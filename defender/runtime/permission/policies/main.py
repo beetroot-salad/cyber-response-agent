@@ -18,7 +18,7 @@ from __future__ import annotations
 # command and the agent burns turns on it. `ls` went with the viewers' file operands, and the
 # surviving viewers read STDIN, so the reason must teach the pipe form or it teaches nothing.
 FALLTHROUGH_DENY_REASON = (
-    "Blocked: only the defender-* shims and read-only viewers (cat/grep/jq/head/tail/wc) are "
+    "Blocked: only the defender-* shims and read-only viewers (cat/grep/head/tail/wc) are "
     "permitted from the main loop, and only `cat` opens a file — the rest read STDIN, so pipe "
     "into them: `cat <path> | grep <pattern>`. Dispatch gather for data-source access; do not "
     "run arbitrary shell."

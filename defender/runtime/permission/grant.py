@@ -279,7 +279,15 @@ def program_shape(name: str) -> re.Pattern[str]:
 
 
 #: The stdin-only viewers, in a canonical order so a compiled lane is deterministic.
-STDIN_VIEWERS = ("wc", "tail", "head", "grep", "jq")
+#:
+#: `jq` was dropped (#540). It predated #611 and was never the sanctioned reduce: the
+#: aggregation path is `query(...)` then `cat <payload> | defender-sql '<SQL>'`, and
+#: `skills/gather/SKILL.md` actively counter-teaches jq ("do not `jq` over payloads").
+#: Nothing in SKILL.md, the handbook or any lesson corpus taught it. Keeping it would have
+#: meant baking a program nobody uses into the box's rootfs — granting a capability the
+#: boundary then has to carry. The repertoire test reads this tuple, so the grant and the
+#: image cannot drift apart in either direction.
+STDIN_VIEWERS = ("wc", "tail", "head", "grep")
 
 
 __all__ = [

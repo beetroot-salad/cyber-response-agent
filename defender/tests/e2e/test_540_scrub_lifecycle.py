@@ -153,13 +153,33 @@ class FakeDocker:
 
     def __init__(self, reply=None):
         self.calls: list[_DockerCall] = []
-        self._reply = reply if reply is not None else (lambda verb: (0, "", ""))
+        self._reply = reply
 
     def __call__(self, argv, **kwargs) -> subprocess.CompletedProcess:
         call = _DockerCall(list(argv))
         self.calls.append(call)
-        rc, out, err = self._reply(call.verb)
+        rc, out, err = (
+            self._reply(call.verb) if self._reply is not None else self._all_succeed(call)
+        )
         return subprocess.CompletedProcess(list(argv), rc, out, err)
+
+    @staticmethod
+    def _all_succeed(call: _DockerCall) -> tuple[int, str, str]:
+        """The default daemon: everything works, INCLUDING reading a file back.
+
+        `(0, "", "")` for every verb is not an all-succeed daemon — it is a daemon whose
+        `cat` returns nothing, which is precisely the C46 silent-empty-bind shape the
+        startup sentinel exists to refuse. A fake that cannot model a working read cannot
+        stand in for a working box, and every test here that just needs A BOX would have
+        been asserting the failure path instead.
+
+        So an `exec` that ends in a path echoes that file's bytes, the way a real `cat`
+        would. Everything else still succeeds silently."""
+        if call.verb == "exec" and len(call.argv) > 1:
+            target = Path(call.argv[-1])
+            if target.is_file():
+                return (0, target.read_text(encoding="utf-8"), "")
+        return (0, "", "")
 
     @property
     def verbs(self) -> list[str]:
@@ -782,7 +802,9 @@ def test_a_stopped_box_of_the_same_name_does_not_block_a_new_run(tmp_path):
                 return subprocess.CompletedProcess(list(argv), *C43A_RM_MISSING)
             if call.verb == "run" and state["present"]:
                 return subprocess.CompletedProcess(list(argv), *C43B_NAME_COLLISION)
-            return subprocess.CompletedProcess(list(argv), 0, "", "")
+            # Everything else behaves like the working daemon — including the sentinel
+            # read-back, which this test is not the one asserting.
+            return subprocess.CompletedProcess(list(argv), *self._all_succeed(call))
 
     docker = StoppedCollision()
     box = start_box(run, DEFENDER, docker=docker)

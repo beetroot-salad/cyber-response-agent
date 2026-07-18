@@ -70,13 +70,14 @@ def _overflow_filter_hint(
     agent's ACTUAL bash lane. A hint naming a program the agent cannot run, or a step it
     cannot take, is worse than no hint — and every part of it here is load-bearing:
 
-      - the reducer is always PIPED (`cat <path> | …`), never handed the file. Every
-        reader's `jq`/`defender-sql` is stdin-compute-only — `jq '<filter>' <path>` is
-        DENIED for main and gather alike, so naming that form taught a dead command;
-      - `jq` when the lane has it (main/gather), `defender-sql` when it does not but the
-        SQL shim is there (the judge — its whole surface is `cat … | defender-sql`);
+      - the reducer is always PIPED (`cat <path> | …`), never handed the file.
+        `defender-sql` is stdin-compute-only, so naming an operand form would teach a
+        dead command;
+      - `defender-sql` for every lane carrying the SQL shim. `jq` was the other branch
+        until #540 removed it from the reader lanes: it predated #611's typed `query`
+        tool, nothing taught it, and gather's own SKILL counter-taught it;
       - the write-the-result-to-a-file step ONLY for an agent with a writer: gather has
-        `jq` but no write tool, so it reads the filtered text straight back;
+        the shim but no write tool, so it reads the filtered text straight back;
       - a lane with neither reducer (actor / oracle / verify / curators) gets pointed at
         its read tool's `pattern=` substring fold, the only reduction it actually has —
         and named by `read_tool`, NOT a hardcoded `read_file`. The same rule that bans a
@@ -85,9 +86,7 @@ def _overflow_filter_hint(
         this branch with a writer an instruction it cannot execute.
     """
     sql_shim = permission.command_shape.SQL_SHIM
-    if _lane_admits(policy, "jq '.'"):
-        reducer = "jq '<filter>'"
-    elif _lane_admits(policy, f"{sql_shim} 'SELECT 1'"):
+    if _lane_admits(policy, f"{sql_shim} 'SELECT 1'"):
         reducer = f'{sql_shim} "SELECT count(*) FROM data"'
     else:
         return (
