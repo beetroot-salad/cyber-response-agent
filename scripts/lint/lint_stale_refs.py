@@ -316,7 +316,9 @@ def _collect_removed_idents(repo_root: Path, base_ref: str) -> set[str]:
             # reference, because a module's binding site is a FILE and `_still_defined`
             # only recognises AST bindings (def/class/assignment/import), so it could
             # never clear the ident. A genuinely deleted module is covered by the
-            # removed-paths walk in `_scan`, not from here.
+            # deleted-path STEM walk in `_scan` — which reads the file's actual fate
+            # from `--name-status`, rather than inferring a module's death from one
+            # importer having dropped a line.
             targets = m.group(2)
             if targets:
                 for part in re.split(r"[\s,]+", targets):
@@ -326,16 +328,28 @@ def _collect_removed_idents(repo_root: Path, base_ref: str) -> set[str]:
     return idents
 
 
-def _renamed_or_deleted_paths(repo_root: Path, base_ref: str) -> set[str]:
+def _renamed_or_deleted_paths(
+    repo_root: Path, base_ref: str
+) -> tuple[set[str], set[str]]:
+    """`(gone, deleted)` — every path the diff removed from its old location, and the
+    subset that was DELETED outright rather than renamed.
+
+    The two are collected differently by `_scan`, and the difference is the basename. A
+    deleted `foo_helper.py` takes the name `foo_helper` with it, so a surviving reference
+    to that name is stale. A RENAMED `a/foo_helper.py` -> `b/foo_helper.py` does not: the
+    module still exists under the same name, and collecting its stem would flag every
+    importer of a module that merely moved."""
     out = _git(["diff", "--name-status", f"{base_ref}...HEAD"], cwd=repo_root)
-    paths: set[str] = set()
+    gone: set[str] = set()
+    deleted: set[str] = set()
     for line in out.splitlines():
         parts = line.split("\t")
         if parts[0].startswith("D") and len(parts) >= 2:
-            paths.add(parts[1])
+            gone.add(parts[1])
+            deleted.add(parts[1])
         elif parts[0].startswith("R") and len(parts) >= 3:
-            paths.add(parts[1])
-    return paths
+            gone.add(parts[1])
+    return gone, deleted
 
 
 def _is_specific(ident: str) -> bool:
@@ -497,12 +511,23 @@ def _scan(
 ) -> list[Finding]:
     changed = _changed_files(repo_root, base_ref) | set(exclude_files)
     idents = _collect_removed_idents(repo_root, base_ref)
-    removed_paths = _renamed_or_deleted_paths(repo_root, base_ref)
+    removed_paths, deleted_paths = _renamed_or_deleted_paths(repo_root, base_ref)
 
     for p in removed_paths:
         for component in Path(p).parts:
             if len(component) >= 5 and "." not in component:
                 idents.add(component)
+
+    # The DIRECTORY components above can never yield a deleted module's own name: every
+    # filename carries a suffix, so the `"." not in component` filter drops the basename
+    # of every file in the diff. That made the removed-paths walk blind to exactly the
+    # case it reads as covering — delete `foo_helper.py`, keep a reference to
+    # `foo_helper`, and nothing here saw it. Take the STEM of deleted paths explicitly.
+    # Deleted, not renamed: see `_renamed_or_deleted_paths`.
+    for p in deleted_paths:
+        stem = Path(p).stem
+        if len(stem) >= 5 and "." not in stem:
+            idents.add(stem)
 
     specific = sorted(i for i in idents if _is_specific(i))
     skipped = sorted(i for i in idents if not _is_specific(i))
