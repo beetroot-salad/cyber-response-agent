@@ -141,6 +141,7 @@ LEAD_AUTHOR_DEF = AgentDefinition(
     write_shapes=(_lead_author_write_shape,),
     deps_cls=LeadAuthorDeps,
     requires_explicit_tree=True,
+    anchors_on_tree=True,   # edits a throwaway worktree; its prompts hand it repo-relative paths (#540)
     deny_reason=_LEAD_AUTHOR_DENY_REASON,
 )
 

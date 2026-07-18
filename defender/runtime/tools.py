@@ -172,6 +172,12 @@ class AgentDeps:
     #: first use: binding a role can never be the thing that silently opens an unboxed lane,
     #: and only `start_box` attaches a live container.
     box: box_mod.BoxExecutor = field(kw_only=True, default_factory=box_mod.BoxExecutor)
+    #: The directory a RELATIVE file operand anchors on (#540) — read by the gate's rebase,
+    #: `_resolve_operand`, and the executor's cwd, so all three name one directory and no
+    #: validator/executor differential can open. Defaults to `run_dir` (the boxed lane's rw
+    #: bind); a tree-anchored role carries its worktree root instead. Set once, at `bind`,
+    #: from the role's `anchors_on_tree` bit — never recomputed per call site.
+    cwd_anchor: Path = field(kw_only=True, default=Path())
 
     role: ClassVar[AgentRole] = AgentRole.MAIN
 
@@ -180,6 +186,7 @@ class AgentDeps:
         cls, run_dir: Path, policy: permission.AgentPolicy,
         *, defender_dir: Path = PATHS.defender_dir, salt: str | None = None,
         box: box_mod.BoxExecutor | None = None,
+        cwd_anchor: Path | None = None,
         **subtype_fields: Any,
     ) -> Self:
         """Build a per-run deps of this subtype: wire the identity fields (run_id as the
@@ -203,6 +210,7 @@ class AgentDeps:
             run_dir=run_dir, defender_dir=defender_dir,
             run_id=run_dir.name, salt=resolved_salt, policy=policy,
             box=box if box is not None else box_mod.BoxExecutor(),
+            cwd_anchor=cwd_anchor if cwd_anchor is not None else run_dir,
             **subtype_fields,
         )
 
@@ -271,6 +279,7 @@ def _tool_bash(deps: AgentDeps, command: str) -> str:
     decision = permission.decide_bash(
         command, policy=deps.policy,
         run_dir=deps.run_dir, defender_dir=deps.defender_dir,
+        cwd_anchor=deps.cwd_anchor,
     )
     if not decision.allow:
         raise ModelRetry(decision.reason)
@@ -302,7 +311,7 @@ def _tool_bash(deps: AgentDeps, command: str) -> str:
         result = deps.box.run_parsed(
             list(decision.pipelines or ()),
             command=command,
-            cwd=deps.run_dir,
+            cwd=deps.cwd_anchor,
             timeout=_BASH_TIMEOUT_S,
         )
     except subprocess.TimeoutExpired as e:
@@ -340,7 +349,7 @@ def _resolve_operand(deps: AgentDeps, path: str) -> Path:
     paths, so this is inert for them). The gate still `resolve()`s the result, so a `..` escape
     past the confine is still denied."""
     p = Path(path)
-    return p if p.is_absolute() else deps.run_dir / p
+    return p if p.is_absolute() else deps.cwd_anchor / p
 
 
 def _gated_read(

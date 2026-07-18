@@ -152,6 +152,15 @@ class AgentDefinition:
     deps_cls: type[AgentDeps] | None = None
     requires_confine: bool = False
     requires_explicit_tree: bool = False
+    #: Where this role's RELATIVE file operands anchor (#540). The default is the run dir —
+    #: the boxed bash lane's cwd and its rw bind, so the gate, the file tools and the executor
+    #: all name one directory. A TREE-anchored role addresses its own worktree instead
+    #: (`defender_dir.parent`): the curators and the lead author edit a throwaway git worktree
+    #: and are handed repo-relative paths (`defender/lessons/{slug}.md`) by their own prompts,
+    #: while their `run_dir` is only a trace anchor and a read root — often not under the repo
+    #: at all. One global anchor cannot serve both, so it is per-role DATA like the two bits
+    #: above rather than an `if role is X` branch.
+    anchors_on_tree: bool = False
     bindable: bool = True
     deny_reason: str = _DEFAULT_DENY_REASON
 
@@ -406,6 +415,11 @@ def bind(
         )
     return defn.deps_cls._for_run(
         run_dir, policy, defender_dir=_resolved_tree(defender_dir), salt=salt, box=box,
+        # Resolved ONCE, here, from the role's own data bit — the three coupled sites then read
+        # one field instead of each re-deriving an anchor and drifting apart.
+        cwd_anchor=(
+            _resolved_tree(defender_dir).parent if defn.anchors_on_tree else run_dir
+        ),
     )
 
 

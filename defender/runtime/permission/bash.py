@@ -287,6 +287,7 @@ def _decide_readers(
 def decide_bash(
     command: str, *, policy: AgentPolicy,
     run_dir: Path | None = None, defender_dir: Path | None = None,
+    cwd_anchor: Path | None = None,
 ) -> BashDecision:
     """Allow/deny a Bash command for an agent, driven entirely by its `AgentPolicy` (no
     per-role method): the per-agent grant lane (shape ∧ scope), then structural adapter routing.
@@ -298,6 +299,12 @@ def decide_bash(
     executor (#540). The run's roots still reach the gate baked into the grants' SCOPES,
     resolved at compile time (#575), so this rebase cannot widen what a policy admits: an
     operand that rebases out of scope still fails the scope check.
+
+    `cwd_anchor` overrides that anchor for a role whose relative operands are NOT run-relative —
+    the curators and the lead author address a throwaway worktree, and their `run_dir` is only a
+    trace anchor. It defaults to `run_dir`, so the boxed runtime lane needs no extra argument and
+    a caller that forgets it cannot silently widen anything: the anchor only decides which file a
+    relative operand NAMES, and the resolved path still has to satisfy the grant's scope.
 
     `defender_dir` is accepted for call-shape uniformity with `decide_read`/`decide_write`; the
     bash lane no longer rebases on it.
@@ -325,7 +332,9 @@ def decide_bash(
     # pinned scripts, adapter-SHAPED commands that must win over adapter classification (the job
     # the old custom matchers did). A claimed command that fails the scope check / carries an
     # unsafe construct denies HERE rather than falling through.
-    reader = _decide_readers(pipelines, policy, run_dir=run_dir)
+    reader = _decide_readers(
+        pipelines, policy, run_dir=cwd_anchor if cwd_anchor is not None else run_dir,
+    )
     if reader is not None:
         return reader
 
