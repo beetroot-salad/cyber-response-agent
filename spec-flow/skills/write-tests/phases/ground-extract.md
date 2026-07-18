@@ -1,10 +1,15 @@
 # Phase A — ground and extract (steps 1–2)
 
-Two leaves, dispatched in parallel; neither reads the other's output. Both read this contract, the intent+design doc, and its inherited `claims:` block. Both may set `status: design-refuted` on their frontier (SKILL.md, "Early exit") — a refuted census or mechanism is this phase's most valuable possible product, and it halts the run at the seam instead of feeding five enumerators a falsehood.
+## Topology
 
-## The grounding leaf → `10-brief.md`
+- Two leaves, dispatched in parallel; neither reads the other's output. Both may set `status: design-refuted` (SKILL.md, "Early exit") — the run halts before the next dispatch.
+- **Grounding leaf** (Explore-shaped): inputs = the intent+design doc with its inherited `claims:` block. Output: `10-brief.md`. If it overruns, dispatch a fresh probe-backed replacement; reconcile when the slow one lands.
+- **Extraction leaf** (frontier model): inputs = the doc and its `claims:` block only. Output: `20-demands.yaml`.
+- Phase B blocks on the finished brief.
 
-Read **references/schema.md**, "Extraction contract" — prompt yourself from it, not from memory of it. Your output is the structure-layer *neighborhood* the change will attach to. Seed from the doc's inherited `claims:` block — what discuss-issue already probed is not re-derived, it is extended; **re-verify rather than inherit** any census the base has moved under, because a plausible-sounding sweep is exactly the shape that arrives wrong.
+## Charge — the grounding leaf
+
+Read **references/schema.md**, "Extraction contract" — prompt yourself from it, not from memory of it. Your output is the structure-layer *neighborhood* the change will attach to. Seed from the doc's inherited `claims:` block — what discuss-issue already probed is not re-derived, it is extended; **re-verify rather than inherit** any census the base has moved under, because a plausible-sounding sweep is exactly the shape that arrives wrong. A refuted census or mechanism is your most valuable possible product: set `status: design-refuted`, record the story and the probe, and stop.
 
 Stay in the reader's lane: **emit questions as claims, and answer only the discovery-shaped ones yourself.** Every factual list the brief carries — per shared root, the writers and consumers and *how* each list was established (the search you ran) — is a **census claim** in the ledger: the search is its probe, the hit list its observed result, so completeness is re-checkable, not a promise. A census is a trace-back: start at the symbol or resource and close over its references. When *the same* is a code symbol — who calls or imports it, where it is defined — resolve it with **symbol-refs**, the resolved sibling of lexical search: it links every importer to the actual definition by the type checker, dropping the comment/string/homonym matches a grep would inflate the hit list with (Python-static only). Then keep going **across process boundaries** — the CLI/harness/eval entrypoints that re-run a module, the subprocess re-exec that relocates a `PATHS`-style constant onto a different tree — which neither a reader following imports nor symbol-refs resolves, and which is exactly where those bugs live; `check_actors` (phase F) is the mechanical net under the execution-context slice, but only for contexts the brief thought to reach. Extraction completeness is the gate's single point of failure — an element the brief misses is invisible to every rule.
 
@@ -12,7 +17,7 @@ Facts only, no judgments — the brief is the one thing the ensemble deliberatel
 
 Frontier inventory: `{claims: n, flagged_facts: n, shared_roots: n}`. Red-flag anything that contradicts the design doc.
 
-## The extraction leaf → `20-demands.yaml`
+## Charge — the extraction leaf
 
 You need only the design doc and the inherited `claims:` block; you return the demand list, the raised claims, and the background classification. Read **references/schema.md** for address forms before starting.
 

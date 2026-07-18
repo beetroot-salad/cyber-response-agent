@@ -22,7 +22,7 @@ The spine owns exactly four things; everything else is a leaf:
 3. **Residue routing** — the gate's residue and the verify findings are routed (to leaves for re-grounding, to §7 for decisions), never resolved in your own voice.
 4. **Deviation decisions** — reduced mode, decomposition, early exit, degraded-model fallbacks — each recorded in `handoff.deviations`.
 
-**Dispatch protocol.** A leaf prompt is a pointer, not a payload: contract path, worktree path, input frontier paths, output frontier path, per-dispatch parameters (lens name, copy index). The contract carries the doctrine — don't restate it. The references are read by the leaves their contracts name; **the orchestrator reads neither.**
+**Dispatch protocol.** A leaf prompt is a pointer, not a payload: contract path **and charge section name**, worktree path, input frontier paths, output frontier path, per-dispatch parameters (lens name, copy index). The contract carries the doctrine — don't restate it. Each contract has two audiences, split by section: its `## Topology` block — always the first section, ≤20 lines — is the spine's (dispatch list, order, models, per-leaf inputs/outputs; read it with `Read`'s `limit`, never the whole file), and the `## Charge — <role>` sections below it are the leaves'. The references are read by the leaves their charges name; **the orchestrator reads neither the charges nor the references.**
 
 **Return protocol.** A leaf's inline return is its frontier's `digest` block only (≤15 lines); everything else lives in the file.
 
