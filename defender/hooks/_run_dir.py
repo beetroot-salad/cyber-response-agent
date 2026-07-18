@@ -1,12 +1,19 @@
 #!/usr/bin/env python3
-"""Shared run-dir + per-run-salt resolution for the defender PostToolUse hooks.
+"""Shared run-dir resolution + locked JSON state for the defender gate modules.
 
 The defender runs one in-process agent per run and exports
-``DEFENDER_RUN_DIR`` into the process (run.py), so both the budget
-enforcer and the tag hook anchor on that single env var rather than a
-session→run map. Centralizing the lookup here keeps the contract (env
-var name, ``is_dir`` guard, ``meta.json`` location) in one place — the
-defender analogue of soc-agent's ``hooks/scripts/run_context.py``.
+``DEFENDER_RUN_DIR`` into the process (run.py), so the budget enforcer and the
+lesson-load recorder anchor on that single env var rather than a session→run
+map. Centralizing the lookup here keeps the contract (env var name, ``is_dir``
+guard) in one place.
+
+``resolve_run_dir`` and ``update_json_locked`` have distinct consumer sets: the
+circuit breaker uses only the locked-write primitive and is handed its run dir
+as an argument, so it is NOT an env-var anchor.
+
+This module resolves no salt. The run's trust token is minted in process by
+``run_common.materialize_run_dir`` and threaded to its consumers as a value; it
+has no run-dir file to be read back out of.
 """
 
 from __future__ import annotations
@@ -14,12 +21,9 @@ from __future__ import annotations
 import fcntl
 import json
 import os
-import secrets
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
-
-from defender._run_paths import RunPaths
 
 
 def update_json_locked(
@@ -56,21 +60,3 @@ def resolve_run_dir() -> Path | None:
         return None
     run_dir = Path(raw)
     return run_dir if run_dir.is_dir() else None
-
-
-def read_meta_salt() -> str:
-    """The stable per-run salt from ``{run_dir}/meta.json`` (written by
-    run.py). Falls back to a fresh random salt only when no run dir / meta
-    is available — callers that need a *stable* salt should treat a missing
-    run dir as degraded."""
-    run_dir = resolve_run_dir()
-    if run_dir is not None:
-        meta_path = RunPaths(run_dir).meta
-        if meta_path.exists():
-            try:
-                salt = json.loads(meta_path.read_text(encoding="utf-8")).get("salt", "")
-                if salt:
-                    return salt
-            except (json.JSONDecodeError, OSError):
-                pass
-    return secrets.token_hex(8)

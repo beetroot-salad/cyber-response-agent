@@ -1,4 +1,13 @@
-# Init Flow & System Connection
+# Init Flow & System Connection (archived)
+
+> **Archived 2026-07-18. Superseded — do not treat as current guidance.**
+> This describes the PREDECESSOR plugin/hooks codebase, which the repo has since
+> replaced with `defender/`. Every implementation path referenced below — the
+> `/connect` skill, `scripts/setup_run.py`, the run-dir `meta.json` the per-run
+> salt was read from, the PostToolUse hook tree — no longer exists. The salt is
+> now minted in process by `run_common.materialize_run_dir` and threaded as a
+> value (#647). Kept for the adapter-contract and preflight reasoning, which is
+> architecture-independent. A replacement doc has not been written yet.
 
 **Version:** 0.1 | **Date:** April 2026 | **Status:** Design sketch
 

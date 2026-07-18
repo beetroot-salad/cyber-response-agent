@@ -150,7 +150,7 @@ def run_gather(
     `turns` (the query calls under test) against the INJECTED verb registry. Everything
     between the two fakes — dispatch, the query tool, its validator, the capture capability,
     the circuit breaker, the two tables — is production code."""
-    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=run_id, salt=SALT)
+    run_dir = materialize(tmp_path, GOLDEN_AB3)
     main = ReplayFn([
         Turn(tool_calls=[("gather", {
             "lead_id": LEAD, "system": system, "goal": "measure this lead",
@@ -275,7 +275,7 @@ def test_query_return_wrap_positive_control(tmp_path):
 
     # The bash command names the run dir, which only exists once materialize() has run — so
     # drive it in two steps rather than guessing the path.
-    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id="q611-ctl", salt=SALT)
+    run_dir = materialize(tmp_path, GOLDEN_AB3)
     payload_abs = run_dir / "gather_raw" / LEAD / "0.json"
     if sql_turn_idx is not None:
         turns[sql_turn_idx] = Turn(tool_calls=[("bash", {
@@ -728,7 +728,7 @@ def test_capture_fires_only_for_the_query_tool(tmp_path):
     method otherwise fires for EVERY tool (the tools=[…] filter exists only on the Hooks
     decorator API)."""
     rec = VerbRecorder()
-    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id="q611-other", salt=SALT)
+    run_dir = materialize(tmp_path, GOLDEN_AB3)
     main = ReplayFn([
         Turn(tool_calls=[("gather", {
             "lead_id": LEAD, "system": "elastic", "goal": "g", "what_to_summarize": ["e"]})]),

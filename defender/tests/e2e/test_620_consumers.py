@@ -193,7 +193,7 @@ def run_gather(tmp_path: Path, *, verbs, turns: list[Turn], system: str = "elast
     """Drive a REAL run: main dispatches one gather lead; the nested gather agent replays the
     query calls under test against the INJECTED registry. Everything between the two fakes is
     production code — dispatch, the query tool, its validator, the capture capability, the row."""
-    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=run_id, salt=SALT)
+    run_dir = materialize(tmp_path, GOLDEN_AB3)
     main = ReplayFn([
         Turn(tool_calls=[("gather", {
             "lead_id": LEAD, "system": system, "goal": "measure this lead",

@@ -30,7 +30,6 @@ against their real signatures, the real capture capability writes the real rows.
 from __future__ import annotations
 
 import asyncio
-import json
 import shutil
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
@@ -252,11 +251,17 @@ def load_turns_from_trace(
 
 # --- fixture materialization, golden diffing, and the drive seam -----------
 
-def materialize(tmp_path: Path, golden: Path, *, run_id: str, salt: str) -> Path:
+def materialize(tmp_path: Path, golden: Path) -> Path:
+    """The on-disk run dir a driven run starts from: `gather_raw/` plus the copied alert.
+
+    Takes no `run_id`/`salt`: it seeds NOTHING salted. Both were parameters only because this
+    used to write the run's retired metadata file (#647); the trust token is now minted in
+    process by `run_common.materialize_run_dir` and threaded as a value, so there is nothing
+    on disk for this to seed. Keeping the parameters would let a test pass `salt=` and believe
+    it had set up a salted run dir — setup a test can silently pass without."""
     run_dir = tmp_path / "run"
     (run_dir / "gather_raw").mkdir(parents=True)
     shutil.copy(golden / "alert.json", run_dir / "alert.json")
-    (run_dir / "meta.json").write_text(json.dumps({"run_id": run_id, "salt": salt}))
     return run_dir
 
 

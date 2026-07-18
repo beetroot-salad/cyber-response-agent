@@ -140,6 +140,15 @@ already intercepts the gather Task return) that writes the wrapped summary
 to `{run_dir}/gather_summaries/{lead_id}.md`. Then a dropped detail is
 recovered with a cheap `Read`, not a re-dispatch.
 
+> **Stale seam (#647).** This paragraph is unimplemented design, and the seam
+> it names no longer exists: `hooks/tag_tool_results.py` was deleted — its
+> `main()` had been wired to nothing since the in-process driver replaced the
+> `claude -p` runtime, and there is no PostToolUse hook layer to extend. Its
+> one live symbol, `wrap()`, is now `runtime/untrusted.py`. Whoever implements
+> this should hang the persist step off the in-process gather return in
+> `runtime/tools_gather.py`, which is where the summary is wrapped today. The
+> rest of the design is unaffected; only the attachment point moved.
+
 - **Location:** outside `gather_raw/`, so the block hook (keyed on the
   literal `gather_raw` marker) permits the main-loop Read with no hook
   edit.
