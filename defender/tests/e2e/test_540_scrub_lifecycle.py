@@ -1024,7 +1024,7 @@ def test_hostile_run_id_fails_rather_than_splitting_the_bind_spec(tmp_path, monk
     alert = fixture / "evil:x:ro,y --privileged.json"
     alert.write_text('{"id": "a"}\n', encoding="utf-8")
 
-    run = run_common.materialize_run_dir(alert, None)
+    run, _salt = run_common.materialize_run_dir(alert, None)
     assert ":" in run.name, "the mint did not carry the hostile stem through"
     assert " " in run.name, "the mint did not carry the hostile stem through"
 
@@ -1094,7 +1094,7 @@ def test_gather_only_workflow_completes_via_its_substitute(tmp_path):
         rec.record("query", ctx, {"native_query": native_query, "limit": limit})
         return [{"@timestamp": "2026-01-01T00:00:00Z", "user.name": "dev.dana"}]
 
-    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id="g540", salt="aabbccddeeff0011")
+    run_dir = materialize(tmp_path, GOLDEN_AB3)
     main = ReplayFn([
         Turn(tool_calls=[("gather", {
             "lead_id": "l-001", "system": "elastic", "goal": "measure this lead",
