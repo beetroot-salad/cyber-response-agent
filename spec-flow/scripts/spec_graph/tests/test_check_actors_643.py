@@ -340,6 +340,105 @@ def test_star_import_reaches_changed_submodule(make_repo):
     assert "app/run.py" not in rc.stdout
 
 
+def test_star_import_over_a_module_file_credits_that_module(make_repo):
+    """`from mod import *` where `mod.py` is a FILE (not a package dir) credits `mod` itself — the
+    star names that module's symbols, and the `base_mod` fallback is what resolves it. The dir arm
+    added for #653 must not swallow this shape by `continue`-ing past the fallback."""
+    fire = make_repo()
+    fire.config(code_roots=["app"], entrypoint_stems=("run",))
+    fire.write("app/run.py", "from app.thing import *\nif __name__ == '__main__':\n    pass\n")
+    fire.write("app/thing.py", "X = 1\n")  # a module FILE, so `base` is not a directory
+    fire.graph(UNMODELLED_GRAPH)
+    fbase = fire.commit("base")
+    fire.write("app/thing.py", "X = 2\n")
+    fire.commit("change")
+    rf = fire.run("spec_graph_x.yaml", fbase)
+    assert rf.returncode == 1
+    assert "app/run.py" in rf.stdout
+    assert "thing" in rf.stdout
+
+    # Control: same shape, but the changed module is one the star over `thing.py` never names.
+    ctl = make_repo()
+    ctl.config(code_roots=["app"], entrypoint_stems=("run",))
+    ctl.write("app/run.py", "from app.thing import *\nif __name__ == '__main__':\n    pass\n")
+    ctl.write("app/thing.py", "X = 1\n")
+    ctl.write("app/elsewhere.py", "Y = 1\n")
+    ctl.graph(UNMODELLED_GRAPH)
+    cbase = ctl.commit("base")
+    ctl.write("app/elsewhere.py", "Y = 2\n")
+    ctl.commit("change")
+    rc = ctl.run("spec_graph_x.yaml", cbase)
+    assert rc.returncode == 0
+    assert "app/run.py" not in rc.stdout
+
+
+def test_star_import_does_not_reach_subpackage_modules(make_repo):
+    """`from pkg import *` credits `pkg`'s DIRECT `*.py` children only, never `pkg/sub/*.py`:
+    binding a sub-package does not auto-import its module files. Pins the one-level depth (`glob`,
+    not `rglob`) the #653 arm chose — a change to `rglob` must break this, not pass silently."""
+    # Negative: only a module in a SUB-package of the starred package changes → no reach.
+    neg = make_repo()
+    neg.config(code_roots=["app"], entrypoint_stems=("run",))
+    neg.write("app/run.py", "from app.pkg import *\nif __name__ == '__main__':\n    pass\n")
+    neg.write("app/pkg/direct.py", "X = 1\n")
+    neg.write("app/pkg/sub/deep.py", "D = 1\n")
+    neg.graph(UNMODELLED_GRAPH)
+    nbase = neg.commit("base")
+    neg.write("app/pkg/sub/deep.py", "D = 2\n")  # one level below the star's binding
+    neg.commit("change")
+    rn = neg.run("spec_graph_x.yaml", nbase)
+    assert rn.returncode == 0
+    assert "app/run.py" not in rn.stdout
+    assert "deep" not in rn.stdout
+
+    # Control (same fixture shape): the DIRECT child changes → fires, so the negative is not vacuous.
+    ctl = make_repo()
+    ctl.config(code_roots=["app"], entrypoint_stems=("run",))
+    ctl.write("app/run.py", "from app.pkg import *\nif __name__ == '__main__':\n    pass\n")
+    ctl.write("app/pkg/direct.py", "X = 1\n")
+    ctl.write("app/pkg/sub/deep.py", "D = 1\n")
+    ctl.graph(UNMODELLED_GRAPH)
+    cbase = ctl.commit("base")
+    ctl.write("app/pkg/direct.py", "X = 2\n")
+    ctl.commit("change")
+    rc = ctl.run("spec_graph_x.yaml", cbase)
+    assert rc.returncode == 1
+    assert "direct" in rc.stdout
+
+
+def test_relative_star_import_reaches_changed_sibling(make_repo):
+    """A RELATIVE star (`from . import *`) reaches a changed sibling. Distinct code path from the
+    absolute star: `base` is derived from the IMPORTER's own directory (the `node.level` branch),
+    not from `root` + `node.module`, and `node.module` is None."""
+    fire = make_repo()
+    fire.config(code_roots=["app"], entrypoint_stems=("run",))
+    fire.write("app/pkg/run.py", "from . import *\nif __name__ == '__main__':\n    pass\n")
+    fire.write("app/pkg/sib.py", "X = 1\n")
+    fire.graph(UNMODELLED_GRAPH)
+    fbase = fire.commit("base")
+    fire.write("app/pkg/sib.py", "X = 2\n")
+    fire.commit("change")
+    rf = fire.run("spec_graph_x.yaml", fbase)
+    assert rf.returncode == 1
+    assert "app/pkg/run.py" in rf.stdout
+    assert "sib" in rf.stdout
+
+    # Control: `from . import *` binds the importer's OWN package, so a changed module in a
+    # different package the entrypoint never imports is not credited.
+    ctl = make_repo()
+    ctl.config(code_roots=["app"], entrypoint_stems=("run",))
+    ctl.write("app/pkg/run.py", "from . import *\nif __name__ == '__main__':\n    pass\n")
+    ctl.write("app/pkg/sib.py", "X = 1\n")
+    ctl.write("app/other/faroff.py", "Y = 1\n")
+    ctl.graph(UNMODELLED_GRAPH)
+    cbase = ctl.commit("base")
+    ctl.write("app/other/faroff.py", "Y = 2\n")
+    ctl.commit("change")
+    rc = ctl.run("spec_graph_x.yaml", cbase)
+    assert rc.returncode == 0
+    assert "app/pkg/run.py" not in rc.stdout
+
+
 def test_stdlib_or_thirdparty_import_is_never_a_driver(make_repo):
     """A stdlib / third-party import is never a driver; a real changed project import in the same
     fixture does fire (control)."""
