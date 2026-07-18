@@ -27,8 +27,20 @@ Usage:
     spec-graph actors [graph.yaml] [--base <ref>] [--config <path>]
 (the `spec-graph` wrapper in the plugin's bin/ is on the Bash PATH and finds this script itself;
 `$CLAUDE_PLUGIN_ROOT` does NOT expand in SKILL.md prose, so never spell a path with it).
-Exit 1 if an unmodelled driver reaches the change. Waive an out-of-scope context by listing
-its stem under a top-level `actor_waivers:` in the graph.
+Exit codes:
+  0  the census answered, and no unmodelled driver reaches the change
+  1  an unmodelled driver reaches the change. Waive an out-of-scope context by listing its
+     stem under a top-level `actor_waivers:` in the graph.
+  2  the census COULD NOT ANSWER — no graph artifacts matched, the source census came back
+     empty, or a file the gate could not parse/read sits somewhere a driver could hide.
+     Never a silent pass (the #618/#621 convention: a gate that cannot look must not report
+     clean).
+
+The 1-vs-2 split is the point. Exit 1 means the gate looked and found something; exit 2 means
+it could not look. Collapsing them would let a broken intermediate file — which denies exactly
+the import edges the reach question needs — certify the graph clean. A gap that is NOT
+load-bearing (no entrypoint reaches the file, no diff touched it) stays a stderr WARN and
+changes no exit code: reddening on a vendored fixture nobody imports would be noise.
 """
 from __future__ import annotations
 
@@ -43,13 +55,24 @@ import yaml
 import _config
 
 
-def _warn(msg: str) -> None:
-    """A census gap the operator has to see. Every path that drops a file out of the import graph
-    routes through here: a file the walk cannot read, or one `ast.parse` rejects, contributes no
-    edges, so a driver that reaches the change only through it goes UNREPORTED. That is a gate
-    reporting clean because it could not look — the #618 class — and it must never be silent.
-    stderr, not stdout: the findings stream is the tool's parsed output."""
-    print(f"  WARN [check_actors] {msg}", file=sys.stderr)
+class CensusBlind(RuntimeError):
+    """The census could not be built well enough to answer. Distinct from "answered: nothing
+    found" — see `main`'s exit-code contract. A gate that cannot look must not report clean."""
+
+
+# file → why it contributes no import edges. Every path that drops a file out of the import graph
+# records here: one `ast.parse` rejects, or one the walk cannot read. A driver whose only reach to
+# the change runs through such a file goes UNREPORTED, so the gap must never be silent.
+_GAPS: dict[Path, str] = {}
+
+
+def _gap(path: Path, reason: str) -> None:
+    """Record a census gap AND surface it. stderr, not stdout: the findings stream is the tool's
+    parsed output. Recording is what lets `main` ask the question the WARN alone could not —
+    whether this particular blindness sits on a path that could hide a driver (load-bearing, exit
+    2) or on a file no entrypoint reaches and no diff touched (a warning, exit unaffected)."""
+    _GAPS[path] = reason
+    print(f"  WARN [check_actors] {path}: {reason}", file=sys.stderr)
 
 
 def _sh(cmd: list[str]) -> str:
@@ -74,13 +97,16 @@ def _changed_paths(base: str) -> set[Path]:
     # `pkg_b/driver.py`), so the reach comparison keys on the resolved file path, not the stem —
     # both here and through the transitive closure. A stem key false-fires on same-stem changes
     # in a package the entrypoint never actually reaches.
+    #
+    # UNFILTERED on purpose. This used to drop `"/tests/" in f`, a SECOND definition of "a test
+    # path" that disagreed with the census's own (`_config._kept`: a `tests` component, so
+    # top-level `tests/foo.py` survived here and was excluded there). The disagreement was inert
+    # only because `check` intersects this set against the reach, which is census-bounded — so the
+    # census predicate already decides membership, and a local filter can only ever re-diverge
+    # from it. One definition, in `_config._kept`, applied where the census is built.
     root = _config.repo_root()
     out = _sh(["git", "diff", "--name-only", f"{base}...HEAD", "--", "*.py"])
-    return {
-        root / f
-        for f in out.splitlines()
-        if f.strip() and "/tests/" not in f
-    }
+    return {root / f for f in out.splitlines() if f.strip()}
 
 
 def _module_targets(importer: Path, text: str, root: Path) -> set[Path]:
@@ -102,8 +128,8 @@ def _module_targets(importer: Path, text: str, root: Path) -> set[Path]:
         tree = ast.parse(text)
     except SyntaxError as e:
         # Not a silent skip: an unparseable file contributes NO import edges, so every driver whose
-        # only reach to the change runs through it stops being reported. Surface it (see _warn).
-        _warn(f"{importer}: unparseable ({e.__class__.__name__}: {e}) — contributes no import edges")
+        # only reach to the change runs through it stops being reported. Surface it (see _gap).
+        _gap(importer, f"unparseable ({e.__class__.__name__}: {e}) — contributes no import edges")
         return set()
     targets: set[Path] = set()
     for node in ast.walk(tree):
@@ -161,7 +187,7 @@ def _read_texts(files: list[Path]) -> dict[Path, str]:
         try:
             texts[f] = f.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError) as e:
-            _warn(f"{f}: unreadable ({e.__class__.__name__}) — contributes no import edges")
+            _gap(f, f"unreadable ({e.__class__.__name__}) — contributes no import edges")
     return texts
 
 
@@ -185,13 +211,47 @@ class _Census:
     produce identical results."""
 
     def __init__(self, base: str, cfg: dict) -> None:
+        _GAPS.clear()  # this census owns the gap set; a second one in-process starts clean
         self.root = _config.repo_root()
         self.changed = _changed_paths(base)
         self.files = _config.source_files(cfg)
+        if not self.files:
+            raise CensusBlind(
+                f"the source census is EMPTY — codeRoots {cfg['codeRoots'] or '(unset: whole repo)'} "
+                f"matched no .py files under {self.root}. Every reach question then answers 'no' for "
+                f"a structural reason, not a factual one. Fix `specGraph.codeRoots` in "
+                f".claude/spec-flow.json."
+            )
         self.texts = _read_texts(self.files)
         # Keyed on the full census, not `texts`: an unreadable module is still a subprocess target.
         self.project_stems = {f.stem for f in self.files}
         self.edges = _import_edges(self.files, self.texts, self.root)
+        self.entrypoints = [
+            f for f, text in self.texts.items()
+            if _is_entrypoint(f, text, set(cfg["entrypointStems"]))
+        ]
+
+    def load_bearing_gaps(self) -> dict[Path, str]:
+        """The census gaps that could actually be hiding a driver.
+
+        A parse failure denies a file's OUTGOING edges — but not its incoming ones: `_module_targets`
+        resolves a target by `is_file()` on the filesystem and never parses it, so who imports the
+        blind file is still known. That is what makes this question answerable at all, and it is why
+        "fail closed only where the gap could matter" does not need the very edges the failure denied.
+
+        A gap is load-bearing when an entrypoint reaches the blind file (the reach continues THROUGH
+        it into territory we cannot see) or when the diff touched it (we cannot tell what the changed
+        file itself imports). Everything else — a vendored fixture, a file using syntax newer than the
+        runner, anything no entrypoint reaches and no diff touched — stays a WARN and reds nothing."""
+        if not _GAPS:
+            return {}
+        reachable: set[Path] = set()
+        for e in self.entrypoints:
+            reachable |= _reach(e, self.edges)
+        return {
+            f: reason for f, reason in _GAPS.items()
+            if f in reachable or f in self.changed or f in self.entrypoints
+        }
 
 
 def _reach(entry: Path, edges: dict[Path, set[Path]]) -> set[Path]:
@@ -221,15 +281,22 @@ def _subprocessed_py_stems(text: str) -> set[str]:
 def _is_entrypoint(path: Path, text: str, extra_stems: set[str]) -> bool:
     """A driver context: a CLI main, an eval/harness file, or a project-declared runner stem
     (`specGraph.entrypointStems`). Excludes pytest files (`test_*`) and private internals
-    (`_foo.py`) — those are not execution contexts that drive the subsystem."""
+    (`_foo.py`) — those are not execution contexts that drive the subsystem.
+
+    The config is consulted FIRST, so an explicit listing beats both exclusions. `entrypointStems`
+    exists precisely to name the runners the heuristics miss, and the heuristics used to run
+    before it: a project declaring `"entrypointStems": ["_harness"]` had that entry silently
+    ignored — a config option that did not do what it said, with no warning. The `_`/`test_` rules
+    stay as DEFAULTS for stems nobody declared."""
     stem = path.stem
+    if stem in extra_stems:
+        return True
     if stem.startswith("test_") or stem.startswith("_"):
         return False
     return (
         "__main__" in text
         or "/evals/" in str(path)
         or "harness" in stem
-        or stem in extra_stems
     )
 
 
@@ -238,7 +305,6 @@ def check(graph_path: Path, census: _Census, cfg: dict) -> list[str]:
     graph = yaml.safe_load(graph_text)
     waivers = set(graph.get("actor_waivers", []) or [])
     aliases: dict[str, str] = cfg["contextAliases"]
-    entry_stems = set(cfg["entrypointStems"])
 
     root, changed = census.root, census.changed
     edges, project_stems = census.edges, census.project_stems
@@ -247,9 +313,8 @@ def check(graph_path: Path, census: _Census, cfg: dict) -> list[str]:
     # One read, in `_read_texts` (utf-8 pinned): the entrypoint scan and the import graph now share
     # it, so they cannot disagree about which files the census contains. The twin unguarded read
     # that used to live here crashed on exactly the files `_import_edges` had chosen to tolerate.
-    for f, text in census.texts.items():
-        if not _is_entrypoint(f, text, entry_stems):
-            continue
+    for f in census.entrypoints:
+        text = census.texts[f]
         # Two ways a driver reaches the change: an in-process import of a changed module —
         # resolved to files and followed TRANSITIVELY over the project import graph, then
         # intersected with the changed set (the arm stays gated on `changed`) — or a subprocess
@@ -318,10 +383,36 @@ def main(argv: list[str]) -> int:
             args.append(a)
     cfg = _config.load(config)
     graphs = [Path(a) for a in args] or _config.artifacts(cfg)
-    census = _Census(base, cfg)  # repo-derived and graph-independent — built once, not per graph
-    all_findings: list[str] = []
-    for g in graphs:
-        all_findings.extend(check(g, census, cfg))
+    try:
+        if not graphs:
+            raise CensusBlind(
+                f"no graph artifacts to check — `specGraph.artifacts` "
+                f"({cfg['artifacts']!r}) matched nothing under {_config.repo_root()}. "
+                f"Checking zero graphs finds zero findings for a reason that has nothing to do "
+                f"with the code; fix the glob, or pass a graph path explicitly."
+            )
+        census = _Census(base, cfg)  # repo-derived, graph-independent — built once, not per graph
+        all_findings: list[str] = []
+        for g in graphs:
+            all_findings.extend(check(g, census, cfg))
+        blind = census.load_bearing_gaps()
+    except CensusBlind as exc:
+        print(f"check_actors: {exc}", file=sys.stderr)
+        return 2
+    if blind:
+        # Exit 2, not 1, and deliberately NOT waivable through actor_waivers: this is not a driver
+        # we found, it is a place we could not look — and it sits on a path that could hide one.
+        # `main` keeps the exit-1 channel meaning "the census answered, and the answer is a finding".
+        print("check_actors: the census went blind where it matters —", file=sys.stderr)
+        for f, reason in sorted(blind.items()):
+            print(f"  {f}: {reason}", file=sys.stderr)
+        print(
+            "Each file above is reachable from an entrypoint, or the diff touched it, so a driver "
+            "that reaches the change through it would go unreported. Make the file parseable/readable "
+            "and re-run — a gap here cannot be waived, only closed.",
+            file=sys.stderr,
+        )
+        return 2
     for f in all_findings:
         print(f"  UNMODELLED {f}")
     n = len(all_findings)
