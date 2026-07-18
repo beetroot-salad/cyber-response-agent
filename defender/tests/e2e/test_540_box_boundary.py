@@ -489,7 +489,8 @@ def test_another_runs_run_dir_is_absent(box, run_dir, sibling_run):
     assert victim.read_text(encoding="utf-8") == "SIBLING-RUN-SECRET-42"
 
     read = _probe(box, run_dir, "sibread", _READ_PATH, str(victim))
-    assert read["read"] is None and read["errno"] == errno_mod.ENOENT, read
+    assert read["read"] is None, read
+    assert read["errno"] == errno_mod.ENOENT, read
 
     wrote = _probe(box, run_dir, "sibwrite", _WRITE_PATH, str(victim))
     assert wrote["wrote"] is False, "the box wrote into another run's run_dir"
@@ -654,7 +655,8 @@ def test_egress_failure_is_a_bare_oserror_asserted_by_errno(box, run_dir):
     assert res["connected"] is False
     assert res["exc"] == "OSError", (
         f"expected a bare OSError, got {res['exc']} — assert by errno, not by subclass")
-    assert isinstance(res["errno"], int) and res["errno"] > 0
+    assert isinstance(res["errno"], int)
+    assert res["errno"] > 0
 
 
 @requires_box
@@ -800,7 +802,8 @@ def test_boundary_holds_with_decide_bash_approving_everything(box, run_dir, sibl
     # The two non-filesystem halves, with the gate equally out of the picture.
     with _echo_listener() as (host, port, accepted):
         egress = _probe(box, run_dir, "o4net", _TCP_CONNECT, host, str(port))
-    assert egress["connected"] is False and accepted == []
+    assert egress["connected"] is False
+    assert accepted == []
 
     poison = _probe(box, run_dir, "o4erofs", _WRITE_PATH,
                     str(DEFENDER / "lessons" / "o4.md"))
@@ -870,10 +873,12 @@ def test_boundary_holds_under_both_runc_and_runsc(run_dir, sibling_run, tmp_path
                        str(run_dir / "alive.txt"))
 
     assert alive["read"] == "alive", f"{runtime}: the box could not read its own rw bind"
-    assert absent["read"] is None and absent["errno"] == errno_mod.ENOENT, absent
+    assert absent["read"] is None, absent
+    assert absent["errno"] == errno_mod.ENOENT, absent
     assert erofs["errno"] == errno_mod.EROFS, erofs
     assert sibling["read"] is None, sibling
-    assert egress["connected"] is False and accepted == []
+    assert egress["connected"] is False
+    assert accepted == []
 
 
 @requires_box
@@ -953,7 +958,8 @@ def test_defender_namespace_package_imports_in_the_box(box, run_dir):
     a module. A mount destination that broke this would make the entrypoint
     unimportable rather than merely awkward."""
     res = _probe(box, run_dir, "nspkg", _IMPORT_DEFENDER)
-    assert res["seg"].startswith(str(DEFENDER)) and res["bash_exec"].startswith(str(DEFENDER))
+    assert res["seg"].startswith(str(DEFENDER))
+    assert res["bash_exec"].startswith(str(DEFENDER))
 
     # The in-box entrypoint itself (M8) is reachable as a MODULE, which is the
     # half a plain `import` does not cover.

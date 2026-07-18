@@ -539,7 +539,8 @@ def test_scrub_runs_before_the_first_run_dir_consumer(tmp_path):
         "whole justification, and a teardown after the scrub makes it a race, not a check"
 
     for later in ("cross_check_tables", "visualize"):
-        assert later in order and order.index("scrub") < order.index(later)
+        assert later in order
+        assert order.index("scrub") < order.index(later)
 
 
 def test_no_consumer_runs_when_the_scrub_raises(tmp_path):
@@ -622,7 +623,8 @@ def test_startup_attempts_a_box_rather_than_detecting_a_binary(tmp_path):
     ok = FakeDocker()
     box = start_box(run, DEFENDER, docker=ok)
     assert box is not None
-    assert "run" in ok.verbs and "exec" in ok.verbs
+    assert "run" in ok.verbs
+    assert "exec" in ok.verbs
 
 
 def test_path_identity_sentinel_fails_closed(tmp_path):
@@ -746,7 +748,9 @@ def test_reaper_does_not_treat_stderr_as_failure(tmp_path):
     still be treated as a failure, so the test cannot pass on a teardown that ignores
     everything."""
     rc, _out, err = C43A_RM_MISSING
-    assert rc == 0 and "Error response from daemon" in err  # the ledger shape, restated
+    # the ledger shape, restated
+    assert rc == 0
+    assert "Error response from daemon" in err
 
     quiet_success = FakeDocker(lambda verb: C43A_RM_MISSING)
     box = start_box(_clean_run_dir(tmp_path), DEFENDER, docker=FakeDocker())
@@ -1021,14 +1025,19 @@ def test_hostile_run_id_fails_rather_than_splitting_the_bind_spec(tmp_path, monk
     alert.write_text('{"id": "a"}\n', encoding="utf-8")
 
     run = run_common.materialize_run_dir(alert, None)
-    assert ":" in run.name and " " in run.name, "the mint did not carry the hostile stem through"
+    assert ":" in run.name, "the mint did not carry the hostile stem through"
+    assert " " in run.name, "the mint did not carry the hostile stem through"
 
-    with pytest.raises(Exception) as e:
+    # Either fault type discharges the demand — what matters is that the hostile id is
+    # REFUSED rather than sanitised into a name. Named explicitly rather than caught as a
+    # blind `Exception`, so an unrelated crash (an AttributeError on the way to the check)
+    # can no longer read as the refusal this test exists to prove.
+    with pytest.raises((BoxFault, ValueError)) as e:
         container_name(run.name)
     assert type(e.value).__name__ in ("BoxFault", "ValueError")
 
     docker = FakeDocker()
-    with pytest.raises(Exception):
+    with pytest.raises((BoxFault, ValueError)):
         start_box(run, DEFENDER, docker=docker)
     assert docker.calls == [], "a hostile id reached the daemon as argv before being refused"
 
@@ -1105,4 +1114,5 @@ def test_gather_only_workflow_completes_via_its_substitute(tmp_path):
     assert (run_dir / "gather_raw" / "l-001.lead.json").is_file(), "the leads row never landed"
     rows = [json.loads(ln) for ln in
             (run_dir / "executed_queries.jsonl").read_text(encoding="utf-8").splitlines() if ln]
-    assert len(rows) == 1 and rows[0]["lead_id"] == "l-001"
+    assert len(rows) == 1
+    assert rows[0]["lead_id"] == "l-001"
