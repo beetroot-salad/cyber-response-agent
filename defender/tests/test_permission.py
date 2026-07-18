@@ -65,7 +65,7 @@ def _bash(cmd, policy):
     "defender-lessons --tags",
     # #575: the viewers lost their file operands, so a run-dir artifact is opened by `cat` and
     # reduced through the stdin-only stages (`tail -1 {run}/…` denies — see the c1 ledger).
-    "cat /run/executed_queries.jsonl | tail -1 | jq '.'",
+    "cat /run/executed_queries.jsonl | tail -1 | wc -c",
 ])
 def test_main_loop_allows_safe(cmd):
     assert _bash(cmd, MAIN).allow
@@ -131,7 +131,7 @@ def test_gather_denies_compound_with_adapter(cmd):
 
 # The reader lane's shapes: `cat` opens (and is scope-checked), the rest read stdin.
 @pytest.mark.parametrize("cmd", [
-    "cat /run/gather_raw/l-001/0.json | jq '.'",   # jq over stdin, not a file operand
+    "cat /run/gather_raw/l-001/0.json | grep hits",   # stdin viewer, not a file operand
     "defender-invlang enum types",
     "cat /run/gather_raw/l-001/0.json",            # gather reads its own raw, absolute
 ])
@@ -165,30 +165,35 @@ def test_decision_carries_no_adapter_routing_payload(cmd):
         assert not d.allow
 
 
-# --- jq comparison operators are not redirects (quote-aware unsafe scan) -----
-# Regression: `>`/`<` inside a quoted jq filter (a comparison) were read as shell
+# --- quoted comparison operators are not redirects (quote-aware unsafe scan) -----
+# Regression: `>`/`<` inside a quoted filter (a comparison) were read as shell
 # redirects and hard-denied in-process. They must be allowed; real redirects and
 # command substitution outside quotes must still be denied.
+#
+# Carried by `defender-sql` and `grep` since #540 dropped jq from the reader lanes. The
+# property under test is the LEXER's, not any one program's: what matters is that a
+# comparison operator inside a quoted token survives, so the substitute only has to keep
+# `>=`/`<=`/`>` inside quotes.
 
 @pytest.mark.parametrize("cmd", [
-    # jq is stdin-compute-only, so the payload is fed via an in-scope `cat …`; the point of this
-    # regression stays — `>`/`<` inside the single-quoted filter are comparisons, not redirects.
-    '''cat /run/gather_raw/l-001/0.json | jq '[.hits[] | select(.["@timestamp"] >= "2026-01-01" and .x <= "2026-12-31")]' ''',
-    '''cat /run/gather_raw/l-001/0.json | jq '[.hosts[] | select(.trust_edges_out | length > 0)]' ''',
+    # stdin-compute-only, so the payload is fed via an in-scope `cat …`; the point of this
+    # regression stays — `>`/`<` inside the single-quoted argument are comparisons, not redirects.
+    '''cat /run/gather_raw/l-001/0.json | defender-sql 'SELECT * FROM data WHERE ts >= "2026-01-01" AND x <= "2026-12-31"' ''',
+    '''cat /run/gather_raw/l-001/0.json | grep 'trust_edges_out > 0' ''',
 ])
-def test_gather_allows_quoted_jq_comparisons(cmd):
+def test_gather_allows_quoted_comparisons(cmd):
     assert _bash(cmd, GATHER).allow
 
 
 @pytest.mark.parametrize("cmd", [
     # Same regression for MAIN — the gather variants above open a gather_raw path that is not in
     # MAIN's enumeration, so cover MAIN over an in-scope NON-raw artifact instead. Without this, no
-    # MAIN test carries a comparison-bearing jq filter, so a main-only over-tightening of redirect
-    # detection (`>=`/`<=` misread as a redirect) would slip through green.
-    '''cat /run/investigation.md | jq '[.hits[] | select(.["@timestamp"] >= "2026-01-01" and .x <= "2026-12-31")]' ''',
-    '''cat /run/investigation.md | jq '[.hosts[] | select(.trust_edges_out | length > 0)]' ''',
+    # MAIN test carries a comparison-bearing quoted filter, so a main-only over-tightening of
+    # redirect detection (`>=`/`<=` misread as a redirect) would slip through green.
+    '''cat /run/investigation.md | defender-sql 'SELECT * FROM data WHERE ts >= "2026-01-01" AND x <= "2026-12-31"' ''',
+    '''cat /run/investigation.md | grep 'trust_edges_out > 0' ''',
 ])
-def test_main_allows_quoted_jq_comparisons(cmd):
+def test_main_allows_quoted_comparisons(cmd):
     assert _bash(cmd, MAIN).allow
 
 
@@ -269,7 +274,7 @@ def test_bash_script_file_before_c_fails_closed(cmd):
     "bash -c 'cat /run/investigation.md'",
     "sh -c 'cat /run/investigation.md'",
     "timeout 5 bash -c 'cat /run/investigation.md'",         # ... behind a timeout prefix
-    "bash -c 'cat /run/investigation.md | jq .'",            # a pipeline payload must not be re-quoted
+    "bash -c 'cat /run/investigation.md | wc -l'",           # a pipeline payload must not be re-quoted
 ])
 def test_inline_bash_c_viewer_still_allowed(cmd):
     assert _bash(cmd, GATHER).allow
@@ -279,7 +284,7 @@ def test_inline_bash_c_viewer_still_allowed(cmd):
 @pytest.mark.parametrize("cmd", [
     # a `timeout` prefix in front of a legit pipeline must STILL be approved — the
     # unwrap fix must not quote the `|` or otherwise break the pipeline.
-    "timeout 30 cat /run/investigation.md | jq '.'",
+    "timeout 30 cat /run/investigation.md | wc -l",
     "timeout 5 cat /run/investigation.md",
 ])
 def test_timeout_prefix_keeps_legit_pipeline(cmd):
@@ -549,12 +554,12 @@ def test_gather_drops_find():
 
 
 def test_gather_keeps_local_computation():
-    # #611: gather's bash lane keeps the LOCAL-COMPUTATION half only — defender-sql/jq over an
+    # #611: gather's bash lane keeps the LOCAL-COMPUTATION half only — defender-sql over an
     # IN-SCOPE payload already on disk, streamed via `cat {RUN}/…`. The adapter half (the one
     # network-capable program the lane ever had) went to the `query` tool, so deleting the route
-    # IS "take the network off bash".
+    # IS "take the network off bash". (#540 dropped jq, so defender-sql is the whole reducer.)
     for cmd in ("cat /run/gather_raw/l-001/1.json | defender-sql 'SELECT count(*) FROM data'",
-                "cat /run/gather_raw/l-001/1.json | jq '.hits|length'"):
+                "cat /run/gather_raw/l-001/1.json | wc -c"):
         assert _bash(cmd, GATHER).allow, cmd
 
 

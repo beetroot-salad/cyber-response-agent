@@ -49,7 +49,6 @@ from defender.scripts.lessons._lessons_common import (
     as_list,
     iter_lessons,
     reexec_into_venv,
-    rel_to_repo,
     use_utf8_stdio,
 )
 

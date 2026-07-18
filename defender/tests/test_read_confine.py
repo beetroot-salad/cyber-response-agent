@@ -214,7 +214,6 @@ def test_resolve_error_fails_closed(tmp_path):
     "head -5 defender/lessons-actor/x.md",
     "tail -5 defender/lessons-actor/x.md",
     "ls defender/lessons-actor",
-    "jq . defender/lessons-actor/x.md",
 ])
 def test_actor_all_generic_readers_denied(cmd):
     """a confined actor (empty `bash_allow`) is denied EVERY generic bash reader — reads go through the tool.
@@ -387,7 +386,7 @@ def test_judge_pipe_with_unapproved_stage_denied(tmp_path):
     claimed, so `head`/`jq` match no judge grant and the whole command is denied."""
     raw = tmp_path / "gather_raw" / "l-002" / "0.json"
     assert not _judge_gate(f"cat {raw} | head", tmp_path).allow
-    assert not _judge_gate(f"cat {raw} | jq '.'", tmp_path).allow
+    assert not _judge_gate(f"cat {raw} | wc -l", tmp_path).allow
 
 
 def test_judge_pipe_all_cat_stages_gated(tmp_path):
@@ -398,7 +397,7 @@ def test_judge_pipe_all_cat_stages_gated(tmp_path):
     assert not _judge_gate(f"cat {raw} | cat /etc/passwd", tmp_path).allow
 
 
-@pytest.mark.parametrize("tmpl", ["grep x {r}", "head {r}", "tail {r}", "ls .", "jq . {r}", "echo hi"])
+@pytest.mark.parametrize("tmpl", ["grep x {r}", "head {r}", "tail {r}", "ls .", "echo hi"])
 def test_judge_other_readers_denied(tmp_path, tmpl):
     """for the judge, grep/head/tail/ls/jq are denied (subsumed by the read tool's read+search), and
     the inert `echo`/`true` viewers are NOT inherited — only cat + defender-sql survive as bash. Note
@@ -544,8 +543,8 @@ def test_gather_stream_plumbing_anchored(tmp_path):
     raw = f"{run}/gather_raw/l-001/0.json"
     assert bash(f"cat {raw} | defender-sql 'SELECT count(*) FROM data'").allow
     assert not bash("defender-elastic query 'x'").allow   # #611: no adapter on any bash lane
-    assert bash(f"cat {raw} | jq '.hits|length'").allow
-    assert not bash("jq '.hits|length' /tmp/p.json").allow
+    assert bash(f"cat {raw} | wc -c").allow
+    assert not bash("cat /tmp/p.json | wc -c").allow
     assert not bash(f"cat {run}/gather_raw/evil.json").allow   # in-root, but not the raw shape
 
 

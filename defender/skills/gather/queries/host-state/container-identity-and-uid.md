@@ -24,12 +24,13 @@ Determine container metadata (name, image) and resolve a user ID to its /etc/pas
 query(system="host-state", verb="container-inspect", params={"container_id": "${container_id}"})
 
 # Query 2: /etc/passwd entry for the target uid — TWO steps. Run the query (it is captured
-# to gather_raw automatically), then filter the captured payload with jq reading STDIN. jq is
-# stdin-compute-only here (it never opens a file), so pipe the captured payload in with `cat`:
+# to gather_raw automatically), then aggregate the captured payload with defender-sql reading
+# STDIN. It is stdin-compute-only here (it never opens a file), so pipe the payload in with
+# `cat`:
 query(system="host-state", verb="passwd", params={"host": "${container_id}"})
 ```
 ```bash
-cat ${passwd_payload} | jq -r '.entries[] | select(split(":")[2] == "${uid}")'
+cat ${passwd_payload} | defender-sql "SELECT * FROM data WHERE uid = '${uid}'"
 ```
 ```
 # Query 3: Process tree on the container
