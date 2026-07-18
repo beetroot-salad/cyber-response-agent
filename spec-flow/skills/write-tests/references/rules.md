@@ -117,7 +117,7 @@ Suite-verification checks that prove properties of the *suite itself* that no pe
 
 ## The artifact — spec_graph_<issue-or-slug>.yaml
 
-One file per spec, committed **beside the suite** (same directory as the new tests, named `spec_graph_<issue-or-slug>.yaml`), as the tests' machine-checked derivation — the checkers and the cold reconciler read it, not the human:
+One file per spec, committed **beside the suite** (same directory as the new tests, named `spec_graph_<issue-or-slug>.yaml`), as the tests' machine-checked derivation:
 
 ```yaml
 schema_version: 1
@@ -149,7 +149,7 @@ handoff:
   deviations: ["<degraded strong author | collapsed step 4 | manual slot check | reduced small-delta mode>", ...]
 ```
 
-Downstream consumers, every one an agent or a checker: the gate checkers (`check_binds`/`check_actors`/`spec-graph claims`) and the cold reconciler verify it in a human reader's place; `write-code-from-spec` reconciles the implementation's actual structure against it (unrealized addresses and invented scope both flag); the later review *can* diff the implementation against it — wiring the review stage to do so is future work. The human reviews the **tests**, not this file.
+Downstream consumers, every one an agent or a checker: the gate checkers (`check_binds`/`check_actors`/`spec-graph claims`) and the cold reconciler check it; `write-code-from-spec` reconciles the implementation's actual structure against it (unrealized addresses and invented scope both flag); the later review *can* diff the implementation against it — wiring the review stage to do so is future work. The human reviews the **tests**, not this file.
 
 Formal-slot validation (kinds, forms, modes, vias, invariant vocabularies) is currently a hand check against schema.md — a `spec_graph` linter is deliberate future work. Until it exists, the step-9 gate records the manual check in `handoff.deviations`.
 
