@@ -23,14 +23,37 @@ scripts/lint/_baseline.py); the gate fails only on a NEW reachable label file.
 
 Run from repo root:  python scripts/lint/lint_ground_truth_leak.py
 Regenerate the baseline:  python scripts/lint/lint_ground_truth_leak.py --update-baseline
+
+Exit codes:
+  0  clean, or every finding is baselined
+  1  a new reachable label file
+  2  the gate COULD NOT RUN — the permission specs it scans against are unreadable
+     or malformed. Never a silent pass (the lint_vulture / lint_stale_refs
+     convention, #618/#621).
+
+The exit-2 channel exists because this gate's clean answer and its blind answer used
+to be the same bytes. `_load_permission_specs` swallowed every exception into
+`data = {}`, and an empty allow-set is a LEGITIMATE state here (see its closing
+comment) — so a malformed `run-settings.json` produced no allow roots, `_reachable`
+returned None for every candidate, and the gate printed 0 findings and exited 0.
+That is not one file dropping out of the scan: it is the whole check switched off,
+reporting clean. Parse failure and "genuinely no allow entries" must therefore be
+distinguishable, which is what `SpecsUnreadable` makes them.
 """
 from __future__ import annotations
 
+import json
 import re
 import sys
 from pathlib import Path
 
 from _baseline import Finding, gate
+
+
+class SpecsUnreadable(RuntimeError):
+    """A permission spec this gate REQUIRES to parse did not. Without it the allow-set is
+    empty, every candidate reads as unreachable, and the scan would report clean having
+    computed nothing. The gate cannot run, and so must not report clean."""
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFENDER = REPO_ROOT / "defender"
@@ -69,8 +92,13 @@ def _load_permission_specs() -> tuple[list[str], list[re.Pattern]]:
             continue
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            continue
+        except OSError as exc:
+            raise SpecsUnreadable(
+                f"{path.relative_to(REPO_ROOT)} exists but could not be read ({exc}) — "
+                f"its --add-dir grants are part of the agent-accessible set this gate "
+                f"scans against, so skipping it would shrink that set to a subset and "
+                f"report clean on the difference."
+            ) from exc
         for m in re.finditer(r"--add-dir\s+([\w/.\-${}]+)", text):
             raw = m.group(1).replace("${", "").replace("}", "")
             if raw.startswith("/"):
@@ -79,12 +107,24 @@ def _load_permission_specs() -> tuple[list[str], list[re.Pattern]]:
         # from allow or deny by reading the JSON structure.
     settings_path = DEFENDER / "run-settings.json"
     if settings_path.exists():
+        # No `except: data = {}` fallback. An empty allow-set is a legitimate answer here
+        # (see the closing comment) and a malformed file must not be able to counterfeit it.
         try:
-            import json as _json
-            data = _json.loads(settings_path.read_text(encoding="utf-8"))
-        except Exception:
-            data = {}
-        perms = data.get("permissions", {})
+            data = json.loads(settings_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise SpecsUnreadable(
+                f"defender/run-settings.json could not be parsed ({exc.__class__.__name__}: "
+                f"{exc}) — its Read(...) allow entries ARE the agent-accessible set this gate "
+                f"tests reachability against, so an unparseable file makes every label file "
+                f"look unreachable. Fix the JSON, then re-run."
+            ) from exc
+        if not isinstance(data, dict):
+            raise SpecsUnreadable(
+                f"defender/run-settings.json parsed as {type(data).__name__}, not an object — "
+                f"no `permissions` block can be read from it, so the allow-set would be empty "
+                f"for a structural reason rather than a declared one."
+            )
+        perms = data.get("permissions", {}) or {}
         for entry in perms.get("allow", []) or []:
             m = re.match(r"Read\((.+)\)$", entry)
             if not m:
@@ -174,7 +214,13 @@ def _scan() -> list[Finding]:
 
 
 def main(argv: list[str]) -> int:
-    findings = _scan()
+    # Before --update-baseline too: you must not be able to bless an empty result that was
+    # never computed (#621's preflight ordering).
+    try:
+        findings = _scan()
+    except SpecsUnreadable as exc:
+        print(f"lint_ground_truth_leak: {exc}", file=sys.stderr)
+        return 2
     print("A finding means a label-shaped file lives in a directory the agent can Read")
     print("at runtime. Move the file outside agent scope, or rename it (see commit f11210f).")
     return gate(

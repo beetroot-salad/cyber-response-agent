@@ -95,6 +95,8 @@ import sys
 from pathlib import Path
 
 from _astlib import (
+    ScanBlind,
+    read_and_parse,
     ModuleEnv,
     callee,
     has_kw,
@@ -216,11 +218,7 @@ def _scan(root: Path) -> list[Finding]:
         rel = path.relative_to(root).as_posix()
         if _is_test_module(rel):
             continue
-        try:
-            text = path.read_text(encoding="utf-8", errors="replace")
-            tree = ast.parse(text)
-        except (OSError, SyntaxError):
-            continue
+        text, tree = read_and_parse(path, rel)
         findings.extend(_scan_file(rel, tree, text.splitlines()))
     return findings
 
@@ -268,10 +266,17 @@ def main(
         if not root.is_dir():
             print(f"scan scope not found at {root}", file=sys.stderr)
             return 2
+    # A file inside the scan scope that could not be read or parsed never entered the corpus,
+    # so an unpinned read could sit in it and this gate would still print 0 findings. Exit 2 —
+    # the gate could not run, which is categorically not "clean" (#618/#621/#652).
     findings: list[Finding] = []
-    for root in roots:
-        prefix = "" if scope is not None else f"{root.relative_to(REPO_ROOT).as_posix()}/"
-        findings.extend(_prefixed_scan(root, prefix))
+    try:
+        for root in roots:
+            prefix = "" if scope is not None else f"{root.relative_to(REPO_ROOT).as_posix()}/"
+            findings.extend(_prefixed_scan(root, prefix))
+    except ScanBlind as exc:
+        print(f"lint_unpinned_text_io: {exc}", file=sys.stderr)
+        return 2
     print(
         'Pin every text read/write to UTF-8: defender._io.read_text_utf8 / read_text_soft '
         'for reads, encoding="utf-8" on write_text/open, encoding="utf-8" on a '

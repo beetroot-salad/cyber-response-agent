@@ -61,6 +61,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from _baseline import Finding, gate
+from _astlib import ScanBlind, read_and_parse
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFENDER = REPO_ROOT / "defender"
@@ -165,11 +166,7 @@ def _collect() -> dict[str, list[tuple[str, int, str]]]:
     for path in sorted(DEFENDER.rglob("*.py")):
         if not _in_scope(path):
             continue
-        try:
-            text = path.read_text(encoding="utf-8", errors="replace")
-            tree = ast.parse(text)
-        except (OSError, SyntaxError):
-            continue
+        text, tree = read_and_parse(path, path.relative_to(REPO_ROOT).as_posix())
         lines = text.splitlines()
         rel = path.relative_to(REPO_ROOT).as_posix()
         for node in tree.body:  # module level only — no methods, no nested defs
@@ -217,7 +214,14 @@ HEADER = (
 
 
 def main(argv: list[str]) -> int:
-    table = _collect()
+    # A file inside the scan scope that could not be read or parsed never entered the corpus,
+    # so a violation could sit in it and this gate would still print 0 findings. Exit 2 — the
+    # gate could not run, which is categorically not "clean" (#618/#621/#652).
+    try:
+        table = _collect()
+    except ScanBlind as exc:
+        print(f"lint_duplicate_helpers: {exc}", file=sys.stderr)
+        return 2
     identical, divergent = _dup_groups(table)
 
     _print_section("identical-duplicate (extract to a shared module)", identical)

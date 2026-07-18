@@ -26,6 +26,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 WORKTREE = Path(__file__).resolve().parents[2]
 LINT_DIR = WORKTREE / "scripts" / "lint"
 LINT_PATH = LINT_DIR / "lint_unpinned_text_io.py"
@@ -142,9 +144,27 @@ def test_suppression(tmp_path):
     )
 
 
-def test_syntax_error_file_is_skipped(tmp_path):
+def test_syntax_error_file_is_not_silently_skipped(tmp_path):
+    """INVERTED by #652 (was `test_syntax_error_file_is_skipped`).
+
+    The old assertion pinned the swallow — `broken.py` left the corpus and the scan carried
+    on, so an unpinned `read_text()` sitting in an unparseable file was reported as clean.
+    A gate that cannot look must not report clean (#618/#621), so the gate now raises
+    ScanBlind, which `main()` surfaces as exit 2."""
+    import _astlib
+
     tree = tmp_path / "scope"
     _pyfile(tree, "broken.py", "def f(:\n")
+    _pyfile(tree, "prod.py", "def f(p):\n    return p.read_text()\n")
+    with pytest.raises(_astlib.ScanBlind) as exc:
+        _kinds(tree)
+    assert "broken.py" in str(exc.value)
+
+
+def test_clean_tree_still_scans(tmp_path):
+    """Control for the above: without the unparseable file the scan works normally, so the
+    raises-test cannot pass against a gate that raises unconditionally."""
+    tree = tmp_path / "scope"
     _pyfile(tree, "prod.py", "def f(p):\n    return p.read_text()\n")
     assert all("prod.py" in fp for fp in _kinds(tree))
 
