@@ -19,7 +19,7 @@ from defender.learning.leads import lead_neighbors as ln  # type: ignore[import-
 
 def test_tokenize_query_drops_pure_numeric_and_plumbing():
     toks = ln.tokenize_query(
-        "python3 wazuh_cli.py --query 'rule.id:5710' --window 1h"
+        "python3 wazuh_adapter.py --query 'rule.id:5710' --window 1h"
     )
     assert "5710" not in toks
     assert "window" not in toks  # PLUMBING

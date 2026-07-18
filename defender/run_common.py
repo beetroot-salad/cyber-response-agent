@@ -12,7 +12,6 @@ that need them.
 from __future__ import annotations
 
 import datetime as _dt
-import json
 import os
 import secrets
 import shutil
@@ -44,7 +43,20 @@ def resolve_runs_base() -> Path:
     return Path(os.environ.get("DEFENDER_RUNS_BASE", str(DEFAULT_RUNS_BASE)))
 
 
-def materialize_run_dir(alert: Path, run_id: str | None) -> Path:
+def materialize_run_dir(alert: Path, run_id: str | None) -> tuple[Path, str]:
+    """Materialize the run dir and mint the run's trust token — `(run_dir, salt)`.
+
+    The pair is promised on the SUCCESS lane only: both guard lanes below exit the
+    process outright, above the mint, so a caller unpacking the pair can never receive
+    a half-built one.
+
+    The salt is the per-run trust token `runtime/untrusted.wrap` interpolates into the
+    quarantine delimiters around untrusted data-source output. It is minted here, in
+    process, and returned to the caller — it is never written to the run dir, and no
+    consumer reads one back off disk. It comes from `secrets`, NOT from anything an
+    outsider can name: deriving it from `run_id` (`{utc_timestamp}-{alert.stem}`) would
+    hand every delimiter to anyone who can predict the run id.
+    """
     if not alert.is_file():
         sys.exit(f"alert not found: {alert}")
     runs_base = resolve_runs_base()
@@ -56,20 +68,14 @@ def materialize_run_dir(alert: Path, run_id: str | None) -> Path:
         sys.exit(f"run dir already exists: {run_dir}")
     RunPaths(run_dir).gather_raw.mkdir(parents=True)
     shutil.copy(alert, RunPaths(run_dir).alert)
-    # Per-run salt consumed by the tag_tool_results tagging to wrap untrusted
-    # data-source output in unguessable delimiters. Stable across the run,
-    # regenerated per run.
-    RunPaths(run_dir).meta.write_text(
-        json.dumps({"run_id": run_dir.name, "salt": secrets.token_hex(8)}, indent=2)
-        + "\n", encoding="utf-8"
-    )
+    salt = secrets.token_hex(8)
     # Propagate a sibling ground_truth.yaml into the run dir so the learning
     # loop's persist stage can recognise held-out cases and suppress
     # queue appends. Fixture layout: {fixture-dir}/{alert.json,ground_truth.yaml}.
     gt = alert.parent / "ground_truth.yaml"
     if gt.is_file():
         shutil.copy(gt, run_dir / "ground_truth.yaml")
-    return run_dir
+    return run_dir, salt
 
 
 def run_env(defender_dir: Path, run_dir: Path) -> dict[str, str]:

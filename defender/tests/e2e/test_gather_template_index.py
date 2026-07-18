@@ -56,7 +56,7 @@ def test_d17_gather_dispatch_carries_the_template_index_end_to_end(tmp_path):
     from defender.tests.e2e._replay_harness import FakeVerbs
 
     run_id, salt = "tmpl-index", "1122334455667788"
-    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=run_id, salt=salt)
+    run_dir = materialize(tmp_path, GOLDEN_AB3)
     report_md = ("---\ncase_id: tmpl-index\ndisposition: benign\n"
                  "confidence: low\n---\nSynthetic template-index test.\n")
 

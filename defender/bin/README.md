@@ -19,7 +19,7 @@ a map of what to attack.
 The harness allowlist matches a Bash command on its **first token**, and it
 splits compound commands (`cd … &&`, pipes, `bash -c '…'`) and re-gates each
 part. Invoking a tool as `python3 -m defender.skills.invlang.cli …`,
-`defender/.venv/bin/python3 …/elastic_cli.py …`, or `cd $run && python3 …`
+`defender/.venv/bin/python3 …/elastic_adapter.py …`, or `cd $run && python3 …`
 produces a different leading token every time, which the permission gate would
 have to special-case (issue #261).
 
@@ -41,11 +41,11 @@ shims resolve from any cwd.
   lane. `defender-sql` runs sandboxed SQL over a payload piped into it — the tier-2
   aggregation fallback for a source with no native aggregation; it queries no source, which
   is exactly why it is still a command.
-- An **adapter-shaped** command (`defender-<system>`, or a `<system>_cli.py` path) is still
+- An **adapter-shaped** command (`defender-<system>`, or a `<system>_adapter.py` path) is still
   CLASSIFIED — `hooks/_cmd_segments` / `permission/command_shape` — but only so the gate can
   deny it with a reason that names the `query` tool. The classification outlived the route.
 
 To add a data source: do NOT drop a shim here — export a `VERBS` mapping from
-`scripts/adapters/{system}_cli.py` (see `runtime/verbs.py`). To add a local tool: drop a shim
+`scripts/adapters/{system}_adapter.py` (see `runtime/verbs.py`). To add a local tool: drop a shim
 following the same pattern and add it to `NON_ADAPTER_SHIMS` *and* `grant._SHIM_FLAGS` (a shim
 in one but not the other degrades to a free-text shape that silently widens what it accepts).

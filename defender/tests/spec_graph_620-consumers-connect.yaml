@@ -316,7 +316,7 @@ demands:
     kind: behavior
     form: test
     outcome:
-      nl: "validate_scaffold normalizes the system name so a single invocation locates BOTH the adapter (underscore, change_mgmt_cli.py) and the skill/corpus (hyphen, skills/change-mgmt/) for change-mgmt/host-state/threat-intel — today NO spelling passes for these three. (A brief-confirmed hole the issue never names; A12's 'green on all seven' silently assumes it.)"
+      nl: "validate_scaffold normalizes the system name so a single invocation locates BOTH the adapter (underscore, change_mgmt_adapter.py) and the skill/corpus (hyphen, skills/change-mgmt/) for change-mgmt/host-state/threat-intel — today NO spelling passes for these three. (A brief-confirmed hole the issue never names; A12's 'green on all seven' silently assumes it.)"
     binds: ["validate_scaffold", "system.domain.distinguished[hyphen-split]"]
 
   - id: validate_scaffold_enforces_placeholder_invariant
@@ -596,7 +596,7 @@ claims:
   - id: elastic-verbs-refined
     kind: behavior
     claim: "the design's '${start}/${end} are not params' is verb-dependent: they ARE declared params of elastic.query/alerts, NOT of esql."
-    probe: "read elastic_cli.py:327-360 — the three real keyword-only signatures + import-and-print of the registry (grounding G1)."
+    probe: "read elastic_adapter.py:327-360 — the three real keyword-only signatures + import-and-print of the registry (grounding G1)."
     observed: "esql(ctx,*,query:str) — one param; query/alerts(ctx,*,native_query,start,end,limit,index). Three engines: esql, lucene/KQL, none."
     verdict: refuted   # refutes the design's system-keyed framing; the placeholder rule is per-verb
   - id: payload-path-not-null

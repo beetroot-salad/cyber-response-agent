@@ -97,7 +97,7 @@ Reached with the **`query` tool** — there is no command, no shim, and no `--he
 Params bind **by name**, with literal JSON types. `active-changes` requires both
 `host` and `at`; every `list-changes` param is an optional filter.
 
-**Do not Read `change_mgmt_cli.py` source to discover params.** This SKILL plus the
+**Do not Read `change_mgmt_adapter.py` source to discover params.** This SKILL plus the
 systems catalog in your dispatch prompt is the authoritative surface, and a call
 with an unknown/missing/mistyped param is rejected with the declared list anyway.
 

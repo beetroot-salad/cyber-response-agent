@@ -110,7 +110,7 @@ def descriptor_catalog(
     tree) each get their own catalog instead of the first caller's. Callers thread the
     run's tree: see ``tools_gather._run_gather`` (#551/#591).
 
-    Scoped to systems that DECLARE VERBS (#611), not to the `*_cli.py` files on disk. That is
+    Scoped to systems that DECLARE VERBS (#611), not to the `*_adapter.py` files on disk. That is
     the difference between failing closed and merely looking like it: the roster used to be a
     filename GLOB that never imported the module, so a system whose module declared nothing was
     unreachable at the tool and still ADVERTISED at the prompt — gather would be told the system
@@ -122,7 +122,7 @@ def descriptor_catalog(
     first tree it saw into the second tree's run.
 
     Reading the roster now IMPORTS each adapter, which the filename glob never did — so one
-    `*_cli.py` that will not import (a newly onboarded system with a typo, a missing dep) would
+    `*_adapter.py` that will not import (a newly onboarded system with a typo, a missing dep) would
     take down catalog construction for EVERY system, and with it every gather dispatch and the
     whole run. A system that cannot be loaded cannot be advertised; it drops out of the catalog
     alone. The tool agrees (`query_tool` files the same failure as infra against that ONE

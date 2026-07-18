@@ -1,6 +1,6 @@
-"""ticket_cli read-only adapter — the `--require-closed` scoped-read guard (#338).
+"""ticket_adapter read-only adapter — the `--require-closed` scoped-read guard (#338).
 
-Since #611 ticket_cli is a VERBS registry (with the one surviving CLI). The guard's seam is now
+Since #611 ticket_adapter is a VERBS registry (with the one surviving CLI). The guard's seam is now
 the verb functions `get_ticket(ctx, key=…, require_closed=…)` and `list_tickets(ctx, status=…,
 require_closed=…)` (the old `cmd_get_ticket(args, config)` / `cmd_list_tickets` wrappers are
 gone). The refusal of a non-closed ticket now RAISES `UpstreamFault` (a query error the capture
@@ -17,7 +17,7 @@ import pytest
 
 from defender.runtime.verbs import VerbContext
 from defender.scripts.adapters import _stub_transport as transport
-from defender.scripts.adapters import ticket_cli
+from defender.scripts.adapters import ticket_adapter
 from defender.scripts.adapters.faults import UpstreamFault
 
 
@@ -40,7 +40,7 @@ def test_require_closed_passes_on_closed(monkeypatch, ctx):
         transport, "http_get_obj",
                         lambda c, cfg, p, params=None: {"key": "c", "status": "closed",
                                                         "resolution": "benign — r"})
-    payload = ticket_cli.get_ticket(ctx, key="c", require_closed=True)
+    payload = ticket_adapter.get_ticket(ctx, key="c", require_closed=True)
     assert payload["status"] == "closed"
 
 
@@ -50,14 +50,14 @@ def test_require_closed_rejects_open(monkeypatch, ctx):
     monkeypatch.setattr(transport, "http_get_obj",  # lint-monkeypatch: ok — transport has no in-process DI seam (this file's established pattern)
                         lambda c, cfg, p, params=None: {"key": "c", "status": "open"})
     with pytest.raises(UpstreamFault):
-        ticket_cli.get_ticket(ctx, key="c", require_closed=True)
+        ticket_adapter.get_ticket(ctx, key="c", require_closed=True)
 
 
 def test_no_flag_allows_any_status(monkeypatch, ctx):
     # Without require_closed the adapter is unchanged (open tickets still fetch).
     monkeypatch.setattr(transport, "http_get_obj",  # lint-monkeypatch: ok — transport has no in-process DI seam (this file's established pattern)
                         lambda c, cfg, p, params=None: {"key": "c", "status": "open"})
-    payload = ticket_cli.get_ticket(ctx, key="c", require_closed=False)
+    payload = ticket_adapter.get_ticket(ctx, key="c", require_closed=False)
     assert payload["status"] == "open"
 
 
@@ -71,7 +71,7 @@ def test_list_require_closed_pins_status_over_widening(monkeypatch, ctx):
         return {"tickets": [], "total": 0}
 
     monkeypatch.setattr(transport, "http_get", fake_get)  # lint-monkeypatch: ok — transport has no in-process DI seam (this file's established pattern)
-    ticket_cli.list_tickets(ctx, status="open", require_closed=True)
+    ticket_adapter.list_tickets(ctx, status="open", require_closed=True)
     assert seen["params"]["status"] == "closed"
 
 
@@ -83,5 +83,5 @@ def test_list_no_flag_passes_status_through(monkeypatch, ctx):
         return {"tickets": [], "total": 0}
 
     monkeypatch.setattr(transport, "http_get", fake_get)  # lint-monkeypatch: ok — transport has no in-process DI seam (this file's established pattern)
-    ticket_cli.list_tickets(ctx, status="open", require_closed=False)
+    ticket_adapter.list_tickets(ctx, status="open", require_closed=False)
     assert seen["params"]["status"] == "open"

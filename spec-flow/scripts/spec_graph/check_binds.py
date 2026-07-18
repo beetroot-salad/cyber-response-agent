@@ -92,7 +92,20 @@ def _test_docstrings(test_dir: Path) -> dict[str, str]:
             continue
         try:
             tree = ast.parse(py.read_text(encoding="utf-8"), filename=str(py))
-        except (SyntaxError, OSError, ValueError):  # ValueError covers UnicodeDecodeError
+        except (SyntaxError, OSError, ValueError) as e:  # ValueError covers UnicodeDecodeError
+            # Not silent. The dominant consequence is already fail-closed — a demand whose
+            # `discharged_by` names a function in this file finds no such name and reports a
+            # dangling pointer below. But two consequences are NOT covered by that, and both are
+            # quiet: `docs.setdefault` means a name this file would have defined FIRST now yields
+            # to a later file, so the prose scanned is another test's; and the operator otherwise
+            # gets no signal that a suite file is broken at all. stderr, not stdout — the findings
+            # stream is the tool's parsed output.
+            print(
+                f"  WARN [check_binds] {py}: unscannable ({e.__class__.__name__}: {e}) — its test "
+                f"docstrings are absent from this check; a `discharged_by` naming one will report "
+                f"as dangling, and a name it shares with another file resolves to that file's prose",
+                file=sys.stderr,
+            )
             continue
         for node in ast.walk(tree):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):

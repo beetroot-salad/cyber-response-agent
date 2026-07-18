@@ -20,9 +20,9 @@ in this package still allowed to exit: it maps a raised fault back to the exit c
 subprocess callers contract on.
 
 Usage (the CLI surface):
-    ticket_cli.py health-check
-    ticket_cli.py list-tickets [--status open] [--label brute-force] [--q sshd]
-    ticket_cli.py get-ticket SOC-1042 [--require-closed]
+    ticket_adapter.py health-check
+    ticket_adapter.py list-tickets [--status open] [--label brute-force] [--q sshd]
+    ticket_adapter.py get-ticket SOC-1042 [--require-closed]
 
 Exit codes:
     0 — success
@@ -39,7 +39,7 @@ import sys
 from pathlib import Path
 
 # Put the workspace root on sys.path so `defender.*` namespace imports resolve when the
-# verb registry loads this module BY PATH (see cmdb_cli.py) or the CLI runs it directly.
+# verb registry loads this module BY PATH (see cmdb_adapter.py) or the CLI runs it directly.
 import sys as _sys
 from pathlib import Path as _Path
 
@@ -54,7 +54,10 @@ SYSTEM = "ticket"
 PREFIX = "TICKET"
 
 
-def _config(ctx: VerbContext) -> dict[str, str]:
+# Same name in each stub adapter, closing over that module's SYSTEM/PREFIX: the shared
+# body already lives once in `transport.load_config`, so this is a zero-argument alias,
+# not a copy of any logic.
+def _config(ctx: VerbContext) -> dict[str, str]:  # lint-dup: ok — per-module alias over the shared transport.load_config
     return transport.load_config(ctx, SYSTEM, PREFIX)
 
 

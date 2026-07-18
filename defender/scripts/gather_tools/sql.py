@@ -5,7 +5,7 @@ Two consumers, both piping a payload in rather than naming a file (this
 tool NEVER opens one):
 
   * **gather**, live — the tier-2 fallback for a source with no native
-    aggregating query language (see `skills/connect/cli-adapter.md` ->
+    aggregating query language (see `skills/connect/adapter.md` ->
     "Prefer native aggregation"). A source that aggregates in its own
     language (e.g. ES|QL) never needs it; that aggregation runs in the
     source.
@@ -244,7 +244,7 @@ def main() -> int:
         prog="defender-sql",
         description="Sandboxed SQL aggregation over a JSON/NDJSON payload on stdin, "
                     "exposed as the table `data`. Tier-2 fallback for a source with "
-                    "no native aggregation (see skills/connect/cli-adapter.md).",
+                    "no native aggregation (see skills/connect/adapter.md).",
         epilog="the payload IS the table — there is no wrapper envelope to reach "
                "through. example: defender-<system> query '<filter>' | defender-sql "
                "\"SELECT h.user, count(*) c "

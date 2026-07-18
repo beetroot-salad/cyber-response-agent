@@ -22,6 +22,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 WORKTREE = Path(__file__).resolve().parents[2]
 LINT_DIR = WORKTREE / "scripts" / "lint"
 LINT_PATH = LINT_DIR / "lint_unsafe_jsonl_io.py"
@@ -135,9 +137,27 @@ def test_suppression(tmp_path):
     ))
 
 
-def test_syntax_error_file_is_skipped(tmp_path):
+def test_syntax_error_file_is_not_silently_skipped(tmp_path):
+    """INVERTED by #652 (was `test_syntax_error_file_is_skipped`).
+
+    The old assertion pinned the swallow — `broken.py` left the corpus and the scan carried
+    on, so an unsafe `json.loads(line)` sitting in an unparseable file was reported as clean.
+    A gate that cannot look must not report clean (#618/#621), so the gate now raises
+    ScanBlind, which `main()` surfaces as exit 2."""
+    import _astlib
+
     tree = tmp_path / "scope"
     _pyfile(tree, "broken.py", "def f(:\n")
+    _pyfile(tree, "prod.py", _reader("import json", "json.loads"))
+    with pytest.raises(_astlib.ScanBlind) as exc:
+        _load_gate()._scan(tree)
+    assert "broken.py" in str(exc.value)
+
+
+def test_clean_tree_still_scans(tmp_path):
+    """Control for the above: without the unparseable file the scan works normally, so the
+    raises-test cannot pass against a gate that raises unconditionally."""
+    tree = tmp_path / "scope"
     _pyfile(tree, "prod.py", _reader("import json", "json.loads"))
     assert all("prod.py" in f.fingerprint for f in _load_gate()._scan(tree))
 

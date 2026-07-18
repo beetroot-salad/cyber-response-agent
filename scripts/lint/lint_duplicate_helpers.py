@@ -31,9 +31,8 @@ so it blocks growth without forcing a big-bang cleanup of the existing set.
 Regenerate the baseline after a deliberate change with `--update-baseline`.
 
 Scope: `defender/` only, module-level defs only (nested defs and methods are
-not counted). Excluded as the jscpd gate's `--ignore` does: `.venv`, the
-transient run-output dirs (`runs/`, `run-visualizations/`), and `**/*_cli.py`
-(per-system adapter shims share argparse scaffolding by design). Excluded
+not counted). Excluded as the jscpd gate's `--ignore` does: `.venv` and the
+transient run-output dirs (`runs/`, `run-visualizations/`). Excluded
 additionally (fixture/scaffold code that re-implements helpers by design):
 test modules — a `tests/` dir or a flat `test_*.py` / `*_test.py` file — and
 `skills/connect/examples/` (adapter scaffold templates meant to be copied). A
@@ -62,6 +61,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from _baseline import Finding, gate
+from _astlib import ScanBlind, read_and_parse
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFENDER = REPO_ROOT / "defender"
@@ -72,11 +72,15 @@ BASELINE_PATH = Path(__file__).with_name("lint_duplicate_helpers_baseline.json")
 # `tests` drops fixture-helper modules (flat test_*.py files handled below).
 EXCLUDED_DIRS = (".venv", "tests", "runs", "run-visualizations")
 
-# Accepted-boilerplate excludes (by filename suffix / path substring):
-#   *_cli.py            — per-system adapter shims share argparse scaffolding by
-#                         design (jscpd ignores `**/*_cli.py` for the same reason)
+# Accepted-boilerplate excludes (by path substring):
 #   connect/examples/   — adapter scaffold templates, meant to be copied
-EXCLUDED_SUFFIXES = ("_cli.py",)
+#
+# There is deliberately no filename-suffix exclusion. The adapters used to be
+# skipped via `*_cli.py` (their name before #619) on the rationale that they 'share
+# argparse scaffolding by design' — dead since #611 took argparse out of every adapter
+# but `ticket`. The
+# exclusion outlived its reason and hid live duplication; findings under
+# `scripts/adapters/` now either get fixed or carry a written `# lint-dup: ok`.
 EXCLUDED_PATH_PARTS = ("skills/connect/examples/",)
 
 # Module-level names that are legitimately defined in many modules — script
@@ -99,8 +103,6 @@ def _in_scope(path: Path) -> bool:
     # Flat pytest modules (test_*.py / *_test.py) outside a tests/ dir are
     # fixture helpers too — exclude them for the same reason a tests/ dir is.
     if path.name.startswith("test_") or path.name.endswith("_test.py"):
-        return False
-    if path.name.endswith(EXCLUDED_SUFFIXES):
         return False
     rel_posix = rel.as_posix()
     return not any(part in rel_posix for part in EXCLUDED_PATH_PARTS)
@@ -164,11 +166,7 @@ def _collect() -> dict[str, list[tuple[str, int, str]]]:
     for path in sorted(DEFENDER.rglob("*.py")):
         if not _in_scope(path):
             continue
-        try:
-            text = path.read_text(encoding="utf-8", errors="replace")
-            tree = ast.parse(text)
-        except (OSError, SyntaxError):
-            continue
+        text, tree = read_and_parse(path, path.relative_to(REPO_ROOT).as_posix())
         lines = text.splitlines()
         rel = path.relative_to(REPO_ROOT).as_posix()
         for node in tree.body:  # module level only — no methods, no nested defs
@@ -216,7 +214,14 @@ HEADER = (
 
 
 def main(argv: list[str]) -> int:
-    table = _collect()
+    # A file inside the scan scope that could not be read or parsed never entered the corpus,
+    # so a violation could sit in it and this gate would still print 0 findings. Exit 2 — the
+    # gate could not run, which is categorically not "clean" (#618/#621/#652).
+    try:
+        table = _collect()
+    except ScanBlind as exc:
+        print(f"lint_duplicate_helpers: {exc}", file=sys.stderr)
+        return 2
     identical, divergent = _dup_groups(table)
 
     _print_section("identical-duplicate (extract to a shared module)", identical)

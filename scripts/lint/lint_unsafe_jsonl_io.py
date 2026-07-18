@@ -74,6 +74,8 @@ import sys
 from pathlib import Path
 
 from _astlib import (
+    ScanBlind,
+    read_and_parse,
     ModuleEnv,
     callee,
     module_env,
@@ -321,11 +323,7 @@ def _scan(root: Path) -> list[Finding]:
     for path in sorted(root.rglob("*.py")):
         if not _in_scope(path):
             continue
-        try:
-            text = path.read_text(encoding="utf-8", errors="replace")
-            tree = ast.parse(text)
-        except (OSError, SyntaxError):
-            continue
+        text, tree = read_and_parse(path, path.relative_to(root).as_posix())
         rel = path.relative_to(root).as_posix()
         findings.extend(_scan_file(rel, tree, text.splitlines()))
     return findings
@@ -355,7 +353,14 @@ def main(
     if not root.is_dir():
         print(f"scan scope not found at {root}", file=sys.stderr)
         return 2
-    findings = _scan(root)
+    # A file inside the scan scope that could not be read or parsed never entered the corpus,
+    # so a violation could sit in it and this gate would still print 0 findings. Exit 2 — the
+    # gate could not run, which is categorically not "clean" (#618/#621/#652).
+    try:
+        findings = _scan(root)
+    except ScanBlind as exc:
+        print(f"lint_unsafe_jsonl_io: {exc}", file=sys.stderr)
+        return 2
     print(
         "Route file-line JSON reads through defender._io.read_jsonl_rows (tolerant "
         "of torn/blank lines; a bare json.loads(line) crashes the drains on a torn "

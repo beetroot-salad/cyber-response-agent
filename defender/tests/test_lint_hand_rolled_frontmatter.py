@@ -22,6 +22,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 WORKTREE = Path(__file__).resolve().parents[2]
 LINT_DIR = WORKTREE / "scripts" / "lint"
 LINT_PATH = LINT_DIR / "lint_hand_rolled_frontmatter.py"
@@ -227,16 +229,39 @@ def test_d_lint_exit2_scope_missing(tmp_path):
 
 
 # ===========================================================================
-# demand: d_lint_syntax_error_skipped
+# demand: d_lint_syntax_error_is_not_clean   (was: d_lint_syntax_error_skipped)
+#
+# INVERTED by #652. The original demand pinned the swallow: a file the gate could not
+# parse was dropped from the corpus and the scan carried on, so `main()` printed
+# "0 finding(s)" and exited 0 over source it never read. That is the #618/#621 class —
+# a gate that cannot look must not report clean — and this test was the executable
+# statement of the bug, which is why the fix could not land without rewriting it.
+#
+# The robustness intent underneath it survives and is still pinned below: one broken
+# file must not produce a traceback or a partial, silently-truncated report. What
+# changes is the answer it produces — ScanBlind, surfaced by main() as exit 2, instead
+# of a quiet skip.
 # ===========================================================================
-def test_d_lint_syntax_error_skipped(tmp_path):
+def test_d_lint_syntax_error_is_not_clean(tmp_path):
+    import _astlib
+
     gate = _load_gate()
     tree = tmp_path / "scope"
     _pyfile(tree, "broken.py", "def f(:\n    this is not python\n")   # syntax error
     _pyfile(tree, "ok.py", _FIND)
-    findings = gate._scan(tree)   # must not raise
-    assert not any("broken.py" in f.fingerprint for f in findings)
-    assert any("ok.py" in f.fingerprint for f in findings)
+    with pytest.raises(_astlib.ScanBlind) as exc:
+        gate._scan(tree)
+    assert "broken.py" in str(exc.value)   # the operator must learn WHICH file went unread
+
+
+def test_d_lint_clean_tree_still_scans(tmp_path):
+    """The control: the same tree minus the unparseable file scans normally and finds the
+    real site. Without this, the raises-test above would also pass against a gate that
+    raised unconditionally."""
+    gate = _load_gate()
+    tree = tmp_path / "scope"
+    _pyfile(tree, "ok.py", _FIND)
+    assert any("ok.py" in f.fingerprint for f in gate._scan(tree))
 
 
 # ===========================================================================

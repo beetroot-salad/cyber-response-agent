@@ -76,13 +76,18 @@ NON_ADAPTER_SHIMS = frozenset(
 # is what makes it deny for everyone (no grant claims it, and no adapter route rescues it).
 OPERATOR_TOOLS = frozenset({"defender-policy"})
 
-# A raw adapter-CLI path form (`scripts/adapters/<name>_cli.py`), i.e. the
-# shim's underlying script invoked directly rather than via its `defender-*`
-# token. The `_cli.py` suffix IS the structural marker for an adapter: every
+# A raw adapter path form (`scripts/adapters/<name>_adapter.py`), i.e. the
+# shim's underlying module invoked directly rather than via its `defender-*`
+# token. The `_adapter.py` suffix IS the structural marker for an adapter: every
 # non-adapter script deliberately avoids it (`record_query.py`, `sql.py`) so it
 # can't be misread as an adapter here.
-# Kept in sync with block_main_loop_raw_access.ADAPTER_CLI_RE.
-ADAPTER_CLI_RE = re.compile(r"scripts/adapters/\w+_cli\.py\b")
+#
+# THIS IS THE SOLE DEFINITION. `block_main_loop_raw_access` and `permission/command_shape`
+# both import it from here — it used to be hand-copied into a
+# second module "kept in sync" by comment. Note the failure mode if the suffix and this
+# pattern ever drift: the regex matches NOTHING, so the main-loop deny silently stops
+# denying. It fails OPEN, and no test that only asserts "allowed stays allowed" catches it.
+ADAPTER_RE = re.compile(r"scripts/adapters/\w+_adapter\.py\b")
 
 
 def all_defender_shims() -> set[str]:

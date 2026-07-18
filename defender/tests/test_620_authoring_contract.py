@@ -400,7 +400,7 @@ def test_gather_prompt_positive_control():
 
 def _connect_skill_text() -> str:
     parts = []
-    for name in ("SKILL.md", "cli-adapter.md", "checklist.md", "decisions.md"):
+    for name in ("SKILL.md", "adapter.md", "checklist.md", "decisions.md"):
         p = _CONNECT / name
         if p.exists():
             parts.append(_read(p))
@@ -457,28 +457,28 @@ def test_connect_examples_compile_against_the_live_tree():
     for py in sorted(_EXAMPLES.glob("*.py")):
         py_compile.compile(str(py), doraise=True)
 
-    example_cli = _load_example("example_cli")
+    example_adapter = _load_example("example_adapter")
 
     # the live registry shape.
-    assert isinstance(getattr(example_cli, "VERBS", None), dict), \
-        "example_cli.py exposes no VERBS mapping"
-    assert example_cli.VERBS, "example_cli.py exposes an empty VERBS mapping"
-    assert "health-check" in example_cli.VERBS, "example_cli.py VERBS declares no health-check"
-    src = inspect.getsource(example_cli)
-    assert "VerbContext" in src, "example_cli.py does not reference VerbContext"
-    assert "faults" in src, "example_cli.py does not use the faults.py taxonomy"
+    assert isinstance(getattr(example_adapter, "VERBS", None), dict), \
+        "example_adapter.py exposes no VERBS mapping"
+    assert example_adapter.VERBS, "example_adapter.py exposes an empty VERBS mapping"
+    assert "health-check" in example_adapter.VERBS, "example_adapter.py VERBS declares no health-check"
+    src = inspect.getsource(example_adapter)
+    assert "VerbContext" in src, "example_adapter.py does not reference VerbContext"
+    assert "faults" in src, "example_adapter.py does not use the faults.py taxonomy"
 
     # the health-check RETURNS a dict — it does not print+exit.
-    hc = example_cli.VERBS["health-check"]
+    hc = example_adapter.VERBS["health-check"]
     hc_src = inspect.getsource(hc)
-    assert re.search(r"\breturn\b", hc_src), "example_cli health-check does not return a value"
+    assert re.search(r"\breturn\b", hc_src), "example_adapter health-check does not return a value"
     assert "print(" not in hc_src, \
-        "example_cli health-check still prints instead of returning a dict"
+        "example_adapter health-check still prints instead of returning a dict"
     assert "SystemExit" not in hc_src, \
-        "example_cli health-check still raises SystemExit instead of returning a dict"
+        "example_adapter health-check still raises SystemExit instead of returning a dict"
 
     # the dead argparse/shim shape is gone from every example module.
-    for name in ("example_cli", "_adapter"):
+    for name in ("example_adapter", "_adapter"):
         if not (_EXAMPLES / f"{name}.py").exists():
             continue
         mod = _load_example(name)

@@ -6,7 +6,7 @@ mirror Claude Code's Read/Write/Edit/Bash so SKILL.md transfers verbatim. Each
 tool enforces its own contract by calling the single `permission` gate and
 raising `ModelRetry` on a deny (the in-process equivalent of a PreToolUse hook's
 exit-2 feedback). Untrusted reads are wrapped in the salted tag in-process — the
-clean version of the `tag_tool_results` annotation.
+in-process quarantine delimiter (`runtime/untrusted.wrap`).
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ from .agent_role import AgentRole
 # Reuse the hook/wrapper helpers in-process (the clean version of the claude -p
 # PreToolUse hooks + the gather capture core). The workspace root is on sys.path
 # via the entry-point bootstrap (run.py) / pytest's `pythonpath = [".."]`.
-from defender.hooks.tag_tool_results import wrap as _wrap
+from defender.runtime.untrusted import wrap as _wrap
 from defender.scripts.gather_tools.record_query import (
     _passthrough_max_bytes as _read_char_cap,
 )
@@ -187,7 +187,7 @@ class AgentDeps:
         behind each subtype's `for_scope` and `bind`. `salt` is the untrusted-data trust
         token: `None` mints a FRESH uuid4 (the stages' behaviour, distinct per call), a
         carried value is threaded verbatim — the MAIN/GATHER reroute passes the run's ONE
-        persisted salt so the tool-output wrapper and orient's alert wrapper stay coherent
+        minted salt so the tool-output wrapper and orient's alert wrapper stay coherent
         (a fresh uuid4 would split the tag and fail the injection defence open). `defender_dir`
         defaults to the `PATHS` primitive (the MAIN checkout's `<repo>/defender` — the
         read-only predictors + main loop), but a writer that edits a throwaway git WORKTREE

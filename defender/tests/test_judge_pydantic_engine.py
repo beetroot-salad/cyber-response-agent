@@ -29,7 +29,7 @@ from defender.runtime.agent_definition import RunScope, compile_policy_for  # no
 from defender.runtime.providers import BuiltModel  # noqa: E402
 
 _PY = "/venv/bin/python3"  # a full path, like sys.executable
-_CLI = Path("/repo/defender/scripts/adapters/ticket_cli.py")
+_CLI = Path("/repo/defender/scripts/adapters/ticket_adapter.py")
 
 
 def _judge_policy(tmp_path, *, ticket_cli=None, read_roots=()):
@@ -234,7 +234,7 @@ def test_ticket_grant_pattern_shape():
     assert not p.fullmatch(f"{_PY} {_CLI} get-ticket --require-closed-not")
     # wrong subcommand / wrong CLI / arbitrary python — denied even WITH the flag
     assert not p.fullmatch(f"{_PY} {_CLI} delete-ticket CASE-9 --require-closed")
-    assert not p.fullmatch(f"{_PY} /repo/defender/scripts/adapters/elastic_cli.py q --require-closed")
+    assert not p.fullmatch(f"{_PY} /repo/defender/scripts/adapters/elastic_adapter.py q --require-closed")
     assert not p.fullmatch(f"{_PY} -c print(1) --require-closed")
 
 

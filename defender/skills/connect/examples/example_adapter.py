@@ -1,5 +1,5 @@
 """Reference adapter for a generic HTTP read source — the shape `/connect`
-copies into `defender/scripts/adapters/{system}_cli.py`.
+copies into `defender/scripts/adapters/{system}_adapter.py`.
 
 An adapter is NOT a CLI: there is no argparse, no `--help`, no `main()`, and
 no `sys.exit`. It is a Python module that exposes a single module-level

@@ -3,12 +3,12 @@ threat-intel, ticket).
 
 All five stubs are auth-less FastAPI services on the compose network. The
 defender reaches them by shelling out to `docker --context soc-playground
-exec <bastion> curl ...` — same transport elastic_cli.py uses for Kibana
+exec <bastion> curl ...` — same transport elastic_adapter.py uses for Kibana
 detection-rule installs. One transport here for all five keeps the
 adapters thin (just verb-to-endpoint mapping).
 
 Host-state has a different shape (docker exec → command output, no HTTP)
-and uses host_state_cli.py's own transport, not this module.
+and uses host_state_adapter.py's own transport, not this module.
 
 Two rules the whole family obeys since #611, when the adapters stopped being
 subprocesses and became in-process VERBS:
@@ -361,7 +361,7 @@ def docker_exec_raw(
 ) -> tuple[int, str, str]:
     """Run `docker --context <ctx's context> exec <bastion> <argv...>`.
 
-    Exposed for host_state_cli.py — same docker context as the HTTP
+    Exposed for host_state_adapter.py — same docker context as the HTTP
     stubs, but the command isn't curl. Returns (rc, stdout, stderr); raises
     `TransportFault` when the exec itself never ran (CLI missing / timeout).
     """
@@ -395,7 +395,7 @@ def docker_inspect_raw(
     """Run `docker --context <ctx's context> inspect [--format <fmt>] <target>`.
 
     Daemon-level container/image inspection — distinct from docker_exec_raw,
-    which runs a command *inside* a container. Exposed for host_state_cli.py's
+    which runs a command *inside* a container. Exposed for host_state_adapter.py's
     container-inspect verb (Falco alerts carry a runtime container id, not a
     host name). Returns (rc, stdout, stderr).
     """

@@ -5,8 +5,9 @@ A spec-first pipeline from GitHub issue to merged PR, as a Claude Code plugin.
 The idea it is built on: **the tests are the spec.** A design written in prose fails three ways —
 it's ambiguous (two defensible readings), incomplete (a case it never mentions), or the code just
 diverges from it. So before any implementation exists, the design is turned into an *executable*
-spec: a list of demands bound to a spec-coverage graph, realized as end-to-end tests, committed and
-reviewed on their own. Then the code is written against it. "Tests green" comes to mean "the code
+spec: a list of demands bound to a spec-coverage graph, realized as end-to-end tests — the tests
+committed and reviewed on their own, the graph riding along as their machine-checked derivation.
+Then the code is written against it. "Tests green" comes to mean "the code
 follows intent" — which is not what it means when the tests were written afterwards, by the same
 agent, from the same assumptions.
 
@@ -14,7 +15,7 @@ agent, from the same assumptions.
 issue ──▶ discuss-issue ──▶ write-tests ──▶ write-code-from-spec ──▶ finalize ──▶ merge
                                   │                                     │
                               human gate:                          human gate:
-                             approve the spec                     approve the merge
+                             approve the tests                    approve the merge
 ```
 
 Two human gates, both placed where judgment is cheap and mistakes are expensive: once on the spec
@@ -28,7 +29,7 @@ to guess.
 | Skill | What it does |
 |---|---|
 | `/spec-flow:discuss-issue` | Explains the issue in plain terms, checks it against the real code, surfaces the open questions — and when work heads to implementation, closes by posting the intent+design doc: typed obligations and mechanisms, with probed claims about existing reality. |
-| `/spec-flow:write-tests` | Turns the intent+design doc into the executable spec: situations from the doc's language, mechanics from executed probes, forks to the human — bound through the spec-coverage graph and gate rules into a suite a null-stub run proves can fail. Ships a **tests-only diff** and a handoff note. |
+| `/spec-flow:write-tests` | Turns the intent+design doc into the executable spec: situations from the doc's language, mechanics from executed probes, forks to the human — bound through the spec-coverage graph and gate rules into a suite a null-stub run proves can fail. Ships a **tests + spec_graph diff** and a handoff note. |
 | `/spec-flow:write-code-from-spec` | Reads the committed spec, writes real code until it passes, ships a PR, watches CI, repairs to green. Never edits a test to make it pass. |
 | `/spec-flow:finalize` | Meets the shipped PR **cold**: applies every fix it's confident in, files the rest, feeds process findings back to the human, and re-greens the PR. |
 | `/spec-flow:ship` | Branch, commit, push, open a PR. Used by the phases above; useful on its own. |

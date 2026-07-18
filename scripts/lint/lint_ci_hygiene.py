@@ -36,6 +36,7 @@ import re
 import sys
 from pathlib import Path
 
+from _astlib import ScanBlind, read_source
 from _baseline import Finding, gate
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -70,7 +71,7 @@ EXCLUDED_PREFIXES = (
     "defender/skills/gather/queries/host-query/",
     "defender/skills/gather/queries/stub-cmdb/",
     "defender/skills/gather/queries/stub-iam/",
-    "defender/scripts/adapters/",                         # per-vendor adapter CLIs
+    "defender/scripts/adapters/",                         # per-vendor adapters
 )
 
 TEXT_SUFFIXES = {".py", ".md", ".json", ".sh", ".yaml", ".yml", ".toml"}
@@ -115,10 +116,7 @@ def check_hardcoded_paths() -> list[Finding]:
     findings: list[Finding] = []
     for path in _iter_defender_files():
         rel = path.relative_to(REPO_ROOT).as_posix()
-        try:
-            text = path.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            continue
+        text = read_source(path, rel)
         for lineno, line in enumerate(text.splitlines(), start=1):
             if "lint-hygiene: ok" in line:
                 continue
@@ -172,10 +170,15 @@ def check_python_interpreter() -> list[Finding]:
         rel = path.relative_to(REPO_ROOT).as_posix()
         if _is_excluded(rel):
             continue
+        # A settings file that will not parse is exactly where a bad interpreter line hides: the
+        # swallow made "malformed" and "clean" the same answer (#618/#621/#652).
         try:
             data = json.loads(path.read_text(encoding="utf-8", errors="replace"))
-        except (OSError, json.JSONDecodeError):
-            continue
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ScanBlind(
+                f"{rel}: could not be parsed ({exc.__class__.__name__}: {exc}) — this gate "
+                f"reads its interpreter line out of that JSON, so an unparseable file reports clean."
+            ) from exc
         for jp, cmd in _iter_command_fields(data):
             if "lint-hygiene: ok" in cmd:
                 continue
@@ -211,10 +214,15 @@ def check_hook_matchers() -> list[Finding]:
         rel = path.relative_to(REPO_ROOT).as_posix()
         if _is_excluded(rel):
             continue
+        # A settings file that will not parse is exactly where a bad hook matchers hides: the
+        # swallow made "malformed" and "clean" the same answer (#618/#621/#652).
         try:
             data = json.loads(path.read_text(encoding="utf-8", errors="replace"))
-        except (OSError, json.JSONDecodeError):
-            continue
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ScanBlind(
+                f"{rel}: could not be parsed ({exc.__class__.__name__}: {exc}) — this gate "
+                f"reads its hook matchers out of that JSON, so an unparseable file reports clean."
+            ) from exc
         for jp, matcher in _iter_matchers(data):
             if "Task" in matcher or "Agent" in matcher:
                 if not ("Task" in matcher and "Agent" in matcher):
@@ -241,11 +249,18 @@ HEADER = (
 
 
 def main(argv: list[str]) -> int:
-    findings = (
-        check_hardcoded_paths()
-        + check_python_interpreter()
-        + check_hook_matchers()
-    )
+    # A file inside the scan scope that could not be read or parsed never entered the corpus,
+    # so a violation could sit in it and this gate would still print 0 findings. Exit 2 — the
+    # gate could not run, which is categorically not "clean" (#618/#621/#652).
+    try:
+        findings = (
+            check_hardcoded_paths()
+            + check_python_interpreter()
+            + check_hook_matchers()
+        )
+    except ScanBlind as exc:
+        print(f"lint_ci_hygiene: {exc}", file=sys.stderr)
+        return 2
     print("Suppress legitimate references with `# lint-hygiene: ok — <reason>` on the line.")
     return gate(
         findings, BASELINE_PATH, argv,

@@ -18,7 +18,7 @@ query(system="cmdb", verb="list-roles", params={})
 
 `get-host` requires `host`; every `list-hosts` param is an optional filter.
 
-**Do not Read `cmdb_cli.py` source to discover params.** This file plus the systems
+**Do not Read `cmdb_adapter.py` source to discover params.** This file plus the systems
 catalog in your dispatch prompt is the authoritative surface, and a call with an
 unknown/missing/mistyped param is rejected with the declared list anyway.
 

@@ -241,7 +241,7 @@ def test_d1_judge_via_bind(tmp_path):
     run = tmp_path / "run"
     cmp = tmp_path / "cmp"
     cmp.mkdir()
-    tcli = tmp_path / "ticket_cli.py"
+    tcli = tmp_path / "ticket_adapter.py"
     jdeps = bind(JUDGE_DEF, run, scope=RunScope(add_dirs=(cmp,), ticket_cli=("python3", tcli)))
     assert isinstance(jdeps, JudgeDeps)
     jpol = jdeps.policy
@@ -332,7 +332,7 @@ def test_d1_lead_author_via_bind(tmp_path):
 
 def test_d1_stages_mint_fresh_salt(tmp_path):
     """d1_stages_mint_fresh_salt: salt=None mints a fresh 32-hex uuid4 (two binds differ); a
-    carried salt threads verbatim; MAIN carries the run's persisted salt."""
+    carried salt threads verbatim; MAIN carries the run's minted salt."""
     # GREEN@HEAD: the salt seam shipped with #545; the fold must keep it.
     run = tmp_path / "run"
     d1 = bind(ORACLE_DEF, run)

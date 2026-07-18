@@ -1,12 +1,12 @@
 # `scripts/adapters/` — data-source adapters
 
-Each connected system has a `{system}_cli.py` adapter here, paired with a
+Each connected system has a `{system}_adapter.py` adapter here, paired with a
 `defender-{system}` shim in `../bin/`. The gather subagent only ever calls
 the shim, never the script directly — see `../../bin/README.md` for the
 shim contract and `../../docs/system-skill-shape.md` for the per-system
 knowledge an adapter is paired with.
 
-(Every file here is an adapter `*_cli.py` or the shared `_stub_transport.py`
+(Every file here is an adapter `*_adapter.py` or the shared `_stub_transport.py`
 they import. The gather pipe-tools, run-dir tooling, and analytics that used
 to share this dir now live under `scripts/gather_tools/`, `scripts/visualize/`,
 and the repo-root `scripts/` tree.)
@@ -31,7 +31,7 @@ second one.
 - **Transport — `docker --context soc-playground exec <bastion> curl …`.**
   The systems are services on the playground compose network, reached by
   shelling out through the bastion named in `BASTION_HOST`, not by direct
-  HTTP from this host. `host_state_cli.py` runs `docker exec → command
+  HTTP from this host. `host_state_adapter.py` runs `docker exec → command
   output` (no HTTP) instead; both route through `_stub_transport`.
 - **Auth — none.** The stubs are auth-less on the compose network, so this
   tree has no `resolve_auth` / `AUTH_TYPE` layer. The connect skill's

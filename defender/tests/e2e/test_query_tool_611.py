@@ -67,7 +67,7 @@ from defender.runtime.circuit_breaker import RunAborted, error_class_for_exit  #
 from defender.runtime.driver import GATHER_DEF, MAIN_DEF, build_agent_core  # noqa: E402
 from defender.runtime.permission.grant import _SHIM_FLAGS, Route  # noqa: E402
 from defender.runtime.providers import BuiltModel  # noqa: E402
-from defender.scripts.adapters import ticket_cli  # noqa: E402
+from defender.scripts.adapters import ticket_adapter  # noqa: E402
 from defender.scripts.gather_tools import record_query  # noqa: E402
 from defender.tests.e2e import _replay_harness  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
@@ -150,7 +150,7 @@ def run_gather(
     `turns` (the query calls under test) against the INJECTED verb registry. Everything
     between the two fakes — dispatch, the query tool, its validator, the capture capability,
     the circuit breaker, the two tables — is production code."""
-    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=run_id, salt=SALT)
+    run_dir = materialize(tmp_path, GOLDEN_AB3)
     main = ReplayFn([
         Turn(tool_calls=[("gather", {
             "lead_id": LEAD, "system": system, "goal": "measure this lead",
@@ -275,7 +275,7 @@ def test_query_return_wrap_positive_control(tmp_path):
 
     # The bash command names the run dir, which only exists once materialize() has run — so
     # drive it in two steps rather than guessing the path.
-    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id="q611-ctl", salt=SALT)
+    run_dir = materialize(tmp_path, GOLDEN_AB3)
     payload_abs = run_dir / "gather_raw" / LEAD / "0.json"
     if sql_turn_idx is not None:
         turns[sql_turn_idx] = Turn(tool_calls=[("bash", {
@@ -309,7 +309,7 @@ def test_verbs_registry_declares_surface():
     `declared_params` (the one reader the tool's validator uses) reads exactly that."""
     reg = ModuleVerbRegistry(ADAPTERS_DIR)
     on_disk = sorted(
-        p.name[: -len("_cli.py")].replace("_", "-") for p in ADAPTERS_DIR.glob("*_cli.py")
+        p.name[: -len("_adapter.py")].replace("_", "-") for p in ADAPTERS_DIR.glob("*_adapter.py")
     )
     assert sorted(reg.systems()) == on_disk, "the registry roster is not the adapter roster"
 
@@ -450,11 +450,11 @@ _TREE_PROBE = (
 
 
 def _make_tree(root: Path, adapters: dict[str, str], described: tuple[str, ...] = ()) -> Path:
-    """A minimal defender tree: `scripts/adapters/{system}_cli.py` + a described SKILL.md per
+    """A minimal defender tree: `scripts/adapters/{system}_adapter.py` + a described SKILL.md per
     system, so descriptor_catalog has a roster to glob AND a description to read."""
     (root / "scripts" / "adapters").mkdir(parents=True)
     for system, src in adapters.items():
-        (root / "scripts" / "adapters" / f"{system}_cli.py").write_text(src, encoding="utf-8")
+        (root / "scripts" / "adapters" / f"{system}_adapter.py").write_text(src, encoding="utf-8")
     for system in described:
         d = root / "skills" / system
         d.mkdir(parents=True)
@@ -467,7 +467,7 @@ def _make_tree(root: Path, adapters: dict[str, str], described: tuple[str, ...] 
 
 def test_descriptor_catalog_advertises_only_declared_systems(tmp_path):
     """descriptor_catalog_advertises_only_declared_systems — fail-closed holds at the PROMPT as
-    well as at the tool: a `*_cli.py` on disk that declares NO verbs is ABSENT from the injected
+    well as at the tool: a `*_adapter.py` on disk that declares NO verbs is ABSENT from the injected
     catalog (which today derives its roster by globbing filenames and never imports the module)."""
     tree = _make_tree(
         tmp_path / "tree",
@@ -728,7 +728,7 @@ def test_capture_fires_only_for_the_query_tool(tmp_path):
     method otherwise fires for EVERY tool (the tools=[…] filter exists only on the Hooks
     decorator API)."""
     rec = VerbRecorder()
-    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id="q611-other", salt=SALT)
+    run_dir = materialize(tmp_path, GOLDEN_AB3)
     main = ReplayFn([
         Turn(tool_calls=[("gather", {
             "lead_id": LEAD, "system": "elastic", "goal": "g", "what_to_summarize": ["e"]})]),
@@ -1209,10 +1209,10 @@ def _decide(cmd: str, policy, run_dir):
 @pytest.mark.parametrize("cmd", [
     "defender-elastic query foo",
     "defender-elastic esql 'FROM x' | defender-sql 'SELECT 1'",
-    "python3 defender/scripts/adapters/elastic_cli.py query foo",
+    "python3 defender/scripts/adapters/elastic_adapter.py query foo",
 ])
 def test_adapters_unreachable_from_gather_bash(tmp_path, cmd):
-    """adapters_unreachable_from_gather_bash — no adapter shim or *_cli.py path is runnable from
+    """adapters_unreachable_from_gather_bash — no adapter shim or *_adapter.py path is runnable from
     gather's bash lane: the CAPTURE_ADAPTER / CAPTURE_ADAPTER_SQL grants are gone and the adapter
     classifier denies unconditionally."""
     run_dir, gather, _ = _policies(tmp_path)
@@ -1305,7 +1305,7 @@ def test_ticket_cli_dual_surface_survives():
     assert {"list-tickets", "get-ticket"} <= set(verbs)
 
     # 2. The CLI surface still parses the argvs its three subprocess callers pin.
-    parser = ticket_cli.build_parser()
+    parser = ticket_adapter.build_parser()
     assert parser.parse_args(["list-tickets", "--status", "closed"]).status == "closed"
     assert parser.parse_args(["get-ticket", "SOC-1042"]).key == "SOC-1042"
     # …including the judge's MANDATORY closed-only flag, which cannot be a params-dict entry.

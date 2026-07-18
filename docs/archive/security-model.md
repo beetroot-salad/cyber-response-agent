@@ -1,8 +1,17 @@
-# Security Model
+# Security Model (archived)
+
+> **Archived 2026-07-18. Superseded — do not treat as current guidance.**
+> This describes the hooks-based Claude Code skill architecture, which the
+> codebase has since replaced with `defender/`. Every implementation path
+> referenced below (`scripts/setup_run.py`, `hooks/scripts/*.py`,
+> `skills/investigate/SKILL.md`) no longer exists, and the `settings.json`
+> permission block does not match any deployment. Kept for the threat model
+> and the knowledge-base deployment guidance, which are architecture-independent.
+> A replacement doc has not been written yet.
 
 Threat model, defense layers, and operational security guidance for the Cyber Response Agent.
 
-This is a living document. It describes the *current* security posture, including intentional trade-offs and known gaps. It does not duplicate code-level details — see the referenced source files for implementation.
+It described the security posture as of the hooks-based architecture, including intentional trade-offs and known gaps. It did not duplicate code-level details — see the referenced source files for implementation.
 
 ## Threat Model
 

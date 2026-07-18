@@ -39,7 +39,7 @@ from typing import Any, Union, get_args, get_origin
 #: The shape a system NAME may take: lowercase kebab, no separators, no dots. `system` is
 #: MODEL-supplied (the `query` tool passes it straight here), and it is joined into a filesystem
 #: path that is then IMPORTED — so a name carrying `/` or `..` (`../../../tmp/evil/pwned`) would,
-#: with a matching `*_cli.py` on disk, execute an arbitrary module. The shape reject is the first
+#: with a matching `*_adapter.py` on disk, execute an arbitrary module. The shape reject is the first
 #: gate; the resolved-containment check in `verbs()` is the belt behind it (the invariant is
 #: "resolve(adapters_dir/<file>) stays under resolve(adapters_dir)", which holds even if a future
 #: edit loosens this pattern). Neither alone: a bare shape check trusts `.replace('-','_')` not to
@@ -47,12 +47,13 @@ from typing import Any, Union, get_args, get_origin
 #: roster never listed.
 _SYSTEM_RE = re.compile(r"[a-z0-9][a-z0-9-]*\Z")
 
-#: A `<system>_cli.py` module keeps its filename even though it is no longer a CLI: the
-#: suffix is load-bearing in four independent places (this glob, `ADAPTER_CLI_RE`, jscpd's
-#: `--ignore` under a hard `--threshold 3`, and `lint_duplicate_helpers.EXCLUDED_SUFFIXES`),
-#: so renaming seven near-identical registries would turn them into a CI-red duplication
-#: finding. Honest naming is a follow-up, not a rider on this change.
-ADAPTER_SUFFIX = "_cli.py"
+#: The structural marker for a data-source adapter. It is load-bearing well beyond this
+#: glob — `_cmd_segments.ADAPTER_RE` (the security regex that denies the main loop direct
+#: adapter execution), `record_query._ADAPTER_RE` (the queries-table system join key), and
+#: `workspace_map` all key on it. Those regexes fail OPEN on a mismatch: they simply stop
+#: matching, and the gate keeps passing while gating nothing. Any change to this constant
+#: must land in the same commit as all of them.
+ADAPTER_SUFFIX = "_adapter.py"
 
 
 @dataclass(frozen=True)
@@ -268,7 +269,7 @@ def validate_params(fn: Verb, params: Mapping[str, Any]) -> str | None:
 # --- the production registry ------------------------------------------------
 
 def _system_of(path: Path) -> str:
-    """`scripts/adapters/host_state_cli.py` → `host-state`. The filename uses `_` where the
+    """`scripts/adapters/host_state_adapter.py` → `host-state`. The filename uses `_` where the
     canonical system name uses `-`; normalizing here keeps the registry's roster and the
     queries table's `system` column spelling the same thing."""
     return path.name[: -len(ADAPTER_SUFFIX)].replace("_", "-")
@@ -303,7 +304,7 @@ class ModuleVerbRegistry:
     """The production registry, resolved PER TREE: `{system: {verb: fn}}` read from each
     adapter module's `VERBS` mapping under `adapters_dir`.
 
-    `systems()` is the roster ON DISK — every `*_cli.py`, including one that declares no verbs.
+    `systems()` is the roster ON DISK — every `*_adapter.py`, including one that declares no verbs.
     That system is then *unreachable* (its `verbs()` is empty and the tool rejects it) rather
     than *unfiltered*: an empty declaration must not read as "no filter". This tree already
     fails OPEN twice in exactly that shape (`adapter_shims()` returning the empty set makes the
@@ -326,7 +327,7 @@ class ModuleVerbRegistry:
         The name is MODEL-supplied and is joined into a path that gets IMPORTED, so it is guarded
         twice before that: the shape reject (`_SYSTEM_RE`) and the post-join containment check
         (`resolve(path)` must stay under `resolve(adapters_dir)`). Without them,
-        `query(system="../../../../tmp/x/pwned")` would exec an arbitrary `pwned_cli.py` — a code
+        `query(system="../../../../tmp/x/pwned")` would exec an arbitrary `pwned_adapter.py` — a code
         path opened by attacker-influenced alert data steering the model."""
         if not _SYSTEM_RE.match(system):
             raise KeyError(system)

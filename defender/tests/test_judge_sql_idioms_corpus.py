@@ -91,7 +91,7 @@ def test_elastic_envelope_truncation_columns_are_readable():
 
 
 def test_the_dead_recipe_stays_dead():
-    """`unnest(result.hits)` — the idiom `sql.py` and `cli-adapter.md` used to document —
+    """`unnest(result.hits)` — the idiom `sql.py` and `adapter.md` used to document —
     errors, because no adapter emits a `result` wrapper. Pinning the failure keeps anyone
     from reintroducing the recipe on the strength of the old docs."""
     proc = _sql(_ELASTIC, "SELECT count(*) FROM (SELECT unnest(result.hits) h FROM data)")
@@ -106,7 +106,7 @@ def test_the_dead_recipe_stays_dead():
 # it was copied across several docs, so guard all of them at once.
 _IDIOM_SURFACES = (
     _DEFENDER / "scripts" / "gather_tools" / "sql.py",
-    _DEFENDER / "skills" / "connect" / "cli-adapter.md",
+    _DEFENDER / "skills" / "connect" / "adapter.md",
     _JUDGE / "compare.py",
     _JUDGE / "run.py",
     _JUDGE / "malicious.md",

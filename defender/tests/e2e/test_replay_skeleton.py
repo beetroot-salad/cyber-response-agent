@@ -41,7 +41,7 @@ pytestmark = pytest.mark.e2e
 
 def test_replay_golden_v2sshd(tmp_path):
     run_id, salt = "replay-v2sshd", "deadbeefcafe0000"
-    run_dir = materialize(tmp_path, GOLDEN, run_id=run_id, salt=salt)
+    run_dir = materialize(tmp_path, GOLDEN)
 
     inv_text = (GOLDEN / "investigation.md").read_text()
     rep_text = (GOLDEN / "report.md").read_text()
@@ -97,7 +97,7 @@ def test_replay_full_run_ab3(tmp_path, monkeypatch):
     belongs to the nested-gather replay (test_nested_gather_capture).
     """
     run_id, salt = "replay-ab3", "0011223344556677"
-    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=run_id, salt=salt)
+    run_dir = materialize(tmp_path, GOLDEN_AB3)
 
     # Reconstruct the main-agent script from the vendored trace, rewriting the
     # recorded run-dir paths to this temp run dir.
@@ -187,7 +187,7 @@ def test_replay_full_run_ab3(tmp_path, monkeypatch):
 def test_main_loop_deny_bounces(tmp_path, label, tool_name, args_fn,
                                 reason_substr, escape_name):
     run_id, salt = f"deny-{label}", "8899aabbccddeeff"
-    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=run_id, salt=salt)
+    run_dir = materialize(tmp_path, GOLDEN_AB3)
 
     probe = DenyProbe(tool_name, args_fn(run_dir))
     drive(run_dir, run_id=run_id, salt=salt, main=probe)
@@ -251,7 +251,7 @@ def _elastic_verbs() -> FakeVerbs:
 
 def test_nested_gather_capture(tmp_path):
     run_id, salt = "nested-gather", "1122334455667788"
-    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=run_id, salt=salt)
+    run_dir = materialize(tmp_path, GOLDEN_AB3)
 
     report_md = ("---\ncase_id: nested-gather\ndisposition: malicious\n"
                  "confidence: low\n---\nSynthetic nested-gather capture test.\n")

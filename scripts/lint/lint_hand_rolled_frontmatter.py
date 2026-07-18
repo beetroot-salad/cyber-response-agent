@@ -68,7 +68,7 @@ import ast
 import sys
 from pathlib import Path
 
-from _astlib import ModuleEnv, callee, module_env, str_args
+from _astlib import ScanBlind, read_and_parse, ModuleEnv, callee, module_env, str_args
 from _baseline import Finding, gate
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -210,11 +210,7 @@ def _scan(root: Path) -> list[Finding]:
             continue
         if _is_test_module(rel):
             continue
-        try:
-            text = path.read_text(encoding="utf-8", errors="replace")
-            tree = ast.parse(text)
-        except (OSError, SyntaxError):
-            continue
+        text, tree = read_and_parse(path, rel)
         findings.extend(_scan_file(rel, tree, text.splitlines()))
     return findings
 
@@ -243,7 +239,14 @@ def main(
     if not root.is_dir():
         print(f"scan scope not found at {root}", file=sys.stderr)
         return 2
-    findings = _scan(root)
+    # A file inside the scan scope that could not be read or parsed never entered the corpus,
+    # so a violation could sit in it and this gate would still print 0 findings. Exit 2 — the
+    # gate could not run, which is categorically not "clean" (#618/#621/#652).
+    try:
+        findings = _scan(root)
+    except ScanBlind as exc:
+        print(f"lint_hand_rolled_frontmatter: {exc}", file=sys.stderr)
+        return 2
     print(
         "Parse frontmatter through defender/_frontmatter.py — split_frontmatter / "
         "parse_frontmatter / parse_frontmatter_or_none — never by re-deriving the "

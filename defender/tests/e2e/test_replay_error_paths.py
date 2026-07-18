@@ -56,7 +56,7 @@ def test_request_limit_writes_partial_trace(tmp_path):
     The driver must treat it as an expected terminator (not a crash): catch it,
     still project the partial trace, and report no output (no End node)."""
     run_id, salt = "limit", "ccddeeff00112233"
-    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=run_id, salt=salt)
+    run_dir = materialize(tmp_path, GOLDEN_AB3)
 
     model = NeverEndsModel(run_dir)
     result = drive(run_dir, run_id=run_id, salt=salt, main=model)
@@ -85,7 +85,7 @@ def test_circuit_breaker_kill_switch_aborts_run(tmp_path):
     unwinding the run is exactly what would swallow the kill switch, because `RunAborted` is a
     plain `Exception` subclass. This test is what says it does not."""
     run_id, salt = "kill-switch", "0011223344550000"
-    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=run_id, salt=salt)
+    run_dir = materialize(tmp_path, GOLDEN_AB3)
 
     main = ReplayFn([
         Turn(tool_calls=[("gather", {
@@ -129,7 +129,7 @@ def test_invlang_deny_bounces_then_recovers(tmp_path):
     hook's exit-2 → fix → retry loop, proven end-to-end through the driver — the
     decide_write unit test sees the deny, never the bounce-and-recover."""
     run_id, salt = "invlang-recover", "1234123412341234"
-    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=run_id, salt=salt)
+    run_dir = materialize(tmp_path, GOLDEN_AB3)
     good = (GOLDEN_AB3 / "investigation.md").read_text()
     inv_path = str(run_dir / "investigation.md")
 
@@ -158,7 +158,7 @@ def test_tripped_system_dispatch_returns_down_message(tmp_path):
     short-circuits at the DISPATCH gate: the nested gather is never spawned and the
     main loop gets the transparent 'system down' summary instead."""
     run_id, salt = "tripped", "55aa55aa55aa55aa"
-    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=run_id, salt=salt)
+    run_dir = materialize(tmp_path, GOLDEN_AB3)
 
     main = ReplayFn([
         Turn(tool_calls=[("gather", {"lead_id": "l-001", "system": "elastic",
@@ -201,7 +201,7 @@ def test_gather_lead_guards_bounce_then_recover(tmp_path):
     agent; a fresh, well-formed lead then dispatches normally. No data source is
     touched — the nested gather returns a text summary immediately."""
     run_id, salt = "lead-guards", "9988776655443322"
-    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=run_id, salt=salt)
+    run_dir = materialize(tmp_path, GOLDEN_AB3)
 
     main = ReplayFn([
         Turn(tool_calls=[("gather", {"lead_id": "l-001", "system": "elastic",
@@ -233,7 +233,7 @@ def test_edit_file_guards_bounce_then_recover(tmp_path):
     end-to-end: each bad edit bounces the model (ModelRetry); a unique edit then
     commits. Mirrors Claude Code's Edit semantics through the real tool + gate."""
     run_id, salt = "edit-guards", "abcdabcdabcdabcd"
-    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=run_id, salt=salt)
+    run_dir = materialize(tmp_path, GOLDEN_AB3)
     notes = str(run_dir / "notes.md")  # a run-dir file (not investigation.md → no invlang)
 
     main = ReplayFn([
@@ -259,7 +259,7 @@ def test_read_file_not_found_bounces_then_recovers(tmp_path):
     bounces (ModelRetry), then a real read (the untrusted alert) succeeds and comes
     back salt-wrapped — the recovery proves the bounce didn't wedge the loop."""
     run_id, salt = "read-missing", "f0f0f0f0f0f0f0f0"
-    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=run_id, salt=salt)
+    run_dir = materialize(tmp_path, GOLDEN_AB3)
 
     main = ReplayFn([
         Turn(tool_calls=[("read_file", {"path": str(run_dir / "nope.txt")})]),

@@ -1,4 +1,11 @@
-# Agent Evaluation and Chaos Engineering — Design
+# Agent Evaluation and Chaos Engineering — Design (archived)
+
+> **Archived 2026-07-18. Superseded — do not treat as current guidance.**
+> This designs a harness over the PREDECESSOR codebase, which the repo has since
+> replaced with `defender/`. The run-dir shape it assumes (including `meta.json`,
+> removed in #647) and the orchestrator it drives no longer exist; the live
+> measurement layer is `defender/evals/`. Kept for the chaos-regime and metric
+> reasoning, which is architecture-independent.
 
 ## Purpose
 

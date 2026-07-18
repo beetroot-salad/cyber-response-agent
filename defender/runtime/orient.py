@@ -36,7 +36,7 @@ from pathlib import Path
 
 from defender._frontmatter import FrontmatterError, split_frontmatter
 from defender._io import read_text_soft, read_text_utf8
-from defender.hooks.tag_tool_results import wrap
+from defender.runtime.untrusted import wrap
 
 _DEFENDER_DIR = Path(__file__).resolve().parents[1]
 _REPO_ROOT = _DEFENDER_DIR.parent  # subprocess cwd for the `defender-*` shims below.

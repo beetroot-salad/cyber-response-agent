@@ -24,6 +24,7 @@ import re
 import sys
 from pathlib import Path
 
+from _astlib import ScanBlind, read_source
 from _baseline import Finding, gate
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -66,7 +67,7 @@ EXCLUDED_PREFIXES = (
     "defender/__pycache__/",
     # POC design notes — internal-facing, not agent runtime.
     "defender/docs/",
-    # Per-vendor adapter CLIs live under scripts/adapters/ — by design vendor-named.
+    # Per-vendor adapters live under scripts/adapters/ — by design vendor-named.
     "defender/scripts/adapters/",
 )
 
@@ -95,7 +96,7 @@ FORBIDDEN = [
     re.compile(r"\bstub[-_]cmdb\b", re.IGNORECASE),
     re.compile(r"\bstub[-_]iam\b", re.IGNORECASE),
     re.compile(r"\bstub[-_]ticket\b", re.IGNORECASE),
-    re.compile(r"\bcmdb_cli\b", re.IGNORECASE),
+    re.compile(r"\bcmdb_adapter\b", re.IGNORECASE),
     re.compile(r"\bplayground\b", re.IGNORECASE),
     re.compile(r"\btarget-endpoint\b", re.IGNORECASE),
 ]
@@ -122,10 +123,7 @@ def _scan() -> list[Finding]:
         rel = path.relative_to(REPO_ROOT).as_posix()
         if _excluded(rel):
             continue
-        try:
-            text = path.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            continue
+        text = read_source(path, rel)
         for lineno, line in enumerate(text.splitlines(), start=1):
             if "lint-shippable: ok" in line:
                 continue
@@ -160,7 +158,14 @@ def main(argv: list[str]) -> int:
     if not DEFENDER.is_dir():
         print(f"defender/ not found at {DEFENDER}", file=sys.stderr)
         return 2
-    findings = _scan()
+    # A file inside the scan scope that could not be read or parsed never entered the corpus,
+    # so a violation could sit in it and this gate would still print 0 findings. Exit 2 — the
+    # gate could not run, which is categorically not "clean" (#618/#621/#652).
+    try:
+        findings = _scan()
+    except ScanBlind as exc:
+        print(f"lint_shippable_surface: {exc}", file=sys.stderr)
+        return 2
     print("Suppress legitimate references with `# lint-shippable: ok — <reason>` on the line.")
     print("Per-vendor systems skills are excluded by directory (see EXCLUDED_PREFIXES).")
     return gate(

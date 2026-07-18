@@ -9,7 +9,7 @@ python3 defender/skills/connect/validate_scaffold.py {system}
 and fix every FAIL before going further. It verifies the structural
 contract a script can check:
 
-- adapter module at `scripts/adapters/{system}_cli.py`, importable and
+- adapter module at `scripts/adapters/{system}_adapter.py`, importable and
   exposing a non-empty `VERBS` mapping;
 - `VERBS` includes `health-check`, and every verb is a `VerbContext`-taking
   function whose model-supplied params are keyword-only;
@@ -32,7 +32,7 @@ This file covers the rest — the calls a script can't make.
       answer here, including silent-failure shapes — enough that a reader
       who'd never touched this system wouldn't fall in blind.
 - [ ] **The adapter conforms to the client.** The Haiku alignment loop was
-      run (`cli-adapter.md`): cosmetic divergences became verb/param
+      run (`adapter.md`): cosmetic divergences became verb/param
       changes, and only irreducible vendor constraints were documented. You
       are not teaching Haiku your aesthetics.
 - [ ] **Native query passes through unmodified** (or the source keys on an
@@ -57,9 +57,9 @@ This file covers the rest — the calls a script can't make.
       flow (odd upstream, unusual access topology, a vendor auth scheme the
       shared transport doesn't cover) is called out in the summary for human
       review — not silently patched, not blocked.
-- [ ] **Human review checkpoint cleared (CLI path).** The maintainer read
+- [ ] **Human review checkpoint cleared (adapter path).** The maintainer read
       the generated adapter and approved it *before* it ran against the
-      live system — not only at the final diff (`cli-adapter.md`).
+      live system — not only at the final diff (`adapter.md`).
 - [ ] **Nothing merged or pushed** without explicit direction. The human
       review gate is non-negotiable. (`/ship` opens the PR.)
 

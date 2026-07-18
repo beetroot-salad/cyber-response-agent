@@ -23,7 +23,7 @@ from __future__ import annotations
 import urllib.parse
 
 # Put the workspace root on sys.path so `defender.*` namespace imports resolve when the
-# verb registry loads this module BY PATH (see cmdb_cli.py).
+# verb registry loads this module BY PATH (see cmdb_adapter.py).
 import sys as _sys
 from pathlib import Path as _Path
 
@@ -39,7 +39,10 @@ PREFIX = "THREAT_INTEL"
 VERDICTS = ("benign", "suspicious", "malicious", "unknown")
 
 
-def _config(ctx: VerbContext) -> dict[str, str]:
+# Same name in each stub adapter, closing over that module's SYSTEM/PREFIX: the shared
+# body already lives once in `transport.load_config`, so this is a zero-argument alias,
+# not a copy of any logic.
+def _config(ctx: VerbContext) -> dict[str, str]:  # lint-dup: ok — per-module alias over the shared transport.load_config
     return transport.load_config(ctx, SYSTEM, PREFIX)
 
 

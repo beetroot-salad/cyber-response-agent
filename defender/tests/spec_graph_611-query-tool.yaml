@@ -91,7 +91,7 @@ demands:
     kind: parity
     form: test
     outcome:
-      nl: "Fail-closed holds at the PROMPT as well as at the tool: a *_cli.py present on disk whose module declares no VERBS is ABSENT from the injected descriptor catalog, which today derives its roster by globbing filenames and never imports the module."
+      nl: "Fail-closed holds at the PROMPT as well as at the tool: a *_adapter.py present on disk whose module declares no VERBS is ABSENT from the injected descriptor catalog, which today derives its roster by globbing filenames and never imports the module."
     binds: ["descriptor_catalog", "verbs_registry.domain.distinguished[empty]"]
 
   - id: descriptor_catalog_does_not_freeze_the_tree
@@ -320,7 +320,7 @@ demands:
     kind: negative
     form: test
     outcome:
-      nl: "No adapter shim or *_cli.py path is runnable from gather's bash lane: the CAPTURE_ADAPTER / CAPTURE_ADAPTER_SQL grants are gone and _decide_adapter denies unconditionally."
+      nl: "No adapter shim or *_adapter.py path is runnable from gather's bash lane: the CAPTURE_ADAPTER / CAPTURE_ADAPTER_SQL grants are gone and _decide_adapter denies unconditionally."
     binds: ["gather_bash_policy.access[bash]"]
 
   - id: deny_reason_names_no_deleted_route
@@ -392,7 +392,7 @@ demands:
     kind: behavior
     form: waiver
     outcome:
-      nl: "The adapter modules keep the *_cli.py filename even though they are no longer CLIs. The suffix is load-bearing in four independent places — descriptor_catalog's glob, ADAPTER_CLI_RE (defined twice), jscpd's --ignore under a hard --threshold 3, and lint_duplicate_helpers.EXCLUDED_SUFFIXES — so renaming turns seven near-identical registries into a CI-red duplication finding. Honest naming is a follow-up."
+      nl: "SUPERSEDED by #619, which carried out the rename this waiver deferred: the adapter modules are now *_adapter.py. The waiver's premise was measured false — with the adapters back in jscpd's scope the hard --threshold 3 gate reports 0.90%, not a CI-red finding — and its site count was low (eight, not four: it missed record_query._ADAPTER_RE, workspace_map, and validate_scaffold). The suffix is still load-bearing, and ADAPTER_RE now has ONE definition rather than two hand-synced copies."
     binds: ["verbs_registry"]
 
   - id: waive_stale_ref_baseline

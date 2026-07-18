@@ -14,7 +14,7 @@ of truth, so a newly onboarded adapter auto-gates)."""
 from __future__ import annotations
 
 from defender.hooks._cmd_segments import (
-    ADAPTER_CLI_RE,
+    ADAPTER_RE,
     NON_ADAPTER_SHIMS,
     OPERATOR_TOOLS,
 )
@@ -27,7 +27,7 @@ SQL_SHIM = "defender-sql"
 
 def is_adapter_stage(argv: list[str]) -> bool:
     """True iff the stage's COMMAND (first token) is a data-source adapter — a
-    `defender-<system>` shim or a `<system>_cli.py` script. Anchored to command
+    `defender-<system>` shim or a `<system>_adapter.py` module. Anchored to command
     position: an adapter name appearing as an *argument* (`which defender-<system>`,
     a `defender-record-query … -- defender-<system> …` wrapper) is NOT a query and
     must not be captured/denied as one."""
@@ -35,10 +35,10 @@ def is_adapter_stage(argv: list[str]) -> bool:
         return False
     cmd = argv[0]
     if cmd in ("python", "python3") and len(argv) > 1:
-        cmd = argv[1]  # raw `python3 …/<system>_cli.py` form
+        cmd = argv[1]  # raw `python3 …/<system>_adapter.py` form
     if cmd.startswith("defender-"):
         return cmd not in NON_ADAPTER_SHIMS and cmd not in OPERATOR_TOOLS
-    return bool(ADAPTER_CLI_RE.search(cmd))
+    return bool(ADAPTER_RE.search(cmd))
 
 
 def flat_stages(pipelines: list[Pipeline]) -> list[list[str]]:

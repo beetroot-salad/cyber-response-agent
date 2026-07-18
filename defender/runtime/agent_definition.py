@@ -21,7 +21,7 @@ This module is the primitive layer:
     write scope, so ``bind``'s policy is the production end-state for every role.
   - ``bind`` — the SINGLE deps + policy resolution seam for all seven roles (#551 finishes the
     #545 wiring): ``resolve_roots`` → ``compile_policy`` → the role's ``AgentDeps`` subtype,
-    carrying the run's salt (MAIN/GATHER keep the persisted trust token; the stages mint a fresh
+    carrying the run's salt (MAIN/GATHER keep the run's minted trust token; the stages mint a fresh
     one) and the ``defender_dir`` tree the gate anchors on (``PATHS`` by default; the lead-author
     drain threads its worktree ``<wt>/defender`` — the unified tree param, into BOTH the policy
     anchor and the deps field). Per-role preconditions are DATA (``requires_confine`` /
@@ -377,7 +377,7 @@ def bind(
 
     ``salt`` is the untrusted-data trust token (decision 1a): ``None`` mints a fresh uuid4
     (the stages' behaviour), a carried value is threaded verbatim so the MAIN/GATHER reroute
-    keeps the run's ONE persisted salt across the deps' tool-output wrapper AND orient's alert
+    keeps the run's ONE minted salt across the deps' tool-output wrapper AND orient's alert
     wrapper (a fresh uuid4 there would split the tag and fail the injection defence open).
 
     ``defender_dir`` (#551) is the tree the gate anchors reads/writes on (see ``compile_policy_for``

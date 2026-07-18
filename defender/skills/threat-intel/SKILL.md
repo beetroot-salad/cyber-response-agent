@@ -87,7 +87,7 @@ Reached with the **`query` tool** — there is no command, no shim, and no `--he
 Params bind **by name**, with literal JSON types. `lookup` requires `value`; every
 `list-indicators` param is an optional filter.
 
-**Do not Read `threat_intel_cli.py` source to discover params.** This SKILL plus the
+**Do not Read `threat_intel_adapter.py` source to discover params.** This SKILL plus the
 systems catalog in your dispatch prompt is the authoritative surface, and a call
 with an unknown/missing/mistyped param is rejected with the declared list anyway.
 

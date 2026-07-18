@@ -31,7 +31,6 @@ if __name__ == "__main__" and _VENV_PY.is_file() and Path(sys.executable) != _VE
 
 import argparse  # noqa: E402
 import asyncio  # noqa: E402
-import json  # noqa: E402
 
 # Put the workspace root on sys.path so `defender.*` namespace imports resolve
 # whether this file is imported or run directly.
@@ -39,7 +38,6 @@ if (_root := str(_DEFENDER_DIR.parent)) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender import run_common as _run  # noqa: E402
-from defender._io import read_text_utf8  # noqa: E402
 from defender._run_paths import RunPaths  # noqa: E402
 from defender.runtime import box as box_mod  # noqa: E402
 from defender.runtime import driver  # noqa: E402
@@ -139,7 +137,7 @@ def main(argv: list[str]) -> int:
         return rc
 
     alert = ns.alert.resolve()
-    run_dir = _run.materialize_run_dir(alert, ns.run_id)
+    run_dir, salt = _run.materialize_run_dir(alert, ns.run_id)
 
     # Case-history bridge — create the OPEN ticket now; closed in the post-steps
     # below (engine-agnostic helper, shared with run.py). Opt-in; non-fatal.
@@ -149,7 +147,6 @@ def main(argv: list[str]) -> int:
         _tw.open_case_ticket(run_dir)
         ticket_writer = _tw
 
-    salt = json.loads(read_text_utf8(RunPaths(run_dir).meta)).get("salt", "")
     print(f"[run.py] run_dir={run_dir} model={model}", file=sys.stderr)
 
     # The bash lane's execution boundary (#540). Built BEFORE the investigation, so a box that

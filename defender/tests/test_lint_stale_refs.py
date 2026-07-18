@@ -318,6 +318,91 @@ def test_baselined_finding_exits_0(tmp_path):
 # Not-a-reference shapes: each is a RULE in the lint, so the baseline can ship empty.
 # --------------------------------------------------------------------------------------
 
+def test_a_dropped_import_line_does_not_condemn_the_MODULE_it_imported(tmp_path):
+    """Removing `from pkg_helper_mod import Thing` is evidence about `Thing`, never about
+    `pkg_helper_mod`. The module's binding site is a FILE, so `_still_defined` — which only
+    recognises AST bindings — structurally cannot clear it, and every surviving importer of
+    a module that still exists reads as a stale reference. On the #647 branch that shape
+    produced 25 false findings across 20 files, none of them stale."""
+    up = _upstream(
+        tmp_path,
+        main_files={
+            "pkg_helper_mod.py": "class Thing:\n    pass\n",
+            "notes_a.md": "See `pkg_helper_mod` for the payload shape.\n",
+            "importer.py": "from pkg_helper_mod import Thing\n\nx = Thing()\n",
+        },
+        pr_files={"importer.py": "x = 1\n", "caller.py": None},
+    )
+    work = _clone(tmp_path, up)
+
+    assert "pkg_helper_mod" not in GATE._collect_removed_idents(work, "origin/main"), (
+        "the module PATH of a dropped from-import was collected as a removed identifier"
+    )
+    assert GATE._scan(work, "origin/main") == []
+    assert _run_gate(work, tmp_path) == 0
+
+
+def test_a_DELETED_module_is_condemned_by_its_own_deletion(tmp_path):
+    """The other half of the rule above: the gate must still catch a reference to a module
+    the PR really deleted. That evidence comes from `--name-status`, not from an importer
+    having dropped a line — so it holds even when NO import of the module was removed
+    anywhere (here there is none: the reference that survives is prose).
+
+    Regression pin for the gap the narrowing opened: the removed-paths walk skipped every
+    component containing a dot, and since every filename carries a suffix, it dropped the
+    BASENAME of every deleted file — leaving the deleted-module class covered by nothing."""
+    up = _upstream(
+        tmp_path,
+        main_files={
+            "dead_helper_mod.py": "VALUE = 1\n",
+            "notes_b.md": "Run `dead_helper_mod.py` before the drain.\n",
+        },
+        pr_files={"dead_helper_mod.py": None, "caller.py": None},
+    )
+    work = _clone(tmp_path, up)
+
+    findings = GATE._scan(work, "origin/main")
+    assert [f.fingerprint for f in findings] == ["notes_b.md:dead_helper_mod"], (
+        f"the surviving reference to a DELETED module was not flagged: {findings}"
+    )
+    assert _run_gate(work, tmp_path) == 1
+
+
+def test_a_RENAMED_module_keeps_its_name_and_is_not_condemned(tmp_path):
+    """A rename is not a deletion. `a/moved_helper_mod.py` -> `b/moved_helper_mod.py` leaves
+    the module under the same name, so collecting the stem for renames too would flag every
+    reference that is still perfectly correct."""
+    up = _upstream(
+        tmp_path,
+        main_files={
+            "a/moved_helper_mod.py": "VALUE = 1\n",
+            "notes_c.md": "See `moved_helper_mod` for the payload shape.\n",
+        },
+        pr_files={
+            "a/moved_helper_mod.py": None,
+            "b/moved_helper_mod.py": "VALUE = 1\n",
+            "caller.py": None,
+        },
+    )
+    work = _clone(tmp_path, up)
+
+    # Probe the FIXTURE, not just the gate: the rule under test only engages when git
+    # actually reports an `R`. If similarity detection ever stops pairing these two paths,
+    # the diff degrades to delete+add, the deleted-stem walk fires legitimately, and this
+    # test would fail for a reason that has nothing to do with the rule — or, worse, a
+    # future relaxation would make it pass vacuously.
+    status = GATE._git(
+        ["diff", "--name-status", "origin/main...HEAD"], cwd=work
+    )
+    assert any(line.startswith("R") and "moved_helper_mod" in line
+               for line in status.splitlines()), (
+        f"fixture rotted: git did not detect the move as a rename\n{status}"
+    )
+
+    assert GATE._scan(work, "origin/main") == []
+    assert _run_gate(work, tmp_path) == 0
+
+
 @pytest.mark.parametrize(
     "rel",
     [

@@ -95,7 +95,7 @@ The rules compute the right *questions*; the ledger keeps their *answers* honest
 - **The probe's instrument matches the claim's kind.** `spec-graph claims` enforces it — a `behavior`/`primitive`/`reachability` claim (about what code does over an input) that closed on `probe_kind: read` is a finding: reading cannot falsify it, only running it over that input can. An inherited claim is re-checked here; the sweep's stamp carries its verdict, not its instrument.
 - **A spend-point closes only by citation.** Every `fired: false`, waiver rationale, pre-discharge credit, and `binds_waivers`/`actor_waivers` entry names the claim id(s) it rests on, of the matching kind. An uncited rationale is `asserted` — a finding, not a pass.
 - **A fake's fault content cites its claim.** The exception class or malformed shape a fake raises is probe-derived data (SKILL.md step 8), never authored belief — a guard and a test built from the same imagined taxonomy are the same wrong prior, green together.
-- **The ledger ships in the artifact.** Claims live in the spec_graph's `claims:` block — the committed, reviewable one — not in a working file. A citation pointing at a side file the diff doesn't carry is indistinguishable from an uncited rationale to everyone downstream: the cold reviewer, write-code-from-spec, and the future session re-checking a claim the base has moved under.
+- **The ledger ships in the artifact.** Claims live in the spec_graph's `claims:` block — the committed, machine-checkable one — not in a working file. A citation pointing at a side file the diff doesn't carry is indistinguishable from an uncited rationale to everyone downstream: the cold reviewer, write-code-from-spec, and the future session re-checking a claim the base has moved under.
 
 A claim only the not-yet-written implementation can settle is `verdict: deferred` and transfers to write-code-from-spec, which probes it when there is code to probe.
 
@@ -117,7 +117,7 @@ Suite-verification checks that prove properties of the *suite itself* that no pe
 
 ## The artifact — spec_graph_<issue-or-slug>.yaml
 
-One file per spec, committed **beside the suite** (same directory as the new tests, named `spec_graph_<issue-or-slug>.yaml`), reviewed by the human *as part of the spec*:
+One file per spec, committed **beside the suite** (same directory as the new tests, named `spec_graph_<issue-or-slug>.yaml`), as the tests' machine-checked derivation:
 
 ```yaml
 schema_version: 1
@@ -149,7 +149,7 @@ handoff:
   deviations: ["<degraded strong author | collapsed step 4 | manual slot check | reduced small-delta mode>", ...]
 ```
 
-Downstream consumers: the human reviews it with the tests; `write-code-from-spec` reconciles the implementation's actual structure against it (unrealized addresses and invented scope both flag); the later review *can* diff the implementation against it — wiring the review stage to do so is future work.
+Downstream consumers, every one an agent or a checker: the gate checkers (`check_binds`/`check_actors`/`spec-graph claims`) and the cold reconciler check it; `write-code-from-spec` reconciles the implementation's actual structure against it (unrealized addresses and invented scope both flag); the later review *can* diff the implementation against it — wiring the review stage to do so is future work. The human reviews the **tests**, not this file.
 
 Formal-slot validation (kinds, forms, modes, vias, invariant vocabularies) is currently a hand check against schema.md — a `spec_graph` linter is deliberate future work. Until it exists, the step-9 gate records the manual check in `handoff.deviations`.
 
