@@ -291,7 +291,7 @@ def test_bind_gather_lead_id_channel(tmp_path):
     # lead-author worktree threads through it, replacing the old `repo_root` kwarg). It still
     # carries NO per-dispatch lead_id/query_id — those stay per-run-vs-per-dispatch separated,
     # stamped by the wrapper post-bind.
-    assert params == {"defn", "run_dir", "scope", "salt", "defender_dir"}
+    assert params == {"defn", "run_dir", "scope", "salt", "defender_dir", "box"}
     # bind itself leaves the per-dispatch lead_id unset; the wrapper stamps it post-bind.
     deps = bind(GATHER_DEF, tmp_path)
     assert isinstance(deps, GatherDeps)

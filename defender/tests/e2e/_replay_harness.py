@@ -49,6 +49,8 @@ from pydantic_ai.models import override_allow_model_requests  # noqa: E402
 from pydantic_ai.models.function import FunctionModel  # noqa: E402
 
 from defender._io import read_jsonl_rows  # noqa: E402
+from defender import run_common  # noqa: E402
+from defender.runtime import box as box_mod  # noqa: E402
 from defender.runtime import driver  # noqa: E402
 from defender.runtime.providers import BuiltModel  # noqa: E402
 
@@ -299,11 +301,16 @@ def drive(run_dir: Path, *, run_id: str, salt: str, main, gather=None, verbs=Non
 
     `box` is the THIRD injection seam (#540): a `BoxExecutor` handed straight to
     `run_investigation(box=…)`, which threads it through `bind` onto `AgentDeps.box`, so
-    every bash tool call in the replay executes through THAT executor. Omit it and the run
-    builds the production box from `BoxSpec` — which needs a real daemon, so any scenario
-    whose script contains a bash turn must supply one. Passed only when supplied, for the
-    same reason `verbs` is: a bash-free replay should not have to name an executor it never
-    reaches."""
+    every bash tool call in the replay executes through THAT executor. A scenario that wants
+    to ASSERT on what crossed the boundary passes its own recording executor.
+
+    Omitted, it defaults to `box.unboxed_executor()` — host execution, no container. That is
+    the honest default for a HERMETIC replay: these runs have no daemon, and the alternative
+    (the inert production default) makes every bash turn fail closed on infrastructure rather
+    than exercising the lane the scenario is about. It does not weaken the boundary claim,
+    which is pinned directly in the #540 suite — `test_no_box_failure_path_executes_in_process`
+    and `test_tool_bash_executes_through_the_injected_box_seam` assert that production has no
+    unboxed path, and this default is reachable only from a test."""
     main_built = BuiltModel(FunctionModel(main), None)
     gather_built = BuiltModel(FunctionModel(gather), None) if gather is not None else None
 
@@ -327,8 +334,10 @@ def drive(run_dir: Path, *, run_id: str, salt: str, main, gather=None, verbs=Non
     seams: dict[str, Any] = {}
     if verbs is not None:
         seams["verbs"] = verbs
-    if box is not None:
-        seams["box"] = box
+    # Always threaded: a hermetic replay has no daemon, so the default is host execution.
+    seams["box"] = box if box is not None else box_mod.unboxed_executor(
+        env=run_common.run_env(DEFENDER, run_dir),
+    )
     with override_allow_model_requests(False):
         return asyncio.run(driver.run_investigation(
             alert_path=run_dir / "alert.json", run_dir=run_dir, run_id=run_id,

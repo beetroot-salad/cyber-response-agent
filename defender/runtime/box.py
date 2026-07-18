@@ -543,7 +543,8 @@ def start_box(
         "executes on the host with no filesystem or network boundary.",
         file=sys.stderr,
     )
-    return BoxExecutor(spec=spec, transport=_host_transport, name="", sandboxed=False)
+    from defender import run_common   # local: run_common imports runtime, so keep it lazy
+    return unboxed_executor(spec, env=run_common.run_env(defender_dir, run_dir))
 
 
 def stop_box(box: BoxExecutor, *, docker: DockerFn = _docker) -> None:
@@ -586,17 +587,46 @@ class _DockerTransport:
         return RawExec(rc=proc.returncode, stdout=proc.stdout, stderr=proc.stderr)
 
 
-def _host_transport(frame: bytes, *, cwd: Path, timeout: float) -> RawExec:
-    """The UNBOXED transport, reachable only through the loud operator opt-out above.
+@dataclass(frozen=True)
+class _HostTransport:
+    """The UNBOXED transport: runs the approved pipelines in-process on the host.
 
-    It runs the approved pipelines in-process on the host — which is precisely what the box
-    exists to prevent, and why it is unreachable without `DEFENDER_ALLOW_UNSANDBOXED=1`."""
-    rc, out, err = bash_exec.run_parsed(
-        decode_request(frame), command="", env=dict(os.environ), cwd=cwd, timeout=timeout,
+    Carries its own `env` because there is no container to hold one. That env must be the
+    bash lane's real environment (`run_common.run_env`) — the `defender-*` shims live on a
+    PATH entry, so a bare `os.environ` yields `command not found` for every granted shim and
+    the lane silently loses its whole repertoire."""
+
+    env: dict[str, str]
+
+    def __call__(self, frame: bytes, *, cwd: Path, timeout: float) -> RawExec:
+        rc, out, err = bash_exec.run_parsed(
+            decode_request(frame), command="", env=self.env, cwd=cwd, timeout=timeout,
+        )
+        return RawExec(rc=rc, stdout=encode_response(BoxResult(
+            rc=rc,
+            out=out.encode("utf-8", "replace"),
+            err=err.encode("utf-8", "replace"),
+        )), stderr=b"")
+
+
+def unboxed_executor(
+    spec: BoxSpec = DEFAULT_SPEC, *, env: Mapping[str, str] | None = None,
+) -> BoxExecutor:
+    """An executor that runs the approved pipelines ON THE HOST, with no container.
+
+    Two callers, and no others should exist: the loud `DEFENDER_ALLOW_UNSANDBOXED=1`
+    operator opt-out in `start_box`, and hermetic tests that exercise the bash lane where
+    no daemon is available. It is a NAMED, greppable thing rather than a private transport
+    a test reaches into, so "who runs bash outside a box" stays one auditable question.
+
+    `sandboxed=False` is carried on the handle so a caller can tell what it got."""
+    return BoxExecutor(
+        spec=spec,
+        transport=_HostTransport(dict(env) if env is not None else dict(os.environ)),
+        name="", sandboxed=False,
     )
-    return RawExec(rc=rc, stdout=encode_response(
-        BoxResult(rc=rc, out=out.encode("utf-8", "replace"), err=err.encode("utf-8", "replace"))
-    ), stderr=b"")
+
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────

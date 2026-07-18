@@ -27,6 +27,6 @@ GATHER_FALLTHROUGH_DENY_REASON = (
     "payload already on disk: the read-only viewers (cat/grep/head/tail/wc), of which only "
     "`cat` opens a file — the rest read STDIN, so pipe into them, e.g. "
     "`cat <ABSOLUTE payload path> | grep '<substring>'`, or aggregate with "
-    "`cat <ABSOLUTE payload path> | defender-sql '<SQL>'`. Use the absolute path the query "
-    "result reports; a relative spelling is denied. Do not run arbitrary shell."
+    "`cat <payload path> | defender-sql '<SQL>'`. Prefer the absolute path the query result "
+    "reports; a relative one resolves against the run dir. Do not run arbitrary shell."
 )

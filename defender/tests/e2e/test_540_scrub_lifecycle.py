@@ -107,7 +107,10 @@ def _clean_run_dir(tmp_path: Path) -> Path:
     (run / "investigation.md").write_text(":L l-001 look here\n", encoding="utf-8")
     (run / "report.md").write_text("---\ndisposition: benign\n---\nfine.\n", encoding="utf-8")
     (run / "executed_queries.jsonl").write_text('{"lead_id": "l-001", "seq": 0}\n', encoding="utf-8")
-    (run / "meta.json").write_text('{"run_id": "r", "salt": "ff"}\n', encoding="utf-8")
+    # A plain run-dir artifact. (The run-dir metadata file this used to name was retired by
+    # #661, which moved the salt in-process.) The scrub cares about link SHAPE, so any
+    # regular file serves.
+    (run / "tool_trace.jsonl").write_text('{"tool": "bash", "seq": 0}\n', encoding="utf-8")
     (run / "gather_raw" / "l-001.lead.json").write_text('{"goal": "g"}\n', encoding="utf-8")
     (run / "gather_raw" / "l-001" / "0.json").write_text('[{"a": 1}]\n', encoding="utf-8")
     return run

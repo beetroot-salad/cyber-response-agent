@@ -7,7 +7,7 @@ parity is checked for free.
 Since #575 the gate speaks ONE containment model: an `AgentPolicy.bash_allow` is a tuple of
 `Grant`s, each a SHAPE (program + flags + arity, no paths) plus a SCOPE (anchored regexes over
 the **RESOLVED** path of everything `PROGRAMS[grant.program]` says the program opens). `cat` is
-the sole opener; `grep`/`head`/`tail`/`wc`/`jq` are stdin-only pipe stages; `ls`/`cd` are gone
+the sole opener; `grep`/`head`/`tail`/`wc` are stdin-only pipe stages; `ls`/`cd` are gone
 from every lane. The capability BITS this file used to construct policies with
 (`adapters` / `adapter_sql_pipe` / `raw_reads` / `operand_gated`) are deleted — each is now a
 fact the grant list carries directly, so the tests below construct grants instead of bits. The
@@ -116,7 +116,7 @@ def test_gather_denies_standalone_adapter():
 
 
 @pytest.mark.parametrize("cmd", [
-    "defender-elastic query foo | jq '.'",                    # piped
+    "defender-elastic query foo | wc -l",                     # piped
     "defender-elastic query foo && cat /run/report.md",       # chained (with a GRANTED viewer)
     "cat /run/report.md; defender-elastic query foo",         # sequenced
 ])
@@ -577,10 +577,11 @@ def test_gather_sql_aggregation_is_now_tool_then_bash():
     new = ("cat /run/gather_raw/l-001/1.json | "
            "defender-sql 'SELECT user, count(*) c FROM data GROUP BY user'")
     assert _bash(new, GATHER).allow
-    # The path must be ABSOLUTE — bash resolves a relative operand against the repo root, so the
-    # relative spelling lands outside the scope and denies. (Which is why the payload note the
-    # query result carries is absolute.)
-    assert not _bash("cat gather_raw/l-001/1.json | defender-sql 'SELECT 1'", GATHER).allow
+    # Since #540 a relative operand resolves against the RUN DIR — where gather_raw/ actually
+    # lives — so the short spelling names the same payload as the absolute one. The payload note
+    # the query result carries stays absolute (that is what the tool reports), but the relative
+    # form is no longer a trap that silently names nothing.
+    assert _bash("cat gather_raw/l-001/1.json | defender-sql 'SELECT 1'", GATHER).allow
     # Main loop never reaches a payload, pipe or not.
     assert not _bash(new, MAIN).allow
 

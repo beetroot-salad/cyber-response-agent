@@ -329,12 +329,19 @@ def test_judge_cat_operand_with_embedded_nul_fails_closed(tmp_path):
     assert not _judge_gate("cat /etc/pass\x00wd | defender-sql 'SELECT 1'", tmp_path).allow
 
 
-def test_judge_relative_operand_denied(tmp_path):
-    """The judge's payloads reach it as ABSOLUTE `read_roots`, so a relative operand — rebased on the
-    executor's cwd (`defender_dir.parent`, the repo root) — names nothing inside its scope and is
-    denied. The prompts must not teach one either — that side is pinned by
+def test_judge_relative_operand_resolves_into_its_own_run(tmp_path):
+    """A relative operand is rebased on the executor's cwd, which since #540 is the RUN DIR.
+
+    That directory IS inside the judge's `read_roots`, so `gather_raw/l-002/0.json` now names
+    a payload the judge may already read by its absolute path — the same file, a shorter
+    spelling, NOT a wider set. Pre-#540 the anchor was the repo root, which is why the old
+    expectation here was a denial: the operand named nothing in scope rather than being
+    forbidden. The escape below is what actually pins the confine, and it is unchanged.
+
+    The prompts still teach absolute paths — pinned by
     `test_every_command_the_prompt_teaches_passes_the_judges_own_gate`."""
-    assert not _judge_gate("cat gather_raw/l-002/0.json", tmp_path).allow
+    assert _judge_gate("cat gather_raw/l-002/0.json", tmp_path).allow
+    assert not _judge_gate("cat ../../etc/passwd", tmp_path).allow
 
 
 def test_judge_relative_operand_gated_against_the_executors_cwd(monkeypatch, tmp_path):
