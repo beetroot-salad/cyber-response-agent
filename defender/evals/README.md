@@ -21,7 +21,9 @@ never the reverse.
 Run them by hand:
 
 ```bash
-# Primary: score a runs dir against ground truth (defaults to $DEFENDER_RUNS_BASE)
+# Primary: score against ground truth (runs dir defaults to $DEFENDER_RUNS_BASE).
+# It walks fixtures/held-out/ and finds each fixture's run by run-id, so launch
+# scored runs as: run.py <fixture>/alert.json --run-id <slug> --no-learn
 python3 defender/evals/held_out.py "$DEFENDER_RUNS_BASE"
 
 # Secondary: frozen-actor replay, pinned K generations back (default 3)

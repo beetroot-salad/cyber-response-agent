@@ -69,12 +69,11 @@ def materialize_run_dir(alert: Path, run_id: str | None) -> tuple[Path, str]:
     RunPaths(run_dir).gather_raw.mkdir(parents=True)
     shutil.copy(alert, RunPaths(run_dir).alert)
     salt = secrets.token_hex(8)
-    # Propagate a sibling ground_truth.yaml into the run dir so the learning
-    # loop's persist stage can recognise held-out cases and suppress
-    # queue appends. Fixture layout: {fixture-dir}/{alert.json,ground_truth.yaml}.
-    gt = alert.parent / "ground_truth.yaml"
-    if gt.is_file():
-        shutil.copy(gt, run_dir / "ground_truth.yaml")
+    # No ground-truth label is copied in. A fixture's `disposition` is an ANSWER KEY
+    # and the run dir is inside the agent's readable workspace; the eval reads labels
+    # from the fixture dir it already owns (`evals/held_out.py`), and the learning loop
+    # never sees one at all. Contamination is prevented at the enqueue boundary
+    # instead — see `enqueue_learning`.
     return run_dir, salt
 
 
@@ -156,11 +155,50 @@ def cross_check_tables(run_dir: Path) -> None:
         print(f"[run.py]   note: leads with no queries (monitor): {xcheck['leads_without_queries']}", file=sys.stderr)
 
 
-def enqueue_learning(run_dir: Path) -> None:
+HELD_OUT_FIXTURES = DEFENDER_DIR / "fixtures" / "held-out"
+
+
+def is_held_out_fixture(alert: Path, fixtures_dir: Path = HELD_OUT_FIXTURES) -> bool:
+    """Whether ``alert`` lives under the labeled held-out eval fixture set.
+
+    A PATH check, deliberately — not a label read. It knows where the eval set lives
+    and nothing about its schema, so no answer key is opened and no ground-truth
+    vocabulary enters the runtime. Containment alone decides, so a fixture whose label
+    is missing or malformed is still refused.
+
+    Both sides are resolved before comparing, so a symlink or ``..`` cannot walk out of
+    the set and present a held-out alert as an ordinary one.
+    """
+    try:
+        alert.resolve().relative_to(fixtures_dir.resolve())
+    except ValueError:
+        return False
+    return True
+
+
+def enqueue_learning(run_dir: Path, alert: Path) -> bool:
     """Hand the finished run to the off-process LEARN worker by dropping a
     learn-queue marker. The runtime holds SIEM creds; learning is SIEM-free and
     runs in a separate process (loop.py --learn-drain), so the investigation's
-    exit no longer waits on — or is rolled back by — the learning chain."""
+    exit no longer waits on — or is rolled back by — the learning chain.
+
+    Held-out fixture runs are REFUSED here. Scoring a run whose findings already
+    taught the corpus is measuring the model on its own training data, so the eval
+    path launches with ``--no-learn``; this is the net for when someone forgets, or
+    runs a held-out alert by hand to debug it. It fails closed: the check is on the
+    input path, so it cannot be defeated by a malformed or missing label file.
+
+    Returns whether the run was enqueued.
+    """
+    if is_held_out_fixture(alert):
+        print(
+            f"[run.py] {alert.parent.name}/{alert.name} is a held-out eval fixture — NOT "
+            "enqueuing for learning (its findings must never feed a corpus it is scored "
+            "against)",
+            file=sys.stderr,
+        )
+        return False
     from defender.learning import loop as _loop
 
     _loop.enqueue_for_learning(run_dir)
+    return True

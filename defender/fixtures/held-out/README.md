@@ -13,12 +13,27 @@ Each subdirectory contains:
   ground_truth.yaml   # disposition + class_axes + rationale, held_out: true
 ```
 
-The `held_out: true` flag is the load-bearing field. `defender/run.py`
-propagates `ground_truth.yaml` into the run dir alongside `alert.json`;
-`defender/learning/loop.py:run_one` checks `held_out` after persisting the
-run artifacts and **skips the queue append** — neither `defender_findings`
-nor (when wired) `actor_observations` from a held-out run ever land in
-`defender/learning/_pending/*.jsonl`.
+`ground_truth.yaml` **never leaves this directory.** `disposition` is an answer
+key and a run dir sits inside the agent's readable workspace, so nothing is
+copied there and no run records a pointer back to its fixture. Two consequences:
+
+- **Scoring** (`evals/held_out.py`) walks THESE dirs and locates each fixture's
+  run by run-id convention — the opposite direction from a scan over run dirs.
+  Launch a scored run as:
+
+  ```bash
+  python3 defender/run.py defender/fixtures/held-out/<slug>/alert.json \
+      --run-id <slug> --no-learn
+  ```
+
+- **Contamination** is stopped at the enqueue boundary, not inside the learning
+  loop. `run_common.enqueue_learning` refuses any alert under this directory, so
+  a held-out run is never handed to the learn worker and no `defender_findings`
+  or `actor_observations` from it can reach `defender/learning/_pending/*.jsonl`.
+  That check is on the PATH, so it holds even if a label file is missing or
+  malformed — and `--no-learn` above makes the intent explicit at the call site.
+
+The learning loop itself has no notion of ground truth at all.
 
 ## Class balance
 
@@ -53,7 +68,7 @@ harnesses depend on.
 ## Schema
 
 ```yaml
-held_out: true              # marker — load-bearing for the persist filter
+held_out: true              # marker — selects the fixture into the eval set
 disposition: benign | malicious | inconclusive
 class_axes:                 # optional taxonomy hints — not consumed by the loop
   vendor: wazuh | falco | suricata | sysmon | bind | modsecurity | auditd

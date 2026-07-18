@@ -24,10 +24,14 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 LEARNING_DIR = REPO_ROOT / "defender" / "learning"
 EVAL_OUT_DIR = REPO_ROOT / "defender" / "evals" / "results" / "secondary"
-FIXTURES_DIR = REPO_ROOT / "defender" / "fixtures" / "held-out"
 WORKTREES_DIR = REPO_ROOT / ".claude" / "worktrees"
 
-from defender.run_common import resolve_runs_base  # noqa: E402 — needs REPO_ROOT on sys.path
+# One definition of where the held-out set lives — shared with run_common's
+# fail-closed enqueue net and evals/held_out.py's fixture walk.
+from defender.run_common import (  # noqa: E402 — needs REPO_ROOT on sys.path
+    HELD_OUT_FIXTURES as FIXTURES_DIR,  # noqa: F401 — re-exported to secondary.py
+    resolve_runs_base,
+)
 
 DEFAULT_RUNS_BASE = resolve_runs_base()
 

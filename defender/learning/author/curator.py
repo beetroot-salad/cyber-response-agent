@@ -37,11 +37,9 @@ from pathlib import Path
 from typing import Any
 from collections.abc import Callable
 
-import yaml
 
 from defender.learning.author import shared as _shared
 from defender.learning.author.verify_forward.checks import ForwardCheck
-from defender._yaml import safe_load
 from defender._corpus import iter_lesson_paths, iter_lessons
 from defender._io import append_jsonl, read_jsonl_rows, write_atomic
 from defender._run_paths import resolve_run_bundle
@@ -50,7 +48,6 @@ from defender.learning.core.config import QueueChannel, make_logger
 from defender.learning.core.persist import rotate_queue_locked
 
 
-GROUND_TRUTH_FILE = "ground_truth.yaml"
 
 
 # Unified with author.py via the shared module — all three raise the same class,
@@ -187,31 +184,6 @@ def existing_observation_ids(corpus_dir: Path) -> set[str]:
     _EXISTING_IDS_CACHE.clear()  # keep only the latest signature
     _EXISTING_IDS_CACHE[sig] = set(ids)
     return ids
-
-
-def is_held_out_source(runs_dir: Path, source_run_dir: str) -> bool:
-    """True if the source run's ``ground_truth.yaml`` declares held-out.
-
-    Resolve the bundle via ``resolve_run_bundle`` off ``runs_dir`` — which must be the
-    shared-state ``LoopPaths.runs_dir`` (worktree-immune), NOT ``repo_root /
-    source_run_dir``: under a batch author worktree the latter resolves into the
-    worktree's empty ``runs/`` and the held-out net silently lets a held-out case leak
-    into the corpus (#425). A *present* bundle with a missing/malformed ``ground_truth.yaml``
-    → False: that's a genuinely not-held-out run. The anomalous case — a non-empty
-    ``source_run_dir`` whose bundle dir is *absent* — is caught loudly upstream in
-    ``_partition_pre_author`` (held as ``source_bundle_missing``), so a resolution
-    regression can't reach here and silently read a missing file as not-held-out."""
-    if not source_run_dir:
-        return False
-    path = resolve_run_bundle(runs_dir, source_run_dir) / GROUND_TRUTH_FILE
-    if not path.is_file():
-        return False
-    try:
-        doc = safe_load(path.read_text(encoding="utf-8")) or {}
-    except yaml.YAMLError:
-        # Including a nesting flood — the shared seam folds it into YAMLError (#609/#613).
-        return False
-    return isinstance(doc, dict) and doc.get("held_out") is True
 
 
 # ---------------------------------------------------------------------------
@@ -510,21 +482,13 @@ def _partition_pre_author(
             # precisely so it outlives the ephemeral run dir, so for a queued observation
             # it should always exist. A missing bundle dir is therefore an anomaly — a
             # #425-class resolution regression or a deleted bundle — NOT a normal
-            # not-held-out run. Fail SAFE + LOUD: hold it (an unverifiable case must never
-            # seed a lesson) and surface it, rather than letting is_held_out_source read a
-            # missing ground_truth.yaml and silently return False — the exact silent mode
-            # #425 exploited.
+            # ordinary run. Fail SAFE + LOUD: hold it (an unverifiable case must never
+            # seed a lesson) and surface it, rather than authoring from a source whose
+            # provenance cannot be checked.
             log(f"source bundle missing for observation {oid} "
                 f"(source_run_dir={src!r} → {resolve_run_bundle(cfg.runs_dir, src)}) — holding")
             rec = dict(entry)
             rec["held_reason"] = "source_bundle_missing"
-            held.append(rec)
-            continue
-        if is_held_out_source(cfg.runs_dir, src):
-            # Producer should have dropped held-out runs; defense-in-depth hold
-            # so a held-out observation can never seed a lesson.
-            rec = dict(entry)
-            rec["held_reason"] = "held_out_double_check"
             held.append(rec)
             continue
         if outcome not in cfg.outcome_author:

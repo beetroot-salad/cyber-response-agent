@@ -243,60 +243,15 @@ def test_idempotency_consumes_already_cited_observations(tmp_path: Path):
     assert by_id["a/0"]["consumed_category"] == "consumed_idempotent"
 
 
-def test_held_out_double_check_holds_observation(tmp_path: Path):
-    ctx = _isolate(tmp_path)
-    # Synthesize a held-out source run dir under the tmp repo root.
-    src = ctx["repo"] / "defender" / "learning" / "runs" / "held/"
-    src.mkdir(parents=True)
-    (src / "ground_truth.yaml").write_text("held_out: true\n")
-    row = _row("held/0", "caught", source_run_dir="defender/learning/runs/held/")
-    _write_queue(ctx["pending"], [row, _row("ok/0", "caught")])
-
-    captured: list[list[dict]] = []
-
-    def fake_invoke(observations, batch_id, cfg):
-        captured.append(observations)
-        return _consume_all(observations, batch_id, cfg)
-
-    rc = curator.run_batch(hold_committed=False, cfg=_cfg(ctx, fake_invoke))
-    assert rc == 0
-    sent_ids = {o["observation_id"] for o in captured[0]}
-    assert sent_ids == {"ok/0"}
-
-    # held/0 must remain in active queue with held_reason annotation.
-    rows_left = [
-        json.loads(line)
-        for line in (ctx["pending"] / "actor_observations.jsonl")
-        .read_text()
-        .splitlines()
-    ]
-    assert len(rows_left) == 1
-    assert rows_left[0]["observation_id"] == "held/0"
-    assert rows_left[0]["held_reason"] == "held_out_double_check"
-
-
-def test_held_out_double_check_worktree_immune(tmp_path: Path):
-    """#425: under a batch worktree the held-out double-check must resolve the bundle
-    off the shared state root (cfg.runs_dir), not the worktree repo_root — else a
-    held-out case silently leaks into the corpus."""
-    orig = tmp_path / "checkout"
-    (orig / "defender" / "learning").mkdir(parents=True)
-    worktree = tmp_path / "worktree"  # fresh origin/main checkout: no runs/
-    worktree.mkdir()
-    # The held-out bundle lives under the ORIGINAL state root, never the worktree.
-    src = orig / "defender" / "learning" / "runs" / "held"
-    src.mkdir(parents=True)
-    (src / "ground_truth.yaml").write_text("held_out: true\n")
-
-    # The drain re-roots the layout at the worktree but keeps the shared state dir.
-    cfg = aa.build_actor_config(LoopPaths(repo_root=orig).with_repo_root(worktree))
-    assert cfg.repo_root == worktree
-    assert cfg.runs_dir == orig / "defender" / "learning" / "runs"
-
-    src_rel = "defender/learning/runs/held/"
-    assert curator.is_held_out_source(cfg.runs_dir, src_rel) is True
-    # The pre-#425 join (repo_root / source_run_dir) would miss it in the worktree.
-    assert not (cfg.repo_root / src_rel / "ground_truth.yaml").is_file()
+# The held-out double-check that used to live here is DELETED along with
+# `curator.is_held_out_source`. It read a `ground_truth.yaml` from the source run's
+# bundle — a file `persist` never copied there, so on real loop runs it always read
+# "not held out" and caught nothing. Contamination is now stopped at the enqueue
+# boundary (`run_common.enqueue_learning`, covered in test_held_out_filter.py), so a
+# held-out run produces no observations for a consume-time net to re-check. The
+# worktree-resolution property the second test pinned (#425) survives in
+# `test_missing_source_bundle_is_held_not_authored`, which exercises the same
+# `resolve_run_bundle(cfg.runs_dir, ...)` join.
 
 
 def test_missing_source_bundle_is_held_not_authored(tmp_path: Path):

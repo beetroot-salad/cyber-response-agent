@@ -27,7 +27,6 @@ from defender.learning.core.config import (
     ADVERSARIAL_DISPOSITIONS,
     BENIGN_DISPOSITIONS,
     DEFAULT_PATHS,
-    GROUND_TRUTH_FILE,
     ORACLE_MODEL,
     FatalConfigError,
     RunUnprocessable,
@@ -70,37 +69,6 @@ from defender.learning.core.validate import (
 # ``FatalConfigError``/``GitError`` are enrolled (not subclassed) because the exit-2 response
 # is learning-only; see ``_run_or_dead_letter`` for the rationale.
 _SYSTEMIC_FAULTS: tuple[type[BaseException], ...] = (StageAbort, FatalConfigError, GitError)
-
-
-# ---------------------------------------------------------------------------
-# Ground-truth (held-out) gate
-# ---------------------------------------------------------------------------
-
-
-def read_ground_truth(run_dir: Path) -> dict | None:
-    """Parsed ground_truth.yaml if the run dir carries one, else None.
-
-    Held-out runs carry it (propagated from the fixture by ``defender/run.py``); the
-    persist stage uses it to suppress queue appends so held-out runs never feed back
-    into the learning corpora.
-    """
-    path = run_dir / GROUND_TRUTH_FILE
-    if not path.is_file():
-        return None
-    try:
-        doc = safe_load(path.read_text(encoding="utf-8")) or {}
-    except yaml.YAMLError as e:
-        # Including a nesting flood — folded into YAMLError by the shared seam (#613),
-        # so a flooded ground_truth.yaml dead-letters the run instead of crashing the drain.
-        raise RunUnprocessable(f"{path}: malformed YAML: {e}") from e
-    if not isinstance(doc, dict):
-        raise RunUnprocessable(f"{path}: expected a mapping at top level")
-    return doc
-
-
-def is_held_out(run_dir: Path) -> bool:
-    gt = read_ground_truth(run_dir)
-    return bool(gt and gt.get("held_out") is True)
 
 
 # ---------------------------------------------------------------------------
@@ -157,7 +125,6 @@ def run_direction(
     disposition: str,
     alert_rule_key: str,
     run_id: str,
-    held_out: bool,
     *,
     paths: LoopPaths,
     agents: Subagents,
@@ -212,10 +179,6 @@ def run_direction(
         ),
         disposition=disposition, alert_rule_key=alert_rule_key,
     )
-
-    if held_out:
-        _log(f"held_out=true — {spec.name} appends suppressed")
-        return False
 
     n_f = append_findings(
         judge_doc, run_id, alert_rule_key, learning_run_dir,
@@ -434,10 +397,9 @@ def run_one(
     alert_rule_key = derive_alert_rule_key(alert)
     learning_run_dir = paths.runs_dir / run_id
     learning_run_dir.mkdir(parents=True, exist_ok=True)
-    held_out = is_held_out(run_dir)
     _log(
         f"step=dispatch disposition={disposition} directions={directions} "
-        f"alert_rule_key={alert_rule_key} held_out={held_out}"
+        f"alert_rule_key={alert_rule_key}"
     )
 
     # The direction legs are mutually independent: each writes disjoint
@@ -454,7 +416,7 @@ def run_one(
         for name in directions:
             futures[pool.submit(
                 run_direction, BY_NAME[name], dirs,
-                disposition, alert_rule_key, run_id, held_out,
+                disposition, alert_rule_key, run_id,
                 paths=paths, agents=agents,
             )] = name
         for fut in as_completed(futures):

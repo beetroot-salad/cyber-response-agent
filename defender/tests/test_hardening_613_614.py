@@ -24,10 +24,8 @@ import yaml
 
 from defender._tsv import _BREAKERS, flatten_cell
 from defender._yaml import safe_load
-from defender.evals.held_out import held_out_runs
-from defender.evals.secondary import load_held_out_fixtures
+from defender.evals.held_out import load_held_out_fixtures
 from defender.learning.core.config import RunUnprocessable
-from defender.learning.core.orchestrate import read_ground_truth
 from defender.learning.pipeline.oracle.sample import parse_lead_events
 from defender.scripts.visualize.visualize_primitives import load_yaml
 
@@ -86,33 +84,20 @@ def test_d_s3_oracle_flood_reply_is_run_unprocessable():
         parse_lead_events(_FLOW_FLOOD, "lead1")
 
 
-def test_d_s4_flood_ground_truth_dead_letters_not_crashes(tmp_path):
-    """d: s4 — ``read_ground_truth`` on a flooded ``ground_truth.yaml`` raises
-    ``RunUnprocessable`` (dead-letter the run) instead of crashing the drain."""
-    (tmp_path / "ground_truth.yaml").write_text(_FLOW_FLOOD, encoding="utf-8")
-    with pytest.raises(RunUnprocessable):
-        read_ground_truth(tmp_path)
+# d: s4 — DELETED. Its subject, `orchestrate.read_ground_truth`, no longer exists: the
+# learning loop does not read eval-fixture YAML at all, so a flooded ground_truth.yaml
+# cannot reach — let alone dead-letter — a learning run. The failure mode is removed
+# rather than handled.
+#
+# d: s5 — FOLDED INTO s6. It pinned walk-survival on `evals/held_out.held_out_runs`, a
+# scan of run dirs for copied-in labels. The eval now walks FIXTURES via
+# `load_held_out_fixtures` — which is exactly s6's subject — so the two demands have one
+# subject and one test.
 
 
-def test_d_s5_held_out_walk_survives_flood_ground_truth(tmp_path, capsys):
-    """d: s5 — one corrupt ``ground_truth.yaml`` costs that one run's row, not the
-    whole held-out report: the healthy run is still found, the corrupt one warns."""
-    good = tmp_path / "good"
-    good.mkdir()
-    (good / "ground_truth.yaml").write_text("held_out: true\n", encoding="utf-8")
-    bad = tmp_path / "bad"
-    bad.mkdir()
-    (bad / "ground_truth.yaml").write_text(_FLOW_FLOOD, encoding="utf-8")
-
-    assert held_out_runs(tmp_path) == [good]
-    err = capsys.readouterr().err
-    assert "bad" in err
-    assert "ground_truth" in err
-
-
-def test_d_s6_secondary_fixture_walk_survives_flood_ground_truth(tmp_path, capsys):
-    """d: s6 — the same walk-survival property at the secondary eval's fixture
-    loader: the flooded fixture is skipped with a warn, the healthy one loads."""
+def test_d_s6_fixture_walk_survives_flood_ground_truth(tmp_path, capsys):
+    """d: s6 (absorbing s5) — walk-survival at the ONE fixture loader both metrics now
+    share: the flooded fixture is skipped with a warn, the healthy one loads."""
     good = tmp_path / "good"
     good.mkdir()
     (good / "alert.json").write_text("{}", encoding="utf-8")
