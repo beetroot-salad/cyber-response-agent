@@ -91,7 +91,11 @@ def _module_targets(importer: Path, text: str, root: Path) -> set[Path]:
     Relative imports resolve against the importer's own directory. `from pkg import name` credits
     `pkg/name.py` when that submodule file exists (a real module reach) and `pkg.py` when THAT
     exists (then `name` is a symbol of module `pkg`); a `from pkg import some_symbol` that names
-    neither resolves to nothing — no phantom driver invented for a function or a class."""
+    neither resolves to nothing — no phantom driver invented for a function or a class.
+    `from pkg import *` binds the whole package namespace, so when `pkg` is a directory it credits
+    every `pkg/*.py` submodule (and `pkg.py` if `pkg` is a module, via the `base_mod` fallback) —
+    the conservative reach a star can bind, bounded by the `fileset` intersection in `_import_edges`
+    so it invents no out-of-census reach."""
     try:
         tree = ast.parse(text)
     except SyntaxError as e:
@@ -121,6 +125,15 @@ def _module_targets(importer: Path, text: str, root: Path) -> set[Path]:
             if base != root and root not in base.parents:
                 continue
             for alias in node.names:  # each name may be a submodule file …
+                if alias.name == "*":
+                    # `from pkg import *` — alias.name is the literal "*", which pathlib cannot
+                    # glob (`base/"*.py"` never `.is_file()`). When `base` is a package directory
+                    # the star binds its submodule namespace, so credit every `base/*.py` (the same
+                    # conservative model the named arm uses). When `base` is a module file, the star
+                    # names that module's symbols — left to the `base_mod` fallback below.
+                    if base.is_dir():
+                        targets.update(p for p in base.glob("*.py") if p.is_file())
+                    continue
                 cand = (base / alias.name).with_suffix(".py")
                 if cand.is_file():
                     targets.add(cand)

@@ -306,6 +306,40 @@ def test_from_pkg_import_symbol_with_no_file_invents_no_driver(make_repo):
     assert "realsub" in rc.stdout
 
 
+def test_star_import_reaches_changed_submodule(make_repo):
+    """`from pkg import *` reaches a changed submodule of `pkg`: the star binds the package's
+    submodule namespace, so a driver reaching the change only through it is flagged (issue #653).
+    A star-import over an UNTOUCHED sibling package stays silent (control — no over-reach)."""
+    # Firing: run.py reaches app/pkg/leaf.py only via `from app.pkg import *`.
+    fire = make_repo()
+    fire.config(code_roots=["app"], entrypoint_stems=("run",))
+    fire.write("app/run.py", "from app.pkg import *\nif __name__ == '__main__':\n    pass\n")
+    fire.write("app/pkg/leaf.py", "X = 1\n")
+    fire.graph(UNMODELLED_GRAPH)
+    fbase = fire.commit("base")
+    fire.write("app/pkg/leaf.py", "X = 2\n")
+    fire.commit("change")
+    rf = fire.run("spec_graph_x.yaml", fbase)
+    assert rf.returncode == 1
+    assert "app/run.py" in rf.stdout
+    assert "leaf" in rf.stdout
+
+    # Control: the star import binds `app/pkg`, and a changed module in a DIFFERENT package the
+    # entrypoint never imports is not credited — the star does not invent out-of-package reach.
+    ctl = make_repo()
+    ctl.config(code_roots=["app"], entrypoint_stems=("run",))
+    ctl.write("app/run.py", "from app.pkg import *\nif __name__ == '__main__':\n    pass\n")
+    ctl.write("app/pkg/leaf.py", "X = 1\n")
+    ctl.write("app/other/faroff.py", "Y = 1\n")
+    ctl.graph(UNMODELLED_GRAPH)
+    cbase = ctl.commit("base")
+    ctl.write("app/other/faroff.py", "Y = 2\n")  # a sibling package the star never binds
+    ctl.commit("change")
+    rc = ctl.run("spec_graph_x.yaml", cbase)
+    assert rc.returncode == 0
+    assert "app/run.py" not in rc.stdout
+
+
 def test_stdlib_or_thirdparty_import_is_never_a_driver(make_repo):
     """A stdlib / third-party import is never a driver; a real changed project import in the same
     fixture does fire (control)."""
