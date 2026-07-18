@@ -8,7 +8,7 @@ blocking two equivalent main-loop moves:
 
   1. Reading `gather_raw/` (Bash/Read/Grep/Glob) — spot-checking or
      re-deriving fields gather already summarized.
-  2. Running an adapter CLI directly (`scripts/adapters/*_cli.py` via Bash)
+  2. Running an adapter directly (`scripts/adapters/*_adapter.py` via Bash)
      — querying a data source itself instead of dispatching gather, then
      reading its own dump. Same violation, renamed, and it escapes the
      executed_queries audit trail.
@@ -19,7 +19,7 @@ subagent.
 
 ### Why scope to the main session
 
-The gather subagent legitimately does both — it runs the adapter CLI
+The gather subagent legitimately does both — it runs the adapter
 (through record_query.py) and reads `gather_raw/` (§3.5/§4). A session-wide
 permission-deny rule can't tell the two apart and would break gather, so
 the scoping lives here.
@@ -54,14 +54,14 @@ from pathlib import Path
 if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
     sys.path.insert(0, _root)
 from defender.hooks._cmd_segments import (
-    ADAPTER_CLI_RE,
+    ADAPTER_RE,
     adapter_shims,
     is_main_session as _is_main_session,
 )
 
 RAW_MARKER = "gather_raw"
-# `ADAPTER_CLI_RE` (a `scripts/adapters/<name>_cli.py` path) is imported from the
-# shared taxonomy. `record_query.py` is NOT `_cli.py`, and the invlang CLI has
+# `ADAPTER_RE` (a `scripts/adapters/<name>_adapter.py` path) is imported from the
+# shared taxonomy. `record_query.py` is NOT `_adapter.py`, and the invlang CLI has
 # no `scripts/adapters/` path, so both stay allowed.
 
 
@@ -145,7 +145,7 @@ def main() -> int:
     if tool_name == "Bash":
         cmd = str(tool_input.get("command", ""))
         shim_re = _adapter_shim_re()
-        is_adapter = bool(ADAPTER_CLI_RE.search(cmd)) or bool(shim_re and shim_re.search(cmd))
+        is_adapter = bool(ADAPTER_RE.search(cmd)) or bool(shim_re and shim_re.search(cmd))
         wrapped = "record_query.py" in cmd or "defender-record-query" in cmd
         if is_adapter and not wrapped:
             print(ADAPTER_DENY_REASON, file=sys.stderr)

@@ -153,7 +153,7 @@ class NeverEndsModel:
 #
 # A fake verb is a plain annotated function: `def q(ctx, *, index: str) -> dict`. Its
 # keyword-only params ARE its declared param surface, so the real query tool validates
-# a model's `params` against the fake exactly as it would against `elastic_cli.VERBS`.
+# a model's `params` against the fake exactly as it would against `elastic_adapter.VERBS`.
 # A fake never classifies and never decides policy: it RECORDS what it was handed and
 # then returns its payload or raises its fault. The exit code, the error class, the
 # payload status, the breaker outcome are all the production code's job.

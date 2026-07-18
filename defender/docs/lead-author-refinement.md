@@ -158,7 +158,7 @@ Key changes:
         "success/failure ratio"
       ],
       "params": {"host": "bastion-01", "srcip": "10.42.7.183", "window": "1h"},
-      "rendered_query": "python3 defender/scripts/adapters/wazuh_cli.py query --query 'rule.groups:(authentication_success OR authentication_failed) AND agent.name:bastion-01 AND data.srcip:10.42.7.183' --window 1h --run-dir <run_dir>",
+      "rendered_query": "python3 defender/scripts/adapters/wazuh_adapter.py query --query 'rule.groups:(authentication_success OR authentication_failed) AND agent.name:bastion-01 AND data.srcip:10.42.7.183' --window 1h --run-dir <run_dir>",
       "payload_status": "ok",
       "payload_digest": "847 events; 12 distinct dstuser; 1 distinct srcip; 95% authentication_failed",
       "result_refs": ["gather_raw/0.json"],
@@ -171,7 +171,7 @@ Key changes:
       "goal_text": "Lateral-spread check: same srcip across other hosts.",
       "what_to_summarize": ["host diversity for this srcip"],
       "params": {"srcip": "bastion-01", "window": "1h"},
-      "rendered_query": "python3 defender/scripts/adapters/wazuh_cli.py query --query 'rule.groups:(authentication_success OR authentication_failed) AND data.srcip:bastion-01' --window 1h --run-dir <run_dir>",
+      "rendered_query": "python3 defender/scripts/adapters/wazuh_adapter.py query --query 'rule.groups:(authentication_success OR authentication_failed) AND data.srcip:bastion-01' --window 1h --run-dir <run_dir>",
       "payload_status": "suspect_empty",
       "payload_digest": "0 events; data.srcip is IP-typed; literal 'bastion-01' rejected silently as non-IP",
       "result_refs": ["gather_raw/4.json"],

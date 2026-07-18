@@ -6,7 +6,7 @@ never surface adapter credentials / `.env` paths / env-var status to the
 orchestrator. Doing so is the regression that issue #255 fixed in the v2
 tree — the orchestrator was handed a `.env` it could neither read nor
 own and burned ~1.1k thinking tokens thrashing on it. Credential sourcing
-is each adapter CLI's job at call time (gather subagent), so the
+is each adapter's job at call time (gather subagent), so the
 orchestrator-facing map must stay credential-free.
 """
 from __future__ import annotations
@@ -27,7 +27,7 @@ def test_canonical_sections_present(tmp_path: Path):
         "## Absolute roots",
         "## Run dir",
         "## System skills",
-        "## Adapter CLIs",
+        "## Adapters",
         "## Gather query templates",
     ):
         assert header in out, f"missing section: {header}"

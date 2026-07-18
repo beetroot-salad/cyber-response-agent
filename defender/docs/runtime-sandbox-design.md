@@ -351,7 +351,7 @@ unchanged; only *where* the subprocess runs moves (host, not isolate).
 the confinement to the credentialed host.** "Unlisted cap refused" gates *which*
 binary, not what arguments reach it, so the RPC must also validate **per-cap argv
 shape** at the broker — the same anchored-grammar move as `bash_allow`, reusing
-the `command_shape` classifiers / `ADAPTER_CLI_RE` that already describe adapter
+the `command_shape` classifiers / `ADAPTER_RE` that already describe adapter
 invocations. Execution is `shell=False`, with a minimal env holding only that
 cap's secret; out-of-shape argv is deny+log, same as an unlisted cap. (Running
 the brokered subprocess under its own light confinement is a worthwhile

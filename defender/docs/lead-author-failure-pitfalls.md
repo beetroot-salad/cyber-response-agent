@@ -123,7 +123,7 @@ move to MCP servers the same record/trip/kill logic applies" —
 
 And the taxonomy stays out of this feature entirely: every connected CLI
 inherits the exit codes from the one shared adapter module ("one shared
-module per tree, never two" — `cli-adapter.md:38-42`), so a new source
+module per tree, never two" — `adapter.md:38-42`), so a new source
 follows the convention for free and the writer — not the consumer — owns
 the mapping into `error_class`.
 

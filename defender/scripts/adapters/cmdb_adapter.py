@@ -33,7 +33,10 @@ SYSTEM = "cmdb"
 PREFIX = "CMDB"
 
 
-def _config(ctx: VerbContext) -> dict[str, str]:
+# Same name in each stub adapter, closing over that module's SYSTEM/PREFIX: the shared
+# body already lives once in `transport.load_config`, so this is a zero-argument alias,
+# not a copy of any logic.
+def _config(ctx: VerbContext) -> dict[str, str]:  # lint-dup: ok — per-module alias over the shared transport.load_config
     return transport.load_config(ctx, SYSTEM, PREFIX)
 
 
@@ -60,7 +63,9 @@ def list_hosts(
     return transport.http_get(ctx, _config(ctx), "/hosts", params=params or None)
 
 
-def list_roles(ctx: VerbContext) -> dict | list:
+# Same spelling as identity's `list_roles`, different service: each resolves its own
+# URL_BASE from its own config, so merging them would be a behavior change.
+def list_roles(ctx: VerbContext) -> dict | list:  # lint-dup: ok — distinct service
     return transport.http_get(ctx, _config(ctx), "/roles")
 
 

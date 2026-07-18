@@ -7,7 +7,7 @@ not whether the live system is reachable.
 
     python3 defender/skills/connect/validate_scaffold.py <system>
 
-Since #611 an adapter is a Python module `scripts/adapters/<system>_cli.py`
+Since #611 an adapter is a Python module `scripts/adapters/<system>_adapter.py`
 exposing a `VERBS` mapping of plain annotated functions — there is no CLI, no
 `--help`, no `bin/` shim, and no exit-code contract to probe. So this validates
 the REGISTRY: the module imports, `VERBS` is non-empty and declares a
@@ -15,7 +15,7 @@ the REGISTRY: the module imports, `VERBS` is non-empty and declares a
 `${placeholder}` is a declared param of its verb or a marked body substitution.
 
 Normalizes the spelling split in one invocation: the adapter file uses `_`
-(`change_mgmt_cli.py`) while the skill / corpus dirs use `-`
+(`change_mgmt_adapter.py`) while the skill / corpus dirs use `-`
 (`skills/change-mgmt/`). `system` is passed hyphenated; the registry maps it to
 the underscore module, and the skill/corpus reads use the hyphen form directly.
 
@@ -40,6 +40,7 @@ from defender._corpus import iter_query_templates  # noqa: E402
 from defender._frontmatter import parse_frontmatter_or_none  # noqa: E402
 from defender._io import read_text_soft  # noqa: E402
 from defender.runtime.verbs import (  # noqa: E402
+    ADAPTER_SUFFIX,
     ModuleVerbRegistry,
     declared_params,
     engine_of,
@@ -85,20 +86,20 @@ def check_registry(report: Report, defender: Path, system: str):
     The registry maps the hyphenated `system` to the underscore module file, so a single
     invocation crosses the spelling split. Returns the verb mapping, or None on a hard FAIL —
     a module that will not import is a broken adapter and exits 1, naming the module."""
-    cli = defender / "scripts" / "adapters" / f"{system.replace('-', '_')}_cli.py"
+    adapter = defender / "scripts" / "adapters" / f"{system.replace('-', '_')}{ADAPTER_SUFFIX}"
     registry = ModuleVerbRegistry(defender / "scripts" / "adapters")
     try:
         verbs = registry.verbs(system)
     except KeyError:
-        report.add(FAIL, f"adapter module {cli.name} is missing or its `system` is malformed")
+        report.add(FAIL, f"adapter module {adapter.name} is missing or its `system` is malformed")
         return None
     except BaseException as exc:  # noqa: BLE001 — a module that will not import is a broken adapter
-        report.add(FAIL, f"adapter module {cli.name} failed to import: {type(exc).__name__}: {exc}")
+        report.add(FAIL, f"adapter module {adapter.name} failed to import: {type(exc).__name__}: {exc}")
         return None
     if not verbs:
-        report.add(FAIL, f"adapter module {cli.name} declares no verbs (empty or missing VERBS)")
+        report.add(FAIL, f"adapter module {adapter.name} declares no verbs (empty or missing VERBS)")
         return None
-    report.add(PASS, f"adapter {cli.name} imports; VERBS declares {len(verbs)} verb(s)")
+    report.add(PASS, f"adapter {adapter.name} imports; VERBS declares {len(verbs)} verb(s)")
     if "health-check" in verbs:
         report.add(PASS, "VERBS declares a health-check verb")
     else:

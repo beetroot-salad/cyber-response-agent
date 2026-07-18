@@ -21,7 +21,7 @@ def _write_template(tmp_path: Path, query_body: str) -> Path:
 
 
 def test_render_substitutes_dollar_brace(tmp_path: Path):
-    p = _write_template(tmp_path, "wazuh_cli.py --host ${host} --window ${window}")
+    p = _write_template(tmp_path, "wazuh_adapter.py --host ${host} --window ${window}")
     rendered = lead_render.render_query(p, {"host": "bastion-01", "window": "1h"})
     assert "bastion-01" in rendered
     assert "1h" in rendered
@@ -36,7 +36,7 @@ def test_render_substitutes_plain_brace(tmp_path: Path):
 
 def test_render_passes_through_unbound(tmp_path: Path):
     """Unknown placeholders stay verbatim — the leak must be visible."""
-    p = _write_template(tmp_path, "wazuh_cli.py --host ${host} --user ${user}")
+    p = _write_template(tmp_path, "wazuh_adapter.py --host ${host} --user ${user}")
     rendered = lead_render.render_query(p, {"host": "bastion-01"})
     assert "bastion-01" in rendered
     assert "${user}" in rendered

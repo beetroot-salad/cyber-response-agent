@@ -137,7 +137,7 @@ defender/
     inject_system_skill_description.py  # descriptor_catalog: the progressive-disclosure system descriptor catalog
     block_main_loop_raw_access.py       # the main-loop adapter/raw deny reasons + adapter-shim regex (used by permission/)
     _cmd_segments.py                    # shared: timeout/bash-c unwrap + adapter/non-adapter shim taxonomy
-    tag_tool_results.py                 # wrap(): salted untrusted-data tagging of adapter-CLI / alert.json output + the gather return
+    tag_tool_results.py                 # wrap(): salted untrusted-data tagging of adapter / alert.json output + the gather return
     budget_enforcer.py                  # per-run tool-call / spawn / wall-clock budget logic (warning-only; driver.py Hook)
     record_lesson_load.py               # lesson_name(): lesson→outcome traceability into {run_dir}/lessons_loaded.jsonl
   skills/
@@ -148,7 +148,7 @@ defender/
     # per-system references (v2 environment) — visibility surface + execution:
     elastic/  identity/  cmdb/  ticket/  change-mgmt/  threat-intel/  host-state/
   scripts/                # each dir = one concern (dev/CI/test/analytics tooling lives at repo-root scripts/, not here)
-    adapters/             # data-source adapter CLIs: {system}_cli.py + the shared _stub_transport.py (THE adapter surface — gated by ADAPTER_CLI_RE)
+    adapters/             # data-source adapters: {system}_adapter.py + the shared _stub_transport.py (THE adapter surface — gated by ADAPTER_RE)
     gather_tools/         # gather-time pipe tools: record_query.py (capture → queries table, called in-process by tools._capture_adapter) + sql.py (defender-sql aggregation fallback)
     visualize/            # post-run transcript renderers (visualize_run.py + data/judge/primitives/runtime); imported in-process by the learning loop
     lessons/              # lessons toolchain: lessons_fm.py (defender-lessons grep), lessons_actor_index.py, lessons_env_retrieve.py

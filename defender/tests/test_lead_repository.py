@@ -49,7 +49,7 @@ def _query(
         "verb": query_id.split(".", 1)[-1],
         "query_id": query_id,
         "params": params or {"host": "web-1"},
-        "raw_command": "python3 cmdb_cli.py host-lookup web-1",
+        "raw_command": "python3 cmdb_adapter.py host-lookup web-1",
         "payload_path": rel,
         "exit_code": 0 if status != "error" else 1,
         "payload_status": status,

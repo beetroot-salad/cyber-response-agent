@@ -55,19 +55,19 @@ Three reasons this beats tunnels:
    down inside the network, the adapter sees it the same way an in-cluster
    client would.
 3. **No new auth surface** — `docker --context soc-playground` is already
-   configured for elastic_cli's needs.
+   configured for elastic_adapter's needs.
 
-Pick any role host as the curl bastion (`web-1` is fine). The adapter CLI
+Pick any role host as the curl bastion (`web-1` is fine). The adapter
 shells out to `docker --context soc-playground exec web-1 curl ...` and
 parses the response. The Bash permission allow rule covers it once added.
 
 For the host-state adapter, the same primitive is the entire transport:
 `docker --context soc-playground exec <target_host> <command>`. No HTTP.
 
-## Adapter CLI shape — mirror `elastic_cli.py`
+## Adapter shape — mirror `elastic_adapter.py`
 
-Each adapter is `defender/scripts/adapters/{system}_cli.py`. Conventions
-that need to match `elastic_cli.py`:
+Each adapter is `defender/scripts/adapters/{system}_adapter.py`. Conventions
+that need to match `elastic_adapter.py`:
 
 - A `VERBS` mapping keyed by verb name (plus `health-check`) — one plain
   annotated function per verb, no argparse, invoked through the `query` tool.
@@ -90,7 +90,7 @@ Config at `defender/knowledge/environment/systems/{system}/config.env`
 declaring `{SYSTEM}_HOST=web-1`, `{SYSTEM}_URL_BASE=http://{system}:8080`,
 `{SYSTEM}_TIMEOUT_SEC=10`. The adapter loads via the same `DEFENDER_DIR /
 knowledge/environment/systems/{system}/config.env` pattern as
-elastic_cli.
+elastic_adapter.
 
 ## Verbs (minimum viable surface)
 
@@ -114,7 +114,7 @@ adapter. Each verb takes keyword-only params (shown in parentheses), not
   `get-ticket` (`key`). v1's `playground_ticket_cli.py` (in
   `soc-agent/scripts/tools/`) is a reference shape, not a drop-in —
   the v2 ticket-server is the same code but the adapter conventions
-  should match v2 elastic_cli, not v1.
+  should match v2 elastic_adapter, not v1.
 - **host-state**: `proc-tree` (`host`), `passwd` (`host`), `authorized-keys`
   (`host`, optional `user`), `fim-checksum` (`host`, `path`), `package-list`
   (`host`). Each wraps a single `docker --context soc-playground exec <host>
@@ -126,9 +126,9 @@ Since #611 a data-source adapter is not on any bash lane. The gather subagent
 calls the in-process typed `query` tool (`runtime/query_tool.py`), which
 dispatches `(system, verb, params)` against the verb registry
 (`runtime/verbs.py`'s `ModuleVerbRegistry`, discovered by glob over
-`scripts/adapters/*_cli.py`). That registry IS the allowlist — a system or verb
+`scripts/adapters/*_adapter.py`). That registry IS the allowlist — a system or verb
 not in it is rejected — so a new adapter auto-gates by dropping its
-`{system}_cli.py` (with a `VERBS` mapping) into `scripts/adapters/`, no per-CLI
+`{system}_adapter.py` (with a `VERBS` mapping) into `scripts/adapters/`, no per-CLI
 permission entry needed. The main loop is denied data-source access entirely
 (the gather subagent is the data-access layer); the per-agent grant model
 (`runtime/permission/`, #575) gates what remains on the read-only bash lanes.

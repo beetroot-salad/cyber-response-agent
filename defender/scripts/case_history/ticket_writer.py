@@ -7,7 +7,7 @@ with the disposition. This is the realistic lifecycle — the ticket pre-exists 
 with the alert), the defender responds and closes — and it makes idempotency natural:
 create-once (409 ⇒ already there), close-is-idempotent.
 
-This is NOT the read-side gather adapter (`ticket_cli.py`, deliberately read-only and
+This is NOT the read-side gather adapter (`ticket_adapter.py`, deliberately read-only and
 inside the gather gate regime). It runs as a driver post-step *outside* that regime,
 and it talks to a **separate** config (`CASE_HISTORY_*`) so the case-history store and
 the customer ticketing SoR stay decoupled even when they're the same server today.

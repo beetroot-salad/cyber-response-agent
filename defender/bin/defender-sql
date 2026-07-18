@@ -3,8 +3,8 @@
 # `defender-sql '<SQL>'` (piped after an adapter's output) instead of a
 # path/module form so the allowlist matches one stable token regardless of cwd,
 # venv path, or compound wrapping. (The script is deliberately NOT named
-# `sql_cli.py`: `*_cli.py` is the structural marker for a data-source adapter
-# CLI — `_cmd_segments.ADAPTER_CLI_RE` — and defender-sql is a non-adapter.)
+# `sql_adapter.py`: `*_adapter.py` is the structural marker for a data-source
+# adapter — `_cmd_segments.ADAPTER_RE` — and defender-sql is a non-adapter.)
 # See defender/bin/README.md.
 PY="${DEFENDER_DIR:?DEFENDER_DIR is not set}/.venv/bin/python3"
 [ -x "$PY" ] || PY=python3

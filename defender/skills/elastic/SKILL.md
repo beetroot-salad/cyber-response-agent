@@ -8,7 +8,7 @@ Filebeat-shipped raw events from Elastic Agent on each role host, Falco
 syscall alerts, and the detection-engine signals emitted by the custom
 rules in `playground-v2/detection-rules/`. All v2 query routing — Falco,
 system auth, syslog, security alerts — goes through one adapter
-(`elastic_cli.py`) against this one cluster.
+(`elastic_adapter.py`) against this one cluster.
 
 This file is the **Visibility surface** — read by the defender (gather
 routing, judge), the author (template scaffolding), and the

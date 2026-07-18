@@ -19,7 +19,7 @@ error (1, carrying the stub's own `detail`).
 from __future__ import annotations
 
 # Put the workspace root on sys.path so `defender.*` namespace imports resolve when the
-# verb registry loads this module BY PATH (see cmdb_cli.py).
+# verb registry loads this module BY PATH (see cmdb_adapter.py).
 import sys as _sys
 from pathlib import Path as _Path
 
@@ -33,7 +33,10 @@ SYSTEM = "identity"
 PREFIX = "IDENTITY"
 
 
-def _config(ctx: VerbContext) -> dict[str, str]:
+# Same name in each stub adapter, closing over that module's SYSTEM/PREFIX: the shared
+# body already lives once in `transport.load_config`, so this is a zero-argument alias,
+# not a copy of any logic.
+def _config(ctx: VerbContext) -> dict[str, str]:  # lint-dup: ok — per-module alias over the shared transport.load_config
     return transport.load_config(ctx, SYSTEM, PREFIX)
 
 
@@ -66,7 +69,9 @@ def list_users(
     return transport.http_get(ctx, _config(ctx), "/users", params=params or None)
 
 
-def list_roles(ctx: VerbContext) -> dict | list:
+# Same spelling as cmdb's `list_roles`, different service: each resolves its own
+# URL_BASE from its own config, so merging them would be a behavior change.
+def list_roles(ctx: VerbContext) -> dict | list:  # lint-dup: ok — distinct service
     return transport.http_get(ctx, _config(ctx), "/roles")
 
 

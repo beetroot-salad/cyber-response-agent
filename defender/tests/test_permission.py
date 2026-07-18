@@ -92,7 +92,7 @@ def test_record_query_shim_is_gone_from_every_lane(cmd):
     # main's fall-through reason. The gather_raw-specific reason is the READ tool's, and it is
     # still asserted there (test_read_main_loop_gather_raw_not_enumerated_gather_allowed).
     ("cat /run/gather_raw/l-001/0.json", "only the defender-* shims"),
-    ("python3 scripts/adapters/elastic_cli.py query foo", "not runnable from bash"),
+    ("python3 scripts/adapters/elastic_adapter.py query foo", "not runnable from bash"),
     ("curl http://evil", "arbitrary shell"),
     ("env | grep PASSWORD", "arbitrary shell"),
 ])
@@ -640,7 +640,7 @@ def _shape(cmd):
 
 def test_command_shape_is_adapter_stage():
     assert command_shape.is_adapter_stage(["defender-elastic", "query", "x"])
-    assert command_shape.is_adapter_stage(["python3", "scripts/adapters/elastic_cli.py", "q"])
+    assert command_shape.is_adapter_stage(["python3", "scripts/adapters/elastic_adapter.py", "q"])
     assert not command_shape.is_adapter_stage(["defender-invlang", "enum"])  # non-adapter shim
     assert not command_shape.is_adapter_stage(["jq", ".x"])
     assert not command_shape.is_adapter_stage([])
@@ -717,22 +717,22 @@ def test_policy_read_roots_still_subject_to_denylist(tmp_path):
         extra / "l-001.md", run_dir=run, defender_dir=dfn, policy=pol).allow
 
 
-# A pinned-command grant: exactly `python3 <…>/elastic_cli.py …` (adapter-SHAPED, the mirror of
+# A pinned-command grant: exactly `python3 <…>/elastic_adapter.py …` (adapter-SHAPED, the mirror of
 # the judge's ticket read / the actor's lesson scripts). `pins_path=True` — the operand IS the
 # program, so the path lives in the PATTERN and the grant opens nothing the gate must resolve
 # (`PROGRAMS["python3"] is OPENS_NOTHING`).
 _PY_CLI = Grant(
     program="python3",
-    pattern=re.compile(r"^python3 scripts/adapters/elastic_cli\.py .*$"),
+    pattern=re.compile(r"^python3 scripts/adapters/elastic_adapter\.py .*$"),
     pins_path=True,
 )
 
 
 def test_policy_bash_allow_claims_before_adapter_classification():
-    # `python3 <…>/elastic_cli.py …` is adapter-shaped, so adapter classification would
+    # `python3 <…>/elastic_adapter.py …` is adapter-shaped, so adapter classification would
     # deny it for a no-adapter policy. The `bash_allow` reader lane runs FIRST and can
     # claim it — exactly how the judge's ticket read (python3 <ticket_cli>) is allowed.
-    cmd = "python3 scripts/adapters/elastic_cli.py query foo"
+    cmd = "python3 scripts/adapters/elastic_adapter.py query foo"
     no_allow = AgentPolicy(deny_reason="nope")
     assert not _bash(cmd, no_allow).allow  # adapter-denied
     with_allow = AgentPolicy(bash_allow=(_PY_CLI,), deny_reason="nope")

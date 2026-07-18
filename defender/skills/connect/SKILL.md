@@ -20,7 +20,7 @@ hierarchy:
 - **Generated adapter** — a small Python module you write: a `VERBS`
   registry the runtime imports in-process (no CLI, no shim). Heavier, but
   it gives output control, the query-capture path, and consistency across
-  adapters. See `cli-adapter.md`.
+  adapters. See `adapter.md`.
 
 The interview decides which. Writing an adapter is more work than pointing
 at an MCP server, but neither is the "real" way to connect — surface the
@@ -46,7 +46,7 @@ are properties you verify the *shape* of, not constraints on you.
 
 Read the doc you need; don't duplicate it into what you scaffold.
 
-- `cli-adapter.md` / `mcp.md` — the two build paths.
+- `adapter.md` / `mcp.md` — the two build paths.
 - `decisions.md` — why the skill is shaped this way (for grounding a call).
 - `defender/docs/system-skill-shape.md` — the per-system `SKILL.md` /
   `execution.md` split and its fields.
@@ -66,7 +66,7 @@ Sequential; if a step blocks, diagnose and fix before moving on.
 ls defender/scripts/adapters/ defender/skills/
 ```
 
-If the system already has a `{system}_cli.py` adapter and a
+If the system already has a `{system}_adapter.py` adapter and a
 `skills/{system}/` dir, stop and ask: replace it, or did they mean a
 different system? A re-run
 on an existing system is a deliberate update — branch
@@ -81,7 +81,7 @@ interview, read the deployment's adapter-conventions note if it has one
 (`scripts/adapters/README.md`) and the closest sibling adapter — between them
 they settle the recurring answers (which shared module, transport, auth
 posture, config scheme), so you **confirm** those instead of asking cold
-(see `cli-adapter.md` → "The shape to copy"). If `scripts/adapters/` is empty,
+(see `adapter.md` → "The shape to copy"). If `scripts/adapters/` is empty,
 you're greenfield and the bundled example is your seed.
 
 ### 2. Interview
@@ -99,12 +99,15 @@ greenfield tree there's nothing cached yet, so ask all four.
 1. **What system are you connecting?** A well-known name gives you the API
    shape from training; verify it against the real docs during the build.
    For something obscure, ask for a docs pointer.
-2. **How do you reach it from this environment?** This drives the route:
-   direct API (endpoint + token) → CLI; an existing CLI/script → CLI
-   wrapper; reachable only over `docker exec` / SSH → CLI with that
-   transport; a configured MCP server → MCP; reachable only by SSHing to
-   a bastion and running tools there → **stop**, the agent must run on the
-   bastion, not here.
+2. **How do you reach it from this environment?** A configured MCP server
+   routes to MCP. Everything else routes to an adapter, and the answer
+   picks its **transport** — the one part of the adapter that varies:
+   direct API (endpoint + token) → HTTP; an existing CLI/script → a
+   transport that shells out to it and parses; reachable only over
+   `docker exec` / SSH → that, as the transport. Reachable only by SSHing
+   to a bastion and running tools there → **stop**, the agent must run on
+   the bastion, not here. The verb surface above the transport is the same
+   either way (see `adapter.md` → "The shape to copy").
 3. **What questions does this system answer for an investigation?**
    Freeform — "host inventory and trust edges", "who is authorized on a
    host", "auth events", "IoC reputation". You need this for the
@@ -119,8 +122,8 @@ greenfield tree there's nothing cached yet, so ask all four.
 Pick the path with the maintainer and follow its doc end-to-end:
 
 - **MCP** → `mcp.md`.
-- **Generated adapter** → `cli-adapter.md` (it writes
-  `scripts/adapters/{system}_cli.py` — a `VERBS` mapping of
+- **Generated adapter** → `adapter.md` (it writes
+  `scripts/adapters/{system}_adapter.py` — a `VERBS` mapping of
   `VerbContext`-taking functions that raise `faults` — on the shared
   transport module, runs the Haiku alignment loop, and **pauses at a human
   review checkpoint** before the live test — generated code is read by a
@@ -170,7 +173,7 @@ runs.
 ### 5. Test
 
 For the generated-adapter path, the human review checkpoint in
-`cli-adapter.md` must be cleared first — running the adapter here executes
+`adapter.md` must be cleared first — running the adapter here executes
 generated code against the live system.
 
 - **Health check.** Confirm the system is reachable and authed (adapter:
@@ -201,7 +204,7 @@ the branch and just leave the files in place for review:
 
 ```bash
 git checkout -b connect/{system}
-git add defender/scripts/adapters/{system}_cli.py \
+git add defender/scripts/adapters/{system}_adapter.py \
         defender/skills/{system}/ \
         defender/knowledge/environment/systems/{system}/config.env \
         defender/skills/gather/queries/{system}/
@@ -224,7 +227,7 @@ Then stop. `/ship` can open the PR.
   to an env var. Secrets live only in env vars; `config.env` holds the
   *names*, and the transport reads the value from the run's scrubbed
   `ctx.env` — the skill never sees a value.
-- **Stay in your lane.** Write only the `{system}_cli.py` adapter,
+- **Stay in your lane.** Write only the `{system}_adapter.py` adapter,
   `skills/{system}/`, that system's `config.env`, and its seed templates
   (plus `pyproject.toml` / `uv.lock` if a dep was added). Never `hooks/`,
   `learning/`, `lessons/`, the runtime `defender/SKILL.md`, the invlang
@@ -237,12 +240,12 @@ Then stop. `/ship` can open the PR.
 
 - **Native queries pass through unmodified, and aggregate in the source
   where the source can** (or key on an identifier for a lookup source).
-  See `cli-adapter.md` -> "Prefer native aggregation."
+  See `adapter.md` -> "Prefer native aggregation."
 - **One system per invocation.** Note any others and suggest re-running.
 - **Generate fresh; don't ship a vendor template library, and don't
   pre-build the query catalog.**
 - **The adapter conforms to the gather subagent**, not the reverse (see
-  `cli-adapter.md`).
+  `adapter.md`).
 
 When a request legitimately falls outside the defaults — a homegrown
 tool, an odd access topology — help anyway: build what's needed, surface

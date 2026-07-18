@@ -220,7 +220,7 @@ class QueryCapture(AbstractCapability[Any]):
     ) -> tuple[str | None, str | None]:
         """`_reject`, plus the one fault it can raise instead of returning: `_reject` IMPORTS the
         adapter module (the registry imports lazily, at first use), so this is the first place a
-        broken `{system}_cli.py` can surface — and it sits OUTSIDE the handler's catch-all, so an
+        broken `{system}_adapter.py` can surface — and it sits OUTSIDE the handler's catch-all, so an
         escape here unwinds `agent.iter()` with no row and no breaker outcome.
 
         Returns `(reason, None)` for a clean admission check, `(None, detail)` when the module

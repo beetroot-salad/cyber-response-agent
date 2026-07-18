@@ -2,7 +2,7 @@
 
 The irreversible calls behind this skill, for whoever edits it next. Each
 is load-bearing — change one only on purpose. The *how* is in `SKILL.md`,
-`cli-adapter.md`, and `mcp.md`; this is just the *why*, kept short.
+`adapter.md`, and `mcp.md`; this is just the *why*, kept short.
 
 - **Secrets live in the environment; the skill never handles values.**
   `config.env` holds non-secret config and the *names* of the env vars
@@ -26,7 +26,7 @@ is load-bearing — change one only on purpose. The *how* is in `SKILL.md`,
   aggregating server-side in a language the model already knows removed
   it. A filter-only source falls back to native-filter passthrough plus
   `defender-sql` (sandboxed SQL the model drives) over the adapter's JSON
-  payload; we don't write a bespoke reducer. The ladder is in `cli-adapter.md`
+  payload; we don't write a bespoke reducer. The ladder is in `adapter.md`
   ("Prefer native aggregation").
 
 - **The adapter conforms to the gather subagent, not the reverse.** The
@@ -35,7 +35,7 @@ is load-bearing — change one only on purpose. The *how* is in `SKILL.md`,
   fresh-context Haiku reaches for. We document a divergence only when
   it's an irreducible vendor constraint, never to teach the client our
   aesthetics. This keeps the instruction surface minimal. (See
-  `cli-adapter.md` → the alignment loop.)
+  `adapter.md` → the alignment loop.)
 
 - **Adapters are generated fresh, never copied from a vendor template
   library.** A vendored adapter rots silently against API changes; a
@@ -44,7 +44,7 @@ is load-bearing — change one only on purpose. The *how* is in `SKILL.md`,
   per-vendor PR queue for a marginal speedup.
 
 - **The bundled example is a greenfield seed, not a mandate to duplicate.**
-  On a fresh tree connect copies `example_cli.py` and writes its own
+  On a fresh tree connect copies `example_adapter.py` and writes its own
   transport; on a populated tree it conforms to the shared transport module
   and conventions the existing adapters already use — one shared module per
   tree, never two. A
@@ -57,13 +57,13 @@ is load-bearing — change one only on purpose. The *how* is in `SKILL.md`,
   from API docs at connect time — it's exactly what the offline
   lead-author extracts from real runs. Speculative templates rot.
 
-- **MCP and CLI are peer paths, not a hierarchy.** Writing a CLI is
-  heavier than pointing at a maintained MCP server, but neither is the
-  "real" way to connect. The interview routes; the maintainer decides.
-  The one defender-specific tilt: only the CLI path's output
-  flows through the capture wrapper into the queries table, so an MCP
-  system is thinner in the offline learning loop. That's a cost to weigh,
-  not a disqualifier.
+- **MCP and a generated adapter are peer paths, not a hierarchy.** Writing
+  an adapter is heavier than pointing at a maintained MCP server, but neither
+  is the "real" way to connect. The interview routes; the maintainer decides.
+  The one defender-specific tilt: only the adapter path's output flows
+  through the capture path into the queries table, so an MCP system is
+  thinner in the offline learning loop. That's a cost to weigh, not a
+  disqualifier.
 
 - **Human review gate.** connect branches and stages; it does not merge
   or push. Generated code does not go live without a human reading the

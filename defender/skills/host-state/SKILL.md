@@ -112,7 +112,7 @@ Reached with the **`query` tool** — there is no command, no shim, and no `--he
 Params bind **by name**, with literal JSON types. `authorized-keys`' `user`
 defaults to `root`; every other param above is required.
 
-**Do not Read `host_state_cli.py` source to discover params.** This SKILL plus the
+**Do not Read `host_state_adapter.py` source to discover params.** This SKILL plus the
 systems catalog in your dispatch prompt is the authoritative surface, and a call
 with an unknown/missing/mistyped param is rejected with the declared list anyway.
 
@@ -136,7 +136,7 @@ known inventory are currently running under the docker context.
 This adapter has **no `config.env`**. The docker context name
 (`soc-playground`) is hardcoded in
 `defender/scripts/adapters/_stub_transport.py`, and the per-verb timeout
-default lives in `host_state_cli.py`. There is nothing else to
+default lives in `host_state_adapter.py`. There is nothing else to
 configure; if a knob is needed in the future (e.g. a non-default
 docker context), promote `DOCKER_CONTEXT` to an env var before adding
 a config file.
