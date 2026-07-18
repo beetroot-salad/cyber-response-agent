@@ -53,8 +53,13 @@ def _warn(msg: str) -> None:
 
 
 def _sh(cmd: list[str]) -> str:
+    # encoding pinned (not the ambient locale): the child is git, and `git diff --name-only` can
+    # emit non-ASCII paths — decoding those under a C/ascii locale would raise, and this is the very
+    # output that drives the changed set (a crash here is a gate that never looked). Same #588/#589
+    # class as the source reads, subprocess side.
     return subprocess.run(
-        cmd, cwd=_config.repo_root(), capture_output=True, text=True, check=False
+        cmd, cwd=_config.repo_root(),
+        capture_output=True, text=True, encoding="utf-8", check=False
     ).stdout
 
 

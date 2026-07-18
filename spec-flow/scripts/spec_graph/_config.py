@@ -42,7 +42,8 @@ _PRUNE = {
 @functools.cache
 def repo_root() -> Path:
     out = subprocess.run(
-        ["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=False
+        ["git", "rev-parse", "--show-toplevel"],
+        capture_output=True, text=True, encoding="utf-8", check=False
     ).stdout.strip()
     return Path(out) if out else Path.cwd()
 
