@@ -7,7 +7,7 @@ The language the spec is written in. Two layers — **demands** (what we require
 Every slot in this schema is one of two kinds, and nothing in between:
 
 - **Formal** (evaluator: a gate rule) — closed vocabulary, typed values, referential integrity. Rules consume *only* these slots (the two flagged exceptions are named in rules.md).
-- **Semantic surface** (evaluator: an LLM or a human) — marked `nl:`, written as full sentences with real grammar, because a person reads it. No rule may reference an `nl:` slot.
+- **Semantic surface** (evaluator: an LLM, or a person reading the form it surfaces into — a test docstring, a step-7 question) — marked `nl:`, written as full sentences with real grammar, because a reader with judgment consumes it, not a query. No rule may reference an `nl:` slot.
 
 The in-between — prose chopped into key-value fragments that no rule can evaluate ("NL without conjunctions") — is banned, and the ban is checkable: no rule reads an `nl:` slot; no formal slot contains free text. When a value doesn't fit a formal vocabulary, that is a signal to either grow the vocabulary (rare, demand-driven) or admit the content is semantic and write it as a sentence.
 
@@ -163,13 +163,13 @@ Every field earns its place by naming its consumer; a field nothing consumes is 
 | `domain.type` / `.default` | R4 obligation content — the baseline column the alternatives cross from | obligation content |
 | `Demand.kind` / `.form`, `binds` | the gate's join (`executable` is derived from `form`) | rule input |
 | `Demand.discharged_by` (form: test) + the named test's docstring | check_binds's prose⊄binds scan; step-9 test-existence check | pointer + rule input |
-| `Demand.outcome` (form: clause / waiver only) | check_binds's prose⊄binds scan for those forms; the human/reviewer | obligation content + readability |
+| `Demand.outcome` (form: clause / waiver only) | check_binds's prose⊄binds scan for those forms; the cold reconciler | obligation content + readability |
 | `Demand.rejected` (clause/waiver) / a test `# rejected:` / a premise `# fork:` | step-7 decision record; a `# fork:` routes a known-decision premise regardless of answerer spread | decision channel |
 | element `provenance` | R0 routing; "which artifact do I fix" | completeness forcer |
 | mandatory-with-`unknown` on invariants; `identity.evidence` | forces claim-or-confess, with the claim's source cited | completeness forcer |
 | `id` | graph diff across runs; witness text | identity |
 | `transport` | extraction reliability only | hint (the lone exception) |
-| `nl:` slots, `refinement`, witness strings | the human / the test author | readability |
+| `nl:` slots, `refinement`, witness strings | the cold reconciler; the test author, where a witness seeds a docstring | readability |
 
 ## Extraction contract
 
