@@ -41,6 +41,7 @@ if (_root := str(_DEFENDER_DIR.parent)) not in sys.path:
 from defender import run_common as _run  # noqa: E402
 from defender._io import read_text_utf8  # noqa: E402
 from defender._run_paths import RunPaths  # noqa: E402
+from defender.runtime import box as box_mod  # noqa: E402
 from defender.runtime import driver  # noqa: E402
 from defender.runtime import providers  # noqa: E402
 
@@ -151,14 +152,34 @@ def main(argv: list[str]) -> int:
     salt = json.loads(read_text_utf8(RunPaths(run_dir).meta)).get("salt", "")
     print(f"[run.py] run_dir={run_dir} model={model}", file=sys.stderr)
 
-    summary = asyncio.run(driver.run_investigation(
-        alert_path=RunPaths(run_dir).alert,
-        run_dir=run_dir,
-        run_id=run_dir.name,
-        defender_dir=DEFENDER_DIR,
-        salt=salt,
-        model_name=model,
-    ))
+    # The bash lane's execution boundary (#540). Built BEFORE the investigation, so a box that
+    # cannot be created refuses the run rather than letting it start unconfined; torn down in a
+    # `finally`, so a crashed driver cannot leak a container (one genuinely survives its
+    # parent's SIGKILL). Nothing here catches the crash — teardown runs, then the exception
+    # keeps propagating, which is what makes the reap-time scrub below unreachable on a run
+    # that never finished.
+    box = box_mod.start_box(run_dir, DEFENDER_DIR)
+    try:
+        summary = asyncio.run(driver.run_investigation(
+            alert_path=RunPaths(run_dir).alert,
+            run_dir=run_dir,
+            run_id=run_dir.name,
+            defender_dir=DEFENDER_DIR,
+            salt=salt,
+            model_name=model,
+            box=box,
+        ))
+    finally:
+        box_mod.stop_box(box)
+
+    # The reap-time scrub, between the box's death and the FIRST consumer of the tree. The
+    # ordering is the whole soundness argument: the box is gone, so there is no live writer and
+    # no TOCTOU window; and no consumer below has read the tree yet, so a tainted run reaches
+    # none of them. `RunTainted` is deliberately left to propagate — sixteen host consumers read
+    # this tree with symlink-unsafe primitives, and the safe answer is to refuse the tree, not
+    # to catch the finding and carry on.
+    box_mod.scrub(run_dir)
+
     out = str(summary.get("output") or "")
     print(f"[run.py] done ({summary.get('requests')} model requests); "
           f"output: {out[:200]}", file=sys.stderr)

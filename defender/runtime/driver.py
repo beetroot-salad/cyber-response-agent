@@ -491,7 +491,10 @@ def _log_node(node: Any) -> None:
         print("[run.py] · end", file=sys.stderr)
 
 
-async def run_investigation(
+async def run_investigation(  # noqa: PLR0913 — a composition root: every parameter is a
+    # keyword-only injection seam (the run's identity, then `make_model`/`verbs`/`box`).
+    # Bundling them into a config object would hide exactly the seams the e2e replay suite
+    # enters through, which is the opposite of what this signature is for.
     *,
     alert_path: Path,
     run_dir: Path,
@@ -501,6 +504,7 @@ async def run_investigation(
     model_name: str | None = None,
     make_model: MakeModel | None = None,
     verbs: Any = None,
+    box: Any = None,
 ) -> dict:
     """Run one investigation end-to-end; emit the trace; return a small summary.
 
@@ -508,7 +512,12 @@ async def run_investigation(
     (#611) — the SECOND injection seam below the model, alongside `make_model`. Production
     resolves the real `ModuleVerbRegistry` off the RUN's `defender_dir`, which is the whole
     point: the tree is a per-run value (a worktree in a learning drain, an eval's tmp tree), so
-    a verb reads THAT tree's `config.env`, not the one the driver happened to import under."""
+    a verb reads THAT tree's `config.env`, not the one the driver happened to import under.
+
+    `box` is the THIRD such seam (#540): the run's execution boundary for the bash lane, built by
+    `run.py` before the investigation starts and torn down after it ends. `None` leaves the deps
+    carrying the inert default executor, so a driver run that never invokes bash needs no
+    container — but one that does invoke it fails closed rather than running on the host."""
     model_name = resolve_main_model(model_name)
     make_model = make_model or providers.build_for_effort
     # The registry is derived from a PARAMETER (the run's tree), so it cannot be a signature
@@ -528,7 +537,9 @@ async def run_investigation(
     # against PATHS while the prompt names tree X. `run_id` is the caller's identity (run.py mints
     # run_dir=base/run_id, so it equals run_dir.name in production; the replay harness passes a
     # distinct label), re-stamped over bind's run_dir-basename default.
-    deps = replace(bind(MAIN_DEF, run_dir, salt=salt, defender_dir=defender_dir), run_id=run_id)
+    deps = replace(
+        bind(MAIN_DEF, run_dir, salt=salt, defender_dir=defender_dir, box=box), run_id=run_id,
+    )
     prompt = _user_prompt(run_dir, alert_path, defender_dir, salt)
 
     t0 = time.time()

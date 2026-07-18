@@ -472,7 +472,11 @@ async def _run_gather(
     # label) are re-stamped. Imported lazily — GATHER_DEF lives in driver.
     from defender.runtime.agent_definition import bind
     from defender.runtime.driver import GATHER_DEF
-    gbase = bind(GATHER_DEF, deps.run_dir, salt=deps.salt, defender_dir=deps.defender_dir)
+    # The subagent shares the RUN's box (#540): confinement is a property of the run, not of
+    # which agent is speaking, so gather's bash lane lands in the same container as main's.
+    gbase = bind(
+        GATHER_DEF, deps.run_dir, salt=deps.salt, defender_dir=deps.defender_dir, box=deps.box,
+    )
     assert isinstance(gbase, GatherDeps)  # bind(GATHER_DEF) → GatherDeps (its def's deps_cls); narrows for lead_id
     gdeps = replace(gbase, run_id=deps.run_id, lead_id=lead_id)
     prompt = _gather_prompt(deps, request, catalog)

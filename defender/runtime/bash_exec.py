@@ -36,6 +36,7 @@ from __future__ import annotations
 import contextlib
 import os
 import subprocess
+import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -350,3 +351,53 @@ def run_parsed(
             err_parts.append(perr)
 
     return rc, "".join(out_parts), "".join(err_parts)
+
+
+def _run_box_entrypoint() -> int:
+    """The in-box entrypoint: `python3 -m defender.runtime.bash_exec` (#540).
+
+    Reads ONE framed request from stdin, runs the gate-approved pipelines, and writes ONE
+    framed response to stdout. This is new, security-relevant surface, so it is deliberately
+    the thinnest thing that can work: it accepts NO argv, so there is no command string for
+    anything in the box to influence, and it reads structure rather than text, so there is no
+    second parse on this side of the boundary. What the gate approved on the host is what runs
+    here — the executor's whole reason for existing survives the move into a container.
+
+    The environment is the container's own (a positive allowlist baked into the create), never
+    anything the frame carries: a request that could set variables would be a channel for the
+    host's secrets to be requested back.
+
+    Stdout carries the frame and NOTHING else. Any unframed byte on this stream would be read
+    by the host as an infrastructure fault, which is exactly what it would be."""
+    from defender.runtime import box
+
+    frame = sys.stdin.buffer.read()
+    try:
+        pipelines = box.decode_request(frame)
+    except ValueError as e:
+        # A frame we cannot decode is never guessed at: failing closed here is what stops a
+        # corrupted request from becoming a different, still-executable command.
+        print(f"box entrypoint: undecodable request frame: {e}", file=sys.stderr)
+        return 2
+
+    try:
+        rc, out, err = run_parsed(
+            pipelines,
+            command="",
+            env=dict(os.environ),
+            cwd=Path.cwd(),
+            timeout=float(os.environ.get("DEFENDER_BOX_TIMEOUT", "120")),
+        )
+    except subprocess.TimeoutExpired:
+        print("box entrypoint: the pipeline exceeded its wall-clock deadline", file=sys.stderr)
+        return 3
+
+    sys.stdout.buffer.write(box.encode_response(box.BoxResult(
+        rc=rc, out=out.encode("utf-8"), err=err.encode("utf-8"),
+    )))
+    sys.stdout.buffer.flush()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(_run_box_entrypoint())

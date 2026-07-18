@@ -368,6 +368,7 @@ def compile_policy_for(
 def bind(
     defn: AgentDefinition, run_dir: Path, *,
     scope: RunScope = _DEFAULT_SCOPE, salt: str | None = None, defender_dir: Path | None = None,
+    box: Any = None,
 ) -> AgentDeps:
     """Resolve a definition for a run into ready-to-use ``AgentDeps``: compile the policy (via
     ``compile_policy_for`` — the shared validate → resolve → compile half), then construct the
@@ -387,6 +388,13 @@ def bind(
     worktree read/write. LEAD_AUTHOR flows through this same spine as every other role — no bespoke
     early-return.
 
+    ``box`` (#540) is the bash lane's execution boundary, threaded onto ``deps.box``. ``None``
+    leaves the deps carrying the INERT default executor, which refuses on first use — so a role
+    bound without a box cannot execute bash at all, rather than executing it on the host. The
+    box rides here rather than being resolved inside the tool because whether execution is
+    confined is a property of the RUN, and the one place a run's identity becomes an agent's
+    deps is this seam.
+
     Stays PER-RUN — no ``lead_id`` parameter; gather's per-dispatch id rides a thin wrapper that
     stamps it post-bind."""
     policy = compile_policy_for(defn, run_dir, scope=scope, defender_dir=defender_dir)
@@ -397,7 +405,7 @@ def bind(
             "importing the learning stages to look it up)."
         )
     return defn.deps_cls._for_run(
-        run_dir, policy, defender_dir=_resolved_tree(defender_dir), salt=salt,
+        run_dir, policy, defender_dir=_resolved_tree(defender_dir), salt=salt, box=box,
     )
 
 

@@ -24,7 +24,7 @@ from pydantic_ai import RunContext
 from pydantic_ai.exceptions import ModelRetry
 
 from defender._io import append_jsonl, read_text_utf8
-from . import bash_exec
+from . import box as box_mod
 from . import permission
 from .agent_definition import ToolSet
 from .agent_role import AgentRole
@@ -166,6 +166,12 @@ class AgentDeps:
     run_id: str
     salt: str
     policy: permission.AgentPolicy = field(kw_only=True)
+    #: The bash lane's execution boundary (#540). Every bash-enabled role carries one, so
+    #: "is this agent boxed" is never a role branch — the same question the gate answers from
+    #: `policy` rather than from identity. The default is an INERT executor that refuses on
+    #: first use: binding a role can never be the thing that silently opens an unboxed lane,
+    #: and only `start_box` attaches a live container.
+    box: box_mod.BoxExecutor = field(kw_only=True, default_factory=box_mod.BoxExecutor)
 
     role: ClassVar[AgentRole] = AgentRole.MAIN
 
@@ -173,6 +179,7 @@ class AgentDeps:
     def _for_run(
         cls, run_dir: Path, policy: permission.AgentPolicy,
         *, defender_dir: Path = PATHS.defender_dir, salt: str | None = None,
+        box: box_mod.BoxExecutor | None = None,
         **subtype_fields: Any,
     ) -> Self:
         """Build a per-run deps of this subtype: wire the identity fields (run_id as the
@@ -195,6 +202,7 @@ class AgentDeps:
         return cls(
             run_dir=run_dir, defender_dir=defender_dir,
             run_id=run_dir.name, salt=resolved_salt, policy=policy,
+            box=box if box is not None else box_mod.BoxExecutor(),
             **subtype_fields,
         )
 
@@ -280,17 +288,34 @@ def _tool_bash(deps: AgentDeps, command: str) -> str:
     # bash. This collapses the validator/executor parser differential — `$VAR`,
     # globs, `$(...)`, and fused redirects never expand, because bash never
     # re-parses. See bash_exec for the rationale.
+    #
+    # Execution happens INSIDE THE BOX (#540) and nowhere else. There is no in-process
+    # fallback on any failure path: a box that cannot be reached is a tool error the model
+    # sees, never a quiet downgrade to running the command on the host. `deps.box` is the
+    # only route, so a role whose box was never attached fails closed on first use rather
+    # than executing unconfined.
+    #
+    # The cwd is `deps.run_dir` — the same anchor the gate rebased against and the box's rw
+    # bind — and it is re-applied on every call, because a cwd does not persist across the
+    # boundary.
     try:
-        rc, out, err = bash_exec.run_parsed(
+        result = deps.box.run_parsed(
             list(decision.pipelines or ()),
             command=command,
-            env=_bash_env(deps),
-            cwd=deps.defender_dir.parent,
+            cwd=deps.run_dir,
             timeout=_BASH_TIMEOUT_S,
         )
     except subprocess.TimeoutExpired as e:
         raise ModelRetry(f"command timed out after {_BASH_TIMEOUT_S}s: {command}") from e
-    return _format_bash_result(rc, out, err)
+    except box_mod.BoxFault as e:
+        # An infrastructure fault has no program result: the frame never arrived, so there is
+        # no exit code and no stdout to report. It is labelled as the box's own failure rather
+        # than dressed in the result envelope, so the model cannot read daemon text as though
+        # the command had run and produced it.
+        raise ModelRetry(f"the sandbox could not run this command: {e}") from e
+    return _format_bash_result(
+        result.rc, result.out.decode("utf-8", "replace"), result.err.decode("utf-8", "replace"),
+    )
 
 
 def _grep_lines(text: str, pattern: str) -> str:
@@ -302,15 +327,20 @@ def _grep_lines(text: str, pattern: str) -> str:
 
 
 def _resolve_operand(deps: AgentDeps, path: str) -> Path:
-    """Resolve a file-tool operand against the agent's repo root (`deps.defender_dir.parent`),
-    matching the bash lane's cwd (`_tool_bash` runs the executor at `deps.defender_dir.parent`).
-    A repo-relative operand — the lead-author writer's handoff paths (`defender/skills/…`) —
-    then lands in the agent's own tree (its worktree), not the ambient process cwd; an absolute
-    operand is unchanged (the read-only stages + the main loop pass absolute run-dir paths, so
-    this is inert for them). Closes the file-vs-bash resolution differential the bash lane never
-    had — the gate still `resolve()`s the result, so a `..` escape past the confine is still denied."""
+    """Resolve a file-tool operand against the run dir (`deps.run_dir`), matching the bash lane's
+    cwd (`_tool_bash` runs the executor at `deps.run_dir`) and the gate's own rebase. One anchor
+    at all three sites, or a relative operand names different files to the validator, the file
+    tools and the executor — the differential this lane exists to close.
+
+    The anchor moved off the repo root (`defender_dir.parent`) in #540. Two reasons, both
+    load-bearing: that directory holds `.env`, `.ssh/` and every sibling worktree, so a relative
+    operand used to anchor one `..` away from the tree's credentials; and `run_dir` is the box's
+    rw bind, the only anchor that still names the same directory inside the container. An
+    absolute operand is unchanged (the read-only stages and the main loop pass absolute run-dir
+    paths, so this is inert for them). The gate still `resolve()`s the result, so a `..` escape
+    past the confine is still denied."""
     p = Path(path)
-    return p if p.is_absolute() else deps.defender_dir.parent / p
+    return p if p.is_absolute() else deps.run_dir / p
 
 
 def _gated_read(
