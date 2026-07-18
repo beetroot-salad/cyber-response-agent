@@ -75,8 +75,9 @@ EXCLUDED_DIRS = (".venv", "tests", "runs", "run-visualizations")
 #   connect/examples/   — adapter scaffold templates, meant to be copied
 #
 # There is deliberately no filename-suffix exclusion. The adapters used to be
-# skipped via `*_adapter.py` on the rationale that they 'share argparse scaffolding by
-# design' — dead since #611 took argparse out of every adapter but `ticket`. The
+# skipped via `*_cli.py` (their name before #619) on the rationale that they 'share
+# argparse scaffolding by design' — dead since #611 took argparse out of every adapter
+# but `ticket`. The
 # exclusion outlived its reason and hid live duplication; findings under
 # `scripts/adapters/` now either get fixed or carry a written `# lint-dup: ok`.
 EXCLUDED_PATH_PARTS = ("skills/connect/examples/",)

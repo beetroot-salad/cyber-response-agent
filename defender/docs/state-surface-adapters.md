@@ -55,7 +55,7 @@ Three reasons this beats tunnels:
    down inside the network, the adapter sees it the same way an in-cluster
    client would.
 3. **No new auth surface** — `docker --context soc-playground` is already
-   configured for elastic_cli's needs.
+   configured for elastic_adapter's needs.
 
 Pick any role host as the curl bastion (`web-1` is fine). The adapter
 shells out to `docker --context soc-playground exec web-1 curl ...` and
@@ -90,7 +90,7 @@ Config at `defender/knowledge/environment/systems/{system}/config.env`
 declaring `{SYSTEM}_HOST=web-1`, `{SYSTEM}_URL_BASE=http://{system}:8080`,
 `{SYSTEM}_TIMEOUT_SEC=10`. The adapter loads via the same `DEFENDER_DIR /
 knowledge/environment/systems/{system}/config.env` pattern as
-elastic_cli.
+elastic_adapter.
 
 ## Verbs (minimum viable surface)
 
@@ -111,10 +111,10 @@ adapter. Each verb takes keyword-only params (shown in parentheses), not
   on miss — never 404. Agent must not treat `unknown` as
   refutation; it's the absence of a signal.
 - **ticket-server**: `list-tickets` (optional `status`, `label`, `q`),
-  `get-ticket` (`key`). v1's `playground_ticket_adapter.py` (in
+  `get-ticket` (`key`). v1's `playground_ticket_cli.py` (in
   `soc-agent/scripts/tools/`) is a reference shape, not a drop-in —
   the v2 ticket-server is the same code but the adapter conventions
-  should match v2 elastic_cli, not v1.
+  should match v2 elastic_adapter, not v1.
 - **host-state**: `proc-tree` (`host`), `passwd` (`host`), `authorized-keys`
   (`host`, optional `user`), `fim-checksum` (`host`, `path`), `package-list`
   (`host`). Each wraps a single `docker --context soc-playground exec <host>
@@ -170,7 +170,7 @@ These are deployment-specific facts every adapter SKILL should put in
   `hosts/inventory.yaml` at startup. Realm changes via Keycloak admin
   UI do **not** reflect until container restart — flag this in
   `read_guidance`.
-- **ticket-server**: shared with v1's `playground_ticket_adapter.py`; the
+- **ticket-server**: shared with v1's `playground_ticket_cli.py`; the
   endpoint shapes are identical. If/when v2 forks the surface, the
   adapter and SKILL drift point will be here.
 - **host-state**: outputs are point-in-time. Two calls 60s apart can
@@ -192,7 +192,7 @@ pattern on small surfaces first), not a multi-PR split:
    adapter contract on a non-REST source.
 4. **change-mgmt**, **threat-intel** — straightforward once 1–3 are
    stable.
-5. **ticket-server** — last; v1's `playground_ticket_adapter.py` already
+5. **ticket-server** — last; v1's `playground_ticket_cli.py` already
    works but doesn't match v2 conventions. Decide port-vs-rewrite at
    this point in the batch, but it ships with the others, not after.
 

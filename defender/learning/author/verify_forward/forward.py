@@ -29,13 +29,15 @@ from pathlib import Path
 
 from defender._run_paths import RunPaths
 from defender.learning.core.config import REPO_ROOT
+from defender.learning.tickets import ticket_seeds
 
 HERE = Path(__file__).resolve().parent
 PROMPT_PATH = HERE / "forward.md"
 
 # Scoped, closed-only read of the cited covering policy for a benign forward-check
-# (issue #338) — same read-only adapter the seed sampler uses.
-_TICKET_CLI = REPO_ROOT / "defender" / "scripts" / "adapters" / "ticket_adapter.py"
+# (issue #338) — same read-only adapter the seed sampler uses, taken from the seed
+# sampler itself rather than re-spelled here (the single source `judge/run.py` names).
+_TICKET_CLI = ticket_seeds._TICKET_CLI
 _POLICY_FETCH_TIMEOUT = 15
 _NO_CITED_POLICY = (
     "(no cited covering policy — none was offered, or the store is unreachable)"

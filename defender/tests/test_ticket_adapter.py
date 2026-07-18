@@ -1,6 +1,6 @@
-"""ticket_cli read-only adapter — the `--require-closed` scoped-read guard (#338).
+"""ticket_adapter read-only adapter — the `--require-closed` scoped-read guard (#338).
 
-Since #611 ticket_cli is a VERBS registry (with the one surviving CLI). The guard's seam is now
+Since #611 ticket_adapter is a VERBS registry (with the one surviving CLI). The guard's seam is now
 the verb functions `get_ticket(ctx, key=…, require_closed=…)` and `list_tickets(ctx, status=…,
 require_closed=…)` (the old `cmd_get_ticket(args, config)` / `cmd_list_tickets` wrappers are
 gone). The refusal of a non-closed ticket now RAISES `UpstreamFault` (a query error the capture

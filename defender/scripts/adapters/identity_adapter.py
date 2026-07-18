@@ -33,24 +33,29 @@ SYSTEM = "identity"
 PREFIX = "IDENTITY"
 
 
+# Same name in each stub adapter, closing over that module's SYSTEM/PREFIX: the shared
+# body already lives once in `transport.load_config`, so this is a zero-argument alias,
+# not a copy of any logic.
+def _config(ctx: VerbContext) -> dict[str, str]:  # lint-dup: ok — per-module alias over the shared transport.load_config
+    return transport.load_config(ctx, SYSTEM, PREFIX)
 
 
 def health_check(ctx: VerbContext) -> dict:
-    return transport.health_check(ctx, transport.load_config(ctx, SYSTEM, PREFIX), SYSTEM)
+    return transport.health_check(ctx, _config(ctx), SYSTEM)
 
 
 def can_access(ctx: VerbContext, *, user: str, host: str) -> dict:
     return transport.http_get_obj(
-        ctx, transport.load_config(ctx, SYSTEM, PREFIX), f"/users/{user}/can_access", params={"host": host},
+        ctx, _config(ctx), f"/users/{user}/can_access", params={"host": host},
     )
 
 
 def get_user(ctx: VerbContext, *, user: str) -> dict:
-    return transport.http_get_obj(ctx, transport.load_config(ctx, SYSTEM, PREFIX), f"/users/{user}")
+    return transport.http_get_obj(ctx, _config(ctx), f"/users/{user}")
 
 
 def list_authorized_hosts(ctx: VerbContext, *, user: str) -> dict | list:
-    return transport.http_get(ctx, transport.load_config(ctx, SYSTEM, PREFIX), f"/users/{user}/authorized_hosts")
+    return transport.http_get(ctx, _config(ctx), f"/users/{user}/authorized_hosts")
 
 
 def list_users(
@@ -61,13 +66,13 @@ def list_users(
         params["role"] = role
     if enabled is not None:
         params["enabled"] = "true" if enabled else "false"
-    return transport.http_get(ctx, transport.load_config(ctx, SYSTEM, PREFIX), "/users", params=params or None)
+    return transport.http_get(ctx, _config(ctx), "/users", params=params or None)
 
 
 # Same spelling as cmdb's `list_roles`, different service: each resolves its own
 # URL_BASE from its own config, so merging them would be a behavior change.
 def list_roles(ctx: VerbContext) -> dict | list:  # lint-dup: ok — distinct service
-    return transport.http_get(ctx, transport.load_config(ctx, SYSTEM, PREFIX), "/roles")
+    return transport.http_get(ctx, _config(ctx), "/roles")
 
 
 VERBS = {

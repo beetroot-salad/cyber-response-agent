@@ -37,7 +37,7 @@ Transport is `docker --context soc-playground exec <bastion> curl
 http://identity:8080/...`. The bastion (default `web-1`) is any role
 host on the compose network — every host has Docker DNS for the stub.
 No SSH tunnel needed; the same docker context already used by
-elastic_cli for rule installs is reused here.
+elastic_adapter for rule installs is reused here.
 
 If a call exits 2 (connectivity / docker / upstream), the data source
 is unreachable: **stop and escalate immediately** with the error — do

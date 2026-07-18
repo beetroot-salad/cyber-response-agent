@@ -39,16 +39,21 @@ PREFIX = "THREAT_INTEL"
 VERDICTS = ("benign", "suspicious", "malicious", "unknown")
 
 
+# Same name in each stub adapter, closing over that module's SYSTEM/PREFIX: the shared
+# body already lives once in `transport.load_config`, so this is a zero-argument alias,
+# not a copy of any logic.
+def _config(ctx: VerbContext) -> dict[str, str]:  # lint-dup: ok — per-module alias over the shared transport.load_config
+    return transport.load_config(ctx, SYSTEM, PREFIX)
 
 
 def health_check(ctx: VerbContext) -> dict:
-    return transport.health_check(ctx, transport.load_config(ctx, SYSTEM, PREFIX), SYSTEM)
+    return transport.health_check(ctx, _config(ctx), SYSTEM)
 
 
 def lookup(ctx: VerbContext, *, value: str) -> dict:
     # /lookup/{value:path} — the value may contain dots/colons; quote it.
     quoted = urllib.parse.quote(value, safe="")
-    return transport.http_get_obj(ctx, transport.load_config(ctx, SYSTEM, PREFIX), f"/lookup/{quoted}")
+    return transport.http_get_obj(ctx, _config(ctx), f"/lookup/{quoted}")
 
 
 def list_indicators(
@@ -71,7 +76,7 @@ def list_indicators(
         params["type"] = type
     if tag:
         params["tag"] = tag
-    return transport.http_get(ctx, transport.load_config(ctx, SYSTEM, PREFIX), "/indicators", params=params or None)
+    return transport.http_get(ctx, _config(ctx), "/indicators", params=params or None)
 
 
 VERBS = {

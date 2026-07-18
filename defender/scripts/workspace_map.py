@@ -28,6 +28,7 @@ if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender._corpus import iter_query_templates  # noqa: E402
+from defender.runtime.verbs import ADAPTER_SUFFIX  # noqa: E402
 
 DEFENDER_DIR = Path(__file__).resolve().parent.parent
 REPO_ROOT = DEFENDER_DIR.parent
@@ -101,7 +102,7 @@ def workspace_map(run_dir: Path) -> str:
     # Adapters
     adapters_dir = DEFENDER_DIR / "scripts" / "adapters"
     lines.append(f"## Adapters — `{_rel(adapters_dir)}/`")
-    adapters = _list_dir(adapters_dir, suffix="_adapter.py")
+    adapters = _list_dir(adapters_dir, suffix=ADAPTER_SUFFIX)
     if adapters:
         for name in adapters:
             lines.append(f"- {name}  (a VERBS registry dispatched via the query tool; do not Read the source)")

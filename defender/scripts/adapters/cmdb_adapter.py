@@ -33,17 +33,22 @@ SYSTEM = "cmdb"
 PREFIX = "CMDB"
 
 
+# Same name in each stub adapter, closing over that module's SYSTEM/PREFIX: the shared
+# body already lives once in `transport.load_config`, so this is a zero-argument alias,
+# not a copy of any logic.
+def _config(ctx: VerbContext) -> dict[str, str]:  # lint-dup: ok — per-module alias over the shared transport.load_config
+    return transport.load_config(ctx, SYSTEM, PREFIX)
 
 
 def health_check(ctx: VerbContext) -> dict:
-    return transport.health_check(ctx, transport.load_config(ctx, SYSTEM, PREFIX), SYSTEM)
+    return transport.health_check(ctx, _config(ctx), SYSTEM)
 
 
 def get_host(ctx: VerbContext, *, host: str) -> dict:
     """The effective record for one host. The param is `host` (not the CLI's old
     positional `name`): the query-template corpus binds `${host}`, and a placeholder that
     does not match a declared param is a template the model cannot fill."""
-    return transport.http_get_obj(ctx, transport.load_config(ctx, SYSTEM, PREFIX), f"/hosts/{host}")
+    return transport.http_get_obj(ctx, _config(ctx), f"/hosts/{host}")
 
 
 def list_hosts(
@@ -55,13 +60,13 @@ def list_hosts(
 ) -> dict | list:
     params = {k: v for k, v in
               (("role", role), ("criticality", criticality), ("owner", owner)) if v}
-    return transport.http_get(ctx, transport.load_config(ctx, SYSTEM, PREFIX), "/hosts", params=params or None)
+    return transport.http_get(ctx, _config(ctx), "/hosts", params=params or None)
 
 
 # Same spelling as identity's `list_roles`, different service: each resolves its own
 # URL_BASE from its own config, so merging them would be a behavior change.
 def list_roles(ctx: VerbContext) -> dict | list:  # lint-dup: ok — distinct service
-    return transport.http_get(ctx, transport.load_config(ctx, SYSTEM, PREFIX), "/roles")
+    return transport.http_get(ctx, _config(ctx), "/roles")
 
 
 VERBS = {
