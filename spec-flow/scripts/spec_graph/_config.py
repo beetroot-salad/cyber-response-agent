@@ -42,7 +42,8 @@ _PRUNE = {
 @functools.cache
 def repo_root() -> Path:
     out = subprocess.run(
-        ["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=False
+        ["git", "rev-parse", "--show-toplevel"],
+        capture_output=True, text=True, encoding="utf-8", check=False
     ).stdout.strip()
     return Path(out) if out else Path.cwd()
 
@@ -62,7 +63,7 @@ def load(explicit: str | None = None) -> dict[str, Any]:
     path = Path(explicit) if explicit else repo_root() / CONFIG_REL
     raw: dict[str, Any] = {}
     if path.is_file():
-        raw = json.loads(path.read_text()).get("specGraph", {}) or {}
+        raw = json.loads(path.read_text(encoding="utf-8")).get("specGraph", {}) or {}
     return {
         # Where the committed spec_graph_*.yaml artifacts live (glob, repo-relative).
         "artifacts": raw.get("artifacts", "**/spec_graph_*.yaml"),

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Unpinned text-I/O — flag text reads/writes under ``defender/`` that decode or encode
-under the **ambient locale** instead of pinning ``encoding="utf-8"``.
+"""Unpinned text-I/O — flag text reads/writes under ``defender/`` and the ``spec-flow/scripts/``
+tool tree that decode or encode under the **ambient locale** instead of pinning ``encoding="utf-8"``.
 
 Every text file this system touches is UTF-8 and says so: the lessons corpora (42 of the
 checked-in lessons carry non-ASCII, em-dashes in ``description`` above all), the invlang
@@ -26,7 +26,7 @@ wrong. (ruff's ``PLW1514`` covers part of this surface, but only where it can in
 ``pathlib.Path`` receiver — it misses ``runtime/tools.py``'s reads, i.e. #588 itself. This
 check is syntactic on purpose.)
 
-What it flags, under ``defender/`` production code:
+What it flags, under the scanned trees (``defender/`` production code + ``spec-flow/scripts/``):
 
 - ``<x>.read_text(...)`` / ``<x>.write_text(...)`` with no ``encoding=`` keyword
 - an OPENER in TEXT mode with no ``encoding=`` — ``open`` / ``io.open`` / ``codecs.open`` /
@@ -68,17 +68,21 @@ The same is true of an untabled module opener called with a literal path.
 Tests are out of scope: a fixture must be free to ``write_bytes`` a deliberately-undecodable
 file, or to shape a latin-1 one, which is exactly what the #589/#588 suite does.
 
-The canonical readers are ``defender._io.read_text_utf8`` (pinned, raising) and
-``read_text_soft`` (pinned, returns ``(text, reason)``); the matching WRITE-side pin for a
+Under ``defender/`` the canonical readers are ``defender._io.read_text_utf8`` (pinned, raising)
+and ``read_text_soft`` (pinned, returns ``(text, reason)``); the matching WRITE-side pin for a
 CLI's stdout is ``defender._io.use_utf8_stdio``. And when you guard a read, guard it with
 ``defender._io.TEXT_READ_ERRORS`` — a ``UnicodeDecodeError`` is a ``ValueError``, NOT an
 ``OSError``, and not a ``json.JSONDecodeError`` either, so an ``except OSError`` around a
-read does not hold it (that is #589, exactly).
+read does not hold it (that is #589, exactly). Under ``spec-flow/scripts/`` those helpers are out
+of reach (the plugin has no ``defender`` on its path), so pin ``encoding="utf-8"`` inline and, for
+a CLI, reconfigure ``sys.stdout``/``stderr`` in ``main`` — the shape ``check_actors.py`` uses.
 
 Mark a deliberate site with ``# lint-text-io: ok — <reason>`` on the call's line span.
 Pre-existing sites are ratcheted via ``lint_unpinned_text_io_baseline.json``; the gate fails
-only on a NEW file+function pair. The baseline ships EMPTY — every site under defender/ was
-pinned when the gate landed, so an entry appearing in it is a regression someone chose.
+only on a NEW file+function pair. Across BOTH scanned trees a fingerprint is prefixed with the
+tree-relative path (``defender/…`` vs ``spec-flow/scripts/…``) so the two can't collide. The
+baseline ships EMPTY — every site under both trees was pinned when its scope came under the gate,
+so an entry appearing in it is a regression someone chose.
 
 Run from repo root:  python scripts/lint/lint_unpinned_text_io.py
 Regenerate the baseline:  python scripts/lint/lint_unpinned_text_io.py --update-baseline
@@ -102,7 +106,13 @@ from _astlib import (
 from _baseline import Finding, gate
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SCOPE = REPO_ROOT / "defender"
+# The trees this gate scans. `defender/` is production code, with the canonical `defender._io`
+# helpers one import away. `spec-flow/scripts/` is the portable spec-graph tooling: it CANNOT
+# import `defender._io` (it ships as a standalone plugin), so its sites pin `encoding="utf-8"`
+# inline — as `check_binds.py` already did and `check_actors.py`/`_config.py` now do. That tree
+# was dark to this gate until #655: an unpinned read there dropped a non-ASCII source file's import
+# edges and reported clean, the #643 false-clean.
+SCOPES = (REPO_ROOT / "defender", REPO_ROOT / "spec-flow" / "scripts")
 BASELINE_PATH = Path(__file__).with_name("lint_unpinned_text_io_baseline.json")
 
 EXCLUDED_DIRS = (".venv", "__pycache__", "run-visualizations", "run-transcripts")
@@ -215,13 +225,27 @@ def _scan(root: Path) -> list[Finding]:
     return findings
 
 
+def _prefixed_scan(root: Path, prefix: str) -> list[Finding]:
+    """`_scan(root)` with `prefix` prepended to every fingerprint AND display. The real run passes
+    each scope's repo-relative path (`defender/`, `spec-flow/scripts/`) so a finding in one tree can
+    never collide with a same-path finding in the other; an empty prefix is the single-scope test
+    seam, returning `_scan(root)` untouched."""
+    if not prefix:
+        return _scan(root)
+    return [
+        Finding(fingerprint=prefix + f.fingerprint, display=prefix + f.display)
+        for f in _scan(root)
+    ]
+
+
 HEADER = (
-    "lint_unpinned_text_io baseline — text reads/writes under defender/ that decode or "
-    "encode under the AMBIENT LOCALE instead of pinning encoding=\"utf-8\" (#588/#589). "
-    "Fingerprint is file:function:kind (read|write|open|subprocess; no line number), file "
-    "relative to the scan scope. CI fails on a fingerprint absent here. This baseline ships "
-    "EMPTY — an entry in it is a regression someone chose. Regenerate: python scripts/lint/"
-    "lint_unpinned_text_io.py --update-baseline."
+    "lint_unpinned_text_io baseline — text reads/writes under defender/ and spec-flow/scripts/ "
+    "that decode or encode under the AMBIENT LOCALE instead of pinning encoding=\"utf-8\" "
+    "(#588/#589; scope widened to the spec-graph tooling in #655). Fingerprint is "
+    "<tree>/file:function:kind (read|write|open|subprocess; no line number), path relative to the "
+    "repo root. CI fails on a fingerprint absent here. This baseline ships EMPTY — an entry in it is "
+    "a regression someone chose. Regenerate: python scripts/lint/lint_unpinned_text_io.py "
+    "--update-baseline."
 )
 
 
@@ -233,12 +257,21 @@ def main(
 ) -> int:
     # DI/test seams: the tests drive injected tmp trees and baselines.
     args = sys.argv[1:] if argv is None else argv
-    root = SCOPE if scope is None else scope
     baseline = BASELINE_PATH if baseline_path is None else baseline_path
-    if not root.is_dir():
-        print(f"scan scope not found at {root}", file=sys.stderr)
-        return 2
-    findings = _scan(root)
+    # A single injected `scope` scans as-is — fingerprints relative to it, no prefix — so the
+    # `_scan(tree)` tests keep their exact fingerprints. The real run scans EVERY root in SCOPES and
+    # prefixes each finding with the root's repo-relative path, so a `defender/` finding and a
+    # `spec-flow/scripts/` finding can never collide on the same file:function:kind — which would let
+    # one baseline entry silence a real site in the other tree.
+    roots = [scope] if scope is not None else list(SCOPES)
+    for root in roots:
+        if not root.is_dir():
+            print(f"scan scope not found at {root}", file=sys.stderr)
+            return 2
+    findings: list[Finding] = []
+    for root in roots:
+        prefix = "" if scope is not None else f"{root.relative_to(REPO_ROOT).as_posix()}/"
+        findings.extend(_prefixed_scan(root, prefix))
     print(
         'Pin every text read/write to UTF-8: defender._io.read_text_utf8 / read_text_soft '
         'for reads, encoding="utf-8" on write_text/open, encoding="utf-8" on a '

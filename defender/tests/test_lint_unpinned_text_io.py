@@ -156,9 +156,35 @@ def test_fingerprint_dedups_within_a_function(tmp_path):
 
 
 def test_real_tree_clean():
-    """The regression check: the shipped baseline is EMPTY, so the real tree must
-    scan clean. Any new finding here is a live site the refactor introduced."""
+    """The regression check: the shipped baseline is EMPTY, so the real trees must
+    scan clean. `main([])` scans BOTH scopes (defender/ + spec-flow/scripts/), so any
+    new unpinned site in either tree turns this — and CI — red."""
     assert _load_gate().main([]) == 0
+
+
+def test_spec_flow_scripts_is_in_scope():
+    """#655: the spec-graph tooling was dark to this gate (SCOPE was defender/ only),
+    which let check_actors' unpinned reads land — the #643 false-clean. Pin that the
+    tree is now a scanned scope so a future refactor can't silently drop it again."""
+    gate = _load_gate()
+    assert gate.REPO_ROOT / "spec-flow" / "scripts" in gate.SCOPES
+
+
+def test_multiple_scopes_are_prefixed_and_cannot_collide(tmp_path):
+    """The real run scans several roots; a finding is prefixed with its tree-relative path so a
+    same-file:function:kind site in two trees yields two DISTINCT fingerprints — otherwise one
+    baseline entry would silence a real site in the other tree. Exercises the prefix seam directly
+    (no monkeypatch), with the empty prefix returning `_scan` untouched (the single-scope path)."""
+    gate = _load_gate()
+    a, b = tmp_path / "treeA", tmp_path / "treeB"
+    _pyfile(a, "_config.py", "def f(p):\n    return p.read_text()\n")
+    _pyfile(b, "_config.py", "def f(p):\n    return p.read_text()\n")  # same rel:func:kind in both
+    fa = gate._prefixed_scan(a, "defender/")
+    fb = gate._prefixed_scan(b, "spec-flow/scripts/")
+    assert [f.fingerprint for f in fa] == ["defender/_config.py:f:read"]
+    assert [f.fingerprint for f in fb] == ["spec-flow/scripts/_config.py:f:read"]
+    assert not ({f.fingerprint for f in fa} & {f.fingerprint for f in fb})  # no collision
+    assert gate._prefixed_scan(a, "") == gate._scan(a)  # empty prefix = untouched (test seam)
 
 
 def test_binary_tempfile_in_the_real_tree_stays_clean(tmp_path):
