@@ -36,6 +36,16 @@ jobs:
         # could hide failures in learning/test_loop.py et al.
         run: uv run pytest tests/ learning/ -v -m "not live"
 
+      # The spec_graph gate checks (check_actors / check_binds) ship with the
+      # spec-flow plugin and were dark to CI — only defender/ was collected, so a
+      # regression in the tooling that gates every write-tests spec could land
+      # green (#643). This suite drives the REAL check_actors CLI against
+      # throwaway git-repo fixtures; it lives outside defender/ but reuses the
+      # defender venv's pytest + pyyaml, so it runs from the repo root against
+      # defender/.venv (the same idiom as the code-smells lint gates below).
+      - name: Run spec-flow tool tests
+        run: defender/.venv/bin/python -m pytest spec-flow/scripts -q
+
   lint:
     runs-on: ubuntu-latest
     steps:

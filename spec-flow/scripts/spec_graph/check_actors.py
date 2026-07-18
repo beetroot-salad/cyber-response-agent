@@ -32,6 +32,7 @@ its stem under a top-level `actor_waivers:` in the graph.
 """
 from __future__ import annotations
 
+import ast
 import re
 import subprocess
 import sys
@@ -48,28 +49,98 @@ def _sh(cmd: list[str]) -> str:
     ).stdout
 
 
-def _changed_stems(base: str) -> set[str]:
+def _changed_paths(base: str) -> set[Path]:
     # Anchored at the repo root, both times. git resolves a pathspec against the process CWD, so
     # running `spec-graph` from a subdirectory (`cd defender && …`, exactly what this project's
     # gate command does) would scope `*.py` to that subtree — and a diff that touched nothing
     # under it would come back EMPTY. The census would then find no changed module to match, go
     # quiet, and exit 0: a gate that passes green on a diff it never looked at.
+    #
+    # PATH-granular (not stem-granular): two modules can share a stem (`pkg_a/driver.py` vs
+    # `pkg_b/driver.py`), so the reach comparison keys on the resolved file path, not the stem —
+    # both here and through the transitive closure. A stem key false-fires on same-stem changes
+    # in a package the entrypoint never actually reaches.
+    root = _config.repo_root()
     out = _sh(["git", "diff", "--name-only", f"{base}...HEAD", "--", "*.py"])
     return {
-        Path(f).stem
+        root / f
         for f in out.splitlines()
         if f.strip() and "/tests/" not in f
     }
 
 
-def _imported_stems(text: str) -> set[str]:
-    """The module stems a file IMPORTS — the final component of each `import`/`from` target.
-    Precise (not loose tokens): `from ...pipeline.actor_engine import X` yields `actor_engine`,
-    but a local var named `main` does NOT match the `main.py` module."""
-    return {
-        m.group(1).split(".")[-1]
-        for m in re.finditer(r"^\s*(?:from|import)\s+([\w.]+)", text, re.MULTILINE)
-    }
+def _module_targets(importer: Path, text: str, root: Path) -> set[Path]:
+    """The project module FILES a file imports, resolved on the filesystem.
+
+    Namespace-package resolution (defender has no `__init__.py`): a dotted name `a.b.c` maps to
+    `root/a/b/c.py` directly — no `__init__.py` walk, which would fail to resolve `defender.x`.
+    Relative imports resolve against the importer's own directory. `from pkg import name` credits
+    `pkg/name.py` when that submodule file exists (a real module reach) and `pkg.py` when THAT
+    exists (then `name` is a symbol of module `pkg`); a `from pkg import some_symbol` that names
+    neither resolves to nothing — no phantom driver invented for a function or a class."""
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return set()
+    targets: set[Path] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                cand = (root / Path(*alias.name.split("."))).with_suffix(".py")
+                if cand.is_file():
+                    targets.add(cand)
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:  # relative: `.` is the importer's own package (its directory)
+                base = importer.parent
+                for _ in range(node.level - 1):
+                    base = base.parent
+                if node.module:
+                    base = base / Path(*node.module.split("."))
+            else:
+                base = root / Path(*(node.module or "").split("."))
+            # A relative import with more leading dots than the file has package ancestors walks
+            # `base` above the repo root: it names no project module, and `base.with_suffix` would
+            # raise on the filesystem root. Bound resolution to within (or at) the root.
+            if base != root and root not in base.parents:
+                continue
+            for alias in node.names:  # each name may be a submodule file …
+                cand = (base / alias.name).with_suffix(".py")
+                if cand.is_file():
+                    targets.add(cand)
+            base_mod = base.with_suffix(".py")  # … or `base` is the module, names its symbols
+            if base_mod.is_file():
+                targets.add(base_mod)
+    return targets
+
+
+def _import_edges(files: list[Path], root: Path) -> dict[Path, set[Path]]:
+    """The project import graph, bounded to the census: file → the census files it imports. A
+    reach that leaves the codeRoots (into a non-census module) is dropped here, so it can never
+    re-enter — an outside-codeRoots-only reach is an accepted, silent gap."""
+    fileset = set(files)
+    edges: dict[Path, set[Path]] = {}
+    for f in files:
+        try:
+            text = f.read_text()
+        except (OSError, UnicodeDecodeError):
+            edges[f] = set()
+            continue
+        edges[f] = _module_targets(f, text, root) & fileset
+    return edges
+
+
+def _reach(entry: Path, edges: dict[Path, set[Path]]) -> set[Path]:
+    """Every census file `entry` reaches transitively via project-module imports. Cycle-safe (a
+    `visited` set), so a 2-node ↔, an N-node ring, or a self-loop terminates rather than hangs."""
+    seen: set[Path] = set()
+    stack = list(edges.get(entry, set()))
+    while stack:
+        n = stack.pop()
+        if n in seen:
+            continue
+        seen.add(n)
+        stack.extend(edges.get(n, set()))
+    return seen
 
 
 def _subprocessed_py_stems(text: str) -> set[str]:
@@ -104,21 +175,27 @@ def check(graph_path: Path, base: str, cfg: dict) -> list[str]:
     aliases: dict[str, str] = cfg["contextAliases"]
     entry_stems = set(cfg["entrypointStems"])
 
-    changed = _changed_stems(base)
+    root = _config.repo_root()
+    changed = _changed_paths(base)
     files = _config.source_files(cfg)
     project_stems = {f.stem for f in files}
+    edges = _import_edges(files, root)
 
     findings: list[str] = []
     for f in files:
         text = f.read_text()
         if not _is_entrypoint(f, text, entry_stems):
             continue
-        # Two ways a driver reaches the change: an in-process import of a changed module, or
-        # a subprocess RE-EXEC of one of the project's own modules (the F2 relocated-anchor hazard).
-        imports_changed = _imported_stems(text) & changed
+        # Two ways a driver reaches the change: an in-process import of a changed module —
+        # resolved to files and followed TRANSITIVELY over the project import graph, then
+        # intersected with the changed set (the arm stays gated on `changed`) — or a subprocess
+        # RE-EXEC of one of the project's own modules (the F2 relocated-anchor hazard).
+        reached_changed = (_reach(f, edges) - {f}) & changed
         subprocs = (_subprocessed_py_stems(text) & project_stems) - {f.stem}
-        if not imports_changed and not subprocs:
+        if not reached_changed and not subprocs:
             continue
+        # Suppression is keyed on the ENTRYPOINT (its stem or contextAlias), never a module on the
+        # reach path — a modelled intermediate must not silence an unmodelled entrypoint.
         stem = f.stem
         if stem in waivers:
             continue
@@ -129,18 +206,24 @@ def check(graph_path: Path, base: str, cfg: dict) -> list[str]:
         )
         if modelled:
             continue
-        # Say which arm fired, and don't overclaim. The subprocess arm is deliberately NOT gated
-        # on `changed` — a re-exec context is a standing hazard, and a guard introduced anywhere
-        # can make a long-unchanged harness newly load-bearing — so it fires on drivers that need
-        # not touch this diff at all. Reporting those as "reaches the changed subsystem" is a
-        # claim the check has not made.
-        rel = f.relative_to(_config.repo_root())
-        reach = (
-            f"reaches the changed subsystem [in-process import of changed {sorted(imports_changed)}]"
-            if imports_changed
-            else f"re-executes {sorted(subprocs)} as a subprocess (relocating the tree anchor onto "
-            f"whatever tree it runs in — a standing hazard this graph does not cover)"
-        )
+        # Say which arm(s) fired, and don't overclaim. When both trip, report BOTH reasons —
+        # neither masks the other. The subprocess arm is deliberately NOT gated on `changed`: a
+        # re-exec context is a standing hazard, and a guard introduced anywhere can make a
+        # long-unchanged harness newly load-bearing, so it fires on drivers that need not touch
+        # this diff at all — a claim the import arm has not made.
+        rel = f.relative_to(root)
+        reasons: list[str] = []
+        if reached_changed:
+            reasons.append(
+                f"reaches the changed subsystem [in-process import of changed "
+                f"{sorted(p.stem for p in reached_changed)}]"
+            )
+        if subprocs:
+            reasons.append(
+                f"re-executes {sorted(subprocs)} as a subprocess (relocating the tree anchor onto "
+                f"whatever tree it runs in — a standing hazard this graph does not cover)"
+            )
+        reach = " and ".join(reasons)
         findings.append(
             f"{graph_path.name}: driver `{rel}` {reach} but is not modelled (no actor, no demand "
             f"names `{stem}`). Model it as an actor — or waive under actor_waivers if out of scope."
