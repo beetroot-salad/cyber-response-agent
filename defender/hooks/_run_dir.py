@@ -2,10 +2,14 @@
 """Shared run-dir resolution + locked JSON state for the defender gate modules.
 
 The defender runs one in-process agent per run and exports
-``DEFENDER_RUN_DIR`` into the process (run.py), so the budget enforcer, the
-circuit breaker and the lesson-load recorder all anchor on that single env
-var rather than a session→run map. Centralizing the lookup here keeps the
-contract (env var name, ``is_dir`` guard) in one place.
+``DEFENDER_RUN_DIR`` into the process (run.py), so the budget enforcer and the
+lesson-load recorder anchor on that single env var rather than a session→run
+map. Centralizing the lookup here keeps the contract (env var name, ``is_dir``
+guard) in one place.
+
+``resolve_run_dir`` and ``update_json_locked`` have distinct consumer sets: the
+circuit breaker uses only the locked-write primitive and is handed its run dir
+as an argument, so it is NOT an env-var anchor.
 
 This module resolves no salt. The run's trust token is minted in process by
 ``run_common.materialize_run_dir`` and threaded to its consumers as a value; it

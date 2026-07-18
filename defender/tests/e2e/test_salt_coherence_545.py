@@ -40,7 +40,7 @@ def test_main_reroute_salt_coherence(tmp_path):
     SAME salt — the run's pinned salt. Exactly one distinct salt appears across the whole
     transcript; a reroute that let bind mint a fresh uuid4 for MAIN would inject a second."""
     run_id, salt = "salt-coherence-545", "deadbeefcafe0000"
-    run_dir = materialize(tmp_path, GOLDEN, run_id=run_id, salt=salt)
+    run_dir = materialize(tmp_path, GOLDEN)
 
     # One read of alert.json (its result is untrusted-wrapped with deps.salt), then stop. The
     # wrapped result rides into the 2nd model request, so ReplayFn.seen captures it alongside

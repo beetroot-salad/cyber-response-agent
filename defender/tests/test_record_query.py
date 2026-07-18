@@ -142,7 +142,7 @@ def test_build_truncated_view_complete_envelope_is_not_flagged_sampled(tmp_path)
 # swallows to None. Driven end-to-end through the real driver loop + real capture capability.
 
 def test_seq_stays_monotonic_when_a_payload_write_fails(tmp_path):
-    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id="rq-seq", salt=SALT)
+    run_dir = materialize(tmp_path, GOLDEN_AB3)
     # Trap: the first payload's target path is a directory, so its write fails closed to None.
     (run_dir / "gather_raw" / LEAD / "0.json").mkdir(parents=True)
 
