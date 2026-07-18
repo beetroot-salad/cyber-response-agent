@@ -624,6 +624,12 @@ claims:
   - {id: P11, kind: behavior, claim: "the repo's own symbol-reference instrument is structurally blind to the caller this change twice missed", probe: "pyrefly-refs defender/run_common.py:47 materialize_run_dir", probe_kind: executed, observed: "'materialize_run_dir — 2 references in 2 files (resolved): defender/run.py:141, defender/run_common.py:47 [grep floor: 5 files contain the name; pyrefly resolved 2]'. It reports TWO and silently omits scripts/testing/gather_only.py:124, because configDir is `defender`. A confident, wrong, smaller answer — the reason the caller demand is written surface-general", verdict: holds}
   - {id: P12, kind: reachability, claim: "nothing in the repo consumes meta.json's incidental 'materialization finished' property", probe: "break-attempt: searched for any lock, sentinel, or readiness check gating a run dir, then read learn_drain's inflight rename and loop.py's run-dir entry", probe_kind: executed, observed: "no lock or on-disk marker enforces a finished run dir anywhere. learn_drain's inflight rename guards only marker double-claims, and `loop.py <run_dir>` can already be pointed at a directory still being written. The ordering was a usual-case property, never derived from meta.json. No counterexample found — no replacement marker is owed", verdict: unrefuted}
   - {id: P13, kind: behavior, claim: "the learning suite is green at be8d2c27 in this worktree", probe: "PYTHONPATH=<worktree> .venv/bin/python -m pytest learning/ -m 'not llm and not live' -q -p no:randomly", probe_kind: executed, observed: "113 passed in 1.78s", verdict: holds}
+  - {id: C40, kind: census,
+     claim: "learning/ops/replay_actor.py does not reach the changed builder: it imports RunPaths but never accesses .meta, and never references run_common or materialize_run_dir.",
+     probe: "grep -n 'run_common|materialize_run_dir|meta.json|RunPaths' defender/learning/ops/replay_actor.py ; grep -n '\\.meta\\b' on the same file ; read of the sole RunPaths usage at :83-95",
+     probe_kind: search,
+     observed: "3 hits, ALL RunPaths (:57 import, :83 construction, :90 comment). ZERO hits for run_common / materialize_run_dir / meta.json. The .meta grep returns nothing. :83-95 uses only .alert, .gather_raw, .executed_queries. Supersedes the earlier read-based reasoning behind d32.",
+     verdict: holds}
 
 # ---------------------------------------------------------------------------
 # GATE
