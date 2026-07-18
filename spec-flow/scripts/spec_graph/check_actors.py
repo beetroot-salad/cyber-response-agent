@@ -43,6 +43,15 @@ import yaml
 import _config
 
 
+def _warn(msg: str) -> None:
+    """A census gap the operator has to see. Every path that drops a file out of the import graph
+    routes through here: a file the walk cannot read, or one `ast.parse` rejects, contributes no
+    edges, so a driver that reaches the change only through it goes UNREPORTED. That is a gate
+    reporting clean because it could not look — the #618 class — and it must never be silent.
+    stderr, not stdout: the findings stream is the tool's parsed output."""
+    print(f"  WARN [check_actors] {msg}", file=sys.stderr)
+
+
 def _sh(cmd: list[str]) -> str:
     return subprocess.run(
         cmd, cwd=_config.repo_root(), capture_output=True, text=True, check=False
@@ -80,7 +89,10 @@ def _module_targets(importer: Path, text: str, root: Path) -> set[Path]:
     neither resolves to nothing — no phantom driver invented for a function or a class."""
     try:
         tree = ast.parse(text)
-    except SyntaxError:
+    except SyntaxError as e:
+        # Not a silent skip: an unparseable file contributes NO import edges, so every driver whose
+        # only reach to the change runs through it stops being reported. Surface it (see _warn).
+        _warn(f"{importer}: unparseable ({e.__class__.__name__}: {e}) — contributes no import edges")
         return set()
     targets: set[Path] = set()
     for node in ast.walk(tree):
@@ -113,20 +125,51 @@ def _module_targets(importer: Path, text: str, root: Path) -> set[Path]:
     return targets
 
 
-def _import_edges(files: list[Path], root: Path) -> dict[Path, set[Path]]:
-    """The project import graph, bounded to the census: file → the census files it imports. A
-    reach that leaves the codeRoots (into a non-census module) is dropped here, so it can never
-    re-enter — an outside-codeRoots-only reach is an accepted, silent gap."""
-    fileset = set(files)
-    edges: dict[Path, set[Path]] = {}
+def _read_texts(files: list[Path]) -> dict[Path, str]:
+    """Every census file's source, read ONCE. Both consumers — the import graph and the
+    per-entrypoint scan — read the same text, so reading here (rather than at each use) keeps the
+    two from disagreeing about which files exist: a file the graph tolerated as unreadable used to
+    crash the entrypoint loop on a second, unguarded read.
+
+    Only the KEYS are dropped for an unreadable file, never the file itself — it stays a census
+    member (see `_import_edges`), because a module nobody can read is still a module others import
+    and still a module the diff can touch."""
+    texts: dict[Path, str] = {}
     for f in files:
         try:
-            text = f.read_text()
-        except (OSError, UnicodeDecodeError):
-            edges[f] = set()
-            continue
-        edges[f] = _module_targets(f, text, root) & fileset
-    return edges
+            texts[f] = f.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as e:
+            _warn(f"{f}: unreadable ({e.__class__.__name__}) — contributes no import edges")
+    return texts
+
+
+def _import_edges(files: list[Path], texts: dict[Path, str], root: Path) -> dict[Path, set[Path]]:
+    """The project import graph, bounded to the census: file → the census files it imports. A
+    reach that leaves the codeRoots (into a non-census module) is dropped here, so it can never
+    re-enter — an outside-codeRoots-only reach is an accepted, silent gap.
+
+    `fileset` spans ALL census files, not just the readable ones: an unreadable (or unparseable)
+    module loses its OUTGOING edges — it cannot say what it imports — but must remain a valid
+    TARGET, or a changed module would stop being reported merely because it failed to decode."""
+    fileset = set(files)
+    return {f: _module_targets(f, texts[f], root) & fileset if f in texts else set() for f in files}
+
+
+class _Census:
+    """The repo-derived half of the check — the changed set, the source census, and the import
+    graph over it. All three depend only on (base, cfg), NOT on the graph under test, so they are
+    built ONCE and reused across every artifact: `main()` checks 14 graphs in this project, and
+    rebuilding meant 14 git subprocesses, 14 filesystem walks and 14 full-repo AST parses to
+    produce identical results."""
+
+    def __init__(self, base: str, cfg: dict) -> None:
+        self.root = _config.repo_root()
+        self.changed = _changed_paths(base)
+        self.files = _config.source_files(cfg)
+        self.texts = _read_texts(self.files)
+        # Keyed on the full census, not `texts`: an unreadable module is still a subprocess target.
+        self.project_stems = {f.stem for f in self.files}
+        self.edges = _import_edges(self.files, self.texts, self.root)
 
 
 def _reach(entry: Path, edges: dict[Path, set[Path]]) -> set[Path]:
@@ -168,22 +211,21 @@ def _is_entrypoint(path: Path, text: str, extra_stems: set[str]) -> bool:
     )
 
 
-def check(graph_path: Path, base: str, cfg: dict) -> list[str]:
-    graph_text = graph_path.read_text()
+def check(graph_path: Path, census: _Census, cfg: dict) -> list[str]:
+    graph_text = graph_path.read_text(encoding="utf-8")
     graph = yaml.safe_load(graph_text)
     waivers = set(graph.get("actor_waivers", []) or [])
     aliases: dict[str, str] = cfg["contextAliases"]
     entry_stems = set(cfg["entrypointStems"])
 
-    root = _config.repo_root()
-    changed = _changed_paths(base)
-    files = _config.source_files(cfg)
-    project_stems = {f.stem for f in files}
-    edges = _import_edges(files, root)
+    root, changed = census.root, census.changed
+    edges, project_stems = census.edges, census.project_stems
 
     findings: list[str] = []
-    for f in files:
-        text = f.read_text()
+    # One read, in `_read_texts` (utf-8 pinned): the entrypoint scan and the import graph now share
+    # it, so they cannot disagree about which files the census contains. The twin unguarded read
+    # that used to live here crashed on exactly the files `_import_edges` had chosen to tolerate.
+    for f, text in census.texts.items():
         if not _is_entrypoint(f, text, entry_stems):
             continue
         # Two ways a driver reaches the change: an in-process import of a changed module —
@@ -245,9 +287,10 @@ def main(argv: list[str]) -> int:
             args.append(a)
     cfg = _config.load(config)
     graphs = [Path(a) for a in args] or _config.artifacts(cfg)
+    census = _Census(base, cfg)  # repo-derived and graph-independent — built once, not per graph
     all_findings: list[str] = []
     for g in graphs:
-        all_findings.extend(check(g, base, cfg))
+        all_findings.extend(check(g, census, cfg))
     for f in all_findings:
         print(f"  UNMODELLED {f}")
     n = len(all_findings)
