@@ -263,6 +263,19 @@ def _run_one_pipeline(
                     # rather than crashing the run; tear down anything started.
                     _kill_all(procs)
                     return 127, "", f"{stage.argv[0]}: command not found\n"
+                except PermissionError:
+                    # The file is THERE but not executable — a missing exec bit, or a
+                    # noexec mount. bash returns 126 and says so; 127 would be a lie,
+                    # because "not found" sends the model hunting for a different path
+                    # when the real answer is that nothing may execute from here.
+                    #
+                    # Load-bearing since #540: `/tmp` in the box is a noexec tmpfs, so this
+                    # is the ordinary outcome of staging a script there — not an edge case.
+                    # Uncaught it escapes the box entrypoint, which then writes no response
+                    # frame at all, and a containment result the boundary is SUPPOSED to
+                    # produce reaches the host looking like an infrastructure fault.
+                    _kill_all(procs)
+                    return 126, "", f"{stage.argv[0]}: Permission denied\n"
                 # The parent's copy of the previous stage's read end must close so
                 # EOF propagates when that stage exits.
                 if prev_stdout is not None:
