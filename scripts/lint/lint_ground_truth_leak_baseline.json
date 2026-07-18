@@ -1,4 +1,0 @@
-{
-  "//": "lint_ground_truth_leak baseline — label/answer-key files reachable from an agent run. Fingerprint is the file path. CI fails on a reachable label file absent here. Regenerate: python scripts/lint/lint_ground_truth_leak.py --update-baseline. Annotate intentional entries; \"\" means un-triaged debt to move or rename.",
-  "entries": {}
-}
