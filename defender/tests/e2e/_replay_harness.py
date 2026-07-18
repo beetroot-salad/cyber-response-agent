@@ -30,7 +30,6 @@ against their real signatures, the real capture capability writes the real rows.
 from __future__ import annotations
 
 import asyncio
-import json
 import shutil
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
@@ -256,7 +255,6 @@ def materialize(tmp_path: Path, golden: Path, *, run_id: str, salt: str) -> Path
     run_dir = tmp_path / "run"
     (run_dir / "gather_raw").mkdir(parents=True)
     shutil.copy(golden / "alert.json", run_dir / "alert.json")
-    (run_dir / "meta.json").write_text(json.dumps({"run_id": run_id, "salt": salt}))
     return run_dir
 
 

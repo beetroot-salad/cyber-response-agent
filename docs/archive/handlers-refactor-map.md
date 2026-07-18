@@ -1,4 +1,11 @@
-# Handlers Refactor Map
+# Handlers Refactor Map (archived)
+
+> **Archived 2026-07-18. Superseded — do not treat as current guidance.**
+> This is an orientation artifact for a refactor of the PREDECESSOR `soc-agent/`
+> codebase, which the repo has since replaced with `defender/`. Every path it maps
+> — `scripts/handlers/`, `scripts/run_orchestrator.py`, `hooks/scripts/*.py`, the
+> run-dir `meta.json` — no longer exists. Kept as a record of the refactor's
+> reasoning. A replacement doc has not been written yet.
 
 **Scope:** `soc-agent/scripts/handlers/` (~9.5K lines, 14 files) + `scripts/orchestrate.py` + `scripts/run_orchestrator.py`.
 

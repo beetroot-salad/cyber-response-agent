@@ -1,7 +1,7 @@
 """#545 e2e canary — the MAIN reroute must NOT split the run's untrusted-data salt.
 
 Design #545 routes the MAIN production deps through `bind`. `bind` mints a FRESH uuid4 salt
-via `_for_run`, but `run_investigation` threads the run's ONE persisted salt to BOTH the deps
+via `_for_run`, but `run_investigation` threads the run's ONE minted salt to BOTH the deps
 (→ every tool result's `<run-{salt}-untrusted>` wrapper, tools.py) AND orient's inlined alert
 wrapper (orient.py). That one salt is the injection-defense trust token the agent is told to
 distrust. A naive `deps = bind(MAIN_DEF, run_dir)` reroute would tag tool output with a
@@ -9,7 +9,7 @@ different salt than the alert → the tag stops matching → fail-open.
 
 This is a CHARACTERIZATION guard (GREEN@HEAD): today run_investigation correctly threads one
 salt to both surfaces. The reroute (decision 1a: bind gains a `salt` seam, MAIN binds with the
-persisted salt) must keep it green. It goes RED the moment a reroute lets a fresh uuid4 leak
+minted salt) must keep it green. It goes RED the moment a reroute lets a fresh uuid4 leak
 into the deps.
 
 Discharges: main_reroute_salt_coherence, replay_salt_golden_survives (spec_graph_545.yaml).

@@ -197,9 +197,13 @@ def test_run_py_unpacks_the_pair_and_threads_both_elements_onward():
     )
 
     src = (DEFENDER / "run.py").read_text(encoding="utf-8")
-    assert '.get("salt"' not in src and ".get('salt'" not in src, (
-        "run.py still reads the salt back out of a JSON blob; the in-process round-trip "
-        "through meta.json is exactly what this change deletes"
+    assert '.get("salt"' not in src, (
+        "run.py still reads the salt back out of a JSON blob (double-quoted .get(\"salt\")); "
+        "the in-process round-trip through meta.json is exactly what this change deletes"
+    )
+    assert ".get('salt'" not in src, (
+        "run.py still reads the salt back out of a JSON blob (single-quoted .get('salt')); "
+        "the in-process round-trip through meta.json is exactly what this change deletes"
     )
 
 
@@ -305,7 +309,7 @@ def test_every_importer_of_the_relocated_wrap_resolves_after_the_move():
 
     assert orient.wrap is wrap
     for mod in (tools, query_tool, tools_gather):
-        assert getattr(mod, "_wrap") is wrap, f"{mod.__name__} holds a different wrap object"
+        assert mod._wrap is wrap, f"{mod.__name__} holds a different wrap object"
     assert lesson_read is not None  # importable: its salted read path still resolves
 
     # Derived, not listed: every tracked module that names the new home resolves it.
@@ -325,8 +329,11 @@ def test_no_symbol_survives_whose_only_reachability_was_the_deleted_entrypoint()
     census of this exact set was undercounted once already. `wrap` is the one exception: it is
     the live symbol, and it survives at its new home."""
     defined = module_level_names_at_base(DELETED_HOOK)
-    assert "wrap" in defined and "main" in defined, (
-        f"the AST walk did not recover the deleted module's symbols: {sorted(defined)}"
+    assert "wrap" in defined, (
+        f"the AST walk did not recover the deleted module's `wrap` symbol: {sorted(defined)}"
+    )
+    assert "main" in defined, (
+        f"the AST walk did not recover the deleted module's `main` symbol: {sorted(defined)}"
     )
     orphans = {n for n in defined if not n.startswith("__")} - {"wrap"}
     assert len(orphans) >= 7, (
@@ -404,7 +411,9 @@ def test_update_json_locked_and_resolve_run_dir_survive_the_sibling_removal(tmp_
     from defender.hooks import budget_enforcer, record_lesson_load
     from defender.runtime import circuit_breaker
 
-    assert budget_enforcer and record_lesson_load and circuit_breaker
+    assert budget_enforcer, "the budget_enforcer consumer no longer imports"
+    assert record_lesson_load, "the record_lesson_load consumer no longer imports"
+    assert circuit_breaker, "the circuit_breaker consumer no longer imports"
 
 
 def test_run_paths_accessor_set_is_five_after_the_meta_accessor_is_removed(tmp_path):
@@ -526,8 +535,13 @@ def test_skill_md_run_delimiter_clause_survives_with_its_producer_intact():
 
     salt = "aabbccddeeff0011"
     produced = wrap("payload", "untrusted", salt)
-    assert produced.startswith(f"<run-{salt}-") and produced.endswith(f"</run-{salt}-untrusted>"), (
-        "the clause MAIN is told to honor no longer matches what the producer emits"
+    assert produced.startswith(f"<run-{salt}-"), (
+        "the clause MAIN is told to honor no longer matches what the producer emits: "
+        "the opening delimiter is not the salted one"
+    )
+    assert produced.endswith(f"</run-{salt}-untrusted>"), (
+        "the clause MAIN is told to honor no longer matches what the producer emits: "
+        "the closing delimiter is not the salted one"
     )
 
 

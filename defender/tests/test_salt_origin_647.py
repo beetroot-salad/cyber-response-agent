@@ -150,12 +150,14 @@ def test_materialize_run_dir_returns_run_dir_then_salt_on_the_success_lane(tmp_p
     "This is not hardening. The change denies no principal access to the salt.\""""
     run_dir, salt = build(tmp_path, monkeypatch)
 
-    assert isinstance(run_dir, Path) and run_dir.is_dir()
+    assert isinstance(run_dir, Path), "the builder did not return a Path for the run dir"
+    assert run_dir.is_dir(), "the builder's returned run dir is not a real directory"
     assert run_dir.name == "origin-647"
     assert (run_dir / "alert.json").is_file()
     assert (run_dir / "gather_raw").is_dir()
 
-    assert isinstance(salt, str) and salt, "the builder returned no trust token"
+    assert isinstance(salt, str), "the builder returned a trust token that is not a string"
+    assert salt, "the builder returned no trust token"
 
     # Two builds mint independent tokens — the value is per-run, not a constant.
     other_dir, other_salt = build(tmp_path, monkeypatch, run_id="origin-647-b")
@@ -206,7 +208,11 @@ def test_salt_returned_by_the_builder_is_the_salt_that_reaches_run_investigation
     forgeable, and no existing pin crosses this seam: the coherence canary injects a hardcoded
     token at both ends and never calls the builder at all."""
     run_dir, salt = build(tmp_path, monkeypatch)
-    assert run_dir.is_dir() and salt, (
+    assert run_dir.is_dir(), (
+        "there is no run dir to follow the minted token through: the builder returned "
+        f"{run_dir}"
+    )
+    assert salt, (
         "there is no minted token to follow: the builder returned "
         f"{salt!r} for {run_dir}"
     )
@@ -233,7 +239,10 @@ def test_every_salted_surface_in_one_model_context_carries_the_minted_token(
     (the bash lane). A constraint pinned on one surface and absent on its sibling is the
     canonical fail-open: a fresh token per wrap lets the model forge a closing delimiter."""
     run_dir, salt = build(tmp_path, monkeypatch, golden=GOLDEN_AB3, run_id="coherence-647")
-    assert run_dir.is_dir() and salt, (
+    assert run_dir.is_dir(), (
+        f"no run dir to carry the salted surfaces: builder returned {run_dir}"
+    )
+    assert salt, (
         f"no token to carry across the salted surfaces: builder returned {salt!r}"
     )
     main, gather, rec = gather_scenario(run_dir, salt, run_id=run_dir.name)
@@ -263,7 +272,10 @@ def test_gather_subagent_is_bound_with_the_parent_token_not_a_fresh_mint(tmp_pat
     loop, so a fresh token on its side would wrap the returned summary in a delimiter MAIN was
     never told about — quarantine failing open at exactly the boundary it exists to guard."""
     run_dir, salt = build(tmp_path, monkeypatch, golden=GOLDEN_AB3, run_id="inherit-647")
-    assert run_dir.is_dir() and salt, (
+    assert run_dir.is_dir(), (
+        f"no parent run dir for the subagent to run over: builder returned {run_dir}"
+    )
+    assert salt, (
         f"no parent token for the subagent to inherit: builder returned {salt!r}"
     )
     main, gather, rec = gather_scenario(run_dir, salt, run_id=run_dir.name)
@@ -287,7 +299,10 @@ def test_no_surface_on_the_run_lane_obtains_a_salt_from_a_source_no_other_surfac
     silently skipped; that a second, independently minted token is genuinely constructible in
     this system is the paired positive control on the curator leg."""
     run_dir, salt = build(tmp_path, monkeypatch, golden=GOLDEN_AB3, run_id="one-token-647")
-    assert run_dir.is_dir() and salt, (
+    assert run_dir.is_dir(), (
+        f"no run dir whose surfaces could be swept: builder returned {run_dir}"
+    )
+    assert salt, (
         f"no known token to compare the run's surfaces against: builder returned {salt!r}"
     )
     main, gather, rec = gather_scenario(run_dir, salt, run_id=run_dir.name)
@@ -313,7 +328,10 @@ def test_fail_open_fresh_mint_is_not_reachable_from_run_py_through_the_driver(
     )
 
     run_dir, salt = build(tmp_path, monkeypatch, run_id="no-failopen-647")
-    assert run_dir.is_dir() and salt, (
+    assert run_dir.is_dir(), (
+        f"the run lane has no builder-supplied run dir at all: builder returned {run_dir}"
+    )
+    assert salt, (
         f"the run lane has no builder-supplied token at all: builder returned {salt!r}"
     )
     replay = ReplayFn([
@@ -457,8 +475,11 @@ def test_run_dir_still_carries_every_investigation_artifact_after_the_removal(
     and its projected tool trace. The narrowed obligation is exactly this: the same
     investigation artifacts and the same salted surfaces — not the same directory listing."""
     run_dir, salt = build(tmp_path, monkeypatch, golden=GOLDEN, run_id="artifacts-647")
-    assert (run_dir / "alert.json").is_file() and (run_dir / "gather_raw").is_dir(), (
-        "the builder materialized none of the investigation artifacts it owns"
+    assert (run_dir / "alert.json").is_file(), (
+        "the builder did not materialize the copied alert it owns"
+    )
+    assert (run_dir / "gather_raw").is_dir(), (
+        "the builder did not materialize the raw-payload subdir it owns"
     )
     inv_text = (GOLDEN / "investigation.md").read_text(encoding="utf-8")
     rep_text = (GOLDEN / "report.md").read_text(encoding="utf-8")
@@ -497,8 +518,11 @@ def test_message_zero_orientation_lists_exactly_the_materialized_run_dir_childre
     and therefore altering MAIN's prompt — went unnoticed through three review passes. The
     listing legitimately loses that one line; the section itself stays."""
     run_dir, salt = build(tmp_path, monkeypatch, run_id="msg0-647")
-    assert run_dir.is_dir() and salt, (
+    assert run_dir.is_dir(), (
         "there is no materialized run dir for the orientation to enumerate"
+    )
+    assert salt, (
+        "there is no minted token to drive the orientation with"
     )
     materialized = {p.name for p in run_dir.iterdir()}
     assert "meta.json" not in materialized
@@ -587,8 +611,11 @@ def test_replay_harness_run_dir_and_production_run_dir_present_the_same_file_set
         "not, so the scope condition no longer holds and the claim must be re-derived"
     )
     prod_dir, salt = build(tmp_path, monkeypatch, run_id="parity-647")
-    assert prod_dir.is_dir() and salt, (
+    assert prod_dir.is_dir(), (
         "the production builder produced no run dir to compare file sets with"
+    )
+    assert salt, (
+        "the production builder returned no salt to materialize the harness run dir with"
     )
     harness_dir = materialize(tmp_path / "h", GOLDEN, run_id="parity-647", salt=salt)
 

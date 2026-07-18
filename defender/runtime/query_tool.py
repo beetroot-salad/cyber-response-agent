@@ -80,7 +80,7 @@ from pydantic_ai.exceptions import (
 
 from defender._io import append_jsonl
 from defender._run_paths import RunPaths
-from defender.hooks.tag_tool_results import wrap as _wrap
+from defender.runtime.untrusted import wrap as _wrap
 from defender.scripts.adapters.faults import USAGE_EXIT_CODE, AdapterFault
 from defender.scripts.gather_tools.record_query import (
     _is_event_payload,
@@ -391,8 +391,8 @@ class QueryCapture(AbstractCapability[Any]):
         gather SKILL filters on.
 
         The wrap is NEW behaviour, not parity: adapter payloads entered gather's context BARE
-        before this change (`tag_tool_results._bash_is_untrusted` lives in a hook whose `main()`
-        is never called). It uses `deps.salt` — the run's ONE token — never a freshly minted one:
+        before this change (the wrap lived in a never-wired PostToolUse hook whose `main()`
+        was never called). It uses `deps.salt` — the run's ONE token — never a freshly minted one:
         a fresh salt lets the model forge the closing tag and the injection defense fails open.
         The note stays OUTSIDE the wrap and stays ABSOLUTE: bash and the read tool resolve a
         relative operand against the repo root, not the run dir, so the relative table FK would

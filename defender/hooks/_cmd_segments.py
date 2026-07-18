@@ -82,8 +82,8 @@ OPERATOR_TOOLS = frozenset({"defender-policy"})
 # non-adapter script deliberately avoids it (`record_query.py`, `sql.py`) so it
 # can't be misread as an adapter here.
 #
-# THIS IS THE SOLE DEFINITION. `block_main_loop_raw_access`, `permission/command_shape`,
-# and `tag_tool_results` all import it from here — it used to be hand-copied into a
+# THIS IS THE SOLE DEFINITION. `block_main_loop_raw_access` and `permission/command_shape`
+# both import it from here — it used to be hand-copied into a
 # second module "kept in sync" by comment. Note the failure mode if the suffix and this
 # pattern ever drift: the regex matches NOTHING, so the main-loop deny silently stops
 # denying. It fails OPEN, and no test that only asserts "allowed stays allowed" catches it.

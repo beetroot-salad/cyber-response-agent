@@ -92,7 +92,7 @@ hooks). The gates:
   `lead_id` with an atomic `O_CREAT|O_EXCL` create — a reused id raises
   in-process, bouncing the defender back to PLAN, so it stays a real integrity
   gate), `inject_system_skill_description.descriptor_catalog` (the
-  progressive-disclosure descriptor catalog), `tag_tool_results.wrap` (salted
+  progressive-disclosure descriptor catalog), `runtime/untrusted.wrap` (salted
   untrusted-data tagging of adapter/alert reads + the gather return), and
   `record_lesson_load.lesson_name` (lesson→outcome traceability into
   `lessons_loaded.jsonl`). These anchor on the run dir from `AgentDeps`.
@@ -131,13 +131,13 @@ defender/
     bash_policy.json    # declarative secret/ground-truth READ DENYLIST (the per-agent capability bits + viewer list died with #575's grants)
     bash_policy.py      # loader for bash_policy.json (fails closed to built-in defaults if unreadable)
     gnu_flags.py        # the GNU short-flag ARITY facts the program shapes compile their flag classes from (#579) — a flag class must be a POSITIVE boolean allowlist, because an arg-consuming flag eats the operand behind it and the program falls back to the CWD. Since #575 there is ONE shape per program (`grant.program_shape`), so the lanes can no longer drift; the sets are a property of the runtime image's binaries, not of any agent's policy
+    untrusted.py        # wrap(): the salted quarantine delimiter around untrusted data (adapter/alert reads + the gather return)
     orient.py  observe.py  compaction.py  circuit_breaker.py
   hooks/                # gate LOGIC, imported as plain libraries by runtime/ (no longer wired as Claude Code hooks)
     record_lead.py                      # claim_lead: writes the leads table {lead_id}.lead.json + claims lead_id (O_EXCL; reuse raises)
     inject_system_skill_description.py  # descriptor_catalog: the progressive-disclosure system descriptor catalog
     block_main_loop_raw_access.py       # the main-loop adapter/raw deny reasons + adapter-shim regex (used by permission/)
     _cmd_segments.py                    # shared: timeout/bash-c unwrap + adapter/non-adapter shim taxonomy
-    tag_tool_results.py                 # wrap(): salted untrusted-data tagging of adapter / alert.json output + the gather return
     budget_enforcer.py                  # per-run tool-call / spawn / wall-clock budget logic (warning-only; driver.py Hook)
     record_lesson_load.py               # lesson_name(): lesson→outcome traceability into {run_dir}/lessons_loaded.jsonl
   skills/
