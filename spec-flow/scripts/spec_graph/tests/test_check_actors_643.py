@@ -211,8 +211,14 @@ def test_transitive_finding_names_the_reached_changed_module(make_repo):
     r = repo.run("spec_graph_x.yaml", base)
     assert r.returncode == 1
     assert "app/run.py" in r.stdout
-    assert "compaction" in r.stdout  # the reached changed leaf is named
-    assert "driver" not in r.stdout  # the intermediate is NOT named — only the reached leaf
+    # The reached-changed list names ONLY the leaf; the intermediate `driver` is not reported as a
+    # reached module. Asserted on the rendered list, not raw stdout: "driver" also appears as the
+    # finding's inherited execution-context noun (``driver `app/run.py` ``) and in the summary line
+    # (``… unmodelled driver context(s) …``), neither of which the fix changes (O0). A raw
+    # ``"driver" not in r.stdout`` is therefore unsatisfiable whenever a finding fires — narrowed
+    # here by write-code-from-spec (#643); see the PR note.
+    assert "['compaction']" in r.stdout  # only the reached leaf, in the sorted-stem rendering
+    assert "'driver'" not in r.stdout  # the intermediate is never a reached-module list entry
 
 
 def test_transitive_changed_sibling_fires_unchanged_stays_silent(make_repo):
