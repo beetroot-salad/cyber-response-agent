@@ -22,30 +22,32 @@ The spine owns exactly four things; everything else is a leaf:
 3. **Residue routing** — the gate's residue and the verify findings are routed (to leaves for re-grounding, to §7 for decisions), never resolved in your own voice.
 4. **Deviation decisions** — reduced mode, decomposition, early exit, degraded-model fallbacks — each recorded in `handoff.deviations`.
 
-**Dispatch protocol.** A leaf prompt is a pointer, not a payload: contract path **and charge section name**, worktree path, input frontier paths, output frontier path, per-dispatch parameters (lens name, copy index). The contract carries the doctrine — don't restate it. Each contract has two audiences, split by section: its `## Topology` block — always the first section, ≤20 lines — is the spine's (dispatch list, order, models, per-leaf inputs/outputs; read it with `Read`'s `limit`, never the whole file), and the `## Charge — <role>` sections below it are the leaves'. The references are read by the leaves their charges name; **the orchestrator reads neither the charges nor the references.**
+**Dispatch protocol.** A leaf prompt is a pointer, not a payload: contract path **and charge section name**, worktree path, input frontier paths, output frontier path, per-dispatch parameters (lens name, copy index). The contract carries the doctrine — don't restate it. Each contract has two audiences, split by section: its `## Topology` block — always the first section, ≤20 lines — is the spine's (dispatch list, order, models, per-leaf inputs/outputs; read it with `Read`'s `limit` or a `Grep` on the heading with `-A` — the cap is a context budget, not a secrecy boundary, so glimpsing a charge's first lines is harmless), and the `## Charge — <role>` sections below it are the leaves'. The references are read by the leaves their charges name; **the orchestrator reads neither the charges nor the references.**
 
-**Return protocol.** A leaf's inline return is its frontier's `digest` block only (≤15 lines); everything else lives in the file.
+**Return protocol.** A leaf's inline return is its frontier's `## Digest` section, verbatim, and nothing else — no trailing summary, no restated inventory; everything else lives in the file.
 
-**Spot-read rule.** Read a frontier's header plus a bounded sample (~40 lines) to verify a leaf stayed in its lane; read *in full* only the two sections written for you — a residue frontier's routing entries and a dispositions frontier's fork section. Never absorb enough content to start answering judgment calls yourself: **every judgment-call outcome routes to §7, none is self-answered** — the one escaped bug of this skill's first week was a self-dispositioned "accepted gap" the human would have overridden. A declined obligation is `Demand {form: waiver}` — an examined no, never a silence in `handoff.drops`.
+**Spot-read rule.** Read a frontier's frontmatter and `## Red flags` plus a bounded sample (~40 lines) to verify a leaf stayed in its lane; read *in full* only the two sections written for you — a residue frontier's routing entries and a dispositions frontier's fork section. Never absorb enough content to start answering judgment calls yourself: **every judgment-call outcome routes to §7, none is self-answered** — the one escaped bug of this skill's first week was a self-dispositioned "accepted gap" the human would have overridden. A declined obligation is `Demand {form: waiver}` — an examined no, never a silence in `handoff.drops`.
 
 **Inline probing and debugging are producing work.** A failing baseline, a stale environment, a "quick verification" grep — dispatch a leaf.
 
 ## Frontiers
 
-Working frontiers live in `<worktree>/.spec-flow/frontiers/`; add `.spec-flow/` to the worktree's `.git/info/exclude` (not the repo's `.gitignore`). The two deliverables — the suite and `spec_graph_<slug>.yaml` — are not frontiers: they live at their final committed paths, with a small digest frontier beside them. Every frontier begins:
+Working frontiers live in `<worktree>/.spec-flow/frontiers/`; add `.spec-flow/` to the worktree's `.git/info/exclude` (not the repo's `.gitignore`). The two deliverables — the suite and `spec_graph_<slug>.yaml` — are not frontiers: they live at their final committed paths, with a small digest frontier beside them.
 
-```yaml
-frontier:
-  phase: <A|B|C|D|E|F, plus the dispatch's own name for fan-out phases>
-  status: complete | design-refuted | blocked
-  inputs: [{path: <frontier consumed>, inventory_echo: {<its counts, as consumed>}}]
-  inventory: {<category>: <count>, ...}   # claims, flagged_facts, premises, forks, demands — whatever the phase produces
-  red_flags: ["<anything the orchestrator or the human must see>", ...]
-  digest: |
-    <the ≤15 lines the leaf returned inline, verbatim>
+A frontier is a **markdown file**: every consumer is an LLM — the next phase's leaves, the cold reconciler, a human peeking mid-run — so the payload is prose and fenced data blocks, not schema. Exactly one sliver is machine-read (the resume scan, the conservation walk, the planned `spec-graph frontiers` lint), and that sliver is **YAML frontmatter** in the repo's one frontmatter grammar — never a fenced code block, which breaks on backticks inside values (this contract's own smoke run tripped on exactly that):
+
+```
+---
+phase: <A|B|C|D|E|F, plus the dispatch's own name for fan-out phases>
+status: complete | design-refuted | blocked
+inputs: [{path: <basename of the consumed frontier>, inventory_echo: {<its counts, as consumed>}}]
+inventory: {<category>: <count>, ...}   # claims, flagged_facts, premises, forks, demands — whatever the phase produces
+---
 ```
 
-**Conservation is the header's job**: each phase echoes the inventories it consumed and accounts for them in its output — counts in equal counts out, every drop named. Each internal handoff is a new place for the premise that silently vanishes; the headers close that hole and phase F re-walks the whole chain.
+Body, in order: `## Digest` — the ≤15 lines the leaf returns inline, verbatim; `## Red flags` — anything the orchestrator or the human must see (omit when empty); then the payload. Producer/consumer pairing is by full filename — the numeric prefix orders the chain for readers, it is not an identity (five `30-*` files share one prefix). A frontier whose payload cannot be a markdown file — phase C's `40-premise-file.py` must stay a real Python file for the shuffle CLI — gets a **sidecar**: `40-premises.md` carries the frontmatter and digest, and the payload file sits beside it.
+
+**Conservation is the frontmatter's job**: each phase echoes the inventories it consumed and accounts for them in its output — counts in equal counts out, every drop named. Each internal handoff is a new place for the premise that silently vanishes; the frontmatter closes that hole and phase F re-walks the whole chain.
 
 **Checkpoint and resume.** On start (§0), scan the frontiers directory; resume at the first phase whose frontier is missing, `blocked`, or stale against its inputs. Never re-run a phase whose frontier is `complete` on unchanged inputs.
 
@@ -56,10 +58,10 @@ frontier:
 | Phase | Steps | Dispatches | Contract | Frontier(s) |
 |---|---|---|---|---|
 | 0 | worktree + resume scan | spine | — | — |
-| A | 1–2 ground ∥ extract | grounding leaf (Explore-shaped) ∥ extraction leaf (frontier model) | phases/ground-extract.md | `10-brief.md`, `20-demands.yaml` |
+| A | 1–2 ground ∥ extract | grounding leaf (reader posture) ∥ extraction leaf (frontier model) | phases/ground-extract.md | `10-brief.md`, `20-demands.md` |
 | B | 3 enumerate | 4 lensed Sonnet leaves + 1 unlensed frontier strong author | phases/enumerate.md | `30-premises-<lens>.md` ×5 |
-| C | 4 answer | synthesis (Sonnet, low) → `shuffle-premises` (spine, CLI) → ~3 identical Sonnet-low answerers → classifier leaf → frontier cold pass | phases/answer.md | `40-premise-file.py`, `45-dispositions.yaml` |
-| D | 5–6 graph + gate | assembler leaf (frontier model) → gate leaf | phases/graph-gate.md | `spec_graph_<slug>.yaml` + `50-graph-digest.md`, `60-residue.yaml` |
+| C | 4 answer | synthesis (Sonnet, low) → `shuffle-premises` (spine, CLI) → ~3 identical Sonnet-low answerers → classifier leaf → frontier cold pass | phases/answer.md | `40-premise-file.py` + `40-premises.md`, `45-dispositions.md` |
+| D | 5–6 graph + gate | assembler leaf (frontier model) → gate leaf | phases/graph-gate.md | `spec_graph_<slug>.yaml` + `50-graph-digest.md`, `60-residue.md` |
 | §7 | 7 human seam | spine (AskUserQuestion) | — | `70-resolutions.md` |
 | E | 8 author | one frontier-model author leaf | phases/author.md | the suite + `80-author-digest.md` |
 | F | 9 verify | mechanical-gate leaf, blind conservation reader, cold reconciler (frontier model) | phases/verify.md | `90-verification.md` |

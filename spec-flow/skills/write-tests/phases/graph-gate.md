@@ -3,8 +3,8 @@
 ## Topology
 
 - Two leaves in sequence. The orchestrator routes the residue afterwards; it produces none of this. (Assembly was once spine-owned to "avoid serializing the graph out"; measurement showed the opposite — in-context assembly cost 20–30k tokens per run, and the one delegated assembly produced the best artifact of its day.)
-- **Assembler leaf** (frontier model): inputs = `10-brief.md`, `20-demands.yaml`, `45-dispositions.yaml`. Outputs: `spec_graph_<slug>.yaml` at its final committed path (the profile's `specGraph.artifacts` names the directory — it is a deliverable, not plumbing) plus `50-graph-digest.md`.
-- **Gate leaf**: inputs = the assembled artifact. Outputs: the gate record written into the artifact, plus `60-residue.yaml`.
+- **Assembler leaf** (frontier model): inputs = `10-brief.md`, `20-demands.md`, `45-dispositions.md`. Outputs: `spec_graph_<slug>.yaml` at its final committed path (the profile's `specGraph.artifacts` names the directory — it is a deliverable, not plumbing) plus `50-graph-digest.md`.
+- **Gate leaf**: inputs = the assembled artifact. Outputs: the gate record written into the artifact, plus `60-residue.md`.
 
 ## Charge — the assembler
 

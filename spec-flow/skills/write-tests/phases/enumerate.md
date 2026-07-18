@@ -2,7 +2,7 @@
 
 ## Topology
 
-- Five parallel leaves, dispatched only after `10-brief.md` is `complete`. Inputs for all: the intent+design doc, `10-brief.md`, `20-demands.yaml`. Each writes `30-premises-<lens>.md` (the strong author: `30-premises-author.md`).
+- Five parallel leaves, dispatched only after `10-brief.md` is `complete`. Inputs for all: the intent+design doc, `10-brief.md`, `20-demands.md`. Each writes `30-premises-<lens>.md` (the strong author: `30-premises-author.md`).
 - **4 lensed enumerators** (Sonnet), one lens each as a dispatch parameter: **dependency**, **input surface**, **lifecycle/state**, and a fourth from the design's danger zone — adversarial input, environment/resource, or concurrency; the profile's `conventions.dangerLens` is the standing default unless *this* change's danger zone is plainly elsewhere.
 - **1 strong author** (frontier model, unlensed) — not economizable: a blind A/B found the cross-cutting, grounding-dependent faults capability-dominated; the lenses miss them at any skill quality. If it genuinely cannot be spawned, run the best derivation available and record the degraded unknown-unknown region in `handoff.deviations`.
 - Dispatch prompt names the charge sections: every leaf takes "Charge — every enumerator" plus its role section.
@@ -23,7 +23,7 @@ def test_transient_enrich_error():
 
 A premise that names a mechanism-level fact — an exception class, a primitive's return shape, what existing code does — has left its lane: strip the fact into a **probe obligation** listed in your frontier and keep the situation. The one exception: a fact that belongs to the *not-yet-written target* (how it signals failure, what it returns) has no probe to run — that is demand #0's territory or a human fork, never a probe obligation. The fault menu is reality's to supply (phase E), not yours to guess. When a premise's outcome is a known judgment call, mark it `# fork:` so phase C routes it to the human regardless of how the answerers land — a silently-chosen branch otherwise leaves no trace it was ever a choice.
 
-Frontier inventory: `{premises: n, probe_obligations: n, forks_flagged: n}`, `inputs` echoing the brief's `flagged_facts` count (state which facts fed a premise of yours — phase F's conservation walks this edge), and `red_flags` for anything that smelled like a design hole while enumerating.
+Frontier inventory: `{premises: n, probe_obligations: n, forks_flagged: n}`, `inputs` echoing the brief's `flagged_facts` count (state which facts fed a premise of yours — phase F's conservation walks this edge), and a `## Red flags` entry for anything that smelled like a design hole while enumerating.
 
 ## Charge — a lensed enumerator
 
@@ -31,4 +31,4 @@ Your dispatch names your lens; hold it. Independence comes from perspective, not
 
 ## Charge — the strong author
 
-You are unlensed: the net under the unknown-unknown region, the complement of both the lenses and the gate rules — the graph rules compute the *known* pit shapes; you cover the unknown ones and the misclassified seams. You are also explicitly charged with the brief's edges: hunt for elements the grounding pass may have missed — a co-writer, a consumer, a surface the brief looks thin on — because an element absent from the graph is invisible to every rule, and this derivation is the only net under that hole. List every suspected brief gap in your frontier's `red_flags`.
+You are unlensed: the net under the unknown-unknown region, the complement of both the lenses and the gate rules — the graph rules compute the *known* pit shapes; you cover the unknown ones and the misclassified seams. You are also explicitly charged with the brief's edges: hunt for elements the grounding pass may have missed — a co-writer, a consumer, a surface the brief looks thin on — because an element absent from the graph is invisible to every rule, and this derivation is the only net under that hole. List every suspected brief gap in your frontier's `## Red flags` section.
