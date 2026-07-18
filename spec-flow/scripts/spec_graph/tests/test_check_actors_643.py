@@ -706,3 +706,32 @@ def test_whole_repo_diff_anchoring_survives_subdir_cwd(make_repo):
     assert r.returncode == 1
     assert "app/run.py" in r.stdout  # the finding still appears — diff anchored at the repo root
     assert "mod" in r.stdout
+
+
+# ── locale robustness (read + output) ────────────────────────────────────────
+# Forces a non-utf-8 (ascii) child locale on CPython/Linux: LC_ALL=C alone is coerced back to
+# C.UTF-8 by PEP 538, so PYTHONCOERCECLOCALE=0 + PYTHONUTF8=0 are needed to actually get ascii.
+_ASCII_LOCALE = {"LC_ALL": "C", "LANG": "C", "PYTHONCOERCECLOCALE": "0", "PYTHONUTF8": "0"}
+
+
+def test_non_utf8_locale_reads_and_prints_the_finding(make_repo):
+    """Under a non-utf-8 locale the gate still resolves a reach THROUGH a non-ASCII source file and
+    still PRINTS the (em-dash-bearing) finding — both sides of the locale class. This repo's own
+    source is full of non-ASCII (em-dashes, arrows), so an unpinned read drops a non-ASCII
+    intermediate's edges (breaking the reach → false-clean) and an unpinned print raises
+    UnicodeEncodeError on the finding text. run → driver (non-ASCII comment) → compaction (changed):
+    the reach exists ONLY through the non-ASCII intermediate, so a dropped edge would silence it."""
+    repo = make_repo()
+    repo.config(code_roots=["app"], entrypoint_stems=("run",))
+    repo.write("app/run.py", "from app.runtime import driver\nif __name__ == '__main__':\n    pass\n")
+    # The intermediate carries a non-ASCII byte (em-dash) — the resolver must still read it as utf-8.
+    repo.write("app/runtime/driver.py", "from . import compaction  # re-exec relocates the anchor — a hazard\n")
+    repo.write("app/runtime/compaction.py", "X = 1\n")
+    repo.graph(UNMODELLED_GRAPH)
+    base = repo.commit("base")
+    repo.write("app/runtime/compaction.py", "X = 2\n")  # only the leaf changes; reach runs via driver
+    repo.commit("change")
+    r = repo.run("spec_graph_x.yaml", base, env_extra=_ASCII_LOCALE)
+    assert r.returncode == 1  # NOT a crash (would be non-clean but with an empty/torn stdout)
+    assert "app/run.py" in r.stdout  # the reach through the non-ASCII intermediate was resolved …
+    assert "compaction" in r.stdout  # … and the em-dash-bearing finding printed without crashing

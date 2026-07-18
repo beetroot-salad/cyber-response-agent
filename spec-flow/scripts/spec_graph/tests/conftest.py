@@ -83,11 +83,18 @@ class Repo:
         return self._git("rev-parse", "HEAD").strip()
 
     def run(
-        self, graph_name: str, base: str, subdir: str | None = None
+        self,
+        graph_name: str,
+        base: str,
+        subdir: str | None = None,
+        env_extra: dict[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
         env = dict(os.environ)
         check = os.environ.get("CHECK_ACTORS_PATH", str(DEFAULT_CHECK_ACTORS))
         env["PYTHONPATH"] = str(SPEC_GRAPH_DIR) + os.pathsep + env.get("PYTHONPATH", "")
+        # `env_extra` overrides process env for the child — used to force a non-utf-8 locale (see the
+        # ascii-locale test), which is exactly the environment that makes an unpinned read/print raise.
+        env.update(env_extra or {})
         # `subdir` runs the tool from a subdirectory of the fixture (not the repo root), exactly as
         # this project's gate does (`cd defender && spec-graph …`). git resolves paths against the
         # process CWD, so the graph arg is made absolute here to stay readable from the subdir —

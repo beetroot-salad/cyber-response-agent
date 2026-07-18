@@ -274,6 +274,15 @@ def check(graph_path: Path, census: _Census, cfg: dict) -> list[str]:
 
 
 def main(argv: list[str]) -> int:
+    # Emit findings (and _warn lines) as utf-8 regardless of the ambient locale — the OUTPUT twin of
+    # the utf-8-pinned reads in `_read_texts`. Both the finding text and the WARN lines carry non-ASCII
+    # (em-dashes), so a non-utf-8 stdout/stderr — a C-locale runner, a Windows console — would raise
+    # UnicodeEncodeError on the very `print` that reports a finding. A gate that cannot emit its finding
+    # reads as clean to a caller that checks exit code but loses the traceback (the #588/#589 class,
+    # output side). reconfigure exists on the standard TextIOWrapper streams; guard for a replaced one.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
     base = "main"
     config: str | None = None
     args = []
