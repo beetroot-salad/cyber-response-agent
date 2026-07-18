@@ -42,8 +42,69 @@ from __future__ import annotations
 import ast
 import builtins
 from dataclasses import dataclass, field
+from pathlib import Path
 
 _BUILTIN_NAMES = frozenset(dir(builtins))
+
+
+class ScanBlind(RuntimeError):
+    """A file inside a gate's own scan scope could not be read or parsed, so the gate never
+    examined it. The gate cannot report on what it did not read, and must not report clean."""
+
+
+def read_and_parse(path: Path, rel: str) -> tuple[str, ast.Module]:
+    """Read and parse one file of a gate's scan scope, or raise ScanBlind.
+
+    Eight gates each carried their own copy of::
+
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+            tree = ast.parse(text)
+        except (OSError, SyntaxError):
+            continue
+
+    — the swallow-to-clean shape (#618/#621/#652): the file drops out of the corpus, the gate
+    scans the remainder, prints ``0 finding(s)`` and exits 0. A ban this gate exists to enforce
+    could sit in the skipped file and nothing would say so.
+
+    Raising (rather than the WARN-and-continue tier ``check_actors`` uses for its census) is
+    right *here* because the scope is this project's own first-party source. There is no
+    vendored or fixture population to tolerate: an unparseable file under ``defender/`` or
+    ``spec-flow/scripts/`` means ruff, mypy and pytest are already failing on it, so this
+    raises approximately never — and when it does, silence would be the wrong answer.
+
+    ``errors="replace"`` is preserved from the copies it replaces, so decoding still cannot
+    raise; a ``UnicodeDecodeError`` (a ``ValueError``, never an ``OSError`` — see
+    ``lint_unpinned_text_io``'s docstring) is therefore not a live case, and is not caught
+    here on the pretence that it is.
+    """
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        raise ScanBlind(
+            f"{rel}: could not be read ({exc.__class__.__name__}: {exc}) — it is inside this "
+            f"gate's scan scope, so skipping it would shrink the scanned corpus silently."
+        ) from exc
+    try:
+        tree = ast.parse(text)
+    except SyntaxError as exc:
+        raise ScanBlind(
+            f"{rel}: could not be parsed ({exc.__class__.__name__}: {exc}) — it is inside this "
+            f"gate's scan scope, so it was never examined. Fix the syntax and re-run; a file "
+            f"this gate cannot parse is a file it cannot clear."
+        ) from exc
+    return text, tree
+
+
+def read_source(path: Path, rel: str) -> str:
+    """The text-only twin of `read_and_parse`, for a gate that scans lines rather than an AST."""
+    try:
+        return path.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        raise ScanBlind(
+            f"{rel}: could not be read ({exc.__class__.__name__}: {exc}) — it is inside this "
+            f"gate's scan scope, so skipping it would shrink the scanned corpus silently."
+        ) from exc
 
 
 _SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)

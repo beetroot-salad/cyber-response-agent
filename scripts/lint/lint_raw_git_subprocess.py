@@ -40,6 +40,7 @@ import sys
 from pathlib import Path
 
 from _baseline import Finding, gate
+from _astlib import ScanBlind, read_and_parse
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCOPE = REPO_ROOT / "defender"
@@ -127,11 +128,7 @@ def _scan() -> list[Finding]:
         rel = path.relative_to(REPO_ROOT).as_posix()
         if rel in EXCLUDED_FILES:
             continue
-        try:
-            text = path.read_text(encoding="utf-8", errors="replace")
-            tree = ast.parse(text)
-        except (OSError, SyntaxError):
-            continue
+        text, tree = read_and_parse(path, rel)
         findings.extend(_scan_file(rel, tree, text.splitlines()))
     return findings
 
@@ -150,7 +147,14 @@ def main(argv: list[str]) -> int:
     if not SCOPE.is_dir():
         print(f"defender/ not found at {SCOPE}", file=sys.stderr)
         return 2
-    findings = _scan()
+    # A file inside the scan scope that could not be read or parsed never entered the corpus,
+    # so a violation could sit in it and this gate would still print 0 findings. Exit 2 — the
+    # gate could not run, which is categorically not "clean" (#618/#621/#652).
+    try:
+        findings = _scan()
+    except ScanBlind as exc:
+        print(f"lint_raw_git_subprocess: {exc}", file=sys.stderr)
+        return 2
     print(
         "Route git invocations through the defender._git facade (git / git_status / "
         "git_commit / git_worktree_* / GitError), not a hand-rolled subprocess call."
