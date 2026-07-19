@@ -93,7 +93,12 @@ def test_build_truncated_view_samples_records(tmp_path):
     view = ge.build_truncated_view(payload, "gather_raw/l-001/0.json", tmp_path)
     assert "200 records" in view
     assert view.count("sample[") == ge.PASSTHROUGH_SAMPLE_COUNT
-    assert "jq" in view
+    # The view must point the agent at a reducer its lane can actually RUN. It named `jq`
+    # until #540 dropped jq from the reader lanes' grants — a hint naming an ungranted
+    # program teaches a dead command, so the second assertion is the live half: it fails if
+    # a future change re-teaches a program the gate denies.
+    assert "defender-sql" in view
+    assert "jq" not in view
     assert str(tmp_path / "gather_raw/l-001/0.json") in view
 
 

@@ -487,6 +487,9 @@ def _plant_sentinel(run_dir: Path, docker: DockerFn, name: str) -> None:
     sentinel.write_text(token, encoding="utf-8")
     proc = docker(["docker", "exec", name, "cat", str(sentinel)])
     if proc.returncode != 0 or (proc.stdout or "").strip() != token:
+        # Deliberately NOT unlinked here: on this path `start_box` refuses, so there is no run to
+        # leave an artifact in, and the sentinel's presence is the only on-disk evidence that the
+        # probe actually wrote before it read back.
         raise BoxFault(
             f"the box could not read back the startup sentinel at {sentinel} — the run dir "
             "is not the same tree inside the box as it is on the host"
@@ -513,7 +516,16 @@ def _start_boxed(
         raise BoxFault(
             f"could not create the box {name}: {(created.stderr or '').strip()}"
         )
-    _plant_sentinel(run_dir, docker, name)
+    # The container EXISTS from here on, so every failure below must reap it. A sentinel that
+    # cannot be read back is the loud case: without this the box survives its own failed
+    # startup, holding a rw bind on the run dir, and — because it is `sleep infinity` and
+    # therefore RUNNING — the `_is_running` refusal above turns that leak into a permanent
+    # block on any retry of the same run id.
+    try:
+        _plant_sentinel(run_dir, docker, name)
+    except BaseException:
+        docker(["docker", "rm", "-f", name])   # rc ignored: we are already failing
+        raise
     return BoxExecutor(
         spec=spec, transport=_DockerTransport(name, spec), name=name, sandboxed=True,
     )

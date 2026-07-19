@@ -40,7 +40,7 @@ hooks). The gates:
   sole opener**, and every other granted program is `OPENS_NOTHING`, a claim its shape
   must earn by admitting no file-opening flag (`grep -f`, `wc --files0-from=`,
   `grep -r`; the flag classes are positive boolean allowlists built from `gnu_flags.py`,
-  #579). `grep`/`jq`/`head`/`tail`/`wc` are stdin-only pipe stages — `cat X | grep -n s`,
+  #579). `grep`/`head`/`tail`/`wc` are stdin-only pipe stages — `cat X | grep -n s`,
   never `grep -n s X` — and there is no `ls`/`cd` on any lane, which leaves the whole
   bash surface with no recursive-descent primitive and no path-opening program but `cat`.
   Each agent hangs its own grant builder on its own `AgentDefinition.bash_shapes`

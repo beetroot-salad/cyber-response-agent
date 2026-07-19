@@ -31,6 +31,7 @@ if __name__ == "__main__" and _VENV_PY.is_file() and Path(sys.executable) != _VE
 
 import argparse  # noqa: E402
 import asyncio  # noqa: E402
+import contextlib  # noqa: E402
 
 # Put the workspace root on sys.path so `defender.*` namespace imports resolve
 # whether this file is imported or run directly.
@@ -155,7 +156,15 @@ def main(argv: list[str]) -> int:
     # parent's SIGKILL). Nothing here catches the crash — teardown runs, then the exception
     # keeps propagating, which is what makes the reap-time scrub below unreachable on a run
     # that never finished.
+    #
+    # Teardown branches on whether the investigation finished, because a `BoxFault` raised from
+    # a `finally` REPLACES the exception in flight: a driver crash would reach the operator as
+    # "could not tear down the box" — the symptom — with the real cause demoted to `__context__`.
+    # So a reap failure is the headline on the clean path and best-effort on the crash path.
+    # Expressed with a flag rather than an `except`: this function must carry NO blanket handler,
+    # or the scrub's `RunTainted` below would have somewhere to land.
     box = box_mod.start_box(run_dir, DEFENDER_DIR)
+    investigation_ok = False
     try:
         summary = asyncio.run(driver.run_investigation(
             alert_path=RunPaths(run_dir).alert,
@@ -166,8 +175,13 @@ def main(argv: list[str]) -> int:
             model_name=model,
             box=box,
         ))
+        investigation_ok = True
     finally:
-        box_mod.stop_box(box)
+        if investigation_ok:
+            box_mod.stop_box(box)
+        else:
+            with contextlib.suppress(box_mod.BoxFault):
+                box_mod.stop_box(box)
 
     # The reap-time scrub, between the box's death and the FIRST consumer of the tree. The
     # ordering is the whole soundness argument: the box is gone, so there is no live writer and
