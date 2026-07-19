@@ -49,11 +49,13 @@ demands:
        already takes that path."},
      binds: ["loop", "frontmatter_parse.domain.distinguished[flood_flow]"]}
   - {id: b11_held_out_flood_false, kind: behavior, form: test,
-     outcome: {nl: "is_held_out_source on a flooded ground_truth.yaml returns False, joining
-       the site's existing YAMLError degrade; controls: held_out true → True, invalid YAML → False."},
-     rejected: [{nl: "fail-closed True on unparseable — the pinned YAMLError posture is False;
-       the flood joins the same malformed class rather than inventing a third posture"}],
-     binds: ["ground_truth_yaml.domain.distinguished[flood_flow]"]}
+     status: retired,
+     outcome: {nl: "RETIRED — the subject `curator.is_held_out_source` is deleted. The
+       learning loop never reads a ground-truth label, so there is no held-out
+       double-check left to harden against a flooded ground_truth.yaml. Contamination is
+       stopped at the enqueue boundary (`run_common.enqueue_learning`) by a PATH check that
+       opens no YAML, so this demand's failure mode cannot occur rather than being handled.
+       The #613 seam property it exercised is still discharged by b12-b14."}}
   - {id: b12_disposition_for_flood_none, kind: behavior, form: test,
      outcome: {nl: "disposition_for on a flooded source_refs.yaml returns None ('no ground
        truth' — the case is held), joining the site's YAMLError degrade; control: healthy file

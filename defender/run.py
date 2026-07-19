@@ -174,8 +174,7 @@ def main(argv: list[str]) -> int:
 
     if ns.no_learn:
         print("[run.py] --no-learn set; not enqueuing for learning", file=sys.stderr)
-    else:
-        _run.enqueue_learning(run_dir)
+    elif _run.enqueue_learning(run_dir, alert):
         print("[run.py] enqueued for off-process learning", file=sys.stderr)
 
     _run.visualize(run_dir)

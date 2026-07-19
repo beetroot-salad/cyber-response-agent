@@ -12,7 +12,6 @@ writable scratch space.
 ```
 {run_id}/
   alert.json              # input — copied by run.py, read-only for the agent
-  ground_truth.yaml       # optional — labeled-fixture marker copied by run.py; flags held-out cases so the loop suppresses queue appends
   investigation.md        # ORIENT/PLAN/GATHER/ANALYZE/REPORT log, dense invlang
                           #   (:V/:E/:H/:L/:R/:T blocks)
   report.md               # YAML frontmatter (case_id, disposition, confidence) + one paragraph
@@ -28,13 +27,16 @@ writable scratch space.
 
 - **`alert.json`** — verbatim copy of the input, written by run setup;
   read-only for the agent.
-- **`ground_truth.yaml`** — optional, present only for labeled fixtures.
-  `run.py` copies it in when a sibling `ground_truth.yaml` sits next to the
-  input alert. It carries a `held_out` flag plus the fixture's true
-  `disposition` / `class_axes` / `rationale`; the learning loop's persist
-  stage uses it to recognize held-out cases and **suppress queue appends**, so
-  eval / held-out runs don't feed the authored corpus (`learning/author/malicious_actor/run.py`,
-  `evals/held_out.py`). Absent for unlabeled runs.
+- **No ground-truth label is ever written into a run dir.** A labeled fixture's
+  `disposition` is an answer key and the run dir is inside the agent's readable
+  workspace, so labels stay beside their fixture
+  (`defender/fixtures/held-out/{slug}/ground_truth.yaml`) and are read there by
+  `evals/held_out.py`. The eval walks fixtures and locates runs by run-id
+  convention; the run dir carries no pointer back to a fixture and no label.
+  Contamination is stopped upstream instead: `run_common.enqueue_learning`
+  refuses to hand a held-out fixture run to the learning loop at all, and the
+  direct LEARN entrypoint refuses one whose `alert.json` is byte-identical to a
+  held-out fixture's.
 - **`investigation.md`** — the agent's audit trail, written across the loop.
   The human + machine debug surface where the agent shows its work. See
   `content/invlang.md` for the block grammar.

@@ -242,9 +242,6 @@ jobs:
       - name: Shippable-surface gate (env-agnostic discipline — baseline-ratcheted)
         run: defender/.venv/bin/python scripts/lint/lint_shippable_surface.py
 
-      - name: Ground-truth-leak gate (baseline-ratcheted)
-        run: defender/.venv/bin/python scripts/lint/lint_ground_truth_leak.py
-
       # For symbols this PR removed, the post-PR tree must hold no surviving reference.
       # Needs the merge-base with origin/main — hence `fetch-depth: 0` on the checkout
       # above. Fails CLOSED: exit 2 if the base ref or the merge-base is unavailable, so

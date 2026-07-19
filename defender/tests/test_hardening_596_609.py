@@ -39,7 +39,6 @@ from defender._frontmatter import (
     parse_frontmatter_or_none,
     split_frontmatter,
 )
-from defender.learning.author.curator import is_held_out_source
 from defender.learning.author.lessons.run import AuthorConfig, disposition_for
 from defender.learning.core.config import RunUnprocessable
 from defender.learning.core.directions import ADVERSARIAL
@@ -270,22 +269,10 @@ def test_d_b10_learn_normalize_disposition_flood_is_run_unprocessable(tmp_path):
         normalize_disposition(rp)
 
 
-def test_d_b11_held_out_flood_ground_truth_reads_not_held_out(tmp_path):
-    """d: b11 — a flooded ground_truth.yaml joins the site's existing YAMLError degrade
-    (→ False, "genuinely not held out"), instead of crashing the author drain. Controls:
-    a declared hold-out is True; plain invalid YAML is already False."""
-    # rejected: fail-closed True on unparseable — the pinned YAMLError posture is False;
-    # the flood joins the same malformed class rather than inventing a third posture.
-    runs = tmp_path / "runs"
-    bundle = runs / "l-1"
-    bundle.mkdir(parents=True)
-    gt = bundle / "ground_truth.yaml"
-    gt.write_text("held_out: true\n", encoding="utf-8")
-    assert is_held_out_source(runs, "l-1") is True
-    gt.write_text("a: [unclosed\n", encoding="utf-8")
-    assert is_held_out_source(runs, "l-1") is False
-    gt.write_text("[" * 3000, encoding="utf-8")
-    assert is_held_out_source(runs, "l-1") is False
+# d: b11 — DELETED. Its subject, `curator.is_held_out_source`, no longer exists: the
+# learning loop never sees a ground-truth label, so there is no held-out double-check to
+# harden. The #613 seam property it exercised (a flooded YAML degrades instead of
+# crashing) is still covered at the sibling sites, b12–b14 below.
 
 
 def test_d_b12_disposition_for_flood_source_refs_is_held(tmp_path):

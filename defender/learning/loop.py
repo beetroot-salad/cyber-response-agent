@@ -46,11 +46,9 @@ from defender.learning.core.directions import (  # noqa: E402
 from defender.learning.core.orchestrate import (  # noqa: E402
     author_drain,
     enqueue_for_learning,
-    is_held_out,
     lead_author_drain,
     learn_drain,
     main,
-    read_ground_truth,
     run_one,
     _directions_for,
     _prepare_engines_for,
@@ -86,7 +84,7 @@ from defender.learning.core.prologue import extract_case_entities  # noqa: E402
 __all__ = [
     "DEFAULT_PATHS", "RunUnprocessable", "StageAbort", "LoopPaths", "InProcessSubagents", "Subagents",
     "run_one", "author_drain", "lead_author_drain", "learn_drain", "enqueue_for_learning",
-    "main", "is_held_out", "read_ground_truth",
+    "main",
     "normalize_disposition", "strip_yaml_fence", "normalize_judge_yaml",
     "dump_oracle_doc",
     "validate_judge_doc", "validate_judge_benign_doc",

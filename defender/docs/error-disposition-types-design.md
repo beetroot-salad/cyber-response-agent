@@ -42,7 +42,7 @@ class RunUnprocessable(Exception): ...     # this run's data is bad; this run on
 old inverted hierarchy (the *more*-fatal type subclassing the *less*-fatal one,
 purely so one `except` caught both). The ~30 per-run sites
 (`core/validate.py`, `core/persist.py`, `core/runner.py`,
-`pipeline/oracle/sample.py`, and `read_ground_truth` / `_validate_judge_yaml` in
+`pipeline/oracle/sample.py`, and `_validate_judge_yaml` in
 `core/orchestrate.py`) re-tag `LoopError → RunUnprocessable`.
 
 **The stage boundary splits by unit-of-work** — the load-bearing decision

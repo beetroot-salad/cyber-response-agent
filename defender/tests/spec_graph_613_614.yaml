@@ -26,17 +26,22 @@ demands:
        docstring promises (raw reply embedded), not a bare RecursionError."},
      binds: ["interacts(oracle_parse->yaml_seam)"]}
   - {id: s4_ground_truth_flood_dead_letters, kind: behavior, form: test,
-     outcome: {nl: "read_ground_truth on a flooded ground_truth.yaml raises RunUnprocessable
-       (dead-letter the run) instead of crashing the drain — parity with its already-guarded
-       sibling at the judge-validate site."},
-     binds: ["interacts(orchestrate_gt->yaml_seam)"]}
+     status: retired,
+     outcome: {nl: "RETIRED — the subject `orchestrate.read_ground_truth` is deleted. The
+       learning loop parses no eval-fixture YAML at all, so a flooded ground_truth.yaml can
+       neither dead-letter nor crash a learning run. The failure mode is removed, not
+       handled: nothing in the loop opens the file."}}
   - {id: s5_held_out_walk_survives, kind: survival, form: test,
-     outcome: {nl: "held_out_runs: one corrupt ground_truth.yaml costs that one run's row
-       (warn to stderr), not the whole held-out report; the healthy sibling is found."},
-     binds: ["interacts(held_out_walk->yaml_seam)"]}
+     status: folded_into_s6,
+     outcome: {nl: "FOLDED INTO s6 — it pinned walk-survival on `evals/held_out.held_out_runs`,
+       a scan of RUN dirs for copied-in labels. The primary metric now walks FIXTURES through
+       `load_held_out_fixtures` (s6's subject, moved into held_out.py and shared with the
+       secondary metric), so both demands have one subject and one test. The survival property
+       is unchanged: one corrupt label costs one row, not the report."}}
   - {id: s6_secondary_fixtures_survive, kind: survival, form: test,
      outcome: {nl: "load_held_out_fixtures: the flooded fixture is skipped with a warn, the
-       healthy sibling loads — the same walk-survival property at the secondary eval."},
+       healthy sibling loads. Now the SOLE fixture walk — absorbs s5 — shared by the primary
+       and secondary metrics, reading labels from the fixture dir where they live."},
      binds: ["interacts(secondary_fixtures->yaml_seam)"]}
   - {id: s7_visualize_flood_none, kind: behavior, form: test,
      outcome: {nl: "The renderer's load_yaml treats a flooded run YAML like any malformed
@@ -62,9 +67,7 @@ structure:
     - id: tsv_flatten      # defender/_tsv.py flatten_cell — the one breaker set
   actors:
     - {id: oracle_parse,        frame: leg, provenance: code}   # oracle/sample.parse_lead_events
-    - {id: orchestrate_gt,      frame: leg, provenance: code}   # core/orchestrate.read_ground_truth
-    - {id: held_out_walk,       frame: leg, provenance: code}   # evals/held_out.held_out_runs + report
-    - {id: secondary_fixtures,  frame: leg, provenance: code}   # evals/secondary.load_held_out_fixtures
+    - {id: secondary_fixtures,  frame: leg, provenance: code}   # evals/held_out.load_held_out_fixtures (shared)
     - {id: visualize_shim,      frame: leg, provenance: code}   # scripts/visualize load_yaml
     - {id: lessons_fm,          frame: leg, provenance: code}
     - {id: lessons_env_retrieve, frame: leg, provenance: code}

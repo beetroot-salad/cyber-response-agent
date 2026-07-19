@@ -89,9 +89,7 @@ _reexec_into_venv_if_needed()
 import argparse
 import importlib.util
 import uuid
-from dataclasses import dataclass
 
-import yaml
 
 # ---------------------------------------------------------------------------
 # Sub-module imports — re-exported so test_secondary.py can access all
@@ -135,15 +133,21 @@ from _pipeline import (  # noqa: E402
 # The head disposition resolves through the SAME function the primary metric
 # uses (#591): one canonical grammar + enum filter, so primary and secondary
 # accept/reject identical reports by construction.
-from held_out import predicted_disposition  # noqa: E402
+# `HeldOutAlert` / `load_held_out_fixtures` live there too: one fixture walk, and the
+# label is read from the fixture dir by both metrics. Re-exported from this module
+# for existing callers.
+from held_out import (  # noqa: E402,F401
+    HeldOutAlert,
+    load_held_out_fixtures,
+    predicted_disposition,
+    warn_if_outside_the_net,
+)
 from _summary import (  # noqa: E402
     SecondarySummary,
     format_summary_md,
     write_summary,
 )
 
-from defender._yaml import safe_load  # noqa: E402
-from defender._run_paths import RunPaths  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -175,35 +179,6 @@ def _load_shared():
 # ---------------------------------------------------------------------------
 # Eligibility / fixtures
 # ---------------------------------------------------------------------------
-
-@dataclass
-class HeldOutAlert:
-    slug: str
-    alert_path: Path
-    ground_truth: dict
-
-
-def load_held_out_fixtures(fixtures_dir: Path) -> list[HeldOutAlert]:
-    out: list[HeldOutAlert] = []
-    for child in sorted(fixtures_dir.iterdir()):
-        if not child.is_dir():
-            continue
-        alert = RunPaths(child).alert
-        gt = child / "ground_truth.yaml"
-        if not (alert.is_file() and gt.is_file()):
-            continue
-        try:
-            gt_doc = safe_load(gt.read_text(encoding="utf-8")) or {}
-        except yaml.YAMLError as e:
-            # One corrupt ground_truth.yaml must cost that one fixture, not the eval (#613).
-            print(f"warn: {child.name}: unparseable ground_truth.yaml ({e}) — fixture skipped",
-                  file=sys.stderr)
-            continue
-        if not isinstance(gt_doc, dict) or gt_doc.get("held_out") is not True:
-            continue
-        out.append(HeldOutAlert(child.name, alert, gt_doc))
-    return out
-
 
 def eligible_for_secondary(alerts: list[HeldOutAlert]) -> list[HeldOutAlert]:
     return [a for a in alerts if a.ground_truth.get("disposition") in ELIGIBLE_DISPOSITIONS]
@@ -262,6 +237,7 @@ def run_secondary(
         write_summary(summary, out_dir)
         return summary
 
+    warn_if_outside_the_net(fixtures_dir)
     fixtures = load_held_out_fixtures(fixtures_dir)
     eligible = eligible_for_secondary(fixtures)
     summary.eligible = len(eligible)

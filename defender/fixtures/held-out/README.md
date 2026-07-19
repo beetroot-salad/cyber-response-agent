@@ -13,12 +13,38 @@ Each subdirectory contains:
   ground_truth.yaml   # disposition + class_axes + rationale, held_out: true
 ```
 
-The `held_out: true` flag is the load-bearing field. `defender/run.py`
-propagates `ground_truth.yaml` into the run dir alongside `alert.json`;
-`defender/learning/loop.py:run_one` checks `held_out` after persisting the
-run artifacts and **skips the queue append** — neither `defender_findings`
-nor (when wired) `actor_observations` from a held-out run ever land in
-`defender/learning/_pending/*.jsonl`.
+`ground_truth.yaml` **never leaves this directory.** `disposition` is an answer
+key and a run dir sits inside the agent's readable workspace, so nothing is
+copied there and no run records a pointer back to its fixture. Two consequences:
+
+- **Scoring** (`evals/held_out.py`) walks THESE dirs and locates each fixture's
+  run by run-id convention — the opposite direction from a scan over run dirs.
+  Launch a scored run as:
+
+  ```bash
+  python3 defender/run.py defender/fixtures/held-out/<slug>/alert.json \
+      --run-id <slug> --no-learn
+  ```
+
+- **Contamination** is stopped at the two entrances to learning, and both checks
+  are label-free:
+
+  - `run_common.enqueue_learning` refuses any alert **under this directory**, so a
+    held-out run is never handed to the learn worker. A PATH check — it holds even
+    if a label file is missing or malformed. `--no-learn` above makes the same
+    intent explicit at the call site.
+  - `loop.py <run_dir>` (the direct LEARN entrypoint) is handed a run dir and never
+    sees the fixture path, so it asks by **content** instead: `run_one` refuses when
+    the run dir's `alert.json` is byte-identical to a held-out fixture's
+    (`run_common.is_held_out_alert_copy`). The alert is a verbatim copy, so its
+    digest is the one surviving link back to the fixture.
+
+  Neither opens a `ground_truth.yaml`. The learning loop still has no notion of
+  ground truth — only of which inputs are eval members.
+
+Because the eval matches a run to its fixture by run-dir NAME, keep the fixture
+slugs anchored: a run dir claims a slug only when the slug is the whole name, a
+prefix, or a suffix at a `-` boundary (`evals/held_out.index_runs`).
 
 ## Class balance
 
@@ -53,7 +79,7 @@ harnesses depend on.
 ## Schema
 
 ```yaml
-held_out: true              # marker — load-bearing for the persist filter
+held_out: true              # marker — selects the fixture into the eval set
 disposition: benign | malicious | inconclusive
 class_axes:                 # optional taxonomy hints — not consumed by the loop
   vendor: wazuh | falco | suricata | sysmon | bind | modsecurity | auditd
