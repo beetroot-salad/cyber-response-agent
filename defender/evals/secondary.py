@@ -140,6 +140,7 @@ from held_out import (  # noqa: E402,F401
     HeldOutAlert,
     load_held_out_fixtures,
     predicted_disposition,
+    warn_if_outside_the_net,
 )
 from _summary import (  # noqa: E402
     SecondarySummary,
@@ -236,6 +237,7 @@ def run_secondary(
         write_summary(summary, out_dir)
         return summary
 
+    warn_if_outside_the_net(fixtures_dir)
     fixtures = load_held_out_fixtures(fixtures_dir)
     eligible = eligible_for_secondary(fixtures)
     summary.eligible = len(eligible)

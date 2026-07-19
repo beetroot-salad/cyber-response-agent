@@ -34,7 +34,9 @@ writable scratch space.
   `evals/held_out.py`. The eval walks fixtures and locates runs by run-id
   convention; the run dir carries no pointer back to a fixture and no label.
   Contamination is stopped upstream instead: `run_common.enqueue_learning`
-  refuses to hand a held-out fixture run to the learning loop at all.
+  refuses to hand a held-out fixture run to the learning loop at all, and the
+  direct LEARN entrypoint refuses one whose `alert.json` is byte-identical to a
+  held-out fixture's.
 - **`investigation.md`** — the agent's audit trail, written across the loop.
   The human + machine debug surface where the agent shows its work. See
   `content/invlang.md` for the block grammar.

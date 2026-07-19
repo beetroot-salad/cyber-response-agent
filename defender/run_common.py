@@ -12,6 +12,7 @@ that need them.
 from __future__ import annotations
 
 import datetime as _dt
+import hashlib
 import os
 import secrets
 import shutil
@@ -43,6 +44,20 @@ def resolve_runs_base() -> Path:
     return Path(os.environ.get("DEFENDER_RUNS_BASE", str(DEFAULT_RUNS_BASE)))
 
 
+# Every fixture in this repo is laid out as `{slug}/alert.json`, so the file STEM is the
+# constant "alert" and carries no information — the slug lives on the parent dir. A run id
+# built from the stem is therefore the same string for every fixture, which also means it
+# can never satisfy the eval's run-id convention (`evals/held_out.py:index_runs` matches a
+# run dir to its fixture by slug). Fall back to the parent's name in that case.
+_GENERIC_ALERT_STEMS = {"alert"}
+
+
+def _alert_label(alert: Path) -> str:
+    """The informative name for ``alert``: its stem, or its parent dir when the stem is
+    the layout-generic ``alert`` (see ``_GENERIC_ALERT_STEMS``)."""
+    return alert.parent.name if alert.stem in _GENERIC_ALERT_STEMS else alert.stem
+
+
 def materialize_run_dir(alert: Path, run_id: str | None) -> tuple[Path, str]:
     """Materialize the run dir and mint the run's trust token — `(run_dir, salt)`.
 
@@ -54,7 +69,7 @@ def materialize_run_dir(alert: Path, run_id: str | None) -> tuple[Path, str]:
     quarantine delimiters around untrusted data-source output. It is minted here, in
     process, and returned to the caller — it is never written to the run dir, and no
     consumer reads one back off disk. It comes from `secrets`, NOT from anything an
-    outsider can name: deriving it from `run_id` (`{utc_timestamp}-{alert.stem}`) would
+    outsider can name: deriving it from `run_id` (`{utc_timestamp}-{alert_label}`) would
     hand every delimiter to anyone who can predict the run id.
     """
     if not alert.is_file():
@@ -62,7 +77,7 @@ def materialize_run_dir(alert: Path, run_id: str | None) -> tuple[Path, str]:
     runs_base = resolve_runs_base()
     if run_id is None:
         ts = _dt.datetime.now(_dt.UTC).strftime("%Y%m%dT%H%M%SZ")
-        run_id = f"{ts}-{alert.stem}"
+        run_id = f"{ts}-{_alert_label(alert)}"
     run_dir = runs_base / run_id
     if run_dir.exists():
         sys.exit(f"run dir already exists: {run_dir}")
@@ -168,12 +183,56 @@ def is_held_out_fixture(alert: Path, fixtures_dir: Path = HELD_OUT_FIXTURES) -> 
 
     Both sides are resolved before comparing, so a symlink or ``..`` cannot walk out of
     the set and present a held-out alert as an ordinary one.
+
+    Only usable where the FIXTURE path is still in hand — i.e. at the ``run.py`` boundary.
+    Once a run dir exists it holds a *copy* at a path that says nothing about its origin;
+    ``is_held_out_alert_copy`` is the net for that side.
     """
     try:
         alert.resolve().relative_to(fixtures_dir.resolve())
     except ValueError:
         return False
     return True
+
+
+def held_out_alert_digests(fixtures_dir: Path = HELD_OUT_FIXTURES) -> set[str]:
+    """sha256 of every ``{slug}/alert.json`` under the held-out set.
+
+    Content, not labels: this opens the ALERTS — the same bytes the agent is handed as
+    input — and never a ``ground_truth.yaml``. No answer key is read and no ground-truth
+    vocabulary enters the caller, exactly as for ``is_held_out_fixture``; the only fact
+    derived is "this input is a member of the eval set".
+    """
+    out: set[str] = set()
+    if not fixtures_dir.is_dir():
+        return out
+    for child in sorted(fixtures_dir.iterdir()):
+        alert = RunPaths(child).alert
+        try:
+            out.add(hashlib.sha256(alert.read_bytes()).hexdigest())
+        except OSError:
+            # A fixture with no readable alert.json contributes no digest; it also
+            # cannot have produced a run, so there is nothing to fail closed about.
+            continue
+    return out
+
+
+def is_held_out_alert_copy(alert: Path, fixtures_dir: Path = HELD_OUT_FIXTURES) -> bool:
+    """Whether ``alert`` is byte-identical to some held-out fixture's ``alert.json``.
+
+    The run-dir-side twin of ``is_held_out_fixture``. A run dir deliberately carries no
+    provenance back to its fixture — no label, no pointer — so a consumer holding only a
+    run dir cannot ask a PATH question. It can still ask an IDENTITY one: the alert was
+    copied verbatim by ``materialize_run_dir``, so the digest is the surviving link.
+
+    This is what lets the direct LEARN entrypoint (``loop.py <run_dir>``, which never sees
+    the fixture path that ``enqueue_learning`` checks) refuse a held-out case too.
+    """
+    try:
+        digest = hashlib.sha256(alert.read_bytes()).hexdigest()
+    except OSError:
+        return False
+    return digest in held_out_alert_digests(fixtures_dir)
 
 
 def enqueue_learning(run_dir: Path, alert: Path) -> bool:

@@ -29,7 +29,9 @@ lessons that beat the judge rise to the top of the corpus.
    under-investigated a *real attack* the actor mislabeled as benign.
    Promoting on survival injects false-negative risk into the actor's
    learning. Gate promotion on **confirmed-correct**: ground-truth-benign
-   (held-out runs carry `ground_truth.yaml`) or a defender FP-finding that
+   (held-out fixtures carry `ground_truth.yaml` — the label stays in
+   `defender/fixtures/held-out/`, read there by the eval and never copied
+   into a run dir) or a defender FP-finding that
    survived author curation, treated as provisional otherwise.
 
 **Design.** See `defender/docs/lessons-success-scoring.md`

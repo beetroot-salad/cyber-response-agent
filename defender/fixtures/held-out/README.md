@@ -26,14 +26,25 @@ copied there and no run records a pointer back to its fixture. Two consequences:
       --run-id <slug> --no-learn
   ```
 
-- **Contamination** is stopped at the enqueue boundary, not inside the learning
-  loop. `run_common.enqueue_learning` refuses any alert under this directory, so
-  a held-out run is never handed to the learn worker and no `defender_findings`
-  or `actor_observations` from it can reach `defender/learning/_pending/*.jsonl`.
-  That check is on the PATH, so it holds even if a label file is missing or
-  malformed — and `--no-learn` above makes the intent explicit at the call site.
+- **Contamination** is stopped at the two entrances to learning, and both checks
+  are label-free:
 
-The learning loop itself has no notion of ground truth at all.
+  - `run_common.enqueue_learning` refuses any alert **under this directory**, so a
+    held-out run is never handed to the learn worker. A PATH check — it holds even
+    if a label file is missing or malformed. `--no-learn` above makes the same
+    intent explicit at the call site.
+  - `loop.py <run_dir>` (the direct LEARN entrypoint) is handed a run dir and never
+    sees the fixture path, so it asks by **content** instead: `run_one` refuses when
+    the run dir's `alert.json` is byte-identical to a held-out fixture's
+    (`run_common.is_held_out_alert_copy`). The alert is a verbatim copy, so its
+    digest is the one surviving link back to the fixture.
+
+  Neither opens a `ground_truth.yaml`. The learning loop still has no notion of
+  ground truth — only of which inputs are eval members.
+
+Because the eval matches a run to its fixture by run-dir NAME, keep the fixture
+slugs anchored: a run dir claims a slug only when the slug is the whole name, a
+prefix, or a suffix at a `-` boundary (`evals/held_out.index_runs`).
 
 ## Class balance
 

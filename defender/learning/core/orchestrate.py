@@ -42,6 +42,7 @@ from defender.learning.core.config import (
 from defender import _git
 from defender._git import GitError
 from defender._io import write_atomic
+from defender.run_common import is_held_out_alert_copy
 from defender.learning.author import shared as _author_shared
 from defender.learning.core.directions import BY_NAME, Direction
 from defender.learning.author.branch import AuthorBranch, BranchError
@@ -387,8 +388,23 @@ def run_one(
         agents = InProcessSubagents()
 
     run_id = run_dir.name
-    _log(f"run_id={run_id} step=normalize")
     src = RunPaths(run_dir)
+    # The contamination boundary's second half. `run_common.enqueue_learning` refuses a
+    # held-out fixture at the `run.py` call site, where the FIXTURE path is still in hand;
+    # nothing reaches the drain for one. But this function is also the direct entrypoint
+    # (`loop.py <run_dir>`), which is handed a run dir and never sees that path — so the
+    # path check cannot run here and, before this guard, a held-out case learned by hand
+    # appended straight into the corpus it is scored against.
+    #
+    # Asked by CONTENT, not by label: the alert is a verbatim copy, so its digest still
+    # identifies the fixture even though the run dir carries no provenance. No
+    # ground_truth.yaml is opened and the loop still has no notion of ground truth — it
+    # only knows which inputs are eval members.
+    if is_held_out_alert_copy(src.alert):
+        _log(f"run_id={run_id} alert is a held-out eval fixture — REFUSING to learn "
+             f"(its findings must never feed a corpus it is scored against)")
+        return 0
+    _log(f"run_id={run_id} step=normalize")
     disposition = normalize_disposition(src.report)
     directions = _directions_for(disposition)
     _prepare_engines_for(directions)

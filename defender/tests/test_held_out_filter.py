@@ -20,6 +20,7 @@ import pytest
 
 REAL_REPO = Path(__file__).resolve().parents[2]
 
+from defender import run_common  # type: ignore[import-not-found]
 from defender.learning import loop  # type: ignore[import-not-found]
 
 
@@ -94,8 +95,6 @@ def _complete_run_dir(tmp_path: Path, disposition: str) -> Path:
 def test_held_out_fixture_is_recognised_by_path(tmp_path: Path) -> None:
     """The net is a PATH check — it opens no label file, so it cannot be defeated by a
     missing, malformed, or absent-key ground_truth.yaml."""
-    from defender import run_common
-
     real = run_common.HELD_OUT_FIXTURES / "m05-lsass-access" / "alert.json"
     assert run_common.is_held_out_fixture(real) is True
     assert run_common.is_held_out_fixture(tmp_path / "alert.json") is False
@@ -104,8 +103,6 @@ def test_held_out_fixture_is_recognised_by_path(tmp_path: Path) -> None:
 def test_held_out_fixture_recognised_without_any_label_file(tmp_path: Path) -> None:
     """Fail-closed: containment alone decides. A held-out fixture with its label
     deleted is still refused."""
-    from defender import run_common
-
     fake_set = tmp_path / "held-out"
     (fake_set / "m01").mkdir(parents=True)
     alert = fake_set / "m01" / "alert.json"
@@ -116,8 +113,6 @@ def test_held_out_fixture_recognised_without_any_label_file(tmp_path: Path) -> N
 def test_symlink_cannot_walk_out_of_the_held_out_set(tmp_path: Path) -> None:
     """Containment is decided on the RESOLVED path, so a symlink pointing into the
     held-out set is still recognised as held-out."""
-    from defender import run_common
-
     fake_set = tmp_path / "held-out"
     (fake_set / "m01").mkdir(parents=True)
     real = fake_set / "m01" / "alert.json"
@@ -130,8 +125,6 @@ def test_symlink_cannot_walk_out_of_the_held_out_set(tmp_path: Path) -> None:
 def test_enqueue_refuses_held_out_fixture(tmp_path: Path, capsys) -> None:
     """The boundary: a held-out fixture run is never handed to the learn worker, so no
     stage downstream has to know what ground truth is."""
-    from defender import run_common
-
     run_dir = _complete_run_dir(tmp_path, "benign")
     alert = run_common.HELD_OUT_FIXTURES / "m05-lsass-access" / "alert.json"
     assert run_common.enqueue_learning(run_dir, alert) is False
@@ -148,8 +141,6 @@ def test_net_is_narrow(tmp_path: Path) -> None:
     injection seam, and faking it would mean a `monkeypatch.setattr` site this project
     ratchets against.
     """
-    from defender import run_common
-
     assert run_common.is_held_out_fixture(tmp_path / "alert.json") is False
     ordinary = run_common.DEFENDER_DIR / "fixtures" / "gtest-01-auth" / "alert.json"
     assert ordinary.is_file(), "control must point at a real non-held-out fixture"
@@ -189,6 +180,39 @@ def test_run_one_enqueues_for_authoring_even_when_a_leg_fails(tmp_path: Path, mo
         loop.run_one(run_dir, paths=paths, agents=agents)
     marker = paths.author_queue_dir / f"{run_dir.name}.json"
     assert marker.exists(), "a failed leg must still enqueue the run for authoring"
+
+
+def test_direct_learn_refuses_a_held_out_run_dir(tmp_path: Path) -> None:
+    """The other half of the boundary. `loop.py <run_dir>` never sees the fixture path
+    `enqueue_learning` checks, so the path net cannot reach it — a held-out case learned
+    by hand used to append straight into the corpus it is scored against.
+
+    Asked by CONTENT: the run dir's alert.json is a verbatim copy of the fixture's, so its
+    digest still identifies the fixture even though the run dir carries no provenance.
+    """
+    run_dir = _complete_run_dir(tmp_path, "benign")
+    fixture_alert = run_common.HELD_OUT_FIXTURES / "m05-lsass-access" / "alert.json"
+    (run_dir / "alert.json").write_bytes(fixture_alert.read_bytes())
+    paths = loop.LoopPaths(repo_root=tmp_path)
+
+    # No agents needed: the refusal must fire before any actor/oracle/judge work.
+    rc = loop.run_one(run_dir, paths=paths, agents=FakeSubagents(judge="outcome: caught\n"))
+    assert rc == 0
+    assert not paths.pending_file.exists(), "a held-out run must append nothing"
+    assert not paths.author_queue_dir.exists(), "a held-out run must not be queued to author"
+
+
+def test_direct_learn_still_learns_an_ordinary_run(tmp_path: Path, monkeypatch) -> None:
+    """Control for the digest net: an ordinary alert is untouched by it, so the refusal
+    cannot quietly starve the learning loop."""
+    monkeypatch.setenv("FIREWORKS_API_KEY", "test-not-used")
+    run_dir = _complete_run_dir(tmp_path, "malicious")
+    agents = FakeSubagents(story_benign="SKIP: not ours\n")
+    paths = loop.LoopPaths(repo_root=tmp_path)
+
+    assert loop.run_one(run_dir, paths=paths, agents=agents) == 0
+    marker = paths.author_queue_dir / f"{run_dir.name}.json"
+    assert marker.exists(), "an ordinary run must still reach the author queue"
 
 
 def test_directions_for_dispatch() -> None:
