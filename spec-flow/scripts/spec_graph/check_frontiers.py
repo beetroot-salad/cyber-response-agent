@@ -13,8 +13,10 @@ What is checked, per `*.md` file in the frontiers directory:
 * frontmatter parses, `status` is in the closed vocabulary, `phase` is present,
   `inventory` is a mapping of category → integer count;
 * every `inputs` entry names an existing sibling file, and its `inventory_echo` equals
-  the producer's actual `inventory` — a mismatch is the consumer trusting a memory of
-  the count (the one conservation break in the contract's smoke runs);
+  the producer's actual `inventory` — a mismatch means the two declarations disagree,
+  and the count must be recomputed from the payload content, never resolved by copying
+  either side (in the contract's smoke runs the break was a producer misdeclaring,
+  caught by the consumer's computed echo);
 * the `## Digest` section exists and holds ≤15 lines (the leaf's inline return, verbatim);
 * the dispositions sum rule: an inventory carrying `consensus`/`forks`/`silent_branches`/
   `drops` must sum to the `premises` count it echoed — every premise leaves with a
@@ -121,17 +123,39 @@ def check(directory: Path) -> list[str]:
                 f"drift runs long, not short."
             )
         echoed_premises: int | None = None
+        raw_inputs = f.meta.get("inputs")
+        for entry in (raw_inputs if isinstance(raw_inputs, list) else []):
+            # The `inputs` property keeps only mappings — a bare string (`inputs:
+            # [10-brief.md]`, the natural shorthand) would otherwise vanish from
+            # reconciliation entirely: no echo check, no finding, no staleness.
+            if not isinstance(entry, dict):
+                findings.append(
+                    f"{name}: input entry {entry!r} is not a mapping — each input must be a "
+                    f"mapping with `path` + `inventory_echo`, or its echo is never reconciled."
+                )
         for inp in f.inputs:
-            ref = str(inp.get("path", ""))
+            ref = str(inp.get("path") or "")
+            if not ref:
+                # A pathless entry has no producer to reconcile against — and in the resume
+                # scan it would resolve to the directory itself (false STALE on every write).
+                findings.append(
+                    f"{name}: input entry carries no `path` — the echo has no producer to "
+                    f"reconcile against."
+                )
+                continue
+            # `./10-brief.md` and `frontiers/10-brief.md` name the same sibling: reconcile by
+            # the bare filename, but keep the raw ref in messages so the author sees their own
+            # spelling. A decorated ref that skipped normalization skipped the echo check too.
+            norm = Path(ref).name
             echo = inp.get("inventory_echo")
-            producer = frontiers.get(ref)
+            producer = frontiers.get(norm)
             if producer is None:
                 # Only a numeric-prefixed name claims to be a sibling in this chain. Anything
                 # else — the design doc, an issue thread, a sidecar payload — is an external
                 # or non-frontier input with no frontmatter to reconcile against.
-                if re.match(r"^\d+-", ref) and ref.endswith(".md"):
+                if re.match(r"^\d+-", norm) and norm.endswith(".md"):
                     findings.append(f"{name}: input `{ref}` names no frontier in {directory.name}/.")
-                elif re.match(r"^\d+-", ref) and not (directory / ref).exists():
+                elif re.match(r"^\d+-", norm) and not (directory / ref).exists():
                     findings.append(f"{name}: input `{ref}` does not exist.")
                 continue
             if producer.error:
@@ -150,14 +174,27 @@ def check(directory: Path) -> list[str]:
                     }
                     findings.append(
                         f"{name}: inventory_echo for `{ref}` disagrees with its actual inventory "
-                        f"— (echoed, actual) per category: {diff}. A consumer trusting its memory "
-                        f"of a count is the conservation break this check exists for."
+                        f"— (echoed, actual) per category: {diff}. The two declarations disagree: "
+                        f"recompute the count from the payload content — never resolve the "
+                        f"mismatch by copying either side."
                     )
             else:
                 findings.append(f"{name}: input `{ref}` carries no `inventory_echo` mapping.")
         # Dispositions sum rule: consensus + forks + silent_branches + drops == premises in.
-        if _DISPOSITIONS <= set(f.inventory) and echoed_premises is not None:
-            total = sum(f.inventory[k] for k in _DISPOSITIONS)
+        # ANY present disposition key engages the rule (phases/answer.md mandates all four):
+        # requiring the full set let a partial inventory (`drops` omitted) skip the sum
+        # entirely — exactly the shape a silent drop hides in.
+        present = _DISPOSITIONS & set(f.inventory)
+        if present and echoed_premises is not None:
+            for missing in sorted(_DISPOSITIONS - present):
+                findings.append(
+                    f"{name}: inventory carries dispositions but omits `{missing}` — all four "
+                    f"disposition categories are mandated, and a missing one is an unrecorded "
+                    f"exit for a premise."
+                )
+            # Non-int counts were already flagged above (counts are computed, never recalled) —
+            # skip them here rather than lose the whole report behind a TypeError mid-sum.
+            total = sum(v for k in sorted(present) if isinstance(v := f.inventory[k], int))
             if total != echoed_premises:
                 findings.append(
                     f"{name}: dispositions sum to {total} but {echoed_premises} premises were "
@@ -183,7 +220,13 @@ def resume(directory: Path) -> int:
             state.append(str(f.status).upper())
         mtime = f.path.stat().st_mtime
         for inp in f.inputs:
-            src = directory / str(inp.get("path", ""))
+            ref = str(inp.get("path") or "")
+            if not ref:
+                # `directory / ""` is the directory itself, whose mtime bumps on every sibling
+                # write — a pathless entry would false-STALE the chain and move the re-entry
+                # point. check() flags the entry; the scan just skips it.
+                continue
+            src = directory / ref
             if src.exists() and src.stat().st_mtime > mtime:
                 state.append(f"STALE (older than {src.name})")
                 break
@@ -200,7 +243,13 @@ def resume(directory: Path) -> int:
     if first_anomaly:
         print(f"\n[resume] re-enter at `{first_anomaly}` — first blocked/stale/unparseable frontier.")
     elif frontiers:
-        print(f"\n[resume] chain is complete through {list(frontiers)[-1]}; proceed to the next phase.")
+        # The scan walks only files that EXIST — a run that died after writing 2 of 5
+        # same-phase frontiers has no anomaly on disk, so completeness here is bounded.
+        print(
+            f"\n[resume] chain is complete through {list(frontiers)[-1]} — this scan sees only "
+            f"frontiers already written; cross-check the phase map for frontiers not yet "
+            f"written, then proceed to the next phase."
+        )
     else:
         print("\n[resume] no frontiers yet — start at phase A.")
     return 0

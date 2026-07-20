@@ -78,7 +78,13 @@ def _cited(entry: dict) -> list[str]:
 
 def check_spend_points(path: Path, graph: dict | None = None) -> list[str]:
     graph = _load(path) if graph is None else graph
-    verdicts = {c.get("id"): c.get("verdict") for c in graph.get("claims", []) or []}
+    # Ids coerced with str() to match `_cited`, which stringifies every citation — an
+    # int-keyed ledger made `cites: [12]` dangle against the claim it names.
+    verdicts = {
+        str(c.get("id")): c.get("verdict")
+        for c in graph.get("claims", []) or []
+        if c.get("id") is not None
+    }
     findings: list[str] = []
 
     def resolve(where: str, entry: dict, required: str | None = None) -> None:
@@ -106,9 +112,15 @@ def check_spend_points(path: Path, graph: dict | None = None) -> list[str]:
         resolve(f"gate.evaluated[{rule}]", e, need)
     for e in gate.get("pre_discharged", []) or []:
         resolve(f"gate.pre_discharged[{e.get('element')}]", e, "a pre-discharge credit")
-    for section in ("obligations", "holes"):
-        for e in gate.get(section, []) or []:
-            resolve(f"gate.{section}[{e.get('element')}]", e)
+    for e in gate.get("obligations", []) or []:
+        resolve(f"gate.obligations[{e.get('element')}]", e)
+    for e in gate.get("holes", []) or []:
+        # A hole that spawned a demand (`resolved_to`) closes through that demand; one
+        # closed by judgment alone ("unreachable", "out of scope") is a spend-point —
+        # rules.md: it closes only by citation.
+        need = ("a hole resolved with no spawned demand"
+                if e.get("resolution") and not e.get("resolved_to") else None)
+        resolve(f"gate.holes[{e.get('element')}]", e, need)
     for d in graph.get("demands", []) or []:
         if d.get("form") == "waiver":
             resolve(f"demand {d.get('id')}", d, "a waiver's rationale")
@@ -157,20 +169,28 @@ def main(argv: list[str]) -> int:
     cfg = _config.load(config)
     paths = [Path(a) for a in args] or _config.artifacts(cfg)
     if not paths:
+        # 2, not 0: the whole toolchain's contract (verify.md) is 2 = could not look —
+        # a run with nothing to check must not read as clean.
         print("check_claims: no spec_graph_*.yaml found", file=sys.stderr)
-        return 0
+        return 2
     findings: list[str] = []
     spend: list[str] = []
+    unreadable: list[Path] = []
     for p in paths:
         # Parsed ONCE and handed to both passes: the two used to load the same graph
-        # independently, doubling every read and parse.
+        # independently, doubling every read and parse. Both passes run INSIDE the try —
+        # nested wrong shapes (a string where a mapping belongs) surface as AttributeError
+        # mid-walk, the same could-not-read class as a bad top level.
         try:
             graph = _load(p)
-        except (OSError, yaml.YAMLError, TypeError) as e:
+            findings.extend(check(p, graph))
+            spend.extend(check_spend_points(p, graph))
+        except (OSError, yaml.YAMLError, TypeError, AttributeError) as e:
+            # Collected, not returned on: bailing here threw away every finding the
+            # already-checked graphs produced.
             print(f"check_claims: cannot read {p}: {e.__class__.__name__}: {e}", file=sys.stderr)
-            return 2
-        findings.extend(check(p, graph))
-        spend.extend(check_spend_points(p, graph))
+            unreadable.append(p)
+            continue
     for f in findings:
         print(f"  INSTRUMENT {f}")
     for f in spend:
@@ -178,6 +198,8 @@ def main(argv: list[str]) -> int:
     # Counted by kind: an instrument mismatch and an uncited spend-point are different slips.
     print(f"\n[check_claims] {len(findings)} claim-instrument finding(s), {len(spend)} "
           f"spend-point citation finding(s) over {len(paths)} graph(s).")
+    if unreadable:
+        return 2
     return 1 if findings or spend else 0
 
 

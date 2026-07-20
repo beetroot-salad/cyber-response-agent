@@ -52,6 +52,21 @@ def _vocab(findings: list[str], where: str, field: str, value, allowed: set) -> 
         findings.append(f"{where}: `{field}: {value}` is not one of {sorted(allowed)}.")
 
 
+def _mappings(findings: list[str], n: str, label: str, entries) -> list[dict]:
+    """A linter lints the malformed shape instead of dying on it: a bare string (or any
+    non-mapping) where schema.md declares a mapping entry is a SLOT finding naming the
+    entry — uncaught, it surfaced as an AttributeError traceback behind exit 1."""
+    kept: list[dict] = []
+    for entry in entries or []:
+        if isinstance(entry, dict):
+            kept.append(entry)
+        else:
+            findings.append(
+                f"{n}: {label} entry `{entry}` is a {type(entry).__name__}, not a mapping."
+            )
+    return kept
+
+
 def check(path: Path) -> list[str]:
     graph = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     if not isinstance(graph, dict):
@@ -69,7 +84,7 @@ def check(path: Path) -> list[str]:
             findings.append(f"{n}: `{field}` is missing — write-code-from-spec's gate reads it.")
 
     demand_ids: set[str] = set()
-    for d in graph.get("demands", []) or []:
+    for d in _mappings(findings, n, "demands", graph.get("demands")):
         did = d.get("id")
         where = f"{n}:{did or '<no-id>'}"
         if not did:
@@ -80,8 +95,14 @@ def check(path: Path) -> list[str]:
         _vocab(findings, where, "kind", d.get("kind"), _KINDS)
         form = d.get("form", "test")
         _vocab(findings, where, "form", form, _FORMS)
-        if not d.get("binds"):
+        binds = d.get("binds")
+        if not binds:
             findings.append(f"{where}: `binds` is empty — a demand must bind ≥1 address.")
+        elif not isinstance(binds, list):
+            # A truthy scalar passed the emptiness check, then check_gate iterated the
+            # string per-character — binds must be a list of addresses.
+            findings.append(f"{where}: `binds` must be a list of addresses, not a "
+                            f"{type(binds).__name__}.")
         if "executable" in d and d["executable"] != (form == "test"):
             findings.append(
                 f"{where}: `executable: {d['executable']}` contradicts form `{form}` — it is "
@@ -107,11 +128,11 @@ def check(path: Path) -> list[str]:
     structure = graph.get("structure", {}) or {}
     for k in set(structure) - _STRUCTURE:
         findings.append(f"{n}: unknown structure key `{k}`.")
-    for a in structure.get("actors", []) or []:
+    for a in _mappings(findings, n, "actors", structure.get("actors")):
         where = f"{n}:actor {a.get('id', '<no-id>')}"
         _vocab(findings, where, "frame", a.get("frame"), _FRAMES)
         _vocab(findings, where, "provenance", a.get("provenance"), _PROVENANCE)
-    for b in structure.get("boundaries", []) or []:
+    for b in _mappings(findings, n, "boundaries", structure.get("boundaries")):
         where = f"{n}:boundary {b.get('id', '<no-id>')}"
         _vocab(findings, where, "provenance", b.get("provenance"), _PROVENANCE)
         facets = b.get("facets")
@@ -137,7 +158,22 @@ def check(path: Path) -> list[str]:
             fv = domain.get("falsy_valid")
             if fv is not None and not isinstance(fv, bool):
                 findings.append(f"{where}.domain: `falsy_valid: {fv}` must be true|false.")
+            # The YAML scalar trap: an unquoted `off`/`no`/`true`/`null` member parses as
+            # bool/None, and check_gate's address matching stringifies it to `True`/`None` —
+            # the cell the author meant can then never be bound. Quote the intended string.
+            for v in domain.get("distinguished", []) or []:
+                if isinstance(v, bool) or v is None:
+                    findings.append(
+                        f"{where}.domain: distinguished member `{v}` parsed as YAML "
+                        f"{type(v).__name__} — quote the intended string."
+                    )
             for alt in domain.get("documented_alternatives", []) or []:
+                av = (alt or {}).get("value")
+                if isinstance(av, bool) or av is None:
+                    findings.append(
+                        f"{where}.domain: alternative value `{av}` parsed as YAML "
+                        f"{type(av).__name__} — quote the intended string."
+                    )
                 cv = (alt or {}).get("crosses_validation")
                 if cv not in (True, False, "unknown"):
                     findings.append(
@@ -153,13 +189,13 @@ def check(path: Path) -> list[str]:
                     f"{where}.access[{via}]: `constraints` must be a list or `unknown` "
                     f"(an explicit confession, never a silent null)."
                 )
-    for e in structure.get("interacts", []) or []:
+    for e in _mappings(findings, n, "interacts", structure.get("interacts")):
         where = f"{n}:interacts({e.get('from')}->{e.get('to')})"
         _vocab(findings, where, "mode", e.get("mode"), _MODES)
         _vocab(findings, where, "provenance", e.get("provenance"), _PROVENANCE)
         if not e.get("via"):
             findings.append(f"{where}: no `via` — the per-repo vocabulary is open, empty is not.")
-    for e in structure.get("drives", []) or []:
+    for e in _mappings(findings, n, "drives", structure.get("drives")):
         where = f"{n}:drives({e.get('from')}->{e.get('to')})"
         _vocab(findings, where, "multiplicity", e.get("multiplicity"), _MULTIPLICITY)
         _vocab(findings, where, "provenance", e.get("provenance"), _PROVENANCE)
@@ -177,21 +213,29 @@ def check(path: Path) -> list[str]:
     gate = graph.get("gate", {}) or {}
     for k in set(gate) - _GATE:
         findings.append(f"{n}: unknown gate key `{k}`.")
-    for entry in gate.get("evaluated", []) or []:
+    for entry in _mappings(findings, n, "gate.evaluated", gate.get("evaluated")):
         where = f"{n}:gate.evaluated"
         _vocab(findings, where, "rule", entry.get("rule"), _RULES)
         if not isinstance(entry.get("fired"), bool):
             findings.append(f"{where}: {entry.get('rule')} `fired: {entry.get('fired')}` "
                             f"must be true|false.")
     for section, ref_field in (("obligations", "discharged_by"), ("pre_discharged", "by")):
-        for entry in gate.get(section, []) or []:
+        for entry in _mappings(findings, n, f"gate.{section}", gate.get(section)):
             _vocab(findings, f"{n}:gate.{section}", "rule", entry.get("rule"), _RULES)
             ref = entry.get(ref_field)
-            if ref and ref not in demand_ids:
+            if not ref:
+                # rules.md declares the shape WITH the pointer — a bare entry still counts
+                # as "the gate saw this element" in check_gate, so an entry pointing at no
+                # demand is a silencer, not a discharge.
+                findings.append(
+                    f"{n}:gate.{section}: entry for `{entry.get('element')}` carries no "
+                    f"`{ref_field}` — the shape requires the demand pointer."
+                )
+            elif ref not in demand_ids:
                 findings.append(
                     f"{n}:gate.{section}: `{ref_field}: {ref}` names no demand in this graph."
                 )
-    for entry in gate.get("holes", []) or []:
+    for entry in _mappings(findings, n, "gate.holes", gate.get("holes")):
         _vocab(findings, f"{n}:gate.holes", "rule", entry.get("rule"), _RULES)
         rt = entry.get("resolved_to")
         if rt and rt not in demand_ids:
@@ -220,15 +264,23 @@ def main(argv: list[str]) -> int:
         print("check_lint: no spec_graph_*.yaml found", file=sys.stderr)
         return 2
     all_findings: list[str] = []
+    unreadable: list[Path] = []
     for p in paths:
         try:
             all_findings.extend(check(p))
-        except (OSError, yaml.YAMLError, TypeError) as e:
+        # AttributeError is the backstop for nested wrong shapes the per-list tolerance
+        # above does not cover — the same could-not-read class as a bad top level, never
+        # a traceback behind exit 1. Collected, not returned on: bailing here threw away
+        # every finding the already-linted graphs produced.
+        except (OSError, yaml.YAMLError, TypeError, AttributeError) as e:
             print(f"check_lint: cannot read {p}: {e.__class__.__name__}: {e}", file=sys.stderr)
-            return 2
+            unreadable.append(p)
+            continue
     for f in all_findings:
         print(f"  SLOT {f}")
     print(f"\n[check_lint] {len(all_findings)} formal-slot finding(s) over {len(paths)} graph(s).")
+    if unreadable:
+        return 2
     return 1 if all_findings else 0
 
 

@@ -129,10 +129,13 @@ The two censuses the grounding brief owes, from the code instead of recall (#644
 anchors the changed modules (`--base`) and reports every entrypoint whose import closure or
 subprocess re-exec reaches them; `resource <name>` anchors a declared sink
 (`specGraph.resources`: `{"<name>": {"writers": ["<file>::<symbol>"], "readers": [...], "grep":
-[...]}}`) and splits its call sites into writers and readers with the call's path expression — the
-template the identity axes are read off. Tools, not gates: every unresolvable reach (dynamic
-dispatch, string-composed paths, unparseable files, cross-process edges) is a `floor` line the
-brief must classify, never a silent drop.
+[...]}}`) and splits its call sites — swept over every project `*.py`, tests and non-codeRoots
+included, wider than the execution census — into writers and readers with the call's path
+expression — the template the identity axes are read off. Tools, not gates, with one edge: every
+unresolvable *reach* (dynamic dispatch, string-composed paths, unparseable files, cross-process
+edges, a subprocess re-exec from a non-entrypoint) is a `floor` line the brief must classify,
+never a silent drop; an unresolvable *anchor* — a declared sink no scan resolves, a `--base` ref
+git cannot — is exit 2, could-not-look.
 
 ## What these do NOT catch (be honest about the residual)
 

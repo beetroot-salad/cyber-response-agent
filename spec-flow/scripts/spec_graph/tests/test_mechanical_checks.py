@@ -153,8 +153,11 @@ structure:
     r.write("g2.yaml", graph + (
         "  obligations:\n"
         "    - {rule: R2, element: sink.identity, witness: w, discharged_by: d_u}\n"
-    ).replace("gate:\n", ""))
+    ))
     p2 = run_script("check_gate.py", "g2.yaml", cwd=r.root)
+    # 0, not just substring-absence: without the returncode pin this arm stayed green
+    # when check_gate crashed (exit 2) or found something unrelated (exit 1).
+    assert p2.returncode == 0, p2.stdout + p2.stderr
     assert "does not cover key axis" not in p2.stdout
 
 

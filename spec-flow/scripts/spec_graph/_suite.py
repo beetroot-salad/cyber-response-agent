@@ -8,14 +8,19 @@ third-party import (pytest, yaml) is not project-rooted and never a target; an i
 that resolves is existing code.
 
 The honest floor: a spec that *modifies* an existing module, or adds a symbol to one,
-has a target these imports cannot identify — every import resolves. Both consumers take
-explicit `--target <dotted.module>` for that case and exit 2 (could not look) rather
-than 0 (looked, found nothing) when no target can be identified at all.
+has a target these imports cannot identify — every import resolves. A spec whose target
+is a brand-new TOP-LEVEL module is just as invisible from the other side: for a
+single-segment name, "project-rooted" and "exists" are the same filesystem test, so
+`from foo import parse` with no `foo.py` reads exactly like a third-party import and is
+never classified a target. Both consumers take explicit `--target <dotted.module>` for
+these cases and exit 2 (could not look) rather than 0 (looked, found nothing) when no
+target can be identified at all.
 """
 from __future__ import annotations
 
 import ast
 import re
+import sys
 from pathlib import Path
 
 _COPY = re.compile(r"\.copy\d+\.py$")
@@ -58,6 +63,23 @@ def target_modules(suite_dir: Path, root: Path) -> tuple[dict[str, set[str]], li
     plus floor notes for the shapes the import heuristic cannot classify."""
     targets: dict[str, set[str]] = {}
     floor: list[str] = []
+    noted_toplevel: set[str] = set()
+
+    def _note_single_segment(py_name: str, dotted: str) -> None:
+        # The single-segment blind spot (see the module docstring): for one segment,
+        # project-rooted and exists collapse into the same test, so a greenfield
+        # top-level target cannot be told from a third-party dep. Floor-noted rather
+        # than guessed at — deduplicated per module name, stdlib names excluded (they
+        # are resolvable without the project and never a not-yet-written target).
+        if "." in dotted or dotted in noted_toplevel or dotted in sys.stdlib_module_names:
+            return
+        noted_toplevel.add(dotted)
+        floor.append(
+            f"{py_name}: unresolved top-level import `{dotted}` — could be a greenfield "
+            f"top-level target or a third-party dep; name it with --target if it is the "
+            f"target."
+        )
+
     for py in suite_files(suite_dir):
         try:
             tree = ast.parse(py.read_text(encoding="utf-8"))
@@ -68,7 +90,9 @@ def target_modules(suite_dir: Path, root: Path) -> tuple[dict[str, set[str]], li
             if isinstance(node, ast.Import):
                 for alias in node.names:
                     dotted = alias.name
-                    if _project_rooted(root, dotted) and not _module_exists(root, dotted):
+                    if not _project_rooted(root, dotted):
+                        _note_single_segment(py.name, dotted)
+                    elif not _module_exists(root, dotted):
                         targets.setdefault(dotted, set())
             elif isinstance(node, ast.ImportFrom):
                 if node.level:
@@ -88,6 +112,7 @@ def target_modules(suite_dir: Path, root: Path) -> tuple[dict[str, set[str]], li
                     continue
                 dotted = node.module
                 if not _project_rooted(root, dotted):
+                    _note_single_segment(py.name, dotted)
                     continue
                 if not _module_exists(root, dotted):
                     targets.setdefault(dotted, set()).update(a.name for a in node.names)

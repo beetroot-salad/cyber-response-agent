@@ -73,6 +73,27 @@ class _Null:
     def __len__(self):
         return 0
 
+    # Container/context/ordering plumbing must hand control to the test's own assert;
+    # a TypeError raised here (implicit __getattr__ never serves dunders) misclassifies
+    # a discriminating test as NON-ASSERT. All answers stay consistent with "empty,
+    # falsy, equal to nothing": contains nothing, orders below nothing.
+    def __getitem__(self, key):
+        return self
+
+    def __contains__(self, item):
+        return False
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False  # never swallow — an exception inside `with` must stay visible
+
+    def __lt__(self, other):
+        return False
+
+    __le__ = __gt__ = __ge__ = __lt__
+
     def __eq__(self, other):
         return other is self
 
@@ -93,47 +114,74 @@ _PLUGIN = '''\
 """pytest plugin: record per-test outcome + crash line for the null-stub classifier."""
 import json
 import os
+import sys
 
 _R = {}
 
 
 def pytest_runtest_logreport(report):
     entry = _R.setdefault(report.nodeid, {})
+    # A non-call phase must never overwrite what the call phase already proved. Against a
+    # null stub, teardown breakage is COMMON (a fixture cleaning up a path the stub never
+    # made): overwriting would report a call-phase assertion failure — textbook
+    # discrimination — as BROKEN, and a call-phase PASS (the NULLSTUB-PASS finding this
+    # check exists for) as BROKEN too. Setup errors with no call outcome still record.
+    if report.when != "call" and entry.get("phase") == "call":
+        return
     if report.skipped:
         entry["outcome"] = "skipped"
+        entry["phase"] = report.when
     elif report.failed:
-        # A teardown error must not erase what the call phase already proved. Against a null
-        # stub, teardown breakage is COMMON (a fixture cleaning up a path the stub never made),
-        # so overwriting here would report a test that failed on its own assertion — textbook
-        # discrimination — as BROKEN.
-        if report.when != "call" and entry.get("outcome") == "failed":
-            return
         crash = getattr(getattr(report, "longrepr", None), "reprcrash", None)
         msg = getattr(crash, "message", None) or str(report.longrepr or "")
         entry["outcome"] = "failed" if report.when == "call" else "error-" + report.when
         entry["message"] = msg.splitlines()[0][:200] if msg else ""
+        entry["phase"] = report.when
     elif report.when == "call" and "outcome" not in entry:
         entry["outcome"] = "passed"
+        entry["phase"] = "call"
 
 
 def pytest_collectreport(report):
     if report.failed:
         _R[str(report.nodeid) or "<collection>"] = {
             "outcome": "collection-error", "message": str(report.longrepr)[:400]}
+    elif report.skipped:
+        # A module skipped at collection (pytest.importorskip, module-level skip) emits no
+        # per-test reports at all — unrecorded, the file vanishes from the report and a
+        # run of only-skipped modules exits 0, certifying tests that never ran.
+        _R[str(report.nodeid) or "<collection>"] = {
+            "outcome": "collection-skipped", "message": str(report.longrepr)[:400]}
 
 
 def pytest_sessionfinish(session, exitstatus):
+    # Where each target ACTUALLY imported from. `python -m pytest` puts the cwd ahead of
+    # PYTHONPATH, so a target that exists on disk (modify-existing case) can shadow the
+    # stub and every verdict silently measures real code; the classifier voids the run
+    # when an origin falls outside the stub dir. A target absent from sys.modules is
+    # fine — nothing imported it.
+    origins = {}
+    for t in filter(None, os.environ.get("NULLSTUB_TARGETS", "").split(",")):
+        f = getattr(sys.modules.get(t), "__file__", None)
+        if f:
+            origins[t] = f
     path = os.environ.get("NULLSTUB_REPORT_FILE")
     if path:
         with open(path, "w", encoding="utf-8") as fh:
-            json.dump(_R, fh)
+            json.dump({"results": _R, "origins": origins}, fh)
 '''
 
 
 def _write_stub(stub_dir: Path, targets: dict[str, set[str]], root: Path) -> None:
     for dotted in targets:
         parts = dotted.split(".")
-        mod = stub_dir.joinpath(*parts).with_suffix(".py")
+        if any(other.startswith(dotted + ".") for other in targets):
+            # A dotted ancestor of another target must be a PACKAGE: a pkg/mod.py file
+            # would shadow pkg/mod/, and the child target's import would die as a
+            # collection error blamed on the suite.
+            mod = stub_dir.joinpath(*parts) / "__init__.py"
+        else:
+            mod = stub_dir.joinpath(*parts).with_suffix(".py")
         mod.parent.mkdir(parents=True, exist_ok=True)
         mod.write_text(_NULL_MODULE, encoding="utf-8")
         for depth in range(1, len(parts)):
@@ -146,13 +194,39 @@ def _write_stub(stub_dir: Path, targets: dict[str, set[str]], root: Path) -> Non
                 )
 
 
+# Shared config files count as pytest config only WITH their pytest section (pytest's own
+# rootdir rules); pytest.ini counts by existence alone.
+_PYTEST_SECTIONS = {
+    "pyproject.toml": "[tool.pytest.ini_options]",
+    "setup.cfg": "[tool:pytest]",
+    "tox.ini": "[pytest]",
+}
+
+
+def _has_pytest_config(d: Path) -> bool:
+    # A packaging-only setup.cfg (or plain pyproject.toml) in a subdir must not hijack
+    # the cwd away from the project's real pytest config. The substring match mirrors
+    # pytest's "does the section exist" rule closely enough: a commented-out section is
+    # the only false positive, and it costs a plausible-but-different cwd, not a verdict.
+    if (d / "pytest.ini").is_file():
+        return True
+    for name, section in _PYTEST_SECTIONS.items():
+        f = d / name
+        try:
+            if f.is_file() and section in f.read_text(encoding="utf-8"):
+                return True
+        except OSError:
+            continue
+    return False
+
+
 def _pytest_cwd(suite_dir: Path, root: Path) -> Path:
     # Walk `parents`, not a hand-rolled `d = d.parent` loop: at the filesystem root
     # `Path("/").parent` is `/` again, so a suite_dir OUTSIDE the repo tree never reached
     # either guard (`d == root` never true, `d != root.parent` never false) and spun forever.
     # `parents` is finite whatever the two paths' relationship.
     for d in (suite_dir, *suite_dir.parents):
-        if any((d / f).is_file() for f in ("pyproject.toml", "pytest.ini", "setup.cfg", "tox.ini")):
+        if _has_pytest_config(d):
             return d
         if d == root:
             break
@@ -168,13 +242,16 @@ def _recorded_passes(suite_dir: Path) -> set[str]:
         except yaml.YAMLError:
             continue
         for entry in handoff.get("nullstub_passes", []) or []:
-            recorded.add(str(entry).split("—")[0].split("--")[0].strip())
+            # The documented separator is the em-dash ONLY; also splitting on "--"
+            # truncated legitimate ids (test_flag[--residue] → "test_flag[").
+            recorded.add(str(entry).split("—", 1)[0].strip())
     return recorded
 
 
 def run(suite_dir: Path, targets: dict[str, set[str]], python: str, keep: bool) -> int:
-    root = _config.repo_root()
-    stub_dir = Path(tempfile.mkdtemp(prefix="nullstub-"))
+    root = _config.repo_root(suite_dir)
+    # resolve(): the shadow check compares module __file__ origins against this dir.
+    stub_dir = Path(tempfile.mkdtemp(prefix="nullstub-")).resolve()
     report_file = stub_dir / "report.json"
     try:
         _write_stub(stub_dir, targets, root)
@@ -183,6 +260,7 @@ def run(suite_dir: Path, targets: dict[str, set[str]], python: str, keep: bool) 
         env["PYTHONPATH"] = os.pathsep.join(
             [str(stub_dir), env.get("PYTHONPATH", "")]).rstrip(os.pathsep)
         env["NULLSTUB_REPORT_FILE"] = str(report_file)
+        env["NULLSTUB_TARGETS"] = ",".join(sorted(targets))
         cmd = [python, "-m", "pytest", str(suite_dir), "-q", "--no-header",
                "-p", "nullstub_report"]
         proc = subprocess.run(
@@ -193,9 +271,39 @@ def run(suite_dir: Path, targets: dict[str, set[str]], python: str, keep: bool) 
             print(f"check_stub: pytest produced no report — the run itself broke:\n"
                   f"{proc.stdout[-2000:]}\n{proc.stderr[-2000:]}", file=sys.stderr)
             return 2
-        results: dict[str, dict] = json.loads(report_file.read_text(encoding="utf-8"))
+        payload: dict = json.loads(report_file.read_text(encoding="utf-8"))
+        results: dict[str, dict] = payload.get("results", {})
+        if not results:
+            # An empty report is "nothing ran", never "everything discriminated": a suite that
+            # silently stopped collecting (renamed files, a conftest that imports but registers
+            # nothing) would otherwise certify clean — the one outcome this check exists to deny.
+            print(f"check_stub: pytest collected no tests under {suite_dir} — the run proves "
+                  f"nothing about discrimination.\n{proc.stdout[-2000:]}", file=sys.stderr)
+            return 2
+        # `python -m pytest` puts the cwd ahead of PYTHONPATH, so a target that EXISTS on
+        # disk (the modify-existing case; namespace packages merge path entries) resolves
+        # to the REAL module — every verdict below would silently measure real code.
+        shadowed = [
+            f"{t} imported from {f}"
+            for t, f in sorted((payload.get("origins") or {}).items())
+            if not Path(f).resolve().is_relative_to(stub_dir)
+        ]
+        if shadowed:
+            print("check_stub: stub was shadowed by real code — verdicts void; the run "
+                  "measured the real implementation, not the null stub:\n  "
+                  + "\n  ".join(shadowed), file=sys.stderr)
+            return 2
     except subprocess.TimeoutExpired:
         print("check_stub: pytest timed out after 600s against the stub", file=sys.stderr)
+        return 2
+    except json.JSONDecodeError as e:
+        print(f"check_stub: could not run — the report is not valid JSON ({e}); the "
+              f"pytest run under `{python}` broke mid-write.", file=sys.stderr)
+        return 2
+    except OSError as e:
+        # A missing or broken interpreter is "could not look" (exit 2), never a
+        # traceback — an uncaught traceback exits 1 and would read as findings.
+        print(f"check_stub: could not run `{python} -m pytest` — {e}", file=sys.stderr)
         return 2
     finally:
         if keep:
@@ -203,14 +311,6 @@ def run(suite_dir: Path, targets: dict[str, set[str]], python: str, keep: bool) 
                   file=sys.stderr)
         else:
             shutil.rmtree(stub_dir, ignore_errors=True)
-
-    if not results:
-        # An empty report is "nothing ran", never "everything discriminated": a suite that
-        # silently stopped collecting (renamed files, a conftest that imports but registers
-        # nothing) would otherwise certify clean — the one outcome this check exists to deny.
-        print(f"check_stub: pytest collected no tests under {suite_dir} — the run proves "
-              f"nothing about discrimination.\n{proc.stdout[-2000:]}", file=sys.stderr)
-        return 2
 
     recorded = _recorded_passes(suite_dir)
     findings: list[str] = []
@@ -221,7 +321,10 @@ def run(suite_dir: Path, targets: dict[str, set[str]], python: str, keep: bool) 
         if outcome == "failed" and (msg.startswith("AssertionError") or msg.startswith("Failed")):
             discriminated += 1
         elif outcome == "passed":
-            if test in recorded:
+            # A parametrized nodeid ends in `[case]`; a recorded bare name covers every
+            # case, and a recorded full id covers just its own.
+            bare = test[: test.find("[")] if "[" in test and test.endswith("]") else test
+            if test in recorded or bare in recorded:
                 discriminated += 1  # an examined pass — recorded with its class in the graph
             else:
                 findings.append(
@@ -233,7 +336,7 @@ def run(suite_dir: Path, targets: dict[str, set[str]], python: str, keep: bool) 
                 f"NON-ASSERT {nodeid}: fails on `{msg}`, not its own assertion — it rides "
                 f"machinery, so it may stay green when only the demand breaks."
             )
-        elif outcome == "skipped":
+        elif outcome in ("skipped", "collection-skipped"):
             findings.append(f"SKIPPED {nodeid}: a skipped test discriminates nothing at spec time.")
         else:
             findings.append(
@@ -271,9 +374,11 @@ def main(argv: list[str]) -> int:
         else:
             args.append(a)
     cfg = _config.load(config)
-    root = _config.repo_root()
     if args:
-        p = Path(args[0])
+        # Absolute BEFORE use: run() moves cwd to the pytest rootdir, so a relative
+        # suite/graph arg handed to pytest would resolve against the wrong base
+        # (run from repo/tests with arg `spec`, pytest would hunt <rootdir>/spec).
+        p = Path(args[0]).resolve()
         suite_dir = p if p.is_dir() else p.parent
     else:
         dirs = sorted({g.parent for g in _config.artifacts(cfg)})
@@ -281,7 +386,8 @@ def main(argv: list[str]) -> int:
             print(f"check_stub: give the suite dir or graph explicitly (found {len(dirs)} "
                   f"candidate dirs)", file=sys.stderr)
             return 2
-        suite_dir = dirs[0]
+        suite_dir = dirs[0].resolve()
+    root = _config.repo_root(suite_dir)
     targets, floor = _suite.target_modules(suite_dir, root)
     for t in explicit:
         targets.setdefault(t, set())

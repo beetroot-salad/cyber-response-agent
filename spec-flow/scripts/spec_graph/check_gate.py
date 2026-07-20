@@ -106,27 +106,57 @@ class Graph:
         """Whether the graph records an answer for a computed trigger: an executable demand
         binds the obligated address, or a gate entry for the rule names it. Per-cell
         addresses (`b.access[via]`, `b.domain.…[v]`) must match exactly — per-cell discharge
-        is the discipline R3/R4 exist for; coarser addresses accept a facet-or-root match."""
-        exact = _CELL.match(element) is not None
-        root = _root(element)
+        is the discipline R3/R4 exist for. A facet-bearing address (`b.identity`,
+        `interacts(a->b).payload`) accepts the same facet on the same root, or the bare
+        boundary/edge — never a SIBLING facet: matching on the root alone let a demand on
+        `sink.payload` silence an R2 trigger on `sink.identity`. Only a bare-root element
+        keeps plain root matching."""
+        root, facet, exact = _parse(element)
+
+        def matches(candidate: str) -> bool:
+            if candidate == element:
+                return True
+            if exact:
+                return False
+            c_root, c_facet, _ = _parse(candidate)
+            if c_root != root:
+                return False
+            return facet is None or c_facet is None or c_facet == facet
+
         for d in self.demands:
             if d.get("form", "test") != "test":
                 continue
-            for b in d.get("binds", []) or []:
-                b = str(b)
-                if b == element or (not exact and _root(b) == root):
+            for b in _binds(d):
+                if matches(str(b)):
                     return True
-        for rec in self.recorded.get(rule, []):
-            if rec == element or (not exact and _root(rec) == root):
-                return True
-        return False
+        return any(matches(rec) for rec in self.recorded.get(rule, []))
 
 
-def _root(address: str) -> str:
-    m = _INTERACTS.match(address) or _DRIVES.match(address)
+def _binds(d: dict) -> list:
+    """`binds:` written as a bare string is one address, not a character sequence —
+    iterating the scalar per-character minted one bogus dangling finding per letter."""
+    b = d.get("binds") or []
+    return [b] if isinstance(b, str) else b
+
+
+def _parse(address: str) -> tuple[str, str | None, bool]:
+    """(root, facet, is_cell) for an address. Root is the boundary/target end — what the
+    obligation is about; facet is the named facet when the address carries one; a cell
+    address stays distinct (exact-match only, see `answered`)."""
+    address = str(address)
+    m = _CELL.match(address)
     if m:
-        return m.group(2)  # the boundary/target end — what the obligation is about
-    return re.split(r"[.\[]", address, maxsplit=1)[0].strip()
+        return m.group(1), "access" if m.group(2) == "access" else "domain", True
+    m = _INTERACTS.match(address)
+    if m:
+        return m.group(2), (m.group(3) or "").lstrip(".") or None, False
+    m = _DRIVES.match(address)
+    if m:
+        return m.group(2), None, False
+    m = _FACET.match(address)
+    if m:
+        return m.group(1), m.group(2), False
+    return re.split(r"[.\[]", address, maxsplit=1)[0].strip(), None, False
 
 
 def _resolves(g: Graph, address: str) -> bool:
@@ -181,7 +211,7 @@ def _r0(g: Graph) -> list[str]:
     findings: list[str] = []
     for d in g.demands:
         did = d.get("id", "<no-id>")
-        for b in d.get("binds", []) or []:
+        for b in _binds(d):
             if not _resolves(g, str(b)):
                 findings.append(
                     f"R0 {g.path.name}:{did}: binds `{b}` resolves to nothing in structure — "
@@ -311,7 +341,11 @@ def _triggers(g: Graph) -> tuple[list[Trigger], list[str]]:
             if any(d.get("to") == e.get("from") for d in g.drives)
         ]
         fires = len({e.get("from") for e in writers}) >= 2 or bool(driven)
-        involved = [g.boundaries.get(bid), *writers, *driven]
+        # The DRIVES edges belong in the delta test: "gaining a new `drives` edge over its
+        # writers" is rules.md's own trigger, and `driven` only re-lists writer edges — so a
+        # design-provenance drives edge over code-provenance writers could never fire.
+        drive_edges = [d for d in g.drives if any(d.get("to") == e.get("from") for e in writers)]
+        involved = [g.boundaries.get(bid), *writers, *drive_edges]
         if not fires or not in_delta(*involved):
             continue
         names = sorted({str(e.get("from")) for e in writers})
@@ -353,13 +387,18 @@ def _triggers(g: Graph) -> tuple[list[Trigger], list[str]]:
                 f"via enforces must hold on the `{via}` cell too (per-cell discharge).",
             ))
 
-    # R4 — domain coverage: a read edge into a domain-facet boundary.
+    # R4 — domain coverage: consumers of a domain-facet boundary. Read edges are the
+    # canonical consumers, but rules.md's trigger is also "a domain facet gaining members" —
+    # a design-provenance domain reached only via invoke/write (or not yet wired at all)
+    # still fires; keying on `mode: read` alone let the edge label silence the rule.
     for bid in g.boundaries:
         domain = g.facet(bid, "domain")
         if domain is None:
             continue
-        readers = [e for e in g.interacts if e.get("to") == bid and e.get("mode") == "read"]
-        if not readers or not in_delta(g.boundaries.get(bid), *readers):
+        edges_in = [e for e in g.interacts if e.get("to") == bid]
+        readers = [e for e in edges_in if e.get("mode") == "read"]
+        consumers = readers or edges_in
+        if not in_delta(g.boundaries.get(bid), *consumers):
             continue
         for v in domain.get("distinguished") or []:
             triggers.append(Trigger(
@@ -465,22 +504,32 @@ def main(argv: list[str]) -> int:
         print("check_gate: no spec_graph_*.yaml found", file=sys.stderr)
         return 2
     all_findings: list[str] = []
+    unreadable: list[Path] = []
     for p in paths:
         try:
             findings, triggers = check(p)
-        except (OSError, yaml.YAMLError, TypeError) as e:
+        # AttributeError is the same could-not-read class as a bad top level: nested wrong
+        # shapes (a string where a mapping belongs, in actors/demands/boundaries/gate lists)
+        # surface as AttributeError inside the walk — uncaught it was a traceback behind
+        # exit 1 ("found findings"), not 2 ("could not look").
+        except (OSError, yaml.YAMLError, TypeError, AttributeError) as e:
             # Never a silent pass: a graph the gate cannot read must not certify clean.
+            # Collected, not returned on: bailing here threw away every finding the
+            # already-checked graphs produced.
             print(f"check_gate: cannot read {p}: {e.__class__.__name__}: {e}", file=sys.stderr)
-            return 2
+            unreadable.append(p)
+            continue
         if residue:
             _residue(p, triggers)
         else:
             all_findings.extend(findings)
     if residue:
-        return 0
+        return 2 if unreadable else 0
     for f in all_findings:
         print(f"  {f}")
     print(f"\n[check_gate] {len(all_findings)} finding(s) over {len(paths)} graph(s).")
+    if unreadable:
+        return 2
     return 1 if all_findings else 0
 
 

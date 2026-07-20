@@ -10,10 +10,11 @@ returned") is a static reachability question, so this script answers it.
 Target identification is `_suite.target_modules`: the suite's project-rooted imports
 that resolve to nothing are the not-yet-written target; `--target <dotted.module>` adds
 or replaces targets for the modify-existing-code case the heuristic cannot see. A test
-"touches" the target when its body — or, transitively, a same-file helper it calls —
-references a symbol imported from a target module or the target module's own name.
-(The third charge clause is subsumed: an object a target call returned only exists in a
-body that made the target call.)
+"touches" the target when its body — or, transitively, a same-file helper it calls, or
+a function in the SAME DIRECTORY's conftest.py (a fixture) — references a symbol
+imported from a target module or the target module's own name. (The third charge
+clause is subsumed: an object a target call returned only exists in a body that made
+the target call.)
 
 Usage:
     spec-graph calls [graph.yaml | suite-dir] [--target <dotted.module> ...] [--config <path>]
@@ -40,6 +41,66 @@ def _fn_refs(fn: ast.AST) -> set[str]:
     return out
 
 
+def _local_targets(tree: ast.Module, targets: dict[str, set[str]], target_names: set[str]) -> set[str]:
+    """The names that reach the target from THIS file's namespace: the shared target
+    names, plus whatever the file's own imports and module-level aliases bind to them."""
+    local = set(target_names)
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.Import, ast.ImportFrom)):
+            continue
+        # Matching the dotted module key (not just pre-collected symbols) matters: an
+        # explicit `--target app.mod` names a module that EXISTS (the modify-existing
+        # case), so the heuristic collected no symbols for it and a suite doing
+        # `from app.mod import f` + `f()` was 100% falsely NO-CALL.
+        from_target = isinstance(node, ast.ImportFrom) and node.module in targets
+        for a in node.names:
+            if from_target and a.name != "*":
+                local.add(a.asname or a.name)
+            elif a.asname and (a.name in targets or a.name.split(".")[-1] in target_names):
+                # Aliases: `from mod import target as t` / `import app.mod as m` make
+                # `t` / `m` target names in this file.
+                local.add(a.asname)
+    # Module-level aliases: `drive = functools.partial(summarize, tmp)` or
+    # `summ = summarize` bind a target-reaching name OUTSIDE any function, which the
+    # function-only harvest below never sees — a test calling only `drive` was falsely
+    # NO-CALL. Walked in body order, so alias-of-alias chains resolve in one pass.
+    for node in tree.body:
+        if isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None:
+            if _fn_refs(node.value) & local:
+                assigned = node.targets if isinstance(node, ast.Assign) else [node.target]
+                for t in assigned:
+                    if isinstance(t, ast.Name):
+                        local.add(t.id)
+    return local
+
+
+def _module_refs(tree: ast.Module) -> dict[str, set[str]]:
+    # Refs are MERGED per name, never last-one-wins: `ast.walk` flattens methods and
+    # nested defs into one namespace, so two same-named helpers in different classes
+    # used to overwrite each other and the fixed point judged both bodies by whichever
+    # the walk reached last. Union keeps the resolution name-based (which is all the
+    # call sites in `refs` can be matched by) without depending on walk order.
+    refs: dict[str, set[str]] = {}
+    for n in ast.walk(tree):
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            refs.setdefault(n.name, set()).update(_fn_refs(n))
+    return refs
+
+
+def _reaching(refs: dict[str, set[str]], local_targets: set[str]) -> set[str]:
+    # Fixed point: a function touches the target directly, or calls a same-file
+    # function that does. Iterate until stable (helper chains, any depth).
+    touches = {name for name, r in refs.items() if r & local_targets}
+    changed = True
+    while changed:
+        changed = False
+        for name, r in refs.items():
+            if name not in touches and r & touches:
+                touches.add(name)
+                changed = True
+    return touches
+
+
 def check(suite_dir: Path, targets: dict[str, set[str]]) -> list[str]:
     # A target is reachable by any of: a symbol imported from it, its own module name
     # (last segment, for `import a.b.c` / `a.b.c.f()` forms), or an alias of either.
@@ -48,44 +109,41 @@ def check(suite_dir: Path, targets: dict[str, set[str]]) -> list[str]:
         target_names.add(dotted.split(".")[-1])
         target_names.update(symbols)
 
+    # Same-dir conftest.py only: pytest injects its fixtures into every test here by
+    # name, so a conftest function that reaches the target makes its NAME
+    # target-reaching for the whole dir (a test body referencing the fixture param then
+    # satisfies the fixed point) — the phase-F charge's "driving an object a call to
+    # the target returned" legitimately spans that seam. Parent-dir conftests stay out
+    # of scope: this check reads one suite dir, and widening it would mean re-deriving
+    # pytest's rootdir discovery.
+    conftest_reaching: set[str] = set()
+    conftest = suite_dir / "conftest.py"
+    if conftest.is_file():
+        try:
+            ctree = ast.parse(conftest.read_text(encoding="utf-8"))
+        except (OSError, SyntaxError, ValueError):
+            pass  # unscannable conftest: same-file reachability still stands
+        else:
+            conftest_reaching = _reaching(
+                _module_refs(ctree), _local_targets(ctree, targets, target_names)
+            )
+
     findings: list[str] = []
     for py in _suite.suite_files(suite_dir):
         try:
             tree = ast.parse(py.read_text(encoding="utf-8"))
         except (OSError, SyntaxError, ValueError):
             continue  # unscannable files are the null-stub gate's collection error to report
-        # Aliases: `from mod import target as t` makes `t` a target name in this file.
-        local_targets = set(target_names)
-        for node in ast.walk(tree):
-            if isinstance(node, (ast.Import, ast.ImportFrom)):
-                for a in node.names:
-                    if a.asname and a.name.split(".")[-1] in target_names:
-                        local_targets.add(a.asname)
-        # Refs are MERGED per name, never last-one-wins: `ast.walk` flattens methods and
-        # nested defs into one namespace, so two same-named helpers in different classes
-        # used to overwrite each other and the fixed point judged both bodies by whichever
-        # the walk reached last. Union keeps the resolution name-based (which is all the
-        # call sites in `refs` can be matched by) without depending on walk order.
-        refs: dict[str, set[str]] = {}
-        for n in ast.walk(tree):
-            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                refs.setdefault(n.name, set()).update(_fn_refs(n))
-        # Fixed point: a function touches the target directly, or calls a same-file
-        # function that does. Iterate until stable (helper chains, any depth).
-        touches = {name for name, r in refs.items() if r & local_targets}
-        changed = True
-        while changed:
-            changed = False
-            for name, r in refs.items():
-                if name not in touches and r & touches:
-                    touches.add(name)
-                    changed = True
+        local_targets = _local_targets(tree, targets, target_names) | conftest_reaching
+        refs = _module_refs(tree)
+        touches = _reaching(refs, local_targets)
         for name in refs:
             if name.startswith("test_") and name not in touches:
                 findings.append(
                     f"NO-CALL {py.name}::{name}: never references the target "
-                    f"({sorted(local_targets)[:6]}…) — directly or through a same-file helper. "
-                    f"A test that never drives the target binds nothing about it."
+                    f"({sorted(local_targets)[:6]}…) — directly, through a same-file helper, "
+                    f"or through a same-dir conftest fixture. A test that never drives the "
+                    f"target binds nothing about it."
                 )
     return findings
 
@@ -108,11 +166,16 @@ def main(argv: list[str]) -> int:
         else:
             args.append(a)
     cfg = _config.load(config)
-    root = _config.repo_root()
     if args:
-        p = Path(args[0])
+        # An explicitly-given suite dir may live in a different repo than the process
+        # cwd; a cwd-anchored root would misclassify every import (nothing is
+        # project-rooted) and exit 2 with a false "every import resolves". Anchor the
+        # root at the argument, resolved so `is_dir`/rooting checks are cwd-independent.
+        p = Path(args[0]).resolve()
         suite_dirs = [p if p.is_dir() else p.parent]
+        root = _config.repo_root(suite_dirs[0])
     else:
+        root = _config.repo_root()
         suite_dirs = sorted({g.parent for g in _config.artifacts(cfg)})
     if not suite_dirs:
         print("check_calls: no suite directory (no graphs matched and none given)", file=sys.stderr)
@@ -139,8 +202,9 @@ def main(argv: list[str]) -> int:
     if blind:
         print(
             f"check_calls: no target identified for {[str(d) for d in blind]} — every suite "
-            f"import resolves. A modify-existing spec's target is invisible to the import "
-            f"heuristic; name it with --target <dotted.module>.",
+            f"import resolves or is indistinguishable from a dependency. A modify-existing "
+            f"spec's target is invisible to the import heuristic, and a brand-new TOP-LEVEL "
+            f"module reads as a third-party import; name it with --target <dotted.module>.",
             file=sys.stderr,
         )
         return 2
