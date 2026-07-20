@@ -1,6 +1,6 @@
 ---
 name: finalize
-description: "Close out the green PR that write-code-from-spec shipped: apply every fix you're confident in inline, file the rest as follow-up issues, feed process findings back to the human, and re-green the PR before the merge gate. Meets the code cold — it does not read the spec's rationale. Use after write-code-from-spec, as the last stage before a human merges."
+description: "Close out the green PR that write-code-from-spec shipped: apply every fix you're confident in inline, file the rest as follow-up issues, trace what escaped back to the stage that should have held it, feed process findings back to the human, and re-green the PR before the merge gate. Meets the code cold — it does not read the spec's rationale. Use after write-code-from-spec, as the last stage before a human merges."
 argument-hint: "[issue # or PR #]"
 effort: xhigh
 ---
@@ -30,24 +30,23 @@ Fix honestly: never green the build by weakening a test, suppressing a type erro
 
 ## Feed the pipeline
 
-You just met a class of bug the pipeline shipped green — data no other stage has: the upstream stages argued from inside the design; you were the first reader to see what landed. When a finding has a *systemic* lever — a stage that should have caught it, not just this one line — name it.
+You just met a class of bug the pipeline shipped green — data no other stage has: the upstream stages argued from inside the design; you were the first reader to see what landed. It shipped because it passed *every* stage that could have stopped it, so before naming a lever, nail down where the defense actually broke.
 
-It shipped green because it passed *every* stage that could have stopped it, so walk it back earliest-first and find where the defense should have held:
+That diagnosis is a subagent's job, not yours. For each finding that is a real defect the suite let through (not a style nit), spawn a **tracer** on `references/trace.md` (sibling of this file) with the finding, the PR and issue numbers, and the spec ref. It walks the bug back through the record earliest-first — design-doc scope, graph demands, discharging tests, the human's fork resolutions, the write-tests frontier chain, linked transcripts — and returns an attribution *proven by a cited artifact*, or marked provisional where the trail is gone. The tracer reads everything you must not — rationale, handoff notes, transcripts — which is exactly why it is a subagent: dispatch it only after your review findings are settled, and take back its verdict, never the design's argument.
 
-- **`discuss-issue`** — was the class never scoped, so the design never had to answer for it?
-- **`write-tests`** — was there a demand a non-discriminating test discharged, or no demand at all?
-- **a mechanical net** — would a lint gate or CI check fire on the shape regardless of who wrote it?
+Its attributions feed two channels, deliberately different:
 
-That walk is diagnosis, not the verdict — it tells you where the defense *should* have held, so you understand the miss instead of papering over it. Choosing the lever is a separate call, on cost and reliability. If the class reduces to a **mechanical shape**, a gate may be the better fix outright — it is cheap and deterministic, where an upstream rule only shifts the odds. If the class is **semantic** — an unverified reachability claim, a test that can't discriminate — no gate can hold it and the fix has to go upstream, or it catches this one shape while the class leaks through others. Often it is both: the upstream rule *and* the gate as belt-and-suspenders. What you must not do is let low LOC stand in for the diagnosis — reach for the gate because you understood the miss, never to avoid it.
+- **Deck-eligible findings** — the tracer marks them: intent was stated and the suite greened anyway — get their exploit shape **appended to `.claude/spec-flow-attacks.md`**, the attack deck the adversarial implementer replays against every future spec. Append it with your inline fixes so the entry rides this PR past the merge-gate human. This is the one pipeline artifact you write: an append-only factual record — each entry an artifact-proven exploit that shipped — never doctrine.
+- **Process findings** — the lever candidates — go in your exit report, to the human at the merge gate; not into the skills, and not into an issue. **You never edit the pipeline's own skills or gates.** A single PR is one data point, and single-PR process intuitions are usually wrong until weighed against other PRs; that weighing is the human's, and the durable form — a memory, an issue, a rule change — is theirs to choose. Your job is to not lose the insight while the context is hot.
 
-For each, hand the human a grounded candidate, not a verdict: the finding at `file:line` (the evidence — a lever with no bug behind it is a guess), the class, the stage where it slipped, and the lever you'd pull.
+The split is load-bearing, not bookkeeping: the deck teaches the *adversary* (mechanical, automatic, exploit shapes), the exit report teaches *write-tests* (semantic, human-weighed, defect classes). A deck entry that restates a write-tests rule, or a process finding that is really "replay this exploit," collapses the two nets into one — and correlated nets miss the same things.
 
-This goes in your exit report, to the human at the merge gate — not into the skills, and not into an issue. **You never edit the pipeline's own skills or gates.** A single PR is one data point, and single-PR process intuitions are usually wrong until weighed against other PRs; that weighing is the human's, and the durable form — a memory, an issue, a rule change — is theirs to choose. Your job is to not lose the insight while the context is hot.
+Choosing the lever stays yours, on cost and reliability, grounded on the tracer's diagnosis. If the class reduces to a **mechanical shape**, a gate may be the better fix outright — it is cheap and deterministic, where an upstream rule only shifts the odds. If the class is **semantic** — an unverified reachability claim, a test that can't discriminate — no gate can hold it and the fix has to go upstream, or it catches this one shape while the class leaks through others. Often it is both: the upstream rule *and* the gate as belt-and-suspenders. What you must not do is let low LOC stand in for the diagnosis — reach for the gate because the tracer showed you the miss, never to avoid the trace. Hand the human a grounded candidate, not a verdict: the finding at `file:line`, the tracer's attribution with its citations, the class, and the lever you'd pull. A *resolved-away* attribution — the human chose this reading — is not a miss; report it as a decision that played out, and skip the lever.
 
-Be opportunistic, not dutiful: most passes surface no systemic lever, and a manufactured one is noise. If the misses were one-offs, say so and skip this.
+Be opportunistic about levers, dutiful about the deck: a deck entry costs three lines and pays on every future run, so append every deck-eligible escape — but most passes surface no systemic lever, and a manufactured one is noise. If the misses were one-offs, say so.
 
 ## Re-green, then hand off
 
 If you pushed any commit, the PR's green is now a claim about the *old* code. Re-run the watch (`gh pr checks --watch`) and repair until it is green again — the human merge gate exists precisely because "the PR is green" is supposed to be true. A review that changed nothing is already green; say so and stop.
 
-Exit by reporting: what you fixed inline, what you filed (with issue numbers), the process findings for the human (or that there were none), and the PR's final CI state. The human merges — you don't.
+Exit by reporting: what you fixed inline, what you filed (with issue numbers), any attack-deck entries you appended, the process findings for the human (or that there were none), and the PR's final CI state. The human merges — you don't.
