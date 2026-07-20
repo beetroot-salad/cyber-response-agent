@@ -224,10 +224,9 @@ class QueryCapture(AbstractCapability[Any]):
                 "not a path and not a program."
             )
         if not verbs:
-            # An empty declaration must not read as "no filter". This tree already fails OPEN
-            # twice in exactly this shape (`adapter_shims()`'s empty set makes the shim regex
-            # None; `descriptor_catalog`'s `or None` degrades an empty roster to no-catalog), so
-            # the emptiness is decided here rather than smoothed into an absence.
+            # An empty declaration must not read as "no filter". This tree already fails OPEN in
+            # exactly this shape (`descriptor_catalog`'s `or None` degrades an empty roster to
+            # no-catalog), so the emptiness is decided here rather than smoothed into an absence.
             return f"system {system!r} declares no verbs — it is unreachable, not unfiltered."
         if verb not in verbs:
             return f"unknown verb {verb!r} for {system}. Declared verbs: {sorted(verbs)}."

@@ -307,10 +307,11 @@ class ModuleVerbRegistry:
     `systems()` is the roster ON DISK — every `*_adapter.py`, including one that declares no verbs.
     That system is then *unreachable* (its `verbs()` is empty and the tool rejects it) rather
     than *unfiltered*: an empty declaration must not read as "no filter". This tree already
-    fails OPEN twice in exactly that shape (`adapter_shims()` returning the empty set makes the
-    shim regex `None`; `descriptor_catalog`'s `or None` degrades an empty roster to no-catalog),
-    which is why the emptiness is carried honestly here and decided by the caller instead of
-    being smoothed away into an absence.
+    fails OPEN in exactly that shape (`descriptor_catalog`'s `or None` degrades an empty roster
+    to no-catalog), which is why the emptiness is carried honestly here and decided by the
+    caller instead of being smoothed away into an absence. (It used to fail open TWICE — the
+    retired main-loop shim regex went `None` on an empty adapter roster too; #667 deleted that
+    hook, so `descriptor_catalog` is the surviving instance, not the second of a pair.)
     """
 
     def __init__(self, adapters_dir: Path):

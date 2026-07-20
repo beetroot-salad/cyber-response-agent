@@ -85,8 +85,8 @@ def derive_system(inner: list[str]) -> str | None:
         # Adapter shim form `defender-<system>`. Require a bare shim token: skip
         # path/flag values that merely start with `defender-` (a
         # `…/defender-runs/…` arg, a `--defender-dir` value), which would
-        # otherwise yield a garbage system. Mirrors the command-position anchor
-        # block_main_loop_raw_access's adapter-shim regex uses for the same reason.
+        # otherwise yield a garbage system. The retired main-loop shim regex anchored
+        # on command position for the same reason.
         if tok.startswith("defender-") and "/" not in tok and "=" not in tok:
             name = tok[len("defender-"):]
             if name and name not in _NON_ADAPTER:

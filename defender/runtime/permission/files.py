@@ -12,7 +12,6 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from defender.hooks.block_main_loop_raw_access import RAW_DENY_REASON, RAW_MARKER
 from defender.runtime import bash_policy
 from defender.skills.invlang.validate import validate_companion
 
@@ -178,6 +177,22 @@ def decide_read(
     if denylisted(rp):
         return Decision(False, f"Blocked: {rp.name} is a denied read (secrets / ground truth).")
     return Decision(True)
+
+
+# The `gather_raw/` path component, and the reason a read of one earns. Both used to live in
+# `hooks/block_main_loop_raw_access.py`, a retired `claude -p` PreToolUse script whose OTHER
+# mechanism — a `RAW_MARKER in <command text>` substring clamp — this package deliberately does
+# NOT implement (see `bash.py`: containment is positive grant enumeration, and the substring scan
+# wrongly denied `… | grep gather_raw`, where the word is a search PATTERN, not a path). Only the
+# marker and the reason survived that supersession, and this is their sole reader.
+RAW_MARKER = "gather_raw"
+RAW_DENY_REASON = (
+    "Blocked: the main loop must not read gather_raw/. Gather's returned "
+    "summary is the authoritative record (defender SKILL §Principles). If a "
+    "field you need is missing, re-dispatch gather with a stricter "
+    "what_to_summarize — do not Read/Grep/jq the raw payload from the main "
+    "loop; that defeats the subagent isolation."
+)
 
 
 def _names_raw(p: Path) -> bool:
