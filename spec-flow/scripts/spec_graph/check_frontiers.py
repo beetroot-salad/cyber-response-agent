@@ -50,7 +50,13 @@ class Frontier:
         self.error: str | None = None
         self.meta: dict = {}
         self.digest_lines: int | None = None
-        text = path.read_text(encoding="utf-8")
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as e:
+            # Same class as unparseable frontmatter: a finding on this file, never a traceback
+            # that takes the whole chain's report down with it.
+            self.error = f"unreadable ({e.__class__.__name__})"
+            return
         m = re.match(r"\A---\s*\n(.*?)\n---\s*\n?", text, re.DOTALL)
         if not m:
             self.error = "no YAML frontmatter (file must open with a `---` block)"
@@ -132,7 +138,10 @@ def check(directory: Path) -> list[str]:
                 continue  # already reported on the producer
             if isinstance(echo, dict):
                 if isinstance(echo.get("premises"), int):
-                    echoed_premises = echo["premises"]
+                    # SUM across inputs, never last-wins: a frontier that fans in two producers
+                    # consumed both their premise counts, and comparing the dispositions against
+                    # only the last echo both false-flags a conserved chain and hides a real drop.
+                    echoed_premises = (echoed_premises or 0) + echo["premises"]
                 if echo != producer.inventory:
                     diff = {
                         k: (echo.get(k), producer.inventory.get(k))
@@ -212,10 +221,10 @@ def main(argv: list[str]) -> int:
         return 2
     if do_resume:
         return resume(directory)
-    findings = check(directory)
-    if not _load(directory):
+    if not any(directory.glob("*.md")):
         print(f"check_frontiers: no *.md frontiers under {directory}", file=sys.stderr)
         return 2
+    findings = check(directory)
     for f in findings:
         print(f"  CONSERVATION {f}")
     print(f"\n[check_frontiers] {len(findings)} finding(s) over {directory}.")

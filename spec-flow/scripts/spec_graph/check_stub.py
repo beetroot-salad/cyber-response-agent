@@ -102,6 +102,12 @@ def pytest_runtest_logreport(report):
     if report.skipped:
         entry["outcome"] = "skipped"
     elif report.failed:
+        # A teardown error must not erase what the call phase already proved. Against a null
+        # stub, teardown breakage is COMMON (a fixture cleaning up a path the stub never made),
+        # so overwriting here would report a test that failed on its own assertion — textbook
+        # discrimination — as BROKEN.
+        if report.when != "call" and entry.get("outcome") == "failed":
+            return
         crash = getattr(getattr(report, "longrepr", None), "reprcrash", None)
         msg = getattr(crash, "message", None) or str(report.longrepr or "")
         entry["outcome"] = "failed" if report.when == "call" else "error-" + report.when
@@ -141,13 +147,15 @@ def _write_stub(stub_dir: Path, targets: dict[str, set[str]], root: Path) -> Non
 
 
 def _pytest_cwd(suite_dir: Path, root: Path) -> Path:
-    d = suite_dir
-    while d != root.parent:
+    # Walk `parents`, not a hand-rolled `d = d.parent` loop: at the filesystem root
+    # `Path("/").parent` is `/` again, so a suite_dir OUTSIDE the repo tree never reached
+    # either guard (`d == root` never true, `d != root.parent` never false) and spun forever.
+    # `parents` is finite whatever the two paths' relationship.
+    for d in (suite_dir, *suite_dir.parents):
         if any((d / f).is_file() for f in ("pyproject.toml", "pytest.ini", "setup.cfg", "tox.ini")):
             return d
         if d == root:
             break
-        d = d.parent
     return root
 
 
@@ -195,6 +203,14 @@ def run(suite_dir: Path, targets: dict[str, set[str]], python: str, keep: bool) 
                   file=sys.stderr)
         else:
             shutil.rmtree(stub_dir, ignore_errors=True)
+
+    if not results:
+        # An empty report is "nothing ran", never "everything discriminated": a suite that
+        # silently stopped collecting (renamed files, a conftest that imports but registers
+        # nothing) would otherwise certify clean — the one outcome this check exists to deny.
+        print(f"check_stub: pytest collected no tests under {suite_dir} — the run proves "
+              f"nothing about discrimination.\n{proc.stdout[-2000:]}", file=sys.stderr)
+        return 2
 
     recorded = _recorded_passes(suite_dir)
     findings: list[str] = []

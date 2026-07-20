@@ -70,7 +70,22 @@ def target_modules(suite_dir: Path, root: Path) -> tuple[dict[str, set[str]], li
                     dotted = alias.name
                     if _project_rooted(root, dotted) and not _module_exists(root, dotted):
                         targets.setdefault(dotted, set())
-            elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            elif isinstance(node, ast.ImportFrom):
+                if node.level:
+                    # A relative import resolves against the suite's own package, which this
+                    # root-anchored heuristic cannot walk. Reported as floor rather than
+                    # skipped: a dropped import is indistinguishable from "every import
+                    # resolves", and that is the sentence both consumers exit 2 on.
+                    floor.append(
+                        f"{py.name}: relative import `from "
+                        f"{'.' * node.level}{node.module or ''} import "
+                        f"{', '.join(a.name for a in node.names)}` — the heuristic resolves "
+                        f"project-rooted absolute imports only; name it with --target if it "
+                        f"is the target."
+                    )
+                    continue
+                if not node.module:
+                    continue
                 dotted = node.module
                 if not _project_rooted(root, dotted):
                     continue

@@ -66,6 +66,11 @@ class Graph:
     def __init__(self, path: Path) -> None:
         self.path = path
         raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        if not isinstance(raw, dict):
+            # Valid YAML, wrong shape. Without this the first `.get` raised AttributeError,
+            # which `main` does not catch — so a malformed artifact exited 1 ("found findings")
+            # behind a traceback instead of 2 ("could not read").
+            raise TypeError(f"top level is a {type(raw).__name__}, not a mapping")
         self.demands: list[dict] = raw.get("demands", []) or []
         structure = raw.get("structure", {}) or {}
         self.axes: list[str] = structure.get("axes", []) or []
@@ -97,21 +102,22 @@ class Graph:
     def in_delta(self, *elements: dict | None) -> bool:
         return any(e is not None and e.get("provenance") == "design" for e in elements)
 
-    def answered(self, rule: str, element: str, *roots: str) -> bool:
+    def answered(self, rule: str, element: str) -> bool:
         """Whether the graph records an answer for a computed trigger: an executable demand
         binds the obligated address, or a gate entry for the rule names it. Per-cell
         addresses (`b.access[via]`, `b.domain.…[v]`) must match exactly — per-cell discharge
         is the discipline R3/R4 exist for; coarser addresses accept a facet-or-root match."""
         exact = _CELL.match(element) is not None
+        root = _root(element)
         for d in self.demands:
             if d.get("form", "test") != "test":
                 continue
             for b in d.get("binds", []) or []:
                 b = str(b)
-                if b == element or (not exact and _root(b) in roots and _root(element) in roots):
+                if b == element or (not exact and _root(b) == root):
                     return True
         for rec in self.recorded.get(rule, []):
-            if rec == element or (not exact and _root(rec) == _root(element)):
+            if rec == element or (not exact and _root(rec) == root):
                 return True
         return False
 
@@ -211,7 +217,10 @@ def _r0(g: Graph) -> list[str]:
                     f"R0 {g.path.name}: {bid}.identity derivation `{(d or {}).get('value')}` "
                     f"derives from `{(d or {}).get('fn_of')}`, not a registered axis."
                 )
-        if identity and not identity.get("evidence"):
+        # Keyed on `key_axes`, not on the facet's mere presence: a `sharing: serialized-append`
+        # sink legitimately claims NO key, and demanding evidence for it asked the author to
+        # justify a key they never asserted.
+        if identity.get("key_axes") and not identity.get("evidence"):
             findings.append(
                 f"R0 {g.path.name}: {bid}.identity claims key_axes with no `evidence` — "
                 f"a claimed key without evidence is treated as unknown (schema.md)."
@@ -239,7 +248,7 @@ def _r0(g: Graph) -> list[str]:
                 for via, cell in (f.get("constraints_by_via") or {}).items():
                     if (cell or {}).get("constraints") == "unknown":
                         el = f"{bid}.access[{via}]"
-                        if not g.answered("R0", el, bid):
+                        if not g.answered("R0", el):
                             findings.append(
                                 f"R0 {g.path.name}: {el} constraints are `unknown` and no hole "
                                 f"records the undecided policy — decide it, then pin it."
@@ -248,7 +257,7 @@ def _r0(g: Graph) -> list[str]:
                 for alt in f.get("documented_alternatives") or []:
                     if (alt or {}).get("crosses_validation") == "unknown":
                         el = f"{bid}.domain.alternatives[{(alt or {}).get('value')}]"
-                        if not g.answered("R0", el, bid):
+                        if not g.answered("R0", el):
                             findings.append(
                                 f"R0 {g.path.name}: {el} `crosses_validation` is `unknown` with "
                                 f"no recorded hole — grounding establishes the crossing."
@@ -318,7 +327,7 @@ def _triggers(g: Graph) -> tuple[list[Trigger], list[str]]:
                     continue
                 # A recorded R2 answer on this boundary means the coverage question reached
                 # the gate — the demand it minted owns the cross-key assertion from here.
-                if g.answered("R2", f"{bid}.identity", bid):
+                if g.answered("R2", f"{bid}.identity"):
                     continue
                 coverage.append(
                         f"R2 {g.path.name}: writer interacts({e.get('from')}->{bid}) does not "
@@ -406,7 +415,7 @@ def check(path: Path) -> tuple[list[str], list[Trigger]]:
                 f"a rule with no entry reads as skipped, not as clean."
             )
     for t in triggers:
-        if g.answered(t.rule, t.element, _root(t.element)):
+        if g.answered(t.rule, t.element):
             continue
         if g.evaluated.get(t.rule) is False:
             findings.append(
@@ -459,7 +468,7 @@ def main(argv: list[str]) -> int:
     for p in paths:
         try:
             findings, triggers = check(p)
-        except (OSError, yaml.YAMLError) as e:
+        except (OSError, yaml.YAMLError, TypeError) as e:
             # Never a silent pass: a graph the gate cannot read must not certify clean.
             print(f"check_gate: cannot read {p}: {e.__class__.__name__}: {e}", file=sys.stderr)
             return 2

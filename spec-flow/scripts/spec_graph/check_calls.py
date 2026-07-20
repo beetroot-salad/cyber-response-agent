@@ -61,11 +61,15 @@ def check(suite_dir: Path, targets: dict[str, set[str]]) -> list[str]:
                 for a in node.names:
                     if a.asname and a.name.split(".")[-1] in target_names:
                         local_targets.add(a.asname)
-        fns = {
-            n.name: n for n in ast.walk(tree)
-            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
-        }
-        refs = {name: _fn_refs(fn) for name, fn in fns.items()}
+        # Refs are MERGED per name, never last-one-wins: `ast.walk` flattens methods and
+        # nested defs into one namespace, so two same-named helpers in different classes
+        # used to overwrite each other and the fixed point judged both bodies by whichever
+        # the walk reached last. Union keeps the resolution name-based (which is all the
+        # call sites in `refs` can be matched by) without depending on walk order.
+        refs: dict[str, set[str]] = {}
+        for n in ast.walk(tree):
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                refs.setdefault(n.name, set()).update(_fn_refs(n))
         # Fixed point: a function touches the target directly, or calls a same-file
         # function that does. Iterate until stable (helper chains, any depth).
         touches = {name for name, r in refs.items() if r & local_targets}
@@ -76,7 +80,7 @@ def check(suite_dir: Path, targets: dict[str, set[str]]) -> list[str]:
                 if name not in touches and r & touches:
                     touches.add(name)
                     changed = True
-        for name in fns:
+        for name in refs:
             if name.startswith("test_") and name not in touches:
                 findings.append(
                     f"NO-CALL {py.name}::{name}: never references the target "
@@ -114,6 +118,7 @@ def main(argv: list[str]) -> int:
         print("check_calls: no suite directory (no graphs matched and none given)", file=sys.stderr)
         return 2
     all_findings: list[str] = []
+    blind: list[Path] = []
     for d in suite_dirs:
         targets, floor = _suite.target_modules(d, root)
         for t in explicit:
@@ -121,18 +126,24 @@ def main(argv: list[str]) -> int:
         for note in floor:
             print(f"  WARN [check_calls] {note}", file=sys.stderr)
         if not targets:
-            print(
-                f"check_calls: no target identified for {d} — every suite import resolves. "
-                f"A modify-existing spec's target is invisible to the import heuristic; "
-                f"name it with --target <dotted.module>.",
-                file=sys.stderr,
-            )
-            return 2
+            # Collected, not returned on: bailing here threw away every finding the
+            # already-scanned dirs produced, so a real NO-CALL went unreported because a
+            # LATER dir happened to be unlookable.
+            blind.append(d)
+            continue
         all_findings.extend(check(d, targets))
     for f in all_findings:
         print(f"  {f}")
     print(f"\n[check_calls] {len(all_findings)} test(s) that never reach the target "
-          f"over {len(suite_dirs)} suite dir(s).")
+          f"over {len(suite_dirs) - len(blind)} suite dir(s).")
+    if blind:
+        print(
+            f"check_calls: no target identified for {[str(d) for d in blind]} — every suite "
+            f"import resolves. A modify-existing spec's target is invisible to the import "
+            f"heuristic; name it with --target <dotted.module>.",
+            file=sys.stderr,
+        )
+        return 2
     return 1 if all_findings else 0
 
 

@@ -54,6 +54,10 @@ def _vocab(findings: list[str], where: str, field: str, value, allowed: set) -> 
 
 def check(path: Path) -> list[str]:
     graph = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    if not isinstance(graph, dict):
+        # Valid YAML, wrong shape — exit 2 ("could not read"), not an AttributeError
+        # traceback behind exit 1 ("found findings").
+        raise TypeError(f"top level is a {type(graph).__name__}, not a mapping")
     n = path.name
     findings: list[str] = []
     for k in set(graph) - _TOP:
@@ -219,7 +223,7 @@ def main(argv: list[str]) -> int:
     for p in paths:
         try:
             all_findings.extend(check(p))
-        except (OSError, yaml.YAMLError) as e:
+        except (OSError, yaml.YAMLError, TypeError) as e:
             print(f"check_lint: cannot read {p}: {e.__class__.__name__}: {e}", file=sys.stderr)
             return 2
     for f in all_findings:

@@ -61,7 +61,12 @@ _JUDGMENT_RULES = {"R0", "R5", "R6"}
 
 def _load(path: Path) -> dict:
     with path.open(encoding="utf-8") as fh:
-        return yaml.safe_load(fh) or {}
+        graph = yaml.safe_load(fh) or {}
+    if not isinstance(graph, dict):
+        # Valid YAML, wrong shape — a caught error (exit 2, "could not read"), not an
+        # AttributeError traceback behind exit 1 ("found findings").
+        raise TypeError(f"top level is a {type(graph).__name__}, not a mapping")
+    return graph
 
 
 def _cited(entry: dict) -> list[str]:
@@ -71,8 +76,8 @@ def _cited(entry: dict) -> list[str]:
     return [str(x) for x in c] if isinstance(c, list) else [str(c)]
 
 
-def check_spend_points(path: Path) -> list[str]:
-    graph = _load(path)
+def check_spend_points(path: Path, graph: dict | None = None) -> list[str]:
+    graph = _load(path) if graph is None else graph
     verdicts = {c.get("id"): c.get("verdict") for c in graph.get("claims", []) or []}
     findings: list[str] = []
 
@@ -112,9 +117,9 @@ def check_spend_points(path: Path) -> list[str]:
     return findings
 
 
-def check(path: Path) -> list[str]:
+def check(path: Path, graph: dict | None = None) -> list[str]:
     findings: list[str] = []
-    for c in _load(path).get("claims", []) or []:
+    for c in (_load(path) if graph is None else graph).get("claims", []) or []:
         cid = c.get("id", "<no-id>")
         kind, verdict, pk = c.get("kind"), c.get("verdict"), c.get("probe_kind")
         if kind not in _REQUIRED:
@@ -154,8 +159,18 @@ def main(argv: list[str]) -> int:
     if not paths:
         print("check_claims: no spec_graph_*.yaml found", file=sys.stderr)
         return 0
-    findings = [f for p in paths for f in check(p)]
-    spend = [f for p in paths for f in check_spend_points(p)]
+    findings: list[str] = []
+    spend: list[str] = []
+    for p in paths:
+        # Parsed ONCE and handed to both passes: the two used to load the same graph
+        # independently, doubling every read and parse.
+        try:
+            graph = _load(p)
+        except (OSError, yaml.YAMLError, TypeError) as e:
+            print(f"check_claims: cannot read {p}: {e.__class__.__name__}: {e}", file=sys.stderr)
+            return 2
+        findings.extend(check(p, graph))
+        spend.extend(check_spend_points(p, graph))
     for f in findings:
         print(f"  INSTRUMENT {f}")
     for f in spend:

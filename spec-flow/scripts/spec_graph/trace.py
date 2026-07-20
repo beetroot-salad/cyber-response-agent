@@ -68,13 +68,20 @@ def _floor_dynamic(texts: dict[Path, str], root: Path) -> list[str]:
 def drivers(base: str, cfg: dict) -> int:
     census = check_actors._Census(base, cfg)
     root = census.root
-    changed = sorted(p for p in census.changed if p in set(census.files))
+    census_files = set(census.files)  # hoisted: inside the genexp this rebuilt per changed path
+    changed = sorted(p for p in census.changed if p in census_files)
     if not changed:
         print(f"[trace drivers] no changed census modules against base={base} — nothing to anchor.")
         return 0
     # Forward reach from each entrypoint, inverted into per-changed-module driver lists —
     # the same closure check_actors gates on, reported as the census itself.
     reach = {e: check_actors._reach(e, census.edges) for e in census.entrypoints}
+    # Scanned once per entrypoint, not once per (changed module × entrypoint) pair: the
+    # regex sweeps each entrypoint's whole source, and it does not vary with `mod`.
+    subproc_stems = {
+        e: check_actors._subprocessed_py_stems(census.texts.get(e, ""))
+        for e in census.entrypoints
+    }
     print(f"[trace drivers] base={base}; {len(changed)} changed module(s), "
           f"{len(census.entrypoints)} entrypoint(s) in census.\n")
     for mod in changed:
@@ -84,8 +91,7 @@ def drivers(base: str, cfg: dict) -> int:
         )
         via_subproc = sorted(
             str(e.relative_to(root)) for e in census.entrypoints
-            if mod.stem in check_actors._subprocessed_py_stems(census.texts.get(e, ""))
-            and e != mod
+            if mod.stem in subproc_stems[e] and e != mod
         )
         print(f"{rel}:")
         for d in via_import:
