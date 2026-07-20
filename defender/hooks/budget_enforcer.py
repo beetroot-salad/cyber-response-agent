@@ -1,36 +1,26 @@
-#!/usr/bin/env python3
-"""PostToolUse hook: per-run tool-call budget tracking (warning-only).
+"""Per-run tool-call budget logic — a LIBRARY, not a hook.
 
-Counts tool calls and subagent spawns per run and prints stderr
+Counts tool calls and subagent spawns per run and produces stderr
 warnings when usage crosses 75% / 100% of the configured caps, plus a
-wall-clock check. **Warning-only** — always exits 0, never blocks the
-agent (the same posture as soc-agent's enforcer; hard enforcement can
-be switched on later by returning 2).
+wall-clock check. **Warning-only**: `check_budgets` returns strings and
+nothing here blocks — see #631 for the blocking posture.
 
-Run identification: the defender runs one in-process agent per run, so
-the run dir is the single ``DEFENDER_RUN_DIR`` env var that run.py
-exports into the process. No session→run map is needed. If the var is unset or not a directory the
-hook is a silent no-op.
+The sole consumer is `runtime/driver.py`'s `after_tool_execute` hook,
+which passes the run dir from `AgentDeps`. This module used to double as
+a `claude -p` PostToolUse hook script (stdin JSON in, exit code out);
+that runtime and its `run-settings.json` wiring were retired, so the
+entrypoint went with them — the logic is imported directly now.
 
 Counters live in ``{run_dir}/budget.json``, incremented under an
-exclusive ``flock`` so concurrent PostToolUse invocations don't race.
-
-Exit codes:
-    0 — always.
+exclusive ``flock`` so concurrent gather subagents don't race.
 """
 
 from __future__ import annotations
 
-import json
-import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-# Sibling-import the shared run-dir helper. defender/hooks/<this>.py → parents[2]
-# is the repo root, so `defender.hooks.*` resolves whether imported or run as a script.
-if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
-    sys.path.insert(0, _root)
-from defender.hooks._run_dir import resolve_run_dir, update_json_locked
+from defender.hooks._run_dir import update_json_locked
 
 # Caps are intentionally inline + single-default: the defender has no
 # per-signature permissions.yaml to overlay, so there is nothing to
@@ -59,9 +49,10 @@ def update_budget_locked(run_dir: Path, run_id: str, tool_name: str) -> dict:
         # wall-clock check never silently drops out for the rest of the run.
         budget.setdefault("started_at", datetime.now(UTC).isoformat())
         budget["tool_calls"] = budget.get("tool_calls", 0) + 1
-        # "Task"/"Agent" = the claude -p subagent dispatch; "gather" = the
-        # in-process PydanticAI gather dispatch tool. Both count as a spawn.
-        if tool_name in ("Task", "Agent", "gather"):
+        # "gather" is the in-process PydanticAI dispatch tool — the only spawn
+        # there is. ("Task"/"Agent", the retired claude -p subagent dispatch,
+        # counted here too; no tool by either name is registered any more.)
+        if tool_name == "gather":
             budget["subagent_spawns"] = budget.get("subagent_spawns", 0) + 1
 
     return update_json_locked(
@@ -107,24 +98,3 @@ def check_budgets(budget: dict, limits: dict) -> list[str]:
     if w:
         warnings.append(w)
     return warnings
-
-
-def main(*, stdin=None, limits: dict | None = None) -> int:
-    try:
-        hook_data = json.loads((stdin or sys.stdin).read())
-    except (json.JSONDecodeError, ValueError):
-        return 0
-
-    run_dir = resolve_run_dir()
-    if run_dir is None:
-        return 0
-
-    tool_name = hook_data.get("tool_name", "")
-    budget = update_budget_locked(run_dir, run_dir.name, tool_name)
-    for warning in check_budgets(budget, limits if limits is not None else DEFAULT_LIMITS):
-        print(f"⚠ {warning}", file=sys.stderr)
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())

@@ -138,7 +138,7 @@ defender/
     inject_system_skill_description.py  # descriptor_catalog: the progressive-disclosure system descriptor catalog
     block_main_loop_raw_access.py       # the main-loop adapter/raw deny reasons + adapter-shim regex (used by permission/)
     _cmd_segments.py                    # shared: timeout/bash-c unwrap + adapter/non-adapter shim taxonomy
-    budget_enforcer.py                  # per-run tool-call / spawn / wall-clock budget logic (warning-only; driver.py Hook)
+    budget_enforcer.py                  # per-run tool-call / spawn / wall-clock budget logic (warning-only; imported by driver.py's after_tool_execute Hook)
     record_lesson_load.py               # lesson_name(): lesson→outcome traceability into {run_dir}/lessons_loaded.jsonl
   skills/
     invlang/            # invlang block surface (schema + author-side CLI: vocab, queries, advisory, validate)

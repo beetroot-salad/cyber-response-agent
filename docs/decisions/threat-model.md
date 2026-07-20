@@ -177,14 +177,14 @@ bytes an attacker-controlled model chose:
   schema-constrained report is what stops it being an arbitrary carrier.
 
 **Class 7 — accounted, not enforced.** A per-run budget exists (tool calls,
-subagent spawns, wall clock) but **both paths warn rather than block**:
-`hooks/budget_enforcer.py` is explicitly *"Warning-only — always exits 0, never
-blocks the agent,"* and the driver's `after_tool_execute` hook prints
-`check_budgets` output to stderr and returns the result unchanged. `circuit_breaker`
-*does* abort, including a run-wide kill switch, but it is scoped to environment
-health (exit-2 connectivity/auth failures), not to a model spending money. So
-against the axiom this is observability. Hard enforcement is a documented one-line
-switch.
+subagent spawns, wall clock) but **it warns rather than blocks**: the driver's
+`after_tool_execute` hook prints `check_budgets` output to stderr and returns the
+result unchanged. There is one enforcement path, not two — `hooks/budget_enforcer.py`
+is the budget *logic* the driver imports, and its `claude -p` PostToolUse entrypoint
+was deleted with that retired runtime. `circuit_breaker` *does* abort, including a
+run-wide kill switch, but it is scoped to environment health (exit-2
+connectivity/auth failures), not to a model spending money. So against the axiom
+this is observability. Blocking posture is designed in #631.
 
 **Class 8 — isolation between runs.** The control is **a box per run**. #291
 (per-agent run dir) is *runtime cleanliness*, not the boundary — do not let it stand
