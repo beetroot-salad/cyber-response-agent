@@ -43,6 +43,20 @@ that left a prompt-injection defence unguarded, with every test green. Waive a c
 mention under a top-level `binds_waivers:` map; prefer *binding* the concept so the test is forced to
 assert it.
 
+The same script runs a second, independent scan: **inspected but never exercised**. A demand
+binding `drives(A->B)` whose test names `B` *only inside an `assert`* is flagged — the demand
+claims a wiring, the test checks a shape, and the shape holds whether or not `A` is wired to `B`.
+The catch it was forged on (#540): a `parity` demand discharged by
+`assert isinstance(deps.box, BoxExecutor)`, where `AgentDeps.box` defaults to
+`field(default_factory=BoxExecutor)` — the inert default and a live container are the same type,
+so the assertion could not fail, and two bash-enabled roles shipped with no box attached.
+
+The rule is deliberately narrow. `B` **absent** from the test is *not* flagged: a test that drives
+the real loop reaches `B` through production wiring and never names it. Only "named, and named
+nowhere but an assertion" is the defect shape. Waive under a top-level `exercise_waivers:` map
+(keyed by demand id → seam names); prefer driving `A` and asserting the observable outcome. The
+two findings are counted separately in the summary line — they name different slips.
+
 ## check_actors.py — execution-context census (missing-consumer / missing-axis class)
 
 `structure.actors` is authored from the design doc, so it captures production consumers and misses
