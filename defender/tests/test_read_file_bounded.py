@@ -73,25 +73,25 @@ def _hinted_command(hint: str) -> str:
     return hint.rsplit("\n", 1)[1].strip().replace("'<filter>'", "'.a'")
 
 
-def test_overflow_hint_main_pipes_into_jq_and_names_the_write_sink(tmp_path) -> None:
+def test_overflow_hint_main_pipes_into_defender_sql_and_names_the_write_sink(tmp_path) -> None:
     """main has `jq` AND a write tool. The reducer must be PIPED: `jq '<filter>' <path>`
     is denied (main/gather `jq` is stdin-compute-only), which the last assertion pins."""
     run = tmp_path / "run"
     pol = _main_policy(tmp_path)
     hint = tools._overflow_filter_hint(str(run / "big.json"), pol)
-    assert "jq" in hint
+    assert "defender-sql" in hint
     assert "write the result" in hint
     assert _admits(pol, _hinted_command(hint), run)
 
 
-def test_overflow_hint_gather_pipes_into_jq_without_the_write_sink(tmp_path) -> None:
+def test_overflow_hint_gather_pipes_into_defender_sql_without_the_write_sink(tmp_path) -> None:
     """gather has `jq` but NO write tool (`write_allow == ()`), so it must not be told to
     write the filtered result to a file — a step it cannot take."""
     run = tmp_path / "run"
     pol = _gather_policy(tmp_path)
     assert not pol.write_allow, "premise: gather has no writer"
     hint = tools._overflow_filter_hint(str(run / "big.json"), pol)
-    assert "jq" in hint
+    assert "defender-sql" in hint
     assert "write the result" not in hint
     assert _admits(pol, _hinted_command(hint), run)
 
@@ -175,7 +175,7 @@ def test_over_cap_truncates_head_and_appends_notice(tmp_path) -> None:
     assert head == "y" * CAP  # head is exactly the first CAP chars, verbatim
     assert note  # a notice was appended
     assert "too large to read whole" in out
-    assert "jq" in out
+    assert "defender-sql" in out
     assert path in out  # the hint carries the file it refers to
     # full size surfaced so the model knows the scale it can't see
     assert str(CAP + 5000) in out

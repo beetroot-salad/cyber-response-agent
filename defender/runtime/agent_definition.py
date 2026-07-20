@@ -152,6 +152,15 @@ class AgentDefinition:
     deps_cls: type[AgentDeps] | None = None
     requires_confine: bool = False
     requires_explicit_tree: bool = False
+    #: Where this role's RELATIVE file operands anchor (#540). The default is the run dir —
+    #: the boxed bash lane's cwd and its rw bind, so the gate, the file tools and the executor
+    #: all name one directory. A TREE-anchored role addresses its own worktree instead
+    #: (`defender_dir.parent`): the curators and the lead author edit a throwaway git worktree
+    #: and are handed repo-relative paths (`defender/lessons/{slug}.md`) by their own prompts,
+    #: while their `run_dir` is only a trace anchor and a read root — often not under the repo
+    #: at all. One global anchor cannot serve both, so it is per-role DATA like the two bits
+    #: above rather than an `if role is X` branch.
+    anchors_on_tree: bool = False
     bindable: bool = True
     deny_reason: str = _DEFAULT_DENY_REASON
 
@@ -368,6 +377,7 @@ def compile_policy_for(
 def bind(
     defn: AgentDefinition, run_dir: Path, *,
     scope: RunScope = _DEFAULT_SCOPE, salt: str | None = None, defender_dir: Path | None = None,
+    box: Any = None,
 ) -> AgentDeps:
     """Resolve a definition for a run into ready-to-use ``AgentDeps``: compile the policy (via
     ``compile_policy_for`` — the shared validate → resolve → compile half), then construct the
@@ -387,6 +397,13 @@ def bind(
     worktree read/write. LEAD_AUTHOR flows through this same spine as every other role — no bespoke
     early-return.
 
+    ``box`` (#540) is the bash lane's execution boundary, threaded onto ``deps.box``. ``None``
+    leaves the deps carrying the INERT default executor, which refuses on first use — so a role
+    bound without a box cannot execute bash at all, rather than executing it on the host. The
+    box rides here rather than being resolved inside the tool because whether execution is
+    confined is a property of the RUN, and the one place a run's identity becomes an agent's
+    deps is this seam.
+
     Stays PER-RUN — no ``lead_id`` parameter; gather's per-dispatch id rides a thin wrapper that
     stamps it post-bind."""
     policy = compile_policy_for(defn, run_dir, scope=scope, defender_dir=defender_dir)
@@ -397,7 +414,12 @@ def bind(
             "importing the learning stages to look it up)."
         )
     return defn.deps_cls._for_run(
-        run_dir, policy, defender_dir=_resolved_tree(defender_dir), salt=salt,
+        run_dir, policy, defender_dir=_resolved_tree(defender_dir), salt=salt, box=box,
+        # Resolved ONCE, here, from the role's own data bit — the three coupled sites then read
+        # one field instead of each re-deriving an anchor and drifting apart.
+        cwd_anchor=(
+            _resolved_tree(defender_dir).parent if defn.anchors_on_tree else run_dir
+        ),
     )
 
 

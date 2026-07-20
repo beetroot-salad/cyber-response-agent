@@ -78,6 +78,7 @@ class VerifierDeps(AgentDeps):
 # ``ToolSet`` (#551 — the standalone ``_VERIFY_POLICY`` constant + ``VerifierDeps.for_run`` front
 # door retired, so there is no second policy source to keep honest by a parity test).
 VERIFY_DEF = AgentDefinition(
+    anchors_on_tree=True,   # runs over the curator's worktree operands (#540)
     role=AgentRole.VERIFIER,
     model=lambda: VERIFIER_MODEL,
     effort=VERIFIER_EFFORT,

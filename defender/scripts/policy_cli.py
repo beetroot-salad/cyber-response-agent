@@ -109,11 +109,18 @@ def _show(policy: AgentPolicy, name: str, run_dir: Path, defender_dir: Path) -> 
     return 0
 
 
-def _explain(
-    policy: AgentPolicy, command: str, run_dir: Path, defender_dir: Path, as_json: bool
+def _explain(  # noqa: PLR0913 — the gate's own call shape, plus the output-format flag
+    policy: AgentPolicy, command: str, run_dir: Path, defender_dir: Path, as_json: bool,
+    *, cwd_anchor: Path,
 ) -> int:
+    # `cwd_anchor` is threaded because this CLI is a second CONSUMER of the gate, never a second
+    # implementation — and since #540 the anchor a RELATIVE operand rebases on is per-role data.
+    # Omit it and `explain` would silently answer for the run-dir anchor while a tree-anchored
+    # role (lead author) really runs on its worktree root: the audit tool would report DENY for
+    # a command production ALLOWs, which is the one failure mode an audit tool cannot have.
     d = permission.decide_bash(
         command, policy=policy, run_dir=run_dir, defender_dir=defender_dir,
+        cwd_anchor=cwd_anchor,
     )
     grants = [g.program for g in d.grants]
     if as_json:
@@ -150,7 +157,12 @@ def main(argv: list[str] | None = None) -> int:
     policy = _policy(defn, args.run_dir, args.defender_dir)
     if args.cmd == "show":
         return _show(policy, args.agent, args.run_dir, args.defender_dir)
-    return _explain(policy, args.command, args.run_dir, args.defender_dir, args.as_json)
+    # The same resolution `agent_definition.bind` performs, off the same `anchors_on_tree` bit —
+    # so the CLI and the runtime cannot answer differently about where an operand anchors.
+    anchor = args.defender_dir.parent if defn.anchors_on_tree else args.run_dir
+    return _explain(
+        policy, args.command, args.run_dir, args.defender_dir, args.as_json, cwd_anchor=anchor,
+    )
 
 
 if __name__ == "__main__":

@@ -214,7 +214,6 @@ def test_resolve_error_fails_closed(tmp_path):
     "head -5 defender/lessons-actor/x.md",
     "tail -5 defender/lessons-actor/x.md",
     "ls defender/lessons-actor",
-    "jq . defender/lessons-actor/x.md",
 ])
 def test_actor_all_generic_readers_denied(cmd):
     """a confined actor (empty `bash_allow`) is denied EVERY generic bash reader — reads go through the tool.
@@ -330,12 +329,19 @@ def test_judge_cat_operand_with_embedded_nul_fails_closed(tmp_path):
     assert not _judge_gate("cat /etc/pass\x00wd | defender-sql 'SELECT 1'", tmp_path).allow
 
 
-def test_judge_relative_operand_denied(tmp_path):
-    """The judge's payloads reach it as ABSOLUTE `read_roots`, so a relative operand — rebased on the
-    executor's cwd (`defender_dir.parent`, the repo root) — names nothing inside its scope and is
-    denied. The prompts must not teach one either — that side is pinned by
+def test_judge_relative_operand_resolves_into_its_own_run(tmp_path):
+    """A relative operand is rebased on the executor's cwd, which since #540 is the RUN DIR.
+
+    That directory IS inside the judge's `read_roots`, so `gather_raw/l-002/0.json` now names
+    a payload the judge may already read by its absolute path — the same file, a shorter
+    spelling, NOT a wider set. Pre-#540 the anchor was the repo root, which is why the old
+    expectation here was a denial: the operand named nothing in scope rather than being
+    forbidden. The escape below is what actually pins the confine, and it is unchanged.
+
+    The prompts still teach absolute paths — pinned by
     `test_every_command_the_prompt_teaches_passes_the_judges_own_gate`."""
-    assert not _judge_gate("cat gather_raw/l-002/0.json", tmp_path).allow
+    assert _judge_gate("cat gather_raw/l-002/0.json", tmp_path).allow
+    assert not _judge_gate("cat ../../etc/passwd", tmp_path).allow
 
 
 def test_judge_relative_operand_gated_against_the_executors_cwd(monkeypatch, tmp_path):
@@ -387,7 +393,7 @@ def test_judge_pipe_with_unapproved_stage_denied(tmp_path):
     claimed, so `head`/`jq` match no judge grant and the whole command is denied."""
     raw = tmp_path / "gather_raw" / "l-002" / "0.json"
     assert not _judge_gate(f"cat {raw} | head", tmp_path).allow
-    assert not _judge_gate(f"cat {raw} | jq '.'", tmp_path).allow
+    assert not _judge_gate(f"cat {raw} | wc -l", tmp_path).allow
 
 
 def test_judge_pipe_all_cat_stages_gated(tmp_path):
@@ -398,7 +404,7 @@ def test_judge_pipe_all_cat_stages_gated(tmp_path):
     assert not _judge_gate(f"cat {raw} | cat /etc/passwd", tmp_path).allow
 
 
-@pytest.mark.parametrize("tmpl", ["grep x {r}", "head {r}", "tail {r}", "ls .", "jq . {r}", "echo hi"])
+@pytest.mark.parametrize("tmpl", ["grep x {r}", "head {r}", "tail {r}", "ls .", "echo hi"])
 def test_judge_other_readers_denied(tmp_path, tmpl):
     """for the judge, grep/head/tail/ls/jq are denied (subsumed by the read tool's read+search), and
     the inert `echo`/`true` viewers are NOT inherited — only cat + defender-sql survive as bash. Note
@@ -544,8 +550,8 @@ def test_gather_stream_plumbing_anchored(tmp_path):
     raw = f"{run}/gather_raw/l-001/0.json"
     assert bash(f"cat {raw} | defender-sql 'SELECT count(*) FROM data'").allow
     assert not bash("defender-elastic query 'x'").allow   # #611: no adapter on any bash lane
-    assert bash(f"cat {raw} | jq '.hits|length'").allow
-    assert not bash("jq '.hits|length' /tmp/p.json").allow
+    assert bash(f"cat {raw} | wc -c").allow
+    assert not bash("cat /tmp/p.json | wc -c").allow
     assert not bash(f"cat {run}/gather_raw/evil.json").allow   # in-root, but not the raw shape
 
 

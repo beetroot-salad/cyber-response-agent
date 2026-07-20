@@ -60,7 +60,7 @@ _NON_ADAPTER = frozenset({"invlang"})
 # stdout into the subagent's context — the 6000-hit / 500KB flood that
 # drives hand-counting. Above this byte ceiling the pass-through is
 # replaced by a count + samples + a pointer to the on-disk payload and a
-# nudge to filter that file with jq/grep instead. The full payload is
+# nudge to filter that file with grep/defender-sql instead. The full payload is
 # always persisted regardless; only the in-context view is capped.
 def _passthrough_max_bytes() -> int:
     """The pass-through byte ceiling, read at call time so an env override set
@@ -185,7 +185,7 @@ def build_truncated_view(stdout: str, payload_rel: str | None, run_dir: Path) ->
     set (an adapter with a non-overridable returned-doc cap), the
     on-disk file is a *bounded sample*, not the full data: counts come from `total`,
     never from counting the sample — so the message says so, and the agent doesn't
-    jq-length a capped array and report the cap as the count."""
+    count a capped array and report the cap as the count."""
     size = len(stdout)
     records = _find_records(stdout)
     total = _envelope_total(stdout)
@@ -223,17 +223,17 @@ def build_truncated_view(stdout: str, payload_rel: str | None, run_dir: Path) ->
             lines.append(
                 "→ COUNTS come from a query envelope's `total`, not this file: to count "
                 "a subset, re-query with the narrowing filter and read its `total`. Use "
-                "the on-disk sample only to read field shape, e.g. (jq reads STDIN — pipe "
-                "the file in, don't pass it as an operand):\n"
-                f"  cat {abs_payload} | jq '.hits[0]'"
+                "the on-disk sample only to read field shape, e.g. (the viewers read "
+                "STDIN — pipe the file in, don't pass it as an operand):\n"
+                f"  cat {abs_payload} | head -40"
             )
         else:
             lines.append(f"full payload: {abs_payload}")
             lines.append(
-                "→ compute every value over the full payload on disk (jq, grep, the Grep "
-                "tool); never count or read answers off the samples above. jq reads STDIN "
+                "→ compute every value over the full payload on disk (defender-sql, grep); "
+                "never count or read answers off the samples above. The reducers read STDIN "
                 "— pipe the file in, don't pass it as an operand, e.g.:\n"
-                f"  cat {abs_payload} | jq '[.hits[] | select(.message | test(\"<substr>\"))] | length'"
+                f"  cat {abs_payload} | defender-sql 'SELECT count(*) FROM data'"
             )
     return "\n".join(lines) + "\n"
 

@@ -71,7 +71,11 @@ UNRELATED_TREES = (
     ".claude/",
     # The spec-run records of THIS and earlier changes: an artifact trail is a record,
     # not live prose, and this change's own graph necessarily names what it removes.
+    # Both homes: graphs live beside the suite they spec, so a run whose spec is an e2e
+    # suite writes into `tests/e2e/`. The bare `tests/` prefix silently missed those —
+    # a path mismatch, not a policy difference (#540's graph is the one that surfaced it).
     "defender/tests/spec_graph_",
+    "defender/tests/e2e/spec_graph_",
 )
 HISTORICAL_RECORD = UNRELATED_TREES
 
@@ -494,7 +498,15 @@ def test_the_deleted_manual_gather_harness_leaves_no_dependent_behind():
     assert not (REPO_ROOT / "scripts" / "testing" / "gather_only.py").exists(), (
         "scripts/testing/gather_only.py is still on disk"
     )
-    hits = live_hits(repo_grep(r"gather_only"))
+    # #540 deleted the file (its fork H3: every bash-enabled role gets a box, and this harness
+    # built deps OUTSIDE `bind`), and its own suite carries the SURVIVAL demand — it names the
+    # path to assert the absence and then drives the substitute workflow. That is the same
+    # reason `SUITE_FILES` exists here: a module quoting a retired name in order to prove it is
+    # gone must not be read as a dependent on it.
+    hits = live_hits(
+        repo_grep(r"gather_only"),
+        extra_excludes=("defender/tests/e2e/test_540_scrub_lifecycle.py",),
+    )
     assert not hits, "a dependent on the deleted harness survives:\n" + "\n".join(hits)
 
 

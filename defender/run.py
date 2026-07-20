@@ -31,6 +31,7 @@ if __name__ == "__main__" and _VENV_PY.is_file() and Path(sys.executable) != _VE
 
 import argparse  # noqa: E402
 import asyncio  # noqa: E402
+import contextlib  # noqa: E402
 
 # Put the workspace root on sys.path so `defender.*` namespace imports resolve
 # whether this file is imported or run directly.
@@ -39,6 +40,7 @@ if (_root := str(_DEFENDER_DIR.parent)) not in sys.path:
 
 from defender import run_common as _run  # noqa: E402
 from defender._run_paths import RunPaths  # noqa: E402
+from defender.runtime import box as box_mod  # noqa: E402
 from defender.runtime import driver  # noqa: E402
 from defender.runtime import providers  # noqa: E402
 
@@ -148,14 +150,47 @@ def main(argv: list[str]) -> int:
 
     print(f"[run.py] run_dir={run_dir} model={model}", file=sys.stderr)
 
-    summary = asyncio.run(driver.run_investigation(
-        alert_path=RunPaths(run_dir).alert,
-        run_dir=run_dir,
-        run_id=run_dir.name,
-        defender_dir=DEFENDER_DIR,
-        salt=salt,
-        model_name=model,
-    ))
+    # The bash lane's execution boundary (#540). Built BEFORE the investigation, so a box that
+    # cannot be created refuses the run rather than letting it start unconfined; torn down in a
+    # `finally`, so a crashed driver cannot leak a container (one genuinely survives its
+    # parent's SIGKILL). Nothing here catches the crash — teardown runs, then the exception
+    # keeps propagating, which is what makes the reap-time scrub below unreachable on a run
+    # that never finished.
+    #
+    # Teardown branches on whether the investigation finished, because a `BoxFault` raised from
+    # a `finally` REPLACES the exception in flight: a driver crash would reach the operator as
+    # "could not tear down the box" — the symptom — with the real cause demoted to `__context__`.
+    # So a reap failure is the headline on the clean path and best-effort on the crash path.
+    # Expressed with a flag rather than an `except`: this function must carry NO blanket handler,
+    # or the scrub's `RunTainted` below would have somewhere to land.
+    box = box_mod.start_box(run_dir, DEFENDER_DIR)
+    investigation_ok = False
+    try:
+        summary = asyncio.run(driver.run_investigation(
+            alert_path=RunPaths(run_dir).alert,
+            run_dir=run_dir,
+            run_id=run_dir.name,
+            defender_dir=DEFENDER_DIR,
+            salt=salt,
+            model_name=model,
+            box=box,
+        ))
+        investigation_ok = True
+    finally:
+        if investigation_ok:
+            box_mod.stop_box(box)
+        else:
+            with contextlib.suppress(box_mod.BoxFault):
+                box_mod.stop_box(box)
+
+    # The reap-time scrub, between the box's death and the FIRST consumer of the tree. The
+    # ordering is the whole soundness argument: the box is gone, so there is no live writer and
+    # no TOCTOU window; and no consumer below has read the tree yet, so a tainted run reaches
+    # none of them. `RunTainted` is deliberately left to propagate — sixteen host consumers read
+    # this tree with symlink-unsafe primitives, and the safe answer is to refuse the tree, not
+    # to catch the finding and carry on.
+    box_mod.scrub(run_dir)
+
     out = str(summary.get("output") or "")
     print(f"[run.py] done ({summary.get('requests')} model requests); "
           f"output: {out[:200]}", file=sys.stderr)

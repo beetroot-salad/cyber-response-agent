@@ -204,7 +204,7 @@ def _claim(argv: list[str], policy: AgentPolicy) -> Grant | None:
     return None
 
 
-def _in_scope(argv: list[str], grant: Grant, *, defender_dir: Path | None) -> bool:
+def _in_scope(argv: list[str], grant: Grant, *, run_dir: Path | None) -> bool:
     """Whether every file this stage OPENS resolves into the claiming grant's scope.
 
     The extractor is looked up by the matched GRANT's program, never by `argv[0]`: a grant
@@ -213,10 +213,16 @@ def _in_scope(argv: list[str], grant: Grant, *, defender_dir: Path | None) -> bo
     `OPENS_NOTHING` program opens nothing this gate must check and passes untouched — its SHAPE
     is then its sole containment, which is why every such shape is a positive flag allowlist.
 
-    A RELATIVE operand is rebased onto `defender_dir.parent` — the cwd `tools._tool_bash` hands
-    the executor — before it is resolved. Without that the gate would resolve against the
-    ambient process cwd while the program opens the file from the executor's, so the two could
-    name different files: the validator/executor differential this package exists to eliminate.
+    A RELATIVE operand is rebased onto `run_dir` — the cwd `tools._tool_bash` hands the executor
+    — before it is resolved. Without that the gate would resolve against the ambient process cwd
+    while the program opens the file from the executor's, so the two could name different files:
+    the validator/executor differential this package exists to eliminate.
+
+    `run_dir` is the anchor at all THREE coupled sites (#540): here, `tools._resolve_operand`,
+    and the `cwd=` the executor runs under. It moved off `defender_dir.parent` — the repo root —
+    because that directory holds `.env`, `.ssh/` and the sibling worktrees: a relative operand
+    used to anchor one `..` away from every credential in the tree. It is also the only anchor
+    that survives the box, whose rw bind IS `run_dir`.
 
     FAILS CLOSED on everything hostile: an argv the extractor cannot decide (`None`), a
     `resolve()` error (a symlink LOOP raises `RuntimeError`; an embedded NUL, `ValueError`), a
@@ -229,9 +235,9 @@ def _in_scope(argv: list[str], grant: Grant, *, defender_dir: Path | None) -> bo
     files = extract(argv)
     if files is None:
         return False
-    if defender_dir is None:
+    if run_dir is None:
         return False  # no cwd to rebase a relative operand against — fail closed
-    cwd = defender_dir.parent
+    cwd = run_dir
     for f in files:
         try:
             p = Path(f)
@@ -246,7 +252,7 @@ def _in_scope(argv: list[str], grant: Grant, *, defender_dir: Path | None) -> bo
 
 
 def _decide_readers(
-    pipelines: list[bash_exec.Pipeline], policy: AgentPolicy, *, defender_dir: Path | None,
+    pipelines: list[bash_exec.Pipeline], policy: AgentPolicy, *, run_dir: Path | None,
 ) -> BashDecision | None:
     """The non-adapter reader lane, driven by `policy.bash_allow`. Returns:
 
@@ -273,7 +279,7 @@ def _decide_readers(
     if any(_stage_unsafe(s) for s in stages):
         return BashDecision(False, policy.deny_reason)
     pairs = zip(stages, claimed, strict=True)   # one grant per stage, by construction
-    if not all(_in_scope(st, g, defender_dir=defender_dir) for st, g in pairs):
+    if not all(_in_scope(st, g, run_dir=run_dir) for st, g in pairs):
         return BashDecision(False, policy.deny_reason)
     return _allow(pipelines, grants=tuple(claimed))
 
@@ -281,16 +287,27 @@ def _decide_readers(
 def decide_bash(
     command: str, *, policy: AgentPolicy,
     run_dir: Path | None = None, defender_dir: Path | None = None,
+    cwd_anchor: Path | None = None,
 ) -> BashDecision:
     """Allow/deny a Bash command for an agent, driven entirely by its `AgentPolicy` (no
     per-role method): the per-agent grant lane (shape ∧ scope), then structural adapter routing.
 
-    `defender_dir` supplies the executor's cwd, against which a RELATIVE file operand is rebased
-    before it resolves; a policy whose grants open no file never consults it. `run_dir` is
-    accepted for call-shape uniformity with `decide_read`/`decide_write` and is deliberately NOT
-    consulted: since #575 the run's roots reach the gate baked into the grants' SCOPES, resolved
-    at compile time — so a caller cannot hand the gate a run the policy was not compiled for
-    (which is exactly the cross-run bleed a shared roots argument invites).
+    `run_dir` supplies the executor's cwd, against which a RELATIVE file operand is rebased
+    before it resolves; a policy whose grants open no file never consults it. It anchors here,
+    in `tools._resolve_operand`, and in the `cwd=` the executor runs under — one directory at
+    all three sites, or a relative operand names different files to the validator and the
+    executor (#540). The run's roots still reach the gate baked into the grants' SCOPES,
+    resolved at compile time (#575), so this rebase cannot widen what a policy admits: an
+    operand that rebases out of scope still fails the scope check.
+
+    `cwd_anchor` overrides that anchor for a role whose relative operands are NOT run-relative —
+    the curators and the lead author address a throwaway worktree, and their `run_dir` is only a
+    trace anchor. It defaults to `run_dir`, so the boxed runtime lane needs no extra argument and
+    a caller that forgets it cannot silently widen anything: the anchor only decides which file a
+    relative operand NAMES, and the resolved path still has to satisfy the grant's scope.
+
+    `defender_dir` is accepted for call-shape uniformity with `decide_read`/`decide_write`; the
+    bash lane no longer rebases on it.
 
     Returns a `BashDecision` carrying the single parse (see the class): callers read
     `.allow`/`.reason` as before, and execute off `.pipelines` without re-parsing (#456)."""
@@ -315,7 +332,9 @@ def decide_bash(
     # pinned scripts, adapter-SHAPED commands that must win over adapter classification (the job
     # the old custom matchers did). A claimed command that fails the scope check / carries an
     # unsafe construct denies HERE rather than falling through.
-    reader = _decide_readers(pipelines, policy, defender_dir=defender_dir)
+    reader = _decide_readers(
+        pipelines, policy, run_dir=cwd_anchor if cwd_anchor is not None else run_dir,
+    )
     if reader is not None:
         return reader
 

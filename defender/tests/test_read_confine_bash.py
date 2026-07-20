@@ -296,7 +296,6 @@ def test_tail_head_have_no_file_slot_and_no_arg_taking_flag(env):
     ("head -5 {p}", "cat {p} | head -5"),
     ("tail -3 {p}", "cat {p} | tail -3"),
     ("wc -l {p}", "cat {p} | wc -l"),
-    ("jq -r '.' {p}", "cat {p} | jq -r '.'"),
 ])
 def test_viewer_file_operand_denied_pipe_form_allowed(env, file_form, pipe_form):
     """The c1 ledger, BOTH sides, on a fully IN-SCOPE path: the file form DENIES (it ALLOWed before
@@ -328,58 +327,8 @@ def test_wc_files0_from_escapes(env):
     assert not _bash(env, f"cat {env.run}/report.md | wc --files0-from=/etc/passwd", "gather").allow
 
 
-def test_jq_standalone_file_operand_denied(env):
-    """jq '.x' {RUN}/gather_raw/l-001/1.json → DENY: jq is stdin-compute-only, NO file slot — even an
-    IN-SCOPE positional file is denied. Substitute: cat FILE | jq '.x'."""
-    # rejected: allow an in-scope positional file (then jq needs a file slot, and jq's file slot
-    #           drags in an option parser for -f/-L/--slurpfile/--rawfile — the reason cat is the
-    #           sole opener)
-    assert not _bash(env, f"jq '.x' {env.run}/gather_raw/l-001/1.json", "gather").allow
-    assert _bash(env, f"cat {env.run}/gather_raw/l-001/1.json | jq '.x'", "gather").allow
 
 
-def test_jq_stdin_rawfile_flag_escapes(env):
-    """cat {RUN}/gather_raw/l-001/1.json | jq --rawfile y /etc/passwd '.' → DENY: --rawfile opens
-    /etc/passwd EVEN in a stdin pipe stage; jq's shape carries no file-flag slot."""
-    # rejected: ALLOW (a free `^jq .*$` stdin pattern lets --rawfile through)
-    cmd = f"cat {env.run}/gather_raw/l-001/1.json | jq --rawfile y /etc/passwd '.'"
-    assert not _bash(env, cmd, "gather").allow
-
-
-def test_jq_stdin_slurpfile_and_L_escape(env):
-    """jq --slurpfile / -L file-opening flags in a stdin stage → DENY (both open out-of-root files/
-    module bodies)."""
-    assert not _bash(env, f"cat {env.run}/report.md | jq --slurpfile y /etc/shadow '.'", "gather").allow
-    assert not _bash(env, f"cat {env.run}/report.md | jq -L /etc '.'", "gather").allow
-
-
-def test_jq_stdin_compute_only_allowed(env):
-    """cat {RUN}/executed_queries.jsonl | jq -r 'select(.lead_id=="l-001")' → ALLOW: the real jq shape
-    (stdin formatter over an in-scope artifact, no file operand, boolean/value flags only)."""
-    cmd = f"""cat {env.run}/executed_queries.jsonl | jq -r 'select(.lead_id=="l-001")'"""
-    assert _bash(env, cmd, "gather").allow
-
-
-def test_jq_stdin_arg_and_argjson_allowed(env):
-    """cat {RUN}/… | jq -r --arg uid "0" '<filter>' → ALLOW: `--arg`/`--argjson NAME VALUE` bind a
-    shell var into the filter as a STRING/JSON literal and open NO file, so they are safe on the
-    stdin-only jq lane. This is the shape the gather query template ships
-    (skills/gather/queries/host-state/container-identity-and-uid.md) — the gate must not deny its own
-    documented workflow. The VALUE is inert even when it looks like a path (`--arg` never reads it)."""
-    # rejected: admit only boolean jq short flags (denies `--arg`, breaking the passwd/uid template)
-    tmpl = (f"cat {env.run}/gather_raw/l-001/0.json | "
-            "jq -r --arg uid \"0\" '.entries[] | select(split(\":\")[2] == $uid)'")
-    assert _bash(env, tmpl, "gather").allow
-    assert _bash(env, f"cat {env.run}/report.md | jq --argjson n 5 '.hits[:$n]'", "gather").allow
-    # a path-LOOKING --arg VALUE is a bound string, not a file read → still allowed
-    assert _bash(env, f"cat {env.run}/report.md | jq --arg p /etc/passwd '.'", "gather").allow
-    # but a FILE-opening jq flag stays denied even alongside --arg (no widening of the file lane)
-    assert not _bash(env, f"cat {env.run}/report.md | jq --arg u 0 --rawfile y /etc/passwd '.'", "gather").allow
-
-
-# ===========================================================================  #
-# D2. Stdin-consuming viewers in a pipe: a downstream stage names NO file        #
-# ===========================================================================  #
 
 def test_stdin_consuming_viewers_in_pipe_allowed(env):
     """`<in-scope cat | shim> | grep/wc/head/tail/cat` → ALLOW: a downstream viewer reads STDIN and
@@ -605,17 +554,25 @@ def test_ls_and_cd_are_gone_from_the_lane(env):
 # ===========================================================================  #
 
 def test_relative_operand_is_rebased_not_guessed(env):
-    """A relative operand is rebased on `defender_dir.parent` — the cwd `tools._tool_bash` hands the
-    executor — before it resolves (#575). Pre-#535 the convention was "absolute only" because a pure
-    regex anchor cannot resolve a relative path; resolving one against the EXECUTOR's cwd is not a
-    widening but a correctness fix: without it the gate validates one file while `cat` opens another.
+    """A relative operand is rebased on the cwd `tools._tool_bash` hands the executor, before it
+    resolves (#575). Pre-#535 the convention was "absolute only" because a pure regex anchor
+    cannot resolve a relative path; resolving one against the EXECUTOR's cwd is not a widening
+    but a correctness fix: without it the gate validates one file while `cat` opens another.
 
-    So `cat gather_raw/l-001/1.json` still DENIES — rebased on the tmp cwd, it names nothing in scope
-    — while the same relative spelling that really does land in the corpus ALLOWs, and a `..` escape
-    from it DENIES."""
-    assert not _bash(env, "cat gather_raw/l-001/1.json", "gather").allow
-    assert _bash(env, f"cat {env.run}/gather_raw/l-001/1.json", "gather").allow   # absolute control
-    assert _bash(env, "cat defender/lessons/x.md", "gather").allow                # rebased into corpus
+    Since #540 that cwd is the RUN DIR (the box's rw bind), so the rebase now lands INSIDE the
+    run rather than at the repo root. `gather_raw/l-001/1.json` therefore names gather's own
+    payload and ALLOWs — the same file the absolute control names, which is the property that
+    matters: one spelling, one file, gate and executor agreeing.
+
+    The repo-relative corpus spelling now DENIES, and that is not a capability loss: an
+    absolute operand bypasses every anchor, and `defender-lessons` emits absolute paths, so
+    the corpus is still reachable by the spelling the agent is actually handed. A `..` escape
+    still DENIES — the rebase is a resolution rule, not a widening."""
+    rel = _bash(env, "cat gather_raw/l-001/1.json", "gather")
+    absolute = _bash(env, f"cat {env.run}/gather_raw/l-001/1.json", "gather")
+    assert rel.allow
+    assert absolute.allow                                                         # absolute control
+    assert not _bash(env, "cat defender/lessons/x.md", "gather").allow            # no longer the repo root
     assert not _bash(env, "cat ../../etc/passwd", "gather").allow                 # rebase is not a widening
 
 

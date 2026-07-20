@@ -36,6 +36,7 @@ from __future__ import annotations
 import contextlib
 import os
 import subprocess
+import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -262,6 +263,19 @@ def _run_one_pipeline(
                     # rather than crashing the run; tear down anything started.
                     _kill_all(procs)
                     return 127, "", f"{stage.argv[0]}: command not found\n"
+                except PermissionError:
+                    # The file is THERE but not executable — a missing exec bit, or a
+                    # noexec mount. bash returns 126 and says so; 127 would be a lie,
+                    # because "not found" sends the model hunting for a different path
+                    # when the real answer is that nothing may execute from here.
+                    #
+                    # Load-bearing since #540: `/tmp` in the box is a noexec tmpfs, so this
+                    # is the ordinary outcome of staging a script there — not an edge case.
+                    # Uncaught it escapes the box entrypoint, which then writes no response
+                    # frame at all, and a containment result the boundary is SUPPOSED to
+                    # produce reaches the host looking like an infrastructure fault.
+                    _kill_all(procs)
+                    return 126, "", f"{stage.argv[0]}: Permission denied\n"
                 # The parent's copy of the previous stage's read end must close so
                 # EOF propagates when that stage exits.
                 if prev_stdout is not None:
@@ -350,3 +364,61 @@ def run_parsed(
             err_parts.append(perr)
 
     return rc, "".join(out_parts), "".join(err_parts)
+
+
+def _run_box_entrypoint() -> int:
+    """The in-box entrypoint: `python3 -m defender.runtime.bash_exec` (#540).
+
+    Reads ONE framed request from stdin, runs the gate-approved pipelines, and writes ONE
+    framed response to stdout. This is new, security-relevant surface, so it is deliberately
+    the thinnest thing that can work: it accepts NO argv, so there is no command string for
+    anything in the box to influence, and it reads structure rather than text, so there is no
+    second parse on this side of the boundary. What the gate approved on the host is what runs
+    here — the executor's whole reason for existing survives the move into a container.
+
+    The environment is the container's own (a positive allowlist baked into the create), never
+    anything the frame carries: a request that could set variables would be a channel for the
+    host's secrets to be requested back.
+
+    Stdout carries the frame and NOTHING else. Any unframed byte on this stream would be read
+    by the host as an infrastructure fault, which is exactly what it would be."""
+    from defender.runtime import box
+
+    frame = sys.stdin.buffer.read()
+    try:
+        pipelines = box.decode_request(frame)
+    except ValueError as e:
+        # A frame we cannot decode is never guessed at: failing closed here is what stops a
+        # corrupted request from becoming a different, still-executable command.
+        print(f"box entrypoint: undecodable request frame: {e}", file=sys.stderr)
+        return 2
+
+    # The environment handed to the program is filtered to the box's positive allowlist. The
+    # container's own env is NOT the allowlist on its own: a rootfs bakes its own variables in
+    # (`python:3.11-slim` ships GPG_KEY, PYTHON_VERSION, PYTHON_SHA256), and `docker run` has no
+    # way to clear an image's ENV. Filtering here — the one place every boxed program is
+    # launched from — is what makes the allowlist true of what the model's code actually sees,
+    # regardless of which rootfs the spec names.
+    box_env = {k: v for k, v in os.environ.items() if k in box.BOX_ENV_ALLOWLIST}
+
+    try:
+        rc, out, err = run_parsed(
+            pipelines,
+            command="",
+            env=box_env,
+            cwd=Path.cwd(),
+            timeout=float(os.environ.get("DEFENDER_BOX_TIMEOUT", "120")),
+        )
+    except subprocess.TimeoutExpired:
+        print("box entrypoint: the pipeline exceeded its wall-clock deadline", file=sys.stderr)
+        return 3
+
+    sys.stdout.buffer.write(box.encode_response(box.BoxResult(
+        rc=rc, out=out.encode("utf-8"), err=err.encode("utf-8"),
+    )))
+    sys.stdout.buffer.flush()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(_run_box_entrypoint())

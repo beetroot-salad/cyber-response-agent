@@ -34,6 +34,19 @@ DEFENDER_DIR = Path(__file__).resolve().parent.parent
 REPO_ROOT = DEFENDER_DIR.parent
 
 
+def _safe_name(name: str) -> str:
+    """Render a run-dir entry name so it cannot forge markdown structure (#540, R6).
+
+    Post-#540 the *box* chooses these names: a boxed process writes model-chosen paths
+    into `run_dir`, and this map renders them RAW into message 0, in-process and upstream
+    of the reap-time scrub. A newline in a filename would otherwise close the bullet and
+    open a forged `## Absolute roots` section — a self-authored instruction the model reads
+    as the host's own orientation. Control characters are escaped to their `\\xNN` form, so
+    the name still appears (an operator can see what was planted) on exactly one line.
+    Ordinary names contain no control characters and pass through byte-identical."""
+    return "".join(c if c.isprintable() or c == " " else repr(c)[1:-1] for c in name)
+
+
 def _rel(p: Path) -> str:
     try:
         return str(p.relative_to(REPO_ROOT))
@@ -84,7 +97,7 @@ def workspace_map(run_dir: Path) -> str:
             if child.name == "gather_raw":
                 continue
             kind = "dir/" if child.is_dir() else ""
-            lines.append(f"- {child.name}{(' ' + kind) if kind else ''}")
+            lines.append(f"- {_safe_name(child.name)}{(' ' + kind) if kind else ''}")
     else:
         lines.append("- (not yet materialized)")
     lines.append("")

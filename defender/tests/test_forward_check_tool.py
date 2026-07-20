@@ -1180,8 +1180,11 @@ def test_d25b_surviving_bash_lane_still_works(tmp_path):
     deps = _deps(scene, run_verify=FakeVerify(), queued=set())
 
     def gate(cmd):
+        # Mirrors `tools._tool_bash`, anchor included: the curator is TREE-anchored (#540), so
+        # a repo-relative operand rebases on its worktree rather than on the run dir.
         return permission.decide_bash(
             cmd, policy=deps.policy, run_dir=deps.run_dir, defender_dir=deps.defender_dir,
+            cwd_anchor=deps.cwd_anchor,
         )
 
     for cmd in (

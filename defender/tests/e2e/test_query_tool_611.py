@@ -1232,22 +1232,35 @@ def test_deny_reason_names_no_deleted_route(tmp_path):
     codebase treats as an enforced invariant, not a cosmetic string."""
     run_dir, gather, _ = _policies(tmp_path)
     for cmd in ("defender-elastic query foo",
-                f"cat gather_raw/{LEAD}/0.json | defender-sql 'SELECT 1'"):
+                "defender-elastic query foo | defender-sql 'SELECT 1'"):
         reason = _decide(cmd, gather, run_dir).reason
         assert "standalone" not in reason.lower(), f"the deny reason teaches a dead route: {reason}"
         assert "query" in reason.lower(), f"the deny reason does not name the query tool: {reason}"
 
+    # The relative-payload reduce is no longer one of the denied shapes: since #540 a relative
+    # operand resolves against the run dir, so it names gather's own payload. Kept here as the
+    # positive control — a reason is only meaningful if the ALLOW case really allows.
+    assert _decide(f"cat gather_raw/{LEAD}/0.json | defender-sql 'SELECT 1'", gather, run_dir).allow
+
 
 def test_gather_bash_keeps_local_computation(tmp_path):
-    """gather_bash_keeps_local_computation — `cat <ABSOLUTE gather_raw payload> | defender-sql
-    '<SQL>'` is still ALLOW for gather, so the split pipe (tool-then-bash) works. The RELATIVE
-    spelling still denies — which is why the payload note must stay ABSOLUTE."""
+    """gather_bash_keeps_local_computation — `cat <gather_raw payload> | defender-sql '<SQL>'`
+    is still ALLOW for gather, so the split pipe (tool-then-bash) works.
+
+    Both spellings now name the SAME file. Pre-#540 a relative operand rebased on the repo
+    root, so `gather_raw/…` named nothing in scope and denied — hence the old "absolute only"
+    convention. The anchor is now the RUN DIR, which is where `gather_raw/` actually lives, so
+    the relative spelling resolves onto the payload rather than into a directory that has no
+    reason to hold one. The payload note still reports absolute paths (that is what the query
+    result carries), but a relative spelling is no longer a trap."""
     run_dir, gather, _ = _policies(tmp_path)
     payload = run_dir / "gather_raw" / LEAD / "0.json"
     assert _decide(f"cat {payload} | defender-sql 'SELECT count(*) FROM data'",
                    gather, run_dir).allow
-    assert not _decide(f"cat gather_raw/{LEAD}/0.json | defender-sql 'SELECT 1'",
-                       gather, run_dir).allow
+    assert _decide(f"cat gather_raw/{LEAD}/0.json | defender-sql 'SELECT 1'",
+                   gather, run_dir).allow
+    # The rebase is a resolution rule, not a widening: an escape still denies.
+    assert not _decide("cat ../../etc/passwd | defender-sql 'SELECT 1'", gather, run_dir).allow
 
 
 def test_main_cannot_reach_a_payload_by_any_surface(tmp_path):

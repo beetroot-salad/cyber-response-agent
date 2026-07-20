@@ -346,12 +346,21 @@ def test_a10_scope_anchors_on_the_resolved_root(env):
 
 
 def test_a11_relative_operand_is_rebased_on_the_executor_cwd(env):
-    """a11: a RELATIVE operand (`cat defender/lessons/x.md`) is rebased on `defender_dir.parent` —
-    the executor's real cwd (`tools.py:305`) — before resolve, so it ALLOWs. Drop the rebase and the
-    gate and the executor name different files: the gate would resolve against the pytest cwd while
-    bash reads the corpus file. Positive control: a relative path that escapes the corpus still
-    DENIES (the rebase is a resolution rule, not a widening)."""
-    assert _bash(env, "cat defender/lessons/x.md", "main").allow
+    """a11: a RELATIVE operand is rebased on the executor's REAL cwd before resolve. Drop the
+    rebase and the gate and the executor name different files: the gate would resolve against
+    the ambient process cwd while bash opens from the executor's.
+
+    Since #540 that cwd is the RUN DIR, not the repo root — it is the box's rw bind, the one
+    directory that names the same thing inside the container and out, and it no longer anchors
+    a relative operand one `..` from the repo's `.env`/`.ssh`. So `investigation.md` names the
+    run's own artifact and ALLOWs, while the repo-relative corpus spelling now DENIEs: nothing
+    hands MAIN that spelling any more, because `defender-lessons` emits ABSOLUTE paths (an
+    absolute operand bypasses every anchor, which is how the lessons lane still works).
+
+    Positive control: a relative path that escapes the run dir still DENIES — the rebase is a
+    resolution rule, not a widening."""
+    assert _bash(env, "cat investigation.md", "main").allow
+    assert not _bash(env, "cat defender/lessons/x.md", "main").allow
     assert not _bash(env, "cat ../../etc/passwd", "main").allow
 
 
@@ -460,10 +469,6 @@ _FILE_OPENING_FLAGS = [
     "grep -e x /etc/passwd",
     "grep -r x",
     "grep -R x",
-    "jq --rawfile v /etc/passwd .",
-    "jq --slurpfile v /etc/passwd .",
-    "jq -f /etc/passwd",
-    "jq -L /etc .",
     "tail -f /etc/passwd",
     "head -c 100 /etc/passwd",
 ]
@@ -480,7 +485,7 @@ def test_b7_opens_nothing_shapes_admit_no_file_opening_flag(env, which, cmd):
     assert not _bash(env, cmd, which).allow
 
 
-@pytest.mark.parametrize("stage", ["grep -n s", "wc -l", "head -5", "tail -3", "jq -r '.'"])
+@pytest.mark.parametrize("stage", ["grep -n s", "wc -l", "head -5", "tail -3"])
 def test_b7_stdin_forms_still_allowed(env, stage):
     """b7 positive control: the STDIN forms of the same programs still ALLOW — the migration takes
     away their file slot, not the programs. `cat {run}/x.md | grep -n s` is the substitute for
@@ -511,7 +516,7 @@ def test_b8_opens_nothing_shapes_admit_no_long_option_or_dash_positional(env):
     # Without this the test passes for a grammar that admits nothing at all.
     admits = {
         "grep": "grep -n secret", "head": "head -5", "tail": "tail -3",
-        "wc": "wc -l", "jq": "jq -r .",
+        "wc": "wc -l",
     }
     main_pol = _all_policies(env)["main"]
     for g in _opens_nothing_grants(main_pol):
@@ -531,7 +536,6 @@ def test_b8_opens_nothing_shapes_admit_no_long_option_or_dash_positional(env):
     ("head -5 {p}", "cat {p} | head -5"),
     ("tail -3 {p}", "cat {p} | tail -3"),
     ("wc -l {p}", "cat {p} | wc -l"),
-    ("jq -r '.' {p}", "cat {p} | jq -r '.'"),
 ])
 def test_c1_file_operand_viewers_lose_their_file_slot(env, file_form, pipe_form):
     """c1 (domain-outcome, behavior change #1 — BOTH sides pinned): grep/head/tail/wc/jq lose their
@@ -574,8 +578,7 @@ def test_c4_shipped_query_template_command_survives(env):
     A shipped template the gate denies is a documented dead command — the worst kind, because the
     agent is TOLD to run it."""
     payload = f"{env.run}/gather_raw/l-001/0.json"
-    cmd = (f"""cat {payload} | jq -r --arg uid "1000" """
-           """'.entries[] | select(split(":")[2] == $uid)'""")
+    cmd = f"""cat {payload} | defender-sql "SELECT * FROM data WHERE uid = '1000'" """
     assert _bash(env, cmd, "gather").allow
 
 
@@ -937,7 +940,8 @@ def test_g2_overflow_hint_reaches_the_right_branch_through_the_real_seam(env):
     path = f"{env.run}/gather_raw/l-001/0.json"
     for which in ("main", "gather"):
         hint = tools._overflow_filter_hint(path, getattr(env, which))
-        assert f"cat {path} | jq" in hint, which
+        assert f"cat {path} | defender-sql" in hint, which
+        assert "jq" not in hint, which
     jhint = tools._overflow_filter_hint(path, _judge(env, ticket_cli=_ticket_cli(env)))
     assert "defender-sql" in jhint
     assert "jq" not in jhint
