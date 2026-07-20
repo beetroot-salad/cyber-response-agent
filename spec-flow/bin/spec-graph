@@ -13,11 +13,18 @@
 #     not exist inside a git worktree — which is exactly where write-tests mandates the work
 #     happen. So the interpreter is discovered, not configured.
 #
-# Usage:  spec-graph binds  [graph.yaml ...]            [--config <path>]
-#         spec-graph actors [graph.yaml] [--base <ref>] [--config <path>]
-#         spec-graph claims [graph.yaml ...]            [--config <path>]
+# Usage:  spec-graph binds     [graph.yaml ...]            [--config <path>]
+#         spec-graph actors    [graph.yaml] [--base <ref>] [--config <path>]
+#         spec-graph claims    [graph.yaml ...]            [--config <path>]
+#         spec-graph gate      [graph.yaml ...] [--residue] [--config <path>]
+#         spec-graph lint      [graph.yaml ...]            [--config <path>]
+#         spec-graph frontiers [dir] [--resume]
+#         spec-graph calls     [graph.yaml | suite-dir] [--target <mod> ...]
+#         spec-graph nullstub  [graph.yaml | suite-dir] [--target <mod> ...] [--python <interp>]
+#         spec-graph trace     {drivers [--base <ref>] | resource [<name> ...]}
 #
 # Override the interpreter with SPEC_GRAPH_PYTHON=<path> if discovery picks wrong.
+# (nullstub runs pytest with the PROJECT's interpreter: --python or $SPEC_GRAPH_TEST_PYTHON.)
 
 set -eu
 
@@ -35,8 +42,14 @@ case "${1:-}" in
   binds) script=$scripts/check_binds.py ;;
   actors) script=$scripts/check_actors.py ;;
   claims) script=$scripts/check_claims.py ;;
+  gate) script=$scripts/check_gate.py ;;
+  lint) script=$scripts/check_lint.py ;;
+  frontiers) script=$scripts/check_frontiers.py ;;
+  calls) script=$scripts/check_calls.py ;;
+  nullstub) script=$scripts/check_stub.py ;;
+  trace) script=$scripts/trace.py ;;
   *)
-    echo "usage: spec-graph {binds|actors|claims} [graph.yaml ...] [--base <ref>] [--config <path>]" >&2
+    echo "usage: spec-graph {binds|actors|claims|gate|lint|frontiers|calls|nullstub|trace} ..." >&2
     exit 2
     ;;
 esac

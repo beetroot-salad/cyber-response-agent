@@ -4,7 +4,7 @@
 
 - Two leaves in sequence. The orchestrator routes the residue afterwards; it produces none of this. (Assembly was once spine-owned to "avoid serializing the graph out"; measurement showed the opposite — in-context assembly cost 20–30k tokens per run, and the one delegated assembly produced the best artifact of its day.)
 - **Assembler leaf** (frontier model): inputs = `10-brief.md`, `20-demands.md`, `45-dispositions.md`. Outputs: `spec_graph_<slug>.yaml` at its final committed path (the profile's `specGraph.artifacts` names the directory — it is a deliverable, not plumbing) plus `50-graph-digest.md`.
-- **Gate leaf**: inputs = the assembled artifact. Outputs: the gate record written into the artifact, plus `60-residue.md`.
+- **Gate leaf** (Sonnet — the R1–R5 triggers are computed by `spec-graph gate`, so this leaf annotates and judges rather than re-derives; a frontier model here re-buys what the tool already knows): inputs = the assembled artifact. Outputs: the gate record written into the artifact, plus `60-residue.md`.
 
 ## Charge — the assembler
 
@@ -18,7 +18,15 @@ Digest-frontier inventory: `{demands: n, claims: n, boundaries: n, unknowns: n}`
 
 ## Charge — the gate leaf
 
-Read **references/rules.md** in full. Execute every rule over the join of demands × structure. The rules are **guaranteed question-generators**: a lens *might* ask the two-writer collision question; the rule makes sure it is asked, every run. Record each rule's outcome — fired or clean — in the artifact's `gate.evaluated`: a rule with no entry reads as skipped, and the cold reconciler cannot tell a quiet rule from a forgotten one.
+Read **references/rules.md** in full. The rules are **guaranteed question-generators**: a lens *might* ask the two-writer collision question; the rule makes sure it is asked, every run — and for R1–R5 the asking is now mechanical. Start with:
+
+```
+spec-graph gate <artifact> --residue
+```
+
+That prints every slot-computed firing (rule, element, reason) plus the R0 formal findings (dangling addresses, unregistered axes, unheard `unknown`s). Your work is what the tool cannot do: write each firing's **witness** (the concrete element and the missing demand, one sentence), classify its route into the typed residue below, and run the three **judgment halves** the tool only demands entries for — R0's bidirectional prose reconciliation (a normative design sentence binding no element; a delta element tracing to no sentence), R5's tightening/safe-by-construction extension, and R6's chooser/sanitizer walk over every rendered sink. Do not re-derive the computed triggers by hand, and do not trim the tool's list — a firing you disagree with is a `fired: false` that must cite its claim, never a deletion.
+
+Record each rule's outcome — fired or clean — in the artifact's `gate.evaluated`: a rule with no entry reads as skipped, and the cold reconciler cannot tell a quiet rule from a forgotten one. Before writing the frontier, re-run `spec-graph gate <artifact>` (no flag) — it must exit clean or every remaining finding must be a residue entry you routed on purpose.
 
 **Every spend-point cites its claim.** A `fired: false`, a waiver's rationale, a pre-discharge credit, a `binds_waivers`/`exercise_waivers`/`actor_waivers` entry, or a hole resolved as "not reachable / cannot be built unsafe" closes only by citing a ledger claim id of the matching kind with an executed probe (rules.md, "Probed claims") — a plausible sentence in one of those slots is exactly what hardens a blind spot into a green suite. Reachability claims are break-attempts and only ever `unrefuted`; a design that needs the universal *confirmed* routes to a safe-by-construction demand instead — enforced, not believed. A spend-point whose claim does not exist yet becomes a probe obligation in the residue, not a citation-shaped sentence.
 

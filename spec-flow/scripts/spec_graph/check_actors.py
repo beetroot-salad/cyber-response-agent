@@ -52,6 +52,7 @@ from pathlib import Path
 
 import yaml
 
+import _cli
 import _config
 
 
@@ -302,7 +303,7 @@ def _is_entrypoint(path: Path, text: str, extra_stems: set[str]) -> bool:
 
 def check(graph_path: Path, census: _Census, cfg: dict) -> list[str]:
     graph_text = graph_path.read_text(encoding="utf-8")
-    graph = yaml.safe_load(graph_text)
+    graph = _cli.load_graph(graph_path)
     waivers = set(graph.get("actor_waivers", []) or [])
     aliases: dict[str, str] = cfg["contextAliases"]
 
@@ -361,27 +362,11 @@ def check(graph_path: Path, census: _Census, cfg: dict) -> list[str]:
 
 
 def main(argv: list[str]) -> int:
-    # Emit findings (and _warn lines) as utf-8 regardless of the ambient locale — the OUTPUT twin of
-    # the utf-8-pinned reads in `_read_texts`. Both the finding text and the WARN lines carry non-ASCII
-    # (em-dashes), so a non-utf-8 stdout/stderr — a C-locale runner, a Windows console — would raise
-    # UnicodeEncodeError on the very `print` that reports a finding. A gate that cannot emit its finding
-    # reads as clean to a caller that checks exit code but loses the traceback (the #588/#589 class,
-    # output side). reconfigure exists on the standard TextIOWrapper streams; guard for a replaced one.
-    for stream in (sys.stdout, sys.stderr):
-        if hasattr(stream, "reconfigure"):
-            stream.reconfigure(encoding="utf-8")
-    base = "main"
-    config: str | None = None
-    args = []
-    it = iter(argv)
-    for a in it:
-        if a == "--base":
-            base = next(it, "main")
-        elif a == "--config":
-            config = next(it, None)
-        else:
-            args.append(a)
-    cfg = _config.load(config)
+    # utf-8 out is the OUTPUT twin of the utf-8-pinned reads in `_read_texts` — see _cli.
+    _cli.utf8_stdio()
+    opts, args = _cli.parse_argv(argv, valued={"--base", "--config"})
+    base = opts["base"] or "main"
+    cfg = _config.load(opts["config"])
     graphs = [Path(a) for a in args] or _config.artifacts(cfg)
     try:
         if not graphs:
@@ -393,8 +378,17 @@ def main(argv: list[str]) -> int:
             )
         census = _Census(base, cfg)  # repo-derived, graph-independent — built once, not per graph
         all_findings: list[str] = []
+        unreadable: list[Path] = []
         for g in graphs:
-            all_findings.extend(check(g, census, cfg))
+            # The family's could-not-read contract (exit 2): a list-top-level graph used
+            # to surface as an AttributeError traceback behind exit 1 ("found findings").
+            try:
+                all_findings.extend(check(g, census, cfg))
+            except (OSError, yaml.YAMLError, TypeError, AttributeError) as e:
+                print(f"check_actors: cannot read {g}: {e.__class__.__name__}: {e}",
+                      file=sys.stderr)
+                unreadable.append(g)
+                continue
         blind = census.load_bearing_gaps()
     except CensusBlind as exc:
         print(f"check_actors: {exc}", file=sys.stderr)
@@ -417,6 +411,8 @@ def main(argv: list[str]) -> int:
         print(f"  UNMODELLED {f}")
     n = len(all_findings)
     print(f"\n[check_actors] {n} unmodelled driver context(s) over {len(graphs)} graph(s) (base={base}).")
+    if unreadable:
+        return 2
     return 1 if n else 0
 
 

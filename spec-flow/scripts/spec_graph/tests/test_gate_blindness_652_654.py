@@ -19,9 +19,8 @@ from __future__ import annotations
 
 import os
 import subprocess
-import sys
 
-from conftest import DEFAULT_CHECK_ACTORS, SPEC_GRAPH_DIR
+from conftest import DEFAULT_CHECK_ACTORS, run_script
 
 BROKEN = "def (:\n"  # unparseable by ast.parse, in any Python
 GRAPH = "schema_version: 1\ndemands: []\nactors: []\n"
@@ -30,13 +29,8 @@ GRAPH = "schema_version: 1\ndemands: []\nactors: []\n"
 def _run_bare(repo, *argv: str) -> subprocess.CompletedProcess[str]:
     """Drive check_actors with arbitrary argv — including NO graph path, which conftest's
     `Repo.run` cannot express (it always passes one) and which is exactly the no-artifacts case."""
-    env = dict(os.environ)
-    env["PYTHONPATH"] = str(SPEC_GRAPH_DIR) + os.pathsep + env.get("PYTHONPATH", "")
     check = os.environ.get("CHECK_ACTORS_PATH", str(DEFAULT_CHECK_ACTORS))
-    return subprocess.run(
-        [sys.executable, check, *argv], cwd=repo.root, env=env,
-        capture_output=True, text=True, timeout=60,
-    )
+    return run_script(check, *argv, cwd=repo.root, timeout=60)
 
 
 def _chain_repo(make_repo, broken_rel: str | None):

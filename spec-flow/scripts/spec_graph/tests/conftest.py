@@ -27,6 +27,28 @@ SPEC_GRAPH_DIR = Path(__file__).resolve().parent.parent
 DEFAULT_CHECK_ACTORS = SPEC_GRAPH_DIR / "check_actors.py"
 
 
+def run_script(
+    script: str,
+    *argv: str,
+    cwd: Path,
+    env_extra: dict[str, str] | None = None,
+    timeout: int = 120,
+) -> subprocess.CompletedProcess[str]:
+    """Drive a real spec_graph script via subprocess — the house style; the scripts have
+    no injection seam. `$PYTHONPATH` carries the spec_graph dir so `import _config`
+    resolves whichever script file is invoked; `script` may be a bare filename (resolved
+    against that dir) or an absolute path (the `$CHECK_*_PATH` null-stub overrides).
+    `env_extra` overrides process env for the child — e.g. forcing a non-utf-8 locale,
+    exactly the environment that makes an unpinned read/print raise."""
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(SPEC_GRAPH_DIR) + os.pathsep + env.get("PYTHONPATH", "")
+    env.update(env_extra or {})
+    return subprocess.run(
+        [sys.executable, str(SPEC_GRAPH_DIR / script), *argv],
+        cwd=cwd, env=env, capture_output=True, text=True, timeout=timeout,
+    )
+
+
 class Repo:
     """A throwaway git repo standing in for a target project's checkout."""
 

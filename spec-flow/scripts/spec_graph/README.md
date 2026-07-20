@@ -6,14 +6,21 @@ blind-spot shapes over the bindings. The gate rules are only as good as the part
 and the binding-edges they're handed — so a graph **coarser than reality** passes green while real
 bugs escape.
 
-These two checks re-derive part of the graph from an **independent** channel (the prose, the call
-graph) and diff. They catch two of the three escape classes that motivated them; the third
-(input-partition granularity, e.g. a `..`-path that resolves to `/`) is not mechanizable from the
-graph alone and wants property-based / differential-oracle testing at impl time instead.
+The checks here are the mechanical half of the write-tests gate. Two families:
 
-Both read the project profile (`.claude/spec-flow.json`, key `specGraph`) for the things that are
+* **cross-derivation** (`binds`, `actors`, `trace`) — re-derive part of the graph from an
+  **independent** channel (the prose, the call graph) and diff, so the graph can't inherit the
+  design doc's blind spots;
+* **self-consistency** (`gate`, `lint`, `claims`, `calls`, `nullstub`, `frontiers`) — evaluate
+  the artifact's own formal slots, the suite's discrimination, and the run's frontier chain, so
+  what the doctrine describes as a procedure is an exit code, not a prompt.
+
+What is NOT mechanizable from the graph alone — input-partition granularity, e.g. a `..`-path
+that resolves to `/` — wants property-based / differential-oracle testing at impl time instead.
+
+All read the project profile (`.claude/spec-flow.json`, key `specGraph`) for the things that are
 not portable — where the project's source lives, which stems are entrypoints, what the graph calls
-each actor. See `_config.py`.
+each actor, which shared roots have declared sinks. See `_config.py`.
 
 **Invoke them through `spec-graph`**, the wrapper in the plugin's `bin/` (which Claude Code puts on
 the Bash PATH). It resolves the scripts from its own location and discovers an interpreter with
@@ -74,6 +81,61 @@ signature `subprocess re-exec of ['lead_author'] (relocates the tree anchor)` �
 guard false-positive that the design-authored actor list could never have surfaced. Model the context
 as an actor — which surfaces its hidden axes — or waive an out-of-scope context under a top-level
 `actor_waivers:` list. Do **not** waive a re-exec context to go green: that redness is the signal.
+
+## check_gate.py — the rule triggers, computed (`spec-graph gate`)
+
+rules.md's R1–R5 trigger on predicates over formal slots, so the tool evaluates them: R0's formal
+half (dangling `binds:` addresses, unregistered axes/interpolates, undefined edge endpoints,
+unheard `unknown`s), the R1–R5 firings over the delta (`provenance: design` scoping), and the
+recorded `gate:` block's consistency — a computed firing with no answering demand or
+obligation/hole/pre-discharge entry, a `fired: false` the slots contradict, or a missing
+`gate.evaluated` entry all fail. `--residue` prints the firings as a YAML skeleton for the phase-D
+gate leaf to annotate (witnesses, routes). The judgment halves — R0's prose reconciliation, R5's
+tightening extension, R6's chooser/sanitizer walk — are demanded (their `evaluated` entries must
+exist) but never derived.
+
+## check_lint.py — formal slots vs the closed vocabularies (`spec-graph lint`)
+
+schema.md's slot discipline, mechanical: demand kinds/forms and the form-conditional fields (a
+`form: test` demand is a pointer — no `outcome`; clause/waiver carry `outcome.nl`), actor/edge/
+facet vocabularies, unique ids, gate entries naming rules R0–R6 and demands that exist. Replaces
+the per-run hand check that used to land in `handoff.deviations`. Grow a vocabulary by growing
+schema.md and this linter's table in one commit.
+
+## check_frontiers.py — frontier-chain conservation + resume (`spec-graph frontiers`)
+
+Walks a write-tests run's `.spec-flow/frontiers/` chain: frontmatter parses, statuses are in
+vocabulary, every `inputs.inventory_echo` equals its producer's actual `inventory` (counts in equal
+counts out), digests hold the ≤15-line cap, and the dispositions sum rule (consensus + forks +
+silent_branches + drops == premises consumed) balances. The orchestrator runs it at every phase
+boundary; `--resume` names the first blocked/stale/unparseable frontier to re-enter at (and treats
+`design-refuted` as the deliberate halt it is).
+
+## check_calls.py / check_stub.py — the suite drives the target (`spec-graph calls` / `nullstub`)
+
+Both identify the target from the suite's own imports: a project-rooted import that resolves to
+nothing is the not-yet-written module (`--target <dotted.module>` for the modify-existing case the
+heuristic cannot see; no identifiable target exits 2, never 0). `calls` is the static half — every
+test must reference a target symbol, directly or through a same-file helper chain. `nullstub` is
+the dynamic half: it generates a null-object stub in a temp dir (callable, attribute-transparent,
+falsy, equal to nothing — tests reach their own asserts instead of dying on plumbing), runs pytest
+under the project's interpreter (`--python` / `$SPEC_GRAPH_TEST_PYTHON`), and classifies each test:
+failed-on-assertion discriminates; a pass is vacuous unless recorded in `handoff.nullstub_passes`;
+an error rides someone else's machinery. The stub is deleted after the run — never committed.
+
+## trace.py — the grounding censuses, derived (`spec-graph trace`)
+
+The two censuses the grounding brief owes, from the code instead of recall (#644/#645): `drivers`
+anchors the changed modules (`--base`) and reports every entrypoint whose import closure or
+subprocess re-exec reaches them; `resource <name>` anchors a declared sink
+(`specGraph.resources`: `{"<name>": {"writers": ["<file>::<symbol>"], "readers": [...], "grep":
+[...]}}`) and splits its call sites — swept over every project `*.py`, tests and non-codeRoots
+included, wider than the execution census — into writers and readers with the call's path
+expression — the template the identity axes are read off. Tools, not gates, with one edge: every
+unresolvable *reach* (dynamic dispatch, string-composed paths, unparseable files, cross-process
+edges, a subprocess re-exec from a non-entrypoint) is a `floor` line the brief must classify,
+never a silent drop; an unresolvable *anchor* — a declared sink no scan resolves, a `--base` ref
+git cannot — is exit 2, could-not-look.
 
 ## What these do NOT catch (be honest about the residual)
 

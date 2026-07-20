@@ -40,12 +40,16 @@ _PRUNE = {
 
 
 @functools.cache
-def repo_root() -> Path:
+def repo_root(start: Path | None = None) -> Path:
+    # `start` anchors the lookup at an explicitly-given path (a suite dir passed as an
+    # argument may live in a different repo than the process cwd); default stays cwd.
+    cmd = ["git", "rev-parse", "--show-toplevel"]
+    if start is not None:
+        cmd[1:1] = ["-C", str(start)]
     out = subprocess.run(
-        ["git", "rev-parse", "--show-toplevel"],
-        capture_output=True, text=True, encoding="utf-8", check=False
+        cmd, capture_output=True, text=True, encoding="utf-8", check=False
     ).stdout.strip()
-    return Path(out) if out else Path.cwd()
+    return Path(out) if out else (start if start is not None else Path.cwd())
 
 
 def _walk(top: Path) -> list[Path]:
@@ -77,6 +81,9 @@ def load(explicit: str | None = None) -> dict[str, Any]:
         "contextAliases": raw.get("contextAliases", {}),
         # Code kwarg name → graph concept name, when the two disagree.
         "conceptAliases": raw.get("conceptAliases", {}),
+        # Shared roots for `spec-graph trace resource`: name → {writers, readers, grep},
+        # each sink `<file>::<symbol>` (see trace.py's docstring).
+        "resources": raw.get("resources", {}),
     }
 
 

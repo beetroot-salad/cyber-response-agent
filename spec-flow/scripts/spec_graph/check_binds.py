@@ -67,7 +67,9 @@ from pathlib import Path
 
 import yaml
 
+import _cli
 import _config
+import _suite
 
 # A `<name>=<value>` kwarg whose RHS is a threaded name/attribute (deps.salt, wt,
 # <worktree>/anchor) — NOT `None`, a bare literal, or a quoted string. Those are
@@ -82,11 +84,6 @@ def _concept_root(bind: str) -> str:
     return re.split(r"[.\[]", bind, maxsplit=1)[0].strip()
 
 
-def _load(path: Path) -> dict:
-    with path.open(encoding="utf-8") as fh:
-        return yaml.safe_load(fh)
-
-
 @functools.lru_cache(maxsize=None)  # several graphs share a suite dir; parse it once
 def _test_functions(test_dir: Path) -> dict[str, ast.AST]:
     """Map test-function name → its AST node, over the `*.py` files beside the graph.
@@ -94,9 +91,7 @@ def _test_functions(test_dir: Path) -> dict[str, ast.AST]:
     Two checks read this. The prose⊄binds scan wants only the docstring; the
     inspected-but-never-exercised scan wants the BODY. Both come off one parse."""
     fns: dict[str, ast.AST] = {}
-    for py in sorted(test_dir.glob("*.py")):
-        if re.search(r"\.copy\d+\.py$", py.name):
-            continue
+    for py in _suite.suite_files(test_dir):
         try:
             tree = ast.parse(py.read_text(encoding="utf-8"), filename=str(py))
         except (SyntaxError, OSError, ValueError) as e:  # ValueError covers UnicodeDecodeError
@@ -114,18 +109,6 @@ def _test_functions(test_dir: Path) -> dict[str, ast.AST]:
     return fns
 
 
-def _names_in(node: ast.AST) -> set[str]:
-    """Every identifier reachable from `node` — bare names and attribute tails alike, so
-    `box.BoxExecutor` and a bare `BoxExecutor` both answer to `BoxExecutor`."""
-    out: set[str] = set()
-    for n in ast.walk(node):
-        if isinstance(n, ast.Name):
-            out.add(n.id)
-        elif isinstance(n, ast.Attribute):
-            out.add(n.attr)
-    return out
-
-
 def _assert_scopes(fn: ast.AST) -> tuple[set[str], set[str]]:
     """Split a test's identifiers into (used outside any assert, used inside an assert).
 
@@ -135,7 +118,7 @@ def _assert_scopes(fn: ast.AST) -> tuple[set[str], set[str]]:
     inside: set[str] = set()
     for n in ast.walk(fn):
         if isinstance(n, ast.Assert):
-            inside |= _names_in(n)
+            inside |= _suite.names_in(n)
     outside: set[str] = set()
 
     def rec(node: ast.AST) -> None:
@@ -229,7 +212,7 @@ def _unexercised(
 
 
 def check(path: Path, cfg: dict) -> list[str]:
-    graph = _load(path)
+    graph = _cli.load_graph(path)
     demands = graph.get("demands", []) or []
     waivers = graph.get("binds_waivers", {}) or {}
     exercise_waivers = graph.get("exercise_waivers", {}) or {}
@@ -320,22 +303,23 @@ def check(path: Path, cfg: dict) -> list[str]:
 
 
 def main(argv: list[str]) -> int:
-    config: str | None = None
-    args = []
-    it = iter(argv)
-    for a in it:
-        if a == "--config":
-            config = next(it, None)
-        else:
-            args.append(a)
-    cfg = _config.load(config)
+    opts, args = _cli.parse_argv(argv, valued={"--config"})
+    cfg = _config.load(opts["config"])
     paths = [Path(a) for a in args] or _config.artifacts(cfg)
     if not paths:
         print("check_binds: no spec_graph_*.yaml found", file=sys.stderr)
         return 0
     all_findings: list[str] = []
+    unreadable: list[Path] = []
     for p in paths:
-        all_findings.extend(check(p, cfg))
+        # The family's could-not-read contract (exit 2): a list-top-level graph used to
+        # surface as an AttributeError traceback behind exit 1 ("found findings").
+        try:
+            all_findings.extend(check(p, cfg))
+        except (OSError, yaml.YAMLError, TypeError, AttributeError) as e:
+            print(f"check_binds: cannot read {p}: {e.__class__.__name__}: {e}", file=sys.stderr)
+            unreadable.append(p)
+            continue
     for f in all_findings:
         print(f"  {f}")
     n = len(all_findings)
@@ -347,6 +331,8 @@ def main(argv: list[str]) -> int:
         f"\n[check_binds] {orphans} prose-orphan(s), {n - orphans} unexercised seam(s) "
         f"over {len(paths)} graph(s)."
     )
+    if unreadable:
+        return 2
     return 1 if n else 0
 
 

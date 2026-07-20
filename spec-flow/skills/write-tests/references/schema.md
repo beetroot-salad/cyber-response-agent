@@ -187,7 +187,7 @@ Two extractors populate the graph; their outputs meet at the gate.
 
 Both extractors fill every invariant field or write `unknown`. Reconciliation is bidirectional (rules.md R0): every normative design sentence binds ≥1 element; every delta element traces to a design sentence.
 
-**Extraction completeness is the gate's single point of failure**: an element missing from the graph is invisible to every rule, and a clean gate then *certifies* the blind spot. No mechanical cross-check exists yet — it, and boundary-identity keying across passes, are tracked as spec_graph tooling follow-ups. Until then: the brief names how each writer/consumer list was established, phase D's name reconciliation unifies the two extractions' ids and axes, and the strong author (phases/enumerate.md) is explicitly charged with hunting the brief's edges.
+**Extraction completeness is the gate's single point of failure**: an element missing from the graph is invisible to every rule, and a clean gate then *certifies* the blind spot. `spec-graph trace` now derives the two riskiest censuses from the code — `drivers` (changed module → the entrypoints that reach it) and `resource` (declared sink → writers/readers with path templates) — with an honest floor for what a static walk cannot resolve; the floor lines, boundary-identity keying across passes, and any census the tools don't cover stay on the reader. The brief still names how each list was established (a tool run is the probe), phase D's name reconciliation unifies the two extractions' ids and axes, and the strong author (phases/enumerate.md) is explicitly charged with hunting the brief's edges.
 
 ## Worked example — demands first
 
