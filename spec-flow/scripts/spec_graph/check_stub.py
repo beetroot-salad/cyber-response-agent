@@ -48,6 +48,7 @@ from pathlib import Path
 
 import yaml
 
+import _cli
 import _config
 import _suite
 
@@ -237,9 +238,11 @@ def _recorded_passes(suite_dir: Path) -> set[str]:
     """Test names listed in any sibling graph's handoff.nullstub_passes ("<test> — <class>")."""
     recorded: set[str] = set()
     for g in sorted(suite_dir.glob("spec_graph_*.yaml")):
+        # A malformed sibling graph must not kill the stub run — skip it; its shape is
+        # check_lint's finding, not this check's.
         try:
-            handoff = (yaml.safe_load(g.read_text(encoding="utf-8")) or {}).get("handoff") or {}
-        except yaml.YAMLError:
+            handoff = _cli.load_graph(g).get("handoff") or {}
+        except (yaml.YAMLError, TypeError):
             continue
         for entry in handoff.get("nullstub_passes", []) or []:
             # The documented separator is the em-dash ONLY; also splitting on "--"
@@ -351,29 +354,15 @@ def run(suite_dir: Path, targets: dict[str, set[str]], python: str, keep: bool) 
 
 
 def main(argv: list[str]) -> int:
-    for stream in (sys.stdout, sys.stderr):
-        if hasattr(stream, "reconfigure"):
-            stream.reconfigure(encoding="utf-8")
-    config: str | None = None
-    python = os.environ.get("SPEC_GRAPH_TEST_PYTHON", "python3")
-    explicit: list[str] = []
-    keep = False
-    args: list[str] = []
-    it = iter(argv)
-    for a in it:
-        if a == "--config":
-            config = next(it, None)
-        elif a == "--target":
-            t = next(it, None)
-            if t:
-                explicit.append(t)
-        elif a == "--python":
-            python = next(it, python)
-        elif a == "--keep":
-            keep = True
-        else:
-            args.append(a)
-    cfg = _config.load(config)
+    _cli.utf8_stdio()
+    opts, args = _cli.parse_argv(
+        argv, valued={"--config", "--python"}, multi={"--target"}, flags={"--keep"}
+    )
+    # A `--python` with no value falls back to the default, never to None.
+    python = opts["python"] or os.environ.get("SPEC_GRAPH_TEST_PYTHON", "python3")
+    explicit: list[str] = opts["target"]
+    keep = opts["keep"]
+    cfg = _config.load(opts["config"])
     if args:
         # Absolute BEFORE use: run() moves cwd to the pytest rootdir, so a relative
         # suite/graph arg handed to pytest would resolve against the wrong base

@@ -24,13 +24,13 @@ from __future__ import annotations
 
 import os
 import subprocess
-import sys
 import textwrap
 from pathlib import Path
 
 import pytest
 
-SPEC_GRAPH_DIR = Path(__file__).resolve().parent.parent
+from conftest import SPEC_GRAPH_DIR, run_script
+
 DEFAULT_CHECK_BINDS = SPEC_GRAPH_DIR / "check_binds.py"
 
 GRAPH = """\
@@ -54,15 +54,10 @@ def _suite(tmp_path: Path, body: str, graph: str = GRAPH) -> Path:
 
 
 def _run(suite: Path) -> subprocess.CompletedProcess[str]:
-    env = dict(os.environ)
-    env["PYTHONPATH"] = str(SPEC_GRAPH_DIR) + os.pathsep + env.get("PYTHONPATH", "")
     # `$CHECK_BINDS_PATH` is the null-stub discrimination seam, mirroring conftest's
     # `$CHECK_ACTORS_PATH`: pointed at a no-op stub, every positive test below must go red.
     check = os.environ.get("CHECK_BINDS_PATH", str(DEFAULT_CHECK_BINDS))
-    return subprocess.run(
-        [sys.executable, check, "spec_graph_x.yaml"],
-        cwd=suite, env=env, capture_output=True, text=True, timeout=60,
-    )
+    return run_script(check, "spec_graph_x.yaml", cwd=suite, timeout=60)
 
 
 def test_a_seam_named_only_in_an_assertion_is_flagged(tmp_path):

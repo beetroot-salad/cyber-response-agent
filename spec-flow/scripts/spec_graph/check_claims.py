@@ -38,7 +38,9 @@ from pathlib import Path
 
 import yaml
 
+import _cli
 import _config
+import _schema
 
 # kind -> the probe_kinds it may legitimately close on. The one place the mapping lives: the
 # rules.md prose describes it for the human, this table enforces it, and the check flags any
@@ -56,17 +58,7 @@ _PROBE_KINDS = {"executed", "read", "search"}
 _PROBED = {"holds", "refuted", "unrefuted"}   # an instrument was used — require probe_kind
 _UNPROBED = {"unprobed", "deferred"}          # nothing run yet — skip (step-9 handles unprobed)
 #: fired:false here rests on an agent's reading, not a slot predicate — it must cite.
-_JUDGMENT_RULES = {"R0", "R5", "R6"}
-
-
-def _load(path: Path) -> dict:
-    with path.open(encoding="utf-8") as fh:
-        graph = yaml.safe_load(fh) or {}
-    if not isinstance(graph, dict):
-        # Valid YAML, wrong shape — a caught error (exit 2, "could not read"), not an
-        # AttributeError traceback behind exit 1 ("found findings").
-        raise TypeError(f"top level is a {type(graph).__name__}, not a mapping")
-    return graph
+_JUDGMENT_RULES = set(_schema.JUDGMENT)
 
 
 def _cited(entry: dict) -> list[str]:
@@ -76,8 +68,7 @@ def _cited(entry: dict) -> list[str]:
     return [str(x) for x in c] if isinstance(c, list) else [str(c)]
 
 
-def check_spend_points(path: Path, graph: dict | None = None) -> list[str]:
-    graph = _load(path) if graph is None else graph
+def check_spend_points(path: Path, graph: dict) -> list[str]:
     # Ids coerced with str() to match `_cited`, which stringifies every citation — an
     # int-keyed ledger made `cites: [12]` dangle against the claim it names.
     verdicts = {
@@ -129,9 +120,9 @@ def check_spend_points(path: Path, graph: dict | None = None) -> list[str]:
     return findings
 
 
-def check(path: Path, graph: dict | None = None) -> list[str]:
+def check(path: Path, graph: dict) -> list[str]:
     findings: list[str] = []
-    for c in (_load(path) if graph is None else graph).get("claims", []) or []:
+    for c in graph.get("claims", []) or []:
         cid = c.get("id", "<no-id>")
         kind, verdict, pk = c.get("kind"), c.get("verdict"), c.get("probe_kind")
         if kind not in _REQUIRED:
@@ -158,15 +149,8 @@ def check(path: Path, graph: dict | None = None) -> list[str]:
 
 
 def main(argv: list[str]) -> int:
-    config: str | None = None
-    args: list[str] = []
-    it = iter(argv)
-    for a in it:
-        if a == "--config":
-            config = next(it, None)
-        else:
-            args.append(a)
-    cfg = _config.load(config)
+    opts, args = _cli.parse_argv(argv, valued={"--config"})
+    cfg = _config.load(opts["config"])
     paths = [Path(a) for a in args] or _config.artifacts(cfg)
     if not paths:
         # 2, not 0: the whole toolchain's contract (verify.md) is 2 = could not look —
@@ -182,7 +166,7 @@ def main(argv: list[str]) -> int:
         # nested wrong shapes (a string where a mapping belongs) surface as AttributeError
         # mid-walk, the same could-not-read class as a bad top level.
         try:
-            graph = _load(p)
+            graph = _cli.load_graph(p)
             findings.extend(check(p, graph))
             spend.extend(check_spend_points(p, graph))
         except (OSError, yaml.YAMLError, TypeError, AttributeError) as e:

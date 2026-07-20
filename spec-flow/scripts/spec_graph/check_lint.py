@@ -26,7 +26,9 @@ from pathlib import Path
 
 import yaml
 
+import _cli
 import _config
+import _schema
 
 _TOP = {"schema_version", "design", "base", "demands", "structure", "claims", "gate",
         "handoff", "binds_waivers", "exercise_waivers", "actor_waivers"}
@@ -42,7 +44,7 @@ _FACETS = {"payload", "identity", "domain", "access"}
 _SHARING = {"unique-key", "serialized-append"}
 _TRUST = {"operator", "attacker-influenced", "derived"}
 _PAYLOAD_INVARIANTS = {"roles-disjoint-sources", "all-slots-bound"}
-_RULES = {"R0", "R1", "R2", "R3", "R4", "R5", "R6"}
+_RULES = set(_schema.RULES)
 _HANDOFF = {"forks", "refuted", "deferred", "drops", "nullstub_passes", "deviations"}
 _GATE = {"evaluated", "obligations", "holes", "pre_discharged"}
 
@@ -68,11 +70,7 @@ def _mappings(findings: list[str], n: str, label: str, entries) -> list[dict]:
 
 
 def check(path: Path) -> list[str]:
-    graph = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    if not isinstance(graph, dict):
-        # Valid YAML, wrong shape — exit 2 ("could not read"), not an AttributeError
-        # traceback behind exit 1 ("found findings").
-        raise TypeError(f"top level is a {type(graph).__name__}, not a mapping")
+    graph = _cli.load_graph(path)
     n = path.name
     findings: list[str] = []
     for k in set(graph) - _TOP:
@@ -247,18 +245,9 @@ def check(path: Path) -> list[str]:
 
 
 def main(argv: list[str]) -> int:
-    for stream in (sys.stdout, sys.stderr):
-        if hasattr(stream, "reconfigure"):
-            stream.reconfigure(encoding="utf-8")
-    config: str | None = None
-    args: list[str] = []
-    it = iter(argv)
-    for a in it:
-        if a == "--config":
-            config = next(it, None)
-        else:
-            args.append(a)
-    cfg = _config.load(config)
+    _cli.utf8_stdio()
+    opts, args = _cli.parse_argv(argv, valued={"--config"})
+    cfg = _config.load(opts["config"])
     paths = [Path(a) for a in args] or _config.artifacts(cfg)
     if not paths:
         print("check_lint: no spec_graph_*.yaml found", file=sys.stderr)

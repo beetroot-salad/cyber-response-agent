@@ -27,9 +27,22 @@ _COPY = re.compile(r"\.copy\d+\.py$")
 
 
 def suite_files(suite_dir: Path) -> list[Path]:
-    """The suite's `*.py`, minus `shuffle-premises` copies (same names, premise-only
-    docstrings — the check_binds exclusion, for the same reason)."""
+    """The suite's `*.py`, minus `shuffle-premises` copies (`*.copyN.py`): they carry the
+    same test names with premise-only docstrings and sort before the real file, so left in
+    they would silently shadow the prose and bodies every consumer scans."""
     return [p for p in sorted(suite_dir.glob("*.py")) if not _COPY.search(p.name)]
+
+
+def names_in(node: ast.AST) -> set[str]:
+    """Every identifier reachable from `node` — bare names and attribute tails alike, so
+    `box.BoxExecutor` and a bare `BoxExecutor` both answer to `BoxExecutor`."""
+    out: set[str] = set()
+    for n in ast.walk(node):
+        if isinstance(n, ast.Name):
+            out.add(n.id)
+        elif isinstance(n, ast.Attribute):
+            out.add(n.attr)
+    return out
 
 
 def _binds_name(init: Path, name: str) -> bool:

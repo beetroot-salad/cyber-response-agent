@@ -49,6 +49,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import _cli
 import _config
 import check_actors
 
@@ -257,25 +258,14 @@ def resource(names: list[str], cfg: dict) -> int:
 
 
 def main(argv: list[str]) -> int:
-    for stream in (sys.stdout, sys.stderr):
-        if hasattr(stream, "reconfigure"):
-            stream.reconfigure(encoding="utf-8")
-    base = "main"
-    config: str | None = None
-    args: list[str] = []
-    it = iter(argv)
-    for a in it:
-        if a == "--base":
-            base = next(it, "main")
-        elif a == "--config":
-            config = next(it, None)
-        else:
-            args.append(a)
+    _cli.utf8_stdio()
+    opts, args = _cli.parse_argv(argv, valued={"--base", "--config"})
+    base = opts["base"] or "main"
     if not args or args[0] not in ("drivers", "resource"):
         print("usage: spec-graph trace {drivers [--base <ref>] | resource [<name> ...]}",
               file=sys.stderr)
         return 2
-    cfg = _config.load(config)
+    cfg = _config.load(opts["config"])
     try:
         if args[0] == "drivers":
             return drivers(base, cfg)

@@ -39,15 +39,9 @@ from pathlib import Path
 
 import yaml
 
+import _cli
 import _config
-
-RULES = ("R0", "R1", "R2", "R3", "R4", "R5", "R6")
-#: The halves no slot predicate computes; their `evaluated` entry is demanded, not derived.
-JUDGMENT = {
-    "R0": "the bidirectional prose reconciliation (design sentence ↔ element)",
-    "R5": "the tightening/safe-by-construction extension",
-    "R6": "the rendered-sink chooser/sanitizer walk",
-}
+from _schema import JUDGMENT, RULES
 
 _INTERACTS = re.compile(r"^interacts\(\s*([\w.-]+)\s*->\s*([\w.-]+)\s*\)(\.\w+)?$")
 _DRIVES = re.compile(r"^drives\(\s*([\w.-]+)\s*->\s*([\w.-]+)\s*\)$")
@@ -65,12 +59,7 @@ class Trigger:
 class Graph:
     def __init__(self, path: Path) -> None:
         self.path = path
-        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-        if not isinstance(raw, dict):
-            # Valid YAML, wrong shape. Without this the first `.get` raised AttributeError,
-            # which `main` does not catch — so a malformed artifact exited 1 ("found findings")
-            # behind a traceback instead of 2 ("could not read").
-            raise TypeError(f"top level is a {type(raw).__name__}, not a mapping")
+        raw = _cli.load_graph(path)
         self.demands: list[dict] = raw.get("demands", []) or []
         structure = raw.get("structure", {}) or {}
         self.axes: list[str] = structure.get("axes", []) or []
@@ -267,31 +256,24 @@ def _r0(g: Graph) -> list[str]:
     # `unknown` invariants are holes to route, not lint errors — but an unknown with no
     # recorded hole is a finding: the confession was made and then nobody heard it.
     for bid in g.boundaries:
-        for facet_name, fields in (
-            ("access", [("constraints_by_via", "constraints")]),
-            ("domain", [("documented_alternatives", "crosses_validation")]),
-        ):
-            f = g.facet(bid, facet_name)
-            if f is None:
-                continue
-            if facet_name == "access":
-                for via, cell in (f.get("constraints_by_via") or {}).items():
-                    if (cell or {}).get("constraints") == "unknown":
-                        el = f"{bid}.access[{via}]"
-                        if not g.answered("R0", el):
-                            findings.append(
-                                f"R0 {g.path.name}: {el} constraints are `unknown` and no hole "
-                                f"records the undecided policy — decide it, then pin it."
-                            )
-            else:
-                for alt in f.get("documented_alternatives") or []:
-                    if (alt or {}).get("crosses_validation") == "unknown":
-                        el = f"{bid}.domain.alternatives[{(alt or {}).get('value')}]"
-                        if not g.answered("R0", el):
-                            findings.append(
-                                f"R0 {g.path.name}: {el} `crosses_validation` is `unknown` with "
-                                f"no recorded hole — grounding establishes the crossing."
-                            )
+        access = g.facet(bid, "access")
+        for via, cell in ((access or {}).get("constraints_by_via") or {}).items():
+            if (cell or {}).get("constraints") == "unknown":
+                el = f"{bid}.access[{via}]"
+                if not g.answered("R0", el):
+                    findings.append(
+                        f"R0 {g.path.name}: {el} constraints are `unknown` and no hole "
+                        f"records the undecided policy — decide it, then pin it."
+                    )
+        domain = g.facet(bid, "domain")
+        for alt in (domain or {}).get("documented_alternatives") or []:
+            if (alt or {}).get("crosses_validation") == "unknown":
+                el = f"{bid}.domain.alternatives[{(alt or {}).get('value')}]"
+                if not g.answered("R0", el):
+                    findings.append(
+                        f"R0 {g.path.name}: {el} `crosses_validation` is `unknown` with "
+                        f"no recorded hole — grounding establishes the crossing."
+                    )
     return findings
 
 
@@ -484,21 +466,10 @@ def _residue(path: Path, triggers: list[Trigger]) -> None:
 
 
 def main(argv: list[str]) -> int:
-    for stream in (sys.stdout, sys.stderr):
-        if hasattr(stream, "reconfigure"):
-            stream.reconfigure(encoding="utf-8")
-    config: str | None = None
-    residue = False
-    args: list[str] = []
-    it = iter(argv)
-    for a in it:
-        if a == "--config":
-            config = next(it, None)
-        elif a == "--residue":
-            residue = True
-        else:
-            args.append(a)
-    cfg = _config.load(config)
+    _cli.utf8_stdio()
+    opts, args = _cli.parse_argv(argv, valued={"--config"}, flags={"--residue"})
+    residue = opts["residue"]
+    cfg = _config.load(opts["config"])
     paths = [Path(a) for a in args] or _config.artifacts(cfg)
     if not paths:
         print("check_gate: no spec_graph_*.yaml found", file=sys.stderr)

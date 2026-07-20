@@ -27,18 +27,9 @@ import ast
 import sys
 from pathlib import Path
 
+import _cli
 import _config
 import _suite
-
-
-def _fn_refs(fn: ast.AST) -> set[str]:
-    out: set[str] = set()
-    for n in ast.walk(fn):
-        if isinstance(n, ast.Name):
-            out.add(n.id)
-        elif isinstance(n, ast.Attribute):
-            out.add(n.attr)
-    return out
 
 
 def _local_targets(tree: ast.Module, targets: dict[str, set[str]], target_names: set[str]) -> set[str]:
@@ -66,7 +57,7 @@ def _local_targets(tree: ast.Module, targets: dict[str, set[str]], target_names:
     # NO-CALL. Walked in body order, so alias-of-alias chains resolve in one pass.
     for node in tree.body:
         if isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None:
-            if _fn_refs(node.value) & local:
+            if _suite.names_in(node.value) & local:
                 assigned = node.targets if isinstance(node, ast.Assign) else [node.target]
                 for t in assigned:
                     if isinstance(t, ast.Name):
@@ -83,7 +74,7 @@ def _module_refs(tree: ast.Module) -> dict[str, set[str]]:
     refs: dict[str, set[str]] = {}
     for n in ast.walk(tree):
         if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            refs.setdefault(n.name, set()).update(_fn_refs(n))
+            refs.setdefault(n.name, set()).update(_suite.names_in(n))
     return refs
 
 
@@ -149,23 +140,10 @@ def check(suite_dir: Path, targets: dict[str, set[str]]) -> list[str]:
 
 
 def main(argv: list[str]) -> int:
-    for stream in (sys.stdout, sys.stderr):
-        if hasattr(stream, "reconfigure"):
-            stream.reconfigure(encoding="utf-8")
-    config: str | None = None
-    explicit: list[str] = []
-    args: list[str] = []
-    it = iter(argv)
-    for a in it:
-        if a == "--config":
-            config = next(it, None)
-        elif a == "--target":
-            t = next(it, None)
-            if t:
-                explicit.append(t)
-        else:
-            args.append(a)
-    cfg = _config.load(config)
+    _cli.utf8_stdio()
+    opts, args = _cli.parse_argv(argv, valued={"--config"}, multi={"--target"})
+    explicit: list[str] = opts["target"]
+    cfg = _config.load(opts["config"])
     if args:
         # An explicitly-given suite dir may live in a different repo than the process
         # cwd; a cwd-anchored root would misclassify every import (nothing is

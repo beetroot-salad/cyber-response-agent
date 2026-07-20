@@ -9,34 +9,42 @@ contract is shared across the family: 0 clean, 1 the check looked and found some
 """
 from __future__ import annotations
 
-import os
-import subprocess
 import sys
 import textwrap
 from pathlib import Path
 
-from conftest import SPEC_GRAPH_DIR
-
-
-def run_script(script: str, *argv: str, cwd: Path) -> subprocess.CompletedProcess[str]:
-    env = dict(os.environ)
-    env["PYTHONPATH"] = str(SPEC_GRAPH_DIR) + os.pathsep + env.get("PYTHONPATH", "")
-    return subprocess.run(
-        [sys.executable, str(SPEC_GRAPH_DIR / script), *argv],
-        cwd=cwd, env=env, capture_output=True, text=True, timeout=120,
-    )
+from conftest import run_script  # re-exported: the fixes suites import it from here
 
 
 # ---------------------------------------------------------------------------
 # check_gate
 # ---------------------------------------------------------------------------
 
-# All seven rules evaluated; R4 recorded `fired: false` (tests that want a clean R4
-# flip it with .replace("R4, fired: false", "R4, fired: true")).
-_EVALUATED_ALL = (
-    "gate:\n  evaluated:\n"
-    + "".join(f"    - {{rule: R{i}, fired: {str(i != 4).lower()}}}\n" for i in range(7))
-)
+# All seven rules evaluated `fired: true` — the common case.
+_EVALUATED_ALL = """\
+gate:
+  evaluated:
+    - {rule: R0, fired: true}
+    - {rule: R1, fired: true}
+    - {rule: R2, fired: true}
+    - {rule: R3, fired: true}
+    - {rule: R4, fired: true}
+    - {rule: R5, fired: true}
+    - {rule: R6, fired: true}
+"""
+
+# Same, but R4 recorded `fired: false` — the slot-vs-evaluated conflict case.
+_EVALUATED_R4_FALSE = """\
+gate:
+  evaluated:
+    - {rule: R0, fired: true}
+    - {rule: R1, fired: true}
+    - {rule: R2, fired: true}
+    - {rule: R3, fired: true}
+    - {rule: R4, fired: false}
+    - {rule: R5, fired: true}
+    - {rule: R6, fired: true}
+"""
 
 # One R4 trigger: a design-provenance domain boundary with a read edge and one
 # distinguished member. `demands:` decides whether the trigger is answered.
@@ -67,8 +75,7 @@ _D_CELL = ('  - {id: d_cell, kind: domain-outcome, form: test, discharged_by: te
 def test_gate_unanswered_trigger_exits_1_and_names_the_cell(make_repo):
     r = make_repo()
     r.config(code_roots=[])
-    r.write("g.yaml", _R4_GRAPH.format(demands="  []", gate=_EVALUATED_ALL.replace(
-        "R4, fired: false", "R4, fired: true")))
+    r.write("g.yaml", _R4_GRAPH.format(demands="  []", gate=_EVALUATED_ALL))
     p = run_script("check_gate.py", "g.yaml", cwd=r.root)
     assert p.returncode == 1
     assert "knob.domain.distinguished[0]" in p.stdout and "UNANSWERED" in p.stdout
@@ -77,8 +84,7 @@ def test_gate_unanswered_trigger_exits_1_and_names_the_cell(make_repo):
 def test_gate_bound_cell_is_answered_and_exits_0(make_repo):
     r = make_repo()
     r.config(code_roots=[])
-    r.write("g.yaml", _R4_GRAPH.format(demands=_D_CELL, gate=_EVALUATED_ALL.replace(
-        "R4, fired: false", "R4, fired: true")))
+    r.write("g.yaml", _R4_GRAPH.format(demands=_D_CELL, gate=_EVALUATED_ALL))
     p = run_script("check_gate.py", "g.yaml", cwd=r.root)
     assert p.returncode == 0, p.stdout + p.stderr
 
@@ -86,7 +92,7 @@ def test_gate_bound_cell_is_answered_and_exits_0(make_repo):
 def test_gate_fired_false_conflicting_with_computed_trigger_is_flagged(make_repo):
     r = make_repo()
     r.config(code_roots=[])
-    r.write("g.yaml", _R4_GRAPH.format(demands="  []", gate=_EVALUATED_ALL))
+    r.write("g.yaml", _R4_GRAPH.format(demands="  []", gate=_EVALUATED_R4_FALSE))
     p = run_script("check_gate.py", "g.yaml", cwd=r.root)
     assert p.returncode == 1
     assert "FIRED-FALSE" in p.stdout and "R4" in p.stdout
@@ -106,8 +112,7 @@ def test_gate_dangling_binds_address_is_an_r0_finding(make_repo):
     r.config(code_roots=[])
     dangling = ('  - {id: d_ghost, kind: behavior, form: test, discharged_by: test_g,\n'
                 '     binds: ["no_such_element"]}\n')
-    r.write("g.yaml", _R4_GRAPH.format(demands=_D_CELL + dangling, gate=_EVALUATED_ALL.replace(
-        "R4, fired: false", "R4, fired: true")))
+    r.write("g.yaml", _R4_GRAPH.format(demands=_D_CELL + dangling, gate=_EVALUATED_ALL))
     p = run_script("check_gate.py", "g.yaml", cwd=r.root)
     assert p.returncode == 1
     assert "no_such_element" in p.stdout and "R0" in p.stdout
@@ -144,7 +149,7 @@ structure:
   interacts:
     - {from: w1, to: sink, mode: write, via: fs, provenance: design, interpolates: [stem]}
     - {from: w2, to: sink, mode: write, via: fs, provenance: design, interpolates: []}
-""" + _EVALUATED_ALL.replace("R4, fired: false", "R4, fired: true")
+""" + _EVALUATED_ALL
     r.write("g.yaml", graph)
     p = run_script("check_gate.py", "g.yaml", cwd=r.root)
     assert p.returncode == 1

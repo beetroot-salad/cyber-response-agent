@@ -39,6 +39,7 @@ from pathlib import Path
 
 import yaml
 
+import _cli
 import _config
 
 _STATUS = {"complete", "design-refuted", "blocked"}
@@ -256,11 +257,9 @@ def resume(directory: Path) -> int:
 
 
 def main(argv: list[str]) -> int:
-    for stream in (sys.stdout, sys.stderr):
-        if hasattr(stream, "reconfigure"):
-            stream.reconfigure(encoding="utf-8")
-    do_resume = "--resume" in argv
-    args = [a for a in argv if a != "--resume"]
+    _cli.utf8_stdio()
+    opts, args = _cli.parse_argv(argv, flags={"--resume"})
+    do_resume = opts["resume"]
     directory = Path(args[0]) if args else _config.repo_root() / ".spec-flow" / "frontiers"
     if not directory.is_dir():
         if do_resume:
