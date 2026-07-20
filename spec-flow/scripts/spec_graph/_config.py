@@ -77,6 +77,9 @@ def load(explicit: str | None = None) -> dict[str, Any]:
         "contextAliases": raw.get("contextAliases", {}),
         # Code kwarg name → graph concept name, when the two disagree.
         "conceptAliases": raw.get("conceptAliases", {}),
+        # Shared roots for `spec-graph trace resource`: name → {writers, readers, grep},
+        # each sink `<file>::<symbol>` (see trace.py's docstring).
+        "resources": raw.get("resources", {}),
     }
 
 

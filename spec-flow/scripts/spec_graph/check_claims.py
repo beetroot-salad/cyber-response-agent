@@ -15,10 +15,21 @@ THE CHECK (deterministic, no LLM): for every claim whose verdict means it was pr
 step-9's own finding, not this check's). An unknown `kind` or `probe_kind` is flagged too — the
 closed vocabulary is enforced here.
 
+THE SPEND-POINT PASS (same run): rules.md's "a spend-point closes only by citation", as a
+field — `cites: [<claim id>, ...]`. Any `cites` anywhere in the gate block or on a demand
+must resolve to a claim that exists and was probed (`holds | refuted | unrefuted`) — a
+citation of an `unprobed`/`deferred` claim rests on nothing executed. `cites` is REQUIRED
+on: a `fired: false` for a judgment rule (R0, R5, R6 — where no slot predicate computed the
+no; `spec-graph gate` verifies the computed rules' `fired` flags against the slots), every
+`pre_discharged` credit, and every `form: waiver` demand. The `binds_waivers` /
+`exercise_waivers` / `actor_waivers` maps cannot carry a `cites` without a shape change
+check_binds/check_actors would trip over — those citations stay a phase-F hand check.
+
 Usage:
     spec-graph claims [graph.yaml ...] [--config <path>]
 (the `spec-graph` wrapper in the plugin's bin/ is on the Bash PATH and finds this script itself.)
-Exit 1 if any claim's instrument is wrong or missing.
+Exit 1 if any claim's instrument is wrong or missing, or any spend-point citation is
+missing, dangling, or unprobed.
 """
 from __future__ import annotations
 
@@ -44,11 +55,61 @@ _REQUIRED: dict[str, set[str]] = {
 _PROBE_KINDS = {"executed", "read", "search"}
 _PROBED = {"holds", "refuted", "unrefuted"}   # an instrument was used — require probe_kind
 _UNPROBED = {"unprobed", "deferred"}          # nothing run yet — skip (step-9 handles unprobed)
+#: fired:false here rests on an agent's reading, not a slot predicate — it must cite.
+_JUDGMENT_RULES = {"R0", "R5", "R6"}
 
 
 def _load(path: Path) -> dict:
     with path.open(encoding="utf-8") as fh:
         return yaml.safe_load(fh) or {}
+
+
+def _cited(entry: dict) -> list[str]:
+    c = entry.get("cites")
+    if c is None:
+        return []
+    return [str(x) for x in c] if isinstance(c, list) else [str(c)]
+
+
+def check_spend_points(path: Path) -> list[str]:
+    graph = _load(path)
+    verdicts = {c.get("id"): c.get("verdict") for c in graph.get("claims", []) or []}
+    findings: list[str] = []
+
+    def resolve(where: str, entry: dict, required: str | None = None) -> None:
+        ids = _cited(entry)
+        if not ids and required:
+            findings.append(
+                f"{path.name}:{where}: {required} closes with no `cites` — an uncited "
+                f"rationale is asserted, a finding, not a pass (rules.md, 'Probed claims')."
+            )
+        for cid in ids:
+            if cid not in verdicts:
+                findings.append(f"{path.name}:{where}: cites `{cid}`, which is no claim in "
+                                f"this graph's ledger.")
+            elif verdicts[cid] not in _PROBED:
+                findings.append(
+                    f"{path.name}:{where}: cites `{cid}` (verdict `{verdicts[cid]}`) — a "
+                    f"spend-point resting on a claim nothing has probed."
+                )
+
+    gate = graph.get("gate", {}) or {}
+    for e in gate.get("evaluated", []) or []:
+        rule = str(e.get("rule"))
+        need = (f"judgment rule {rule} `fired: false`"
+                if e.get("fired") is False and rule in _JUDGMENT_RULES else None)
+        resolve(f"gate.evaluated[{rule}]", e, need)
+    for e in gate.get("pre_discharged", []) or []:
+        resolve(f"gate.pre_discharged[{e.get('element')}]", e, "a pre-discharge credit")
+    for section in ("obligations", "holes"):
+        for e in gate.get(section, []) or []:
+            resolve(f"gate.{section}[{e.get('element')}]", e)
+    for d in graph.get("demands", []) or []:
+        if d.get("form") == "waiver":
+            resolve(f"demand {d.get('id')}", d, "a waiver's rationale")
+        else:
+            resolve(f"demand {d.get('id')}", d)
+    return findings
 
 
 def check(path: Path) -> list[str]:
@@ -94,10 +155,15 @@ def main(argv: list[str]) -> int:
         print("check_claims: no spec_graph_*.yaml found", file=sys.stderr)
         return 0
     findings = [f for p in paths for f in check(p)]
+    spend = [f for p in paths for f in check_spend_points(p)]
     for f in findings:
         print(f"  INSTRUMENT {f}")
-    print(f"\n[check_claims] {len(findings)} claim-instrument finding(s) over {len(paths)} graph(s).")
-    return 1 if findings else 0
+    for f in spend:
+        print(f"  CITATION {f}")
+    # Counted by kind: an instrument mismatch and an uncited spend-point are different slips.
+    print(f"\n[check_claims] {len(findings)} claim-instrument finding(s), {len(spend)} "
+          f"spend-point citation finding(s) over {len(paths)} graph(s).")
+    return 1 if findings or spend else 0
 
 
 if __name__ == "__main__":
