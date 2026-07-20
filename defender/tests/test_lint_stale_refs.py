@@ -277,6 +277,66 @@ def test_deleted_cli_shim_named_in_a_prompt_is_flagged(tmp_path):
     assert "skills/gather/SKILL.md:defender-record-query" in fingerprints
 
 
+def test_surviving_module_named_in_a_from_package_import_is_not_flagged(tmp_path):
+    """`from pkg import mod` puts a MODULE in the target position, where idents are
+    collected. Deleting one importer must not make every OTHER importer of that live
+    module read as a stale reference — a module's binding site is a file, which the AST
+    binding scan cannot see. `_removed_idents` already refuses to collect the module PATH
+    of `from pkg.mod import name` for this reason; the target position is the same shape.
+    """
+    up = _upstream(
+        tmp_path,
+        main_files={
+            "pkg/__init__.py": "",
+            "pkg/shared_taxonomy.py": "NAMES = {'a'}\n",
+            # A surviving importer, committed on main so it is outside the PR's diff.
+            "other_importer.py": "from pkg import shared_taxonomy\n\ny = shared_taxonomy.NAMES\n",
+            # The importer the PR will delete — also on main, so `git rm` on pr finds it.
+            "doomed_importer.py": "from pkg import shared_taxonomy\n\nz = shared_taxonomy.NAMES\n",
+        },
+    )
+    _git(up, "checkout", "-q", "pr")
+    _git(up, "rm", "-q", "doomed_importer.py")
+    _commit(up, "delete one importer; pkg/shared_taxonomy.py itself survives")
+    work = _clone(tmp_path, up)
+
+    fingerprints = {f.fingerprint for f in GATE._scan(work, "origin/main")}
+    assert "other_importer.py:shared_taxonomy" not in fingerprints, (
+        "a surviving importer of a LIVE module was flagged as a stale reference"
+    )
+
+
+def test_a_genuinely_deleted_module_is_still_flagged(tmp_path):
+    """Positive control for the rule above: the module-exists check is scoped to
+    git-TRACKED paths, so it clears a module that SURVIVES without blunting the deletion
+    the gate exists to catch. (A filesystem walk would find a stale copy under
+    `.worktrees/` — where a module deleted from this tree still sits on disk — and mask
+    exactly this.)
+
+    The surviving reference is prose, not an import: a surviving `from pkg import mod`
+    line is itself an AST binding of that name, so `_still_defined` clears it on the
+    pre-existing rule and the deleted-module case never reaches the new one. Prose is
+    also where the #617-class stale reference actually lives.
+    """
+    up = _upstream(
+        tmp_path,
+        main_files={
+            "pkg/__init__.py": "",
+            "pkg/doomed_mod.py": "NAMES = {'a'}\n",
+            "skills/guide.md": "# Guide\n\nThe roster lives in `pkg/doomed_mod.py`.\n",
+        },
+    )
+    _git(up, "checkout", "-q", "pr")
+    _git(up, "rm", "-q", "pkg/doomed_mod.py")
+    _commit(up, "delete the module itself (skills/guide.md still names it)")
+    work = _clone(tmp_path, up)
+
+    fingerprints = {f.fingerprint for f in GATE._scan(work, "origin/main")}
+    assert "skills/guide.md:doomed_mod" in fingerprints, (
+        "a reference to a genuinely DELETED module was not flagged"
+    )
+
+
 def test_moved_symbol_is_not_flagged(tmp_path):
     """A symbol deleted HERE and defined THERE was moved, not removed."""
     up = _upstream(tmp_path, pr_files={"moved.py": "def some_removed_helper():\n    return 1\n"})
