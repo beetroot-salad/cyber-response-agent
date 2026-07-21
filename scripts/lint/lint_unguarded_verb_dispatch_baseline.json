@@ -1,0 +1,4 @@
+{
+  "//": "lint_unguarded_verb_dispatch baseline — empty: no pre-existing unguarded verb dispatches. See scripts/lint/lint_unguarded_verb_dispatch.py.",
+  "entries": {}
+}

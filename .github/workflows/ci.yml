@@ -253,6 +253,15 @@ jobs:
       - name: Hand-rolled-frontmatter gate (one fence grammar, #591 — baseline-ratcheted)
         run: defender/.venv/bin/python scripts/lint/lint_hand_rolled_frontmatter.py
 
+      # A data-source verb dispatch `registry.verbs(system)[verb]` resolved OUTSIDE its fault
+      # `try` (#672/#678). The dispatch lazily imports the adapter and can raise, so out of the
+      # seam a broken adapter unwinds the stage with no queries-table row and no breaker outcome
+      # — the invariant the tool documents, silently unmet, and invisible to a suite whose fakes
+      # all resolve cleanly. Modules with a pydantic-ai capability catch-all (query_tool) are
+      # exempt. The baseline ships EMPTY: both live dispatch sites are guarded.
+      - name: Unguarded-verb-dispatch gate (fault seam encloses the dispatch — baseline-ratcheted)
+        run: defender/.venv/bin/python scripts/lint/lint_unguarded_verb_dispatch.py
+
       # Defender hygiene + discipline gates. Each script is independently
       # inspectable under scripts/lint/lint_*.py; source PRs that prompted each
       # check are cited in the module docstrings.
