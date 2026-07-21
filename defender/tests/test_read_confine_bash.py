@@ -118,7 +118,10 @@ def test_cat_run_investigation_allowed(env):
 
 def test_cat_run_gather_summary_allowed(env):
     """cat {RUN}/gather_summaries/l-001.md → ALLOW: the per-lead summary (built inline at
-    tools_gather.py, NOT a RunPaths prop — the scope must still cover it)."""
+    tools_gather.py, NOT a RunPaths prop — the scope must still cover it).
+
+    Read on the MAIN lane on purpose: the summary is main's sanctioned view of a lead's data
+    (the raw payload is gather's), and it is a shape main's grants carry."""
     assert _bash(env, f"cat {env.run}/gather_summaries/l-001.md", "main").allow
 
 
@@ -291,21 +294,11 @@ def test_tail_head_have_no_file_slot_and_no_arg_taking_flag(env):
         assert _bash(env, f"{inv} | head -c 100", which).allow, which    # control
 
 
-@pytest.mark.parametrize(("file_form", "pipe_form"), [
-    ("grep -n secret {p}", "cat {p} | grep -n secret"),
-    ("head -5 {p}", "cat {p} | head -5"),
-    ("tail -3 {p}", "cat {p} | tail -3"),
-    ("wc -l {p}", "cat {p} | wc -l"),
-])
-def test_viewer_file_operand_denied_pipe_form_allowed(env, file_form, pipe_form):
-    """The c1 ledger, BOTH sides, on a fully IN-SCOPE path: the file form DENIES (it ALLOWed before
-    #575 — this is the documented behavior change) and the `cat … |` form ALLOWS. Pinning the file
-    form against an in-scope path is what makes this a test of the SHAPE (the slot is gone) rather
-    than of the scope (which would deny an out-of-root path anyway)."""
-    p = f"{env.run}/investigation.md"
-    for which in ("main", "gather"):
-        assert not _bash(env, file_form.format(p=p), which).allow, f"{which}: {file_form}"
-        assert _bash(env, pipe_form.format(p=p), which).allow, f"{which}: {pipe_form}"
+# The c1 ledger — viewers lose their file-operand slot, the `cat … |` form still allows —
+# is pinned once, on a fully in-scope path, at
+# test_grant_gate_575.py::test_c1_file_operand_viewers_lose_their_file_slot. The copy that
+# lived here was byte-identical to it (same four parameter pairs, same operand, same
+# main/gather loop) against an equivalent `env`, so it could not fail alone.
 
 
 def test_grep_free_text_pattern_is_not_a_path(env):
@@ -511,12 +504,6 @@ def test_gather_raw_as_a_grep_pattern_is_not_a_read(env):
     Positive control — the property that must NOT regress: main still cannot open the payload."""
     assert _bash(env, f"cat {env.run}/report.md | grep gather_raw", "main").allow
     assert not _bash(env, f"cat {env.run}/gather_raw/l-001/1.json", "main").allow
-
-
-def test_gather_summaries_readable_by_main(env):
-    """cat {RUN}/gather_summaries/l-001.md (main) → ALLOW: the summary is main's sanctioned view of a
-    lead's data (the raw payload is gather's), and it is a shape main's grants carry."""
-    assert _bash(env, f"cat {env.run}/gather_summaries/l-001.md", "main").allow
 
 
 def test_no_recursive_descent_primitive_on_any_lane(env):

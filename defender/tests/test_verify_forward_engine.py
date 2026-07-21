@@ -16,9 +16,7 @@ import pytest
 
 pytest.importorskip("pydantic_ai")  # CI installs the runtime extra; skip otherwise
 
-from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart  # noqa: E402
 from pydantic_ai.models import override_allow_model_requests  # noqa: E402
-from pydantic_ai.models.function import FunctionModel  # noqa: E402
 
 from defender.learning.author.verify_forward.engine import (  # noqa: E402
     VERIFY_DEF,
@@ -31,24 +29,13 @@ from defender.learning.pipeline import _pydantic_stage  # noqa: E402
 from defender.runtime import observe, permission  # noqa: E402
 from defender.runtime.agent_definition import bind  # noqa: E402
 from defender.runtime.agent_role import AgentRole  # noqa: E402
-from defender.runtime.providers import BuiltModel  # noqa: E402
+from defender.tests._engine_helpers import fake_model as _fake_model  # noqa: E402
+from defender.tests._engine_helpers import replay_once as _replay  # noqa: E402
 
 _DEFENDER_DIR = config.REPO_ROOT / "defender"
 _VERDICT = "I reason about the counterfactual here.\n\nMore reasoning.\n\nVERDICT: GOOD"
 
 
-def _replay(text: str, *, calls=()):
-    """A FunctionModel fn returning one scripted turn: optional tool calls + a text part."""
-    def fn(messages, info):
-        parts = [ToolCallPart(tool_name=n, args=a) for n, a in calls]
-        parts.append(TextPart(content=text))
-        return ModelResponse(parts=parts)
-    return fn
-
-
-def _fake_model(fn):
-    # settings=None — a FunctionModel needs no provider settings (mirrors _replay_harness).
-    return lambda model, effort: BuiltModel(FunctionModel(fn), None)
 
 
 def _prompt(tmp_path):
