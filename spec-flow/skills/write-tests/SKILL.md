@@ -2,7 +2,7 @@
 name: write-tests
 description: "Use once a design is settled enough to become the contract the code must satisfy — after discuss-issue has posted the intent+design doc, and before any implementation exists — to turn that design into the executable spec (end-to-end tests bound to a spec-coverage graph) the code is then written against. Kick back to discuss-issue if intent itself is still unsettled."
 argument-hint: "[design doc path or issue #]"
-effort: xhigh
+effort: medium
 ---
 
 # Write tests
@@ -67,7 +67,7 @@ Body, in order: `## Digest` — the ≤15 lines the leaf returns inline, verbati
 | F | 9 verify | mechanical-gate leaf → blind conservation reader ∥ cold reconciler (Opus) | phases/verify.md | `90-mechanical.md`, `91-blind.md`, `92-reconciliation.md` |
 | 10 | hand off | spine | — | — |
 
-Scheduler-enforced constraints: B's five leaves **block on A's finished brief**; the early-exit check runs after A and after any later `design-refuted` flip. C's answerers see only their own shuffled copy. §7 runs after D so the gate's residue reaches the human with the forks; F's findings route back through §7, never straight into the diff. If A's grounding leaf overruns, dispatch a *fresh* probe-backed grounding leaf — never derive the brief on the spine — and reconcile when the slow one lands. Models are named in the contracts and are not economizable where they say Opus; if one genuinely cannot be spawned, run the best derivation available and **record in `handoff.deviations` that the unknown-unknown region ran degraded**.
+Scheduler-enforced constraints: B's five leaves **block on A's finished brief**; the early-exit check runs after A and after any later `design-refuted` flip. C's answerers see only their own shuffled copy. §7 runs after D so the gate's residue reaches the human with the forks; F's findings route back through §7, never straight into the diff. If A's grounding leaf overruns, dispatch a *fresh* probe-backed grounding leaf — never derive the brief on the spine — and reconcile when the slow one lands. Models **and efforts** are named in the contracts and are not economizable where they say Opus; dispatch each leaf at its contract-named effort — the skill's own `effort: medium` is the spine's orchestration budget, and a leaf left to inherit it runs degraded; if one genuinely cannot be spawned, run the best derivation available and **record in `handoff.deviations` that the unknown-unknown region ran degraded**.
 
 ## 0. Worktree, hygiene, resume
 

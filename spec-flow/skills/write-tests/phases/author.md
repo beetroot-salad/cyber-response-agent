@@ -2,7 +2,7 @@
 
 ## Topology
 
-- **One author leaf** (Opus). Inputs: `45-dispositions.md`, `70-resolutions.md`, the spec_graph (demands and ledger — the refuted claims especially), the project profile. Outputs: the suite at the profile's `tests.dir`, the spec_graph's `discharged_by` pointers updated, and `80-author-digest.md`.
+- **One author leaf** (Opus, xhigh effort). Inputs: `45-dispositions.md`, `70-resolutions.md`, the spec_graph (demands and ledger — the refuted claims especially), the project profile. Outputs: the suite at the profile's `tests.dir`, the spec_graph's `discharged_by` pointers updated, and `80-author-digest.md`.
 - Dispatch only after §7 has produced `70-resolutions.md`; if the #0 reading flipped there, C's classification re-runs first.
 
 ## Charge — the author
