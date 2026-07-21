@@ -630,7 +630,8 @@ def test_write_report_still_allowed(env):
     (regression). Main declares its run-dir subtree as its write_allow."""
     pol = permission.AgentPolicy(write_allow=(permission.build_write_allow(env.run),))
     assert permission.decide_write(
-        env.run / "report.md", "disposition: benign\n", policy=pol,
+        env.run / "report.md", "---\ndisposition: benign\n---\nConcise analysis.\n",
+        run_dir=env.run, defender_dir=env.dfn, policy=pol,
     ).allow
 
 
@@ -639,7 +640,8 @@ def test_write_investigation_invalid_invlang_denied(env):
     (the run-dir write_allow admits the path, then invlang denies the content)."""
     pol = permission.AgentPolicy(write_allow=(permission.build_write_allow(env.run),))
     d = permission.decide_write(
-        env.run / "investigation.md", "```yaml\nfoo: bar\n```\n", policy=pol,
+        env.run / "investigation.md", "```yaml\nfoo: bar\n```\n",
+        run_dir=env.run, defender_dir=env.dfn, policy=pol,
     )
     assert not d.allow
 

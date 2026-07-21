@@ -43,7 +43,9 @@ what compile_policy emits changed, so almost every demand below is re-expressed,
     branch remains in bind; bind additionally HARDENS its root inputs (relative/degenerate
     roots + a lead-author main-checkout tree are UNBUILDABLE).
   - the writers (`tools._tool_write_file`/`_tool_edit_file`) pass `deps.run_dir`/
-    `deps.defender_dir` to `decide_write`, activating the dormant write⊆read guard.
+    `deps.defender_dir` to `decide_write`, activating the then-dormant write⊆read guard.
+    [#681: the roots became REQUIRED arguments, so the guard has no dormant mode left —
+    an omission is a TypeError at the call site, not a silently skipped check.]
   - the parallel factory path retires: `_ORACLE_POLICY`/`_VERIFY_POLICY`/`_lead_author_policy`
     go; `compile_policy_for` (the policy-only half of `bind`) is the sole policy source and
     carries `reader_read_shapes`, flipping a non-`.md` corpus read allow→deny (hole H4). [The
@@ -131,6 +133,14 @@ from defender.agents import (  # noqa: E402
 )
 
 _DEFENDER = PATHS.defender_dir
+
+# `decide_write` requires both run roots since #681 (its former `run_dir=None` default silently
+# skipped the #629 output-structure gate). Every write probe below threads them; the shape
+# assertions are unchanged, since the write⊆read containment guard is a no-op for a target that
+# already sits inside the policy's own roots. `run_dir/report.md` probes additionally carry a
+# VALID report body — that path is a gated artifact once the roots are present, so junk content
+# would now deny for a reason the write_allow shape under test knows nothing about.
+_VALID_REPORT = "---\ndisposition: benign\n---\nok\n"
 
 # Real repo-relative script/confine paths (mirrors test_bind_wiring_545.py) — the actor's
 # _script_pattern does script.resolve().relative_to(REPO_ROOT), so synthetic paths raise.
@@ -300,7 +310,8 @@ def test_d1_oracle_via_bind(tmp_path):
     # probe with a command a GRANTED agent could run (`ls` is gone from every lane since #575, so
     # denying it would prove nothing about this policy) — the deny here is the empty grant list.
     assert not permission.decide_bash(f"cat {run}/report.md", policy=opol, run_dir=run, defender_dir=_DEFENDER).allow
-    assert not permission.decide_write(run / "x.md", "c", policy=opol).allow
+    assert not permission.decide_write(
+        run / "x.md", "c", run_dir=run, defender_dir=_DEFENDER, policy=opol).allow
 
 
 def test_d1_verifier_via_bind(tmp_path):
@@ -310,7 +321,8 @@ def test_d1_verifier_via_bind(tmp_path):
     vpol = bind(VERIFY_DEF, run).policy
     assert isinstance(bind(VERIFY_DEF, run), VerifierDeps)
     assert not permission.decide_bash(f"cat {run}/report.md", policy=vpol, run_dir=run, defender_dir=_DEFENDER).allow
-    assert not permission.decide_write(run / "x.md", "c", policy=vpol).allow
+    assert not permission.decide_write(
+        run / "x.md", "c", run_dir=run, defender_dir=_DEFENDER, policy=vpol).allow
 
 
 def test_d1_lead_author_via_bind(tmp_path):
@@ -325,7 +337,8 @@ def test_d1_lead_author_via_bind(tmp_path):
     assert isinstance(deps, LeadAuthorDeps)
     pol = deps.policy
     # write scope: the worktree skills .md corpus.
-    assert permission.decide_write(skills / "gather" / "x.md", "c", policy=pol).allow
+    assert permission.decide_write(
+        skills / "gather" / "x.md", "c", run_dir=run, defender_dir=wtd, policy=pol).allow
     # rm-of-drafts grant.
     assert permission.decide_bash(f"rm {skills}/gather/_draft/x.md", policy=pol, run_dir=run, defender_dir=wtd).allow
 
@@ -386,8 +399,10 @@ def test_d2_write_shapes_field(tmp_path):
     run = tmp_path / "run"
     roots = resolve_roots(run, (), RunScope())
     pol = compile_policy(_reader_def(write=True, write_shapes=(_main_write_shape,)), roots)
-    assert permission.decide_write(run / "x.md", "c", policy=pol).allow          # resolved into write_allow
-    assert not permission.decide_write(tmp_path / "y.md", "c", policy=pol).allow  # outside the shape
+    assert permission.decide_write(                                              # resolved into write_allow
+        run / "x.md", "c", run_dir=run, defender_dir=_DEFENDER, policy=pol).allow
+    assert not permission.decide_write(                                          # outside the shape
+        tmp_path / "y.md", "c", run_dir=run, defender_dir=_DEFENDER, policy=pol).allow
     ro = compile_policy(_reader_def(), roots)                                     # write=False + empty
     assert ro.write_allow == ()
 
@@ -401,8 +416,11 @@ def test_d2_main_write_shape_anchors_run_dir(tmp_path):
     # run-dir positive control (run/x.md is no longer admitted — see test_main_write_scope_631).
     run = tmp_path / "run"
     pol = bind(MAIN_DEF, run).policy
-    assert permission.decide_write(run / "report.md", "c", policy=pol).allow          # positive control
-    assert not permission.decide_write(_DEFENDER / "skills" / "report.md", "c", policy=pol).allow
+    assert permission.decide_write(                                                   # positive control
+        run / "report.md", _VALID_REPORT, run_dir=run, defender_dir=_DEFENDER, policy=pol).allow
+    assert not permission.decide_write(
+        _DEFENDER / "skills" / "report.md", _VALID_REPORT,
+        run_dir=run, defender_dir=_DEFENDER, policy=pol).allow
 
 
 def test_d2_lead_author_write_shape_anchors_skills(tmp_path):
@@ -414,9 +432,12 @@ def test_d2_lead_author_write_shape_anchors_skills(tmp_path):
     wtd = tmp_path / "wt" / "defender"
     skills = wtd / "skills"
     pol = bind(LEAD_AUTHOR_DEF, run, defender_dir=wtd).policy
-    assert permission.decide_write(skills / "gather" / "x.md", "c", policy=pol).allow   # positive control (.md)
-    assert not permission.decide_write(run / "x.md", "c", policy=pol).allow             # wrong root
-    assert not permission.decide_write(skills / "gather" / "x.txt", "c", policy=pol).allow  # wrong suffix
+    assert permission.decide_write(                                                     # positive control (.md)
+        skills / "gather" / "x.md", "c", run_dir=run, defender_dir=wtd, policy=pol).allow
+    assert not permission.decide_write(                                                 # wrong root
+        run / "x.md", "c", run_dir=run, defender_dir=wtd, policy=pol).allow
+    assert not permission.decide_write(                                                 # wrong suffix
+        skills / "gather" / "x.txt", "c", run_dir=run, defender_dir=wtd, policy=pol).allow
 
 
 def test_d2_write_shape_resolves_symlinked_root(tmp_path):
@@ -431,7 +452,8 @@ def test_d2_write_shape_resolves_symlinked_root(tmp_path):
     pol = bind(MAIN_DEF, link).policy
     # report.md is MAIN's writable artifact post-#631 (S2); link/report.md resolves to
     # real/report.md, so admitting it proves the write shape anchors on the RESOLVED root.
-    assert permission.decide_write(link / "report.md", "c", policy=pol).allow
+    assert permission.decide_write(
+        link / "report.md", _VALID_REPORT, run_dir=link, defender_dir=_DEFENDER, policy=pol).allow
 
 
 def test_d2_main_lead_shapes_no_cross_contamination(tmp_path):
@@ -446,10 +468,14 @@ def test_d2_main_lead_shapes_no_cross_contamination(tmp_path):
     main_pol = bind(MAIN_DEF, run).policy
     lead_pol = bind(LEAD_AUTHOR_DEF, run, defender_dir=wtd).policy
 
-    assert permission.decide_write(run / "report.md", "c", policy=main_pol).allow        # MAIN: sanctioned run-dir artifact
-    assert not permission.decide_write(skills / "report.md", "c", policy=main_pol).allow # MAIN doesn't widen into skills
-    assert permission.decide_write(skills / "gather" / "x.md", "c", policy=lead_pol).allow  # LEAD: sanctioned .md
-    assert not permission.decide_write(run / "x.md", "c", policy=lead_pol).allow         # LEAD doesn't widen into run_dir
+    assert permission.decide_write(                                                     # MAIN: sanctioned run-dir artifact
+        run / "report.md", _VALID_REPORT, run_dir=run, defender_dir=_DEFENDER, policy=main_pol).allow
+    assert not permission.decide_write(                                                 # MAIN doesn't widen into skills
+        skills / "report.md", _VALID_REPORT, run_dir=run, defender_dir=wtd, policy=main_pol).allow
+    assert permission.decide_write(                                                     # LEAD: sanctioned .md
+        skills / "gather" / "x.md", "c", run_dir=run, defender_dir=wtd, policy=lead_pol).allow
+    assert not permission.decide_write(                                                 # LEAD doesn't widen into run_dir
+        run / "x.md", "c", run_dir=run, defender_dir=wtd, policy=lead_pol).allow
 
 
 def test_d2_lead_author_rm_scope(tmp_path):
@@ -563,8 +589,10 @@ def test_d3_lead_author_worktree_anchor(tmp_path):
     wtd = tmp_path / "wt" / "defender"
     deps = bind(LEAD_AUTHOR_DEF, run, defender_dir=wtd)
     assert deps.defender_dir == wtd
-    assert permission.decide_write(wtd / "skills" / "x.md", "c", policy=deps.policy).allow
-    assert not permission.decide_write(_DEFENDER / "skills" / "x.md", "c", policy=deps.policy).allow
+    assert permission.decide_write(
+        wtd / "skills" / "x.md", "c", run_dir=run, defender_dir=wtd, policy=deps.policy).allow
+    assert not permission.decide_write(
+        _DEFENDER / "skills" / "x.md", "c", run_dir=run, defender_dir=wtd, policy=deps.policy).allow
 
 
 def test_d3_main_gather_non_paths_defender_dir(tmp_path):
@@ -726,7 +754,8 @@ def test_d5_oracle_verify_denyall_via_compile_policy(tmp_path):
         assert pol.bash_allow == ()
         assert pol.write_allow == ()
         assert not permission.decide_bash("cat x", policy=pol, run_dir=run, defender_dir=_DEFENDER).allow
-        assert not permission.decide_write(run / "x.md", "c", policy=pol).allow
+        assert not permission.decide_write(
+            run / "x.md", "c", run_dir=run, defender_dir=_DEFENDER, policy=pol).allow
 
 
 def test_d5_judge_actor_bash_lane_preserved(tmp_path):
@@ -798,8 +827,9 @@ def test_d5_reader_patterns_for_kept(tmp_path):
 def test_d6_writers_pass_roots(tmp_path):
     """d6_writers_pass_roots (seam): both writer call sites (tools.py write_file/edit_file) call
     decide_write with run_dir=deps.run_dir and defender_dir=deps.defender_dir, activating the
-    write⊆read guard — driving _tool_write_file with an escaping write_allow is DENIED (today it
-    is allowed, the guard being dormant)."""
+    write⊆read guard — driving _tool_write_file with an escaping write_allow is DENIED (at #551's
+    HEAD it was allowed, the guard being dormant; since #681 both roots are required arguments, so
+    the wiring this test pins is the only shape that type-checks)."""
     run = tmp_path / "run"
     run.mkdir()
     dfn = tmp_path / "dfn"
@@ -809,7 +839,7 @@ def test_d6_writers_pass_roots(tmp_path):
         write_allow=(permission.build_write_allow(escape, suffix=".md"),), deny_reason="d",
     )
     deps = AgentDeps(run_dir=run, defender_dir=dfn, run_id="r", salt="s", policy=escape_pol)
-    # RED@HEAD: _tool_write_file calls decide_write WITHOUT roots → the guard is dormant → allowed.
+    # RED@#551-HEAD: _tool_write_file called decide_write WITHOUT roots → guard dormant → allowed.
     with pytest.raises(ModelRetry):
         _tool_write_file(deps, str(escape / "x.md"), "content")
     # both call sites must pass the tree — a source check covers edit_file (whose read gate already
@@ -821,17 +851,20 @@ def test_d6_writers_pass_roots(tmp_path):
 
 
 def test_d6_guard_denies_escape(tmp_path):
-    """d6_guard_denies_escape (negative): with both roots supplied, decide_write DENIES a target
-    matching write_allow but resolving OUTSIDE the read surface (an escaping write_allow) — the
-    guard's reason to exist; the paired positive control is d6_guard_noop_for_real_writers."""
-    # GREEN@HEAD: the guard lives in decide_write; it just needs roots (dormant at the tool call sites).
+    """d6_guard_denies_escape (negative): decide_write DENIES a target matching write_allow but
+    resolving OUTSIDE the read surface (an escaping write_allow) — the guard's reason to exist;
+    the paired positive control is d6_guard_noop_for_real_writers."""
+    # GREEN@HEAD: the guard lives in decide_write.
     run = tmp_path / "run"
     dfn = tmp_path / "dfn"
     escape = tmp_path / "escape"
     pol = AgentPolicy(write_allow=(permission.build_write_allow(escape, suffix=".md"),), deny_reason="d")
     tgt = escape / "x.md"
-    assert not permission.decide_write(tgt, "c", run_dir=run, defender_dir=dfn, policy=pol).allow  # roots → guard denies
-    assert permission.decide_write(tgt, "c", policy=pol).allow                                     # no roots → dormant (allow)
+    assert not permission.decide_write(tgt, "c", run_dir=run, defender_dir=dfn, policy=pol).allow
+    # The guard's former DORMANT mode (`decide_write(tgt, "c", policy=pol)` → allow, roots omitted)
+    # is gone with #681: both roots are required, so an omission is a TypeError at the call site
+    # rather than a silently skipped guard. Pinned in test_permission.py::
+    # test_decide_write_requires_policy_and_roots.
 
 
 def test_d6_guard_noop_for_real_writers(tmp_path):
@@ -845,10 +878,10 @@ def test_d6_guard_noop_for_real_writers(tmp_path):
     main_pol = bind(MAIN_DEF, run).policy
     # #629 reconciliation: run_dir/report.md now carries an output-structure gate (frontmatter +
     # size), so the D6 CONTAINMENT no-op must be shown with content that clears that orthogonal
-    # gate — a valid in-bounds report. The assertion is unchanged: the write⊆read guard admits a
+    # gate — a valid in-bounds report (the module's one `_VALID_REPORT`, so a change to what that
+    # gate accepts lands in one place). The assertion is unchanged: the write⊆read guard admits a
     # real main write at the run-dir root.
-    valid_report = "---\ndisposition: benign\n---\nok\n"
-    assert permission.decide_write(run / "report.md", valid_report, run_dir=run, defender_dir=_DEFENDER, policy=main_pol).allow
+    assert permission.decide_write(run / "report.md", _VALID_REPORT, run_dir=run, defender_dir=_DEFENDER, policy=main_pol).allow
     lead_pol = AgentPolicy(write_allow=(permission.build_write_allow(skills, suffix=".md"),), deny_reason="d")
     assert permission.decide_write(skills / "gather" / "x.md", "c", run_dir=run, defender_dir=wtd, policy=lead_pol).allow
 

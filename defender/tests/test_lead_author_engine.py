@@ -144,11 +144,13 @@ def test_for_run_binds_worktree_defender_dir_and_write_allow(tmp_path):
     assert deps.role is AgentRole.LEAD_AUTHOR
     skill = wt / "defender" / "skills" / "gather" / "queries" / "foo" / "x.md"
     # positive: the worktree binding lets the agent write + read its own corpus
-    assert permission.decide_write(skill, "body\n", policy=deps.policy).allow
+    assert permission.decide_write(
+        skill, "body\n", run_dir=rd, defender_dir=deps.defender_dir, policy=deps.policy).allow
     assert permission.decide_read(skill, run_dir=rd, defender_dir=deps.defender_dir, policy=deps.policy).allow
     # guarded negatives: a policy bound to a DIFFERENT worktree tree denies the write …
     other_pol = _lead_deps(rd, tmp_path / "other").policy
-    assert not permission.decide_write(skill, "body\n", policy=other_pol).allow
+    assert not permission.decide_write(
+        skill, "body\n", run_dir=rd, defender_dir=deps.defender_dir, policy=other_pol).allow
     # … and calling the gate with a mismatched defender_dir (the split) denies the read.
     assert not permission.decide_read(skill, run_dir=rd, defender_dir=config.REPO_ROOT / "defender", policy=deps.policy).allow
 
@@ -251,8 +253,10 @@ def test_cross_surface_parity_out_of_scope_denied_on_both_lanes(tmp_path):
     skills_ok = wt / "defender" / "skills" / "gather" / "queries" / "foo" / "y.md"
     lessons = wt / "defender" / "lessons" / "z.md"
     # write surface
-    assert permission.decide_write(skills_ok, "b\n", policy=pol).allow            # positive control
-    assert not permission.decide_write(lessons, "b\n", policy=pol).allow           # negative
+    assert permission.decide_write(                                               # positive control
+        skills_ok, "b\n", run_dir=rd, defender_dir=wt / "defender", policy=pol).allow
+    assert not permission.decide_write(                                           # negative
+        lessons, "b\n", run_dir=rd, defender_dir=wt / "defender", policy=pol).allow
     # rm (bash) surface — repo-relative spellings the matcher recognizes
     assert permission.decide_bash("rm defender/skills/gather/queries/foo/_draft/y.md", policy=pol).allow  # positive
     assert not permission.decide_bash("rm defender/lessons/z.md", policy=pol).allow             # negative
@@ -269,12 +273,14 @@ def test_both_lanes_deny_dotdot_traversal_escape(tmp_path):
     wt, rd = _worktree(tmp_path), _run_dir(tmp_path)
     pol = _lead_deps(rd, wt).policy
     escape = wt / "defender" / "skills" / ".." / "lessons" / "x.md"
-    assert not permission.decide_write(escape, "b\n", policy=pol).allow
+    assert not permission.decide_write(
+        escape, "b\n", run_dir=rd, defender_dir=wt / "defender", policy=pol).allow
     assert not permission.decide_bash("rm defender/skills/../lessons/x.md", policy=pol).allow
     # a ..-escape via the absolute spelling is denied too
     assert not permission.decide_bash(f"rm {wt}/defender/skills/../../etc/passwd", policy=pol).allow
     ok = wt / "defender" / "skills" / "gather" / "queries" / "foo" / "z.md"
-    assert permission.decide_write(ok, "b\n", policy=pol).allow
+    assert permission.decide_write(
+        ok, "b\n", run_dir=rd, defender_dir=wt / "defender", policy=pol).allow
     assert permission.decide_bash("rm defender/skills/gather/queries/foo/_draft/z.md", policy=pol).allow
 
 

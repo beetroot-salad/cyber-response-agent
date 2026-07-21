@@ -263,7 +263,7 @@ def is_untrusted_read(path: Path) -> bool:
 
 def decide_write(
     path: Path, proposed_text: str = "", *,
-    run_dir: Path | None = None, defender_dir: Path | None = None,
+    run_dir: Path, defender_dir: Path,
     policy: AgentPolicy,
 ) -> Decision:
     """Allow/deny a write of `proposed_text` to `path` — a **flat, deny-by-default allowlist**
@@ -275,16 +275,23 @@ def decide_write(
     a `resolve()` error (a symlink cycle, or an embedded NUL — `ValueError`, reachable from any
     model-supplied operand) FAILS CLOSED rather than propagating out of the gate.
 
-    `run_dir`/`defender_dir` are the OPTIONAL run roots (uniform with `decide_read`/`decide_bash`):
-    when both are supplied, a write target must ALSO resolve within the agent's read CONTAINMENT
-    — its read roots (`read_confine`/`read_roots`/run dir/`defender_dir`) minus the secret/ground-
-    truth denylist (`read_allowed_path`), the `write_allow ⊆ read roots` invariant `edit_file`
-    relies on. NOTE this is containment + denylist, NOT the full `decide_read` gate: it does not
-    apply the read-side path SHAPES (`read_allow`), so a writer whose `write_allow` admits a path
-    its read shapes exclude is not additionally blocked here — a writer's declared paths are its
-    own, and MAIN legitimately writes run-dir artifacts. Skipped when omitted
-    (the run-dir tool callers, already confined by `write_allow`); mirrors `decide_bash`'s
-    optional-roots shape.
+    `run_dir`/`defender_dir` are REQUIRED run roots — the same shape `decide_read` has always
+    had, and REQUIRED rather than optional since #681. A write target must ALSO resolve within
+    the agent's read CONTAINMENT — its read roots (`read_confine`/`read_roots`/run dir/
+    `defender_dir`) minus the secret/ground-truth denylist (`read_allowed_path`), the
+    `write_allow ⊆ read roots` invariant `edit_file` relies on. NOTE this is containment +
+    denylist, NOT the full `decide_read` gate: it does not apply the read-side path SHAPES
+    (`read_allow`), so a writer whose `write_allow` admits a path its read shapes exclude is not
+    additionally blocked here — a writer's declared paths are its own, and MAIN legitimately
+    writes run-dir artifacts.
+
+    The roots are threaded by TYPE because the output-structure gate below KEYS on
+    `<run_dir>/<name>`: under the former `run_dir: Path | None = None` an omitted kwarg silently
+    skipped that whole gate and fell through to `Decision(True)` — a caller could lose a blocking
+    gate by forgetting an argument, with no signal (#681). Requiring both moves that failure to
+    the call site (a `TypeError`, and a mypy error in CI) where it cannot hide, and retires the
+    guard's former dormant-when-omitted mode: the containment check now always runs, a pinned
+    no-op for every real writer whose `write_allow` already sits inside its read roots.
 
     For `investigation.md`, run the structural invlang validator against the
     full proposed text (current on-disk text supplies the append-only baseline);
@@ -302,15 +309,13 @@ def decide_write(
             "Blocked: writes are limited to this agent's declared paths "
             f"(its write allowlist); {path} is not one of them.",
         )
-    # Defense-in-depth (write ⊆ read roots): when the run roots are supplied, the write target
-    # must also sit inside the agent's read CONTAINMENT — its read roots minus the secret/ground-
-    # truth denylist (`read_allowed_path`), fails closed on a resolve error. This is containment +
-    # denylist, NOT the full `decide_read` (the read-side path SHAPES are not applied: a writer's
-    # declared paths are its own). A no-op for every real writer (its write_allow already sits
-    # within its read roots); it only closes a hypothetical write_allow that escapes them.
-    if run_dir is not None and defender_dir is not None and not read_allowed_path(
-        rp, run_dir=run_dir, defender_dir=defender_dir, policy=policy
-    ):
+    # Defense-in-depth (write ⊆ read roots): the write target must also sit inside the agent's
+    # read CONTAINMENT — its read roots minus the secret/ground-truth denylist
+    # (`read_allowed_path`), fails closed on a resolve error. This is containment + denylist, NOT
+    # the full `decide_read` (the read-side path SHAPES are not applied: a writer's declared paths
+    # are its own). A no-op for every real writer (its write_allow already sits within its read
+    # roots); it only closes a hypothetical write_allow that escapes them.
+    if not read_allowed_path(rp, run_dir=run_dir, defender_dir=defender_dir, policy=policy):
         return Decision(
             False,
             f"Blocked: {path} is outside this agent's read roots — a write must land within the "
@@ -323,20 +328,16 @@ def decide_write(
     # gated; a `<run_dir>/sub/report.md` is NOT), and scoping to the run-dir root leaves a
     # same-named lesson in a curator's corpus untouched (the verify_forward forward-check
     # operand — F-A2: gating it would flip its pure-containment allow into a deny).
+    # BOTH artifacts key that one way. investigation.md's legacy exact-basename fallback
+    # retired with the run_dir-less caller it existed for (#681): the roots are required now,
+    # so nothing reaches here without a run root and the fallback was unreachable — while
+    # keeping a name-only key would gate a corpus file that merely SHARES the basename, the
+    # F-A2 regression above. Resolving still decides for investigation.md too (#631, PBW2D):
+    # a symlink `alias.md` resolving to investigation.md clears the allowlist on `rp`, so it
+    # must face the same validator the direct write does, or identical text is refused through
+    # the real name and admitted through the alias.
     is_report = _is_run_dir_file(rp, run_dir, "report.md")
-    # investigation.md: run-dir-root keyed when a run root is supplied (mirrors report.md,
-    # so the symlink/subdir disguise is closed for it too); falls back to the legacy
-    # exact-basename keying when no run root is threaded, so a caller that gates an
-    # investigation write without `run_dir` still gets the invlang guard it always had.
-    # That fallback keys on the RESOLVED name (#631, PBW2D), not the unresolved operand:
-    # `write_allow` matches `rp`, so a symlink `alias.md` resolving to `investigation.md`
-    # clears the allowlist and must then face the same validator the direct write does, or
-    # identical text is refused through the real name and admitted through the alias.
-    is_investigation = (
-        _is_run_dir_file(rp, run_dir, "investigation.md")
-        if run_dir is not None
-        else rp.name == "investigation.md"
-    )
+    is_investigation = _is_run_dir_file(rp, run_dir, "investigation.md")
     if is_report or is_investigation:
         # Both artifact gates measure UTF-8 BYTES (`_utf8_len`) and splice the text into live
         # egresses. Content that is not UTF-8-encodable — a lone surrogate, reachable from a model
@@ -360,14 +361,12 @@ def decide_write(
     return Decision(True)
 
 
-def _is_run_dir_file(rp: Path, run_dir: Path | None, name: str) -> bool:
+def _is_run_dir_file(rp: Path, run_dir: Path, name: str) -> bool:
     """True iff the RESOLVED operand `rp` is exactly `<run_dir>/<name>` — the run-dir ROOT,
     exact basename, symlinks already collapsed into `rp` by the caller's `resolve()`. `run_dir`
-    is resolved here to align with `rp`'s resolution. `None` run_dir (no run root supplied) or a
-    `resolve()` error both return False — the artifact branch then simply does not fire, and the
-    write stands on the generic allowlist decision that already ran above."""
-    if run_dir is None:
-        return False
+    is resolved here to align with `rp`'s resolution. A `resolve()` error returns False — the
+    artifact branch then simply does not fire, and the write stands on the generic allowlist
+    decision that already ran above."""
     try:
         return rp == run_dir.resolve() / name
     except RESOLVE_ERRORS:
@@ -387,20 +386,44 @@ def _has_duplicate_top_level_key(raw: str) -> bool:
     shadowing an invalid one) would pass a plain membership check on the parsed mapping — this
     catches it at the node level instead. Returns False on any parse trouble: `raw` already
     parsed once via `split_frontmatter`, so trouble here means no reliable duplicate signal and
-    the other checks stand."""
+    the other checks stand.
+
+    Duplicates are judged on the CONSTRUCTED key — what `safe_load` would put in the mapping —
+    not on the raw scalar node text (#681). The node text is the wrong equality: it both
+    FALSE-POSITIVES (`1:` and `"1":` are distinct keys to `safe_load`, one int and one str, but
+    carry the same `key_node.value` `"1"`) and FALSE-NEGATIVES (`1:` / `0x1:`, `yes:` / `true:`
+    construct to the same key from different text, a real last-wins shadowing the raw compare
+    would miss). ONE `SafeLoader` — the same class `split_frontmatter` parses under — both
+    composes and constructs, so the two readings of "the same key" cannot diverge. That includes
+    `flatten_mapping`: `safe_load` expands a `<<:` merge INTO the mapping before building it, so
+    a merge-injected key is a real last-wins entry; skipping the flatten would hide exactly the
+    shadowing this check exists to catch (`<<: [*a, *b]` where both anchors carry `disposition`
+    — the parsed mapping keeps one, the raw text shows two). A key that cannot be constructed or
+    compared — an untabled tag, an unhashable list/mapping key, an out-of-range implicit
+    timestamp, all of which `safe_load` would have rejected upstream anyway — is skipped rather
+    than raised out of this blocking gate."""
+    loader = yaml.SafeLoader(raw)
     try:
-        node = yaml.compose(raw)
-    except (yaml.YAMLError, RecursionError):
+        try:
+            node = loader.get_single_node()
+            if not isinstance(node, yaml.MappingNode):
+                return False
+            loader.flatten_mapping(node)  # `<<:` merges become real top-level pairs
+        except (yaml.YAMLError, RecursionError):
+            return False
+        seen: set[object] = set()
+        for key_node, _value_node in node.value:
+            try:
+                key = loader.construct_object(key_node, deep=True)
+                duplicate = key in seen
+            except (yaml.YAMLError, RecursionError, TypeError, ValueError):
+                continue  # unconstructible / unhashable — no reliable signal for THIS key
+            if duplicate:
+                return True
+            seen.add(key)
         return False
-    if not isinstance(node, yaml.MappingNode):
-        return False
-    seen: set[object] = set()
-    for key_node, _value_node in node.value:
-        key = getattr(key_node, "value", None)
-        if key in seen:
-            return True
-        seen.add(key)
-    return False
+    finally:
+        loader.dispose()
 
 
 def _decide_report_write(proposed_text: str) -> Decision:
