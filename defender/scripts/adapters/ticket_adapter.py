@@ -5,15 +5,17 @@ Wraps the v2 ticket-server (the v1 FastAPI app reused under playground-v2's comp
 read-only.
 
 Two surfaces over ONE implementation. The six other adapters lost their CLI with #611
-(nothing invokes them any more); ticket keeps its argparse entry point because three
+(nothing invokes them any more); ticket keeps its argparse entry point because two
 NON-gather consumers still run it as a subprocess and pin its exit codes:
 
   - `learning/tickets/ticket_seeds.py`
   - `learning/author/verify_forward/forward.py`
-  - the benign judge's pinned bash grant — whose MANDATORY `--require-closed` lookahead is
-    its entire answer-key defense. A params-dict cannot express a mandatory flag: a verb's
-    `require_closed` param has a default, and the model chooses. Only the grant's argv
-    grammar can make it non-optional, so only argv can carry that read.
+
+(The benign judge's closed-ticket read was a THIRD subprocess consumer — its pinned bash
+grant, whose MANDATORY `--require-closed` lookahead was its answer-key defense. #672 moved
+that read off bash into two typed host-side tools that call the verb bodies IN-PROCESS with
+`require_closed=True` hard-coded, so closed-only is now unreachable-to-loosen by construction
+rather than mandatory in the argv grammar.)
 
 Both surfaces call `list_tickets` / `get_ticket` — the verbs. `main()` is the sole place
 in this package still allowed to exit: it maps a raised fault back to the exit code its

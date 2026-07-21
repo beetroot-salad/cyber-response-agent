@@ -9,7 +9,6 @@ prompts are ``malicious.md`` / ``benign.md`` in this package.
 from __future__ import annotations
 
 import json
-import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -25,18 +24,17 @@ from defender.learning.pipeline.judge.compare import (
     render_synthesis,
     write_comparison_files,
 )
-from defender.learning.tickets import ticket_seeds
 from defender.scripts.case_history import case_ticket
 
 
 @dataclass(frozen=True)
 class _ToolScope:
     """The tool-surface scoping forwarded to a ``judge_fn`` — the read add-dir(s) and the
-    benign closed-ticket pins ``(py, ticket_cli)`` the in-process judge builds its custom
-    matcher from (issue #338); None on the adversarial leg."""
+    benign-only ``closed_ticket_read`` bit that turns on the judge's two closed-ticket tools
+    (#672; False on the adversarial leg — absence by registration)."""
 
     add_dir: Path | list[Path] | None = None
-    ticket_cli: tuple[str, Path] | None = None
+    closed_ticket_read: bool = False
 
 
 @dataclass(frozen=True)
@@ -46,23 +44,14 @@ class JudgeInvocation:
     user_text: str
     add_dirs: list
     comparison_paths: list
-    # The benign closed-ticket pins ``(py, ticket_cli)`` when this direction grants the
-    # scoped read (#338), else None. The in-process judge_fn turns these into its
-    # closed-ticket bash grant (see engine_pydantic._ticket_grant).
-    ticket_cli: tuple[str, Path] | None = None
 
 
-def _ticket_cli_path() -> Path:
-    """The read-only ticket adapter path — the single source is ``ticket_seeds._TICKET_CLI``."""
-    return ticket_seeds._TICKET_CLI
-
-
-def _cited_policy_read_section(
-    run_dir: Path, learning_run_dir: Path, py: str, ticket_cli: Path
-) -> str:
-    """The benign judge's scoped closed-ticket read instructions (issue #338): the
-    exact closed-only commands, the in-flight key it must never read, and the seed menu
-    of candidate closed cases the actor was offered (its citations should be among them).
+def _cited_policy_read_section(run_dir: Path, learning_run_dir: Path) -> str:
+    """The benign judge's closed-ticket read instructions (#672, superseding #338's bash
+    commands): the TWO typed tools by their frozen names, the in-flight key it must never read
+    (excluded structurally now, so the teaching no longer asserts the ticket's state), the Fork D
+    rule that a cached payload is context and only the live read confirms, and the seed menu of
+    candidate closed cases the actor was offered (its citations should be among them).
     Best-effort: a thin alert / absent menu degrades the hint, never the section."""
     inflight_key = learning_run_dir.name
     try:
@@ -73,15 +62,15 @@ def _cited_policy_read_section(
     menu_path = learning_run_dir / "past_tickets.txt"
     seed_menu = menu_path.read_text(encoding="utf-8").strip() if menu_path.is_file() else ""
     body = (
-        "Confirm a CITED past case against the case-history store with a scoped, "
-        "CLOSED-ONLY read — closed cases only, never the in-flight ticket. Use exactly:\n"
-        f"  {py} {ticket_cli} list-tickets --status closed --require-closed --label {sig_label}\n"
-        f"  {py} {ticket_cli} get-ticket <case-id> --require-closed\n"
-        f"The in-flight ticket for the alert you are scoring is `{inflight_key}` — never "
-        "read it (it is open; --require-closed refuses it on both commands). A cited seed "
-        "the store can't "
-        "confirm, or whose grounded conditions these actuals contradict, does not survive "
-        "on that basis."
+        "Confirm a CITED past case against the case-history store with the closed-only "
+        "typed tools — closed cases only, by construction:\n"
+        f"  list_closed_tickets(label=\"{sig_label}\") — find the precedent among closed cases\n"
+        "  get_closed_ticket(key=\"<case-id>\") — confirm the one you cite\n"
+        f"The in-flight ticket for the alert you are scoring is `{inflight_key}` — never read "
+        "it; both tools refuse it (it is the answer key). Cached gather_raw payloads are "
+        "context, never confirmation: only the live closed-only read can say 'the store "
+        "confirmed it'. A cited seed the store can't confirm, or whose grounded conditions "
+        "these actuals contradict, does not survive on that basis."
     )
     if seed_menu:
         body += (
@@ -90,7 +79,7 @@ def _cited_policy_read_section(
         )
     return _section(
         "cited_policy_read", body,
-        "scoped closed-ticket read — confirm a cited closed case's policy here",
+        "closed-ticket tools — confirm a cited closed case's policy here",
     )
 
 
@@ -126,7 +115,6 @@ def build_judge_invocation(
     comparisons = build_comparison(run_dir, projected_telemetry_path, companion=companion)
     comparison_paths = write_comparison_files(comparisons, comparison_dir, gather_raw)
 
-    py, ticket_cli = sys.executable, _ticket_cli_path()
     add_dirs = [d for d in (gather_raw, comparison_dir) if d.is_dir()]
 
     report = RunPaths(run_dir).report
@@ -157,11 +145,9 @@ def build_judge_invocation(
         )
     )
     if closed_ticket_read:
-        user += _cited_policy_read_section(run_dir, learning_run_dir, py, ticket_cli)
+        user += _cited_policy_read_section(run_dir, learning_run_dir)
     return JudgeInvocation(
-        user_text=user, add_dirs=add_dirs,
-        comparison_paths=comparison_paths,
-        ticket_cli=(py, ticket_cli) if closed_ticket_read else None,
+        user_text=user, add_dirs=add_dirs, comparison_paths=comparison_paths,
     )
 
 
@@ -183,5 +169,7 @@ def invoke_judge(wiring: JudgeWiring, run_dir: Path, actor_story_path: Path,
     return judge_fn(
         wiring.prompt_path, wiring.model, wiring.effort, wiring.trace_name, wiring.label,
         inv.user_text, learning_run_dir,
-        scope=_ToolScope(add_dir=inv.add_dirs, ticket_cli=inv.ticket_cli),
+        scope=_ToolScope(
+            add_dir=inv.add_dirs, closed_ticket_read=wiring.closed_ticket_read,
+        ),
     )

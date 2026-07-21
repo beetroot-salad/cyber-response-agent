@@ -79,6 +79,7 @@ from defender.runtime.permission import (  # noqa: E402
     Route,
     under,
 )
+from defender.runtime.permission.command_shape import SQL_SHIM  # noqa: E402
 
 _DEFENDER = PATHS.defender_dir
 _POLICY_CLI = _DEFENDER / "bin" / "defender-policy"
@@ -131,19 +132,13 @@ def _read(env, path, which="gather"):
     return permission.decide_read(Path(path), run_dir=env.run, defender_dir=env.dfn, policy=pol)
 
 
-def _judge(env, *, ticket_cli=None):
-    """The judge's policy via the real bind seam (adversarial when ticket_cli is None)."""
+def _judge(env):
+    """The judge's policy via the real bind seam. Both legs compile the same bash lane now
+    (#672): the benign closed-ticket read is a typed tool, not a bash grant."""
     cmp_dir = env.tmp / "cmp"
     cmp_dir.mkdir(exist_ok=True)
-    scope = RunScope(add_dirs=(cmp_dir,), ticket_cli=ticket_cli)
+    scope = RunScope(add_dirs=(cmp_dir,))
     return bind(JUDGE_DEF, env.run, scope=scope, defender_dir=env.dfn).policy
-
-
-def _ticket_cli(env) -> tuple[str, Path]:
-    cli = env.dfn / "scripts" / "case_history" / "case_ticket.py"
-    cli.parent.mkdir(parents=True, exist_ok=True)
-    cli.write_text("#\n")
-    return ("python3", cli)
 
 
 def _actor(env):
@@ -175,11 +170,10 @@ def _curator(env):
 def _all_policies(env) -> dict[str, permission.AgentPolicy]:
     """Every agent's compiled policy, through each role's REAL seam. The audit demands (a2/a4/
     b3/b8/g1) sweep this."""
-    tc = _ticket_cli(env)
     return {
         "main": env.main,
         "gather": env.gather,
-        "judge": _judge(env, ticket_cli=tc),
+        "judge": _judge(env),
         "actor": _actor(env),
         "oracle": compile_policy_for(ORACLE_DEF, run_dir=env.run, defender_dir=env.dfn),
         "verify": compile_policy_for(VERIFY_DEF, run_dir=env.run, defender_dir=env.dfn),
@@ -216,11 +210,11 @@ def test_a1_shape_and_scope_both_required(env):
 
 def test_a2_no_unmarked_grant_pattern_embeds_a_path(env):
     """a2 (negative): NO UNMARKED grant's `pattern` embeds a path. Sweep every compiled Grant of
-    all 8 defs: a pattern carrying a literal/escaped run_dir, defender_dir, script or ticket-CLI
-    path MUST carry `pins_path=True` (the R1 exemption). Positive control: the three exempt grants
-    (actor python3-script, lead-author/curator rm, judge ticket-CLI) DO embed a path — so the audit
-    can tell the two classes apart — and the SCOPE patterns DO carry the anchored roots (that is
-    where a path belongs)."""
+    all 8 defs: a pattern carrying a literal/escaped run_dir, defender_dir or script path MUST
+    carry `pins_path=True` (the R1 exemption). Positive control: the two exempt grants (actor
+    python3-script, lead-author/curator rm) DO embed a path — so the audit can tell the two
+    classes apart — and the SCOPE patterns DO carry the anchored roots (that is where a path
+    belongs). (The judge's ticket-CLI was a third exempt grant; #672 moved it off bash.)"""
     pols = _all_policies(env)
     roots = (str(env.run), str(env.dfn), str(PATHS.repo_root))
     exempt_seen = 0
@@ -234,7 +228,7 @@ def test_a2_no_unmarked_grant_pattern_embeds_a_path(env):
             assert "/" not in src, f"{name}: unmarked grant embeds a path: {src}"
             for root in roots:
                 assert root not in src, f"{name}: unmarked grant embeds {root}: {src}"
-    assert exempt_seen >= 3          # actor script, lead-author/curator rm, judge ticket
+    assert exempt_seen >= 2          # actor script, lead-author/curator rm (judge ticket → #672)
     # positive control: the anchored roots live in the SCOPE, not the shape
     cat_scope = " ".join(s.pattern for s in _cat_grant(pols["main"]).scope)
     assert str(env.run) in cat_scope or re.escape(str(env.run)) in cat_scope
@@ -714,38 +708,22 @@ def test_d6_denylist_still_applies_inside_scope(env):
 # §E — The exempt (`pins_path`) grants                                         #
 # ===========================================================================  #
 
-def test_e1_judge_ticket_grant_still_requires_require_closed(env):
-    """e1 (negative — THE JUDGE'S SECURITY PROPERTY): `<py> <ticket-cli> get-ticket case-1` with NO
-    `--require-closed` → DENY. `--require-closed` is what stops the benign judge grading against the
-    live, in-flight ticket (the answer key). A boolean-flag allowlist makes every flag OPTIONAL, so
-    a mechanical migration of `_ticket_pattern` into a flag grammar drops the requirement SILENTLY —
-    which is exactly why this grant is `pins_path` (kept verbatim, lookahead included).
-    Positive control: the same CLI WITH `--require-closed` ALLOWs."""
-    py, cli = _ticket_cli(env)
-    pol = _judge(env, ticket_cli=(py, cli))
-    assert not _bash(env, f"{py} {cli} get-ticket case-1", pol).allow
-    assert _bash(env, f"{py} {cli} list-tickets --require-closed", pol).allow   # positive control
-    assert _bash(env, f"{py} {cli} get-ticket case-1 --require-closed", pol).allow
-
-
-def test_e2_adversarial_judge_has_no_ticket_grant(env):
-    """e2: the adversarial judge (`RunScope(ticket_cli=None)`) carries NO ticket grant at all — even
-    the well-formed `… list-tickets --require-closed` DENIES. The case store is unreachable by
-    construction, not by flag."""
-    py, cli = _ticket_cli(env)
-    pol = _judge(env, ticket_cli=None)
+def test_e1_judge_grants_no_ticket_shape_on_either_leg(env):
+    """e1 (#672 — retires the old `_ticket_grant` closed-only-lookahead tests): the benign
+    judge's closed-ticket read is a typed host-side tool now, not a bash grant, so BOTH legs
+    compile the identical bash lane and NO ticket command clears it. The old
+    `<py> <cli> {list,get}-ticket … --require-closed` grant — and its answer-key security
+    property (`--require-closed` mandatory) — is gone; the property now lives in the tool
+    (closed-only by construction, no model-facing param). The store is unreachable through bash
+    on either leg, not merely by flag."""
+    pol = _judge(env)
+    py, cli = "python3", env.dfn / "scripts" / "adapters" / "ticket_adapter.py"
+    assert not _bash(env, f"{py} {cli} get-ticket case-1 --require-closed", pol).allow
     assert not _bash(env, f"{py} {cli} list-tickets --require-closed", pol).allow
-    assert not any(g.program.endswith("case_ticket.py") for g in pol.bash_allow)
-
-
-def test_e3_require_closed_cannot_be_smuggled_in_a_quoted_operand(env):
-    """e3: `--require-closed` cannot be smuggled inside a QUOTED operand:
-    `<py> <cli> get-ticket "x --require-closed"` → DENY. The `_TOKEN_SPACE` NUL sentinel replaces
-    each token's own spaces, so every real space in the joined argv is a true token boundary and the
-    lookahead can only be satisfied by a whole token."""
-    py, cli = _ticket_cli(env)
-    pol = _judge(env, ticket_cli=(py, cli))
-    assert not _bash(env, f'{py} {cli} get-ticket "x --require-closed"', pol).allow
+    assert not any(
+        "ticket" in g.program or "ticket" in g.pattern.pattern for g in pol.bash_allow
+    ), "a ticket shape survives on the judge's bash lane"
+    assert {g.program for g in pol.bash_allow} == {"cat", SQL_SHIM}
 
 
 def test_e4_actor_script_and_lead_author_rm_survive(env):
@@ -786,20 +764,17 @@ def test_f1_bash_decision_carries_the_single_parse_and_no_adapter_route(env):
     assert _cat_grant(env.gather).route is Route.PLAIN
 
 
-def test_f2_reader_lane_claims_before_adapter_classification(env):
-    """f2: adapter classification stays STRUCTURAL and runs AFTER the reader lane returns None —
-    the ORDER, not just the verdict. An adapter-SHAPED command that a grant claims is decided by the
-    grant: the judge's ticket read is `python3 <cli> …` (adapter-shaped), and the judge has no
-    adapter capability — yet it ALLOWs, and is NOT diverted to the adapter deny. Reverse the order
-    and the judge loses its case-history read outright."""
-    py, cli = _ticket_cli(env)
-    pol = _judge(env, ticket_cli=(py, cli))
+def test_f2_judge_ticket_command_is_unreachable_through_bash(env):
+    """f2 (#672 — retires the adapter-classification-ordering test whose subject was the deleted
+    judge ticket grant): the judge's old adapter-shaped ticket read `python3 <adapter> …` is no
+    longer claimed by any grant, so it DENIES on both legs — the closed-ticket read moved off bash
+    into a typed tool, and the store is unreachable through the judge's bash lane. The judge grants
+    exactly cat + defender-sql, neither of which is python3 or adapter-shaped."""
+    pol = _judge(env)
+    py, cli = "python3", env.dfn / "scripts" / "adapters" / "ticket_adapter.py"
     d = _bash(env, f"{py} {cli} list-tickets --require-closed", pol)
-    assert d.allow
-    # claimed by the grant, so it did NOT fall through to the adapter deny
-    assert d.reason != permission.ADAPTER_RETIRED_REASON
-    assert not hasattr(d, "adapter_argv")
-    assert not hasattr(d, "sql_pipe")
+    assert not d.allow
+    assert {g.program for g in pol.bash_allow} == {"cat", SQL_SHIM}
 
 
 @pytest.mark.parametrize(("cmd", "reason_substr"), [
@@ -942,7 +917,7 @@ def test_g2_overflow_hint_reaches_the_right_branch_through_the_real_seam(env):
         hint = tools._overflow_filter_hint(path, getattr(env, which))
         assert f"cat {path} | defender-sql" in hint, which
         assert "jq" not in hint, which
-    jhint = tools._overflow_filter_hint(path, _judge(env, ticket_cli=_ticket_cli(env)))
+    jhint = tools._overflow_filter_hint(path, _judge(env))
     assert "defender-sql" in jhint
     assert "jq" not in jhint
     ahint = tools._overflow_filter_hint(path, _actor(env), read_tool="read_file")
@@ -1037,14 +1012,14 @@ def test_i1_policy_show_prints_grants_and_never_a_misleading_empty_scope(env):
         assert word in out
     assert str(env.run) in out                      # the scopes are the RESOLVED roots
     assert "ls" not in _named_programs(out)         # a deleted program is not advertised
+    # #672: the judge's closed-ticket read is a typed tool now, not a bash grant — `show judge`
+    # prints its cat + defender-sql lane and advertises no ticket command anywhere.
     j = _cli("show", "judge", "--run-dir", str(env.run))
     assert j.returncode == 0, j.stderr
-    for line in j.stdout.splitlines():
-        if "--require-closed" in line:              # the exempt ticket grant's line
-            assert "scope: []" not in line
-            break
-    else:
-        pytest.fail("defender-policy show judge did not report the exempt ticket grant's pattern")
+    assert "cat" in j.stdout
+    assert "bash" in j.stdout
+    assert "--require-closed" not in j.stdout
+    assert "ticket" not in _named_programs(j.stdout)
 
 
 @pytest.mark.parametrize("cmd", [

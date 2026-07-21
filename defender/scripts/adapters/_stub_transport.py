@@ -75,9 +75,10 @@ class AdapterArgumentParser(argparse.ArgumentParser):
     """ArgumentParser whose usage errors exit ``USAGE_EXIT_CODE`` (64) instead of
     argparse's default 2.
 
-    Only `ticket_cli` still has a CLI (three subprocess callers pin its exit codes, and
-    the benign judge's grant pins a MANDATORY ``--require-closed`` a params-dict cannot
-    express). It keeps this parser so a bad flag / unknown subcommand the agent passed is
+    Only `ticket_cli` still has a CLI (two subprocess callers — ``ticket_seeds`` and
+    ``verify_forward`` — pin its exit codes; #672 moved the benign judge's closed-ticket read
+    off the CLI onto a typed in-process tool). It keeps this parser so a bad flag / unknown
+    subcommand the agent passed is
     *structurally* distinct from a connectivity failure (exit 2). The circuit breaker then
     keys on the exit code alone — no fragile stderr-phrase sniffing to tell the two apart.
     Subparsers built via ``add_subparsers()`` inherit this class automatically

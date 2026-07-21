@@ -43,13 +43,11 @@ _ROLES = {r.name.lower(): r for r in AgentRole}
 
 def _scope_for(role: AgentRole, defender_dir: Path) -> RunScope:
     """The per-invocation inputs a static def cannot carry. `show`/`explain` audit the agent's
-    MAXIMAL surface, so the judge is scoped with its ticket CLI (the benign leg — the
-    adversarial leg is the same policy minus that one grant) and the actor with both pinned
-    scripts. Imported lazily: the learning config pulls the pipeline, and `show main` should not
-    pay for it."""
-    if role is AgentRole.JUDGE:
-        py = str(defender_dir / ".venv" / "bin" / "python3")
-        return RunScope(ticket_cli=(py, defender_dir / "scripts" / "case_history" / "case_ticket.py"))
+    MAXIMAL surface — the actor with both pinned scripts. The judge's benign-only closed-ticket
+    read is a typed tool now (#672), authorized by registration rather than a bash grant, so it
+    carries no per-invocation scope here; both legs compile the same cat + defender-sql lane.
+    Imported lazily: the learning config pulls the pipeline, and `show main` should not pay for
+    it."""
     if role is AgentRole.ACTOR:
         from defender.learning.core import config
         return RunScope(
@@ -77,8 +75,8 @@ def _policy(defn: AgentDefinition, run_dir: Path, defender_dir: Path) -> AgentPo
 def _containment(g: Grant) -> str:
     """What CONFINES this grant's operands. An exempt (`pins_path`) grant must report its
     PATTERN, never a bare `scope: []` — an empty scope reads as "unconfined" when the pattern IS
-    the confinement (the judge's ticket CLI is the sharpest case: its mandatory
-    `--require-closed` lookahead is the whole security property, and it lives in the pattern)."""
+    the confinement (the actor's pinned lesson scripts are the case: the exact command lives in
+    the pattern, and there is no file operand for a scope to bound)."""
     if g.pins_path:
         return f"scope: the pattern pins the path (pins_path) — {g.pattern.pattern}"
     if PROGRAMS[g.program] is OPENS_NOTHING:

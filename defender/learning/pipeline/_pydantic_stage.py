@@ -38,7 +38,7 @@ from pydantic_ai.exceptions import UsageLimitExceeded
 from pydantic_ai.usage import UsageLimits
 
 
-def build_stage_agent(
+def build_stage_agent(  # noqa: PLR0913 — the stage-build seam plus the make_model/tools/verbs DI seams; every param is load-bearing
     deps_type: type[AgentDeps],
     prompt_path: Path,
     model: str,
@@ -47,6 +47,8 @@ def build_stage_agent(
     label: str,
     *,
     make_model: MakeModel = providers.build_for_effort,
+    tools: Any = None,
+    verbs: Any = None,
 ) -> Agent[Any, str]:
     """Build one in-process stage agent — a THIN WRAPPER over the shared ``build_agent_core``
     (the single agent-construction site, #493/#538). The stage's TOOLSET comes from its
@@ -60,10 +62,19 @@ def build_stage_agent(
 
     ``AGENTS`` is imported LAZILY here (not at module top) to keep the shared-harness ↔
     registry edge off the import graph — ``agents`` pulls the stage engine modules, which
-    import this harness."""
+    import this harness.
+
+    ``tools`` is an OPTIONAL per-leg ``ToolSet`` override, re-bound onto the def by the same
+    ``replace`` seam that re-binds ``model``/``effort`` — the benign judge leg rides it to turn
+    on its ``closed_tickets`` bit while the frozen def keeps it off (#672); ``None`` keeps the
+    def's static toolset. ``verbs`` is the data-source verb registry threaded to registration
+    like the driver's, required by any leg whose toolset declares ``query``/``closed_tickets``."""
     from defender.agents import AGENTS
 
-    defn = replace(AGENTS[deps_type.role], model=lambda: model, effort=effort)
+    overrides: dict[str, Any] = {"model": lambda: model, "effort": effort}
+    if tools is not None:
+        overrides["tools"] = tools
+    defn = replace(AGENTS[deps_type.role], **overrides)
     return build_agent_core(
         defn,
         deps_type=deps_type,
@@ -71,6 +82,7 @@ def build_stage_agent(
         logger=logger,
         agent_id=label,
         make_model=make_model,
+        verbs=verbs,
     )
 
 
@@ -100,6 +112,8 @@ def run_stage(  # noqa: PLR0913 — every param is load-bearing per-call transpo
     make_model: MakeModel = providers.build_for_effort,
     require_output: bool = True,
     wall_clock_timeout: int = SUBAGENT_TIMEOUT,
+    tools: Any = None,
+    verbs: Any = None,
 ) -> str:
     """Run one in-process stage to completion and return its model's final text VERBATIM.
 
@@ -126,7 +140,7 @@ def run_stage(  # noqa: PLR0913 — every param is load-bearing per-call transpo
         try:
             agent = build_stage_agent(
                 type(deps), prompt_path, model, effort, logger, label,
-                make_model=make_model,
+                make_model=make_model, tools=tools, verbs=verbs,
             )
         except ValueError as e:
             raise FatalConfigError(f"{stage} ({label}) misconfigured: {e}") from e
