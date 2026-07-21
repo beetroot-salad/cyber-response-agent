@@ -2,7 +2,7 @@
 name: write-tests
 description: "Use once a design is settled enough to become the contract the code must satisfy — after discuss-issue has posted the intent+design doc, and before any implementation exists — to turn that design into the executable spec (end-to-end tests bound to a spec-coverage graph) the code is then written against. Kick back to discuss-issue if intent itself is still unsettled."
 argument-hint: "[design doc path or issue #]"
-effort: xhigh
+effort: medium
 ---
 
 # Write tests
@@ -19,12 +19,12 @@ The spine owns exactly four things; everything else is a leaf:
 
 1. **Dispatch, monitor, retry.** A slow or stalled leaf is resumed or replaced, never absorbed; a bad return is re-dispatched with the defect named, not patched inline. A phase too small to dispatch is small enough to be cheap as a leaf; dispatch it anyway.
 2. **The human seam** (§7).
-3. **Residue routing** — the gate's residue and the verify findings are routed (to leaves for re-grounding, to §7 for decisions), never resolved in your own voice.
+3. **Residue routing** — the gate's residue, the judge's `route: re-ground` probe obligations (dispatched before §7 — a provisional discount must be settled before its premise's disposition reaches the human), and the verify findings are routed (to leaves for re-grounding, to §7 for decisions), never resolved in your own voice.
 4. **Deviation decisions** — reduced mode, decomposition, early exit, degraded-model fallbacks — each recorded in `handoff.deviations`.
 
 **Dispatch protocol.** A leaf prompt is a pointer, not a payload: contract path **and charge section name**, worktree path, input frontier paths, output frontier path, per-dispatch parameters (lens name, copy index). The contract carries the doctrine — don't restate it. Each contract has two audiences, split by section: its `## Topology` block — always the first section, ≤20 lines — is the spine's (dispatch list, order, models, per-leaf inputs/outputs; read it with `Read`'s `limit` or a `Grep` on the heading with `-A` — the cap is a context budget, not a secrecy boundary, so glimpsing a charge's first lines is harmless), and the `## Charge — <role>` sections below it are the leaves'. The references are read by the leaves their charges name; **the orchestrator reads neither the charges nor the references.**
 
-**Return protocol.** A leaf's inline return is its frontier's `## Digest` section, verbatim, and nothing else — no preamble sentence, no trailing summary, no restated inventory; everything else lives in the file. The ≤15-line digest cap binds frontier-model leaves too.
+**Return protocol.** A leaf's inline return is its frontier's `## Digest` section, verbatim, and nothing else — no preamble sentence, no trailing summary, no restated inventory; everything else lives in the file. The ≤15-line digest cap binds Opus leaves too.
 
 **Spot-read rule.** Read a frontier's frontmatter and `## Red flags` plus a bounded sample (~40 lines) to verify a leaf stayed in its lane; read *in full* only the two sections written for you — a residue frontier's routing entries and a dispositions frontier's fork section. Never absorb enough content to start answering judgment calls yourself: **every judgment-call outcome routes to §7, none is self-answered** — a gap accepted on the spine is a gap the human never got the chance to override. A declined obligation is `Demand {form: waiver}` — an examined no, never a silence in `handoff.drops`.
 
@@ -45,7 +45,7 @@ inventory: {<category>: <count>, ...}   # claims, flagged_facts, premises, forks
 ---
 ```
 
-Body, in order: `## Digest` — the ≤15 lines the leaf returns inline, verbatim; `## Red flags` — anything the orchestrator or the human must see (omit when empty); then the payload. Producer/consumer pairing is by full filename — the numeric prefix orders the chain for readers, it is not an identity (five `30-*` files share one prefix). A frontier whose payload cannot be a markdown file — phase C's `40-premise-file.py` must stay a real Python file for the shuffle CLI — gets a **sidecar**: `40-premises.md` carries the frontmatter and digest, and the payload file sits beside it.
+Body, in order: `## Digest` — the ≤15 lines the leaf returns inline, verbatim; `## Red flags` — anything the orchestrator or the human must see (omit when empty); then the payload. Producer/consumer pairing is by full filename — the numeric prefix orders the chain for readers, it is not an identity (five `30-*` files share one prefix). A frontier whose payload cannot be a markdown file gets a **sidecar** carrying the frontmatter and digest, with the payload file beside it. Phase C uses this for `40-premise-file.py` / `40-premises.md` and for each answerer's `42-answers-<copy>.py` / `42-answers-<copy>.md` pair.
 
 **Conservation is the frontmatter's job**: each phase echoes the inventories it consumed and accounts for them in its output — counts in equal counts out, every drop named. **Counts are computed, never recalled** — a `grep -c`/`wc` over the file's own content; a producer trusting its memory of its own count is precisely what conservation exists to catch. Each internal handoff is a new place for the premise that silently vanishes; the frontmatter closes that hole mechanically: **run `spec-graph frontiers <dir>` at every phase boundary** — it reconciles every echo against its producer's *declared* inventory and exits nonzero on a break, so a broken frontier is found where it was written; the tool never sees the payload — declaration against declaration — so its echo-equality bites only because the consumer's echo is computed from the file's own content; phase F re-runs it over the finished chain and adds the semantic edge (which name maps to which) the counts cannot see.
 
@@ -58,16 +58,16 @@ Body, in order: `## Digest` — the ≤15 lines the leaf returns inline, verbati
 | Phase | Steps | Dispatches | Contract | Frontier(s) |
 |---|---|---|---|---|
 | 0 | worktree + resume scan | spine | — | — |
-| A | 1–2 ground ∥ extract | grounding leaf (reader posture) ∥ extraction leaf (frontier model) | phases/ground-extract.md | `10-brief.md`, `20-demands.md` |
-| B | 3 enumerate | 4 lensed Sonnet leaves + 1 unlensed frontier strong author | phases/enumerate.md | `30-premises-<lens>.md` ×5 |
-| C | 4 answer | synthesis (Sonnet, low) → `shuffle-premises` (spine, CLI) → ~3 identical Sonnet-low answerers → classifier leaf → frontier cold pass | phases/answer.md | `40-premise-file.py` + `40-premises.md`, `45-dispositions.md` |
-| D | 5–6 graph + gate | assembler leaf (frontier model) → gate leaf (Sonnet, over `spec-graph gate --residue`) | phases/graph-gate.md | `spec_graph_<slug>.yaml` + `50-graph-digest.md`, `60-residue.md` |
+| A | 1–2 ground ∥ extract | grounding leaf (reader posture) ∥ extraction leaf (Opus) | phases/ground-extract.md | `10-brief.md`, `20-demands.md` |
+| B | 3 enumerate | 4 lensed Sonnet leaves + 1 unlensed Opus strong author | phases/enumerate.md | `30-premises-<lens>.md` ×5 |
+| C | 4 answer | synthesis (Sonnet, low) → `shuffle-premises` (spine, CLI) → ~3 same-charge low answerers (2 Sonnet + 1 Haiku) → judge leaf (Opus) | phases/answer.md | `40-premise-file.py` + `40-premises.md`, `42-answers-<copy>.py` + sidecars, `45-dispositions.md` |
+| D | 5–6 graph + gate | assembler leaf (Opus) → gate leaf (Sonnet, over `spec-graph gate --residue`) | phases/graph-gate.md | `spec_graph_<slug>.yaml` + `50-graph-digest.md`, `60-residue.md` |
 | §7 | 7 human seam | spine (AskUserQuestion) | — | `70-resolutions.md` |
-| E | 8 author | one frontier-model author leaf | phases/author.md | the suite + `80-author-digest.md` |
-| F | 9 verify | mechanical-gate leaf, blind conservation reader, cold reconciler (frontier model) | phases/verify.md | `90-verification.md` |
+| E | 8 author | one Opus author leaf | phases/author.md | the suite + `80-author-digest.md` |
+| F | 9 verify | mechanical-gate leaf (Sonnet) → blind conservation reader (Sonnet) ∥ cold reconciler (Opus) | phases/verify.md | `90-mechanical.md`, `91-blind.md`, `92-reconciliation.md` |
 | 10 | hand off | spine | — | — |
 
-Scheduler-enforced constraints: B's five leaves **block on A's finished brief**; the early-exit check runs after A and after any later `design-refuted` flip. C's answerers see only their own shuffled copy. §7 runs after D so the gate's residue reaches the human with the forks; F's findings route back through §7, never straight into the diff. If A's grounding leaf overruns, dispatch a *fresh* probe-backed grounding leaf — never derive the brief on the spine — and reconcile when the slow one lands. Models are named in the contracts and are not economizable where they say frontier model; if one genuinely cannot be spawned, run the best derivation available and **record in `handoff.deviations` that the unknown-unknown region ran degraded**.
+Scheduler-enforced constraints: B's five leaves **block on A's finished brief**; the early-exit check runs after A and after any later `design-refuted` flip. C's answerers see only their own shuffled copy. §7 runs after D so the gate's residue reaches the human with the forks; F's findings route back through §7, never straight into the diff. If A's grounding leaf overruns, dispatch a *fresh* probe-backed grounding leaf — never derive the brief on the spine — and reconcile when the slow one lands. Models **and efforts** are named in the contracts and are not economizable where they say Opus; dispatch each leaf at its contract-named effort — the skill's own `effort: medium` is the spine's orchestration budget, and a leaf left to inherit it runs degraded; if one genuinely cannot be spawned, run the best derivation available and **record in `handoff.deviations` that the unknown-unknown region ran degraded**.
 
 ## 0. Worktree, hygiene, resume
 
@@ -75,7 +75,7 @@ Work in a **dedicated git worktree** — confirm before starting, create if not;
 
 ## Scale and decomposition
 
-Scale the ceremony to the delta. Small delta (no shared sink, nothing removed, a handful of demands): two lenses plus the strong author in B, and collapse C's copies-and-answerers (the synthesis leaf answers its own premise file — every judgment-call outcome still routes to §7; C's cold pass never collapses) — record the reduced mode in `handoff.deviations`. The gate always runs; the frontier files and their conservation headers are never collapsed — the checkpoint chain is not ceremony. Too large for one clean pass: decide *where* to cut **before** phase A, each piece its own frontier chain — **references/decomposition.md** carries the test for a sound cut; read it when splitting.
+Scale the ceremony to the delta. Small delta (no shared sink, nothing removed, a handful of demands): two lenses plus the strong author in B, and collapse C's copies-and-answerers (the synthesis leaf answers its own premise file — every judgment-call outcome still routes to §7; C's judge never collapses) — record the reduced mode in `handoff.deviations`. The gate always runs; the frontier files and their conservation headers are never collapsed — the checkpoint chain is not ceremony. Too large for one clean pass: decide *where* to cut **before** phase A, each piece its own frontier chain — **references/decomposition.md** carries the test for a sound cut; read it when splitting.
 
 ## 7. Resolve with the human
 
@@ -85,6 +85,6 @@ Record every outcome in `70-resolutions.md`, conservation-counted against the in
 
 ## 10. Hand off
 
-**The diff** is **tests + spec_graph only** — the suite with `spec_graph_<issue-or-slug>.yaml` beside it (demands, structure, gate record, claims ledger, `handoff:` block); its `base:` field is the fork commit. The frontiers directory stays untracked. Commit **before the implementation exists** — write-code-from-spec refuses to start otherwise, and a spec phase that never ran discretely can't bite.
+**The diff** is **tests + spec_graph only** — the suite with `spec_graph_<issue-or-slug>.yaml` beside it (demands, structure, gate record, claims ledger, `handoff:` block); its `base:` field is the fork commit. The frontiers directory stays untracked. Commit and push the spec branch **before the implementation exists** — verify the remote branch contains the commit before posting the handoff. Write-code-from-spec refuses to start otherwise, and a spec phase that never ran discretely can't bite.
 
 **The note** is the baton to a *cold* write-code-from-spec, reachable only through the issue thread — post it there with the `handoff` skill: branch and base commit, the forks the human resolved and which reading they picked, anything that ran degraded, the single next action. Write it **for the implementer, not the reviewer** — `finalize` deliberately meets the code cold.

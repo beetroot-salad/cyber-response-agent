@@ -2,10 +2,10 @@
 
 ## Topology
 
-- Three dispatches. The first repairs what is mechanically wrong; the other two only find — their findings route through §7, never straight into the diff.
-- **Mechanical-gate leaf**: inputs = the suite, the spec_graph, the full frontier chain. Output: `90-verification.md` (it also generates the conservation questions for the blind reader).
-- **Blind conservation reader**: inputs = the tests and the generated questions **only** — never the intent doc, and the dispatch prompt must not paraphrase it; the isolation is the instrument. Appends its findings section to `90-verification.md`.
-- **Cold reconciler** (frontier model, fresh — never the orchestrator, never the phase-E author): inputs = the full frontier chain, the artifact, the committed diff. Appends its findings section.
+- Three dispatches with single-writer outputs. The mechanical leaf runs first because it may repair the suite; after it completes, the two readers may run in parallel. Reader findings route through §7, never straight into the diff.
+- **Mechanical-gate leaf** (Sonnet, high effort — the toolchain computes the findings; Opus here re-buys what the tools already know, the same economy as phase D's gate leaf): inputs = the suite, the spec_graph, the full frontier chain. Output: `90-mechanical.md`, including the conservation questions for the blind reader.
+- **Blind conservation reader** (Sonnet, high effort — the isolation is the instrument, not the model): inputs = the tests and the generated questions **only** — never the intent doc, and the dispatch prompt must not paraphrase it; the isolation is the instrument. Output: `91-blind.md`.
+- **Cold reconciler** (Opus, xhigh effort, fresh — never the orchestrator, never the phase-E author): inputs = the full frontier chain, the artifact, the working diff. Output: `92-reconciliation.md`.
 - Loop: findings → §7; the human's resolutions re-run the affected phase (usually E, sometimes D); this phase re-verifies. Closed when the findings list is empty and every check is green or recorded.
 
 ## Charge — the mechanical-gate leaf
@@ -18,7 +18,6 @@ Read **references/rules.md**, "Suite verification". Reject or repair any test th
 spec-graph lint <artifact>                      # formal slots vs schema.md's closed vocabularies
 spec-graph gate <artifact>                      # R0 formal half + R1–R5 triggers vs the recorded gate
 spec-graph binds <artifact>                     # prose ⊄ binds + unexercised seams + dangling pointers
-spec-graph actors <artifact> --base <base>      # execution-context census vs the graph's actors
 spec-graph claims <artifact>                    # probe instruments + spend-point citations
 spec-graph calls <suite-dir>                    # AST: every test reaches the target (or --target)
 spec-graph nullstub <suite-dir> --python <interp>   # null-stub discrimination, classified per test
@@ -26,6 +25,8 @@ spec-graph frontiers <frontiers-dir>            # frontmatter conservation over 
 ```
 
 Then work the residue the tools name and the checks only you can run:
+
+`spec-graph actors` is deliberately absent here: before implementation, the branch has no production-code diff for that checker to follow. Confirm the graph and `handoff.deferred` record the planned execution-context census; write-code-from-spec §3 runs the mechanical check once real code exists.
 
 - **Null-stub triage.** `nullstub` generates the stub, runs the suite, and classifies: a `NULLSTUB-PASS` is vacuous unless you record it per-test with its class (structure / reuse / parity) in `handoff.nullstub_passes` — prefer strengthening the test so it fails; a `NON-ASSERT` rides machinery instead of failing on its own demand-specific assertion — repair it to reach its assert; a `BROKEN`/collection entry proves only that the file is broken. Scan the classified failures for many tests failing on the SAME assertion line or message — a shared same-file helper's assert certifies as discrimination for every test that funnels through it, but it is one test's discrimination and everyone else's ride; rules.md's own-demand-specific-assertion requirement is still yours to verify, no tool checks it. The stub lives in a temp dir and is never committed. The target's own import failing in the *real* (un-stubbed) suite is the expected red; do not repair it by committing skeleton source.
 - **Beyond `calls`' reach:** no test asserts only against a value its own body computed — the expected side of every assertion traces to the demand or a fixture, never to a re-implementation of the target's logic. And no assertion depends on an `nl:` prose slot's wording — `nl:` is for humans, and `lint` lints the artifact, never the suite.
@@ -44,6 +45,10 @@ Frontier inventory: `{checks_passed: n, repairs: n, findings_for_human: n, nulls
 
 You receive a test suite and a list of questions; you have not seen the design and must not seek it — your ignorance is the instrument, and an anchored reader confirms instead of measures. Answer every question from the tests alone. "Unanswerable" is a first-class verdict, not a failure — say it plainly when the tests don't determine an answer. Then one open-ended cold read: state the intent this suite implies, as if reverse-engineering its spec — this backstops the questions neither side generated.
 
+Frontier inventory: `{questions: n, answered: n, unanswerable: n, findings: n}`, with `inputs` echoing `90-mechanical.md`.
+
 ## Charge — the cold reconciler
 
-Read the run's artifact trail — the frontier chain from `10-brief.md` through `70-resolutions.md`, the ledger, the gate record — against the committed diff, and answer one question: *does the spec conserve everything this run learned?* Spend your judgment where no later net reaches. The adversarial implementer (write-code-from-spec §2) holds the *stated-intent* lane — an exploit that greens the suite while violating a written obligation is its game, so **composition** (two facts individually pinned, jointly an escape) and **altitude** (a demand pinned at a different grain than its premise asked) are its sweep now: flag them when they stare at you (a finding here costs one §7 round; the adversary's costs a post-approval kickback), but do not sweep those lanes. What the adversary structurally cannot attack is learning that never became a stated clause, and that is your charge: **a `no-consequence` dismissal that looks load-bearing** (conservation confirms the fact was dispositioned; only judgment catches a wrong call), and **a consequence the run absorbed silently** — a probed fact whose implication surfaces in no demand, claim, or dismissal; a resolution applied narrower than the human's words. You read hot on purpose — the mirror of finalize's deliberate cold read: one checks the artifact without the rationale, you check the rationale all made it into the artifact.
+Read the run's artifact trail — the frontier chain from `10-brief.md` through `70-resolutions.md`, the ledger, the gate record — against the working tests + spec_graph diff, and answer one question: *does the spec conserve everything this run learned?* Spend your judgment where no later net reaches. The adversarial implementer (write-code-from-spec §2) holds the *stated-intent* lane — an exploit that greens the suite while violating a written obligation is its game, so **composition** (two facts individually pinned, jointly an escape) and **altitude** (a demand pinned at a different grain than its premise asked) are its sweep now: flag them when they stare at you (a finding here costs one §7 round; the adversary's costs a post-spec kickback), but do not sweep those lanes. What the adversary structurally cannot attack is learning that never became a stated clause, and that is your charge: **a `no-consequence` dismissal that looks load-bearing** (conservation confirms the fact was dispositioned; only judgment catches a wrong call), and **a consequence the run absorbed silently** — a probed fact whose implication surfaces in no demand, claim, or dismissal; a resolution applied narrower than the human's words. You read hot on purpose — the mirror of finalize's deliberate cold read: one checks the artifact without the rationale, you check the rationale all made it into the artifact.
+
+Frontier inventory: `{findings: n, trail_items_checked: n}`, with `inputs` echoing the completed frontier chain through `90-mechanical.md`.

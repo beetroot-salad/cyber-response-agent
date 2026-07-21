@@ -1,0 +1,47 @@
+{
+  "test_accounting_write_cannot_acquire_its_serialization_at_all": [
+    "haiku"
+  ],
+  "test_accounting_write_fails_on_the_very_call_that_would_have_tripped_the_cap": [
+    "haiku"
+  ],
+  "test_budget_json_missing_the_subagent_spawns_key": [
+    "haiku"
+  ],
+  "test_connectivity_failures_spend_the_budget_pool": [
+    "haiku"
+  ],
+  "test_enforce_flag_empty_string": [
+    "haiku"
+  ],
+  "test_enforce_flag_whitespace_and_case_variants": [
+    "haiku"
+  ],
+  "test_injected_limits_negative_cap": [
+    "haiku"
+  ],
+  "test_intra_agent_parallel_calls_race_the_same_shared_check": [
+    "haiku"
+  ],
+  "test_query_capture_ordering_holds_independently_for_every_concurrent_query_call": [
+    "sonnet"
+  ],
+  "test_same_budget_stopped_tool_reissued_twice_in_one_turn": [
+    "sonnet"
+  ],
+  "test_same_tool_name_on_two_agents": [
+    "haiku"
+  ],
+  "test_the_budget_kill_fires_while_the_other_mechanism_is_mid_shutdown": [
+    "haiku"
+  ],
+  "test_the_failing_accounting_write_leaves_the_state_file_damaged": [
+    "haiku"
+  ],
+  "test_two_different_kills_are_raised_by_two_concurrent_callers": [
+    "haiku"
+  ],
+  "test_visualization_of_a_run_dir_the_kill_truncated": [
+    "haiku"
+  ]
+}
