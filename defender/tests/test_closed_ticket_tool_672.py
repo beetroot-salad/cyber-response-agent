@@ -219,6 +219,7 @@ from defender.runtime.agent_role import AgentRole  # noqa: E402
 from defender.runtime.permission.command_shape import SQL_SHIM  # noqa: E402
 from defender.runtime.providers import BuiltModel  # noqa: E402
 from defender.runtime.verbs import VerbContext  # noqa: E402
+from defender.scripts.adapters import _stub_transport as transport  # noqa: E402
 from defender.scripts.adapters.faults import (  # noqa: E402
     ConfigFault,
     TransportFault,
@@ -449,6 +450,13 @@ def _tool_delta(run: _Driven) -> str:
     earlier in the run (#684/F2 — the whole-run greps let a listing that faulted or
     dropped everything pass a per-item demand)."""
     assert len(run.script.seen) >= 2, "the drive never issued a second model request"
+    # The whole guarantee above rests on the histories being APPEND-ONLY. Assert it rather
+    # than assume it: if the harness ever re-flattens non-additively (a compaction, a retry
+    # rewriting history), the slice below silently starts mid-message and every conjunction
+    # built on this delta goes non-discriminating again — the failure mode #684 exists to end.
+    assert run.script.seen[-1].startswith(run.script.seen[-2]), (
+        "the flattened history is not append-only — the delta is not one response"
+    )
     return run.script.seen[-1][len(run.script.seen[-2]):]
 
 
@@ -1464,9 +1472,11 @@ def test_key_grammar_comes_from_this_environments_config(tmp_path, pattern, key,
             "missing required config keys in ticket/config.env: TICKET_KEY_PATTERN"))},
         {"declare_key_pattern": False},
         {"key_pattern": ("return", "SOC-[0-9")},
+        {"key_pattern": ("return", "SOC-[0-9]{99999999999}")},
         {"key_pattern": ("return", "")},
     ],
-    ids=["config-key-absent", "verb-undeclared", "pattern-uncompilable", "pattern-empty"],
+    ids=["config-key-absent", "verb-undeclared", "pattern-uncompilable",
+         "pattern-overflows-the-compiler", "pattern-empty"],
 )
 def test_absent_key_grammar_fails_closed_and_loud(tmp_path, registry_kwargs):
     """[d30_key_grammar_from_config — the fail-closed half] A ticket store that declares no
@@ -1476,7 +1486,10 @@ def test_absent_key_grammar_fails_closed_and_loud(tmp_path, registry_kwargs):
     fact. So the tool fails CLOSED — zero store attempts, the key never sent — on every shape
     the missing fact can take: the config key absent (ConfigFault out of load_config), the
     adapter declaring no such verb at all, and a declared value that is empty or will not
-    compile.
+    compile — including the two ways "will not compile" is NOT a `re.error`: a repeat count
+    that overflows the compiler, and (its sibling) a pattern deep enough to recurse. That
+    compile runs OUTSIDE `_run_verb`'s fault seam, so an uncaught one would unwind the judge
+    stage and write no row at all, not fail closed.
 
     And LOUD, in all three channels the tool owns, because a silent refusal reads to the
     judge exactly like a store that has nothing to say: the model sees a FAILED result naming
@@ -1499,6 +1512,14 @@ def test_absent_key_grammar_fails_closed_and_loud(tmp_path, registry_kwargs):
     (row,) = run.rows()
     assert row["exit_code"] == 2
     assert row["error_class"] == "infra"
+    # The row names the verb that actually ran and FAILED. Filing it as a `get-ticket`
+    # carrying the model's key would write a store attempt that never happened into the one
+    # artifact that EVIDENCES "zero store attempts" — and would land an unscreened
+    # model-chosen key in the queries table on the path whose point is that it sent none.
+    assert row["verb"] == "key-pattern", (
+        "the fail-closed row claims a store verb the tool never reached"
+    )
+    assert "key" not in row["params"], "the unscreened model key was filed as if it were sent"
     assert run.breaker().get("systems", {}).get("ticket", {}).get("failures") == 1, (
         "a store with no declared key grammar must contribute to the breaker like any other "
         "infra fault — otherwise a misconfigured store is retried at full price forever"
@@ -1522,14 +1543,10 @@ def test_shipped_ticket_config_declares_the_key_grammar():
         "the key grammar must be REQUIRED config — an optional one resolves silently"
     )
     cfg = DEFENDER / "knowledge" / "environment" / "systems" / "ticket" / "config.env"
-    declared: dict[str, str] = {}
-    for line in cfg.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if line.startswith("#") or "=" not in line:
-            continue
-        k, _, v = line.partition("=")
-        declared[k.strip()] = v.strip().strip('"').strip("'")
-    pattern = declared.get("TICKET_KEY_PATTERN")
+    # The REAL loader's parser, not a second copy of its grammar: a currency test that
+    # re-derives the quoting/comment handling can pass against a value `load_config` would
+    # read differently — this module's own lesson (#684/F1) one layer down.
+    pattern = transport._parse_env_file(cfg).get("TICKET_KEY_PATTERN")
     assert pattern, f"{cfg} declares no TICKET_KEY_PATTERN — every ticket verb now faults"
     assert pattern == SHIPPED_KEY_PATTERN, (
         "the shipped grammar drifted from the one this suite drives its screens with"

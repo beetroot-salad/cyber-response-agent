@@ -39,9 +39,14 @@ def ctx(tmp_path):
 def _stub_config(monkeypatch):
     # `_config(ctx)` → `transport.load_config`; stub it so the verbs reach the (also-stubbed)
     # http layer without a real config file. It serves whatever key set the adapter asks for,
-    # so the stub cannot silently diverge from `ticket_adapter.REQUIRED_CONFIG_KEYS`.
+    # so the stub cannot silently diverge from `ticket_adapter.REQUIRED_CONFIG_KEYS` — and it
+    # serves each key a value of the SHAPE the real config holds, so a test that stops
+    # stubbing the http layer reaches the transport instead of dying in
+    # `int(config["TIMEOUT_SEC"])` on a placeholder string.
+    _SHAPED = {"URL_BASE": "http://x", "BASTION_HOST": "web-1", "TIMEOUT_SEC": "10"}
+
     def _fake(ctx, system, prefix, required=transport.REQUIRED_CONFIG_KEYS_TEMPLATE):
-        return {"URL_BASE": "http://x", **{k: f"stub-{k}" for k in required if k != "URL_BASE"}}
+        return {k: _SHAPED.get(k, f"stub-{k}") for k in required}
 
     monkeypatch.setattr(transport, "load_config", _fake)  # lint-monkeypatch: ok — the docker-exec-curl transport has no in-process DI seam (this file's established pattern)
 
@@ -266,6 +271,8 @@ def test_list_filters_ride_urlencoded_not_raw(monkeypatch, ctx, label, q):
     assert parsed["label"] == [label], "the label did not survive the round trip verbatim"
     assert parsed["q"] == [q], "the q value did not survive the round trip verbatim"
     assert parsed["status"] == ["closed"], "require_closed's pin left the wire"
-    # No raw metacharacter reached the query string as a delimiter: every `&`/`=` in the
-    # built query is a separator the encoder put there, so the parse above is total.
-    assert len(query.split("&")) == len(parsed), "a filter value injected a query parameter"
+    # No raw metacharacter reached the query string as a delimiter: the ONLY `&`s in the
+    # built query are the two separators the encoder put between three params. Counting
+    # them (rather than comparing segment count to `len(parsed)`, which an injected
+    # `&c=d` satisfies by adding one of each) is what makes this row discriminating.
+    assert query.count("&") == 2, "a filter value injected a query-parameter separator"

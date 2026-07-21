@@ -94,6 +94,7 @@ the defender, the author skill, and the actor-reviewer judge.
 query(system="ticket", verb="health-check", params={})
 query(system="ticket", verb="list-tickets", params={"status": "X", "label": "X", "q": "X"})
 query(system="ticket", verb="get-ticket",   params={"key": "<key>"})
+query(system="ticket", verb="key-pattern",  params={})
 ```
 
 Reached with the **`query` tool** — there is no command, no shim, and no `--help`.

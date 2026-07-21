@@ -155,10 +155,15 @@ async def _key_grammar(
         )
     try:
         return re.compile(rf"\A(?:{pattern})\Z"), 0, ""
-    except re.error as e:
+    except (re.error, RecursionError, OverflowError) as e:
+        # ``re.error`` is NOT the whole of "will not compile": a repeat count the compiler
+        # cannot hold (``a{99999999999}``) raises ``OverflowError``, and a deeply nested
+        # pattern raises ``RecursionError``. Both escape a bare ``except re.error`` — and
+        # this compile sits OUTSIDE ``_run_verb``'s seam, so one escaping would unwind the
+        # whole judge stage and write NO row: the exact hole this module documents closing.
         return None, DEFAULT_FAULT_EXIT, (
             f"ticket key grammar unusable: TICKET_KEY_PATTERN {pattern!r} does not "
-            f"compile ({e})"
+            f"compile ({type(e).__name__}: {e})"
         )
 
 
@@ -311,9 +316,13 @@ async def _get_body(deps: AgentDeps, lock: asyncio.Lock, verbs: Any, key: str) -
     grammar, cfg_exit, cfg_detail = await _key_grammar(deps, verbs)
     if grammar is None:
         # No grammar, no read: the screen cannot run, so the store is never asked. The row
-        # and the breaker contribution are what make that refusal loud.
+        # and the breaker contribution are what make that refusal loud — and the row is
+        # filed under the verb that actually ran and FAILED (`key-pattern`, no params).
+        # Filing it as a `get-ticket` carrying the model's key would put a store attempt
+        # that never happened into the very audit trail that EVIDENCES zero store attempts,
+        # and would land an unscreened model-chosen key in the queries table besides.
         return await _capture_and_view(
-            deps, lock, "get-ticket", {"key": key}, None, cfg_exit, cfg_detail,
+            deps, lock, _KEY_PATTERN_VERB, {}, None, cfg_exit, cfg_detail,
         )
     reason = _key_reject_reason(key, grammar)
     if reason is not None:
