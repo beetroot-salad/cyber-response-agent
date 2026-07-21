@@ -47,6 +47,13 @@ findings stand regardless: the two-round adjudication pattern (a single
 strict judge discards ~90% of real ambiguity findings) and the leaf
 isolation hole (STRICT ISOLATION block; 4/6 Sonnet leaves peeked).
 
+**Addendum 2026-07-21 (later same day): decision revised.** One Sonnet
+answerer is swapped for Haiku in the production panel — a plain swap, not
+the declined promotion-only hybrid, so no screening tier is added. The
+fc_confident risk is bounded by panel mechanics: a lone Haiku assertion
+cannot reach consensus, so its inventions surface as forks routed to §7
+rather than expected values. Recorded in `phases/answer.md` (c).
+
 ## Metric aggregates (final: 10/12 trials complete; sonnet-631 t2/t3
 ## unrecoverable after the worktree deletion)
 

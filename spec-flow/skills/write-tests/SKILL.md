@@ -60,7 +60,7 @@ Body, in order: `## Digest` — the ≤15 lines the leaf returns inline, verbati
 | 0 | worktree + resume scan | spine | — | — |
 | A | 1–2 ground ∥ extract | grounding leaf (reader posture) ∥ extraction leaf (Opus) | phases/ground-extract.md | `10-brief.md`, `20-demands.md` |
 | B | 3 enumerate | 4 lensed Sonnet leaves + 1 unlensed Opus strong author | phases/enumerate.md | `30-premises-<lens>.md` ×5 |
-| C | 4 answer | synthesis (Sonnet, low) → `shuffle-premises` (spine, CLI) → ~3 identical Sonnet-low answerers → judge leaf (Opus) | phases/answer.md | `40-premise-file.py` + `40-premises.md`, `42-answers-<copy>.py` + sidecars, `45-dispositions.md` |
+| C | 4 answer | synthesis (Sonnet, low) → `shuffle-premises` (spine, CLI) → ~3 same-charge low answerers (2 Sonnet + 1 Haiku) → judge leaf (Opus) | phases/answer.md | `40-premise-file.py` + `40-premises.md`, `42-answers-<copy>.py` + sidecars, `45-dispositions.md` |
 | D | 5–6 graph + gate | assembler leaf (Opus) → gate leaf (Sonnet, over `spec-graph gate --residue`) | phases/graph-gate.md | `spec_graph_<slug>.yaml` + `50-graph-digest.md`, `60-residue.md` |
 | §7 | 7 human seam | spine (AskUserQuestion) | — | `70-resolutions.md` |
 | E | 8 author | one Opus author leaf | phases/author.md | the suite + `80-author-digest.md` |
