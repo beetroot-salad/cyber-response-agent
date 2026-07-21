@@ -1,0 +1,77 @@
+{
+  "test_closed_ticket_registration_reaches_every_benign_call_site": [
+    "haiku"
+  ],
+  "test_filter_values_with_shell_and_url_metacharacters": [
+    "haiku",
+    "sonnet"
+  ],
+  "test_get_closed_ticket_key_non_ascii": [
+    "haiku"
+  ],
+  "test_get_closed_ticket_key_not_found_vs_wrong_status": [
+    "haiku"
+  ],
+  "test_get_closed_ticket_key_pathologically_long": [
+    "haiku"
+  ],
+  "test_get_closed_ticket_response_omits_status": [
+    "sonnet"
+  ],
+  "test_get_closed_ticket_response_shape_mismatch": [
+    "haiku"
+  ],
+  "test_get_closed_ticket_status_case_or_whitespace_variant": [
+    "haiku"
+  ],
+  "test_list_closed_tickets_label_and_q_together": [
+    "haiku"
+  ],
+  "test_list_closed_tickets_label_empty_string": [
+    "haiku"
+  ],
+  "test_list_closed_tickets_no_filters_supplied": [
+    "haiku"
+  ],
+  "test_list_closed_tickets_q_empty_string": [
+    "haiku"
+  ],
+  "test_list_closed_tickets_q_pathologically_long": [
+    "haiku"
+  ],
+  "test_list_closed_tickets_response_contains_duplicate_key": [
+    "haiku"
+  ],
+  "test_list_closed_tickets_result_empty": [
+    "sonnet"
+  ],
+  "test_no_surface_teaches_the_tool_to_a_leg_that_lacks_it": [
+    "sonnet"
+  ],
+  "test_operator_policy_cli_after_the_demo_scope_removal": [
+    "haiku"
+  ],
+  "test_repeated_builds_of_the_same_leg_do_not_accumulate_registrations": [
+    "haiku",
+    "sonnet"
+  ],
+  "test_taught_tool_names_match_registered_names": [
+    "sonnet"
+  ],
+  "test_ticket_config_knob_value_changes_between_two_calls_in_one_run": [
+    "haiku"
+  ],
+  "test_ticket_key_that_was_never_opened_at_all": [
+    "haiku",
+    "sonnet"
+  ],
+  "test_ticket_status_transitions_around_the_read": [
+    "haiku"
+  ],
+  "test_typed_tool_config_env_divergence_from_cli_callers": [
+    "haiku"
+  ],
+  "test_wiring_bit_does_not_leak_from_one_built_leg_into_the_next": [
+    "haiku"
+  ]
+}

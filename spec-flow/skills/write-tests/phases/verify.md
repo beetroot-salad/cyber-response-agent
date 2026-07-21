@@ -5,7 +5,7 @@
 - Three dispatches. The first repairs what is mechanically wrong; the other two only find — their findings route through §7, never straight into the diff.
 - **Mechanical-gate leaf**: inputs = the suite, the spec_graph, the full frontier chain. Output: `90-verification.md` (it also generates the conservation questions for the blind reader).
 - **Blind conservation reader**: inputs = the tests and the generated questions **only** — never the intent doc, and the dispatch prompt must not paraphrase it; the isolation is the instrument. Appends its findings section to `90-verification.md`.
-- **Cold reconciler** (frontier model, fresh — never the orchestrator, never the phase-E author): inputs = the full frontier chain, the artifact, the committed diff. Appends its findings section.
+- **Cold reconciler** (Opus, fresh — never the orchestrator, never the phase-E author): inputs = the full frontier chain, the artifact, the committed diff. Appends its findings section.
 - Loop: findings → §7; the human's resolutions re-run the affected phase (usually E, sometimes D); this phase re-verifies. Closed when the findings list is empty and every check is green or recorded.
 
 ## Charge — the mechanical-gate leaf

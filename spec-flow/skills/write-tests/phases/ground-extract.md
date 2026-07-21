@@ -4,7 +4,7 @@
 
 - Two leaves, dispatched in parallel; neither reads the other's output. Both may set `status: design-refuted` (SKILL.md, "Early exit") — the run halts before the next dispatch.
 - **Grounding leaf** (reader posture; it must Write its frontier, so a general leaf — not the read-only Explore agent type): inputs = the intent+design doc with its inherited `claims:` block. Output: `10-brief.md`. If it overruns, dispatch a fresh probe-backed replacement; reconcile when the slow one lands.
-- **Extraction leaf** (frontier model): content inputs = the doc and its `claims:` block only — but repo probe access is expected; its charge probes behavior claims the doc's sweep missed. Output: `20-demands.md`.
+- **Extraction leaf** (Opus): content inputs = the doc and its `claims:` block only — but repo probe access is expected; its charge probes behavior claims the doc's sweep missed. Output: `20-demands.md`.
 - Phase B blocks on the finished brief.
 
 ## Charge — the grounding leaf

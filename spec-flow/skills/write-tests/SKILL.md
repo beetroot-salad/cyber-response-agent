@@ -24,7 +24,7 @@ The spine owns exactly four things; everything else is a leaf:
 
 **Dispatch protocol.** A leaf prompt is a pointer, not a payload: contract path **and charge section name**, worktree path, input frontier paths, output frontier path, per-dispatch parameters (lens name, copy index). The contract carries the doctrine — don't restate it. Each contract has two audiences, split by section: its `## Topology` block — always the first section, ≤20 lines — is the spine's (dispatch list, order, models, per-leaf inputs/outputs; read it with `Read`'s `limit` or a `Grep` on the heading with `-A` — the cap is a context budget, not a secrecy boundary, so glimpsing a charge's first lines is harmless), and the `## Charge — <role>` sections below it are the leaves'. The references are read by the leaves their charges name; **the orchestrator reads neither the charges nor the references.**
 
-**Return protocol.** A leaf's inline return is its frontier's `## Digest` section, verbatim, and nothing else — no preamble sentence, no trailing summary, no restated inventory; everything else lives in the file. The ≤15-line digest cap binds frontier-model leaves too.
+**Return protocol.** A leaf's inline return is its frontier's `## Digest` section, verbatim, and nothing else — no preamble sentence, no trailing summary, no restated inventory; everything else lives in the file. The ≤15-line digest cap binds Opus leaves too.
 
 **Spot-read rule.** Read a frontier's frontmatter and `## Red flags` plus a bounded sample (~40 lines) to verify a leaf stayed in its lane; read *in full* only the two sections written for you — a residue frontier's routing entries and a dispositions frontier's fork section. Never absorb enough content to start answering judgment calls yourself: **every judgment-call outcome routes to §7, none is self-answered** — a gap accepted on the spine is a gap the human never got the chance to override. A declined obligation is `Demand {form: waiver}` — an examined no, never a silence in `handoff.drops`.
 
@@ -58,16 +58,16 @@ Body, in order: `## Digest` — the ≤15 lines the leaf returns inline, verbati
 | Phase | Steps | Dispatches | Contract | Frontier(s) |
 |---|---|---|---|---|
 | 0 | worktree + resume scan | spine | — | — |
-| A | 1–2 ground ∥ extract | grounding leaf (reader posture) ∥ extraction leaf (frontier model) | phases/ground-extract.md | `10-brief.md`, `20-demands.md` |
-| B | 3 enumerate | 4 lensed Sonnet leaves + 1 unlensed frontier strong author | phases/enumerate.md | `30-premises-<lens>.md` ×5 |
-| C | 4 answer | synthesis (Sonnet, low) → `shuffle-premises` (spine, CLI) → ~3 identical Sonnet-low answerers → classifier leaf → frontier cold pass | phases/answer.md | `40-premise-file.py` + `40-premises.md`, `45-dispositions.md` |
-| D | 5–6 graph + gate | assembler leaf (frontier model) → gate leaf (Sonnet, over `spec-graph gate --residue`) | phases/graph-gate.md | `spec_graph_<slug>.yaml` + `50-graph-digest.md`, `60-residue.md` |
+| A | 1–2 ground ∥ extract | grounding leaf (reader posture) ∥ extraction leaf (Opus) | phases/ground-extract.md | `10-brief.md`, `20-demands.md` |
+| B | 3 enumerate | 4 lensed Sonnet leaves + 1 unlensed Opus strong author | phases/enumerate.md | `30-premises-<lens>.md` ×5 |
+| C | 4 answer | synthesis (Sonnet, low) → `shuffle-premises` (spine, CLI) → ~3 identical Sonnet-low answerers → judge leaf (Opus) | phases/answer.md | `40-premise-file.py` + `40-premises.md`, `45-dispositions.md` |
+| D | 5–6 graph + gate | assembler leaf (Opus) → gate leaf (Sonnet, over `spec-graph gate --residue`) | phases/graph-gate.md | `spec_graph_<slug>.yaml` + `50-graph-digest.md`, `60-residue.md` |
 | §7 | 7 human seam | spine (AskUserQuestion) | — | `70-resolutions.md` |
-| E | 8 author | one frontier-model author leaf | phases/author.md | the suite + `80-author-digest.md` |
-| F | 9 verify | mechanical-gate leaf, blind conservation reader, cold reconciler (frontier model) | phases/verify.md | `90-verification.md` |
+| E | 8 author | one Opus author leaf | phases/author.md | the suite + `80-author-digest.md` |
+| F | 9 verify | mechanical-gate leaf, blind conservation reader, cold reconciler (Opus) | phases/verify.md | `90-verification.md` |
 | 10 | hand off | spine | — | — |
 
-Scheduler-enforced constraints: B's five leaves **block on A's finished brief**; the early-exit check runs after A and after any later `design-refuted` flip. C's answerers see only their own shuffled copy. §7 runs after D so the gate's residue reaches the human with the forks; F's findings route back through §7, never straight into the diff. If A's grounding leaf overruns, dispatch a *fresh* probe-backed grounding leaf — never derive the brief on the spine — and reconcile when the slow one lands. Models are named in the contracts and are not economizable where they say frontier model; if one genuinely cannot be spawned, run the best derivation available and **record in `handoff.deviations` that the unknown-unknown region ran degraded**.
+Scheduler-enforced constraints: B's five leaves **block on A's finished brief**; the early-exit check runs after A and after any later `design-refuted` flip. C's answerers see only their own shuffled copy. §7 runs after D so the gate's residue reaches the human with the forks; F's findings route back through §7, never straight into the diff. If A's grounding leaf overruns, dispatch a *fresh* probe-backed grounding leaf — never derive the brief on the spine — and reconcile when the slow one lands. Models are named in the contracts and are not economizable where they say Opus; if one genuinely cannot be spawned, run the best derivation available and **record in `handoff.deviations` that the unknown-unknown region ran degraded**.
 
 ## 0. Worktree, hygiene, resume
 
@@ -75,7 +75,7 @@ Work in a **dedicated git worktree** — confirm before starting, create if not;
 
 ## Scale and decomposition
 
-Scale the ceremony to the delta. Small delta (no shared sink, nothing removed, a handful of demands): two lenses plus the strong author in B, and collapse C's copies-and-answerers (the synthesis leaf answers its own premise file — every judgment-call outcome still routes to §7; C's cold pass never collapses) — record the reduced mode in `handoff.deviations`. The gate always runs; the frontier files and their conservation headers are never collapsed — the checkpoint chain is not ceremony. Too large for one clean pass: decide *where* to cut **before** phase A, each piece its own frontier chain — **references/decomposition.md** carries the test for a sound cut; read it when splitting.
+Scale the ceremony to the delta. Small delta (no shared sink, nothing removed, a handful of demands): two lenses plus the strong author in B, and collapse C's copies-and-answerers (the synthesis leaf answers its own premise file — every judgment-call outcome still routes to §7; C's judge never collapses) — record the reduced mode in `handoff.deviations`. The gate always runs; the frontier files and their conservation headers are never collapsed — the checkpoint chain is not ceremony. Too large for one clean pass: decide *where* to cut **before** phase A, each piece its own frontier chain — **references/decomposition.md** carries the test for a sound cut; read it when splitting.
 
 ## 7. Resolve with the human
 

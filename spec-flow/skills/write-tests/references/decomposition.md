@@ -50,7 +50,7 @@ hierarchy — but naive recursion amplifies the one failure the demand tests can
 guarded exception, not the norm. **Default to one level of fan-out.** One level already buys the whole
 payoff (focus, cheap models, boundary-checkable output); each extra level multiplies the composition
 surface and pushes invariants further from the human who reviews only the root. A leaf that is "too
-big to hold" is often the coupled core in disguise — do it whole on the frontier model, don't recurse
+big to hold" is often the coupled core in disguise — do it whole on Opus, don't recurse
 it.
 
 When you do recurse, the checks split on whether they **compose bottom-up**, and the split is the
@@ -159,8 +159,8 @@ Neither judges a cut; both point at the piece you haven't cut well.
   way: it is usually the design-risk core, the piece that needed a spike. Uneven size is a *finder for
   the hard part.*
 - **Model tier.** This one is literal: the tier you can dispatch each leaf on. A good cut drains the
-  uncertainty into a few leaves (dispatch those on the frontier model) and lets the rest run cheap. If
-  *every* leaf still needs the frontier model, you split the work but not the uncertainty — you cut in
+  uncertainty into a few leaves (dispatch those on Opus) and lets the rest run cheap. If
+  *every* leaf still needs Opus, you split the work but not the uncertainty — you cut in
   the wrong place. The assignable tier is both a readout of cut quality and the payoff you were after.
 
 ## Two modes of dispatch — don't confuse them
