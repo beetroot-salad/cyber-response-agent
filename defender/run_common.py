@@ -40,8 +40,26 @@ DEFAULT_RUNS_BASE = Path("/tmp/defender-runs")
 
 def resolve_runs_base() -> Path:
     """The runtime runs base from ``$DEFENDER_RUNS_BASE`` (call time), else the
-    default. Resolved here so the env var + default literal have one source."""
-    return Path(os.environ.get("DEFENDER_RUNS_BASE", str(DEFAULT_RUNS_BASE)))
+    default. Resolved here so the env var + default literal have one source.
+
+    REFUSES a runs base that resolves to the same directory as the learning state root
+    (#631, Q1): the runtime pool ``budget.json`` lives under the runs base, so pairing
+    the two env vars onto one path would let unenforced learning agents spend the
+    enforced pool. The disjointness is otherwise emergent from two env-var defaults; here
+    it is asserted (a symlink alias to the same dir is the same collision — both sides
+    are ``resolve()``-d)."""
+    base = Path(os.environ.get("DEFENDER_RUNS_BASE", str(DEFAULT_RUNS_BASE)))
+    from defender._env import FatalConfigError
+    from defender.learning.core.config import learning_state_root
+
+    if base.resolve() == learning_state_root().resolve():
+        raise FatalConfigError(
+            "DEFENDER_RUNS_BASE and the learning state root "
+            "(DEFENDER_LEARNING_STATE_DIR) resolve to the same directory "
+            f"({base.resolve()}): the enforced runtime budget pool would be spent by "
+            "unenforced learning agents. Point them at distinct directories."
+        )
+    return base
 
 
 # Every fixture in this repo is laid out as `{slug}/alert.json`, so the file STEM is the
@@ -235,7 +253,7 @@ def is_held_out_alert_copy(alert: Path, fixtures_dir: Path = HELD_OUT_FIXTURES) 
     return digest in held_out_alert_digests(fixtures_dir)
 
 
-def enqueue_learning(run_dir: Path, alert: Path) -> bool:
+def enqueue_learning(run_dir: Path, alert: Path, *, truncated_by: str | None = None) -> bool:
     """Hand the finished run to the off-process LEARN worker by dropping a
     learn-queue marker. The runtime holds SIEM creds; learning is SIEM-free and
     runs in a separate process (loop.py --learn-drain), so the investigation's
@@ -247,8 +265,21 @@ def enqueue_learning(run_dir: Path, alert: Path) -> bool:
     runs a held-out alert by hand to debug it. It fails closed: the check is on the
     input path, so it cannot be defeated by a malformed or missing label file.
 
+    A run the budget TRUNCATED (``truncated_by`` set — #631, D8) is REFUSED too: the
+    runtime OWNS this check rather than relying on downstream report.md validation, so a
+    weakened validator never lets the loop train on a truncated investigation. Compared
+    with ``is not None`` (never a falsy-swallow) so "no mark" and "a mark I could not
+    read" are not conflated — that shape would suppress learning for every run.
+
     Returns whether the run was enqueued.
     """
+    if truncated_by is not None:
+        print(
+            f"[run.py] run was truncated (truncated_by={truncated_by!r}) — NOT enqueuing "
+            "for learning (a truncated investigation must not train the corpus)",
+            file=sys.stderr,
+        )
+        return False
     if is_held_out_fixture(alert):
         print(
             f"[run.py] {alert.parent.name}/{alert.name} is a held-out eval fixture — NOT "
@@ -258,6 +289,13 @@ def enqueue_learning(run_dir: Path, alert: Path) -> bool:
         )
         return False
     from defender.learning import loop as _loop
+    from defender.learning.core.config import REPO_ROOT as _LEARN_REPO_ROOT
+    from defender.learning.core.config import LoopPaths, _env_state_dir
 
-    _loop.enqueue_for_learning(run_dir)
+    # Resolve the queue layout at CALL time from the live environment, not the import-
+    # frozen `DEFAULT_PATHS`: a run that set `DEFENDER_LEARNING_STATE_DIR` after this
+    # module imported must drop its marker under THAT state root (and a test pointing it
+    # into a tmp dir must not pollute the in-repo default).
+    paths = LoopPaths(repo_root=_LEARN_REPO_ROOT, state_dir=_env_state_dir())
+    _loop.enqueue_for_learning(run_dir, paths)
     return True

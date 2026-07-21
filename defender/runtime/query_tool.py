@@ -80,6 +80,7 @@ from pydantic_ai.exceptions import (
 
 from defender._io import append_jsonl
 from defender._run_paths import RunPaths
+from defender.hooks.budget_enforcer import BudgetKill
 from defender.runtime.untrusted import wrap as _wrap
 from defender.scripts.adapters.faults import USAGE_EXIT_CODE, AdapterFault
 from defender.scripts.gather_tools.record_query import (
@@ -138,6 +139,28 @@ def _fault_exit(e: BaseException) -> int:
     if isinstance(e, SystemExit) and isinstance(e.code, int) and e.code != 0:
         return e.code
     return DEFAULT_FAULT_EXIT
+
+
+def _json_safe_params(value: Any) -> Any:
+    """Recursively coerce non-finite floats (`inf`/`-inf`/`nan`) to their string form so
+    the queries-table row is STRICT RFC-8259 JSON (#631, PBW3N).
+
+    `append_jsonl` is `json.dumps(row) + "\n"` with no `allow_nan=False`, so a
+    model-chosen non-finite float — reachable by ACCIDENT through an ordinary `1e400`
+    that overflows to `inf` at a `params: dict[str, Any]` boundary — would land a bare
+    `Infinity` token that every Python reader accepts but `jq`/Go/Rust reject, and it
+    escapes the run through `actor_view` into the checked-in lessons corpus. Coercing the
+    non-finite value (rather than a blanket stringify) preserves ORDINARY finite floats
+    and every string param byte-for-byte — the positive control forbids the blanket fix."""
+    import math
+
+    if isinstance(value, float) and not math.isfinite(value):
+        return repr(value)  # "inf" / "-inf" / "nan" — a string, not a bare JSON token
+    if isinstance(value, dict):
+        return {k: _json_safe_params(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe_params(v) for v in value]
+    return value
 
 
 def _payload_status(exit_code: int, payload: Any) -> str:
@@ -241,7 +264,11 @@ class QueryCapture(AbstractCapability[Any]):
             return self._reject(system, verb, params, model_query_id), None
         except CONTROL_FLOW_EXCEPTIONS:
             raise
-        except (KeyboardInterrupt, GeneratorExit, asyncio.CancelledError):
+        # BudgetKill ends the RUN — it is not a query fault and must not be recorded as an
+        # adapter-load failure (#631, M5). Re-raised alongside the interpreter/cancel group
+        # (NOT added to CONTROL_FLOW_EXCEPTIONS, whose members are query control-flow; and
+        # RunAborted's connectivity-flavoured constructor is not the budget kill's).
+        except (BudgetKill, KeyboardInterrupt, GeneratorExit, asyncio.CancelledError):
             raise
         except BaseException as e:  # noqa: BLE001 — the registry could not LOAD this system's module
             return None, f"{system} adapter failed to load: {type(e).__name__}: {e}"
@@ -318,7 +345,9 @@ class QueryCapture(AbstractCapability[Any]):
             payload = await handler(args)
         except CONTROL_FLOW_EXCEPTIONS:
             raise
-        except (KeyboardInterrupt, GeneratorExit, asyncio.CancelledError):
+        # BudgetKill ends the run (#631, M5); re-raised with the interpreter/cancel group so
+        # it is never recorded as a query fault (see _reject_guarded for the rationale).
+        except (BudgetKill, KeyboardInterrupt, GeneratorExit, asyncio.CancelledError):
             raise
         except AdapterFault as e:
             exit_code, detail = e.exit_code, e.detail
@@ -369,7 +398,7 @@ class QueryCapture(AbstractCapability[Any]):
                 # honest value in costs nothing and ends the lie.
                 "verb": verb,
                 "query_id": query_id,
-                "params": dict(params),
+                "params": _json_safe_params(dict(params)),
                 "raw_command": _raw_command(system, verb, params),
                 "payload_path": payload_rel,
                 "exit_code": exit_code,

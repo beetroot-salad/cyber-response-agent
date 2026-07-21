@@ -19,7 +19,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from pydantic_ai import RunContext
-from pydantic_ai.exceptions import ModelRetry, UsageLimitExceeded
+from pydantic_ai.exceptions import ModelRetry, UnexpectedModelBehavior, UsageLimitExceeded
 from pydantic_ai.usage import UsageLimits
 
 from . import circuit_breaker
@@ -491,6 +491,20 @@ async def _run_gather(
             f"gather for {lead_id} hit its request limit ({e}) before finishing; "
             "any queries it ran are in the queries table. Treat this lead as "
             "incomplete and reason from what was captured."
+        )
+    except UnexpectedModelBehavior as e:
+        # M7 (#631): an UnexpectedModelBehavior from the nested `gagent.run` — e.g. a
+        # subagent that spammed a stopped tool with schema-invalid args to its retry
+        # ceiling — would otherwise propagate out of the gather tool body and kill the
+        # WHOLE run with no report. Convert it to the same measurement-shaped string as
+        # the request-limit path so MAIN reads an incomplete lead and reasons on. The
+        # budget's own `BudgetKill` is deliberately NOT caught here (nor is it a subclass
+        # of these) — it ENDS the run, and converting it to a lead summary would defeat
+        # the kill (M5).
+        output = (
+            f"gather for {lead_id} ended abnormally ({e}); any queries it ran are in "
+            "the queries table. Treat this lead as incomplete and reason from what was "
+            "captured."
         )
 
     # 4. Wrap the summary as untrusted — it's the primary attacker-influenced

@@ -234,7 +234,10 @@ def test_edit_file_guards_bounce_then_recover(tmp_path):
     commits. Mirrors Claude Code's Edit semantics through the real tool + gate."""
     run_id, salt = "edit-guards", "abcdabcdabcdabcd"
     run_dir = materialize(tmp_path, GOLDEN_AB3)
-    notes = str(run_dir / "notes.md")  # a run-dir file (not investigation.md → no invlang)
+    # report.md is a MAIN-writable, non-invlang run-dir file. (Was notes.md until #631's
+    # S2 narrowed MAIN's write scope to exactly {investigation.md, report.md}; report.md
+    # is the writable non-invlang artifact that still exercises the edit_file guards.)
+    notes = str(run_dir / "report.md")
 
     main = ReplayFn([
         Turn(tool_calls=[("write_file", {"path": notes, "content": "alpha\nbeta\nalpha\n"})]),
@@ -247,7 +250,7 @@ def test_edit_file_guards_bounce_then_recover(tmp_path):
     drive(run_dir, run_id=run_id, salt=salt, main=main)
 
     assert main.calls == 6
-    assert (run_dir / "notes.md").read_text() == "alpha\nBETA\nalpha\n"
+    assert (run_dir / "report.md").read_text() == "alpha\nBETA\nalpha\n"
     seen = "\n".join(main.seen)
     assert "would overwrite it" in seen   # empty old_string on an existing file
     assert "old_string not found" in seen

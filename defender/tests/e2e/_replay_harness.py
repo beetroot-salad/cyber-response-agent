@@ -21,15 +21,18 @@ it). Drive a run with `drive(run_dir, run_id=…, salt=…, main=<callable>)`, w
 the callable is a `ReplayFn` / `DenyProbe` / `NeverEndsModel` — `drive` wraps it
 in `FunctionModel`, so scripts never touch the pydantic plumbing.
 
-Below the model there are exactly THREE fakeable boundaries, and all are INJECTED
-(never monkeypatched): the model itself (`make_model`), the data-source verb
-registry (`verbs=` → `run_investigation(verbs=…)`, #611), and the box executor
-(`box=` → `run_investigation(box=…)`, #540). A scenario hands `drive` a `FakeVerbs`
-table of plain annotated functions; the real query tool validates against their real
-signatures, the real capture capability writes the real rows. The `box` seam is the
-same shape one layer lower: the bash tool's execution boundary is a container the
-test process cannot start hermetically, so a scenario hands in a `BoxExecutor` built
-over a fake transport and the REAL framing codec still runs on both sides.
+Below the model there are exactly FOUR injected seams, and every one is a VALUE the run
+is handed (never a monkeypatched module attribute): the model itself (`make_model`), the
+data-source verb registry (`verbs=` → `run_investigation(verbs=…)`, #611), the budget cap
+table (`limits=` → `run_investigation(limits=…)`, #631), and the box executor (`box=` →
+`run_investigation(box=…)`, #540). A scenario hands `drive` a `FakeVerbs` table of plain
+annotated functions; the real query tool validates against their real signatures, the real
+capture capability writes the real rows. A scenario hands `drive` a `limits` dict; the real
+accounting hook and the real enforcing seam read it, so a run crosses a real cap in a few
+`Turn(...)` lines. The `box` seam is the same shape one layer lower: the bash tool's
+execution boundary is a container the test process cannot start hermetically, so a scenario
+hands in a `BoxExecutor` built over a fake transport and the REAL framing codec still runs
+on both sides.
 """
 from __future__ import annotations
 
@@ -279,7 +282,8 @@ def normalize(text: str, *, run_dir: Path, salt: str, run_id: str) -> str:
                 .replace(run_id, "<RUN_ID>"))
 
 
-def drive(run_dir: Path, *, run_id: str, salt: str, main, gather=None, verbs=None, box=None):
+def drive(run_dir: Path, *, run_id: str, salt: str, main, gather=None, verbs=None,
+          limits=None, box=None):
     """Run the real driver with injected fake models — no monkeypatching of the
     model symbol. `main`/`gather` are plain replay callables (ReplayFn / DenyProbe
     / NeverEndsModel); this wraps each in `FunctionModel`, so scripts stay
@@ -334,6 +338,12 @@ def drive(run_dir: Path, *, run_id: str, salt: str, main, gather=None, verbs=Non
     seams: dict[str, Any] = {}
     if verbs is not None:
         seams["verbs"] = verbs
+    # `limits` (#631, demand `limits_seam`): the cap table `run_investigation` resolves ONCE
+    # at the boundary and threads inward to `check_budgets`, so a scenario can drive a run
+    # across a real cap without any operator-facing configuration existing (`no_operator_config`).
+    # Omitted → the run resolves the production `DEFAULT_LIMITS`.
+    if limits is not None:
+        seams["limits"] = limits
     # Always threaded: a hermetic replay has no daemon, so the default is host execution.
     seams["box"] = box if box is not None else box_mod.unboxed_executor(
         env=run_common.run_env(DEFENDER, run_dir),

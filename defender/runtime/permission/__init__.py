@@ -35,7 +35,13 @@ from .bash import (
     require_anchor_root,
 )
 from .decision import Decision
-from .files import build_write_allow, decide_read, decide_write, is_untrusted_read
+from .files import (
+    build_named_write_allow,
+    build_write_allow,
+    decide_read,
+    decide_write,
+    is_untrusted_read,
+)
 from .grant import OPENS_NOTHING, PROGRAMS, Grant, Route, under
 from .policies.gather import GATHER_FALLTHROUGH_DENY_REASON
 from .policies.main import FALLTHROUGH_DENY_REASON
@@ -53,6 +59,7 @@ __all__ = [
     "Decision",
     "Grant",
     "Route",
+    "build_named_write_allow",
     "build_write_allow",
     "command_shape",
     "decide_bash",

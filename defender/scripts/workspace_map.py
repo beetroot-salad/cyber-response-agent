@@ -96,6 +96,13 @@ def workspace_map(run_dir: Path) -> str:
             # returned summary, never the raw tree, so keep it off the map.
             if child.name == "gather_raw":
                 continue
+            # budget.json is the enforcement accounting state (#631): written at run
+            # start (open_budget), but the orchestrator neither reads nor writes it (its
+            # write scope is exactly investigation.md/report.md), so advertising it in
+            # message 0 would name a file the model can't author. Off the map like
+            # gather_raw — and the replayed-listing parity gate pins that it stays off.
+            if child.name == "budget.json":
+                continue
             kind = "dir/" if child.is_dir() else ""
             lines.append(f"- {_safe_name(child.name)}{(' ' + kind) if kind else ''}")
     else:

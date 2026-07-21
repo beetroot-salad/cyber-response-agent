@@ -100,7 +100,10 @@ def _build_gather_agent(instructions: str, logger: observe.RequestLogger, agent_
         AnthropicModel(driver.GATHER_MODEL),
         deps_type=tools.GatherDeps,
         instructions=instructions,
-        capabilities=[driver._make_hooks(logger, agent_id)],
+        # This measurement harness runs the gather UNENFORCED (it counts turns, it does
+        # not deny them); the #631 posture bit is REQUIRED at the seam, so it is stated
+        # here explicitly rather than defaulted — the fail-open M2 exists to prevent.
+        capabilities=[driver._make_hooks(logger, agent_id, enforce=False)],
         model_settings=driver._CACHE_SETTINGS,
         retries=driver.DEFAULT_TOOL_RETRIES,
     )

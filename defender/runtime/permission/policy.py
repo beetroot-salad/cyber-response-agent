@@ -67,6 +67,11 @@ class AgentPolicy:
     read_confine: tuple[Path, ...] = ()
     write_allow: tuple[re.Pattern[str], ...] = ()
     deny_reason: str = _DEFAULT_DENY_REASON
+    # The budget-posture bit (#631), carried from the agent DEFINITION through
+    # `compile_policy` so the budget hook reads it off `deps.policy` — DATA, never a
+    # role branch. False for every learning stage (accounting-only); True for MAIN and
+    # GATHER (deny-and-kill). A new agent must STATE its posture rather than inherit one.
+    budget_enforced: bool = False
 
     def __post_init__(self) -> None:
         """Fail LOUD on a grant naming a program absent from `PROGRAMS` — never fail-open at

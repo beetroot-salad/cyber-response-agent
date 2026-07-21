@@ -207,7 +207,23 @@ def _copy_shared_inputs(run_dir: Path, learning_run_dir: Path) -> None:
             src = getattr(src_paths, name)
             if not src.is_file():
                 raise RunUnprocessable(f"missing source artifact for persist: {src}")
-            shutil.copy2(src, getattr(dst_paths, name))
+            dst = getattr(dst_paths, name)
+            # The fs lane authors a file NAMED investigation.md, and it never consults
+            # the api lane's `write_allow`/invlang gate (#631, PBW2): so `investigation.md`
+            # is validated HERE, at the one authoring path that reaches it off the gate.
+            # Fail closed on invalid invlang — a source carrying rejected text must not
+            # come to rest at a validated-looking destination artifact. Validated by the
+            # SAME structural validator the api lane uses, so a valid golden still lands.
+            if name == "investigation":
+                from defender.skills.invlang.validate import validate_companion
+
+                errors = validate_companion(src.read_text(encoding="utf-8"), None)
+                if errors:
+                    raise RunUnprocessable(
+                        f"investigation.md failed invlang validation on the copy path "
+                        f"({src}): {errors}"
+                    )
+            shutil.copy2(src, dst)
         # Best-effort: the lesson-load trace (record_lesson_load hook). Optional —
         # a run that loaded no lesson has none — so it is NOT in _SHARED_COPY_ARTIFACTS;
         # copy it when present so trace_lesson survives the ephemeral run dir being

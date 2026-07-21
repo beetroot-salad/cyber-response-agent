@@ -48,9 +48,28 @@ from defender._env import env_bool
 from defender._run_paths import RunPaths
 from defender.hooks.budget_enforcer import (
     DEFAULT_LIMITS,
+    BudgetKill,
+    account_call,
     check_budgets,
+    open_budget,
+    read_budget,
+    refusal_message,
+    should_refuse,
+    tail_exhausted,
+    tier,
     update_budget_locked,
 )
+
+# The #631 enforcement flag: OFF for interactive dev, ON in CI/eval. Read through the
+# closed-token `env_bool`, so a typo fails loud rather than silently shipping unenforced.
+BUDGET_ENFORCE_FLAG = "DEFENDER_BUDGET_ENFORCE"
+
+
+def enforcement_enabled() -> bool:
+    """Whether the blocking budget posture is on for this process (`DEFENDER_BUDGET_ENFORCE`,
+    default False). The single read of the flag; an unrecognized token raises
+    FatalConfigError at startup rather than being coerced to a silently-unenforced run."""
+    return env_bool(BUDGET_ENFORCE_FLAG, False)
 
 # The MAIN-loop default model — Fireworks GLM 5.2 (flagship) unless overridden by
 # --model / $DEFENDER_MODEL. Production is single-provider (Fireworks), no Anthropic
@@ -104,22 +123,75 @@ def _user_prompt(run_dir: Path, alert_path: Path, defender_dir: Path, salt: str)
     )
 
 
-def _make_hooks(logger: observe.RequestLogger, agent_id: str) -> Hooks[Any]:
+def _budget_short_circuit(
+    deps: AgentDeps, tool_name: str, limits: dict,
+    logger: observe.RequestLogger, agent_id: str,
+) -> str | None:
+    """The enforced pre-execute decision (#631): raise `BudgetKill` when the report tail is
+    exhausted, return the refusal message (and mint its own record) when the pool is tripped
+    for this tool's tier, else None (proceed). Read OFF the flock-consistent budget state; a
+    refusal is NOT an executed call, so it neither increments nor calls check_budgets (NF2)."""
+    state = read_budget(deps.run_dir)
+    if tail_exhausted(state, limits):
+        # Raised OUTSIDE any accounting guard (FF11), so the "budget must never break the
+        # run" catch cannot swallow it — it ENDS the run.
+        raise BudgetKill(f"budget tail exhausted at {tool_name}")
+    if should_refuse(state, tool_name, tier(tool_name, deps.role), limits):
+        logger.log_budget_refusal(tool_name=tool_name, agent_id=agent_id)
+        return refusal_message(state, tool_name, limits)
+    return None
+
+
+def _account_executed_call(deps: AgentDeps, tool_name: str, *, active: bool, limits: dict) -> None:
+    """Account one EXECUTED call and emit stderr warnings, under BOTH postures. Enforced →
+    `account_call` (commit-time re-checked, accounting-failure aware, may `BudgetKill`);
+    unenforced → the plain unconditional increment. The kill escapes the guard like the tail
+    kill; every other accounting fault is swallowed (budget must never break the run)."""
+    try:
+        call_tier = tier(tool_name, deps.role)
+        if active:
+            state = account_call(deps.run_dir, deps.run_id, tool_name, limits=limits, tier=call_tier)
+        else:
+            state = update_budget_locked(deps.run_dir, deps.run_id, tool_name, limits=limits)
+        for w in check_budgets(state, limits):
+            print(f"[run.py] {w}", file=sys.stderr)
+    except BudgetKill:
+        raise
+    except Exception as e:  # noqa: BLE001 — budget accounting must never break the run
+        print(f"[run.py] budget accounting skipped: {e!r}", file=sys.stderr)
+
+
+def _make_hooks(
+    logger: observe.RequestLogger, agent_id: str, *, enforce: bool, limits: dict = DEFAULT_LIMITS,
+) -> Hooks[Any]:
     """The budget + observability hooks, shared by the main and gather agents.
-    `agent_id` tags this instance's logged requests ("main" / "gather:{lead_id}")
-    and binds the same run-scoped budget (keyed by run_dir, locked)."""
+    `agent_id` tags this instance's logged requests ("main" / "gather:{lead_id}") and
+    binds the same run-scoped budget (keyed by run_dir, locked).
+
+    `enforce` is the agent's budget POSTURE bit (#631, M2) — REQUIRED, keyword-only, no
+    default: a caller that states nothing would run unenforced (the fail-open M2 exists
+    to prevent), so omitting it is a `TypeError` at the one call site CI never collects
+    (`experiments/.../run_arms.py`) rather than a silent unenforced run. `limits` is the
+    cap table threaded from the boundary (`no_operator_config`). `enforce` already folds in
+    the flag (the production boundary ANDs `defn.budget_enforced` with `enforcement_enabled()`),
+    so a direct `build_agent_core` build enforces on the bit alone."""
     hooks = Hooks()
 
-    @hooks.on.after_tool_execute
-    async def _budget(ctx, *, call, result, **_):  # noqa: ANN001 — **_ absorbs the unused tool_def/args framework kwargs
-        # Warning-only budget accounting, same caps as the claude -p enforcer.
-        try:
-            deps: AgentDeps = ctx.deps
-            state = update_budget_locked(deps.run_dir, deps.run_id, call.tool_name)
-            for w in check_budgets(state, DEFAULT_LIMITS):
-                print(f"[run.py] {w}", file=sys.stderr)
-        except Exception as e:  # noqa: BLE001 — budget must never break the run
-            print(f"[run.py] budget accounting skipped: {e!r}", file=sys.stderr)
+    @hooks.on.tool_execute
+    async def _budget(ctx, *, call, args, handler, **_):  # noqa: ANN001 — **_ absorbs the framework's tool_def
+        # The budget SHORT-CIRCUIT + accounting, in one wrap-style seam ahead of QueryCapture
+        # (M11): when the pool is tripped the tool is refused here WITHOUT awaiting the handler
+        # — so a refused `query` never enters QueryCapture and writes no phantom row, and the
+        # model reads a permanent-withdrawal ToolReturnPart rather than a framework retry.
+        # Accounting runs for every EXECUTED call under either posture; only refusal/kill gate.
+        deps: AgentDeps = ctx.deps
+        tool_name = call.tool_name
+        if enforce:
+            refusal = _budget_short_circuit(deps, tool_name, limits, logger, agent_id)
+            if refusal is not None:
+                return refusal
+        result = await handler(args)
+        _account_executed_call(deps, tool_name, active=enforce, limits=limits)
         return result
 
     @hooks.on.model_request  # the wrap-style model-request hook
@@ -172,7 +244,7 @@ def gather_model() -> str:
 MakeModel = Callable[[str, str | None], BuiltModel]
 
 
-def build_agent_core(
+def build_agent_core(  # noqa: PLR0913 — the single build site's config + 3 DI seams (make_model/verbs/limits); every param is load-bearing per-build
     defn: AgentDefinition,
     *,
     deps_type: type,
@@ -182,6 +254,7 @@ def build_agent_core(
     extra_capabilities: Sequence[Any] = (),
     make_model: MakeModel = providers.build_for_effort,
     verbs: Any = None,
+    limits: dict = DEFAULT_LIMITS,
 ) -> Agent[Any, str]:
     """Construct one agent + register EXACTLY its `AgentDefinition`'s toolset — the
     single build site.
@@ -202,10 +275,21 @@ def build_agent_core(
     — that is the whole inseparability property: an agent cannot be built holding the `query`
     tool and not writing its queries row, because there is no seam between them to unpick."""
     built = make_model(defn.model(), defn.effort)
-    capabilities: list[Any] = [_make_hooks(logger, agent_id), *extra_capabilities]
+    capabilities: list[Any] = [
+        _make_hooks(logger, agent_id, enforce=defn.budget_enforced, limits=limits),
+        *extra_capabilities,
+    ]
     if defn.tools.query:
+        from defender._paths import PATHS
+
         from .query_tool import QueryCapture
 
+        # A query-declaring def with no registry threaded in resolves the PRODUCTION
+        # registry off the main-checkout adapters (still an allowlist, never fail-open):
+        # run_investigation always threads the run's tree, so this default only fires for
+        # a direct `build_agent_core` build (the gate/tier tests, which never call query).
+        if verbs is None:
+            verbs = ModuleVerbRegistry(PATHS.defender_dir / "scripts" / "adapters")
         capabilities.append(QueryCapture(verbs))
     agent: Agent[Any, str] = Agent(
         built.model,
@@ -258,10 +342,16 @@ def _gather_bash_shapes(roots: ResolvedRoots) -> tuple[Any, ...]:
 
 
 def _main_write_shape(roots: ResolvedRoots) -> tuple[Any, ...]:
-    """MAIN's write scope: the run-dir subtree (`investigation.md` / `report.md` + any case
-    artifact it authors), resolved by `compile_policy` into `write_allow`. Anchored on `run_dir`
-    — NOT `defender_dir` — so MAIN can never author the corpus."""
-    return (permission.build_write_allow(roots.run_dir),)
+    """MAIN's write scope: a POSITIVE ALLOW-LIST of exactly `investigation.md` and
+    `report.md` under `run_dir` (#631, S2) — NOT the whole run-dir subtree. The bound on
+    spend is only a bound if the RECORD of spend is unforgeable, so every other path under
+    the run dir (budget.json, circuit_breaker.json, the two tables, gather_summaries, …)
+    is refused, and so are the `gather_raw/evil.md` / `sub/report.md` a `.md`-suffix filter
+    would have admitted (`decide_write` applies no path shapes). Anchored on `run_dir` — NOT
+    `defender_dir` — so MAIN can never author the corpus. `_main_write_shape`'s "+ any case
+    artifact it authors" enumerates to the empty set (Q2d), so nothing legitimate is lost;
+    a future MAIN-authored artifact needs an explicit allow-list edit (accepted cost)."""
+    return permission.build_named_write_allow(roots.run_dir, ("investigation.md", "report.md"))
 
 
 # MAIN — the orchestrator: reader lane + the file writers (it authors investigation.md /
@@ -279,6 +369,7 @@ MAIN_DEF = AgentDefinition(
     write_shapes=(_main_write_shape,),
     deps_cls=AgentDeps,
     deny_reason=permission.FALLTHROUGH_DENY_REASON,
+    budget_enforced=True,
 )
 
 # GATHER — the data-access subagent: the reader lane + its own gather_raw + the typed `query`
@@ -298,6 +389,7 @@ GATHER_DEF = AgentDefinition(
     bash_shapes=(_gather_bash_shapes,),
     deps_cls=GatherDeps,
     deny_reason=permission.GATHER_FALLTHROUGH_DENY_REASON,
+    budget_enforced=True,
 )
 
 
@@ -309,6 +401,7 @@ def build_gather_agent(
     defender_dir: Path, logger: observe.RequestLogger, agent_id: str,
     make_model: MakeModel = providers.build_for_effort,
     verbs: Any = None,
+    limits: dict = DEFAULT_LIMITS,
 ) -> Agent[GatherDeps, str]:
     """The single-agent gather (#340) — the production gather for the PydanticAI
     engine. One agent runs find→execute(one server-side ES|QL aggregation)→verify and
@@ -324,13 +417,20 @@ def build_gather_agent(
     today, while the static def carries the Fireworks default."""
     name = gather_model()
     return build_agent_core(
-        replace(GATHER_DEF, model=lambda: name, effort=providers.effort_for_role(name, AgentRole.GATHER)),
+        replace(
+            GATHER_DEF, model=lambda: name,
+            effort=providers.effort_for_role(name, AgentRole.GATHER),
+            # Fold the flag into the posture at the production boundary (#631, M9): the
+            # def carries the static bit; the run enforces only when the flag is also on.
+            budget_enforced=GATHER_DEF.budget_enforced and enforcement_enabled(),
+        ),
         deps_type=GatherDeps,
         instructions=_gather_instructions(defender_dir),
         logger=logger,
         agent_id=agent_id,
         make_model=make_model,
         verbs=verbs,
+        limits=limits,
     )
 
 
@@ -448,7 +548,7 @@ def _main_extra_capabilities() -> list[ProcessHistory[Any]]:
 def build_agent(
     defender_dir: Path, logger: observe.RequestLogger,
     make_model: MakeModel = providers.build_for_effort,
-    *, main_model: str | None = None, verbs: Any = None,
+    *, main_model: str | None = None, verbs: Any = None, limits: dict = DEFAULT_LIMITS,
 ) -> Agent[AgentDeps, str]:
     """The MAIN loop agent — built through the single `build_agent_core` site from
     `MAIN_DEF` (the reader lane + file writers + MAIN's compaction capability), then the
@@ -462,21 +562,30 @@ def build_agent(
     print(f"[run.py] gather model: {gather_model()}{_override}", file=sys.stderr)
     name = resolve_main_model(main_model)
     agent = build_agent_core(
-        replace(MAIN_DEF, model=lambda: name, effort=providers.effort_for_role(name, AgentRole.MAIN)),
+        replace(
+            MAIN_DEF, model=lambda: name,
+            effort=providers.effort_for_role(name, AgentRole.MAIN),
+            # Fold the flag into the posture at the production boundary (#631, M9).
+            budget_enforced=MAIN_DEF.budget_enforced and enforcement_enabled(),
+        ),
         deps_type=AgentDeps,
         instructions=_main_instructions(defender_dir),
         logger=logger,
         agent_id="main",
         extra_capabilities=extra,
         make_model=make_model,
+        limits=limits,
     )
     # The gather dispatch tool builds a fresh nested gather agent per lead
     # (#340): one agent runs find→execute(one server-side ES|QL aggregation)→verify
     # and auto-captures its own adapter calls. The finder/executor split (#339) was
-    # superseded by this before it ever merged.
+    # superseded by this before it ever merged. The SAME threaded `limits` reach the
+    # nested gather so MAIN and GATHER share the one enforced pool (M8).
     register_gather_tool(
         agent,
-        lambda agent_id: build_gather_agent(defender_dir, logger, agent_id, make_model, verbs),
+        lambda agent_id: build_gather_agent(
+            defender_dir, logger, agent_id, make_model, verbs, limits,
+        ),
         GATHER_REQUEST_LIMIT,
     )
     return agent
@@ -492,7 +601,7 @@ def _log_node(node: Any) -> None:
 
 
 async def run_investigation(  # noqa: PLR0913 — a composition root: every parameter is a
-    # keyword-only injection seam (the run's identity, then `make_model`/`verbs`/`box`).
+    # keyword-only injection seam (the run's identity, then `make_model`/`verbs`/`limits`/`box`).
     # Bundling them into a config object would hide exactly the seams the e2e replay suite
     # enters through, which is the opposite of what this signature is for.
     *,
@@ -504,6 +613,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     model_name: str | None = None,
     make_model: MakeModel | None = None,
     verbs: Any = None,
+    limits: dict | None = None,
     box: Any = None,
 ) -> dict:
     """Run one investigation end-to-end; emit the trace; return a small summary.
@@ -514,7 +624,11 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     point: the tree is a per-run value (a worktree in a learning drain, an eval's tmp tree), so
     a verb reads THAT tree's `config.env`, not the one the driver happened to import under.
 
-    `box` is the THIRD such seam (#540): the run's execution boundary for the bash lane, built by
+    `limits` is the THIRD injection seam (#631): the cap table resolved ONCE here at the
+    boundary and threaded inward (there is no operator-facing config — N1). Production resolves
+    `DEFAULT_LIMITS`; a test injects low caps so a run crosses a real cap in a few turns.
+
+    `box` is the FOURTH such seam (#540): the run's execution boundary for the bash lane, built by
     `run.py` before the investigation starts and torn down after it ends. `None` leaves the deps
     carrying the inert default executor, so a driver run that never invokes bash needs no
     container — but one that does invoke it fails closed rather than running on the host."""
@@ -525,8 +639,14 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     # one `make_model` uses on the line above.
     adapters = defender_dir / "scripts" / "adapters"
     verbs = verbs if verbs is not None else ModuleVerbRegistry(adapters)  # lint-default: ok — DI seam owning its default (tree-derived; no signature default possible)
+    limits = limits if limits is not None else DEFAULT_LIMITS  # lint-default: ok — DI seam owning its default (the cap table, threaded inward)
+    # Open the run's budget with its cross-process wall-clock origin BEFORE the first tool
+    # call, so the enforcing read never mistakes an un-opened run for a cold start (#631, D2).
+    open_budget(run_dir, run_id)
     logger = observe.RequestLogger(run_dir / "llm_requests.jsonl")
-    agent = build_agent(defender_dir, logger, make_model, main_model=model_name, verbs=verbs)
+    agent = build_agent(
+        defender_dir, logger, make_model, main_model=model_name, verbs=verbs, limits=limits,
+    )
     # MAIN deps via the single bind() seam (#545): compile_policy reproduces the authored
     # main policy field-for-field AND adds the read↔bash filename filter (read_shapes), and
     # the run's PERSISTED salt is carried in (never a fresh uuid4) so the deps' tool-output
@@ -543,6 +663,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     prompt = _user_prompt(run_dir, alert_path, defender_dir, salt)
 
     t0 = time.time()
+    truncated_by: str | None = None
     # Hitting request_limit is an expected loop terminator, not a crash:
     # UsageLimitExceeded propagates out of `agent.iter`. Catch it so the
     # post-steps run; every request up to the limit is already in the live
@@ -562,6 +683,14 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
         # the loop and write the partial trace, same as the request-limit path —
         # every request up to here is already in the live request log.
         print(f"[run.py] {e}; writing partial trace", file=sys.stderr)
+    except BudgetKill as e:
+        # The budget tail is exhausted (or the accounting write is standing-failed): the
+        # SAME shutdown as the request-limit path — write the partial trace from the live
+        # log — but MARKED, so the post-run pipeline can tell an enforced stop from a
+        # clean conclusion. Its own exception type (not RunAborted), caught by a plain
+        # `except BudgetKill` (P6: concurrent kills collapse to one, unwrapped).
+        print(f"[run.py] {e}; writing partial trace", file=sys.stderr)
+        truncated_by = "budget"
     wall_ms = (time.time() - t0) * 1000.0
 
     # result is None when the run ends without an End node (e.g. the request-limit
@@ -571,4 +700,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     observe.write_trace(run_dir, logger.messages, wall_ms=wall_ms)
     logger.close()
     output = result.output if result is not None else None
-    return {"output": output, "model": model_name, "requests": logger.n_requests}
+    return {
+        "output": output, "model": model_name, "requests": logger.n_requests,
+        "truncated_by": truncated_by,
+    }
