@@ -252,6 +252,11 @@ class CuratorDeps(AgentDeps):
             run_dir,
             _corpus_author_policy(corpus_dir),
             defender_dir=defender_dir,
+            # Anchored on the WORKTREE, not the run dir (#540). The curator's prompts hand it
+            # repo-relative operands (`defender/lessons/{slug}.md`), and `run_dir` here is the
+            # pending queue — often not under the repo at all — so a run-anchored operand would
+            # resolve into the queue and miss the corpus it is supposed to be editing.
+            cwd_anchor=repo_root,
             corpus_dir=corpus_dir,
             check=check,
             runs_dir=runs_dir,

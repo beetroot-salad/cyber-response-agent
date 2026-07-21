@@ -28,6 +28,26 @@ jobs:
         working-directory: defender
         run: uv sync --extra dev --extra runtime
 
+      # The #540 boundary suite drives a REAL container: the mounts and --network=none are the
+      # boundary, so a fake cannot pin them. gVisor is the default runtime behind the knob, and
+      # it installs on stock ubuntu-latest (systrap needs no KVM) — verified precedents:
+      # microsoft/typescript-benchmarking and geomys/sandboxed-step. Without this step those
+      # tests self-skip on a runner with no runsc, and the boundary would be pinned by nothing.
+      - name: Install gVisor (runsc) for the box suite
+        run: |
+          set -eux
+          curl -fsSL https://gvisor.dev/archive.key \
+            | sudo gpg --dearmor -o /usr/share/keyrings/gvisor-archive-keyring.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/gvisor-archive-keyring.gpg] https://storage.googleapis.com/gvisor/releases release main" \
+            | sudo tee /etc/apt/sources.list.d/gvisor.list > /dev/null
+          sudo apt-get update && sudo apt-get install -y runsc
+          sudo runsc install
+          sudo systemctl restart docker
+          docker info --format '{{.Runtimes}}'
+
+      - name: Pre-pull the box rootfs
+        run: docker pull python:3.11-slim
+
       - name: Run unit tests
         working-directory: defender
         # Collect both the learning-loop invariant suite (tests/) AND the

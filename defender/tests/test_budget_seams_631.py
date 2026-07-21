@@ -103,7 +103,13 @@ def drive_agent(defn, run_dir: Path, turns, *, limits, enforce: bool | None = No
         make_model=lambda name, effort: BuiltModel(FunctionModel(model), None),
         limits=limits,
     )
-    deps = bind(defn, run_dir, salt="0011223344556677", defender_dir=DEFENDER)
+    # Thread a host executor for the bash lane (#540): after that change bash fails closed
+    # without a box, so a hermetic seams test that drives bash must hand in an
+    # `unboxed_executor` — the same shape `tests/e2e/_replay_harness.drive` always threads.
+    from defender import run_common
+    from defender.runtime import box as box_mod
+    box = box_mod.unboxed_executor(env=run_common.run_env(DEFENDER, run_dir))
+    deps = bind(defn, run_dir, salt="0011223344556677", defender_dir=DEFENDER, box=box)
     import asyncio
 
     async def _go():

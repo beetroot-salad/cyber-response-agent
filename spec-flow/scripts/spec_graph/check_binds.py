@@ -1,5 +1,19 @@
 #!/usr/bin/env python3
-"""spec-graph check #1 — prose-token ⊄ binds (the F7 class).
+"""spec-graph check #1 — prose-token ⊄ binds (the F7 class), plus the unexercised-seam check.
+
+Two checks, both deterministic, both over a demand's `binds`:
+
+* **prose ⊄ binds** — a concept a demand's PROSE threads but its `binds` omits. Documented in
+  full below; it is the check this module was forged on.
+* **inspected but never exercised** — a demand binding `drives(A->B)` whose test names `B` only
+  inside an `assert`. The demand claims a wiring; the test checks a shape. See `_unexercised`
+  for the #540 defect that produced it — a `parity` demand discharged by
+  `assert isinstance(deps.box, BoxExecutor)`, where the field's own default IS a `BoxExecutor`,
+  so the assertion could not fail and two roles shipped with no box attached.
+
+Both fail the run (exit 1) and are counted separately, because they name different slips.
+
+--- prose ⊄ binds ---
 
 A write-tests spec graph (`spec_graph_*.yaml`, committed beside the tests) is a list of
 *demands*, each with a `binds` list naming the graph elements it covers. The gate rules
@@ -53,7 +67,9 @@ from pathlib import Path
 
 import yaml
 
+import _cli
 import _config
+import _suite
 
 # A `<name>=<value>` kwarg whose RHS is a threaded name/attribute (deps.salt, wt,
 # <worktree>/anchor) — NOT `None`, a bare literal, or a quoted string. Those are
@@ -68,12 +84,57 @@ def _concept_root(bind: str) -> str:
     return re.split(r"[.\[]", bind, maxsplit=1)[0].strip()
 
 
-def _load(path: Path) -> dict:
-    with path.open(encoding="utf-8") as fh:
-        return yaml.safe_load(fh)
-
-
 @functools.lru_cache(maxsize=None)  # several graphs share a suite dir; parse it once
+def _test_functions(test_dir: Path) -> dict[str, ast.AST]:
+    """Map test-function name → its AST node, over the `*.py` files beside the graph.
+
+    Two checks read this. The prose⊄binds scan wants only the docstring; the
+    inspected-but-never-exercised scan wants the BODY. Both come off one parse."""
+    fns: dict[str, ast.AST] = {}
+    for py in _suite.suite_files(test_dir):
+        try:
+            tree = ast.parse(py.read_text(encoding="utf-8"), filename=str(py))
+        except (SyntaxError, OSError, ValueError) as e:  # ValueError covers UnicodeDecodeError
+            # Not silent — see _test_docstrings' note; the same fail-closed consequences apply.
+            print(
+                f"  WARN [check_binds] {py}: unscannable ({e.__class__.__name__}: {e}) — its test "
+                f"docstrings are absent from this check; a `discharged_by` naming one will report "
+                f"as dangling, and a name it shares with another file resolves to that file's prose",
+                file=sys.stderr,
+            )
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                fns.setdefault(node.name, node)
+    return fns
+
+
+def _assert_scopes(fn: ast.AST) -> tuple[set[str], set[str]]:
+    """Split a test's identifiers into (used outside any assert, used inside an assert).
+
+    The exclusion must skip assert SUBTREES, not just the `Assert` node — `ast.walk` yields a
+    statement's children independently of the statement, so a naive walk-and-skip puts every
+    asserted name in both sets and the check inverts."""
+    inside: set[str] = set()
+    for n in ast.walk(fn):
+        if isinstance(n, ast.Assert):
+            inside |= _suite.names_in(n)
+    outside: set[str] = set()
+
+    def rec(node: ast.AST) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.Assert):
+                continue          # the whole assert subtree is inspection, not exercise
+            if isinstance(child, ast.Name):
+                outside.add(child.id)
+            elif isinstance(child, ast.Attribute):
+                outside.add(child.attr)
+            rec(child)
+
+    rec(fn)
+    return outside, inside
+
+
 def _test_docstrings(test_dir: Path) -> dict[str, str]:
     """Map test-function name → its docstring, over the `*.py` files beside the graph.
 
@@ -85,38 +146,77 @@ def _test_docstrings(test_dir: Path) -> dict[str, str]:
     not this one's. `shuffle-premises` copies (`*.copyN.py`) are excluded: they carry the same
     test names with premise-only docstrings, sort before the real file, and would silently
     shadow the prose this check exists to scan.
+
+    The parse — and its unscannable-file WARN, whose fail-closed consequences are unchanged —
+    lives in `_test_functions`. This is the docstring projection of that one parse.
     """
-    docs: dict[str, str] = {}
-    for py in sorted(test_dir.glob("*.py")):
-        if re.search(r"\.copy\d+\.py$", py.name):
+    return {
+        name: (ast.get_docstring(node) or "")
+        for name, node in _test_functions(test_dir).items()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+
+
+#: A `drives(A->B)` binds entry: the demand claims its test drives A, reaching B. A trailing
+#: `.suffix` (`interacts(X->Y).response`) is tolerated by matching only the head.
+_DRIVES = re.compile(r"drives\(\s*([\w.]+)\s*->\s*([\w.]+)\s*\)")
+
+
+def _unexercised(
+    path: Path, did: str, demand: dict, fn: ast.AST, waived: set[str]
+) -> list[str]:
+    """Flag a `drives(A->B)` demand whose test names B ONLY inside an assertion.
+
+    The class (found in #540's own graph): `d_every_bash_enabled_role_has_a_box` bound
+    `drives(_tool_bash->BoxExecutor)` and discharged it with
+
+        deps = bind(defn, run_dir, ...)            # no box= threaded
+        assert isinstance(deps.box, box.BoxExecutor)
+
+    `AgentDeps.box` defaults to `field(default_factory=BoxExecutor)`, so the inert default and
+    an attached container are the SAME TYPE and the assertion cannot fail. The demand's content
+    is attachment; the test asserts only the field's type. It stayed green through a change that
+    left two bash-enabled roles with no box at all.
+
+    The discriminator is deliberately NARROW: B present, but present only inside `assert`
+    statements. "B absent entirely" is NOT flagged — a test that drives the real loop reaches B
+    through production wiring and never names it (`test_the_existing_e2e_bash_corpus_...` reaches
+    `_tool_bash` only via the driver's tool registration), so requiring a mention there is a false
+    positive. What is left is the shape that cannot be anything but inspection: the test knows B
+    well enough to name it, and never once puts it to work.
+
+    Measured over every `spec_graph_*.yaml` in this repo at authoring time — 14 `drives()`
+    bindings across 17 graphs — this fires exactly once, on the defect above. That corpus is
+    small; widen the rule only against a bigger one.
+    """
+    outside, inside = _assert_scopes(fn)
+    findings: list[str] = []
+    seen: set[str] = set()
+    for b in demand.get("binds", []) or []:
+        m = _DRIVES.search(str(b))
+        if not m:
             continue
-        try:
-            tree = ast.parse(py.read_text(encoding="utf-8"), filename=str(py))
-        except (SyntaxError, OSError, ValueError) as e:  # ValueError covers UnicodeDecodeError
-            # Not silent. The dominant consequence is already fail-closed — a demand whose
-            # `discharged_by` names a function in this file finds no such name and reports a
-            # dangling pointer below. But two consequences are NOT covered by that, and both are
-            # quiet: `docs.setdefault` means a name this file would have defined FIRST now yields
-            # to a later file, so the prose scanned is another test's; and the operator otherwise
-            # gets no signal that a suite file is broken at all. stderr, not stdout — the findings
-            # stream is the tool's parsed output.
-            print(
-                f"  WARN [check_binds] {py}: unscannable ({e.__class__.__name__}: {e}) — its test "
-                f"docstrings are absent from this check; a `discharged_by` naming one will report "
-                f"as dangling, and a name it shares with another file resolves to that file's prose",
-                file=sys.stderr,
+        driver, target = m.group(1), m.group(2)
+        if target in seen or target in waived:
+            continue
+        seen.add(target)
+        if target in inside and target not in outside:
+            findings.append(
+                f"UNEXERCISED {path.name}:{did}: binds `drives({driver}->{target})`, but its test "
+                f"names `{target}` only inside an assertion — it INSPECTS the seam without ever "
+                f"exercising it, so the demand is discharged by a shape check that holds whether "
+                f"or not {driver} is wired to {target} (drive {driver} and assert the observable "
+                f"outcome, or waive under exercise_waivers)."
             )
-            continue
-        for node in ast.walk(tree):
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                docs.setdefault(node.name, ast.get_docstring(node) or "")
-    return docs
+    return findings
 
 
 def check(path: Path, cfg: dict) -> list[str]:
-    graph = _load(path)
+    graph = _cli.load_graph(path)
     demands = graph.get("demands", []) or []
     waivers = graph.get("binds_waivers", {}) or {}
+    exercise_waivers = graph.get("exercise_waivers", {}) or {}
+    test_fns = _test_functions(path.parent)
     # Code kwarg name → graph concept name, when the two disagree: the graph may model the
     # anchor tree as `anchor_tree` while the code threads it as the `anchor_dir=` kwarg.
     #
@@ -153,16 +253,23 @@ def check(path: Path, cfg: dict) -> list[str]:
             suite_dir = path.resolve().parent.name
             if test_name not in docstrings:
                 findings.append(
-                    f"{path.name}:{did}: `discharged_by: {test_name}` names no test function in "
-                    f"{suite_dir}/ — the pointer dangles, so its prose is unscannable "
+                    f"ORPHAN {path.name}:{did}: `discharged_by: {test_name}` names no test function "
+                    f"in {suite_dir}/ — the pointer dangles, so its prose is unscannable "
                     f"(write the test, or fix the name)."
                 )
                 continue
+            # The exercise check reads the BODY, so it runs before the docstring gate below —
+            # a test with no docstring still has a body worth checking.
+            if test_name in test_fns:
+                findings.extend(_unexercised(
+                    path, did, d, test_fns[test_name],
+                    set(exercise_waivers.get(did, []) or []),
+                ))
             prose = docstrings[test_name]
             if not prose.strip():
                 findings.append(
-                    f"{path.name}:{did}: `discharged_by: {test_name}` points at a test with no "
-                    f"docstring — the demand's prose is missing, so there is nothing to check "
+                    f"ORPHAN {path.name}:{did}: `discharged_by: {test_name}` points at a test with "
+                    f"no docstring — the demand's prose is missing, so there is nothing to check "
                     f"against `binds` (step 8 puts the outcome sentence in that docstring)."
                 )
                 continue
@@ -170,7 +277,7 @@ def check(path: Path, cfg: dict) -> list[str]:
             prose = outcome_nl  # clause/waiver, or a legacy form:test demand inlining its outcome
         elif d.get("form", "test") == "test":
             findings.append(
-                f"{path.name}:{did}: form:test demand carries neither `discharged_by` nor "
+                f"ORPHAN {path.name}:{did}: form:test demand carries neither `discharged_by` nor "
                 f"`outcome` — no prose to check for prose⊄binds (add the `discharged_by` pointer)."
             )
             continue
@@ -188,7 +295,7 @@ def check(path: Path, cfg: dict) -> list[str]:
             seen.add(concept)
             if concept in modelled and concept not in bind_roots and concept not in waived:
                 findings.append(
-                    f"{path.name}:{did}: threads `{kw}={rhs}` in prose but does not bind "
+                    f"ORPHAN {path.name}:{did}: threads `{kw}={rhs}` in prose but does not bind "
                     f"`{concept}` — the gate rules cover {sorted(bind_roots)}, so the "
                     f"`{concept}` assertion is untracked (bind it, or waive under binds_waivers)."
                 )
@@ -196,26 +303,36 @@ def check(path: Path, cfg: dict) -> list[str]:
 
 
 def main(argv: list[str]) -> int:
-    config: str | None = None
-    args = []
-    it = iter(argv)
-    for a in it:
-        if a == "--config":
-            config = next(it, None)
-        else:
-            args.append(a)
-    cfg = _config.load(config)
+    opts, args = _cli.parse_argv(argv, valued={"--config"})
+    cfg = _config.load(opts["config"])
     paths = [Path(a) for a in args] or _config.artifacts(cfg)
     if not paths:
         print("check_binds: no spec_graph_*.yaml found", file=sys.stderr)
         return 0
     all_findings: list[str] = []
+    unreadable: list[Path] = []
     for p in paths:
-        all_findings.extend(check(p, cfg))
+        # The family's could-not-read contract (exit 2): a list-top-level graph used to
+        # surface as an AttributeError traceback behind exit 1 ("found findings").
+        try:
+            all_findings.extend(check(p, cfg))
+        except (OSError, yaml.YAMLError, TypeError, AttributeError) as e:
+            print(f"check_binds: cannot read {p}: {e.__class__.__name__}: {e}", file=sys.stderr)
+            unreadable.append(p)
+            continue
     for f in all_findings:
-        print(f"  ORPHAN {f}")
+        print(f"  {f}")
     n = len(all_findings)
-    print(f"\n[check_binds] {n} prose-orphan(s) over {len(paths)} graph(s).")
+    # Counted by kind: the two findings answer different questions (a demand that under-BINDS a
+    # concept vs. one whose test never EXERCISES a seam it binds), and collapsing them into one
+    # number hides which discipline slipped.
+    orphans = sum(1 for f in all_findings if f.startswith("ORPHAN "))
+    print(
+        f"\n[check_binds] {orphans} prose-orphan(s), {n - orphans} unexercised seam(s) "
+        f"over {len(paths)} graph(s)."
+    )
+    if unreadable:
+        return 2
     return 1 if n else 0
 
 

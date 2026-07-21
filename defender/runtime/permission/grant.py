@@ -114,7 +114,6 @@ PROGRAMS: dict[str, Extractor] = {
     "head": OPENS_NOTHING,
     "tail": OPENS_NOTHING,
     "wc": OPENS_NOTHING,
-    "jq": OPENS_NOTHING,
     # The argument-inert viewers.
     "echo": OPENS_NOTHING,
     "true": OPENS_NOTHING,
@@ -232,11 +231,6 @@ _GREP_FLAG = gnu_flags.bundle(gnu_flags.GREP_BOOL + gnu_flags.GREP_LIST)
 # tail/head: booleans + `-n`/`-c` (whose NUM is a bare digit run) + a fused count (`-5`).
 # `-f`/`-F` (follow) are excluded: a follow never returns, wedging the stage.
 _NUM_FLAG = gnu_flags.bundle(gnu_flags.TAIL_HEAD_BOOL + gnu_flags.DIGITS)
-# jq is not a coreutil, so its set stays local: the safe boolean short flags (NO `-f`/`-L`,
-# which open a filter file / a module dir) plus the file-FREE `--arg`/`--argjson` binders,
-# whose VALUE is an inert string/JSON literal even when it looks like a path.
-_JQ_FLAG = r"-[rjcnesRaSCM]+"
-_JQ_KV_FLAG = rf"(?:--arg|--argjson) {VALUE} {VALUE}"
 
 
 def _shim_shape(name: str) -> re.Pattern[str]:
@@ -271,15 +265,21 @@ def program_shape(name: str) -> re.Pattern[str]:
         return re.compile(rf"^{name}(?: (?:{_NUM_FLAG}|[0-9]+))*$")
     if name == "wc":
         return re.compile(rf"^wc(?: {_WC_FLAG})*$")
-    if name == "jq":
-        return re.compile(rf"^jq(?: (?:{_JQ_FLAG}|{_JQ_KV_FLAG}))*(?: {VALUE})$")
     if name == "true":
         return re.compile(r"^true$")
     return _shim_shape(name)
 
 
 #: The stdin-only viewers, in a canonical order so a compiled lane is deterministic.
-STDIN_VIEWERS = ("wc", "tail", "head", "grep", "jq")
+#:
+#: `jq` was dropped (#540). It predated #611 and was never the sanctioned reduce: the
+#: aggregation path is `query(...)` then `cat <payload> | defender-sql '<SQL>'`, and
+#: `skills/gather/SKILL.md` actively counter-teaches jq ("do not `jq` over payloads").
+#: Nothing in SKILL.md, the handbook or any lesson corpus taught it. Keeping it would have
+#: meant baking a program nobody uses into the box's rootfs — granting a capability the
+#: boundary then has to carry. The repertoire test reads this tuple, so the grant and the
+#: image cannot drift apart in either direction.
+STDIN_VIEWERS = ("wc", "tail", "head", "grep")
 
 
 __all__ = [

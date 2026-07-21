@@ -49,7 +49,6 @@ from defender.scripts.lessons._lessons_common import (
     as_list,
     iter_lessons,
     reexec_into_venv,
-    rel_to_repo,
     use_utf8_stdio,
 )
 
@@ -78,7 +77,13 @@ DIMENSIONS = ("source_signature", "telemetry_source", "attack_phase")
 def _emit_match(path: Path, fm: dict) -> None:
     # LLM-authored value in a TSV cell: the shared full-breaker flatten (#614).
     desc = flatten_cell(str(fm.get("description") or "")).strip()
-    print(f"{rel_to_repo(path, REPO_ROOT)}\t{desc}")
+    # ABSOLUTE, not repo-relative (#540). This line IS the agent's read surface — SKILL.md
+    # tells it to Read the bodies that fit, and message 0's Lessons block is built by
+    # shelling out to this same shim. A relative path here would be resolved against the
+    # reader's own cwd anchor, which for the runtime lane is the RUN DIR (the box's rw bind),
+    # so `defender/lessons/x.md` would name a file inside the run that does not exist. An
+    # absolute path bypasses every anchor and names the same file on all of them.
+    print(f"{path.resolve()}\t{desc}")
 
 
 def cmd_grep(patterns: list[str]) -> int:
@@ -150,7 +155,7 @@ def cmd_show(paths: list[str]) -> int:
             print(f"error: {raw_path}: malformed lesson: {e}", file=sys.stderr)
             rc = 2
             continue
-        print(f"--- {rel_to_repo(lesson, REPO_ROOT)}")
+        print(f"--- {lesson.resolve()}")
         print(fm_raw)
     return rc
 
