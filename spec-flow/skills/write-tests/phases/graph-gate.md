@@ -2,7 +2,7 @@
 
 ## Topology
 
-- Two leaves in sequence. The orchestrator routes the residue afterwards; it produces none of this. (Assembly was once spine-owned to "avoid serializing the graph out"; measurement showed the opposite — in-context assembly cost 20–30k tokens per run, and the one delegated assembly produced the best artifact of its day.)
+- Two leaves in sequence. The orchestrator routes the residue afterwards; it produces none of this — assembly is a leaf's job, never the spine's.
 - **Assembler leaf** (frontier model): inputs = `10-brief.md`, `20-demands.md`, `45-dispositions.md`. Outputs: `spec_graph_<slug>.yaml` at its final committed path (the profile's `specGraph.artifacts` names the directory — it is a deliverable, not plumbing) plus `50-graph-digest.md`.
 - **Gate leaf** (Sonnet — the R1–R5 triggers are computed by `spec-graph gate`, so this leaf annotates and judges rather than re-derives; a frontier model here re-buys what the tool already knows): inputs = the assembled artifact. Outputs: the gate record written into the artifact, plus `60-residue.md`.
 

@@ -67,7 +67,7 @@ An address that resolves to nothing in structure ∪ delta is an R0 finding, not
 
 An id is a *stable slug*, but it is not a free one: **name the element what the code names it.** The address forms above are already code addresses — `compile_policy`, `resolve_roots`, `read_surface.access[bash-cat]` are literal symbols — and the mechanical checks join the graph to the code **by name**.
 
-A private synonym does not cost you a config entry; it costs you the check, silently. `check_binds` treats a concept as *modelled* iff some demand binds it, so if the graph calls the anchor tree `anchor_tree` while the code threads it as `anchor_dir=`, then every `anchor_dir=` in a demand's prose maps to a concept nothing binds — and the check **skips it**. The under-binding it exists to catch becomes invisible. (Learned the hard way: one graph coined `defender_tree` while four others and ~54 call sites said `defender_dir`, and the gap was papered over with an alias that quietly disabled the check for that concept.)
+A private synonym does not cost you a config entry; it costs you the check, silently. `check_binds` treats a concept as *modelled* iff some demand binds it, so if the graph calls the anchor tree `anchor_tree` while the code threads it as `anchor_dir=`, then every `anchor_dir=` in a demand's prose maps to a concept nothing binds — and the check **skips it**. The under-binding it exists to catch becomes invisible. Unify the name with the one the code threads; never paper the gap over with an alias, which disables the check for that concept.
 
 Alias (`specGraph.conceptAliases` / `contextAliases` in the project profile) **only** where alignment is genuinely impossible:
 
