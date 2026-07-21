@@ -130,7 +130,16 @@ EXCLUDED_GREP_DIRS = (
 # Frozen spec graphs of merged issues: inert records, not code. Rewriting one to name
 # today's symbols would falsify the record. The executable half of a spec
 # (defender/tests/test_*.py) is still fully scanned, and fails if spec and code diverge.
-EXCLUDED_GREP_GLOBS = ("defender/tests/spec_graph_*.yaml",)
+# A spec graph whose suite lives under tests/e2e/ sits there too, and the first glob does
+# NOT reach it — `*` does not cross a `/`. Same class as the `defender/fixtures-e2e` and
+# `defender/lessons-environment` entries above, and it slipped through on the same
+# technicality (#667): spec_graph_540.yaml's frozen prose names `resolve_run_dir`, which
+# #667 deletes. Kept as a second explicit glob rather than a `**` relaxation, which would
+# silently swallow any future spec graph parked anywhere under defender/.
+EXCLUDED_GREP_GLOBS = (
+    "defender/tests/spec_graph_*.yaml",
+    "defender/tests/e2e/spec_graph_*.yaml",
+)
 
 # On the REFERENCING line: this reference names a dead symbol deliberately.
 SUPPRESS = "lint-stale-ref: ok"
