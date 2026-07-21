@@ -23,6 +23,7 @@ cross-process read nor a system-clock step can void the wall cap (VR1).
 
 from __future__ import annotations
 
+import json
 import threading
 import time
 from datetime import UTC, datetime
@@ -160,7 +161,6 @@ _ACCOUNT_LOCK = threading.Lock()
 
 
 def _write_budget_atomic(run_dir: Path, state: dict) -> None:
-    import json  # local import; module stays free of the config-load primitives the caps test greps
     write_atomic(run_dir / "budget.json", json.dumps(state, indent=2))
 
 
@@ -257,7 +257,6 @@ def _reset_accounting_failure(run_dir: Path) -> None:
 
 
 def _write_accounting_failure(run_dir: Path, state: dict) -> None:
-    import json  # local, as in _write_budget_atomic
     write_atomic(_accounting_failure_path(run_dir), json.dumps(state))
 
 
