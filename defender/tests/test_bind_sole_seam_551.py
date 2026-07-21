@@ -843,7 +843,12 @@ def test_d6_guard_noop_for_real_writers(tmp_path):
     wtd = tmp_path / "wt" / "defender"
     skills = wtd / "skills"
     main_pol = bind(MAIN_DEF, run).policy
-    assert permission.decide_write(run / "report.md", "c", run_dir=run, defender_dir=_DEFENDER, policy=main_pol).allow
+    # #629 reconciliation: run_dir/report.md now carries an output-structure gate (frontmatter +
+    # size), so the D6 CONTAINMENT no-op must be shown with content that clears that orthogonal
+    # gate — a valid in-bounds report. The assertion is unchanged: the write⊆read guard admits a
+    # real main write at the run-dir root.
+    valid_report = "---\ndisposition: benign\n---\nok\n"
+    assert permission.decide_write(run / "report.md", valid_report, run_dir=run, defender_dir=_DEFENDER, policy=main_pol).allow
     lead_pol = AgentPolicy(write_allow=(permission.build_write_allow(skills, suffix=".md"),), deny_reason="d")
     assert permission.decide_write(skills / "gather" / "x.md", "c", run_dir=run, defender_dir=wtd, policy=lead_pol).allow
 

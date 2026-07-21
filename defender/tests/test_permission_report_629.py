@@ -133,7 +133,8 @@ def test_decide_write_returns_decision(env):
     rejection and Decision(True) (reason '') on acceptance; deny <=> .allow False with a
     non-empty .reason (the tool lane then raises ModelRetry(reason), pinned e2e)."""
     accept = env.decide("report.md", VALID_REPORT)
-    assert accept.allow is True and accept.reason == ""
+    assert accept.allow is True
+    assert accept.reason == ""
     deny = env.decide("report.md", whole_file_of(BODY_BOUND + 1))
     assert deny.allow is False
     assert deny.reason, "a rejection must carry a non-empty reason for the ModelRetry channel"
@@ -184,7 +185,8 @@ def test_investigation_size_bound(env):
     assert len(over.encode("utf-8")) > INV_BOUND
     assert env.decide("investigation.md", over).allow is False
     mb = GOLDEN_INV + "\n" + "\U0001F600" * (INV_BOUND // 4 + 100) + "\n"
-    assert len(mb.encode("utf-8")) > INV_BOUND and len(mb) <= INV_BOUND
+    assert len(mb.encode("utf-8")) > INV_BOUND
+    assert len(mb) <= INV_BOUND
     assert env.decide("investigation.md", mb).allow is False
 
 
@@ -665,7 +667,9 @@ def test_investigation_reaches_bound_single_shot_vs_incremental(env):
     single = env.decide("investigation.md", at_bound).allow
     _ = env.decide("investigation.md", GOLDEN_INV)  # a prior under-bound call changes nothing
     incremental = env.decide("investigation.md", at_bound).allow
-    assert single is True and incremental is True and single == incremental
+    assert single is True
+    assert incremental is True
+    assert single == incremental
 
 
 def test_report_committed_before_investigation_finished(env):
