@@ -21,13 +21,19 @@ absence by registration, N3):
   - **Key schema** (Fork A, tightened by #684) — ``get`` screens ``key`` against a defined
     grammar before any store attempt: anything outside it — empty, whitespace-only,
     path/URL-significant characters, whitespace and CR/LF — draws a retry-class response with
-    ZERO store attempts (``get_ticket`` interpolates ``key`` into the URL path unescaped).
-    The grammar is an ENVIRONMENT fact, not a constant here: it is the ticket system's
-    REQUIRED ``TICKET_KEY_PATTERN`` config value, reached through the same ``verbs=`` registry
-    seam as the store itself, and a store that declares none FAILS CLOSED AND LOUD (no read,
-    a recorded infra fault, a breaker contribution) rather than falling back to a built-in
-    guess. ``label``/``q`` keep riding ``list_tickets``' urlencoding opaquely — the chosen
-    asymmetry.
+    ZERO store attempts. The grammar is an ENVIRONMENT fact, not a constant here: it is the
+    ticket system's REQUIRED ``TICKET_KEY_PATTERN`` config value, reached through the same
+    ``verbs=`` registry seam as the store itself, and a store that declares none FAILS CLOSED
+    AND LOUD (no read, a recorded infra fault, a breaker contribution) rather than falling
+    back to a built-in guess.
+
+    This screen is DEFENSE IN DEPTH, not the only control: #684's follow-up percent-encodes
+    the key into ``/tickets/{key}`` at the adapter (as the ticket WRITER always has), so no
+    key value can reshape the request even unscreened. What the screen still buys is
+    retry-class feedback the model can act on, a store never asked for a key this environment
+    says cannot exist, and an audit trail without garbage in it. ``label``/``q`` need no
+    screen for the same reason they never did — ``list_tickets`` urlencodes them — so the two
+    paths are now symmetric rather than the deliberate asymmetry #672 recorded.
   - **Self-key exclusion** (Fork C/H) — the case-under-judgment's own key (the judge's learning
     run-dir basename) is refused pre-store on ``get``, filtered per-item by identity on ``list``,
     and — on ``get`` only — screened out of a fetched closed ticket whose free text NAMES it
@@ -104,13 +110,11 @@ def _key_reject_reason(key: str, grammar: re.Pattern[str]) -> str | None:
 
     ``grammar`` comes from the store's own config (``TICKET_KEY_PATTERN``) and is anchored by
     the caller: the environment declares the key SHAPE, this module decides that a key must
-    match it WHOLE. The screen exists because ``get_ticket`` interpolates ``key`` into
-    ``/tickets/{key}`` UNESCAPED (ticket_adapter.py:105) while the ticket WRITER
-    percent-encodes every key it mints (ticket_writer.py:189) — so a key outside the declared
-    grammar is not fetchable through this path anyway, and rejecting it costs no readable
-    ticket. Length is an explicit non-clause; #684 dropped #672's separate "clean non-ASCII
-    flows opaquely" carve-out — whether non-ASCII keys exist is now the environment's
-    statement to make, in its pattern.
+    match it WHOLE. Rejecting an off-grammar key costs no readable ticket — a key this store
+    cannot mint is a key it cannot hold — and the model gets a retry it can act on rather than
+    a 404 it must interpret. Length is an explicit non-clause; #684 dropped #672's separate
+    "clean non-ASCII flows opaquely" carve-out — whether non-ASCII keys exist is now the
+    environment's statement to make, in its pattern.
     """
     if not key.strip():
         return (

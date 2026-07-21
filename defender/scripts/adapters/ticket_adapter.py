@@ -38,6 +38,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import urllib.parse
 from pathlib import Path
 
 # Put the workspace root on sys.path so `defender.*` namespace imports resolve when the
@@ -126,8 +127,20 @@ def get_ticket(ctx: VerbContext, *, key: str, require_closed: bool = False) -> d
     the alert under judgment (#338). Refusing a non-closed ticket HERE means the read scope
     can't reach the in-flight ticket even by key — the refusal is a query error (exit 1),
     the same code the CLI callers already pin.
+
+    The key is PERCENT-ENCODED into the path (#684), as `ticket_writer` has always encoded
+    the keys it mints (`urllib.parse.quote(case_id, safe="")`). It used to be interpolated
+    raw, which was wrong in both directions: a key the writer can legitimately mint but this
+    reader cannot fetch (anything needing encoding round-tripped to a different URL), and a
+    key carrying `?`/`#`/CR-LF reshaping the REQUEST — a query string, a fragment, or a
+    header break where a path segment was meant. Not a shell surface: the transport passes
+    the URL as one argv element (`docker_exec_curl`, no `shell=True`), so this is an
+    HTTP-semantics fix. `list_tickets` has always urlencoded its filters via `http_get`'s
+    `params=`; encoding here makes the two paths symmetric.
     """
-    payload = transport.http_get_obj(ctx, _config(ctx), f"/tickets/{key}")
+    payload = transport.http_get_obj(
+        ctx, _config(ctx), f"/tickets/{urllib.parse.quote(key, safe='')}",
+    )
     if require_closed and payload.get("status") != "closed":
         raise UpstreamFault(
             f"{key} is status={payload.get('status')!r}, not 'closed' (--require-closed)"

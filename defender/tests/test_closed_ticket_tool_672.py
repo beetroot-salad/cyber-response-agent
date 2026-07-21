@@ -88,9 +88,12 @@ so those two are test-only tightenings):
   settles #672's "clean non-ASCII flows opaquely": the question moved to whoever describes
   the environment, and THIS environment declares an ASCII grammar, so `SOC-λ42` now
   refuses here while a store that mints accented keys says so in its pattern. Free of cost
-  either way, by the writer/reader asymmetry: the ticket writer percent-encodes every key
-  it mints (ticket_writer.py:189), this reader interpolates unescaped, so a key outside the
-  declared grammar was never fetchable through this path.
+  either way: a key this store cannot mint is a key it cannot hold, so refusing one forfeits
+  no readable ticket. #684 also closed the reader/writer encoding asymmetry this screen used
+  to stand in for — `get_ticket` now percent-encodes the key into the path as
+  `ticket_writer` always has (pinned in test_ticket_adapter.py), so no key value can reshape
+  the request even unscreened, and the screen is DEFENSE IN DEPTH: what it still buys is
+  retry-class feedback, a store never asked for an impossible key, and a clean audit trail.
   F2 the two `served OR faulted` whole-response disjunctions
   (d24/d23) became CONJUNCTIONS on the list call's own response — the good sibling is served
   in the SAME response the non-closed/self items are excluded from, so faulting the whole
@@ -150,7 +153,9 @@ their own name land inside the named test):
       -> test_teaching_surfaces_teach_tool_not_bash
   key_pathologically_long / key_non_ascii -> test_malformed_key_model_retry (controls)
   filter_values_with_shell_and_url_metacharacters -> test_bodies_hardcode_require_closed
-      (label/q ride opaquely — the chosen asymmetry against Fork A's key screen)
+      (label/q ride opaquely: list_tickets urlencodes them — #672 recorded this as a chosen
+      ASYMMETRY against Fork A's key screen; since #684 encodes the key too, the two paths
+      are symmetric and the screen is defense in depth)
   status_case_or_whitespace_variant / response_contains_duplicate_key
       -> test_list_response_non_closed_item_dropped_or_faulted
   case_own_ticket_state_at_judgment_time -> test_case_own_key_refused_at_tool_boundary
@@ -703,8 +708,9 @@ def test_bodies_hardcode_require_closed(tmp_path):
     payload, the facet's invariant, not on the fake's canned response: get sends exactly
     {key, require_closed=True}; list sends require_closed=True with NO status value, and its
     label/q filters ride to the verb OPAQUELY (shell/URL metacharacters included — the
-    chosen asymmetry: Fork A's schema screens `key`, which the real verb interpolates into
-    the URL path unescaped, while label/q keep riding list_tickets' urlencoding). Under
+    #672 called this a chosen asymmetry — Fork A screens `key` while label/q ride
+    list_tickets' urlencoding; #684 encoded the key path too, so both are now encoded and
+    the key screen is defense in depth, pinned end-to-end in test_ticket_adapter.py). Under
     require_closed=True the real verb body pins the outgoing store query to status=closed
     and refuses a non-closed body — executed-probed as c2/c3/g5/g6 and pinned in
     test_ticket_adapter.py; this test pins the composition's judge-side half."""
@@ -1353,8 +1359,7 @@ def test_repeated_store_failures_across_one_judge_run(tmp_path):
 def test_malformed_key_model_retry(tmp_path, key, reaches_store):
     """[d10_model_retry_malformed] The key meets Fork A's DEFINED schema before any store
     attempt — a GRAMMAR (`_KEY_RE`), not a metacharacter blacklist: anything outside
-    `[A-Za-z0-9][A-Za-z0-9._-]*` draws a retry-class response with ZERO store attempts,
-    because `get_ticket` interpolates `key` into `/tickets/{key}` UNESCAPED. The
+    the declared grammar draws a retry-class response with ZERO store attempts. The
     wrong-JSON-type key (the §7 silent branch) pins the same model-visible observable
     LAYER-AGNOSTICALLY — a retry-class response and zero store attempts, whether the
     framework's schema validation or the tool body rejects; the test must not assert which
@@ -1466,7 +1471,7 @@ def test_key_grammar_comes_from_this_environments_config(tmp_path, pattern, key,
 def test_absent_key_grammar_fails_closed_and_loud(tmp_path, registry_kwargs):
     """[d30_key_grammar_from_config — the fail-closed half] A ticket store that declares no
     usable key grammar stops the read. There is no built-in fallback: the screen exists to
-    keep a model-chosen key out of an UNESCAPED URL interpolation, and screening against a
+    keep a model-chosen key out of a store that cannot hold it, and screening against a
     grammar this environment never agreed to would be a guess standing in for the missing
     fact. So the tool fails CLOSED — zero store attempts, the key never sent — on every shape
     the missing fact can take: the config key absent (ConfigFault out of load_config), the

@@ -183,8 +183,10 @@ demands:
     # REWRITTEN at #684/F1 — the schema is a GRAMMAR, not the metacharacter blacklist
     # that shipped: a blacklist under-samples by construction, and the one that shipped
     # let `#`, `&`, `=`, backtick, an internal space and — the canonical
-    # request-reshaping vector — `SOC-1\r\nHost: …` through to a reader that
-    # interpolates `key` into `/tickets/{key}` UNESCAPED. Anything outside the grammar
+    # request-reshaping vector — `SOC-1\r\nHost: …` through to a reader that then
+    # interpolated `key` into `/tickets/{key}` UNESCAPED (that interpolation is itself
+    # closed at #684 — the adapter now percent-encodes, as the writer always has, so this
+    # screen is defense in depth). Anything outside the grammar
     # rejects with a retry-class response and ZERO store attempts; length remains an
     # explicit non-clause and a store refusal of a clearing key folds into O4.
     # The grammar itself is NOT owned here — it is the environment's declared
@@ -367,7 +369,7 @@ demands:
                         # the one disposition explicitly rejected: screening a model-chosen
                         # key against a grammar this environment never agreed to is a guess
                         # standing in for the missing fact, on the exact path that reaches
-                        # an UNESCAPED URL interpolation.
+                        # the store.
     form: test
     binds: ["interacts(benign_judge->get_closed_ticket).payload", "ticket_store.access[typed-tool]"]
     discharged_by: test_key_grammar_comes_from_this_environments_config
@@ -515,7 +517,7 @@ structure:
         payload:
           parts: [{role: args, source: model-authored}]
           invariants: []
-          nl: "the model-facing call schema is exactly {label, q} — no require_closed, no status (x8); filter values with shell/URL metacharacters inherit the pre-existing host-side transport's handling (dispositions — the in-process call removes the model-text-to-argv assembly; the asymmetry against Fork A's key screen is CHOSEN: label/q keep riding list_tickets' urlencoding, no new screen). The response side is inside O2's controlled surface (Fork G, §7): each returned item's status is re-checked client-side before the envelope (d24), and — V-A, F round — the case-under-judgment's OWN record is excluded per-item by IDENTITY even when genuinely closed (the get-path screen mirrored onto list, d23/d24); duplicates still survive (no dedup)."
+          nl: "the model-facing call schema is exactly {label, q} — no require_closed, no status (x8); filter values with shell/URL metacharacters inherit the pre-existing host-side transport's handling (dispositions — the in-process call removes the model-text-to-argv assembly; #672 chose an ASYMMETRY here — label/q keep riding list_tickets' urlencoding, no new screen — and #684 made the two paths symmetric instead by encoding the get path's key as well; the filter encoding is now pinned executably in test_ticket_adapter.py rather than asserted in prose). The response side is inside O2's controlled surface (Fork G, §7): each returned item's status is re-checked client-side before the envelope (d24), and — V-A, F round — the case-under-judgment's OWN record is excluded per-item by IDENTITY even when genuinely closed (the get-path screen mirrored onto list, d23/d24); duplicates still survive (no dedup)."
 
     - id: closed_tickets      # the NEW ToolSet bit (doc-proposed name — fork f2)
       provenance: design
