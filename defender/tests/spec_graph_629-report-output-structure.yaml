@@ -1,0 +1,785 @@
+schema_version: 1
+design: "#629 — decide_write gains a report.md frontmatter+size branch and an investigation.md size bound (intent+design posted as issue comments: https://github.com/beetroot-salad/cyber-response-agent/issues/629)"
+base: 07596adf   # spec branch forked from main == 10-brief/20-demands base_commit; tree has not moved
+
+# ---------------------------------------------------------------------------
+# Name reconciliation (phase-D join). The three input frontiers coined ids
+# independently; unified here by role+origin:
+#   - the gate is `decide_write` (files.py:213), modelled as a leg-actor — the
+#     575 `decide_bash` precedent. The charge names it "the central boundary";
+#     it is reconciled to the gate leg because only an actor bears the OUT-edges
+#     that read the per-artifact contract boundaries, and typed facets cannot
+#     hold two artifacts' contracts on one boundary. The "per-artifact facets"
+#     are the report_md / investigation_md sinks and the contract boundaries
+#     (disposition, report_frontmatter, *_size, artifact_key) decide_write reads.
+#   - report.md / investigation.md files -> boundaries `report_md`,
+#     `investigation_md` (dots are not slug-legal). write tools -> `write_file`,
+#     `edit_file` (code: _tool_write_file/_tool_edit_file; contextAlias `tools`).
+#   - third caller -> `verify_forward` (_gate_lesson_path, F-A2 seam).
+# Change kinds (rules.md Procedure 1, from the DESIGN):
+#   - report.md branch  = ADD    (new branch replacing Decision(True) @files.py:287)  -> provenance: design
+#   - investigation size = MODIFY (a size facet materializing on the existing
+#                                  investigation.md branch @files.py:269)             -> provenance: design
+#   - the grounded neighborhood it attaches to (writers, callers, consumers)          -> provenance: code
+#
+# form:test demands are POINTERS (schema.md): id/kind/form/binds/discharged_by, NO
+# inline outcome — the observable prose lives in the named test's docstring, which
+# check_binds scans. The seed for each (from the consensus assertion / 20-demands
+# seed) is the `# seed:` comment; 45-dispositions.md carries the full assertion,
+# keyed by the same test name.
+# ---------------------------------------------------------------------------
+
+# ===========================================================================
+# DEMANDS — the spec proper.  D0-D6/D1b = the umbrella contract (20-demands.md).
+# 38 consensus assertions (45-dispositions.md) = the concrete test cases; each
+# carries `# discharges: Dx` and its 45-dispositions section letter. lc6 is the
+# concrete golden lifecycle test discharging D5.
+# Every fork/silent-branch is an `unknown` invariant in the structure below or a
+# handoff.forks OPEN entry — NONE is a resolved demand (charge point 3).
+# Plus 4 GATE-MINTED demands (fb12-fb14, cc7) — genuine R4/R6 obligations the
+# gate leaf found with no consensus/fork covering them; see `gate.obligations`
+# and 60-residue.md. Plus 17 PHASE-E author-minted (section J: ak1-7, dn1-4, fk11,
+# fa1, fa3, fork9, fork10, fork12) — one per §7-resolved fork that was a phase-D
+# `unknown` invariant / gate.hole; ak5-ak7 are the investigation.md half of the shared
+# F-A2/Fork 6 keying rule (mirroring ak1-ak3). 46 (38+8) + 4 + 17 = 67 demands total.
+# ===========================================================================
+demands:
+
+  # --- D0-D6 / D1b umbrella (20-demands.md, verbatim binds) ---
+  - {id: D0, kind: behavior, form: test, discharged_by: test_decide_write_returns_decision,
+     binds: ["decide_write", "interacts(write_file->report_md)", "interacts(edit_file->report_md)"]}
+     # seed: decide_write returns Decision(False,<non-empty reason>) on any rejection and Decision(True) (reason '') on acceptance; the tool lane raises ModelRetry(decision.reason) iff allow is False. deny <=> .allow False with non-empty .reason.
+  - {id: D1, kind: behavior, form: test, discharged_by: test_report_frontmatter_gate,
+     binds: ["decide_write", "report_md", "report_frontmatter", "disposition", "interacts(write_file->report_md)"]}
+     # seed: a report.md write is denied unless its frontmatter parses under split_frontmatter (leading+closing fence, valid YAML, a mapping) AND disposition is present and in {benign,inconclusive,malicious}.
+  - {id: D1b, kind: behavior, form: test, discharged_by: test_report_case_id_confidence_not_required,
+     binds: ["decide_write", "report_md", "disposition.domain"]}
+     # seed: a report.md with valid disposition but NEITHER case_id NOR confidence still commits (Decision(True)); only disposition is validated. rejected: requiring case_id/confidence over-tightens past test_540_scrub_lifecycle.py:108.
+  - {id: D2, kind: behavior, form: test, discharged_by: test_report_size_bounds,
+     binds: ["decide_write", "report_md", "report_frontmatter_size", "report_body_size"]}
+     # seed: a report.md whose frontmatter exceeds 512 B OR whose post-.strip() body exceeds 8,192 B is denied; at/under both bounds passes. (basis/span UNRESOLVED — forks F1/F2.)
+  - {id: D3, kind: behavior, form: test, discharged_by: test_investigation_size_bound,
+     binds: ["decide_write", "investigation_md", "investigation_size", "interacts(write_file->investigation_md)"]}
+     # seed: an investigation.md whose resulting total (exactly len(proposed_text), no append arithmetic) exceeds 65,536 B is denied; existing invlang validation still runs. (basis UNRESOLVED — F1.)
+  - {id: D4, kind: behavior, form: test, discharged_by: test_report_deny_bounces_then_recovers,
+     binds: ["decide_write", "interacts(write_file->report_md)", "interacts(edit_file->report_md)"]}
+     # seed: an over-bound/malformed report.md write is denied and the reason reaches the model as ModelRetry; a corrected rewrite within bounds then commits. Pins bounce-and-recover THROUGH the driver (mirrors test_invlang_deny_bounces_then_recovers). NOTE (phase-F): discharged_by names a test in tests/e2e/test_report_gate_629.py — a different directory than this artifact's (tests/); spec-graph binds's same-directory scan cannot see it (routed to §7, manually verified: the function exists, non-empty docstring, matching prose).
+  - {id: D5, kind: survival, form: test, discharged_by: test_golden_ab_run_still_commits,
+     binds: ["decide_write", "report_md", "investigation_md", "interacts(renderer->report_md)"]}
+     # seed: a current-shape golden report.md/investigation.md still commits with the SAME disposition and the HTML still renders the analyst's reasoning — bounds clear every current-shape artifact. Positive control for D1-D3. Concretely discharged by lc6. NOTE (phase-F): cross-directory discharged_by, see D4's note.
+  - {id: D6, kind: parity, form: test, discharged_by: test_both_write_paths_gate,
+     binds: ["interacts(write_file->report_md)", "interacts(edit_file->report_md)", "interacts(write_file->investigation_md)", "interacts(edit_file->investigation_md)"]}
+     # seed: BOTH write paths (write_file, edit_file) route their full resulting text through decide_write; neither commits a report.md/investigation.md the gate denies. No second write path bypasses the gate. NOTE (phase-F): cross-directory discharged_by, see D4's note.
+
+  # --- section A: path / branch keying (3) ---
+  - {id: pa1, kind: behavior, form: test, discharged_by: test_report_md_at_run_dir_root,
+     binds: ["decide_write", "report_md", "artifact_key.domain.distinguished[report.md]", "interacts(write_file->report_md)"]}
+     # discharges D1/D2. seed: a report.md at the canonical root — Decision(True) iff content independently satisfies D1+D2, else Decision(False, reason). Keying-scheme-invariant. POSITIVE CONTROL for pa2/pa3.
+  - {id: pa2, kind: negative, form: test, discharged_by: test_filename_near_miss_does_not_collide_with_report_md,
+     binds: ["decide_write", "artifact_key.domain.distinguished[near-miss]", "report_md"]}
+     # discharges D1/D2 (C1). seed: a substring near-miss ("my_report.md","report.md.bak") never enters D1/D2 under exact-match -> Decision(True), unguarded, inert per census-5. positive control = pa1.
+  - {id: pa3, kind: negative, form: test, discharged_by: test_main_writes_an_arbitrarily_named_file_into_the_run_dir,
+     binds: ["decide_write", "artifact_key.domain.distinguished[arbitrary]", "interacts(write_file->run_dir_other)"]}
+     # discharges Scope (R-c/C3/census-5), D6-adjacent. seed: an arbitrarily-named file matches neither key -> Decision(True), unbounded; inert because no consumer globs the run dir. positive control = pa1.
+
+  # --- section B: frontmatter / content shape (11) ---
+  - {id: fb1, kind: domain-outcome, form: test, discharged_by: test_report_md_no_leading_fence,
+     binds: ["decide_write", "report_frontmatter.domain.distinguished[no-leading-fence]"]}
+     # discharges D1. seed: no leading `---` fence -> Decision(False, reason).
+  - {id: fb2, kind: domain-outcome, form: test, discharged_by: test_report_md_leading_fence_no_closing_fence,
+     binds: ["decide_write", "report_frontmatter.domain.distinguished[no-closing-fence]"]}
+     # discharges D1. seed: leading fence but no closing `---` fence -> Decision(False, reason).
+  - {id: fb3, kind: domain-outcome, form: test, discharged_by: test_report_md_frontmatter_invalid_yaml,
+     binds: ["decide_write", "report_frontmatter.domain.distinguished[invalid-yaml]"]}
+     # discharges D1. seed: invalid YAML frontmatter -> Decision(False, reason).
+  - {id: fb4, kind: domain-outcome, form: test, discharged_by: test_report_md_frontmatter_valid_yaml_not_a_mapping,
+     binds: ["decide_write", "report_frontmatter.domain.distinguished[non-mapping]"]}
+     # discharges D1. seed: valid YAML but not a mapping (list/scalar) -> Decision(False, reason).
+  - {id: fb5, kind: domain-outcome, form: test, discharged_by: test_report_md_frontmatter_missing_disposition_key,
+     binds: ["decide_write", "disposition.domain.distinguished[absent]"]}
+     # discharges D1. seed: mapping omits the disposition key -> Decision(False, reason).
+  - {id: fb6, kind: domain-outcome, form: test, discharged_by: test_report_md_disposition_outside_enum,
+     binds: ["decide_write", "disposition.domain.distinguished[outside-enum]"]}
+     # discharges D1. seed: disposition value outside {benign,inconclusive,malicious} -> Decision(False, reason).
+  - {id: fb7, kind: behavior, form: test, discharged_by: test_report_md_valid_disposition_no_case_id_no_confidence,
+     binds: ["decide_write", "report_md", "disposition.domain"]}
+     # discharges D1b. seed: valid disposition, NEITHER case_id NOR confidence -> Decision(True); only disposition required (matches test_540_scrub_lifecycle.py:108).
+  - {id: fb8, kind: domain-outcome, form: test, discharged_by: test_report_md_empty_proposed_text,
+     binds: ["decide_write", "report_frontmatter.domain.distinguished[empty-text]"]}
+     # discharges D1. seed: empty proposed_text -> Decision(False, reason) (no leading fence).
+  - {id: fb9, kind: domain-outcome, form: test, discharged_by: test_report_md_whitespace_only_proposed_text,
+     binds: ["decide_write", "report_frontmatter.domain.distinguished[whitespace-only]"]}
+     # discharges D1. seed: whitespace-only proposed_text -> Decision(False, reason) (no leading fence).
+  - {id: fb10, kind: behavior, form: test, discharged_by: test_report_md_valid_frontmatter_empty_body,
+     binds: ["decide_write", "report_md", "report_body_size.domain.distinguished[empty-body]"]}
+     # discharges D1/D2. seed: valid frontmatter, empty body -> Decision(True); D2's body bound is upper-bound-only, no minimum.
+  - {id: fb11, kind: behavior, form: test, discharged_by: test_report_md_body_contains_a_second_fence,
+     binds: ["decide_write", "report_frontmatter.domain.distinguished[second-fence-in-body]"]}
+     # discharges D1/D2. seed: split_frontmatter splits on the FIRST closing fence only; a second `---` line in the body is inert -> Decision(True) if otherwise in-bound. (behavior of the cited existing parser.)
+  - {id: fb12, kind: domain-outcome, form: test, discharged_by: test_report_md_disposition_benign_commits,
+     binds: ["decide_write", "disposition.domain.distinguished[benign]"]}
+     # GATE-MINTED (R4 obligation, phase-D gate leaf — no prior consensus demand pinned this member). discharges D1. seed: an otherwise-valid, in-bound report.md with `disposition: benign` -> Decision(True). Positive control alongside fb13/fb14; complements fb5 (absent)/fb6 (outside-enum), which pin only the INVALID members.
+  - {id: fb13, kind: domain-outcome, form: test, discharged_by: test_report_md_disposition_inconclusive_commits,
+     binds: ["decide_write", "disposition.domain.distinguished[inconclusive]"]}
+     # GATE-MINTED. discharges D1. seed: an otherwise-valid, in-bound report.md with `disposition: inconclusive` -> Decision(True).
+  - {id: fb14, kind: domain-outcome, form: test, discharged_by: test_report_md_disposition_malicious_commits,
+     binds: ["decide_write", "disposition.domain.distinguished[malicious]"]}
+     # GATE-MINTED. discharges D1. seed: an otherwise-valid, in-bound report.md with `disposition: malicious` -> Decision(True).
+
+  # --- section C: size boundary, non-basis (2; the 3rd, alias amplification, moved to Fork 12) ---
+  - {id: sz1, kind: domain-outcome, form: test, discharged_by: test_report_frontmatter_valid_but_over_size_bound,
+     binds: ["decide_write", "report_frontmatter_size.domain.distinguished[over-bound]"]}
+     # discharges D2. seed: size bound independent of D1 validity — a structurally/enum-valid report over the 512 B frontmatter bound -> Decision(False, reason).
+  - {id: sz2, kind: domain-outcome, form: test, discharged_by: test_report_frontmatter_and_body_both_over_bound_simultaneously,
+     binds: ["decide_write", "report_frontmatter_size.domain.distinguished[over-bound]", "report_body_size.domain.distinguished[over-bound]"]}
+     # discharges D2. seed: at least one bound violated -> Decision(False, reason), regardless of ordering. (which violation wins the one-reason slot is unaddressed but does not change accept/deny.)
+
+  # --- section D: adversarial payload / carrier-capacity (6) — the R6 sink walk ---
+  - {id: cc1, kind: behavior, form: test, discharged_by: test_report_body_encodes_high_entropy_payload_within_bound,
+     binds: ["decide_write", "report_body_size.domain", "interacts(judge->judge_llm).payload"]}
+     # discharges D2 (+B1/B2). seed: in-bound + disposition-valid high-entropy body -> Decision(True); guard is a volume+structure control, not a content oracle (acknowledged residual).
+  - {id: cc2, kind: behavior, form: test, discharged_by: test_report_frontmatter_extraneous_key_rides_to_judge_verbatim,
+     binds: ["decide_write", "report_md", "interacts(judge->judge_llm).payload"]}
+     # discharges D1b. seed: an extraneous frontmatter key rides verbatim to the judge -> Decision(True); only disposition is required.
+  - {id: cc3, kind: behavior, form: test, discharged_by: test_report_confidence_field_carries_unvalidated_payload_to_html_render,
+     binds: ["decide_write", "report_md", "interacts(renderer->report_md)"]}
+     # discharges D1b. seed: a confidence field carries an unvalidated payload to the HTML render unmodified -> Decision(True); confidence is untyped/unenforced.
+  - {id: cc4, kind: behavior, form: test, discharged_by: test_report_body_within_bound_reaches_ticket_http_egress,
+     binds: ["decide_write", "report_body_size.domain", "interacts(ticket_bridge->ticket_post).payload"]}
+     # discharges D2. seed: an in-bound body reaches the ticket bridge reason field verbatim over HTTP -> Decision(True); capped only in volume by D2 (flag-f).
+  - {id: cc5, kind: behavior, form: test, discharged_by: test_combined_report_and_investigation_bytes_reaching_judge_uncapped,
+     binds: ["decide_write", "report_body_size.domain", "investigation_size.domain", "interacts(judge->judge_llm).payload"]}
+     # discharges D2+D3 (independence, R-c). seed: each artifact independently gated; NO combined/summed cross-artifact ceiling -> Decision(True) each.
+  - {id: cc6, kind: behavior, form: test, discharged_by: test_investigation_body_encodes_payload_surviving_invlang_and_size_bound,
+     binds: ["decide_write", "investigation_size.domain", "invlang_validation"]}
+     # discharges D3 (+B1/B2). seed: invlang-structural + D3-in-bound investigation carrying an encoded payload -> Decision(True); guard does not inspect invlang-legal fields (acknowledged residual).
+  - {id: cc7, kind: negative, form: test, discharged_by: test_report_body_containing_closing_report_sequence_denied,
+     binds: ["decide_write", "report_md", "interacts(judge->judge_llm).payload"]}
+     # GATE-MINTED (R6 trust-walk obligation, phase-D gate leaf) — RESOLVED by §7 (70-resolutions.md,
+     # cc7) to DENY at the write guard (the gate leaf's original seed proposed an acknowledged
+     # residual/Decision(True); §7 reversed that horn — the branch fail-closes on the sequence).
+     # seed: an in-bound, disposition-valid report body containing the literal `</report>` delimiter
+     # sequence is DENIED (Decision(False, reason)), fail-closed alongside the size bounds —
+     # judge/run.py's `_section("report", ...)` (learning/pipeline/_prompt.py:13) splices the body
+     # raw into a `<report>...</report>` block with NO tag-delimiter escaping, so an unescaped
+     # `</report>` can close the tag early and forge an adjacent judge-prompt section. kind:negative,
+     # so the POSITIVE CONTROL (same address) is a body with an opening `<report>`-like token but no
+     # closing delimiter, and a plain-prose body — both COMMIT (the gate denies the delimiter
+     # sequence, not `<`/`>` generally). The judge-payload surface it binds is the one the content
+     # could reach; the deny closes it at the write boundary.
+
+  # --- section E: write mode & report revision (5) ---
+  - {id: wm1, kind: domain-outcome, form: test, discharged_by: test_report_over_bound_via_write_file,
+     binds: ["decide_write", "report_body_size.domain.distinguished[over-bound]", "interacts(write_file->report_md)"]}
+     # discharges D2/D6. seed: an over-bound report.md via write_file -> Decision(False, reason). NOTE (phase-F): cross-directory discharged_by, see D4's note.
+  - {id: wm2, kind: behavior, form: test, discharged_by: test_report_over_bound_via_edit_file,
+     binds: ["decide_write", "report_body_size.domain.distinguished[over-bound]", "interacts(edit_file->report_md)"]}
+     # discharges D2/D6. seed: an over-bound report.md via edit_file -> Decision(False, reason); same checks as write_file, over the full resulting text. NOTE (phase-F): cross-directory discharged_by, see D4's note.
+  - {id: wm3, kind: behavior, form: test, discharged_by: test_report_edit_leaves_preexisting_malformed_frontmatter_untouched_by_the_edit,
+     binds: ["decide_write", "report_frontmatter.domain", "interacts(edit_file->report_md)"]}
+     # discharges D1/D2. seed: edit_file hands the FULL resulting document; a still-malformed untouched frontmatter is re-validated and fails -> Decision(False, reason). NOTE (phase-F): cross-directory discharged_by, see D4's note.
+  - {id: wm4, kind: behavior, form: test, discharged_by: test_edit_file_turns_a_committed_valid_report_into_a_malformed_one,
+     binds: ["decide_write", "report_frontmatter.domain", "interacts(edit_file->report_md)"]}
+     # discharges D1/D2. seed: prior validity confers no exemption; an edit that introduces a fault fails the same demand a first write would -> Decision(False, reason). NOTE (phase-F): cross-directory discharged_by, see D4's note.
+  - {id: wm5, kind: behavior, form: test, discharged_by: test_identical_content_rewrite_of_already_valid_report,
+     binds: ["decide_write", "report_md", "interacts(write_file->report_md)"]}
+     # discharges D1/D2. seed: no memoization; a byte-identical rewrite of an already-valid report is evaluated fresh -> Decision(True) again. NOTE (phase-F): cross-directory discharged_by, see D4's note.
+
+  # --- section F: investigation.md interaction of checks (3) ---
+  - {id: ii1, kind: behavior, form: test, discharged_by: test_report_disposition_precedes_supporting_investigation_content,
+     binds: ["decide_write", "report_md", "investigation_md"]}
+     # discharges D1/D2 vs D3 independence. seed: a valid in-bound report.md is Decision(True) reachable with zero investigation.md content on disk.
+  - {id: ii2, kind: behavior, form: test, discharged_by: test_investigation_write_after_report_already_committed,
+     binds: ["decide_write", "investigation_md", "interacts(write_file->investigation_md)"]}
+     # discharges D3 (independence). seed: investigation.md's write is judged purely on its own merits; report.md's committed state has no bearing.
+  - {id: ii3, kind: behavior, form: test, discharged_by: test_denied_write_preserves_prior_disk_content,
+     binds: ["decide_write", "interacts(write_file->report_md)", "interacts(edit_file->report_md)"]}
+     # discharges D4. seed: Decision computed/returned strictly before p.write_text() in both callers; on denial, prior on-disk content (or absence) is byte-for-byte unchanged. (P4 open: code-level no-other-write-path.) NOTE (phase-F): cross-directory discharged_by, see D4's note.
+
+  # --- section G: lifecycle / state (6; lc6 == D5's concrete golden test) ---
+  - {id: lc1, kind: behavior, form: test, discharged_by: test_investigation_crosses_bound_mid_run,
+     binds: ["decide_write", "investigation_size.domain.distinguished[over-bound]", "interacts(write_file->investigation_md)"]}
+     # discharges D3/D4. seed: at turn K only that call's full resulting text is evaluated; if over bound, Decision(False, reason) for that call only; K-1 prior turns untouched. NOTE (phase-F): cross-directory discharged_by, see D4's note.
+  - {id: lc2, kind: behavior, form: test, discharged_by: test_edit_file_splice_pushes_investigation_over_bound,
+     binds: ["decide_write", "investigation_size.domain.distinguished[over-bound]", "interacts(edit_file->investigation_md)"]}
+     # discharges D3. seed: an edit_file splice pushing investigation over 65,536 B -> Decision(False, reason); gate sees the post-splice WHOLE text, not the delta. NOTE (phase-F): cross-directory discharged_by, see D4's note.
+  - {id: lc3, kind: behavior, form: test, discharged_by: test_edit_file_splice_pulls_investigation_under_bound,
+     binds: ["decide_write", "investigation_size.domain.distinguished[at-bound]", "interacts(edit_file->investigation_md)"]}
+     # discharges D3. seed: a shrinking splice landing <=65,536 B is accepted regardless of the stale over-bound baseline -> Decision(True) (assuming invlang also passes). NOTE (phase-F): cross-directory discharged_by, see D4's note.
+  - {id: lc4, kind: behavior, form: test, discharged_by: test_investigation_reaches_bound_single_shot_vs_incremental,
+     binds: ["decide_write", "investigation_size.domain", "interacts(write_file->investigation_md)", "interacts(edit_file->investigation_md)"]}
+     # discharges D3. seed: single-shot and incremental paths reaching the same final text produce the identical Decision; write history is not observable to decide_write. (P3 open: code-level property.)
+  - {id: lc5, kind: behavior, form: test, discharged_by: test_report_committed_before_investigation_finished,
+     binds: ["decide_write", "report_md", "investigation_md"]}
+     # discharges D1/D2 vs D3 independence. seed: report.md is acceptable while investigation.md is mid-lifecycle; no ordering requirement between the two gates.
+  - {id: lc6, kind: survival, form: test, discharged_by: test_golden_ab_run_lifecycle_preserves_disposition,
+     binds: ["decide_write", "report_md", "investigation_md", "interacts(renderer->report_md)"]}
+     # discharges D5 (concrete). seed: every write in a legit golden sequence returns Decision(True); the run commits with the SAME disposition as baseline; the HTML still renders the analyst's reasoning. NOTE (phase-F): cross-directory discharged_by, see D4's note.
+
+  # --- section H: adversarial probing / retry-budget (1) ---
+  - {id: ap1, kind: behavior, form: test, discharged_by: test_repeated_boundary_probing_denies_across_retry_budget,
+     binds: ["decide_write", "interacts(write_file->report_md)"]}
+     # discharges D4. seed: each write evaluated independently; denied calls each return their own Decision(False, reason); nothing caps the NUMBER of denied attempts — stateless per call by design.
+
+  # --- section I: author cross-cutting: consumer tolerance (1) ---
+  - {id: ct1, kind: survival, form: test, discharged_by: test_absent_report_still_reaches_the_tolerant_consumer_fallbacks,
+     binds: ["decide_write", "report_md", "interacts(learning_validate->report_md)", "interacts(evals->report_md)"]}
+     # discharges Scope (R-c). seed: no decide_write call for a file never written; tolerant fallbacks (parse_report {}/body-only, held_out None, trace_lesson '?') and hard-raising consumers (normalize_disposition, ticket bridge) are all unchanged by #629.
+
+  # --- section J: §7-RESOLVED forks (phase-E author-minted; each pins one 70-resolutions horn
+  # that was an `unknown` invariant / gate.hole at phase D — now a real demand with a test) ---
+  - {id: ak1, kind: negative, form: test, discharged_by: test_report_case_variant_not_gated,
+     binds: ["decide_write", "artifact_key.domain.distinguished[case-variant]", "report_md"]}
+     # §7 Fork 6a -> EXACT-MATCH name. seed: a case/whitespace-variant filename ("Report.md","REPORT.MD") is NOT the exact basename report.md -> misses the branch, malformed content commits unguarded (inert per C3). positive control: exact-cased report.md with the same content denies.
+  - {id: ak2, kind: negative, form: test, discharged_by: test_report_md_in_subdir_not_gated,
+     binds: ["decide_write", "artifact_key.domain.distinguished[subdir]", "report_md"]}
+     # §7 Fork 6b -> RUN-DIR ROOT only. seed: `<run_dir>/sub/report.md` resolves to a non-root path -> branch does not fire -> over-bound content commits. positive control: root report.md over-bound denies.
+  - {id: ak3, kind: negative, form: test, discharged_by: test_symlink_operand_resolves_before_keying,
+     binds: ["decide_write", "artifact_key.domain.distinguished[symlink]", "report_md"]}
+     # §7 Fork 6c -> RESOLVE SYMLINKS. seed: the branch keys on the RESOLVED path — a `decoy.md` symlinked to `<run_dir>/report.md` resolves in and IS gated (over-bound -> deny), while a `report.md` symlinked ELSEWHERE resolves away and is NOT gated. Closes the disguise bypass.
+  - {id: ak4, kind: negative, form: test, discharged_by: test_forward_check_lesson_named_report_md_not_gated,
+     binds: ["decide_write", "verify_forward", "artifact_key.domain.distinguished[report.md]"]}
+     # §7 F-A2 -> run-dir-membership keying. seed: a verify_forward lesson operand literally named report.md, in the curator's OWN corpus (not `<run_dir>/report.md`), proposed_text="" -> NOT routed into the report branch (Decision(True)) -> the allow->deny regression is closed. positive control: an empty write to the actual `<run_dir>/report.md` DOES enter the branch and denies.
+  # ak5-ak7: the investigation.md half of the SAME §7 F-A2/Fork 6 keying rule (stated over BOTH
+  # artifacts verbatim). Mirror ak1/ak2/ak3 so the branch cannot be left keyed name-only for
+  # investigation.md (files.py:269) — which would re-open the symlink-disguise size bypass ak3 closes.
+  - {id: ak5, kind: negative, form: test, discharged_by: test_investigation_case_variant_not_gated,
+     binds: ["decide_write", "artifact_key.domain.distinguished[case-variant]", "investigation_md"]}
+     # §7 Fork 6a -> EXACT-MATCH name (investigation half). seed: a case/whitespace-variant filename ("Investigation.md","INVESTIGATION.MD") is NOT the exact basename investigation.md -> misses the branch, over-bound content commits unguarded (inert per C3). positive control: exact-cased investigation.md with the same over-bound content denies.
+  - {id: ak6, kind: negative, form: test, discharged_by: test_investigation_md_in_subdir_not_gated,
+     binds: ["decide_write", "artifact_key.domain.distinguished[subdir]", "investigation_md"]}
+     # §7 Fork 6b -> RUN-DIR ROOT only (investigation half). seed: `<run_dir>/sub/investigation.md` resolves to a non-root path -> branch does not fire -> over-bound content commits. positive control: root investigation.md over-bound denies.
+  - {id: ak7, kind: negative, form: test, discharged_by: test_investigation_symlink_operand_resolves_before_keying,
+     binds: ["decide_write", "artifact_key.domain.distinguished[symlink]", "investigation_md"]}
+     # §7 Fork 6c -> RESOLVE SYMLINKS (investigation half, THE critical leg). seed: the branch keys on the RESOLVED path — a `decoy2.md` symlinked to `<run_dir>/investigation.md` resolves in and IS gated (over-bound -> deny), while an `investigation.md` symlinked ELSEWHERE resolves away and is NOT gated. Closes the disguise size-bypass for investigation.md exactly as ak3 does for report.md; FAILS if the branch is left name-only.
+  - {id: dn1, kind: negative, form: test, discharged_by: test_report_disposition_case_variant_denied,
+     binds: ["decide_write", "disposition.domain.distinguished[outside-enum]", "report_md"]}
+     # §7 Fork 7a -> EXACT-LOWERCASE. seed: "Benign"/"MALICIOUS" is not an exact-lowercase member -> deny; no case-folding. positive control: the exact-lowercase value commits.
+  - {id: dn2, kind: negative, form: test, discharged_by: test_report_disposition_surrounding_whitespace_denied,
+     binds: ["decide_write", "disposition.domain.distinguished[outside-enum]", "report_md"]}
+     # §7 Fork 7b -> no trim. seed: a YAML-quoted `" benign "` (spaces surviving the parse) is not an exact member -> deny. positive control: the untrimmed exact value commits.
+  - {id: dn3, kind: negative, form: test, discharged_by: test_report_disposition_non_string_denied,
+     binds: ["decide_write", "disposition.domain.distinguished[outside-enum]", "report_md"]}
+     # §7 Fork 7c -> not-in-enum. seed: a non-string value (null/int/list/mapping) is treated as not-in-enum and denies CLEANLY — a returned Decision(False), never a `value in ENUM` TypeError escaping (the unhashable-list case). positive control: a string member commits.
+  - {id: dn4, kind: negative, form: test, discharged_by: test_report_disposition_duplicate_key_denied,
+     binds: ["decide_write", "disposition.domain.distinguished[outside-enum]", "report_md"]}
+     # §7 Fork 7d -> not-in-enum. seed: a duplicated `disposition:` key denies even when a last-value-wins parse resolves to a VALID member (both benign) — the gate cannot lean on PyYAML's silent last-key-wins. positive control: a single key commits.
+  - {id: fk11, kind: negative, form: test, discharged_by: test_report_disposition_nested_not_found_denied,
+     binds: ["decide_write", "report_frontmatter.domain.distinguished[non-mapping]", "disposition.domain.distinguished[absent]"]}
+     # §7 Fork 11 -> TOP-LEVEL key lookup. seed: `disposition` nested inside a sibling collection is "missing" under a top-level lookup -> deny. positive control: the same value as a top-level key commits.
+  - {id: fa1, kind: negative, form: test, discharged_by: test_report_body_bound_measures_whole_file,
+     binds: ["decide_write", "report_body_size.domain.distinguished[over-bound]", "interacts(judge->judge_llm).payload", "interacts(ticket_bridge->ticket_post).payload"]}
+     # §7 F-A1 -> WHOLE ON-DISK FILE. seed: the body bound measures the whole file (`len(proposed_text.encode())`), not the post-.strip() body — a tiny stripped body padded with kilobytes of whitespace OUTSIDE the span pushes the whole file over 8,192 B and DENIES, closing the whitespace carrier into the judge/ticket egresses. positive control: the same tiny stripped body without padding commits.
+  - {id: fa3, kind: behavior, form: test, discharged_by: test_investigation_over_bound_and_invlang_invalid_single_feedback,
+     binds: ["decide_write", "investigation_size.domain.distinguished[over-bound]", "invlang_validation"]}
+     # §7 F-A3 -> SIZE-FIRST short-circuit. seed: an investigation.md that is BOTH over 65,536 B AND invlang-invalid yields exactly one Decision(False) whose reason names the SIZE failure — validate_companion never runs on the oversize doc (the invlang signature string is ABSENT from the reason). positive control: a small invlang-invalid doc denies WITH the invlang reason (the invlang branch is still reachable).
+  - {id: fork9, kind: behavior, form: test, discharged_by: test_investigation_empty_or_whitespace_commits,
+     binds: ["decide_write", "investigation_size.domain", "invlang_validation"]}
+     # §7 Fork 9 (re-ground, settled) -> ACCEPTS. seed: empty/whitespace-only investigation.md ACCEPTS — 0 bytes <= bound and validate_companion('' / whitespace, None) == [] (probed) -> Decision(True). positive control: an over-bound investigation denies.
+  - {id: fork10, kind: negative, form: test, discharged_by: test_report_body_zero_width_and_combining_mark_density,
+     binds: ["decide_write", "report_body_size.domain.distinguished[over-bound]", "report_md"]}
+     # §7 Fork 10 (rides F1, residual-risk doc) -> byte basis. seed: a zero-width/combining-mark-dense body UNDER the 8,192 B byte bound commits (density is a residual the volume-only guard does not close); the same density pushed OVER the byte bound denies. Collapses onto F1's byte basis.
+  - {id: fork12, kind: behavior, form: test, discharged_by: test_report_frontmatter_yaml_alias_amplification_under_byte_bound,
+     binds: ["decide_write", "report_frontmatter_size.domain", "report_md"]}
+     # §7 Fork 12 (rides F2 -> RAW span) -> Decision(True). seed: frontmatter using YAML anchors/aliases whose RAW between-fence text is <= 512 B commits, even though the re-serialized parsed mapping expands past 512 B — F2 measures the RAW span, so alias expansion is invisible. The fixture re-probes that the two spans genuinely diverge, so the rejected re-serialized-span horn would deny it and the test would catch it.
+
+# ===========================================================================
+# STRUCTURE — the address space
+# ===========================================================================
+structure:
+  axes: [run_dir]      # the identity key for both sinks; the only axis writers interpolate
+
+  actors:
+    - {id: decide_write,       frame: leg,         provenance: code}   # MODIFY: the gate (files.py:213); gains the report.md branch + investigation size facet
+    - {id: write_file,         frame: leg,         provenance: code}   # _tool_write_file (tools.py:437)
+    - {id: edit_file,          frame: leg,         provenance: code}   # _tool_edit_file (tools.py:497)
+    - {id: run_investigation,  frame: composition, provenance: code}   # MAIN loop — fans write_file/edit_file over many turns (R2 composition frame)
+    - {id: verify_forward,     frame: leg,         provenance: code}   # third caller, _gate_lesson_path (tool.py:138), proposed_text="" — the F-A2 seam
+    - {id: judge,              frame: composition, provenance: code}   # inlines report.md VERBATIM into the judge LLM (flag-e); investigation DERIVED
+    - {id: ticket_bridge,      frame: leg,         provenance: code}   # reason=body -> POST /tickets (flag-f)
+    - {id: renderer,           frame: leg,         provenance: code}   # visualize -> transcript/runtime HTML (flag-g)
+    - {id: learning_validate,  frame: leg,         provenance: code}   # normalize_disposition — HARD raise on bad disposition (validate.py:43)
+    - {id: evals,              frame: leg,         provenance: code}   # held_out/secondary — SOFT disposition read
+
+  boundaries:
+    # --- the two write sinks (grounded; the report.md gate contract is new) ---
+    - id: report_md
+      provenance: code                                  # the file pre-exists (census-2/3); its GATE is new (design demands)
+      facets:
+        identity:
+          key_axes: [run_dir]
+          evidence: {nl: "RunPaths(run_dir).report = run_dir/report.md (_run_paths.py:36); one fixed file per run dir, no interpolation axis beyond run_dir; write_file/edit_file both write the whole resulting text (overwrite)."}
+          sharing: unique-key
+    - id: investigation_md
+      provenance: code                                  # pre-exists; its branch gains a size facet (MODIFY)
+      facets:
+        identity:
+          key_axes: [run_dir]
+          evidence: {nl: "RunPaths(run_dir).investigation = run_dir/investigation.md (_run_paths.py:40); one fixed file per run dir."}
+          sharing: unique-key
+
+    # --- the branch-keying predicate (ADD) — routes Fork 6 (path-keying) + F-A2 ---
+    - id: artifact_key
+      provenance: design
+      facets:
+        domain:
+          type: enum
+          refinement: {nl: "which write operand enters the new report.md/investigation.md branch. RESOLVED §7 (F-A2/Fork 6): the branch fires only when the operand's RESOLVED path is exactly `<run_dir>/report.md` or `<run_dir>/investigation.md` — exact basename (no case-folding), run-dir ROOT membership, symlinks resolved. A case-variant / subdir / symlink-elsewhere / verify_forward lesson operand is NOT gated (falls through to Decision(True))."}
+          default: unguarded-fallthrough                # a non-matching name falls through to Decision(True)
+          distinguished: [report.md, investigation.md, near-miss, arbitrary, case-variant, subdir, symlink]
+          falsy_valid: false
+          documented_alternatives:
+            - {value: name-only-key, crosses_validation: false}                 # RESOLVED §7: REJECTED (F-A2 regression); ak1/ak2/ak4
+            - {value: name-plus-run_dir-membership, crosses_validation: true}    # RESOLVED §7: ADOPTED (F-A2); ak2/ak4
+            - {value: resolved-path-basename, crosses_validation: true}          # RESOLVED §7: ADOPTED (Fork 6c symlink); ak3
+
+    # --- disposition enum (ADD) — routes Fork 7 (normalization) ---
+    - id: disposition
+      provenance: design
+      facets:
+        domain:
+          type: enum
+          refinement: {nl: "DISPOSITION_ENUM = {benign,inconclusive,malicious} (config.py:308); present-and-in-enum is the ONLY enforced frontmatter key. RESOLVED §7 (Fork 7): compared EXACT-LOWERCASE, no normalization; a case-variant / surrounding-whitespace / non-string / duplicate-key value is treated as not-in-enum -> clean Decision(False, reason) (never a `value in ENUM` TypeError escaping)."}
+          default: deny-if-absent-or-not-exact-lowercase   # RESOLVED §7: presence + exact-lowercase membership required; anything else denies
+          distinguished: [benign, inconclusive, malicious, absent, outside-enum]
+          falsy_valid: false
+          documented_alternatives:
+            - {value: exact-lowercase-match, crosses_validation: true}           # RESOLVED §7: ADOPTED (Fork 7); dn1/fb6
+            - {value: case-or-whitespace-normalized, crosses_validation: false}   # RESOLVED §7: REJECTED (Fork 7a/7b); dn1/dn2
+            - {value: non-string-value-handling, crosses_validation: true}        # RESOLVED §7: not-in-enum -> clean deny (Fork 7c); dn3
+            - {value: duplicate-key-resolution, crosses_validation: true}         # RESOLVED §7: not-in-enum -> deny (Fork 7d); dn4
+
+    # --- frontmatter structural validity (ADD) — routes Fork 11 (nested lookup) ---
+    - id: report_frontmatter
+      provenance: design
+      facets:
+        domain:
+          type: enum
+          refinement: {nl: "split_frontmatter (_frontmatter.py:25-55) must succeed (leading fence, closing fence, valid YAML, a mapping); the distinguished members are its failure modes plus the two benign in-body cases. RESOLVED §7 (Fork 11): `disposition` presence is a TOP-LEVEL key lookup — a nested value (inside a sibling collection) is 'missing' -> Decision(False)."}
+          default: valid-mapping
+          distinguished: [no-leading-fence, no-closing-fence, invalid-yaml, non-mapping, empty-text, whitespace-only, second-fence-in-body, valid-mapping]
+          falsy_valid: false
+          documented_alternatives:
+            - {value: top-level-disposition-lookup, crosses_validation: true}       # RESOLVED §7: ADOPTED (Fork 11); fk11
+            - {value: nested-disposition-traversal, crosses_validation: false}      # RESOLVED §7: REJECTED (Fork 11); fk11
+
+    # --- report frontmatter size (ADD) — routes F1 (basis) + F2 (span) + Fork 12 (alias) ---
+    - id: report_frontmatter_size
+      provenance: design
+      facets:
+        domain:
+          type: int
+          refinement: {nl: "frontmatter <= 512 B. RESOLVED §7 (F1+F2): measured as UTF-8 BYTES of the RAW between-fence text (split_frontmatter's `raw`) — not codepoints, not the full fenced block, not the re-serialized mapping. Fork 12's alias-amplification carrier rides the (rejected) re-serialized span, so a raw-basis measure leaves alias expansion invisible (fork12 -> Decision(True))."}
+          default: 512
+          distinguished: [at-bound, over-bound]
+          falsy_valid: false
+          documented_alternatives:
+            - {value: utf-8-bytes-of-raw-between-fences, crosses_validation: true}    # RESOLVED §7: ADOPTED (F1+F2); sz1/fork12
+            - {value: len-codepoints-of-raw, crosses_validation: false}              # RESOLVED §7: REJECTED (F1)
+            - {value: full-fenced-block-span, crosses_validation: false}             # RESOLVED §7: REJECTED (F2)
+            - {value: re-serialized-mapping-span, crosses_validation: false}         # RESOLVED §7: REJECTED (F2/Fork 12 alias bomb)
+
+    # --- report body size (ADD) — routes F1 (basis) + F-A1 (stripped-body vs whole-file carrier) ---
+    - id: report_body_size
+      provenance: design
+      facets:
+        domain:
+          type: int
+          refinement: {nl: "body <= 8,192 B. RESOLVED §7 (F1+F-A1): measured as UTF-8 BYTES of the WHOLE on-disk file (`len(proposed_text.encode())`) — the full file the judge/ticket egresses ingest — NOT the post-.strip() body. Closes the whitespace-padding carrier F-A1 named (a stripped-body-only bound left an unbounded channel into two live egresses). Also gates the literal `</report>` delimiter sequence (cc7, a content deny, not a size one)."}
+          default: 8192
+          distinguished: [at-bound, over-bound, empty-body]
+          falsy_valid: true                             # an empty body is valid (fb10 -> Decision(True))
+          documented_alternatives:
+            - {value: stripped-body-len-codepoints, crosses_validation: false}       # RESOLVED §7: REJECTED (F1/F-A1 doc-literal)
+            - {value: stripped-body-utf-8-bytes, crosses_validation: false}          # RESOLVED §7: REJECTED (F-A1 chose whole-file)
+            - {value: whole-file-read_text-carrier, crosses_validation: true}        # RESOLVED §7: ADOPTED (F-A1, whole-file bytes); fa1/D2
+
+    # --- investigation size (MODIFY: new facet on the existing branch) — routes F1 ---
+    - id: investigation_size
+      provenance: design
+      facets:
+        domain:
+          type: int
+          refinement: {nl: "resulting total <= 65,536 B, exactly len(proposed_text) — no append arithmetic (both write paths hand the full resulting doc, flag-c). RESOLVED §7 (F1): measured as UTF-8 BYTES. The size check runs FIRST (F-A3, size-first short-circuit) before validate_companion, so a both-over-and-invalid write's single reason names the SIZE failure. Fork 9 re-ground SETTLED: empty/whitespace-only text ACCEPTS (0 B <= bound; validate_companion('' / whitespace, None) == [], probed validate.py:552-586)."}
+          default: 65536
+          distinguished: [at-bound, over-bound]
+          falsy_valid: true                             # RESOLVED §7 (Fork 9): 0 bytes is under the bound AND invlang returns [] for empty/whitespace -> empty COMMITS (fork9)
+          documented_alternatives:
+            - {value: len-proposed_text-codepoints, crosses_validation: false}       # RESOLVED §7: REJECTED (F1)
+            - {value: utf-8-bytes, crosses_validation: true}                         # RESOLVED §7: ADOPTED (F1); D3/fa3/fork9
+
+    # --- existing investigation invlang validation (unchanged; F-A3 ordering rides here) ---
+    - id: invlang_validation
+      provenance: code
+      facets: {}                                        # validate_companion (files.py:269-286); F-A3 RESOLVED §7: SIZE-FIRST short-circuit (the size check runs before validate_companion; fa3)
+
+    # --- R6 rendered/parsed sinks the report body reaches (grounded neighborhood) ---
+    - id: judge_llm
+      provenance: code
+      facets:
+        payload:
+          parts:
+            - {role: system, source: "const:JUDGE_PROMPT"}
+            - {role: user,   source: "template:judge_run", slots: {report: report_md, investigation: investigation_md}}
+          invariants: [roles-disjoint-sources, all-slots-bound]
+          nl: "the judge user turn inlines report.md VERBATIM (the disposition claim being scored, judge/run.py:132) and the parsed investigation synthesis; #629's size bound is the ONLY thing between MAIN-authored content and this LLM sink — chooser = MAIN model, sanitizer = volume-only (the guard is not a content oracle, B1/B2)."
+    - id: ticket_post
+      provenance: code
+      facets:
+        payload:
+          parts:
+            - {role: user, source: "template:case_ticket", slots: {reason: report_md}}
+          invariants: [all-slots-bound]
+          nl: "reason = report body verbatim -> POST /tickets (case_ticket.py:183, flag-f); the D2 body bound caps this HTTP egress in volume only — chooser = MAIN model, sanitizer = volume-only."
+
+    # --- facetless grounded targets (no contract -> quiet) ---
+    - {id: run_dir_other, provenance: design, facets: {}}   # the arbitrary/near-miss run-dir file that misses the key (pa2/pa3 negative controls)
+    - {id: report_html,   provenance: code,   facets: {}}   # renderer output (D5/cc3 render target)
+
+  interacts:
+    # writers -> sinks (grounded; MAIN already writes both files, census-2)
+    - {from: write_file, to: report_md,        mode: write, via: fs, provenance: code, interpolates: [run_dir]}
+    - {from: edit_file,  to: report_md,        mode: write, via: fs, provenance: code, interpolates: [run_dir]}
+    - {from: write_file, to: investigation_md, mode: write, via: fs, provenance: code, interpolates: [run_dir]}
+    - {from: edit_file,  to: investigation_md, mode: write, via: fs, provenance: code, interpolates: [run_dir]}
+    - {from: write_file, to: run_dir_other,    mode: write, via: fs, provenance: code, interpolates: [run_dir]}   # pa3 arbitrary-name fall-through
+
+    # the gate reads the per-artifact contracts (the report.md branch = ADD/design; investigation_size = MODIFY/design)
+    - {from: decide_write, to: artifact_key,            mode: read, via: api, provenance: design}
+    - {from: decide_write, to: report_md,               mode: read, via: fs,  provenance: design}   # inspects proposed_text/name
+    - {from: decide_write, to: investigation_md,        mode: read, via: fs,  provenance: design}
+    - {from: decide_write, to: disposition,             mode: read, via: api, provenance: design}
+    - {from: decide_write, to: report_frontmatter,      mode: read, via: api, provenance: design}
+    - {from: decide_write, to: report_frontmatter_size, mode: read, via: api, provenance: design}
+    - {from: decide_write, to: report_body_size,        mode: read, via: api, provenance: design}
+    - {from: decide_write, to: investigation_size,      mode: read, via: api, provenance: design}   # MODIFY facet
+    - {from: decide_write, to: invlang_validation,      mode: read, via: api, provenance: code}     # existing invlang call, unchanged
+
+    # R6 sinks — report body reaches the judge LLM and the ticket HTTP egress
+    - {from: judge,         to: report_md,        mode: read,   via: fs,   provenance: code}
+    - {from: judge,         to: investigation_md, mode: read,   via: fs,   provenance: code}
+    - {from: judge,         to: judge_llm,        mode: invoke, via: api,  provenance: code, sends: payload, transport: llm}
+    - {from: ticket_bridge, to: report_md,        mode: read,   via: fs,   provenance: code}
+    - {from: ticket_bridge, to: ticket_post,      mode: invoke, via: http, provenance: code, sends: payload, transport: http}
+
+    # other grounded consumers (all fixed-path, census-3/4/5)
+    - {from: renderer,          to: report_md,   mode: read,  via: fs, provenance: code}
+    - {from: renderer,          to: report_html, mode: write, via: fs, provenance: code, interpolates: [run_dir]}
+    - {from: learning_validate, to: report_md,   mode: read,  via: fs, provenance: code}
+    - {from: evals,             to: report_md,   mode: read,  via: fs, provenance: code}
+
+  drives:
+    - {from: run_investigation, to: write_file,   provenance: code, multiplicity: serial}   # MAIN fans write over turns
+    - {from: run_investigation, to: edit_file,    provenance: code, multiplicity: serial}
+    - {from: write_file,        to: decide_write, provenance: code, multiplicity: serial}
+    - {from: edit_file,         to: decide_write, provenance: code, multiplicity: serial}
+    - {from: verify_forward,    to: decide_write, provenance: code, multiplicity: serial}   # third caller, proposed_text="" (F-A2)
+
+# ===========================================================================
+# CLAIMS — every load-bearing statement about existing reality, probed not asserted.
+# Inherited (C1-C7) keep their design-doc ids; C8-C10 raised in 20-demands;
+# census-1..6 the phase-A brief's census probes; P3/P4/fork9/P6 the open probes.
+# ===========================================================================
+claims:
+  # --- inherited from the design doc (via 20-demands.md), re-confirmed at this base ---
+  - {id: C1, kind: behavior, claim: "decide_write does filename-keyed per-artifact validation; report.md alone falls through to Decision(True) at files.py:287.",
+     probe: "PYTHONPATH=. .venv/bin/python -c: permission.decide_write(run_dir/'report.md', 'no fence at all\\n', run_dir=run_dir, defender_dir=dfn_dir, policy=pol) against HEAD (07596adf)", probe_kind: executed, observed: "Decision(allow=True, reason='') for a malformed (no-fence) report.md at HEAD — confirmed the fall-through by execution, not just by reading files.py:213-287", verdict: holds}
+  - {id: C2, kind: census, claim: "both write paths gate the full resulting text as proposed_text; no append mode.",
+     probe: "read tools.py:437-452 (write_file->content) and :496-507 (edit_file->new_text=current.replace(old,new,1)); pyrefly-refs decide_write", probe_kind: search, observed: "write_file passes content, edit_file passes new_text (full resulting doc); both then p.write_text; no append arithmetic", verdict: holds}
+  - {id: C3, kind: census, claim: "the judge and every other consumer open fixed RunPaths paths; nothing globs the run dir to discover artifacts.",
+     probe: "grep glob|iterdir|rglob|listdir over learning/scripts/evals/run_common/runtime (non-test); read each hit", probe_kind: search, observed: "no site enumerates a single run dir for artifacts; the two run_dir.iterdir sites print names only (census-5)", verdict: holds}
+  - {id: C4, kind: census, claim: "one canonical frontmatter parser, key-agnostic; disposition enum enforced by consumers, case_id/confidence by none.",
+     probe: "grep DISPOSITION_ENUM (non-test); read validate.py:43, case_ticket.py:189/193-199, held_out.py:74", probe_kind: search, observed: "enum hard-raised at validate.py:43 + case_ticket.py:189; case_id derived from run dir; confidence untyped (census-6)", verdict: holds}
+  - {id: C5, kind: census, claim: "curators read no report prose — only the closed-enum disposition; the report->judge prose hop is real, report->curator is not.",
+     probe: "00-triage F16/F17 census (carried, not re-derived); census-3 judge inline @judge/run.py:132", probe_kind: search, observed: "judge inlines report.md verbatim; curators consume only disposition", verdict: holds}
+  - {id: C6, kind: behavior, claim: "baseline green on main @07596adf: 113 passed, 11 skipped.",
+     probe: "cd defender && uv run pytest tests/ learning/ -m 'not llm and not live'", probe_kind: executed, observed: "113 passed, 11 skipped", verdict: holds}
+  - {id: C7, kind: referential, claim: "the nearest mirror test is test_replay_error_paths.py::test_invlang_deny_bounces_then_recovers (:125-150).",
+     probe: "read tests/e2e/test_replay_error_paths.py:125-150", probe_kind: read, observed: "an invlang-deny bounce-and-recover e2e; the D4 template", verdict: holds}
+  # --- raised in 20-demands.md (anchor D0/D1/D2/D4) ---
+  - {id: C8, kind: referential, claim: "Decision is @dataclass(frozen=True) with allow: bool and reason: str = '' (permission/decision.py:8-11); reject = Decision(False,<reason>), accept = Decision(True).",
+     probe: "read permission/decision.py", probe_kind: read, observed: "frozen dataclass Decision(allow: bool, reason: str = '') confirmed", verdict: holds}
+  - {id: C9, kind: behavior, claim: "a denied write surfaces to the model as raise ModelRetry(decision.reason), raised identically in _tool_write_file (tools.py:440-441) and _tool_edit_file (tools.py:500-501).",
+     probe: "read tools.py:440-441, :500-501", probe_kind: read, observed: "both callers: if not decision.allow: raise ModelRetry(decision.reason)", verdict: holds}
+  - {id: C10, kind: primitive, claim: "split_frontmatter (_frontmatter.py:25-55) raises FrontmatterError on no-leading-fence/no-closing-fence/invalid-YAML/non-mapping; returns body post-.strip() (line 54) and raw = YAML text between fences (line 46). DISPOSITION_ENUM at learning/core/config.py:308.",
+     probe: "PYTHONPATH=. .venv/bin/python -c: split_frontmatter() executed over all four malformed shapes + a padded-body/raw-text case; DISPOSITION_ENUM imported and printed from learning.core.config", probe_kind: executed, observed: "all four shapes raised FrontmatterError with the documented messages (missing leading fence / missing closing fence / not valid YAML / not a YAML mapping); body post-.strip() == 'padded body text' (padding stripped); raw between-fence == 'disposition: benign' (unstripped-of-body span); DISPOSITION_ENUM == {'benign','malicious','inconclusive'}", verdict: holds}
+  # --- the phase-A brief's census probes (10-brief.md, claims: 6) ---
+  - {id: census-1, kind: census, claim: "decide_write has exactly THREE non-test production callers (write_file, edit_file, verify_forward) + one re-export; only the first two route report/investigation content, verify_forward passes proposed_text=''.",
+     probe: "pyrefly-refs files.py:213 decide_write (resolved) -> 57 refs in 9 files", probe_kind: search, observed: "3 production callers + __init__.py re-export; verify_forward gates a lesson path as pure containment (the floor line, classified)", verdict: holds}
+  - {id: census-2, kind: census, claim: "the SOLE production writer of both report.md and investigation.md is MAIN, via write_file/edit_file into the run-dir subtree.",
+     probe: "grep report.md|investigation.md|.report|.investigation (non-test); cross-read driver.py write allowlist", probe_kind: search, observed: "only MAIN writes both; CURATOR/LEAD_AUTHOR write own corpora, GATHER writes nothing", verdict: holds}
+  - {id: census-3, kind: census, claim: "report.md has SIX fixed-path consumers (validate, evals, trace_lesson, judge-verbatim, ticket-bridge, HTML); none globs.",
+     probe: "grep report.md|RunPaths(...).report (non-test); read each call site", probe_kind: search, observed: "six consumers, every one opening RunPaths(run_dir).report; judge inlines verbatim, ticket bridge sets reason=body", verdict: holds}
+  - {id: census-4, kind: census, claim: "investigation.md's consumers are all fixed-path (judge DERIVED via parser, verify_forward, subagents, lead_repository, run_common, HTML, compaction).",
+     probe: "grep investigation.md|.investigation|parse_investigation_companion (non-test)", probe_kind: search, observed: "all open fixed RunPaths(run_dir).investigation; corpus.py rglob runs over an explicit offline corpus root, not a run dir", verdict: holds}
+  - {id: census-5, kind: census, claim: "NO consumer enumerates a single run dir to discover artifacts — a filename-keyed write gate is a complete gate over everything any consumer reads.",
+     probe: "grep glob|iterdir|rglob|listdir over the consumer roots (non-test); read each hit", probe_kind: search, observed: "enumeration hits are over other roots; the two run_dir.iterdir sites print entry.name only", verdict: holds}
+  - {id: census-6, kind: census, claim: "DISPOSITION_ENUM = {benign,inconclusive,malicious} (config.py:308, case_ticket.py:36); enforced HARD at validate.py:43 + case_ticket.py:189, SOFT at held_out.py:74 + case_ticket.py:346; case_id/confidence enforced by none.",
+     probe: "grep DISPOSITION_ENUM (non-test defender/); read each enforcement site", probe_kind: search, observed: "confirmed; case_id derived from run dir (case_ticket.py:193-199), confidence a bare string everywhere", verdict: holds}
+  # --- open probes (45/40 obligations that remain open; re-ground / defer targets) ---
+  - {id: P4, kind: census, claim: "no write path other than write_file/edit_file streams a report.md/investigation.md write past decide_write (ii3's no-bypass premise); duplicates census-1/census-2's completeness sweep, closed independently here.",
+     probe: "phase-F RE-PROBED (was unprobed; retyped reachability->census, matching what was actually run — a completeness sweep, not a break-attempt): grep -rl 'report.md|investigation.md' over the non-test tree, then grep each hit for write_text/.open(...'w')/.write( — 31 files matched the first sweep, 8 had a write call; none targets report.md/investigation.md (they write git_log.txt, source_refs.yaml, actor_story/telemetry/judge yaml, ticket_write.json, transcript/runtime.html, etc.). runtime/compaction.py (flagged in 30-premises-author.md as reconstructing investigation.md in-process) has ZERO write calls, confirmed. The one report.md write_text hit outside tools.py is learning/test_loop.py's own test fixture helper (_make_run_dir), not production code.", probe_kind: search, observed: "no second production write path found — corroborates census-1 (3 non-test decide_write callers, only write_file/edit_file route content) and census-2 (MAIN is the sole production writer of both artifacts).", verdict: holds}
+  - {id: P3, kind: behavior, claim: "single-shot and incremental writes reaching the same final text yield the identical Decision (write history not observable to decide_write).",
+     probe: "phase-F EXECUTED (was unprobed): PYTHONPATH=. .venv/bin/python -c: decide_write(run/'investigation.md', text, ...) called cold (single-shot), then again after a PRIOR decide_write call on different content (incremental) reaches the same final text; compare the two Decision objects for full equality (not just .allow). Also discharged functionally by lc4 (test_investigation_reaches_bound_single_shot_vs_incremental), executed as part of the suite.", probe_kind: executed, observed: "Decision(allow=True, reason='') both times; single_shot == incremental (full dataclass equality) — decide_write carries no history-dependent state.", verdict: holds}
+  - {id: fork9-invlang-empty, kind: primitive, claim: "validate_companion ACCEPTS empty/whitespace-only investigation.md text (returns []), so the empty case COMMITS (0 B <= bound AND invlang []), not denies.",
+     probe: "cd defender && uv run python -c 'from defender.skills.invlang.validate import validate_companion; assert validate_companion(chr(32)*3+chr(10), None) == [] == validate_companion(\"\", None)'", probe_kind: executed, observed: "RE-GROUNDED (phase E): validate_companion('', None) == [] and whitespace-only == [] (validate.py:552-586). The two answerers who guessed REJECT were WRONG; empty ACCEPTS. Discharged by fork9 (test_investigation_empty_or_whitespace_commits).", verdict: holds}
+  - {id: P6, kind: primitive, claim: "what `current` resolves to when edit_file targets investigation.md before any write_file has created it (whether decide_write is reached at all).",
+     probe: "read tools.py:496 + drive edit_file-before-write_file at runtime", probe_kind: unprobed, observed: "deferred — a drop's probe obligation; three non-convergent candidates including a short-circuit-before-decide_write branch; settles at implementation time", verdict: deferred}
+
+# ===========================================================================
+# GATE (gate leaf, phase D step 6). `spec-graph gate --residue` computed 45 R4
+# firings over the six domain boundaries (report_frontmatter, disposition,
+# artifact_key, report_frontmatter_size, report_body_size, investigation_size);
+# 19 are already answered by an existing demand's exact `binds:` (no entry
+# needed below — recorded for the record in 60-residue.md's Pre-discharged
+# section instead); 2 are judgment pre-discharges (not literally cell-bound,
+# but an existing demand's scenario already exercises the member); 4 are
+# genuine gaps minted as obligations; 23 are fork/unknown-owned design holes
+# (18 of them ALSO an R0 finding — `documented_alternatives[...].crosses_validation:
+# unknown` with no recorded hole — so those 18 carry two entries below, one per
+# rule, over the same element). R1/R2/R3 do not fire (see evaluated notes).
+# `spec-graph gate` (bare) is clean after this block — verified below.
+# ===========================================================================
+gate:
+  evaluated:
+    - {rule: R0, fired: true}
+      # Formal half fired 18x (report_frontmatter/artifact_key/disposition/*_size
+      # `documented_alternatives[].crosses_validation: unknown` with no recorded
+      # hole) — all 18 now answered by the R0-tagged hole entries below.
+      # Judgment half (bidirectional prose reconciliation) run by hand against
+      # 05-design-doc.md's "Intent"/"Demands"/"Scope boundaries" sections:
+      # every normative sentence binds >=1 element (D1 frontmatter grammar ->
+      # report_frontmatter+disposition; D2 size bounds -> report_frontmatter_size
+      # /report_body_size; D3 -> investigation_size; D4 -> D0/D4/C9's ModelRetry
+      # chain; D5 -> D5/lc6 incl. the renderer edge; "gate at the write boundary
+      # only... covers judge + ticket-bridge egress" -> the R6 sink walk, cc1-cc6;
+      # "report.md stays a rendered frontmatter+prose file... six consumers" ->
+      # census-3/ct1; "no new required frontmatter keys beyond disposition" ->
+      # D1b/fb7/cc2). No extraction gap found. Reverse direction: every
+      # design-provenance structure element (artifact_key, disposition,
+      # report_frontmatter, report_frontmatter_size, report_body_size,
+      # investigation_size) traces to one of the sentences above — no invented
+      # scope. "No lead-ref/query-ref typing" (R-a) is explicitly non-observable
+      # in the doc itself, correctly generating no element.
+    - {rule: R1, fired: false}
+      # No `sends` edge is delta-scoped: judge->judge_llm and ticket_bridge->
+      # ticket_post both carry `sends: payload`, but the edges, both boundaries,
+      # and both actors are `provenance: code` (the grounded neighborhood #629
+      # attaches to, not the design delta) — R1's trigger requires the sending
+      # edge/its endpoints to be in the delta, and none is. The report-body
+      # payload reaching these pre-existing sinks is R6's walk, not R1's.
+    - {rule: R2, fired: false}
+      # report_md and investigation_md each have 2 writers (write_file, edit_file)
+      # — R2's raw writer-count predicate is satisfied — but the boundary, both
+      # writer edges, and every `drives` edge into either writer are ALL
+      # `provenance: code`: #629 adds no new writer and no new drives edge to
+      # either sink (it only adds a read-side CONTRACT decide_write enforces,
+      # modelled as decide_write's read edges to the *_size/frontmatter/
+      # disposition/artifact_key boundaries, which are not identity-faceted).
+      # Not delta-scoped; R2 does not fire.
+    - {rule: R3, fired: false}
+      # No boundary in this graph declares an `access` facet
+      # (`constraints_by_via`) — R3's trigger (>=2 vias reaching one access
+      # boundary) has no candidate.
+    - {rule: R4, fired: true}
+      # 45 firings; routed below (obligations/holes/pre_discharged) and in
+      # 60-residue.md.
+    - {rule: R5, fired: false, cites: [census-1]}
+      # Judgment extension considered (rules.md: "when the delta tightens a
+      # constraint... rather than removing anything"). The report.md branch
+      # REPLACES the unconditional `Decision(True)` fall-through (files.py:287)
+      # with a validated branch — a tightening, not a formal `mode: remove`
+      # edge (none exists in `structure.interacts`), so the slot-computed half
+      # correctly does not fire. Judgment question: is a security-critical
+      # caller left CONSTRUCTIBLE in a newly-unsafe state, or does the
+      # tightening silently orphan a workflow a live in-edge depended on?
+      # census-1 enumerates decide_write's COMPLETE live-caller set (3
+      # production callers — write_file, edit_file, verify_forward; 57 refs,
+      # 9 files) — nothing outside that set can reach the tightened branch, so
+      # there is no unenumerated caller to check. Of the three: write_file/
+      # edit_file are covered by D5/lc6 (legit runs still commit) and D6/wm1-5
+      # (no-bypass parity, both paths gated identically) — no orphaned
+      # workflow. verify_forward's own allow-><the new branch> exposure (a
+      # lesson literally named report.md, proposed_text="") is a REAL
+      # tightening-side-effect (F-A2) but it is already routed as a design
+      # hole (artifact_key.documented_alternatives[name-plus-run_dir-
+      # membership] + the modelled verify_forward->decide_write drive edge) —
+      # not a silently-missed orphan. No additional safe-by-construction
+      # demand is needed beyond D1-D6 + the F-A2 hole.
+    - {rule: R6, fired: true}
+      # The rendered-sink trust walk over judge/run.py's prompt build
+      # (build_judge_invocation, ~:132-140) and case_ticket.py's ticket
+      # payload (read_case_record/alert_to_open_payload, ~:183). Both sinks
+      # ingest the report.md content chosen by the MAIN model (attacker/
+      # model-influenced chooser); D2's size bound is the only sanitizer
+      # (volume, not content) — cc1-cc6 already mint the acknowledged-residual
+      # obligations (entropy/opacity, extraneous keys, confidence-field HTML
+      # injection, cross-artifact volume independence). This walk's ADDITIONAL
+      # finding, not previously modelled: `_section()` (learning/pipeline/
+      # _prompt.py) builds the judge's `<report>...</report>` block by raw
+      # string concatenation with NO escaping of `<`, `>`, or the literal
+      # sequence `</report>` — the FRAME (tag name "report") is a safe
+      # constant, but the PAYLOAD is spliced in unescaped. A report body
+      # containing `</report>\n<coverage_manifest>FORGED...` can close the
+      # tag early and forge an adjacent prompt section (e.g. counterfeiting
+      # the "authoritative... ground truth for coverage" manifest the judge
+      # is told to trust) — a distinct escape mechanism from cc1 (entropy/
+      # opacity, doesn't test structural breakout) or cc2 (extraneous
+      # frontmatter key, not a delimiter break). Minted as a new obligation
+      # below. The ticket sink (case_ticket.py) is NOT similarly exposed:
+      # `reason=body` lands as a plain JSON dict value (`alert_to_open_payload`
+      # / `CaseRecord`), not spliced into a delimited template string — no
+      # comparable frame-breakout surface there.
+      # F-A1 (report_body_size.documented_alternatives[whole-file-read_text-
+      # carrier]) is this walk's other live finding: judge/run.py inlines
+      # `report.read_text()` — the WHOLE on-disk file, frontmatter fences
+      # included — not the D2-bounded stripped body; already routed as an
+      # R0+R4 design hole below (SECURITY), reiterated here as R6-critical
+      # per the charge.
+  obligations:
+    - {rule: R4, element: "disposition.domain.distinguished[benign]", discharged_by: fb12,
+       witness: "no demand exercised a report.md whose disposition is exactly `benign`; only the invalid members (absent via fb5, outside-enum via fb6) were pinned — the valid-member accept path per distinguished value was untested. Minted fb12."}
+    - {rule: R4, element: "disposition.domain.distinguished[inconclusive]", discharged_by: fb13,
+       witness: "same gap as `benign` — D1's seed states presence+enum-membership generically but no demand bound this exact distinguished member. Minted fb13."}
+    - {rule: R4, element: "disposition.domain.distinguished[malicious]", discharged_by: fb14,
+       witness: "same gap as `benign`/`inconclusive` — lc6/D5's golden run asserts 'the SAME disposition as baseline' generically, not this literal value as its own pinned case. Minted fb14."}
+    - {rule: R6, element: "interacts(judge->judge_llm).payload", discharged_by: cc7,
+       witness: "judge/run.py's `_section(\"report\", report.read_text(...))` (learning/pipeline/_prompt.py) splices the report body raw into a `<report>...</report>` block with no escaping of `<`/`>`/the literal `</report>` sequence; chooser = MAIN model, sanitizer = none for tag-delimiter sequences — a body containing `</report>\n<coverage_manifest>` can forge an adjacent judge-prompt section. RESOLVED §7: the write guard DENIES the delimiter sequence (fail-closed). Minted cc7 (kind:negative, positive control = a body without the sequence commits)."}
+    # --- §7-RESOLVED (phase E): every former hole below is now discharged by a minted
+    #     demand pinning the §7 horn. The R0 half no longer fires (crosses_validation set
+    #     true/false in `structure`); the R4/distinguished half is discharged by a real test. ---
+    - {rule: R4, element: "artifact_key.domain.distinguished[case-variant]", discharged_by: ak1,
+       witness: "§7 Fork 6a -> EXACT-MATCH name: a case-variant filename misses the branch. Minted ak1 (test_report_case_variant_not_gated) for report.md; ak5 (test_investigation_case_variant_not_gated) for the investigation.md half of the same shared rule."}
+    - {rule: R4, element: "artifact_key.domain.distinguished[case-variant]", discharged_by: ak5,
+       witness: "§7 Fork 6a (investigation half) -> the shared distinguished member is pinned for BOTH artifacts: ak5 (test_investigation_case_variant_not_gated) mirrors ak1 for investigation.md, over-bound carrier."}
+    - {rule: R4, element: "artifact_key.domain.distinguished[subdir]", discharged_by: ak2,
+       witness: "§7 Fork 6b -> RUN-DIR ROOT only: a subdir report.md misses the branch. Minted ak2 (test_report_md_in_subdir_not_gated) for report.md; ak6 (test_investigation_md_in_subdir_not_gated) for the investigation.md half."}
+    - {rule: R4, element: "artifact_key.domain.distinguished[subdir]", discharged_by: ak6,
+       witness: "§7 Fork 6b (investigation half) -> ak6 (test_investigation_md_in_subdir_not_gated) mirrors ak2 for `<run_dir>/sub/investigation.md`."}
+    - {rule: R4, element: "artifact_key.domain.distinguished[symlink]", discharged_by: ak3,
+       witness: "§7 Fork 6c -> RESOLVE symlinks: keying on the resolved path closes the disguise bypass. Minted ak3 (test_symlink_operand_resolves_before_keying) for report.md; ak7 (test_investigation_symlink_operand_resolves_before_keying) for the investigation.md half — the leg that fails if the investigation branch is left name-only (files.py:269)."}
+    - {rule: R4, element: "artifact_key.domain.distinguished[symlink]", discharged_by: ak7,
+       witness: "§7 Fork 6c (investigation half, critical) -> ak7 (test_investigation_symlink_operand_resolves_before_keying) mirrors ak3: a decoy symlinked INTO investigation.md is gated, an investigation.md symlinked ELSEWHERE is not. Closes the symlink-disguise size bypass for investigation.md."}
+    - {rule: R4, element: "artifact_key.domain.alternatives[name-plus-run_dir-membership]", discharged_by: ak4,
+       witness: "§7 F-A2 -> ADOPTED (run-dir-membership keying): a verify_forward lesson operand named report.md is not gated. Minted ak4 (test_forward_check_lesson_named_report_md_not_gated)."}
+    - {rule: R4, element: "artifact_key.domain.alternatives[resolved-path-basename]", discharged_by: ak3,
+       witness: "§7 Fork 6c -> ADOPTED (resolve symlinks before keying). Discharged by ak3."}
+    - {rule: R4, element: "artifact_key.domain.alternatives[name-only-key]", discharged_by: ak2,
+       witness: "§7 -> REJECTED (the F-A2 regression horn); ak1/ak2/ak4 prove the branch is scoped to the resolved run-dir-root key, not the bare name."}
+    - {rule: R4, element: "disposition.domain.alternatives[exact-lowercase-match]", discharged_by: dn1,
+       witness: "§7 Fork 7 -> ADOPTED (exact-lowercase). Minted dn1 (test_report_disposition_case_variant_denied); also fb6."}
+    - {rule: R4, element: "disposition.domain.alternatives[case-or-whitespace-normalized]", discharged_by: dn2,
+       witness: "§7 Fork 7a/7b -> REJECTED (no normalization); dn1/dn2 pin case + whitespace variants as not-in-enum -> deny."}
+    - {rule: R4, element: "disposition.domain.alternatives[non-string-value-handling]", discharged_by: dn3,
+       witness: "§7 Fork 7c -> ADOPTED (non-string -> not-in-enum -> clean deny). Minted dn3 (test_report_disposition_non_string_denied)."}
+    - {rule: R4, element: "disposition.domain.alternatives[duplicate-key-resolution]", discharged_by: dn4,
+       witness: "§7 Fork 7d -> ADOPTED (duplicate key -> not-in-enum -> deny). Minted dn4 (test_report_disposition_duplicate_key_denied)."}
+    - {rule: R4, element: "report_frontmatter.domain.alternatives[top-level-disposition-lookup]", discharged_by: fk11,
+       witness: "§7 Fork 11 -> ADOPTED (top-level-key lookup). Minted fk11 (test_report_disposition_nested_not_found_denied)."}
+    - {rule: R4, element: "report_frontmatter.domain.alternatives[nested-disposition-traversal]", discharged_by: fk11,
+       witness: "§7 Fork 11 -> REJECTED (no deeper traversal); fk11 pins a nested value as 'missing' -> deny."}
+    - {rule: R4, element: "report_frontmatter_size.domain.distinguished[at-bound]", discharged_by: sz1,
+       witness: "§7 F1+F2 -> raw-between-fences UTF-8 bytes fixes the 512 B boundary; sz1's fixture builds raw exactly at/over the bound."}
+    - {rule: R4, element: "report_frontmatter_size.domain.alternatives[utf-8-bytes-of-raw-between-fences]", discharged_by: sz1,
+       witness: "§7 F1+F2 -> ADOPTED (bytes of raw between-fences). Discharged by sz1; fork12 confirms alias expansion is invisible under it."}
+    - {rule: R4, element: "report_frontmatter_size.domain.alternatives[re-serialized-mapping-span]", discharged_by: fork12,
+       witness: "§7 F2/Fork 12 -> REJECTED (the alias-bomb carrier). Minted fork12 (test_report_frontmatter_yaml_alias_amplification_under_byte_bound) pins raw <=512 B commits though re-serialized >512 B."}
+    - {rule: R4, element: "report_frontmatter_size.domain.alternatives[len-codepoints-of-raw]", discharged_by: sz1,
+       witness: "§7 F1 -> REJECTED (codepoints, not bytes). phase-F STRENGTHENED sz1 with a 4-byte-codepoint raw span over the BYTE bound but under the CODEPOINT bound -> deny (a len(str) impl over the raw span would wrongly accept)."}
+    - {rule: R4, element: "report_frontmatter_size.domain.alternatives[full-fenced-block-span]", discharged_by: sz1,
+       witness: "§7 F2 -> REJECTED (raw between-fences only, not the fence-inclusive block). phase-F STRENGTHENED sz1: the at-bound raw span (512 B) wrapped with its two `---` fence lines is 521 B -- a full-block basis would have wrongly denied where the real raw-only basis correctly accepts."}
+    - {rule: R4, element: "report_body_size.domain.distinguished[at-bound]", discharged_by: fa1,
+       witness: "§7 F-A1 -> whole-file UTF-8 bytes fixes the 8,192 B boundary; D2/fa1 build the whole file at/over the bound."}
+    - {rule: R4, element: "report_body_size.domain.alternatives[whole-file-read_text-carrier]", discharged_by: fa1,
+       witness: "§7 F-A1 SECURITY -> ADOPTED (whole on-disk file, closes the whitespace-padding carrier). Minted fa1 (test_report_body_bound_measures_whole_file)."}
+    - {rule: R4, element: "report_body_size.domain.alternatives[stripped-body-utf-8-bytes]", discharged_by: fa1,
+       witness: "§7 F-A1 -> REJECTED (stripped body, not the whole file). fa1's fixture keeps the stripped body tiny (under bound on ANY stripped-body basis, bytes or codepoints) while the whole file is over -> a stripped-body-bytes impl would have wrongly accepted where the real whole-file basis correctly denies."}
+    - {rule: R4, element: "report_body_size.domain.alternatives[stripped-body-len-codepoints]", discharged_by: fa1,
+       witness: "§7 F-A1+F1 -> REJECTED (stripped body AND codepoints, doubly rejected). Same fa1 fixture discriminates this alternative too -- the padding is pure ASCII, so bytes and codepoints agree on the stripped span's tiny size."}
+    - {rule: R4, element: "investigation_size.domain.alternatives[utf-8-bytes]", discharged_by: fa3,
+       witness: "§7 F1 -> ADOPTED (UTF-8 bytes). Discharged by D3/fa3; fa3 also pins F-A3 size-first ordering."}
+    - {rule: R4, element: "investigation_size.domain.alternatives[len-proposed_text-codepoints]", discharged_by: D3,
+       witness: "§7 F1 -> REJECTED (codepoints, not bytes). D3's multibyte leg (a 4-byte codepoint investigation total over the BYTE bound, under the CODEPOINT bound) denies -- a len(str) impl would wrongly accept it."}
+  holes: []      # §7-resolved (phase E): every phase-D hole is now discharged above / recorded in handoff.forks as RESOLVED. No open design hole remains for this graph.
+  pre_discharged:
+    - {rule: R4, element: "artifact_key.domain.distinguished[investigation.md]", by: D3, cites: [C1]}
+      # not literally cell-bound (D3 binds the `investigation_md`/`investigation_size`
+      # roots), but D3 (+lc1-lc4) construct every fixture from a file literally named
+      # investigation.md — the member is exercised by construction on every run of
+      # those tests. C1 establishes decide_write's filename-keyed structure that makes
+      # "investigation.md" the distinguishing value in the first place.
+    - {rule: R4, element: "report_frontmatter.domain.distinguished[valid-mapping]", by: pa1, cites: [C10]}
+      # not literally cell-bound (pa1 binds report_md/artifact_key/decide_write), but
+      # pa1 is explicitly the positive control ("content independently satisfies
+      # D1+D2") — its fixture IS a valid-mapping frontmatter. C10 establishes what
+      # "valid mapping" means (split_frontmatter's success path, the complement of
+      # its four failure modes fb1-fb4 pin).
+    # The other 17 of 19 covered R4 firings need no entry here — an existing demand's
+    # `binds:` already names the exact address (pa1/pa2/pa3, fb1-fb6/fb8/fb9/fb11,
+    # sz1, wm1, fb10, lc1, lc3 — full list + citations in 60-residue.md's
+    # Pre-discharged section, for the record).
+
+# ===========================================================================
+# check_actors flags two re-exec/tree-relocating drivers reaching the shared
+# runtime. Waived as out-of-scope for #629's path.name-keyed report/investigation
+# gate (559 precedent), which is driven through the already-modelled
+# run_investigation -> write_file/edit_file -> decide_write path.
+# ===========================================================================
+actor_waivers:
+  replay_actor: >-
+    defender/learning/ops/replay_actor.py re-execs and relocates the tree anchor, re-executing
+    `run` (== run_investigation). It reaches #629's changed code ONLY through the run_investigation
+    -> write_file/edit_file -> decide_write path already modelled here (run_dir is threaded into
+    decide_write as a kwarg, so a relocated run_dir still yields run_dir/report.md); it introduces
+    no new edge to the report.md/investigation.md gate the modelled writers do not already carry.
+    The tree-relocation concern (does the branch anchor on the THREADED run_dir vs an import-time
+    constant, 575's h4 shape) is the run_dir-membership question routed as F-A2/Fork 6 — RESOLVED
+    by §7 (70-resolutions.md) to exact-name + run-dir-ROOT membership + resolve-symlinks (see
+    ak2/ak3/ak4); the waiver's conclusion is unaffected by which horn F-A2/Fork 6 settled on,
+    since replay_actor's relocated run_dir still threads through decide_write the same way either
+    way. Out of scope for this graph's own demands.
+  harness_lead: >-
+    defender/evals/harness_lead.py re-execs and relocates the tree anchor, driving lead_author
+    (learning/leads/) — a different writer stage that writes defender/skills/**.md, NOT
+    report.md/investigation.md. It never reaches the path.name-keyed #629 branch. Out of scope.
+
+# ===========================================================================
+# HANDOFF (stub — the gate leaf fills gate:, then completes this block).
+# The 28 human-routed premises (23 forks + 5 silent branches, grouped into 12
+# relay entries in 45-dispositions.md) are recorded here as OPEN and as `unknown`
+# invariants in the structure above; the gate leaf routes them to gate.holes/§7.
+# ===========================================================================
+handoff:
+  forks:      # ALL RESOLVED by §7 (70-resolutions.md); each now discharged by an authored test.
+    - "RESOLVED F1 -> UTF-8 BYTES for all three bounds. Discharged: D2/D3 (byte-basis + multibyte legs), fork10 (density rides F1)."
+    - "RESOLVED F2 -> RAW between-fence text (bytes). Discharged: sz1, fork12 (alias amplification invisible under raw)."
+    - "RESOLVED F-A1 -> WHOLE on-disk file bytes (not stripped body). Discharged: fa1 (whitespace-padding carrier closed), D2."
+    - "RESOLVED F-A2 -> exact-name + run-dir-ROOT + resolve-symlinks keying; a lesson operand named report.md is NOT gated. Discharged: ak4 (+ ak1/ak2/ak3)."
+    - "RESOLVED F-A3 -> SIZE-FIRST short-circuit before invlang; the single reason names the size failure. Discharged: fa3."
+    - "RESOLVED Fork 6 -> exact-match name / run-dir-root dir-scope / resolved-path symlink. Discharged: ak1 (case), ak2 (subdir), ak3 (symlink)."
+    - "RESOLVED Fork 7 -> exact-lowercase; non-string/duplicate/case/whitespace -> not-in-enum -> clean deny. Discharged: dn1 (case), dn2 (whitespace), dn3 (non-string), dn4 (duplicate)."
+    - "RESOLVED Fork 8 (lifecycle policy) -> NO decide_write-level mitigation (mid-run exhaustion out of scope; grandfathered files ungated until next touched; no single-write enforcement). No net-new mechanism; the stateless-per-call reading is pinned by ap1 (each denied probe its own Decision) + lc3 (grandfathered over-bound file editable down)."
+    - "RESOLVED Fork 9 (re-ground) -> empty/whitespace investigation ACCEPTS (validate_companion == [], probed; claim fork9-invlang-empty re-grounded to holds). Discharged: fork9."
+    - "RESOLVED Fork 10 -> byte-basis density is a residual the volume-only guard does not close; under-bound commits, over-bound denies. Discharged: fork10."
+    - "RESOLVED Fork 11 -> TOP-LEVEL key lookup; a nested disposition is 'missing' -> deny. Discharged: fk11."
+    - "RESOLVED Fork 12 -> RAW span (rides F2); raw <=512 B commits though re-serialized >512 B (the re-serialized-span alias-bomb horn REJECTED). Discharged: fork12."
+  refuted: []      # nothing refuted — the design stands (20-demands: "nothing refuted, design stands")
+  deferred:
+    - "P6 (edit_file-before-write_file `current` resolution) — a probe obligation that settles at implementation time; transfers to write-code-from-spec."
+    - "The F1/F2/F-A1 measurement-basis decisions transfer to §7 first, then to write-code-from-spec as the fixtures' basis."
+  drops:
+    - "test_deny_reason_discloses_exact_boundary_arithmetic — unwritten-demand/design territory (does the deny reason disclose exact measured size); only the settled non-empty-reason sub-fact (D4) survives, already exercised by every deny-path demand. No standalone assertion."
+    - "test_edit_file_first_write_before_any_write_file — pure code-investigation probe (P6, deferred above); three non-convergent candidates including a short-circuit-before-decide_write branch. Carried as a probe obligation, not a suite assertion."
+  nullstub_passes:
+    - "test_absent_report_still_reaches_the_tolerant_consumer_fallbacks — reuse. `spec-graph nullstub` could not run (defender.runtime.permission is a regular __init__.py package, so the PYTHONPATH-prepend stub cannot shadow its files.py submodule — the tool self-detects this and exits 2, 'stub was shadowed by real code'); phase-F reproduced the check by hand (the exact `_Null` class from check_stub.py, decide_write monkeypatched to a single `_Null()` instance, every other test/fixture real) over all 51 unit tests: 50/51 discriminate on their own AssertionError, exactly this one (ct1) passes. Legitimate: ct1 asserts the READ-side consumer contracts when report.md is NEVER WRITTEN (a scope/survival demand, Scope R-c) — it calls `parse_frontmatter_or_none`/`predicted_disposition`/`normalize_disposition`/`read_case_record`, none of which touch decide_write, so nulling the target cannot affect it by construction. Not strengthened further: forcing it to touch decide_write would dilute the demand it pins (the read-side is UNCHANGED by #629)."
+  deviations:
+    - "PHASE E (author leaf, #629): authored 63 tests across tests/test_permission_report_629.py (50 unit, driving the REAL decide_write) + tests/e2e/test_report_gate_629.py (13, driving the real _tool_write_file/_tool_edit_file via `bind` and the replay driver via `drive`). RED-against-HEAD: 34 unit tests fail (guard absent — files.py:287 falls through to Decision(True), investigation.md has no size bound), 16 pass (positive-only). The e2e file requires the pydantic_ai extra (CI) and skips in a bare env. cc7 REFRAMED from the gate leaf's acknowledged-residual/Decision(True) seed to the §7 DENY resolution (kind:behavior -> kind:negative, discharged_by renamed to test_report_body_containing_closing_report_sequence_denied). 14 §7-resolved forks MINTED as demands (section J: ak1-4, dn1-4, fk11, fa1, fa3, fork9, fork10, fork12), each pinning one 70-resolutions horn that was a phase-D `unknown` invariant / gate.hole. All documented_alternatives crosses_validation set true(adopted)/false(rejected); every gate.hole discharged (holes: []). fork9-invlang-empty re-grounded (unprobed -> holds: empty ACCEPTS). No refuted ledger claim weakened."
+    - "assembler leaf: gate: block intentionally omitted (the gate leaf's to compute via `spec-graph gate`)."
+    - "`decide_write` reconciled from the charge's 'central boundary' to a leg-ACTOR (575 decide_bash precedent): only an actor bears the out-edges reading the per-artifact contract boundaries; typed facets cannot hold two artifacts' contracts on one boundary."
+    - "Forks recorded as `unknown` invariants (documented_alternatives crosses_validation:unknown) so `spec-graph gate` fires R0/R4 mechanically; the gate leaf routes each to gate.holes/§7."
+    - "form:test demands are pointers (discharged_by, no inline outcome) per the landed `spec-graph lint` pointer discipline — a change from the 559/575 priors, which predate the linter and note it 'not yet landed'. The observable prose lives in each named test's docstring; the seed is the `# seed:` comment (full assertion in 45-dispositions.md, keyed by test name)."
+    - "check_binds reports 50 prose-orphans (every discharged_by names a test not yet in tests/; 46 assembler-authored + 4 gate-minted) — this is the EXPECTED phase-D state: the pointers are resolved when phase E authors the tests; test-existence is the phase-F check (rules.md, Demand.discharged_by row). All binds STRUCTURE addresses resolve (0 unexercised seams). check_actors' two re-exec drivers are waived above."
+    - "gate leaf (phase D step 6): `spec-graph gate --residue` computed 45 R4 firings over the six domain boundaries. 19 already answered by an existing demand's exact `binds:` (no gate.pre_discharged entry needed — recorded in 60-residue.md for the record); 2 credited as judgment pre-discharges (gate.pre_discharged, cited: C1/C10 — the covering demand's fixture exercises the member without a literal cell-bind); 4 were genuine gaps with no fork/unknown owning them (disposition's 3 valid distinguished members + one R6 finding, below) — minted as new demands fb12-fb14/cc7 rather than left as bare obligations, because `spec-graph lint` requires `gate.obligations[].discharged_by` to name a real demand (a bare entry 'is a silencer, not a discharge'). The remaining 23 (18 also R0 findings, dual-tagged) are fork/unknown-owned design holes, routed to §7 without resolution (see `gate.holes` and `handoff.forks`)."
+    - "R6 trust walk (judgment half, no mechanical trigger for R6 exists in `spec-graph gate`) surfaced ONE finding beyond the already-modelled cc1-cc6: judge/run.py's `_section()` (learning/pipeline/_prompt.py) splices the report body into a `<report>...</report>` block with no escaping of the literal `</report>` sequence — a tag-delimiter breakout the size bound (volume-only) does not close. Minted as cc7, an acknowledged-residual demand alongside cc1/cc2/cc6 (same B1/B2 rationale: content validation is out of scope by design)."
+    - "R5's judgment extension (delta tightens the report.md fall-through rather than removing anything) was run against census-1's complete live-caller enumeration; no orphaned in-edge or newly-unsafe-constructible caller found beyond what F-A2 (already a routed hole) names. No new safe-by-construction demand minted."
+    - "OUT OF SCOPE for the phase-D gate pass, left untouched there: `spec-graph claims` flagged C1/C9/C10 (kind: behavior|primitive, probe_kind: read) as an instrument mismatch — those claims read code structure rather than executing it, inherited verbatim from 20-demands.md/05-design-doc.md. PHASE-F (mechanical-gate leaf) RE-PROBED two of the three by execution: C1 (decide_write's report.md fall-through, executed against a malformed report.md at HEAD) and C10 (split_frontmatter's four failure modes + body/raw spans + DISPOSITION_ENUM, executed) now both close on `probe_kind: executed`. C9 (ModelRetry raised identically in _tool_write_file/_tool_edit_file) remains `probe_kind: read` — re-probing it by execution requires importing `defender.runtime.tools`, which needs the CI-only `pydantic_ai` extra unavailable in this bare env (confirmed: even a minimal stub for `pydantic_ai.RunContext`/`ModelRetry` is insufficient — `tools.py` transitively imports `tools_gather.py`, which needs `pydantic_ai.usage.UsageLimits` and `pydantic_ai.capabilities.abstract.AbstractCapability`). C9 is functionally covered by the 13 e2e tests in tests/e2e/test_report_gate_629.py (which DO execute this exact path in CI); recommend re-probing C9 there before merge. Routed to §7 as a residual (blind-reader/toolchain finding), not silently re-typed."
