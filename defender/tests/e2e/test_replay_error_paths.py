@@ -34,11 +34,6 @@ from defender.skills.invlang.validate import validate_companion
 pytestmark = pytest.mark.e2e
 
 
-# The failing-registry seam (#611). It replaces the harness's old
-# `FailingAdapterSubprocess` — a stub of `record_query`'s `subprocess` MODULE, which a verb
-# registry does not have. A fake verb injects the fault and nothing else: the exit code (2),
-# the error class (infra) and the breaker outcome are all production code's work, which is
-# what makes the assertions below assertions about the breaker rather than about the fake.
 def _down(*systems: str) -> FakeVerbs:
     def probe(ctx, *, q: str = "probe") -> list[dict]:
         raise TransportFault("connection refused")
@@ -61,12 +56,9 @@ def test_request_limit_writes_partial_trace(tmp_path):
     model = NeverEndsModel(run_dir)
     result = drive(run_dir, run_id=run_id, salt=salt, main=model)
 
-    # The loop ran EXACTLY to the request limit (the (limit+1)th request is the
-    # one refused), then the driver caught the overflow and returned cleanly.
     assert model.calls == driver.DEFAULT_REQUEST_LIMIT
     assert result["output"] is None
     assert result["requests"] == driver.DEFAULT_REQUEST_LIMIT
-    # Partial trace + live request log written despite the run never ending.
     assert (run_dir / "tool_trace.jsonl").is_file()
     assert (run_dir / "llm_requests.jsonl").is_file()
 
@@ -93,32 +85,21 @@ def test_circuit_breaker_kill_switch_aborts_run(tmp_path):
             "goal": "probe every source", "what_to_summarize": ["x"]})]),
         Turn(text="should not be reached — gather aborts the run first"),
     ])
-    # Five queries to five DISTINCT systems: each is a system's FIRST failure (so none trips
-    # the per-system breaker at 2), but the run total reaches RUN_FAIL_KILL_LIMIT on the fifth
-    # → RunAborted.
     systems = ("elastic", "identity", "cmdb", "ticket", "host-state")
-    assert len(systems) == circuit_breaker.RUN_FAIL_KILL_LIMIT  # the test is pinned to the limit
+    assert len(systems) == circuit_breaker.RUN_FAIL_KILL_LIMIT
     gather = ReplayFn([_q(s) for s in systems] + [Turn(text="never reached")])
 
     result = drive(run_dir, run_id=run_id, salt=salt, main=main, gather=gather,
                    verbs=_down(*systems))
 
-    # The run did not crash: the driver caught RunAborted and returned cleanly with
-    # no output, exactly like the request-limit terminator.
     assert result["output"] is None
-    # Main stopped at the dispatch; the 5th gather adapter call raised before the
-    # gather's own stop turn.
     assert main.calls == 1
     assert gather.calls == circuit_breaker.RUN_FAIL_KILL_LIMIT
-    # Circuit-breaker state crossed the run-wide kill threshold.
     cb = json.loads((run_dir / "circuit_breaker.json").read_text())
     assert cb["total_failures"] == circuit_breaker.RUN_FAIL_KILL_LIMIT
-    # Every failing adapter call was still captured (the row is written BEFORE the
-    # breaker raises) — the audit trail survives the abort.
     qlines = (run_dir / "executed_queries.jsonl").read_text().splitlines()
     assert len(qlines) == circuit_breaker.RUN_FAIL_KILL_LIMIT
     assert all(json.loads(q)["exit_code"] == 2 for q in qlines)
-    # Partial trace written despite the abort.
     assert (run_dir / "tool_trace.jsonl").is_file()
 
 
@@ -134,7 +115,6 @@ def test_invlang_deny_bounces_then_recovers(tmp_path):
     inv_path = str(run_dir / "investigation.md")
 
     main = ReplayFn([
-        # A bare ```yaml fence fails the invlang surface check (Rule 0).
         Turn(tool_calls=[("write_file", {"path": inv_path, "content": "```yaml\nfoo: bar\n```\n"})]),
         Turn(tool_calls=[("write_file", {"path": inv_path, "content": good})]),
         Turn(text="done"),
@@ -142,9 +122,7 @@ def test_invlang_deny_bounces_then_recovers(tmp_path):
     drive(run_dir, run_id=run_id, salt=salt, main=main)
 
     assert main.calls == 3
-    # The validator's deny reached the model as retry feedback after the bad write.
     assert any("invlang validation" in s for s in main.seen)
-    # The corrected content committed and is independently invlang-valid.
     produced = (run_dir / "investigation.md").read_text()
     assert produced == good
     assert validate_companion(produced, None) == []
@@ -168,30 +146,21 @@ def test_tripped_system_dispatch_returns_down_message(tmp_path):
         Turn(text="done"),
     ])
     gather = ReplayFn([
-        _q("elastic"),                       # fail 1
-        _q("elastic"),                       # fail 2 → trips
-        _q("elastic"),                       # gated in-gather (pre-call trip, no row)
+        _q("elastic"),
+        _q("elastic"),
+        _q("elastic"),
         Turn(text="gather l-001 incomplete"),
     ])
     drive(run_dir, run_id=run_id, salt=salt, main=main, gather=gather, verbs=_down("elastic"))
 
-    # Main dispatched twice then ended; gather ran ONLY for l-001 (4 turns). The
-    # l-002 dispatch did NOT respawn the nested agent — the dispatch gate caught it.
     assert main.calls == 3
     assert gather.calls == 4
-    # elastic tripped at exactly the per-system limit (the 3rd call was gated, so
-    # it did not advance the counter).
     cb = json.loads((run_dir / "circuit_breaker.json").read_text())
     assert cb["systems"]["elastic"]["failures"] == circuit_breaker.PER_SYSTEM_FAIL_LIMIT
-    # Only the two pre-trip calls were captured; the 3rd (the pre-call trip inside
-    # wrap_tool_execute) returned the down-message WITHOUT executing, so it wrote no row.
     qlines = (run_dir / "executed_queries.jsonl").read_text().splitlines()
     assert len(qlines) == circuit_breaker.PER_SYSTEM_FAIL_LIMIT
-    # Both leads were CLAIMED (the dispatch gate fires AFTER the claim), so l-002
-    # shows in the leads table as planned-but-unmeasured.
     assert (run_dir / "gather_raw" / "l-001.lead.json").is_file()
     assert (run_dir / "gather_raw" / "l-002.lead.json").is_file()
-    # The transparent down-message reached the main loop for the tripped re-dispatch.
     assert "DOWN for this run" in main.seen[-1]
 
 
@@ -205,27 +174,25 @@ def test_gather_lead_guards_bounce_then_recover(tmp_path):
 
     main = ReplayFn([
         Turn(tool_calls=[("gather", {"lead_id": "l-001", "system": "elastic",
-                                     "goal": "g", "what_to_summarize": ["x"]})]),    # ok
+                                     "goal": "g", "what_to_summarize": ["x"]})]),
         Turn(tool_calls=[("gather", {"lead_id": "l-001", "system": "elastic",
-                                     "goal": "g", "what_to_summarize": ["x"]})]),    # reuse → bounce
+                                     "goal": "g", "what_to_summarize": ["x"]})]),
         Turn(tool_calls=[("gather", {"lead_id": "not a lead", "system": "elastic",
-                                     "goal": "g", "what_to_summarize": ["x"]})]),    # invalid → bounce
+                                     "goal": "g", "what_to_summarize": ["x"]})]),
         Turn(tool_calls=[("gather", {"lead_id": "l-002", "system": "elastic",
-                                     "goal": "g", "what_to_summarize": ["x"]})]),    # ok
+                                     "goal": "g", "what_to_summarize": ["x"]})]),
         Turn(text="done"),
     ])
     gather = ReplayFn([Turn(text="summary l-001"), Turn(text="summary l-002")])
     drive(run_dir, run_id=run_id, salt=salt, main=main, gather=gather)
 
     assert main.calls == 5
-    # Only the two well-formed leads spawned the nested agent; reuse + invalid
-    # bounced before the spawn.
     assert gather.calls == 2
     assert (run_dir / "gather_raw" / "l-001.lead.json").is_file()
     assert (run_dir / "gather_raw" / "l-002.lead.json").is_file()
     seen = "\n".join(main.seen)
-    assert "already dispatched" in seen   # reuse retry reason
-    assert "invalid lead_id" in seen      # malformed-id retry reason
+    assert "already dispatched" in seen
+    assert "invalid lead_id" in seen
 
 
 def test_edit_file_guards_bounce_then_recover(tmp_path):
@@ -234,23 +201,15 @@ def test_edit_file_guards_bounce_then_recover(tmp_path):
     commits. Mirrors Claude Code's Edit semantics through the real tool + gate."""
     run_id, salt = "edit-guards", "abcdabcdabcdabcd"
     run_dir = materialize(tmp_path, GOLDEN_AB3)
-    # report.md is a MAIN-writable, non-invlang run-dir file. (Was notes.md until #631's
-    # S2 narrowed MAIN's write scope to exactly {investigation.md, report.md}; report.md
-    # is the writable non-invlang artifact that still exercises the edit_file guards.)
     notes = str(run_dir / "report.md")
-    # #629 reconciliation: report.md now also faces an output-structure gate, so both the
-    # seed write and the state the surviving edit leaves behind must be VALID reports —
-    # otherwise the write is denied for its structure and the edit_file guards under test
-    # never run. The frontmatter is inert padding here; the body carries the edit fixtures
-    # ("alpha" twice for the non-unique guard, "beta" once for the unique edit, no "zzz").
     fm = "---\ndisposition: benign\n---\n"
 
     main = ReplayFn([
         Turn(tool_calls=[("write_file", {"path": notes, "content": fm + "alpha\nbeta\nalpha\n"})]),
-        Turn(tool_calls=[("edit_file", {"path": notes, "old_string": "", "new_string": "x"})]),        # clobber guard
-        Turn(tool_calls=[("edit_file", {"path": notes, "old_string": "zzz", "new_string": "x"})]),      # not found
-        Turn(tool_calls=[("edit_file", {"path": notes, "old_string": "alpha", "new_string": "A"})]),    # non-unique
-        Turn(tool_calls=[("edit_file", {"path": notes, "old_string": "beta", "new_string": "BETA"})]),  # unique → ok
+        Turn(tool_calls=[("edit_file", {"path": notes, "old_string": "", "new_string": "x"})]),
+        Turn(tool_calls=[("edit_file", {"path": notes, "old_string": "zzz", "new_string": "x"})]),
+        Turn(tool_calls=[("edit_file", {"path": notes, "old_string": "alpha", "new_string": "A"})]),
+        Turn(tool_calls=[("edit_file", {"path": notes, "old_string": "beta", "new_string": "BETA"})]),
         Turn(text="done"),
     ])
     drive(run_dir, run_id=run_id, salt=salt, main=main)
@@ -258,7 +217,7 @@ def test_edit_file_guards_bounce_then_recover(tmp_path):
     assert main.calls == 6
     assert (run_dir / "report.md").read_text() == fm + "alpha\nBETA\nalpha\n"
     seen = "\n".join(main.seen)
-    assert "would overwrite it" in seen   # empty old_string on an existing file
+    assert "would overwrite it" in seen
     assert "old_string not found" in seen
     assert "is not unique" in seen
 
@@ -279,5 +238,4 @@ def test_read_file_not_found_bounces_then_recovers(tmp_path):
 
     assert main.calls == 3
     assert any("file not found" in s for s in main.seen)
-    # The recovered read returned the alert, salt-wrapped as untrusted data.
     assert salt in main.seen[-1]

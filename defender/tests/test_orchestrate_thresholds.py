@@ -27,7 +27,6 @@ from defender.learning.core.config import (  # type: ignore[import-not-found]
 from defender.learning.leads import lead_author  # type: ignore[import-not-found]
 
 
-# --- env_int -----------------------------------------------------------------
 
 def test_env_int_returns_default_when_unset(monkeypatch):
     monkeypatch.delenv("LEARNING_AUTHOR_THRESHOLD", raising=False)
@@ -46,10 +45,6 @@ def test_env_int_raises_fatal_config_on_non_numeric(monkeypatch, bad):
         config.env_int("LEARNING_AUTHOR_THRESHOLD", 5)
 
 
-# --- wake gates raise (not crash) on a bad threshold -------------------------
-# The gate propagates the FatalConfigError that env_int raises; it is enrolled
-# alongside StageAbort at the drain catch sites, so it still maps to rc 2 (the
-# end-to-end `_run_stage(...) == 2` assertions below pin that).
 
 def test_has_curator_work_raises_on_bad_threshold(tmp_path, monkeypatch):
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "high")
@@ -94,7 +89,6 @@ def test_lead_author_max_retries_bad_value_raises_fatal_config(tmp_path, monkeyp
         orchestrate._drain_lead_author_markers(paths, lambda _p, _rd: None)
 
 
-# --- the stage contract: bad threshold -> exit 2, never a traceback ----------
 
 def test_author_drain_bad_threshold_is_fatal_two(tmp_path, monkeypatch):
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "high")
@@ -108,13 +102,10 @@ def test_lead_author_drain_bad_threshold_is_fatal_two(tmp_path, monkeypatch):
     assert orchestrate._run_stage(lambda: orchestrate.lead_author_drain(paths=paths)) == 2
 
 
-# --- happy path: a valid threshold + empty queues still short-circuits to 0 ---
 
 def test_drains_skip_cleanly_with_valid_threshold_and_empty_queues(tmp_path, monkeypatch):
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "5")
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "5")
-    # The author_drain gate also reads the per-direction observation thresholds; clear
-    # any ambient non-numeric override so this happy-path assertion can't fail spuriously.
     for sibling in (
         "LEARNING_AUTHOR_ACTOR_THRESHOLD",
         "LEARNING_AUTHOR_ENV_THRESHOLD",
@@ -122,31 +113,13 @@ def test_drains_skip_cleanly_with_valid_threshold_and_empty_queues(tmp_path, mon
     ):
         monkeypatch.delenv(sibling, raising=False)
     paths = LoopPaths(repo_root=tmp_path)
-    # Empty queues + a parseable threshold -> the gate returns False and the drain
-    # skips the worktree without touching git.
     assert orchestrate._run_stage(lambda: orchestrate.author_drain(paths=paths)) == 0
     assert orchestrate._run_stage(lambda: orchestrate.lead_author_drain(paths=paths)) == 0
 
-    # Dispatch guard (#513): the lead-author drain resolves the cross-run pitfalls
-    # curation mode by module-name string (_invoke_pitfalls -> _run_curator_module ->
-    # <module>.run_pitfalls). The drains above short-circuit at the wake gate on empty
-    # queues, so they never exercise that resolution; drive it directly. With an empty
-    # pitfalls queue run_pitfalls returns 0 without spawning or touching git, so this
-    # stays green through a correct Part-2 move of run_pitfalls into pitfalls_curator (the
-    # module-name dispatch entry updated in lockstep) and goes red — an AttributeError from
-    # _run_curator_module's `mod.run_pitfalls` — if the code moves but the dispatch is left
-    # pointing at its old home.
     empty = LoopPaths(repo_root=tmp_path, state_dir=tmp_path / "empty-state")
     assert orchestrate._invoke_pitfalls(empty) == 0
 
 
-# --- #438 / #443: StageAbort punches through the per-marker quarantine guards ---
-#
-# The lift threshold is read DEEP in the per-marker flow (run() -> _prepare_handoffs
-# -> _lift_threshold), under _drain_lead_author_markers' broad `except Exception`.
-# Pre-#438 a non-numeric LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD quarantined a healthy
-# marker as `lead-author-error` (work lost, cause mislabeled, no exit 2). This is the
-# one fatal-config path #437's wake-gate reads did NOT cover.
 
 
 def test_fatal_config_error_is_enrolled_not_subclassed_and_disjoint_from_run_unprocessable():
@@ -159,7 +132,7 @@ def test_fatal_config_error_is_enrolled_not_subclassed_and_disjoint_from_run_unp
     the `_run_stage(...) == 2` tests, not by a subclass relationship."""
     from defender._env import FatalConfigError as SharedFatalConfigError
 
-    assert FatalConfigError is SharedFatalConfigError  # config re-exports the shared type
+    assert FatalConfigError is SharedFatalConfigError
     assert issubclass(FatalConfigError, ValueError)
     assert not issubclass(FatalConfigError, StageAbort)
     assert not issubclass(FatalConfigError, RunUnprocessable)
@@ -230,16 +203,12 @@ def test_lead_author_marker_drain_reraises_fatal_lift_threshold(tmp_path, monkey
     run_dir.mkdir()
     orchestrate._enqueue_for_authoring(run_dir, paths)
 
-    # Stand in for the deep read: the real _lift_threshold() (-> env_int) raises the
-    # FatalConfigError exactly as run() -> _prepare_handoffs would.
     def _run_lead_author(_paths, _run_dir):
         lead_author._lift_threshold()
 
     with pytest.raises(FatalConfigError):
         orchestrate._drain_lead_author_markers(paths, _run_lead_author)
 
-    # The marker must NOT have been quarantined — it stays queued to retry once the
-    # operator fixes the env (and the drain failed loud instead of losing the work).
     failed_dir = paths.author_queue_dir / "failed"
     assert not (failed_dir / f"{run_dir.name}.json").exists()
     assert (paths.author_queue_dir / f"{run_dir.name}.json").exists()
@@ -257,14 +226,6 @@ def test_drain_pitfalls_reraises_fatal_config_error(tmp_path):
         orchestrate._drain_pitfalls(paths, _run_pitfalls)
 
 
-# --- #442: the drain CALL SITES wire the primitive correctly -----------------
-#
-# _run_or_dead_letter's own unit tests (below) pin the primitive's contract in isolation;
-# these pin that _drain_lead_author_markers / _drain_pitfalls actually route through it —
-# the success unlink, the dead-letter quarantine, the `propagate=(_LeadAuthorRetry,)` retry
-# hand-off, and the pitfalls swallow. A primitive that is correct in isolation can still be
-# mis-wired at the call site (a dropped `propagate=` would turn every transient into a
-# silent quarantine), and the success path is the PR's core change (`else:`/`if drained:`).
 
 
 def test_lead_author_drain_unlinks_marker_on_success(tmp_path, monkeypatch):
@@ -319,7 +280,7 @@ def test_lead_author_drain_requeues_a_transient_with_bumped_attempts(tmp_path, m
     orchestrate._drain_lead_author_markers(paths, _run_lead_author)
 
     marker = paths.author_queue_dir / f"{run_dir.name}.json"
-    assert marker.exists()  # left queued for retry, not quarantined
+    assert marker.exists()
     assert not (paths.author_queue_dir / "failed" / f"{run_dir.name}.json").exists()
     assert json.loads(marker.read_text())["attempts"] == 1
 
@@ -333,14 +294,9 @@ def test_drain_pitfalls_swallows_a_plain_curation_error(tmp_path):
     def _run_pitfalls(_paths):
         raise RuntimeError("curation hiccup")
 
-    orchestrate._drain_pitfalls(paths, _run_pitfalls)  # must not raise
+    orchestrate._drain_pitfalls(paths, _run_pitfalls)
 
 
-# --- #442: the dead-letter contract is enforced by one primitive, not per-site discipline ---
-#
-# _run_or_dead_letter is the single place "re-raise StageAbort, dead-letter the rest"
-# lives, so the invariant has one regression guard instead of one hand-copied clause per
-# swallow site (the #438 footgun: a new drain that forgets the re-raise silently regresses).
 
 
 def test_run_or_dead_letter_returns_true_on_success():
@@ -437,8 +393,8 @@ class _StubBranch:
 def test_lead_author_drain_bad_lift_threshold_is_fatal_two(tmp_path, monkeypatch):
     """End-to-end: a queued marker + a bad lift threshold drives the whole
     lead_author_drain stage to the contracted exit 2 (not a quarantine, not exit 0)."""
-    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "5")  # valid: wake gate must pass
-    monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "high")  # the fatal one
+    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "5")
+    monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "high")
     paths = LoopPaths(repo_root=tmp_path)
     run_dir = tmp_path / "run-x"
     run_dir.mkdir()
@@ -458,13 +414,6 @@ def test_lead_author_drain_bad_lift_threshold_is_fatal_two(tmp_path, monkeypatch
     assert rc == 2
 
 
-# --- #443: the _run_stage disposition split (the structural guard) -----------
-#
-# StageAbort (systemic) -> exit 2 on every stage. RunUnprocessable (this run's data
-# is bad) -> exit 2 ONLY on the direct single-run path (allow_run_error=True); on a
-# drain it PROPAGATES, because a RunUnprocessable reaching a drain's boundary did not
-# pass the per-item quarantine guard and is therefore a bug — it must fail loud (a
-# traceback), not masquerade as a clean contracted exit 2.
 
 
 def _raise(exc):
@@ -475,7 +424,6 @@ def _raise(exc):
 
 
 def test_run_stage_maps_stage_abort_to_exit_two():
-    # Both modes: a systemic fault always aborts the stage.
     assert orchestrate._run_stage(_raise(StageAbort("systemic"))) == 2
     assert orchestrate._run_stage(_raise(FatalConfigError("bad cfg"))) == 2
     assert orchestrate._run_stage(
@@ -498,11 +446,6 @@ def test_run_stage_maps_run_unprocessable_to_exit_two_on_direct_run():
     ) == 2
 
 
-# main()'s argv -> allow_run_error routing is the load-bearing wiring of the #443 guard:
-# the direct <run_dir> path must pass allow_run_error=True (bad run -> exit 2) and every
-# drain must pass the default False (a leaked RunUnprocessable propagates). The
-# _run_stage tests above pass the flag explicitly, so they can't catch a regression that
-# routes the wrong flag to the wrong stage; these drive main() end to end to pin it.
 
 
 def test_main_direct_run_maps_run_unprocessable_to_exit_two(tmp_path, monkeypatch):
@@ -510,8 +453,6 @@ def test_main_direct_run_maps_run_unprocessable_to_exit_two(tmp_path, monkeypatc
     maps to the contracted exit 2 rather than an uncontracted exit-1 + traceback."""
     def boom(_run_dir):
         raise RunUnprocessable("bad run data")
-    # main() is the CLI dispatch entrypoint; it resolves the module-global stage by argv,
-    # so patching the global is the only seam for the wiring under test.
     monkeypatch.setattr(  # lint-monkeypatch: ok — main() CLI dispatch resolves stage by argv
         orchestrate, "run_one", boom
     )
@@ -522,7 +463,6 @@ def test_main_drain_propagates_run_unprocessable(monkeypatch):
     """The drains wire the default allow_run_error=False, so a RunUnprocessable leaking
     to a drain's boundary (a bug that escaped the per-item quarantine guard) propagates
     uncaught rather than masquerading as a clean exit 2."""
-    # Same CLI-dispatch seam: main() resolves the drain global by argv.
     monkeypatch.setattr(  # lint-monkeypatch: ok — main() CLI dispatch resolves drain by argv
         orchestrate, "learn_drain", _raise(RunUnprocessable("leaked"))
     )
@@ -530,7 +470,6 @@ def test_main_drain_propagates_run_unprocessable(monkeypatch):
         orchestrate.main(["loop.py", "--learn-drain"])
 
 
-# --- GitError is a systemic fault (enrolled alongside StageAbort, #460) -------
 
 def test_run_or_dead_letter_reraises_giterror_not_quarantine():
     """A ``GitError`` (a broken local-state git op) dooms the whole batch, so it must
@@ -544,7 +483,7 @@ def test_run_or_dead_letter_reraises_giterror_not_quarantine():
 
     with pytest.raises(_git.GitError):
         orchestrate._run_or_dead_letter(boom, dead_lettered.append)
-    assert dead_lettered == []  # systemic, not dead-lettered
+    assert dead_lettered == []
 
 
 def test_run_stage_maps_giterror_to_exit_2():

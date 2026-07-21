@@ -21,7 +21,6 @@ def test_list_slots_returns_sorted_strings():
     slots = vocab.list_slots()
     assert slots == sorted(slots)
     assert all(isinstance(s, str) for s in slots)
-    # Pin the small, stable set so a renamed slot trips this test.
     expected = {
         "types", "relations", "anchor-kinds", "auth-kinds",
         "compute.role", "compute.zone", "compute.provenance", "compute.kind",
@@ -48,8 +47,6 @@ def test_get_enum_raises_on_unknown_slot():
 
 def test_relations_includes_added_verbs():
     rels = vocab.get_enum("relations")
-    # New verbs from the closed-vocab rewrite — pin so they don't get
-    # silently dropped.
     for r in ("authenticated_via", "assumed_role", "granted_consent",
               "issued", "contained_in", "created", "deleted"):
         assert r in rels, f"missing relation {r!r}"

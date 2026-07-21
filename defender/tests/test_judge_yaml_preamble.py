@@ -38,15 +38,10 @@ from defender.learning.core.validate import (
 )
 from defender.evals.judge_equivalence import parse_judge_verdict
 
-# No trailing whitespace: strip_yaml_fence does `text.strip()`, so a trailing newline
-# would itself count as a mutation. These are true no-op inputs for the passthrough tests.
 _CLEAN_ADV = "outcome: caught\ndefender_findings: []"
 _CLEAN_BENIGN = "outcome: refuted\ndefender_findings: []"
 
 
-# ===========================================================================
-# E1 — strip_yaml_preamble (the general primitive)
-# ===========================================================================
 
 def test_clean_mapping_is_passthrough_noop():
     """E1: input that already parses to a mapping is returned unchanged (the common
@@ -171,7 +166,6 @@ def test_multidoc_separator_yields_the_trailing_single_doc():
     (it is single-doc), so every prefix containing the separator fails; the walk stops at
     the trailing single doc -> outcome 'survived'. A pathological input; pinned so the
     behavior is defined rather than accidental."""
-    # rejected: dead-letter the whole ambiguous double-doc output instead of taking the last
     raw = "outcome: caught\ndefender_findings: []\n---\noutcome: survived\ndefender_findings: []"
     assert yaml.safe_load(strip_yaml_preamble(raw))["outcome"] == "survived"
 
@@ -185,9 +179,6 @@ def test_composes_after_strip_yaml_fence_for_preamble_plus_fence():
     assert yaml.safe_load(out)["outcome"] == "caught"
 
 
-# ===========================================================================
-# E2 — orchestrate._validate_judge_yaml  (the live loop; both engines feed it)
-# ===========================================================================
 
 def test_e2_parses_preambled_verdict(tmp_path):
     """E2: a prose-preamble'd adversarial verdict now normalizes + validates -> returns
@@ -244,16 +235,13 @@ def test_e2_schema_invalid_raises_and_writes_raw(tmp_path):
     """E2: a doc that parses but fails the schema gate (missing defender_findings) raises
     RunUnprocessable and writes the raw companion — normalization does not paper over a
     validation failure."""
-    raw = "outcome: caught"  # parses to a mapping, but no defender_findings
+    raw = "outcome: caught"
     raw_path = tmp_path / "judge.raw.txt"
     with pytest.raises(RunUnprocessable):
         _validate_judge_yaml(raw, validate_judge_doc, raw_path)
     assert raw_path.read_text() == raw
 
 
-# ===========================================================================
-# E3 — judge_equivalence.parse_judge_verdict  (the A/B harness)
-# ===========================================================================
 
 def test_e3_parses_preambled_adversarial_verdict():
     """E3: the eval harness now trims a prose preamble too (it was the third consumer the
@@ -281,9 +269,6 @@ def test_e3_malformed_returns_parsed_ok_false_without_raising():
     assert v.outcome is None
 
 
-# ===========================================================================
-# Cross-consumer parity + layering
-# ===========================================================================
 
 def test_e2_and_e3_agree_on_same_preambled_input(tmp_path):
     """PARITY (the whole point of #492): the SAME preamble'd input yields the SAME outcome

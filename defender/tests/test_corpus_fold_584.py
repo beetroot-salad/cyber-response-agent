@@ -53,7 +53,6 @@ import defender.learning.author.shared as _shared  # noqa: E402
 from defender.learning.frontend import serialize  # noqa: E402
 from defender.hooks import record_lesson_load  # noqa: E402
 
-# The #559/#577 fixtures — imported, never re-declared (see the module docstring).
 from defender.tests.test_corpus_fold_seed import _BlockYaml  # noqa: E402
 from defender.tests.test_curator_manifest import _findings_lesson, _headers  # noqa: E402
 from defender.tests.test_trace_lesson import _mk_run  # noqa: E402
@@ -64,9 +63,6 @@ TL_PATH = DEFENDER / "learning" / "ops" / "trace_lesson.py"
 ENV_RETRIEVE = DEFENDER / "scripts" / "lessons" / "lessons_env_retrieve.py"
 
 
-# ===========================================================================
-# Helpers — the corpus domain (spec_graph: corpus_dir.domain.distinguished)
-# ===========================================================================
 
 
 def _corpus_of(tmp_path: Path, *stems: str, name: str = "lessons") -> Path:
@@ -86,7 +82,7 @@ def _frontmatter_error_members(corpus: Path) -> dict[str, str]:
     (corpus / "unfenced.md").write_text("no frontmatter fence at all\n")
     (corpus / "no-close.md").write_text("---\nname: nc\nnever closes the fence\n")
     (corpus / "bad-yaml.md").write_text("---\nname: [unclosed\n---\nbody\n")
-    (corpus / "null-doc.md").write_text("---\n\n---\nbody\n")  # yaml -> None, not a mapping
+    (corpus / "null-doc.md").write_text("---\n\n---\nbody\n")
     (corpus / "bom.md").write_bytes(b"\xef\xbb\xbf---\nname: bom\n---\nbody\n")
     return {
         "unfenced.md": "missing leading fence",
@@ -135,7 +131,7 @@ def _load_by_path(name: str, path: Path):
     spec = importlib.util.spec_from_file_location(name, path)
     mod = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
-    sys.modules[spec.name] = mod  # @dataclass resolves cls.__module__ through sys.modules
+    sys.modules[spec.name] = mod
     spec.loader.exec_module(mod)
     return mod
 
@@ -158,9 +154,6 @@ def _records(view: dict) -> list[dict]:
     return [rec for g in view["groups"].values() for rec in g["lessons"]]
 
 
-# ===========================================================================
-# d0-d4 — the return contract
-# ===========================================================================
 
 
 def test_d0_iter_lessons_yields_a_frozen_lesson_dataclass(tmp_path):
@@ -184,15 +177,15 @@ def test_d0_iter_lessons_yields_a_frozen_lesson_dataclass(tmp_path):
     assert len(yielded) == 1
     lesson = yielded[0]
 
-    assert type(lesson) is mod.Lesson  # the dataclass, not a subclass or a tuple
+    assert type(lesson) is mod.Lesson
     assert dataclasses.is_dataclass(lesson)
     assert [f.name for f in dataclasses.fields(lesson)] == ["path", "fm", "raw", "body"]
-    assert mod.Lesson.__module__ == "defender._corpus"  # not a new defender.* module (test_c4)
+    assert mod.Lesson.__module__ == "defender._corpus"
     with pytest.raises(dataclasses.FrozenInstanceError):
         lesson.fm = {}  # type: ignore[misc]
 
     with pytest.raises(TypeError):
-        mod.iter_lessons(corpus, with_raw=True)  # the flag is GONE, not merely ignored
+        mod.iter_lessons(corpus, with_raw=True)
 
 
 def test_d1_lesson_is_not_unpackable(tmp_path):
@@ -250,7 +243,7 @@ def test_d2_fm_and_raw_are_discriminable_by_value(tmp_path):
     assert isinstance(lesson.fm, dict)
     assert lesson.fm["telemetry_source"] == ["sshd", "auditd"]
     assert isinstance(lesson.raw, str)
-    assert "telemetry_source: [sshd, auditd]" in lesson.raw  # the YAML SOURCE, not a dict repr
+    assert "telemetry_source: [sshd, auditd]" in lesson.raw
     assert "'telemetry_source':" not in lesson.raw
 
 
@@ -271,14 +264,14 @@ def test_d3_raw_is_the_slice_the_parser_consumed(tmp_path, capsys):
     corpus.mkdir()
     _crlf_lesson(corpus)
 
-    lesson = next(iter(mod.iter_lessons(corpus)))  # a CRLF lesson is well-formed: no warn
+    lesson = next(iter(mod.iter_lessons(corpus)))
     assert capsys.readouterr().err == ""
 
     assert "\r" not in lesson.raw
-    assert lesson.raw == "name: crlf\ntelemetry_source: [sshd, auditd]"  # the exact parser slice
+    assert lesson.raw == "name: crlf\ntelemetry_source: [sshd, auditd]"
     assert not lesson.raw.startswith("---")
     assert not lesson.raw.endswith("---")
-    assert "body mentions" not in lesson.raw  # the body is NOT in raw
+    assert "body mentions" not in lesson.raw
     assert lesson.body == "body mentions telemetry_source: sshd here"
 
 
@@ -300,19 +293,16 @@ def test_d4_import_purity_survives_the_dataclass():
     blocker = _BlockYaml()
     sys.meta_path.insert(0, blocker)
     try:
-        mod = importlib.import_module("defender._corpus")  # must NOT raise
+        mod = importlib.import_module("defender._corpus")
         assert "yaml" not in sys.modules
         lesson = mod.Lesson(path=Path("x.md"), fm={"name": "x"}, raw="name: x", body="b")
-        assert lesson.path.name == "x.md"  # constructible with no venv
+        assert lesson.path.name == "x.md"
     finally:
         sys.meta_path.remove(blocker)
         sys.modules.pop("defender._corpus", None)
         sys.modules.update(purged)
 
 
-# ===========================================================================
-# d5-d11 — the corpus domain (R4) + the discovery rules
-# ===========================================================================
 
 
 def test_d5_utf8_pin_saves_a_valid_lesson_under_a_c_locale(tmp_path):
@@ -353,8 +343,6 @@ def test_d5_utf8_pin_saves_a_valid_lesson_under_a_c_locale(tmp_path):
     )
     assert proc.returncode == 0, f"the C-locale walk did not complete:\n{proc.stderr}"
     assert "enc=ANSI_X3.4-1968" in proc.stdout, f"the C locale did not take: {proc.stdout!r}"
-    # The ascii sibling is the control: it survives either way, so a mismatch here is the café
-    # lesson going missing — not the whole walk failing.
     assert "stems=ascii-lesson,cafe-lesson" in proc.stdout, (
         "the café lesson was warn-SKIPPED under a C locale — the read is still locale-dependent:"
         f"\nstdout={proc.stdout!r}\nstderr={proc.stderr!r}"
@@ -375,10 +363,10 @@ def test_d6_empty_frontmatter_mapping_is_yielded(tmp_path, capsys):
     (corpus / "empty-fm.md").write_text("---\n{}\n---\nbody\n")
 
     by_stem = {lesson.path.stem: lesson for lesson in mod.iter_lessons(corpus)}
-    assert set(by_stem) == {"normal", "empty-fm"}  # yielded, not dropped
-    assert by_stem["empty-fm"].fm == {}  # a successful parse of an empty mapping
+    assert set(by_stem) == {"normal", "empty-fm"}
+    assert by_stem["empty-fm"].fm == {}
     assert by_stem["empty-fm"].body == "body"
-    assert capsys.readouterr().err == ""  # and NOT warned as malformed
+    assert capsys.readouterr().err == ""
 
 
 def test_d7_frontmatter_error_members_are_warn_skipped_by_name(tmp_path, capsys):
@@ -398,7 +386,7 @@ def test_d7_frontmatter_error_members_are_warn_skipped_by_name(tmp_path, capsys)
     members = _frontmatter_error_members(corpus)
 
     yielded = [lesson.path.stem for lesson in mod.iter_lessons(corpus)]
-    assert yielded == ["good"]  # the well-formed sibling survives all five
+    assert yielded == ["good"]
 
     err = capsys.readouterr().err
     for name, why in members.items():
@@ -419,7 +407,7 @@ def test_d8_undecodable_bytes_are_warn_skipped(tmp_path, capsys):
     corpus = _corpus_of(tmp_path, "good")
     _undecodable(corpus)
 
-    yielded = [lesson.path.stem for lesson in mod.iter_lessons(corpus)]  # must not raise
+    yielded = [lesson.path.stem for lesson in mod.iter_lessons(corpus)]
     assert yielded == ["good"]
     assert "undecodable.md" in capsys.readouterr().err
 
@@ -436,7 +424,7 @@ def test_d9_oserror_members_are_warn_skipped(tmp_path, capsys):
     corpus = _corpus_of(tmp_path, "good")
     members = _oserror_members(corpus)
 
-    yielded = [lesson.path.stem for lesson in mod.iter_lessons(corpus)]  # must not raise
+    yielded = [lesson.path.stem for lesson in mod.iter_lessons(corpus)]
     assert yielded == ["good"]
 
     err = capsys.readouterr().err
@@ -459,7 +447,7 @@ def test_d10_discovery_rules_are_unchanged(tmp_path, capsys):
     (corpus / "_TEMPLATE.md").write_text("---\nname: t\n---\nbody\n")
 
     assert [lesson.path.stem for lesson in mod.iter_lessons(corpus)] == ["cover-prereqs", "cover"]
-    assert capsys.readouterr().err == ""  # the `_`-skip is SILENT, not a warn
+    assert capsys.readouterr().err == ""
 
 
 def test_d11_custom_warn_label_still_reaches_the_warn_line(tmp_path):
@@ -476,8 +464,8 @@ def test_d11_custom_warn_label_still_reaches_the_warn_line(tmp_path):
     from defender.tests.test_author_actor import _index_cli_runner, _isolate
 
     ctx = _isolate(tmp_path)
-    _index_cli_runner(ctx)  # materializes the mirrored tree; we drive it ourselves for stderr
-    corpus = ctx["lessons"]  # <fake repo>/defender/lessons-actor
+    _index_cli_runner(ctx)
+    corpus = ctx["lessons"]
     (corpus / "bad.md").write_text("no fence at all\n")
 
     proc = subprocess.run(
@@ -485,13 +473,10 @@ def test_d11_custom_warn_label_still_reaches_the_warn_line(tmp_path):
         capture_output=True, text=True,
     )
     assert proc.returncode == 0, proc.stderr
-    assert "defender/lessons-actor/bad.md" in proc.stderr  # the repo-relative label, not p.name
-    assert "corpus manifest" not in proc.stderr  # no other consumer's label leaked into the default
+    assert "defender/lessons-actor/bad.md" in proc.stderr
+    assert "corpus manifest" not in proc.stderr
 
 
-# ===========================================================================
-# d12-d19 — the frontend fold
-# ===========================================================================
 
 
 def test_d12_build_view_takes_a_defaulted_corpus_root(tmp_path):
@@ -513,9 +498,9 @@ def test_d12_build_view_takes_a_defaulted_corpus_root(tmp_path):
     _findings_lesson(root / "lessons", "fixture-only-lesson")
 
     view = serialize.build_view(defender_dir=root)
-    assert _titles(view) == {"fixture-only-lesson"}  # the fixture tree, and ONLY it
+    assert _titles(view) == {"fixture-only-lesson"}
 
-    real = serialize.build_view()  # the default still resolves to the real DEFENDER
+    real = serialize.build_view()
     assert set(real["groups"]) == {"defender", "actor", "environment"}
     assert _titles(real) != _titles(view)
     assert all(g["lessons"] for g in real["groups"].values())
@@ -536,10 +521,10 @@ def test_d13_source_path_keys_off_the_injected_root(tmp_path):
     _findings_lesson(root / "lessons", "fixture-lesson")
 
     rec = _records(serialize.build_view(defender_dir=root))[0]
-    assert rec["source_path"] == "defender/lessons/fixture-lesson.md"  # rel to defender_dir.parent
+    assert rec["source_path"] == "defender/lessons/fixture-lesson.md"
     assert not Path(rec["source_path"]).is_absolute()
 
-    for real in _records(serialize.build_view()):  # unchanged against the real tree
+    for real in _records(serialize.build_view()):
         assert real["source_path"].startswith("defender/lessons")
         assert (WORKSPACE_ROOT / real["source_path"]).is_file()
 
@@ -577,10 +562,10 @@ def test_d14_frontend_truth_table_has_no_silent_subtraction(tmp_path, capsys):
 
     view = serialize.build_view(defender_dir=root)
     assert _titles(view) == {"good", "empty-fm", "unfenced", "no-close", "bad-yaml", "null-doc",
-                             "bom", "undecodable"}  # EXACTLY — discovery, minus the `_`-skip
+                             "bom", "undecodable"}
     assert {rec["group"] for rec in _records(view)} == {"defender"}
     by_title = {rec["title"]: rec for rec in _records(view)}
-    assert by_title["empty-fm"]["status"] == "live"  # a valid {} parse is NOT a marker (d15)
+    assert by_title["empty-fm"]["status"] == "live"
     for skipped in ("unfenced", "no-close", "bad-yaml", "null-doc", "bom", "undecodable"):
         assert by_title[skipped]["status"] == "malformed", skipped
 
@@ -588,7 +573,7 @@ def test_d14_frontend_truth_table_has_no_silent_subtraction(tmp_path, capsys):
     for name in ("unfenced.md", "no-close.md", "bad-yaml.md", "null-doc.md", "bom.md",
                  "undecodable.md"):
         assert name in err, f"{name} was dropped without being named on stderr"
-    assert "_TEMPLATE" not in err  # the `_`-skip is silent, not a warn
+    assert "_TEMPLATE" not in err
 
 
 def test_d15_empty_mapping_record_shape(tmp_path):
@@ -608,7 +593,7 @@ def test_d15_empty_mapping_record_shape(tmp_path):
     (root / "lessons" / "empty-fm.md").write_text("---\n{}\n---\nthe body\n")
 
     rec = _records(serialize.build_view(defender_dir=root))[0]
-    assert rec["title"] == "empty-fm"  # the stem — keeps test_lesson_record_shape's truthiness
+    assert rec["title"] == "empty-fm"
     assert rec["description"] == ""
     assert rec["status"] == "live"
     assert rec["metadata"] == {}
@@ -638,7 +623,7 @@ def test_d16_build_completes_despite_a_bad_lesson(tmp_path, capsys):
     _undecodable(corpus)
     _oserror_members(corpus)
 
-    view = serialize.build_view(defender_dir=root)  # must not raise
+    view = serialize.build_view(defender_dir=root)
     assert _titles(view) == {"survivor", "undecodable", "foo", "dead"}
     assert {r["title"] for r in _records(view) if r["status"] != "malformed"} == {"survivor"}
 
@@ -666,8 +651,8 @@ def test_d17_stdout_stays_a_json_protocol(tmp_path, capsys):
 
     serialize.build_view(defender_dir=root)
     captured = capsys.readouterr()
-    assert captured.out == ""  # EMPTY, not merely warn-free
-    assert "undecodable.md" in captured.err  # and the warn really did fire, on stderr
+    assert captured.out == ""
+    assert "undecodable.md" in captured.err
 
 
 def test_d17b_stdout_positive_control_dump_contract_round_trips():
@@ -700,15 +685,15 @@ def test_d18_the_serialize_walk_is_gone():
     The two names are COMPOSED below, not spelled: ``lint_stale_refs`` word-greps the whole working
     tree for every ident a PR deletes, and a literal here would make this file a stale-ref survivor
     and block the implementing PR's CI for saying the thing the demand exists to say."""
-    dead = {"_read" "_lesson", "_iter" "_corpus"}  # composed on purpose — see the docstring
+    dead = {"_read" "_lesson", "_iter" "_corpus"}
     tree = ast.parse((DEFENDER / "learning" / "frontend" / "serialize.py").read_text())
 
     defs = {n.name for n in tree.body if isinstance(n, ast.FunctionDef)}
     assert not (dead & defs), f"the hand-rolled serializer walk survives: {sorted(dead & defs)}"
 
     imported = {n.module for n in tree.body if isinstance(n, ast.ImportFrom) and n.level == 0}
-    assert "defender._frontmatter" not in imported  # orphaned → ruff F401 would block CI
-    assert "defender._corpus" in imported  # …and the shared walk took its place
+    assert "defender._frontmatter" not in imported
+    assert "defender._corpus" in imported
 
 
 def test_d19_on_disk_oracle_is_rebuilt_on_iter_lessons():
@@ -733,9 +718,6 @@ def test_d19_on_disk_oracle_is_rebuilt_on_iter_lessons():
         assert len(groups[name]["lessons"]) == len(on_disk), name
 
 
-# ===========================================================================
-# d20-d24 — the trace_lesson fold
-# ===========================================================================
 
 
 def test_d20_trace_lesson_gains_a_lessons_dir_seam(tmp_path, capsys):
@@ -760,13 +742,13 @@ def test_d20_trace_lesson_gains_a_lessons_dir_seam(tmp_path, capsys):
 
     assert tl.main(["--all", "--lessons-dir", str(corpus), "--runs-dir", str(runs)]) == 0
     listed = [ln.split("\t")[0] for ln in capsys.readouterr().out.splitlines() if ln.strip()]
-    assert listed == ["fixture-lesson"]  # the injected corpus, and ONLY it
+    assert listed == ["fixture-lesson"]
 
-    assert tl.main(["--all", "--runs-dir", str(runs)]) == 0  # omitted → the anchored default
+    assert tl.main(["--all", "--runs-dir", str(runs)]) == 0
     default_listed = {ln.split("\t")[0] for ln in capsys.readouterr().out.splitlines() if ln.strip()}
     real = {p.stem for p in tl.LESSONS_DIR.glob("*.md") if not p.name.startswith("_")}
     assert real, "the real corpus is empty — the default-resolution half would be vacuous"
-    assert default_listed == real  # omitting the flag still resolves to defender/lessons
+    assert default_listed == real
 
 
 def test_d21_trace_all_walks_the_shared_iterator(tmp_path, capsys):
@@ -794,17 +776,16 @@ def test_d21_trace_all_walks_the_shared_iterator(tmp_path, capsys):
 
     rc = tl.main(["--all", "--lessons-dir", str(corpus), "--runs-dir", str(runs)])
     captured = capsys.readouterr()
-    assert rc == 0  # one bad file does not fail the run
+    assert rc == 0
 
     lines = [ln for ln in captured.out.splitlines() if ln.strip()]
-    # well-formed rows first, then #590's marker rows for the skipped-but-discovered lessons
     assert [ln.split("\t")[0] for ln in lines] == ["alpha", "beta", "undecodable", "unfenced"]
-    assert all(len(ln.split("\t")) == 3 for ln in lines)  # <name>\t<description>\t<count>
+    assert all(len(ln.split("\t")) == 3 for ln in lines)
     marker_rows = [ln for ln in lines if "(malformed lesson" in ln]
     assert [ln.split("\t")[0] for ln in marker_rows] == ["undecodable", "unfenced"]
-    assert "_TEMPLATE" not in captured.out  # the `_`-skip it never had
+    assert "_TEMPLATE" not in captured.out
     assert "unfenced.md" in captured.err
-    assert "undecodable.md" in captured.err  # the read guard it never had
+    assert "undecodable.md" in captured.err
 
 
 def test_d22_missing_lessons_dir_follows_the_seam(tmp_path, capsys):
@@ -825,7 +806,7 @@ def test_d22_missing_lessons_dir_follows_the_seam(tmp_path, capsys):
     assert tl.main(["--all", "--lessons-dir", str(missing)]) == 1
     err = capsys.readouterr().err
     assert f"no lessons dir: {missing}" in err
-    assert str(tl.LESSONS_DIR) not in err  # the INJECTED path is named, not the real one
+    assert str(tl.LESSONS_DIR) not in err
 
 
 def test_d23_lesson_identity_is_the_stem_cross_module(tmp_path, capsys):
@@ -850,11 +831,11 @@ def test_d23_lesson_identity_is_the_stem_cross_module(tmp_path, capsys):
     lesson_path = corpus / "foo-bar.md"
 
     oracle = record_lesson_load.lesson_name(str(lesson_path))
-    assert oracle == "foo-bar"  # the co-writer's key, read off the real function
+    assert oracle == "foo-bar"
 
     assert tl.main(["--all", "--lessons-dir", str(corpus), "--runs-dir", str(runs)]) == 0
     first_column = capsys.readouterr().out.splitlines()[0].split("\t")[0]
-    assert first_column == oracle  # the join key trace_lesson emits IS the one the hook writes
+    assert first_column == oracle
 
 
 def test_d23b_stem_wins_when_the_frontmatter_name_disagrees(tmp_path, capsys):
@@ -872,8 +853,6 @@ def test_d23b_stem_wins_when_the_frontmatter_name_disagrees(tmp_path, capsys):
     tl = _load_by_path("trace_lesson_584", TL_PATH)
     corpus = tmp_path / "defender" / "lessons"
     corpus.mkdir(parents=True)
-    # created_at keeps the fixture windowed so this window-independent subject (the join
-    # key) stays green beside #596's unwindowed marker; the load below is inside the window.
     (corpus / "foo-bar.md").write_text(
         "---\nname: foo_bar\ndescription: d\ncreated_at: 2026-06-04\n---\nbody\n"
     )
@@ -910,19 +889,16 @@ def test_d24_single_lesson_path_keeps_its_own_guarded_read(tmp_path, capsys):
     assert tl.main(["nope", *base]) == 1
     assert f"no such lesson: {corpus / 'nope.md'}" in capsys.readouterr().err
 
-    assert tl.main(["corrupt", *base]) == 1  # guarded: an error, not a traceback
+    assert tl.main(["corrupt", *base]) == 1
     err = capsys.readouterr().err
     assert "corrupt.md" in err
     assert "Traceback" not in err
-    assert len([ln for ln in err.splitlines() if ln.strip()]) == 1  # one clean line
+    assert len([ln for ln in err.splitlines() if ln.strip()]) == 1
 
     assert tl.main(["good", *base]) == 0
     assert capsys.readouterr().out.startswith("# good")
 
 
-# ===========================================================================
-# d25-d30 — consumer survival + cross-via parity
-# ===========================================================================
 
 
 def test_d25_env_retrieve_stdout_shape(tmp_path, capsys):
@@ -945,7 +921,7 @@ def test_d25_env_retrieve_stdout_shape(tmp_path, capsys):
         "---\nsubject: vpn-egress\nalert_rule_ids: [rule-x]\nstatus: live\n"
         "relevance_criteria: egress from the corp VPN range is expected\n---\nbody\n"
     )
-    (corpus / "unfenced.md").write_text("no fence at all\n")  # forces a warn onto stderr
+    (corpus / "unfenced.md").write_text("no fence at all\n")
 
     assert mod.main(["prog", "--corpus", str(corpus)]) == 0
     captured = capsys.readouterr()
@@ -953,10 +929,10 @@ def test_d25_env_retrieve_stdout_shape(tmp_path, capsys):
     assert len(lines) == 1
 
     fields = lines[0].split("\t")
-    assert len(fields) == 2  # exactly two — a dict spliced into a third column is the fault
+    assert len(fields) == 2
     assert Path(fields[0]).resolve() == (corpus / "vpn-egress.md").resolve()
     assert fields[1] == "egress from the corp VPN range is expected"
-    assert "unfenced.md" in captured.err  # warns on stderr, never on the protocol lane
+    assert "unfenced.md" in captured.err
     assert "unfenced" not in captured.out
 
 
@@ -986,9 +962,9 @@ def test_d26_cmd_grep_still_greps_the_yaml_source(tmp_path, capsys):
     mod = _load(corpus)
     assert mod.main(["prog", r"telemetry_source:.*\bsshd\b"]) == 0
     out = capsys.readouterr().out
-    assert "sshd-one.md" in out  # matched on the YAML SOURCE
-    assert "falco-one.md" not in out  # the body is never searched
-    assert out.strip().endswith("\tsshd lesson one")  # <path>\t<description>, unchanged
+    assert "sshd-one.md" in out
+    assert "falco-one.md" not in out
+    assert out.strip().endswith("\tsshd lesson one")
 
 
 def test_d27_cmd_tags_counts_are_unchanged(tmp_path, capsys):
@@ -1016,7 +992,7 @@ def test_d27_cmd_tags_counts_are_unchanged(tmp_path, capsys):
         parts[0]: int(parts[1])
         for parts in (ln.split() for ln in out.splitlines() if ln.startswith("  "))
     }
-    assert counts == {"sshd": 2, "auditd": 1}  # values AND counts; _TEMPLATE excluded
+    assert counts == {"sshd": 2, "auditd": 1}
 
 
 def test_d28_curator_consumers_survive_the_dataclass(tmp_path, capsys):
@@ -1045,14 +1021,14 @@ def test_d28_curator_consumers_survive_the_dataclass(tmp_path, capsys):
     )
     _undecodable(corpus)
 
-    manifest = _shared.build_corpus_manifest(corpus)  # must not raise
-    assert _headers(manifest) == ["good", "obs", "undecodable"]  # #590: the bad stem is claimed
+    manifest = _shared.build_corpus_manifest(corpus)
+    assert _headers(manifest) == ["good", "obs", "undecodable"]
     assert "description: DESC" in manifest
 
     assert existing_finding_ids(cfg) == {"fid/0", "fid/1"}
     assert existing_observation_ids(corpus) == {"obs-1"}
     err = capsys.readouterr().err
-    assert err.count("undecodable.md") == 3  # each consumer warn-skipped it by name, none crashed
+    assert err.count("undecodable.md") == 3
 
 
 def test_d29_test_corpus_split_folds_onto_the_iterator(tmp_path):
@@ -1069,17 +1045,17 @@ def test_d29_test_corpus_split_folds_onto_the_iterator(tmp_path):
     from defender.tests.test_corpus_split import _corpus
 
     corpus = _corpus_of(tmp_path, "good")
-    _crlf_lesson(corpus)  # today's regex reds on this; iter_lessons parses it
+    _crlf_lesson(corpus)
     (corpus / "_TEMPLATE.md").write_text("---\nname: t\n---\nbody\n")
 
     got = _corpus(corpus)
-    assert [p.stem for p, _doc in got] == ["crlf", "good"]  # `_`-skipped; CRLF parsed
+    assert [p.stem for p, _doc in got] == ["crlf", "good"]
     assert all(isinstance(doc, dict) for _p, doc in got)
     assert dict(got)[corpus / "crlf.md"]["telemetry_source"] == ["sshd", "auditd"]
 
     (corpus / "unfenced.md").write_text("no fence at all\n")
     with pytest.raises(AssertionError):
-        _corpus(corpus)  # a malformed lesson still REDS CI — the guarantee, verbatim
+        _corpus(corpus)
 
 
 def test_d30_relocated_tree_survival(tmp_path):
@@ -1112,12 +1088,11 @@ def test_d30_relocated_tree_survival(tmp_path):
     out = run_index(["--techniques", "T1078"])
     lines = [ln for ln in out.splitlines() if ln.strip()]
     assert [ln.split("\t")[0] for ln in lines] == ["defender/lessons-actor/relocated-lesson.md"]
-    assert (ctx["repo"] / lines[0].split("\t")[0]).is_file()  # rel to the FAKE tree's root
+    assert (ctx["repo"] / lines[0].split("\t")[0]).is_file()
     real_stems = {p.stem for p in (DEFENDER / "lessons-actor").glob("*.md")}
-    assert not any(stem in out for stem in real_stems)  # the ORIGINAL corpus never leaked in
+    assert not any(stem in out for stem in real_stems)
 
-    # The eval harness's temp tree: the curator pre-flight reads the injected root, not the repo's.
     cfg = build_author_config(LoopPaths(repo_root=tmp_path / "eval"))
     cfg.lessons_dir.mkdir(parents=True)
     _findings_lesson(cfg.lessons_dir, "temp-tree-lesson", finding_ids=("tmp/0",))
-    assert existing_finding_ids(cfg) == {"tmp/0"}  # exactly the temp tree's ids
+    assert existing_finding_ids(cfg) == {"tmp/0"}

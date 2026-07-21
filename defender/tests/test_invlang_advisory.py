@@ -84,9 +84,6 @@ def _benign_case(case_id: str, *, signature_id="5710") -> Companion:
     )
 
 
-# ---------------------------------------------------------------------------
-# Happy path
-# ---------------------------------------------------------------------------
 
 
 def test_advisory_recall_returns_all_three_sections_when_signature_has_cases():
@@ -119,7 +116,6 @@ def test_top_k_truncates_similar_cases_and_hypothesis_vocab():
         load_fn=_stub_loader(corpus),
     )
     assert len(out.sections[CLASS_SIMILAR_CASES].hits) == 3
-    # 2 unique hypothesis names in the fixture; top_k=3 caps but won't pad.
     assert len(out.sections[CLASS_HYPOTHESIS_VOCAB].hits) == 2
 
 
@@ -146,7 +142,7 @@ def test_hypothesis_vocab_aggregates_with_weight_histogram():
             "c3",
             signature_id="5710",
             hypotheses=[{"id": "h-001", "name": "?spray", "weight": "+"}],
-            leads=[],  # ?spray unassessed → unresolved
+            leads=[],
         ),
     ]
 
@@ -160,12 +156,9 @@ def test_hypothesis_vocab_aggregates_with_weight_histogram():
     assert row["name"] == "?spray"
     assert row["n"] == 3
     assert row["buckets"] == {"++": 1, "+": 1, "-": 0, "--": 1}
-    assert row["unresolved"] == 0  # initial weight `+` counts as a final-bucket hit
+    assert row["unresolved"] == 0
 
 
-# ---------------------------------------------------------------------------
-# Loud-empty
-# ---------------------------------------------------------------------------
 
 
 def test_loud_empty_when_signature_has_no_cases():
@@ -184,7 +177,6 @@ def test_loud_empty_when_signature_has_no_cases():
 
     md = out.as_markdown()
     assert "No past cases for 5710" in md
-    # Loud-empty short-circuits per-section rendering — one banner, not three.
     assert "### Similar cases" not in md
     assert CAVEAT in md
 
@@ -205,9 +197,6 @@ def test_loud_empty_at_class_level_when_frontier_has_no_match():
     assert "_no leads touched frontier" in md
 
 
-# ---------------------------------------------------------------------------
-# Class subsetting + validation
-# ---------------------------------------------------------------------------
 
 
 def test_classes_subset_only_runs_requested():
@@ -231,9 +220,6 @@ def test_unknown_class_raises():
         )
 
 
-# ---------------------------------------------------------------------------
-# Output shape
-# ---------------------------------------------------------------------------
 
 
 def test_as_markdown_renders_expected_sections_in_order():
@@ -246,13 +232,11 @@ def test_as_markdown_renders_expected_sections_in_order():
         load_fn=_stub_loader(corpus),
     )
     md = out.as_markdown()
-    # Order matters: similar → vocab → discrimination.
     sim_idx = md.index("### Similar cases")
     voc_idx = md.index("### Hypothesis vocabulary")
     dis_idx = md.index("### Lead discrimination")
     assert sim_idx < voc_idx < dis_idx
     assert CAVEAT in md
-    # Frontier surfaces in the discrimination header for context.
     assert "?credential-spray-scan" in md.split("### Lead discrimination", 1)[1]
 
 
@@ -275,7 +259,7 @@ def test_telemetry_carries_parse_health():
     out = advisory_recall(
         "/tmp/fake",
         signature_id="5710",
-        load_fn=_stub_loader(corpus, scanned=5),  # 3 files didn't load
+        load_fn=_stub_loader(corpus, scanned=5),
     )
     t = out.telemetry
     assert t["cases_scanned"] == 5
@@ -283,9 +267,6 @@ def test_telemetry_carries_parse_health():
     assert t["cases_for_signature"] == 2
 
 
-# ---------------------------------------------------------------------------
-# Empty-frontier degeneracy
-# ---------------------------------------------------------------------------
 
 
 def test_empty_frontier_falls_back_to_top_k_leads():

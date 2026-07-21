@@ -12,9 +12,6 @@ import pytest
 from defender.learning.leads import lead_neighbors as ln  # type: ignore[import-not-found]
 
 
-# ---------------------------------------------------------------------------
-# tokenize_query — argument-side tokenizer
-# ---------------------------------------------------------------------------
 
 
 def test_tokenize_query_drops_pure_numeric_and_plumbing():
@@ -22,7 +19,7 @@ def test_tokenize_query_drops_pure_numeric_and_plumbing():
         "python3 wazuh_adapter.py --query 'rule.id:5710' --window 1h"
     )
     assert "5710" not in toks
-    assert "window" not in toks  # PLUMBING
+    assert "window" not in toks
     assert "run_dir" not in toks
 
 
@@ -48,13 +45,10 @@ def test_tokenize_query_preserves_hyphenated_index_name():
     signal); trailing glob/hyphen punctuation is normalized off."""
     toks = ln.tokenize_query('FROM logs-system.auth-* | STATS c = COUNT(*)')
     assert "logs-system.auth" in toks
-    assert "logs" not in toks  # not shattered onto the common bare token
+    assert "logs" not in toks
     assert "count" in toks
 
 
-# ---------------------------------------------------------------------------
-# Regression-pin fixture — exact-order top-3 per case
-# ---------------------------------------------------------------------------
 
 
 REGRESSION_FIXTURE: tuple[dict, ...] = (
@@ -128,11 +122,6 @@ def idf(catalog):
     return ln.build_idf(ln._all_query_variants(catalog))
 
 
-# The regression fixture below and test_cli_firewall pin scorer behavior over
-# a populated wazuh catalog. defender-v2-env stripped that catalog in the
-# v1-strip and its v2 replacements aren't authored yet, so the pinned ids don't
-# resolve. Skip until the v2 gather catalog is populated, then regenerate the
-# fixture against real v2 templates (don't hand-invent rankings).
 _V2_CATALOG_PENDING = pytest.mark.skip(
     reason="regression baseline pinned against the v1 wazuh catalog (stripped on "
     "defender-v2-env); regenerate against v2 templates once the catalog is populated"
@@ -169,9 +158,6 @@ def test_unresolved_query_id_raises(catalog):
         ln.top_k_neighbors("nonexistent.lookup", catalog, k=3)
 
 
-# ---------------------------------------------------------------------------
-# Catalog walk — _draft/ + status tagging
-# ---------------------------------------------------------------------------
 
 
 def test_load_catalog_walks_draft_subdir(tmp_path):
@@ -189,7 +175,6 @@ def test_load_catalog_walks_draft_subdir(tmp_path):
     assert "wazuh.novel-thing" in by_id
     assert by_id["wazuh.auth-events"].status == "established"
     assert by_id["wazuh.novel-thing"].status == "draft"
-    # System derivation: draft entry's system is still "wazuh", not "_draft".
     assert by_id["wazuh.novel-thing"].system == "wazuh"
 
 
@@ -216,9 +201,6 @@ def test_load_catalog_does_not_promote_a_missing_status_to_established(tmp_path)
     assert cat[0].status != "established"
 
 
-# ---------------------------------------------------------------------------
-# ES|QL fence extraction (#340 / #343 migration)
-# ---------------------------------------------------------------------------
 
 
 _ESQL_SECTION = """\
@@ -246,10 +228,8 @@ def test_query_variants_extracts_esql_fence_not_prose():
     """
     variants = ln._query_variants(_ESQL_SECTION)
     toks = set().union(*variants)
-    # Query-body tokens are present...
     assert "user.name" in toks
     assert "source.ip" in toks
     assert "event.outcome" in toks
-    # ...and prose / narrowing-example tokens outside the fence are not.
     assert "zzzproseword" not in toks
     assert "otherprosenarrowing" not in toks

@@ -23,7 +23,6 @@ from defender._env import (  # type: ignore[import-not-found]
 _NAME = "DEFENDER_TEST_KNOB"
 
 
-# --- FatalConfigError surface ------------------------------------------------
 
 def test_fatal_config_error_is_a_value_error():
     """Loud-by-default for any uncatching caller (e.g. runtime startup): a plain
@@ -31,7 +30,6 @@ def test_fatal_config_error_is_a_value_error():
     assert issubclass(FatalConfigError, ValueError)
 
 
-# --- env_int -----------------------------------------------------------------
 
 def test_env_int_returns_default_when_unset(monkeypatch):
     monkeypatch.delenv(_NAME, raising=False)
@@ -50,7 +48,6 @@ def test_env_int_raises_named_fatal_on_non_numeric(monkeypatch, bad):
         env_int(_NAME, 7)
 
 
-# --- env_bool ----------------------------------------------------------------
 
 def test_env_bool_returns_default_when_unset(monkeypatch):
     monkeypatch.delenv(_NAME, raising=False)
@@ -81,7 +78,6 @@ def test_env_bool_raises_on_unrecognized_token(monkeypatch, bad):
         env_bool(_NAME, False)
 
 
-# --- env_str -----------------------------------------------------------------
 
 def test_env_str_returns_default_when_unset(monkeypatch):
     monkeypatch.delenv(_NAME, raising=False)
@@ -112,7 +108,6 @@ def test_env_str_validates_the_default_against_choices(monkeypatch):
         env_str(_NAME, "typo", choices=("a", "b"))
 
 
-# --- _clock.now_iso ----------------------------------------------------------
 
 def test_now_iso_is_utc_seconds_precision():
     """The loop's canonical clock string: UTC, seconds precision, no microseconds."""

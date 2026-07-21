@@ -13,9 +13,6 @@ from defender.scripts.case_history import case_ticket, ticket_writer
 from defender.scripts.case_history.ticket_writer import TicketWriterDeps
 
 
-# ---------------------------------------------------------------------------
-# Driver: read the adversarial outcome from judge_findings.yaml
-# ---------------------------------------------------------------------------
 
 
 def _write_verdict(lrd: Path, outcome: str) -> None:
@@ -30,8 +27,6 @@ def test_read_outcome_valid(tmp_path: Path):
 
 
 def test_read_outcome_tolerates_trailing_rationale(tmp_path: Path):
-    # The judge sometimes fuses the keyword with a clause; the loop's parser
-    # takes the head token.
     tmp_path.joinpath("judge_findings.yaml").write_text(
         "outcome: caught. The investigation refuted the story.\ndefender_findings: []\n"
     )
@@ -49,8 +44,6 @@ def test_read_outcome_malformed_is_none(tmp_path: Path):
 
 @pytest.mark.parametrize("body", ["just a string\n", "- a\n- b\n", "42\n"])
 def test_read_outcome_non_mapping_is_none(tmp_path: Path, body: str):
-    # A verdict that parses to a non-dict (scalar/list) must be a WARN+None, not an
-    # uncaught AttributeError on .get() that would crash run_one before enqueue.
     tmp_path.joinpath("judge_findings.yaml").write_text(body)
     assert ticket_enrichment._read_adversarial_outcome(tmp_path) is None
 
@@ -61,7 +54,7 @@ def test_enrich_skips_when_no_verdict(tmp_path: Path):
         tmp_path / "run-1", tmp_path,
         annotate_fn=lambda key, outcome: calls.append((key, outcome)),
     )
-    assert calls == []  # no verdict file → no write attempted
+    assert calls == []
 
 
 def test_enrich_delegates_outcome_keyed_on_run_dir_name(tmp_path: Path):
@@ -73,12 +66,9 @@ def test_enrich_delegates_outcome_keyed_on_run_dir_name(tmp_path: Path):
         tmp_path / "20260620-case", lrd,
         annotate_fn=lambda key, outcome: calls.append((key, outcome)),
     )
-    assert calls == [("20260620-case", "survived")]  # key is the run-dir basename
+    assert calls == [("20260620-case", "survived")]
 
 
-# ---------------------------------------------------------------------------
-# Writer: annotate_case_ticket — GET-then-check idempotency, non-fatal
-# ---------------------------------------------------------------------------
 
 
 _CONFIG = {"URL_BASE": "http://x:8080", "BASTION_HOST": "web-1", "TIMEOUT_SEC": "10"}
@@ -112,7 +102,7 @@ def stub_transport():
     def fake_request(config, method, path, body=None):
         if method == "GET":
             return "200", json.dumps(rec["ticket"])
-        rec["posts"].append((path, body))  # POST (and any non-GET) is a write
+        rec["posts"].append((path, body))
         return "201", ""
 
     rec["deps"] = _deps(fake_request)
@@ -128,7 +118,6 @@ def test_annotate_posts_once_on_clean_ticket(stub_transport):
 
 
 def test_annotate_idempotent_when_already_flagged(stub_transport):
-    # Ticket already carries an enrichment comment → no second post.
     flagged = case_ticket.enrichment_to_comment("caught")
     stub_transport["ticket"] = {"key": "c", "comments": [{"author": "learning", **flagged}]}
     ticket_writer.annotate_case_ticket("c", "caught", deps=stub_transport["deps"])
@@ -136,24 +125,20 @@ def test_annotate_idempotent_when_already_flagged(stub_transport):
 
 
 def test_annotate_non_fatal_on_404():
-    ticket_writer.annotate_case_ticket("missing", "caught", deps=_deps(_request_404))  # must not raise
+    ticket_writer.annotate_case_ticket("missing", "caught", deps=_deps(_request_404))
 
 
 def test_annotate_non_fatal_on_transport_error():
     deps = _deps(lambda c, m, p, body=None: (None, "transport error: boom"))
-    ticket_writer.annotate_case_ticket("c", "caught", deps=deps)  # must not raise
+    ticket_writer.annotate_case_ticket("c", "caught", deps=deps)
 
 
 def test_annotate_no_config_is_noop():
-    # request must never be called when config is absent.
     deps = _deps(lambda *a, **k: pytest.fail("called transport without config"),
                  load_config=lambda: None)
     ticket_writer.annotate_case_ticket("c", "caught", deps=deps)
 
 
-# ---------------------------------------------------------------------------
-# Driver: read resolution_method + delegate (issue #338)
-# ---------------------------------------------------------------------------
 
 
 def _write_verdict_with_method(lrd: Path, outcome: str, method: str) -> None:
@@ -168,7 +153,7 @@ def test_read_resolution_method_valid(tmp_path: Path):
 
 
 def test_read_resolution_method_absent_is_none(tmp_path: Path):
-    _write_verdict(tmp_path, "caught")  # no resolution_method key
+    _write_verdict(tmp_path, "caught")
     assert ticket_enrichment._read_resolution_method(tmp_path) is None
 
 
@@ -202,7 +187,7 @@ def test_enrich_delegates_resolution_method_when_present(tmp_path: Path):
 def test_enrich_skips_resolution_method_when_absent(tmp_path: Path):
     lrd = tmp_path / "learn"
     lrd.mkdir()
-    _write_verdict(lrd, "caught")  # outcome only, no resolution_method
+    _write_verdict(lrd, "caught")
     seen = []
     ticket_enrichment.enrich_case_ticket(
         tmp_path / "case-9", lrd,
@@ -213,9 +198,6 @@ def test_enrich_skips_resolution_method_when_absent(tmp_path: Path):
 
 
 def test_enrich_skips_resolution_method_when_outcome_not_seed_eligible(tmp_path: Path):
-    # A method present but a non-seed-eligible outcome (`survived` = flagged FN) must NOT
-    # stamp a covering policy: the resolution-method rides the seed-eligibility polarity,
-    # so the store never carries a benign covering policy on a case the probe contested.
     lrd = tmp_path / "learn"
     lrd.mkdir()
     _write_verdict_with_method(lrd, "survived", "no-egress (l-005)")
@@ -228,9 +210,6 @@ def test_enrich_skips_resolution_method_when_outcome_not_seed_eligible(tmp_path:
     assert seen == ["annotate"]
 
 
-# ---------------------------------------------------------------------------
-# Writer: enrich_case_resolution — GET-then-append transition, idempotent
-# ---------------------------------------------------------------------------
 
 
 _GROUNDED_METHOD = "identity-confirmed (l-002) + no-egress (l-005)"
@@ -243,7 +222,6 @@ def test_enrich_resolution_posts_transition_on_ungrounded(stub_transport):
     path, body = stub_transport["posts"][0]
     assert path.endswith("/transitions")
     assert body["status"] == "closed"
-    # The new resolution preserves disposition/reason and carries the grounded method.
     assert case_ticket.ticket_disposition({"resolution": body["resolution"]}) == "benign"
     assert case_ticket.resolution_method_from_resolution(body["resolution"]) == _GROUNDED_METHOD
 
@@ -252,13 +230,13 @@ def test_enrich_resolution_idempotent_when_already_grounded(stub_transport):
     grounded = case_ticket.append_resolution_method("benign — routine", _GROUNDED_METHOD)
     stub_transport["ticket"] = {"key": "c", "resolution": grounded, "comments": []}
     ticket_writer.enrich_case_resolution("c", "different (l-009)", deps=stub_transport["deps"])
-    assert stub_transport["posts"] == []  # already grounded → no write
+    assert stub_transport["posts"] == []
 
 
 def test_enrich_resolution_skips_foreign_resolution(stub_transport):
     stub_transport["ticket"] = {"key": "c", "resolution": "Closed by analyst.", "comments": []}
     ticket_writer.enrich_case_resolution("c", _GROUNDED_METHOD, deps=stub_transport["deps"])
-    assert stub_transport["posts"] == []  # not our close resolution → untouched
+    assert stub_transport["posts"] == []
 
 
 def test_enrich_resolution_noop_on_empty_method(stub_transport):
@@ -268,7 +246,7 @@ def test_enrich_resolution_noop_on_empty_method(stub_transport):
 
 def test_enrich_resolution_non_fatal_on_404():
     deps = _deps(_request_404)
-    ticket_writer.enrich_case_resolution("missing", _GROUNDED_METHOD, deps=deps)  # must not raise
+    ticket_writer.enrich_case_resolution("missing", _GROUNDED_METHOD, deps=deps)
 
 
 def test_enrich_resolution_no_config_is_noop():

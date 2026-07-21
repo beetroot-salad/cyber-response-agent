@@ -45,7 +45,7 @@ from typing import Any
 
 import pytest
 
-pytest.importorskip("pydantic_ai")  # CI installs the runtime extra; skip otherwise
+pytest.importorskip("pydantic_ai")
 
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart  # noqa: E402
 from pydantic_ai.models import override_allow_model_requests  # noqa: E402
@@ -57,15 +57,12 @@ from defender.runtime import box as box_mod  # noqa: E402
 from defender.runtime import driver  # noqa: E402
 from defender.runtime.providers import BuiltModel  # noqa: E402
 
-DEFENDER = Path(__file__).resolve().parents[2]  # tests/e2e/ -> tests/ -> defender/
+DEFENDER = Path(__file__).resolve().parents[2]
 GOLDEN = DEFENDER / "fixtures-e2e" / "golden-v2sshd"
 GOLDEN_AB3 = DEFENDER / "fixtures-e2e" / "golden-sshpivot-ab3"
-# The run dir the vendored ab3 trace was recorded under; rewritten to the temp
-# run dir on replay (the context-reproduction step).
 AB3_ORIG_RUN_DIR = "/tmp/defender-runs/ab3-B"
 
 
-# --- scripted turns + replay models ----------------------------------------
 
 @dataclass
 class Turn:
@@ -92,14 +89,11 @@ class ReplayFn:
     request. Past the script it returns a text-only turn so the loop terminates
     rather than hanging (mirrors a real run hitting its stop condition)."""
 
-    __name__ = "ReplayFn"  # FunctionModel derives its model_name from this
+    __name__ = "ReplayFn"
 
     def __init__(self, turns: list[Turn]):
         self._turns = turns
         self.calls = 0
-        # Flattened message history per request, so error-path scripts can assert
-        # a gate's deny reason bounced back as retry feedback (the same trick
-        # DenyProbe uses). Purely additive — the golden-replay scripts ignore it.
         self.seen: list[str] = []
 
     def __call__(self, messages, info) -> ModelResponse:
@@ -152,19 +146,6 @@ class NeverEndsModel:
         return ModelResponse(parts=[ToolCallPart(tool_name="read_file", args={"path": self._alert})])
 
 
-# --- the injected verb-registry seam (#611) --------------------------------
-# The data-source transports are the one boundary below the model with no in-process
-# twin, so a hermetic run fakes them. They enter through an INJECTION seam — the same
-# shape as `make_model` — not by monkeypatching a module attribute: a registry is a
-# VALUE the run is handed, and a fake registry has to satisfy the very signature the
-# real validator reads.
-#
-# A fake verb is a plain annotated function: `def q(ctx, *, index: str) -> dict`. Its
-# keyword-only params ARE its declared param surface, so the real query tool validates
-# a model's `params` against the fake exactly as it would against `elastic_adapter.VERBS`.
-# A fake never classifies and never decides policy: it RECORDS what it was handed and
-# then returns its payload or raises its fault. The exit code, the error class, the
-# payload status, the breaker outcome are all the production code's job.
 
 
 @dataclass(frozen=True)
@@ -218,7 +199,6 @@ class FakeVerbs:
         return self._table[system]
 
 
-# --- trace mining (Layer 2): real tool_trace.jsonl -> scripted Turns -------
 
 def _rewrite_paths(v, old: str | None, new: str | None):
     """Recursively rewrite `old`->`new` in string leaves of a tool-args value."""
@@ -258,7 +238,6 @@ def load_turns_from_trace(
     return turns
 
 
-# --- fixture materialization, golden diffing, and the drive seam -----------
 
 def materialize(tmp_path: Path, golden: Path) -> Path:
     """The on-disk run dir a driven run starts from: `gather_raw/` plus the copied alert.
@@ -318,11 +297,6 @@ def drive(run_dir: Path, *, run_id: str, salt: str, main, gather=None, verbs=Non
     main_built = BuiltModel(FunctionModel(main), None)
     gather_built = BuiltModel(FunctionModel(gather), None) if gather is not None else None
 
-    # The (name, effort) seam (#493) can only tell the two fakes apart by model NAME, so a
-    # two-fake replay REQUIRES the MAIN and GATHER models to resolve to distinct names. They
-    # do for the defaults (glm-5.2 vs kimi-k2.6); fail loud rather than silently route the
-    # MAIN loop to the gather fake if a fixture/env ever collapses them onto one name (e.g.
-    # DEFENDER_GATHER_MODEL set to match MAIN).
     if gather_built is not None and driver.resolve_main_model() == driver.gather_model():
         raise ValueError(
             "replay harness can't inject distinct main/gather fakes when both resolve to "
@@ -338,13 +312,8 @@ def drive(run_dir: Path, *, run_id: str, salt: str, main, gather=None, verbs=Non
     seams: dict[str, Any] = {}
     if verbs is not None:
         seams["verbs"] = verbs
-    # `limits` (#631, demand `limits_seam`): the cap table `run_investigation` resolves ONCE
-    # at the boundary and threads inward to `check_budgets`, so a scenario can drive a run
-    # across a real cap without any operator-facing configuration existing (`no_operator_config`).
-    # Omitted → the run resolves the production `DEFAULT_LIMITS`.
     if limits is not None:
         seams["limits"] = limits
-    # Always threaded: a hermetic replay has no daemon, so the default is host execution.
     seams["box"] = box if box is not None else box_mod.unboxed_executor(
         env=run_common.run_env(DEFENDER, run_dir),
     )

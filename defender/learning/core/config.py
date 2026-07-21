@@ -1,11 +1,3 @@
-"""Static config, injectable paths, and shared primitives for the learning loop.
-
-`LoopPaths` is the injection seam for the run/queue filesystem layout: production
-uses `DEFAULT_PATHS`; tests construct `LoopPaths(repo_root=tmp_path)` and thread it
-through `run_one` / the persist + queue functions instead of monkeypatching module
-globals. Everything else here is static deployment config (prompt files, models,
-enums) that tests never need to override.
-"""
 from __future__ import annotations
 
 import os
@@ -15,25 +7,10 @@ from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
 
-# The env-coercion + clock primitives live at the ``defender.`` namespace root so
-# every layer (runtime/, scripts/, learning/) shares one source instead of each
-# re-deriving a crash-prone ``int(os.environ.get(...))`` with its own default.
-# Re-exported below (``env_int``, ``now_iso``, ``FatalConfigError``) so existing
-# ``core.config`` importers are unchanged; the import-time constants in this module
-# call ``env_int`` directly. ``FatalConfigError`` (the layer-neutral *condition*)
-# is enrolled into this loop's ``StageAbort``/exit-2 *response* at the drain catch
-# sites in ``orchestrate`` — see that module and ``StageAbort`` below.
 from defender._clock import now_iso  # noqa: F401 — re-export: core.config stays the loop's import surface
 from defender._env import env_int, env_str
 from defender._env import FatalConfigError  # noqa: F401 — re-export; enrolled as stage-fatal in orchestrate
-# RunPaths is a neutral top-level value object (no learning dependency, so the
-# runtime/hooks/scripts can import it without coupling to the loop — #317).
-# Re-exported here so learning-side code keeps importing it off core.config.
 from defender._run_paths import RunPaths  # noqa: F401 — re-export
-# DefenderPaths is the repo-relative layout primitive (defender/_paths.py, another
-# neutral top-level value object): the single owner of every ``<repo>/defender/...``
-# offset. LoopPaths composes it below (its repo-relative properties delegate), and it
-# is re-exported here so learning-side code imports it off core.config like RunPaths.
 from defender._paths import DefenderPaths  # noqa: F401 — used by LoopPaths + re-export
 
 
@@ -42,11 +19,6 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 
 @dataclass(frozen=True)
 class QueueChannel:
-    """One _pending observation stream as a unit: its queue ``file``, the
-    ``consumed`` sink rows rotate into, and the ``lock`` serializing both. Always
-    consumed together, so callers take the channel instead of rebuilding the
-    triple by hand. (The ``findings`` stream is deliberately *not* a channel — it
-    has a queue + lock but no consumed sink.)"""
 
     file: Path
     consumed: Path
@@ -55,36 +27,14 @@ class QueueChannel:
 
 @dataclass(frozen=True)
 class LoopPaths:
-    """Run-dir + _pending queue layout.
-
-    Two roots: ``repo_root`` resolves the in-repo prompts/code (read-only at
-    runtime); ``state_dir`` resolves the mutable learning *state* (the findings
-    queue, per-run learning dirs, the author lock + work queue). When
-    ``state_dir`` is None the state lives under ``learning_dir`` — today's
-    in-repo behavior, so tests that pass only ``repo_root`` are unaffected.
-    Concurrent live runs set ``DEFENDER_LEARNING_STATE_DIR`` so the queue lives
-    out-of-repo and every process resolves the same single location.
-    """
 
     repo_root: Path
     state_dir: Path | None = None
 
     @cached_property
     def defender(self) -> DefenderPaths:
-        """The repo-relative layout, composed. The offset strings live in
-        ``DefenderPaths`` (``defender/_paths.py``); the repo-relative properties
-        below delegate here so there is one owner per offset. ``LoopPaths`` keeps
-        ``repo_root`` as its field, so every caller constructs it unchanged.
-
-        ``cached_property``: ``repo_root`` is frozen, so the composed value never
-        changes — resolve it once instead of allocating a fresh ``DefenderPaths`` on
-        every delegated property read."""
         return DefenderPaths(self.repo_root)
 
-    # Repo-relative corpora + catalog + skills roots (read-only at runtime; never
-    # relocate with DEFENDER_LEARNING_STATE_DIR). Delegated to ``self.defender`` so
-    # the author family + scope-gate share one layout owner; a test rooted at a tmp
-    # tree still resolves them with one ``LoopPaths(repo_root=tmp)``.
     @property
     def learning_dir(self) -> Path:
         return self.defender.learning_dir
@@ -101,9 +51,6 @@ class LoopPaths:
     def lessons_environment_dir(self) -> Path:
         return self.defender.lessons_environment_dir
 
-    # Repo-relative twins of the three corpus dirs, used as git pathspec prefixes
-    # by the author commit/scope-gate. Trailing slash significant; repo-root-
-    # independent class constants on ``DefenderPaths``.
     @property
     def lessons_dir_rel(self) -> str:
         return DefenderPaths.lessons_dir_rel
@@ -130,20 +77,9 @@ class LoopPaths:
 
     @property
     def state_root(self) -> Path:
-        """The resolved mutable-state root: out-of-repo ``state_dir`` when set, else the
-        in-repo ``learning_dir``. The authoritative source for ``runs_dir`` / the queues
-        AND for the ``DEFENDER_LEARNING_STATE_DIR`` value pinned into curator-agent
-        subprocesses (#425) — derive the state root from this, never by inverting
-        ``runs_dir`` (e.g. ``runs_dir.parent``), which silently breaks if the runs layout
-        ever gains a level."""
         return self.state_dir if self.state_dir is not None else self.learning_dir
 
     def with_repo_root(self, repo_root: Path) -> LoopPaths:
-        """A copy rooted at a different ``repo_root`` (e.g. an author batch worktree)
-        that keeps this layout's *resolved* state dir. So the corpus/catalog dirs move
-        to the worktree (where the curator edits + the loop commits) while the queues,
-        locks, and pending files stay at the shared original location — the markers
-        being drained live there, not in the throwaway worktree."""
         return LoopPaths(repo_root=repo_root, state_dir=self.state_root)
 
     @property
@@ -158,9 +94,6 @@ class LoopPaths:
     def lead_pending_dir(self) -> Path:
         return self.state_root / "_pending_leads"
 
-    # --- general-failure pitfalls queue (cross-run; feeds the lead-author's
-    # execution.md curation mode). Lives under the shared state root so an append
-    # from inside a drain worktree lands centrally, like the other pending queues. ---
     @property
     def pitfalls_pending_dir(self) -> Path:
         return self.state_root / "_pending_pitfalls"
@@ -179,11 +112,6 @@ class LoopPaths:
 
     @property
     def learn_queue_dir(self) -> Path:
-        # run.py drops a marker here per finished run; the off-process learn
-        # worker (loop.py --learn-drain) claims + drains it. Mirror of
-        # author_queue_dir, one stage upstream. No drain lock: learning is
-        # concurrent (§4.3), so cross-worker safety is the per-marker
-        # rename-claim into learn-queue/inflight/, not a one-at-a-time lock.
         return self.state_root / "learn-queue"
 
     @property
@@ -192,17 +120,10 @@ class LoopPaths:
 
     @property
     def author_drain_lock_file(self) -> Path:
-        # Distinct from author_lock_file (the curators' repo lock): the drainer
-        # holds this so a second drainer exits, while the curators it calls can
-        # still take author_lock_file without a same-process deadlock.
         return self.state_root / ".author-drain.lock"
 
     @property
     def lead_author_drain_lock_file(self) -> Path:
-        # The lead-author drain's own one-drainer-at-a-time lock, distinct from
-        # author_drain_lock_file so the lessons drain and the lead-author drain
-        # are independently scheduled. Each drain runs in its own git worktree,
-        # so they need no cross-drain lock — this only serializes same-type ticks.
         return self.state_root / ".lead-author-drain.lock"
 
     @property
@@ -229,11 +150,6 @@ class LoopPaths:
             lock=self.pending_dir / ".environment.lock",
         )
 
-    # Adversarial env-fact stream — a second source for the SHARED
-    # lessons-environment/ corpus (issue #298). Separate queue from the benign
-    # environment_observations so each drains in its own single-direction batch
-    # (clean per-commit trailers + per-direction outcome policy); both authors
-    # commit into defender/lessons-environment/.
     @property
     def actor_environment_observations(self) -> QueueChannel:
         return QueueChannel(
@@ -244,16 +160,6 @@ class LoopPaths:
 
 
 def _env_state_dir() -> Path | None:
-    """Out-of-repo learning-state dir from ``DEFENDER_LEARNING_STATE_DIR``.
-
-    Returns None when unset (state stays in-repo). When set, the dir is
-    *resolved* so producer (run/learn) and consumer (author) processes agree on
-    one identical location — no silent fallback that would split-brain the queue
-    across concurrent runs. It is **not** created here: importing this module
-    must have no filesystem side effect, and a typo'd/unwritable path should fail
-    at first use (where each writer mkdirs the specific subdir it needs), not
-    crash the import of the whole learning subsystem.
-    """
     raw = os.environ.get("DEFENDER_LEARNING_STATE_DIR")
     if not raw:
         return None
@@ -261,22 +167,10 @@ def _env_state_dir() -> Path | None:
 
 
 def learning_state_root() -> Path:
-    """The learning-state root resolved **at call time** from the live environment:
-    the out-of-repo ``DEFENDER_LEARNING_STATE_DIR`` when set, else the in-repo
-    ``defender/learning``. ``DEFAULT_PATHS`` below freezes this at import time for the
-    loop; renderers that run in a separately-spawned process (e.g. the visualizer,
-    which the off-process worker invokes after setting the env) call this so they
-    mirror ``LoopPaths.runs_dir`` from one source instead of re-reading the env."""
     return _env_state_dir() or (REPO_ROOT / "defender" / "learning")
 
 
 def learning_run_paths(run_id: str) -> RunPaths:
-    """A learning-leg ``RunPaths`` for ``run_id``, deriving ``learning_run_dir`` from
-    the call-time ``learning_state_root()`` so a separately-spawned renderer honors
-    ``DEFENDER_LEARNING_STATE_DIR``. The single source for the
-    ``<state_root>/runs/<run_id>`` path that ``orchestrate`` and the visualizers both
-    need — no parallel re-derivation (the latent "renders an empty judge page" bug).
-    Rooted at ``learning_run_dir`` so the copied artifact accessors resolve there."""
     learning_run_dir = learning_state_root() / "runs" / run_id
     return RunPaths(run_dir=learning_run_dir, learning_run_dir=learning_run_dir)
 
@@ -288,8 +182,6 @@ LEARNING_DIR = DEFAULT_PATHS.learning_dir
 _PIPELINE_DIR = LEARNING_DIR / "pipeline"
 ACTOR_PROMPT = _PIPELINE_DIR / "malicious_actor" / "prompt.md"
 ACTOR_BENIGN_PROMPT = _PIPELINE_DIR / "benign_actor" / "prompt.md"
-# Per-lead generative telemetry oracle: one call per lead, fanned out concurrently
-# (see pipeline/oracle/run.py + pipeline/oracle/sample.py).
 ORACLE_PROMPT = _PIPELINE_DIR / "oracle" / "prompt.md"
 JUDGE_PROMPT = _PIPELINE_DIR / "judge" / "malicious.md"
 JUDGE_BENIGN_PROMPT = _PIPELINE_DIR / "judge" / "benign.md"
@@ -297,24 +189,16 @@ JUDGE_BENIGN_PROMPT = _PIPELINE_DIR / "judge" / "benign.md"
 LESSONS_ACTOR_DIR = DEFAULT_PATHS.lessons_actor_dir
 LESSONS_ENVIRONMENT_DIR = DEFAULT_PATHS.lessons_environment_dir
 
-# The two read-only lesson-retrieval scripts the in-process actor may run, pinned by the
-# actor's pinned-script bash grants (pipeline/actor_engine._script_grant). The single
-# home for these offsets — verify_forward/env.py reuses LESSONS_ENV_RETRIEVE_SCRIPT.
 _LESSONS_SCRIPTS_DIR = REPO_ROOT / "defender" / "scripts" / "lessons"
 LESSONS_ENV_RETRIEVE_SCRIPT = _LESSONS_SCRIPTS_DIR / "lessons_env_retrieve.py"
 LESSONS_ACTOR_INDEX_SCRIPT = _LESSONS_SCRIPTS_DIR / "lessons_actor_index.py"
 
 
 DISPOSITION_ENUM = {"benign", "inconclusive", "malicious"}
-# Direction dispatch: the adversarial actor hunts false negatives on
-# closed/uncertain dispositions; the benign actor hunts false positives on
-# escalated/uncertain ones. ``inconclusive`` runs both.
 ADVERSARIAL_DISPOSITIONS = {"benign", "inconclusive"}
 BENIGN_DISPOSITIONS = {"malicious", "inconclusive"}
 
 OUTCOME_ENUM = {"caught", "survived", "undecidable", "incoherent", "skip-passthrough"}
-# Benign judge outcomes mirror the adversarial enum: ``survived`` always means
-# "the defender failed to handle the story" — FN-risk adversarially, FP-risk here.
 BENIGN_OUTCOME_ENUM = {
     "survived",
     "refuted",
@@ -329,72 +213,27 @@ QUEUEABLE_FINDING_TYPES = {
     "analyze-discipline",
     "observability",
 }
-# Audit-only adversarial types: validated + emitted for analysis, but never
-# queued as lessons (filtered in ``_loop_persist.append_findings``), so the
-# author / lesson schema / verify_forward need not route them.
-#   detection-confirmed — a justified detection worth preserving.
 ADVERSARIAL_AUDIT_ONLY_FINDING_TYPES = {"detection-confirmed"}
 ALL_FINDING_TYPES = QUEUEABLE_FINDING_TYPES | ADVERSARIAL_AUDIT_ONLY_FINDING_TYPES
-# Benign defender findings share the queueable types; ``disposition-confirmed``
-# is the FP-direction audit-only type (the adversarial ``detection-confirmed``
-# analog — a justified escalation, filtered out of the queued lessons).
 BENIGN_AUDIT_ONLY_FINDING_TYPES = {"disposition-confirmed"}
 BENIGN_ALL_FINDING_TYPES = QUEUEABLE_FINDING_TYPES | BENIGN_AUDIT_ONLY_FINDING_TYPES
 ACTOR_OBSERVATION_TYPES = {"misprediction", "framing-choice", "discarded-class"}
 
-# The actor runs IN-PROCESS on PydanticAI (GLM 5.2, Fireworks) — the metered first-party path,
-# the mirror of the judge migration (both actors share the metered key; oracle/curators stay on
-# claude -p). GLM reasons by default and bills that thinking as output tokens, capped by
-# `reasoning_effort`; `low` is the shipped default (the cheapest coherent tier). NB a prior
-# Sonnet effort A/B found `low` sharply curtails story sophistication (effort drives
-# sophistication, not fact fidelity — that's corpus work), so revisit `medium` if the secondary
-# catch-rate / story quality regresses. Override via ACTOR_MODEL / ACTOR_EFFORT (any provider
-# providers.provider_for routes — e.g. claude-sonnet-4-6 for an A/B).
 ACTOR_MODEL = os.environ.get("ACTOR_MODEL", "glm-5.2")
 BENIGN_ACTOR_MODEL = os.environ.get("BENIGN_ACTOR_MODEL", "glm-5.2")
 ACTOR_EFFORT = os.environ.get("ACTOR_EFFORT", "low")
 BENIGN_ACTOR_EFFORT = os.environ.get("BENIGN_ACTOR_EFFORT", "low")
-# The oracle runs IN-PROCESS on PydanticAI (GLM 5.2, Fireworks) — the metered first-party path,
-# the mirror of the actor/judge migrations (all three in-process stages share the metered key;
-# the curators run in-process too). Each call is a MECHANICAL per-lead projection: it sees only its
-# own lead — sanitized what_to_summarize + queries + one scrubbed sample — and emits a signed
-# baseline-diff, with no cross-lead matching to reason about. So reasoning is DISABLED: `none` is
-# the explicit string that forwards reasoning_effort="none" (NOT Python None, which OMITS the knob
-# and leaves GLM reasoning on) — the same lever the equally-mechanical gather subagent uses. Effort
-# maps through `providers.build_for_effort` (Fireworks `reasoning_effort` / Anthropic
-# `anthropic_effort`). Override via ORACLE_MODEL / ORACLE_EFFORT (any provider
-# providers.provider_for routes). NB `none` is a Fireworks-only effort: an Anthropic A/B
-# (e.g. ORACLE_MODEL=claude-sonnet-4-6) MUST also set ORACLE_EFFORT to a Claude-valid effort
-# (low/medium/high/…), else build_for_effort raises → FatalConfigError (exit 2) on every lead.
-# ORACLE_MAX_CONCURRENCY bounds the per-direction fan-out of per-lead calls.
 ORACLE_MODEL = os.environ.get("ORACLE_MODEL", "glm-5.2")
 ORACLE_EFFORT = os.environ.get("ORACLE_EFFORT", "none")
 ORACLE_MAX_CONCURRENCY = env_int("ORACLE_MAX_CONCURRENCY", 8)
-# The judge runs in-process (PydanticAI) on GLM 5.2 (Fireworks) by default. Override
-# per-direction via env for the A/B (any provider `providers.provider_for` can route).
 JUDGE_MODEL = os.environ.get("JUDGE_MODEL", "glm-5.2")
 BENIGN_JUDGE_MODEL = os.environ.get("BENIGN_JUDGE_MODEL", "glm-5.2")
-# GLM 5.2 reasons by default and bills that thinking as output tokens, capped by
-# `reasoning_effort`; the judge follows a heavily-scaffolded prompt and does only a
-# bounded handful of read-only verification tool calls, so `medium` is the ported
-# default (per the Step-2 model A/B — see evals/judge_equivalence.py), with `low` a
-# cheaper fallback. Effort maps through `providers.build_for_effort` (Fireworks
-# `reasoning_effort` / Anthropic `anthropic_effort`), so `medium` is valid on either.
-# Override per-direction via env for A/B.
 JUDGE_EFFORT = os.environ.get("JUDGE_EFFORT", "medium")
 BENIGN_JUDGE_EFFORT = os.environ.get("BENIGN_JUDGE_EFFORT", "medium")
 
 
 @dataclass(frozen=True)
 class JudgeWiring:
-    """Per-direction judge knobs — the only things that differ between the adversarial
-    and benign grounded-judge calls (the projection itself rides
-    ``projected_telemetry_path``). Bundled beside the ``JUDGE_*`` constants they wrap so
-    the per-direction config lives in one place instead of being threaded as loose kwargs
-    through every call layer. ``comparison_dirname`` is distinct per direction so
-    concurrent legs on an ``inconclusive`` case don't clobber each other's grounding
-    files (see ``build_judge_invocation`` in ``_loop_subagents.py``). The two instances
-    live on the ``Direction`` specs in ``_loop_directions.py``."""
 
     prompt_path: Path
     model: str
@@ -402,224 +241,79 @@ class JudgeWiring:
     trace_name: str
     label: str
     comparison_dirname: str
-    # When True, the judge is granted a scoped, closed-only ticket read (issue #338) so it
-    # can confirm a cited closed case from the case-history store — the benign (FP)
-    # direction only; the adversarial judge never reads the store.
     closed_ticket_read: bool = False
 
 
 SUBAGENT_TIMEOUT = env_int("LEARNING_SUBAGENT_TIMEOUT_SECONDS", 450)
 
-# --- Author / verifier / lead-author wiring -------------------------------------
-# The curator-AGENT model/effort/timeout per author direction (distinct from the
-# ACTOR/ORACLE/JUDGE *stage* models above), plus the forward-check verifier and the
-# repo lock. Centralized here so each module reads ONE source instead of re-deriving
-# the same env var + default from os.environ — the duplicated-default divergence #449
-# fixed for the actor model, generalized to every stage knob.
 
-# Forward-check gate — shared by both LLM verify_forward entry points
-# (verify_forward/actor.py and forward.py; verify_forward/env.py is deterministic and
-# has no model). Runs IN-PROCESS on PydanticAI (GLM 5.2, Fireworks) — the metered
-# first-party path, the mirror of the judge/actor/oracle migrations. Two reasons the
-# forward-check runs GLM rather than the old subscription Haiku: (1) it is the FOURTH
-# in-process stage, so it shares the `_pydantic_stage` transport + billing invariant with
-# the rest of the loop, and (2) the check is a same-case regression PROXY — it predicts
-# what the *defender* (`runtime/driver.DEFAULT_MODEL = "glm-5.2"`) would conclude with the
-# candidate lesson loaded — so predicting with the defender's own model tightens the proxy.
-# GLM reasons by default and bills that thinking as output tokens, capped by
-# `reasoning_effort`; `low` is the default — it matches the defender's OWN MAIN effort
-# (`providers.FIREWORKS.main_effort`), so the proxy reasons at the SAME tier the defender it
-# predicts does (and it mirrors the actor). `medium` is the fallback if a verifier TNR/TPR
-# re-measure under GLM (experiments/defender-author-verification/) shows the counterfactual
-# judgment regressing at `low`. Both knobs override via env (any provider
-# `providers.provider_for` routes — e.g. claude-haiku-4-5 to A/B against the pre-migration gate).
 VERIFIER_MODEL = os.environ.get("LEARNING_VERIFIER_MODEL", "glm-5.2")
 VERIFIER_EFFORT = os.environ.get("LEARNING_VERIFIER_EFFORT", "low")
-# Per-check wall-clock ceiling for the in-process forward-check, threaded into
-# `_pydantic_stage.run_stage` as its `wall_clock_timeout`. A deliberate 0 is honored (it times
-# the check out at once), so it must never be coerced with an `or DEFAULT`.
 VERIFIER_TIMEOUT = env_int("LEARNING_VERIFIER_TIMEOUT_SECONDS", 180)
-# How many forward-checks the curator's `forward_check` tool runs concurrently — the shipped
-# default, and the fallback `verify_batch_workers()` re-reads against at call time. The retired
-# batch driver also carried a CHILD timeout above VERIFIER_TIMEOUT so a subprocess could
-# self-time-out into a reportable ERROR rather than be killed; in-process, `run_stage`'s own
-# wait_for raises RunUnprocessable, leaving nothing for a second ceiling to do.
 VERIFY_BATCH_WORKERS = env_int("LEARNING_VERIFY_BATCH_WORKERS", 8)
 
 
 def verify_batch_workers() -> int:
-    """The forward-check fan-out bound, read at CALL time so an operator (or a test) can drive
-    it without a module reload. A zero bound FAILS LOUD: `asyncio.Semaphore(0)` would block
-    until the wall clock, where the retired `ThreadPoolExecutor(0)` raised immediately."""
     n = env_int("LEARNING_VERIFY_BATCH_WORKERS", VERIFY_BATCH_WORKERS)
     if n < 1:
         raise FatalConfigError(f"LEARNING_VERIFY_BATCH_WORKERS must be >= 1; got {n}")
     return n
 
-# The three lesson curators (findings / actor-tradecraft / environment) run IN-PROCESS on
-# PydanticAI (GLM 5.2, Fireworks) — the metered first-party path, mirroring the lead-author
-# port (#543). `glm-5.2 @ low` matches the defender MAIN + verifier (the corpus these curators
-# write is what the defender reads); the curators run in-process on the metered key (there is
-# no subscription `claude -p` path anymore). A strong-author
-# A/B overrides via LEARNING_AUTHOR_*_MODEL / LEARNING_AUTHOR_*_EFFORT (any provider
-# `providers.provider_for` routes — e.g. claude-sonnet-4-6 @ low; `low` is a valid effort on both
-# the Anthropic and Fireworks providers). NB `none` is a Fireworks-only effort: an Anthropic A/B
-# MUST set a Claude-valid effort, else build_for_effort raises → FatalConfigError (which the
-# curator spawn lets PROPAGATE, exit 2).
-# Findings (lessons/) curator agent.
 AUTHOR_MODEL = os.environ.get("LEARNING_AUTHOR_MODEL", "glm-5.2")
 AUTHOR_TIMEOUT = env_int("LEARNING_AUTHOR_TIMEOUT_SECONDS", 1800)
-AUTHOR_EFFORT = os.environ.get("LEARNING_AUTHOR_EFFORT", "low")  # low|medium|high|xhigh|max
-# Actor-tradecraft (lessons-actor/) curator agent.
+AUTHOR_EFFORT = os.environ.get("LEARNING_AUTHOR_EFFORT", "low")
 AUTHOR_ACTOR_MODEL = os.environ.get("LEARNING_AUTHOR_ACTOR_MODEL", "glm-5.2")
 AUTHOR_ACTOR_TIMEOUT = env_int("LEARNING_AUTHOR_ACTOR_TIMEOUT_SECONDS", 1800)
 AUTHOR_ACTOR_EFFORT = os.environ.get("LEARNING_AUTHOR_ACTOR_EFFORT", "low")
-# Environment-lessons (lessons-environment/) curator agent — both env directions share it.
 AUTHOR_ENV_MODEL = os.environ.get("LEARNING_AUTHOR_ENV_MODEL", "glm-5.2")
 AUTHOR_ENV_TIMEOUT = env_int("LEARNING_AUTHOR_ENV_TIMEOUT_SECONDS", 1800)
 AUTHOR_ENV_EFFORT = os.environ.get("LEARNING_AUTHOR_ENV_EFFORT", "low")
-# Per-curator in-process tool-loop request cap (default 250, mirroring LEAD_AUTHOR_REQUEST_LIMIT).
-# The retired `claude -p` subprocess had NO request cap, so a small cap would kill a multi-file
-# curator on its 2nd tool call; the AUTHOR_*_TIMEOUT wall-clock ceiling is the real backstop.
 AUTHOR_REQUEST_LIMIT = env_int("LEARNING_AUTHOR_REQUEST_LIMIT", 250)
 AUTHOR_ACTOR_REQUEST_LIMIT = env_int("LEARNING_AUTHOR_ACTOR_REQUEST_LIMIT", 250)
 AUTHOR_ENV_REQUEST_LIMIT = env_int("LEARNING_AUTHOR_ENV_REQUEST_LIMIT", 250)
-# Batch-granular dead-letter budget: after this many per-run authoring faults on one batch, the
-# curator quarantines its rows to a `deadletter.jsonl` sidecar instead of retrying every tick
-# forever (the row-level analog of the lead author's LEAD_AUTHOR_MAX_RETRIES).
 LEARNING_AUTHOR_MAX_ATTEMPTS = env_int("LEARNING_AUTHOR_MAX_ATTEMPTS", 3)
-# Offline lead-author (skills/ catalog + system skills) agent, plus its sibling the pitfalls
-# curator (both share the _lead_spine spawn). Runs IN-PROCESS on PydanticAI (GLM 5.2, Fireworks)
-# — the FIRST *writer* among the in-process stages (the read-only judge/actor/oracle/verifier
-# predate it). `glm-5.2 @ low` matches the defender MAIN + verifier (the corpus the author writes
-# is what the defender reads). A strong-author A/B overrides via LEAD_AUTHOR_MODEL / LEAD_AUTHOR_EFFORT
-# (any provider `providers.provider_for` routes — e.g. claude-sonnet-4-6 @ low). NB `none` is a
-# Fireworks-only effort: an Anthropic A/B MUST set a Claude-valid effort (low/medium/high/…), else
-# build_for_effort raises → FatalConfigError (which the lead-author spawn lets PROPAGATE, exit 2).
 LEAD_AUTHOR_MODEL = os.environ.get("LEAD_AUTHOR_MODEL", "glm-5.2")
 LEAD_AUTHOR_EFFORT = os.environ.get("LEAD_AUTHOR_EFFORT", "low")
 LEAD_AUTHOR_TIMEOUT = env_int("LEAD_AUTHOR_TIMEOUT_SECONDS", 1800)
-# The lead author is a multi-file editor (reads the catalog + sibling skills, writes/edits several
-# skill files, rm's drafts), so its tool-loop request cap is generous — the LEAD_AUTHOR_TIMEOUT
-# wall-clock ceiling is the real backstop (the read-only predictors need only a handful of requests).
 LEAD_AUTHOR_REQUEST_LIMIT = env_int("LEAD_AUTHOR_REQUEST_LIMIT", 250)
 
-# Repo lock wait ceiling — the single location every curator serializes on. Lives here
-# (not author/shared.py) so the value has one home; shared.py re-exports it.
 REPO_LOCK_WAIT_SECONDS = env_int("LEARNING_REPO_LOCK_WAIT_SECONDS", 1800)
 
-# Author merge gating (platform-design §4.4). The serial author always opens a PR
-# (audit trail); this knob decides whether it auto-merges on a green bar or waits
-# for human review. Default `human_review` until the revert + lesson→outcome
-# traceability surface lands (PR D) — see docs/decisions/ephemeral-run-worktree-isolation.md.
 VALID_MERGE_MODES = ("auto_on_green", "human_review")
 
 
 def merge_mode() -> str:
-    """The author merge gate, read + validated at **call time** (not import).
-
-    A function, not a module constant, so the ``choices`` validation runs lazily at
-    the author stage (``orchestrate.author_drain``) — this module is imported by
-    every learning stage (LEARN, run_one, run.py's post-step), and a typo'd
-    author-only knob must not crash stages that never merge. ``env_str`` raises
-    ``FatalConfigError`` on an out-of-set value, which the drain maps to exit 2.
-    Call-time read also lets tests override via ``monkeypatch.setenv`` (the env_int
-    threshold pattern)."""
     return env_str("LEARNING_MERGE_MODE", "human_review", choices=VALID_MERGE_MODES)
 
 
 class StageAbort(Exception):
-    """A systemic failure — the whole stage must abort with the contracted
-    ``exit 2``. This is the type ``_run_stage`` maps to exit 2 on every stage
-    (drains and the direct single-run path alike), and the type the drains
-    re-raise *before* their broad per-item quarantine guard so a deployment-wide
-    fault dooms the stage rather than being mislabeled as one corrupt item.
-
-    The layer-neutral ``FatalConfigError`` (imported from ``defender._env``, a
-    misconfig *condition* runtime/ shares) is **enrolled alongside** ``StageAbort``
-    at those two catch sites — it is no longer a subclass, since the exit-2
-    *response* is learning-only while the *condition* is universal. See the
-    ``except (StageAbort, FatalConfigError)`` seams in ``orchestrate``.
-
-    Distinct from ``RunUnprocessable``: ``StageAbort`` is "the deployment is
-    broken, stop everything"; ``RunUnprocessable`` is "this one run's data is
-    bad, skip it." Keeping them disjoint (not one subclassing the other) is the
-    point of #443 — the disposition is now carried by the *type*, not by which
-    ``except`` happens to catch it.
-    """
+    pass
 
 
 class RunUnprocessable(Exception):
-    """This run's data/content is unprocessable — stop processing THIS run.
-
-    The per-run data failures the loop overwhelmingly raises: a malformed
-    ``report.md`` / judge YAML, a missing artifact, a per-run model/stage error.
-    Raised only inside ``run_one``'s call graph (the per-run pipeline + its
-    validators). Its disposition depends on the unit of work:
-
-    * On the **queue path** (``learn_drain`` → ``_process_marker``) a drain's
-      broad ``except Exception`` quarantines this one run and keeps draining.
-    * On the **direct single-run path** (``loop.py <run_dir>``) there is no
-      queue, so ``_run_stage`` (called with ``allow_run_error=True``) maps it to
-      the contracted ``exit 2``.
-
-    It is **not** a ``StageAbort`` and is never raised on an author-drain path —
-    those use ``AuthorError`` / ``LeadAuthorError`` (quarantine) or
-    ``StageAbort`` (abort). A ``RunUnprocessable`` reaching a *drain's*
-    ``_run_stage`` is therefore a bug: it propagates uncaught (a loud
-    exit-1 + traceback) rather than masquerading as a clean exit 2. See #443.
-    """
+    pass
 
 
 def pitfalls_threshold() -> int:
-    """Min count of queued general-failure pitfalls before the curation mode fires.
-
-    Lives in ``core`` (not ``leads.pitfalls_curator``) because BOTH the lead-author drain's
-    wake gate (``core.orchestrate._has_lead_author_work``) and the curator itself
-    (``leads.pitfalls_curator.run_pitfalls``) read it. Keeping the env name + default in one
-    core place stops the gate and the curator from disagreeing about the threshold — and
-    lets the gate read it without ``core`` reaching up into the ``leads`` package. Read at
-    call time so tests can monkeypatch via ``monkeypatch.setenv``.
-    """
     return env_int("LEARNING_PITFALLS_THRESHOLD", 5)
 
 
 def make_logger(prefix: str, *, flush: bool = False) -> Callable[[str], None]:
-    """Build a stderr logger that prefixes every line with ``[prefix]``."""
     def _log(msg: str) -> None:
         print(f"[{prefix}] {msg}", file=sys.stderr, flush=flush)
     return _log
 
 
-_log = make_logger("loop")  # this module's own logger
+_log = make_logger("loop")
 
 
 def source_first_party_key(model: str, *, label: str = "judge") -> None:
-    """Source an in-process PydanticAI stage's metered first-party key into ``os.environ``
-    (idempotent) so the stage can authenticate against the first-party API. The provider is
-    derived from the model name (``claude-*`` → ANTHROPIC_API_KEY, ``glm-5.2`` →
-    FIREWORKS_API_KEY). ``label`` names the stage in the log/error text (``judge`` / ``actor``
-    / ``engine`` for a mixed prep).
-
-    The metered key sourced here authenticates the in-process PydanticAI stages; it never
-    leaks into a tool subprocess, because every bash-tool subprocess a stage spawns gets a
-    key-stripped env from ``run_common.run_env`` (which pops ``providers.api_key_vars()``). A
-    ``.env`` key takes precedence over the ambient value (for Anthropic the ambient is the
-    subscription credential, which 401s against the first-party REST API). Fail loud
-    (``FatalConfigError`` → the orchestrator's exit 2) when no key is available at all,
-    rather than 401-ing mid-stage."""
-    # provider_for imports no pydantic-ai backend (declarative routing), so this is
-    # safe in the SIEM-free learn worker; _first_party_key is neutral (no run.py).
     from defender.runtime import providers
     from defender._first_party_key import resolve_first_party_key
 
     try:
         var = providers.provider_for(model).api_key_var
     except ValueError as e:
-        # A typo'd model (JUDGE_MODEL / ACTOR_MODEL / …) is unroutable in provider_for; surface
-        # it as the FatalConfigError → exit-2 this function documents (matching run.py's
-        # _source_provider_keys) rather than a bare ValueError the drain would dead-letter
-        # per-run for a run-independent config fault.
         raise FatalConfigError(str(e)) from e
     key, src = resolve_first_party_key(var=var, root=REPO_ROOT)
     if key:

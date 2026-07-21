@@ -33,7 +33,7 @@ from types import SimpleNamespace
 
 import pytest
 
-pytest.importorskip("pydantic_ai")  # CI installs the runtime extra; skip otherwise
+pytest.importorskip("pydantic_ai")
 
 from pydantic_ai.exceptions import ModelRetry  # noqa: E402
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart  # noqa: E402
@@ -57,8 +57,6 @@ from defender.learning.author.verify_forward.engine import (  # noqa: E402
     _run_verify_pydantic,
 )
 from defender.learning.pipeline._pydantic_stage import build_stage_agent  # noqa: E402
-# NOT-YET-WRITTEN TARGET (m16): the user-prompt builder must be an importable pure function,
-# else the built payload is observable only through monkeypatch.setattr, which CI ratchets.
 from defender.learning.author.lessons.run import build_user_prompt  # noqa: E402
 from defender.runtime import observe, permission, providers  # noqa: E402
 from defender.runtime.agent_role import AgentRole  # noqa: E402
@@ -66,7 +64,6 @@ from defender.agents import AGENTS  # noqa: E402
 from defender.tests._engine_helpers import fake_model as _fake_model  # noqa: E402
 from defender.tests._engine_helpers import replay_once as _replay  # noqa: E402
 
-# --- THE TARGET (missing until implemented; the ImportError IS the expected red) ---
 from defender.learning.author.verify_forward.checks import (  # noqa: E402
     ACTOR_CHECK,
     ENV_CHECK,
@@ -89,9 +86,6 @@ _VERDICT_GOOD = "reasoning\n\nVERDICT: GOOD\n"
 _VERDICT_BAD = "reasoning\n\nVERDICT: BAD\n"
 
 
-# ===========================================================================
-# Declarative fault-injection fakes (enter via CuratorDeps.run_verify)
-# ===========================================================================
 
 
 @dataclass
@@ -156,9 +150,6 @@ class FakeVerify:
                 self._inflight -= 1
 
 
-# ===========================================================================
-# FunctionModel DI-seam helpers (mirror test_verify_forward_engine.py)
-# ===========================================================================
 
 
 def _seq(*responses: ModelResponse):
@@ -172,9 +163,6 @@ def _seq(*responses: ModelResponse):
     return fn
 
 
-# ===========================================================================
-# Scene builders (a worktree corpus + shared-state run bundles + pending queue)
-# ===========================================================================
 
 
 def _scene(tmp_path: Path):
@@ -194,7 +182,7 @@ def _scene(tmp_path: Path):
 
 def _lesson(scene, name: str = "lesson", body: str = "a candidate lesson body\n") -> str:
     (scene.corpus / f"{name}.md").write_text(f"---\nname: {name}\n---\n{body}")
-    return f"defender/lessons/{name}.md"  # repo-relative operand, what the agent types
+    return f"defender/lessons/{name}.md"
 
 
 def _bundle(scene, run_id: str, *, transcript: str | None = None,
@@ -243,9 +231,6 @@ def _prompt(tmp_path: Path) -> Path:
     return p
 
 
-# ===========================================================================
-# D0 — the return-value contract
-# ===========================================================================
 
 
 def test_d0_returns_text_protocol(tmp_path):
@@ -260,7 +245,7 @@ def test_d0_returns_text_protocol(tmp_path):
     })
     pairs = [_fpair(scene, "run-1"), _fpair(scene, "run-2"), _fpair(scene, "run-3")]
     deps = _deps(scene, run_verify=fake, queued={"run-1", "run-2", "run-3"})
-    out = _run(deps, pairs)  # never raises for the per-pair RunUnprocessable
+    out = _run(deps, pairs)
     lines = _lines(out)
     assert lines[0].startswith("GOOD")
     assert "run-1" in lines[0]
@@ -276,7 +261,6 @@ def test_d0b_results_in_input_order(tmp_path):
     """When the checks complete out of order the result lines are still emitted in
     input-pair order."""
     scene = _scene(tmp_path)
-    # decreasing delays → later pairs finish first, yet output must stay in input order
     fake = FakeVerify(specs={
         "run-0": VerifySpec(raw=_VERDICT_GOOD, delay=0.06),
         "run-1": VerifySpec(raw=_VERDICT_BAD, delay=0.04),
@@ -292,9 +276,6 @@ def test_d0b_results_in_input_order(tmp_path):
     assert fake.peak >= 2, "the delayed checks did not genuinely interleave"
 
 
-# ===========================================================================
-# Tool existence, binding, and the absent program operand
-# ===========================================================================
 
 
 def _build_curator_agent(tmp_path):
@@ -317,13 +298,11 @@ def test_d1_tool_registered_for_corpus_author(tmp_path):
         assert "forward_check" in agent._function_toolset.tools
     finally:
         logger.close()
-    # the bit is set on ONLY the corpus-author def
     for role, defn in AGENTS.items():
         if role is AgentRole.CORPUS_AUTHOR:
             assert defn.tools.forward_check is True
         else:
             assert defn.tools.forward_check is False
-    # and a concrete other-role agent (the tool-free verifier) registers no such tool
     lg = observe.RequestLogger(tmp_path / "v.jsonl")
     try:
         ver = build_stage_agent(
@@ -341,8 +320,7 @@ def test_d2_check_bound_from_deps_not_operand(tmp_path):
     scene = _scene(tmp_path)
     fake = FakeVerify()
     deps = _deps(scene, run_verify=fake, check=FINDINGS_CHECK, queued={"run-X"})
-    assert deps.check is FINDINGS_CHECK  # the check rides on the deps, not a tool argument
-    # the tool's own registered signature carries no script/program operand (see d3)
+    assert deps.check is FINDINGS_CHECK
     agent, logger = _build_curator_agent(tmp_path)
     try:
         schema = agent._function_toolset.tools["forward_check"].tool_def.parameters_json_schema
@@ -367,12 +345,11 @@ def test_d3_no_program_operand_negative(tmp_path):
         schema = agent._function_toolset.tools["forward_check"].tool_def.parameters_json_schema
     finally:
         logger.close()
-    assert set(schema.get("properties", {})) == {"pairs"}  # the ONLY operand is `pairs`
+    assert set(schema.get("properties", {})) == {"pairs"}
     assert _pair_field_names(schema) <= {"lesson_path", "source_id", "direction"}
     blob = json.dumps(schema).lower()
     for forbidden in ("script", "program", "argv", "interpreter", "command"):
         assert forbidden not in blob, f"the tool schema exposes a {forbidden!r} operand"
-    # paired positive control (d0's address): a legitimate pair set DOES execute the bound check
     scene = _scene(tmp_path)
     fake = FakeVerify(default=VerifySpec(raw=_VERDICT_GOOD))
     deps = _deps(scene, run_verify=fake, queued={"run-1"})
@@ -401,7 +378,7 @@ def test_d4b_empty_pairs_is_an_empty_batch(tmp_path):
     out = _run(deps, [])
     assert _lines(out) == [ln for ln in _lines(out) if ln.startswith("BATCH:")]
     assert _counts(out) == (0, 0, 0)
-    assert fake.calls == []  # no check invoked
+    assert fake.calls == []
 
 
 def test_d4c_duplicate_pairs_are_not_deduplicated(tmp_path):
@@ -413,7 +390,7 @@ def test_d4c_duplicate_pairs_are_not_deduplicated(tmp_path):
     pair = _fpair(scene, "run-1")
     out = _run(deps, [pair, pair])
     verdict_lines = [ln for ln in _lines(out) if not ln.startswith("BATCH:")]
-    assert len(verdict_lines) == 2  # not collapsed to one
+    assert len(verdict_lines) == 2
     assert _counts(out) == (2, 0, 0)
     assert len(fake.calls) == 2
 
@@ -421,21 +398,16 @@ def test_d4c_duplicate_pairs_are_not_deduplicated(tmp_path):
 def test_d5_all_four_curators_share_the_signature(tmp_path):
     """Each of the four curators invokes the same forward_check tool signature; the only
     per-curator variation is which check the deps bind."""
-    # three distinct ForwardChecks (env-benign and env-adversarial share ENV_CHECK)
     checks = [FINDINGS_CHECK, ACTOR_CHECK, ENV_CHECK]
     assert all(isinstance(c, ForwardCheck) for c in checks)
-    assert len({c.error_prefix for c in checks}) == len(checks)  # they differ only in identity
-    # ONE tool signature: the same run_forward_check drives every curator; only deps.check varies
+    assert len({c.error_prefix for c in checks}) == len(checks)
     scene = _scene(tmp_path)
     for c in checks:
         deps = _deps(scene, run_verify=FakeVerify(), check=c, queued=set())
         assert deps.check is c
-        assert _counts(_run(deps, [])) == (0, 0, 0)  # same entry point, same empty-batch shape
+        assert _counts(_run(deps, [])) == (0, 0, 0)
 
 
-# ===========================================================================
-# Fan-out, isolation, faults
-# ===========================================================================
 
 
 def test_d6_concurrency_bounded_by_workers(tmp_path):
@@ -449,8 +421,8 @@ def test_d6_concurrency_bounded_by_workers(tmp_path):
     deps = _deps(scene, run_verify=fake, queued=set(rids))
     out = _run(deps, pairs)
     assert _counts(out) == (n, 0, 0)
-    assert fake.peak <= config.VERIFY_BATCH_WORKERS  # never exceeds the bound
-    assert fake.peak >= 2  # the channel genuinely interleaved (not a serial fan-out)
+    assert fake.peak <= config.VERIFY_BATCH_WORKERS
+    assert fake.peak >= 2
 
 
 def test_d7_one_check_fault_does_not_fail_the_batch(tmp_path):
@@ -467,16 +439,14 @@ def test_d7_one_check_fault_does_not_fail_the_batch(tmp_path):
     lines = _lines(_run(deps, pairs))
     assert lines[0].startswith("GOOD")
     assert lines[1].startswith("ERROR")
-    assert lines[1].strip() != "ERROR"  # a cause-specific detail
-    assert lines[2].startswith("BAD")  # the real verdict, not swept away by the sibling fault
+    assert lines[1].strip() != "ERROR"
+    assert lines[2].startswith("BAD")
 
 
 def test_m14_raising_check_does_not_cancel_siblings(tmp_path):
     """A check that raises does not cancel its sibling checks; the siblings run to completion
     and their verdicts appear."""
     scene = _scene(tmp_path)
-    # the raiser fires immediately; the siblings are mid-flight (delayed) when it raises —
-    # a bare asyncio.gather / pydantic-ai except-BaseException would cancel them
     fake = FakeVerify(specs={
         "run-0": VerifySpec(raises=RunUnprocessable("boom")),
         "run-1": VerifySpec(raw=_VERDICT_GOOD, delay=0.05),
@@ -488,10 +458,10 @@ def test_m14_raising_check_does_not_cancel_siblings(tmp_path):
     assert lines[0].startswith("ERROR")
     assert "run-0" in lines[0]
     assert lines[1].startswith("GOOD")
-    assert "run-1" in lines[1]  # sibling ran to completion
+    assert "run-1" in lines[1]
     assert lines[2].startswith("BAD")
-    assert "run-2" in lines[2]   # sibling ran to completion
-    assert fake.peak >= 2  # the siblings were genuinely in-flight when the raiser raised
+    assert "run-2" in lines[2]
+    assert fake.peak >= 2
 
 
 def test_d8_per_check_timeout_is_one_pairs_error(tmp_path):
@@ -508,7 +478,7 @@ def test_d8_per_check_timeout_is_one_pairs_error(tmp_path):
     assert lines[0].startswith("ERROR")
     assert "run-1" in lines[0]
     assert re.search(r"(?i)time", lines[0]), "the timeout detail is not timeout-specific"
-    assert lines[1].startswith("GOOD")  # the batch completed past the timed-out pair
+    assert lines[1].startswith("GOOD")
     assert _counts(_run(deps, pairs)) == (1, 0, 1)
 
 
@@ -524,18 +494,18 @@ def test_d9_error_details_are_cause_specific(tmp_path):
     fake = FakeVerify(specs={
         "run-t": VerifySpec(raises=RunUnprocessable("did not complete: TimeoutError()")),
         "run-m": VerifySpec(raises=RunUnprocessable("failed: ModelHTTPError(status=500)")),
-        "run-v": VerifySpec(raw="reasoning only, no verdict token here"),  # unparseable verdict
+        "run-v": VerifySpec(raw="reasoning only, no verdict token here"),
     })
     deps = _deps(scene, run_verify=fake, queued={"run-t", "run-m", "run-v", "run-x"})
     pairs = [
         Pair(l_t, "run-t", "adversarial"),
         Pair(l_m, "run-m", "adversarial"),
         Pair(l_v, "run-v", "adversarial"),
-        Pair("defender/lessons/absent.md", "run-x", "adversarial"),  # missing lesson file
+        Pair("defender/lessons/absent.md", "run-x", "adversarial"),
     ]
     _bundle(scene, "run-x")
     lines = [ln for ln in _lines(_run(deps, pairs)) if ln.startswith("ERROR")]
-    details = [ln.split(None, 3)[-1] for ln in lines]  # the trailing detail of each ERROR line
+    details = [ln.split(None, 3)[-1] for ln in lines]
     assert len(lines) == 4
     assert len(set(details)) == 4, f"the four causes are not cause-distinct: {details}"
 
@@ -552,9 +522,9 @@ def test_d9b_unusable_verdict_is_that_pairs_error(tmp_path):
     pairs = [_fpair(scene, r) for r in ("run-none", "run-maybe", "run-ok")]
     deps = _deps(scene, run_verify=fake, queued={"run-none", "run-maybe", "run-ok"})
     lines = _lines(_run(deps, pairs))
-    assert lines[0].startswith("ERROR")  # no verdict → ERROR, NOT coerced to BAD
-    assert lines[1].startswith("ERROR")  # MAYBE → ERROR, NOT coerced
-    assert lines[2].startswith("BAD")    # positive control: a real verdict is honored
+    assert lines[0].startswith("ERROR")
+    assert lines[1].startswith("ERROR")
+    assert lines[2].startswith("BAD")
     assert _counts(_run(deps, pairs)) == (0, 1, 2)
 
 
@@ -568,7 +538,7 @@ def test_d10_systemic_faults_propagate(tmp_path):
         scene, run_verify=FakeVerify(specs={"run-1": VerifySpec(raises=FatalConfigError("no key"))}),
         queued={"run-1"},
     )
-    with pytest.raises(FatalConfigError):  # NOT flattened into an ERROR line
+    with pytest.raises(FatalConfigError):
         _run(deps_cfg, [pair])
     deps_abort = _deps(
         scene, run_verify=FakeVerify(specs={"run-1": VerifySpec(raises=StageAbort("deployment-wide"))}),
@@ -576,7 +546,6 @@ def test_d10_systemic_faults_propagate(tmp_path):
     )
     with pytest.raises(StageAbort):
         _run(deps_abort, [pair])
-    # positive control: a per-run RunUnprocessable IS flattened to that pair's ERROR (d7)
     deps_perrun = _deps(
         scene, run_verify=FakeVerify(specs={"run-1": VerifySpec(raises=RunUnprocessable("one run"))}),
         queued={"run-1"},
@@ -590,8 +559,6 @@ def test_m12_a_raising_check_does_not_hang_the_batch(tmp_path):
     scene = _scene(tmp_path)
     n = config.VERIFY_BATCH_WORKERS
     rids = [f"run-{i}" for i in range(n + 4)]
-    # the first `n` checks hold a slot (delay) then RAISE — a slot not released on raise would
-    # starve the last 4 and deadlock; the last 4 must still run.
     specs = {r: VerifySpec(delay=0.02, raises=RunUnprocessable("boom")) for r in rids[:n]}
     specs.update({r: VerifySpec(raw=_VERDICT_GOOD) for r in rids[n:]})
     fake = FakeVerify(specs=specs)
@@ -601,13 +568,10 @@ def test_m12_a_raising_check_does_not_hang_the_batch(tmp_path):
     async def _drive():
         return await run_forward_check(deps, pairs)
 
-    out = asyncio.run(asyncio.wait_for(_drive(), timeout=15))  # a deadlock would TimeoutError
-    assert _counts(out) == (4, 0, n)  # every pair produced a result — no starvation
+    out = asyncio.run(asyncio.wait_for(_drive(), timeout=15))
+    assert _counts(out) == (4, 0, n)
 
 
-# ===========================================================================
-# The verify prompt payload (R1)
-# ===========================================================================
 
 
 def test_m1_verify_payload_shape(tmp_path):
@@ -621,21 +585,14 @@ def test_m1_verify_payload_shape(tmp_path):
     deps = _deps(scene, run_verify=fake, queued={"run-X"})
     _run(deps, [Pair("defender/lessons/lp.md", "run-X", "adversarial")])
     call = fake.calls[0]
-    # disjoint sources: the system turn is the check's own prompt file (const), the user turn is
-    # the bundle-derived DATA — the system source is NOT re-inlined into the user turn.
     assert Path(str(call.prompt_path)).name == Path(str(FINDINGS_CHECK.prompt_path)).name
-    # every DATA slot is substituted: the real bundle bytes are present …
     assert "TRANSCRIPT-BODY-XYZ" in call.user
     assert "LESSON-BODY-XYZ" in call.user
-    assert "malicious" in call.user  # the (direction-aware) ground-truth disposition
-    # … and NO unrendered slot token survives in the user turn
+    assert "malicious" in call.user
     for slot in ("{transcript}", "{lesson}", "{disposition}", "{cited_policy}"):
         assert slot not in call.user
 
 
-# ===========================================================================
-# Key sourcing, environment, budget (driven through run_curator_stage)
-# ===========================================================================
 
 
 def _curator_stage(scene, **over):
@@ -683,9 +640,9 @@ def test_d13_key_sourced_once_per_spawn(tmp_path):
             run_author=lambda **kw: _run_curator_pydantic(**kw, make_model=_fake_model(curator_fn)),
             run_verify=verify,
         )
-    assert isinstance(out, dict)  # the spawn completed through the real transport
-    assert len(verify.calls) == 3  # the N-pair batch's checks all ran (the tool fired)
-    assert len(sourced) == 1  # the key was sourced ONCE at the spawn, not per check
+    assert isinstance(out, dict)
+    assert len(verify.calls) == 3
+    assert len(sourced) == 1
 
 
 def test_d14_no_environ_mutation(tmp_path):
@@ -696,8 +653,7 @@ def test_d14_no_environ_mutation(tmp_path):
     deps = _deps(scene, run_verify=fake, queued={"run-1"})
     before = dict(os.environ)
     _run(deps, [_fpair(scene, "run-1")])
-    assert dict(os.environ) == before  # no add / change / remove — no DEFENDER_LEARNING_STATE_DIR pin
-    # positive control (d16): the check still resolved the real bundle via deps, not the env
+    assert dict(os.environ) == before
     assert "TRANSCRIPT-for-run-1" in fake.calls[0].user
 
 
@@ -709,7 +665,7 @@ def test_d15_verify_requests_do_not_consume_curator_request_cap(tmp_path):
     for r in rids:
         _bundle(scene, r)
         _lesson(scene, f"l-{r}")
-    verifier_fn = _replay("reasoning\n\nVERDICT: GOOD")  # one real (FunctionModel) request each
+    verifier_fn = _replay("reasoning\n\nVERDICT: GOOD")
     vcalls: list = []
 
     def _verify_transport(**kw):
@@ -723,18 +679,15 @@ def test_d15_verify_requests_do_not_consume_curator_request_cap(tmp_path):
     curator_fn = _forward_tool_call(pairs_args)
     with override_allow_model_requests(False):
         out = _curator_stage(
-            scene, request_limit=4,  # curator's own 2 turns fit; 4 LEAKED nested requests would not
+            scene, request_limit=4,
             queued_ids=frozenset(rids),
             run_author=lambda **kw: _run_curator_pydantic(**kw, make_model=_fake_model(curator_fn)),
             run_verify=_verify_transport,
         )
-    assert isinstance(out, dict)  # completed — the nested requests did not exhaust the curator cap
-    assert len(vcalls) == 4  # all four nested checks genuinely ran (each its own metered request)
+    assert isinstance(out, dict)
+    assert len(vcalls) == 4
 
 
-# ===========================================================================
-# Paths resolve from deps, not module constants
-# ===========================================================================
 
 
 def test_d16_bundle_resolves_from_deps(tmp_path):
@@ -747,7 +700,7 @@ def test_d16_bundle_resolves_from_deps(tmp_path):
     fake = FakeVerify(default=VerifySpec(raw=_VERDICT_GOOD))
     deps = _deps(scene, run_verify=fake, queued={"run-X"})
     _run(deps, [Pair("defender/lessons/l.md", "run-X", "adversarial")])
-    assert "DEPS-BUNDLE-SENTINEL" in fake.calls[0].user  # the deps.runs_dir bundle, not the default
+    assert "DEPS-BUNDLE-SENTINEL" in fake.calls[0].user
     assert str(scene.runs) in str(fake.calls[0].source_run_dir)
 
 
@@ -757,7 +710,6 @@ def test_d17_env_check_uses_the_worktree_corpus(tmp_path):
     scene = _scene(tmp_path)
     env_corpus = scene.repo / "defender" / "lessons-environment"
     env_corpus.mkdir(parents=True)
-    # a bundle + a queued observation row keyed on a rule id
     d = scene.runs / "run-E"
     d.mkdir(parents=True)
     (d / "investigation.md").write_text(
@@ -769,21 +721,19 @@ def test_d17_env_check_uses_the_worktree_corpus(tmp_path):
     ) + "\n")
     lp = "defender/lessons-environment/mylesson.md"
     pair = Pair(lp, "obs-1")
-    fake = FakeVerify()  # ENV check is model-free → run_verify must never be called
-    # empty corpus → the keyed lesson is not retrievable → BAD
+    fake = FakeVerify()
     deps_empty = _deps(scene, run_verify=fake, check=ENV_CHECK, corpus=env_corpus,
                        queued={"obs-1"})
     out_bad = _run(deps_empty, [pair])
-    assert _counts(out_bad)[1] == 1 or _counts(out_bad)[2] == 1  # BAD (or ERROR) — not retrieved
-    # place the keyed lesson INTO the deps corpus → now retrievable → GOOD, proving deps.corpus_dir
+    assert _counts(out_bad)[1] == 1 or _counts(out_bad)[2] == 1
     (env_corpus / "mylesson.md").write_text(
         "---\nsubject: s\nalert_rule_ids: [rule-Z]\nstatus: live\n"
         "relevance_criteria: c\n---\nbody\n"
     )
     deps_full = _deps(scene, run_verify=fake, check=ENV_CHECK, corpus=env_corpus,
                       queued={"obs-1"})
-    assert _counts(_run(deps_full, [pair])) == (1, 0, 0)  # retrieved from the deps corpus → GOOD
-    assert fake.calls == []  # the deterministic env check never touched the model transport
+    assert _counts(_run(deps_full, [pair])) == (1, 0, 0)
+    assert fake.calls == []
 
 
 def test_d20_pending_queue_resolves_from_deps(tmp_path):
@@ -801,13 +751,10 @@ def test_d20_pending_queue_resolves_from_deps(tmp_path):
     fake = FakeVerify(default=VerifySpec(raw=_VERDICT_GOOD))
     deps = _deps(scene, run_verify=fake, check=ACTOR_CHECK, pending=pending, queued={"obs-1"})
     out = _run(deps, [Pair(lp, "obs-1")])
-    assert _counts(out) == (1, 0, 0)  # the row was found IN deps.pending → the check ran
-    assert "ACTOR-STORY-SENTINEL" in fake.calls[0].user  # resolved via the deps-named queue
+    assert _counts(out) == (1, 0, 0)
+    assert "ACTOR-STORY-SENTINEL" in fake.calls[0].user
 
 
-# ===========================================================================
-# The lesson_path operand (R3 parity + confinement)
-# ===========================================================================
 
 
 def test_d18_lesson_path_resolves_against_the_worktree(tmp_path):
@@ -820,8 +767,6 @@ def test_d18_lesson_path_resolves_against_the_worktree(tmp_path):
     deps = _deps(scene, run_verify=fake, queued={"run-X"})
     out = _run(deps, [Pair("defender/lessons/wt.md", "run-X", "adversarial")])
     assert _counts(out) == (1, 0, 0)
-    # the repo-relative operand resolved into the worktree corpus (repo_root/defender/...),
-    # not the ambient process cwd — its body reached the payload
     assert "WT-LESSON-BODY" in fake.calls[0].user
 
 
@@ -831,25 +776,23 @@ def test_d19_lesson_path_confined_to_own_corpus(tmp_path):
     trace file nor the returned text."""
     scene = _scene(tmp_path)
     _bundle(scene, "run-X")
-    # a sibling corpus file whose CONTENT must never exfiltrate
     sib = scene.repo / "defender" / "lessons-actor"
     sib.mkdir(parents=True)
     (sib / "secret.md").write_text("SIBLING-SECRET-CONTENT\n")
     outside = scene.tmp / "outside.md"
     outside.write_text("OUTSIDE-CONTENT\n")
     escapes = [
-        "defender/lessons-actor/secret.md",           # a sibling corpus
-        "defender/lessons/../../../etc/hosts",        # a parent traversal
-        str(outside),                                 # an absolute path outside
+        "defender/lessons-actor/secret.md",
+        "defender/lessons/../../../etc/hosts",
+        str(outside),
     ]
     for bad in escapes:
         fake = FakeVerify()
         deps = _deps(scene, run_verify=fake, queued={"run-X"})
-        with pytest.raises(ModelRetry) as ei:  # a policy DENY (not a per-pair ERROR)
+        with pytest.raises(ModelRetry) as ei:
             _run(deps, [Pair(bad, "run-X", "adversarial")])
-        assert fake.calls == []  # NO check ran → the escaped file was never read
-        assert "SIBLING-SECRET-CONTENT" not in str(ei.value)  # its bytes are not in the error
-    # and no trace file was ever written for a denied call
+        assert fake.calls == []
+        assert "SIBLING-SECRET-CONTENT" not in str(ei.value)
     assert not list(scene.runs.glob("**/*.trace.jsonl"))
 
 
@@ -863,8 +806,8 @@ def test_d19b_in_corpus_lesson_path_accepted(tmp_path):
         fake = FakeVerify(default=VerifySpec(raw=_VERDICT_GOOD))
         deps = _deps(scene, run_verify=fake, queued={"run-X"})
         out = _run(deps, [Pair(spelling, "run-X", "adversarial")])
-        assert _counts(out) == (1, 0, 0)  # accepted (proves the channel can see the difference)
-        assert "IN-CORPUS-CONTENT" in fake.calls[0].user  # its content was checked
+        assert _counts(out) == (1, 0, 0)
+        assert "IN-CORPUS-CONTENT" in fake.calls[0].user
 
 
 def test_m3_tool_arg_denylist_parity(tmp_path):
@@ -873,22 +816,18 @@ def test_m3_tool_arg_denylist_parity(tmp_path):
     held-out ground truth is refused on both surfaces."""
     scene = _scene(tmp_path)
     _bundle(scene, "run-X")
-    # a denylisted name (`ground_truth`), in-corpus and .md — so only the DENYLIST refuses it
     (scene.corpus / "ground_truth.md").write_text("---\n---\nheld-out ground truth\n")
     lp = "defender/lessons/ground_truth.md"
     rp = (scene.corpus / "ground_truth.md").resolve()
     fake = FakeVerify()
     deps = _deps(scene, run_verify=fake, queued={"run-X"})
-    # write-tool lane: denied by the secret/ground-truth denylist
     wd = permission.decide_write(
         rp, "x", run_dir=deps.run_dir, defender_dir=deps.defender_dir, policy=deps.policy,
     )
     assert not wd.allow
-    # tool-arg lane: denied too (parity) — a policy deny, no check runs
     with pytest.raises(ModelRetry):
         _run(deps, [Pair(lp, "run-X", "adversarial")])
     assert fake.calls == []
-    # paired positive control: a normal in-corpus .md is accepted on BOTH surfaces
     (scene.corpus / "ok.md").write_text("---\nname: ok\n---\nfine\n")
     ok_rp = (scene.corpus / "ok.md").resolve()
     assert permission.decide_write(
@@ -908,19 +847,16 @@ def test_m3b_tool_arg_resolve_parity(tmp_path):
     outside = scene.tmp / "outside_secret.md"
     outside.write_text("OUTSIDE-SECRET\n")
     link = scene.corpus / "sneaky.md"
-    link.symlink_to(outside)  # textually under the corpus, RESOLVES outside it
+    link.symlink_to(outside)
     lp = "defender/lessons/sneaky.md"
     fake = FakeVerify()
     deps = _deps(scene, run_verify=fake, queued={"run-X"})
-    # write-tool lane resolves before the fullmatch → denied
     assert not permission.decide_write(
         link, "x", run_dir=deps.run_dir, defender_dir=deps.defender_dir, policy=deps.policy,
     ).allow
-    # tool-arg lane resolves too (parity) → a textual-prefix bypass is closed
     with pytest.raises(ModelRetry):
         _run(deps, [Pair(lp, "run-X", "adversarial")])
     assert fake.calls == []
-    # paired positive control: a real in-corpus .md (resolves INSIDE) is accepted on both
     (scene.corpus / "real.md").write_text("---\nname: real\n---\nREAL-BODY\n")
     assert permission.decide_write(
         (scene.corpus / "real.md").resolve(), "x",
@@ -931,9 +867,6 @@ def test_m3b_tool_arg_resolve_parity(tmp_path):
     assert _counts(_run(deps2, [Pair("defender/lessons/real.md", "run-X", "adversarial")])) == (1, 0, 0)
 
 
-# ===========================================================================
-# The id operand (F-ID)
-# ===========================================================================
 
 
 def test_m11_source_id_confined_to_queued_rows(tmp_path):
@@ -942,19 +875,18 @@ def test_m11_source_id_confined_to_queued_rows(tmp_path):
     model payload or the trace."""
     scene = _scene(tmp_path)
     _bundle(scene, "run-queued")
-    _bundle(scene, "run-unqueued", transcript="UNQUEUED-TRANSCRIPT-SENTINEL\n")  # exists, NOT queued
+    _bundle(scene, "run-unqueued", transcript="UNQUEUED-TRANSCRIPT-SENTINEL\n")
     lp_u = _lesson(scene, "lu")
     fake = FakeVerify()
     deps = _deps(scene, run_verify=fake, queued={"run-queued"})
     out = _run(deps, [Pair(lp_u, "run-unqueued", "adversarial")])
     lines = _lines(out)
     assert lines[0].startswith("ERROR")
-    assert "run-unqueued" in lines[0]  # a data fault, not a deny
+    assert "run-unqueued" in lines[0]
     assert _counts(out) == (0, 0, 1)
-    # the unrelated case's transcript reached NO out-edge (the bundle was never read)
-    assert fake.calls == []  # transport never called → not in payload
-    assert "UNQUEUED-TRANSCRIPT-SENTINEL" not in out  # not in the returned text
-    assert not list(scene.runs.glob("**/*.trace.jsonl"))  # not in a trace
+    assert fake.calls == []
+    assert "UNQUEUED-TRANSCRIPT-SENTINEL" not in out
+    assert not list(scene.runs.glob("**/*.trace.jsonl"))
 
 
 def test_m11b_queued_source_id_accepted(tmp_path):
@@ -967,12 +899,9 @@ def test_m11b_queued_source_id_accepted(tmp_path):
     deps = _deps(scene, run_verify=fake, queued={"run-queued"})
     out = _run(deps, [Pair(lp, "run-queued", "adversarial")])
     assert _counts(out) == (1, 0, 0)
-    assert "QUEUED-TRANSCRIPT-SENTINEL" in fake.calls[0].user  # queued id → its bundle loaded
+    assert "QUEUED-TRANSCRIPT-SENTINEL" in fake.calls[0].user
 
 
-# ===========================================================================
-# The async seam (F-ASYNC — the OBSERVABLE only)
-# ===========================================================================
 
 
 def test_d21_no_nested_event_loop_crash(tmp_path):
@@ -983,19 +912,18 @@ def test_d21_no_nested_event_loop_crash(tmp_path):
     _lesson(scene, "lx")
     verifier_fn = _replay("reasoning\n\nVERDICT: GOOD")
 
-    def _verify_transport(**kw):  # the REAL transport (its run_stage calls asyncio.run inside)
+    def _verify_transport(**kw):
         return _run_verify_pydantic(**kw, make_model=_fake_model(verifier_fn))
 
     deps = _deps(scene, run_verify=_verify_transport, queued={"run-X"})
 
-    async def _outer():  # drive the tool from INSIDE an already-running loop
+    async def _outer():
         return await run_forward_check(deps, [Pair("defender/lessons/lx.md", "run-X", "adversarial")])
 
     with override_allow_model_requests(False):
-        out = asyncio.run(_outer())  # no RuntimeError("asyncio.run() ... running event loop")
+        out = asyncio.run(_outer())
     assert _counts(out) == (1, 0, 0)
 
-    # and the fan-out is genuinely concurrent (does not serialize into one blocking call)
     fake = FakeVerify(specs={f"run-{i}": VerifySpec(raw=_VERDICT_GOOD, delay=0.04) for i in range(4)})
     pairs = [_fpair(scene, f"run-{i}") for i in range(4)]
     deps2 = _deps(scene, run_verify=fake, queued={f"run-{i}" for i in range(4)})
@@ -1004,12 +932,9 @@ def test_d21_no_nested_event_loop_crash(tmp_path):
         return await run_forward_check(deps2, pairs)
 
     asyncio.run(_outer2())
-    assert fake.peak >= 2  # in-flight interleaving under the running loop, not serialized
+    assert fake.peak >= 2
 
 
-# ===========================================================================
-# Config domain coverage (R4)
-# ===========================================================================
 
 
 def test_m4_workers_zero_fails_loud(tmp_path, monkeypatch):
@@ -1024,9 +949,8 @@ def test_m4_workers_zero_fails_loud(tmp_path, monkeypatch):
     async def _drive():
         return await run_forward_check(deps, pairs)
 
-    with pytest.raises((ValueError, FatalConfigError)):  # fails LOUD, not a semaphore deadlock
-        asyncio.run(asyncio.wait_for(_drive(), timeout=8))  # a hang would surface as TimeoutError
-    # paired positive control: a POSITIVE bound runs the fan-out to completion
+    with pytest.raises((ValueError, FatalConfigError)):
+        asyncio.run(asyncio.wait_for(_drive(), timeout=8))
     monkeypatch.setenv("LEARNING_VERIFY_BATCH_WORKERS", "2")
     fake = FakeVerify(default=VerifySpec(raw=_VERDICT_GOOD))
     deps2 = _deps(scene, run_verify=fake, queued={"run-1", "run-2"})
@@ -1037,13 +961,10 @@ def test_m5_verifier_timeout_zero_is_honored(tmp_path):
     """A verifier timeout of zero is honored as written and is not swallowed by an or-default
     coercion."""
     scene = _scene(tmp_path)
-    # the tool threads the CONFIGURED verifier timeout verbatim to the transport
     fake = FakeVerify(default=VerifySpec(raw=_VERDICT_GOOD))
     deps = _deps(scene, run_verify=fake, queued={"run-1"})
     _run(deps, [_fpair(scene, "run-1")])
-    assert fake.calls[0].timeout == config.VERIFIER_TIMEOUT  # threaded, not coerced
-    # the config CONSUMER honors a deliberate 0 (the real transport): wall_clock_timeout=0 times
-    # out immediately, where an `x or DEFAULT` coercion would let the fake model return.
+    assert fake.calls[0].timeout == config.VERIFIER_TIMEOUT
     src = scene.runs / "run-1"
     with override_allow_model_requests(False), pytest.raises(RunUnprocessable):
         _run_verify_pydantic(
@@ -1051,7 +972,6 @@ def test_m5_verifier_timeout_zero_is_honored(tmp_path):
             "vf.0.trace.jsonl", "l", "u", src,
             wall_clock_timeout=0, make_model=_fake_model(_replay(_VERDICT_GOOD)),
         )
-    # positive control: a generous timeout lets the same transport return
     with override_allow_model_requests(False):
         out = _run_verify_pydantic(
             _prompt(tmp_path), config.VERIFIER_MODEL, config.VERIFIER_EFFORT,
@@ -1065,15 +985,13 @@ def test_m6_verifier_model_alternative_crosses(tmp_path, monkeypatch):
     """The documented alternative verifier model runs the fan-out to completion under the
     shipped effort default."""
     scene = _scene(tmp_path)
-    # the tool threads the configured verifier model to the transport (whichever it is)
     fake = FakeVerify(default=VerifySpec(raw=_VERDICT_GOOD))
     deps = _deps(scene, run_verify=fake, queued={"run-1"})
     assert _counts(_run(deps, [_fpair(scene, "run-1")])) == (1, 0, 0)
     assert fake.calls[0].model == config.VERIFIER_MODEL
-    # guarded control at the builder: the documented A/B model BUILDS under the shipped effort
     pytest.importorskip("pydantic_ai.models.openai")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
-    providers.build_for_effort("claude-haiku-4-5", config.VERIFIER_EFFORT)  # low is valid on Anthropic
+    providers.build_for_effort("claude-haiku-4-5", config.VERIFIER_EFFORT)
 
 
 def test_m7_verifier_effort_none_is_provider_gated(tmp_path, monkeypatch):
@@ -1083,18 +1001,15 @@ def test_m7_verifier_effort_none_is_provider_gated(tmp_path, monkeypatch):
     fake = FakeVerify(default=VerifySpec(raw=_VERDICT_GOOD))
     deps = _deps(scene, run_verify=fake, queued={"run-1"})
     _run(deps, [_fpair(scene, "run-1")])
-    assert fake.calls[0].effort == config.VERIFIER_EFFORT  # the tool threads the configured effort
+    assert fake.calls[0].effort == config.VERIFIER_EFFORT
     pytest.importorskip("pydantic_ai.models.openai")
     monkeypatch.setenv("FIREWORKS_API_KEY", "fw-test")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
-    providers.build_for_effort("glm-5.2", "none")  # `none` is a valid Fireworks effort
+    providers.build_for_effort("glm-5.2", "none")
     with pytest.raises(ValueError, match="unsupported Anthropic effort"):
-        providers.build_for_effort("claude-haiku-4-5", "none")  # crossing an Anthropic model FAILS LOUD
+        providers.build_for_effort("claude-haiku-4-5", "none")
 
 
-# ===========================================================================
-# Subtraction (R5)
-# ===========================================================================
 
 
 def test_d23_curator_verifies_n_lessons_in_one_call(tmp_path):
@@ -1105,7 +1020,7 @@ def test_d23_curator_verifies_n_lessons_in_one_call(tmp_path):
     fake = FakeVerify(default=VerifySpec(raw=_VERDICT_GOOD))
     pairs = [_fpair(scene, r) for r in rids]
     deps = _deps(scene, run_verify=fake, queued=set(rids))
-    out = _run(deps, pairs)  # ONE call over N lessons → ONE output
+    out = _run(deps, pairs)
     verdict_lines = [ln for ln in _lines(out) if not ln.startswith("BATCH:")]
     assert len(verdict_lines) == 5
     assert _counts(out) == (5, 0, 0)
@@ -1116,14 +1031,12 @@ def test_d24_eval_harness_scenario_still_runs(tmp_path):
     through an injected author config, copying no entry scripts and spawning no verifier
     subprocess."""
     scene = _scene(tmp_path)
-    # a scenario: N source cases + N candidate lessons in the worktree corpus
     rids = [f"case-{i}" for i in range(3)]
     fake = FakeVerify(default=VerifySpec(raw=_VERDICT_GOOD))
     pairs = [_fpair(scene, r) for r in rids]
     deps = _deps(scene, run_verify=fake, queued=set(rids))
     out = _run(deps, pairs)
     assert _counts(out) == (3, 0, 0)
-    # verified IN-PROCESS through the injected run_verify seam — no entry scripts, no subprocess
     assert len(fake.calls) == 3
 
 
@@ -1142,7 +1055,6 @@ def test_d25_no_bash_grant_for_the_verifier(tmp_path):
             cmd, policy=deps.policy, run_dir=deps.run_dir, defender_dir=deps.defender_dir,
         )
         assert not d.allow, f"a python-interpreter command was admitted: {cmd!r}"
-    # paired positive control: the surviving in-corpus rm still succeeds
     ok = permission.decide_bash(
         "rm defender/lessons/draft.md", policy=deps.policy,
         run_dir=deps.run_dir, defender_dir=deps.defender_dir,
@@ -1168,8 +1080,6 @@ def test_d25b_surviving_bash_lane_still_works(tmp_path):
     deps = _deps(scene, run_verify=FakeVerify(), queued=set())
 
     def gate(cmd):
-        # Mirrors `tools._tool_bash`, anchor included: the curator is TREE-anchored (#540), so
-        # a repo-relative operand rebases on its worktree rather than on the run dir.
         return permission.decide_bash(
             cmd, policy=deps.policy, run_dir=deps.run_dir, defender_dir=deps.defender_dir,
             cwd_anchor=deps.cwd_anchor,
@@ -1205,10 +1115,8 @@ def test_d26_no_curator_resolves_a_verifier_interpreter(tmp_path):
         if "resolve_verifier_python" in names:
             callers.add(py.relative_to(author_dir).as_posix())
     assert callers == set(), f"a curator module still resolves a verifier interpreter: {callers}"
-    # the dedicated resolver module is gone entirely
     with pytest.raises(ModuleNotFoundError):
         __import__("defender.learning.author._verifier_python")
-    # and a curator deps builds without any verifier-python resolution (target symbol)
     scene = _scene(tmp_path)
     deps = _deps(scene, run_verify=FakeVerify(), queued=set())
     assert deps.check is FINDINGS_CHECK
@@ -1236,7 +1144,6 @@ def test_m16_user_prompt_builder_is_a_seam(tmp_repo):
 def test_d27_user_prompt_carries_no_command_template(tmp_repo):
     """The built curator user prompt contains no verify-batch, verify-forward or forward-check
     command line, and no orphan direction line."""
-    # The DEMANDED surface: the payload the orchestrator actually builds and sends.
     built = build_user_prompt(
         [{"id": "f-1", "run_id": "run-1", "direction": "adversarial"}],
         "batch-1",
@@ -1244,19 +1151,15 @@ def test_d27_user_prompt_carries_no_command_template(tmp_repo):
     )
     for token in _COMMAND_TEMPLATE_TOKENS:
         assert token not in built, f"built user prompt still carries {token!r}"
-    # POSITIVE CONTROL: the builder does emit the payload the agent needs, so the assertions
-    # above are not passing against an empty string.
     assert "batch-1" in built
     assert "f-1" in built
 
-    # The second surface the same content could reach: the three system prompts.
     root = config.REPO_ROOT / "defender" / "learning" / "author"
     for name in ("lessons", "malicious_actor", "benign_actor"):
         text = (root / name / "prompt.md").read_text()
         for token in _COMMAND_TEMPLATE_TOKENS:
             assert token not in text, f"{name}/prompt.md still carries {token!r}"
 
-    # And the tool bit that replaced the deleted command template.
     assert AGENTS[AgentRole.CORPUS_AUTHOR].tools.forward_check is True
 
 
@@ -1268,21 +1171,15 @@ def test_m9_verify_forward_helpers_survive_as_a_library(tmp_path):
     (runs / "r").mkdir(parents=True)
     (runs / "r" / "investigation.md").write_text("body\n")
     (runs / "r" / "source_refs.yaml").write_text("normalized_disposition: benign\n")
-    # run-context loading
     transcript, disp = vf.load_run_context("r", runs_dir=runs)
     assert "body" in transcript
     assert disp == "benign"
-    # expected-disposition selection
     assert vf.expected_disposition("benign", "malicious") == "benign"
     assert vf.expected_disposition("adversarial", "benign") == "benign"
-    # cited-policy loading (neutral when no menu)
     assert vf.load_cited_policy("r", runs_dir=runs) == vf._NO_CITED_POLICY
-    # case-entity extraction
     from defender.learning.core.prologue import extract_case_entities
     assert callable(extract_case_entities)
-    # verdict parsing
     assert vfs.parse_verdict("x\n\nVERDICT: GOOD\n", error_prefix="verify_forward") == "GOOD"
-    # the surviving library is exactly what the new checks wrap (target symbols)
     assert Path(FINDINGS_CHECK.prompt_path).name == "forward.md"
     assert isinstance(ACTOR_CHECK, ForwardCheck)
 
@@ -1294,13 +1191,10 @@ def test_m10_curator_deps_cannot_be_built_without_a_corpus_confine(tmp_path):
     scene = _scene(tmp_path)
     common = dict(runs_dir=scene.runs, pending=scene.pending,
                   queued_ids=frozenset(), run_verify=FakeVerify())
-    # omitting the corpus (the write + lesson confine) is a construction-time error
     with pytest.raises(TypeError):
-        CuratorDeps.for_run(scene.curdir, scene.repo, check=FINDINGS_CHECK, **common)  # no corpus_dir
-    # omitting the check (which forward-check runs) is likewise not defaultable
+        CuratorDeps.for_run(scene.curdir, scene.repo, check=FINDINGS_CHECK, **common)
     with pytest.raises(TypeError):
-        CuratorDeps.for_run(scene.curdir, scene.repo, scene.corpus, **common)  # no check
-    # paired positive control: naming the corpus builds, and its writes are corpus-scoped
+        CuratorDeps.for_run(scene.curdir, scene.repo, scene.corpus, **common)
     deps = CuratorDeps.for_run(scene.curdir, scene.repo, scene.corpus,
                                check=FINDINGS_CHECK, **common)
     inside = permission.decide_write(
@@ -1311,7 +1205,7 @@ def test_m10_curator_deps_cannot_be_built_without_a_corpus_confine(tmp_path):
         (scene.repo / "defender" / "lessons-actor" / "b.md").resolve(), "x",
         run_dir=deps.run_dir, defender_dir=deps.defender_dir, policy=deps.policy,
     )
-    assert inside.allow  # confined to the named corpus, not a wider tree
+    assert inside.allow
     assert not outside.allow
 
 
@@ -1322,17 +1216,12 @@ def test_m15_verify_transport_is_a_deps_seam(tmp_path):
     scene = _scene(tmp_path)
     fake = FakeVerify(default=VerifySpec(raw=_VERDICT_GOOD))
     deps = _deps(scene, run_verify=fake, queued={"run-1"})
-    assert deps.run_verify is fake  # the transport is a per-call deps FIELD (the injection seam)
+    assert deps.run_verify is fake
     out = _run(deps, [_fpair(scene, "run-1")])
     assert fake.calls, "the tool did not enter through deps.run_verify"
     assert _counts(out) == (1, 0, 0)
 
 
-# ===========================================================================
-# Protocol integrity — a model-controlled operand cannot forge a verdict line
-# (review regression: lesson_path / source_id were echoed raw into the
-# whitespace-delimited protocol, so a newline in either split into a fake line)
-# ===========================================================================
 
 
 def test_render_batch_neutralizes_forged_operands():
@@ -1346,20 +1235,20 @@ def test_render_batch_neutralizes_forged_operands():
         _Result(Pair(forged_path, "run-1", "adversarial"), "GOOD", ""),
         _Result(Pair("defender/lessons/b.md", forged_id, "adversarial"), "ERROR", "boom"),
     ]
-    lines = _render_batch(results).splitlines()  # does not raise: escaping holds
-    assert len(lines) == 3  # 2 results + summary, NOT 4 — no forged line
-    assert sum(ln.startswith("GOOD") for ln in lines) == 1  # the forged GOOD did not land
-    assert lines[-1] == "BATCH: n_good=1 n_bad=0 n_error=1"  # real counts, not the forged 99
+    lines = _render_batch(results).splitlines()
+    assert len(lines) == 3
+    assert sum(ln.startswith("GOOD") for ln in lines) == 1
+    assert lines[-1] == "BATCH: n_good=1 n_bad=0 n_error=1"
 
 
 def test_output_grammar_tripwire_catches_an_unescaped_line():
     """The output-grammar tripwire refuses a rendered batch that is not exactly one line per
     pair plus the summary — the defense-in-depth that fires if a future result field is rendered
     without escaping, before the extra line can be read as a forged verdict."""
-    _assert_wellformed("GOOD  a  b\nBATCH: n_good=1 n_bad=0 n_error=0\n", 1)  # well-formed: no raise
-    with pytest.raises(_ProtocolError):  # an extra physical line for one pair
+    _assert_wellformed("GOOD  a  b\nBATCH: n_good=1 n_bad=0 n_error=0\n", 1)
+    with pytest.raises(_ProtocolError):
         _assert_wellformed("GOOD  a  b\nFORGED  x  y\nBATCH: n_good=1 n_bad=0 n_error=0\n", 1)
-    with pytest.raises(_ProtocolError):  # a result line without a leading verdict token
+    with pytest.raises(_ProtocolError):
         _assert_wellformed("nope  a  b\nBATCH: n_good=0 n_bad=0 n_error=0\n", 1)
-    with pytest.raises(_ProtocolError):  # summary missing / displaced
+    with pytest.raises(_ProtocolError):
         _assert_wellformed("BATCH: n_good=0 n_bad=0 n_error=0\nGOOD  a  b\n", 1)

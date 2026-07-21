@@ -55,8 +55,6 @@ pytestmark = pytest.mark.e2e
 DEFENDER = Path(__file__).resolve().parents[1]
 LEAD = "l-001"
 
-# Any run-scoped delimiter, whatever its tag — the sweep must be able to SEE a foreign token,
-# not just confirm the expected one is present.
 ANY_RUN_TAG = re.compile(r"</?run-([0-9a-zA-Z]*)-([a-z-]+)>")
 RUN_DIR_SECTION = re.compile(r"^## Run dir — .*$((?:\n- .*)*)", re.M)
 
@@ -66,7 +64,6 @@ PAYLOAD = [
 ]
 
 
-# ── production-builder scenario plumbing ─────────────────────────────────────
 
 
 def build(tmp_path, monkeypatch, golden: Path = GOLDEN, run_id: str = "origin-647"):
@@ -131,9 +128,6 @@ def run_dir_listing(message_zero: str) -> list[str]:
     return [line[2:].split(" ")[0] for line in m.group(1).splitlines() if line.startswith("- ")]
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# The return contract
-# ═════════════════════════════════════════════════════════════════════════════
 
 
 def test_materialize_run_dir_returns_run_dir_then_salt_on_the_success_lane(tmp_path, monkeypatch):
@@ -159,7 +153,6 @@ def test_materialize_run_dir_returns_run_dir_then_salt_on_the_success_lane(tmp_p
     assert isinstance(salt, str), "the builder returned a trust token that is not a string"
     assert salt, "the builder returned no trust token"
 
-    # Two builds mint independent tokens — the value is per-run, not a constant.
     other_dir, other_salt = build(tmp_path, monkeypatch, run_id="origin-647-b")
     assert other_salt != salt, "two runs share a trust token"
     assert other_dir != run_dir
@@ -186,14 +179,10 @@ def test_builder_early_exit_lanes_fire_before_any_salt_is_minted(tmp_path, monke
     with pytest.raises(SystemExit) as exc:
         run_common.materialize_run_dir(GOLDEN / "alert.json", "collision-647")
     assert "already exists" in str(exc.value)
-    # The colliding call minted nothing: the first run's directory is untouched.
     assert sorted(p.name for p in run_dir.iterdir()) == ["alert.json", "gather_raw"]
     assert salt
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# The origin pin — the obligation this change actually creates
-# ═════════════════════════════════════════════════════════════════════════════
 
 
 def test_salt_returned_by_the_builder_is_the_salt_that_reaches_run_investigation(
@@ -250,14 +239,11 @@ def test_every_salted_surface_in_one_model_context_carries_the_minted_token(
     main_seen = "\n".join(main.seen)
     gather_seen = "\n".join(gather.seen)
 
-    # api — the orientation's raw alert, and the gather return riding back into MAIN.
     assert f"<run-{salt}-untrusted>" in main.seen[0], "the orient alert wrap is missing"
     assert main.seen[-1].count(f"<run-{salt}-untrusted>") >= 2, (
         "the gather return did not come back untrusted-wrapped with the run's token"
     )
-    # fs — the read of the alert file.
     assert f"<run-{salt}-untrusted>" in main.seen[1], "the read_file result is not salt-wrapped"
-    # bash — the data-source payload the gather subagent saw.
     assert rec.calls, "the injected verb never ran — the bash lane was not exercised"
     assert f"<run-{salt}-untrusted>" in gather_seen, "the query return is not salt-wrapped"
 
@@ -285,7 +271,6 @@ def test_gather_subagent_is_bound_with_the_parent_token_not_a_fresh_mint(tmp_pat
     assert tokens(gather_seen) == {salt}, (
         f"the gather subagent used a token the parent never minted: {tokens(gather_seen)}"
     )
-    # The summary crosses back into MAIN under the same token.
     assert f"<run-{salt}-untrusted>" in main.seen[-1]
 
 
@@ -347,9 +332,6 @@ def test_fail_open_fresh_mint_is_not_reachable_from_run_py_through_the_driver(
     )
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# The salt's domain
-# ═════════════════════════════════════════════════════════════════════════════
 
 
 def test_empty_string_salt_is_not_constructible_once_the_disk_read_is_gone(
@@ -365,8 +347,6 @@ def test_empty_string_salt_is_not_constructible_once_the_disk_read_is_gone(
     run_dir, salt = build(tmp_path, monkeypatch, run_id="no-empty-647")
     assert salt != "", "the builder returned an empty token"
 
-    # The real fault, induced through the real filesystem: a leftover blob with no salt key,
-    # exactly the shape the deleted read would have turned into an empty token.
     (run_dir / "meta.json").write_text('{"run_id": "no-empty-647"}', encoding="utf-8")
 
     replay = ReplayFn([Turn(text="Done.")])
@@ -415,8 +395,6 @@ def test_minted_salt_is_independent_of_the_run_id_and_drawn_from_secrets(tmp_pat
         f"run id, not of an entropy source: {sorted(salts)}"
     )
 
-    # The mint site itself: a seeded-PRNG implementation satisfies the behavioural arm above
-    # only by accident of the seed, so the generator is pinned by name too.
     src = (DEFENDER / "run_common.py").read_text(encoding="utf-8")
     tree = ast.parse(src)
     builder = next(
@@ -440,9 +418,6 @@ def test_minted_salt_is_independent_of_the_run_id_and_drawn_from_secrets(tmp_pat
     assert not seeded, "the builder derives its token from a seedable generator"
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# The removed file
-# ═════════════════════════════════════════════════════════════════════════════
 
 
 def test_a_driven_run_leaves_no_meta_json_in_the_run_dir(tmp_path, monkeypatch):
@@ -502,9 +477,6 @@ def test_run_dir_still_carries_every_investigation_artifact_after_the_removal(
     assert m, "the report's disposition frontmatter no longer parses"
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# The message-0 listing — pinned here for the first time
-# ═════════════════════════════════════════════════════════════════════════════
 
 
 def test_message_zero_orientation_lists_exactly_the_materialized_run_dir_children(
@@ -530,15 +502,6 @@ def test_message_zero_orientation_lists_exactly_the_materialized_run_dir_childre
     replay = ReplayFn([Turn(text="Done.")])
     drive(run_dir, run_id=run_dir.name, salt=salt, main=replay)
 
-    # SCOPE — this pin does NOT bless what the listing contains, only that it tracks the run
-    # dir's real children and no longer names the removed file. In particular it does not
-    # bless `ground_truth.yaml`: `workspace_map` lists that file into MAIN's message 0 whenever
-    # the fixture carries a sibling one (26 tracked fixtures do, including every held-out eval
-    # case), so MAIN is TOLD the answer key exists even though `permission/files.py` denies
-    # reading it by filename. That is pre-existing and explicitly OUT OF SCOPE for #647 — a
-    # human decision recorded in the spec graph, not an oversight of this suite. Follow-up:
-    # decide whether workspace_map should skip ground_truth.yaml the way it skips gather_raw.
-    # Do NOT widen the assertion below to cover it without that decision.
     listed = run_dir_listing(replay.seen[0])
     assert listed == sorted(listed), "the listing is not in sorted order"
     assert "meta.json" not in listed, "message 0 still advertises the removed file to MAIN"

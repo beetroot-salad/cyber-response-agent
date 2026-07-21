@@ -1,10 +1,3 @@
-"""Judge view sections (transcript.html).
-
-The judge view answers "did the learning loop's judgment hold up?" —
-report.md + compact lead list (the judge's *input*), then the actor's
-adversarial story, then the judge's outcome + findings + encounter
-analysis. Oracle and raw artifacts collapse below the fold.
-"""
 from __future__ import annotations
 
 from pathlib import Path
@@ -22,9 +15,6 @@ from defender.scripts.visualize.visualize_primitives import (  # noqa: F401 — 
 )
 
 
-# ---------------------------------------------------------------------------
-# Judge finding card
-# ---------------------------------------------------------------------------
 
 
 def render_judge_finding(idx: int, f: dict, anchor_prefix: str = "finding") -> str:
@@ -63,9 +53,6 @@ def render_judge_finding(idx: int, f: dict, anchor_prefix: str = "finding") -> s
     )
 
 
-# ---------------------------------------------------------------------------
-# Sections
-# ---------------------------------------------------------------------------
 
 
 def _lead_count(run_dir: Path) -> int:
@@ -73,13 +60,6 @@ def _lead_count(run_dir: Path) -> int:
 
 
 def render_judge_defender_summary(run_dir: Path) -> str:
-    """The judge's input: report.md + compact lead list. No raw invlang.
-
-    investigation.md is the agent's working memory and reads as dense
-    invlang; it is the wrong surface for evaluating judgment. The judge
-    is grading whether the disposition is supportable given the leads
-    that ran — those two pieces (report + lead list) are sufficient.
-    """
     body = f"""<h3>report.md</h3>
   {render_report_card(run_dir)}
 
@@ -167,12 +147,6 @@ def render_judge_oracle_section(run_id: str) -> str:
     return section("sec-oracle", "oracle", "Oracle", "— projected telemetry (collapsed by default)", inner)
 
 
-# ---------------------------------------------------------------------------
-# Benign (FP-direction) sections — mirror the adversarial trio above, but
-# self-gate to "" when the *_benign artifacts are absent so adversarial-only
-# runs render unchanged. Shown for runs whose disposition triggers the benign
-# direction (malicious → benign-only; inconclusive → both directions).
-# ---------------------------------------------------------------------------
 
 
 def render_env_observation(idx: int, o: dict) -> str:
@@ -303,7 +277,6 @@ def render_judge_toc(n_findings: int, n_benign_findings: int | None = None) -> s
     if n_findings == 0:
         finding_links = '<li class="item muted">(none)</li>'
 
-    # Benign block only when the FP direction ran (n_benign_findings is not None).
     benign_block = ""
     if n_benign_findings is not None:
         benign_finding_links = "".join(

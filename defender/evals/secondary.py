@@ -47,27 +47,6 @@ from pathlib import Path
 
 
 def _reexec_into_venv_if_needed() -> None:
-    """Re-exec into defender/.venv when invoked under a non-venv python.
-
-    Two failure modes this guards against:
-
-    1. loop.py has its own top-level os.execv guard. If we let that
-       fire during ``importlib.exec_module(loop)`` later in this
-       module, it would replace the harness process on the wrong
-       argv. Pre-empting at our own top means loop's guard becomes a
-       no-op by the time we import it.
-    2. The module imports non-stdlib packages (``yaml``) below. A
-       system python without PyYAML would fail at our own import
-       line *before* this guard had a chance to switch interpreters.
-       So the guard must run before the first non-stdlib import.
-
-    At pytest-collection time we must NOT re-exec (the venv's console
-    script names its interpreter ``python``, not ``python3``; strict
-    equality would replace the collector process with the harness CLI
-    and exit 2). The ``sys.prefix == venv`` check is permissive:
-    any same-venv interpreter (``python``, ``python3``, ``python3.11``)
-    is treated as already valid.
-    """
     venv = Path(__file__).resolve().parents[2] / "defender" / ".venv"
     if not venv.is_dir():
         return
@@ -82,8 +61,6 @@ def _reexec_into_venv_if_needed() -> None:
         os.execv(str(venv_py), [str(venv_py), __file__, *sys.argv[1:]])
 
 
-# Must run before any non-stdlib import (yaml below) so a system
-# python without PyYAML can still reach the re-exec into the venv.
 _reexec_into_venv_if_needed()
 
 import argparse
@@ -91,16 +68,7 @@ import importlib.util
 import uuid
 
 
-# ---------------------------------------------------------------------------
-# Sub-module imports — re-exported so test_secondary.py can access all
-# public symbols via the ``sec`` module reference it obtains by loading
-# this file directly with importlib.
-# ---------------------------------------------------------------------------
 
-# Ensure evals/ is on sys.path so the _secondary_config / _generation /
-# _pipeline / _summary peers are importable regardless of how this module is
-# loaded — script, spec_from_file_location, or ``import defender.evals.secondary``.
-# The peers each carry the same guard; the orchestrator needs it too.
 _EVALS_DIR = Path(__file__).resolve().parent
 if str(_EVALS_DIR) not in sys.path:
     sys.path.insert(0, str(_EVALS_DIR))
@@ -130,12 +98,6 @@ from _pipeline import (  # noqa: E402
     run_frozen_actor,
     run_head_oracle_and_judge,
 )
-# The head disposition resolves through the SAME function the primary metric
-# uses (#591): one canonical grammar + enum filter, so primary and secondary
-# accept/reject identical reports by construction.
-# `HeldOutAlert` / `load_held_out_fixtures` live there too: one fixture walk, and the
-# label is read from the fixture dir by both metrics. Re-exported from this module
-# for existing callers.
 from held_out import (  # noqa: E402,F401
     HeldOutAlert,
     load_held_out_fixtures,
@@ -150,15 +112,8 @@ from _summary import (  # noqa: E402
 
 
 
-# ---------------------------------------------------------------------------
-# loop.py shims — load on demand so tests can import this module without
-# pulling pyyaml-only loop dependencies into the import path.
-# ---------------------------------------------------------------------------
 
 def _load_by_path(modname: str, filename: str):
-    """Load a ``learning/`` sibling by path under a private module name. The
-    asserts narrow the optional spec/loader for the type gate; ``setdefault``
-    keeps a prior import (the shim may be loaded more than once per process)."""
     spec = importlib.util.spec_from_file_location(modname, LEARNING_DIR / filename)
     assert spec is not None
     assert spec.loader is not None
@@ -176,17 +131,11 @@ def _load_shared():
     return _load_by_path("_defender_learning_shared_secondary", "_author_shared.py")
 
 
-# ---------------------------------------------------------------------------
-# Eligibility / fixtures
-# ---------------------------------------------------------------------------
 
 def eligible_for_secondary(alerts: list[HeldOutAlert]) -> list[HeldOutAlert]:
     return [a for a in alerts if a.ground_truth.get("disposition") in ELIGIBLE_DISPOSITIONS]
 
 
-# ---------------------------------------------------------------------------
-# Orchestrator
-# ---------------------------------------------------------------------------
 
 def run_secondary(
     *,
@@ -198,8 +147,8 @@ def run_secondary(
     worktrees_dir: Path | None = None,
 ) -> SecondarySummary:
     shared = _load_shared()
-    n_next = shared.actor_generation_count(repo_root)  # = 1 + prior committed
-    n_committed = n_next - 1                  # latest committed gen
+    n_next = shared.actor_generation_count(repo_root)
+    n_committed = n_next - 1
     summary = SecondarySummary(
         current_generation=n_committed,
         pinned_generation=None,
@@ -242,11 +191,6 @@ def run_secondary(
     eligible = eligible_for_secondary(fixtures)
     summary.eligible = len(eligible)
 
-    # Per-attempt suffix so reruns after an interruption don't collide
-    # with prior run dirs (``defender/run.py`` refuses to overwrite an
-    # existing one). One suffix per harness invocation so all alerts in
-    # a run share the same attempt id and per-alert artifacts cluster
-    # together on disk.
     attempt = uuid.uuid4().hex[:8]
 
     loop_mod = _load_loop()
@@ -257,9 +201,6 @@ def run_secondary(
             ground_truth=alert.ground_truth["disposition"],
             status="failed",
         )
-        # Stable case_id (no attempt suffix) for actor seeding —
-        # decoupled from the per-attempt run dir so reruns of the same
-        # (generation, alert) sample the identical menu/archetype.
         case_id = f"sec-eval-gen{n_committed}-{alert.slug}"
         try:
             head_run_dir = run_head_defender(alert, run_id, runs_base)
@@ -271,10 +212,6 @@ def run_secondary(
                 summary.results.append(result)
                 continue
             if head_disp not in ELIGIBLE_DISPOSITIONS:
-                # Missing report.md / unparseable frontmatter / non-enum
-                # disposition. A broken HEAD run mustn't smuggle bogus
-                # rows into the metric — record as failed and skip the
-                # actor/oracle/judge stages.
                 result.error = (
                     f"HEAD defender produced no eligible disposition "
                     f"(got {head_disp!r})"
@@ -321,7 +258,4 @@ def main(argv: list[str]) -> int:
 
 
 if __name__ == "__main__":
-    # _reexec_into_venv_if_needed() ran at import time (before the
-    # PyYAML import) so by the time we get here we're already in the
-    # venv or there was no venv to re-exec into.
     sys.exit(main(sys.argv[1:]))

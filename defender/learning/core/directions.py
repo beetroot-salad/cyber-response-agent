@@ -1,9 +1,3 @@
-"""Direction specs — the data that distinguishes the adversarial (FN-hunting) and
-benign (FP-hunting) legs, so `run_direction` has one body.
-
-Each spec wires the seam methods, validator, observation appender, output filenames,
-and the per-direction observation-curator trigger.
-"""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -38,15 +32,14 @@ BENIGN_WIRING = JudgeWiring(
     JUDGE_BENIGN_PROMPT, BENIGN_JUDGE_MODEL, BENIGN_JUDGE_EFFORT,
     "judge_benign_trace.jsonl", "judge-benign",
     "comparison_benign",
-    closed_ticket_read=True,  # the benign judge confirms a cited closed case (#338)
+    closed_ticket_read=True,
 )
 
 
 @dataclass(frozen=True)
 class ObsTrigger:
-    """Threshold-gated trigger for a direction's observation-curator module."""
 
-    pending_file: Callable[[LoopPaths], Path]  # LoopPaths -> the queue file Path
+    pending_file: Callable[[LoopPaths], Path]
     threshold_env: str
     module_name: str
     pending_label: str
@@ -55,27 +48,16 @@ class ObsTrigger:
 @dataclass(frozen=True)
 class Direction:
     name: str
-    invoke_actor: Callable        # (agents, run_dir, lrd, alert_rule_key) -> story
-    # Plain data, not a Callable like the other seams: the judge collapsed to a single
-    # agents.judge(wiring, ...) method, so the per-direction variation is pure config.
-    # (actor stays a Callable because actor/actor_benign differ in name and arity.)
-    judge_wiring: JudgeWiring     # per-direction judge knobs, passed through agents.judge
-    # The in-process actor model for this leg — the actor twin of judge_wiring.model, read by
-    # orchestrate._prepare_engines_for to source the metered key up front (the actor stage
-    # itself reads ACTOR_MODEL/BENIGN_ACTOR_MODEL directly in pipeline/*_actor/run.py).
+    invoke_actor: Callable
+    judge_wiring: JudgeWiring
     actor_model: str
-    validate: Callable            # (doc) -> doc
-    append_observations: Callable  # (doc, run_id, key, lrd, *, paths) -> int
+    validate: Callable
+    append_observations: Callable
     story_name: str
     telemetry_name: str
     judge_name: str
     judge_raw_name: str
     obs_trigger: ObsTrigger
-    # Optional second observation stream from the same judge doc. The adversarial
-    # direction also emits positive-polarity env facts into the SHARED
-    # lessons-environment/ corpus (issue #298): `append_env_observations` queues
-    # them and each entry in `extra_obs_triggers` drains a stream the same way
-    # `obs_trigger` drains the primary one.
     append_env_observations: Callable | None = None
     extra_obs_triggers: tuple[ObsTrigger, ...] = ()
 

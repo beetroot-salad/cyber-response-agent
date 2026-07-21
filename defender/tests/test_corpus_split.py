@@ -60,8 +60,6 @@ def test_env_corpus_has_anchor_and_wellformed_entities() -> None:
             assert "class" in sel, (
                 f"{p.name}: entity selector must have a 'class' key"
             )
-            # No identity selectors — the defender never grounds the identity in
-            # the prologue, so it is not a retrievable key (the grounding is body).
             assert sel["type"] != "identity", (
                 f"{p.name}: env lessons must not key on an identity selector"
             )
@@ -69,8 +67,6 @@ def test_env_corpus_has_anchor_and_wellformed_entities() -> None:
 
 def test_actor_corpus_is_pattern_only() -> None:
     for p, doc in _corpus(LESSONS_ACTOR):
-        # A pattern lesson is keyed by techniques. A mutable: true, subject-bearing,
-        # techniques-less lesson is an env-fact and no longer belongs here.
         is_env_fact = (
             doc.get("mutable") is True
             and doc.get("subject")

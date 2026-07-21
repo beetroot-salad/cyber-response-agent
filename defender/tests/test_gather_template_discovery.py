@@ -46,9 +46,6 @@ _DEFENDER = Path(__file__).resolve().parents[1]
 _REAL_CATALOG = _DEFENDER / "skills" / "gather" / "queries"
 
 
-# --------------------------------------------------------------------------
-# fixtures — a synthetic catalog tree, so the corpus under test is OURS
-# --------------------------------------------------------------------------
 
 def _tpl(system: str, tid: str, *, status: str = "established", goal: str = "", query: str = "",
          fm: str | None = None) -> str:
@@ -77,7 +74,6 @@ def _catalog(tmp_path: Path) -> Path:
         (q / system / "_draft" / f"{tid}.md").write_text(
             _tpl(system, tid, status="draft", goal=f"`{system}.{tid}` lookup. Auto-drafted from an executed gather query.")
         )
-    # change-mgmt: an established template and NO _draft/ dir at all (the real corpus has this)
     (q / "change-mgmt").mkdir(parents=True, exist_ok=True)
     (q / "change-mgmt" / "active-changes.md").write_text(
         _tpl("change-mgmt", "active-changes", goal="Change requests active in a window.")
@@ -102,9 +98,6 @@ def _prompt_for(tmp_path: Path, defender_dir: Path, system: str = "elastic") -> 
     return tools_gather._gather_prompt(deps, _request(system), catalog="- `elastic`: the SIEM")
 
 
-# ==========================================================================
-# d0a / d18b — the fold: one walk, and it honours the root it is GIVEN
-# ==========================================================================
 
 def test_d0a_walk_yields_a_record_per_template_sorted_by_path(tmp_path):
     """iter_query_templates yields id/system/status/goal/query/path for every template —
@@ -123,10 +116,9 @@ def test_d0a_walk_yields_a_record_per_template_sorted_by_path(tmp_path):
     r = by_id["elastic.sshd-auth-history"]
     assert r.system == "elastic"
     assert r.status == "established"
-    assert "Failed password" in r.goal          # the ## Goal BODY, not the frontmatter
-    assert "FROM elastic" in r.query            # the ## Query body
+    assert "Failed password" in r.goal
+    assert "FROM elastic" in r.query
     assert r.path.name == "sshd-auth-history.md"
-    # the draft's system is the GRANDparent (it sits under _draft/)
     assert by_id["elastic.coined-redirect-probe"].system == "elastic"
     assert by_id["elastic.coined-redirect-probe"].status == "draft"
 
@@ -140,8 +132,8 @@ def test_d18b_walk_reads_the_catalog_dir_it_is_given_not_a_module_default(tmp_pa
     dfn = _catalog(tmp_path)
     rows = list(_corpus.iter_query_templates(dfn / "skills" / "gather" / "queries"))
     ids = {r.id for r in rows}
-    assert "elastic.sshd-auth-history" in ids                 # positive control: it read OUR tree
-    assert "elastic.falco-alerts" not in ids                  # a real-repo id our tree does not carry
+    assert "elastic.sshd-auth-history" in ids
+    assert "elastic.falco-alerts" not in ids
     assert "host-state.package-list" not in ids
 
 
@@ -167,7 +159,7 @@ def test_d13_malformed_template_is_skipped_with_a_warning_not_raised(tmp_path, c
     rows = list(_corpus.iter_query_templates(q))
 
     ids = {r.id for r in rows}
-    assert "elastic.sshd-auth-history" in ids          # positive control: the good ones survive
+    assert "elastic.sshd-auth-history" in ids
     assert "cmdb.hostname-by-ip" in ids
     assert not {"elastic.no-fence", "elastic.bad-yaml", "elastic.no-id", "elastic.u"} & ids
     err = capsys.readouterr().err
@@ -201,9 +193,6 @@ def test_d11_load_catalog_still_returns_templates_over_the_folded_walk(tmp_path)
     assert by_id["elastic.coined-redirect-probe"].status == "draft"
 
 
-# ==========================================================================
-# d12 — _corpus stays importable under the SYSTEM python (no PyYAML)
-# ==========================================================================
 
 def test_d12_corpus_module_imports_with_no_yaml_available(tmp_path):
     """_corpus.py is deliberately yaml-free at import: the actor runs the pinned lesson scripts
@@ -246,9 +235,6 @@ def test_d12b_positive_control_the_walk_does_parse_frontmatter_under_the_venv(tm
     assert all(r.id and r.status for r in rows), "frontmatter really was parsed"
 
 
-# ==========================================================================
-# d2 / d3 / d4 / d23 — the injected index
-# ==========================================================================
 
 def test_d2_index_entry_carries_id_path_and_goal(tmp_path):
     """The index line is the template's id, its repo-relative path, and its `## Goal` body —
@@ -258,9 +244,9 @@ def test_d2_index_entry_carries_id_path_and_goal(tmp_path):
 
     assert "elastic.sshd-auth-history" in prompt
     assert "skills/gather/queries/elastic/sshd-auth-history.md" in prompt
-    assert "Failed password" in prompt                       # the Goal body, verbatim
-    assert "FROM elastic | LIMIT 1" not in prompt            # the Query body is NOT inlined
-    assert "status: established" not in prompt               # nor the raw frontmatter
+    assert "Failed password" in prompt
+    assert "FROM elastic | LIMIT 1" not in prompt
+    assert "status: established" not in prompt
 
 
 def test_d3_index_does_not_vary_on_the_dispatched_system(tmp_path):
@@ -284,9 +270,9 @@ def test_d4_index_excludes_drafts_and_d4b_includes_established(tmp_path):
     and not an empty render."""
     prompt = _prompt_for(tmp_path, _catalog(tmp_path))
 
-    assert "elastic.coined-redirect-probe" not in prompt     # negative: the draft
+    assert "elastic.coined-redirect-probe" not in prompt
     assert "cmdb.coined-ip-scan" not in prompt
-    assert "elastic.sshd-auth-history" in prompt             # positive control: its established sibling
+    assert "elastic.sshd-auth-history" in prompt
     assert "cmdb.hostname-by-ip" in prompt
 
 
@@ -308,7 +294,7 @@ def test_d4c_a_template_with_no_status_is_not_admitted_as_established(tmp_path):
 
     assert "elastic.no-status" not in prompt
     assert "elastic.empty-status" not in prompt
-    assert "elastic.sshd-auth-history" in prompt             # positive control
+    assert "elastic.sshd-auth-history" in prompt
 
 
 def test_d23_index_block_stays_under_its_char_budget(tmp_path):
@@ -329,11 +315,11 @@ def test_d19_an_unbuildable_index_degrades_loudly(tmp_path):
     coins a fresh query for every lead, catalog reuse collapses, and nothing is ever raised. The
     dispatch must still run, but the degradation must be VISIBLE in the prompt."""
     dfn = tmp_path / "empty" / "defender"
-    (dfn / "skills").mkdir(parents=True)                     # a tree with NO queries/ at all
+    (dfn / "skills").mkdir(parents=True)
     prompt = _prompt_for(tmp_path, dfn)
 
-    assert "Begin gathering this lead" in prompt             # the dispatch still happens
-    assert "template_search" in prompt                       # the fallback surface is still named
+    assert "Begin gathering this lead" in prompt
+    assert "template_search" in prompt
     assert re.search(r"index[^\n]*unavailable|unavailable[^\n]*index", prompt, re.I), \
         "an unbuildable index must say so in the prompt, not vanish from it"
 
@@ -355,16 +341,12 @@ def test_d18_index_is_built_from_the_threaded_tree_and_is_not_memoized(tmp_path)
 
     assert "elastic.sshd-auth-history" in prompt_a
     assert "identity.only-one" not in prompt_a
-    assert "identity.only-one" in prompt_b                   # B is not serving A's cached index
+    assert "identity.only-one" in prompt_b
     assert "elastic.sshd-auth-history" not in prompt_b
-    # and neither is serving the REAL repo's corpus
     assert "elastic.falco-alerts" not in prompt_a
     assert "elastic.falco-alerts" not in prompt_b
 
 
-# ==========================================================================
-# d5 / d6 — template_search: the registration seam
-# ==========================================================================
 
 class _ToolRecorder:
     def __init__(self):
@@ -385,13 +367,13 @@ def test_d5_gather_registers_template_search_and_main_does_not():
     g = _ToolRecorder()
     tools.register_tools(g, GATHER_DEF.tools, FakeVerbs({}))
     assert "template_search" in g.names
-    assert g.names == ["bash", "read_file", "template_search", "query"]   # register_tools' FIXED order
+    assert g.names == ["bash", "read_file", "template_search", "query"]
 
     m = _ToolRecorder()
     tools.register_tools(m, MAIN_DEF.tools)
-    assert "template_search" not in m.names                      # negative
-    assert "query" not in m.names                                # #611: main reaches no data source
-    assert "read_file" in m.names                                # positive control: main still reads
+    assert "template_search" not in m.names
+    assert "query" not in m.names
+    assert "read_file" in m.names
 
 
 def test_d5_toolset_carries_the_template_search_bit():
@@ -415,9 +397,6 @@ def test_d6_template_search_exposes_no_path_parameter():
     assert params == {"pattern", "system"}, f"template_search must take no path: {params}"
 
 
-# ==========================================================================
-# d7 / d8 — template_search: the system argument
-# ==========================================================================
 
 @pytest.mark.parametrize("bad", ["..", "../..", "elastic/..", "/etc", "elastic\x00", "_draft"])
 def test_d7_no_system_value_escapes_the_corpus_root(tmp_path, bad):
@@ -470,7 +449,7 @@ def test_d8_an_unknown_system_reports_the_ones_that_exist(tmp_path):
 
     with pytest.raises(ModelRetry) as e:
         tools_gather._tool_template_search(deps, "sshd", system="siem")
-    assert "elastic" in str(e.value)          # the retry names the real systems
+    assert "elastic" in str(e.value)
 
 
 def test_d8_empty_system_is_not_a_second_spelling_of_all(tmp_path):
@@ -483,9 +462,6 @@ def test_d8_empty_system_is_not_a_second_spelling_of_all(tmp_path):
         tools_gather._tool_template_search(deps, "sshd", system="")
 
 
-# ==========================================================================
-# d9 / d20 / d21 / d22 / d0b — template_search: the search contract
-# ==========================================================================
 
 def test_d0b_a_hit_carries_the_template_id_and_its_path(tmp_path):
     """read_file(path, pattern=) ALREADY grep-folds one file, and gather already has it. If
@@ -494,9 +470,9 @@ def test_d0b_a_hit_carries_the_template_id_and_its_path(tmp_path):
     deps = _deps(tmp_path, _catalog(tmp_path))
     out = tools_gather._tool_template_search(deps, "Failed password")
 
-    assert "elastic.sshd-auth-history" in out                                  # the id to bind
-    assert "skills/gather/queries/elastic/sshd-auth-history.md" in out         # the path to read
-    assert "Failed password" in out                                            # the matching line
+    assert "elastic.sshd-auth-history" in out
+    assert "skills/gather/queries/elastic/sshd-auth-history.md" in out
+    assert "Failed password" in out
 
 
 def test_d9_search_admits_drafts_while_the_index_excludes_them(tmp_path):
@@ -507,8 +483,8 @@ def test_d9_search_admits_drafts_while_the_index_excludes_them(tmp_path):
     deps = _deps(tmp_path, dfn)
 
     hits = tools_gather._tool_template_search(deps, "Auto-drafted")
-    assert "elastic.coined-redirect-probe" in hits             # search reaches the draft
-    assert "elastic.coined-redirect-probe" not in _prompt_for(tmp_path, dfn)   # the index does not
+    assert "elastic.coined-redirect-probe" in hits
+    assert "elastic.coined-redirect-probe" not in _prompt_for(tmp_path, dfn)
 
 
 def test_d20_search_is_case_insensitive(tmp_path):
@@ -528,7 +504,7 @@ def test_d20_the_pattern_is_a_substring_not_a_regex(tmp_path):
     The pattern is literal text: `.*` searches for the two characters `.*`."""
     deps = _deps(tmp_path, _catalog(tmp_path))
     out = tools_gather._tool_template_search(deps, ".*")
-    assert "elastic.sshd-auth-history" not in out             # not a wildcard
+    assert "elastic.sshd-auth-history" not in out
     assert "sudo" not in out
 
 
@@ -540,10 +516,10 @@ def test_d21_zero_matches_says_so_instead_of_returning_the_empty_string(tmp_path
 
     miss = tools_gather._tool_template_search(deps, "xyzzy-no-template-says-this")
     assert miss.strip() != ""
-    assert "xyzzy-no-template-says-this" in miss               # names the pattern it searched for
+    assert "xyzzy-no-template-says-this" in miss
     assert "no" in miss.lower()
 
-    hit = tools_gather._tool_template_search(deps, "Failed password")   # positive control
+    hit = tools_gather._tool_template_search(deps, "Failed password")
     assert "elastic.sshd-auth-history" in hit
     assert hit != miss
 
@@ -560,9 +536,6 @@ def test_d22_the_empty_pattern_is_not_a_wildcard(tmp_path):
         tools_gather._tool_template_search(deps, "   ")
 
 
-# ==========================================================================
-# d10 — the trust boundary: a draft is attacker-influenced
-# ==========================================================================
 
 def test_d10_a_draft_hit_comes_back_untrusted_wrapped(tmp_path):
     """draft_synthesis writes {system}/_draft/{verb}.md from an executed gather query — the
@@ -579,8 +552,8 @@ def test_d10_a_draft_hit_comes_back_untrusted_wrapped(tmp_path):
     deps = _deps(tmp_path, dfn)
 
     out = tools_gather._tool_template_search(deps, "IGNORE YOUR LEAD")
-    assert "IGNORE YOUR LEAD" in out                     # the hit is returned (not censored)
-    assert f"<run-{deps.salt}-untrusted>" in out         # ...but tagged as untrusted
+    assert "IGNORE YOUR LEAD" in out
+    assert f"<run-{deps.salt}-untrusted>" in out
     assert f"</run-{deps.salt}-untrusted>" in out
 
 
@@ -602,14 +575,10 @@ def test_d10_is_untrusted_read_distinguishes_a_draft_from_an_established_templat
     q = _REAL_CATALOG
     assert permission.is_untrusted_read(q / "elastic" / "_draft" / "x.md") is True
     assert permission.is_untrusted_read(q / "elastic" / "sshd-auth-history.md") is False
-    # the pre-existing members must not regress
     assert permission.is_untrusted_read(Path("/tmp/run/alert.json")) is True
     assert permission.is_untrusted_read(Path("/tmp/run/gather_raw/l-001/0.json")) is True
 
 
-# ==========================================================================
-# d14 — workspace_map: counts, not filenames
-# ==========================================================================
 
 def test_d14_map_names_no_template_and_no_draft_filename():
     """workspace_map lists every template AND every _draft filename into MAIN's message 0
@@ -620,9 +589,9 @@ def test_d14_map_names_no_template_and_no_draft_filename():
     out = wsm.workspace_map(Path("/tmp/does-not-matter"))
 
     section = out.split("## Gather query templates", 1)[1]
-    assert "## Gather query templates" in out                  # positive control: the header stays
-    assert "sshd-auth-history.md" not in section               # no established filename
-    assert "_draft/" not in section                            # no draft filename, no draft dir
+    assert "## Gather query templates" in out
+    assert "sshd-auth-history.md" not in section
+    assert "_draft/" not in section
     assert not re.search(r"\S+\.md\b", section), "the section names no .md file at all"
 
 
@@ -642,9 +611,6 @@ def test_d14_positive_control_the_map_carries_per_system_counts():
     ), "the section carries established counts"
 
 
-# ==========================================================================
-# d15 / d16 — the prose stops teaching a dead route
-# ==========================================================================
 
 def test_d15_the_prose_no_longer_instructs_an_impossible_discovery_move():
     """gather/SKILL.md §2 says "Read the catalog dir; past ~15 templates, `Grep` the ## Goal
@@ -664,7 +630,7 @@ def test_d15_the_prose_no_longer_instructs_an_impossible_discovery_move():
         assert not re.search(r"\b(ls|find)\b[^\n]*\b(catalog|queries)\b", low), \
             f"{name} still names ls/find over the catalog"
 
-    assert "template_search" in skill        # positive control: it names the surface that EXISTS
+    assert "template_search" in skill
     assert "template_search" in schema
 
 
@@ -689,9 +655,6 @@ def test_d16_the_skill_demands_reading_the_template_before_binding_its_id():
         "gather/SKILL.md must require reading the template body before binding its query_id"
 
 
-# ==========================================================================
-# d1 / d24 — corpus invariants (asserted nowhere in CI today)
-# ==========================================================================
 
 def test_d1_no_template_carries_a_description_frontmatter_key():
     """The index's description text is the file's `## Goal` body — the field SCHEMA.md already
@@ -709,9 +672,6 @@ def test_d1_positive_control_every_template_resolves_a_goal():
     """Positive control for d1: the index CAN be built without a description field, because every
     template already carries the Goal the index renders."""
     rows = list(_corpus.iter_query_templates(_REAL_CATALOG))
-    # #620 dropped the 33 machine-generated `_draft/` arg0 templates (the loop refills the queue
-    # on the next real run), so the corpus is smaller than the pre-migration ~63; the count guard
-    # just asserts a non-trivially-populated catalog. The intent is the goal check below.
     assert len(rows) >= 25
     assert all(r.goal.strip() for r in rows), "a template with no ## Goal has no index entry"
 
@@ -737,11 +697,6 @@ def test_d24_status_agrees_with_the_draft_directory():
         assert in_draft_dir == (r.status == "draft"), f"{r.path}: status {r.status!r} vs its location"
 
 
-# ==========================================================================
-# review — the search reads the WHOLE body, and it is bounded on both axes
-#
-# Both pinned in review of the shipped PR (#592), neither covered by the spec above.
-# ==========================================================================
 
 def test_search_reads_sections_beyond_goal_and_query(tmp_path):
     """The search must read the FULL body, not just the two parsed sections.
@@ -770,10 +725,6 @@ def test_a_broad_pattern_is_bounded_and_says_that_it_truncated(tmp_path):
     return 25 and 41 of the 63 shipped templates (14 KB / 21 KB of dispatch context); a bare `e`
     returns all 63. Both caps must hold, and both must ANNOUNCE — a silently clipped result reads
     as a complete one, which is the same lie as the silent empty this tool exists to replace."""
-    # The fixture is a FIXED size, never `_SEARCH_MAX_TEMPLATES + k`. Sizing a corpus off the
-    # constant under test couples the fixture to the value it is meant to bound: raise the cap and
-    # the test silently writes that many files (at 10**6 it writes a million and fills the disk).
-    # The corpus is a constant; the assertion is an inequality against the cap.
     corpus, lines_each = 40, 8
     assert corpus > tools_gather._SEARCH_MAX_TEMPLATES, "fixture too small to exercise the cap"
     assert lines_each > tools_gather._SEARCH_LINES_PER_TEMPLATE, "fixture too thin for the cap"
@@ -790,10 +741,9 @@ def test_a_broad_pattern_is_bounded_and_says_that_it_truncated(tmp_path):
 
     listed = out.count("` — `")
     assert listed == tools_gather._SEARCH_MAX_TEMPLATES, f"list is unbounded: {listed} templates"
-    assert "not listed" in out                                        # spilled templates ANNOUNCED
-    assert str(corpus - tools_gather._SEARCH_MAX_TEMPLATES) in out    # ...and counted
-    assert "not shown" in out                                         # clipped evidence lines too
-    # The bound is on the RETURN, not on the truth: the sentinel must not appear.
+    assert "not listed" in out
+    assert str(corpus - tools_gather._SEARCH_MAX_TEMPLATES) in out
+    assert "not shown" in out
     assert not out.startswith("no template matches")
 
 
@@ -801,13 +751,12 @@ def test_the_truncated_list_keeps_the_densest_matches(tmp_path):
     """Which templates survive the cap is not incidental. Ranked by match density, the strongest
     candidate survives; in corpus-walk order it would be whichever system sorts first, so the
     best template could be dropped for an alphabetical accident while 20 weaker ones are shown."""
-    corpus = 40                                    # fixed, not derived from the cap (see above)
+    corpus = 40
     assert corpus > tools_gather._SEARCH_MAX_TEMPLATES, "fixture too small to exercise the cap"
 
     dfn = tmp_path / "wt" / "defender"
     q = dfn / "skills" / "gather" / "queries" / "zzz-last-system"
     q.mkdir(parents=True)
-    # The strongest match sorts LAST by path — it survives only if density is what ranks.
     (q / "the-one.md").write_text(
         _tpl("zzz-last-system", "the-one", goal="widget\nwidget\nwidget\nwidget", query="widget")
     )
@@ -821,9 +770,6 @@ def test_the_truncated_list_keeps_the_densest_matches(tmp_path):
     assert "zzz-last-system.the-one" in out, "the densest match was dropped for an alphabetical one"
 
 
-# ==========================================================================
-# #598 — a `## ` line inside a code fence is NOT a heading
-# ==========================================================================
 
 def test_598_a_hash_line_inside_a_fence_does_not_split_the_section(tmp_path):
     """`_sections` swept `^## ` over the whole body with re.MULTILINE, blind to code fences. Every
@@ -844,7 +790,7 @@ def test_598_a_hash_line_inside_a_fence_does_not_split_the_section(tmp_path):
         f"a fenced `## ` line invented a section: {sorted(sections)}"
     )
     assert "LIMIT 5" in sections["Query"], "the ## Query body was truncated at the fenced `## ` line"
-    assert "## not a heading" in sections["Query"]     # the comment stays IN the query
+    assert "## not a heading" in sections["Query"]
     assert sections["What to summarize"] == "- the count"
 
 
@@ -877,6 +823,4 @@ def test_598_no_shipped_template_hides_a_heading_in_a_fence():
             if ln.lstrip().startswith(("```", "~~~")):
                 fenced = not fenced
             elif fenced and ln.startswith("## "):
-                # Not a failure of the parser (it handles this) — a heads-up that the corpus now
-                # exercises the fence path, so the guard above is load-bearing, not decorative.
                 assert r.query.strip(), f"{r.path}: fenced `## ` line truncated the query"

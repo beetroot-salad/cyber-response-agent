@@ -32,7 +32,7 @@ from pathlib import Path
 
 import pytest
 
-pytest.importorskip("pydantic_ai")  # CI installs the runtime extra; skip otherwise
+pytest.importorskip("pydantic_ai")
 
 from pydantic_ai.models import override_allow_model_requests  # noqa: E402
 from pydantic_ai.models.function import FunctionModel  # noqa: E402
@@ -56,18 +56,8 @@ DEFENDER = REPO_ROOT / "defender"
 GOLDEN = DEFENDER / "fixtures-e2e" / "golden-v2sshd"
 FLAG = "DEFENDER_BUDGET_ENFORCE"
 
-# The invlang surface REFUSES a ```yaml fence (Rule 0) — the same fixture
-# tests/test_permission.py:447 already drives through the api lane.
 BAD_INVLANG = "```yaml\nfoo: bar\n```\n"
 
-# The six integrity facets S1 names, plus the two the census added, as they appear
-# under a real run dir. Each was probed model-writable by an EXECUTED sweep:
-# budget.json/circuit_breaker.json (PO51/Q6), llm_requests.jsonl + tool_trace.jsonl
-# (Q7 — the ENABLING facet: one write corrupts both, since the trace is DERIVED),
-# executed_queries.jsonl + the leads table (Q9 — it ESCAPES the run through
-# actor_view into the checked-in lessons corpus), gather_summaries (Q10 — the
-# post-compaction recovery surface), alert.json (Q8 — its read-only status is
-# documentation with no enforcement behind it).
 INTEGRITY_SURFACE = (
     "budget.json",
     "circuit_breaker.json",
@@ -97,7 +87,6 @@ def _report_text() -> str:
     return "---\ncase_id: c-1\ndisposition: benign\nconfidence: low\n---\n\nDone.\n"
 
 
-# --- the flag itself (scope: the FLAG and nothing else) ---------------------
 
 def test_model_cannot_disable_enforcement(tmp_path):
     """A model that writes to files or runs bash cannot turn the enforcement FLAG off
@@ -117,15 +106,6 @@ def test_model_cannot_disable_enforcement(tmp_path):
     run_dir = _run_dir(tmp_path)
     policy = _main_policy(run_dir)
 
-    # POSITIVE CONTROL on the bash lane (blind reader R32): the gate is not a
-    # deny-everything wall — a benign read-only command IS allowed — so the denials
-    # below are the flag-mutating shapes being refused, not the gate refusing all input.
-    # SURFACED-FOR-RATIFICATION (write-code-from-spec): the operand must be ABSOLUTE.
-    # The bash gate resolves a relative operand against the repo root (tools._resolve_operand /
-    # decide_bash), not run_dir, so `cat alert.json` resolves OUTSIDE run_dir and is denied —
-    # pre-existing gate behaviour (confirmed: `cat <abs run_dir>/alert.json` is allowed). The
-    # positive-control INTENT (a benign read IS allowed, so the denials below are the flag-mutating
-    # shapes being refused, not a deny-everything wall) is preserved with the absolute form.
     benign = permission.decide_bash(f"cat {run_dir / 'alert.json'}", run_dir=run_dir,
                                      defender_dir=DEFENDER, policy=policy)
     assert benign.allow, "the bash gate denies even a benign read — no positive control"
@@ -148,10 +128,6 @@ def test_model_cannot_disable_enforcement(tmp_path):
                                            defender_dir=DEFENDER, policy=policy)
         assert not decision.allow, f"the api lane admitted a write to {target!r}"
 
-    # A child that DOES set the flag leaves the parent's environment untouched (blind
-    # reader R32: the previous `echo hi` set nothing, so the assertion held trivially).
-    # A real child process that sets the variable and exits does not reach the parent's
-    # in-process os.environ, which is where enforcement_enabled() reads it.
     before = os.environ.get(FLAG)
     subprocess.run(
         [sys.executable, "-c",
@@ -161,7 +137,6 @@ def test_model_cannot_disable_enforcement(tmp_path):
     assert os.environ.get(FLAG) == before, "a child process mutated the parent's flag"
 
 
-# --- the whole run integrity surface ----------------------------------------
 
 def test_model_cannot_author_its_own_budget_state(tmp_path):
     """MAIN cannot author or edit the record its own enforcement decision reads: a
@@ -195,15 +170,11 @@ def test_model_cannot_author_its_own_budget_state(tmp_path):
         assert not decision.allow, f"MAIN may still author {rel}"
         assert decision.reason, f"{rel} was refused with no reason the model can read"
 
-    # The bash lane is closed too — no program in either grant list writes a file.
     for command in ("cat /dev/null > budget.json", "echo '{}' > budget.json",
                     "jq -n '{}' > budget.json"):
         assert not permission.decide_bash(command, run_dir=run_dir,
                                           defender_dir=DEFENDER, policy=policy).allow
 
-    # DRIVEN, inside the tail: the pool is tripped, write_file is still tail-tier and
-    # still runs, and the budget.json write is refused OBSERVABLY — the model sees the
-    # deny reason as retry feedback rather than the write being silently discarded.
     open_budget(run_dir, "r")
     limits = {**DEFAULT_LIMITS, "max_tool_calls": 1}
     update_budget_locked(run_dir, "r", "bash", limits=limits)
@@ -215,11 +186,6 @@ def test_model_cannot_author_its_own_budget_state(tmp_path):
                           "content": _report_text()})]],
         limits=limits, enforce=True,
     )
-    # SURFACED-FOR-RATIFICATION (write-code-from-spec): the ORIGINAL `== before` conflated "the
-    # forged reset didn't land" with "budget.json is byte-identical", but the LEGITIMATE report.md
-    # tail write in this same script accounts an executed call and advances tool_calls (0→2) — the
-    # very tail-write-increments behaviour test_kill_lands_between (passing) requires. The demand's
-    # INTENT is that the model's forged RESET (tool_calls:0) did not take; asserted directly.
     on_disk = json.loads((run_dir / "budget.json").read_text())
     assert on_disk.get("tool_calls", 0) >= 1, "the forged counter reset landed"
     assert on_disk.get("run_id") == "r", "the forged budget.json displaced the run's own state"
@@ -289,16 +255,9 @@ def test_main_write_scope_is_an_explicit_allow_list(tmp_path):
                 *INTEGRITY_SURFACE,
                 "gather_raw/evil.md", "notes.md", "a/b/c/deep.md",
                 "anything/at/all/x.bin", "report.md.bak",
-                "sub/report.md", "gather_raw/investigation.md"):  # allowed name at depth
+                "sub/report.md", "gather_raw/investigation.md"):
         target = run_dir / rel
         target.parent.mkdir(parents=True, exist_ok=True)
-        # Each probe carries content that CLEARS the orthogonal output-structure gate for
-        # its basename, so every denial below is attributable to the write ALLOW-LIST — this
-        # test's subject — and never to content. investigation.md takes golden invlang;
-        # report.md takes a valid in-bounds report (#629 reconciliation, same as
-        # test_bind_sole_seam_551::test_d6_guard_noop_for_real_writers). The allowed-name-at-
-        # depth probes (`sub/report.md`, `gather_raw/investigation.md`) get valid content too:
-        # that is what makes them discriminating, since a basename-keyed rule would admit them.
         if rel.endswith("investigation.md"):
             text = (GOLDEN / "investigation.md").read_text()
         elif rel.endswith("report.md"):
@@ -313,7 +272,6 @@ def test_main_write_scope_is_an_explicit_allow_list(tmp_path):
     )
 
 
-# --- the two authoring paths that reach investigation.md --------------------
 
 def test_the_artifact_copy_path_does_not_land_unvalidated_investigation_md(tmp_path):
     """Text the invlang validator REJECTS does not come to rest at a path named
@@ -341,10 +299,6 @@ def test_the_artifact_copy_path_does_not_land_unvalidated_investigation_md(tmp_p
     (src / "investigation.md").write_text(BAD_INVLANG)
     assert validate_companion(BAD_INVLANG, None), "the fixture is no longer rejected"
 
-    # dst is PRE-CREATED (blind reader R22): otherwise a bare `shutil.copy2` with no
-    # validation raises FileNotFoundError into an unwritable dir and satisfies the
-    # negative for the wrong reason. With dst present, an UNVALIDATED copy SUCCEEDS —
-    # so the raise below can only come from the validation the demand requires.
     dst = tmp_path / "learning-run"
     dst.mkdir()
     with pytest.raises(Exception):  # noqa: B017, PT011 — the demand pins "fails closed", not the exception type
@@ -390,12 +344,6 @@ def test_a_write_through_an_alias_to_investigation_md_is_still_validated(tmp_pat
     assert not through_alias.allow, "the alias bypassed the invlang validator"
     assert "invlang validation" in through_alias.reason
 
-    # POSITIVE CONTROL (blind reader R23): VALID invlang through the SAME alias must be
-    # ALLOWED. Without it, an implementation that simply denies every symlink — or every
-    # name not literally investigation.md/report.md — passes the two denials above while
-    # never resolving anything, which is indistinguishable from "select the validator on
-    # the resolved path". Allowing valid text through the alias is what proves resolution
-    # actually happened.
     good = (GOLDEN / "investigation.md").read_text()
     assert validate_companion(good, None) == []
     valid_alias = permission.decide_write(alias, good, run_dir=run_dir,
@@ -434,7 +382,6 @@ def test_a_valid_investigation_md_still_lands_through_every_authoring_path(tmp_p
     assert (dst / "alert.json").is_file()
 
 
-# --- the queries table's line protocol --------------------------------------
 
 def _drive_one_query(run_dir: Path, params: dict) -> list[dict]:
     """Drive ONE real `query` call on a real GATHER agent against an injected verb
@@ -497,10 +444,6 @@ def test_a_query_row_carrying_a_non_finite_param_is_still_strict_json(tmp_path):
     The positive control forbids the blanket fix: see
     test_hostile_string_params_still_produce_exactly_one_row."""
     run_dir = _run_dir(tmp_path)
-    # A FINITE float rides alongside the non-finite one (blind reader R24): the fix must
-    # keep ordinary numbers, so a blanket "stringify/drop every float" sanitizer — which
-    # both queries tests would otherwise permit, since the string control carries no
-    # numbers — is forbidden by asserting `count` survives as a real number below.
     _drive_one_query(run_dir, {"threshold": 1e400, "count": 42.5, "index": "logs"})
 
     table = run_dir / "executed_queries.jsonl"
@@ -516,7 +459,6 @@ def test_a_query_row_carrying_a_non_finite_param_is_still_strict_json(tmp_path):
     row = json.loads(lines[0])
     for value in row["params"].values():
         assert not (isinstance(value, float) and not math.isfinite(value))
-    # The ordinary finite float survived as a number, not stringified or dropped.
     assert row["params"].get("count") == 42.5, (
         "a legitimate finite float was mangled — the non-finite fix is a blanket sanitizer"
     )

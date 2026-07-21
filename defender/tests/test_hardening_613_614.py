@@ -34,14 +34,11 @@ SCRIPTS = Path(__file__).resolve().parents[1] / "scripts" / "lessons"
 _FLOW_FLOOD = "a: " + "[" * 3000
 _BLOCK_FLOOD = "\n".join(" " * i + f"k{i}:" for i in range(3000))
 
-# The same hostile scalar as test_hardening_596_609: every splitlines breaker + tab.
 _HOSTILE_VALUE = '"a\\tb\\nc\\rd\\x0Be\\x0Cf\\x85g\\u2028h\\u2029i"'
 _HOSTILE_FLAT = "a b c d e f g h i"
 
 
 def _load_script(stem: str):
-    # Distinct module names so these loads can't clobber the sibling test files'
-    # loads of the same scripts in sys.modules within one pytest session.
     spec = importlib.util.spec_from_file_location(f"{stem}_614", SCRIPTS / f"{stem}.py")
     mod = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -49,9 +46,6 @@ def _load_script(stem: str):
     return mod
 
 
-# ---------------------------------------------------------------------------
-# #613 — the seam (demands s1–s2)
-# ---------------------------------------------------------------------------
 
 
 def test_d_s1_seam_folds_flood_into_yamlerror_and_recovers():
@@ -72,9 +66,6 @@ def test_d_s2_healthy_yaml_is_untouched():
     assert safe_load("") is None
 
 
-# ---------------------------------------------------------------------------
-# #613 — the previously exposed call sites (demands s3–s7)
-# ---------------------------------------------------------------------------
 
 
 def test_d_s3_oracle_flood_reply_is_run_unprocessable():
@@ -84,15 +75,6 @@ def test_d_s3_oracle_flood_reply_is_run_unprocessable():
         parse_lead_events(_FLOW_FLOOD, "lead1")
 
 
-# d: s4 — DELETED. Its subject, `orchestrate.read_ground_truth`, no longer exists: the
-# learning loop does not read eval-fixture YAML at all, so a flooded ground_truth.yaml
-# cannot reach — let alone dead-letter — a learning run. The failure mode is removed
-# rather than handled.
-#
-# d: s5 — FOLDED INTO s6. It pinned walk-survival on `evals/held_out.held_out_runs`, a
-# scan of run dirs for copied-in labels. The eval now walks FIXTURES via
-# `load_held_out_fixtures` — which is exactly s6's subject — so the two demands have one
-# subject and one test.
 
 
 def test_d_s6_fixture_walk_survives_flood_ground_truth(tmp_path, capsys):
@@ -122,9 +104,6 @@ def test_d_s7_visualize_load_yaml_flood_degrades_to_none(tmp_path):
     assert load_yaml(p) is None
 
 
-# ---------------------------------------------------------------------------
-# #614 — the breaker set and the sibling emitters (demands t1–t2)
-# ---------------------------------------------------------------------------
 
 
 def test_d_t1_breaker_set_is_exactly_splitlines_plus_tab():
@@ -148,7 +127,7 @@ def test_d_t1_breaker_set_is_exactly_splitlines_plus_tab():
          ["prog"]),
         ("lessons_env_retrieve",
          f"subject: s\nrelevance_criteria: {_HOSTILE_VALUE}",
-         None),  # --corpus is an arg, filled in below
+         None),
         ("lessons_actor_index",
          f"subject: s\nrelevance_criteria: {_HOSTILE_VALUE}",
          ["prog"]),

@@ -1,27 +1,3 @@
-"""Cross-case advisory retrieval over a loaded defender companion corpus.
-
-Three query helpers, ported from the soc-agent equivalents under
-`soc-agent/scripts/invlang/queries_{lookup,effectiveness}.py` and adapted
-to the defender parser's canonical companion dict shape:
-
-- `lead_sequence_pattern` (Class 5)  — what did past cases like this do?
-- `hypothesis_name_wildcard` (Class 6) — what hypotheses spawned + how
-  did they terminate?
-- `lead_branch_effects` (Class 8)    — per-lead, per-hypothesis effect
-  distribution + empty-rate; the discussion-anchor query for PLAN.
-- `hypothesis_shape_match`           — topology-shape → ?names used,
-  with weight + disposition distributions. Cross-signature: the answer
-  to "what have we called this kind of fork before?"
-
-All three operate on `list[Companion]` from `defender.skills.invlang.corpus`
-and return dicts safe to dump as JSON. Investigation-scoped ids
-(`hypothesis_id`, `lead_id`) are deliberately stripped from outputs —
-cross-case retrieval ranks on observable attributes, not record handles.
-
-The defender parser emits `tests_hypotheses` (not `tests`) for the lead
-column that names which hypotheses a lead is forking; the helpers read
-that field directly.
-"""
 
 from __future__ import annotations
 
@@ -34,33 +10,20 @@ from .corpus import Companion
 from .schema import Conclude, FindingRecord, HypothesisRecord
 
 
-# ---------------------------------------------------------------------------
-# Per-record helpers
-# ---------------------------------------------------------------------------
 
 def _hypothesis_name(h: HypothesisRecord) -> str:
     return h.get("name", "") or ""
 
 
 def _all_hypotheses(c: Companion) -> Iterable[HypothesisRecord]:
-    """Hypothesize-block hypotheses plus any new_hypotheses spawned in leads
-    (deduped by id; shared with the write-time validator via `_walkers`)."""
     return _walkers.all_hypotheses(c.body).values()
 
 
 def _lead_outcome_empty(lead: FindingRecord) -> bool:
-    """A lead is 'empty' when its analyzed observations carry no vertices and no
-    edges. Defender's gather records payload-shape sidecars separately, but at
-    the invlang level the observations block is the only signal we have.
-    """
     obs = (lead.get("outcome") or {}).get("observations") or {}
     return not obs.get("vertices") and not obs.get("edges")
 
 
-# `conclude` is the `Conclude` TypedDict, but the helper walks a *dynamic*
-# string path (`conclude["termination"]["category"]`) — TypedDict indexing
-# needs literal keys, so the cursor stays `Any` to keep the dynamic `.get`
-# walk type-checking. The id-stripping behavior is unaffected.
 def _conclude_field(conclude: Conclude, *path: str) -> Any:
     cur: Any = conclude
     for key in path:
@@ -70,18 +33,8 @@ def _conclude_field(conclude: Conclude, *path: str) -> Any:
     return cur
 
 
-# ---------------------------------------------------------------------------
-# Class 5 — lead sequence pattern (PLAN-time: "what did past cases do?")
-# ---------------------------------------------------------------------------
 
 def _lead_trace(c: Companion) -> str:
-    """Compact per-case trace: lead1→lead2→...→termination:disposition.
-
-    Annotates the bare lead name with a 1–2 char suffix that surfaces failure
-    or consultation shape without exploding to full observations. Branching
-    vs. interpretive vs. mechanical is intentionally NOT in the trace — that
-    would duplicate Class 8's signal and bloat the line.
-    """
     parts: list[str] = []
     for lead in c.leads:
         name = lead.get("name", "?")
@@ -105,11 +58,6 @@ def lead_sequence_pattern(
     disposition: str | None = None,
     signature_id: str | None = None,
 ) -> dict[str, Any]:
-    """Serialize each case's gather sequence as a trace string.
-
-    Filters are AND-ed. Default sort: longest investigation first (proxy for
-    the cases that branched the most — usually the most informative).
-    """
     hits: list[dict[str, Any]] = []
     for c in corpus:
         if disposition is not None and c.conclude.get("disposition") != disposition:
@@ -131,9 +79,6 @@ def lead_sequence_pattern(
     return {"hits": hits, "count": len(hits)}
 
 
-# ---------------------------------------------------------------------------
-# Class 6 — hypothesis name wildcard (PLAN-time: seed vocabulary discovery)
-# ---------------------------------------------------------------------------
 
 def hypothesis_name_wildcard(
     corpus: list[Companion],
@@ -143,17 +88,6 @@ def hypothesis_name_wildcard(
     disposition: str | None = None,
     signature_id: str | None = None,
 ) -> dict[str, Any]:
-    """Match hypothesis names against an fnmatch pattern (e.g. '?*brute-force*').
-
-    For each matching hypothesis: emit `case_id`, the hypothesis `name`, its
-    final weight (last assessment seen across the case's lead resolutions, or
-    the initial weight if never assessed), the case disposition, and the
-    hypothesis status. `hypothesis_id` is deliberately omitted — it's
-    investigation-scoped and meaningless cross-case.
-
-    Sort: final_weight desc (++ → + → null → - → --), then case_id for
-    stability.
-    """
     hits: list[dict[str, Any]] = []
     for c in corpus:
         if disposition is not None and c.conclude.get("disposition") != disposition:
@@ -180,9 +114,6 @@ def hypothesis_name_wildcard(
     return {"hits": hits, "count": len(hits), "pattern": pattern}
 
 
-# ---------------------------------------------------------------------------
-# Class 8 — per-lead, per-hypothesis effect distribution (PLAN discrimination)
-# ---------------------------------------------------------------------------
 
 def _empty_bucket() -> dict[str, int]:
     return {b: 0 for b in vocab.WEIGHT_BUCKETS}
@@ -195,31 +126,6 @@ def lead_branch_effects(
     min_support: int = 1,
     max_hypotheses_per_lead: int = 5,
 ) -> dict[str, Any]:
-    """For each lead name observed across the corpus, surface:
-
-    - `n`               — total appearances
-    - `empty_rate`      — "K/N" string: K of N appearances returned no
-                          observations
-    - `per_hypothesis_effect` — for each touched hypothesis (filtered to
-                          `hypothesis_patterns` if supplied), a histogram of
-                          assessment shifts ({++, +, -, --} counts) PLUS the
-                          number of appearances where the lead's resolutions
-                          named that hypothesis (`support`).
-
-    The output is data, not a recommendation. Ranking the leads is the
-    caller's job — we sort by `n` desc as a tiebreaker stable enough for
-    LLM consumption, then by lead_name for determinism.
-
-    `min_support` drops lead-rows whose total `n` falls below the threshold.
-    `max_hypotheses_per_lead` caps the per-lead breakdown to the K
-    most-touched hypotheses (by resolution count) when no patterns are
-    supplied; with patterns, all matching hypotheses are shown regardless.
-
-    The defender corpus stores per-resolution shifts on the lead's
-    `resolutions[]` (each row carries `hypothesis` + `before` + `after`),
-    keyed by `hypothesis` = the synthetic id `h-NNN`. We resolve the id to a
-    name via the case's hypothesis index.
-    """
     counts: dict[str, int] = {}
     empties: dict[str, int] = {}
     per_hyp: dict[str, dict[str, dict[str, int]]] = {}
@@ -258,9 +164,6 @@ def _accumulate_lead_effects(
 ) -> None:
     name = lead.get("name")
     if not name:
-        # Nameless leads can't be cross-case keys — drop them silently
-        # rather than collapsing them into a "?" bucket that the caller
-        # can't act on. Parser-side issue, not retrieval's to fix.
         return
     touched = _touched_hypothesis_names(lead, h_names)
     matching = (
@@ -268,17 +171,10 @@ def _accumulate_lead_effects(
         if patterns_active else touched
     )
     if patterns_active and not matching:
-        # No frontier match — this occurrence is irrelevant to the
-        # caller's question. Skip entirely so n + empty_rate reflect
-        # frontier-specific support only.
         return
     counts[name] = counts.get(name, 0) + 1
     if _lead_outcome_empty(lead):
         empties[name] = empties.get(name, 0) + 1
-    # Initialize a zero-bucket entry for every matching touched hypothesis.
-    # Leads that forked for ?H but never resolved still surface here with
-    # all-zero counts; combined with empty_rate they carry the "this lead
-    # failed on ?H" signal. Sorted for PYTHONHASHSEED-stable order.
     for hn in sorted(matching):
         per_hyp.setdefault(name, {}).setdefault(hn, _empty_bucket())
     for r in lead.get("resolutions", []) or []:
@@ -300,13 +196,6 @@ def _hyp_pattern_matches(name: str, patterns: tuple[str, ...]) -> bool:
 def _touched_hypothesis_names(
     lead: FindingRecord, h_names: dict[str, str]
 ) -> set[str]:
-    """Hypothesis names this lead occurrence touched.
-
-    Union of two sources: declared via `tests_hypotheses` (surfaces
-    empty-gather forks that never resolved) plus actual `resolutions[]`
-    entries. Resolution-only would lose the high-empty-rate signal
-    precisely when it matters.
-    """
     touched: set[str] = set()
     for h_id in lead.get("tests_hypotheses", []) or []:
         if (hn := h_names.get(h_id)):
@@ -332,8 +221,6 @@ def _build_lead_effect_rows(
             continue
         hyp_table = per_hyp.get(name, {})
         if not patterns_active and len(hyp_table) > max_hypotheses_per_lead:
-            # Keep the K hypotheses this lead most often resolved against.
-            # Name as tiebreaker for PYTHONHASHSEED stability.
             ordered = sorted(
                 hyp_table.items(),
                 key=lambda kv: (-sum(kv[1].values()), kv[0]),
@@ -348,13 +235,8 @@ def _build_lead_effect_rows(
     return rows
 
 
-# ---------------------------------------------------------------------------
-# Topology-shape -> ?hypothesis-names (PLAN: "what have we called this fork?")
-# ---------------------------------------------------------------------------
 
 def _compute_final_weights(c: Companion) -> dict[str, Any]:
-    """Initial hypothesis weight, overlaid by the last resolution shift
-    (shared with the write-time validator via `_walkers`)."""
     return _walkers.final_weights(c.body)
 
 
@@ -388,29 +270,6 @@ def hypothesis_shape_match(
     rel: str | None = None,
     attached_to_type: str | None = None,
 ) -> dict[str, Any]:
-    """Group ?hypothesis-names by topology shape across the corpus.
-
-    Filters (all optional, AND-ed):
-      - `parent_type`        exact match on :H parent_type (closed vocab).
-      - `parent_class`       fnmatch pattern on :H parent_class
-                             (`bastion/*`, `*/internal/*`, exact string).
-      - `rel`                exact match on the proposed-edge relation.
-      - `attached_to_type`   exact match on the type of the vertex named
-                             by the hypothesis's `attached_to` field
-                             (resolved through the case's prologue).
-
-    At least one filter is required — a wide-open query returns the whole
-    catalog with no actionable signal. Cross-signature by design: same
-    topology shape recurs across signatures, and the caller is asking
-    "what have we called this kind of fork before?", not "what did we
-    call it for this rule?".
-
-    For each matching ?name, emit per-occurrence aggregates: total `n`,
-    final-weight histogram (using the last assessment seen in any lead's
-    resolutions, or the initial weight if never assessed), disposition
-    histogram, and supporting `case_ids`. Investigation-scoped ids
-    (`hypothesis_id`) are intentionally omitted.
-    """
     if not (parent_type or parent_class or rel or attached_to_type):
         raise ValueError(
             "at least one of parent_type, parent_class, rel, "
@@ -420,7 +279,6 @@ def hypothesis_shape_match(
     agg: dict[str, dict[str, Any]] = {}
 
     for c in corpus:
-        # vertex id -> type for attached_to_type resolution
         v_type: dict[str, str] = {}
         for v in c.prologue.get("vertices", []) or []:
             if isinstance(v, dict) and v.get("id"):

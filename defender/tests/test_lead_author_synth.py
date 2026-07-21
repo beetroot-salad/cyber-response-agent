@@ -21,10 +21,6 @@ def _lead(
     query_id: str, params: dict | None = None, raw_command: str = "",
     system: str | None = None, verb: str = "get",
 ) -> lead_author.ExecutedLead:
-    # The queries table records ``system`` + ``verb`` independently; default ``system`` to the
-    # query_id's namespace (how record_query builds the id) so callers only set it explicitly
-    # when exercising a system/id-prefix mismatch. ``verb`` is the honest registry verb the row
-    # freezes; it defaults to a value that is NOT the id suffix (so the id reads as coined).
     if system is None:
         system = query_id.split(".", 1)[0] if "." in query_id else ""
     return lead_author.ExecutedLead(
@@ -69,7 +65,6 @@ def test_resolved_verb_not_drafted(tmp_path):
 
 def test_adhoc_query_id_skipped(tmp_path):
     cat = _catalog(tmp_path)
-    # `ad-hoc` has no `{system}.` prefix — not a catalog candidate.
     assert lead_author.synthesize_drafts([_lead("ad-hoc")], catalog_dir=cat) == []
     assert not (cat / "ad-hoc").exists()
 
@@ -84,9 +79,6 @@ def test_idempotent(tmp_path):
     assert second == []
 
 
-# ---------------------------------------------------------------------------
-# Canonical-record skeleton shape (#340 / #343 / #620 migration)
-# ---------------------------------------------------------------------------
 
 _ESQL_PIPE = (
     'FROM logs-system.auth-*\n'
@@ -107,8 +99,8 @@ def test_esql_draft_carries_literal_query_not_placeholder(tmp_path):
     text = (cat / "elastic" / "_draft" / "sshd-failed-by-srcip.md").read_text()
     assert "engine: esql" in text
     assert "```esql" in text
-    assert "STATS failed = COUNT(*) BY source.ip" in text   # the literal pipe
-    assert "Fill in the real" not in text                   # old placeholder gone
+    assert "STATS failed = COUNT(*) BY source.ip" in text
+    assert "Fill in the real" not in text
     assert "## What to summarize" not in text
     assert "## Pitfalls" in text
 
@@ -119,8 +111,6 @@ def test_executed_query_is_the_declared_body_or_structured_call(tmp_path):
     never a dead `params['arg0']` read."""
     lead = _lead("elastic.x", {"query": _ESQL_PIPE}, verb="esql", system="elastic")
     assert lead_author._executed_query(lead) == _ESQL_PIPE
-    # A param-only verb → the structured call, carrying the verb + every bound param, never the
-    # shlex audit string.
     param_lead = _lead("cmdb.host-lookup", {"host": "db-1"}, verb="get-host", system="cmdb",
                        raw_command="cmdb get-host host=db-1")
     record = lead_author._executed_query(param_lead)
@@ -134,10 +124,8 @@ def test_executed_query_keys_on_recorded_verb_not_id_prefix(tmp_path):
     tagged query whose id namespace differs from the verb that actually ran is still classified
     by the real per-verb engine."""
     pipe = "FROM logs-system.auth-* | STATS c = COUNT(*)"
-    # An esql verb (system=elastic) even though the tagged id namespace differs.
     el = _lead("custom.tagged", {"query": pipe}, verb="esql", system="elastic")
     assert lead_author._executed_query(el) == pipe
-    # A param-only verb even though the id prefix says elastic → the structured call.
     non = _lead("elastic.weird", {"host": "10.0.0.5"}, verb="get-host", system="cmdb")
     record = lead_author._executed_query(non)
     assert "get-host" in record
@@ -154,7 +142,7 @@ def test_malformed_query_id_does_not_mint_off_surface_draft(tmp_path):
         _lead("elastic.", {"query": _ESQL_PIPE}, verb="esql", system="elastic"),
     ], catalog_dir=cat)
     assert created == []
-    assert not (cat / "_draft").exists()              # no catalog-root draft dir
+    assert not (cat / "_draft").exists()
     assert not (cat / "elastic" / "_draft" / ".md").exists()
 
 
@@ -176,13 +164,10 @@ def test_traversal_query_id_does_not_escape_catalog(tmp_path):
     line on its own for any already-persisted/foreign row."""
     cat = _catalog(tmp_path)
     created = lead_author.synthesize_drafts([
-        # `/` + `..` in the suffix → would resolve outside the catalog.
         _lead("elastic.../../../../PWNED", {"query": _ESQL_PIPE}, verb="esql", system="elastic"),
-        # traversal in the system segment.
         _lead("../../etc.passwd", {"query": _ESQL_PIPE}, verb="esql", system="elastic"),
     ], catalog_dir=cat)
     assert created == []
-    # No file escaped the catalog (or landed anywhere under the temp tree).
     assert not (tmp_path / "PWNED.md").exists()
     assert list(tmp_path.rglob("PWNED.md")) == []
 

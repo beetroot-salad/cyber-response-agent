@@ -1,44 +1,4 @@
 #!/usr/bin/env python3
-"""Render a defender run as two self-contained HTML pages.
-
-A run serves two first-class concerns:
-
-    transcript.html — Judge evaluation (default landing).
-        Optimized for assessing the learning loop's judgment: what did
-        the defender produce, what counterfactual story did the actor
-        write, what did the judge conclude. Surfaces report.md + a
-        compact lead list (the judge's *input*), the actor story, then
-        judge outcome + findings + encounter analysis. Oracle and raw
-        artifacts collapse below the fold.
-
-    runtime.html — Defender run inspection.
-        The *process* page. A top fold answers the run at a glance — an
-        ANALYSIS card (disposition + execution health + report.md + lead
-        summary) beside a METRICS card (total cost / wall + per-phase
-        bars) — over a muted metadata byline. Below it: investigation.md
-        split by phase, a searchable / filterable chronological transcript
-        (built from llm_requests.jsonl), and the § Leads & queries data
-        trail. A sticky phase sidebar navigates the transcript.
-
-The two pages cross-link via a header tab strip and share their CSS.
-
-Module layout (all in defender/scripts/, sibling imports thanks to
-Python prepending the script's directory to sys.path):
-
-    visualize_run.py        — this file: CLI, CSS + transcript JS, page
-                              composition, header / byline / top fold
-    visualize_primitives.py — esc / block / pre helpers, load_*,
-                              raw event renderers, shared content
-                              fragments (alert, lead list, report card)
-    visualize_data.py       — pricing, cost attribution, phase tagging,
-                              wall times + the llm_requests.jsonl readers
-                              (transcript, tool usage, cost, health)
-    visualize_judge.py      — judge view sections + TOC
-    visualize_runtime.py    — runtime view sections + TOC + footer
-
-Usage:
-    python3 defender/scripts/visualize/visualize_run.py <run_dir>
-"""
 from __future__ import annotations
 
 import re
@@ -46,8 +6,6 @@ import shutil
 import sys
 from pathlib import Path
 
-# Put the workspace root on sys.path so `defender.*` namespace imports
-# resolve whether this file is imported or run directly (see tests/conftest.py).
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
@@ -108,18 +66,6 @@ _REPO_ROOT = _DEFENDER_DIR.parent
 
 
 def render_and_mirror(run_dir: Path) -> list[Path]:
-    """Render the judge + runtime pages into ``run_dir`` and mirror them into
-    ``defender/run-visualizations/<run_id>/``.
-
-    The mirror lives here (not just in run.py) so every renderer — run.py's
-    pre-learn pass AND the off-process learn worker's post-learn re-render —
-    refreshes it identically; the post-learn pass wins (last write), leaving the
-    repo-persisted copy carrying the judge eval even if /tmp is later cleared.
-    The judge page resolves its artifacts by case_id from the learning state
-    dir (``load_judge_findings``), so re-rendering picks them up wherever they
-    landed. Mirrored into a per-run subdir because the pages cross-link via
-    relative hrefs.
-    """
     (run_dir / JUDGE_FILENAME).write_text(render_judge_page(run_dir), encoding="utf-8")
     (run_dir / RUNTIME_FILENAME).write_text(render_runtime_page(run_dir), encoding="utf-8")
     dest_dir = _DEFENDER_DIR / "run-visualizations" / run_dir.name
@@ -135,9 +81,6 @@ def render_and_mirror(run_dir: Path) -> list[Path]:
     return mirrored
 
 
-# ---------------------------------------------------------------------------
-# Header + tabs (shared across views)
-# ---------------------------------------------------------------------------
 
 
 def render_header(case_id: str, active: str, byline: str, stats_html: str = "") -> str:
@@ -160,24 +103,17 @@ def render_header(case_id: str, active: str, byline: str, stats_html: str = "") 
 
 
 def _byline(parts: list[str]) -> str:
-    """Muted 'contact-info'-style line: the items joined by dot separators. The
-    items are already escaped/safe by their callers."""
     return '<span class="bl-sep">·</span>'.join(
         f'<span class="bl-item">{p}</span>' for p in parts if p
     )
 
 
-# ---------------------------------------------------------------------------
-# Headlines (one per view)
-# ---------------------------------------------------------------------------
 
 
 def render_judge_headline(run_dir: Path, judge: dict | None, judge_benign: dict | None = None) -> str:
     report = parse_report(run_dir)
     disposition = str(report.get("disposition", "?"))
     confidence = str(report.get("confidence", "?"))
-    # Prefer the adversarial outcome (FN-hunt); fall back to the benign
-    # (FP-hunt) direction when that's the one that ran (malicious disposition).
     if judge:
         outcome = str(judge.get("outcome", "—"))
         n_findings = len(judge.get("defender_findings") or [])
@@ -216,10 +152,6 @@ def render_runtime_headline(
     health: dict,
     leads: list,
 ) -> str:
-    """The top fold: a single full-width ANALYSIS card (disposition + execution
-    health + report + lead summary) that owns the first screen. The run totals
-    (cost / wall) sit in the header top bar; the per-phase bars + tool usage live
-    in the § Metrics section below the fold (``render_runtime_metrics``)."""
     disposition = str(report.get("disposition", "?"))
     confidence = str(report.get("confidence", "?"))
     body = report.get("body", "").strip() or "(no report body)"
@@ -261,9 +193,6 @@ def render_runtime_metrics(
     totals: dict,
     health: dict,
 ) -> str:
-    """§ Metrics — the per-phase cost / wall bars + a tool-usage breakdown. Lives
-    below the analysis fold; the headline numbers (total cost / wall) are in the
-    header top bar."""
     cost_bar = _phase_bar(
         {ph: (attribution.get(ph) or {}).get("cost", 0.0) for ph in phase_order},
         phase_order, lambda v: f"${v:.3f}",
@@ -301,14 +230,9 @@ def render_runtime_metrics(
     return section("sec-metrics", "defender", "Metrics", "— per-phase cost / wall + tool usage", body)
 
 
-# ---------------------------------------------------------------------------
-# Top-fold helpers: per-phase segmented bar + compact lead summary
-# ---------------------------------------------------------------------------
 
 
 def _phase_bar(values: dict[str, float], phase_order: list[str], fmt) -> str:
-    """A segmented bar: one slice per phase, width proportional to its value
-    (cost or wall seconds), colored by phase. Reuses the shared .cost-bar CSS."""
     total = sum(v for v in values.values() if v and v > 0)
     if total <= 0:
         return '<div class="empty">(no per-phase attribution)</div>'
@@ -320,9 +244,6 @@ def _phase_bar(values: dict[str, float], phase_order: list[str], fmt) -> str:
         pct = v / total * 100
         verb = phase_verb(ph)
         title = f"{ph} · {fmt(v)} · {pct:.1f}%"
-        # Slivers can't hold a label without clipping it to garble ("PLA $0.06" →
-        # "LA $0.0"); show text only when the segment is wide enough, and drop the
-        # value on the merely-narrow ones. Full detail stays in the hover title.
         if pct >= 9:
             inner = f'<span class="cb-label">{esc(verb[:3])}</span><span class="cb-pct">{esc(fmt(v))}</span>'
         elif pct >= 4.5:
@@ -337,17 +258,11 @@ def _phase_bar(values: dict[str, float], phase_order: list[str], fmt) -> str:
 
 
 def _lead_sort_key(jl) -> tuple[int, str]:
-    """Numeric order over lead ids (``l-002`` before ``l-010``); falls back to the
-    raw id when there's no number to parse (e.g. an orphan)."""
     m = re.search(r"\d+", jl.lead_id or "")
     return (int(m.group()) if m else 1 << 30, jl.lead_id or "")
 
 
 def _lead_summary(leads: list) -> str:
-    """The analysis card's compact lead list: id + goal + a ∅ marker for
-    dead-ends. The goal is CSS-clamped to one line; clicking it expands the full
-    text in place (the truncating ellipsis is the affordance). The full queries
-    live in § Leads & queries below."""
     if not leads:
         return '<span class="empty">no leads</span>'
     rows: list[str] = []
@@ -355,8 +270,6 @@ def _lead_summary(leads: list) -> str:
         dead = jl.orphan or not jl.queries
         goal = (jl.goal or ("orphan" if jl.orphan else "")).strip()
         mark = ' <span class="lead-dead">∅</span>' if dead else ""
-        # Full goal in the DOM; CSS clamps it to one line. The JS marks it `.clip`
-        # (and wires click-to-expand) only when it actually overflows.
         goal_html = f'<span class="lead-mini-goal">{esc(goal)}</span>' if goal else ""
         rows.append(
             f'<div class="lead-mini"><span class="lead-mini-id">{esc(jl.lead_id)}</span>'
@@ -365,31 +278,15 @@ def _lead_summary(leads: list) -> str:
     return f'<div class="an-sublabel">leads</div><div class="lead-mini-list">{"".join(rows)}</div>'
 
 
-# ---------------------------------------------------------------------------
-# Page assets (#451): CSS shared by both pages + runtime JS (runtime page only).
-# Authored under visualize/assets/*.{css,js} so they lint/highlight as real
-# assets; read once at import and inlined into <style>/<script>, keeping each
-# page self-contained.
-# ---------------------------------------------------------------------------
 
 _ASSETS = Path(__file__).resolve().parent / "assets"
-# encoding pinned to utf-8: the assets carry non-ASCII bytes (em-dashes, §, ·, →)
-# and the old inline literals were always decoded as utf-8 (PEP 3120). A bare
-# read_text() would instead use the locale encoding, so importing this module
-# under a C/POSIX locale (utf-8 mode off) would raise UnicodeDecodeError.
 CSS = (_ASSETS / "styles.css").read_text(encoding="utf-8")
 
 
-# ---------------------------------------------------------------------------
-# Runtime-page interactivity: transcript search / filter + phase scroll-spy
-# ---------------------------------------------------------------------------
 
 RUNTIME_JS = (_ASSETS / "runtime.js").read_text(encoding="utf-8")
 
 
-# ---------------------------------------------------------------------------
-# Page composition + CLI entry
-# ---------------------------------------------------------------------------
 
 
 def _stats(events: list[dict]) -> tuple[int, int, float]:
@@ -450,24 +347,14 @@ def render_runtime_page(run_dir: Path) -> str:
     case_id = run_dir.name
     events = read_jsonl_rows(run_dir / "tool_trace.jsonl")
     messages = load_messages(run_dir)
-    # _stats' n_events / cost are unused on this page; only the tool-call count
-    # and the result-event cost total (== _stats' cost) are. Read the lead/query
-    # join + report once here and thread them into the consumers below.
     _, n_tool_calls, result_total = _stats(events)
     report = parse_report(run_dir)
-    # joined() orders leads by execution order (its contract, shared with the
-    # actor view); for the inspection page we want them in numeric lead-id order
-    # (l-002 before l-010) across both the fold summary and the § Leads table.
     leads = sorted(lead_repository.joined(run_dir), key=_lead_sort_key)
 
-    # Drop "preamble" from the attribution order — agent work before the first
-    # ## header is functionally ORIENT-bucket work. The phase still renders.
     raw_phases = normalize_phase_names(split_investigation_phases(run_dir))
     phase_order = [p["name"] for p in raw_phases if p["name"] != "preamble"]
     tags = tag_events_by_phase(events, phase_order)
 
-    # Per-phase cost: accurate per-message main cost (tagger fixed) + the nested
-    # gather (Haiku) cost folded back in from the message log at its dispatch phase.
     attribution = phase_attribution(events, phase_order, tags)
     main_total = sum(b["cost"] for b in attribution.values())
     gather_by_phase, gather_total = gather_cost_by_phase(
@@ -477,9 +364,6 @@ def render_runtime_page(run_dir: Path) -> str:
         attribution[ph]["gather_cost"] = gather_by_phase.get(ph, 0.0)
         attribution[ph]["cost"] += gather_by_phase.get(ph, 0.0)
     wall_times = phase_wall_times(events, tags, phase_order)
-    # Move gather's execution wall out of the PLAN window it was dispatched in and
-    # into the GATHER bar, mirroring the cost reattribution above (else GATHER
-    # renders as a zero-width sliver — the gather work is the bulk of the loop).
     g_wall_to, g_wall_from = gather_wall_by_phase(
         run_dir, events, tags, phase_order, messages
     )
@@ -499,14 +383,8 @@ def render_runtime_page(run_dir: Path) -> str:
     wall_ms = sum(e.get("duration_ms") or 0 for e in events if e.get("type") == "result")
     main_model = md["models"][0] if md["models"] else "main"
     by_model = {main_model: main_total}
-    # Fold gather cost in under the model the gather agent actually ran on (read
-    # from the log), not a hardcoded name — same-model gather merges into one line.
     for model, cost in gather_cost_by_model(run_dir, messages).items():
         by_model[model] = by_model.get(model, 0.0) + cost
-    # Headline total = main + gather, which by gather_cost_by_phase's contract
-    # always equals the sum of the per-phase cost bars. With no phases there are
-    # no bars to reconcile against, so fall back to the run's reported total
-    # rather than the 0 an empty attribution would yield.
     totals = {
         "cost": (main_total + gather_total) if phase_order else result_total,
         "wall_ms": wall_ms,
@@ -523,8 +401,6 @@ def render_runtime_page(run_dir: Path) -> str:
     transcript_html, n_tx, tx_phases = render_runtime_transcript(entries, tools, phases)
     leads_html, n_leads = render_runtime_leads_queries(run_dir, leads)
 
-    # Run totals now headline the top bar (was the metrics card); the bars moved
-    # to § Metrics below the fold.
     stats_html = (
         f'<span class="ts-cost">${totals.get("cost", 0.0):.4f}</span>'
         f'<span class="ts-sep">·</span>'

@@ -21,29 +21,24 @@ ADAPTERS = DEFENDER / "scripts" / "adapters"
 
 
 def test_a_real_system_is_admitted():
-    # The positive control: the guard is selective, not a blanket deny.
     reg = ModuleVerbRegistry(ADAPTERS)
     assert "health-check" in reg.verbs("elastic")
 
 
 @pytest.mark.parametrize("bad", [
-    "../../../../etc/passwd",     # classic traversal
-    "elastic/../elastic",         # a `/` even where it re-lands in the dir
-    "elastic.x",                  # a `.` — would be a different filename token
-    "Elastic",                    # uppercase — not the lowercase-kebab shape
-    "elastic ",                   # trailing space
-    "",                           # empty
+    "../../../../etc/passwd",
+    "elastic/../elastic",
+    "elastic.x",
+    "Elastic",
+    "elastic ",
+    "",
 ])
 def test_a_malformed_system_is_rejected_not_imported(bad):
-    # A malformed `system` raises KeyError (which the query tool turns into "unknown system"),
-    # never a module import.
     with pytest.raises(KeyError):
         ModuleVerbRegistry(ADAPTERS).verbs(bad)
 
 
 def test_a_traversal_system_cannot_execute_an_out_of_tree_module(tmp_path):
-    # The teeth: plant a hostile `*_adapter.py` OUTSIDE the adapters dir, reachable by `..`, and
-    # confirm the registry never imports it. A module that ran would flip this flag.
     outside = tmp_path / "evil"
     outside.mkdir()
     marker = tmp_path / "EXECUTED"
@@ -53,7 +48,7 @@ def test_a_traversal_system_cannot_execute_an_out_of_tree_module(tmp_path):
     )
     reg = ModuleVerbRegistry(ADAPTERS)
     rel = os.path.relpath(outside / "pwned_adapter.py", ADAPTERS)[: -len("_adapter.py")]
-    assert ".." in rel  # the probe really does traverse out of the adapters dir
+    assert ".." in rel
 
     with pytest.raises(KeyError):
         reg.verbs(rel)

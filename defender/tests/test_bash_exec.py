@@ -23,11 +23,6 @@ def _env(**extra: str) -> dict[str, str]:
 
 
 def _run(cmd: str, *, env=None, cwd="/", timeout: float = 10.0):
-    # String-in driver for the executor's unit tests: replicate the unwrap + parse
-    # the gate does in production, then run the result through the production seam
-    # `run_parsed`. Production enters at `run_parsed` directly (the gate already
-    # parsed); this gate-free path is what lets us exercise the executor on commands
-    # the gate would reject (raw redirects, `cd`, arbitrary programs).
     stripped = cmd.strip()
     if not stripped:
         return 0, "", ""
@@ -39,7 +34,6 @@ def _run(cmd: str, *, env=None, cwd="/", timeout: float = 10.0):
     )
 
 
-# --- ordinary shapes execute correctly ------------------------------------
 
 def test_single_command():
     rc, out, err = _run("echo hi")
@@ -68,15 +62,12 @@ def test_three_stage_pipe():
 
 
 def test_quoted_pipe_is_not_a_split():
-    # A `|` inside a quoted arg (e.g. a jq filter `'.hits | length'`) is token
-    # content, not a pipeline separator — the executor must run ONE command.
     rc, out, err = _run("echo 'a | b'")
     assert rc == 0
     assert out == "a | b\n"
 
 
 def test_pipe_exit_code_is_last_stage(tmp_path):
-    # `grep` finds nothing → rc 1; that is the pipeline's rc (last stage wins).
     f = tmp_path / "p.txt"
     f.write_text("alpha\n")
     rc, out, err = _run(f"cat {f} | grep zzz")
@@ -96,7 +87,6 @@ def test_timeout_prefix_is_stripped_and_runs():
     assert out == "hi\n"
 
 
-# --- connectors -----------------------------------------------------------
 
 def test_and_short_circuits_on_failure():
     rc, out, err = _run("false && echo nope")
@@ -128,7 +118,6 @@ def test_newline_separates_commands():
     assert out == "a\nb\n"
 
 
-# --- cd threads cwd into later stages -------------------------------------
 
 def test_cd_then_relative_read(tmp_path):
     (tmp_path / "data.txt").write_text("X")
@@ -144,7 +133,6 @@ def test_cd_missing_dir_fails():
     assert "No such file" in err
 
 
-# --- benign stderr redirects ----------------------------------------------
 
 def test_stderr_to_devnull_is_suppressed():
     rc, out, err = _run("ls /nonexistent_path_xyz 2>/dev/null")
@@ -161,7 +149,6 @@ def test_stderr_merged_into_stdout():
 
 
 def test_devnull_in_pipe(tmp_path):
-    # cat of a missing file errors (suppressed); wc reads the empty stream.
     rc, out, err = _run("cat /nonexistent_xyz 2>/dev/null | wc -l")
     assert rc == 0
     assert out.strip() == "0"
@@ -176,18 +163,14 @@ def test_default_stderr_is_captured():
 
 
 def test_mid_pipe_stderr_is_captured():
-    # A non-last stage's stderr is captured even though its stdout is piped onward.
     rc, out, err = _run("cat /nope_aaa | wc -l")
     assert rc == 0
     assert out.strip() == "0"
     assert "nope_aaa" in err
 
 
-# --- the security property: no shell expansion ----------------------------
 
 def test_dollar_var_does_not_expand():
-    # The whole point of dropping shell=True: an injected `echo $SECRET` prints
-    # the literal token, never the secret in the environment.
     rc, out, err = _run("echo $SECRET", env=_env(SECRET="topsecret-value"))
     assert out == "$SECRET\n"
     assert "topsecret-value" not in out
@@ -197,7 +180,7 @@ def test_glob_does_not_expand(tmp_path):
     (tmp_path / "a.json").write_text("{}")
     (tmp_path / "b.json").write_text("{}")
     rc, out, err = _run("echo *.json", cwd=tmp_path)
-    assert out == "*.json\n"  # literal, not "a.json b.json"
+    assert out == "*.json\n"
 
 
 def test_brace_does_not_expand():
@@ -205,7 +188,6 @@ def test_brace_does_not_expand():
     assert out == "x{1,2}\n"
 
 
-# --- failure modes --------------------------------------------------------
 
 def test_command_not_found_is_127():
     rc, out, err = _run("no_such_binary_abc123")
@@ -219,11 +201,6 @@ def test_timeout_raises():
 
 
 def test_timeout_bounds_nonterminating_upstream():
-    # The last stage can exit BEFORE an upstream one: here the producer writes one
-    # line then sleeps, so `head -1` exits at once while the producer keeps running
-    # and never receives SIGPIPE (it isn't writing). communicate() only bounds the
-    # last stage, so without a bounded upstream reap this pipeline would hang past
-    # the timeout — the read-only-lane regression vs the old shell=True path.
     import shlex
     import sys
     producer = f"{sys.executable} -c " + shlex.quote(
@@ -234,9 +211,6 @@ def test_timeout_bounds_nonterminating_upstream():
 
 
 def test_non_utf8_output_does_not_crash():
-    # A read-only viewer that emits non-UTF-8 bytes must not raise UnicodeDecodeError
-    # out of the executor (tools.py only catches TimeoutExpired); the bytes are
-    # decoded with replacement instead of crashing the run.
     import shlex
     import sys
     emit = f"{sys.executable} -c " + shlex.quote(
@@ -248,18 +222,12 @@ def test_non_utf8_output_does_not_crash():
 
 
 def test_unexpected_redirect_fails_closed(tmp_path):
-    # A real stdout redirect never passes the gate; if one reached the executor
-    # it must fail closed rather than write a file.
     target = tmp_path / "should_not_write"
     with pytest.raises(bash_exec.BashExecError):
         _run(f"echo hi > {target}")
     assert not target.exists()
 
 
-# --- run_parsed: the parse-once seam (#456) --------------------------------
-# Every `_run(...)` test above already drives run_parsed through the string-in
-# path (unwrap + parse + run_parsed) — the same composition production uses. This
-# section covers run_parsed's own edge contract directly.
 
 def test_run_parsed_empty_is_noop():
     assert bash_exec.run_parsed([], command="", env=_env(), cwd="/", timeout=10.0) == (0, "", "")

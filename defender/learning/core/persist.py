@@ -1,8 +1,3 @@
-"""Per-run artifact persistence and `_pending/` queue appends.
-
-All filesystem locations come from an injected `LoopPaths` (default `DEFAULT_PATHS`),
-so tests pass `paths=LoopPaths(repo_root=tmp_path)` instead of monkeypatching globals.
-"""
 from __future__ import annotations
 
 import contextlib
@@ -31,14 +26,10 @@ from defender.learning.core.config import (
 from defender.learning.core.validate import _benign_outcome_keyword, _outcome_keyword
 
 
-# ---------------------------------------------------------------------------
-# Low-level helpers
-# ---------------------------------------------------------------------------
 
 
 @contextlib.contextmanager
 def _flock(lock_path: Path):
-    """Exclusive flock over ``lock_path`` for the duration of the block."""
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     fh = lock_path.open("a+", encoding="utf-8")
     try:
@@ -52,10 +43,6 @@ def _flock(lock_path: Path):
 
 
 def _load_jsonl_ids(path: Path, key: str) -> set[str]:
-    """Set of ``entry[key]`` strings in a JSONL file; missing file → empty set.
-
-    Reads via ``read_jsonl_rows`` so blank/malformed lines are skipped, not raised.
-    """
     ids: set[str] = set()
     for obj in read_jsonl_rows(path):
         v = obj.get(key)
@@ -74,12 +61,6 @@ def _rewrite_queue(
     *,
     merge: bool,
 ) -> None:
-    """Atomically rewrite ``pending_file`` to the survivors and append consumed.
-
-    ``merge=True`` re-reads the current file and keeps any row the author never
-    processed (mutated ``held`` rows + untouched new arrivals); ``merge=False``
-    writes ``held`` verbatim. The caller owns whatever lock the producer uses.
-    """
     if merge:
         processed = {e[id_key] for e in held} | {e[id_key] for e in consumed}
         current = read_jsonl_rows(pending_file)
@@ -110,24 +91,6 @@ def rotate_queue_locked(
     commit_sha: str | None,
     merge_concurrent: bool = True,
 ) -> None:
-    """Drain a JSONL queue: rewrite survivors atomically + append consumed rows.
-
-    ``merge_concurrent`` selects how the caller relates to the producer's
-    ``lock_file``:
-
-    * ``True`` (the findings path) — the caller held the queue lock only
-      *briefly* to read its batch, so a producer may have appended new rows in
-      the minutes since. Take ``lock_file`` here, re-read, and preserve any row
-      whose ``id_key`` the author never processed.
-    * ``False`` (the observation paths) — the caller already holds ``lock_file``
-      across the whole read→rotate batch, so no row can arrive mid-batch and a
-      held-only rewrite cannot lose data. Re-taking ``lock_file`` here would
-      self-deadlock (flock denies a second fd held by the same process), so we
-      must not — the caller's lock already serializes the rewrite.
-
-    Consumed rows append to ``consumed_file`` with ``consumed_at`` /
-    ``consumed_commit``.
-    """
     pending_file.parent.mkdir(parents=True, exist_ok=True)
     if merge_concurrent:
         with _flock(lock_file):
@@ -154,7 +117,6 @@ def _slugify(s: str) -> str:
 
 
 def derive_alert_rule_key(alert: dict) -> str:
-    """POC-grade vendor-neutral key derivation per task §findings.jsonl."""
     rule = alert.get("rule")
     if isinstance(rule, dict) and rule.get("id") not in (None, ""):
         return f"rule-{rule['id']}"
@@ -168,34 +130,16 @@ def derive_alert_rule_key(alert: dict) -> str:
 
 
 def _source_run_dir(learning_run_dir: Path, repo_root: Path) -> str:
-    """Path to the run bundle, as ``resolve_run_bundle`` (in ``defender._run_paths``)
-    resolves it.
-
-    Repo-relative when the run lives in-repo (the default); absolute when it
-    lives out-of-repo under ``DEFENDER_LEARNING_STATE_DIR`` (no repo-relative
-    form exists). Trailing slash preserved for the existing string contract.
-    """
     try:
         return str(learning_run_dir.relative_to(repo_root)) + "/"
     except ValueError:
         return str(learning_run_dir) + "/"
 
 
-# ---------------------------------------------------------------------------
-# Persist per-run artifacts
-# ---------------------------------------------------------------------------
 
 
-# Hard-required flat inputs, named as RunPaths accessors. The two lead/query
-# tables (executed_queries.jsonl + the gather_raw/ directory) are copied
-# separately and are best-effort — a query-less run has neither, which is a
-# monitor case, not a persist failure.
 _SHARED_COPY_ARTIFACTS = ("alert", "report", "investigation")
 
-# Both directions write the same disposition-level shared artifacts (copied inputs
-# + source_refs.yaml). When the legs run concurrently these truncating writes target
-# identical paths, so serialize them — identical content doesn't make a non-atomic
-# write safe.
 _SHARED_INPUTS_LOCK = threading.Lock()
 
 
@@ -208,12 +152,6 @@ def _copy_shared_inputs(run_dir: Path, learning_run_dir: Path) -> None:
             if not src.is_file():
                 raise RunUnprocessable(f"missing source artifact for persist: {src}")
             dst = getattr(dst_paths, name)
-            # The fs lane authors a file NAMED investigation.md, and it never consults
-            # the api lane's `write_allow`/invlang gate (#631, PBW2): so `investigation.md`
-            # is validated HERE, at the one authoring path that reaches it off the gate.
-            # Fail closed on invalid invlang — a source carrying rejected text must not
-            # come to rest at a validated-looking destination artifact. Validated by the
-            # SAME structural validator the api lane uses, so a valid golden still lands.
             if name == "investigation":
                 from defender.skills.invlang.validate import validate_companion
 
@@ -224,18 +162,9 @@ def _copy_shared_inputs(run_dir: Path, learning_run_dir: Path) -> None:
                         f"({src}): {errors}"
                     )
             shutil.copy2(src, dst)
-        # Best-effort: the lesson-load trace (record_lesson_load hook). Optional —
-        # a run that loaded no lesson has none — so it is NOT in _SHARED_COPY_ARTIFACTS;
-        # copy it when present so trace_lesson survives the ephemeral run dir being
-        # swept (it scans this durable dir, which also carries report.md above).
         loaded = run_dir / "lessons_loaded.jsonl"
         if loaded.is_file():
             shutil.copy2(loaded, learning_run_dir / "lessons_loaded.jsonl")
-        # The two live tables (queries JSONL + the gather_raw/ tree). Staged
-        # via the single lead_repository helper so this and the secondary-eval
-        # staging step share one definition of the on-disk table set. Imported
-        # here, not at module load, to keep the persist→repository edge lazy
-        # (lead_repository pulls in the full read/join layer).
         from defender.learning import lead_repository
 
         lead_repository.stage_tables(run_dir, learning_run_dir)
@@ -263,9 +192,6 @@ def _write_source_refs(
 
 @dataclass(frozen=True)
 class DirectionArtifacts:
-    """The three per-direction artifacts ``persist_run`` writes, each a
-    (content, on-disk name) pair. ``judge_yaml`` / ``telemetry_yaml`` are None on
-    the actor-SKIP short-circuit (only the story is written)."""
 
     actor_story: str
     story_name: str
@@ -282,13 +208,6 @@ def persist_run(
     disposition: str,
     alert_rule_key: str,
 ) -> None:
-    """Persist one direction's per-run artifacts under direction-suffixed names.
-
-    The four input copies + source_refs are shared across directions (an
-    ``inconclusive`` run that runs both writes them once each; the copies are
-    idempotent). ``judge_yaml`` / ``telemetry_yaml`` are the fence-stripped, validated
-    YAML — caller-side raw text (if any) belongs in a ``*.raw.txt`` companion.
-    """
     run_dir, learning_run_dir = dirs.run_dir, dirs.learning_run_dir
     assert learning_run_dir is not None, "persist_run requires a learning leg dir"
     actor_story, story_name = artifacts.actor_story, artifacts.story_name
@@ -303,9 +222,6 @@ def persist_run(
     _write_source_refs(run_dir, learning_run_dir, disposition, alert_rule_key)
 
 
-# ---------------------------------------------------------------------------
-# Queue: defender findings (shared corpus, direction-tagged)
-# ---------------------------------------------------------------------------
 
 
 def append_findings(
@@ -317,15 +233,6 @@ def append_findings(
     direction: str = "adversarial",
     paths: LoopPaths = DEFAULT_PATHS,
 ) -> int:
-    """Append queueable defender findings to the shared pending queue.
-
-    Both directions feed ``_pending/findings.jsonl`` → ``defender/lessons/``. The
-    audit-only finding types are filtered out (``detection-confirmed``
-    adversarially, ``disposition-confirmed`` benignly). Each
-    row is tagged with ``direction`` so the shared curator applies the right
-    ground-truth gate; benign ids live in a ``benign/`` namespace so the two
-    directions never collide on a ``run_id``.
-    """
     if direction == "benign":
         outcome = _benign_outcome_keyword(judge_doc["outcome"])
         audit_only_types, namespace = BENIGN_AUDIT_ONLY_FINDING_TYPES, "benign/"
@@ -356,22 +263,9 @@ def append_findings(
         return append_jsonl(paths.pending_file, rows)
 
 
-# ---------------------------------------------------------------------------
-# Queue: general-failure pitfalls (cross-run; feeds execution.md curation)
-# ---------------------------------------------------------------------------
 
 
 def append_pitfalls(rows: list[dict], *, paths: LoopPaths = DEFAULT_PATHS) -> int:
-    """Append general-failure pitfall rows to the cross-run pending queue.
-
-    Rows are pre-built by ``lead_author.collect_general_failures`` (one per
-    agent-fixable execution failure that resolved to no template and is not a
-    draft candidate). Each carries a deterministic ``pitfall_id`` so a
-    re-collected duplicate (the failure-retry path) dedups by id at rotate time
-    rather than double-counting. The lead-author curation mode (``run_pitfalls``)
-    drains it into each system's ``execution.md`` ``## Common pitfalls`` section.
-    Returns the number appended.
-    """
     if not rows:
         return 0
     with _flock(paths.pitfalls.lock):
@@ -379,22 +273,12 @@ def append_pitfalls(rows: list[dict], *, paths: LoopPaths = DEFAULT_PATHS) -> in
 
 
 def read_pitfalls(paths: LoopPaths = DEFAULT_PATHS) -> list[dict]:
-    """All queued pitfall rows (tolerant of blank/malformed lines)."""
     return read_jsonl_rows(paths.pitfalls.file)
 
 
 def rotate_pitfalls(
     batch_ids: list[str], commit_sha: str | None, *, paths: LoopPaths = DEFAULT_PATHS
 ) -> None:
-    """Drain the curated batch out of the pending queue after a successful commit.
-
-    The fold is prose into ``execution.md`` with no per-id filter once merged, so
-    — unlike the findings queue's ``hold_committed`` — consumed rows are rotated
-    out *immediately* rather than held: a rejected PR loses them, recovered by
-    re-collection when the same failure recurs. ``merge_concurrent=True`` re-reads
-    under the lock so any row a concurrent collection tick appended while the
-    curator agent ran is preserved (dedup is by ``pitfall_id``).
-    """
     ids = set(batch_ids)
     consumed = [
         {**r, "consumed_category": "consumed_committed"}
@@ -413,9 +297,6 @@ def rotate_pitfalls(
     )
 
 
-# ---------------------------------------------------------------------------
-# Queue: per-direction observation streams
-# ---------------------------------------------------------------------------
 
 
 def _append_observations(
@@ -428,15 +309,6 @@ def _append_observations(
     *,
     id_prefix: str = "",
 ) -> int:
-    """Dedup ``observations`` on ``observation_id`` against active + consumed, then
-    append the rows ``build_row`` produces. Shared by all observation streams.
-
-    ``id_prefix`` namespaces the minted ``observation_id`` (``{run_id}/{prefix}{i}``).
-    Streams that share one downstream corpus — and thus one corpus-wide idempotency
-    set — must use distinct prefixes so a single ``run_id`` cannot collide across
-    them (the adversarial + benign env streams both feed lessons-environment/; an
-    ``inconclusive`` case runs both). Mirrors the ``benign/`` namespace in
-    ``append_findings``."""
     with _flock(lock_file):
         existing = _load_jsonl_ids(queue_file, "observation_id") | _load_jsonl_ids(
             consumed_file, "observation_id"
@@ -458,11 +330,6 @@ def append_actor_observations(
     *,
     paths: LoopPaths = DEFAULT_PATHS,
 ) -> int:
-    """Append judge ``actor_observations`` to the actor pending queue.
-
-    The producer's only outcome filter is ``skip-passthrough`` (defensive — the judge
-    emits none on SKIP); the author owns the caught/incoherent/survived policy.
-    """
     outcome = _outcome_keyword(judge_doc["outcome"])
     if outcome == "skip-passthrough":
         return 0
@@ -493,13 +360,6 @@ def append_actor_observations(
 
 
 def _anchor_with_case_key(judge_rule_ids: Any, alert_rule_key: str) -> list[str]:
-    """Guarantee the case's deterministic rule key leads the stored anchor.
-
-    The judge free-reads ``alert_rule_ids``; the benign actor + forward-check query
-    with ``derive_alert_rule_key``. Unioning the canonical key in (leading) keeps the
-    lesson retrievable for its own source case regardless of how the judge phrased the
-    rule id, while preserving the judge's cross-rule generalizations.
-    """
     ids = judge_rule_ids if isinstance(judge_rule_ids, list) else [judge_rule_ids]
     ids = [str(r) for r in ids if str(r).strip()]
     if alert_rule_key and alert_rule_key not in ids:
@@ -509,9 +369,6 @@ def _anchor_with_case_key(judge_rule_ids: Any, alert_rule_key: str) -> list[str]
 
 @dataclass(frozen=True)
 class _EnvFactStream:
-    """One environment-observation queue + its id/provenance namespace. The benign
-    and adversarial env streams differ only in these fields; the row shape is defined
-    once in ``_append_env_fact_observations`` so the shared corpus can't drift."""
 
     outcome_keyword: Callable[[Any], str]
     channel: QueueChannel
@@ -528,11 +385,6 @@ def _append_env_fact_observations(
     paths: LoopPaths,
     stream: _EnvFactStream,
 ) -> int:
-    """Append judge ``environment_observations`` to one env queue feeding the SHARED
-    lessons-environment/ corpus (issue #298). The two sources differ only in their
-    outcome-keyword enum, queue paths, id namespace, and ``provenance`` tag — the env
-    row shape (the retrieval keys the curator and ``verify_forward_env.py`` read) is
-    one definition here so the streams can't drift apart in the shared corpus."""
     outcome_keyword = stream.outcome_keyword
     ch, id_prefix, provenance = stream.channel, stream.id_prefix, stream.provenance
     outcome = outcome_keyword(judge_doc["outcome"])
@@ -550,8 +402,6 @@ def _append_env_fact_observations(
             "observation_index": i,
             "alert_rule_key": alert_rule_key,
         }
-        # The judge omits `subject` for observations not about one named referent;
-        # carry it only when supplied so the curator never writes `subject: null`.
         subject = obs.get("subject")
         if subject:
             row["subject"] = subject
@@ -582,9 +432,6 @@ def append_environment_observations(
     *,
     paths: LoopPaths = DEFAULT_PATHS,
 ) -> int:
-    """Append benign-judge ``environment_observations`` to the env queue (FP mirror of
-    ``append_actor_observations``). Rows carry the retrieval keys the curator and
-    ``verify_forward_env.py`` read directly, tagged ``provenance: benign``."""
     return _append_env_fact_observations(
         judge_benign_doc, run_id, alert_rule_key, learning_run_dir,
         paths=paths,
@@ -605,14 +452,6 @@ def append_actor_environment_observations(
     *,
     paths: LoopPaths = DEFAULT_PATHS,
 ) -> int:
-    """Append the adversarial judge's ``environment_observations`` to the SHARED
-    lessons-environment/ corpus, via a dedicated adversarial env queue (issue #298).
-
-    The adversarial direction's finding-bearing outcomes are ``caught``/``incoherent``
-    (a grounded misprediction whose refutation cites real telemetry); the env author's
-    adversarial config owns that outcome policy. Ids are namespaced ``adv-env/`` so they
-    cannot collide with benign env ids from the same ``run_id`` in the shared corpus's
-    idempotency set; rows are tagged ``provenance: adversarial``."""
     return _append_env_fact_observations(
         judge_doc, run_id, alert_rule_key, learning_run_dir,
         paths=paths,

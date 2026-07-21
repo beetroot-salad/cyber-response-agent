@@ -48,9 +48,6 @@ from defender.learning.author.verify_forward.checks import FINDINGS_CHECK  # noq
 from defender.learning.pipeline._pydantic_stage import build_stage_agent  # noqa: E402
 
 
-# ===========================================================================
-# Scaffolding (mirrors test_forward_check_tool.py)
-# ===========================================================================
 
 
 def _scene(tmp_path: Path):
@@ -64,7 +61,7 @@ def _scene(tmp_path: Path):
     pending = tmp_path / "state" / "_pending" / "findings.jsonl"
     pending.parent.mkdir(parents=True)
     pending.write_text("")
-    curdir = tmp_path / "state" / "_pending"  # the curator run_dir (lessons_loaded.jsonl lands here)
+    curdir = tmp_path / "state" / "_pending"
     return SimpleNamespace(
         tmp=tmp_path, repo=repo, corpus=corpus, runs=runs, pending=pending, curdir=curdir,
     )
@@ -117,9 +114,6 @@ def _lesson(corpus: Path, stem: str, *, name_key: bool = True, body: str = "less
     return f"defender/{corpus.name}/{stem}.md"
 
 
-# ===========================================================================
-# lesson_read — part modes, degrade, pattern
-# ===========================================================================
 
 
 def test_l1_body_default_strips_frontmatter(tmp_path):
@@ -132,7 +126,7 @@ def test_l1_body_default_strips_frontmatter(tmp_path):
     finally:
         logger.close()
     assert "L1-BODY-SENTINEL" in out
-    assert "name:" not in out  # the frontmatter was stripped
+    assert "name:" not in out
     assert "---" not in out
 
 
@@ -147,8 +141,8 @@ def test_l2_full_returns_whole_file(tmp_path):
         body = _read(agent, deps, path=lp)
     finally:
         logger.close()
-    assert "name: l2" in full  # frontmatter present under full
-    assert "name: l2" not in body  # …and stripped under body
+    assert "name: l2" in full
+    assert "name: l2" not in body
     assert full != body
 
 
@@ -159,11 +153,11 @@ def test_l3_default_part_is_body(tmp_path):
     lp = _lesson(scene.corpus, "l3", body="L3-BODY")
     agent, logger = _build_curator_agent(scene.tmp)
     try:
-        out = _read(agent, _deps(scene), path=lp)  # no part arg → body
+        out = _read(agent, _deps(scene), path=lp)
         schema = _tool(agent, "lesson_read").tool_def.parameters_json_schema
     finally:
         logger.close()
-    assert "L3-BODY" in out  # no part arg → the stripped body
+    assert "L3-BODY" in out
     assert "name:" not in out
     assert schema["properties"]["part"]["default"] == "body"
 
@@ -188,7 +182,7 @@ def test_l5_non_fenced_file_degrades_to_whole_text(tmp_path):
     agent, logger = _build_curator_agent(scene.tmp)
     try:
         deps = _deps(scene)
-        body = _read(agent, deps, path=lp)  # degrade, not raise
+        body = _read(agent, deps, path=lp)
         full = _read(agent, deps, path=lp, part="full")
     finally:
         logger.close()
@@ -213,15 +207,12 @@ def test_l6_pattern_grep_folds_the_selected_text(tmp_path):
         unfolded = _read(agent, deps, path=lp, part="body")
     finally:
         logger.close()
-    assert "in body" in folded  # the matching body line
-    assert "in fm" not in folded  # grep ran over the SELECTED (body) text, not the frontmatter
-    assert "other body line" not in folded  # non-matching body line folded out
-    assert "other body line" in unfolded  # positive control: pattern=None is unfolded
+    assert "in body" in folded
+    assert "in fm" not in folded
+    assert "other body line" not in folded
+    assert "other body line" in unfolded
 
 
-# ===========================================================================
-# lesson_read — the gate (root-only, denylist, trust)
-# ===========================================================================
 
 
 def test_l7_denied_path_raises_no_existence_oracle(tmp_path):
@@ -237,8 +228,8 @@ def test_l7_denied_path_raises_no_existence_oracle(tmp_path):
         for bad in (str(outside), "defender/lessons/../../../../etc/passwd"):
             with pytest.raises(ModelRetry) as ei:
                 _read(agent, deps, path=bad, part="full")
-            assert "OUTSIDE-SECRET-CONTENT" not in str(ei.value)  # bytes did not leak into the error
-        assert "IN-CORPUS-BODY" in _read(agent, deps, path=lp_ok)  # positive control
+            assert "OUTSIDE-SECRET-CONTENT" not in str(ei.value)
+        assert "IN-CORPUS-BODY" in _read(agent, deps, path=lp_ok)
     finally:
         logger.close()
 
@@ -259,8 +250,8 @@ def test_l8_admits_a_sibling_corpus_the_cat_lane_cannot(tmp_path):
         )
     finally:
         logger.close()
-    assert "SIB-BODY" in out  # lesson_read reaches the sibling (root-only gate)
-    assert not cat.allow  # …where the corpus-anchored cat lane cannot
+    assert "SIB-BODY" in out
+    assert not cat.allow
 
 
 def test_l9_template_schema_read_via_full(tmp_path):
@@ -277,8 +268,8 @@ def test_l9_template_schema_read_via_full(tmp_path):
         body = _read(agent, deps, path=lp)
     finally:
         logger.close()
-    assert "techniques" in full  # the schema frontmatter is readable via full
-    assert "techniques" not in body  # body strips the schema
+    assert "techniques" in full
+    assert "techniques" not in body
     assert "TEMPLATE-BODY" in body
 
 
@@ -298,12 +289,12 @@ def test_l10_oversized_lesson_bounded_by_shared_cap(tmp_path):
         out = _read(agent, _deps(scene), path="defender/lessons/big.md", part="full")
     finally:
         logger.close()
-    assert len(out) < cap + 5000  # truncated
-    assert "[lesson_read]" in out  # the shared bounded-read notice, tagged with THIS tool
+    assert len(out) < cap + 5000
+    assert "[lesson_read]" in out
     assert "too large" in out
-    assert "lesson_read(" in out  # the hint names the tool the curator HAS …
-    assert "pattern=" in out  # … with the substring fold it does have …
-    assert "read_file(" not in out  # … and not the one #559 took away
+    assert "lesson_read(" in out
+    assert "pattern=" in out
+    assert "read_file(" not in out
 
 
 def test_l11_trusted_lesson_returned_raw_no_wrap(tmp_path):
@@ -311,7 +302,7 @@ def test_l11_trusted_lesson_returned_raw_no_wrap(tmp_path):
     salted untrusted wrap (the reused wrap tail is inert for the trusted corpus)."""
     scene = _scene(tmp_path)
     lp = _lesson(scene.corpus, "l11", body="L11-RAW-BODY")
-    assert permission.is_untrusted_read(scene.corpus / "l11.md") is False  # control: trusted corpus
+    assert permission.is_untrusted_read(scene.corpus / "l11.md") is False
     agent, logger = _build_curator_agent(scene.tmp)
     try:
         deps = _deps(scene)
@@ -319,7 +310,7 @@ def test_l11_trusted_lesson_returned_raw_no_wrap(tmp_path):
     finally:
         logger.close()
     assert "L11-RAW-BODY" in out
-    assert f"<run-{deps.salt}-untrusted>" not in out  # no untrusted wrap around a trusted lesson
+    assert f"<run-{deps.salt}-untrusted>" not in out
 
 
 def test_l12_records_lesson_load_across_all_three_corpora(tmp_path):
@@ -338,9 +329,9 @@ def test_l12_records_lesson_load_across_all_three_corpora(tmp_path):
         logger.close()
     rows = read_jsonl_rows(scene.curdir / "lessons_loaded.jsonl")
     loaded = {r.get("lesson_name") for r in rows}
-    assert "actor-lesson" in loaded  # F3 widening — actor now logs
-    assert "env-lesson" in loaded  # F3 widening — env now logs
-    assert "find-lesson" in loaded  # positive control — findings always logged
+    assert "actor-lesson" in loaded
+    assert "env-lesson" in loaded
+    assert "find-lesson" in loaded
 
 
 def test_l12b_read_file_keeps_the_author_corpora_out_of_the_case_trace(tmp_path):
@@ -355,12 +346,12 @@ def test_l12b_read_file_keeps_the_author_corpora_out_of_the_case_trace(tmp_path)
     find = _lesson(scene.corpus, "rf-find")
     actor = _lesson(scene.repo / "defender" / "lessons-actor", "rf-actor", name_key=False)
     deps = _deps(scene)
-    assert "lesson body" in _rt_tools._tool_read_file(deps, actor)  # the read itself succeeds …
-    _rt_tools._tool_read_file(deps, find)  # … and a runtime-corpus read (positive control)
+    assert "lesson body" in _rt_tools._tool_read_file(deps, actor)
+    _rt_tools._tool_read_file(deps, find)
     rows = read_jsonl_rows(scene.curdir / "lessons_loaded.jsonl")
     loaded = {r.get("lesson_name") for r in rows}
-    assert "rf-actor" not in loaded  # read_file keeps the author corpora out of the case trace
-    assert "rf-find" in loaded  # …while still recording the runtime corpus
+    assert "rf-actor" not in loaded
+    assert "rf-find" in loaded
 
 
 def test_l12c_template_schema_read_is_not_a_lesson_load(tmp_path):
@@ -375,23 +366,20 @@ def test_l12c_template_schema_read_is_not_a_lesson_load(tmp_path):
     try:
         deps = _deps(scene)
         _read(agent, deps, path="defender/lessons-actor/_TEMPLATE.md", part="full")
-        _read(agent, deps, path=real, part="full")  # positive control
+        _read(agent, deps, path=real, part="full")
     finally:
         logger.close()
     loaded = {r.get("lesson_name") for r in read_jsonl_rows(scene.curdir / "lessons_loaded.jsonl")}
-    assert "_TEMPLATE" not in loaded  # the schema read is not a lesson load
-    assert "tmpl-ctl" in loaded  # …but a real sibling lesson still is
+    assert "_TEMPLATE" not in loaded
+    assert "tmpl-ctl" in loaded
 
 
-# ===========================================================================
-# ToolSet / registration
-# ===========================================================================
 
 
 def test_t1_toolset_has_lesson_read_field(tmp_path):
     """demand: T1 — ``ToolSet`` has ``lesson_read: bool = False``."""
     assert ToolSet(lesson_read=True).lesson_read is True
-    assert ToolSet().lesson_read is False  # defaults off
+    assert ToolSet().lesson_read is False
 
 
 def test_t2_corpus_author_def_drops_read_adds_lesson_read(tmp_path):
@@ -407,19 +395,17 @@ def test_t3_registers_lesson_read_not_read_file(tmp_path):
     agent, logger = _build_curator_agent(tmp_path)
     try:
         tools = agent._function_toolset.tools
-        assert "lesson_read" in tools  # the curator's sole read surface
-        assert "read_file" not in tools  # …not the generic read tool
+        assert "lesson_read" in tools
+        assert "read_file" not in tools
     finally:
         logger.close()
-    # control: the bit is set on ONLY the corpus-author def
     for role, defn in AGENTS.items():
         assert defn.tools.lesson_read is (role is AgentRole.CORPUS_AUTHOR)
-    # control: a read=True role still registers read_file WITH its pattern grep-fold
     ctrl = _bare_agent()
     register_tools(ctrl, ToolSet(read=True))
     ctrl_tools = ctrl._function_toolset.tools
-    assert "read_file" in ctrl_tools  # a read=True role still registers read_file …
-    assert "lesson_read" not in ctrl_tools  # … and not lesson_read
+    assert "read_file" in ctrl_tools
+    assert "lesson_read" not in ctrl_tools
     assert "pattern" in ctrl_tools["read_file"].tool_def.parameters_json_schema["properties"]
 
 
@@ -433,7 +419,7 @@ def test_t4_curator_still_reads_a_body_after_read_dropped(tmp_path):
         out = _read(agent, _deps(scene), path=lp)
     finally:
         logger.close()
-    assert "T4-SURVIVES" in out  # the read capability survives on the CORPUS_AUTHOR agent
+    assert "T4-SURVIVES" in out
 
 
 def _bare_agent():

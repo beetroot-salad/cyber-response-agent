@@ -24,7 +24,7 @@ from pathlib import Path
 
 import pytest
 
-pytest.importorskip("pydantic_ai")  # CI installs the runtime extra; skip otherwise
+pytest.importorskip("pydantic_ai")
 
 import yaml  # noqa: E402
 from pydantic_ai import Agent  # noqa: E402
@@ -55,7 +55,6 @@ CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 FLAG = "DEFENDER_BUDGET_ENFORCE"
 
 
-# --- a real agent, built through the real construction site ------------------
 
 class ScriptedModel:
     """Emits one scripted turn per model request; past the script, text (which ends
@@ -103,9 +102,6 @@ def drive_agent(defn, run_dir: Path, turns, *, limits, enforce: bool | None = No
         make_model=lambda name, effort: BuiltModel(FunctionModel(model), None),
         limits=limits,
     )
-    # Thread a host executor for the bash lane (#540): after that change bash fails closed
-    # without a box, so a hermetic seams test that drives bash must hand in an
-    # `unboxed_executor` — the same shape `tests/e2e/_replay_harness.drive` always threads.
     from defender import run_common
     from defender.runtime import box as box_mod
     box = box_mod.unboxed_executor(env=run_common.run_env(DEFENDER, run_dir))
@@ -123,7 +119,6 @@ def drive_agent(defn, run_dir: Path, turns, *, limits, enforce: bool | None = No
         logger.close()
 
 
-# --- the kill's type and where it must NOT be absorbed ----------------------
 
 def test_budget_kill_is_not_control_flow(tmp_path):
     """The budget kill type is absent from query_tool.CONTROL_FLOW_EXCEPTIONS and
@@ -151,9 +146,6 @@ def test_budget_kill_is_not_control_flow(tmp_path):
     run_dir = _run_dir(tmp_path)
     open_budget(run_dir, "run-1")
 
-    # THE EXECUTE PATH (query_tool.py:319): a verb that raises the kill. The catch-all
-    # around `await handler(args)` writes a row for an unmapped fault; the kill must
-    # escape it instead, and leave NO row claiming the query ran.
     class KillingVerbs:
         def systems(self):
             return ("elastic",)
@@ -169,9 +161,6 @@ def test_budget_kill_is_not_control_flow(tmp_path):
         "the kill was filed as a query fault — a row claims a call that never ran"
     )
 
-    # THE REJECT PATH (query_tool.py:242): the registry itself raises the kill while
-    # the capture is resolving the system, inside `_reject_guarded`'s BaseException
-    # catch-all — which would otherwise file it as "adapter failed to load".
     class KillingRegistry:
         def systems(self):
             raise BudgetKill("tail exhausted")
@@ -182,13 +171,6 @@ def test_budget_kill_is_not_control_flow(tmp_path):
     with pytest.raises(BudgetKill):
         _drive_gather_query(_run_dir(tmp_path, "run2"), KillingRegistry())
 
-    # _run_gather's handler: the kill must NOT become the measurement-shaped string.
-    # SURFACED-FOR-RATIFICATION (write-code-from-spec): the ORIGINAL factory was `async def`, so
-    # calling it yielded a COROUTINE that never raised on call — `_run_gather` then did
-    # `gagent.run(...)` on a coroutine → AttributeError, never BudgetKill. The demand's INTENT is
-    # that a kill from the nested `gagent.run` propagates PAST `_run_gather`'s widened
-    # `except (UsageLimitExceeded, UnexpectedModelBehavior)` handler (M7) rather than being
-    # converted — so a fake agent whose `run` raises the kill exercises exactly that path.
     class _KillingAgent:
         async def run(self, *args, **kwargs):
             raise BudgetKill("tail exhausted")
@@ -234,7 +216,6 @@ def _drive_gather_query(run_dir: Path, registry):
         logger.close()
 
 
-# --- posture is data, not role ----------------------------------------------
 
 def test_enforcement_keys_on_declared_bit(tmp_path):
     """The refusal and the kill read a declared budget-posture bit on the agent
@@ -251,16 +232,9 @@ def test_enforcement_keys_on_declared_bit(tmp_path):
     assert MAIN_DEF.budget_enforced is True
     assert AGENTS[AgentRole.JUDGE].budget_enforced is False
 
-    # The bit reaches the hook closure through deps.policy, not through the role.
     deps = bind(MAIN_DEF, _run_dir(tmp_path, "p"), salt="0" * 16, defender_dir=DEFENDER)
     assert deps.policy.budget_enforced is True
 
-    # SURFACED-FOR-RATIFICATION (write-code-from-spec): the script must drive a CORE-tier tool.
-    # read_file is TAIL on MAIN (pinned by test_tier_table_over_the_real_census +
-    # test_same_tool_name_on_two_agents, both passing), so it is NOT refused at a cap-1 trip — it
-    # runs inside the report tail. To observe the posture bit's difference the tool must be
-    # refusable, so this drives core-tier `bash` (echo): the declared-True agent refuses once the
-    # cap trips; the declared-False agent of the same role does not. Same INTENT, refusable tool.
     limits = {**DEFAULT_LIMITS, "max_tool_calls": 1}
     on_dir = _run_dir(tmp_path, "enf-on")
     open_budget(on_dir, "r")
@@ -306,8 +280,6 @@ def test_make_hooks_requires_the_posture_bit_and_every_caller_supplies_it(tmp_pa
         driver._make_hooks(logger, "main")
     logger.close()
 
-    # Exercise the experiments/ call site's ACTUAL argument list against the real
-    # signature — the site CI never collects, fixed in this diff.
     src = (REPO_ROOT / "experiments" / "gather-verifiable-code-289" / "run_arms.py")
     tree = ast.parse(src.read_text())
     calls = [n for n in ast.walk(tree)
@@ -315,9 +287,6 @@ def test_make_hooks_requires_the_posture_bit_and_every_caller_supplies_it(tmp_pa
              and n.func.attr == "_make_hooks"]
     assert calls, "run_arms.py no longer calls driver._make_hooks — re-scope this demand"
     for call in calls:
-        # A `**kwargs` splat has kw.arg is None (blind reader R18); guard it so the
-        # census fails cleanly rather than erroring, and a splat cannot mask a missing
-        # required keyword.
         assert all(kw.arg is not None for kw in call.keywords), (
             "run_arms.py splats **kwargs into _make_hooks — the required posture bit is "
             "no longer statically visible at the call site"
@@ -325,7 +294,6 @@ def test_make_hooks_requires_the_posture_bit_and_every_caller_supplies_it(tmp_pa
         kwargs = {kw.arg for kw in call.keywords}
         sig.bind(*(object() for _ in call.args), **{k: object() for k in kwargs})
 
-    # And the boundary every OTHER caller reaches it through carries the bit too.
     core_sig = inspect.signature(driver.build_agent_core)
     assert "limits" in core_sig.parameters
 
@@ -359,7 +327,6 @@ def test_learning_stages_are_accounting_only(tmp_path):
     assert state["tool_calls"] >= 4, "the unenforced stage stopped being accounted for"
 
 
-# --- the limits seam and the absence of operator config ---------------------
 
 def test_limits_threaded_from_boundary(tmp_path):
     """The driver resolves DEFAULT_LIMITS ONCE at the boundary and threads it inward
@@ -374,11 +341,6 @@ def test_limits_threaded_from_boundary(tmp_path):
     from defender.tests.e2e import _replay_harness
     assert "limits" in inspect.signature(_replay_harness.drive).parameters
 
-    # The wired half must be able to FAIL (blind reader R6): the old bound
-    # `tool_calls <= 3 + 10` was true whether limits was honoured, ignored, or dropped,
-    # because five turns can never exceed five. Drive a CORE-tier script well past the
-    # injected cap of 3 and assert a refusal was OBSERVED — which happens only if the
-    # INJECTED cap (not the module default of 200) is what the hook read.
     run_dir = _run_dir(tmp_path, "seam")
     open_budget(run_dir, "r")
     injected = {**DEFAULT_LIMITS, "max_tool_calls": 3, "wall_clock_timeout": 3600,
@@ -411,8 +373,6 @@ def test_caps_are_not_operator_configurable(tmp_path, monkeypatch):
     `pytest.raises(BudgetKill)`) — a latent cross-test failure under any reordering."""
     before = dict(DEFAULT_LIMITS)
 
-    # A child process imports budget_enforcer with every plausible cap env var set and a
-    # config file planted in its cwd; its DEFAULT_LIMITS must match this process's.
     probe = (
         "import os, json, sys;"
         f"sys.path.insert(0, {str(REPO_ROOT)!r});"
@@ -430,13 +390,11 @@ def test_caps_are_not_operator_configurable(tmp_path, monkeypatch):
     assert child.returncode == 0, child.stderr
     assert json.loads(child.stdout) == before, "an env var or config file changed a cap"
 
-    # And the module reads none of the four config-load primitives at all.
     src = (DEFENDER / "hooks" / "budget_enforcer.py").read_text()
     for primitive in ("os.environ", "environ.get", "env_int(", "open(", "json.load("):
         assert primitive not in src, f"budget_enforcer reads {primitive}"
 
 
-# --- the tier table ----------------------------------------------------------
 
 def test_unknown_tool_tiers_as_core(tmp_path):
     """A tool absent from the tail table tiers as core — the restrictive arm — so
@@ -449,17 +407,9 @@ def test_unknown_tool_tiers_as_core(tmp_path):
     `ExtendedToolSet(read=True, undispatched=True)` registers exactly ['read_file'],
     so the bit produces no tool name and never reaches the tier function at all. The
     safety there is INERTNESS, not the fail-closed default."""
-    # The tier function is TOTAL over arbitrary names — the default arm is `core`, the
-    # restrictive one — so a tool the tail table forgot inherits the tight cap rather
-    # than raising a KeyError on the enforcement path. Driving an UNREGISTERED name
-    # proves nothing (blind reader R25/A22: pydantic-ai rejects it upstream, so it never
-    # reaches the tier function), so this is asserted directly over the function, which
-    # is what the enforcement seam calls with `call.tool_name`.
     assert tier("a_tool_that_does_not_exist", AgentRole.MAIN) == "core"
     assert tier("", AgentRole.GATHER) == "core"
-    assert tier("read_file", AgentRole.GATHER) == "core"  # a real tool the tail table omits on GATHER
-    # Totality is a property of the LOOKUP, not of any one name: no input yields a
-    # KeyError or anything other than {"core", "tail"}.
+    assert tier("read_file", AgentRole.GATHER) == "core"
     for name in ("", "gather", "read_file", "\x00", "write_file", "totally-made-up"):
         assert tier(name, AgentRole.MAIN) in {"core", "tail"}
 
@@ -507,25 +457,19 @@ def test_same_tool_name_on_two_agents(tmp_path):
     assert tier("read_file", AgentRole.MAIN) == "tail"
     assert tier("read_file", AgentRole.GATHER) == "core"
 
-    # Each agent drives its OWN pre-tripped run dir (blind reader R10): the previous
-    # version ran both against ONE shared budget.json with MAIN first, so a pure
-    # spend-threshold implementation with no (tool, agent) keying produced the same
-    # allowed-then-refused pair from the rising count alone. Two identically-tripped
-    # pools remove that confound — the ONLY difference is the agent, so read_file being
-    # tail for one and core for the other must be what admits one and refuses the other.
     limits = {**DEFAULT_LIMITS, "max_tool_calls": 1, "wall_clock_timeout": 3600,
               "grace_seconds": 600}
 
     main_dir = _run_dir(tmp_path, "pair-main")
     open_budget(main_dir, "r")
-    update_budget_locked(main_dir, "r", "bash", limits=limits)  # trip it
+    update_budget_locked(main_dir, "r", "bash", limits=limits)
     main_result, _ = drive_agent(
         MAIN_DEF, main_dir, [[("read_file", {"path": str(main_dir / "alert.json")})]],
         limits=limits, enforce=True)
 
     gather_dir = _run_dir(tmp_path, "pair-gather")
     open_budget(gather_dir, "r")
-    update_budget_locked(gather_dir, "r", "bash", limits=limits)  # identically tripped
+    update_budget_locked(gather_dir, "r", "bash", limits=limits)
     gather_result, _ = drive_agent(
         GATHER_DEF, gather_dir, [[("read_file", {"path": str(gather_dir / "alert.json")})]],
         limits=limits, enforce=True, agent_id="gather:l-001")
@@ -554,7 +498,6 @@ def _registered_names(defn) -> set[str]:
     return set(agent._function_toolset.tools)
 
 
-# --- GATHER's own bound is untouched -----------------------------------------
 
 def test_gather_keeps_its_request_limit(tmp_path):
     """GATHER_REQUEST_LIMIT stays 40, the bound a multi-dimension lead needs, and it
@@ -573,7 +516,6 @@ def test_gather_keeps_its_request_limit(tmp_path):
                     request_limit=driver.GATHER_REQUEST_LIMIT)
 
 
-# --- the flag's own input surface --------------------------------------------
 
 def test_enforce_flag_defaults_off(monkeypatch):
     """DEFENDER_BUDGET_ENFORCE is read through env_bool and defaults to False when
@@ -659,7 +601,6 @@ def test_ci_runs_the_suite_with_enforcement_on():
     for step in unit:
         value = (step.get("env") or {}).get(FLAG)
         assert value is not None, f"{step.get('name')!r} carries no {FLAG} env block"
-        # The token CI sets must be one the real reader accepts as ON.
         os.environ[FLAG] = str(value)
         try:
             assert driver.enforcement_enabled() is True
@@ -667,7 +608,6 @@ def test_ci_runs_the_suite_with_enforcement_on():
             os.environ.pop(FLAG, None)
 
 
-# --- the two pool roots ------------------------------------------------------
 
 def test_the_learning_state_root_and_the_runs_base_cannot_be_the_same_dir(
     tmp_path, monkeypatch,
@@ -690,14 +630,12 @@ def test_the_learning_state_root_and_the_runs_base_cannot_be_the_same_dir(
     with pytest.raises(FatalConfigError):
         run_common.resolve_runs_base()
 
-    # A symlinked alias to the same dir is the same collision.
     alias = tmp_path / "alias"
     alias.symlink_to(shared)
     monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(alias))
     with pytest.raises(FatalConfigError):
         run_common.resolve_runs_base()
 
-    # The control: the shipped defaults are disjoint and resolve cleanly.
     runs = tmp_path / "runs"
     learn = tmp_path / "learn"
     runs.mkdir()
@@ -707,7 +645,6 @@ def test_the_learning_state_root_and_the_runs_base_cannot_be_the_same_dir(
     assert run_common.resolve_runs_base().resolve() == runs.resolve()
 
 
-# --- the retry ceiling -------------------------------------------------------
 
 def test_every_agent_construction_pins_retries_explicitly(tmp_path):
     """Every Agent construction site passes `retries` explicitly: the framework
@@ -748,10 +685,6 @@ def test_every_agent_construction_pins_retries_explicitly(tmp_path):
 
     assert driver.DEFAULT_TOOL_RETRIES == 10
 
-    # Driven: two consecutive denials of the same tool survive AND the run reaches its
-    # third (text) turn — at the framework default of None (an effective ceiling of 1)
-    # the second denial would raise UnexpectedModelBehavior out of `agent.run`, which
-    # drive_agent would propagate. Observing the loop RUN TO COMPLETION is the discriminator.
     run_dir = _run_dir(tmp_path, "retries")
     open_budget(run_dir, "r")
     missing = str(run_dir / "nope" / "absent.json")
@@ -764,7 +697,6 @@ def test_every_agent_construction_pins_retries_explicitly(tmp_path):
     assert result.output is not None, "two consecutive denials aborted — retries was not pinned"
 
 
-# --- D8's boundary: what a truncated run does downstream --------------------
 
 def test_the_runtime_skips_the_learning_enqueue_for_a_truncated_run(tmp_path, monkeypatch):
     """The runtime itself skips the learning enqueue for a run marked
@@ -776,10 +708,6 @@ def test_the_runtime_skips_the_learning_enqueue_for_a_truncated_run(tmp_path, mo
     The positive control is test_a_completed_run_is_still_enqueued_for_learning."""
     from defender import run_common
 
-    # Point the learning state dir INTO tmp (blind reader R9): otherwise a real enqueue
-    # writes under the DEFAULT dir outside tmp_path, so `_markers(tmp_path) == before`
-    # holds whether or not a marker was dropped — and a regression would pollute the
-    # developer's / CI's real learning state directory.
     monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "learn"))
     run_dir = _run_dir(tmp_path, "trunc")
     alert = run_dir / "alert.json"

@@ -1,16 +1,3 @@
-"""Defender-side invlang corpus loader (strict, aligned with current schema).
-
-Walks `**/investigation.md` under an explicit corpus root, parses each
-file with the strict defender parser, and exposes a list of
-`Companion` records. Parse warnings (per-row skips) are threaded
-through so post-mortem debugging always has a paper trail.
-
-Signature ID: drawn from the sibling `alert.json`'s `rule.id` field
-(defender runs don't follow the `ruleNNN/` path convention).
-
-created_at: drawn from the run directory's mtime (defender writers
-don't stamp the `<!-- created: -->` header that soc-agent uses).
-"""
 
 from __future__ import annotations
 
@@ -62,10 +49,6 @@ class Companion:
 
 @dataclass
 class LoadReport:
-    """Telemetry from one corpus scan. `skipped` = whole-file rejects;
-    `partial` = files that loaded but had at least one row-level
-    warning. Both lists carry enough context to diagnose.
-    """
     root: Path
     scanned: int = 0
     loaded: int = 0
@@ -78,11 +61,6 @@ class LoadReport:
 
 
 def _read_signature_id(alert_path: Path) -> str | None:
-    # Read through `read_text_soft`, not `alert_path.open()` + `json.load`. The old guard was
-    # `except (OSError, json.JSONDecodeError)`, and JSONDecodeError is a *sibling* of
-    # UnicodeDecodeError under ValueError, not its superclass — so an undecodable alert.json
-    # (vendor-supplied bytes) escaped this guard and killed the whole corpus walk. Same defect as
-    # `_load_one` below, same file. A missing signature degrades the companion; it never sinks it.
     text, _err = read_text_soft(alert_path)
     if text is None:
         return None
@@ -96,10 +74,6 @@ def _read_signature_id(alert_path: Path) -> str | None:
     rid = rule.get("id")
     if rid is None:
         return None
-    # The case signature is its bare `rule.id` — the same vendor-neutral
-    # convention as `case_history.case_ticket._signature_id`. It is only an
-    # opaque cross-case join key (advisory Classes 5/6/8), recomputed live on
-    # every corpus load and never persisted, so the format is free to change.
     return str(rid)
 
 
@@ -119,12 +93,6 @@ def _load_one(
 ) -> tuple[Companion | None, str | None, list[ParseWarning]]:
     if path.suffix != ".md":
         return None, f"not a .md file: {path.name}", []
-    # `read_text_soft` owns both halves of the read (#589): the utf-8 pin, and the guard — which
-    # must catch UnicodeDecodeError, a ValueError and NOT an OSError. The `except OSError` that
-    # stood here let an undecodable investigation.md escape `_load_one`, escape `load_corpus`
-    # (which has no try), and take down `defender-invlang` — an allowed main-loop shim — over one
-    # bad byte in one past run. `defender/_corpus.py` had the guard right; this was a hand-rolled
-    # copy of it that dropped half.
     text, err = read_text_soft(path)
     if text is None:
         return None, f"read error: {err}", []
@@ -151,7 +119,6 @@ def _load_one(
 
 
 def load_corpus(root: Path | str) -> tuple[list[Companion], LoadReport]:
-    """Walk `root` for investigation.md files. Returns (companions, report)."""
     root_p = Path(root)
     report = LoadReport(root=root_p)
     companions: list[Companion] = []
@@ -170,13 +137,10 @@ def load_corpus(root: Path | str) -> tuple[list[Companion], LoadReport]:
     return companions, report
 
 
-# ---------------------------------------------------------------------------
-# CLI: report parse health
-# ---------------------------------------------------------------------------
 
 
 def _main(argv: list[str]) -> int:
-    use_utf8_stdio()  # the corpus is model-authored and carries non-ASCII; see cli.main
+    use_utf8_stdio()
     verbose = "--verbose" in argv
     args = [a for a in argv if not a.startswith("--")]
     root = (

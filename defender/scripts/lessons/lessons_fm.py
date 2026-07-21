@@ -38,9 +38,6 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-# Put the workspace root on sys.path so the `defender.*` namespace import below
-# resolves whether this file is imported or run directly (sys.path[0] is this
-# script's dir, not the workspace root). Must precede the shared import.
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
@@ -52,37 +49,22 @@ from defender.scripts.lessons._lessons_common import (
     use_utf8_stdio,
 )
 
-# Re-exec into defender/.venv so PyYAML resolves regardless of which python the
-# caller used (the bin/ shim already points here; this covers a direct
-# ``python3 defender/scripts/lessons/lessons_fm.py`` run). Gated on __main__ so
-# importing this module as a library never execs the importing process away.
 if __name__ == "__main__":
     reexec_into_venv(__file__)
 
 import argparse
 import re
 
-# Below the re-exec gate (like the yaml import it replaces): `defender._frontmatter` is
-# yaml-backed, and this script is launched by the actor under the SYSTEM interpreter, which
-# has no PyYAML. Anything yaml-backed must be imported only after `reexec_into_venv`.
 from defender._frontmatter import FrontmatterError, split_frontmatter
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 LESSONS_DIR = REPO_ROOT / "defender" / "lessons"
 
-# The list-valued retrieval dimensions, in display order.
 DIMENSIONS = ("source_signature", "telemetry_source", "attack_phase")
 
 
 def _emit_match(path: Path, fm: dict) -> None:
-    # LLM-authored value in a TSV cell: the shared full-breaker flatten (#614).
     desc = flatten_cell(str(fm.get("description") or "")).strip()
-    # ABSOLUTE, not repo-relative (#540). This line IS the agent's read surface — SKILL.md
-    # tells it to Read the bodies that fit, and message 0's Lessons block is built by
-    # shelling out to this same shim. A relative path here would be resolved against the
-    # reader's own cwd anchor, which for the runtime lane is the RUN DIR (the box's rw bind),
-    # so `defender/lessons/x.md` would name a file inside the run that does not exist. An
-    # absolute path bypasses every anchor and names the same file on all of them.
     print(f"{path.resolve()}\t{desc}")
 
 
@@ -103,7 +85,7 @@ def cmd_tags(field: str | None) -> int:
     if field and field not in DIMENSIONS:
         print(f"error: unknown dimension {field!r}; choose from {', '.join(DIMENSIONS)}", file=sys.stderr)
         return 2
-    lessons = list(iter_lessons(LESSONS_DIR))  # one walk, not one per dimension
+    lessons = list(iter_lessons(LESSONS_DIR))
     for f in fields:
         counts: dict[str, int] = {}
         for lesson in lessons:
@@ -122,17 +104,6 @@ def cmd_show(paths: list[str]) -> int:
         p = Path(raw_path)
         if not p.is_absolute():
             p = REPO_ROOT / raw_path
-        # --show is the one lesson read that takes a MODEL-SUPPLIED path, and nothing upstream
-        # confines it: `defender-lessons` is an allowed main-loop shim (hooks/_cmd_segments.py)
-        # and the bash allowlist pins the PROGRAM token, not its operands — the reader lane
-        # compiles shims as `defender-lessons(?: .*)?`, so every argument passes. This read
-        # therefore never reaches `decide_read`'s {run_dir, defender_dir} allowlist. Unconfined it
-        # is a frontmatter-DISCLOSURE primitive for any fenced file the process can read
-        # (`--show /tmp/anything.md` prints its YAML verbatim) plus a file-EXISTENCE oracle over
-        # the whole filesystem. Confine it to the corpus this CLI is about — membership in the
-        # walk is the confinement — and fail the off-corpus, absent and not-a-file cases with an
-        # IDENTICAL message, so nothing can be probed through the difference between them.
-        # `resolve()` first, so a symlink out of the corpus cannot smuggle a target back in.
         lesson = p.resolve()
         try:
             lesson.relative_to(corpus)
@@ -143,12 +114,6 @@ def cmd_show(paths: list[str]) -> int:
             print(f"error: no such lesson: {raw_path}", file=sys.stderr)
             rc = 2
             continue
-        # Read exactly as the shared corpus walk does. The encoding is PINNED for the same reason
-        # iter_lessons pins it: a bare read_text() decodes under the ambient locale, so where the
-        # walk warn-skips an accented lesson this raised an ascii UnicodeDecodeError straight out
-        # of main() — a traceback, on a shim the agent runs at PLAN. The fence split delegates to
-        # the canonical parser so --show cannot disagree with --tags/the grep about where a
-        # lesson's frontmatter ends.
         try:
             fm_raw = split_frontmatter(lesson.read_text(encoding="utf-8"))[1]
         except (FrontmatterError, OSError, UnicodeDecodeError) as e:
@@ -161,7 +126,7 @@ def cmd_show(paths: list[str]) -> int:
 
 
 def main(argv: list[str]) -> int:
-    use_utf8_stdio()  # lessons carry non-ASCII; stdout must not decode under the ambient locale
+    use_utf8_stdio()
     ap = argparse.ArgumentParser(
         prog="defender-lessons",
         description=__doc__.splitlines()[0],

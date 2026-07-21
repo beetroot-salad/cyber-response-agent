@@ -122,7 +122,10 @@ def _parse_env_file(path: Path) -> dict[str, str]:
     return out
 
 
-def load_config(ctx: VerbContext, system: str, prefix: str) -> dict[str, str]:
+def load_config(
+    ctx: VerbContext, system: str, prefix: str,
+    required: tuple[str, ...] = REQUIRED_CONFIG_KEYS_TEMPLATE,
+) -> dict[str, str]:
     """Load `{ctx.defender_dir}/knowledge/environment/systems/{system}/config.env`.
 
     The tree comes from the RUN (`ctx.defender_dir`), not a module constant: a run anchored
@@ -135,6 +138,14 @@ def load_config(ctx: VerbContext, system: str, prefix: str) -> dict[str, str]:
     no config is definitionally down. (It used to be a bare `sys.exit("error: …")`, i.e.
     exit 1: a dead system filed as an agent-fixable query error, which never tripped the
     breaker.)
+
+    `required` is the key set THIS system needs — the three-key transport template by
+    default, which is what the five stubs sharing the docker-exec-curl transport declare.
+    A system needing more passes its own tuple (`ticket_adapter.REQUIRED_CONFIG_KEYS` adds
+    KEY_PATTERN, its key grammar); `elastic_adapter` keeps a whole separate loader for the
+    same reason. There is deliberately no optional-with-default lane: every value read here
+    is required, absent means down, and a caller that wants a fallback must say so in its
+    own code rather than have a missing environment fact resolve silently.
     """
     path = _config_path(ctx, system)
     if not path.exists():
@@ -145,14 +156,14 @@ def load_config(ctx: VerbContext, system: str, prefix: str) -> dict[str, str]:
 
     raw = _parse_env_file(path)
     cfg: dict[str, str] = {}
-    for key in REQUIRED_CONFIG_KEYS_TEMPLATE:
+    for key in required:
         prefixed = f"{prefix}_{key}"
         # The RUN's env overrides the file for ops convenience (CI, per-run overrides).
         val = ctx.env.get(prefixed) or raw.get(prefixed)
         if val:
             cfg[key] = val
 
-    missing = [k for k in REQUIRED_CONFIG_KEYS_TEMPLATE if not cfg.get(k)]
+    missing = [k for k in required if not cfg.get(k)]
     if missing:
         raise ConfigFault(
             f"missing required config keys in {path}: "

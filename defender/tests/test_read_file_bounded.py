@@ -62,8 +62,6 @@ def _admits(policy: AgentPolicy, command: str, run_dir: Path) -> bool:
     ).allow
 
 
-# The main-lane hint, for the `_bounded_read` tests below. `_bounded_read` stays
-# hint-agnostic — the branching lives in `_overflow_filter_hint`, pinned just below.
 _MAIN_HINT = "Reduce it in a pipe, write the result to a file, then read that"
 
 
@@ -116,7 +114,7 @@ def test_overflow_hint_reducer_less_agent_points_at_its_read_tool() -> None:
     assert "jq" not in hint
     assert "defender-sql" not in hint
     assert "pattern=" in hint
-    assert "read_file(" in hint  # the default reader's tool
+    assert "read_file(" in hint
 
 
 def test_overflow_hint_names_the_callers_read_tool_not_a_constant() -> None:
@@ -126,13 +124,13 @@ def test_overflow_hint_names_the_callers_read_tool_not_a_constant() -> None:
     hand them an instruction they cannot execute. The tool name comes from the caller, and the
     overflow notice tag agrees with it."""
     hint = tools._overflow_filter_hint(_PATH, AgentPolicy(), "lesson_read")
-    assert "lesson_read(" in hint  # the curator's ACTUAL read tool …
-    assert "read_file(" not in hint  # … not the one it no longer has
-    assert "pattern=" in hint  # …with the substring fold it does have
+    assert "lesson_read(" in hint
+    assert "read_file(" not in hint
+    assert "pattern=" in hint
     over = tools._bounded_read(
         "x" * (tools._read_char_cap() + 10), _PATH, filter_hint=hint, read_tool="lesson_read",
     )
-    assert "[lesson_read]" in over  # the notice tag agrees with the hint
+    assert "[lesson_read]" in over
     assert "[read_file]" not in over
 
 
@@ -172,37 +170,31 @@ def test_over_cap_truncates_head_and_appends_notice(tmp_path) -> None:
         text, path, filter_hint=tools._overflow_filter_hint(path, _main_policy(tmp_path)),
     )
     head, _, note = out.partition("\n\n[read_file]")
-    assert head == "y" * CAP  # head is exactly the first CAP chars, verbatim
-    assert note  # a notice was appended
+    assert head == "y" * CAP
+    assert note
     assert "too large to read whole" in out
     assert "defender-sql" in out
-    assert path in out  # the hint carries the file it refers to
-    # full size surfaced so the model knows the scale it can't see
+    assert path in out
     assert str(CAP + 5000) in out
 
 
 def test_notice_reports_true_line_count() -> None:
-    # a single giant line (the real payload shape) — line count is 1, and there
-    # is no offset/limit paging suggestion because paging a 1-line file is a no-op
     blob = "z" * (CAP + 1000)
     out = tools._bounded_read(blob, "/p.json", filter_hint=_MAIN_HINT)
     assert "/ 1 line(s)" in out
     assert "offset" not in out
     assert "limit" not in out
-    # a multi-line oversized file reports its real line count
     lined = ("line\n" * ((CAP // 5) + 200))
     out2 = tools._bounded_read(lined, "/p.json", filter_hint=_MAIN_HINT)
     assert f"/ {lined.count(chr(10)) + 1} line(s)" in out2
 
 
 def test_char_slice_never_splits_multibyte() -> None:
-    # a head ending on a multibyte boundary: slicing by char (not byte) keeps it
-    # a valid str — re-encoding must not raise.
     text = "é" * (CAP + 100)
     out = tools._bounded_read(text, "/p.json", filter_hint=_MAIN_HINT)
     head = out.split("\n\n[read_file]")[0]
     assert head == "é" * CAP
-    head.encode("utf-8")  # would raise on a split surrogate; chars are intact
+    head.encode("utf-8")
 
 
 def _read_file_tool_output(run_dir: Path, path: Path, salt: str) -> str:
@@ -224,7 +216,7 @@ def _read_file_tool_output(run_dir: Path, path: Path, salt: str) -> str:
         return ModelResponse(parts=[TextPart("done")])
 
     agent = Agent(deps_type=tools.AgentDeps)
-    tools.register_tools(agent, ToolSet(read=True))  # the test exercises read_file only
+    tools.register_tools(agent, ToolSet(read=True))
     deps = tools.AgentDeps(
         run_dir=run_dir, defender_dir=_DEFENDER, run_id="t", salt=salt,
         policy=compile_policy_for(MAIN_DEF, run_dir=run_dir, defender_dir=_DEFENDER),
@@ -248,8 +240,6 @@ def test_oversized_untrusted_read_caps_before_wrapping(tmp_path) -> None:
     salt = "SALT123"
     run_dir = tmp_path / "run"
     (run_dir / "gather_raw").mkdir(parents=True)
-    # alert.json is an untrusted read (permission.is_untrusted_read) that the main
-    # session is allowed to read — unlike gather_raw, which it's clamped from.
     alert = run_dir / "alert.json"
     alert.write_text("y" * (CAP + 5000))
 
@@ -259,11 +249,7 @@ def test_oversized_untrusted_read_caps_before_wrapping(tmp_path) -> None:
     assert out.startswith(opener), "untrusted read was not wrapped"
     assert out.rstrip().endswith(closer), "closing delimiter missing/truncated"
     assert "[read_file]" in out, "oversized read was not capped"
-    # the notice (hence the bounded head) sits INSIDE the wrap, not after it —
-    # this is what cap-before-wrap buys, and what a reorder would break.
     assert out.index("[read_file]") < out.index(closer)
-    # and the full dump never reached the model: the wrapped body is the bounded
-    # head + a short notice, not CAP+5000 chars.
     assert len(out) < CAP + 2000
 
 

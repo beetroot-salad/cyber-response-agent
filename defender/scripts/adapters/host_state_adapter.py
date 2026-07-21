@@ -1,27 +1,3 @@
-"""Host live-state adapter — the `host-state` VERBS registry.
-
-No HTTP. Each verb wraps a single
-    `docker --context <the run's context> exec <host> <command>`
-and renders the relevant output. Outputs are point-in-time; two calls
-seconds apart can legitimately disagree on volatile state (process
-tables in particular).
-
-Verbs (`VERBS` is the whole model-facing surface — there is no CLI):
-    health-check
-    container-inspect  container_id
-    proc-tree          host
-    passwd             host
-    authorized-keys    host [user]
-    fim-checksum       host, path
-    package-list       host
-
-`fim-checksum`'s `path` is the ONE declared exception to "no verb names a path": it is a
-path on a playground TARGET host, reached through `docker exec` — never a path in the
-driver's namespace. It stays behind SAFE_PATH_RE + the absolute-path check.
-
-Faults (`faults.py`): TransportFault = the host/docker is down (2), UpstreamFault = the
-verb's own answer says no (1) — a missing file, an unknown user, an unsafe argument.
-"""
 
 from __future__ import annotations
 
@@ -31,8 +7,6 @@ import re
 import subprocess
 import sys
 
-# Put the workspace root on sys.path so `defender.*` namespace imports resolve when the
-# verb registry loads this module BY PATH (see cmdb_adapter.py).
 import sys as _sys
 from pathlib import Path as _Path
 
@@ -44,10 +18,6 @@ from defender.scripts.adapters import _stub_transport as transport
 from defender.scripts.adapters.faults import TransportFault, UpstreamFault
 
 SYSTEM = "host-state"
-# Hosts addressable via the soc-playground docker context. The list is
-# advisory — we don't validate, just surface a hint when the caller
-# misspells one. Source of truth is `docker context ps`; this list
-# tracks playground-v2/hosts/inventory.yaml.
 KNOWN_HOSTS = (
     "web-1", "web-2", "db-1", "jump-box-1",
     "dev-ws-1", "office-ws-1", "office-ws-2", "canary-1",
@@ -74,16 +44,6 @@ def _exec(
 
 
 def _raise_on_docker_error(ctx: VerbContext, rc: int, stderr: str, host: str) -> None:
-    """Map docker-exec stderr patterns onto the fault taxonomy.
-
-    Transport/unreachable failures are `TransportFault` (infra, exit 2) so the circuit
-    breaker counts them. They are identified by docker's own connection/lookup signatures,
-    because docker is *loud* about them (container missing, daemon/context unreachable).
-    Everything else — including a quiet non-zero inner command with empty stderr — is a verb
-    -level error the caller reasons about (`UpstreamFault`, exit 1), not a down host: a quiet
-    command failure has empty stderr precisely because docker exec itself succeeded, and
-    scoring it as infra would spuriously trip the breaker on a perfectly reachable host.
-    """
     if rc == 0:
         return
     s = stderr.strip()
@@ -105,16 +65,9 @@ def _utcnow_z() -> str:
 
 
 def health_check(ctx: VerbContext) -> dict:
-    """Lightweight: verify the docker context can list containers. RETURNS the roster —
-    the prose this used to print has no answer under "a verb returns its payload", and the
-    queries row would carry an empty payload for the one call whose whole point is to say
-    whether the system is up."""
     context = transport.docker_context(ctx)
     cmd = ["docker", "--context", context, "ps", "--format", "{{.Names}}"]
     try:
-        # LOSSY decode + a MANDATORY timeout, like every other transport in the family:
-        # container names are foreign bytes, and a strict decode raises UnicodeDecodeError —
-        # a ValueError, which sails past every guard below.
         proc = subprocess.run(
             cmd, capture_output=True, text=True, timeout=HEALTH_TIMEOUT_SEC,
             encoding="utf-8", errors="replace", env=dict(ctx.env),
@@ -140,13 +93,6 @@ def health_check(ctx: VerbContext) -> dict:
 
 
 def container_inspect(ctx: VerbContext, *, container_id: str) -> dict:
-    """Container name + image by container id — daemon-level `docker inspect`.
-
-    Unlike the other verbs this takes a container id, not a known host name
-    (Falco alerts carry the runtime container id), so it neither runs
-    _check_host nor routes through docker exec. Docker resolves partial-hash
-    ids without a separate lookup.
-    """
     fmt = "{{json .Name}}\t{{json .Config.Image}}"
     rc, out, err = transport.docker_inspect_raw(ctx, container_id, fmt=fmt)
     if rc != 0:
@@ -158,7 +104,6 @@ def container_inspect(ctx: VerbContext, *, container_id: str) -> dict:
             )
         raise TransportFault(f"docker inspect failed (rc={rc}): {s}")
     parts = out.strip().split("\t")
-    # `.Name` comes back with a leading slash (docker's canonical form).
     name = json.loads(parts[0]).lstrip("/") if parts and parts[0] else ""
     image = json.loads(parts[1]) if len(parts) > 1 and parts[1] else ""
     return {
@@ -188,7 +133,6 @@ def authorized_keys(ctx: VerbContext, *, host: str, user: str = "root") -> dict:
     _check_host(host)
     if not SAFE_USERNAME_RE.match(user):
         raise UpstreamFault(f"refusing unsafe user value: {user!r}")
-    # Use getent so we get the right home dir for system + UNIX-PAM users.
     rc, home_out, err = _exec(ctx, host, ["getent", "passwd", user])
     if rc != 0 or not home_out.strip():
         raise UpstreamFault(f"user {user!r} not found on {host}")
@@ -200,8 +144,6 @@ def authorized_keys(ctx: VerbContext, *, host: str, user: str = "root") -> dict:
     rc, out, err = _exec(ctx, host, ["cat", ak_path])
     if rc != 0:
         s = err.strip()
-        # Treat missing file as "no keys" rather than an error — common
-        # for unprivileged users on a freshly-seeded host.
         if "No such file" not in s:
             _raise_on_docker_error(ctx, rc, err, host)
         keys: list[str] = []
@@ -218,9 +160,6 @@ def authorized_keys(ctx: VerbContext, *, host: str, user: str = "root") -> dict:
 
 
 def fim_checksum(ctx: VerbContext, *, host: str, path: str) -> dict:
-    """SHA-256 of one file ON THE TARGET HOST. `path` is the declared exception to the
-    no-path rule: it is resolved inside the playground container by `sha256sum`, never in
-    the driver's namespace, and it must be absolute and match SAFE_PATH_RE."""
     _check_host(host)
     if not SAFE_PATH_RE.match(path) or not path.startswith("/"):
         raise UpstreamFault(f"refusing unsafe path value: {path!r}")
@@ -236,7 +175,6 @@ def fim_checksum(ctx: VerbContext, *, host: str, path: str) -> dict:
 
 def package_list(ctx: VerbContext, *, host: str) -> dict:
     _check_host(host)
-    # dpkg-query is present on every host (ubuntu base in playground-v2).
     fmt = r"${Package} ${Version}\n"
     rc, out, err = _exec(ctx, host, ["dpkg-query", "-W", "-f=" + fmt], timeout_sec=30)
     _raise_on_docker_error(ctx, rc, err, host)

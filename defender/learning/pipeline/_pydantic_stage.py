@@ -1,20 +1,3 @@
-"""The in-process PydanticAI transport shared by every learning-loop stage that runs
-in-process — it replaced the removed ``claude -p`` subprocess transport.
-
-The judge was the first in-process stage, so this generic transport was born inline in
-``pipeline/judge/engine_pydantic.py``: the ``RequestLogger`` setup, the ``build_agent_core``
-wrapper, the one-shot ``_drive`` (wall-clock ceiling + tool-loop request cap), and the
-error-mapping ladder (config faults → ``FatalConfigError`` exit-2, per-run model/timeout
-faults → ``RunUnprocessable`` dead-letter, systemic faults re-raised). A SECOND in-process
-stage (the actor) would have cloned all of it, so it lives here once and both stages
-(``judge/engine_pydantic.py``, ``actor_engine.py``) compose it. Each stage module keeps only
-what is genuinely stage-specific — its ``AgentDeps`` subclass, its ``AgentPolicy`` (matchers),
-its request cap, its labels — and builds its own fully-scoped ``deps`` before delegating.
-
-This module imports the pydantic-ai graph, so it is imported LAZILY — only by the two engine
-modules, which are themselves imported lazily (when a stage actually runs), never at loop
-import.
-"""
 from __future__ import annotations
 
 import asyncio
@@ -50,25 +33,6 @@ def build_stage_agent(  # noqa: PLR0913 — the stage-build seam plus the make_m
     tools: Any = None,
     verbs: Any = None,
 ) -> Agent[Any, str]:
-    """Build one in-process stage agent — a THIN WRAPPER over the shared ``build_agent_core``
-    (the single agent-construction site, #493/#538). The stage's TOOLSET comes from its
-    ``AgentDefinition`` (looked up by ``deps_type.role`` in ``agents.AGENTS`` — the single
-    source of truth), so the judge/actor register the read + bash pair while the
-    pure-prediction oracle/verify register NOTHING (#538); this stage's per-run ``model`` +
-    ``effort`` are re-bound onto that def. ``effort`` is per-call config (not role-keyed), so
-    two legs of a stage can run concurrently at different efforts. ``make_model`` is the DI
-    seam tests use to inject a FunctionModel; production uses ``providers.build_for_effort``
-    (Anthropic ``anthropic_effort`` / Fireworks ``reasoning_effort``).
-
-    ``AGENTS`` is imported LAZILY here (not at module top) to keep the shared-harness ↔
-    registry edge off the import graph — ``agents`` pulls the stage engine modules, which
-    import this harness.
-
-    ``tools`` is an OPTIONAL per-leg ``ToolSet`` override, re-bound onto the def by the same
-    ``replace`` seam that re-binds ``model``/``effort`` — the benign judge leg rides it to turn
-    on its ``closed_tickets`` bit while the frozen def keeps it off (#672); ``None`` keeps the
-    def's static toolset. ``verbs`` is the data-source verb registry threaded to registration
-    like the driver's, required by any leg whose toolset declares ``query``/``closed_tickets``."""
     from defender.agents import AGENTS
 
     overrides: dict[str, Any] = {"model": lambda: model, "effort": effort}
@@ -89,8 +53,6 @@ def build_stage_agent(  # noqa: PLR0913 — the stage-build seam plus the make_m
 async def _drive(
     agent: Agent[Any, str], user: str, deps: AgentDeps, request_limit: int, timeout: int
 ):
-    """One-shot stage run with a wall-clock ceiling (the in-process twin of the ``claude -p``
-    subprocess timeout) and a request cap on the tool loop."""
     return await asyncio.wait_for(
         agent.run(user, deps=deps, usage_limits=UsageLimits(request_limit=request_limit)),
         timeout=timeout,
@@ -115,25 +77,6 @@ def run_stage(  # noqa: PLR0913 — every param is load-bearing per-call transpo
     tools: Any = None,
     verbs: Any = None,
 ) -> str:
-    """Run one in-process stage to completion and return its model's final text VERBATIM.
-
-    The caller supplies a fully-built ``deps`` (its identity + ``AgentPolicy``); this owns the
-    rest — build the agent (``deps_type`` = ``type(deps)``), log every request to
-    ``learning_run_dir/{trace_name}`` via ``RequestLogger``, run once (async bridged via
-    ``asyncio.run`` — safe in the loop's per-direction worker thread, which has no running
-    event loop), and map faults: an unroutable model / unsupported effort raised at build is a
-    run-independent CONFIG fault (``FatalConfigError`` → exit 2, never dead-lettering every run
-    for it); a timeout / usage-limit / model error after retries quarantines the single run
-    (``RunUnprocessable``), the same per-run disposition the removed ``claude -p`` stages got
-    from a non-zero exit; ``StageAbort`` / ``FatalConfigError`` from the run are systemic and
-    re-raised. ``stage`` is the human stage name in those messages (``judge`` / ``actor``);
-    ``label`` is the per-leg observability id (``agent_id`` + the ``step=`` log line).
-
-    ``wall_clock_timeout`` (seconds) is the per-run wall-clock ceiling — the author-time
-    forward-check passes its own ``VERIFIER_TIMEOUT`` here; the default anchors to the pipeline
-    ``SUBAGENT_TIMEOUT`` (unchanged for the judge/actor/oracle stages, which omit the arg). Anchored
-    in the signature rather than coalesced with ``or`` in the body so a deliberately-set ``0`` is
-    honored, not silently swapped for the 450s default."""
     logger = observe.RequestLogger(learning_run_dir / trace_name)
     _log(f"step={label} engine=pydantic_ai model={model} effort={effort}")
     try:
@@ -150,22 +93,12 @@ def run_stage(  # noqa: PLR0913 — every param is load-bearing per-call transpo
     except (TimeoutError, UsageLimitExceeded) as e:
         raise RunUnprocessable(f"{stage} ({label}) did not complete: {e!r}") from e
     except (StageAbort, FatalConfigError):
-        raise  # systemic faults doom the whole stage (exit 2) — never per-run dead-letter
-    except Exception as e:  # a model/API error after retries — quarantine the run
+        raise
+    except Exception as e:
         raise RunUnprocessable(f"{stage} ({label}) failed: {e!r}") from e
     finally:
         logger.close()
     out = str(result.output or "")
     if require_output and not out.strip():
-        # A reasoning model (GLM@low, the shipped default) can burn its whole budget in the
-        # thinking channel and emit an EMPTY final text part without tripping the request /
-        # usage cap. An empty story or verdict is never valid; quarantine this run (the same
-        # per-run disposition a ``claude -p`` stage got from an empty/failed exit) rather than
-        # letting ``""`` flow on to the oracle/judge — for the actor, is_skip_story("") is
-        # False, so an empty story would otherwise be graded as a real (empty) one.
-        #
-        # A WRITER stage opts OUT (``require_output=False``): the lead author's output is the
-        # committed tree, not the returned text — it does its work through write_file/edit_file/rm
-        # tool calls and legitimately ends with an empty final part.
         raise RunUnprocessable(f"{stage} ({label}) returned empty output")
     return out

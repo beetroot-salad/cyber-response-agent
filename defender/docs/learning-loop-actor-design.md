@@ -1,7 +1,7 @@
 # Learning-loop actor — design draft (2026-05-08)
 
 Companion to `defender/docs/learning-loop.md` and
-`defender/docs/learning-loop-experiments-2026-05-08.md`. Captures the
+`defender/docs/archive/learning-loop-experiments-2026-05-08.md`. Captures the
 actor-side decisions taken during design discussion and flags the one
 open question that an A/B trial against real fixtures closed.
 

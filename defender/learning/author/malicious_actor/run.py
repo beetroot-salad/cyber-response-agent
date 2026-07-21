@@ -1,26 +1,10 @@
 #!/usr/bin/env python3
-"""Actor lessons curator — consumer half of the actor learning queue.
-
-Drains ``_pending/actor_observations.jsonl`` into the checked-in
-``defender/lessons-actor/`` corpus. The transaction envelope (queue lock → repo
-lock → clean-scope → partition → curator agent → git cross-check → rotate) lives in
-``_author_curator``; this module supplies the actor direction's config and the one
-divergent step — ``invoke_agent``, which hands the curator agent the actor-side
-forward check (``ACTOR_CHECK``, bound onto the curator's deps).
-
-Outcome policy (see judge.md): ``caught``/``incoherent`` author pattern/tradecraft
-lessons; ``survived``/``undecidable`` skip. Standing deployment facts flow to the
-shared ``lessons-environment/`` corpus via ``author_actor_benign`` (issue #298), not
-here. Commits carry ``Generation: N`` + ``Actor-Model:`` trailers.
-"""
 from __future__ import annotations
 
 import functools
 import sys
 from pathlib import Path
 
-# Put the workspace root on sys.path so `defender.*` namespace imports
-# resolve whether this file is imported or run directly (see tests/conftest.py).
 if (_root := str(Path(__file__).resolve().parents[4])) not in sys.path:
     sys.path.insert(0, _root)
 
@@ -37,13 +21,7 @@ from defender.learning.core.config import (
 )
 
 
-# All four model/wiring constants come from core.config (one source per env var,
-# no duplicated defaults — cf. #449). ACTOR_MODEL is the actor *stage* model the real
-# actor invocation reads (pipeline/malicious_actor/run.py); this curator only stamps
-# it into the Actor-Model: commit trailer as provenance, never as authoring input.
-# AUTHOR_ACTOR_* is the curator agent's own model/timeout/effort.
 
-# Re-exported for callers/tests that referenced the curator's fatal error type here.
 AuthorError = _curator.AuthorError
 
 
@@ -52,11 +30,6 @@ def invoke_agent(
     batch_id: str,
     cfg: _curator.CuratorConfig,
 ) -> dict:
-    """Spawn the actor curator agent. Returns the parsed AUTHOR_RESULT dict.
-
-    The actor corpus forward-checks its lessons through the in-process ``forward_check`` tool; the
-    actor check is bound onto the curator's deps here. The commit-trailer provenance is stamped by
-    the loop, not the agent, so nothing trailer-related goes in the prompt."""
     from defender.learning.author.verify_forward.checks import ACTOR_CHECK
 
     return _curator.invoke_curator_agent(
@@ -67,10 +40,6 @@ def invoke_agent(
 
 
 def build_actor_config(paths: LoopPaths = DEFAULT_PATHS) -> _curator.CuratorConfig:
-    """Build the actor-direction ``CuratorConfig`` from an injected ``LoopPaths``.
-
-    Constructed at call time (not import) so a test rooted at a tmp tree threads one
-    ``LoopPaths(repo_root=tmp)`` instead of monkeypatching module path globals."""
     return _curator.CuratorConfig(
         repo_root=paths.repo_root,
         pending_dir=paths.pending_dir,

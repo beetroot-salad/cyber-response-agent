@@ -1,11 +1,3 @@
-"""Benign actor stage — ops-teamer story generation (FP direction).
-
-``invoke_actor_benign`` reconstructs the authorized operation from the alert + the
-environment lessons it retrieves, optionally seeded with prior benign-and-survived
-closed cases on the same signature, and runs the actor IN-PROCESS via the shared
-PydanticAI engine (``pipeline/actor_engine``). The mirror of ``malicious_actor`` for the
-over-escalation hunt.
-"""
 from __future__ import annotations
 
 import json
@@ -30,37 +22,18 @@ def invoke_actor_benign(
     *,
     actor_fn=None,
 ) -> str:
-    """Benign (ops-teamer) actor for the FP direction.
-
-    Reconstructs the authorized operation from the alert + the environment lessons
-    it retrieves via ``lessons_env_retrieve.py``, keyed by ``case_entities`` +
-    ``alert_rule_key`` (both handed in so the actor uses the same deterministic
-    anchor the observation + forward-check use).
-
-    When the case-history store has them, an optional ``past_tickets`` seed menu —
-    prior benign-and-survived closed cases on this signature — is injected as variance
-    (the FP-direction analog of the adversarial actor's MITRE menu). Seeds are the
-    actor's *proposal* of a covering operation; the benign judge re-confirms each
-    against the actuals, so a contradicted seed just fails to survive. Sampled
-    offline and non-fatal: an empty pool (cold start / store unreachable) yields no
-    section and the actor grounds off the systems-of-record exactly as before.
-    """
     alert_text = alert_path.read_text(encoding="utf-8")
     user = (
         _section("alert", alert_text)
         + _section("alert_rule_id", alert_rule_key)
         + _section("case_entities", case_entities)
     )
-    # case_id == the runtime run-dir basename == the learning run dir name == the
-    # ticket key, so it's both the self-exclusion key and the reproducible sample seed.
     case_id = learning_run_dir.name
     seeds = ticket_seeds.sample_seeds(json.loads(alert_text), case_id, case_id)
     if seeds:
         menu_text = ticket_seeds.format_seeds(seeds)
         (learning_run_dir / "past_tickets.txt").write_text(menu_text + "\n", encoding="utf-8")
         user += _section("past_tickets", menu_text)
-    # DI seam that owns its default (CLAUDE.md conventions): the in-process actor engine in
-    # production; InProcessSubagents / tests pass an explicit actor_fn.
     from defender.learning.pipeline.actor_engine import _ActorScope, _run_actor_pydantic
     actor_fn = actor_fn if actor_fn is not None else _run_actor_pydantic  # lint-default: ok — DI seam owns its default; a signature default needs a module-top import that would defeat the lazy pydantic-ai import (subagents imports this module eagerly)
     return actor_fn(

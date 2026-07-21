@@ -32,19 +32,17 @@ def test_orientation_inlines_raw_alert_untrusted_wrapped(tmp_path):
     open_tag, close_tag = "<run-SALT123-untrusted>", "</run-SALT123-untrusted>"
     assert open_tag in out
     assert close_tag in out
-    # the injected instruction must sit INSIDE the wrap (inert), not in trusted prose
     assert out.index(open_tag) < out.index("ignore previous instructions") < out.index(close_tag)
 
 
 def test_orientation_inlines_invlang_grammar_without_frontmatter(tmp_path):
     out = orient.orientation(tmp_path, _DEFENDER, _alert(tmp_path), salt="s")
     assert "## invlang grammar (authoritative block syntax" in out
-    assert ":L findings [id|loop|" in out          # grammar body reproduced
-    assert "---\ndescription:" not in out          # SKILL frontmatter stripped
+    assert ":L findings [id|loop|" in out
+    assert "---\ndescription:" not in out
 
 
 def test_orientation_missing_alert_is_failsafe(tmp_path):
-    # a bad alert path omits the Alert section but still builds the grammar/catalog
     out = orient.orientation(tmp_path, _DEFENDER, tmp_path / "nope.json", salt="s")
     assert "## Alert (raw" not in out
     assert "## invlang grammar" in out

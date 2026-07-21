@@ -62,9 +62,6 @@ def _deps(tmp_path):
     return bind(MAIN_DEF, run, defender_dir=dfn), run
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# D6 + write-mode family (wm1-wm5) — both paths gate; edit re-validates full text
-# ═══════════════════════════════════════════════════════════════════════════
 
 def test_both_write_paths_gate(tmp_path):
     """D6 (parity) — BOTH write paths route their full resulting text through decide_write and
@@ -78,9 +75,8 @@ def test_both_write_paths_gate(tmp_path):
         runtime_tools._tool_write_file(deps, p, over)
     assert not (run / "report.md").exists(), "a denied write_file must not commit"
     with pytest.raises(ModelRetry):
-        runtime_tools._tool_edit_file(deps, p, "", over)  # create via edit
+        runtime_tools._tool_edit_file(deps, p, "", over)
     assert not (run / "report.md").exists(), "a denied edit_file must not commit"
-    # positive control: a valid report commits through both paths.
     runtime_tools._tool_write_file(deps, p, VALID_REPORT)
     assert (run / "report.md").read_text(encoding="utf-8") == VALID_REPORT
     runtime_tools._tool_edit_file(deps, p, "Concise analysis.", "Revised analysis.")
@@ -122,7 +118,6 @@ def test_report_edit_leaves_preexisting_malformed_frontmatter_untouched_by_the_e
     (run / "report.md").write_text("no frontmatter fence\nBODY-OLD marker\n", encoding="utf-8")
     with pytest.raises(ModelRetry):
         runtime_tools._tool_edit_file(deps, p, "BODY-OLD marker", "BODY-NEW marker")
-    # positive control: the same body edit on a valid report commits
     (run / "report.md").write_text("---\ndisposition: benign\n---\nBODY-OLD marker\n", encoding="utf-8")
     runtime_tools._tool_edit_file(deps, p, "BODY-OLD marker", "BODY-NEW marker")
     assert "BODY-NEW marker" in (run / "report.md").read_text(encoding="utf-8")
@@ -167,9 +162,6 @@ def test_denied_write_preserves_prior_disk_content(tmp_path):
     assert (run / "report.md").read_text(encoding="utf-8") == VALID_REPORT
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# investigation lifecycle (lc1-lc3) — full resulting text, per-call, size-gated
-# ═══════════════════════════════════════════════════════════════════════════
 
 def test_investigation_crosses_bound_mid_run(tmp_path):
     """lc1 — at turn K only that call's full resulting text is evaluated: an under-bound
@@ -207,16 +199,13 @@ def test_edit_file_splice_pulls_investigation_under_bound(tmp_path):
     p = str(run / "investigation.md")
     pad = "x" * (INV_BOUND + 5000)
     over = GOLDEN_INV.rstrip() + "\n" + pad + "\n"
-    (run / "investigation.md").write_text(over, encoding="utf-8")  # planted grandfathered, ungated
+    (run / "investigation.md").write_text(over, encoding="utf-8")
     runtime_tools._tool_edit_file(deps, p, "\n" + pad + "\n", "\n")
     shrunk = (run / "investigation.md").read_text(encoding="utf-8")
     assert len(shrunk.encode("utf-8")) <= INV_BOUND
     assert pad not in shrunk
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# D4 / D5 / lc6 — end-to-end through the replay driver
-# ═══════════════════════════════════════════════════════════════════════════
 
 def test_report_deny_bounces_then_recovers(tmp_path):
     """D4 — an over-bound report.md write is denied and the reason reaches the model as
@@ -239,11 +228,7 @@ def test_report_deny_bounces_then_recovers(tmp_path):
     drive(run_dir, run_id="rpt-recover", salt="1234123412341234", main=main)
 
     assert main.calls == 3
-    # The corrected content committed…
     assert (run_dir / "report.md").read_text(encoding="utf-8") == good
-    # …and the FIRST (over-bound) write was rejected, not committed: exactly one successful
-    # report write appears in the model's history (a denied write raises ModelRetry, emitting no
-    # `wrote` success). At HEAD both writes commit -> two successes -> this fails (the red).
     assert main.seen[-1].count("report.md (") == 1
 
 
@@ -281,7 +266,6 @@ def test_golden_ab_run_lifecycle_preserves_disposition(tmp_path):
     rp = str(run_dir / "report.md")
     anchor = GOLDEN_INV.rstrip()[-40:]
     main = ReplayFn([
-        # an incremental investigation build: initial write, then an append-edit, then the report
         Turn(tool_calls=[("write_file", {"path": ip, "content": GOLDEN_INV})]),
         Turn(tool_calls=[("edit_file", {"path": ip, "old_string": anchor,
                                         "new_string": anchor + "\n\nAddendum: no new leads.\n"})]),

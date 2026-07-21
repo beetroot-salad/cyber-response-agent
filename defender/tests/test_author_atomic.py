@@ -19,16 +19,11 @@ def test_agent_exception_leaves_queue_intact(tmp_repo, helpers, monkeypatch):
     cfg = replace(tmp_repo.cfg, invoke_agent=boom)
     rc = a.run_batch(cfg=cfg)
     assert rc == 2
-    # The finding is NOT lost on an agent failure — it survives in the queue, retryable. The
-    # dead-letter queue bumps its `attempts` counter (findings.jsonl gets the same batch-granular
-    # quarantine as the observation curators) but 1 < LEARNING_AUTHOR_MAX_ATTEMPTS, so it is NOT
-    # yet dead-lettered.
     rows = read_jsonl_rows(tmp_repo.paths.pending_file)
     assert {r["finding_id"] for r in rows} == {"run-K/0"}, "queue must survive agent failure"
     assert [r.get("attempts") for r in rows] == [1]
     assert not tmp_repo.paths.pending_file.with_suffix(".deadletter.jsonl").exists()
 
-    # Lock must have been released — a follow-up tick can run.
     fh = shared.acquire_flock(tmp_repo.cfg.lock_file)
     assert fh is not None
     shared.release_flock(fh)
@@ -40,7 +35,7 @@ def test_dlq_quarantines_poison_findings_batch(tmp_repo, helpers, monkeypatch):
     field): a poison findings batch that faults every tick quarantines to the ``deadletter.jsonl``
     sidecar after ``LEARNING_AUTHOR_MAX_ATTEMPTS`` instead of retrying forever and wedging the
     ``defender/lessons/`` queue."""
-    monkeypatch.setenv("LEARNING_AUTHOR_MAX_ATTEMPTS", "3")  # (= the default; documents the budget)
+    monkeypatch.setenv("LEARNING_AUTHOR_MAX_ATTEMPTS", "3")
     a = tmp_repo.author
     helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-P", "benign")
     helpers.write_finding(tmp_repo.paths.pending_file, finding_id="run-P/0", run_id="run-P")
@@ -49,10 +44,9 @@ def test_dlq_quarantines_poison_findings_batch(tmp_repo, helpers, monkeypatch):
         raise a.AuthorError("simulated per-run authoring fault")
 
     fault_cfg = replace(tmp_repo.cfg, invoke_agent=boom)
-    for _ in range(3):  # tick 1→attempts 1, tick 2→2, tick 3 reaches the budget
+    for _ in range(3):
         assert a.run_batch(cfg=fault_cfg) == 2
 
-    # Gone from the active queue, moved to the deadletter sidecar carrying its attempt count + reason.
     assert read_jsonl_rows(tmp_repo.paths.pending_file) == []
     dead = read_jsonl_rows(tmp_repo.paths.pending_file.with_suffix(".deadletter.jsonl"))
     assert {r["finding_id"] for r in dead} == {"run-P/0"}
@@ -72,7 +66,6 @@ def test_idempotent_retry_after_partial_failure(tmp_repo, helpers, monkeypatch):
         state["calls"] += 1
         if state["calls"] == 1:
             raise a.AuthorError("commit failed")
-        # Second call: succeed. Write the lesson, run NO git (the loop commits).
         body = (
             "---\n"
             "name: lessonR\n"
@@ -87,10 +80,8 @@ def test_idempotent_retry_after_partial_failure(tmp_repo, helpers, monkeypatch):
                 "commit_message": "lessonR"}
 
     cfg = replace(tmp_repo.cfg, invoke_agent=maybe_fail)
-    assert a.run_batch(cfg=cfg) == 2  # first tick fails
-    # Findings still queued.
+    assert a.run_batch(cfg=cfg) == 2
     assert "run-R/0" in tmp_repo.paths.pending_file.read_text()
-    # Second tick succeeds.
     assert a.run_batch(cfg=cfg) == 0
     assert tmp_repo.paths.pending_file.read_text().strip() == ""
 
@@ -123,7 +114,6 @@ def test_hold_committed_keeps_findings_queued_until_corpus_covers_them(
     cfg = replace(
         tmp_repo.cfg, invoke_agent=_commit_lesson(tmp_repo, a, name="lessonH", fid="run-H/0")
     )
-    # Tick 1: lesson committed, finding held (not consumed), stamp stripped.
     assert a.run_batch(hold_committed=True, cfg=cfg) == 0
     assert "run-H/0" in tmp_repo.paths.pending_file.read_text()
     consumed = tmp_repo.cfg.consumed_file.read_text() if tmp_repo.cfg.consumed_file.exists() else ""
@@ -131,8 +121,6 @@ def test_hold_committed_keeps_findings_queued_until_corpus_covers_them(
     held_row = json.loads(tmp_repo.paths.pending_file.read_text().splitlines()[0])
     assert "consumed_category" not in held_row
 
-    # Tick 2: lesson now covers the finding → consumed_idempotent → rotates out,
-    # and the agent is never re-invoked on an already-covered finding.
     def must_not_author(findings, batch_id, cfg):
         raise AssertionError("re-authored an already-covered finding")
 
@@ -151,6 +139,6 @@ def test_default_rotate_consumes_committed_immediately(tmp_repo, helpers, monkey
     cfg = replace(
         tmp_repo.cfg, invoke_agent=_commit_lesson(tmp_repo, a, name="lessonD", fid="run-D/0")
     )
-    assert a.run_batch(cfg=cfg) == 0  # hold_committed defaults False
+    assert a.run_batch(cfg=cfg) == 0
     assert tmp_repo.paths.pending_file.read_text().strip() == ""
     assert "run-D/0" in tmp_repo.cfg.consumed_file.read_text()

@@ -120,7 +120,6 @@ def refusal_stem() -> str:
     return stem
 
 
-# --- demand #0: the return contract -----------------------------------------
 
 def test_budget_trip_returns_summary_and_writes_trace(tmp_path, enforced):
     """When a cap trips with enforcement on, run_investigation returns its normal
@@ -136,8 +135,8 @@ def test_budget_trip_returns_summary_and_writes_trace(tmp_path, enforced):
     absence of."""
     run_dir = materialize(tmp_path, GOLDEN)
     replay = ReplayFn([
-        Turn(tool_calls=[("bash", {"command": "echo hi"})]),      # executes, trips
-        Turn(tool_calls=[("bash", {"command": "echo again"})]),   # refused (observed)
+        Turn(tool_calls=[("bash", {"command": "echo hi"})]),
+        Turn(tool_calls=[("bash", {"command": "echo again"})]),
         Turn(text="Investigation complete."),
     ])
     summary = drive(run_dir, run_id="trip", salt=SALT, main=replay,
@@ -160,9 +159,6 @@ def test_a_budget_killed_run_carries_truncated_by_budget(tmp_path, enforced):
     pipeline can see that enforcement stopped the run rather than the defender
     concluding, and does not score a truncated investigation as a complete one."""
     run_dir = materialize(tmp_path, GOLDEN)
-    # Deterministic kill via the COUNT limb: the first read_file trips at cap 1, then
-    # tail-tier read_files advance the count to N + TAIL_ALLOWANCE and the run is
-    # killed — no dependence on whether N replayed turns consume a wall second.
     summary = drive(run_dir, run_id="trunc", salt=SALT,
                     main=ReplayFn(tail_turns(run_dir, 15)),
                     limits=caps(max_tool_calls=1, wall_clock_timeout=3600,
@@ -170,7 +166,6 @@ def test_a_budget_killed_run_carries_truncated_by_budget(tmp_path, enforced):
     assert summary["truncated_by"] == "budget"
     assert summary["output"] is None, "the kill ended the run before an End node"
 
-    # The control on the same address: a run that ends on its own carries no mark.
     clean_dir = materialize(tmp_path / "clean", GOLDEN)
     clean = drive(clean_dir, run_id="clean", salt=SALT,
                   main=ReplayFn([Turn(text="Investigation complete.")]),
@@ -191,8 +186,6 @@ def test_only_the_budget_kill_marks_truncated_by_budget(tmp_path, enforced):
     from defender.tests.e2e._replay_harness import NeverEndsModel
 
     run_dir = materialize(tmp_path, GOLDEN)
-    # NeverEndsModel drives an allowed read_file forever, so the loop runs into its
-    # request limit rather than any budget cap (default caps, far from tripping).
     summary = drive(run_dir, run_id="reqlimit", salt=SALT,
                     main=NeverEndsModel(run_dir), limits=caps())
     assert summary["truncated_by"] is None, (
@@ -219,9 +212,6 @@ def test_budget_kill_writes_partial_trace(tmp_path, enforced):
     raise the group past its caller — this test would then fail LOUDLY at that raise,
     which is exactly the guard P6 bought."""
     run_dir = materialize(tmp_path, GOLDEN)
-    # One turn carrying many parallel tail-tier calls, so the kill becomes eligible for
-    # several concurrently-committing callers at once (P6's shape). The count limb makes
-    # exhaustion deterministic — no wall-clock race (blind reader R25).
     burst = [Turn(tool_calls=[("read_file", {"path": str(run_dir / "alert.json")})] * 15)]
     summary = drive(run_dir, run_id="kill", salt=SALT, main=ReplayFn(burst),
                     limits=caps(max_tool_calls=1, wall_clock_timeout=3600,
@@ -297,8 +287,6 @@ def test_budget_kill_and_breaker_kill_are_independent(tmp_path, enforced):
     the run with the budget's counters intact and no truncated_by mark."""
     from defender.runtime import circuit_breaker
 
-    # Budget first: the breaker has failures recorded but is not tripped. Deterministic
-    # count-limb kill (blind reader R25), not a wall-clock race.
     run_dir = materialize(tmp_path, GOLDEN)
     circuit_breaker.record_outcome(run_dir, "elastic", 2)
     before = json.loads((run_dir / "circuit_breaker.json").read_text())
@@ -311,10 +299,6 @@ def test_budget_kill_and_breaker_kill_are_independent(tmp_path, enforced):
         "the budget kill reached into the breaker's state"
     )
 
-    # Breaker first: the budget is nowhere near a cap. The breaker MUST be shown to have
-    # fired (blind reader R30) — otherwise a ConnectionError silently swallowed with no
-    # breaker in the tree would pass both assertions. A failing verb drives real
-    # record_outcome calls, so circuit_breaker.json carries a nonzero failure count.
     other = materialize(tmp_path / "brk", GOLDEN)
     verbs = FakeVerbs({"elastic": {"esql": _dead_verb()}})
     gather = ReplayFn([Turn(tool_calls=[("query", {
@@ -331,7 +315,7 @@ def test_budget_kill_and_breaker_kill_are_independent(tmp_path, enforced):
     assert budget(other)["tool_calls"] < DEFAULT_LIMITS["max_tool_calls"]
     breaker_state = json.loads((other / "circuit_breaker.json").read_text())
     assert breaker_state, "the breaker never engaged, so arm 2 controls nothing"
-    assert circuit_breaker.record_outcome  # the abort authority is real, not stubbed
+    assert circuit_breaker.record_outcome
 
 
 def _dead_verb():
@@ -340,7 +324,6 @@ def _dead_verb():
     return esql
 
 
-# --- the trip seam ----------------------------------------------------------
 
 def test_stopped_tool_is_refused_not_withdrawn(tmp_path, enforced):
     """After a cap trips, the budget-stopped tool is STILL OFFERED to the model, and
@@ -361,8 +344,8 @@ def test_stopped_tool_is_refused_not_withdrawn(tmp_path, enforced):
     never fires for a tool the framework has already rejected)."""
     run_dir = materialize(tmp_path, GOLDEN)
     replay = ReplayFn([
-        Turn(tool_calls=[("bash", {"command": "echo hi"})]),      # lands, trips the cap
-        Turn(tool_calls=[("bash", {"command": "echo again"})]),   # refused
+        Turn(tool_calls=[("bash", {"command": "echo hi"})]),
+        Turn(tool_calls=[("bash", {"command": "echo again"})]),
         Turn(text="Acknowledged."),
     ])
     drive(run_dir, run_id="refuse", salt=SALT, main=replay,
@@ -373,9 +356,6 @@ def test_stopped_tool_is_refused_not_withdrawn(tmp_path, enforced):
     assert "Unknown tool name" not in history, (
         "the tool was WITHDRAWN rather than refused — X6's refuted mechanism"
     )
-    # The refused call's handler never ran, so the pool did not advance past the cap:
-    # the count is the observable that the body was short-circuited (blind reader R7
-    # retired the dead `sentinel.txt` assertion — nothing wrote it under shell=False).
     assert budget(run_dir)["tool_calls"] == 1, (
         "the refused call's handler ran — the seam did not short-circuit"
     )
@@ -406,10 +386,6 @@ def test_repeated_reissue_accumulates_no_retries(tmp_path, enforced):
     except UnexpectedModelBehavior as e:  # pragma: no cover - the failure this pins
         pytest.fail(f"25 consecutive re-issues accumulated retries: {e}")
 
-    # The mechanism must be PRESENT (blind reader R31): without a refusal assertion this
-    # test is green against a run with no enforcement at all, where 26 bash calls just
-    # execute. Pin that the tool WAS stopped (a refusal was delivered) and that the
-    # refusals did not spend the pool past the cap.
     assert refusal_stem() in "\n".join(replay.seen), (
         "no refusal was ever delivered — the tool was not budget-stopped at all"
     )
@@ -446,18 +422,14 @@ def test_refusal_message_content(tmp_path, enforced):
     drive(run_dir, run_id="msg", salt=SALT, main=replay,
           limits=caps(max_tool_calls=1, wall_clock_timeout=3600, grace_seconds=600))
 
-    # (1) CONTENT — the constant the seam sends must itself carry the three concepts.
     constant = BUDGET_REFUSAL_MESSAGE.lower()
     assert "permanent" in constant, "the message does not state the stop is permanent"
     assert "report" in constant, "the message does not tell the model to write its report"
     assert re.search(r"still (available|allowed)|remain", constant), (
         "the message does not say what remains available"
     )
-    # It must carry at least one interpolated field, so a reader is told WHICH tool /
-    # limb / how much tail is left rather than a fixed banner (blind reader R27).
     assert "{" in BUDGET_REFUSAL_MESSAGE, "the refusal message interpolates nothing"
 
-    # (2) DELIVERY — every one of the six refusals put the message into the history.
     final = replay.seen[-1]
     stem = refusal_stem()
     assert final.count(stem) >= 6, (
@@ -491,15 +463,8 @@ def test_refused_call_does_not_increment_tool_calls(tmp_path, enforced, capsys):
           limits=caps(max_tool_calls=1, wall_clock_timeout=3600, grace_seconds=600))
     err = capsys.readouterr().err
 
-    # A refusal was actually delivered — so "no warnings" is silence DURING a real
-    # refusal loop, not silence because nothing was refused (blind reader R20).
     assert refusal_stem() in "\n".join(replay.seen), "no refusal was delivered at all"
     assert budget(run_dir)["tool_calls"] == 1, "a refusal spent the tail band"
-    # EXACTLY one "Budget exceeded" — the single line the ONE executed over-cap call
-    # legitimately emits — and no more. NF2 (blind reader R7): the assertion is silence
-    # ACROSS the refusal loop, so `== 1` catches the fail-open where check_budgets is
-    # re-run on every one of the 20 refusals (P2: it re-emits byte-identical text five
-    # for five), while `>= 1` would also catch a warning subsystem deleted to zero.
     assert err.count("Budget exceeded") == 1, (
         f"the refusal loop re-emitted the exceeded line {err.count('Budget exceeded')}× — "
         "check_budgets was called on refusals (NF2 says the refusal path must not)"
@@ -534,7 +499,6 @@ def test_a_refused_call_writes_an_explicit_refusal_record(tmp_path, enforced):
     assert refusals[0].get("agent_id") == "main"
 
 
-# --- the tail band ----------------------------------------------------------
 
 def test_replay_run_crosses_budget_and_still_reports(tmp_path, enforced):
     """The hermetic replay suite drives a full run with INJECTED LOW LIMITS until a
@@ -553,7 +517,7 @@ def test_replay_run_crosses_budget_and_still_reports(tmp_path, enforced):
     replay = ReplayFn([
         Turn(tool_calls=[("bash", {"command": "echo one"})]),
         Turn(tool_calls=[("bash", {"command": "echo two"})]),
-        Turn(tool_calls=[("bash", {"command": "echo three"})]),   # refused
+        Turn(tool_calls=[("bash", {"command": "echo three"})]),
         Turn(tool_calls=[("write_file", {"path": str(report),
                                          "content": report_text()})]),
         Turn(text="Investigation complete."),
@@ -595,7 +559,6 @@ def test_each_trip_limb_opens_the_same_bounded_report_tail(tmp_path, enforced):
 
     stem = refusal_stem()
 
-    # COUNT limb.
     history, rep = one_limb("count", caps(max_tool_calls=1, wall_clock_timeout=3600,
                                           grace_seconds=600),
                             [Turn(tool_calls=[("bash", {"command": "echo a"})]),
@@ -603,7 +566,6 @@ def test_each_trip_limb_opens_the_same_bounded_report_tail(tmp_path, enforced):
     assert stem in history
     assert rep.is_file()
 
-    # SPAWN limb — the arm that had no demand before, driven against the live counter.
     gathers = [Turn(tool_calls=[("gather", {"lead_id": f"l-00{i}", "system": "elastic",
                                             "goal": "g", "what_to_summarize": ["w"]})])
                for i in (1, 2)]
@@ -613,7 +575,6 @@ def test_each_trip_limb_opens_the_same_bounded_report_tail(tmp_path, enforced):
     assert stem in history, "crossing the spawn cap produced no observable refusal"
     assert rep.is_file(), "the spawn limb denied MAIN its report tail"
 
-    # CLOCK limb — refusals never advance the count, so this is the only limb left.
     history, rep = one_limb("clock", caps(max_tool_calls=500, wall_clock_timeout=0,
                                           grace_seconds=600),
                             [Turn(tool_calls=[("bash", {"command": "echo a"})])])
@@ -632,10 +593,6 @@ def test_kill_lands_between_two_report_writes(tmp_path, enforced):
     inv = run_dir / "investigation.md"
     inv_text = (GOLDEN / "investigation.md").read_text()
 
-    # Both writes are tail-tier, so they LAND inside the tail band; the count limb then
-    # exhausts deterministically as tail-tier read_files advance the count to
-    # N + TAIL_ALLOWANCE — no `wall_clock_timeout=2`-against-machine-speed race
-    # (blind reader R25 named this the most fragile of the timing bloc).
     replay = ReplayFn([
         Turn(tool_calls=[("write_file", {"path": str(inv), "content": inv_text})]),
         Turn(tool_calls=[("write_file", {"path": str(part_one),
@@ -653,7 +610,6 @@ def test_kill_lands_between_two_report_writes(tmp_path, enforced):
     assert (run_dir / "tool_trace.jsonl").is_file()
 
 
-# --- one pool, and what does and does not spend it ---------------------------
 
 def test_main_and_gather_share_one_budget(tmp_path, unenforced):
     """MAIN and every GATHER subagent increment the ONE budget.json keyed by run dir,
@@ -781,9 +737,6 @@ def test_refused_gather_and_the_spawn_counter(tmp_path, enforced):
     assert (run_dir / "gather_raw" / "l-001.lead.json").exists(), (
         "the admitted gather did not claim its lead id"
     )
-    # l-002 is the FIRST refused gather — the off-by-one case an implementation that
-    # claims the id and THEN refuses would get wrong (blind reader R33). l-003 confirms
-    # the refusal is standing, not a one-off.
     assert not (run_dir / "gather_raw" / "l-002.lead.json").exists(), (
         "the first refused gather claimed a lead id"
     )
@@ -838,7 +791,6 @@ def test_subagent_dispatched_into_an_already_stopped_pool(tmp_path, enforced):
     )
 
 
-# --- capability ordering: the phantom row -----------------------------------
 
 def test_stopped_query_writes_no_row(tmp_path, enforced):
     """A query stopped by the budget writes NO row into the queries table —
@@ -874,10 +826,10 @@ def test_stopped_query_writes_no_row(tmp_path, enforced):
     gather = ReplayFn([
         Turn(tool_calls=[("query", {"system": "elastic", "verb": "esql",
                                     "params": {"index": "logs"},
-                                    "query_id": "elastic.probe"})]),      # executes, trips
+                                    "query_id": "elastic.probe"})]),
         Turn(tool_calls=[("query", {"system": "elastic", "verb": "esql",
                                     "params": {"index": "logs2"},
-                                    "query_id": "elastic.probe2"})]),     # refused
+                                    "query_id": "elastic.probe2"})]),
         Turn(text="done"),
     ])
     drive(run_dir, run_id="phantom", salt=SALT,
@@ -896,8 +848,6 @@ def test_stopped_query_writes_no_row(tmp_path, enforced):
     assert len(rows) == 1, (
         f"the stopped query wrote a phantom row — {len(rows)} rows for 1 executed query"
     )
-    # The stopped query, though preempted before QueryCapture, is still legible: it
-    # mints its own budget_refusal record (pairs with refusal_writes_its_own_record).
     refusals = [r for r in read_jsonl_rows(run_dir / "llm_requests.jsonl")
                 if r.get("kind") == "budget_refusal" and r.get("tool_name") == "query"]
     assert refusals, "the stopped query reached the seam but left no record at all"
@@ -936,7 +886,6 @@ def test_executed_query_writes_a_row(tmp_path, unenforced):
     assert recorder.only().params == {"index": "logs"}
 
 
-# --- GATHER's own boundary ---------------------------------------------------
 
 def test_gather_abort_becomes_measurement_string(tmp_path, enforced):
     """A gather subagent that runs into its own request limit is converted to the
@@ -957,7 +906,6 @@ def test_gather_abort_becomes_measurement_string(tmp_path, enforced):
                                              "params": {"index": "logs"},
                                              "query_id": "elastic.probe"})])
 
-    # ARM A — the subagent never stops and hits its own request limit.
     run_dir = materialize(tmp_path / "limit", GOLDEN)
     main = ReplayFn([
         Turn(tool_calls=[("gather", {"lead_id": "l-001", "system": "elastic",
@@ -969,11 +917,6 @@ def test_gather_abort_becomes_measurement_string(tmp_path, enforced):
     assert "hit its request limit" in "\n".join(main.seen)
     assert "Treat this lead as incomplete" in "\n".join(main.seen)
 
-    # ARM B — a budget refusal inside GATHER: an ordinary tool result, so the subagent
-    # keeps working and MAIN reads its OWN degraded summary, not the measurement string.
-    # The subagent must genuinely run (blind reader R8): cap 1 admits the dispatch and
-    # the subagent's FIRST query, then trips, so its SECOND query is refused as a
-    # ToolReturnPart and it narrates its own "PARTIAL SUMMARY: refused" — the P1 shape.
     other = materialize(tmp_path / "refused", GOLDEN)
     main_b = ReplayFn([
         Turn(tool_calls=[("gather", {"lead_id": "l-001", "system": "elastic",
@@ -981,10 +924,10 @@ def test_gather_abort_becomes_measurement_string(tmp_path, enforced):
         Turn(text="done"),
     ])
     gather_b = ReplayFn([
-        query_turn,                                                    # executes, trips
+        query_turn,
         Turn(tool_calls=[("query", {"system": "elastic", "verb": "esql",
                                     "params": {"index": "logs2"},
-                                    "query_id": "elastic.probe2"})]),  # refused
+                                    "query_id": "elastic.probe2"})]),
         Turn(text="PARTIAL SUMMARY: refused"),
     ])
     drive(other, run_id="gref", salt=SALT, main=main_b, gather=gather_b, verbs=verbs,

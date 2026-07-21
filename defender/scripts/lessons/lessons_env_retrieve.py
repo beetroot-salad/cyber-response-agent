@@ -1,20 +1,9 @@
 #!/usr/bin/env python3
-"""Retrieve environment lessons relevant to a case, by classification.
-
-Discovery primitive for the benign (ops-teamer) actor — see ``--help`` for
-the retrieval model, when/how to use it, and examples.
-
-A plain corpus scan (NO PERSISTENT INDEX) — fine at the current scale;
-revisit (duckdb / a built index) when a per-call directory scan hurts.
-"""
 from __future__ import annotations
 
 import sys
 from pathlib import Path
 
-# Put the workspace root on sys.path so the `defender.*` namespace imports below
-# resolve whether this file is imported or run directly (sys.path[0] is this
-# script's dir, not the workspace root). Must precede the shared import.
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
@@ -29,8 +18,6 @@ from defender.scripts.lessons._lessons_common import (
     use_utf8_stdio,
 )
 
-# Re-exec into defender/.venv so PyYAML resolves regardless of which python the
-# caller used. Gated on __main__ so importing this module never execs away.
 if __name__ == "__main__":
     reexec_into_venv(__file__)
 
@@ -42,7 +29,6 @@ DEFAULT_CORPUS = REPO_ROOT / "defender" / "lessons-environment"
 
 
 def _parse_case_entities(value: str | None) -> list[tuple[str, str]]:
-    """`identity:service-account/known-corp,socket:ssh` → [(type, class), ...]."""
     out: list[tuple[str, str]] = []
     for tok in (value or "").split(","):
         tok = tok.strip()
@@ -78,18 +64,10 @@ def _lesson_applies(
     entities_provided: bool,
     want_rule_ids: set[str],
 ) -> bool:
-    # Entity selectors are enforced only when the caller supplies case
-    # entities; otherwise this axis is unfiltered (whole-corpus listing).
     if entities_provided:
         for selector in as_list(fm.get("entities")):
             if not _selector_satisfied(selector, case_entities):
                 return False
-    # Rule-anchored retrieval: a lesson must declare a matching anchor. Every
-    # environment lesson is required to carry a non-empty alert_rule_ids (the
-    # template + observation enforce it); a lesson with an empty/disjoint anchor
-    # is malformed and matches NOTHING here, rather than matching everything —
-    # otherwise an unanchored lesson would surface for every unrelated alert
-    # rule. (Whole-corpus listing passes no rule ids and is unfiltered.)
     if want_rule_ids:
         lesson_rules = as_str_set(fm.get("alert_rule_ids"))
         if not lesson_rules or lesson_rules.isdisjoint(want_rule_ids):
@@ -145,7 +123,7 @@ examples:
 
 
 def main(argv: list[str]) -> int:
-    use_utf8_stdio()  # lessons carry non-ASCII; stdout must not decode under the ambient locale
+    use_utf8_stdio()
     ap = argparse.ArgumentParser(
         prog="lessons_env_retrieve.py",
         description=_HELP_DESCRIPTION,
@@ -173,7 +151,6 @@ def main(argv: list[str]) -> int:
             continue
         if not _lesson_applies(fm, case_entities, entities_provided, want_rule_ids):
             continue
-        # LLM-authored value in a TSV cell: the shared full-breaker flatten (#614).
         criteria = flatten_cell(str(fm.get("relevance_criteria") or "")).strip()
         rel = rel_to_repo(path, REPO_ROOT)
         print(f"{rel}\t{criteria}")

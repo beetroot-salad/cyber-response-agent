@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-pytest.importorskip("pydantic_ai")  # CI installs the runtime extra; skip otherwise
+pytest.importorskip("pydantic_ai")
 
 from pydantic_ai.models import override_allow_model_requests  # noqa: E402
 
@@ -50,7 +50,6 @@ def _src(tmp_path):
     return d
 
 
-# --- the transport returns the model's final text verbatim + writes its trace ----
 
 def test_run_verify_pydantic_returns_text_verbatim_and_writes_trace(tmp_path):
     src = _src(tmp_path)
@@ -60,16 +59,12 @@ def test_run_verify_pydantic_returns_text_verbatim_and_writes_trace(tmp_path):
             "vf.run-X.trace.jsonl", "verify:X", "predict this case", src,
             make_model=_fake_model(_replay(_VERDICT)),
         )
-    # verbatim — parsing is the caller's job (shared.parse_verdict), so the reasoning survives
     assert out == _VERDICT
     assert (src / "vf.run-X.trace.jsonl").is_file()
-    assert (src / "vf.run-X.trace.jsonl").read_text().strip()  # at least one request logged
+    assert (src / "vf.run-X.trace.jsonl").read_text().strip()
 
 
 def test_run_verify_pydantic_empty_output_is_unprocessable(tmp_path):
-    # A GLM reasoning model can burn its whole budget in the thinking channel and emit an EMPTY
-    # final text part; an empty verdict is never valid, so run_stage quarantines the run — which
-    # the CLI surfaces as a non-zero exit / batch ERROR, not a bogus GOOD/BAD.
     with override_allow_model_requests(False), pytest.raises(RunUnprocessable):
         _run_verify_pydantic(
             _prompt(tmp_path), config.VERIFIER_MODEL, config.VERIFIER_EFFORT,
@@ -78,21 +73,12 @@ def test_run_verify_pydantic_empty_output_is_unprocessable(tmp_path):
         )
 
 
-# --- the deny-all policy through the full gate -----------------------------------
 
 def test_verify_policy_denies_adapters_and_shell():
-    # #551: the standalone `_VERIFY_POLICY` constant retired; `bind(VERIFY_DEF)` compiles the
-    # same deny-all policy over VERIFY_DEF's empty ToolSet.
-    #
-    # #575: the `adapters` / `raw_reads` capability BITS are deleted — a declared bit could
-    # disagree with the lane enforcing it, so what an agent may do IS its grant list. For this
-    # pure-prediction stage an empty `bash_allow` subsumes both bits (the adapter capability is
-    # itself a routed Grant now), and the gate denials below are what prove it.
     pol = bind(VERIFY_DEF, Path("/tmp/verify-run")).policy
-    assert pol.bash_allow == ()          # no grants ⇒ no adapter route, no viewer, no opener
-    assert pol.read_allow == ()          # no `cat` grant ⇒ no read shapes either
+    assert pol.bash_allow == ()
+    assert pol.read_allow == ()
     assert pol.read_roots == ()
-    # a data-source adapter, an aggregation pipe, and arbitrary shell are all denied
     assert not permission.decide_bash("defender-elastic query x", policy=pol).allow
     assert not permission.decide_bash("defender-elastic query x | defender-sql 'SELECT 1'", policy=pol).allow
     assert not permission.decide_bash("cat /etc/passwd", policy=pol).allow
@@ -102,7 +88,6 @@ def test_verify_deps_role_is_verifier():
     assert VerifierDeps.role is AgentRole.VERIFIER
 
 
-# --- the agent is read-only (no writers) + GLM effort plumbing -------------------
 
 def test_verify_agent_is_read_only_no_writers():
     logger = observe.RequestLogger(Path("/tmp/does-not-need-to-exist-verify-tools.jsonl"))
@@ -113,16 +98,10 @@ def test_verify_agent_is_read_only_no_writers():
         )
     finally:
         logger.close()
-    # #538: the verifier is TOOL-FREE — VERIFY_DEF registers an empty ToolSet(), so there is no
-    # read_file to peek at the source run's source_refs.yaml answer key (nor any bash).
     assert list(agent._function_toolset.tools) == []
 
 
 def test_build_verify_agent_applies_glm_effort(monkeypatch):
-    # The GLM effort lever this migration ships (glm-5.2 @ the config default, `low`, to match the
-    # defender's MAIN effort): effort flows model → providers.build_for_effort →
-    # Fireworks extra_body.reasoning_effort. build_for_effort constructs a REAL OpenAIChatModel
-    # (needs a key at construction; a fake key keeps it hermetic — settings make no request).
     pytest.importorskip("pydantic_ai.models.openai")
     monkeypatch.setenv("FIREWORKS_API_KEY", "fw-test")
     logger = observe.RequestLogger(Path("/tmp/does-not-need-to-exist-verify-effort.jsonl"))
@@ -135,6 +114,3 @@ def test_build_verify_agent_applies_glm_effort(monkeypatch):
     assert agent.model_settings["extra_body"]["reasoning_effort"] == config.VERIFIER_EFFORT
 
 
-# --- forward_check: the CLI orchestration both forward.py + actor.py share -------
-# forward_check owns two DI seams (`source_key` / `run_verify`) that default to the real
-# collaborators, so these inject fakes rather than monkeypatching module globals.

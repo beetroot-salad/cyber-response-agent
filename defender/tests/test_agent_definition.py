@@ -38,7 +38,7 @@ from pathlib import Path
 
 import pytest
 
-pytest.importorskip("pydantic_ai")  # CI installs the runtime extra; skip otherwise
+pytest.importorskip("pydantic_ai")
 
 from pydantic_ai.exceptions import UsageLimitExceeded  # noqa: E402
 from pydantic_ai.messages import ModelResponse, TextPart  # noqa: E402
@@ -65,9 +65,6 @@ from defender.runtime.providers import BuiltModel  # noqa: E402
 from defender.tests._engine_helpers import fake_model as _fake_model  # noqa: E402
 from defender.runtime.tools import AgentDeps, GatherDeps  # noqa: E402
 
-# `build_registry` (the guarded collector) lives in the definition primitive layer alongside
-# AgentDefinition; the registry it feeds lives at `defender.agents` — OUT of `runtime/` (#575:
-# a registry enumerates agents, and `runtime/` is the library they are built on).
 from defender.runtime.agent_definition import (  # noqa: E402
     AgentDefinition,
     RunScope,
@@ -89,20 +86,14 @@ from defender.agents import (  # noqa: E402
     VERIFY_DEF,
 )
 
-# Real repo-relative script/confine paths — the actor's `_script_grant` does
-# `script.resolve().relative_to(REPO_ROOT)`, so synthetic paths outside the repo raise.
 _ENV_RETRIEVE = config.LESSONS_ENV_RETRIEVE_SCRIPT
 _ACTOR_INDEX = config.LESSONS_ACTOR_INDEX_SCRIPT
 _ACTOR_DIR = config.LESSONS_ACTOR_DIR
 _ENV_DIR = config.LESSONS_ENVIRONMENT_DIR
 
-# A minimal, well-formed per-lead oracle reply — the shape the run tests replay.
 _ORACLE_YAML = 'events:\n  - Computer: "FINANCE-DB"\n    EventID: 4624\n'
 
 
-# ============================================================================
-# Test machinery (mirrors test_harness_b_construction / test_oracle_pydantic_engine)
-# ============================================================================
 
 def _text_fn(text: str = "ok"):
     return lambda messages, info: ModelResponse(parts=[TextPart(content=text)])
@@ -150,9 +141,6 @@ def _glm_thunk() -> str:
     return "glm-5.2"
 
 
-# ToolSet() is frozen/immutable, so one shared module-level singleton is a safe default
-# (the endorsed `repo_root: Path = REPO_ROOT` shape — no in-body re-defaulting the lint
-# gate flags, and no call-in-argument-default the B008 gate flags).
 _EMPTY_TOOLSET = ToolSet()
 
 
@@ -177,8 +165,6 @@ def _scope_patterns(policy) -> list[str]:
     return [p.pattern for p in policy.read_allow]
 
 
-# RunScope() is frozen, so one shared module-level singleton is a safe default anchored
-# in the signature (satisfies both the unanchored-default and the B008 gates).
 _DEFAULT_SCOPE = RunScope()
 
 
@@ -189,9 +175,6 @@ def _compile(defn, run_dir, scope=_DEFAULT_SCOPE):
     return compile_policy(defn, resolve_roots(run_dir, defn.corpus_dirs, scope))
 
 
-# ============================================================================
-# Type / seam shapes — AgentDefinition, ToolSet
-# ============================================================================
 
 def test_agentdefinition_shape():
     """AgentDefinition is a frozen dataclass carrying role/model(thunk)/effort/tools/
@@ -200,12 +183,12 @@ def test_agentdefinition_shape():
     defn = AgentDefinition(role=AgentRole.MAIN, model=lambda: "glm-5.2", effort="low")
     assert dataclasses.is_dataclass(defn)
     assert defn.role is AgentRole.MAIN
-    assert callable(defn.model)               # model is a zero-arg thunk
+    assert callable(defn.model)
     assert defn.model() == "glm-5.2"
     assert defn.effort == "low"
-    assert isinstance(defn.tools, ToolSet)     # defaults to ToolSet()
+    assert isinstance(defn.tools, ToolSet)
     assert defn.corpus_dirs == ()
-    assert defn.bash_shapes == ()              # the per-agent grant builders (#575)
+    assert defn.bash_shapes == ()
     assert defn.write_shapes == ()
     assert defn.deps_cls is None
     assert isinstance(defn.deny_reason, str)
@@ -246,16 +229,12 @@ def test_read_surface_is_the_cat_grants_scope(tmp_path):
                        "read_shapes")
     pol = compile_policy_for(MAIN_DEF, run_dir=tmp_path, defender_dir=PATHS.defender_dir)
     cat_scope = next(g.scope for g in pol.bash_allow if g.program == "cat")
-    assert pol.read_allow is cat_scope                 # the SAME object, not a copy
+    assert pol.read_allow is cat_scope
     assert pol.read_allow is read_allow_of(pol.bash_allow)
-    assert cat_scope                                    # non-empty — the identity is not vacuous
-    # negative control: no cat grant → no shape filter at all
+    assert cat_scope
     assert read_allow_of(_compile(_defn(role=AgentRole.ORACLE), tmp_path).bash_allow) == ()
 
 
-# ============================================================================
-# #0 return contract — bind dispatches on defn.role to the AgentDeps subtype
-# ============================================================================
 
 def test_bind_gather_isinstance_preserved(tmp_path):
     """bind(GATHER_DEF, run_dir) returns an object for which isinstance(x, GatherDeps) is
@@ -273,8 +252,8 @@ def test_bind_actor_read_confine(tmp_path):
     confine = (_ACTOR_DIR, _ENV_DIR)
     deps = bind(ACTOR_DEF, tmp_path, scope=RunScope(scripts=(_ENV_RETRIEVE, _ACTOR_INDEX), read_confine=confine))
     assert isinstance(deps, ActorDeps)
-    assert deps.policy.read_confine == confine     # non-empty confine carried verbatim
-    assert deps.policy.read_confine != ()          # the gray-box wall is set
+    assert deps.policy.read_confine == confine
+    assert deps.policy.read_confine != ()
 
 
 def test_bind_gather_lead_id_channel(tmp_path):
@@ -284,21 +263,12 @@ def test_bind_gather_lead_id_channel(tmp_path):
     params = set(inspect.signature(bind).parameters)
     assert "lead_id" not in params
     assert "query_id" not in params
-    # #551 supersedes the #545 `repo_root` seam: bind carries the `salt` (decision 1a, the carried
-    # untrusted-data trust token) + `defender_dir` (the unified tree the gate anchors on — the
-    # lead-author worktree threads through it, replacing the old `repo_root` kwarg). It still
-    # carries NO per-dispatch lead_id/query_id — those stay per-run-vs-per-dispatch separated,
-    # stamped by the wrapper post-bind.
     assert params == {"defn", "run_dir", "scope", "salt", "defender_dir", "box"}
-    # bind itself leaves the per-dispatch lead_id unset; the wrapper stamps it post-bind.
     deps = bind(GATHER_DEF, tmp_path)
     assert isinstance(deps, GatherDeps)
     assert getattr(deps, "lead_id", None) is None
 
 
-# ============================================================================
-# build_agent_core — exact tool registration derived from the ToolSet
-# ============================================================================
 
 def test_build_registers_exact_toolset(logger):
     """build_agent_core(defn) registers EXACTLY the present tools in defn.tools and nothing
@@ -350,7 +320,7 @@ def test_toolset_bash_presence_vs_permission(logger, tmp_path):
     could not be spelled apart). bash=False registers NO bash tool; bash=True DOES register it
     even when the def declares NO grants at all — and that agent's compiled policy then has an
     EMPTY bash_allow, i.e. it holds the tool and the gate denies every command."""
-    granted = _defn(tools=ToolSet(read=True, bash=True))            # tool present, nothing granted
+    granted = _defn(tools=ToolSet(read=True, bash=True))
     with override_allow_model_requests(False):
         none_agent = driver.build_agent_core(
             _defn(tools=ToolSet(read=True, bash=False)),
@@ -361,14 +331,11 @@ def test_toolset_bash_presence_vs_permission(logger, tmp_path):
             granted, deps_type=AgentDeps, instructions="x", logger=logger,
             agent_id="b", make_model=_fake_model(_text_fn()),
         )
-    assert "bash" not in list(none_agent._function_toolset.tools)   # False → unregistered
-    assert "bash" in list(bash_agent._function_toolset.tools)       # True  → registered
-    assert _compile(granted, tmp_path).bash_allow == ()             # …and granted nothing
+    assert "bash" not in list(none_agent._function_toolset.tools)
+    assert "bash" in list(bash_agent._function_toolset.tools)
+    assert _compile(granted, tmp_path).bash_allow == ()
 
 
-# ============================================================================
-# Tool-free predictors (negatives, each with a positive control)
-# ============================================================================
 
 def test_oracle_empty_toolset(logger):
     """build_agent_core(ORACLE_DEF) with tools=ToolSet() registers NOTHING: the tool list is
@@ -386,7 +353,7 @@ def test_oracle_empty_toolset(logger):
             agent_id="main", make_model=_fake_model(_text_fn()),
         )
     assert list(oracle._function_toolset.tools) == []
-    assert "read_file" in list(main._function_toolset.tools)   # positive control
+    assert "read_file" in list(main._function_toolset.tools)
 
 
 def test_verify_empty_toolset(logger):
@@ -403,7 +370,7 @@ def test_verify_empty_toolset(logger):
             agent_id="judge", make_model=_fake_model(_text_fn()),
         )
     assert list(verify._function_toolset.tools) == []
-    assert "read_file" in list(judge._function_toolset.tools)   # positive control
+    assert "read_file" in list(judge._function_toolset.tools)
 
 
 def test_oracle_no_escape_hatch(logger, tmp_path):
@@ -423,12 +390,9 @@ def test_oracle_no_escape_hatch(logger, tmp_path):
             agent_id="reader", make_model=_fake_model(_text_fn()),
         )
     assert "read_file" not in list(oracle._function_toolset.tools)
-    assert "read_file" in list(reader._function_toolset.tools)   # positive control
+    assert "read_file" in list(reader._function_toolset.tools)
 
 
-# ============================================================================
-# compile_policy — step-one characterization (decide_bash/decide_read UNCHANGED)
-# ============================================================================
 
 def test_compile_policy_emits_only_declared_grants(tmp_path):
     """SAFE-BY-CONSTRUCTION: compile_policy emits no capability the DEFINITION did not declare.
@@ -446,18 +410,18 @@ def test_compile_policy_emits_only_declared_grants(tmp_path):
     (`tests/e2e/test_query_tool_611.py`), not here. This test's surviving claim is that main and
     gather both project a PLAIN-only bash lane and nothing infers a route."""
     no_bash = _compile(_defn(role=AgentRole.MAIN, tools=ToolSet(read=True)), tmp_path)
-    assert no_bash.bash_allow == ()          # no builders → no grants
-    assert no_bash.read_allow == ()          # …and hence no cat scope → no read shapes
+    assert no_bash.bash_allow == ()
+    assert no_bash.read_allow == ()
 
     def _routes(policy) -> set[Route]:
         return {g.route for g in policy.bash_allow}
 
     main = _compile(MAIN_DEF, tmp_path)
     gather = _compile(GATHER_DEF, tmp_path)
-    assert _routes(main) == {Route.PLAIN}                    # main: no adapter address at all
-    assert _routes(gather) == {Route.PLAIN}                  # gather too — the adapter route is gone
-    assert list(Route) == [Route.PLAIN]                      # the enum carries no capture route
-    assert gather.bash_allow                                 # gather still has a (plain) reader lane
+    assert _routes(main) == {Route.PLAIN}
+    assert _routes(gather) == {Route.PLAIN}
+    assert list(Route) == [Route.PLAIN]
+    assert gather.bash_allow
     assert all(isinstance(g, Grant) for g in gather.bash_allow)
 
 
@@ -471,34 +435,25 @@ def test_gate_bash_parity_read_convergent(tmp_path):
     dfn = PATHS.defender_dir
     bound = bind(MAIN_DEF, tmp_path).policy
     authored = compile_policy_for(MAIN_DEF, run_dir=tmp_path, defender_dir=dfn)
-    # BASH: bind reproduces compile_policy_for's allowlist exactly (they are the same policy now).
     for cmd in (
-        f"cat {tmp_path}/investigation.md",       # anchored viewer under run_dir
-        "defender-elastic query x",         # a data-source adapter (main may not)
-        "rm -rf /tmp/x",                           # arbitrary shell
+        f"cat {tmp_path}/investigation.md",
+        "defender-elastic query x",
+        "rm -rf /tmp/x",
     ):
         assert (
             permission.decide_bash(cmd, policy=bound, run_dir=tmp_path, defender_dir=dfn).allow
             == permission.decide_bash(cmd, policy=authored, run_dir=tmp_path, defender_dir=dfn).allow
         )
-    # READ: the run-dir + out-of-roots probes agree (the scope admits the run-dir branch; both
-    # deny outside the roots) …
     for p in (tmp_path / "alert.json", tmp_path.parent / "outside.txt"):
         assert (
             permission.decide_read(p, run_dir=tmp_path, defender_dir=dfn, policy=bound).allow
             == permission.decide_read(p, run_dir=tmp_path, defender_dir=dfn, policy=authored).allow
         )
-    # … and so does a corpus file that is NOT a tight corpus `.md` (SKILL.md sits directly under
-    # defender_dir, outside lessons/skills/examples): the path-shape filter now on BOTH
-    # (compile_policy_for carries it) DENIES it, in parity with the bash cat lane. No divergence.
     skill_md = dfn / "SKILL.md"
     assert not permission.decide_read(skill_md, run_dir=tmp_path, defender_dir=dfn, policy=bound).allow
     assert not permission.decide_read(skill_md, run_dir=tmp_path, defender_dir=dfn, policy=authored).allow
 
 
-# ============================================================================
-# resolve_roots — per-run, corpus resolution, no cross-run bleed
-# ============================================================================
 
 def test_resolve_roots_per_run_no_bleed(tmp_path):
     """resolve_roots(run_A, …) then resolve_roots(run_B, …) yield run-anchored roots with NO
@@ -513,23 +468,20 @@ def test_resolve_roots_per_run_no_bleed(tmp_path):
     pb = compile_policy(MAIN_DEF, resolve_roots(run_b, MAIN_DEF.corpus_dirs, RunScope()))
     na, nb = re.escape(str(run_a)), re.escape(str(run_b))
     pats_a, pats_b = _scope_patterns(pa), _scope_patterns(pb)
-    assert any(na in p for p in pats_a)          # run_A anchored to itself
-    assert not any(na in p for p in pats_b)      # …and does NOT bleed into run_B's policy
-    assert any(nb in p for p in pats_b)          # run_B correctly anchored to itself
-    # the SHAPES carry no path at all now — containment lives in the scope, so a run dir must
-    # never appear in an argv pattern (the textual-containment model #575 deleted).
+    assert any(na in p for p in pats_a)
+    assert not any(na in p for p in pats_b)
+    assert any(nb in p for p in pats_b)
     assert not any(na in g.pattern.pattern for g in pa.bash_allow)
 
 
 def test_resolve_roots_corpus_resolution(tmp_path):
     """resolve_roots resolves corpus_dirs to absolutes under defender_dir; corpus_dirs=()
     yields only the run-derived roots (no corpus dirs added)."""
-    # spec-assumption: the resolved roots expose the corpus absolutes as `.corpus_roots`.
     roots = resolve_roots(tmp_path, ("lessons", "skills"), RunScope())
     assert all(c.is_absolute() for c in roots.corpus_roots)
     assert set(roots.corpus_roots) == {PATHS.defender_dir / "lessons", PATHS.defender_dir / "skills"}
     empty = resolve_roots(tmp_path, (), RunScope())
-    assert empty.corpus_roots == ()              # no corpus names -> no corpus dirs
+    assert empty.corpus_roots == ()
 
 
 def test_corpus_dirs_excludes_gather_summaries(tmp_path):
@@ -543,12 +495,9 @@ def test_corpus_dirs_excludes_gather_summaries(tmp_path):
         tmp_path / "gather_summaries" / "x.md",
         run_dir=tmp_path, defender_dir=PATHS.defender_dir, policy=pol,
     )
-    assert d.allow                               # readable via the run-root anchor, not corpus
+    assert d.allow
 
 
-# ============================================================================
-# AGENTS registry (R2) + duplicate-role guard
-# ============================================================================
 
 def test_agents_registry_covers_every_role():
     """AGENTS covers EXACTLY the AgentRole members (one AgentDefinition each, keyed on its own
@@ -558,7 +507,7 @@ def test_agents_registry_covers_every_role():
     definition fails here."""
     assert set(AGENTS.keys()) == set(AgentRole)
     assert len(AGENTS) == len(AgentRole)
-    assert AgentRole.LEAD_AUTHOR in AGENTS      # the #543 writer, brought into the AgentDefinition framework
+    assert AgentRole.LEAD_AUTHOR in AGENTS
     for role, d in AGENTS.items():
         assert isinstance(d, AgentDefinition)
         assert d.role is role
@@ -569,18 +518,13 @@ def test_agents_duplicate_role_raises():
     RAISES (vs the dict-comp's silent last-wins overwrite). POSITIVE CONTROL: the real, distinct
     defs build the registry successfully."""
     d1 = _defn(role=AgentRole.ORACLE)
-    d2 = _defn(role=AgentRole.ORACLE)            # same role — the collision
-    # spec-assumption: the duplicate-role error names the offending "role".
+    d2 = _defn(role=AgentRole.ORACLE)
     with pytest.raises(ValueError, match="role"):
         build_registry((d1, d2))
-    # positive control: the real, distinct defs collect cleanly
     reg = build_registry(tuple(AGENTS.values()))
     assert set(reg.keys()) == set(AgentRole)
 
 
-# ============================================================================
-# model thunk + effort (R4)
-# ============================================================================
 
 def test_model_thunk_liveness(monkeypatch):
     """AgentDefinition.model is a zero-arg thunk called at build time: setting DEFENDER_MODEL
@@ -590,7 +534,7 @@ def test_model_thunk_liveness(monkeypatch):
     before = MAIN_DEF.model()
     monkeypatch.setenv("DEFENDER_MODEL", "glm-sentinel-xyz")
     after = MAIN_DEF.model()
-    assert after == "glm-sentinel-xyz"           # re-read live from the env
+    assert after == "glm-sentinel-xyz"
     assert before != after
 
 
@@ -605,7 +549,7 @@ def test_model_via_env_channel(monkeypatch, logger):
             MAIN_DEF, deps_type=AgentDeps, instructions="x", logger=logger,
             agent_id="main", make_model=fake,
         )
-    assert calls[0][0] == "sentinel-model"       # the thunk fed the --model override to build
+    assert calls[0][0] == "sentinel-model"
 
 
 def test_effort_none_vs_None_distinct(monkeypatch, logger):
@@ -623,8 +567,8 @@ def test_effort_none_vs_None_distinct(monkeypatch, logger):
             _defn(role=AgentRole.ORACLE, model=lambda: "glm-5.2", effort="none", tools=ToolSet()),
             deps_type=OracleDeps, instructions="x", logger=logger, agent_id="o2",
         )
-    assert omit.model_settings is None                                          # None -> omit
-    assert disabled.model_settings["extra_body"]["reasoning_effort"] == "none"  # 'none' -> set
+    assert omit.model_settings is None
+    assert disabled.model_settings["extra_body"]["reasoning_effort"] == "none"
     assert omit.model_settings != disabled.model_settings
 
 
@@ -635,7 +579,6 @@ def test_effort_none_claude_crossing(monkeypatch, logger):
     CONTROL: effort='none' + a fireworks/glm model builds fine."""
     pytest.importorskip("pydantic_ai.models.anthropic")
     pytest.importorskip("pydantic_ai.models.openai")
-    # Fake keys keep both hermetic — the ValueError comes from settings_for_effort, not a call.
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
     monkeypatch.setenv("FIREWORKS_API_KEY", "fw-test")
     claude_defn = _defn(role=AgentRole.ORACLE, model=lambda: "claude-sonnet-4-6",
@@ -645,7 +588,6 @@ def test_effort_none_claude_crossing(monkeypatch, logger):
             claude_defn, deps_type=OracleDeps, instructions="x", logger=logger,
             agent_id="oracle", make_model=providers.build_for_effort,
         )
-    # positive control: effort='none' + glm builds fine (Fireworks reasoning DISABLED)
     with override_allow_model_requests(False):
         ok = driver.build_agent_core(
             _defn(role=AgentRole.ORACLE, model=lambda: "glm-5.2", effort="none", tools=ToolSet()),
@@ -661,7 +603,7 @@ def test_effort_live_on_toolfree(logger, tmp_path):
     effort-derived model_settings AND issues exactly one model request — effort is consumed at
     build regardless of the empty toolset (F-BUILD-ORDER: the model is built before, and
     independent of, tool registration)."""
-    settings = {"extra_body": {"reasoning_effort": "none"}}   # stands for the effort-derived settings
+    settings = {"extra_body": {"reasoning_effort": "none"}}
     fake, reqs = _counting_make_model(text=_ORACLE_YAML, settings=settings)
     defn = _defn(role=AgentRole.ORACLE, model=lambda: "glm-5.2", effort="none", tools=ToolSet(),
                  deps_cls=OracleDeps)
@@ -670,18 +612,15 @@ def test_effort_live_on_toolfree(logger, tmp_path):
             defn, deps_type=OracleDeps, instructions="x", logger=logger,
             agent_id="oracle", make_model=fake,
         )
-        assert list(agent._function_toolset.tools) == []   # empty toolset
-        assert agent.model_settings == settings            # effort-derived settings survive
-        assert reqs == []                                  # not yet run
+        assert list(agent._function_toolset.tools) == []
+        assert agent.model_settings == settings
+        assert reqs == []
         result = agent.run_sync("project this lead", deps=bind(defn, tmp_path),
                                 usage_limits=UsageLimits(request_limit=1))
-    assert result.output == _ORACLE_YAML                   # completes
-    assert len(reqs) == 1                                  # exactly one model request
+    assert result.output == _ORACLE_YAML
+    assert len(reqs) == 1
 
 
-# ============================================================================
-# Request limits (R4) + floor guard
-# ============================================================================
 
 def test_request_limit_one():
     """ORACLE_REQUEST_LIMIT == 1 and VERIFY_REQUEST_LIMIT == 1 (down from 6): no tool is
@@ -728,12 +667,9 @@ def test_request_limit_reject_below_one(logger, tmp_path):
                            usage_limits=UsageLimits(request_limit=0))
         result = agent.run_sync("project this lead", deps=deps,
                                 usage_limits=UsageLimits(request_limit=1))
-    assert result.output == _ORACLE_YAML   # positive control
+    assert result.output == _ORACLE_YAML
 
 
-# ============================================================================
-# R5 subtraction / survival
-# ============================================================================
 
 def test_agentspec_removed_migrated():
     """AgentSpec is removed: no residual construction site under defender/ (production + tests
@@ -743,7 +679,7 @@ def test_agentspec_removed_migrated():
     pydantic_ai ships its OWN unrelated `AgentSpec` (`pydantic_ai/agent/spec.py`), so scanning it
     would false-positive on CI (where `.venv` sits under `defender/`); it is not our source, the
     same reason `__pycache__` is skipped."""
-    needle = "AgentSpec" "("   # split so this test file itself never matches
+    needle = "AgentSpec" "("
     this = Path(__file__).resolve()
     hits = []
     for py in PATHS.defender_dir.rglob("*.py"):
@@ -765,20 +701,15 @@ def test_main_keeps_tools(logger):
     assert list(agent._function_toolset.tools) == ["bash", "read_file", "write_file", "edit_file"]
 
 
-# ============================================================================
-# Guard — corpus traversal on the confinement primitive
-# ============================================================================
 
 def test_guard_corpus_traversal(tmp_path):
     """GUARD: resolve_roots raises if a corpus_dirs entry contains '..' or is an absolute path
     (path-traversal defense on the confinement primitive). POSITIVE CONTROL: a clean relative
     name like 'lessons' resolves to a real absolute under defender_dir (not silently
     dropped/normalized)."""
-    # spec-assumption: the traversal error names the offending "corpus" entry.
     with pytest.raises(ValueError, match="corpus"):
-        resolve_roots(tmp_path, ("../evil",), RunScope())        # a '..' traversal
+        resolve_roots(tmp_path, ("../evil",), RunScope())
     with pytest.raises(ValueError, match="corpus"):
-        resolve_roots(tmp_path, ("/etc",), RunScope())           # an absolute path
-    # positive control: a clean relative name resolves under defender_dir
+        resolve_roots(tmp_path, ("/etc",), RunScope())
     roots = resolve_roots(tmp_path, ("lessons",), RunScope())
     assert roots.corpus_roots == (PATHS.defender_dir / "lessons",)

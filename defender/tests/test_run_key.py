@@ -47,8 +47,6 @@ def test_repo_root_env_used_when_no_explicit(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     repo.mkdir()
     (repo / ".env").write_text("ANTHROPIC_API_KEY=sk-ant-api03-repo\n")
-    # root/.env is the first non-explicit candidate, so this is deterministic
-    # regardless of any real .env on the host.
     key, src = run.resolve_first_party_key(root=repo)
     assert key == "sk-ant-api03-repo"
     assert src == repo / ".env"
@@ -56,10 +54,6 @@ def test_repo_root_env_used_when_no_explicit(tmp_path, monkeypatch):
 
 def test_resolver_returns_none_when_all_candidates_missing(tmp_path, monkeypatch):
     monkeypatch.delenv("DEFENDER_ENV_FILE", raising=False)
-    # Inject BOTH `.env` roots at an empty tmp dir so resolution is hermetic: with
-    # only `root` injected, the second candidate (`_main_repo_root()/.env`) still
-    # reads the real main checkout, where a developer's local `.env` would leak in
-    # and make this assertion fail.
     missing = tmp_path / "repo"
     key, src = run.resolve_first_party_key(root=missing, main_repo_root=missing)
     assert key is None

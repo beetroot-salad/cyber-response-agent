@@ -27,9 +27,6 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-# Put the workspace root on sys.path so the `defender.*` namespace imports below
-# resolve whether this file is imported or run directly (sys.path[0] is this
-# script's dir, not the workspace root). Must precede the shared import.
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
@@ -43,8 +40,6 @@ from defender.scripts.lessons._lessons_common import (
     use_utf8_stdio,
 )
 
-# Re-exec into defender/.venv so PyYAML resolves regardless of which python the
-# caller used. Gated on __main__ so importing this module never execs away.
 if __name__ == "__main__":
     reexec_into_venv(__file__)
 
@@ -56,7 +51,7 @@ LESSONS_ROOT = REPO_ROOT / "defender" / "lessons-actor"
 
 
 def main(argv: list[str]) -> int:
-    use_utf8_stdio()  # lessons carry non-ASCII; stdout must not decode under the ambient locale
+    use_utf8_stdio()
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--techniques", help="Comma-separated MITRE T-IDs; OR within the list")
     ap.add_argument("--alert-rule-ids", help="Comma-separated SIEM rule IDs; OR within the list")
@@ -74,16 +69,12 @@ def main(argv: list[str]) -> int:
 
     for lesson in iter_lessons(LESSONS_ROOT, warn_label=lambda p: rel_to_repo(p, REPO_ROOT)):
         path, fm = lesson.path, lesson.fm
-        # Stale filter (default hide; mutable=false lessons never have
-        # status=stale, so they pass through unconditionally).
         if not ns.include_stale and str(fm.get("status") or "live").strip() == "stale":
             continue
 
-        # Subject is the equivalence key — exact match only when filter set.
         if want_subject is not None and str(fm.get("subject") or "").strip() != want_subject:
             continue
 
-        # Multi-key filters: AND across, OR within.
         if want_techniques and as_str_set(fm.get("techniques")).isdisjoint(want_techniques):
             continue
         if want_rule_ids and as_str_set(fm.get("alert_rule_ids")).isdisjoint(want_rule_ids):
@@ -94,7 +85,6 @@ def main(argv: list[str]) -> int:
             continue
 
         criteria = fm.get("relevance_criteria") or ""
-        # LLM-authored value in a TSV cell: the shared full-breaker flatten (#614).
         criteria = flatten_cell(str(criteria)).strip()
         rel = rel_to_repo(path, REPO_ROOT)
         print(f"{rel}\t{criteria}")

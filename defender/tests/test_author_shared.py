@@ -24,17 +24,10 @@ import pytest
 from defender import _git  # type: ignore[import-not-found]
 from defender.learning.author import shared as shared  # type: ignore[import-not-found]
 
-# Reference ``shared.AuthorError`` live (not a module-level alias): a sibling test's
-# ``tmp_repo`` fixture reloads ``_author_shared``, which rebinds the class — a captured
-# alias would go stale and stop matching freshly-raised errors. In production nothing
-# reloads, so author.py / _author_curator.py / _author_shared all share one class.
 
 CORPUS_REL = "defender/lessons/"
 
 
-# ---------------------------------------------------------------------------
-# Fixture helpers — a fresh tmp repo, injected as repo_root (no monkeypatch).
-# ---------------------------------------------------------------------------
 
 
 def _repo(tmp_path: Path) -> Path:
@@ -75,16 +68,13 @@ def _status(repo: Path, path: str) -> str:
     ).stdout
 
 
-# ---------------------------------------------------------------------------
-# commit_corpus — pathspec-scoped commit, optional trailers, no-op, guard
-# ---------------------------------------------------------------------------
 
 
 def test_commit_corpus_commits_only_corpus(tmp_path):
     """The author path (no trailers): an uncommitted corpus edit is committed, the new sha
     returned, the working tree left clean, and no provenance trailer is stamped."""
     repo = _repo(tmp_path)
-    (_corpus(repo) / "x.md").write_text("hello\n")  # agent edit, uncommitted
+    (_corpus(repo) / "x.md").write_text("hello\n")
     sha = shared.commit_corpus(repo, _corpus(repo), "lesson batch")
     assert sha == shared.git_head_sha(repo)
     assert _head_files(repo) == ["defender/lessons/x.md"]
@@ -98,14 +88,13 @@ def test_commit_corpus_stages_only_corpus(tmp_path):
     bare index-global ``git commit`` would sweep it in; ``-- <corpus_dir>`` bounds it."""
     repo = _repo(tmp_path)
     (_corpus(repo) / "x.md").write_text("hello\n")
-    (repo / "stray.txt").write_text("stray\n")  # outside the corpus
+    (repo / "stray.txt").write_text("stray\n")
     subprocess.run(["git", "-C", str(repo), "add", "stray.txt"], check=True)
 
     shared.commit_corpus(repo, _corpus(repo), "lesson batch")
     files = _head_files(repo)
     assert files == ["defender/lessons/x.md"]
     assert "stray.txt" not in files
-    # The stray stays staged-but-uncommitted, untouched by the lesson commit.
     assert _status(repo, "stray.txt").startswith("A  ")
 
 
@@ -178,18 +167,15 @@ def test_commit_corpus_commit_failure_is_atomic(tmp_path):
     assert shared.git_head_sha(repo) == head_before
 
 
-# ---------------------------------------------------------------------------
-# changes_outside / corpus_dir_clean — the scope-gate primitives
-# ---------------------------------------------------------------------------
 
 
 def test_changes_outside_flags_only_non_corpus_paths(tmp_path):
     """A corpus ``*.md`` edit is in-scope; anything else (incl. a non-``.md`` file inside
     the corpus dir) is stray. ``--untracked-files=all`` reports each stray individually."""
     repo = _repo(tmp_path)
-    (_corpus(repo) / "x.md").write_text("hello\n")       # in scope
-    (repo / "scratch.txt").write_text("nope\n")          # stray (outside)
-    (_corpus(repo) / "notes.txt").write_text("nope\n")   # stray (wrong suffix)
+    (_corpus(repo) / "x.md").write_text("hello\n")
+    (repo / "scratch.txt").write_text("nope\n")
+    (_corpus(repo) / "notes.txt").write_text("nope\n")
     assert shared.changes_outside(repo, CORPUS_REL) == [
         "defender/lessons/notes.txt",
         "scratch.txt",
@@ -203,16 +189,13 @@ def test_corpus_dir_clean(tmp_path):
     assert shared.corpus_dir_clean(repo, _corpus(repo)) is False
 
 
-# ---------------------------------------------------------------------------
-# verify_agent_state — the post-flight working-tree cross-check
-# ---------------------------------------------------------------------------
 
 
 def test_verify_rejects_change_outside_corpus(tmp_path):
     """Scope gate: a working-tree change outside the corpus (a stray the path-scoped commit
     would ignore) fails verification rather than committing silently."""
     repo = _repo(tmp_path)
-    (repo / "scratch.txt").write_text("stray\n")  # uncommitted, outside the corpus
+    (repo / "scratch.txt").write_text("stray\n")
     result = {"committed": [], "commit_message": None}
     with pytest.raises(shared.AuthorError, match="outside"):
         shared.verify_agent_state(repo, result, _corpus(repo), CORPUS_REL, "findings", [])
@@ -225,7 +208,6 @@ def test_verify_tolerates_baseline_stray(tmp_path):
     (repo / "scratch.txt").write_text("stray\n")
     baseline = shared.changes_outside(repo, CORPUS_REL)
     result = {"committed": [], "commit_message": None}
-    # No new stray beyond baseline, corpus clean, committed empty ⇒ passes (no raise).
     shared.verify_agent_state(
         repo, result, _corpus(repo), CORPUS_REL, "findings", baseline
     )
@@ -251,9 +233,6 @@ def test_verify_rejects_committed_with_clean_corpus_using_noun(tmp_path):
         )
 
 
-# ---------------------------------------------------------------------------
-# git_head_sha / _commit_message / _result_list — the small lifted helpers
-# ---------------------------------------------------------------------------
 
 
 def test_git_head_sha_matches_rev_parse(tmp_path):
@@ -285,9 +264,6 @@ def test_result_list_normalizes_and_validates():
         shared._result_list({"committed": "x"}, "committed")
 
 
-# ---------------------------------------------------------------------------
-# flock_or_skip — the scoped non-blocking flock (author-drain / lesson-revert).
-# ---------------------------------------------------------------------------
 
 
 def test_flock_or_skip_acquires_then_releases(tmp_path: Path):
@@ -295,8 +271,7 @@ def test_flock_or_skip_acquires_then_releases(tmp_path: Path):
     lock = tmp_path / "sub" / ".lock"
     with shared.flock_or_skip(lock) as locked:
         assert locked is True
-        assert lock.parent.is_dir()  # parent created on the way in
-    # released on block exit: a fresh non-blocking acquire now succeeds
+        assert lock.parent.is_dir()
     fh = shared.acquire_flock(lock)
     assert fh is not None
     shared.release_flock(fh)
@@ -326,7 +301,7 @@ def test_flock_or_skip_propagates_non_contention_oserror(tmp_path: Path, monkeyp
 
     monkeypatch.setattr(shared.fcntl, "flock", _no_locks)
     with pytest.raises(OSError, match="No locks available") as excinfo, shared.flock_or_skip(lock):
-        pass  # never reached — acquire raises before yielding
+        pass
     assert excinfo.value.errno == errno.ENOLCK
 
 

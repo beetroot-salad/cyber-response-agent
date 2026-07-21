@@ -46,11 +46,6 @@ from pathlib import Path
 
 import yaml
 
-# Put the workspace root on sys.path so the sibling loaders below resolve the
-# modules' absolute `defender.learning.*` imports when this script is run
-# directly (or as the evals/secondary subprocess). _loop_subagents.py and
-# lead_repository.py are library modules — unlike the entry points, they don't
-# self-bootstrap. See defender/tests/conftest.py.
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
@@ -86,37 +81,21 @@ def main(argv: list[str]) -> int:
         print(f"missing {alert}", file=sys.stderr)
         return 2
     if not staging_paths.gather_raw.is_dir() and not staging_paths.executed_queries.is_file():
-        # Name the two artifacts through `staging_paths` rather than hardcoding them beside the
-        # RunPaths that already owns those offsets: one source for "what the tables are called",
-        # so a relocation cannot leave this message pointing at a path that no longer exists.
         print(f"missing the lead/query tables under {staging} "
               f"({staging_paths.gather_raw.name}/ + {staging_paths.executed_queries.name})",
               file=sys.stderr)
         return 2
 
-    here = Path(__file__).resolve().parent          # .../defender/learning/ops
-    learning = here.parent                          # .../defender/learning
-    # Load the actor stage + read surface from *this worktree* so all sibling refs
-    # (the actor prompt, mitre_corpus.py, lessons-actor/) resolve to the pinned
-    # generation, not HEAD. The malicious actor lives in pipeline/malicious_actor/run.py.
+    here = Path(__file__).resolve().parent
+    learning = here.parent
     sub = _load_sibling(
         "_defender_learning_subagents_replay",
         learning / "pipeline" / "malicious_actor" / "run.py",
     )
     lr = _load_sibling("_defender_learning_lead_repository_replay", learning / "lead_repository.py")
 
-    # The actor now runs IN-PROCESS on the metered first-party key (it moved off the claude -p
-    # subscription transport). Source it up front for the pinned generation's model
-    # (sub.ACTOR_MODEL, resolved from this worktree's config + any ACTOR_MODEL env override the
-    # secondary harness set), fail-loud if absent — the discipline run_one applies before its
-    # fan-out.
     source_first_party_key(sub.ACTOR_MODEL, label="actor")
 
-    # Re-stamp case_id to the caller-supplied stable id so the actor's
-    # seed/menu/archetype is keyed on (generation, alert) — independent
-    # of the staging dir name, which carries a per-attempt suffix so
-    # filesystem dirs don't collide across reruns. Without this split,
-    # retry identity would perturb catch rate.
     case_id = ns.case_id or staging.name
     view = lr.actor_view(staging)
     view["case_id"] = case_id
@@ -125,12 +104,6 @@ def main(argv: list[str]) -> int:
     actor_input = staging / "actor_input.yaml"
     actor_input.write_text(yaml.safe_dump(view, sort_keys=False), encoding="utf-8")
 
-    # invoke_actor seeds menu/archetype from learning_run_dir.name —
-    # but in replay we want the seed keyed on the stable case_id
-    # (independent of any per-attempt suffix in the staging dir name).
-    # Pin the seed by overriding _actor_seed for the duration of the
-    # call; all other actor artifacts (archetype, menu, story,
-    # transcript) still land in `staging` as the harness expects.
     original_seed = sub._actor_seed
     sub._actor_seed = lambda _run_id, _stable=case_id: original_seed(_stable)
     try:

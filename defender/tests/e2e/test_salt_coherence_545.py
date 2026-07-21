@@ -42,9 +42,6 @@ def test_main_reroute_salt_coherence(tmp_path):
     run_id, salt = "salt-coherence-545", "deadbeefcafe0000"
     run_dir = materialize(tmp_path, GOLDEN)
 
-    # One read of alert.json (its result is untrusted-wrapped with deps.salt), then stop. The
-    # wrapped result rides into the 2nd model request, so ReplayFn.seen captures it alongside
-    # the orient alert wrapper from the 1st request.
     replay = ReplayFn([
         Turn(tool_calls=[("read_file", {"path": str(run_dir / "alert.json")})]),
         Turn(text="Done."),
