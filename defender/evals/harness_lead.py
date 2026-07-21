@@ -1,33 +1,4 @@
 #!/usr/bin/env python3
-"""Run defender/learning/lead_author.py against an isolated scenario.
-
-Sibling to ``harness.py`` (which exercises the *lessons* curator,
-``author.py``); this one exercises the **lead-author** — the curator that
-folds executed gather queries into the query-template catalog. It exists to
-test the anti-**underfolding** behaviour: when gather coins a query that is
-really a *narrowing* of an existing wide/superset template, the lead-author
-must discard-into-widen (or skip), never promote a narrow sibling.
-
-A scenario directory:
-
-    scenarios_lead/<name>/
-      README.md          # hypothesis + what "good" looks like (human notes)
-      expect.json        # machine verdict (see _verdict)
-      run/<run_id>/
-        executed_queries.jsonl                 # the QUERIES table
-        gather_raw/<lead_id>.lead.json         # the LEADS table
-        gather_raw/<lead_id>/<seq>.json        # by-ref payloads
-      catalog_overlay/   # optional: extra/override {system}/*.md templates
-
-The harness materializes a fresh temp repo (the real learning/ scripts +
-the real query catalog + per-system SKILL.md), overlays the scenario, git
-commits a baseline, runs the lead-author tick, and evaluates ``expect.json``.
-
-The lead-author runs IN-PROCESS on GLM (Fireworks, the metered first-party path;
-the engine sources FIREWORKS_API_KEY from the repo ``.env``), so this is a live,
-non-deterministic agent run: treat the verdict as one sample, not a unit test.
-Re-run for confidence.
-"""
 from __future__ import annotations
 
 import argparse
@@ -40,28 +11,21 @@ import sys
 import tempfile
 from pathlib import Path
 
-# Sibling import — this harness runs as a standalone script, so evals/ is on
-# sys.path[0]. Shared with harness.py.
 from _harness_util import find_venv_py, init_git, run as _run
 
-from defender import _git  # _harness_util put the repo root on sys.path
+from defender import _git
 
 
-HERE = Path(__file__).resolve().parent      # .../defender/evals
-REAL_DEFENDER = HERE.parent                 # .../defender
-REAL_LEARNING = REAL_DEFENDER / "learning"  # .../defender/learning
-REAL_REPO_ROOT = REAL_DEFENDER.parent       # workspace root (worktree)
+HERE = Path(__file__).resolve().parent
+REAL_DEFENDER = HERE.parent
+REAL_LEARNING = REAL_DEFENDER / "learning"
+REAL_REPO_ROOT = REAL_DEFENDER.parent
 RESULTS_DIR = HERE / "results_lead"
 
 
 def materialize(scenario: Path, tmp: Path) -> Path:
-    """Build the temp working tree; return the scenario's run_dir inside it."""
     learning_dst = tmp / "defender" / "learning"
     learning_dst.mkdir(parents=True)
-    # Copy the learning scripts + prompts, preserving the reorganized subtree so
-    # lead_author lands at leads/lead_author.py and its imported sibling modules
-    # resolve. Copying, not symlinking, so lead_author's REPO_ROOT = parents[3]
-    # lands in tmp. Skip generated/state/frontend trees.
     _SKIP = {"__pycache__", "_pending", "_pending_leads", "runs", "frontend", "judge-alignment"}
     for path in sorted(REAL_LEARNING.rglob("*")):
         if path.suffix not in (".py", ".md"):
@@ -73,18 +37,15 @@ def materialize(scenario: Path, tmp: Path) -> Path:
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(path, dst)
 
-    # The real query catalog (the thing under curation).
     shutil.copytree(
         REAL_DEFENDER / "skills" / "gather" / "queries",
         tmp / "defender" / "skills" / "gather" / "queries",
     )
-    # Per-system SKILL.md (lift targets + reference the agent may read).
     for skill in sorted((REAL_DEFENDER / "skills").glob("*/SKILL.md")):
         dst = tmp / "defender" / "skills" / skill.parent.name / "SKILL.md"
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(skill, dst)
 
-    # Optional catalog overlay (add/override templates for the scenario).
     overlay = scenario / "catalog_overlay"
     if overlay.is_dir():
         shutil.copytree(
@@ -92,7 +53,6 @@ def materialize(scenario: Path, tmp: Path) -> Path:
             dirs_exist_ok=True,
         )
 
-    # The run dir (the two tables). Copy under tmp so payload refs resolve.
     src_runs = scenario / "run"
     if not src_runs.is_dir():
         sys.exit(f"scenario missing run/: {src_runs}")
@@ -107,14 +67,7 @@ def materialize(scenario: Path, tmp: Path) -> Path:
 def run_lead_author(tmp: Path, run_dir: Path) -> subprocess.CompletedProcess:
     venv_py = find_venv_py(REAL_REPO_ROOT)
     env = os.environ.copy()
-    # Keep the lead-author's mutable queue/lock state out of the repo tree so
-    # the post-flight clean-tree check isn't tripped by lock files.
     env["DEFENDER_LEARNING_STATE_DIR"] = str(tmp / "_state")
-    # The lead author now runs IN-PROCESS on GLM (Fireworks) — the shipped default
-    # (LEAD_AUTHOR_MODEL=glm-5.2 @ low); the engine sources FIREWORKS_API_KEY from <repo>/.env.
-    # Left unpinned so the eval exercises the production default; a caller can override
-    # LEAD_AUTHOR_MODEL / LEAD_AUTHOR_EFFORT via the environment for an A/B (e.g. claude-sonnet-4-6
-    # @ low — any provider providers.provider_for routes; keep effort Claude-valid, not `none`).
     return _run(
         [str(venv_py), str(tmp / "defender" / "learning" / "leads" / "lead_author.py"), str(run_dir)],
         cwd=tmp, env=env, check=False,
@@ -122,27 +75,16 @@ def run_lead_author(tmp: Path, run_dir: Path) -> subprocess.CompletedProcess:
 
 
 def _catalog_path(tmp: Path, rel: str) -> Path:
-    # expect.json paths are repo-relative (defender/skills/...); resolve in tmp.
     return tmp / rel
 
 
 def _verdict(tmp: Path, expect: dict) -> tuple[str, list[str]]:
-    """Evaluate the scenario's expectations against the post-run tree.
-
-    Verdict levels:
-      FAIL        — a forbidden narrow sibling was promoted (the underfold).
-      PASS        — no forbidden promotion; the coined draft was discarded.
-      WEAK-PASS   — no forbidden promotion, but the draft was left in place
-                    (skip) rather than folded — acceptable, not ideal.
-    """
     notes: list[str] = []
-    # 1) The forbidden promotion(s) must not exist as established templates.
     for rel in expect.get("forbid_promoted", []):
         if _catalog_path(tmp, rel).exists():
             notes.append(f"UNDERFOLD: promoted narrow sibling exists: {rel}")
             return "FAIL", notes
 
-    # 2) Was the coined draft discarded (good) or left behind (weak)?
     draft_rel = expect.get("synthesized_draft")
     draft_gone = draft_rel is not None and not _catalog_path(tmp, draft_rel).exists()
     if draft_rel is None:
@@ -153,16 +95,8 @@ def _verdict(tmp: Path, expect: dict) -> tuple[str, list[str]]:
     else:
         notes.append(f"draft left in place (skip): {draft_rel}")
 
-    # 3) Did the agent widen the preferred wide template? (informational.)
     widened = expect.get("prefer_widened")
     if widened:
-        # Only meaningful when the loop actually committed: the agent edits the tree
-        # and runs no git, so the loop commits onto HEAD (this CLI path commits
-        # in-place — worktrees are only in the drain). A no-edit/skip run leaves HEAD
-        # at the baseline, so HEAD~1 doesn't exist (git errors, empty stdout) and we'd
-        # mislabel it "untouched". Gate on a second commit, and match the path exactly
-        # against the name-only lines (not a substring, which a longer sibling path
-        # would spuriously satisfy).
         count = _git.git(["rev-list", "--count", "HEAD"], cwd=tmp, check=False)
         ncommits = int(count) if count.isdigit() else 0
         if ncommits >= 2:
@@ -179,9 +113,6 @@ def capture(tmp: Path, scenario_name: str, proc: subprocess.CompletedProcess,
             verdict: str, notes: list[str]) -> Path:
     ts = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
     out = RESULTS_DIR / f"{ts}-{scenario_name}"
-    # exist_ok: re-running the same scenario inside one wall-clock second (the
-    # README invites "re-run for confidence", and a skip run returns sub-second)
-    # collides on the second-resolution timestamp dir — don't lose the result.
     out.mkdir(parents=True, exist_ok=True)
     (out / "lead_author.stdout").write_text(proc.stdout, encoding="utf-8")
     (out / "lead_author.stderr").write_text(proc.stderr, encoding="utf-8")
@@ -191,7 +122,6 @@ def capture(tmp: Path, scenario_name: str, proc: subprocess.CompletedProcess,
     show = _git.git(["show", "--stat", "HEAD"], cwd=tmp, check=False)
     (out / "head_show.txt").write_text(show, encoding="utf-8")
     (out / "verdict.txt").write_text(verdict + "\n" + "\n".join(notes) + "\n", encoding="utf-8")
-    # Snapshot the post-run catalog so the disposition is inspectable.
     shutil.copytree(
         tmp / "defender" / "skills" / "gather" / "queries",
         out / "catalog_after", dirs_exist_ok=True,
@@ -213,11 +143,6 @@ def main() -> int:
         expect = json.loads((scenario / "expect.json").read_text(encoding="utf-8"))
 
     RESULTS_DIR.mkdir(exist_ok=True)
-    # Materialize OUTSIDE the repo. The in-process agent's Bash tool resolves relative tool paths and
-    # `git` against the project root it discovers by walking up from cwd — so a
-    # temp tree nested inside this repo makes the agent edit/commit the REAL repo
-    # instead of the sandbox. A system-temp dir (its own git repo, no enclosing
-    # one) keeps the agent's writes contained.
     tmp = Path(tempfile.mkdtemp(prefix=f"leadauthor-eval-{scenario.name}-"))
     if REAL_REPO_ROOT in tmp.resolve().parents:
         shutil.rmtree(tmp, ignore_errors=True)
@@ -227,7 +152,6 @@ def main() -> int:
     try:
         run_dir = materialize(scenario, tmp)
         init_git(tmp)
-        # Sanity: the driver synthesizes the draft before spawning the agent.
         print(f"[harness] running lead-author against {scenario.name}", file=sys.stderr)
         proc = run_lead_author(tmp, run_dir)
         verdict, notes = _verdict(tmp, expect)

@@ -1,11 +1,3 @@
-"""The agent-role discriminator threaded through `AgentDeps`.
-
-One value per agent, used now as an **identity label** — for observability and the
-gather-capture `isinstance` narrow — NOT as the permission discriminator. The gate
-keys on `deps.policy` (an `AgentPolicy`, i.e. data the agent brings), so adding an
-agent is a new policy value (+ custom matchers), not a new gate branch. `role` is
-just a name.
-"""
 
 from __future__ import annotations
 
@@ -13,11 +5,11 @@ from enum import Enum
 
 
 class AgentRole(Enum):
-    MAIN = "main"      # the orchestrator loop (slice 1)
-    GATHER = "gather"  # the per-lead ES|QL gather subagent (slice 2)
-    JUDGE = "judge"    # the learning-loop grounded-outcome judge (PydanticAI)
-    ACTOR = "actor"    # the learning-loop adversarial/benign story actor (PydanticAI)
-    ORACLE = "oracle"  # the learning-loop per-lead telemetry oracle (PydanticAI)
-    VERIFIER = "verifier"  # the author-time forward-check gate (PydanticAI)
-    LEAD_AUTHOR = "lead_author"  # the offline skills/catalog author + pitfalls curator (PydanticAI, writer)
-    CORPUS_AUTHOR = "corpus_author"  # the four lesson curators (findings/actor/env, PydanticAI, writer)
+    MAIN = "main"
+    GATHER = "gather"
+    JUDGE = "judge"
+    ACTOR = "actor"
+    ORACLE = "oracle"
+    VERIFIER = "verifier"
+    LEAD_AUTHOR = "lead_author"
+    CORPUS_AUTHOR = "corpus_author"

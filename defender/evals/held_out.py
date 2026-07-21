@@ -38,8 +38,6 @@ from pathlib import Path
 
 import yaml
 
-# Put the workspace root on sys.path so the `defender.*` namespace import below
-# resolves whether this file is imported or run directly (see tests/conftest.py).
 if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
     sys.path.insert(0, _root)
 
@@ -52,12 +50,6 @@ from defender.run_common import HELD_OUT_FIXTURES as FIXTURES_DIR, resolve_runs_
 
 
 def _read_frontmatter(report_path: Path) -> dict | None:
-    """Return the YAML frontmatter as a dict, or None if unreadable/unparseable/missing.
-
-    Soft read: an unreadable or undecodable report counts as unparseable (None),
-    per the "unparseable counts as wrong" accounting above — a crash would abort
-    the whole eval instead of scoring the run.
-    """
     if not report_path.is_file():
         return None
     text, _reason = read_text_soft(report_path)
@@ -84,12 +76,6 @@ class HeldOutAlert:
 
 
 def load_held_out_fixtures(fixtures_dir: Path) -> list[HeldOutAlert]:
-    """The labeled held-out fixtures, read from the FIXTURE dir.
-
-    The label never leaves this directory — see the module docstring. Lives here
-    (the primary metric) and is imported by ``secondary.py``, which already depends
-    on this module for ``predicted_disposition``; one fixture walk, one direction.
-    """
     out: list[HeldOutAlert] = []
     for child in sorted(fixtures_dir.iterdir()):
         if not child.is_dir():
@@ -97,20 +83,14 @@ def load_held_out_fixtures(fixtures_dir: Path) -> list[HeldOutAlert]:
         alert = RunPaths(child).alert
         gt = child / "ground_truth.yaml"
         if not gt.is_file():
-            continue  # an unlabeled dir is simply not part of the held-out set
+            continue
         if not alert.is_file():
-            # LABELED but unrunnable. Never silent: dropping it would shrink the
-            # denominator, and a shrinking denominator is how a stable-looking score
-            # hides a case that has gone missing (the same reason `score` surfaces
-            # un-run fixtures instead of omitting them).
             print(f"warn: {child.name}: labeled held-out fixture has no {alert.name} "
                   f"— excluded from the eval set", file=sys.stderr)
             continue
         try:
             gt_doc = safe_load(gt.read_text(encoding="utf-8")) or {}
         except yaml.YAMLError as e:
-            # One corrupt ground_truth.yaml must cost that one fixture, not the whole
-            # eval (#613; the #595 walk-survival class).
             print(f"warn: {child.name}: unparseable ground_truth.yaml ({e}) — fixture skipped",
                   file=sys.stderr)
             continue
@@ -121,14 +101,6 @@ def load_held_out_fixtures(fixtures_dir: Path) -> list[HeldOutAlert]:
 
 
 def warn_if_outside_the_net(fixtures_dir: Path) -> bool:
-    """Warn when ``fixtures_dir`` is not the set the contamination net actually refuses.
-
-    ``run_common.enqueue_learning`` refuses exactly ONE directory — the constant both
-    metrics default to. An operator who points a harness elsewhere (``--fixtures-dir`` /
-    ``--fixtures``) gets those fixtures SCORED but never got them REFUSED, so their
-    findings may already have taught the corpus they are being measured against. Shared by
-    both metrics; returns whether it warned.
-    """
     if fixtures_dir.resolve() == FIXTURES_DIR.resolve():
         return False
     print(f"WARNING: scoring {fixtures_dir}, but the enqueue-time contamination net only "
@@ -138,44 +110,12 @@ def warn_if_outside_the_net(fixtures_dir: Path) -> bool:
 
 
 def _claimed_slug(name: str, slugs: list[str]) -> str | None:
-    """The one fixture slug a run dir named ``name`` belongs to, or None.
-
-    A run dir claims a slug only when the slug is ANCHORED at one end of the name, at a
-    `-` boundary: the whole name (``--run-id <slug>``), a prefix (``<slug>-<attempt>``), or
-    a suffix (``{utc_timestamp}-<slug>``, the shape ``materialize_run_dir`` mints when no
-    ``--run-id`` is passed). A slug buried in the MIDDLE does not count — that is what
-    keeps the secondary harness's own run dirs (``sec-eval-gen{N}-<slug>-<attempt>`` and
-    its ``-replay`` staging twin, which share this runs base by default) from being scored
-    as the primary metric's answer for that fixture.
-
-    When several slugs anchor the same name the LONGEST wins, so a fixture set holding
-    both ``m05-lsass-access`` and ``m05-lsass-access-v2`` resolves each run to the fixture
-    it actually came from instead of to whichever was tried first.
-    """
     claims = [s for s in slugs
               if name == s or name.startswith(f"{s}-") or name.endswith(f"-{s}")]
     return max(claims, key=len) if claims else None
 
 
 def index_runs(slugs: list[str], runs_dir: Path) -> dict[str, Path]:
-    """Map each fixture slug to its most recent run dir, in ONE pass over ``runs_dir``.
-
-    Runs are located by NAME, not by any artifact inside the run dir — the run dir carries
-    no provenance back to its fixture, deliberately (see the module docstring). Launch
-    held-out runs as::
-
-        python3 defender/run.py defender/fixtures/held-out/<slug>/alert.json \\
-            --run-id <slug> --no-learn
-
-    Most recent by mtime, ties broken by name, so re-running a fixture scores the latest
-    attempt rather than an arbitrary one. One pass rather than a scan per fixture: the
-    default runs base accumulates every run ever made and is never pruned, so a per-fixture
-    scan is O(fixtures x runs) of iterdir + stat for a result one sweep already has.
-
-    Survives a runs dir mutating underneath it — a dir unlinked between the listing and its
-    ``stat`` costs that one candidate, not the whole eval (the #595 walk-survival class the
-    fixture walk above already honors for a corrupt label).
-    """
     best: dict[str, tuple[float, str, Path]] = {}
     if not runs_dir.is_dir():
         return {}
@@ -198,7 +138,6 @@ def index_runs(slugs: list[str], runs_dir: Path) -> dict[str, Path]:
 
 @dataclass
 class Scored:
-    """One scoring pass: rows by true class, the failure bucket, and the coverage gap."""
 
     by_class: dict[str, list[tuple[str, str | None, str]]]
     failures: list[tuple[str, str]]
@@ -221,12 +160,8 @@ def score(fixtures: list[HeldOutAlert], runs_dir: Path) -> Scored:
     for fx in fixtures:
         run_dir = runs.get(fx.slug)
         if run_dir is None:
-            # Surfaced, NOT scored: an un-attempted fixture is a coverage gap, not a
-            # wrong answer. Counting it wrong would invent a failure; dropping it
-            # silently would let a shrinking denominator pass for a stable score.
             not_run.append(fx.slug)
             continue
-        # "?" (not None): a missing disposition still needs a printable, sortable class key.
         true_disp = str(fx.ground_truth.get("disposition") or "?")
         pred = predicted_disposition(run_dir)
         verdict = "ok" if pred == true_disp else "wrong"

@@ -24,10 +24,6 @@ from defender._io import read_jsonl_rows
 from defender.scripts.visualize import visualize_data as d
 from defender.scripts.visualize.visualize_run import render_runtime_page
 
-# A four-phase run. Each assistant turn writes investigation.md, introducing one
-# new "## PHASE" header with substantive body (so the tagger advances), and the
-# PLAN turn also dispatches a gather. The model ids match between tool_trace and
-# llm_requests so the phase map lines up (as it does in production).
 _USAGE = {"input_tokens": 100, "output_tokens": 800, "cache_read_input_tokens": 5000, "cache_creation_input_tokens": 200}
 
 _TURNS = [
@@ -37,8 +33,6 @@ _TURNS = [
     ("main#3", "REPORT", "## GATHER\n\nGathered.\n\n## REPORT\n\nDisposition: malicious — confirmed pivot.\n", None),
 ]
 
-# The on-disk investigation.md is the *cumulative* document (all four headers);
-# split_investigation_phases reads this to derive the phase order.
 _FULL_INVESTIGATION = (
     "## ORIENT\n\nOriented on the alert: ssh auth anomaly.\n\n"
     "## PLAN\n\nPlanning to gather ssh auth + identity.\n\n"
@@ -79,7 +73,6 @@ def _build_run(tmp: Path) -> Path:
             "type": "user", "timestamp": f"2026-06-26T14:0{i}:30+00:00",
             "message": {"content": [{"type": "tool_result", "tool_name": "write_file"}]},
         })
-        # llm_requests: response (same id) + a request carrying the tool returns.
         parts = [{"part_kind": "tool-call", "tool_name": b["name"], "tool_call_id": b["id"], "args": b["input"]} for b in blocks]
         messages.append({
             "agent_id": "main", "seq": seq, "id": mid, "kind": "response",
@@ -91,7 +84,6 @@ def _build_run(tmp: Path) -> Path:
         messages.append({"agent_id": "main", "seq": seq, "id": f"r{seq}", "kind": "request", "message": {"kind": "request", "parts": returns}})
         seq += 1
 
-    # one gate retry (health + transcript) and one gather instance (Haiku cost)
     messages.append({"agent_id": "main", "seq": seq, "id": f"r{seq}", "kind": "request",
                      "message": {"kind": "request", "parts": [{"part_kind": "retry-prompt", "tool_name": "bash", "content": "Denied: raw adapter from main loop."}]}})
     messages.append({"agent_id": "gather:l-001", "seq": 0, "id": "gather:l-001#0", "kind": "response",
@@ -104,8 +96,6 @@ def _build_run(tmp: Path) -> Path:
     (run / "tool_trace.jsonl").write_text("".join(json.dumps(e) + "\n" for e in trace))
     (run / "llm_requests.jsonl").write_text("".join(json.dumps(m) + "\n" for m in messages))
 
-    # two tables: l-001 ran two queries; l-002 has a sidecar but no query row
-    # (a dead-end lead — the planning/tooling gap run_health surfaces).
     queries = [
         {"lead_id": "l-001", "seq": 0, "system": "elastic", "verb": "search", "query_id": "elastic.ssh-auth",
          "params": {"user": "root"}, "exit_code": 0, "payload_status": "ok", "payload_path": "gather_raw/l-001/0.json"},
@@ -157,7 +147,6 @@ def test_gather_dispatch_phase_and_cost(tmp_path):
     main_total = sum(b["cost"] for b in attr.values())
     by_phase, gather_total = d.gather_cost_by_phase(run, events, tags, order, main_total, 0.5)
     assert gather_total > 0
-    # reattributed off the PLAN dispatch phase onto the matching GATHER bar
     gather_phase = next(p for p in order if p.startswith("GATHER"))
     assert by_phase[gather_phase] > 0
     assert by_phase[gphase["l-001"]] == 0
@@ -178,8 +167,6 @@ def test_gather_wall_and_model_reattribution(tmp_path):
     assert from_dispatch[plan_phase] > 0
     assert to_gather[plan_phase] == 0
 
-    # the fixture's gather agent runs on Haiku — the breakdown reflects that, not
-    # a hardcoded name.
     by_model = d.gather_cost_by_model(run)
     assert list(by_model) == ["haiku-4-5"]
     assert by_model["haiku-4-5"] > 0
@@ -190,18 +177,17 @@ def test_gather_cost_not_dropped_without_gather_phase(tmp_path):
     and a run with no ``## GATHER`` header still has its cost placed in a bar —
     so gather_total stays equal to the full gather cost the per-model breakdown
     reports, and the headline never under-counts what by_model shows."""
-    order = ["ORIENT loop 1", "PLAN loop 1", "REPORT loop 1"]  # no GATHER phase
+    order = ["ORIENT loop 1", "PLAN loop 1", "REPORT loop 1"]
     messages = [
         {"kind": "response", "agent_id": "gather:l-001", "model": "claude-haiku-4-5", "usage": _USAGE},
     ]
-    # empty events/tags → gather_dispatch_phase can't tag l-001 (gphase miss)
     by_phase, gather_total = d.gather_cost_by_phase(
         tmp_path, [], [], order, 0.0, 0.0, messages
     )
     full = sum(d.gather_cost_by_model(tmp_path, messages).values())
     assert full > 0
-    assert gather_total == full  # nothing dropped
-    assert by_phase[order[0]] == gather_total  # landed in the first phase
+    assert gather_total == full
+    assert by_phase[order[0]] == gather_total
 
 def test_transcript_from_messages(tmp_path):
     """The transcript is built from llm_requests.jsonl with full content +
@@ -216,12 +202,10 @@ def test_transcript_from_messages(tmp_path):
     kinds = {e["kind"] for e in entries}
     assert {"assistant", "tool_result", "retry"} <= kinds
 
-    # tool-results carry real content (not the empty trace projection)
     results = [e for e in entries if e["kind"] == "tool_result"]
     assert results
     assert all(e["content"] for e in results)
 
-    # the gather call is an assistant entry tagged to a PLAN phase
     plan_calls = [e for e in entries if e["kind"] == "assistant" and "gather" in (e.get("tools") or [])]
     assert plan_calls
     assert plan_calls[0]["phase"].startswith("PLAN")
@@ -235,7 +219,7 @@ def test_run_health(tmp_path):
 
     assert health["completed"] is True
     assert health["retries"] == 1
-    assert health["dead_ends"] == 1  # l-002 has a sidecar but ran no query
+    assert health["dead_ends"] == 1
     assert health["level"] == "warn"
     assert any("retr" in det for det in health["details"])
 
@@ -255,11 +239,9 @@ def test_render_runtime_page_reconciles_and_renders(tmp_path, monkeypatch):
     ):
         assert marker in html, f"missing {marker}"
 
-    # leads & queries table has the ran lead and the dead-end lead
     assert "elastic.ssh-auth" in html
     assert "dead-end lead" in html
 
-    # top-bar total cost == sum of the § Metrics cost-bar $ segments
     headline = float(re.search(r'ts-cost">\$([0-9.]+)', html).group(1))
     segs = [float(x) for x in re.findall(r'cb-pct">\$([0-9.]+)', html)]
     assert abs(headline - sum(segs)) < 0.002, f"{headline} != {sum(segs)}"

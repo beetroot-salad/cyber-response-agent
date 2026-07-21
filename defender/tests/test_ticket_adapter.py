@@ -23,8 +23,6 @@ from defender.scripts.adapters import _stub_transport as transport
 from defender.scripts.adapters import ticket_adapter
 from defender.scripts.adapters.faults import ConfigFault, UpstreamFault
 
-#: Captured before the autouse `_stub_config` fixture swaps it out, so the config tests
-#: below can drive the REAL loader against a config file in the throwaway tree.
 _REAL_LOAD_CONFIG = transport.load_config
 
 
@@ -37,9 +35,6 @@ def ctx(tmp_path):
 
 @pytest.fixture(autouse=True)
 def _stub_config(monkeypatch):
-    # `_config(ctx)` → `transport.load_config`; stub it so the verbs reach the (also-stubbed)
-    # http layer without a real config file. It serves whatever key set the adapter asks for,
-    # so the stub cannot silently diverge from `ticket_adapter.REQUIRED_CONFIG_KEYS`.
     def _fake(ctx, system, prefix, required=transport.REQUIRED_CONFIG_KEYS_TEMPLATE):
         return {"URL_BASE": "http://x", **{k: f"stub-{k}" for k in required if k != "URL_BASE"}}
 
@@ -56,8 +51,6 @@ def test_require_closed_passes_on_closed(monkeypatch, ctx):
 
 
 def test_require_closed_rejects_open(monkeypatch, ctx):
-    # #338/#611: the refusal of a non-closed ticket is a query error — now raised as UpstreamFault
-    # (the capture layer maps it to exit 1), not SystemExit(1). The answer-key guard stands.
     monkeypatch.setattr(transport, "http_get_obj",  # lint-monkeypatch: ok — transport has no in-process DI seam (this file's established pattern)
                         lambda c, cfg, p, params=None: {"key": "c", "status": "open"})
     with pytest.raises(UpstreamFault):
@@ -65,7 +58,6 @@ def test_require_closed_rejects_open(monkeypatch, ctx):
 
 
 def test_no_flag_allows_any_status(monkeypatch, ctx):
-    # Without require_closed the adapter is unchanged (open tickets still fetch).
     monkeypatch.setattr(transport, "http_get_obj",  # lint-monkeypatch: ok — transport has no in-process DI seam (this file's established pattern)
                         lambda c, cfg, p, params=None: {"key": "c", "status": "open"})
     payload = ticket_adapter.get_ticket(ctx, key="c", require_closed=False)
@@ -73,8 +65,6 @@ def test_no_flag_allows_any_status(monkeypatch, ctx):
 
 
 def test_list_require_closed_pins_status_over_widening(monkeypatch, ctx):
-    # require_closed forces status=closed even when a (last-wins) status=open tries to widen the
-    # list — the scoped read can't reach the in-flight OPEN ticket.
     seen = {}
 
     def fake_get(c, cfg, path, params=None):
@@ -98,7 +88,6 @@ def test_list_no_flag_passes_status_through(monkeypatch, ctx):
     assert seen["params"]["status"] == "open"
 
 
-# ── the key grammar as REQUIRED environment config (#684) ───────────────────────────────
 
 
 def _write_config(ctx, **values) -> None:
@@ -139,7 +128,7 @@ def test_key_pattern_is_required_config_and_absence_takes_the_system_down(ctx, r
     at `_config`, the absence fails the WHOLE ticket surface closed, not just the screen that
     reads it: a consumer cannot get a store read out of an environment that has not said what
     its keys look like, and the fault names the missing key so the fix is obvious."""
-    _write_config(ctx, **_BASE_CONFIG)  # no TICKET_KEY_PATTERN
+    _write_config(ctx, **_BASE_CONFIG)
     with pytest.raises(ConfigFault, match="TICKET_KEY_PATTERN"):
         ticket_adapter.key_pattern(ctx)
     with pytest.raises(ConfigFault, match="TICKET_KEY_PATTERN"):
@@ -157,7 +146,6 @@ def test_run_env_overrides_the_declared_grammar(ctx, real_config):
     assert ticket_adapter.key_pattern(over) == "CASE-[0-9]+"
 
 
-# ── the key/filter encoding symmetry (#684 follow-up) ───────────────────────────────────
 
 
 @pytest.mark.parametrize(
@@ -266,6 +254,4 @@ def test_list_filters_ride_urlencoded_not_raw(monkeypatch, ctx, label, q):
     assert parsed["label"] == [label], "the label did not survive the round trip verbatim"
     assert parsed["q"] == [q], "the q value did not survive the round trip verbatim"
     assert parsed["status"] == ["closed"], "require_closed's pin left the wire"
-    # No raw metacharacter reached the query string as a delimiter: every `&`/`=` in the
-    # built query is a separator the encoder put there, so the parse above is total.
     assert len(query.split("&")) == len(parsed), "a filter value injected a query parameter"

@@ -48,7 +48,6 @@ from defender.hooks.budget_enforcer import (
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
-# --- fixtures: real state on disk, never a stubbed reader --------------------
 
 def _budget(run_dir: Path) -> dict:
     return json.loads((run_dir / "budget.json").read_text())
@@ -73,7 +72,6 @@ def _reads_as_healthy(state: dict, limits: dict) -> bool:
     return not any("Budget exceeded" in m for m in check_budgets(state, limits))
 
 
-# --- the cap table ----------------------------------------------------------
 
 def test_default_limits_values():
     """DEFAULT_LIMITS carries wall_clock_timeout 1200 seconds — O4's ~20 minutes of
@@ -90,7 +88,6 @@ def test_grace_seconds_value():
     assert DEFAULT_LIMITS["grace_seconds"] == 120
 
 
-# --- the tail band and its two limbs ----------------------------------------
 
 def test_tail_ends_on_count_or_clock(tmp_path):
     """The post-trip tail ends when tool_calls reaches max_tool_calls + 10 OR when
@@ -104,22 +101,17 @@ def test_tail_ends_on_count_or_clock(tmp_path):
     limits = _tight(max_tool_calls=5, wall_clock_timeout=100, grace_seconds=20)
     now = time.monotonic()
 
-    # Inside the tail on both limbs: over cap, under N+10, under clock+grace.
     assert TAIL_ALLOWANCE == 10
     assert not tail_exhausted(
         {"tool_calls": 5 + TAIL_ALLOWANCE - 1, "started_monotonic": now - 10}, limits)
 
-    # The COUNT limb ends it.
     assert tail_exhausted(
         {"tool_calls": 5 + TAIL_ALLOWANCE, "started_monotonic": now - 10}, limits)
 
-    # The CLOCK limb ends it with the count frozen — the refusal-only tail F3(b)
-    # creates, where no executed call ever advances tool_calls past the cap.
     assert not tail_exhausted({"tool_calls": 5, "started_monotonic": now - 119}, limits)
     assert tail_exhausted({"tool_calls": 5, "started_monotonic": now - 121}, limits)
 
 
-# --- the clock origin: cold start, replacement, and the swallow -------------
 
 def test_missing_started_at_does_not_restart_the_clock(tmp_path):
     """A budget.json missing started_at does not get a fresh timestamp backfilled on
@@ -135,27 +127,18 @@ def test_missing_started_at_does_not_restart_the_clock(tmp_path):
     open_budget(tmp_path, "run-1")
     original = _budget(tmp_path)
     assert original["run_id"] == "run-1"
-    # The origin must EXIST first, or the no-restart property is vacuous — blind reader
-    # R14: the old disjunction `"started_at" not in after or ...` short-circuited on
-    # its first arm, so a budget_enforcer with no clock-origin concept at all passed.
     origin = original.get("created_at")
     assert origin, "open_budget wrote no cross-process wall-clock origin (VR1)"
 
-    # The real fault PO51 established: the model authors the file with no origin.
     _author_budget(tmp_path, run_id="run-1", tool_calls=0, subagent_spawns=0)
     after_write = update_budget_locked(tmp_path, "run-1", "bash", limits=DEFAULT_LIMITS)
     after = _budget(tmp_path)
 
-    # The run's own writer did NOT silently re-cold-start the origin: whatever origin the
-    # replaced file now carries is not a FRESH timestamp later than the real start. A
-    # `setdefault(created_at, now)` backfill — the incumbent hazard — would fail this.
     new_origin = after.get("created_at")
     assert new_origin in (None, origin), (
         "the run's writer re-minted a fresh clock origin over a replaced budget.json, "
         "restarting the wall clock and voiding the cap"
     )
-    # And the enforcing read does not read the reset file as a healthy fresh run: with
-    # no readable origin it fails closed rather than admitting the call.
     assert not _reads_as_healthy(after_write, DEFAULT_LIMITS), (
         "a budget.json replaced mid-run read as a cold start and admitted the call"
     )
@@ -183,9 +166,6 @@ def test_budget_state_carries_a_run_scoped_sentinel_from_before_the_first_call(t
     assert on_disk["run_id"] == "run-abc"
     assert on_disk["created_at"] == state["created_at"]
 
-    # Mismatched sentinel: the model authored a file claiming a DIFFERENT run with reset
-    # counters, hoping to escape a pool this run has been spending. The run's own writer
-    # holds run_id="run-abc" and must not accept the foreign file's reset as healthy.
     _author_budget(tmp_path, run_id="not-this-run", created_at="2020-01-01T00:00:00+00:00",
                    tool_calls=0, subagent_spawns=0)
     after = update_budget_locked(tmp_path, "run-abc", "bash", limits=DEFAULT_LIMITS)
@@ -215,11 +195,11 @@ def test_unreadable_started_at_does_not_silently_drop_the_wall_clock_limb(tmp_pa
     `elapsed = max(wall_delta, local_monotonic_delta)` the limb must still fire off the
     monotonic backup despite the unreadable origin."""
     limits = _tight(wall_clock_timeout=100, max_tool_calls=10_000)
-    past_cap = time.monotonic() - 500  # the per-process backup: 500s > the 100s cap
-    for bad_origin in ({},                                  # absent
-                       {"started_at": None},               # present, null
-                       {"started_at": "not-a-timestamp"},  # present, unparseable
-                       {"started_at": []}):                # present, wrong type
+    past_cap = time.monotonic() - 500
+    for bad_origin in ({},
+                       {"started_at": None},
+                       {"started_at": "not-a-timestamp"},
+                       {"started_at": []}):
         state = {"run_id": "r", "tool_calls": 1, "started_monotonic": past_cap,
                  **bad_origin}
         msgs = check_budgets(state, limits)
@@ -227,9 +207,6 @@ def test_unreadable_started_at_does_not_silently_drop_the_wall_clock_limb(tmp_pa
             f"the wall-clock limb dropped out silently for started_at={bad_origin!r}"
         )
 
-    # And with NO origin of either kind the enforcing read fails CLOSED — it does not
-    # conclude "under cap, clock unreadable" and admit the call (the swallow the
-    # incumbent (KeyError, ValueError) pass would take).
     assert not _reads_as_healthy({"run_id": "r", "tool_calls": 1}, limits), (
         "an origin-less state admitted the call instead of failing closed"
     )
@@ -246,10 +223,8 @@ def test_elapsed_reads_a_monotonic_source_and_survives_a_backward_clock_step(tmp
     `elapsed = max(wall_delta, local_monotonic_delta)`, so the per-process monotonic
     delta fires the limb whichever way the wall clock is pushed."""
     limits = _tight(wall_clock_timeout=100, max_tool_calls=10_000)
-    past_cap = time.monotonic() - 500  # the run has genuinely run 500s > the 100s cap
+    past_cap = time.monotonic() - 500
 
-    # FORWARD-dated origin (PB8): started_at in the far future makes wall_delta negative;
-    # the monotonic delta still shows the run is past its cap, so max() fires the limb.
     forward = {"run_id": "r", "tool_calls": 1,
                "started_at": (datetime.now(UTC) + timedelta(days=30_000)).isoformat(),
                "started_monotonic": past_cap}
@@ -258,10 +233,6 @@ def test_elapsed_reads_a_monotonic_source_and_survives_a_backward_clock_step(tmp
         "a forward-dated started_at suppressed the wall-clock limb"
     )
 
-    # BACKWARD clock step DURING the run (blind reader R16 — the name's other half,
-    # previously undriven): the host clock jumps back, so `now` is now BEHIND started_at
-    # and a wall-only elapsed would go negative and read as "just started". The monotonic
-    # source is immune, so the limb still fires and the cap is not extended.
     backward = {"run_id": "r", "tool_calls": 1,
                 "started_at": (datetime.now(UTC) + timedelta(seconds=1000)).isoformat(),
                 "started_monotonic": past_cap}
@@ -270,14 +241,11 @@ def test_elapsed_reads_a_monotonic_source_and_survives_a_backward_clock_step(tmp
         "a backward system-clock step reset the wall-clock limb and extended the cap"
     )
 
-    # The control: an honest origin under the cap does NOT fire, so the assertions
-    # above are not satisfied by a limb that fires unconditionally.
     fresh = {"run_id": "r", "tool_calls": 1, "started_at": datetime.now(UTC).isoformat(),
              "started_monotonic": time.monotonic()}
     assert not any("wall_clock" in m for m in check_budgets(fresh, limits))
 
 
-# --- the validating read (D9) -----------------------------------------------
 
 def test_a_counter_failing_validation_trips_rather_than_returning_no_messages(tmp_path):
     """A counter that fails type or range validation TRIPS: a negative or boolean
@@ -295,7 +263,7 @@ def test_a_counter_failing_validation_trips_rather_than_returning_no_messages(tm
     for bad in (-5, True, False, "9", "not-a-number", [1], {"a": 1}, None, 3.5):
         state = {"run_id": "r", "tool_calls": bad, "subagent_spawns": 0,
                  "started_monotonic": now}
-        msgs = check_budgets(state, limits)  # must not raise
+        msgs = check_budgets(state, limits)
         assert any("Budget exceeded" in m and "tool_calls" in m for m in msgs), (
             f"tool_calls={bad!r} failed open: {msgs!r}"
         )
@@ -308,8 +276,6 @@ def test_a_counter_failing_validation_trips_rather_than_returning_no_messages(tm
             f"subagent_spawns={bad!r} failed open: {msgs!r}"
         )
 
-    # The control that keeps the above from passing against a check_budgets that
-    # simply always trips: a well-formed, far-under-cap state stays silent.
     assert check_budgets(
         {"run_id": "r", "tool_calls": 1, "subagent_spawns": 0,
          "started_monotonic": now}, limits) == []
@@ -336,14 +302,10 @@ def test_an_injected_cap_of_zero_trips_immediately_rather_than_disabling(tmp_pat
     assert any("subagent_spawns" in m and "Budget exceeded" in m for m in msgs)
     assert any("wall_clock" in m and "Budget exceeded" in m for m in msgs)
 
-    # A cap of 0 trips on the very FIRST call, too — not only far past it.
     first = {"run_id": "r", "tool_calls": 1, "subagent_spawns": 0,
              "started_at": datetime.now(UTC).isoformat(), "started_monotonic": now}
     assert any("tool_calls" in m for m in check_budgets(first, zeroed))
 
-    # The in-test NON-ZERO control (blind reader A58/R12): a positive cap with an
-    # under-cap state stays silent, so the trip above is the 0-specific "disabled → trip
-    # immediately" flip and not a check_budgets that trips unconditionally.
     nonzero = {"max_tool_calls": 1, "max_subagent_spawns": 1,
                "wall_clock_timeout": 100, "grace_seconds": 0}
     assert check_budgets(
@@ -351,11 +313,9 @@ def test_an_injected_cap_of_zero_trips_immediately_rather_than_disabling(tmp_pat
          "started_at": datetime.now(UTC).isoformat(), "started_monotonic": now},
         nonzero) == []
 
-    # And the tail a zero cap opens is exhausted by the clock limb, not silently endless.
     assert tail_exhausted({"tool_calls": 1, "started_monotonic": now - 1}, zeroed)
 
 
-# --- counting -----------------------------------------------------------------
 
 def test_no_trip_state_no_reset(tmp_path):
     """The run's own writer persists no trip flag and never resets or decrements a
@@ -373,9 +333,6 @@ def test_no_trip_state_no_reset(tmp_path):
     for name in ("bash", "gather", "read_file", "gather", "write_file", "query"):
         state = update_budget_locked(tmp_path, "run-1", name, limits=limits)
         seen.append((state["tool_calls"], state["subagent_spawns"]))
-        # Blind reader R20: the returned dict AND the on-disk file must carry no trip
-        # flag — an implementation that persists one only to disk would slip a
-        # returned-dict-only check, so both surfaces are inspected under likely names.
         for surface in (state, _budget(tmp_path)):
             assert not any(k in surface for k in trip_keys), (
                 f"a trip flag was persisted into budget.json: {surface!r}"
@@ -525,19 +482,10 @@ def test_the_enforcing_read_of_budget_json_is_never_torn(tmp_path):
         torn = 0
         reads = 0
         live_reads = 0
-        started = False  # the writers have committed their first increment (see below)
+        started = False
         while any(p.poll() is None for p in procs) and reads < 4000:
             state = budget_enforcer.read_budget(tmp_path)
             reads += 1
-            # SURFACED-FOR-RATIFICATION (write-code-from-spec): only count a read as torn ONCE
-            # the writers are live. open_budget writes tool_calls=0, and 6 writer SUBPROCESSES
-            # take real time to spawn + import before their first increment — during that startup
-            # window a `tool_calls==0` read is the LEGITIMATE initial state, not a masked torn read
-            # (the ORIGINAL condition counted the whole window as torn, so the assertion was
-            # unpassable by any correct read; empirically all zero-reads land before the first
-            # increment, and conservation below holds). Once a non-zero read is seen the writers are
-            # committing, and thereafter a `{}` / missing-key / zeroed read IS the truncate-window
-            # fail-open R15's maskable-oracle names — counted.
             if state.get("tool_calls"):
                 started = True
             if not started:
@@ -548,11 +496,6 @@ def test_the_enforcing_read_of_budget_json_is_never_torn(tmp_path):
     finally:
         for p in procs:
             p.wait()
-    # WRITER LIVENESS (blind reader R15): the writers must have actually run and landed
-    # their increments, or a source that raised on import would make every writer exit in
-    # milliseconds and the read loop pass against a quiescent file. This assertion doubles
-    # as the cross-process lost-update conservation check (A41): 6 × 150 committed under
-    # the flock, none lost.
     assert all(p.returncode == 0 for p in procs), "a writer subprocess crashed"
     assert reads > 0, "the read loop never ran against a live writer"
     assert live_reads > 0, "the read loop never observed a live (post-first-increment) writer"
@@ -562,12 +505,6 @@ def test_the_enforcing_read_of_budget_json_is_never_torn(tmp_path):
     assert torn == 0, f"the enforcing read observed {torn} torn states in {live_reads} live reads"
 
 
-# --- D4 / NF4: the accounting write itself fails ----------------------------
-#
-# The fault is REAL INPUT THROUGH THE REAL PRIMITIVE: the run dir is made unwritable
-# with chmod, so `update_json_locked`'s own open() fails on its own terms. Nothing is
-# faked and nothing is patched — the taxonomy assumption ceases to exist rather than
-# being pinned once.
 
 def _seal(run_dir: Path) -> None:
     run_dir.chmod(stat.S_IRUSR | stat.S_IXUSR)
@@ -601,13 +538,12 @@ def test_one_failed_accounting_write_costs_one_call_of_overshoot(tmp_path):
 
     _seal(run_dir)
     try:
-        account_call(run_dir, "run-1", "bash", limits=limits, tier="core")  # must not raise
+        account_call(run_dir, "run-1", "bash", limits=limits, tier="core")
     finally:
         _unseal(run_dir)
     assert _budget(run_dir)["tool_calls"] == 2, "the failed write landed anyway"
     assert accounting_failure_state(run_dir)["consecutive_failures"] == 1
 
-    # The very next call re-crosses and trips: one call of overshoot, and no more.
     state = account_call(run_dir, "run-1", "bash", limits=limits, tier="core")
     assert state["tool_calls"] == 3
     assert any("tool_calls at 3/3" in m for m in check_budgets(state, limits))
@@ -639,8 +575,6 @@ def test_consecutive_accounting_write_failures_stop_or_mark_the_run(tmp_path):
         _unseal(run_dir)
     assert accounting_failure_state(run_dir)["consecutive_failures"] >= 3
 
-    # The reset-on-success half, which is what makes this limb blind to the
-    # intermittent fault its sibling catches.
     fresh = tmp_path / "run2"
     fresh.mkdir()
     open_budget(fresh, "run-2")
@@ -687,7 +621,6 @@ def test_an_intermittent_accounting_failure_trips_the_first_failure_stamp(tmp_pa
         while time.monotonic() < deadline:
             alternating_call(fail=fail)
             fail = not fail
-            # The count limb NEVER reaches its threshold on this sequence.
             assert accounting_failure_state(run_dir)["consecutive_failures"] < 3
             time.sleep(0.02)
         pytest.fail("the first-failure stamp never tripped on an alternating fault")
@@ -697,7 +630,6 @@ def test_an_intermittent_accounting_failure_trips_the_first_failure_stamp(tmp_pa
     )
 
 
-# --- VR1 / R27: gaps the phase-F blind reader flagged as first-raised holes -----
 
 def test_budget_origin_is_a_cross_process_wall_clock(tmp_path):
     """The run's clock origin is a WALL-CLOCK timestamp — the shared, cross-process-
@@ -715,16 +647,14 @@ def test_budget_origin_is_a_cross_process_wall_clock(tmp_path):
     exactly the cap-evasion VR1 closes."""
     state = open_budget(tmp_path, "run-1")
     created = state["created_at"]
-    parsed = datetime.fromisoformat(created)  # a bare monotonic float would raise here
+    parsed = datetime.fromisoformat(created)
     assert parsed.tzinfo is not None, "the origin is not an absolute (tz-aware) wall time"
 
-    # A reader whose per-process monotonic clock reads as "just started" (this process's
-    # clock) still sees a run 500 wall-seconds old, because the wall delta dominates.
     limits = _tight(wall_clock_timeout=100, max_tool_calls=10_000)
     old_wall = (datetime.now(UTC) - timedelta(seconds=500)).isoformat()
     cross_process = {"run_id": "run-1", "tool_calls": 1,
                      "started_at": old_wall, "created_at": old_wall,
-                     "started_monotonic": time.monotonic()}  # fresh in THIS process
+                     "started_monotonic": time.monotonic()}
     assert any("wall_clock" in m and "Budget exceeded" in m
                for m in check_budgets(cross_process, limits)), (
         "a reader with a fresh monotonic clock could not see the run's true age from the "
@@ -768,7 +698,7 @@ def test_accounting_failure_state_persists_outside_the_sealed_run_dir(tmp_path):
     _seal(run_dir)
     try:
         account_call(run_dir, "run-1", "bash", limits=limits, tier="core")
-        recorded = accounting_failure_state(run_dir)  # readable despite the seal
+        recorded = accounting_failure_state(run_dir)
     finally:
         _unseal(run_dir)
     assert recorded["consecutive_failures"] == 1, (

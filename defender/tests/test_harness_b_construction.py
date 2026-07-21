@@ -43,7 +43,7 @@ from pathlib import Path
 
 import pytest
 
-pytest.importorskip("pydantic_ai")  # CI installs the runtime extra; skip otherwise
+pytest.importorskip("pydantic_ai")
 
 from pydantic_ai.messages import ModelResponse, TextPart  # noqa: E402
 from pydantic_ai.models import override_allow_model_requests  # noqa: E402
@@ -63,9 +63,6 @@ from defender.runtime.tools import AgentDeps  # noqa: E402
 
 _DEFENDER = Path(__file__).resolve().parents[1]
 
-# The Anthropic three-part prompt cache — the role-invariant base every claude settings
-# object carries. Mirrors the constant in tests/test_glm_fireworks.py (the equivalence
-# oracle for the settings values this refactor must preserve).
 _CACHE = {
     "anthropic_cache_instructions": "1h",
     "anthropic_cache_tool_definitions": "1h",
@@ -99,14 +96,8 @@ def logger(tmp_path):
         lg.close()
 
 
-# NOTE: the AgentSpec value-object tests moved to test_agent_definition.py (#538 folded
-# AgentSpec into AgentDefinition — shape + frozenness are pinned there).
 
 
-# ============================================================================
-# effort_for_role — the provider seam that collapses settings(role) into
-# settings_for_effort. Router shape: providers.effort_for_role(name, role).
-# ============================================================================
 
 def test_effort_for_role_anthropic_is_none_for_every_role():
     """Anthropic exposes no role→effort policy → effort_for_role returns None for MAIN
@@ -161,10 +152,6 @@ def test_effort_for_role_unknown_model_fails_loud():
         providers.effort_for_role("gpt-4o", AgentRole.MAIN)
 
 
-# ============================================================================
-# settings_for_effort(None) — the new omit input (Fork 1). The "default" string
-# stays tolerated (existing test_glm_fireworks cases keep passing).
-# ============================================================================
 
 def test_anthropic_settings_for_effort_none_is_cache_only():
     """settings_for_effort(None) omits the anthropic_effort override → cache-only,
@@ -194,9 +181,6 @@ def test_settings_role_still_equals_pinned_values_after_collapse(monkeypatch):
             == an.settings_for_effort(an.effort_for_role(AgentRole.GATHER)))
 
 
-# ============================================================================
-# build_agent_core — the single construction site
-# ============================================================================
 
 def test_build_agent_core_threads_def_model_and_effort_to_make_model(logger):
     """build_agent_core resolves the model via make_model(defn.model(), defn.effort) — the
@@ -266,17 +250,8 @@ def test_build_agent_core_extra_capabilities_default_is_immutable_empty():
     assert isinstance(default, tuple)
 
 
-# NOTE: the old `spec_for_role` producer is gone (#538) — MAIN/GATHER are now
-# `driver.MAIN_DEF` / `driver.GATHER_DEF` (shape pinned in test_agent_definition.py), and
-# `build_agent` / `build_gather_agent` re-bind the per-invocation model+effort onto them.
-# Its intents survive here: gather-ignores-the-main-model is structural (build_gather_agent
-# takes no main model), and the effort defaults/omit are pinned by the effort_for_role tests
-# above + the construction tests below.
 
 
-# ============================================================================
-# MAIN / GATHER / JUDGE construction — the three callers survive the collapse
-# ============================================================================
 
 def test_build_gather_agent_is_read_only_and_cannot_self_dispatch(monkeypatch, logger):
     """build_gather_agent (re-pointed at build_agent_core via the GATHER spec) yields the
@@ -290,9 +265,6 @@ def test_build_gather_agent_is_read_only_and_cannot_self_dispatch(monkeypatch, l
     harness-owned root. This is the ONE test that pins gather's REAL registered surface — the
     `["bash", "read_file"]` assertions in test_gather_engine_seam.py and at :224 above feed a
     SYNTHETIC ToolSet and would stay green while GATHER_DEF drifted."""
-    # The GATHER spec routes through the real env path (gather_model() → provider_for,
-    # effort_for_role → env_str); clear the gather env so an ambient DEFENDER_GATHER_MODEL
-    # (the A/B benchmark exports it) or DEFENDER_GATHER_REASONING_EFFORT can't error the build.
     monkeypatch.delenv("DEFENDER_GATHER_MODEL", raising=False)
     monkeypatch.delenv("DEFENDER_GATHER_REASONING_EFFORT", raising=False)
     fake, _ = _capture_make_model()
@@ -301,7 +273,7 @@ def test_build_gather_agent_is_read_only_and_cannot_self_dispatch(monkeypatch, l
             _DEFENDER, logger, "gather:l-001", make_model=fake, verbs=FakeVerbs({}),
         )
     assert list(agent._function_toolset.tools) == ["bash", "read_file", "template_search", "query"]
-    assert "gather" not in agent._function_toolset.tools    # no self-dispatch
+    assert "gather" not in agent._function_toolset.tools
     assert "write_file" not in agent._function_toolset.tools
 
 
@@ -312,15 +284,13 @@ def test_build_agent_main_has_gather_dispatch_and_writers(monkeypatch, logger):
     seam MAIN must now accept."""
     monkeypatch.delenv("DEFENDER_COMPACTION", raising=False)
     monkeypatch.delenv("DEFENDER_MODEL", raising=False)
-    # MAIN's spec routes through effort_for_role → env_str; clear the effort env so an
-    # ambient DEFENDER_MAIN_REASONING_EFFORT can't FatalConfigError the build.
     monkeypatch.delenv("DEFENDER_MAIN_REASONING_EFFORT", raising=False)
     fake, _ = _capture_make_model()
     with override_allow_model_requests(False):
         agent = driver.build_agent(_DEFENDER, logger, make_model=fake)
     tools = set(agent._function_toolset.tools)
-    assert {"bash", "read_file", "write_file", "edit_file"} <= tools  # writers
-    assert "gather" in tools  # the layered dispatch tool, MAIN-only
+    assert {"bash", "read_file", "write_file", "edit_file"} <= tools
+    assert "gather" in tools
 
 
 def test_main_extra_capabilities_empty_when_compaction_off(monkeypatch):
@@ -348,10 +318,9 @@ def test_build_judge_agent_thin_wrapper_still_applies_per_leg_effort(monkeypatch
     agents with distinct anthropic_effort — no shared role env can carry two values.
     Uses the real build_for_effort (a fake key keeps it hermetic; settings make no call)."""
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
-    prompt = Path(__file__)  # any readable file for instructions
+    prompt = Path(__file__)
     malicious = engine_pydantic.build_judge_agent(prompt, "claude-sonnet-4-6", "low", logger, "judge-malicious")
     benign = engine_pydantic.build_judge_agent(prompt, "claude-sonnet-4-6", "high", logger, "judge-benign")
     assert malicious.model_settings["anthropic_effort"] == "low"
     assert benign.model_settings["anthropic_effort"] == "high"
-    # read-only: the judge grades evidence, never writes
     assert list(malicious._function_toolset.tools) == ["bash", "read_file"]

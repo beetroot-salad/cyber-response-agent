@@ -1,22 +1,8 @@
 #!/usr/bin/env python3
-"""One-click lesson revert (platform-design §4.4 human control loop).
-
-Lessons are recommend-only and reversible: the post-merge control is not pre-merge
-sign-off but visibility (``trace_lesson.py``) + this one-click revert. Given a lesson
-slug, opens a PR that ``git rm``s ``defender/lessons/<name>.md`` off freshly-fetched
-``origin/main`` — reusing ``author_branch.AuthorBranch`` for the branch/PR machinery
-(its own throwaway worktree, so the dev checkout is never touched). Not lease-gated: a
-revert may need to land while another lessons PR is open.
-
-Usage:
-  revert_lesson.py <lesson_name>
-"""
 from __future__ import annotations
 
 import sys
 
-# Put the workspace root on sys.path so `defender.*` namespace imports
-# resolve whether this file is imported or run directly (see tests/conftest.py).
 from pathlib import Path
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
@@ -31,15 +17,6 @@ LESSONS_REL = "defender/lessons"
 def revert(
     lesson_name: str, *, branch: AuthorBranch | None = None, paths: LoopPaths = DEFAULT_PATHS
 ) -> int:
-    """Open a one-click revert PR for ``defender/lessons/<lesson_name>.md``.
-
-    ``revert_lesson_pr`` is now HEAD-safe on its own (it runs in a throwaway worktree off
-    ``origin/main``, never the dev checkout), so this flock is belt-and-suspenders — it
-    serializes the revert against an in-flight **lessons** ``author_drain`` (its own lock;
-    the lead-author drain runs on a separate lock in its own worktree and is *not*
-    serialized against this) at the process level rather than being the sole guard it was
-    under the old in-place ``checkout -B``. Existence is verified against ``origin/main``
-    inside ``revert_lesson_pr``."""
     if branch is None:
         branch = AuthorBranch()
     rel = f"{LESSONS_REL}/{lesson_name}.md"
@@ -54,9 +31,6 @@ def revert(
         except BranchError as e:
             print(f"[revert_lesson] FATAL: {e}", file=sys.stderr)
             return 2
-        # Not "opened": revert_lesson_pr is idempotent — on a repeat click it returns the
-        # ALREADY-open PR's ref without opening anything (#482), so a neutral label is honest
-        # for both the freshly-opened and the handed-back case.
         print(f"revert PR: {pr}")
         return 0
 

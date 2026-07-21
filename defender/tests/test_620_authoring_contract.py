@@ -35,7 +35,7 @@ from defender.learning.leads import lead_neighbors as ln
 from defender.runtime import circuit_breaker
 
 _DEFENDER = Path(__file__).resolve().parents[1]
-_ROOT = _DEFENDER.parent                       # the worktree root (defender's parent)
+_ROOT = _DEFENDER.parent
 _QUERIES = _DEFENDER / "skills" / "gather" / "queries"
 _SCHEMA = _QUERIES / "SCHEMA.md"
 _CONNECT = _DEFENDER / "skills" / "connect"
@@ -46,9 +46,6 @@ _HANDBOOK = _DEFENDER / "skills" / "handbook" / "content"
 _PLACEHOLDER_RE = re.compile(r"\$\{(\w+)\}")
 
 
-# ---------------------------------------------------------------------------
-# helpers over the real corpus / files
-# ---------------------------------------------------------------------------
 
 def _established():
     """Every ESTABLISHED template (outside ``_draft/``), as ``_corpus.QueryTemplate``."""
@@ -68,7 +65,6 @@ def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-# The 12 established templates whose ## Query is NOT a query at HEAD (grounded, do-not-rederive).
 _ARGV_TEMPLATES = [
     _QUERIES / "change-mgmt" / "active-changes.md",
     _QUERIES / "change-mgmt" / "get-change.md",
@@ -88,9 +84,6 @@ _POINTER_TEMPLATES = [
 _NON_QUERY_TODAY = _ARGV_TEMPLATES + _POINTER_TEMPLATES
 
 
-# ==========================================================================
-# §2f/2g — the template corpus
-# ==========================================================================
 
 def test_every_established_query_is_a_query():
     """demand: every_established_query_is_a_query.
@@ -104,25 +97,17 @@ def test_every_established_query_is_a_query():
         q = t.query
         assert q.strip(), f"{t.path}: empty ## Query (positive control — every template has one)"
 
-        # (a) no `# See … SKILL.md` cross-reference pointer standing in for a query.
         assert not re.search(r"See\b.*SKILL\.md", q), \
             f"{t.path}: ## Query is a `See … SKILL.md` pointer, not a query"
 
-        # (b) verbs bind params BY NAME — no CLI `--flag` argv survives in a ## Query body.
         assert not re.search(r"--[a-z]", q), \
             f"{t.path}: ## Query still carries a CLI --flag argv fragment"
 
-        # (c) the body is a real call, not only comment lines (kills the pointer stubs).
         non_comment = [ln_ for ln_ in q.splitlines()
                        if ln_.strip() and not ln_.strip().startswith(("#", "```", "~~~"))]
         assert non_comment, f"{t.path}: ## Query has no non-comment content — a pointer stub"
 
-        # (d) the template declares its verb — the structured-call/query enabler the corpus
-        #     gains, which is what turns a bare `get-host ${host}` argv into a dispatchable call.
-        #     ASSUMED POST-MIGRATION SHAPE: a `verb:` frontmatter key on every template.
-        assert t.status  # walked record
-    # the bare-argv survivors with no flag (get-change/get-host/${user}) and the pointers are
-    # all forced to declare a verb — none does at HEAD.
+        assert t.status
     for path in _NON_QUERY_TODAY:
         fm, _q = _fm_and_query(path)
         assert fm.get("verb"), (
@@ -130,7 +115,6 @@ def test_every_established_query_is_a_query():
             f"call — the template declares no `verb:` (ASSUMED post-migration frontmatter key)"
         )
 
-    # sshd-auth-event-by-id.md stops teaching arg0 by name and the exit=2 claim.
     sshd_by_id = _read(_QUERIES / "elastic" / "sshd-auth-event-by-id.md")
     assert "arg0" not in sshd_by_id, "sshd-auth-event-by-id.md still names the dead `arg0` param"
     assert "exit=2" not in sshd_by_id, "sshd-auth-event-by-id.md still claims exit=2 for a param mistake"
@@ -143,7 +127,6 @@ def test_draft_arg0_raw_templates_are_dropped():
     plus ``raw: True``) are DROPPED, not migrated. The drop must leave lead_neighbors' catalog
     walk + IDF coherent — no import error, no zero-corpus divide.
     """
-    # No surviving template (draft or established) carries the dead arg0/raw bound-params marker.
     offenders = [
         t.path for t in _corpus.iter_query_templates(_QUERIES)
         if "'raw': True" in t.body or "'arg0'" in t.body
@@ -153,7 +136,6 @@ def test_draft_arg0_raw_templates_are_dropped():
         f"marker (should be deleted): {[str(p) for p in offenders[:5]]}"
     )
 
-    # Survival: the reduced corpus still walks and scores without a divide-by-zero / import error.
     catalog = ln.load_catalog(_QUERIES)
     assert catalog, "load_catalog returned nothing after the drop (catalog walk broke)"
     idf = ln.build_idf(ln._all_query_variants(catalog))
@@ -178,7 +160,7 @@ def test_placeholder_is_a_declared_param_or_marked_body_substitution():
     def violations(fm: dict, query_body: str) -> set[str]:
         placeholders = set(_PLACEHOLDER_RE.findall(query_body))
         if not fm.get("verb"):
-            return placeholders                     # undecidable without a verb -> all "neither"
+            return placeholders
         params = fm.get("params") or []
         names: set[str] = set()
         if isinstance(params, list):
@@ -216,8 +198,6 @@ def test_placeholder_is_a_declared_param_or_marked_body_substitution():
     assert not passes(bad_undeclared), "an undeclared ${placeholder} must FAIL the invariant"
     assert not passes(bad_no_verb), "a template that declares no verb is undecidable -> FAIL"
 
-    # The real corpus must satisfy the invariant — which forces every template to gain the
-    # verb / param / body-substitution declaration (none carries it at HEAD).
     failing = [t.path for t in _established() if not passes(_read(t.path))]
     assert failing == [], (
         f"{len(failing)} established template(s) fail the placeholder<->param invariant "
@@ -235,23 +215,17 @@ def test_body_substitution_distinguishable_and_schema_documents_it():
     fence sanction are corrected; the untagged-KQL-fence gap is documented; and ``filter_keys``
     is REMOVED from the 2 templates carrying it.
     """
-    # filter_keys removed corpus-wide (the 2 elastic templates carried the only readers-free key).
     carriers = [t.path for t in _corpus.iter_query_templates(_QUERIES)
                 if "filter_keys" in _read(t.path)]
     assert carriers == [], f"filter_keys still present in: {[str(p) for p in carriers]}"
 
     schema = _read(_SCHEMA)
-    # the deleted `engine:` heuristic category is gone.
     assert "shell/SQL-shaped" not in schema, \
         "SCHEMA.md still names the deleted 'shell/SQL-shaped systems' engine category"
-    # the "one CLI invocation" template definition (contradicted by #617's 3-query exemplar).
     assert "one CLI invocation" not in schema, \
         "SCHEMA.md still defines a template as 'one CLI invocation'"
-    # the ```bash fence sanction is corrected: bash is no longer a sanctioned query fence.
     assert "```bash" not in schema, "SCHEMA.md still sanctions a ```bash query fence"
 
-    # ASSUMED POST-MIGRATION SHAPE: SCHEMA documents the ```query render for a param-only verb,
-    # the untagged-KQL-fence gap (names KQL), and the body-substitution-vs-param distinction.
     low = schema.lower()
     assert "```query" in schema, "SCHEMA.md does not document the structured ```query render"
     assert "kql" in low, "SCHEMA.md does not document the (untagged) KQL fence"
@@ -275,24 +249,16 @@ def test_lead_neighbors_scores_the_new_param_only_fence():
     var_b = ln._query_variants(fence_b)
     tokens_b = frozenset().union(*var_b) if var_b else frozenset()
 
-    # non-degenerate: the structured fence yields real discriminating tokens (verb + values),
-    # not an empty set and not only plumbing.
     assert tokens_a - ln.PLUMBING_TOKENS, "structured param-only fence tokenized to only plumbing"
     assert "get-host" in tokens_a, f"structured fence lost its verb token: {sorted(tokens_a)}"
     assert "web-1" in tokens_a, f"structured fence lost its value token: {sorted(tokens_a)}"
-    # discrimination: two distinct measurements produce distinct token variants.
     assert tokens_a != tokens_b, "two distinct param-only measurements collapsed to one variant"
 
-    # start/end/limit are real params of elastic.query/alerts — no longer treated as plumbing,
-    # so a structured elastic fence keeps them as discriminating tokens.
     assert "start" not in ln.PLUMBING_TOKENS, "start is a real param — must not be dropped as plumbing"
     assert "end" not in ln.PLUMBING_TOKENS, "end is a real param — must not be dropped as plumbing"
     assert "limit" not in ln.PLUMBING_TOKENS, "limit is a real param — must not be dropped as plumbing"
 
 
-# ==========================================================================
-# §2d — the pitfalls lane (prompt + execution.md)
-# ==========================================================================
 
 def test_pitfalls_prompt_names_reachable_sections_and_failures():
     """demand: pitfalls_prompt_names_reachable_sections_and_failures.
@@ -310,7 +276,6 @@ def test_pitfalls_prompt_names_reachable_sections_and_failures():
     assert "ends the shell command" not in prompt, \
         "lead_pitfalls.md still teaches the unreachable shell-newline pitfall (nothing shells out)"
     assert not re.search(r"\bsiem\b", prompt), "lead_pitfalls.md still uses the non-existent 'siem' system"
-    # the reachable failure class the lane now exists for is the exit-64 param error.
     assert "64" in prompt, "lead_pitfalls.md must name the exit-64 param-error failure class"
 
 
@@ -321,19 +286,16 @@ def test_pitfalls_keeps_exit_64_and_reshapes_examples():
     the agent-fixable signal the lane exists for — and the prompt's exemplars are reshaped from
     CLI flags to param errors.
     """
-    # the queue-inclusion invariant: 64 is agent-fixable (kept), 2 is infra (dropped).
     assert circuit_breaker.error_class_for_exit(64) == "agent-fixable"
     assert circuit_breaker.error_class_for_exit(2) == "infra"
 
     prompt = _read(_DEFENDER / "learning" / "leads" / "lead_pitfalls.md")
-    # the "What a pitfall entry looks like" exemplars are reshaped off the CLI-flag surface.
     assert "`index=windows`" not in prompt, \
         "lead_pitfalls.md still exemplifies a CLI index-flag mistake instead of a param error"
     assert "`index:windows`" not in prompt, \
         "lead_pitfalls.md still exemplifies a CLI index-flag mistake instead of a param error"
     assert "shell command" not in prompt, \
         "lead_pitfalls.md still exemplifies a shell-command mistake (nothing shells out)"
-    # ASSUMED POST-MIGRATION SHAPE: an exemplar names a param mistake (unknown/mistyped param -> 64).
     assert re.search(r"param", prompt), "lead_pitfalls.md exemplars do not name a param mistake"
 
 
@@ -356,14 +318,10 @@ def test_execution_md_documents_exit_64_and_index_off_flags():
     assert idx.strip(), "elastic/execution.md lost its ## Index-pattern selection section"
     assert "--index" not in idx, \
         "elastic/execution.md ## Index-pattern selection still teaches the --index CLI flag"
-    # positive control: the section is re-homed, not deleted — it still lists index patterns.
     assert "logs-system.auth-*" in idx, \
         "elastic/execution.md ## Index-pattern selection no longer lists the index patterns"
 
 
-# ==========================================================================
-# §2e — the always-injected gather prompt
-# ==========================================================================
 
 def test_gather_prompt_does_not_hardcode_esql_for_every_system():
     """demand: gather_prompt_does_not_hardcode_esql_for_every_system.
@@ -374,10 +332,8 @@ def test_gather_prompt_does_not_hardcode_esql_for_every_system():
     """
     skill = _read(_DEFENDER / "skills" / "gather" / "SKILL.md")
 
-    # the ORIENT line no longer universally equates "the query language" with ES|QL.
     assert "the query language is **ES|QL**" not in skill, \
         "gather/SKILL.md ORIENT still tells every dispatch the query language is ES|QL"
-    # the worked example no longer pairs a generic system with a hardcoded esql verb.
     assert not re.search(r'query\(system="<system>",\s*verb="esql"', skill), \
         "gather/SKILL.md worked example hardcodes verb=\"esql\" for a generic system=\"<system>\""
 
@@ -394,9 +350,6 @@ def test_gather_prompt_positive_control():
     assert re.search(r"\bparams=", skill), "gather/SKILL.md no longer names the params arg"
 
 
-# ==========================================================================
-# §3 — connect skill + examples
-# ==========================================================================
 
 def _connect_skill_text() -> str:
     parts = []
@@ -418,13 +371,11 @@ def test_connect_teaches_the_registry_contract_not_the_shim():
     """
     text = _connect_skill_text()
 
-    # the dead shim / CLI-adapter contract is gone.
     assert "AdapterArgumentParser" not in text, "connect/ still teaches AdapterArgumentParser"
     assert "EXIT_USAGE" not in text, "connect/ still teaches the EXIT_* / die() adapter contract"
     assert "resolve_auth" not in text, "connect/ still routes credentials through _adapter.resolve_auth"
     assert not re.search(r"[Rr]egister the shim", text), "connect/ still tells the author to register a shim"
 
-    # the replacement contract is PRESENT (registry: importable module + VERBS mapping + faults).
     assert "VERBS" in text, "connect/ does not teach the VERBS registry contract"
     assert "faults" in text, "connect/ does not point authors at the faults.py taxonomy"
 
@@ -453,13 +404,11 @@ def test_connect_examples_compile_against_the_live_tree():
     a dict) — not ``AdapterArgumentParser`` / ``build_parser`` / ``main()`` / ``die()`` /
     ``EXIT_*`` / a bash shim, none of which any shipped adapter imports.
     """
-    # every example .py at least compiles.
     for py in sorted(_EXAMPLES.glob("*.py")):
         py_compile.compile(str(py), doraise=True)
 
     example_adapter = _load_example("example_adapter")
 
-    # the live registry shape.
     assert isinstance(getattr(example_adapter, "VERBS", None), dict), \
         "example_adapter.py exposes no VERBS mapping"
     assert example_adapter.VERBS, "example_adapter.py exposes an empty VERBS mapping"
@@ -468,7 +417,6 @@ def test_connect_examples_compile_against_the_live_tree():
     assert "VerbContext" in src, "example_adapter.py does not reference VerbContext"
     assert "faults" in src, "example_adapter.py does not use the faults.py taxonomy"
 
-    # the health-check RETURNS a dict — it does not print+exit.
     hc = example_adapter.VERBS["health-check"]
     hc_src = inspect.getsource(hc)
     assert re.search(r"\breturn\b", hc_src), "example_adapter health-check does not return a value"
@@ -477,7 +425,6 @@ def test_connect_examples_compile_against_the_live_tree():
     assert "SystemExit" not in hc_src, \
         "example_adapter health-check still raises SystemExit instead of returning a dict"
 
-    # the dead argparse/shim shape is gone from every example module.
     for name in ("example_adapter", "_adapter"):
         if not (_EXAMPLES / f"{name}.py").exists():
             continue
@@ -487,9 +434,6 @@ def test_connect_examples_compile_against_the_live_tree():
             assert not hasattr(mod, dead), f"examples/{name}.py still defines the dead symbol {dead!r}"
 
 
-# ==========================================================================
-# A15 — dead-contract docs re-homed (no lint gate; these tests ARE the gate)
-# ==========================================================================
 
 def test_dead_contract_docs_rehomed():
     """demand: dead_contract_docs_rehomed.
@@ -504,7 +448,6 @@ def test_dead_contract_docs_rehomed():
     ASSUMED POST-MIGRATION SHAPE: each doc names the query-tool / ``VERBS`` / ``faults.py``
     contract (any of the listed ``live`` tokens present); the exact wording is the author's.
     """
-    # (path, dead tokens that must be ABSENT, live tokens of which ANY must be PRESENT)
     cases = [
         (_DEFENDER / "scripts" / "adapters" / "README.md",
          ["AdapterArgumentParser", "print(json.dumps(payload))"],
@@ -533,9 +476,6 @@ def test_dead_contract_docs_rehomed():
             f"{path.name}: names no replacement contract (expected one of {live})"
 
 
-# ==========================================================================
-# oracle prompt
-# ==========================================================================
 
 def test_oracle_prompt_teaches_a_runnable_call():
     """demand: oracle_prompt_teaches_a_runnable_call.
@@ -548,7 +488,5 @@ def test_oracle_prompt_teaches_a_runnable_call():
 
     assert not re.search(r"\bkql\b", prompt), "oracle prompt still teaches a `kql` param (no verb has one)"
     assert not re.search(r"\bsentinel\b", prompt), "oracle prompt still uses the fictitious 'sentinel' system"
-    # ASSUMED POST-MIGRATION SHAPE: the reshaped example uses a real registry param
-    # (native_query for elastic query/alerts).
     assert "native_query" in prompt, \
         "oracle prompt's example does not use a real registry param (e.g. native_query)"

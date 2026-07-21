@@ -32,7 +32,7 @@ def test_committed_finding_consumed(tmp_repo, helpers, monkeypatch):
     helpers.write_finding(tmp_repo.paths.pending_file, finding_id="run-1/0", run_id="run-1")
 
     def fake_invoke(findings, batch_id, cfg):
-        _write_lesson(tmp_repo, "lessonA", "run-1/0")  # no git
+        _write_lesson(tmp_repo, "lessonA", "run-1/0")
         return {
             "committed": ["run-1/0"],
             "held_forward_bad": [],
@@ -42,7 +42,6 @@ def test_committed_finding_consumed(tmp_repo, helpers, monkeypatch):
 
     cfg = replace(tmp_repo.cfg, invoke_agent=fake_invoke)
     assert a.run_batch(cfg=cfg) == 0
-    # The loop committed the lesson the agent left in the working tree.
     head_files = tmp_repo.run_git(
         "show", "--name-only", "--pretty=format:", "HEAD"
     ).stdout.split()
@@ -64,7 +63,7 @@ def test_committed_finding_without_commit_message_aborts(tmp_repo, helpers, monk
     pre_pending = tmp_repo.paths.pending_file.read_text()
 
     def fake_invoke(findings, batch_id, cfg):
-        _write_lesson(tmp_repo, "lessonB", "run-1b/0")  # corpus dirty, but no message
+        _write_lesson(tmp_repo, "lessonB", "run-1b/0")
         return {
             "committed": ["run-1b/0"],
             "held_forward_bad": [],
@@ -83,7 +82,6 @@ def test_held_forward_bad_stays_in_queue(tmp_repo, helpers, monkeypatch):
     helpers.write_finding(tmp_repo.paths.pending_file, finding_id="run-2/0", run_id="run-2")
 
     def fake_invoke(findings, batch_id, cfg):
-        # No commit because every candidate was forward-BAD (reverted → corpus clean).
         return {
             "committed": [],
             "held_forward_bad": [{"finding_id": "run-2/0", "reason": "regresses-elsewhere"}],
@@ -99,7 +97,6 @@ def test_held_forward_bad_stays_in_queue(tmp_repo, helpers, monkeypatch):
     ]
     assert [p["finding_id"] for p in pending] == ["run-2/0"]
     assert "forward_bad" in pending[0]["held_reason"]
-    # held_report.log records the no-commit forward-BAD batch.
     assert tmp_repo.cfg.held_report.is_file()
     assert "run-2/0" in tmp_repo.cfg.held_report.read_text()
 
@@ -137,7 +134,6 @@ def test_committed_but_corpus_clean_aborts(tmp_repo, helpers, monkeypatch):
     pre_pending = tmp_repo.paths.pending_file.read_text()
 
     def fake_invoke(findings, batch_id, cfg):
-        # Reports a commit but wrote nothing — corpus stays clean.
         return {
             "committed": ["run-4/0"],
             "held_forward_bad": [],
@@ -158,7 +154,6 @@ def test_no_commit_but_left_corpus_edits_aborts(tmp_repo, helpers, monkeypatch):
     pre_pending = tmp_repo.paths.pending_file.read_text()
 
     def fake_invoke(findings, batch_id, cfg):
-        # Write a lesson but report no commit.
         (tmp_repo.paths.lessons_dir / "orphan.md").write_text("uncommitted\n")
         return {
             "committed": [],
@@ -180,7 +175,6 @@ def test_agent_result_missing_finding_aborts(tmp_repo, helpers, monkeypatch):
     pre_pending = tmp_repo.paths.pending_file.read_text()
 
     def fake_invoke(findings, batch_id, cfg):
-        # Only reports one of two findings.
         return {
             "committed": [],
             "held_forward_bad": [],
@@ -205,12 +199,11 @@ def test_prestaged_stray_does_not_ride_into_lesson_commit(
     a = tmp_repo.author
     helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-8", "benign")
     helpers.write_finding(tmp_repo.paths.pending_file, finding_id="run-8/0", run_id="run-8")
-    # Pre-stage a stray OUTSIDE the corpus, present before the agent runs.
     (tmp_repo.root / "sibling_draft.md").write_text("unrelated staged work\n")
     tmp_repo.run_git("add", "sibling_draft.md")
 
     def fake_invoke(findings, batch_id, cfg):
-        _write_lesson(tmp_repo, "lessonH", "run-8/0")  # no git
+        _write_lesson(tmp_repo, "lessonH", "run-8/0")
         return {
             "committed": ["run-8/0"],
             "held_forward_bad": [],
@@ -225,12 +218,11 @@ def test_prestaged_stray_does_not_ride_into_lesson_commit(
     ).stdout.split()
     assert head_files == ["defender/lessons/lessonH.md"]
     assert "sibling_draft.md" not in head_files
-    # The stray stays staged-but-uncommitted, untouched by the lesson commit.
     status = tmp_repo.run_git(
         "status", "--porcelain", "--", "sibling_draft.md"
     ).stdout
     assert status.startswith("A  ")
-    assert tmp_repo.paths.pending_file.read_text().strip() == ""  # finding rotated out
+    assert tmp_repo.paths.pending_file.read_text().strip() == ""
 
 
 @pytest.mark.parametrize(
@@ -280,7 +272,6 @@ def test_agent_writes_outside_lessons_aborts(tmp_repo, helpers, monkeypatch):
     pre_pending = tmp_repo.paths.pending_file.read_text()
 
     def fake_invoke(findings, batch_id, cfg):
-        # Write a file outside lessons/ (+ a valid lesson) — no git.
         (tmp_repo.root / "scratch.txt").write_text("oops")
         _write_lesson(tmp_repo, "in-scope", "run-7/0")
         return {

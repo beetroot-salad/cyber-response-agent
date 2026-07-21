@@ -30,8 +30,6 @@ _SKILL_MD = (
     Path(__file__).resolve().parents[1] / "skills" / "invlang" / "SKILL.md"
 )
 
-# `:T tag  name  [col|col|...]` — the bracketed column header of a documented
-# block. The name allows the `h-NNN` / `l-NNN` id prefixes and dotted sub-names.
 _HEADER_RE = re.compile(
     r"^:(?P<tag>[A-Z])\s+(?P<name>[\w.\-]+)\s+\[(?P<cols>[^\]]+)\]"
 )
@@ -61,7 +59,7 @@ def _expected(tag: str, name: str) -> list[str] | None:
         return parser._EDGE_COLS
     if tag == "H":
         if name == "hypothesize.hypotheses":
-            return sorted(parser._HYP_HEADER_COLS)  # a set — order-insensitive
+            return sorted(parser._HYP_HEADER_COLS)
         if name.endswith(".preds"):
             return parser._HYP_PRED_COLS
         if name.endswith(".attr_preds"):
@@ -80,10 +78,6 @@ def test_skill_md_grammar_matches_parser_constants():
         expected = _expected(tag, name)
         if expected is None:
             continue
-        # The `:H` header is a set in the parser (`_is_current_hyp_header`
-        # compares unordered); everything else is read positionally, so order
-        # matters. `_expected` returns a sorted list for the set case, so sort
-        # the documented columns to match — and assert order elsewhere.
         if tag == "H" and name == "hypothesize.hypotheses":
             assert sorted(cols) == expected, (
                 f":{tag} {name} header {cols} != parser _HYP_HEADER_COLS"
@@ -94,9 +88,6 @@ def test_skill_md_grammar_matches_parser_constants():
             )
         pinned_tags.add(tag)
 
-    # Guard against silent vacuity: if a SKILL.md restructure (or a regex
-    # break) stops the headers from being found, the loop above passes
-    # trivially. Require that the core surfaces were actually present.
     assert {"V", "E", "H"} <= pinned_tags, (
         f"expected to pin :V/:E/:H grammar headers from SKILL.md, "
         f"found tags {sorted(pinned_tags)} — extraction may have broken"

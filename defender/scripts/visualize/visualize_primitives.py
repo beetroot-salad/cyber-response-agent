@@ -1,14 +1,3 @@
-"""HTML escaping + raw event renderers + shared content fragments.
-
-This is the "no-business-logic" tier of the visualize_run pipeline:
-everything here is either a tiny HTML helper, a file-loading shim, or
-a renderer that turns a single stream-json event / artifact into HTML.
-The judge and runtime views both import from here.
-
-Cross-module imports use the ``defender.scripts``/``defender.learning``
-namespace packages; entry points (``visualize_run.py``, ``run.py``) put the
-workspace root on ``sys.path`` so they resolve.
-"""
 from __future__ import annotations
 
 import html
@@ -19,12 +8,8 @@ from pathlib import Path
 import yaml
 
 
-# Repo root — re-exported for the git-backed renderers (visualize_runtime uses it as
-# the `git -C` cwd). The learning-state run dir is resolved via config, not from here.
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
-# The two-table read/join surface + loop config live in defender/learning/ — reached
-# via the `defender.learning` namespace package (callers put the repo root on sys.path).
 from defender._yaml import safe_load  # noqa: E402
 from defender._frontmatter import FrontmatterError, parse_frontmatter  # noqa: E402
 from defender._io import TEXT_READ_ERRORS, read_text_utf8  # noqa: E402
@@ -33,9 +18,6 @@ from defender.learning import lead_repository  # noqa: E402
 from defender.learning.core import config as _loop_config  # noqa: E402
 
 
-# ---------------------------------------------------------------------------
-# Primitives
-# ---------------------------------------------------------------------------
 
 
 def esc(s) -> str:
@@ -48,7 +30,6 @@ def load_yaml(path: Path) -> dict | list | None:
     try:
         return safe_load(path.read_text(encoding="utf-8"))
     except yaml.YAMLError:
-        # Including a nesting flood — folded into YAMLError by the shared seam (#613).
         return None
 
 
@@ -64,14 +45,6 @@ def block(kind: str, title: str, body: str, *, open_: bool = False, anchor: str 
 
 
 def section(anchor: str, stage: str, title: str, subtitle: str, body: str) -> str:
-    """The stage-section shell: ``<section><h2>Title <sub></h2>{body}</section>``.
-
-    Sibling of :func:`block`. ``title`` and ``subtitle`` are raw HTML (they may
-    carry entities like ``&amp;``); ``anchor`` is escaped and ``stage`` names the
-    ``stage-{stage}`` color class. Each stage renderer computes its body once —
-    empty-state or populated — and returns ``section(...)``, so the ``<h2>`` is
-    written in exactly one place.
-    """
     return f"""
 <section id="{esc(anchor)}" class="stage stage-{stage}">
   <h2>{title} <span class="stage-sub">{subtitle}</span></h2>
@@ -92,9 +65,6 @@ def pre_json(obj) -> str:
     return f'<pre class="json">{esc(rendered)}</pre>'
 
 
-# A JSON token: a string (optionally a key — a string followed by a colon), a
-# literal, or a number. Everything between tokens (braces, commas, whitespace)
-# is structural and HTML-safe, so it passes through unescaped.
 _JSON_TOKEN_RE = re.compile(
     r'"(?:\\.|[^"\\])*"(?:\s*:)?'
     r'|\b(?:true|false|null)\b'
@@ -113,9 +83,6 @@ def _json_token_class(tok: str) -> str:
 
 
 def pretty_json_html(obj) -> str:
-    """Syntax-highlighted ``<pre>`` for a JSON-able object (keys / strings /
-    numbers / literals colored). Falls back to plain ``pre_text`` if the object
-    won't serialize."""
     try:
         text = json.dumps(obj, indent=2, ensure_ascii=False)
     except (TypeError, ValueError):
@@ -142,10 +109,6 @@ def fmt_duration(ms: float | int) -> str:
     return f"{s // 60}m{s % 60:02d}s"
 
 
-# ---------------------------------------------------------------------------
-# Raw transcript event helpers (used by the Runtime view's § Raw section
-# *and* by the per-phase inner-events expander)
-# ---------------------------------------------------------------------------
 
 
 def render_tool_use(blk: dict) -> str:
@@ -252,15 +215,9 @@ def render_event(event: dict) -> str:
     return block(t, t, pre_json(event))
 
 
-# ---------------------------------------------------------------------------
-# Shared content fragments (used by both judge and runtime views)
-# ---------------------------------------------------------------------------
 
 
 def parse_report(run_dir: Path) -> dict:
-    """One fallback contract (#591): ``{}`` when the report is missing or unreadable,
-    ``{'body': <whole text, fences visible>}`` when it does not parse under the
-    canonical grammar, ``{**fm, 'body': <stripped body>}`` when it does."""
     p = RunPaths(run_dir).report
     if not p.is_file():
         return {}
@@ -276,14 +233,6 @@ def parse_report(run_dir: Path) -> dict:
 
 
 def _learning_run_dir(run_id: str) -> Path:
-    """The learning-state run dir for ``run_id``, honoring
-    ``DEFENDER_LEARNING_STATE_DIR``.
-
-    Delegates to ``config.learning_run_paths`` — the single derivation of
-    ``<state_root>/runs/<run_id>`` shared with the LEARN stage (call-time, so the
-    off-process worker's env is honored). A renderer re-deriving the path itself
-    would re-render an empty judge page wherever the findings actually landed.
-    """
     return _loop_config.learning_run_paths(run_id).run_dir
 
 
@@ -293,11 +242,6 @@ def load_judge_findings(run_id: str) -> dict | None:
 
 
 def load_judge_benign_findings(run_id: str) -> dict | None:
-    """Benign (FP-direction) judge output — the mirror of load_judge_findings.
-
-    The two directions persist under different names so they never collide in
-    one run dir; the benign direction writes ``judge_benign_findings.yaml``.
-    """
     data = load_yaml(_learning_run_dir(run_id) / "judge_benign_findings.yaml")
     return data if isinstance(data, dict) else None
 
@@ -315,12 +259,6 @@ def render_alert_block(run_dir: Path, *, open_: bool = False, anchor: str = "sec
 
 
 def render_lead_sequence_compact(run_dir: Path) -> str:
-    """Compact lead list — lead_id, goal one-liner, queries[].id + params.
-
-    This is the judge's view of "what did the defender measure?", rendered
-    from the joined two-table surface. Raw payloads stay collapsed under
-    § Runtime.
-    """
     leads = lead_repository.joined(run_dir)
     if not leads:
         return '<div class="empty">no leads recorded</div>'
@@ -348,7 +286,6 @@ def render_lead_sequence_compact(run_dir: Path) -> str:
 
 
 def render_report_card(run_dir: Path) -> str:
-    """Report disposition + body, presented as a card (shared by both views)."""
     report = parse_report(run_dir)
     disposition = str(report.get("disposition", "?"))
     confidence = str(report.get("confidence", "?"))

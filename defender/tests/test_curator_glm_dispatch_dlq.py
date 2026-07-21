@@ -41,10 +41,6 @@ from defender.learning.author.benign_actor import run as aenv  # type: ignore[im
 from defender.learning.core.config import FatalConfigError, LoopPaths  # type: ignore[import-not-found]
 
 
-# ---------------------------------------------------------------------------
-# Repo + queue harness (a real git checkout so the transaction envelope's git
-# status/commit run for real; the curators are driven through the REAL run_batch)
-# ---------------------------------------------------------------------------
 
 
 def _git(repo: Path, *args: str) -> None:
@@ -141,7 +137,6 @@ def _max_attempts_seen(paths: LoopPaths) -> int:
     return hi
 
 
-# --- fakes: inject the fault (raise) or the clean result (return) ONLY ---------
 
 
 def _fault_fake(observations: list[dict], batch_id: str, cfg) -> dict:
@@ -184,9 +179,6 @@ def _commit_fake(observations: list[dict], batch_id: str, cfg) -> dict:
     }
 
 
-# ---------------------------------------------------------------------------
-# Dispatch fix — the author_actor_env KeyError (survival)
-# ---------------------------------------------------------------------------
 
 
 def test_dispatch_author_actor_env_resolves_module() -> None:
@@ -227,7 +219,6 @@ def test_dispatch_at_threshold_drain_completes(tmp_path: Path, monkeypatch) -> N
     ):
         monkeypatch.delenv(env, raising=False)
     paths = _env_repo(tmp_path)
-    # Adversarial-env queue at the default threshold (5), all skip-by-policy.
     _seed(paths.actor_environment_observations.file, [_obs(f"env/{i}", "survived") for i in range(5)])
 
     class _RepoBranch:
@@ -253,10 +244,8 @@ def test_dispatch_at_threshold_drain_completes(tmp_path: Path, monkeypatch) -> N
             pass
 
     rc = orch.author_drain(paths, branch=_RepoBranch(paths.repo_root))
-    assert rc == 0  # the drain completed — no KeyError wedge
+    assert rc == 0
 
-    # Positive control: every curator (the other three + D) resolves via the REAL
-    # dispatch to its mapped module — the dispatch table is complete.
     expected = {
         "author": "defender.learning.author.lessons.run",
         "author_actor": "defender.learning.author.malicious_actor.run",
@@ -269,36 +258,31 @@ def test_dispatch_at_threshold_drain_completes(tmp_path: Path, monkeypatch) -> N
         assert box == [dotted]
 
 
-# ---------------------------------------------------------------------------
-# Dead-letter queue — batch-granular attempts bump + quarantine (new mechanism)
-# ---------------------------------------------------------------------------
 
 
 def test_dlq_bumps_attempts_on_authoring_fault(tmp_path: Path, monkeypatch) -> None:
     """dlq-attempt-bump: a per-run authoring fault increments an ``attempts`` counter
     on the batch's active queue rows, persisted across ticks (1 → 2). Positive
     control: a SUCCESSFUL batch never writes an attempts counter at all."""
-    monkeypatch.setenv("LEARNING_AUTHOR_MAX_ATTEMPTS", "10")  # high: isolate the bump from quarantine
+    monkeypatch.setenv("LEARNING_AUTHOR_MAX_ATTEMPTS", "10")
     paths = _env_repo(tmp_path)
     cfg = aenv.build_adversarial_config(paths)
     ch = paths.actor_environment_observations
 
-    # Positive control: a clean all-skip batch consumes its row and touches no counter.
     _seed(ch.file, [_obs("ok/0", "caught")])
     rc = curator.run_batch(hold_committed=False, cfg=dataclasses.replace(cfg, invoke_agent=_skip_fake))
     assert rc == 0
-    assert "ok/0" not in _active_by_id(paths)   # cleanly consumed, not re-queued
-    assert _max_attempts_seen(paths) == 0       # success never wrote an attempts counter
+    assert "ok/0" not in _active_by_id(paths)
+    assert _max_attempts_seen(paths) == 0
     assert _deadletter_rows(paths) == []
 
-    # Fault path: two ticks bump + persist the counter (1 then 2).
     _seed(ch.file, [_obs("bad/0", "caught")])
     fault_cfg = dataclasses.replace(cfg, invoke_agent=_fault_fake)
     curator.run_batch(hold_committed=False, cfg=fault_cfg)
     assert _active_by_id(paths)["bad/0"].get("attempts") == 1
     curator.run_batch(hold_committed=False, cfg=fault_cfg)
     assert _active_by_id(paths)["bad/0"].get("attempts") == 2
-    assert _deadletter_rows(paths) == []        # 2 < 10 — still retryable, not quarantined
+    assert _deadletter_rows(paths) == []
 
 
 def test_dlq_quarantines_batch_at_max_attempts(tmp_path: Path, monkeypatch) -> None:
@@ -313,11 +297,11 @@ def test_dlq_quarantines_batch_at_max_attempts(tmp_path: Path, monkeypatch) -> N
     _seed(ch.file, [_obs("p/0", "caught")])
     fault_cfg = dataclasses.replace(cfg, invoke_agent=_fault_fake)
 
-    for _ in range(3):  # tick 1→1, tick 2→2, tick 3 reaches 3
+    for _ in range(3):
         curator.run_batch(hold_committed=False, cfg=fault_cfg)
 
-    assert "p/0" not in _active_by_id(paths)                         # gone from the active queue
-    assert "p/0" in {r["observation_id"] for r in _deadletter_rows(paths)}  # dead-lettered
+    assert "p/0" not in _active_by_id(paths)
+    assert "p/0" in {r["observation_id"] for r in _deadletter_rows(paths)}
 
 
 def test_dlq_quarantine_is_batch_granular(tmp_path: Path, monkeypatch) -> None:
@@ -332,17 +316,17 @@ def test_dlq_quarantine_is_batch_granular(tmp_path: Path, monkeypatch) -> None:
     _seed(ch.file, [_obs(i, "caught") for i in ids])
     fault_cfg = dataclasses.replace(cfg, invoke_agent=_fault_fake)
 
-    curator.run_batch(hold_committed=False, cfg=fault_cfg)   # tick 1
-    curator.run_batch(hold_committed=False, cfg=fault_cfg)   # tick 2 — below threshold
+    curator.run_batch(hold_committed=False, cfg=fault_cfg)
+    curator.run_batch(hold_committed=False, cfg=fault_cfg)
     active = _active_by_id(paths)
-    assert set(ids) <= set(active)                           # all three still queued together
-    assert all(active[i].get("attempts") == 2 for i in ids)  # sharing one attempt count
-    assert _deadletter_rows(paths) == []                    # none dead-lettered early
+    assert set(ids) <= set(active)
+    assert all(active[i].get("attempts") == 2 for i in ids)
+    assert _deadletter_rows(paths) == []
 
-    curator.run_batch(hold_committed=False, cfg=fault_cfg)   # tick 3 — reaches 3
+    curator.run_batch(hold_committed=False, cfg=fault_cfg)
     active = _active_by_id(paths)
-    assert not (set(ids) & set(active))                     # all three gone from the queue
-    assert set(ids) <= {r["observation_id"] for r in _deadletter_rows(paths)}  # all dead-lettered as a unit
+    assert not (set(ids) & set(active))
+    assert set(ids) <= {r["observation_id"] for r in _deadletter_rows(paths)}
 
 
 def test_dlq_does_not_block_subsequent_clean_batch(tmp_path: Path, monkeypatch) -> None:
@@ -357,16 +341,14 @@ def test_dlq_does_not_block_subsequent_clean_batch(tmp_path: Path, monkeypatch) 
     fault_cfg = dataclasses.replace(cfg, invoke_agent=_fault_fake)
     for _ in range(3):
         curator.run_batch(hold_committed=False, cfg=fault_cfg)
-    assert "poison/0" in {r["observation_id"] for r in _deadletter_rows(paths)}  # sanity: quarantined
+    assert "poison/0" in {r["observation_id"] for r in _deadletter_rows(paths)}
 
-    # A following clean batch of NEW findings arrives on the (now unblocked) queue.
     _append(ch.file, [_obs("clean/0", "caught")])
     head_before = _head(paths.repo_root)
     rc = curator.run_batch(hold_committed=True, cfg=dataclasses.replace(cfg, invoke_agent=_commit_fake))
 
     assert rc == 0
-    assert _head(paths.repo_root) != head_before   # a commit landed — authored normally
-    # The dead-lettered poison batch stays quarantined (not resurrected by the clean run).
+    assert _head(paths.repo_root) != head_before
     assert "poison/0" in {r["observation_id"] for r in _deadletter_rows(paths)}
 
 
@@ -384,5 +366,5 @@ def test_dlq_systemic_fault_is_exempt_and_propagates(tmp_path: Path, monkeypatch
     with pytest.raises(FatalConfigError):
         curator.run_batch(hold_committed=False, cfg=systemic_cfg)
 
-    assert _max_attempts_seen(paths) == 0   # a systemic fault never bumps the counter
-    assert _deadletter_rows(paths) == []    # nor dead-letters the batch
+    assert _max_attempts_seen(paths) == 0
+    assert _deadletter_rows(paths) == []

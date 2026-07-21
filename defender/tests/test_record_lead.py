@@ -46,7 +46,7 @@ def test_writes_lead_id_keyed_sidecar(tmp_path):
 
 
 def test_creates_gather_raw_dir_if_missing(tmp_path):
-    run_dir = tmp_path / "run-C"  # no gather_raw subdir
+    run_dir = tmp_path / "run-C"
     assert claim_lead(_dispatch(run_dir, "l-002", "g", ["d"])) == 0
     assert (run_dir / "gather_raw" / "l-002.lead.json").is_file()
 
@@ -64,19 +64,16 @@ def test_reused_id_returns_2_with_remediation(tmp_path, capsys):
     run_dir = tmp_path / "run-reuse"
     (run_dir / "gather_raw").mkdir(parents=True)
     assert claim_lead(_dispatch(run_dir, "l-001", "first", ["d"])) == 0
-    # Second dispatch echoing the same id must be rejected.
     assert claim_lead(_dispatch(run_dir, "l-001", "second", ["d"])) == 2
     err = capsys.readouterr().err
     assert "l-001" in err
     assert "append a new :L" in err
-    # The first claim's content is preserved (no overwrite).
     assert json.loads((run_dir / "gather_raw" / "l-001.lead.json").read_text())["goal"] == "first"
 
 
 def test_malformed_lead_id_silently_skips(tmp_path):
     run_dir = tmp_path / "run-bad-id"
     (run_dir / "gather_raw").mkdir(parents=True)
-    # `0` is not an l-NNN id → benign skip, no sidecar, no block.
     assert claim_lead(_dispatch(run_dir, "0", "g", ["d"])) == 0
     assert list((run_dir / "gather_raw").glob("*.lead.json")) == []
 
@@ -92,7 +89,6 @@ def test_missing_lead_id_silently_skips(tmp_path):
 def test_missing_required_keys_silently_skips_write(tmp_path):
     run_dir = tmp_path / "run-D"
     (run_dir / "gather_raw").mkdir(parents=True)
-    # No `goal` — a required field.
     assert claim_lead({"run_dir": str(run_dir), "lead_id": "l-001"}) == 0
     assert not (run_dir / "gather_raw" / "l-001.lead.json").exists()
 
@@ -117,16 +113,15 @@ def test_failed_payload_write_removes_empty_sidecar_and_allows_retry(tmp_path, m
     real_fdopen = os.fdopen
 
     def boom(fd, *a, **k):
-        os.close(fd)  # release the fd the way the real fdopen would on success
+        os.close(fd)
         raise OSError("disk full")
 
     monkeypatch.setattr(os, "fdopen", boom)
-    assert claim_lead(dispatch) == 0                # fails open, never blocks
+    assert claim_lead(dispatch) == 0
     monkeypatch.setattr(os, "fdopen", real_fdopen)
 
     sidecar = run_dir / "gather_raw" / "l-001.lead.json"
-    assert not sidecar.exists()                     # no 0-byte orphan left behind
+    assert not sidecar.exists()
 
-    # A genuine retry of the same id now succeeds (not falsely rejected).
     assert claim_lead(dispatch) == 0
     assert json.loads(sidecar.read_text())["goal"] == "g"

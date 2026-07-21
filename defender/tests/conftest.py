@@ -19,11 +19,6 @@ import pytest
 REAL_REPO = Path(__file__).resolve().parents[2]
 LEARNING_SRC = REAL_REPO / "defender" / "learning"
 
-# The workspace root is on sys.path via `pythonpath = [".."]` in pyproject.toml's
-# [tool.pytest.ini_options], so `defender.*` namespace imports resolve. Note that
-# learning/ is intentionally NOT on the path: a bare `import author` must fail
-# loudly so a missed migration surfaces instead of silently creating a second
-# module object (defender.learning.author.lessons.run vs author) that monkeypatch misses.
 
 
 @pytest.fixture
@@ -39,9 +34,6 @@ def tmp_repo(tmp_path: Path):
     (repo / "defender" / "lessons").mkdir(parents=True)
     (repo / "defender" / "lessons" / ".gitkeep").write_text("")
 
-    # Copy the author entry + verifier (and prompts) so they exist at the same
-    # relative paths as the real (reorganized) repo — git tracks them and the
-    # author resolves its prompt/verifier commands off these paths.
     for rel in (
         "author/lessons/run.py",
         "author/lessons/prompt.md",
@@ -62,8 +54,6 @@ def tmp_repo(tmp_path: Path):
             check=check,
         )
 
-    # Mirror the real repo's gitignore so transient state under
-    # _pending/ and runs/ doesn't sneak into git add -A.
     (repo / ".gitignore").write_text(
         "defender/learning/_pending/\n"
         "defender/learning/_author.lock\n"
@@ -79,15 +69,6 @@ def tmp_repo(tmp_path: Path):
     from defender.learning.author.lessons import run as author_mod  # type: ignore[import-not-found]
     from defender.learning.core.config import LoopPaths  # type: ignore[import-not-found]
 
-    # No importlib.reload: every module binds `AuthorError = _shared.AuthorError` once
-    # at import and never rebinds, so a single stable class object lives for the whole
-    # session and `except shared.AuthorError` can't diverge. Tests reference
-    # ``shared.AuthorError`` live (never a collection-time alias).
-    #
-    # `_author_shared` reads no import-time module globals any more: its git layer, repo
-    # lock, and generation counters all take ``repo_root`` / lock-file by param, threaded
-    # from the injected ``LoopPaths`` / ``AuthorConfig`` (``ctx.paths`` / ``ctx.cfg``)
-    # below — there is nothing left on the shared module to point at the tmp tree (#389).
     paths = LoopPaths(repo_root=repo)
     cfg = author_mod.build_author_config(paths)
 
@@ -114,9 +95,6 @@ def write_finding(
 ) -> dict:
     pending_file.parent.mkdir(parents=True, exist_ok=True)
     import json
-    # Mirror loop.append_actor_observations' row layout — every real finding
-    # carries `direction` (after `alert_rule_key`); the author gate reads it
-    # fail-loud, so the fixture must too.
     entry = {
         "schema_version": 1,
         "finding_id": finding_id,

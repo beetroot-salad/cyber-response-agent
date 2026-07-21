@@ -24,7 +24,7 @@ from types import SimpleNamespace
 
 import pytest
 
-pytest.importorskip("pydantic_ai")  # CI installs the runtime extra; skip otherwise
+pytest.importorskip("pydantic_ai")
 
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart  # noqa: E402
 from pydantic_ai.models import override_allow_model_requests  # noqa: E402
@@ -37,7 +37,6 @@ from defender.learning.author.curator_engine import (  # noqa: E402
 from defender.learning.author.verify_forward.engine import _run_verify_pydantic  # noqa: E402
 from defender.tests._engine_helpers import fake_model as _fake_model  # noqa: E402
 
-# --- THE TARGET (missing until implemented; the ImportError IS the expected red) ---
 from defender.learning.author.verify_forward.checks import (  # noqa: E402
     ENV_CHECK,
     FINDINGS_CHECK,
@@ -52,7 +51,6 @@ _AUTHOR_RESULT_OK = (
 )
 
 
-# --- FunctionModel DI-seam helpers -----------------------------------------
 
 
 def _verifier(text: str, *, delay: float = 0.0):
@@ -65,7 +63,6 @@ def _verifier(text: str, *, delay: float = 0.0):
     return fn
 
 
-# --- Scene builder ----------------------------------------------------------
 
 
 def _scene(tmp_path: Path):
@@ -108,9 +105,6 @@ def _counts(out: str) -> tuple[int, int, int]:
     return tuple(int(x) for x in m.groups())  # type: ignore[return-value]
 
 
-# ===========================================================================
-# d11 — distinct trace names per check, under a genuine interleaving (A/B only)
-# ===========================================================================
 
 
 def test_d11_trace_names_distinct_per_check(tmp_path):
@@ -121,7 +115,6 @@ def test_d11_trace_names_distinct_per_check(tmp_path):
     (scene.corpus / "samelesson.md").write_text("---\nname: samelesson\n---\nlesson body\n")
     src = _bundle(scene, "run-X", disposition="malicious")
 
-    # instrument in-flight so the interleaving is provably genuine; call the REAL transport
     lock = threading.Lock()
     inflight = [0]
     peak = [0]
@@ -148,21 +141,12 @@ def test_d11_trace_names_distinct_per_check(tmp_path):
     traces = sorted(src.glob("*.trace.jsonl"))
     assert len(traces) == 2, f"same-stem checks did not write DISTINCT trace files: {traces}"
     contents = [t.read_text() for t in traces]
-    assert all(c.strip() for c in contents)  # both hold REAL content (no vacuous 'no collision')
-    # each trace holds ITS OWN check's content: the direction-aware disposition differs, so a
-    # shared-name truncation (one file / same bytes) is ruled out. Anchor on the rendered
-    # DISPOSITION SECTION, not a bare word — a bare "benign" appears in EVERY trace in BOTH
-    # directions, from two sources this demand does not own: the `instructions` (forward.md,
-    # which the design puts out of scope) and the CITED COVERING POLICY section label, which
-    # reads "benign/FP lessons only — adversarial lessons cite none".
-    assert sum(r"DISPOSITION:\n\nmalicious" in c for c in contents) == 1  # the adversarial target
-    assert sum(r"DISPOSITION:\n\nbenign" in c for c in contents) == 1     # the benign corrected one
+    assert all(c.strip() for c in contents)
+    assert sum(r"DISPOSITION:\n\nmalicious" in c for c in contents) == 1
+    assert sum(r"DISPOSITION:\n\nbenign" in c for c in contents) == 1
     assert peak[0] >= 2, "the two same-stem checks did not genuinely interleave"
 
 
-# ===========================================================================
-# d12 — the curator spawn trace and the nested check traces land in DIFFERENT roots
-# ===========================================================================
 
 
 def test_d12_curator_trace_in_a_separate_root(tmp_path):
@@ -194,14 +178,11 @@ def test_d12_curator_trace_in_a_separate_root(tmp_path):
             run_verify=_transport,
         )
 
-    # the curator spawn's own trace lands in the persistent learning_run_dir …
     curator_traces = list(scene.curdir.glob("*.trace.jsonl"))
     assert curator_traces, "the curator spawn wrote no trace in its learning_run_dir"
-    # … the nested check's trace lands in the SOURCE bundle — a DIFFERENT directory …
     nested_traces = list(src.glob("*.trace.jsonl"))
     assert nested_traces, "the nested check wrote no trace in the source bundle"
-    assert scene.curdir.resolve() != src.resolve()  # two distinct roots
-    # … so no nested check truncated the curator's own (non-empty) trace.
+    assert scene.curdir.resolve() != src.resolve()
     assert any(t.read_text().strip() for t in curator_traces)
 
 
@@ -218,9 +199,6 @@ def _make_curator_fn(pairs_args):
     return fn
 
 
-# ===========================================================================
-# m2 — the deterministic env check writes NO trace (the negative-control shape)
-# ===========================================================================
 
 
 def test_m2_env_checks_write_no_trace(tmp_path):
@@ -241,17 +219,15 @@ def test_m2_env_checks_write_no_trace(tmp_path):
 
     calls: list = []
 
-    def _transport(**kw):  # the ENV check is model-free — this must NEVER be called
+    def _transport(**kw):
         calls.append(kw)
         return "VERDICT: GOOD"
 
     deps = _deps(scene, run_verify=_transport, check=ENV_CHECK, corpus=env_corpus, queued={"obs-1"})
     asyncio.run(run_forward_check(deps, [Pair("defender/lessons-environment/x.md", "obs-1")]))
-    assert calls == []                              # no model transport touched
-    assert not list(src.glob("*.trace.jsonl"))      # NO trace written in the source bundle
+    assert calls == []
+    assert not list(src.glob("*.trace.jsonl"))
 
-    # paired positive control (same address, verify_trace_root): a MODEL-BACKED check DOES write
-    # a trace, so the observation channel can see the difference.
     (scene.corpus / "m.md").write_text("---\nname: m\n---\nbody\n")
     src2 = _bundle(scene, "run-M")
 
@@ -264,9 +240,6 @@ def test_m2_env_checks_write_no_trace(tmp_path):
     assert list(src2.glob("*.trace.jsonl")), "a model-backed check wrote no trace (control failed)"
 
 
-# ===========================================================================
-# m13 — a raising check still closes its trace handle (no fd leak)
-# ===========================================================================
 
 
 def _fd_count() -> int:
@@ -283,8 +256,6 @@ def test_m13_trace_handle_closed_when_a_check_raises(tmp_path):
         _bundle(scene, r)
 
     def _transport(**kw):
-        # an EMPTY final → run_stage's require_output raises RunUnprocessable AFTER its
-        # `finally: logger.close()`, so the real RequestLogger handle is still released.
         return _run_verify_pydantic(**kw, make_model=_fake_model(_verifier("")))
 
     pairs = [Pair(f"defender/lessons/l-{r}.md", r, "adversarial") for r in rids]
@@ -295,8 +266,7 @@ def test_m13_trace_handle_closed_when_a_check_raises(tmp_path):
         out = asyncio.run(run_forward_check(deps, pairs))
     after = _fd_count()
 
-    assert _counts(out) == (0, 0, 10)      # every raising check surfaced as its pair's ERROR
+    assert _counts(out) == (0, 0, 10)
     assert after - before <= 2, f"leaked file descriptors: {before} -> {after}"
-    # and each raising check DID open (then close) a real trace — the handles were used, not skipped
     written = sum(1 for r in rids if list((scene.runs / r).glob("*.trace.jsonl")))
     assert written == 10

@@ -74,14 +74,6 @@ SALT = "s540"
 RUN_ID = "exec-seam-540"
 
 
-# ---------------------------------------------------------------------------
-# The transport fake — the ONE fakeable point below `BoxExecutor`.
-#
-# A real transport spawns `docker exec` and returns its raw result. Ours returns
-# scripted `box.RawExec` values and RECORDS every inbound frame, so a byte-exactness
-# demand asserts on what actually crossed rather than on a canned reply. The frames it
-# records are produced by the REAL encoder and read back by the REAL decoder.
-# ---------------------------------------------------------------------------
 
 @dataclass(frozen=True)
 class ExecCall:
@@ -141,10 +133,6 @@ def framed(rc: int, out: bytes, err: bytes, *, exec_rc: int | None = None) -> bo
     )
 
 
-# R-C39, executed this run: `docker run --rm alpine:latest /nonexistent-binary-xyz` →
-# rc=127, stdout **0 bytes**, stderr **347 bytes, plain LF**. This is the OBSERVED shape of
-# a daemon-level failure on the current daemon (client 29.6.1 / server 29.5.3) and it is
-# exactly inverted from the doc's C39. It is the canonical unframed-stdout fault.
 DAEMON_START_FAILURE = box.RawExec(
     rc=127,
     stdout=b"",
@@ -154,15 +142,12 @@ DAEMON_START_FAILURE = box.RawExec(
             b"/nonexistent-binary-xyz: no such file or directory: unknown\n"),
 )
 
-# C35b, executed: `docker exec -w <missing>` → rc=127 (while `docker run -w <missing>`
-# silently CREATES the directory). Another unframed fault, at a different site.
 MISSING_WORKDIR_FAILURE = box.RawExec(
     rc=127, stdout=b"",
     stderr=b"OCI runtime exec failed: exec failed: unable to start container process: "
            b"chdir to cwd: no such file or directory: unknown\n",
 )
 
-# C43b, executed: a STOPPED container of the same name collides at rc=125.
 NAME_COLLISION_FAILURE = box.RawExec(
     rc=125, stdout=b"",
     stderr=b"docker: Error response from daemon: Conflict. The container name "
@@ -170,9 +155,6 @@ NAME_COLLISION_FAILURE = box.RawExec(
 )
 
 
-# ---------------------------------------------------------------------------
-# deps / run-dir helpers
-# ---------------------------------------------------------------------------
 
 def _run_dir(tmp_path: Path) -> Path:
     return materialize(tmp_path, GOLDEN_AB3)
@@ -199,9 +181,6 @@ def _cat_alert(run_dir: Path) -> str:
     return f"cat {run_dir / 'alert.json'}"
 
 
-# ===========================================================================
-# DEMAND #0 — the wire
-# ===========================================================================
 
 def test_box_returns_boxresult_dataclass_not_a_tuple(tmp_path):
     """box_returns_boxresult_dataclass_not_a_tuple — a completed box call yields a
@@ -245,14 +224,11 @@ def test_unframed_stdout_is_never_returned_as_program_output(tmp_path):
     with pytest.raises(box.BoxFault):
         executor.run_parsed(bash_exec.parse("cat x"), command="cat x", cwd=run_dir, timeout=5.0)
 
-    # A second, differently-shaped unframed reply: bytes ON stdout that are not a frame.
-    # (Asserted as "not a frame", NOT as "daemon text on stdout" — R-C39 forbids that claim.)
     noise = box.RawExec(rc=0, stdout=b"Error response from daemon: something\n", stderr=b"")
     executor2 = box.BoxExecutor(spec=box.BoxSpec(), transport=RecordingTransport(noise))
     with pytest.raises(box.BoxFault):
         executor2.run_parsed(bash_exec.parse("cat x"), command="cat x", cwd=run_dir, timeout=5.0)
 
-    # ...and through the real tool: the model is never shown those bytes as program stdout.
     deps = _main_deps(run_dir, RecordingTransport(noise))
     with pytest.raises((ModelRetry, box.BoxFault)) as caught:
         _bash(deps, _cat_alert(run_dir))
@@ -339,16 +315,11 @@ def test_infrastructure_failure_raises_boxfault(tmp_path):
     assert not isinstance(caught.value, box.BoxResult)
     assert isinstance(caught.value, Exception), "BoxFault must be raisable, not a value type"
 
-    # The daemon is unreachable: the transport itself fails. NOTE: the ledger has no executed
-    # row for a DOWN daemon (D21 records it reachable), so this is a primitive-level fault,
-    # flagged as such rather than dressed up as an observation.
     boom = ConnectionError("Cannot connect to the Docker daemon at unix:///var/run/docker.sock")
     executor = box.BoxExecutor(spec=box.BoxSpec(), transport=RecordingTransport(boom))
     with pytest.raises(box.BoxFault):
         executor.run_parsed(bash_exec.parse("cat x"), command="cat x", cwd=tmp_path, timeout=5.0)
 
-    # Inline positive control: a classifier that raised BoxFault unconditionally would pass
-    # every assertion above. The SAME executor shape, given a well-formed frame, must return.
     ok = box.BoxExecutor(spec=box.BoxSpec(), transport=RecordingTransport(framed(0, b"ok\n", b"")))
     assert ok.run(bash_exec.parse("cat x"), command="cat x", cwd=tmp_path, timeout=5.0) == \
         box.BoxResult(rc=0, out=b"ok\n", err=b"")
@@ -368,32 +339,25 @@ def test_malformed_frame_never_becomes_a_different_command(tmp_path):
     author-imagined byte string."""
     good = box.encode_response(box.BoxResult(rc=0, out=b"abcdefgh", err=b"xy"))
 
-    # (a) declared len(out) overstates the payload → a short read, not a truncated result.
     overstated = good[:8] + struct.pack("!Q", 9999) + good[16:]
     executor = box.BoxExecutor(spec=box.BoxSpec(), transport=RecordingTransport(
         box.RawExec(rc=0, stdout=overstated, stderr=b"")))
     with pytest.raises(box.BoxFault):
         executor.run_parsed(bash_exec.parse("cat x"), command="cat x", cwd=tmp_path, timeout=5.0)
 
-    # (b) the frame is truncated mid-payload.
     executor = box.BoxExecutor(spec=box.BoxSpec(), transport=RecordingTransport(
         box.RawExec(rc=0, stdout=good[:-3], stderr=b"")))
     with pytest.raises(box.BoxFault):
         executor.run_parsed(bash_exec.parse("cat x"), command="cat x", cwd=tmp_path, timeout=5.0)
 
-    # (c) the magic is wrong → absent frame, by definition.
     executor = box.BoxExecutor(spec=box.BoxSpec(), transport=RecordingTransport(
         box.RawExec(rc=0, stdout=b"XXXX" + good[4:], stderr=b"")))
     with pytest.raises(box.BoxFault):
         executor.run_parsed(bash_exec.parse("cat x"), command="cat x", cwd=tmp_path, timeout=5.0)
 
-    # (d) the REQUEST side — the in-box entrypoint's decoder. A mutated length must raise,
-    #     never re-slice the argv into another command.
     pipelines = bash_exec.parse("cat /etc/hostname | grep -n root")
     request = box.encode_request(pipelines)
     original = box.decode_request(request)
-    # Control: the UNmutated frame round-trips to the real parse. Without this, a decoder
-    # that returned a constant would satisfy every "decoded the same" assertion below.
     assert original, "the request frame decoded to nothing"
     assert original == pipelines, "the request frame does not round-trip at all"
     for i in range(4, min(len(request), 64)):
@@ -401,7 +365,7 @@ def test_malformed_frame_never_becomes_a_different_command(tmp_path):
         try:
             got = box.decode_request(mutated)
         except Exception:
-            continue  # failing closed is the required outcome
+            continue
         assert got == original, (
             f"a single flipped byte at offset {i} decoded into a DIFFERENT command: {got!r}")
 
@@ -432,7 +396,6 @@ def test_no_pickle_on_the_box_boundary(tmp_path):
     with pytest.raises(box.BoxFault):
         executor.run_parsed(bash_exec.parse("cat x"), command="cat x", cwd=tmp_path, timeout=5.0)
 
-    # Control: the same executor accepts a REAL frame, so the rejection above is the pickle's.
     ok = box.BoxExecutor(spec=box.BoxSpec(), transport=RecordingTransport(framed(0, b"", b"")))
     assert ok.run(pipelines, command="cat x", cwd=tmp_path, timeout=5.0).rc == 0
 
@@ -457,9 +420,6 @@ def test_an_empty_pipeline_crosses_as_a_valid_zero_rc_frame(tmp_path):
     assert result == box.BoxResult(rc=0, out=b"", err=b"")
 
 
-# ===========================================================================
-# O7 / NO15 — argv byte-exactness
-# ===========================================================================
 
 def test_hostile_argv_crosses_byte_exact(tmp_path):
     """hostile_argv_crosses_byte_exact — the argv the gate approved is the argv that crosses
@@ -489,13 +449,11 @@ def test_hostile_argv_crosses_byte_exact(tmp_path):
         crossed = t.argvs()
         assert crossed[-1] == expected_tail, f"argv was rewritten on the wire for {command!r}"
         assert crossed[0] == ["cat", str(alert)]
-        # ...and it is exactly what the gate validated: one parse, one execution (#456).
         decision = permission.decide_bash(
             command, policy=deps.policy, run_dir=run_dir, defender_dir=DEFENDER)
         assert crossed == [list(st.argv) for pl in decision.pipelines for st in pl.stages], \
             "the box ran a different decomposition than the gate approved"
 
-    # The two metacharacter classes that never reach the box: the HOST gate refuses them.
     for denied in (f"cat {alert} | grep -n '`id`'", f"cat {alert} | grep -n '$(whoami)'"):
         assert not permission.decide_bash(
             denied, policy=deps.policy, run_dir=run_dir, defender_dir=DEFENDER).allow
@@ -512,7 +470,7 @@ def test_non_utf8_argv_rejected_rather_than_transcoded(tmp_path):
     has to be an explicit encoder-side refusal. The framing carrying raw bytes does not
     supersede this obligation: it removes the transcode from the RESULTS half, while the
     argv half is rejected outright."""
-    surrogate = "\udcff"  # a lone surrogate: unencodable as UTF-8, exactly C36a's input class
+    surrogate = "\udcff"
     hostile = [bash_exec.Pipeline("first", [bash_exec.Stage(["grep", "-n", surrogate])])]
 
     t = RecordingTransport(framed(0, b"", b""))
@@ -591,15 +549,11 @@ def test_command_substitution_splits_into_four_tokens_at_the_host_parse():
     assert bash_exec.parse("echo $(whoami)")[0].stages[0].argv == \
         ["echo", "$", "(", "whoami", ")"]
 
-    # The three classes that ARE single tokens — the control that makes the split meaningful.
     assert bash_exec.parse("grep -n 'a b'")[0].stages[0].argv == ["grep", "-n", "a b"]
     assert bash_exec.parse("grep -n `y`")[0].stages[0].argv == ["grep", "-n", "`y`"]
     assert bash_exec.parse("grep -n *.txt")[0].stages[0].argv == ["grep", "-n", "*.txt"]
 
 
-# ===========================================================================
-# M9 / C52 — the three-site cwd invariant
-# ===========================================================================
 
 def test_relative_operand_names_the_same_file_at_all_three_sites(tmp_path):
     """relative_operand_names_the_same_file_at_all_three_sites — a RELATIVE operand names one
@@ -621,7 +575,6 @@ def test_relative_operand_names_the_same_file_at_all_three_sites(tmp_path):
     t = RecordingTransport(framed(0, b"", b""))
     deps = _main_deps(run_dir, t)
 
-    # --- site 1: the gate's rebase, read off its decision ---
     assert permission.decide_bash(
         "cat alert.json", policy=deps.policy, run_dir=run_dir, defender_dir=DEFENDER).allow, \
         "the gate did not rebase a relative operand onto the run dir"
@@ -629,14 +582,11 @@ def test_relative_operand_names_the_same_file_at_all_three_sites(tmp_path):
         f"cat {lesson_rel}", policy=deps.policy, run_dir=run_dir, defender_dir=DEFENDER).allow, \
         "the gate is still rebasing onto the repo root — site 1 did not move"
 
-    # --- site 3: the executor's cwd, recorded on the real call ---
     _bash(deps, "cat alert.json")
     assert t.only().cwd == run_dir, "the box ran at a different cwd than the gate validated"
 
-    # --- site 2: _resolve_operand, the file-tool lane ---
     assert runtime_tools._resolve_operand(deps, "alert.json") == run_dir / "alert.json"
 
-    # ...and the three name ONE file, not merely one string.
     assert (run_dir / "alert.json").exists()
     assert (t.only().cwd / "alert.json").resolve() == \
         runtime_tools._resolve_operand(deps, "alert.json").resolve()
@@ -687,9 +637,6 @@ def test_the_chosen_cwd_exists_before_the_first_exec(tmp_path):
     assert call.cwd == run_dir
 
 
-# ===========================================================================
-# The deps seam
-# ===========================================================================
 
 def test_tool_bash_executes_through_the_injected_box_seam(tmp_path):
     """tool_bash_executes_through_the_injected_box_seam — the REAL `_tool_bash` runs its
@@ -716,7 +663,6 @@ def test_tool_bash_executes_through_the_injected_box_seam(tmp_path):
     assert real_content.strip() not in shown, \
         "the host executed the command in-process; the box seam was bypassed"
 
-    # A gate DENY still precedes the box: nothing crosses when the command is refused.
     t2 = RecordingTransport(framed(0, b"", b""))
     deps2 = _main_deps(run_dir, t2)
     with pytest.raises(ModelRetry):
@@ -751,7 +697,7 @@ def test_every_bash_enabled_role_executes_through_a_box(tmp_path):
 
     for defn in agents_registry.AGENTS.values():
         if defn.bindable and not defn.tools.bash:
-            assert not defn.tools.bash  # documented: an empty ToolSet needs no box
+            assert not defn.tools.bash
 
 
 def test_the_existing_e2e_bash_corpus_completes_through_the_box(tmp_path):

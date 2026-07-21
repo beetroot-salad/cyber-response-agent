@@ -193,7 +193,7 @@ from pathlib import Path
 
 import pytest
 
-pytest.importorskip("pydantic_ai")  # CI installs the runtime extra; skip otherwise
+pytest.importorskip("pydantic_ai")
 
 from pydantic_ai.models import override_allow_model_requests  # noqa: E402
 from pydantic_ai.models.function import FunctionModel  # noqa: E402
@@ -235,26 +235,17 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 
-# fork f2 (§7): names FROZEN — the graph joins to code by name.
 TOOL_GET = "get_closed_ticket"
 TOOL_LIST = "list_closed_tickets"
 BIT = "closed_tickets"
 
-# The key grammar this environment DECLARES (TICKET_KEY_PATTERN in the ticket system's
-# config.env — a REQUIRED key of ticket_adapter.REQUIRED_CONFIG_KEYS). Held here as a literal
-# so every drive stays hermetic, and pinned against the shipped file by
-# test_shipped_ticket_config_declares_the_key_grammar (d30's currency half).
 SHIPPED_KEY_PATTERN = "[A-Za-z0-9][A-Za-z0-9._-]*"
 
 _YAML = "outcome: skip-passthrough\ndefender_findings: []\n"
 DONE = Turn(text=_YAML)
 
-# The case id doubles as the in-flight ticket key: the learning run dir's basename is the
-# key the judge's deps carry (run_id) and the key `_cited_policy_read_section` names.
 CASE = "20260720T0000Z-sshd-672"
 
-# One well-known closed ticket every happy-path fake returns. The marker strings are what
-# the assertions grep for in the model-visible channel.
 OTHER_KEY = "SOC-777"
 CLOSED_TKT = {
     "key": OTHER_KEY,
@@ -274,7 +265,6 @@ def _list(**filters) -> Turn:
     return Turn(tool_calls=[(TOOL_LIST, filters)])
 
 
-# ── the injected ticket-verb registry (the #611 FakeVerbs idiom, ticket-shaped) ──────────
 
 
 def _outcome(spec_queue: deque, default):
@@ -333,7 +323,6 @@ def _ticket_registry(
     return FakeVerbs({"ticket": table})
 
 
-# ── the drive: the REAL judge leg entry, fakes through its injection seams ───────────────
 
 
 class _Script(ReplayFn):
@@ -467,9 +456,6 @@ def _store_calls(rec: VerbRecorder) -> list:
     return [c for c in rec.calls if c.verb != "key-pattern"]
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# A. Registration, schema, census
-# ═════════════════════════════════════════════════════════════════════════════
 
 
 def test_benign_leg_registers_closed_ticket_tools(tmp_path):
@@ -486,8 +472,6 @@ def test_benign_leg_registers_closed_ticket_tools(tmp_path):
     run = _drive(tmp_path, [DONE], registry=_ticket_registry(rec))
     assert run.tool_names() == {"bash", "read_file", TOOL_GET, TOOL_LIST}
 
-    # The carrier is the wiring bit, not the direction name: same benign wiring, bit off →
-    # the tools are absent from the model-visible roster.
     off = replace(_wiring(tmp_path), closed_ticket_read=False)
     run_off = _drive(
         tmp_path, [DONE], registry=_ticket_registry(VerbRecorder()),
@@ -496,8 +480,6 @@ def test_benign_leg_registers_closed_ticket_tools(tmp_path):
     assert TOOL_GET not in run_off.tool_names()
     assert TOOL_LIST not in run_off.tool_names()
 
-    # x6's premise, extended to the new bit: every ToolSet bit defaults False, so the frozen
-    # JUDGE_DEF cannot carry the tools statically — only the per-leg replace turns them on.
     assert getattr(ToolSet(), BIT, None) is False
     assert getattr(JUDGE_DEF.tools, BIT, None) is False
 
@@ -516,19 +498,18 @@ def test_adversarial_leg_has_no_ticket_tools(tmp_path):
     """
     benign1 = _drive(tmp_path, [DONE], registry=_ticket_registry(VerbRecorder()),
                      case=_case(tmp_path, name=CASE + "-b1"))
-    assert {TOOL_GET, TOOL_LIST} <= benign1.tool_names()  # positive control (d1's seam)
+    assert {TOOL_GET, TOOL_LIST} <= benign1.tool_names()
 
     adv = _drive(tmp_path, [DONE], registry=_ticket_registry(VerbRecorder()),
                  case=_case(tmp_path, name=CASE + "-adv"), benign=False)
     assert TOOL_GET not in adv.tool_names()
     assert TOOL_LIST not in adv.tool_names()
-    # Per-leg toolset exact beyond the new bit: read+bash identical on both legs.
     assert adv.tool_names() == {"bash", "read_file"}
 
     benign2 = _drive(tmp_path, [DONE], registry=_ticket_registry(VerbRecorder()),
                      case=_case(tmp_path, name=CASE + "-b2"))
     names = [t.name for t in benign2.script.tool_defs]
-    assert names.count(TOOL_GET) == 1  # no accumulation across builds
+    assert names.count(TOOL_GET) == 1
     assert names.count(TOOL_LIST) == 1
 
 
@@ -565,7 +546,7 @@ def test_no_query_tool_on_judge_legs(tmp_path):
                  case=_case(tmp_path, name=CASE + "-adv19"), benign=False)
     assert "query" not in benign.tool_names()
     assert "query" not in adv.tool_names()
-    assert benign.tool_names()  # control: the roster capture channel is not blind
+    assert benign.tool_names()
 
 
 def test_closed_ticket_tools_registration_order(tmp_path):
@@ -585,9 +566,6 @@ def test_closed_ticket_tools_registration_order(tmp_path):
     [bash, read_file, list_closed_tickets, get_closed_ticket], a SEQUENCE assertion where
     d1's roster check deliberately compares sets — so list-before-get is observed on a
     real agent."""
-    # (1) The source-order census: the ToolSet presence-table guard sequence, walked in
-    # execution order (register_tools' body, splicing in any local helper it composes —
-    # today the deferred tail lives in _register_deferred_tools).
     tree = ast.parse((DEFENDER / "runtime" / "tools.py").read_text(encoding="utf-8"))
     funcs = {n.name: n for n in tree.body if isinstance(n, ast.FunctionDef)}
 
@@ -610,7 +588,6 @@ def test_closed_ticket_tools_registration_order(tmp_path):
         "enter the fixed order at the TAIL, after query"
     )
 
-    # (2) The judge-leg projection: the pair's order on the model-visible roster.
     run = _drive(tmp_path, [DONE], registry=_ticket_registry(VerbRecorder()))
     assert [t.name for t in run.script.tool_defs] == [
         "bash", "read_file", TOOL_LIST, TOOL_GET,
@@ -647,13 +624,9 @@ def test_closed_ticket_registration_reaches_every_benign_call_site():
         assert p.is_file(), f"census subject vanished: {p}"
         trees[name] = ast.parse(p.read_text(encoding="utf-8"))
 
-    # The funnel exists: the loop's judge carrier (subagents) and the equivalence harness
-    # (run_judge_ab's runner) both CALL invoke_judge.
     assert "invoke_judge" in _called_names(trees["subagents"])
     assert "invoke_judge" in _called_names(trees["judge_equivalence"])
-    # learning_loop reaches it via its re-export/import (the subagents carrier).
     assert "invoke_judge" in files["learning_loop"].read_text(encoding="utf-8")
-    # run_judge_ab reuses judge_equivalence's runner rather than minting its own drive.
     ab_imports = {
         alias.name
         for node in ast.walk(trees["run_judge_ab"]) if isinstance(node, ast.ImportFrom)
@@ -670,15 +643,11 @@ def test_closed_ticket_registration_reaches_every_benign_call_site():
         )
         assert not (called & banned), f"{name} builds a judge agent outside the one seam"
 
-    # The bit rides the Direction specs both eval drivers and the loop source wiring from.
     from defender.learning.core.directions import ADVERSARIAL, BENIGN
     assert BENIGN.judge_wiring.closed_ticket_read is True
     assert ADVERSARIAL.judge_wiring.closed_ticket_read is False
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# B. The seam and the outbound payload
-# ═════════════════════════════════════════════════════════════════════════════
 
 
 def test_tools_drive_verbs_in_process_via_deps(tmp_path):
@@ -696,10 +665,10 @@ def test_tools_drive_verbs_in_process_via_deps(tmp_path):
     run = _drive(tmp_path, [_get(OTHER_KEY), DONE], registry=_ticket_registry(rec))
     (call,) = _get_calls(rec)
     assert isinstance(call.ctx, VerbContext)
-    assert Path(call.ctx.run_dir) == run.lrd          # the judge's OWN run identity
+    assert Path(call.ctx.run_dir) == run.lrd
     assert Path(call.ctx.defender_dir).name == "defender"
     assert isinstance(call.ctx.env, dict)
-    assert "TKT-CONTENT-777" in run.all_text          # the fake's payload is what came back
+    assert "TKT-CONTENT-777" in run.all_text
 
 
 def test_bodies_hardcode_require_closed(tmp_path):
@@ -726,14 +695,11 @@ def test_bodies_hardcode_require_closed(tmp_path):
     assert g.params == {"key": OTHER_KEY, "require_closed": True}
     (ls,) = _list_calls(rec)
     assert ls.params["require_closed"] is True
-    assert ls.params["status"] is None            # never model-chosen, never tool-invented
-    assert ls.params["label"] == ugly_label       # opaque pass-through, verbatim
+    assert ls.params["status"] is None
+    assert ls.params["label"] == ugly_label
     assert ls.params["q"] == ugly_q
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# C. The return contract (Fork B: full query-tool mirror)
-# ═════════════════════════════════════════════════════════════════════════════
 
 
 def test_tool_result_envelope(tmp_path):
@@ -752,15 +718,10 @@ def test_tool_result_envelope(tmp_path):
                  registry=_ticket_registry(rec))
     assert run.out.strip() == _YAML.strip()
 
-    # The model-visible result: exit-code envelope + salted wrap around the view.
     assert "exit=0" in run.all_text
     assert WRAP_RE.search(run.all_text)
     assert "TKT-CONTENT-777" in run.all_text
 
-    # The no-filters consensus premise's OWN value: the require_closed pin is UNCONDITIONAL
-    # on filter presence. test_bodies_hardcode_require_closed pins it on a list call that
-    # supplies label AND q; without this assertion an implementation that pins closed-only
-    # only when a filter is present passes the whole suite green (phase F, conservation).
     (ls,) = _list_calls(rec)
     assert ls.params["require_closed"] is True, "the pin is conditional on filter presence"
     assert ls.params["label"] is None
@@ -809,7 +770,6 @@ def test_oversized_payload_bounded_view_and_capture_row(tmp_path):
     fails)."""
     cap = _passthrough_max_bytes()
 
-    # (1) The far-oversized LISTING: bounded view + note + by-ref persistence.
     rec = VerbRecorder()
     fat = {
         "tickets": [
@@ -819,7 +779,7 @@ def test_oversized_payload_bounded_view_and_capture_row(tmp_path):
         "total": 300,
     }
     serialized = json.dumps(fat, default=str)
-    assert len(serialized) > 3 * cap  # far past the ceiling on any accounting
+    assert len(serialized) > 3 * cap
     run = _drive(tmp_path, [_list(label="fat"), DONE],
                  registry=_ticket_registry(rec, lst=[("return", fat)]))
 
@@ -829,11 +789,8 @@ def test_oversized_payload_bounded_view_and_capture_row(tmp_path):
     assert row.get("payload_path")
     on_disk = (run.lrd / row["payload_path"]).read_text(encoding="utf-8")
     assert "TKT-FAT-299" in on_disk, "the FULL payload must be persisted by-ref"
-    # The truncation note points the judge at the persisted payload (the query-tool idiom:
-    # an absolute pointer the read/bash lanes can actually open).
     assert str(run.lrd / row["payload_path"]) in run.all_text
 
-    # (2) The EXACT edge, one byte over: truncated, and the note names the byte size.
     over = _sized_ticket("OVER", cap + 1)
     rec2 = VerbRecorder()
     run2 = _drive(tmp_path, [_get("SOC-OVER"), DONE],
@@ -850,7 +807,6 @@ def test_oversized_payload_bounded_view_and_capture_row(tmp_path):
         "the truncation note must name the payload's byte size (the query-tool note idiom)"
     )
 
-    # (3) The complementary control AT the ceiling: the same shape passes through whole.
     at = _sized_ticket("ATCAP", cap)
     rec3 = VerbRecorder()
     run3 = _drive(tmp_path, [_get("SOC-ATCAP"), DONE],
@@ -902,8 +858,6 @@ def test_capture_row_written_in_judge_run_dir(tmp_path):
         assert run.lrd.resolve() in p.parents, "payload persisted outside the judge run dir"
     assert rows[0]["params"].get("key") == OTHER_KEY
     assert rows[1]["params"].get("label") == "sig"
-    # The negative half: the judge's capture never writes gather's table (different run
-    # dir, different writer set — no gather ran in this fixture, so any row here is ours).
     assert not (run.run_dir / "executed_queries.jsonl").exists(), (
         "judge capture leaked into the INVESTIGATION run dir's queries table"
     )
@@ -932,7 +886,6 @@ def test_returns_salt_wrapped_untrusted(tmp_path):
     assert "TKT-CONTENT-778" in inner.group(1), "the whole rendered view must sit inside one wrap"
     assert body.count(f"<run-{salt}-untrusted>") == 1, "per-item wraps split the frame"
 
-    # Fault detail is wrapped the same way (the vendor's diagnosis is the far side's text).
     rec2 = VerbRecorder()
     run2 = _drive(
         tmp_path, [_get(OTHER_KEY), DONE],
@@ -963,7 +916,6 @@ def test_delimiter_lookalike_and_model_directed_text_stay_inert(tmp_path):
     so it could never have equalled it) — this drive models the payload author who has
     SEEN one closing tag and quotes it back, so a salt that is reused or derivable across
     binds hands them the real delimiter and fails the test."""
-    # Bind 1: observe the real frame the payload author will try to forge.
     prior_run = _drive(tmp_path, [_get(OTHER_KEY), DONE],
                        registry=_ticket_registry(VerbRecorder()),
                        case=_case(tmp_path, name=CASE + "-prior-bind"))
@@ -994,9 +946,6 @@ def test_delimiter_lookalike_and_model_directed_text_stay_inert(tmp_path):
     assert f"</run-{forged}-untrusted>" in inner.group(1), "byte-for-byte passthrough"
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# D. Faults and the circuit breaker (Fork E: full participation)
-# ═════════════════════════════════════════════════════════════════════════════
 
 
 def test_open_ticket_refused_as_failed_result(tmp_path):
@@ -1017,9 +966,9 @@ def test_open_ticket_refused_as_failed_result(tmp_path):
                 f"{other_inflight} is status='open', not 'closed' (--require-closed)"))],
         ),
     )
-    assert run.out.strip()                       # the judge run continues
-    assert "exit=1" in run.all_text              # the query-error class, distinguishable
-    assert "status='open'" in run.all_text       # the salt-wrapped detail
+    assert run.out.strip()
+    assert "exit=1" in run.all_text
+    assert "status='open'" in run.all_text
     (row,) = run.rows()
     assert row["exit_code"] == 1
     assert row["error_class"] == "agent-fixable"
@@ -1027,7 +976,7 @@ def test_open_ticket_refused_as_failed_result(tmp_path):
         "a business refusal must not contribute to the breaker"
     )
     (g,) = _get_calls(rec)
-    assert g.params["require_closed"] is True    # positive control: the pin was on the wire
+    assert g.params["require_closed"] is True
 
 
 @pytest.mark.parametrize(
@@ -1094,7 +1043,7 @@ def test_unmapped_fault_returns_envelope(tmp_path):
         registry=_ticket_registry(
             rec, get=[("raise", RuntimeError("connection reset by peer mid-body"))]),
     )
-    assert run.out.strip()                          # no unwind
+    assert run.out.strip()
     assert "connection reset by peer" in run.all_text
     (row,) = run.rows()
     assert row["exit_code"] != 0
@@ -1125,7 +1074,7 @@ def test_registry_resolution_fault_recorded_not_unwound(tmp_path):
     suite because every fake registry resolves cleanly. The 'write a row, never delete one'
     invariant this module documents must hold for the resolution too, not only the transport."""
     run = _drive(tmp_path, [_get(OTHER_KEY), DONE], registry=_ResolutionFaultVerbs())
-    assert run.out.strip()                       # the judge run reaches its verdict, no unwind
+    assert run.out.strip()
     assert "ticket adapter failed to import" in run.all_text
     (row,) = run.rows()
     assert row["exit_code"] != 0
@@ -1145,14 +1094,13 @@ def test_list_closed_tickets_malformed_store_response(tmp_path):
     get beside the malformed list, and its `failures >= 1` was satisfiable by the get
     alone, leaving list→breaker contribution unpinned in either direction. The malformed
     content itself must not be served as a success view."""
-    # (1) The malformed LISTING alone: the breaker trip here is the list call's own.
     rec = VerbRecorder()
     run = _drive(
         tmp_path, [_list(label="x"), DONE],
         registry=_ticket_registry(
             rec, lst=[("return", {"tickets": "TKT-GARBAGE not-a-list", "total": "?"})]),
     )
-    assert run.out.strip()                          # the run survived
+    assert run.out.strip()
     assert not _get_calls(rec), "attribution guard: no sibling get in this drive"
     assert len(run.rows()) == 1, "the malformed-list fault must still write its capture row"
     assert run.breaker().get("systems", {}).get("ticket", {}).get("failures", 0) >= 1, (
@@ -1161,7 +1109,6 @@ def test_list_closed_tickets_malformed_store_response(tmp_path):
     for chunk in re.findall(r"exit=0.*?(?=exit=|\Z)", run.all_text, re.S):
         assert "TKT-GARBAGE" not in chunk
 
-    # (2) The malformed GET body in its own run: the same O4/M4 catch-all class.
     rec2 = VerbRecorder()
     run2 = _drive(
         tmp_path, [_get(OTHER_KEY), DONE],
@@ -1200,7 +1147,6 @@ def test_control_flow_exceptions_propagate(tmp_path):
     (Fork F: cut loose, documented — no await-to-clean-stop, and the unfinished attempt
     still counts as the one attempt, d8); ModelRetry reaches the MODEL as retry feedback
     and the run continues."""
-    # RunAborted — the kill switch must escape the tool, not become a result.
     rec = VerbRecorder()
     with pytest.raises(RunUnprocessable, match="RunAborted"):
         _drive(tmp_path, [_get(OTHER_KEY), DONE],
@@ -1208,7 +1154,6 @@ def test_control_flow_exceptions_propagate(tmp_path):
                    rec, get=[("raise", circuit_breaker.RunAborted(5, ["ticket"]))]))
     assert len(_get_calls(rec)) == 1
 
-    # CancelledError — re-raises immediately; the attempt is not re-driven.
     rec2 = VerbRecorder()
     with pytest.raises(asyncio.CancelledError):
         _drive(tmp_path, [_get(OTHER_KEY), DONE],
@@ -1216,7 +1161,6 @@ def test_control_flow_exceptions_propagate(tmp_path):
                case=_case(tmp_path, name=CASE + "-cancel"))
     assert len(_get_calls(rec2)) == 1, "Fork F: the unfinished attempt is the one attempt"
 
-    # ModelRetry — retry feedback, not a fault envelope; the run continues.
     from pydantic_ai.exceptions import ModelRetry
     rec3 = VerbRecorder()
     run = _drive(tmp_path, [_get(OTHER_KEY), DONE],
@@ -1246,7 +1190,7 @@ def test_store_breaker_open_when_judge_reads(tmp_path):
 
     rec = VerbRecorder()
     run = _drive(tmp_path, [_get(OTHER_KEY), DONE], registry=_ticket_registry(rec), case=case)
-    assert run.out.strip()                       # a failed result, not an unwind
+    assert run.out.strip()
     assert not rec.calls, "an open breaker must mean NO transport attempt"
     feedback = _feedback(run)
     assert feedback.strip(), "the breaker-open refusal never reached the model"
@@ -1280,9 +1224,9 @@ def test_store_breaker_open_blocks_list_path(tmp_path):
     rec = VerbRecorder()
     run = _drive(tmp_path, [_list(q="precedent"), DONE],
                  registry=_ticket_registry(rec), case=case)
-    assert run.out.strip()                       # a failed result, not an unwind
+    assert run.out.strip()
     assert not _list_calls(rec), "an open breaker must mean NO list transport attempt"
-    assert not rec.calls                         # no other verb was reached either
+    assert not rec.calls
     feedback = _feedback(run)
     assert feedback.strip(), "the breaker-open refusal never reached the model"
     assert "exit=0" not in feedback, "the breaker-open list path returned a SUCCESS envelope"
@@ -1300,7 +1244,7 @@ def test_repeated_store_failures_across_one_judge_run(tmp_path):
     the third read fails FAST — no transport attempt, no inner-timeout cost — and the run
     request budget is no longer the only bound. Judge-side faults CONTRIBUTE (they are the
     same machinery as the query tool's capture, Fork B)."""
-    assert circuit_breaker.PER_SYSTEM_FAIL_LIMIT == 2  # the scenario is built on this
+    assert circuit_breaker.PER_SYSTEM_FAIL_LIMIT == 2
     rec = VerbRecorder()
     run = _drive(
         tmp_path,
@@ -1320,9 +1264,6 @@ def test_repeated_store_failures_across_one_judge_run(tmp_path):
     assert "tripped_at" in sysrec
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# E. The key boundary and the self-case exclusions (Forks A, C, G, H)
-# ═════════════════════════════════════════════════════════════════════════════
 
 
 @pytest.mark.parametrize(
@@ -1388,18 +1329,12 @@ def test_malformed_key_model_retry(tmp_path, key, reaches_store):
     assert run.out.strip(), "the run must continue past the boundary either way"
     if reaches_store:
         (g,) = _get_calls(rec)
-        assert g.params["key"] == key            # verbatim, opaque
+        assert g.params["key"] == key
         assert g.params["require_closed"] is True
     else:
         assert not _store_calls(rec), (
             f"key {key!r} reached the store — the schema must reject first"
         )
-        # Fork A's OTHER half (cold C4 — previously asserted nowhere): the rejection is
-        # RETRY-CLASS, layer-agnostic. The old `len(seen) >= 2` was true on every path
-        # including success; bind the retry path itself: feedback for the rejected call
-        # reached the model, it is NOT the O4 fault envelope (no exit-code result — an
-        # implementation folding ill-formed keys into the fault path contradicts the
-        # resolved wording), and it is not a bare empty tool return.
         assert len(run.script.seen) >= 2, "the model was never re-invoked after the rejection"
         feedback = _feedback(run)
         assert feedback.strip(), f"key {key!r}: the rejection produced no model-visible feedback"
@@ -1568,21 +1503,11 @@ def test_case_own_key_refused_at_tool_boundary(tmp_path):
     assert run.out.strip()
     keys_asked = [c.params["key"] for c in _get_calls(rec)]
     assert CASE not in keys_asked, "the self-key reached the store — the exclusion is boundary-side"
-    # Positive control on the same address, complementary condition:
     assert OTHER_KEY in keys_asked
     assert "TKT-CONTENT-777" in run.all_text
-    # V-A: the list path filters the self record by IDENTITY (its status is genuinely
-    # closed — only the key marks it), a self-key item handled the way a non-closed item
-    # is (d24's resolved arm: drop or fault, never silent pass-through).
     assert "TKT-SELF-LISTED" not in run.all_text, (
         "a precedent search returned the case itself — the self-key screen has a list hole"
     )
-    # #684 (F2): a CONJUNCTION on the list call's own appended result — the good sibling
-    # is served in the SAME response the self record is excluded from. The old
-    # `served OR faulted` disjunction was satisfied by faulting the whole listing whenever
-    # any item is the self-case, which guts Fork C's own use case (a precedent search that
-    # returns the self-case beside good siblings would serve NONE of them). d23's exclusion
-    # is per-item, so the per-item observable is what this pins.
     list_delta = _tool_delta(run)
     assert "TKT-LIST-OK" in list_delta, (
         "the sibling was not served in the SAME response the self record was excluded "
@@ -1634,19 +1559,15 @@ def test_closed_ticket_naming_self_key_refused(tmp_path, field):
                                             ("return", CLOSED_TKT)]),
     )
     assert run.out.strip()
-    assert len(_get_calls(rec)) == 3             # all three were legitimately fetchable
+    assert len(_get_calls(rec)) == 3
     assert "TKT-QUOTES-SELF" not in run.all_text, (
         f"the payload naming the self-case in `{field}` leaked — the screen must run over "
         "the SERIALIZED WHOLE payload, not one field"
     )
     assert "duplicate of in-flight" not in run.all_text, "the quoting free text leaked"
-    # The withheld read is a BUSINESS refusal: its own row files exit-1 and the breaker
-    # stays clean (shipping it as an infra fault would trip the breaker on three cases).
     assert run.rows()[0]["exit_code"] == 1
     assert not run.breaker().get("systems", {}).get("ticket", {}).get("failures")
-    # The N-note half: other-ticket quotes ride wrapped, unredacted.
     assert "TKT-QUOTES-OTHER" in run.all_text
-    # Control: the clean read is served.
     assert "TKT-CONTENT-777" in run.all_text
 
 
@@ -1681,12 +1602,6 @@ def test_list_response_non_closed_item_dropped_or_faulted(tmp_path):
     assert "TKT-ITEM-SELF" not in run.all_text, (
         "the self-case's closed record crossed the list envelope — V-A's identity filter"
     )
-    # #684 (F2): a CONJUNCTION on the list call's own appended result. d24's "drop OR
-    # fault" is PER-ITEM: the good sibling rides the SAME response the non-closed and
-    # self records are excluded from. The old whole-response disjunction (`served or
-    # faulted` over run.all_text / run.last) was satisfied by faulting the ENTIRE listing
-    # whenever any item is bad — an implementation that serves nothing whenever a store
-    # misfilters, silently gutting O1's precedent search.
     delta = _tool_delta(run)
     assert "TKT-ITEM-CLOSED" in delta, (
         "the closed sibling was not served in the SAME response the non-closed/self items "
@@ -1696,7 +1611,6 @@ def test_list_response_non_closed_item_dropped_or_faulted(tmp_path):
     for marker in ("TKT-ITEM-INPROGRESS", "TKT-ITEM-CASEVARIANT", "TKT-ITEM-SELF"):
         assert marker not in delta
 
-    # Duplicates: the status-only re-check does not dedup.
     rec2 = VerbRecorder()
     dupes = {"tickets": [
         {"key": "SOC-DUP", "status": "closed", "summary": "TKT-DUP-A"},
@@ -1709,9 +1623,6 @@ def test_list_response_non_closed_item_dropped_or_faulted(tmp_path):
     assert "TKT-DUP-B" in run2.all_text
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# F. State, repeats, concurrency (live reads; no cache, no reconciliation)
-# ═════════════════════════════════════════════════════════════════════════════
 
 
 def test_repeated_reads_are_fresh_live_and_unreconciled(tmp_path):
@@ -1784,8 +1695,8 @@ def test_ticket_flips_state_between_list_and_get(tmp_path):
         ),
     )
     assert run.out.strip()
-    assert "TKT-FLIP-LISTED" in run.all_text     # the list view stood, at its moment
-    assert "exit=1" in run.all_text              # the get refused, at its own moment
+    assert "TKT-FLIP-LISTED" in run.all_text
+    assert "exit=1" in run.all_text
 
 
 def test_same_case_judged_second_time_fresh_salt_persistent_audit(tmp_path):
@@ -1811,10 +1722,6 @@ def test_same_case_judged_second_time_fresh_salt_persistent_audit(tmp_path):
     assert salt1, "no salted wrap observed on the first judgment"
     assert salt2, "no salted wrap observed on the second judgment"
     assert set(salt1).isdisjoint(set(salt2)), "the salt survived across binds — forgeable"
-    # UNPREDICTABILITY, not mere freshness: two independent 128-bit draws differ in ~30 of
-    # 32 hex positions; a counter (or any small-step successor) differs in the last few
-    # only. The bound is generous (>= 8) so no honest RNG ever trips it, and every
-    # derivable-successor scheme does.
     s1, s2 = salt1[0], salt2[0]
     assert sum(a != b for a, b in zip(s1, s2, strict=True)) >= 8, (
         "the second bind's salt is a small step from the first — predictable (a counter), "
@@ -1854,15 +1761,12 @@ def test_cached_open_payload_beside_live_refusal(tmp_path):
         case=case,
     )
     assert run.out.strip()
-    assert "TKT-CACHED-OPEN-K" in run.all_text   # the cache is context, and it is readable
-    assert "exit=1" in run.all_text              # the live read refuses the same key
+    assert "TKT-CACHED-OPEN-K" in run.all_text
+    assert "exit=1" in run.all_text
     (g,) = _get_calls(rec)
     assert g.params == {"key": "SOC-K", "require_closed": True}
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# G. Teaching, deny reason, grants, routes, CLI survival, operator surface
-# ═════════════════════════════════════════════════════════════════════════════
 
 
 def _cited_section(user_text: str) -> str:
@@ -1898,24 +1802,20 @@ def test_teaching_surfaces_teach_tool_not_bash(tmp_path):
     assert "ticket_adapter" not in section
     assert "--require-closed" not in section
     assert "--status closed" not in section
-    assert CASE in section                        # the in-flight key warning survives
-    assert "it is open" not in section            # the falsehood does not
-    assert OTHER_KEY in text                      # the seed menu survives
+    assert CASE in section
+    assert "it is open" not in section
+    assert OTHER_KEY in text
 
-    # The taught names ARE the registered names (fork f2 — no rename drift).
     run = _drive(tmp_path, [DONE], registry=_ticket_registry(VerbRecorder()),
                  case=_case(tmp_path, name=CASE + "-names"))
     assert {TOOL_GET, TOOL_LIST} <= run.tool_names()
 
-    # benign.md: item 7 teaches the tools; the bash argv is gone from the whole prompt.
     benign_md = (DEFENDER / "learning" / "pipeline" / "judge" / "benign.md").read_text(
         encoding="utf-8")
     assert TOOL_LIST in benign_md
     assert TOOL_GET in benign_md
     assert "--require-closed" not in benign_md
 
-    # No surface teaches the tool to a leg that lacks it: the adversarial invocation
-    # carries neither the section nor the tool names.
     run_dir, story, telem, lrd = _case(tmp_path, name=CASE + "-advteach")
     adv = build_judge_invocation(run_dir, story, telem, lrd)
     assert "cited_policy_read" not in adv.user_text
@@ -1943,14 +1843,11 @@ def test_cited_seed_instruction_survives(tmp_path):
     which is where the blind reader's cache-context absence resolves."""
     section = _cited_section(_benign_invocation_text(tmp_path))
     assert "does not survive" in section
-    # The coupling sentence: the cached surface and the rule in ONE sentence, so a
-    # section carrying the phrase detached from cached payloads cannot pass.
     assert re.search(
         r"[^.\n]*(?:cached|gather_raw)[^.\n]*context, never confirmation", section, re.I), (
         "the rewritten section must state, in one sentence, that cached gather_raw "
         "payloads are context, never confirmation"
     )
-    # The confirmation-denial half: what a cached payload does NOT satisfy, and what does.
     assert "store confirmed" in section, (
         "the section must name what the cache fails to satisfy — 'the store confirmed it'"
     )
@@ -1983,7 +1880,7 @@ def test_no_doc_surface_teaches_removed_bash_lane():
     assert "--require-closed" not in gates, (
         "runtime-gates.md still teaches the deleted mandatory lookahead"
     )
-    assert "pins_path" in gates            # control: the live exemption idiom survives
+    assert "pins_path" in gates
     adapters = (DEFENDER / "docs" / "state-surface-adapters.md").read_text(encoding="utf-8")
     assert "--require-closed" not in adapters
     assert "judge's ticket" not in adapters
@@ -2023,14 +1920,12 @@ def test_judge_bash_grants_exactly_cat_sql(tmp_path):
     policy = compile_policy_for(JUDGE_DEF, tmp_path, scope=scope, defender_dir=tmp_path)
     assert {g.program for g in policy.bash_allow} == {"cat", SQL_SHIM}
 
-    # The per-invocation carriage cannot even EXPRESS a ticket pin any more.
     assert not hasattr(RunScope(), "ticket_cli"), "RunScope still threads ticket_cli (d20)"
     assert "ticket_cli" not in {f for f in ResolvedRoots.__dataclass_fields__}
     import defender.learning.pipeline.judge.engine_pydantic as ep
     src = Path(ep.__file__).read_text(encoding="utf-8")
     assert "_ticket_grant" not in src, "the pinned bash ticket grant survives in the engine"
 
-    # Driven: the old command is DENIED by policy on the benign leg (not a sandbox fault).
     cli = DEFENDER / "scripts" / "adapters" / "ticket_adapter.py"
     old_cmd = f"{sys.executable} {cli} get-ticket SOC-1 --require-closed"
     run = _drive(tmp_path, [Turn(tool_calls=[("bash", {"command": old_cmd})]), DONE],
@@ -2054,7 +1949,7 @@ def test_deny_reason_matches_shrunk_grants():
     assert "benign only" not in reason
     assert "--require-closed" not in reason
     assert "ticket_adapter" not in reason
-    assert "cat" in reason        # still teaches the live lane's opener
+    assert "cat" in reason
     assert "defender-sql" in reason
 
 
@@ -2101,7 +1996,7 @@ def test_cli_exit_codes_survive_for_subprocess_consumers(tmp_path, monkeypatch):
     cfg = subprocess.run([sys.executable, cli, "get-ticket", "SOC-1", "--require-closed"],
                          capture_output=True, text=True, env=env, timeout=60)
     assert cfg.returncode == 2
-    assert cfg.stderr.strip()                    # the stderr detail channel survives
+    assert cfg.stderr.strip()
 
     lst = subprocess.run(
         [sys.executable, cli, "list-tickets", "--status", "closed", "--require-closed",
@@ -2110,8 +2005,8 @@ def test_cli_exit_codes_survive_for_subprocess_consumers(tmp_path, monkeypatch):
     assert lst.returncode == 2, "the closed-only list argv no longer parses (64) or hangs"
 
     monkeypatch.setenv("DEFENDER_DIR", str(missing))
-    assert ticket_seeds._list_closed("brute-force") == []   # non-fatal empty pool
-    assert _fetch_closed_resolution("SOC-1") is None        # best-effort None
+    assert ticket_seeds._list_closed("brute-force") == []
+    assert _fetch_closed_resolution("SOC-1") is None
 
 
 def test_operator_policy_cli_after_demo_scope_removal(tmp_path):
@@ -2130,4 +2025,4 @@ def test_operator_policy_cli_after_demo_scope_removal(tmp_path):
 
     policy = compile_policy_for(JUDGE_DEF, tmp_path, scope=scope, defender_dir=tmp_path)
     assert {g.program for g in policy.bash_allow} == {"cat", SQL_SHIM}
-    assert BIT not in src                        # N6: no typed-tool display grew here
+    assert BIT not in src

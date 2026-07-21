@@ -14,7 +14,7 @@ from types import SimpleNamespace
 
 import pytest
 
-pytest.importorskip("pydantic_ai")  # CI installs the runtime extra; skip otherwise
+pytest.importorskip("pydantic_ai")
 
 import yaml  # noqa: E402
 
@@ -35,8 +35,6 @@ from defender.tests._engine_helpers import replay_turns as _replay  # noqa: E402
 
 _DEFENDER_DIR = config.REPO_ROOT / "defender"
 
-# A minimal, well-formed per-lead oracle reply (one distinguishable event) — the shape
-# sample.parse_lead_events consumes downstream.
 _ORACLE_YAML = 'events:\n  - Computer: "FINANCE-DB"\n    EventID: 4624\n'
 
 
@@ -54,7 +52,6 @@ def _prompt(tmp_path):
     return p
 
 
-# --- the engine returns the model's final YAML verbatim + writes its per-lead trace ---
 
 def test_run_oracle_pydantic_returns_yaml_and_writes_trace(tmp_path):
     lrd = _lrd(tmp_path)
@@ -67,27 +64,15 @@ def test_run_oracle_pydantic_returns_yaml_and_writes_trace(tmp_path):
         )
     assert out == _ORACLE_YAML
     assert (lrd / "oracle_l-001.trace.jsonl").is_file()
-    assert (lrd / "oracle_l-001.trace.jsonl").read_text().strip()  # at least one request logged
+    assert (lrd / "oracle_l-001.trace.jsonl").read_text().strip()
 
 
-# --- the deny-all policy through the full gate (the oracle runs NO tools) --------------
 
 def test_oracle_policy_denies_everything():
-    # #551: the standalone `_ORACLE_POLICY` constant retired; `bind(ORACLE_DEF)` compiles the
-    # same deny-all policy over ORACLE_DEF's empty ToolSet.
-    #
-    # #575: the `adapters` / `adapter_sql_pipe` / `raw_reads` capability BITS are deleted. Each was
-    # a DECLARED value that could disagree with the lane that enforced it; what an agent may do is
-    # now the grant list itself. For a pure-prediction stage that makes the assertion strictly
-    # stronger AND simpler: an EMPTY `bash_allow` is not "three capabilities declared off" — it is
-    # the absence of any address at all, and the adapter routes are grants too, so
-    # `bash_allow == ()` now subsumes all three bits. The gate denials below are what prove it.
     pol = bind(ORACLE_DEF, Path("/tmp/oracle-run")).policy
-    assert pol.bash_allow == ()          # no grants ⇒ no adapter route, no sql pipe, no viewer
-    assert pol.read_allow == ()          # no `cat` grant ⇒ no read shapes either
+    assert pol.bash_allow == ()
+    assert pol.read_allow == ()
     assert pol.read_roots == ()
-    # a data-source adapter, the adapter|defender-sql pipe, arbitrary python, and arbitrary shell
-    # are all denied — the oracle's whole input is inlined in the prompt, so it needs none of them.
     assert not permission.decide_bash("defender-elastic query x", policy=pol).allow
     assert not permission.decide_bash(
         "defender-elastic query x | defender-sql 'SELECT 1'", policy=pol
@@ -96,25 +81,21 @@ def test_oracle_policy_denies_everything():
     assert not permission.decide_bash("rm -rf /tmp/x", policy=pol).allow
 
 
-# --- read scope: under defender_dir / run_dir defaults, with NO read_roots -------------
 
 def test_oracle_reads_under_defender_dir_without_read_roots(tmp_path):
     lrd = _lrd(tmp_path)
-    pol = bind(ORACLE_DEF, lrd).policy   # #551: deny-all via bind, not the retired _ORACLE_POLICY
+    pol = bind(ORACLE_DEF, lrd).policy
     assert pol.read_roots == ()
-    # a file under defender_dir is allowed purely by the defender-corpus root (no read_roots)
     allowed = permission.decide_read(
         _DEFENDER_DIR / "SKILL.md", run_dir=lrd, defender_dir=_DEFENDER_DIR, policy=pol
     )
     assert allowed.allow
-    # a file outside {run_dir, defender_dir} is refused (the oracle has no extra roots)
     denied = permission.decide_read(
         tmp_path / "elsewhere.txt", run_dir=lrd, defender_dir=_DEFENDER_DIR, policy=pol
     )
     assert not denied.allow
 
 
-# --- the agent is read-only (no writers) + the GLM reasoning-DISABLED lever -------------
 
 def test_oracle_agent_is_read_only_no_writers():
     logger = observe.RequestLogger(Path("/tmp/does-not-need-to-exist-oracle-tools.jsonl"))
@@ -125,17 +106,10 @@ def test_oracle_agent_is_read_only_no_writers():
         )
     finally:
         logger.close()
-    # #538: the oracle is TOOL-FREE — ORACLE_DEF registers an empty ToolSet(), so there is no
-    # read_file to peek at answer-bearing artifacts (nor any bash); the tool list is empty.
     assert list(agent._function_toolset.tools) == []
 
 
 def test_build_oracle_agent_disables_glm_reasoning(monkeypatch):
-    # The "thinking=None" lever this port ships: effort "none" flows model →
-    # providers.build_for_effort → Fireworks extra_body.reasoning_effort="none" (reasoning
-    # DISABLED, distinct from OMITTING the knob, which leaves GLM reasoning on). build_for_effort
-    # constructs a REAL OpenAIChatModel (needs a key at construction; a fake key keeps it hermetic
-    # — the settings make no request).
     pytest.importorskip("pydantic_ai.models.openai")
     monkeypatch.setenv("FIREWORKS_API_KEY", "fw-test")
     logger = observe.RequestLogger(Path("/tmp/does-not-need-to-exist-oracle-effort.jsonl"))
@@ -149,8 +123,6 @@ def test_build_oracle_agent_disables_glm_reasoning(monkeypatch):
 
 
 def test_oracle_ships_glm_reasoning_disabled_by_default():
-    # Guard the shipped defaults (the headline of this port). config reads these from os.environ at
-    # import, so only assert when an operator override is NOT set.
     import os
 
     if "ORACLE_MODEL" not in os.environ:
@@ -159,7 +131,6 @@ def test_oracle_ships_glm_reasoning_disabled_by_default():
         assert config.ORACLE_EFFORT == "none"
 
 
-# --- InProcessSubagents.oracle runs the in-process engine ----------------------------
 
 def test_subagents_oracle_runs_pydantic_engine(monkeypatch, tmp_path):
     captured = {}
@@ -178,7 +149,6 @@ def test_subagents_oracle_runs_pydantic_engine(monkeypatch, tmp_path):
     assert captured["learning_run_dir"] == tmp_path / "lrd"
 
 
-# --- the per-lead fan-out contract (NOT covered by the shared single-call harness) ------
 
 def test_invoke_oracle_fans_out_per_lead_in_order(monkeypatch, tmp_path):
     """invoke_oracle fans one call per lead through oracle_fn, threads the learning_run_dir, gives
@@ -194,7 +164,6 @@ def test_invoke_oracle_fans_out_per_lead_in_order(monkeypatch, tmp_path):
 
     def fake_oracle_fn(prompt_path, model, effort, trace_name, label, user, learning_run_dir):
         calls.append((label, trace_name, learning_run_dir))
-        # Echo the lead id back as this lead's single event, so a cross-lead scramble would show.
         lead_id = label.split(":", 1)[1]
         return f'events:\n  - lead: "{lead_id}"\n'
 
@@ -206,13 +175,9 @@ def test_invoke_oracle_fans_out_per_lead_in_order(monkeypatch, tmp_path):
     doc = oracle_run.invoke_oracle(tmp_path, story, lrd, oracle_fn=fake_oracle_fn)
     parsed = yaml.safe_load(doc)
 
-    # projections reassembled in lead order, each carrying its OWN lead's echoed event
     assert [p["lead_id"] for p in parsed["projections"]] == ["l-001", "l-002", "l-003"]
     assert [p["events"][0]["lead"] for p in parsed["projections"]] == ["l-001", "l-002", "l-003"]
 
-    # one call per lead, with distinct per-lead labels + trace names; learning_run_dir threaded in.
-    # The trace name carries the story stem ("story") so the two direction legs (which share
-    # learning_run_dir and the same lead set) don't collide on one file — see the next test.
     assert sorted(c[0] for c in calls) == ["oracle:l-001", "oracle:l-002", "oracle:l-003"]
     assert sorted(c[1] for c in calls) == [
         "oracle_story_l-001.trace.jsonl", "oracle_story_l-002.trace.jsonl",
@@ -245,7 +210,6 @@ def test_invoke_oracle_trace_name_is_per_direction(monkeypatch, tmp_path):
 
     adversarial = _trace_names_for("actor_story.md")
     benign = _trace_names_for("actor_benign_story.md")
-    # same lead_id, but the per-direction stem keeps the trace files disjoint across legs
     assert adversarial == ["oracle_actor_story_l-001.trace.jsonl"]
     assert benign == ["oracle_actor_benign_story_l-001.trace.jsonl"]
     assert set(adversarial).isdisjoint(benign)

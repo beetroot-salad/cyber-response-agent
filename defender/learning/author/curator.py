@@ -1,33 +1,4 @@
 #!/usr/bin/env python3
-"""Shared transaction engine for the actor / environment lessons curators.
-
-``author_actor.py`` (actor tradecraft) and ``author_actor_benign.py`` (the two
-environment-lessons directions) are the same curator: lock the queue, lock the
-repo, clean-scope check, partition the batch, hand the survivors to an in-process (PydanticAI)
-curator agent, cross-check the working tree it left against git, commit that corpus
-with the provenance trailers, then rotate the queue. Only the corpus directory, queue
-paths, outcome policy, commit trailer, generation counter, curator-agent prompt/model,
-and forward-check invocation differ — captured in a ``CuratorConfig``. This module owns
-the envelope; the direction modules own the config + the one genuinely-divergent piece
-(``invoke_agent``).
-
-The agent runs **no git**: it authors lesson content + a commit message (returned as
-data) and the loop is the sole committer (``commit_corpus``). The loop owns the
-``Generation:`` / ``{trailer_label}:`` provenance trailers — it already computes both
-values, so the recorded provenance can't drift off a hand-typed literal, and there is no
-commit→stamp split that could leave an un-stamped lesson commit behind (issue #321).
-Confining the agent to no-git is also what lets prod fence its writable set to the corpus
-at the OS layer (``docs/platform-design.md`` §4.7).
-
-The agent owns fold/supersede/new judgment and the forward-check flow; this module
-enforces the transaction envelope. The deterministic git plumbing (stray scope-gate,
-corpus-clean predicate, the loop-owned pathspec-scoped committer, HEAD-sha reader, and
-the working-tree cross-check) is shared with ``author.py`` via ``_author_shared``,
-parameterized by the corpus dir + the ``Generation:``/``{trailer_label}:`` provenance
-trailers; the ``commit_corpus`` / ``changes_outside_corpus`` / ``corpus_dir_clean`` /
-``verify_agent_state`` here are thin ``CuratorConfig``-threading adapters over it
-(issue #330).
-"""
 from __future__ import annotations
 
 import json
@@ -50,58 +21,31 @@ from defender.learning.core.persist import rotate_queue_locked
 
 
 
-# Unified with author.py via the shared module — all three raise the same class,
-# so the shared git layer (`_author_shared`) can raise it too (issue #330).
 AuthorError = _shared.AuthorError
 
 
-# ---------------------------------------------------------------------------
-# Direction config — everything that differs between the curators.
-# ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
 class CuratorConfig:
-    # Repo root (git cwd + relative-path anchor) and the _pending state dir,
-    # resolved from the injected ``LoopPaths`` by the per-direction factory so the
-    # engine reads no import-time module globals.
     repo_root: Path
     pending_dir: Path
-    # Run-bundle dir for the held-out double-check. Resolved from the injected
-    # ``LoopPaths.runs_dir``, which ``with_repo_root`` keeps pinned to the shared state
-    # root — so it stays correct even though ``repo_root`` moves to a batch worktree
-    # (#425). Do NOT resolve the bundle off ``repo_root``.
     runs_dir: Path
-    # Corpus the agent edits (absolute) + its repo-relative form (trailing slash).
     corpus_dir: Path
     corpus_dir_rel: str
-    # Queue channel — file/consumed/lock for the stream this curator drains
-    # (honors DEFENDER_LEARNING_STATE_DIR via DEFAULT_PATHS).
     channel: QueueChannel
-    # Shared repo lock every curator serializes on + its wait ceiling, threaded
-    # from the LoopPaths so tests inject a tmp lock instead of patching
-    # _author_shared module globals (issue #389).
     repo_lock_file: Path
     repo_lock_wait_seconds: int
-    # Outcome policy — which judge_outcomes author vs skip-by-policy.
     outcome_author: frozenset[str]
     outcome_skip: frozenset[str]
-    # Commit-message trailer key (no colon) + its generation counter.
     trailer_label: str
     generation_fn: Callable[[], int]
-    # Actor model stamped into the {trailer_label}: provenance trailer — commit
-    # metadata, NOT authoring input (the curator agent never sees it). Sourced from
-    # core.config's ACTOR_MODEL/BENIGN_ACTOR_MODEL, the same constants the real actor
-    # invocation reads, so the recorded model matches the model the actor ran at (#449).
     actor_model: str
     log_prefix: str
-    # Curator agent (in-process PydanticAI) wiring.
     author_prompt: Path
     author_model: str
     author_timeout: int
     author_effort: str
-    # The one genuinely-divergent step: build the AUTHOR_RESULT dict from the
-    # batch. Signature: (observations, batch_id, cfg) -> dict.
     invoke_agent: Callable[[list[dict], str, CuratorConfig], dict]
 
     @property
@@ -109,39 +53,16 @@ class CuratorConfig:
         return self.pending_dir / f"{self.log_prefix}_run.jsonl"
 
 
-# ---------------------------------------------------------------------------
-# Pre-flight
-# ---------------------------------------------------------------------------
 
 
 def read_batch(cfg: CuratorConfig) -> list[dict]:
-    # Tolerant read: a torn last line from an interrupted append is skipped, not
-    # raised — a JSONDecodeError here would escape every drain guard and crash
-    # the author_drain every tick until the queue was hand-fixed (#446).
     return read_jsonl_rows(cfg.channel.file)
 
 
-# Cache of the corpus-wide id set, keyed on a (name, mtime_ns) signature of the
-# corpus files. The repo lock means the corpus only changes when a commit lands,
-# which bumps the signature and invalidates the cache — so two drains on an
-# unchanged corpus (e.g. benign + adversarial in one serial tick) reuse the parse
-# instead of re-globbing + re-parsing YAML. Keyed by corpus dir so curators over
-# distinct corpora don't collide.
 _EXISTING_IDS_CACHE: dict[tuple[str, tuple[tuple[str, int], ...]], set[str]] = {}
 
 
 def _mtime_ns(path: Path) -> int:
-    """``path``'s mtime in ns, or ``-1`` when it cannot be stat'd.
-
-    The cache signature has to tolerate exactly what the walk tolerates. ``iter_lessons``
-    warn-SKIPS an unreadable lesson — a dangling symlink is a member of the corpus domain, not an
-    error — so an unguarded ``stat()`` here would crash the whole curator drain, before the agent
-    ever runs, on a file the walk itself shrugs off. (It is also the TOCTOU window: a lesson
-    removed between the glob and the stat raises the same ``FileNotFoundError``.)
-
-    ``-1`` is a sound stand-in rather than a silent hole: the file contributes no ids either way,
-    and if it later becomes readable its real mtime differs from ``-1``, which busts the cache.
-    """
     try:
         return path.stat().st_mtime_ns
     except OSError:
@@ -149,24 +70,6 @@ def _mtime_ns(path: Path) -> int:
 
 
 def existing_observation_ids(corpus_dir: Path) -> set[str]:
-    """Union of source_observation_ids across all lessons in ``corpus_dir``.
-
-    Corpus-wide, so an id already authored into this corpus (by any direction that
-    shares it) is treated as consumed. Lessons missing the field or with a non-list
-    value are skipped silently.
-
-    Parses through the shared ``iter_lessons``, like the corpus manifest this pre-flight runs
-    beside. The hand-rolled walk it replaces read each file OUTSIDE any guard, so a single
-    undecodable byte raised ``UnicodeDecodeError`` (a ``ValueError``, NOT an ``OSError``) and took
-    the whole curator drain down where the manifest would have warned and skipped the one file.
-    (It did NOT, contrary to an earlier draft of this docstring, miss a CRLF lesson: ``read_text()``
-    universal-newline-translates, so ``\\r\\n`` is already ``\\n`` before the ``\\A---\\n`` regex
-    runs.)
-
-    A *signature* pass survives, because the cache needs the file set before paying for the parse
-    and the iterator exposes no mtimes — but it takes the discovery rule from ``iter_lesson_paths``
-    rather than restating it, and it stats through :func:`_mtime_ns` so it tolerates exactly what
-    the walk tolerates."""
     if not corpus_dir.is_dir():
         return set()
     paths = iter_lesson_paths(corpus_dir)
@@ -181,15 +84,11 @@ def existing_observation_ids(corpus_dir: Path) -> set[str]:
         sids = lesson.fm.get("source_observation_ids") or []
         if isinstance(sids, list):
             ids.update(sid for sid in sids if isinstance(sid, str))
-    _EXISTING_IDS_CACHE.clear()  # keep only the latest signature
+    _EXISTING_IDS_CACHE.clear()
     _EXISTING_IDS_CACHE[sig] = set(ids)
     return ids
 
 
-# ---------------------------------------------------------------------------
-# Agent invocation — shared scaffolding; directions supply the forward-check
-# prompt lines (the one place the contract differs).
-# ---------------------------------------------------------------------------
 
 
 def invoke_curator_agent(
@@ -200,21 +99,6 @@ def invoke_curator_agent(
     check: ForwardCheck,
     request_limit: int,
 ) -> dict:
-    """Spawn the in-process curator on GLM and return its parsed AUTHOR_RESULT dict.
-
-    ``check`` is the direction's forward-check, bound onto the curator's deps at spawn — which is
-    what leaves the ``forward_check`` tool with no script operand to gate. ``request_limit`` is the
-    direction's per-curator cap. The agent
-    runs **no git**: it authors lesson content (+ a commit message it returns as data) and the loop
-    is the sole committer (``commit_corpus``) — so the agent is handed neither the generation nor the
-    model, and there is no intermediate un-stamped commit it could leave behind (issue #321). Routed
-    through ``curator_engine.run_curator_stage`` (imported lazily — it pulls the pydantic-ai graph),
-    which sources the metered key, drives the in-process spawn under ``require_output=True``, and
-    parses the ``AUTHOR_RESULT`` marker from the returned text (via ``curator_engine.extract_marked_result``). The
-    RequestLogger trace lands in the persistent shared ``pending_dir`` (not the throwaway worktree),
-    keyed ``{batch_id}.{pid}`` so two curators in one drain tick never truncate each other's trace.
-    The nested checks read the real source bundle straight off ``cfg.runs_dir`` (the shared state
-    root), so no ``DEFENDER_LEARNING_STATE_DIR`` needs pinning into any subprocess env (#425, #558)."""
     from defender.learning.author import curator_engine
 
     cfg.pending_dir.mkdir(parents=True, exist_ok=True)
@@ -242,9 +126,6 @@ def invoke_curator_agent(
     )
 
 
-# ---------------------------------------------------------------------------
-# Post-flight — working-tree cross-check + loop-owned commit
-# ---------------------------------------------------------------------------
 
 
 def git_head_sha(repo_root: Path) -> str:
@@ -252,15 +133,12 @@ def git_head_sha(repo_root: Path) -> str:
 
 
 def changes_outside_corpus(repo_root: Path, corpus_dir_rel: str) -> list[str]:
-    """Curator adapter over ``_shared.changes_outside`` — scope gate for the cfg corpus."""
     return _shared.changes_outside(repo_root, corpus_dir_rel)
 
 
 def commit_corpus(
     generation: int, model: str, message: str, cfg: CuratorConfig,
 ) -> str | None:
-    """Curator adapter over ``_shared.commit_corpus`` — pins the cfg corpus and stamps the
-    loop-owned ``Generation:`` / ``{trailer_label}:`` provenance trailers."""
     return _shared.commit_corpus(
         cfg.repo_root,
         cfg.corpus_dir,
@@ -278,13 +156,9 @@ def _result_list(result: dict, key: str) -> list[Any]:
 
 
 def _commit_message(result: dict) -> str:
-    """Curator adapter over ``_shared._commit_message`` (noun: ``observations``)."""
     return _shared._commit_message(result, "observations")
 
 
-# ---------------------------------------------------------------------------
-# Queue rotation
-# ---------------------------------------------------------------------------
 
 
 def rotate_queue(
@@ -294,13 +168,6 @@ def rotate_queue(
     commit_sha: str | None,
     cfg: CuratorConfig,
 ) -> None:
-    """Held-only rewrite of the queue + append to consumed (the shared
-    ``rotate_queue_locked`` with ``merge_concurrent=False``).
-
-    No re-read-merge (unlike ``author.rotate_queue``): ``run_batch`` holds the queue
-    lock across read→rotate, and the producer's append blocks on that same lock, so
-    no observation can arrive mid-batch — a held-only rewrite cannot lose data, and
-    re-taking the lock here would self-deadlock (hence ``merge_concurrent=False``)."""
     rotate_queue_locked(
         pending_file=cfg.channel.file,
         consumed_file=cfg.channel.consumed,
@@ -313,45 +180,15 @@ def rotate_queue(
     )
 
 
-# ---------------------------------------------------------------------------
-# Dead-letter queue — batch-granular quarantine of a poison batch
-# ---------------------------------------------------------------------------
 
 
 def _deadletter_file(queue_file: Path) -> Path:
-    """The per-queue dead-letter sidecar under ``_pending`` — ``<queue>.deadletter.jsonl``,
-    beside the active queue so a discovered sidecar is unambiguously this stream's."""
     return queue_file.with_suffix(".deadletter.jsonl")
 
 
 def _dead_letter_or_bump(
     batch: list[dict], *, queue_file: Path, pending_dir: Path, id_key: str, reason: str,
 ) -> None:
-    """On a per-run authoring fault (``invoke_agent`` raised ``AuthorError`` — a ``RunUnprocessable``
-    or an unparseable AUTHOR_RESULT, both relocated into that raise by ``run_curator_stage``), bump an
-    ``attempts`` counter on the batch's active queue rows so a poison batch quarantines after
-    ``LEARNING_AUTHOR_MAX_ATTEMPTS`` instead of retrying every tick forever.
-
-    Config-agnostic on purpose: keyed by ``id_key`` (``observation_id`` for the actor/env curators,
-    ``finding_id`` for the findings curator) over the explicit ``queue_file`` + ``pending_dir``, so
-    BOTH the observation curators (``curator.py``) and the findings curator (``lessons/run.py``) share
-    the ONE dead-letter mechanism the spec binds every curator to — not just the three that route
-    through this module's envelope.
-
-    Runs under the queue lock the envelope already holds (``run_batch_envelope`` acquires the queue
-    lock), so it re-reads/rewrites the active queue WITHOUT re-locking — no self-deadlock, and since
-    this rc-2 fault path returns before ``rotate_queue``, this rewrite is the queue's final state this
-    tick. Batch-granular: rc 2 originates before any per-row attribution, so ALL ``batch`` rows share
-    the fault. A row reaching the attempt budget moves — carrying its reason + attempt count — to the
-    ``deadletter.jsonl`` sidecar and out of the active queue (the move-aside shape of the lead author's
-    ``_quarantine_marker`` at the row level); the rest are rewritten with the incremented counter.
-    Held / pre-consumed rows (not in ``batch``) are preserved verbatim for the next tick's
-    re-partition. The sidecar append lands BEFORE the active-queue rewrite so a crash between the two
-    writes duplicates a quarantined row (at-least-once) rather than losing the poison batch entirely.
-
-    Only THIS per-run authoring fault bumps: systemic faults (``FatalConfigError`` / ``StageAbort``)
-    escape uncaught and never reach here, and the dirty-corpus pre-flight (rc 2, environment) / lock
-    contention (rc 0, never ran) return from the envelope before ``_author_to_author`` runs."""
     batch_ids = {o[id_key] for o in batch}
     max_attempts = config.LEARNING_AUTHOR_MAX_ATTEMPTS
     survivors: list[dict] = []
@@ -373,19 +210,9 @@ def _dead_letter_or_bump(
     write_atomic(queue_file, "".join(json.dumps(r) + "\n" for r in survivors))
 
 
-# ---------------------------------------------------------------------------
-# Orchestration
-# ---------------------------------------------------------------------------
 
 
 def run_batch(*, hold_committed: bool, cfg: CuratorConfig) -> int:
-    """Drain one observation batch into ``cfg``'s corpus.
-
-    ``hold_committed`` (set by the serial author drain) keeps just-committed
-    observations in the queue instead of rotating them out, since the commit is on an
-    unmerged PR branch — see ``author.run_batch`` for the rationale (a rejected PR
-    must not strand them; a merged one filters them via ``existing_observation_ids``
-    next batch)."""
     return _shared.run_batch_envelope(
         queue_lock_file=cfg.channel.lock,
         repo_lock_file=cfg.repo_lock_file,
@@ -425,9 +252,6 @@ def _run_batch_inner(*, hold_committed: bool, cfg: CuratorConfig) -> int:
         if rc != 0:
             return rc
 
-    # hold_committed: keep `committed` in the queue (stripped of the consumed
-    # stamp) instead of rotating it out, since the commit is on an unmerged PR
-    # branch. consumed_pre + consumed_skip always rotate out. See author.py.
     held_committed, rotated_committed = _shared.partition_committed(
         committed, hold_committed=hold_committed
     )
@@ -452,11 +276,6 @@ def _run_batch_inner(*, hold_committed: bool, cfg: CuratorConfig) -> int:
 def _partition_pre_author(
     batch: list[dict], cfg: CuratorConfig,
 ) -> tuple[list[dict], list[dict], list[dict]]:
-    """Split the queue into (held, consumed_pre, to_author) before the agent runs.
-
-    consumed_pre bundles already-authored (idempotent) observations and
-    skip-by-policy outcomes. held covers held-out double-checks, a missing source
-    bundle, and unexpected outcomes (kept for human review)."""
     existing = existing_observation_ids(cfg.corpus_dir)
     log = make_logger(cfg.log_prefix)
     held: list[dict] = []
@@ -478,13 +297,6 @@ def _partition_pre_author(
             continue
         src = entry.get("source_run_dir", "")
         if src and not resolve_run_bundle(cfg.runs_dir, src).is_dir():
-            # The durable learning-leg bundle is copied under runs_dir at LEARN time
-            # precisely so it outlives the ephemeral run dir, so for a queued observation
-            # it should always exist. A missing bundle dir is therefore an anomaly — a
-            # #425-class resolution regression or a deleted bundle — NOT a normal
-            # ordinary run. Fail SAFE + LOUD: hold it (an unverifiable case must never
-            # seed a lesson) and surface it, rather than authoring from a source whose
-            # provenance cannot be checked.
             log(f"source bundle missing for observation {oid} "
                 f"(source_run_dir={src!r} → {resolve_run_bundle(cfg.runs_dir, src)}) — holding")
             rec = dict(entry)
@@ -504,18 +316,11 @@ def _author_to_author(
     to_author: list[dict], all_obs: dict[str, dict],
     batch_id: str, generation: int, cfg: CuratorConfig,
 ) -> tuple[int, str | None, list[dict], list[dict]]:
-    """Run the agent on `to_author` and partition its result.
-
-    Returns (rc, commit_sha, committed, consumed_skip). rc != 0 means a FATAL
-    happened and the caller should bail with that code."""
     log = make_logger(cfg.log_prefix)
     baseline_stray = changes_outside_corpus(cfg.repo_root, cfg.corpus_dir_rel)
     try:
         result = cfg.invoke_agent(to_author, batch_id, cfg)
     except AuthorError as e:
-        # A per-run authoring fault (the in-process spawn's RunUnprocessable / an unparseable
-        # AUTHOR_RESULT, both surfaced as AuthorError). Bump the batch's attempt counter (and
-        # quarantine at the budget) BEFORE returning rc 2, so a poison batch stops blocking the queue.
         log(f"FATAL: {e}")
         _dead_letter_or_bump(
             to_author, queue_file=cfg.channel.file, pending_dir=cfg.pending_dir,
@@ -533,9 +338,6 @@ def _author_to_author(
         )
         commit_sha: str | None = None
         if _result_list(result, "committed"):
-            # The agent runs no git; the loop is the sole committer. Commit the
-            # corpus the agent left in the working tree, stamping Generation:/<model>
-            # at creation time (atomic — no un-stamped intermediate, issue #321).
             commit_sha = commit_corpus(
                 generation, cfg.actor_model, _commit_message(result), cfg,
             )

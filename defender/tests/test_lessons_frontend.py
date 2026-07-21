@@ -78,9 +78,9 @@ def test_environment_seed_field_mapping():
     env = serialize.build_view()["groups"]["environment"]["lessons"]
     assert env, "environment corpus is empty — env-seed retrieval would surface nothing"
     for seed in env:
-        assert seed["title"], seed["source_path"]        # subject→title
-        assert seed["description"], seed["source_path"]  # relevance_criteria→description
-        assert seed["body"], seed["source_path"]         # carried for the expander
+        assert seed["title"], seed["source_path"]
+        assert seed["description"], seed["source_path"]
+        assert seed["body"], seed["source_path"]
         assert isinstance(seed["metadata"], dict), seed["source_path"]
 
 
@@ -117,25 +117,25 @@ def test_skipped_lesson_gets_a_degraded_record(tmp_path):
         (fixture / spec["dir"]).mkdir(parents=True)
     (fixture / "lessons" / "good.md").write_text("---\nname: good\ndescription: d\n---\nbody\n")
     (fixture / "lessons" / "broken.md").write_text("---\ndescription: [unclosed\n---\nbody\n")
-    (fixture / "lessons" / "_draft.md").write_text("not a lesson\n")  # excluded by discovery
+    (fixture / "lessons" / "_draft.md").write_text("not a lesson\n")
 
     lessons = serialize.build_view(defender_dir=fixture)["groups"]["defender"]["lessons"]
 
-    assert [rec["title"] for rec in lessons] == ["broken", "good"]  # sorted, both present
+    assert [rec["title"] for rec in lessons] == ["broken", "good"]
     broken = lessons[0]
     assert broken["status"] == "malformed"
     assert "frontmatter unavailable" in broken["description"]
     assert broken["metadata"] == {}
     assert broken["body"] == ""
     assert broken["source_path"] == "defender/lessons/broken.md"
-    json.dumps(lessons)  # the degraded record is as JSON-safe as a normal one
+    json.dumps(lessons)
 
 
 def test_metadata_is_json_safe():
     """YAML-parsed dates etc. must serialize (defender lessons carry created_at)."""
     import json
 
-    json.dumps(serialize.build_view())  # raises if any value is non-serializable
+    json.dumps(serialize.build_view())
 
 
 def test_json_safe_coerces_exotic_types():
@@ -149,7 +149,7 @@ def test_json_safe_coerces_exotic_types():
         "t": datetime.time(9, 30),
         "d": datetime.date(2026, 6, 2),
     })
-    assert out["s"] == ["a", "b"]        # set → sorted list (deterministic)
-    assert out["d"] == "2026-06-02"      # date → iso string
-    assert isinstance(out["t"], str)     # time → str fallback
-    json.dumps(out)                      # must not raise
+    assert out["s"] == ["a", "b"]
+    assert out["d"] == "2026-06-02"
+    assert isinstance(out["t"], str)
+    json.dumps(out)

@@ -59,7 +59,6 @@ def test_the_default_run_id_satisfies_the_convention():
     all of them and matches nothing — the label comes from the parent dir instead."""
     assert _alert_label(HELD_OUT_FIXTURES / SLUG / "alert.json") == SLUG
     assert _claimed_slug(f"20260718T101500Z-{SLUG}", [SLUG]) == SLUG
-    # A non-generic stem still speaks for itself.
     assert _alert_label(Path("/x/y/wazuh-5710.json")) == "wazuh-5710"
 
 
@@ -104,7 +103,7 @@ def test_labeled_fixture_with_no_alert_is_excluded_loudly(tmp_path: Path, capsys
     (tmp_path / "m01").mkdir()
     (tmp_path / "m01" / "ground_truth.yaml").write_text(
         "held_out: true\ndisposition: malicious\n", encoding="utf-8"
-    )  # no alert.json
+    )
     assert load_held_out_fixtures(tmp_path) == []
     err = capsys.readouterr().err
     assert "m01" in err

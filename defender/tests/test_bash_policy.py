@@ -47,7 +47,7 @@ def test_capability_bits_are_gone_from_the_loader():
     permission the grant list already owns, and it can drift from it."""
     for dead in ("adapters_allowed", "adapter_sql_pipe_allowed", "raw_reads_allowed", "viewers"):
         assert not hasattr(bash_policy, dead), f"the {dead!r} capability bit is back"
-    assert "bash" not in bash_policy._policy()          # the whole agents/capability config block
+    assert "bash" not in bash_policy._policy()
 
 
 def test_read_deny_covers_secrets_and_groundtruth():
@@ -57,9 +57,6 @@ def test_read_deny_covers_secrets_and_groundtruth():
 
 
 def test_fails_closed_to_defaults_when_json_unreadable(tmp_path):
-    # The injected loader: a missing file must fall back to the built-in deny-by-default
-    # defaults (which still deny secrets), not crash and not widen anything. Uses the
-    # _load_policy(path) seam directly — no monkeypatching.
     policy = bash_policy._load_policy(tmp_path / "does-not-exist.json")
     assert policy is bash_policy._FALLBACK_POLICY
     assert ".env" in policy["read_deny"]["substrings"]

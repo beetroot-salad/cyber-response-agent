@@ -39,7 +39,6 @@ def corpus(tmp_path):
         "source_signature: [v2-falco-suspicious-network-tool]\n"
         "telemetry_source: [falco, zeek]\n"
         "attack_phase: [execution]",
-        # body deliberately mentions sshd to prove the body is NOT searched
         body="this body talks about telemetry_source: sshd at length",
     )
     _write(
@@ -50,7 +49,7 @@ def corpus(tmp_path):
         "telemetry_source: [sshd, auditd]\n"
         "attack_phase: [persistence]",
     )
-    _write(d, "_TEMPLATE.md", "name: t\ndescription: d")  # underscore → skipped
+    _write(d, "_TEMPLATE.md", "name: t\ndescription: d")
     return d
 
 
@@ -94,7 +93,7 @@ def test_bare_call_lists_whole_corpus(corpus, capsys):
     out = _out(capsys)
     assert "falco-one.md" in out
     assert "sshd-one.md" in out
-    assert "_TEMPLATE.md" not in out  # underscore-prefixed skipped
+    assert "_TEMPLATE.md" not in out
 
 
 def test_tags_enumerates_values_with_counts(corpus, capsys):
@@ -124,7 +123,6 @@ def test_unknown_dimension_exits_2(corpus, capsys):
     assert mod.main(["prog", "--tags", "nonsense"]) == 2
 
 
-# --- iter_lessons: the shared corpus iterator behind all three lesson CLIs ---
 
 
 def test_iter_lessons_skips_undecodable_bytes(tmp_path, capsys):
@@ -142,20 +140,16 @@ def test_iter_lessons_skips_undecodable_bytes(tmp_path, capsys):
     corpus.mkdir()
     (corpus / "good.md").write_text("---\nname: good\n---\nbody\n")
     (corpus / "corrupt.md").write_bytes(b"---\nname: c\n---\n\xff\xfe not utf-8\n")
-    (corpus / "unfenced.md").write_text("no fence at all\n")  # the parse-side control
+    (corpus / "unfenced.md").write_text("no fence at all\n")
 
-    yielded = [lesson.path.stem for lesson in iter_lessons(corpus)]  # must not raise
+    yielded = [lesson.path.stem for lesson in iter_lessons(corpus)]
 
-    assert yielded == ["good"]  # the well-formed sibling survives both bad files
+    assert yielded == ["good"]
     err = capsys.readouterr().err
-    assert "corrupt" in err  # the undecodable one was warn-skipped …
-    assert "unfenced" in err  # … alongside the unparseable one
+    assert "corrupt" in err
+    assert "unfenced" in err
 
 
-# ===========================================================================
-# Review hardening (PR #586). Three defects the corpus fold left standing in
-# the file it was editing — each pinned here against the fix.
-# ===========================================================================
 
 
 def test_show_is_confined_to_the_corpus(corpus, tmp_path, capsys):
@@ -174,7 +168,7 @@ def test_show_is_confined_to_the_corpus(corpus, tmp_path, capsys):
 
     assert rc == 2
     out = capsys.readouterr().out
-    assert "sk-live-DEADBEEF" not in out  # the whole point
+    assert "sk-live-DEADBEEF" not in out
     assert "api_key" not in out
 
 
@@ -194,7 +188,6 @@ def test_show_does_not_leak_an_existence_oracle(corpus, tmp_path, capsys):
     err_absent = capsys.readouterr().err
 
     assert rc_exists == rc_absent == 2
-    # identical modulo the echoed path — nothing distinguishes "is there" from "isn't"
     assert err_exists.replace(str(exists_outside), "P") == err_absent.replace(str(absent), "P")
 
 
@@ -224,5 +217,5 @@ def test_show_reads_a_real_lesson_and_pins_the_encoding(corpus, capsys):
 
     out = capsys.readouterr().out
     assert rc == 0
-    assert "café" in out  # the non-ASCII survived the round trip
-    assert "BODYMARKER" not in out  # frontmatter only, as ever
+    assert "café" in out
+    assert "BODYMARKER" not in out

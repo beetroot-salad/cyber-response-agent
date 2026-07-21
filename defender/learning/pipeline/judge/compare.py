@@ -1,26 +1,3 @@
-"""The comparison "zipper": ground the judge in actuals, lead by lead.
-
-The judge used to score an encounter from the defender's *narrative*
-(`investigation.md`, a lossy summary) plus the oracle projection — it never saw the
-actual query results in `gather_raw/`. This module is the structural fix shared by both
-directions (adversarial attack story and benign routine-operation story): a pure join
-that, per lead, places three columns side by side —
-
-  [1] the oracle's projection (what the actor's story *would* have produced),
-  [2] a real sample event from the actual payload (orientation; the judge queries the
-      full payload with defender-sql for absence-checks), and
-  [3] the defender's own per-lead reasoning from the invlang (`:T resolutions` belief
-      movement + `:R authz`) — the "why" behind its read of this lead —
-
-into one `comparison/{lead_id}.md` file the judge reads one at a time. The cross-lead
-synthesis (hypotheses + final weights + conclusion) is rendered separately as context.
-
-Everything here is read-only over the run dir (it never crashes the judge step: every
-column degrades to a labelled placeholder). The only write is `write_comparison_files`,
-into the learning state dir. The judge's read-only tool scope (`cat … | defender-sql` and
-`read_file` over the two add-dir'd payload trees, plus the benign closed-ticket matcher) is
-the in-process gate's concern — see `judge/engine_pydantic.py`.
-"""
 from __future__ import annotations
 
 import json
@@ -35,25 +12,15 @@ from defender.learning import lead_repository
 from defender.learning.pipeline.oracle.sample import real_sample_text
 
 
-# ---------------------------------------------------------------------------
-# invlang access (lazy — mirrors lead_repository.narration_crosscheck_from_run)
-# ---------------------------------------------------------------------------
 
 
 def _invlang():
-    """Return (parser_module, walkers_module); lazily imported so the readers stay
-    importable in minimal contexts (the only cross-package dependency)."""
     from defender.skills.invlang import _walkers as w
     from defender.skills.invlang import parser as p
     return p, w
 
 
 def parse_investigation_companion(run_dir: Path) -> dict:
-    """Parse the run's investigation.md into a companion dict, or `{}` on any failure.
-
-    A parse failure must never abort the judge — the judge can still ground against
-    the actuals via defender-sql; it just loses the defender's recorded reasoning.
-    """
     inv = RunPaths(Path(run_dir)).investigation
     if not inv.is_file():
         return {}
@@ -65,28 +32,23 @@ def parse_investigation_companion(run_dir: Path) -> dict:
         return {}
 
 
-# ---------------------------------------------------------------------------
-# Per-lead comparison record
-# ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
 class LeadComparison:
-    """One lead's three columns, joined by `lead_id`."""
 
     lead_id: str
     goal: str | None
     orphan: bool
-    queries: list  # list[lead_repository.QueryRow]
-    projected_events: list | None  # oracle events, [] (empty projection), or None (none emitted)
+    queries: list
+    projected_events: list | None
     real_sample: str
-    resolutions: list = field(default_factory=list)  # per-lead :T resolutions rows
-    authz: list = field(default_factory=list)  # per-lead :R authz rows
-    note: str = ""  # anomaly annotation (e.g. a projection for a lead absent from the tables)
+    resolutions: list = field(default_factory=list)
+    authz: list = field(default_factory=list)
+    note: str = ""
 
 
 def _projection_index(projected_telemetry_path: Path) -> dict:
-    """`{lead_id: events}` from the oracle doc, defensively (any failure → `{}`)."""
     try:
         doc = yaml.safe_load(read_text_utf8(Path(projected_telemetry_path)))
     except Exception:  # noqa: BLE001
@@ -134,10 +96,6 @@ def build_comparison(
     *,
     companion: dict | None = None,
 ) -> list[LeadComparison]:
-    """Join, per lead, the oracle projection + the real actual sample + the defender's
-    per-lead invlang reasoning. Driven off `lead_repository.joined` (the authoritative,
-    total coverage surface). Pure read-only; never raises on a partial/malformed run.
-    """
     run_dir = Path(run_dir)
     if companion is None:
         companion = parse_investigation_companion(run_dir)
@@ -155,14 +113,12 @@ def build_comparison(
                 goal=jl.goal,
                 orphan=jl.orphan,
                 queries=list(jl.queries),
-                projected_events=proj.get(jl.lead_id),  # None when no projection emitted
+                projected_events=proj.get(jl.lead_id),
                 real_sample=real_sample_text(jl),
                 resolutions=res_by_lead.get(jl.lead_id, []),
                 authz=authz_by_lead.get(jl.lead_id, []),
             )
         )
-    # A projection for a lead the executed tables never recorded is anomalous (the
-    # oracle projected against a lead the join doesn't know) — surface it, don't drop it.
     for lid in proj:
         if lid not in seen:
             out.append(
@@ -179,9 +135,6 @@ def build_comparison(
     return out
 
 
-# ---------------------------------------------------------------------------
-# Rendering
-# ---------------------------------------------------------------------------
 
 
 def _yaml_or(obj, placeholder: str) -> str:
@@ -191,12 +144,6 @@ def _yaml_or(obj, placeholder: str) -> str:
 
 
 def _payload_paths(c: LeadComparison, gather_raw: Path) -> list[str]:
-    """Every payload this lead actually wrote, absolute, in seq order — read off the
-    queries table's `raw_ref` rather than assuming `{lead_id}/0.json`. A lead that ran
-    N queries has `0.json … {N-1}.json`, and the judge cannot enumerate them itself
-    (`ls` is denied, and a `*.json` glob is inert under the shell=False executor). An
-    absence check over seq 0 alone is unsound the same way one over a `truncated`
-    payload is — the entity may sit in a sibling seq."""
     paths = [str(q.raw_ref) for q in c.queries if q.raw_ref is not None]
     return paths or [str(gather_raw / c.lead_id / "0.json")]
 
@@ -255,7 +202,6 @@ def _render_lead_file(c: LeadComparison, gather_raw: Path) -> str:
 def write_comparison_files(
     comparisons: list[LeadComparison], out_dir: Path, gather_raw: Path
 ) -> list[Path]:
-    """Write one `{lead_id}.md` per comparison into `out_dir`; return the paths."""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     paths: list[Path] = []
@@ -267,7 +213,6 @@ def write_comparison_files(
 
 
 def render_manifest(comparisons: list[LeadComparison]) -> str:
-    """Compact in-prompt list of the per-lead files to read, one at a time."""
     if not comparisons:
         return "(no leads were executed — monitor case; nothing to compare)"
     lines = ["Read each per-lead comparison file at its turn:"]
@@ -293,8 +238,6 @@ def _resolution_line(lid: str, r: dict) -> str:
 
 
 def render_synthesis(companion: dict) -> str:
-    """Cross-lead context: hypotheses + final weights, belief movement, authorization
-    reasoning, and the conclusion — the WHY behind the defender's disposition."""
     if not companion:
         return "(no invlang reasoning parsed from investigation.md)"
     try:

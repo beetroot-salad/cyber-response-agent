@@ -34,8 +34,6 @@ _spec.loader.exec_module(defender_sql)
 
 
 def _run(monkeypatch, capsys, payload, query: str) -> tuple[int, str]:
-    # _run reads sys.stdin.buffer (bytes) so untrusted, possibly non-UTF-8
-    # payloads never hit a text decode. Accept str (encoded UTF-8) or raw bytes.
     data = payload.encode() if isinstance(payload, str) else payload
     fake_stdin = types.SimpleNamespace(buffer=io.BytesIO(data))
     monkeypatch.setattr("sys.stdin", fake_stdin)
@@ -43,9 +41,6 @@ def _run(monkeypatch, capsys, payload, query: str) -> tuple[int, str]:
     return code, capsys.readouterr().out
 
 
-# The real modal payload shape (241/640 of the corpus). There is NO `{system, endpoint,
-# args, result}` wrapper — no adapter has ever emitted one, and `unnest(result.hits)` is
-# a Binder Error against every real payload (pinned in test_judge_sql_idioms_corpus.py).
 _PAYLOAD = json.dumps({
     "index": "logs-*", "total": 4, "returned": 4, "truncated": False,
     "hits": [
@@ -57,7 +52,6 @@ _PAYLOAD = json.dumps({
 })
 
 
-# --- aggregation ----------------------------------------------------------
 
 
 def test_aggregates_over_the_payload(monkeypatch, capsys):
@@ -82,7 +76,6 @@ def test_aggregates_ndjson(monkeypatch, capsys):
     assert json.loads(out) == [{"u": "a", "c": 2}, {"u": "b", "c": 1}]
 
 
-# --- input / query errors -------------------------------------------------
 
 
 def test_empty_stdin_is_input_error(monkeypatch, capsys):
@@ -98,8 +91,6 @@ def test_bad_sql_is_query_error(monkeypatch, capsys):
 
 
 def test_utf8_payload_round_trips(monkeypatch, capsys):
-    # Untrusted source data routinely carries non-ASCII (usernames, hostnames,
-    # log lines). A multibyte payload must aggregate, not be mangled.
     code, out = _run(
         monkeypatch, capsys, '{"u":"André"}\n{"u":"André"}\n',
         "SELECT u, count(*) c FROM data GROUP BY u",
@@ -109,17 +100,12 @@ def test_utf8_payload_round_trips(monkeypatch, capsys):
 
 
 def test_non_utf8_payload_is_clean_input_error(monkeypatch, capsys):
-    # A payload with an invalid-UTF-8 byte must exit EXIT_INPUT_ERROR, not crash
-    # with an uncaught UnicodeError (it would, if stdin were read in text mode).
     code, out = _run(monkeypatch, capsys, b'{"u":"a\xff b"}\n', "SELECT u FROM data")
     assert code == defender_sql.EXIT_INPUT_ERROR
     assert out == ""
 
 
 def test_non_finite_floats_serialize_as_null(monkeypatch, capsys):
-    # A divide-by-zero ratio yields a DOUBLE Infinity; the output must stay
-    # strict JSON (null), not the bare `Infinity` literal RFC 8259 forbids and a
-    # strict downstream parser (JS JSON.parse, Go) rejects.
     code, out = _run(
         monkeypatch, capsys, '{"hits":1,"total":0}',
         "SELECT hits::DOUBLE / total::DOUBLE AS ratio FROM data",
@@ -131,9 +117,6 @@ def test_non_finite_floats_serialize_as_null(monkeypatch, capsys):
 
 
 def test_tmpdir_with_quote_does_not_break_materialization(monkeypatch, capsys, tmp_path):
-    # mkdtemp honors $TMPDIR; a scratch path containing a single quote must not
-    # break the read_json_auto call (it would, if the path were interpolated
-    # into the SQL string instead of parameter-bound).
     qdir = tmp_path / "has'quote"
     qdir.mkdir()
     monkeypatch.setattr("tempfile.tempdir", str(qdir))
@@ -143,14 +126,13 @@ def test_tmpdir_with_quote_does_not_break_materialization(monkeypatch, capsys, t
     assert json.loads(out) == [{"c": 2}]
 
 
-# --- sandbox: the caller's SQL is sealed ----------------------------------
 
 
 @pytest.mark.parametrize("hostile", [
-    "SELECT * FROM read_csv('/etc/hostname')",                       # arbitrary file read
-    "SELECT * FROM read_json_auto('/workspace/x/ground_truth.json')",  # held-out read-deny
-    "ATTACH '/etc/hostname' AS e",                                   # attach another db
-    "SET enable_external_access=true",                              # undo the seal
+    "SELECT * FROM read_csv('/etc/hostname')",
+    "SELECT * FROM read_json_auto('/workspace/x/ground_truth.json')",
+    "ATTACH '/etc/hostname' AS e",
+    "SET enable_external_access=true",
 ])
 def test_sandbox_blocks_filesystem_and_unlock(monkeypatch, capsys, tmp_path, hostile):
     code, out = _run(monkeypatch, capsys, _PAYLOAD, hostile)

@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-pytest.importorskip("pydantic_ai")  # CI installs the runtime extra; skip otherwise
+pytest.importorskip("pydantic_ai")
 
 from pydantic_ai.models import override_allow_model_requests  # noqa: E402
 
@@ -28,7 +28,7 @@ from defender.runtime.permission.command_shape import SQL_SHIM  # noqa: E402
 from defender.tests._engine_helpers import fake_model as _fake_model  # noqa: E402
 from defender.tests._engine_helpers import replay_turns as _replay  # noqa: E402
 
-_PY = "/venv/bin/python3"  # a full path, like sys.executable
+_PY = "/venv/bin/python3"
 _CLI = Path("/repo/defender/scripts/adapters/ticket_adapter.py")
 
 
@@ -75,20 +75,11 @@ def test_run_judge_pydantic_returns_yaml_and_writes_trace(tmp_path):
             "score this", lrd, scope=_ToolScope(add_dir=[]), make_model=_fake_model(fn),
         )
     assert out == _YAML
-    # The observability trace lands at learning_run_dir/{trace_name} (per-direction, so
-    # concurrent legs don't collide) — the eval's cost/latency source.
     assert (lrd / "judge_trace.jsonl").is_file()
-    assert (lrd / "judge_trace.jsonl").read_text().strip()  # at least one request logged
+    assert (lrd / "judge_trace.jsonl").read_text().strip()
 
 
 def test_run_judge_pydantic_reads_gather_raw_through_read_roots(tmp_path):
-    # End-to-end proof that read_roots widening actually works: the judge reads a
-    # gather_raw file that lives OUTSIDE {run_dir(=lrd), defender_dir} — under the
-    # investigation run dir, not the learning run dir — so the read is allowed ONLY
-    # because gather_raw is a declared policy.read_root (and raw_reads=True lets it past
-    # the gather_raw clamp). A file under lrd would be allowed by the run_dir root
-    # regardless of read_roots, proving nothing; this one is refused if read_roots is
-    # dropped, so it genuinely exercises the widening.
     lrd = _lrd(tmp_path)
     gather_raw = tmp_path / "run" / "gather_raw"
     (gather_raw / "l-001").mkdir(parents=True)
@@ -108,15 +99,9 @@ def test_run_judge_pydantic_reads_gather_raw_through_read_roots(tmp_path):
             make_model=_fake_model(fn),
         )
     assert out == _YAML
-    # The file content came back to the model → the read was ALLOWED via read_roots.
     assert any("GATHER_RAW_SENTINEL_XYZ" in s for s in seen)
 
 
-# --- #492: the preamble trim RELOCATED off the engine boundary ---------------------
-# The old test_extract_yaml_doc_* unit tests moved to tests/test_judge_yaml_preamble.py
-# (they now target the shared validate.strip_yaml_preamble primitive). What remains here
-# is the engine-side half of the contract: the engine no longer trims, and a preamble'd
-# verdict still survives once the shared downstream normalizer runs.
 
 def test_extract_yaml_doc_symbol_removed():
     """#492 (E4): the engine-boundary trim is DELETED — `_extract_yaml_doc` and
@@ -163,17 +148,12 @@ def test_pydantic_engine_preamble_survives_end_to_end_via_shared_path(tmp_path):
 
 
 def test_build_judge_agent_applies_effort_via_provider(monkeypatch):
-    # Effort flows model → providers.build_for_effort → Anthropic anthropic_effort (the
-    # claude -p --effort equivalence lever). build_for_effort constructs a REAL
-    # AnthropicModel, which needs a key at construction time (see test_glm_fireworks's
-    # build_model tests); a fake key keeps this hermetic — settings_for_effort (the
-    # assertion target) makes no network request.
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
     import defender.runtime.observe as observe
     logger = observe.RequestLogger(Path("/tmp/does-not-need-to-exist-judge-effort.jsonl"))
     try:
         agent = engine_pydantic.build_judge_agent(
-            _prompt_path := Path(__file__),  # any readable file for instructions
+            _prompt_path := Path(__file__),
             "claude-sonnet-4-6", "low", logger, "judge",
         )
     finally:
@@ -181,13 +161,6 @@ def test_build_judge_agent_applies_effort_via_provider(monkeypatch):
     assert agent.model_settings["anthropic_effort"] == "low"
 
 
-# --- the benign closed-ticket read moved off bash into a typed tool (#672) -------------
-# The old `_ticket_grant` pattern-shape / --require-closed-spoof / grant-honored tests are
-# RETIRED: the pinned `python3 <adapter> … --require-closed` bash grant no longer exists (its
-# closed-only property now lives in the typed tool, closed-only by construction). What survives
-# here is the judge's bash lane itself — cat + defender-sql — and that no ticket shape reaches
-# the store through it on either leg. The tool's own contract is pinned in
-# tests/test_closed_ticket_tool_672.py.
 
 def test_judge_no_ticket_shape_on_bash_lane_either_leg(tmp_path):
     """#672: the judge grants exactly cat + defender-sql on BOTH legs, and the old adapter-shaped
@@ -220,12 +193,10 @@ def test_judge_pipe_and_arbitrary_denied_through_gate(tmp_path):
     def gate(cmd):
         return permission.decide_bash(cmd, policy=benign, run_dir=tmp_path, defender_dir=tmp_path).allow
 
-    # inert composition over data the judge may already read
     assert gate(f"cat {raw} | cat")
     assert gate(f"cat {raw} | defender-sql 'SELECT 1'")
-    # ...but a pipe stage may not OPEN a new file, nor leave the lane
-    assert not gate(f"cat {raw} | cat /etc/passwd")   # the scope check bites inside the pipe
-    assert not gate(f"cat {raw} | head")              # `head` matches no judge grant
+    assert not gate(f"cat {raw} | cat /etc/passwd")
+    assert not gate(f"cat {raw} | head")
     assert not gate(f"{_PY} -c 'print(1)'")
 
 
@@ -246,17 +217,12 @@ def test_judge_policy_reads_gather_raw_through_the_gate(tmp_path):
             run_dir=tmp_path, defender_dir=tmp_path,
         ).allow
 
-    # The judge (either direction) refuses data-source adapters + arbitrary shell, but MAY
-    # aggregate an IN-SCOPE gather_raw payload through the `cat | defender-sql` lane.
     assert not gate("defender-elastic query x")
     assert not gate("rm -rf /tmp/x")
     assert gate(f"cat {raw} | defender-sql 'SELECT count(*) FROM data'")
-    # …but a cat of an OUT-OF-SCOPE file is denied (the reader surface is path-gated).
     assert not gate("cat /etc/passwd | defender-sql 'SELECT 1'")
-    # …and jq is gone from the judge's lane entirely.
     assert not gate(f"jq '.' {raw}")
-    assert not gate(f"cat {raw} | jq '.'")   # not even as a stdin stage — jq is not granted here
-    # The adversarial leg compiles the identical lane (no ticket grant to differ on).
+    assert not gate(f"cat {raw} | jq '.'")
     adversarial = _judge_policy(tmp_path, read_roots=(tmp_path / "gather_raw",))
     assert {g.program for g in adversarial.bash_allow} == {"cat", SQL_SHIM}
 
@@ -294,17 +260,14 @@ def test_judge_read_roots_reach_a_gather_raw_outside_the_run_dir(tmp_path):
         JUDGE_DEF, run_dir=learning, defender_dir=tmp_path / "defender",
     )
     assert gate(with_root)
-    assert not gate(without_root)   # the widening is what makes the read possible
+    assert not gate(without_root)
 
 
-# --- InProcessSubagents.judge always runs the in-process judge -----------
 
 _SENTINEL = object()
 
 
 def test_subagents_judge_runs_pydantic_engine(monkeypatch, tmp_path):
-    # The judge is pydantic-only: .judge dispatches invoke_judge with
-    # judge_fn=_run_judge_pydantic, whatever the wiring's model provider.
     captured = {}
 
     def _spy(wiring, run_dir, actor_story_path, projected_telemetry_path, learning_run_dir,
@@ -319,6 +282,5 @@ def test_subagents_judge_runs_pydantic_engine(monkeypatch, tmp_path):
     sub.judge(ADVERSARIAL_WIRING, *tail)
     assert captured["judge_fn"] is _run_judge_pydantic
 
-    # A claude-* judge model still runs in-process (no legacy claude -p fallback).
     sub.judge(dataclasses.replace(ADVERSARIAL_WIRING, model="claude-sonnet-4-6"), *tail)
     assert captured["judge_fn"] is _run_judge_pydantic

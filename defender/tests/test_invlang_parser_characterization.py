@@ -72,7 +72,6 @@ def _fence(body: str) -> str:
     return "```invlang\n" + body + "\n```\n"
 
 
-# Reusable minimal `:H` header so sub-block fixtures have a parent to attach to.
 _HYP_HEADER = (
     ":H hypothesize.hypotheses "
     "[id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]\n"
@@ -80,9 +79,6 @@ _HYP_HEADER = (
 )
 
 
-# ---------------------------------------------------------------------------
-# A. Full-output identity on the real corpus (the strongest drift guard)
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("case", ["golden-v2sshd", "golden-sshpivot-ab3"])
@@ -97,15 +93,8 @@ def test_real_corpus_companion_is_byte_identical(case):
     assert body == expected
 
 
-# ---------------------------------------------------------------------------
-# B. Import-surface contract — the names the refactor must keep re-exported
-# ---------------------------------------------------------------------------
 
 
-# Exactly the names imported from `defender.skills.invlang.parser` today by
-# production consumers (validate.py, corpus.py, lead_repository.py, compare.py,
-# compaction.py) and by the two invlang test modules. This is the observable
-# re-export contract the module split must preserve.
 _PRODUCTION_SURFACE = ["parse_dense_companion", "ParseWarning", "INVLANG_FENCE_RE"]
 _TEST_SURFACE = [
     "RowError",
@@ -134,23 +123,16 @@ def test_reexported_symbols_keep_their_kind():
     assert callable(parser._resolution_record)
     assert callable(parser._split_cells)
     assert issubclass(parser.RowError, ValueError)
-    # INVLANG_FENCE_RE is a compiled pattern used with .finditer by validate.py.
     assert hasattr(parser.INVLANG_FENCE_RE, "finditer")
-    # The grammar-pin test indexes these as ordered column lists / a set.
     assert parser._VERTEX_COLS == ["id", "type", "class", "ident", "attrs"]
     assert parser._EDGE_COLS[:2] == ["id", "rel"]
     assert isinstance(parser._HYP_HEADER_COLS, set)
     assert parser._HYP_PRED_COLS == ["id", "subject", "claim"]
 
 
-# ---------------------------------------------------------------------------
-# C. Schema-free lexer, called directly (the _cells.py extraction target)
-# ---------------------------------------------------------------------------
 
 
 def test_split_quoted_cell_form_keeps_empty_and_honors_quotes():
-    # Cell form: unescape_delim + keep_empty. A `|` inside quotes is not a
-    # delimiter; the trailing empty token is retained.
     assert _split_quoted('a|"b|c"|', "|", unescape_delim=True, keep_empty=True) == [
         "a",
         '"b|c"',
@@ -159,14 +141,11 @@ def test_split_quoted_cell_form_keeps_empty_and_honors_quotes():
 
 
 def test_split_quoted_subcell_form_drops_empty_and_honors_quotes():
-    # Sub-cell form: no unescape, drop empties. `;` inside quotes is inert.
     assert _split_quoted('x;"y;z";', ";") == ["x", '"y;z"']
 
 
 def test_split_quoted_backslash_depends_on_unescape_knob():
-    # unescape_delim=False: `\|` passes through verbatim (two chars).
     assert _split_quoted(r"a\|b", "|") == [r"a\|b"]
-    # unescape_delim=True: `\|` collapses to a literal `|` inside the token.
     assert _split_quoted(r"a\|b", "|", unescape_delim=True, keep_empty=True) == ["a|b"]
 
 
@@ -223,7 +202,6 @@ def test_row_dict_zips_columns_preferring_block_header():
         "ident": "i",
         "attrs": "k=v",
     }
-    # Headerless block falls back to default_cols.
     headerless = Block(tag="H", name="h-1.parent_attrs", columns=None)
     assert _row_dict(headerless, "k|v", ["key", "value"]) == {"key": "k", "value": "v"}
 
@@ -231,16 +209,11 @@ def test_row_dict_zips_columns_preferring_block_header():
 def test_require_raises_its_message_on_missing_or_falsy_key():
     with pytest.raises(RowError, match="need id"):
         _require({"id": "", "name": "x"}, "id", msg="need id")
-    # Present-and-truthy passes silently.
     _require({"id": "x"}, "id", msg="need id")
 
 
-# ---------------------------------------------------------------------------
-# D. ParseWarning block-label + reason at every reachable construction site
-# ---------------------------------------------------------------------------
 
 
-# (label, invlang-body, expected block, reason substring, expected row_index)
 _WARNING_SITES = [
     (
         "unknown-block",
@@ -341,9 +314,6 @@ def test_warning_site_block_label_and_reason(label, body, exp_block, exp_reason,
     assert exp_reason in w.reason
 
 
-# ---------------------------------------------------------------------------
-# E. Projection paths neither the real corpus nor test_invlang_parser.py hits
-# ---------------------------------------------------------------------------
 
 
 def test_r_consultations_bucket_projects_canonically():

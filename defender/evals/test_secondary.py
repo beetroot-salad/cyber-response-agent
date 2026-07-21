@@ -1,11 +1,3 @@
-"""Unit tests for the secondary-metric harness.
-
-Covers the pure helpers (eligibility, generation parsing, catch-rate
-math, summary formatting) plus worktree idempotency on a real git
-repo fixture. Avoids real model calls — actor / oracle / judge
-calls are out of scope here and are exercised by manual end-to-end
-runs.
-"""
 from __future__ import annotations
 
 import importlib.util
@@ -32,9 +24,6 @@ def _load(name: str, path: Path):
 sec = _load("eval_secondary_t", _HERE / "secondary.py")
 
 
-# ---------------------------------------------------------------------------
-# Generation trailers
-# ---------------------------------------------------------------------------
 
 def test_parse_trailers_extracts_generation_and_model():
     body = (
@@ -56,9 +45,6 @@ def test_parse_trailers_missing_returns_none():
     assert model is None
 
 
-# ---------------------------------------------------------------------------
-# Eligibility
-# ---------------------------------------------------------------------------
 
 def _write_fixture(root: Path, slug: str, disposition: str, held_out: bool = True):
     d = root / slug
@@ -91,9 +77,6 @@ def test_eligible_filter_skips_non_held_out(tmp_path: Path):
     assert {a.slug for a in alerts} == {"b01-x"}
 
 
-# ---------------------------------------------------------------------------
-# Catch-rate math (denominator excludes skip-passthrough + not_executed)
-# ---------------------------------------------------------------------------
 
 def _result(slug, status, outcome=None, gt="benign", err=None):
     return sec.AlertResult(
@@ -124,8 +107,6 @@ def test_catch_rate_excludes_skip_passthrough_and_not_executed():
     assert counts["undecidable"] == 1
     assert counts["skip-passthrough"] == 1
     caught, denom = s.catch_rate()
-    # Denominator: caught+survived+incoherent+undecidable = 5
-    # Skip and not_executed and failed are *not* in the denominator
     assert caught == 2
     assert denom == 5
 
@@ -144,9 +125,6 @@ def test_catch_rate_denom_zero_when_all_skip_or_not_executed():
     assert (caught, denom) == (0, 0)
 
 
-# ---------------------------------------------------------------------------
-# Summary formatting
-# ---------------------------------------------------------------------------
 
 def test_summary_md_replay_incompatible_short_form():
     s = sec.SecondarySummary(
@@ -157,7 +135,6 @@ def test_summary_md_replay_incompatible_short_form():
     md = sec.format_summary_md(s)
     assert "replay-incompatible" in md
     assert "have 2 commits, need 3" in md
-    # No catch-rate section when incompatible
     assert "catch rate" not in md
 
 
@@ -177,9 +154,6 @@ def test_summary_md_renders_executed_breakdown():
     assert "beta" in md
 
 
-# ---------------------------------------------------------------------------
-# Worktree idempotency on a real git repo
-# ---------------------------------------------------------------------------
 
 def _git(repo: Path, *args):
     return subprocess.run(
@@ -211,7 +185,6 @@ def test_list_actor_commits_returns_all_generations(tmp_path: Path):
 
 def test_resolve_target_pin_returns_none_when_history_too_short(tmp_path: Path):
     repo = _init_repo_with_actor_commits(tmp_path, n=2, model_name="m")
-    # k=3 with only 2 commits → target gen = -1 → None
     assert sec.resolve_target_pin(repo, k=3) is None
 
 
@@ -219,7 +192,7 @@ def test_resolve_target_pin_picks_correct_generation(tmp_path: Path):
     repo = _init_repo_with_actor_commits(tmp_path, n=5, model_name="m")
     pin = sec.resolve_target_pin(repo, k=3)
     assert pin is not None
-    assert pin.generation == 2  # 5 - 3
+    assert pin.generation == 2
     assert pin.actor_model == "m"
 
 
@@ -231,28 +204,17 @@ def test_ensure_worktree_idempotent(tmp_path: Path):
     p1 = sec.ensure_worktree(pin, repo, worktrees_dir=tmp_path / "wts")
     assert p1.is_dir()
     assert (p1 / ".git").exists()
-    # Second call is a no-op (no exception, same path).
     p2 = sec.ensure_worktree(pin, repo, worktrees_dir=tmp_path / "wts")
     assert p2 == p1
     assert sec._worktree_head_sha(p2) == pin.sha
 
 
 def test_ensure_worktree_recreates_when_head_mismatch(tmp_path: Path):
-    """Reused worktree at the wrong SHA gets removed and rebuilt at pin.sha.
-
-    Simulates: a prior harness run on a different branch left a
-    worktree at this path checked out to a different commit. Without
-    recreation, the frozen actor would run with the wrong tree but
-    the summary would still claim ``pin.sha`` — silently
-    misattributing the catch rate to the wrong generation.
-    """
     repo = _init_repo_with_actor_commits(tmp_path, n=4, model_name="m")
     worktrees_dir = tmp_path / "wts"
-    pin = sec.resolve_target_pin(repo, k=3)  # gen 1 (4-3)
+    pin = sec.resolve_target_pin(repo, k=3)
     assert pin is not None
 
-    # Build the worktree pointing at gen 4 (a different SHA than the
-    # one resolve_target_pin returns).
     all_commits = sec.list_actor_commits(repo)
     other = next(c for c in all_commits if c.generation == 4)
     assert other.sha != pin.sha
@@ -269,9 +231,6 @@ def test_ensure_worktree_recreates_when_head_mismatch(tmp_path: Path):
     assert sec._worktree_head_sha(rebuilt) == pin.sha
 
 
-# ---------------------------------------------------------------------------
-# write_summary side effects
-# ---------------------------------------------------------------------------
 
 def test_write_summary_emits_md_per_alert_json_and_index_jsonl(tmp_path: Path):
     s = sec.SecondarySummary(
@@ -301,21 +260,12 @@ def test_write_summary_emits_md_per_alert_json_and_index_jsonl(tmp_path: Path):
 
 
 def test_replay_actor_uses_stable_case_id_for_seed(tmp_path: Path):
-    """Stable --case-id keeps actor seed constant across attempt-suffixed staging dirs.
-
-    Loads ``replay_actor.py`` directly, stubs out the heavy bits
-    (loop.invoke_actor and the lead_repository actor_view it projects
-    from), and asserts that the seed captured during the invoke_actor
-    call corresponds to the ``--case-id`` value rather than
-    ``staging.name``. This is the invariant that protects catch rate
-    from per-attempt noise.
-    """
     replay = _load("replay_actor_t", _HERE.parent / "learning" / "ops" / "replay_actor.py")
 
     captured: dict = {}
 
     class FakeLoop:
-        ACTOR_MODEL = "claude-sonnet-4-6"  # replay sources the metered key for sub.ACTOR_MODEL
+        ACTOR_MODEL = "claude-sonnet-4-6"
 
         class RunUnprocessable(Exception):
             pass
@@ -326,9 +276,6 @@ def test_replay_actor_uses_stable_case_id_for_seed(tmp_path: Path):
 
         @staticmethod
         def invoke_actor(alert_path, actor_input_path, learning_run_dir):
-            # Mirrors the real signature; record what the seed
-            # function returns under the active override so the test
-            # can assert it's the *case_id* version, not staging.name.
             captured["seed"] = fake_loop._actor_seed(learning_run_dir.name)
             captured["learning_run_dir"] = str(learning_run_dir)
             return "STORY\n"
@@ -350,50 +297,23 @@ def test_replay_actor_uses_stable_case_id_for_seed(tmp_path: Path):
     staging = tmp_path / "stage-with-attempt-aaaaaaaa"
     staging.mkdir()
     (staging / "alert.json").write_text("{}")
-    (staging / "gather_raw").mkdir()  # the leads table (required replay input)
+    (staging / "gather_raw").mkdir()
 
     import unittest.mock as mock
     with mock.patch.object(replay, "_load_sibling", side_effect=fake_load_sibling), \
          mock.patch.object(replay, "source_first_party_key", return_value=None):
-        # Neutralize metered-key sourcing: the actor now runs in-process, so replay.main
-        # sources the first-party key; this hermetic seed test must not require a real .env key.
         rc = replay.main([str(staging), "--case-id", "sec-eval-gen4-b01"])
 
     assert rc == 0
     assert (staging / "actor_story.md").read_text() == "STORY\n"
-    # The seed must reflect the stable case_id, NOT the attempt-suffixed
-    # staging dir name. (Real invoke_actor seeds from
-    # learning_run_dir.name; the override in replay_actor.py reroutes
-    # that to case_id, so the seed string passed to the captured
-    # invoke_actor matches the stable id.)
     assert captured["seed"] == "seed-of-sec-eval-gen4-b01"
 
 
 def test_module_import_does_not_reexec():
-    """Importing eval_secondary as a library must not os.execv.
-
-    The pytest invocation imports this module under the venv's
-    ``python`` console script (no ``3`` suffix). A strict-equality
-    re-exec guard at module top would replace the test collector
-    process with the harness CLI and exit 2. This test pins that the
-    import path is safe — the guard lives behind ``__main__`` only.
-    """
-    # If the guard were at module top, the importlib._load earlier in
-    # this file (or pytest collection) would already have re-exec'd
-    # away. Reaching this line is the assertion.
     assert sec.__name__.endswith("eval_secondary_t")
 
 
 def test_run_head_oracle_and_judge_converts_oracle_timeout(tmp_path: Path):
-    """A RunUnprocessable from the oracle must surface as SecondaryError.
-
-    The oracle now runs IN-PROCESS (PydanticAI), dispatched through the InProcessSubagents
-    adapter like the judge: run_stage maps a hung / timed-out / model-errored per-lead call to
-    ``RunUnprocessable`` (there is no subprocess to raise TimeoutExpired). Left uncaught it would
-    escape the per-alert handler in run_secondary() and abort the whole harness before the summary
-    is written. This test pins the conversion. NB the harness now sources the in-process stages'
-    keys BEFORE the oracle, so the fake stubs ``_prepare_engines_for`` too.
-    """
     actor_story = tmp_path / "actor_story.md"
     actor_story.write_text("not a SKIP\n")
     lead_seq = tmp_path / "lead_sequence.yaml"
@@ -418,15 +338,14 @@ def test_run_head_oracle_and_judge_converts_oracle_timeout(tmp_path: Path):
             return False
 
         @staticmethod
-        def _prepare_engines_for(_directions, **_kw):  # **_kw: absorbs include_actor=
-            pass  # hermetic: no metered key sourced, no engine validation
+        def _prepare_engines_for(_directions, **_kw):
+            pass
 
     with pytest.raises(sec.SecondaryError, match="oracle invocation failed"):
         sec.run_head_oracle_and_judge(head_run, staging, FakeLoop)
 
 
 def test_run_head_oracle_and_judge_converts_judge_timeout(tmp_path: Path):
-    """Same protection for the judge invoke."""
     head_run = tmp_path
     (head_run / "alert.json").write_text("{}")
     (head_run / "investigation.md").write_text("")
@@ -453,7 +372,7 @@ def test_run_head_oracle_and_judge_converts_judge_timeout(tmp_path: Path):
             pass
 
         lead_repository = _FakeLR
-        ADVERSARIAL_WIRING = object()  # opaque — the judge stub ignores it
+        ADVERSARIAL_WIRING = object()
         InProcessSubagents = _FakeSubagents
 
         @staticmethod
@@ -465,8 +384,8 @@ def test_run_head_oracle_and_judge_converts_judge_timeout(tmp_path: Path):
             return text
 
         @staticmethod
-        def _prepare_engines_for(_directions, **_kw):  # **_kw: absorbs include_actor=
-            pass  # hermetic: no metered key sourced, no engine validation
+        def _prepare_engines_for(_directions, **_kw):
+            pass
 
     with pytest.raises(sec.SecondaryError, match="judge invocation failed"):
         sec.run_head_oracle_and_judge(head_run, staging, FakeLoop)

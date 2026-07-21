@@ -53,13 +53,9 @@ from defender.learning.core.validate import (  # noqa: E402
     validate_judge_doc,
 )
 
-if TYPE_CHECKING:  # annotation-only — the runtime harness never imports the heavy config graph
+if TYPE_CHECKING:
     from defender.learning.core.config import JudgeWiring
 
-# The load-bearing flip axis per direction: a swap between these two verdicts changes
-# FN/FP accounting and therefore which findings get queued. Zero systematic flips is
-# the hard gate; the other outcomes (undecidable/incoherent/skip-passthrough) are
-# punts, tracked separately.
 _ADVERSARIAL_AXIS = ("caught", "survived")
 _BENIGN_AXIS = ("refuted", "survived")
 _PUNTS = {"undecidable", "incoherent"}
@@ -67,22 +63,15 @@ _PUNTS = {"undecidable", "incoherent"}
 
 @dataclass(frozen=True)
 class Verdict:
-    """One judge verdict, reduced to the fields the loop consumes. `finding_keys` is
-    the `(type, subject_anchor)` set — the routing-relevant identity of a finding, not
-    its prose (which varies run-to-run even within one engine and is never compared)."""
 
     case_id: str
-    direction: str  # "adversarial" | "benign"
-    outcome: str | None            # None if the doc did not parse
-    finding_keys: frozenset        # {(type, subject_anchor), ...}
+    direction: str
+    outcome: str | None
+    finding_keys: frozenset
     parsed_ok: bool
 
 
 def parse_judge_verdict(text: str, *, case_id: str, direction: str) -> Verdict:
-    """Parse a judge's raw YAML output into a `Verdict` — via the SAME
-    `normalize_judge_yaml` (fence/envelope + prose-preamble strip) + validate the loop
-    applies downstream, so a candidate that emits an unparseable doc scores as
-    `parsed_ok=False` (itself a regression) rather than crashing the A/B."""
     benign = direction == "benign"
     try:
         import yaml
@@ -99,7 +88,6 @@ def parse_judge_verdict(text: str, *, case_id: str, direction: str) -> Verdict:
     return Verdict(case_id, direction, validated.get("outcome"), keys, True)
 
 
-# --- pure metrics over PAIRED verdict lists (reference[i] ↔ candidate[i]) -----
 
 
 def _axis_for(direction: str) -> tuple[str, str]:
@@ -107,16 +95,12 @@ def _axis_for(direction: str) -> tuple[str, str]:
 
 
 def outcome_match_rate(ref: Sequence[Verdict], cand: Sequence[Verdict]) -> float:
-    """Fraction of paired cases whose `outcome` matches exactly (empty → 1.0)."""
     if not ref:
         return 1.0
     return sum(a.outcome == b.outcome for a, b in zip(ref, cand, strict=True)) / len(ref)
 
 
 def systematic_flips(ref: Sequence[Verdict], cand: Sequence[Verdict]) -> list[str]:
-    """Case ids where reference and candidate land on OPPOSITE ends of the direction's
-    load-bearing axis (caught↔survived / refuted↔survived). This must be empty to
-    promote a candidate — each flip changes FN/FP accounting and thus training labels."""
     flipped = []
     for a, b in zip(ref, cand, strict=True):
         lo, hi = _axis_for(a.direction)
@@ -126,8 +110,6 @@ def systematic_flips(ref: Sequence[Verdict], cand: Sequence[Verdict]) -> list[st
 
 
 def findings_agreement(ref: Sequence[Verdict], cand: Sequence[Verdict]) -> float:
-    """Mean Jaccard of the `(type, subject_anchor)` finding-key sets across paired
-    cases. A pair where both are empty counts as full agreement (1.0)."""
     if not ref:
         return 1.0
     total = 0.0
@@ -138,8 +120,6 @@ def findings_agreement(ref: Sequence[Verdict], cand: Sequence[Verdict]) -> float
 
 
 def punt_rate(verdicts: Sequence[Verdict]) -> float:
-    """Fraction that punted (undecidable/incoherent). A candidate that punts more —
-    even if its non-punt verdicts agree — is a quality regression."""
     if not verdicts:
         return 0.0
     return sum(v.outcome in _PUNTS for v in verdicts) / len(verdicts)
@@ -163,7 +143,6 @@ class Comparison:
 
 
 def compare(ref: Sequence[Verdict], cand: Sequence[Verdict]) -> Comparison:
-    """The full metric bundle for a candidate vs a reference (paired, same order)."""
     if len(ref) != len(cand):
         raise ValueError(f"paired verdict lists differ in length: {len(ref)} vs {len(cand)}")
     return Comparison(
@@ -178,7 +157,6 @@ def compare(ref: Sequence[Verdict], cand: Sequence[Verdict]) -> Comparison:
 
 
 def render_report(title: str, cmp: Comparison, *, self_consistency: float | None = None) -> str:
-    """A markdown-ish scores block (matching held_out.py's plain-print style)."""
     lines = [
         f"# {title}",
         "",
@@ -202,12 +180,10 @@ def render_report(title: str, cmp: Comparison, *, self_consistency: float | None
     return "\n".join(lines)
 
 
-# --- the runner: run the judge over frozen cases under a config -------------
 
 
 @dataclass
 class EngineConfig:
-    """A judge configuration under test: which engine (`judge_fn`), model, effort."""
 
     label: str
     judge_fn: Callable[..., str]
@@ -217,25 +193,18 @@ class EngineConfig:
 
 @dataclass
 class FrozenCase:
-    """A frozen judge input: the investigation run dir + the actor story + oracle
-    telemetry for one direction. `build_judge_invocation` is a pure function of these,
-    so re-running the judge over them varies only the config under test."""
 
     case_id: str
-    direction: str  # "adversarial" | "benign"
+    direction: str
     run_dir: Path
     actor_story_path: Path
     projected_telemetry_path: Path
-    wiring: JudgeWiring | None = field(repr=False, default=None)  # the base wiring for the direction
+    wiring: JudgeWiring | None = field(repr=False, default=None)
 
 
 def run_config(
     cases: Sequence[FrozenCase], config: EngineConfig, out_root: Path,
 ) -> list[Verdict]:
-    """Run one config over the frozen cases → the parsed verdicts, paired by case order.
-    Each case gets a fresh staged learning-run dir under `out_root/{label}/{case_id}`
-    so concurrent/repeat runs never clobber each other's comparison files or trace.
-    Makes real model calls — the operator supplies the API key (see module docstring)."""
     from defender.learning.pipeline.judge.run import invoke_judge
 
     verdicts: list[Verdict] = []

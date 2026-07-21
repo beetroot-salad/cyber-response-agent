@@ -48,9 +48,6 @@ def _actor_policy(scripts, *, read_confine, run_dir=None):
 
 
 
-# ============================================================================
-# builder wiring: _actor_policy carries the confine + zero readers
-# ============================================================================
 
 def test_actor_policy_malicious_wires_confine_and_no_readers():
     """_actor_policy for the malicious leg -> read_confine == {lessons-actor, lessons-environment},
@@ -59,9 +56,6 @@ def test_actor_policy_malicious_wires_confine_and_no_readers():
     pol = _actor_policy((_ENV_RETRIEVE, _ACTOR_INDEX), read_confine=(_ACTOR_DIR, _ENV_DIR))
     assert set(pol.read_confine) == {_ACTOR_DIR, _ENV_DIR}
     assert len(pol.bash_allow) == 2
-    # The capability BITS are gone (#575); the properties they stood for are now addresses:
-    # no `cat` grant at all → no opener, so no read shapes and no gather_raw address to clamp
-    # (`raw_reads`), and no routed grant → no adapter capability.
     assert not any(g.program == "cat" for g in pol.bash_allow)
     assert pol.read_allow == ()
     assert all(g.route is Route.PLAIN for g in pol.bash_allow)
@@ -120,12 +114,10 @@ def test_judge_policy_is_cat_and_sql_only(tmp_path):
     )
     assert {g.program for g in pol.bash_allow} == {"cat", "defender-sql"}
     cat = next(g for g in pol.bash_allow if g.program == "cat")
-    assert cat.scope                                   # it opens files, so it is scope-checked
+    assert cat.scope
     assert PROGRAMS["cat"] is not permission.OPENS_NOTHING
     for denied in ("jq '.'", "grep x y", "head x", "tail x", "ls .", "echo hi", "true"):
         assert not any(g.pattern.fullmatch(denied) for g in pol.bash_allow), denied
-    # and the payload under the comparison root — the judge's whole reason for a bash lane — is
-    # reachable through that scope, with no bit involved.
     raw = cmp_dir / "gather_raw" / "l-001" / "0.json"
     raw.parent.mkdir(parents=True)
     raw.write_text("{}\n")
@@ -134,9 +126,6 @@ def test_judge_policy_is_cat_and_sql_only(tmp_path):
     ).allow
 
 
-# ============================================================================
-# read tool: routing + pattern fold + return contract
-# ============================================================================
 
 def _tree(tmp_path):
     """tmp tree: a confine dir with a real lesson file + an out-of-confine rubric. Returns
@@ -152,9 +141,6 @@ def _tree(tmp_path):
     rubric.write_text("SURVIVED-CRITERIA\n")
     run = tmp_path / "run"
     run.mkdir()
-    # A confined, bash-less policy: no grants at all (so no opener, no adapter route, and no
-    # gather_raw address), reads bounded by the confine. The capability bits it used to spell
-    # out are exactly the grants it does not have.
     pol = AgentPolicy(read_confine=(conf,), bash_allow=(), read_roots=())
     deps = ActorDeps(run_dir=run, defender_dir=dfn, run_id="r", salt="s", policy=pol)
     return deps, conf, lesson, rubric
@@ -171,12 +157,11 @@ def test_tool_denial_gives_no_existence_oracle(tmp_path):
     'file not found') — the deny path runs before any existence check, so it leaks nothing."""
     deps, conf, lesson, rubric = _tree(tmp_path)
     with pytest.raises(ModelRetry) as e_exists:
-        tools._tool_read_file(deps, str(rubric))                       # denied, exists
+        tools._tool_read_file(deps, str(rubric))
     with pytest.raises(ModelRetry) as e_absent:
-        tools._tool_read_file(deps, str(rubric.parent / "nope.md"))    # denied, absent
+        tools._tool_read_file(deps, str(rubric.parent / "nope.md"))
     assert "not found" not in str(e_exists.value).lower()
     assert "not found" not in str(e_absent.value).lower()
-    # rejected: 404 'file not found' for a denied path (an existence oracle)
 
 
 def test_tool_in_confine_missing_is_file_not_found(tmp_path):
@@ -200,7 +185,6 @@ def test_tool_pattern_no_match_returns_empty_not_error(tmp_path):
     """read_file(in-confine file, pattern='zzz') -> empty result, NOT ModelRetry (no-match is a valid outcome)."""
     deps, conf, lesson, rubric = _tree(tmp_path)
     assert tools._tool_read_file(deps, str(lesson), pattern="zzz").strip() == ""
-    # rejected: raise/err on zero matches
 
 
 def test_tool_pattern_over_denied_path_raises(tmp_path):

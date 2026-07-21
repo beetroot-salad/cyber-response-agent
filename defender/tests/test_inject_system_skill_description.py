@@ -65,7 +65,6 @@ def test_block_scalar_with_blank_line_between_paragraphs(tmp_path):
 
 
 def test_silent_noop_when_skill_file_missing(tmp_path):
-    # No skill written under the injected skills_dir.
     assert read_description("elastic", skills_dir=tmp_path) is None
 
 

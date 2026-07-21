@@ -12,9 +12,6 @@ import sys
 from pathlib import Path
 
 _SCRIPTS = Path(__file__).resolve().parents[1] / "scripts" / "visualize"
-# visualize_judge imports siblings via the `defender.scripts.visualize.*`
-# namespace, resolved by the repo root on sys.path (pytest pythonpath); keep
-# the package dir importable too for the by-path module loads below.
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
@@ -62,8 +59,6 @@ def test_benign_section_renders_outcome_findings_and_env_obs():
     html = vj.render_judge_benign_section(_BENIGN_JUDGE)
     assert 'id="sec-judge-benign-outcome"' in html
     assert "out-survived-fp" in html
-    # benign findings use a distinct anchor prefix so they never collide with
-    # adversarial finding ids on an inconclusive run that rendered both.
     assert 'id="benign-finding-0"' in html
     assert 'id="sec-judge-benign-env"' in html
     assert "svc.monitoring performs scheduled nc -z reachability probes" in html
@@ -78,7 +73,7 @@ def test_env_observation_card_handles_missing_entities():
         "fact": "f",
     })
     assert 'id="env-obs-0"' in html
-    assert "env-obs-ents" not in html  # no entities block when absent
+    assert "env-obs-ents" not in html
 
 
 def test_actor_benign_section_empty_when_story_absent(tmp_path, monkeypatch):
@@ -115,9 +110,6 @@ def test_toc_includes_benign_block_when_requested():
 
 
 def test_learning_run_dir_honors_state_dir(tmp_path, monkeypatch):
-    # Out-of-repo concurrent mode (the off-process learn worker's reason to exist):
-    # the LEARN stage persists judge artifacts under $DEFENDER_LEARNING_STATE_DIR,
-    # so the (re-)render must resolve them there — not the in-repo learning/runs path.
     monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
     assert vp._learning_run_dir("case-9") == (tmp_path / "state").resolve() / "runs" / "case-9"
 
@@ -128,8 +120,6 @@ def test_learning_run_dir_defaults_in_repo(monkeypatch):
 
 
 def test_adversarial_finding_anchor_unchanged():
-    # The default anchor prefix must stay `finding-` so the adversarial TOC
-    # links (#finding-N) keep resolving.
     html = vj.render_judge_finding(0, {
         "type": "missing-knowledge",
         "subject_anchor": "a",
