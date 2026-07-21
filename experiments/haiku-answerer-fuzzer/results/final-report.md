@@ -50,9 +50,15 @@ isolation hole (STRICT ISOLATION block; 4/6 Sonnet leaves peeked).
 **Addendum 2026-07-21 (later same day): decision revised.** One Sonnet
 answerer is swapped for Haiku in the production panel — a plain swap, not
 the declined promotion-only hybrid, so no screening tier is added. The
-fc_confident risk is bounded by panel mechanics: a lone Haiku assertion
-cannot reach consensus, so its inventions surface as forks routed to §7
-rather than expected values. Recorded in `phases/answer.md` (c).
+fc_confident risk is bounded twice: panel mechanics keep a lone Haiku
+assertion out of consensus, and the judge's **reality-lane discount** keeps
+it out of §7 — spread resting on a mechanism-level is-assertion is set
+aside against the ledger (cite the refuting claim, or mint a probe
+obligation when no claim covers it) instead of ratcheting to the human;
+only surviving ought-spread routes. Without the discount, the measured
+fc_confident ≈ 11–12/trial would have made the human at §7 the screening
+tier this same decision declined to build. Recorded in
+`phases/answer.md` (c)/(d) and the judge charge's ratchet rule.
 
 ## Metric aggregates (final: 10/12 trials complete; sonnet-631 t2/t3
 ## unrecoverable after the worktree deletion)
