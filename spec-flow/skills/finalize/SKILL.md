@@ -26,7 +26,7 @@ Run `/code-review --fix` over the PR, and then:
 - **Reconcile against the prior review trail.** Do the cheap cleanups an earlier pass deferred; fix — or file — the out-of-diff bugs it noted and moved on from. Leave only genuine design choices for a human.
 - **File a follow-up issue for anything you surface but don't fix**, naming the finding and where it lives (`file:line`). A finding that exists only in a chat message is a finding that is already lost.
 
-Fix honestly: never green the build by weakening a test, suppressing a type error, or baselining a finding this change introduced. The tests are the approved spec — if one of them is genuinely wrong, that is a finding to raise, not a line to edit.
+Fix honestly: never green the build by weakening a test, suppressing a type error, or baselining a finding this change introduced. The tests are the committed spec — if one of them is genuinely wrong, that is a finding to raise, not a line to edit.
 
 ## Feed the pipeline
 

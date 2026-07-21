@@ -45,7 +45,7 @@ inventory: {<category>: <count>, ...}   # claims, flagged_facts, premises, forks
 ---
 ```
 
-Body, in order: `## Digest` — the ≤15 lines the leaf returns inline, verbatim; `## Red flags` — anything the orchestrator or the human must see (omit when empty); then the payload. Producer/consumer pairing is by full filename — the numeric prefix orders the chain for readers, it is not an identity (five `30-*` files share one prefix). A frontier whose payload cannot be a markdown file — phase C's `40-premise-file.py` must stay a real Python file for the shuffle CLI — gets a **sidecar**: `40-premises.md` carries the frontmatter and digest, and the payload file sits beside it.
+Body, in order: `## Digest` — the ≤15 lines the leaf returns inline, verbatim; `## Red flags` — anything the orchestrator or the human must see (omit when empty); then the payload. Producer/consumer pairing is by full filename — the numeric prefix orders the chain for readers, it is not an identity (five `30-*` files share one prefix). A frontier whose payload cannot be a markdown file gets a **sidecar** carrying the frontmatter and digest, with the payload file beside it. Phase C uses this for `40-premise-file.py` / `40-premises.md` and for each answerer's `42-answers-<copy>.py` / `42-answers-<copy>.md` pair.
 
 **Conservation is the frontmatter's job**: each phase echoes the inventories it consumed and accounts for them in its output — counts in equal counts out, every drop named. **Counts are computed, never recalled** — a `grep -c`/`wc` over the file's own content; a producer trusting its memory of its own count is precisely what conservation exists to catch. Each internal handoff is a new place for the premise that silently vanishes; the frontmatter closes that hole mechanically: **run `spec-graph frontiers <dir>` at every phase boundary** — it reconciles every echo against its producer's *declared* inventory and exits nonzero on a break, so a broken frontier is found where it was written; the tool never sees the payload — declaration against declaration — so its echo-equality bites only because the consumer's echo is computed from the file's own content; phase F re-runs it over the finished chain and adds the semantic edge (which name maps to which) the counts cannot see.
 
@@ -60,11 +60,11 @@ Body, in order: `## Digest` — the ≤15 lines the leaf returns inline, verbati
 | 0 | worktree + resume scan | spine | — | — |
 | A | 1–2 ground ∥ extract | grounding leaf (reader posture) ∥ extraction leaf (Opus) | phases/ground-extract.md | `10-brief.md`, `20-demands.md` |
 | B | 3 enumerate | 4 lensed Sonnet leaves + 1 unlensed Opus strong author | phases/enumerate.md | `30-premises-<lens>.md` ×5 |
-| C | 4 answer | synthesis (Sonnet, low) → `shuffle-premises` (spine, CLI) → ~3 identical Sonnet-low answerers → judge leaf (Opus) | phases/answer.md | `40-premise-file.py` + `40-premises.md`, `45-dispositions.md` |
+| C | 4 answer | synthesis (Sonnet, low) → `shuffle-premises` (spine, CLI) → ~3 identical Sonnet-low answerers → judge leaf (Opus) | phases/answer.md | `40-premise-file.py` + `40-premises.md`, `42-answers-<copy>.py` + sidecars, `45-dispositions.md` |
 | D | 5–6 graph + gate | assembler leaf (Opus) → gate leaf (Sonnet, over `spec-graph gate --residue`) | phases/graph-gate.md | `spec_graph_<slug>.yaml` + `50-graph-digest.md`, `60-residue.md` |
 | §7 | 7 human seam | spine (AskUserQuestion) | — | `70-resolutions.md` |
 | E | 8 author | one Opus author leaf | phases/author.md | the suite + `80-author-digest.md` |
-| F | 9 verify | mechanical-gate leaf, blind conservation reader, cold reconciler (Opus) | phases/verify.md | `90-verification.md` |
+| F | 9 verify | mechanical-gate leaf → blind conservation reader ∥ cold reconciler (Opus) | phases/verify.md | `90-mechanical.md`, `91-blind.md`, `92-reconciliation.md` |
 | 10 | hand off | spine | — | — |
 
 Scheduler-enforced constraints: B's five leaves **block on A's finished brief**; the early-exit check runs after A and after any later `design-refuted` flip. C's answerers see only their own shuffled copy. §7 runs after D so the gate's residue reaches the human with the forks; F's findings route back through §7, never straight into the diff. If A's grounding leaf overruns, dispatch a *fresh* probe-backed grounding leaf — never derive the brief on the spine — and reconcile when the slow one lands. Models are named in the contracts and are not economizable where they say Opus; if one genuinely cannot be spawned, run the best derivation available and **record in `handoff.deviations` that the unknown-unknown region ran degraded**.
@@ -85,6 +85,6 @@ Record every outcome in `70-resolutions.md`, conservation-counted against the in
 
 ## 10. Hand off
 
-**The diff** is **tests + spec_graph only** — the suite with `spec_graph_<issue-or-slug>.yaml` beside it (demands, structure, gate record, claims ledger, `handoff:` block); its `base:` field is the fork commit. The frontiers directory stays untracked. Commit **before the implementation exists** — write-code-from-spec refuses to start otherwise, and a spec phase that never ran discretely can't bite.
+**The diff** is **tests + spec_graph only** — the suite with `spec_graph_<issue-or-slug>.yaml` beside it (demands, structure, gate record, claims ledger, `handoff:` block); its `base:` field is the fork commit. The frontiers directory stays untracked. Commit and push the spec branch **before the implementation exists** — verify the remote branch contains the commit before posting the handoff. Write-code-from-spec refuses to start otherwise, and a spec phase that never ran discretely can't bite.
 
 **The note** is the baton to a *cold* write-code-from-spec, reachable only through the issue thread — post it there with the `handoff` skill: branch and base commit, the forks the human resolved and which reading they picked, anything that ran degraded, the single next action. Write it **for the implementer, not the reviewer** — `finalize` deliberately meets the code cold.

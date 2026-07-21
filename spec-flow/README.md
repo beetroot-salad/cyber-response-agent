@@ -6,7 +6,7 @@ The idea it is built on: **the tests are the spec.** A design written in prose f
 it's ambiguous (two defensible readings), incomplete (a case it never mentions), or the code just
 diverges from it. So before any implementation exists, the design is turned into an *executable*
 spec: a list of demands bound to a spec-coverage graph, realized as end-to-end tests — the tests
-committed and reviewed on their own, the graph riding along as their machine-checked derivation.
+committed before implementation, the graph riding along as their machine-checked derivation.
 Then the code is written against it. "Tests green" comes to mean "the code
 follows intent" — which is not what it means when the tests were written afterwards, by the same
 agent, from the same assumptions.
@@ -14,15 +14,15 @@ agent, from the same assumptions.
 ```
 issue ──▶ discuss-issue ──▶ write-tests ──▶ write-code-from-spec ──▶ finalize ──▶ merge
                                   │                                     │
-                              human gate:                          human gate:
-                             approve the tests                    approve the merge
+                              human seam:                          human gate:
+                             resolve forks                        approve merge
 ```
 
-Two human gates, both placed where judgment is cheap and mistakes are expensive: once on the spec
-(before code exists), once on the merge. Everything between them runs unattended. One discipline
-runs the whole pipe: enumerators interpret the design's language, executed probes answer every
-question about existing reality, and humans decide only genuine forks — nothing in between gets
-to guess.
+Human judgment enters twice for different reasons: `write-tests` pauses only for genuine design
+forks, before code exists, and the merge stays human-approved after review. Everything else runs
+unattended. One discipline runs the whole pipe: enumerators interpret the design's language,
+executed probes answer every question about existing reality, and humans decide only genuine forks
+— nothing in between gets to guess.
 
 ## The skills
 

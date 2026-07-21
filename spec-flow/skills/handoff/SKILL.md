@@ -19,4 +19,4 @@ Skip what the code, git history, or an open PR already say — link to them inst
 ## Where it goes
 
 - **No argument** — output the note in the chat.
-- **An issue number or URL is given** — post the note as a **comment** on that issue with `gh issue comment <n> --body "<note>"` (a comment, so nothing already on the issue is overwritten), then report the comment URL. Show the note in the chat too, so it's visible without opening GitHub.
+- **An issue number or URL is given** — write the note to a temporary file with the file-writing tool, then post it as a **comment** with `gh issue comment <n> --body-file <temp-path>`. Never interpolate the note into a shell argument: handoffs routinely contain backticks and may contain `$()`-shaped text. Remove the temporary file after a successful post, report the comment URL, and show the note in chat too so it is visible without opening GitHub.
