@@ -484,6 +484,9 @@ def test_decide_write_requires_policy_and_roots(tmp_path):
     with pytest.raises(TypeError):  # run_dir only — read containment needs BOTH roots
         permission.decide_write(run_dir / "x.md", "b\n", run_dir=run_dir,
                                 policy=_run_dir_pol(run_dir))
+    with pytest.raises(TypeError):  # defender_dir only — and `run_dir` is THE root #681 is about,
+        permission.decide_write(run_dir / "x.md", "b\n",  # so its omission is the leg to pin
+                                defender_dir=tmp_path / "defender", policy=_run_dir_pol(run_dir))
 
 
 def test_write_allow_admits_declared_denies_sibling(tmp_path):

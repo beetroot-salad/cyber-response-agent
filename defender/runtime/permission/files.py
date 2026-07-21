@@ -393,31 +393,37 @@ def _has_duplicate_top_level_key(raw: str) -> bool:
     FALSE-POSITIVES (`1:` and `"1":` are distinct keys to `safe_load`, one int and one str, but
     carry the same `key_node.value` `"1"`) and FALSE-NEGATIVES (`1:` / `0x1:`, `yes:` / `true:`
     construct to the same key from different text, a real last-wins shadowing the raw compare
-    would miss). Constructing with the SAME `SafeLoader` `split_frontmatter` parses under keeps
-    the two readings of "the same key" from diverging. A key that cannot be constructed or
-    compared — an untabled tag, or an unhashable list/mapping key, which `safe_load` would have
-    rejected upstream anyway — is skipped rather than raised out of this blocking gate."""
+    would miss). ONE `SafeLoader` — the same class `split_frontmatter` parses under — both
+    composes and constructs, so the two readings of "the same key" cannot diverge. That includes
+    `flatten_mapping`: `safe_load` expands a `<<:` merge INTO the mapping before building it, so
+    a merge-injected key is a real last-wins entry; skipping the flatten would hide exactly the
+    shadowing this check exists to catch (`<<: [*a, *b]` where both anchors carry `disposition`
+    — the parsed mapping keeps one, the raw text shows two). A key that cannot be constructed or
+    compared — an untabled tag, an unhashable list/mapping key, an out-of-range implicit
+    timestamp, all of which `safe_load` would have rejected upstream anyway — is skipped rather
+    than raised out of this blocking gate."""
+    loader = yaml.SafeLoader(raw)
     try:
-        node = yaml.compose(raw, Loader=yaml.SafeLoader)
-    except (yaml.YAMLError, RecursionError):
-        return False
-    if not isinstance(node, yaml.MappingNode):
-        return False
-    ctor = yaml.SafeLoader("")
-    try:
+        try:
+            node = loader.get_single_node()
+            if not isinstance(node, yaml.MappingNode):
+                return False
+            loader.flatten_mapping(node)  # `<<:` merges become real top-level pairs
+        except (yaml.YAMLError, RecursionError):
+            return False
         seen: set[object] = set()
         for key_node, _value_node in node.value:
             try:
-                key = ctor.construct_object(key_node, deep=True)
+                key = loader.construct_object(key_node, deep=True)
                 duplicate = key in seen
-            except (yaml.YAMLError, RecursionError, TypeError):
+            except (yaml.YAMLError, RecursionError, TypeError, ValueError):
                 continue  # unconstructible / unhashable — no reliable signal for THIS key
             if duplicate:
                 return True
             seen.add(key)
         return False
     finally:
-        ctor.dispose()
+        loader.dispose()
 
 
 def _decide_report_write(proposed_text: str) -> Decision:

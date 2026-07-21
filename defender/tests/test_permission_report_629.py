@@ -790,7 +790,10 @@ def test_report_gate_cannot_be_skipped_by_omitting_the_run_root(env):
         env.run / "report.md", repro, run_dir=None, defender_dir=None, policy=env.pol
     )
     assert explicit_none.allow is False
-    assert explicit_none.reason
+    # …and it fails closed at the READ-CONTAINMENT check specifically: a bare `allow is False`
+    # would stay green if the deny drifted to write_allow, a resolve error, or anything else,
+    # while the docstring's claim about WHICH check catches the untyped caller went false.
+    assert "read roots" in explicit_none.reason
     gated = env.decide("report.md", repro)  # positive control — the gate itself, not containment
     assert gated.allow is False
     assert "disposition" in gated.reason
@@ -803,8 +806,10 @@ def test_report_duplicate_key_compares_constructed_keys_not_node_text(env):
     denying a structurally valid report; and it FALSE-NEGATIVED on `1:` vs `0x1:` and `yes:` vs
     `true:` (different text, same constructed key), missing a real last-wins shadowing of exactly
     the kind the check exists to catch. Each leg re-probes `safe_load`'s own key set, so the
-    fixtures cannot drift from the parser they are asserting about. Positive control: the
-    duplicate `disposition` detection is unchanged."""
+    fixtures cannot drift from the parser they are asserting about. The deny legs assert the
+    DUPLICATE reason, not merely `allow is False`: the report gate has five other ways to deny,
+    and a bare allow-check would keep them green while the duplicate branch went dead. Positive
+    control: the duplicate `disposition` detection is unchanged."""
     type_variant = 'disposition: benign\n1: a\n"1": b\n'
     assert yaml.safe_load(type_variant) == {"disposition": "benign", 1: "a", "1": "b"}, \
         "re-probe: int 1 and str '1' are DISTINCT keys to safe_load — not a duplicate"
@@ -812,9 +817,49 @@ def test_report_duplicate_key_compares_constructed_keys_not_node_text(env):
     for same_key in ("disposition: benign\n1: a\n0x1: b\n", "disposition: benign\nyes: a\ntrue: b\n"):
         assert len(yaml.safe_load(same_key)) == 2, \
             f"re-probe: the two spellings collapse to ONE key — a real duplicate: {same_key!r}"
-        assert env.decide("report.md", f"---\n{same_key}---\nbody\n").allow is False, same_key
+        d = env.decide("report.md", f"---\n{same_key}---\nbody\n")
+        assert d.allow is False, same_key
+        assert "more than once" in d.reason, same_key
     # positive control: the duplicate this check exists for still denies.
     assert env.decide("report.md", report(extra_fm="disposition: benign")).allow is False
+
+
+def test_report_duplicate_key_sees_through_a_merge_key(env):
+    """`safe_load` FLATTENS a `<<:` merge INTO the mapping before building it, so a merge-injected
+    key is a real last-wins entry in the parsed dict — and the duplicate check must read the
+    mapping the same way. Composing WITHOUT flattening left the top level looking like
+    `{a, b, <<}` (no duplicate) while `safe_load` resolved two `disposition` entries and kept one:
+    a report whose raw frontmatter carries `totally-bogus` alongside `benign` committed, and the
+    text that rides verbatim into the judge prompt and the ticket egress disagreed with the
+    decision the gate made about it. Positive control: a merge that injects NO duplicate still
+    commits, so the flatten did not turn every `<<:` into a deny."""
+    shadowed = ("a: &a {disposition: benign}\n"
+                "b: &b {disposition: totally-bogus}\n"
+                "<<: [*a, *b]\n")
+    fm = yaml.safe_load(shadowed)  # re-probe: the merge really does resolve one disposition
+    assert fm["disposition"] == "benign"
+    assert fm["b"]["disposition"] == "totally-bogus"
+    d = env.decide("report.md", f"---\n{shadowed}---\nbody\n")
+    assert d.allow is False
+    assert "more than once" in d.reason
+    # positive control: a non-shadowing merge is untouched.
+    benign_merge = "base: &a {case_id: c1}\n<<: *a\ndisposition: benign\n"
+    assert env.decide("report.md", f"---\n{benign_merge}---\nbody\n").allow is True
+
+
+def test_report_frontmatter_uncontructible_scalar_fails_closed_not_raises(env):
+    """PyYAML's implicit `timestamp` resolver matches on SHAPE and only then hands the fields to
+    `datetime`, so a shape-valid but calendar-invalid scalar (`2001-02-30`, `25:59:43`) comes back
+    as a bare `ValueError` — NOT a `yaml.YAMLError` — past every `except yaml.YAMLError` on the
+    frontmatter path. The gate's contract is to RETURN a Decision and fail CLOSED, never propagate
+    (the RESOLVE_ERRORS rule); the fold lives in `defender._yaml.safe_load`, the seam that already
+    folds PyYAML's other bare exception (`RecursionError`, #613), so every frontmatter reader gets
+    it. Positive control: a well-formed timestamp key still parses and commits."""
+    for bad in ("2001-02-30", "2001-12-14t25:59:43.10-05:00"):
+        d = env.decide("report.md", f"---\ndisposition: benign\n{bad}: x\n---\nbody\n")
+        assert d.allow is False, bad
+        assert d.reason, bad
+    assert env.decide("report.md", "---\ndisposition: benign\n2001-02-28: x\n---\nbody\n").allow is True
 
 
 def test_non_utf8_encodable_content_fails_closed_not_raises(env):

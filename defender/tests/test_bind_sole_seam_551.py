@@ -43,7 +43,9 @@ what compile_policy emits changed, so almost every demand below is re-expressed,
     branch remains in bind; bind additionally HARDENS its root inputs (relative/degenerate
     roots + a lead-author main-checkout tree are UNBUILDABLE).
   - the writers (`tools._tool_write_file`/`_tool_edit_file`) pass `deps.run_dir`/
-    `deps.defender_dir` to `decide_write`, activating the dormant write⊆read guard.
+    `deps.defender_dir` to `decide_write`, activating the then-dormant write⊆read guard.
+    [#681: the roots became REQUIRED arguments, so the guard has no dormant mode left —
+    an omission is a TypeError at the call site, not a silently skipped check.]
   - the parallel factory path retires: `_ORACLE_POLICY`/`_VERIFY_POLICY`/`_lead_author_policy`
     go; `compile_policy_for` (the policy-only half of `bind`) is the sole policy source and
     carries `reader_read_shapes`, flipping a non-`.md` corpus read allow→deny (hole H4). [The
@@ -825,8 +827,9 @@ def test_d5_reader_patterns_for_kept(tmp_path):
 def test_d6_writers_pass_roots(tmp_path):
     """d6_writers_pass_roots (seam): both writer call sites (tools.py write_file/edit_file) call
     decide_write with run_dir=deps.run_dir and defender_dir=deps.defender_dir, activating the
-    write⊆read guard — driving _tool_write_file with an escaping write_allow is DENIED (today it
-    is allowed, the guard being dormant)."""
+    write⊆read guard — driving _tool_write_file with an escaping write_allow is DENIED (at #551's
+    HEAD it was allowed, the guard being dormant; since #681 both roots are required arguments, so
+    the wiring this test pins is the only shape that type-checks)."""
     run = tmp_path / "run"
     run.mkdir()
     dfn = tmp_path / "dfn"
@@ -836,7 +839,7 @@ def test_d6_writers_pass_roots(tmp_path):
         write_allow=(permission.build_write_allow(escape, suffix=".md"),), deny_reason="d",
     )
     deps = AgentDeps(run_dir=run, defender_dir=dfn, run_id="r", salt="s", policy=escape_pol)
-    # RED@HEAD: _tool_write_file calls decide_write WITHOUT roots → the guard is dormant → allowed.
+    # RED@#551-HEAD: _tool_write_file called decide_write WITHOUT roots → guard dormant → allowed.
     with pytest.raises(ModelRetry):
         _tool_write_file(deps, str(escape / "x.md"), "content")
     # both call sites must pass the tree — a source check covers edit_file (whose read gate already
@@ -875,10 +878,10 @@ def test_d6_guard_noop_for_real_writers(tmp_path):
     main_pol = bind(MAIN_DEF, run).policy
     # #629 reconciliation: run_dir/report.md now carries an output-structure gate (frontmatter +
     # size), so the D6 CONTAINMENT no-op must be shown with content that clears that orthogonal
-    # gate — a valid in-bounds report. The assertion is unchanged: the write⊆read guard admits a
+    # gate — a valid in-bounds report (the module's one `_VALID_REPORT`, so a change to what that
+    # gate accepts lands in one place). The assertion is unchanged: the write⊆read guard admits a
     # real main write at the run-dir root.
-    valid_report = "---\ndisposition: benign\n---\nok\n"
-    assert permission.decide_write(run / "report.md", valid_report, run_dir=run, defender_dir=_DEFENDER, policy=main_pol).allow
+    assert permission.decide_write(run / "report.md", _VALID_REPORT, run_dir=run, defender_dir=_DEFENDER, policy=main_pol).allow
     lead_pol = AgentPolicy(write_allow=(permission.build_write_allow(skills, suffix=".md"),), deny_reason="d")
     assert permission.decide_write(skills / "gather" / "x.md", "c", run_dir=run, defender_dir=wtd, policy=lead_pol).allow
 
