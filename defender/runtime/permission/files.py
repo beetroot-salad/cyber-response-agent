@@ -323,8 +323,7 @@ def decide_write(
     # gated; a `<run_dir>/sub/report.md` is NOT), and scoping to the run-dir root leaves a
     # same-named lesson in a curator's corpus untouched (the verify_forward forward-check
     # operand — F-A2: gating it would flip its pure-containment allow into a deny).
-    if _is_run_dir_file(rp, run_dir, "report.md"):
-        return _decide_report_write(proposed_text)
+    is_report = _is_run_dir_file(rp, run_dir, "report.md")
     # investigation.md: run-dir-root keyed when a run root is supplied (mirrors report.md,
     # so the symlink/subdir disguise is closed for it too); falls back to the legacy
     # exact-basename keying when no run root is threaded, so a caller that gates an
@@ -338,6 +337,24 @@ def decide_write(
         if run_dir is not None
         else rp.name == "investigation.md"
     )
+    if is_report or is_investigation:
+        # Both artifact gates measure UTF-8 BYTES (`_utf8_len`) and splice the text into live
+        # egresses. Content that is not UTF-8-encodable — a lone surrogate, reachable from a model
+        # tool-call JSON arg (`json.loads('"\\ud800"')` yields one) — can be neither byte-measured
+        # nor written (`write_text(encoding="utf-8")` raises the SAME error), so deny it FAIL-CLOSED
+        # here rather than let `_utf8_len`'s `.encode()` raise out of the gate: the gate's contract
+        # is to return a Decision, never propagate (the RESOLVE_ERRORS fail-closed rule above).
+        try:
+            proposed_text.encode("utf-8")
+        except UnicodeEncodeError:
+            artifact = "report.md" if is_report else "investigation.md"
+            return Decision(
+                False,
+                f"{artifact} contains bytes that are not valid UTF-8 (e.g. a lone surrogate) — "
+                "rewrite it as UTF-8 text and retry.",
+            )
+    if is_report:
+        return _decide_report_write(proposed_text)
     if is_investigation:
         return _decide_investigation_write(proposed_text, rp)
     return Decision(True)

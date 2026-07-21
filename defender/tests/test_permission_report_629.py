@@ -768,3 +768,29 @@ def test_report_frontmatter_yaml_alias_amplification_under_byte_bound(env):
     fm, raw_span, _ = split_frontmatter(text)
     assert len(raw_span.encode("utf-8")) <= FM_BOUND < len(yaml.safe_dump(fm).encode("utf-8"))
     assert env.decide("report.md", text).allow is True
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# regression (finalize / PR #677) — the gate FAILS CLOSED, never raises
+# ═══════════════════════════════════════════════════════════════════════════
+
+def test_non_utf8_encodable_content_fails_closed_not_raises(env):
+    """A lone surrogate (`\\ud800`, reachable from a model tool-call JSON arg —
+    `json.loads('"\\\\ud800"')` yields one) is not UTF-8-encodable, so the byte-length basis
+    `_utf8_len` would `.encode()`-raise. The gate's contract is to RETURN a Decision and fail
+    CLOSED (the RESOLVE_ERRORS rule), never let the exception propagate out of decide_write and
+    abort the run un-bounceably. Both artifacts deny with a non-empty reason; the content is
+    un-writable anyway (`write_text(encoding="utf-8")` raises the same error), so deny is the only
+    coherent outcome. Positive control: the same shape with the surrogate removed commits."""
+    surrogate = "\ud800"
+    # report.md: passes fence + disposition, then hits the byte bound on non-encodable body
+    r = env.decide("report.md", f"---\ndisposition: benign\n---\n{surrogate}\n")
+    assert r.allow is False
+    assert r.reason, "a fail-closed deny must carry a reason for the ModelRetry channel"
+    # investigation.md: the size check is the first thing that runs
+    i = env.decide("investigation.md", surrogate)
+    assert i.allow is False
+    assert i.reason
+    # positive control: the surrogate removed, both commit
+    assert env.decide("report.md", "---\ndisposition: benign\n---\nok\n").allow is True
+    assert env.decide("investigation.md", "").allow is True
