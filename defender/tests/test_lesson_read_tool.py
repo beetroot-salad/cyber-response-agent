@@ -37,7 +37,8 @@ from defender.runtime import observe, permission  # noqa: E402
 from defender.runtime.agent_role import AgentRole  # noqa: E402
 from defender.agents import AGENTS  # noqa: E402
 from defender.runtime.agent_definition import ToolSet  # noqa: E402
-from defender.runtime.providers import BuiltModel  # noqa: E402
+from defender.tests._engine_helpers import fake_model as _fake_model  # noqa: E402
+from defender.tests._engine_helpers import replay_once as _replay  # noqa: E402
 from defender.runtime.tools import AgentDeps, register_tools  # noqa: E402
 from defender.learning.author.curator_engine import (  # noqa: E402
     CORPUS_AUTHOR_DEF,
@@ -50,16 +51,6 @@ from defender.learning.pipeline._pydantic_stage import build_stage_agent  # noqa
 # ===========================================================================
 # Scaffolding (mirrors test_forward_check_tool.py)
 # ===========================================================================
-
-
-def _fake_model(fn):
-    return lambda model, effort: BuiltModel(FunctionModel(fn), None)
-
-
-def _replay(text: str):
-    def fn(messages, info):
-        return ModelResponse(parts=[TextPart(content=text)])
-    return fn
 
 
 def _scene(tmp_path: Path):

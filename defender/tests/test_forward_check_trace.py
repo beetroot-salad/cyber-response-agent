@@ -28,7 +28,6 @@ pytest.importorskip("pydantic_ai")  # CI installs the runtime extra; skip otherw
 
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart  # noqa: E402
 from pydantic_ai.models import override_allow_model_requests  # noqa: E402
-from pydantic_ai.models.function import FunctionModel  # noqa: E402
 
 from defender.learning.author.curator_engine import (  # noqa: E402
     CuratorDeps,
@@ -36,7 +35,7 @@ from defender.learning.author.curator_engine import (  # noqa: E402
     run_curator_stage,
 )
 from defender.learning.author.verify_forward.engine import _run_verify_pydantic  # noqa: E402
-from defender.runtime.providers import BuiltModel  # noqa: E402
+from defender.tests._engine_helpers import fake_model as _fake_model  # noqa: E402
 
 # --- THE TARGET (missing until implemented; the ImportError IS the expected red) ---
 from defender.learning.author.verify_forward.checks import (  # noqa: E402
@@ -54,10 +53,6 @@ _AUTHOR_RESULT_OK = (
 
 
 # --- FunctionModel DI-seam helpers -----------------------------------------
-
-
-def _fake_model(fn):
-    return lambda model, effort: BuiltModel(FunctionModel(fn), None)
 
 
 def _verifier(text: str, *, delay: float = 0.0):

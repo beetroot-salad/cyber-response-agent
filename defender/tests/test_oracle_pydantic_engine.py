@@ -18,9 +18,7 @@ pytest.importorskip("pydantic_ai")  # CI installs the runtime extra; skip otherw
 
 import yaml  # noqa: E402
 
-from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart  # noqa: E402
 from pydantic_ai.models import override_allow_model_requests  # noqa: E402
-from pydantic_ai.models.function import FunctionModel  # noqa: E402
 
 from defender.learning.core import config, subagents  # noqa: E402
 from defender.learning.pipeline import _pydantic_stage  # noqa: E402
@@ -32,7 +30,8 @@ from defender.learning.pipeline.oracle_engine import (  # noqa: E402
 )
 from defender.runtime import observe, permission  # noqa: E402
 from defender.runtime.agent_definition import bind  # noqa: E402
-from defender.runtime.providers import BuiltModel  # noqa: E402
+from defender.tests._engine_helpers import fake_model as _fake_model  # noqa: E402
+from defender.tests._engine_helpers import replay_turns as _replay  # noqa: E402
 
 _DEFENDER_DIR = config.REPO_ROOT / "defender"
 
@@ -41,27 +40,6 @@ _DEFENDER_DIR = config.REPO_ROOT / "defender"
 _ORACLE_YAML = 'events:\n  - Computer: "FINANCE-DB"\n    EventID: 4624\n'
 
 
-def _replay(turns, *, seen=None):
-    """A FunctionModel fn replaying scripted turns. Each turn is
-    {"calls": [(tool, args)...], "text": str}."""
-    state = {"i": 0}
-
-    def fn(messages, info):
-        if seen is not None:
-            seen.append(messages)
-        turn = turns[min(state["i"], len(turns) - 1)]
-        state["i"] += 1
-        parts = [ToolCallPart(tool_name=n, args=a) for n, a in turn.get("calls", [])]
-        if turn.get("text"):
-            parts.append(TextPart(content=turn["text"]))
-        return ModelResponse(parts=parts)
-
-    return fn
-
-
-def _fake_model(fn):
-    # settings=None — a FunctionModel needs no provider settings (mirrors _replay_harness).
-    return lambda model, effort: BuiltModel(FunctionModel(fn), None)
 
 
 def _lrd(tmp_path):

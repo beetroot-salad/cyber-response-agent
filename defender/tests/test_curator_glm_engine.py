@@ -43,9 +43,7 @@ import pytest
 
 pytest.importorskip("pydantic_ai")  # CI installs the runtime extra; skip otherwise
 
-from pydantic_ai.messages import ModelResponse, TextPart  # noqa: E402
 from pydantic_ai.models import override_allow_model_requests  # noqa: E402
-from pydantic_ai.models.function import FunctionModel  # noqa: E402
 
 from defender.learning.author import shared as _shared  # noqa: E402
 from defender.learning.core import config  # noqa: E402
@@ -57,7 +55,8 @@ from defender.learning.core.config import (  # noqa: E402
 # The port target — missing until implemented, so this import is the EXPECTED red.
 from defender.learning.author.curator_engine import run_curator_stage  # noqa: E402
 from defender.runtime import providers  # noqa: E402
-from defender.runtime.providers import BuiltModel  # noqa: E402
+from defender.tests._engine_helpers import fake_model as _fake_model  # noqa: E402
+from defender.tests._engine_helpers import replay_once as _replay  # noqa: E402
 
 AuthorError = _shared.AuthorError
 
@@ -73,16 +72,6 @@ _AUTHOR_RESULT_OK = (
 # ---------------------------------------------------------------------------
 
 
-def _replay(text: str):
-    """A FunctionModel fn returning one scripted turn: a single text part (no tool calls)."""
-    def fn(messages, info):
-        return ModelResponse(parts=[TextPart(content=text)])
-    return fn
-
-
-def _fake_model(fn):
-    # settings=None — a FunctionModel needs no provider settings (mirrors the lead-author test).
-    return lambda model, effort: BuiltModel(FunctionModel(fn), None)
 
 
 def _repo_root(tmp_path: Path) -> Path:

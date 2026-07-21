@@ -15,9 +15,7 @@ import pytest
 pytest.importorskip("pydantic_ai")  # CI installs the runtime extra; skip otherwise
 
 from pydantic_ai.exceptions import ModelRetry  # noqa: E402
-from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart  # noqa: E402
 from pydantic_ai.models import override_allow_model_requests  # noqa: E402
-from pydantic_ai.models.function import FunctionModel  # noqa: E402
 
 from defender.learning.core import config, subagents  # noqa: E402
 from defender.learning.pipeline import _pydantic_stage  # noqa: E402
@@ -27,7 +25,8 @@ from defender.learning.pipeline.actor_engine import ACTOR_DEF  # noqa: E402
 from defender.learning.pipeline.malicious_actor.run import is_skip_story  # noqa: E402
 from defender.runtime import observe, permission  # noqa: E402
 from defender.runtime.agent_definition import RunScope, compile_policy_for  # noqa: E402
-from defender.runtime.providers import BuiltModel  # noqa: E402
+from defender.tests._engine_helpers import fake_model as _fake_model  # noqa: E402
+from defender.tests._engine_helpers import replay_turns as _replay  # noqa: E402
 
 _ENV_RETRIEVE = config.LESSONS_ENV_RETRIEVE_SCRIPT
 _ACTOR_INDEX = config.LESSONS_ACTOR_INDEX_SCRIPT
@@ -38,37 +37,6 @@ _ENV_DIR = config.LESSONS_ENVIRONMENT_DIR
 _MALICIOUS_CONFINE = (_ACTOR_DIR, _ENV_DIR)
 
 
-def _flatten(messages) -> str:
-    out = []
-    for msg in messages:
-        for part in getattr(msg, "parts", []):
-            c = getattr(part, "content", None)
-            if isinstance(c, str):
-                out.append(c)
-    return "\n".join(out)
-
-
-def _replay(turns, *, seen=None):
-    """A FunctionModel fn replaying scripted turns. Each turn is
-    {"calls": [(tool, args)...], "text": str}."""
-    state = {"i": 0}
-
-    def fn(messages, info):
-        if seen is not None:
-            seen.append(_flatten(messages))
-        turn = turns[min(state["i"], len(turns) - 1)]
-        state["i"] += 1
-        parts = [ToolCallPart(tool_name=n, args=a) for n, a in turn.get("calls", [])]
-        if turn.get("text"):
-            parts.append(TextPart(content=turn["text"]))
-        return ModelResponse(parts=parts)
-
-    return fn
-
-
-def _fake_model(fn):
-    # settings=None — a FunctionModel needs no provider settings (mirrors _replay_harness).
-    return lambda model, effort: BuiltModel(FunctionModel(fn), None)
 
 
 def _lrd(tmp_path):

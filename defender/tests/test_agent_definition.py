@@ -62,6 +62,7 @@ from defender.learning.pipeline.oracle_engine import (  # noqa: E402
 from defender.runtime import driver, observe, permission, providers  # noqa: E402
 from defender.runtime.agent_role import AgentRole  # noqa: E402
 from defender.runtime.providers import BuiltModel  # noqa: E402
+from defender.tests._engine_helpers import fake_model as _fake_model  # noqa: E402
 from defender.runtime.tools import AgentDeps, GatherDeps  # noqa: E402
 
 # `build_registry` (the guarded collector) lives in the definition primitive layer alongside
@@ -107,9 +108,6 @@ def _text_fn(text: str = "ok"):
     return lambda messages, info: ModelResponse(parts=[TextPart(content=text)])
 
 
-def _fake_model(fn):
-    # settings=None — a FunctionModel needs no provider settings (mirrors _replay_harness).
-    return lambda model, effort: BuiltModel(FunctionModel(fn), None)
 
 
 def _capture_make_model(settings=None):

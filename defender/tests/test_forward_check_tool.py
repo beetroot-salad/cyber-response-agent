@@ -38,7 +38,6 @@ pytest.importorskip("pydantic_ai")  # CI installs the runtime extra; skip otherw
 from pydantic_ai.exceptions import ModelRetry  # noqa: E402
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart  # noqa: E402
 from pydantic_ai.models import override_allow_model_requests  # noqa: E402
-from pydantic_ai.models.function import FunctionModel  # noqa: E402
 
 from defender.learning.core import config  # noqa: E402
 from defender.learning.core.config import (  # noqa: E402
@@ -64,7 +63,8 @@ from defender.learning.author.lessons.run import build_user_prompt  # noqa: E402
 from defender.runtime import observe, permission, providers  # noqa: E402
 from defender.runtime.agent_role import AgentRole  # noqa: E402
 from defender.agents import AGENTS  # noqa: E402
-from defender.runtime.providers import BuiltModel  # noqa: E402
+from defender.tests._engine_helpers import fake_model as _fake_model  # noqa: E402
+from defender.tests._engine_helpers import replay_once as _replay  # noqa: E402
 
 # --- THE TARGET (missing until implemented; the ImportError IS the expected red) ---
 from defender.learning.author.verify_forward.checks import (  # noqa: E402
@@ -159,18 +159,6 @@ class FakeVerify:
 # ===========================================================================
 # FunctionModel DI-seam helpers (mirror test_verify_forward_engine.py)
 # ===========================================================================
-
-
-def _fake_model(fn):
-    return lambda model, effort: BuiltModel(FunctionModel(fn), None)
-
-
-def _replay(text: str, *, calls=()):
-    def fn(messages, info):
-        parts = [ToolCallPart(tool_name=n, args=a) for n, a in calls]
-        parts.append(TextPart(content=text))
-        return ModelResponse(parts=parts)
-    return fn
 
 
 def _seq(*responses: ModelResponse):
