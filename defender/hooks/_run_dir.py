@@ -1,15 +1,15 @@
-#!/usr/bin/env python3
-"""Shared run-dir resolution + locked JSON state for the defender gate modules.
+"""Locked JSON state for the defender gate modules.
 
-The defender runs one in-process agent per run and exports
-``DEFENDER_RUN_DIR`` into the process (run.py), so the budget enforcer and the
-lesson-load recorder anchor on that single env var rather than a session→run
-map. Centralizing the lookup here keeps the contract (env var name, ``is_dir``
-guard) in one place.
+``update_json_locked`` is the single locked-update primitive behind the per-run
+``budget.json`` and ``circuit_breaker.json`` files. Its two consumers — the budget
+enforcer and the circuit breaker — are each handed their run dir as an argument.
 
-``resolve_run_dir`` and ``update_json_locked`` have distinct consumer sets: the
-circuit breaker uses only the locked-write primitive and is handed its run dir
-as an argument, so it is NOT an env-var anchor.
+This module used to also resolve the run dir from ``DEFENDER_RUN_DIR`` for the
+gate modules that ran as `claude -p` hook subprocesses and had no other way to
+learn it. Every such entrypoint is gone (#631, #667), and the in-process gates
+take the run dir from ``AgentDeps``, so ``resolve_run_dir`` went with the last of
+them. The env var still crosses into the bash tool's subprocess environment for
+the ticket adapter, which reads it directly (``scripts/adapters/ticket_adapter``).
 
 This module resolves no salt. The run's trust token is minted in process by
 ``run_common.materialize_run_dir`` and threaded to its consumers as a value; it
@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import fcntl
 import json
-import os
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -76,12 +75,3 @@ def read_json_locked(path: Path) -> dict:
         return json.loads(raw) if raw else {}
     except json.JSONDecodeError:
         return {}
-
-
-def resolve_run_dir() -> Path | None:
-    """The run dir from ``DEFENDER_RUN_DIR``, or None if unset/not a dir."""
-    raw = os.environ.get("DEFENDER_RUN_DIR")
-    if not raw:
-        return None
-    run_dir = Path(raw)
-    return run_dir if run_dir.is_dir() else None

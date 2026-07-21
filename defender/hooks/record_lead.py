@@ -1,11 +1,7 @@
-#!/usr/bin/env python3
-"""PreToolUse hook: write the leads table + claim the lead_id.
+"""Leads-table write + lead_id claim — a LIBRARY, not a hook.
 
-Fires on Task tool calls whose prompt dispatches the defender gather
-subagent (identified by the literal `defender/skills/gather/SKILL.md`
-in the prompt). Parses the dispatch's YAML block — `run_dir`,
-`lead_id`, `goal`, `what_to_summarize` — and writes the leads-table row
-`{run_dir}/gather_raw/{lead_id}.lead.json` = `{goal, what_to_summarize}`.
+Writes the leads-table row `{run_dir}/gather_raw/{lead_id}.lead.json` =
+`{goal, what_to_summarize}`.
 
 `lead_id` is the `:L` invlang row id the defender echoes from the
 already-authored `:L findings` row (e.g. `l-001`) — not a new id minted
@@ -13,22 +9,25 @@ here. It is the FK the queries table (`record_query.py`) and the read
 surface (`learning/lead_repository.py`) join on.
 
 The write is an atomic exclusive create (`O_CREAT|O_EXCL`): one syscall
-that both persists the row and detects a reused id. Parallel leads
-dispatch as concurrent Task calls (SKILL.md), firing this hook
-concurrently — distinct ids claim distinct paths and all succeed; a
-genuine reuse (same id twice in a batch, or across turns) fails the
-exclusive create and the hook **exits 2**, blocking the Task so gather
-never runs and no orphan query row is written. The remediation fed back
-to the agent is to append a fresh `:L` findings row and echo its id (a
-retry is a new lead, never a reused id — append-only invlang).
+that both persists the row and detects a reused id. Parallel leads dispatch
+concurrently — distinct ids claim distinct paths and all succeed; a genuine
+reuse (same id twice in a batch, or across turns) fails the exclusive create
+and `claim_lead` returns **2**. The sole consumer, `runtime/tools_gather.py`'s
+`_run_gather`, turns that into a `ModelRetry` before gather is spawned, so no
+orphan query row is written and the defender bounces back to PLAN. The
+remediation fed back to the agent is to append a fresh `:L` findings row and
+echo its id (a retry is a new lead, never a reused id — append-only invlang).
 
-The hook stays silent (exit 0) on parse failure / missing fields /
-malformed lead_id — never blocking a dispatch over an extraction issue;
-only a real reuse collision blocks.
+`claim_lead` returns 0 on a benign skip (missing fields / malformed lead_id /
+plumbing error) — never block a dispatch over an extraction issue; only a real
+reuse collision returns 2.
 
-Exit codes:
-    0 — claimed, or benign skip (not a gather dispatch / parse failure).
-    2 — lead_id reuse collision; reason on stderr is fed back to the agent.
+This module used to double as a `claude -p` PreToolUse hook script that read the
+dispatch off a Task tool call's prompt (stdin JSON in, exit code out). That
+runtime and its `run-settings.json` wiring were retired, so the entrypoint went
+with them — and with it the lenient prompt-YAML parser (`extract_dispatch` /
+`_parse_block`) that existed only to recover these fields from prompt text. The
+caller passes the typed dispatch fields directly now.
 """
 
 from __future__ import annotations
@@ -43,66 +42,10 @@ from pathlib import Path
 
 from defender._run_paths import RunPaths
 
-
-GATHER_SKILL_MARKER = "defender/skills/gather/SKILL.md"
-
 # A lead_id is the `:L` row id: `l-` + alphanumerics. Grammar mirrors the
 # invlang parser's lead-id grammar and scripts/gather_tools/record_query.py's --lead
 # guard — keep in sync. Used verbatim as a path segment and FK.
 LEAD_ID_RE = re.compile(r"^l-[A-Za-z0-9]+$")
-
-# Capture the first ```yaml ... ``` (or ```yml) fenced block in the prompt.
-FENCE_RE = re.compile(r"```ya?ml\s*\n(.*?)\n```", re.DOTALL)
-
-# Top-level key: line — `name:` or `name: value` (no leading whitespace).
-# `name` is conservatively limited to identifier-shape chars so colons
-# inside free-form values can't be mistaken for a new key.
-_KEY_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*):\s*(.*)$")
-# Bullet — two-or-more-space indent + dash + body. Body is taken literally,
-# including any colons.
-_BULLET_RE = re.compile(r"^\s{2,}-\s+(.*)$")
-
-
-def extract_dispatch(prompt: str) -> dict | None:
-    """Parse the dispatch block leniently.
-
-    YAML.safe_load is unsafe here because the dispatch fields are free-form
-    natural-language strings (`goal: Compare fields: user and src`,
-    `- process cmdline: /bin/sh`). YAML interprets the inner colon-space
-    as a nested mapping or raises, which silently drops the sidecar. We
-    parse line-by-line instead: only the leading `name:` or `  - ` is
-    structural; everything after is a literal string.
-    """
-    match = FENCE_RE.search(prompt)
-    if not match:
-        return None
-    return _parse_block(match.group(1))
-
-
-def _parse_block(text: str) -> dict | None:
-    out: dict = {}
-    current_list_key: str | None = None
-    for raw in text.splitlines():
-        line = raw.rstrip()
-        if not line.strip():
-            continue
-        bullet = _BULLET_RE.match(line)
-        if bullet and current_list_key is not None:
-            out.setdefault(current_list_key, []).append(bullet.group(1).strip())
-            continue
-        key = _KEY_RE.match(line)
-        if not key:
-            # Unrecognized continuation line — ignore rather than fail.
-            continue
-        name, value = key.group(1), key.group(2).strip()
-        if value:
-            out[name] = value
-            current_list_key = None
-        else:
-            # Empty value → next bullets accumulate into a list.
-            out[name] = []
-            current_list_key = name
-    return out or None
 
 
 def claim_lead(dispatch: dict) -> int:
@@ -165,28 +108,3 @@ def claim_lead(dispatch: dict) -> int:
             os.unlink(sidecar_path)
         return 0
     return 0
-
-
-def main() -> int:
-    try:
-        hook_data = json.loads(sys.stdin.read())
-    except (json.JSONDecodeError, ValueError):
-        return 0
-
-    if hook_data.get("tool_name") not in ("Task", "Agent"):
-        return 0
-
-    tool_input = hook_data.get("tool_input") or {}
-    prompt = tool_input.get("prompt") or ""
-    if GATHER_SKILL_MARKER not in prompt:
-        return 0
-
-    dispatch = extract_dispatch(prompt)
-    if dispatch is None:
-        return 0
-
-    return claim_lead(dispatch)
-
-
-if __name__ == "__main__":
-    sys.exit(main())

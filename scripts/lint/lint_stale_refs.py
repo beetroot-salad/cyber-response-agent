@@ -79,6 +79,7 @@ import subprocess
 import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 
 from _baseline import Finding, gate
@@ -129,7 +130,16 @@ EXCLUDED_GREP_DIRS = (
 # Frozen spec graphs of merged issues: inert records, not code. Rewriting one to name
 # today's symbols would falsify the record. The executable half of a spec
 # (defender/tests/test_*.py) is still fully scanned, and fails if spec and code diverge.
-EXCLUDED_GREP_GLOBS = ("defender/tests/spec_graph_*.yaml",)
+# A spec graph whose suite lives under tests/e2e/ sits there too, and the first glob does
+# NOT reach it — `*` does not cross a `/`. Same class as the `defender/fixtures-e2e` and
+# `defender/lessons-environment` entries above, and it slipped through on the same
+# technicality (#667): spec_graph_540.yaml's frozen prose names `resolve_run_dir`, which
+# #667 deletes. Kept as a second explicit glob rather than a `**` relaxation, which would
+# silently swallow any future spec graph parked anywhere under defender/.
+EXCLUDED_GREP_GLOBS = (
+    "defender/tests/spec_graph_*.yaml",
+    "defender/tests/e2e/spec_graph_*.yaml",
+)
 
 # On the REFERENCING line: this reference names a dead symbol deliberately.
 SUPPRESS = "lint-stale-ref: ok"
@@ -464,8 +474,42 @@ def _is_binding(
     )
 
 
+@lru_cache(maxsize=1)
+def _tracked_paths(repo_root: Path) -> frozenset[str]:
+    """Every git-tracked path, repo-relative. Cached — `_module_named` is called per ident."""
+    return frozenset(_git(["ls-files"], cwd=repo_root).splitlines())
+
+
+def _module_named(repo_root: Path, ident: str) -> bool:
+    """Whether `ident` names a module or package that still EXISTS in the tree.
+
+    A module's binding site is a FILE, which `_is_binding` — an AST scan for
+    def/class/assignment/import — can never see. `_removed_idents` already refuses to
+    collect the module PATH of a `from X.Y import Z` for exactly this reason, but the
+    `from PACKAGE import MODULE` form puts the module in the TARGET position, where it
+    is collected like any other name. Without this, deleting one importer of a live
+    module makes every OTHER importer of it read as a stale reference.
+
+    A genuinely deleted module is still caught: `_scan`'s deleted-path STEM walk reads
+    the file's actual fate from `--name-status` instead of inferring it from an import
+    line, and this check finds no file for it.
+
+    Scoped to git-TRACKED paths, never a filesystem walk: `rglob` would descend into
+    `.worktrees/` and any vendored checkout, where a stale copy of a module deleted from
+    THIS tree still sits on disk — which would mask exactly the deletion the gate exists
+    to catch."""
+    tracked = _tracked_paths(repo_root)
+    return any(
+        (rel.endswith(f"/{ident}.py") or rel == f"{ident}.py"
+         or rel.endswith(f"/{ident}/__init__.py") or rel == f"{ident}/__init__.py")
+        and not _is_excluded_path(rel)
+        for rel in tracked
+    )
+
+
 def _still_defined(
-    idents: list[str], hits: list[tuple[str, int, str]], py: _PySources
+    idents: list[str], hits: list[tuple[str, int, str]], py: _PySources,
+    repo_root: Path | None = None,
 ) -> set[str]:
     """Idents that still have a binding site (def/class/assignment/import) ANYWHERE
     in the post-PR tree — i.e. moved or re-exported, not removed. A genuine stale
@@ -477,7 +521,8 @@ def _still_defined(
     everywhere — so what counts as a binding has to be exact. It is the AST's answer for
     Python, never the line's text: a parameter on its own line of a multi-line signature,
     and a name on its own line of a list literal, both read as a bare `name,` — the same
-    text a multi-line import member has."""
+    text a multi-line import member has. The one binding the AST cannot answer for is a
+    MODULE's, whose binding site is a file — see `_module_named`."""
     defined: set[str] = set()
     for rel, lineno, content in hits:
         if _is_excluded_path(rel):
@@ -486,6 +531,8 @@ def _still_defined(
         for ident in idents:
             if ident not in defined and _is_binding(facts, lineno, content, ident):
                 defined.add(ident)
+    if repo_root is not None:
+        defined.update(i for i in idents if i not in defined and _module_named(repo_root, i))
     return defined
 
 
@@ -544,7 +591,7 @@ def _scan(
     # Drop idents still defined/imported somewhere post-PR (moved, re-exported, or
     # an import line merely reflowed) — those are not stale, only a removed-AND-
     # undefined symbol with surviving references is.
-    moved = _still_defined(specific, grep_hits, py)
+    moved = _still_defined(specific, grep_hits, py, repo_root)
     if moved:
         print(f"Skipped {len(moved)} still-defined identifier(s) (moved/re-exported): "
               f"{', '.join(sorted(moved)[:10])}" + ("..." if len(moved) > 10 else ""))

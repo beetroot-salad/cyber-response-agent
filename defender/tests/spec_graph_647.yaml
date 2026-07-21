@@ -161,10 +161,9 @@ demands:
 
   # --- The surviving module and the accessor set ---------------------------
   - {id: d21_hooks_run_dir_survives_its_deleted_member, kind: survival, form: test,
-     discharged_by: test_update_json_locked_and_resolve_run_dir_survive_the_sibling_removal,
+     discharged_by: test_update_json_locked_survives_the_sibling_removal,
      binds: ["hooks_run_dir", "interacts(budget_enforcer->hooks_run_dir)",
-             "interacts(circuit_breaker->hooks_run_dir)",
-             "interacts(record_lesson_load->hooks_run_dir)"]}
+             "interacts(circuit_breaker->hooks_run_dir)"]}
 
   - {id: d22_run_paths_exposes_five_accessors, kind: shape, form: test,
      discharged_by: test_run_paths_accessor_set_is_five_after_the_meta_accessor_is_removed,
@@ -215,7 +214,7 @@ demands:
 
   # --- The env boundary -----------------------------------------------------
   - {id: d29_run_dir_env_var_survives_with_its_readers, kind: survival, form: test,
-     discharged_by: test_defender_run_dir_still_crosses_the_subprocess_boundary_for_its_two_readers,
+     discharged_by: test_defender_run_dir_still_crosses_the_subprocess_boundary_for_its_reader,
      binds: ["DEFENDER_RUN_DIR", "DEFENDER_RUN_DIR.access[env]",
              "interacts(run_investigation->DEFENDER_RUN_DIR)",
              "interacts(ticket_adapter->DEFENDER_RUN_DIR)"]}
@@ -227,9 +226,13 @@ demands:
      discharged_by: test_the_subprocess_environment_carries_no_path_to_the_run_salt,
      binds: ["DEFENDER_RUN_DIR.access[env]", "salt.access[env]"]}
 
+  # RETIRED by #667. The unset member was a property of `resolve_run_dir`, which #667
+  # deleted along with its last consumer (record_lesson_load's `claude -p` entrypoint).
+  # There is no resolver left whose unset branch could fail open, so the demand has no
+  # subject rather than an undischarged one — the deletion itself is pinned by d21.
   - {id: d31_run_dir_env_var_unset_member, kind: domain-outcome, form: test,
-     discharged_by: test_resolve_run_dir_returns_none_when_the_env_var_is_unset,
-     binds: ["DEFENDER_RUN_DIR.domain.distinguished[unset]", "hooks_run_dir"]}
+     discharged_by: null, status: retired,
+     binds: []}
 
   # --- Waivers (human decisions recorded at step 7) ------------------------
   # --- Author finding, surfaced by check_actors, NOT yet human-resolved ----
@@ -505,7 +508,11 @@ structure:
     # the surviving hooks module's live consumers
     - {from: budget_enforcer,    to: hooks_run_dir, mode: read, via: api, provenance: code}
     - {from: circuit_breaker,    to: hooks_run_dir, mode: read, via: api, provenance: code}
-    - {from: record_lesson_load, to: hooks_run_dir, mode: read, via: api, provenance: code}
+    # record_lesson_load reached `resolve_run_dir` only from its retired `claude -p`
+    # entrypoint (#667), so the edge went with the entrypoint — the module's library
+    # half (`lesson_name`) needs no run dir. `hooks_run_dir` still stands on the two
+    # consumers above; the actor stays, per the tag_tool_results_main idiom.
+    - {from: record_lesson_load, to: hooks_run_dir, mode: remove, via: api, provenance: code}
     - {from: budget_enforcer,    to: DEFENDER_RUN_DIR, mode: read, via: env, provenance: code}
     - {from: ticket_adapter,     to: DEFENDER_RUN_DIR, mode: read, via: env, provenance: code}
 
@@ -712,10 +719,13 @@ gate:
          the learning stages rely on it to mint a uuid4, and the run lane must
          never reach it.",
        discharged_by: d6_curator_leg_mints_its_own_token}
+    # RETIRED by #667 with d31: `resolve_run_dir` — whose unset branch this named — was
+    # deleted with its last consumer. The element has no surviving bearer.
     - {rule: R4, element: "DEFENDER_RUN_DIR.domain.distinguished[unset]",
-       witness: "resolve_run_dir survives read_meta_salt's removal and its unset
-         member is the branch the deleted fail-open used to paper over.",
-       discharged_by: d31_run_dir_env_var_unset_member}
+       witness: "resolve_run_dir survived read_meta_salt's removal and its unset
+         member was the branch the deleted fail-open used to paper over. #667 then
+         deleted resolve_run_dir itself.",
+       discharged_by: d31_run_dir_env_var_unset_member, status: retired}
 
     # --- R5 — subtraction and conservation (dominant) ----------------------
     - {rule: R5, element: "meta_json",
@@ -776,9 +786,12 @@ gate:
          collection.",
        discharged_by: d20_import_of_the_deleted_module_fails_at_collection}
     - {rule: R5, element: "hooks_run_dir",
-       witness: "read_meta_salt is removed from a module with three live
-         consumers of its other two symbols; the flock'd update_json_locked and
-         resolve_run_dir must remain importable and functional.",
+       witness: "read_meta_salt is removed from a module whose OTHER symbols have
+         live consumers; the flock'd update_json_locked must remain importable and
+         functional for them. (#647 counted three consumers of two symbols; #667
+         deleted resolve_run_dir and the record_lesson_load consumer with the
+         entrypoint that was their only reason to exist, leaving update_json_locked
+         and its two.)",
        discharged_by: d21_hooks_run_dir_survives_its_deleted_member}
     - {rule: R5, element: "gather_only",
        witness: "The whole actor is deleted. Its in-edges are the only thing
@@ -1079,12 +1092,10 @@ handoff:
     - {test: test_every_importer_of_the_relocated_wrap_resolves_after_the_move,
        class: "survival — object identity across importers, true of any wrap incl. the stub;
          the bytes are pinned by d17"}
-    - {test: test_update_json_locked_and_resolve_run_dir_survive_the_sibling_removal,
+    - {test: test_update_json_locked_survives_the_sibling_removal,
        class: "survival — characterization guard over untouched code (green@HEAD by design)"}
-    - {test: test_defender_run_dir_still_crosses_the_subprocess_boundary_for_its_two_readers,
+    - {test: test_defender_run_dir_still_crosses_the_subprocess_boundary_for_its_reader,
        class: "survival — characterization guard over untouched code (green@HEAD by design)"}
-    - {test: test_resolve_run_dir_returns_none_when_the_env_var_is_unset,
-       class: "domain-outcome — the unset branch of an untouched resolver (green@HEAD)"}
     - {test: test_learning_curator_leg_mints_a_fresh_uuid4_salt_distinct_from_the_run_token,
        class: "positive control — the SECOND, legitimate salt origin on an untouched leg; it is
          green@HEAD on purpose, which is what makes the run-lane negatives non-vacuous"}

@@ -88,7 +88,7 @@ as Claude Code PreToolUse hooks):
 |---|---|---|
 | `record_lead.claim_lead` | called in `runtime/tools.py` on gather dispatch | Writes the leads-table row `gather_raw/{lead_id}.lead.json` (goal + dimensions), claiming the `lead_id` with an atomic `O_CREAT|O_EXCL` create — a reused id raises (an integrity gate, not just a shim) |
 | `inject_system_skill_description.descriptor_catalog` | `runtime/tools.py` | Supplies the per-system SKILL `description:` catalog (progressive disclosure) so gather confirms relevance then reads the full SKILL |
-| `runtime/permission.py` | called before each tool | Blocks the main loop from running system CLIs directly or reading `gather_raw` to re-derive fields (using the `block_main_loop_raw_access` predicates); raises `ModelRetry` on a deny |
+| `runtime/permission.py` | called before each tool | Blocks the main loop from running system CLIs directly or reading `gather_raw` to re-derive fields (positive grant enumeration — main carries no `gather_raw` shape); raises `ModelRetry` on a deny |
 
 If a write or read is blocked, the fix is to dispatch gather — never to find
 another path to the bytes.

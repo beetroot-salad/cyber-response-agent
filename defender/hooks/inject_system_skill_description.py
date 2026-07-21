@@ -1,70 +1,40 @@
-#!/usr/bin/env python3
-"""PreToolUse hook: inject the system SKILL's frontmatter `description:`
-into gather dispatches.
+"""System SKILL `description:` reading — a LIBRARY, not a hook.
 
-Fires on Task tool calls whose prompt dispatches the defender gather
-subagent. Parses the dispatch YAML, finds `system: <name>`, reads
-`defender/skills/<name>/SKILL.md`'s frontmatter `description:` field,
-and appends it to the dispatch prompt as an auto-injected block.
+Reads `defender/skills/<name>/SKILL.md`'s frontmatter `description:` field, and
+assembles the per-tree descriptor catalog the gather subagent is given.
 
-The description is a **relevance signal**, not a rules carrier — it
-tells the subagent what the system is for and when it's the right
-target. When the subagent confirms the lead targets this system, it
-then Reads the full SKILL.md body to pick up CLI conventions, field
-vocabularies, and load-bearing rules (the "use --help, don't read
-source" kind of thing). The body is where rules live; this hook just
-saves the discovery turn (ls / Glob across `skills/`) by pre-naming
-the relevant SKILL via its description.
+The description is a **relevance signal**, not a rules carrier — it tells the
+subagent what the system is for and when it's the right target. When the subagent
+confirms the lead targets this system, it then Reads the full SKILL.md body to pick
+up CLI conventions, field vocabularies, and load-bearing rules (the "use --help,
+don't read source" kind of thing). The body is where rules live; the catalog just
+saves the discovery turn (ls / Glob across `skills/`) by pre-naming the relevant
+SKILL via its description.
 
-Silent on every failure (missing system field, missing SKILL file,
-malformed frontmatter) — the subagent then proceeds with its
-un-augmented prompt and either succeeds or fails on its own. The hook
-never blocks the dispatch.
+Silent on every failure (missing SKILL file, malformed frontmatter) — the subagent
+then proceeds without the descriptor and either succeeds or fails on its own.
 
-Emits `hookSpecificOutput.updatedInput` to replace the tool_input with
-the augmented prompt, matching the soc-agent inject_env_context.py
-contract.
-
-Exit codes:
-    0 — always.
+The live consumers are `runtime/tools_gather.py`'s `_run_gather` (`descriptor_catalog`)
+and the #289 experiment's `run_arms.py` (`read_description`). This module used to
+double as a `claude -p` PreToolUse hook script that rewrote a Task dispatch's prompt
+in place (stdin JSON in, `hookSpecificOutput.updatedInput` out); that runtime and its
+`run-settings.json` wiring were retired, so the entrypoint went with them — along with
+the prompt-rewriting half it alone reached (`extract_system`, `build_augmented_prompt`
+and their fence/key regexes). The catalog is injected directly now.
 """
 
 from __future__ import annotations
 
-import json
-import re
-import sys
 from functools import cache
 from pathlib import Path
 
-# Workspace root on sys.path so the `defender.*` namespace imports resolve
-# whether this module is imported (runtime/tools_gather.py) or run directly.
-if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
-    sys.path.insert(0, _root)
+from defender._frontmatter import parse_frontmatter_or_none
+from defender._io import read_text_soft
+from defender.runtime.verbs import ModuleVerbRegistry
 
-from defender._frontmatter import parse_frontmatter_or_none  # noqa: E402
-from defender._io import read_text_soft  # noqa: E402
-from defender.runtime.verbs import ModuleVerbRegistry  # noqa: E402
-
-
-GATHER_SKILL_MARKER = "defender/skills/gather/SKILL.md"
 DEFENDER_DIR = Path(__file__).resolve().parent.parent
 SKILLS_DIR = DEFENDER_DIR / "skills"
 ADAPTERS_DIR = DEFENDER_DIR / "scripts" / "adapters"
-
-FENCE_RE = re.compile(r"```ya?ml\s*\n(.*?)\n```", re.DOTALL)
-SYSTEM_KEY_RE = re.compile(r"^system:\s*([A-Za-z0-9_.-]+)\s*$", re.MULTILINE)
-
-
-def extract_system(prompt: str) -> str | None:
-    """Find `system: <name>` in the first fenced YAML block of the prompt."""
-    fence = FENCE_RE.search(prompt)
-    if not fence:
-        return None
-    match = SYSTEM_KEY_RE.search(fence.group(1))
-    if not match:
-        return None
-    return match.group(1)
 
 
 def read_description(system: str, skills_dir: Path = SKILLS_DIR) -> str | None:
@@ -142,52 +112,3 @@ def descriptor_catalog(
     return "\n".join(lines) or None
 
 
-def build_augmented_prompt(original: str, system: str, description: str) -> str:
-    header = (
-        f"\n\n---\n## System `{system}` (auto-injected from SKILL frontmatter)\n\n"
-        f"The description below tells you what this system is for and when\n"
-        f"it's the right target. Use it to confirm your lead actually wants\n"
-        f"this system. If it does, **Read the full**\n"
-        f"`defender/skills/{system}/SKILL.md` before running anything — the\n"
-        f"body carries the system's verb/param surface, field vocabularies, and\n"
-        f"load-bearing rules that the description does not.\n\n"
-    )
-    return f"{original}{header}{description}\n"
-
-
-def main() -> int:
-    try:
-        hook_data = json.loads(sys.stdin.read())
-    except (json.JSONDecodeError, ValueError):
-        return 0
-
-    if hook_data.get("tool_name") not in ("Task", "Agent"):
-        return 0
-
-    tool_input = hook_data.get("tool_input") or {}
-    prompt = tool_input.get("prompt") or ""
-    if GATHER_SKILL_MARKER not in prompt:
-        return 0
-
-    system = extract_system(prompt)
-    if not system:
-        return 0
-
-    description = read_description(system)
-    if not description:
-        return 0
-
-    augmented = build_augmented_prompt(prompt, system, description)
-    updated = dict(tool_input)
-    updated["prompt"] = augmented
-    print(json.dumps({
-        "hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "updatedInput": updated,
-        }
-    }))
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())

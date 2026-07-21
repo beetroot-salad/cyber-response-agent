@@ -10,7 +10,13 @@ onboarded adapter shim auto-gates everywhere with no per-site edit.
 Consumers:
   - ``runtime/bash_exec`` — the no-shell executor (`unwrap`/`tokenize`).
   - ``runtime/permission`` — the in-process gate (the taxonomy + `unwrap`).
-  - ``block_main_loop_raw_access`` — the main-loop adapter/raw deny reasons.
+
+The `defender-*` shim ROSTER readers (`all_defender_shims`/`adapter_shims`) and the
+main-loop discriminator (`is_main_session`) went with `block_main_loop_raw_access`: the
+first two existed only to build that module's shim regex, and the second read an
+`agent_id` field only a `claude -p` PreToolUse payload ever carried. What survives here
+is the static taxonomy (`NON_ADAPTER_SHIMS`/`OPERATOR_TOOLS`/`ADAPTER_RE`) plus the
+unwrapping the executor and the gate share.
 
 The argv-stage decomposition the gate validates against now lives with the
 executor (`bash_exec.parse`), so validator and executor share one decomposition
@@ -24,24 +30,6 @@ from __future__ import annotations
 
 import re
 import shlex
-from pathlib import Path
-
-# This file lives at <repo>/defender/hooks/_cmd_segments.py → parents[2] is the
-# repo root, matching run.py's REPO_ROOT and the hook modules.
-REPO_ROOT = Path(__file__).resolve().parents[2]
-
-
-def is_main_session(hook_data: dict) -> bool:
-    """True for the top-level agent loop, False for a Task subagent.
-
-    The discriminator is `agent_id`: the PreToolUse payload carries it (plus
-    `agent_type`) ONLY when the hook fires inside a subagent call; the main loop
-    has neither (per the hooks reference, confirmed empirically). cwd is NOT
-    usable — run.py spawns the orchestrator and every gather subagent in-process
-    at the same cwd (REPO_ROOT), so a `cwd == REPO_ROOT` test flags gather
-    subagents as the main loop and wrongly blocks their legitimate gather_raw
-    reads. Absence of `agent_id` → main loop → apply the clamps."""
-    return not hook_data.get("agent_id")
 
 # Non-adapter shims: corpus query + gather's own wrappers. Everything else
 # under defender/bin/ that starts with `defender-` is a data-source adapter.
@@ -82,28 +70,11 @@ OPERATOR_TOOLS = frozenset({"defender-policy"})
 # non-adapter script deliberately avoids it (`record_query.py`, `sql.py`) so it
 # can't be misread as an adapter here.
 #
-# THIS IS THE SOLE DEFINITION. `block_main_loop_raw_access` and `permission/command_shape`
-# both import it from here — it used to be hand-copied into a
-# second module "kept in sync" by comment. Note the failure mode if the suffix and this
+# THIS IS THE SOLE DEFINITION. `permission/command_shape` imports it from here — it used to
+# be hand-copied into a second module "kept in sync" by comment. Note the failure mode if the suffix and this
 # pattern ever drift: the regex matches NOTHING, so the main-loop deny silently stops
 # denying. It fails OPEN, and no test that only asserts "allowed stays allowed" catches it.
 ADAPTER_RE = re.compile(r"scripts/adapters/\w+_adapter\.py\b")
-
-
-def all_defender_shims() -> set[str]:
-    """All `defender-*` shim names from defender/bin/ (cheap dir read). Falls
-    back to the known non-adapter set if the dir is unreadable."""
-    bin_dir = REPO_ROOT / "defender" / "bin"
-    try:
-        return {p.name for p in bin_dir.iterdir() if p.name.startswith("defender-")}
-    except OSError:
-        return set(NON_ADAPTER_SHIMS)
-
-
-def adapter_shims() -> set[str]:
-    """The data-source adapter shims = every `defender-*` shim minus the non-adapter tooling
-    and the operator tools. These are the calls that must be captured."""
-    return all_defender_shims() - set(NON_ADAPTER_SHIMS) - set(OPERATOR_TOOLS)
 
 
 def _skip_timeout_prefix(tokens: list[str]) -> int:

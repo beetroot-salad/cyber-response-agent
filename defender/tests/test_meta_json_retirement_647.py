@@ -388,12 +388,17 @@ def test_no_module_in_the_repo_still_imports_the_deleted_hook_module():
 # ═════════════════════════════════════════════════════════════════════════════
 
 
-def test_update_json_locked_and_resolve_run_dir_survive_the_sibling_removal(tmp_path, monkeypatch):
-    """The hooks run-dir module loses only its salt reader. Its other two symbols — the
-    flock'd read-modify-write behind the per-run budget and circuit-breaker files, and the
-    env-var run-dir resolver — remain importable AND functional for their three live consumers
-    (the budget enforcer, the circuit breaker, the lesson-load recorder). Removing a member is
-    not removing the module."""
+def test_update_json_locked_survives_the_sibling_removal(tmp_path):
+    """The hooks run-dir module loses its salt reader but not itself: the flock'd
+    read-modify-write behind the per-run budget and circuit-breaker files remains importable
+    AND functional. Removing a member is not removing the module.
+
+    It has two live consumers (the budget enforcer, the circuit breaker), asserted below on
+    the BINDING rather than on the module object — a module is truthy whether or not it
+    consumes anything, which made the old assertion vacuous. `resolve_run_dir` was this
+    module's other survivor and the lesson-load recorder its third consumer, until #667
+    deleted the `claude -p` entrypoint that was the only reason either existed; both left
+    d21 with it."""
     assert not hasattr(hooks_run_dir, "read_meta_salt"), (
         "read_meta_salt survived — its only caller was the deleted hook entrypoint, and its "
         "fail-open minted a token no other surface knew"
@@ -406,18 +411,21 @@ def test_update_json_locked_and_resolve_run_dir_survive_the_sibling_removal(tmp_
     )
     assert state["tool_calls"] == 2, "the locked read-modify-write no longer accumulates"
 
-    run_dir = tmp_path / "run"
-    run_dir.mkdir()
-    monkeypatch.setenv("DEFENDER_RUN_DIR", str(run_dir))
-    assert hooks_run_dir.resolve_run_dir() == run_dir
+    assert not hasattr(hooks_run_dir, "resolve_run_dir"), (
+        "resolve_run_dir survived — its last consumer was record_lesson_load's deleted "
+        "entrypoint, and the in-process gates take the run dir from AgentDeps"
+    )
 
-    # Its three live consumers still import it.
-    from defender.hooks import budget_enforcer, record_lesson_load
+    # Its two live consumers still reach the SAME function object — not merely importable.
+    from defender.hooks import budget_enforcer
     from defender.runtime import circuit_breaker
 
-    assert budget_enforcer, "the budget_enforcer consumer no longer imports"
-    assert record_lesson_load, "the record_lesson_load consumer no longer imports"
-    assert circuit_breaker, "the circuit_breaker consumer no longer imports"
+    assert budget_enforcer.update_json_locked is hooks_run_dir.update_json_locked, (
+        "the budget_enforcer consumer no longer binds update_json_locked"
+    )
+    assert circuit_breaker.update_json_locked is hooks_run_dir.update_json_locked, (
+        "the circuit_breaker consumer no longer binds update_json_locked"
+    )
 
 
 def test_run_paths_accessor_set_is_five_after_the_meta_accessor_is_removed(tmp_path):
@@ -624,13 +632,14 @@ def test_the_three_predecessor_codebase_docs_are_archived_rather_than_corrected(
 # ═════════════════════════════════════════════════════════════════════════════
 
 
-def test_defender_run_dir_still_crosses_the_subprocess_boundary_for_its_two_readers(
+def test_defender_run_dir_still_crosses_the_subprocess_boundary_for_its_reader(
     tmp_path, monkeypatch
 ):
     """The run-dir env var survives the removal of the only mechanism that ever turned it into
-    a salt. The bash tool's subprocess environment still exports it, and both live readers
-    still resolve it across that boundary: the hooks' run-dir resolver, and the ticket adapter
-    building its verb context from the ambient environment."""
+    a salt. The bash tool's subprocess environment still exports it, and its live reader still
+    resolves it across that boundary: the ticket adapter, building its verb context from the
+    ambient environment. (The hooks' run-dir resolver was the second reader until #667 — it
+    served hook subprocesses, which no longer exist; the adapter reads the var directly.)"""
     from defender import run_common
     from defender.scripts.adapters import ticket_adapter
 
@@ -641,7 +650,6 @@ def test_defender_run_dir_still_crosses_the_subprocess_boundary_for_its_two_read
 
     for key, value in env.items():
         monkeypatch.setenv(key, value)
-    assert hooks_run_dir.resolve_run_dir() == run_dir
     assert ticket_adapter._cli_context().run_dir == run_dir
 
 
@@ -676,17 +684,10 @@ def test_the_subprocess_environment_carries_no_path_to_the_run_salt(tmp_path):
     ), "the salt is recoverable from a file inside the exported run dir"
 
 
-def test_resolve_run_dir_returns_none_when_the_env_var_is_unset(monkeypatch):
-    """With the run-dir env var unset, the resolver returns nothing at all — the distinguished
-    member of its domain. That branch used to be papered over by the deleted salt reader's
-    fail-open, which answered an unresolvable run dir with a freshly minted token no other
-    surface knew; with the fail-open gone, the unset case is simply the absence it always
-    was. A non-directory value resolves the same way."""
-    monkeypatch.delenv("DEFENDER_RUN_DIR", raising=False)
-    assert hooks_run_dir.resolve_run_dir() is None
-
-    monkeypatch.setenv("DEFENDER_RUN_DIR", "")
-    assert hooks_run_dir.resolve_run_dir() is None
-
-    monkeypatch.setenv("DEFENDER_RUN_DIR", "/nonexistent/definitely-not-a-dir-647")
-    assert hooks_run_dir.resolve_run_dir() is None
+# `test_resolve_run_dir_returns_none_when_the_env_var_is_unset` lived here. It pinned the
+# unset/non-directory branch of `resolve_run_dir` as a plain absence — the distinguished
+# member of its domain — against the deleted salt reader's fail-open, which had answered an
+# unresolvable run dir with a freshly minted token no other surface knew. #667 deleted
+# `resolve_run_dir` itself (its last consumer was record_lesson_load's retired entrypoint),
+# so there is no longer a resolver whose unset branch could fail open. The survival assertion
+# in `test_update_json_locked_survives_the_sibling_removal` pins the deletion instead.
