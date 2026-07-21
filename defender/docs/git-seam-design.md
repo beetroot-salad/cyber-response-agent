@@ -5,7 +5,7 @@ subprocess is reinvented ~8× and `evals/` carries a second worktree manager).
 Mirrors the namespace-root hoists `defender/_io.py` (#447) and
 `defender/_env.py` / `_clock.py` (#448); extends the author/curator git
 consolidation of #330; adopts the inject→real-tmp-repo testing philosophy of
-#389. The failure disposition composes with `docs/error-disposition-types-design.md`
+#389. The failure disposition composes with `defender/docs/error-disposition-types-design.md`
 (#438 → #441 → #443, #468): a git failure is a `StageAbort`-class systemic fault.
 
 ## What this is
@@ -114,7 +114,7 @@ brittle, locale-bound stderr parsing):
 
 A local-state git failure means a broken tree/repo/config/disk — it dooms the
 *whole batch*, not one marker, so it is a `StageAbort`-class systemic fault
-(`docs/error-disposition-types-design.md`). `GitError` is **enrolled alongside**
+(`defender/docs/error-disposition-types-design.md`). `GitError` is **enrolled alongside**
 `StageAbort` in `_run_or_dead_letter`'s reraise tuple (`orchestrate.py:507`) and
 the `:1090` catch — not subclassed under it, because (like `FatalConfigError`,
 #468) the exit-2 *response* is learning-only while the *condition* is layer-neutral.
