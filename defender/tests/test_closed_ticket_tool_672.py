@@ -1013,6 +1013,37 @@ def test_unmapped_fault_returns_envelope(tmp_path):
     assert run.breaker().get("systems", {}).get("ticket", {}).get("failures") == 1
 
 
+class _ResolutionFaultVerbs:
+    """A registry whose verb RESOLUTION itself faults — the production shape when
+    ``ModuleVerbRegistry.verbs('ticket')`` lazily imports a broken adapter (an import-time error,
+    or a malformed/absent ``VERBS`` mapping → ``KeyError``). Every happy-path fake resolves
+    cleanly, so this is the only way to drive the resolution seam."""
+
+    def systems(self):
+        return ("ticket",)
+
+    def verbs(self, system):
+        raise RuntimeError("ticket adapter failed to import: No module named 'httpx'")
+
+
+def test_registry_resolution_fault_recorded_not_unwound(tmp_path):
+    """[d7_unmapped_fault_enveloped — the registry-resolution seam] A fault RESOLVING the verb
+    from the registry (not inside the verb body) faults-and-continues exactly like a body fault:
+    a failed tool result, no unwind out of ``agent.iter()``, a capture row, and an infra
+    contribution to the breaker. Regression for the finalize fix: before it, the resolution
+    ``verbs.verbs(SYSTEM)[...]`` sat OUTSIDE ``_run_verb``'s fault seam, so a broken adapter
+    unwound the judge stage with no row and no breaker record — invisible to the rest of the
+    suite because every fake registry resolves cleanly. The 'write a row, never delete one'
+    invariant this module documents must hold for the resolution too, not only the transport."""
+    run = _drive(tmp_path, [_get(OTHER_KEY), DONE], registry=_ResolutionFaultVerbs())
+    assert run.out.strip()                       # the judge run reaches its verdict, no unwind
+    assert "ticket adapter failed to import" in run.all_text
+    (row,) = run.rows()
+    assert row["exit_code"] != 0
+    assert row["error_class"] == "infra"
+    assert run.breaker().get("systems", {}).get("ticket", {}).get("failures") == 1
+
+
 def test_list_closed_tickets_malformed_store_response(tmp_path):
     """[d7_unmapped_fault_enveloped — dispositions consensus ×2] A store response whose shape
     defeats the tool — a listing whose `tickets` is not a list, or a get body that is not an

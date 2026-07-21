@@ -24,7 +24,9 @@ absence by registration, N3):
     ``q`` keep riding ``list_tickets``' urlencoding opaquely — the chosen asymmetry.
   - **Self-key exclusion** (Fork C/H) — the case-under-judgment's own key (the judge's learning
     run-dir basename) is refused pre-store on ``get``, filtered per-item by identity on ``list``,
-    and screened out of any fetched closed ticket whose free text NAMES it.
+    and — on ``get`` only — screened out of a fetched closed ticket whose free text NAMES it
+    (Fork H is ``get``-scoped; the ``list`` path carries the status + identity screens only, so a
+    listed sibling's free text that names the self-case is NOT redacted — the graph's N-note).
   - **Item re-check** (Fork G) — ``list`` re-checks each returned item's status client-side and
     drops non-closed (or self-key) records before the envelope.
 
@@ -104,15 +106,23 @@ def _key_reject_reason(key: str) -> str | None:
     return None
 
 
-async def _run_verb(deps: AgentDeps, fn: Any, params: dict) -> tuple[Any, int, str]:
-    """Drive one ticket verb body in-process, off the event loop, mirroring the query tool's
-    error seam: control-flow exceptions re-raise; ``AdapterFault`` maps to its
-    ``(exit_code, detail)``; an unmapped ``BaseException`` still returns (as infra) so the
-    caller can write a row rather than unwind out of ``agent.iter()``."""
+async def _run_verb(deps: AgentDeps, verbs: Any, verb: str, params: dict) -> tuple[Any, int, str]:
+    """Resolve one ticket verb from the registry and drive its body in-process, off the event
+    loop, mirroring the query tool's error seam: control-flow exceptions re-raise; ``AdapterFault``
+    maps to its ``(exit_code, detail)``; an unmapped ``BaseException`` still returns (as infra) so
+    the caller can write a row rather than unwind out of ``agent.iter()``.
+
+    The registry lookup is INSIDE the seam too: ``verbs.verbs(SYSTEM)[verb]`` lazily imports the
+    real adapter on first use (``ModuleVerbRegistry``), so a broken adapter — an import-time fault,
+    a malformed/absent ``VERBS`` mapping (→ ``KeyError``) — faults-and-continues like any other
+    infra fault (a row is written, the breaker records it) rather than unwinding the stage. A
+    resolution fault escaping here was the one hole in the 'write a row, never delete one'
+    invariant this module documents; keeping it inside the try closes it."""
     vctx = VerbContext(
         defender_dir=deps.defender_dir, run_dir=deps.run_dir, env=_bash_env(deps),
     )
     try:
+        fn = verbs.verbs(SYSTEM)[verb]
         payload = await asyncio.to_thread(fn, vctx, **params)
     except CONTROL_FLOW_EXCEPTIONS:
         raise
@@ -219,9 +229,8 @@ async def _list_body(deps: AgentDeps, lock: asyncio.Lock, verbs: Any,
     re-check each returned item client-side (Fork G/V-A), then capture + view."""
     if circuit_breaker.is_tripped(deps.run_dir, SYSTEM):
         return circuit_breaker.down_message(deps.run_dir, SYSTEM)
-    fn = verbs.verbs(SYSTEM)["list-tickets"]
     payload, exit_code, detail = await _run_verb(
-        deps, fn, {"label": label, "q": q, "require_closed": True},
+        deps, verbs, "list-tickets", {"label": label, "q": q, "require_closed": True},
     )
     if exit_code == 0:
         if not (isinstance(payload, dict) and isinstance(payload.get("tickets"), list)):
@@ -250,9 +259,8 @@ async def _get_body(deps: AgentDeps, lock: asyncio.Lock, verbs: Any, key: str) -
             "that key is the in-flight ticket for the case you are scoring — it is the answer "
             "key, never readable through this confirm. Cite a past CLOSED case."
         )
-    fn = verbs.verbs(SYSTEM)["get-ticket"]
     payload, exit_code, detail = await _run_verb(
-        deps, fn, {"key": key, "require_closed": True},
+        deps, verbs, "get-ticket", {"key": key, "require_closed": True},
     )
     if exit_code == 0:
         payload, exit_code, detail = _screen_fetched_ticket(deps, payload)
