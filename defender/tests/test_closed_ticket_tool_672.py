@@ -13,8 +13,8 @@ REVERSED two of the classifier's recommendations; the fork letters below name th
   Fork A  — ``key`` meets a defined schema at the tool boundary: anything outside it draws a
             retry-class response with ZERO store attempts; length is an explicit non-clause and
             flows to the store opaquely. (#684 replaced the metacharacter blacklist this
-            originally shipped as with a grammar, and reversed the non-ASCII half — see
-            ROUND 4 below.)
+            originally shipped as with a grammar, moved that grammar into the ticket system's
+            REQUIRED config, and made an absent one fail closed — see ROUND 4 below.)
   Fork B  — the tools mirror the query tool FULLY: every call writes a capture row into the
             judge run dir's queries table, and an oversized view is bounded with a truncation
             note + the persisted-payload pointer. NOT record-free (d0's provisional flip).
@@ -76,15 +76,22 @@ decided intent, none re-decided):
 ROUND 4 (#684 — the non-discriminating screening assertions the adversarial implementer and
 finalize's PR-#678 review both flagged; the honest implementation was already correct on F2/F3,
 so those two are test-only tightenings):
-  F1 the key screen is now a GRAMMAR (`_KEY_RE`, anchored on the shape case ids are minted
-  in) instead of a seven-token blacklist a lazier implementation could trim to exactly the
-  sampled rows, and the parametrize set pins the characters that set omitted entirely —
-  `#`/`&`/`=`/backtick/internal space and, the request-reshaping vector, whitespace and
-  CR/LF. This REVERSES #672's resolved "clean non-ASCII flows opaquely" (`SOC-λ42` now
-  rejects) — a human decision at the #684 gate, not a mechanical tighten, made free of cost
-  by the writer/reader asymmetry: the ticket writer percent-encodes every key it mints
-  (ticket_writer.py:189), this reader interpolates unescaped, so a non-ASCII key was never
-  fetchable through this path. F2 the two `served OR faulted` whole-response disjunctions
+  F1 the key screen is now a GRAMMAR instead of a seven-token blacklist a lazier
+  implementation could trim to exactly the sampled rows, and the parametrize set pins the
+  characters that set omitted entirely — `#`/`&`/`=`/backtick/internal space and, the
+  request-reshaping vector, whitespace and CR/LF. The grammar is NOT a constant in the
+  judge's code: it is the ticket system's REQUIRED `TICKET_KEY_PATTERN` config value
+  (d30), read through the same `verbs=` registry seam the store is read through, because
+  what a key looks like is a fact about the deployed store, not about this consumer — and
+  a store that declares none FAILS CLOSED AND LOUD (no read, an infra row, a breaker
+  contribution) rather than screening against a built-in guess. That relocation also
+  settles #672's "clean non-ASCII flows opaquely": the question moved to whoever describes
+  the environment, and THIS environment declares an ASCII grammar, so `SOC-λ42` now
+  refuses here while a store that mints accented keys says so in its pattern. Free of cost
+  either way, by the writer/reader asymmetry: the ticket writer percent-encodes every key
+  it mints (ticket_writer.py:189), this reader interpolates unescaped, so a key outside the
+  declared grammar was never fetchable through this path.
+  F2 the two `served OR faulted` whole-response disjunctions
   (d24/d23) became CONJUNCTIONS on the list call's own response — the good sibling is served
   in the SAME response the non-closed/self items are excluded from, so faulting the whole
   listing no longer passes a per-ITEM demand (it would gut O1's precedent search). F3 the
@@ -228,6 +235,12 @@ TOOL_GET = "get_closed_ticket"
 TOOL_LIST = "list_closed_tickets"
 BIT = "closed_tickets"
 
+# The key grammar this environment DECLARES (TICKET_KEY_PATTERN in the ticket system's
+# config.env — a REQUIRED key of ticket_adapter.REQUIRED_CONFIG_KEYS). Held here as a literal
+# so every drive stays hermetic, and pinned against the shipped file by
+# test_shipped_ticket_config_declares_the_key_grammar (d30's currency half).
+SHIPPED_KEY_PATTERN = "[A-Za-z0-9][A-Za-z0-9._-]*"
+
 _YAML = "outcome: skip-passthrough\ndefender_findings: []\n"
 DONE = Turn(text=_YAML)
 
@@ -273,11 +286,18 @@ def _ticket_registry(
     lst=(),
     get_default=("return", CLOSED_TKT),
     lst_default=None,
+    key_pattern=("return", SHIPPED_KEY_PATTERN),
+    declare_key_pattern=True,
 ) -> FakeVerbs:
     """A fake `ticket` verb table with the REAL declared param surfaces (the Fork D probe's
     executed `declared_params`: get-ticket {key, require_closed=False}; list-tickets
-    {status, label, q, require_closed=False}). Each fake records what it was HANDED and then
-    returns/raises its declarative outcome spec — it never inspects the params to decide."""
+    {status, label, q, require_closed=False}), plus the `key-pattern` verb the key screen
+    resolves this environment's grammar through. Each fake records what it was HANDED and then
+    returns/raises its declarative outcome spec — it never inspects the params to decide.
+
+    `key_pattern` serves the grammar (default: the value the shipped config declares, so every
+    other test drives the real screen); `declare_key_pattern=False` builds a registry whose
+    adapter declares NO such verb — the misconfigured-store shape, which must fail closed."""
     lst_default = lst_default or ("return", {"tickets": [dict(CLOSED_TKT)], "total": 1})
     get_q, lst_q = deque(get), deque(lst)
 
@@ -296,9 +316,16 @@ def _ticket_registry(
         recorder.record("health-check", ctx, {})
         return {"status": "ok"}
 
-    return FakeVerbs({"ticket": {
+    def key_pattern_verb(ctx):
+        recorder.record("key-pattern", ctx, {})
+        return _outcome(deque(), key_pattern)
+
+    table = {
         "get-ticket": get_ticket, "list-tickets": list_tickets, "health-check": health_check,
-    }})
+    }
+    if declare_key_pattern:
+        table["key-pattern"] = key_pattern_verb
+    return FakeVerbs({"ticket": table})
 
 
 # ── the drive: the REAL judge leg entry, fakes through its injection seams ───────────────
@@ -426,6 +453,13 @@ def _get_calls(rec: VerbRecorder) -> list:
 
 def _list_calls(rec: VerbRecorder) -> list:
     return [c for c in rec.calls if c.verb == "list-tickets"]
+
+
+def _store_calls(rec: VerbRecorder) -> list:
+    """Every call that REACHED THE STORE. The `key-pattern` verb reads this environment's
+    config to build the screen and touches no ticket, so "zero store attempts" is a claim
+    about everything but it."""
+    return [c for c in rec.calls if c.verb != "key-pattern"]
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -655,8 +689,7 @@ def test_tools_drive_verbs_in_process_via_deps(tmp_path):
     """
     rec = VerbRecorder()
     run = _drive(tmp_path, [_get(OTHER_KEY), DONE], registry=_ticket_registry(rec))
-    call = rec.only()
-    assert call.verb == "get-ticket"
+    (call,) = _get_calls(rec)
     assert isinstance(call.ctx, VerbContext)
     assert Path(call.ctx.run_dir) == run.lrd          # the judge's OWN run identity
     assert Path(call.ctx.defender_dir).name == "defender"
@@ -1353,7 +1386,9 @@ def test_malformed_key_model_retry(tmp_path, key, reaches_store):
         assert g.params["key"] == key            # verbatim, opaque
         assert g.params["require_closed"] is True
     else:
-        assert not rec.calls, f"key {key!r} reached the store — the schema must reject first"
+        assert not _store_calls(rec), (
+            f"key {key!r} reached the store — the schema must reject first"
+        )
         # Fork A's OTHER half (cold C4 — previously asserted nowhere): the rejection is
         # RETRY-CLASS, layer-agnostic. The old `len(seen) >= 2` was true on every path
         # including success; bind the retry path itself: feedback for the rejected call
@@ -1368,6 +1403,135 @@ def test_malformed_key_model_retry(tmp_path, key, reaches_store):
             "retry-class response"
         )
         assert "TKT-CONTENT-777" not in run.all_text
+
+
+@pytest.mark.parametrize(
+    ("pattern", "key", "reaches_store"),
+    [
+        ("SOC-[0-9]+", "SOC-1042", True),
+        ("SOC-[0-9]+", "20260719T2300Z-sshd-999", False),
+        ("[A-Za-z0-9À-ɏ._-]+", "SOC-é42", True),
+        (SHIPPED_KEY_PATTERN, "SOC-é42", False),
+    ],
+    ids=["narrow-accepts-its-own", "narrow-rejects-what-the-shipped-one-takes",
+         "wide-accepts-accented", "shipped-rejects-accented"],
+)
+def test_key_grammar_comes_from_this_environments_config(tmp_path, pattern, key, reaches_store):
+    """[d30_key_grammar_from_config] The key grammar is an ENVIRONMENT fact, read from the
+    ticket system's own config (`TICKET_KEY_PATTERN`, a REQUIRED key of
+    ticket_adapter.REQUIRED_CONFIG_KEYS) through the same `verbs=` registry seam the store is
+    reached through — never a constant in the judge's code. What a ticket key looks like is
+    the deployed store's statement to make: swapping this playground for a tracker with
+    another key vocabulary is a config edit, not a code change.
+
+    The rows drive the discrimination BOTH ways against the same tool build: a NARROWER
+    configured pattern rejects a key the shipped one accepts (with zero store attempts), and
+    a WIDER one lets through a key the shipped pattern rejects. An implementation that
+    hardcodes any single grammar — including the one this repo ships — fails a row.
+
+    That second direction is also where #672's "clean non-ASCII flows opaquely" decision
+    went: #684 did not settle whether non-ASCII keys exist, it moved the question to whoever
+    describes the environment. This store declares an ASCII grammar, so `SOC-é42` refuses
+    here; a store that mints accented keys says so in its pattern and they read through."""
+    rec = VerbRecorder()
+    run = _drive(tmp_path, [Turn(tool_calls=[(TOOL_GET, {"key": key})]), DONE],
+                 registry=_ticket_registry(rec, key_pattern=("return", pattern)))
+    assert run.out.strip()
+    if reaches_store:
+        (g,) = _get_calls(rec)
+        assert g.params["key"] == key
+    else:
+        assert not _store_calls(rec), (
+            f"key {key!r} reached the store under the configured grammar {pattern!r}"
+        )
+        feedback = _feedback(run)
+        assert "exit=" not in feedback, "an off-grammar key owes a retry-class response"
+        assert pattern in feedback, (
+            "the retry feedback must name the grammar the key was judged against — the model "
+            "cannot correct a key against a rule it is never told"
+        )
+
+
+@pytest.mark.parametrize(
+    "registry_kwargs",
+    [
+        {"key_pattern": ("raise", ConfigFault(
+            "missing required config keys in ticket/config.env: TICKET_KEY_PATTERN"))},
+        {"declare_key_pattern": False},
+        {"key_pattern": ("return", "SOC-[0-9")},
+        {"key_pattern": ("return", "")},
+    ],
+    ids=["config-key-absent", "verb-undeclared", "pattern-uncompilable", "pattern-empty"],
+)
+def test_absent_key_grammar_fails_closed_and_loud(tmp_path, registry_kwargs):
+    """[d30_key_grammar_from_config — the fail-closed half] A ticket store that declares no
+    usable key grammar stops the read. There is no built-in fallback: the screen exists to
+    keep a model-chosen key out of an UNESCAPED URL interpolation, and screening against a
+    grammar this environment never agreed to would be a guess standing in for the missing
+    fact. So the tool fails CLOSED — zero store attempts, the key never sent — on every shape
+    the missing fact can take: the config key absent (ConfigFault out of load_config), the
+    adapter declaring no such verb at all, and a declared value that is empty or will not
+    compile.
+
+    And LOUD, in all three channels the tool owns, because a silent refusal reads to the
+    judge exactly like a store that has nothing to say: the model sees a FAILED result naming
+    the missing grammar (never a success envelope, never an empty return), the capture row
+    records it as infra, and it contributes to the `ticket` breaker — so a persistently
+    misconfigured store trips the breaker instead of paying full price every judgment."""
+    rec = VerbRecorder()
+    run = _drive(tmp_path, [_get(OTHER_KEY), DONE],
+                 registry=_ticket_registry(rec, **registry_kwargs))
+    assert run.out.strip(), "the judge run continues to its verdict — no unwind"
+    assert not _store_calls(rec), "the store was read with no grammar to screen the key by"
+    assert "TKT-CONTENT-777" not in run.all_text
+
+    feedback = _feedback(run)
+    assert "exit=0" not in feedback, "a missing key grammar returned a SUCCESS envelope"
+    assert "key grammar" in feedback, (
+        "the refusal must say WHY on the model-visible channel — an unexplained failure is "
+        "indistinguishable from a store with nothing to say"
+    )
+    (row,) = run.rows()
+    assert row["exit_code"] == 2
+    assert row["error_class"] == "infra"
+    assert run.breaker().get("systems", {}).get("ticket", {}).get("failures") == 1, (
+        "a store with no declared key grammar must contribute to the breaker like any other "
+        "infra fault — otherwise a misconfigured store is retried at full price forever"
+    )
+
+
+def test_shipped_ticket_config_declares_the_key_grammar():
+    """[d30_key_grammar_from_config — the currency half] The grammar every other test in this
+    module drives is the one this repo actually ships: `TICKET_KEY_PATTERN` is present in the
+    ticket system's config.env, it compiles, and it matches the two key shapes the store is
+    known to hold — the minted case id (`{%Y%m%dT%H%M%SZ}-{alert_label}`, run_common.py:98,
+    which ticket_writer mints every real ticket under) and the seeded `SOC-<n>`. Without this
+    the suite could go green against a fake grammar while the deployed judge screens every
+    legitimate key out — and the failure would look like 'the store confirmed nothing'.
+
+    It also pins the REQUIRED-ness: the key is in ticket_adapter's own required set, so a
+    config missing it is a ConfigFault (exit 2, infra) rather than a silent default."""
+    from defender.scripts.adapters import ticket_adapter
+
+    assert "KEY_PATTERN" in ticket_adapter.REQUIRED_CONFIG_KEYS, (
+        "the key grammar must be REQUIRED config — an optional one resolves silently"
+    )
+    cfg = DEFENDER / "knowledge" / "environment" / "systems" / "ticket" / "config.env"
+    declared: dict[str, str] = {}
+    for line in cfg.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line.startswith("#") or "=" not in line:
+            continue
+        k, _, v = line.partition("=")
+        declared[k.strip()] = v.strip().strip('"').strip("'")
+    pattern = declared.get("TICKET_KEY_PATTERN")
+    assert pattern, f"{cfg} declares no TICKET_KEY_PATTERN — every ticket verb now faults"
+    assert pattern == SHIPPED_KEY_PATTERN, (
+        "the shipped grammar drifted from the one this suite drives its screens with"
+    )
+    grammar = re.compile(rf"\A(?:{pattern})\Z")
+    assert grammar.match(CASE), "the shipped grammar rejects the minted case-id shape"
+    assert grammar.match(OTHER_KEY), "the shipped grammar rejects the seeded SOC-<n> shape"
 
 
 def test_case_own_key_refused_at_tool_boundary(tmp_path):
@@ -1905,7 +2069,7 @@ def test_benign_store_routes_census(tmp_path):
     rec = VerbRecorder()
     run = _drive(tmp_path, [_get(OTHER_KEY), DONE], registry=_ticket_registry(rec))
     assert run.tool_names() == {"bash", "read_file", TOOL_GET, TOOL_LIST}
-    assert rec.calls, "positive control: the typed route is live"
+    assert _store_calls(rec), "positive control: the typed route is live"
 
     scope = RunScope(add_dirs=(run.run_dir / "gather_raw",))
     policy = compile_policy_for(JUDGE_DEF, run.lrd, scope=scope)

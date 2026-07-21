@@ -19,11 +19,15 @@ absence by registration, N3):
   - **Closed-pin** — ``require_closed=True`` on the wire; the verb body pins the outgoing
     ``status=closed`` and refuses a non-closed body as a business fault (exit 1).
   - **Key schema** (Fork A, tightened by #684) — ``get`` screens ``key`` against a defined
-    grammar (``_KEY_RE``, anchored on the shape case ids are minted in) before any store
-    attempt: anything outside it — empty, whitespace-only, path/URL-significant characters,
-    whitespace and CR/LF, non-ASCII — draws a retry-class response with ZERO store attempts
-    (``get_ticket`` interpolates ``key`` into the URL path unescaped). ``label``/``q`` keep
-    riding ``list_tickets``' urlencoding opaquely — the chosen asymmetry.
+    grammar before any store attempt: anything outside it — empty, whitespace-only,
+    path/URL-significant characters, whitespace and CR/LF — draws a retry-class response with
+    ZERO store attempts (``get_ticket`` interpolates ``key`` into the URL path unescaped).
+    The grammar is an ENVIRONMENT fact, not a constant here: it is the ticket system's
+    REQUIRED ``TICKET_KEY_PATTERN`` config value, reached through the same ``verbs=`` registry
+    seam as the store itself, and a store that declares none FAILS CLOSED AND LOUD (no read,
+    a recorded infra fault, a breaker contribution) rather than falling back to a built-in
+    guess. ``label``/``q`` keep riding ``list_tickets``' urlencoding opaquely — the chosen
+    asymmetry.
   - **Self-key exclusion** (Fork C/H) — the case-under-judgment's own key (the judge's learning
     run-dir basename) is refused pre-store on ``get``, filtered per-item by identity on ``list``,
     and — on ``get`` only — screened out of a fetched closed ticket whose free text NAMES it
@@ -80,23 +84,11 @@ TOOL_LIST = "list_closed_tickets"
 _QUERIES_TABLE = "executed_queries.jsonl"
 _PAYLOAD_DIR = "ticket_reads"
 
-#: Fork A's ``key`` grammar — an actual schema, not the metacharacter blacklist that used to
-#: stand here (#684/F1: a blacklist under-samples by construction; the old seven tokens let
-#: ``SOC-1#frag``, ``a&b``, ``k=v``, a backtick, an internal space and — the canonical
-#: request-reshaping vector — ``SOC-1\r\nHost: …`` reach the store).
-#:
-#: It is anchored on the shape the store's keys are actually MINTED in: the case id, which is
-#: the run-dir basename ``{%Y%m%dT%H%M%SZ}-{alert_label}`` (run_common.py:98). The asymmetry
-#: that makes this safe to tighten: the ticket WRITER percent-encodes every key it mints
-#: (``urllib.parse.quote(case_id, safe="")``, ticket_writer.py:189) while ``get_ticket``
-#: interpolates ``key`` into ``/tickets/{key}`` UNESCAPED (ticket_adapter.py:105) — so a key
-#: outside this grammar is not fetchable through this path anyway, and rejecting it costs no
-#: readable ticket. A ``..`` traversal needs a separator, which the grammar already rejects.
-#:
-#: Length stays an explicit non-clause. #684 REVERSES #672's "clean non-ASCII flows opaquely"
-#: (d10): a non-ASCII key is not a shape this store mints, and the unescaped reader cannot
-#: fetch one.
-_KEY_RE = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._-]*\Z")
+#: The verb that yields this environment's ticket-key grammar (``TICKET_KEY_PATTERN``, a
+#: REQUIRED key of the ticket system's config — ticket_adapter.REQUIRED_CONFIG_KEYS). It is
+#: resolved through the SAME registry seam as the store reads, so the screen has no second
+#: route to the environment and tests drive it with the same fake.
+_KEY_PATTERN_VERB = "key-pattern"
 
 
 def _self_key(deps: AgentDeps) -> str:
@@ -106,21 +98,64 @@ def _self_key(deps: AgentDeps) -> str:
     return Path(deps.run_dir).name
 
 
-def _key_reject_reason(key: str) -> str | None:
-    """Fork A's defined minimal ``key`` schema. ``None`` when the key clears it."""
+def _key_reject_reason(key: str, grammar: re.Pattern[str]) -> str | None:
+    """Fork A's key schema, checked against THIS environment's declared grammar. ``None`` when
+    the key clears it.
+
+    ``grammar`` comes from the store's own config (``TICKET_KEY_PATTERN``) and is anchored by
+    the caller: the environment declares the key SHAPE, this module decides that a key must
+    match it WHOLE. The screen exists because ``get_ticket`` interpolates ``key`` into
+    ``/tickets/{key}`` UNESCAPED (ticket_adapter.py:105) while the ticket WRITER
+    percent-encodes every key it mints (ticket_writer.py:189) — so a key outside the declared
+    grammar is not fetchable through this path anyway, and rejecting it costs no readable
+    ticket. Length is an explicit non-clause; #684 dropped #672's separate "clean non-ASCII
+    flows opaquely" carve-out — whether non-ASCII keys exist is now the environment's
+    statement to make, in its pattern.
+    """
     if not key.strip():
         return (
             "closed-ticket key must be a non-empty, non-blank case id (e.g. SOC-1042). "
             "Cite the closed case from the seed menu."
         )
-    if _KEY_RE.match(key) is None:
+    if grammar.match(key) is None:
         return (
-            f"closed-ticket key {key!r} is not a bare case id. A key is ASCII letters, "
-            "digits, '.', '_' and '-' only, starting with a letter or digit "
-            "(e.g. SOC-1042, 20260720T0000Z-sshd-672) — no path, URL, whitespace, "
-            "line break, or other punctuation."
+            f"closed-ticket key {key!r} does not match this ticket store's key grammar "
+            f"({grammar.pattern}) — pass a bare case id (e.g. SOC-1042, "
+            "20260720T0000Z-sshd-672), not a path, URL, or free text."
         )
     return None
+
+
+async def _key_grammar(
+    deps: AgentDeps, verbs: Any,
+) -> tuple[re.Pattern[str] | None, int, str]:
+    """This environment's ticket-key grammar, compiled and ANCHORED, or the fault that stands
+    in for it — ``(None, exit_code, detail)``.
+
+    FAIL CLOSED AND LOUD is the whole contract here. The grammar is a required config key, so
+    an absent one (``ConfigFault``), an adapter that declares no such verb (``KeyError``), or
+    a value that will not compile all resolve to a fault the caller turns into a FAILED tool
+    result with ZERO store attempts — the read stops rather than proceeding on a built-in
+    guess about what this store's keys look like. Loud, in the three channels the tool already
+    owns: the model sees the failure, the capture row records it, and the infra class
+    contributes to the ``ticket`` breaker, so a persistently misconfigured store trips it
+    instead of paying full price on every judgment.
+    """
+    pattern, exit_code, detail = await _run_verb(deps, verbs, _KEY_PATTERN_VERB, {})
+    if exit_code != 0:
+        return None, exit_code, f"ticket key grammar unavailable: {detail}"
+    if not isinstance(pattern, str) or not pattern:
+        return None, DEFAULT_FAULT_EXIT, (
+            f"ticket key grammar unavailable: {_KEY_PATTERN_VERB} returned "
+            f"{type(pattern).__name__}, not a non-empty pattern string"
+        )
+    try:
+        return re.compile(rf"\A(?:{pattern})\Z"), 0, ""
+    except re.error as e:
+        return None, DEFAULT_FAULT_EXIT, (
+            f"ticket key grammar unusable: TICKET_KEY_PATTERN {pattern!r} does not "
+            f"compile ({e})"
+        )
 
 
 async def _run_verb(deps: AgentDeps, verbs: Any, verb: str, params: dict) -> tuple[Any, int, str]:
@@ -263,12 +298,20 @@ async def _list_body(deps: AgentDeps, lock: asyncio.Lock, verbs: Any,
 
 
 async def _get_body(deps: AgentDeps, lock: asyncio.Lock, verbs: Any, key: str) -> str:
-    """``get_closed_ticket`` end-to-end: honor the breaker, screen the key (Fork A) and the
+    """``get_closed_ticket`` end-to-end: honor the breaker, resolve the environment's key
+    grammar (fail closed if it is missing), screen the key against it (Fork A) and against the
     self-case's own key (Fork C), drive the verb closed-only, screen a self-key-naming payload
     (Fork H), then capture + view."""
     if circuit_breaker.is_tripped(deps.run_dir, SYSTEM):
         return circuit_breaker.down_message(deps.run_dir, SYSTEM)
-    reason = _key_reject_reason(key)
+    grammar, cfg_exit, cfg_detail = await _key_grammar(deps, verbs)
+    if grammar is None:
+        # No grammar, no read: the screen cannot run, so the store is never asked. The row
+        # and the breaker contribution are what make that refusal loud.
+        return await _capture_and_view(
+            deps, lock, "get-ticket", {"key": key}, None, cfg_exit, cfg_detail,
+        )
+    reason = _key_reject_reason(key, grammar)
     if reason is not None:
         raise ModelRetry(reason)
     if key == _self_key(deps):

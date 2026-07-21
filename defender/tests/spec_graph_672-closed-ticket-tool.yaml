@@ -180,19 +180,17 @@ demands:
     binds: ["interacts(benign_judge->get_closed_ticket).payload"]
     discharged_by: test_malformed_key_model_retry
     # Fork A RESOLVED (§7, refined): the boundary is an explicit, DEFINED key schema.
-    # REWRITTEN at #684/F1 — the schema is a GRAMMAR (`_KEY_RE`,
-    # `[A-Za-z0-9][A-Za-z0-9._-]*`, anchored on the shape case ids are minted in:
-    # run_common.py:98), not the metacharacter blacklist that shipped: a blacklist
-    # under-samples by construction, and the one that shipped let `#`, `&`, `=`,
-    # backtick, an internal space and — the canonical request-reshaping vector —
-    # `SOC-1\r\nHost: …` through to a reader that interpolates `key` into
-    # `/tickets/{key}` UNESCAPED. Anything outside the grammar rejects with a
-    # retry-class response and ZERO store attempts; length remains an explicit
-    # non-clause and a store refusal of a clearing key folds into O4.
-    # The 'clean non-ASCII flows opaquely' half is REVERSED at #684 (`SOC-λ42` now
-    # rejects) — a human decision at that gate, free of cost because the ticket writer
-    # percent-encodes every key it mints (ticket_writer.py:189) while this reader does
-    # not, so a non-ASCII key is unfetchable through this path either way.
+    # REWRITTEN at #684/F1 — the schema is a GRAMMAR, not the metacharacter blacklist
+    # that shipped: a blacklist under-samples by construction, and the one that shipped
+    # let `#`, `&`, `=`, backtick, an internal space and — the canonical
+    # request-reshaping vector — `SOC-1\r\nHost: …` through to a reader that
+    # interpolates `key` into `/tickets/{key}` UNESCAPED. Anything outside the grammar
+    # rejects with a retry-class response and ZERO store attempts; length remains an
+    # explicit non-clause and a store refusal of a clearing key folds into O4.
+    # The grammar itself is NOT owned here — it is the environment's declared
+    # TICKET_KEY_PATTERN (d30), so this demand pins the SCREEN, not the vocabulary.
+    # #672's 'clean non-ASCII flows opaquely' clause is therefore retired rather than
+    # simply reversed: whether non-ASCII keys exist is the deployed store's statement.
     # The silent branch (wrong-JSON-type key) pins the same model-visible observable
     # LAYER-AGNOSTICALLY — the test must not assert which layer.
 
@@ -351,6 +349,32 @@ demands:
                         # fixture (summary) left a summary-scoped screen green.
     binds: ["interacts(benign_judge->get_closed_ticket).response", "salt"]
     discharged_by: test_closed_ticket_naming_self_key_refused
+
+  - id: d30_key_grammar_from_config
+    kind: behavior      # #684: minted when F1's tighten exposed that d10's screen was
+                        # checking a grammar HARDCODED in the consumer. What a ticket key
+                        # looks like is an ENVIRONMENT fact, so it is declared where the
+                        # environment is described — TICKET_KEY_PATTERN, a REQUIRED key of
+                        # ticket_adapter.REQUIRED_CONFIG_KEYS — and reached through the same
+                        # `verbs=` registry seam as the store (the `key-pattern` verb), so
+                        # the screen has no second route to the environment. Swapping this
+                        # store for a tracker with another key vocabulary is a config edit.
+                        # FAIL CLOSED AND LOUD is half the demand, not a rider: with no
+                        # usable grammar (config key absent, verb undeclared, value empty or
+                        # uncompilable) the read STOPS — zero store attempts — and says so
+                        # in all three channels the tool owns (model-visible failed result,
+                        # infra capture row, breaker contribution). A built-in fallback is
+                        # the one disposition explicitly rejected: screening a model-chosen
+                        # key against a grammar this environment never agreed to is a guess
+                        # standing in for the missing fact, on the exact path that reaches
+                        # an UNESCAPED URL interpolation.
+    form: test
+    binds: ["interacts(benign_judge->get_closed_ticket).payload", "ticket_store.access[typed-tool]"]
+    discharged_by: test_key_grammar_comes_from_this_environments_config
+    # + test_absent_key_grammar_fails_closed_and_loud (the fail-closed half) and
+    # test_shipped_ticket_config_declares_the_key_grammar (the currency half: the shipped
+    # config declares it, it compiles, and it matches the minted case-id + seeded SOC-<n>
+    # shapes — so the suite cannot go green against a grammar the deployment lacks).
 
   # ===========================================================================
   # F-ROUND DEMANDS (75-verify-resolutions.md): the V-C currency test, the V-D
@@ -940,7 +964,7 @@ gate:
 # ===========================================================================
 handoff:
   forks:
-    - "Fork A — the key meets a DEFINED schema before any store attempt (anything outside the grammar rejects with zero store attempts; length flows opaquely). Human refined the recommendation. REWRITTEN at #684: the shipped metacharacter blacklist became the grammar `[A-Za-z0-9][A-Za-z0-9._-]*`, and the 'clean non-ASCII flows opaquely' half was REVERSED by the human at the #684 gate — the writer percent-encodes every key it mints while this reader interpolates unescaped, so a non-ASCII key was never fetchable through this path. -> d10"
+    - "Fork A — the key meets a DEFINED schema before any store attempt (anything outside the grammar rejects with zero store attempts; length flows opaquely). Human refined the recommendation. REWRITTEN at #684: the shipped metacharacter blacklist became a grammar, and the human then moved the grammar OUT of the consumer into the environment that owns it — TICKET_KEY_PATTERN, a REQUIRED ticket config key, absent = fail closed and loud. #672's 'clean non-ASCII flows opaquely' clause is retired with it: that is now the deployed store's statement, not this design's. -> d10 (the screen) + d30 (the grammar's source)"
     - "Fork B — demand #0's provisional record-free reading FLIPPED: the tools mirror the query tool FULLY (capture row per call + bounded truncation-noted view). Human DEPARTED from the recommendation. -> d0"
     - "Fork C — the case-under-judgment's own key is excluded at the tool boundary, state-independent. -> d23"
     - "Fork D — only the live closed-only read confirms; cached gather_raw payloads are context, never confirmation. Challenged by the human as unreachable; an executed probe (65-forkd-probe.md, claims p1-p3) refuted the challenge. -> d16"

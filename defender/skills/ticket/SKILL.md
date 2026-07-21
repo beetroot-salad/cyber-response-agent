@@ -23,6 +23,7 @@ the defender, the author skill, and the actor-reviewer judge.
 |---|---|
 | `list-tickets [--status X] [--label X] [--q X]` | Filtered ticket list with summary + labels |
 | `get-ticket <key>` | Full ticket record incl. description + comments |
+| `key-pattern` | This store's key grammar (regex, unanchored) — config, not data |
 
 ### gaps
 
@@ -113,7 +114,9 @@ http://ticket-server:8080/...`. Bastion default `web-1`.
 ### Config
 
 `defender/knowledge/environment/systems/ticket/config.env` declares
-`TICKET_URL_BASE`, `TICKET_BASTION_HOST`, `TICKET_TIMEOUT_SEC`.
+`TICKET_URL_BASE`, `TICKET_BASTION_HOST`, `TICKET_TIMEOUT_SEC`,
+`TICKET_KEY_PATTERN`. All are required — a missing one means the system is
+down (`ConfigFault`, exit 2), never a default.
 
 ### Exit codes
 
