@@ -292,8 +292,19 @@ def test_main_write_scope_is_an_explicit_allow_list(tmp_path):
                 "sub/report.md", "gather_raw/investigation.md"):  # allowed name at depth
         target = run_dir / rel
         target.parent.mkdir(parents=True, exist_ok=True)
-        text = (GOLDEN / "investigation.md").read_text() if rel.endswith(
-            "investigation.md") else "x\n"
+        # Each probe carries content that CLEARS the orthogonal output-structure gate for
+        # its basename, so every denial below is attributable to the write ALLOW-LIST — this
+        # test's subject — and never to content. investigation.md takes golden invlang;
+        # report.md takes a valid in-bounds report (#629 reconciliation, same as
+        # test_bind_sole_seam_551::test_d6_guard_noop_for_real_writers). The allowed-name-at-
+        # depth probes (`sub/report.md`, `gather_raw/investigation.md`) get valid content too:
+        # that is what makes them discriminating, since a basename-keyed rule would admit them.
+        if rel.endswith("investigation.md"):
+            text = (GOLDEN / "investigation.md").read_text()
+        elif rel.endswith("report.md"):
+            text = "---\ndisposition: benign\n---\nok\n"
+        else:
+            text = "x\n"
         if permission.decide_write(target, text, run_dir=run_dir,
                                    defender_dir=DEFENDER, policy=policy).allow:
             admitted.add(rel)

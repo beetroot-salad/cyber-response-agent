@@ -238,9 +238,15 @@ def test_edit_file_guards_bounce_then_recover(tmp_path):
     # S2 narrowed MAIN's write scope to exactly {investigation.md, report.md}; report.md
     # is the writable non-invlang artifact that still exercises the edit_file guards.)
     notes = str(run_dir / "report.md")
+    # #629 reconciliation: report.md now also faces an output-structure gate, so both the
+    # seed write and the state the surviving edit leaves behind must be VALID reports —
+    # otherwise the write is denied for its structure and the edit_file guards under test
+    # never run. The frontmatter is inert padding here; the body carries the edit fixtures
+    # ("alpha" twice for the non-unique guard, "beta" once for the unique edit, no "zzz").
+    fm = "---\ndisposition: benign\n---\n"
 
     main = ReplayFn([
-        Turn(tool_calls=[("write_file", {"path": notes, "content": "alpha\nbeta\nalpha\n"})]),
+        Turn(tool_calls=[("write_file", {"path": notes, "content": fm + "alpha\nbeta\nalpha\n"})]),
         Turn(tool_calls=[("edit_file", {"path": notes, "old_string": "", "new_string": "x"})]),        # clobber guard
         Turn(tool_calls=[("edit_file", {"path": notes, "old_string": "zzz", "new_string": "x"})]),      # not found
         Turn(tool_calls=[("edit_file", {"path": notes, "old_string": "alpha", "new_string": "A"})]),    # non-unique
@@ -250,7 +256,7 @@ def test_edit_file_guards_bounce_then_recover(tmp_path):
     drive(run_dir, run_id=run_id, salt=salt, main=main)
 
     assert main.calls == 6
-    assert (run_dir / "report.md").read_text() == "alpha\nBETA\nalpha\n"
+    assert (run_dir / "report.md").read_text() == fm + "alpha\nBETA\nalpha\n"
     seen = "\n".join(main.seen)
     assert "would overwrite it" in seen   # empty old_string on an existing file
     assert "old_string not found" in seen

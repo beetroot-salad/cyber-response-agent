@@ -3,20 +3,43 @@
 Both return a plain `Decision`. Reads must resolve inside the run dir or the
 defender corpus (with a belt-and-suspenders secret/ground-truth denylist on top);
 writes must `fullmatch` one of the agent's `policy.write_allow` patterns (its
-declared paths — a flat, deny-by-default allowlist), and an `investigation.md`
-write must additionally pass the structural invlang validator. `is_untrusted_read`
-flags attacker-influenced data the caller must tag-wrap."""
+declared paths — a flat, deny-by-default allowlist). On top of the allowlist, the
+run's two model-authored output artifacts get an OUTPUT-STRUCTURE gate (#629): a
+`report.md` write must carry parseable frontmatter with a valid `disposition` and
+stay within its frontmatter/whole-file byte bounds, and an `investigation.md` write
+must stay within its byte bound — checked before the structural invlang validator.
+`is_untrusted_read` flags attacker-influenced data the caller must tag-wrap."""
 
 from __future__ import annotations
 
 import re
 from pathlib import Path
 
+import yaml
+
+from defender._frontmatter import FrontmatterError, split_frontmatter
+from defender.learning.core.config import DISPOSITION_ENUM
 from defender.runtime import bash_policy
 from defender.skills.invlang.validate import validate_companion
 
 from .decision import Decision
 from .policy import AgentPolicy
+
+# #629 — output-structure bounds for the run's two model-authored artifacts, all in
+# UTF-8 BYTES. These are a VOLUME + STRUCTURE control on bytes that leave the system
+# (the report/investigation ride verbatim into the judge LLM prompt, and the report
+# body into the ticket bridge's HTTP egress) — not a content oracle: an in-bound,
+# well-formed payload still passes. Values are policy inputs decided in the #629
+# intent+design doc (report frontmatter 512 B / whole file 8 KiB; investigation 64 KiB).
+_REPORT_FRONTMATTER_MAX = 512
+_REPORT_FILE_MAX = 8192
+_INVESTIGATION_FILE_MAX = 65536
+
+# The judge splices report.md verbatim into a `<report>…</report>` block with no
+# tag-delimiter escaping (learning/pipeline/judge/run.py + pipeline/_prompt.py::_section),
+# so a literal closing delimiter in the report could close the tag early and forge an
+# adjacent prompt section — deny it fail-closed alongside the size bounds (#629 cc7).
+_REPORT_CLOSE_DELIMITER = "</report>"
 
 # Everything `Path.resolve()` can throw on a hostile operand, so every gate that
 # resolves one fails CLOSED instead of propagating. `OSError`/`RuntimeError` are the
@@ -294,27 +317,167 @@ def decide_write(
             "agent's read containment (write ⊆ read roots).",
         )
 
-    # Select the invlang validator on the RESOLVED name, not the unresolved operand
-    # (#631, PBW2D): `write_allow` matches `rp`, so a symlink `alias.md` that resolves to
-    # `investigation.md` passes the allowlist — and must then face the same validator the
-    # direct write does, or identical text is refused through the real name and admitted
-    # through the alias. The append-only baseline reads from `rp` for the same reason.
-    if rp.name == "investigation.md":
-        current = rp.read_text(encoding="utf-8") if rp.is_file() else None
-        # Fail closed on an internal validator error — same as invlang_validate's
-        # hook, which exits 2 (block) rather than letting the write through.
+    # #629 — the run's two model-authored output artifacts get a structural + volume gate,
+    # keyed on the operand RESOLVING to the run-dir ROOT (not `path.name` alone). Resolving
+    # first closes the symlink/subdir disguise (a `decoy.md` -> `<run_dir>/report.md` IS
+    # gated; a `<run_dir>/sub/report.md` is NOT), and scoping to the run-dir root leaves a
+    # same-named lesson in a curator's corpus untouched (the verify_forward forward-check
+    # operand — F-A2: gating it would flip its pure-containment allow into a deny).
+    is_report = _is_run_dir_file(rp, run_dir, "report.md")
+    # investigation.md: run-dir-root keyed when a run root is supplied (mirrors report.md,
+    # so the symlink/subdir disguise is closed for it too); falls back to the legacy
+    # exact-basename keying when no run root is threaded, so a caller that gates an
+    # investigation write without `run_dir` still gets the invlang guard it always had.
+    # That fallback keys on the RESOLVED name (#631, PBW2D), not the unresolved operand:
+    # `write_allow` matches `rp`, so a symlink `alias.md` resolving to `investigation.md`
+    # clears the allowlist and must then face the same validator the direct write does, or
+    # identical text is refused through the real name and admitted through the alias.
+    is_investigation = (
+        _is_run_dir_file(rp, run_dir, "investigation.md")
+        if run_dir is not None
+        else rp.name == "investigation.md"
+    )
+    if is_report or is_investigation:
+        # Both artifact gates measure UTF-8 BYTES (`_utf8_len`) and splice the text into live
+        # egresses. Content that is not UTF-8-encodable — a lone surrogate, reachable from a model
+        # tool-call JSON arg (`json.loads('"\\ud800"')` yields one) — can be neither byte-measured
+        # nor written (`write_text(encoding="utf-8")` raises the SAME error), so deny it FAIL-CLOSED
+        # here rather than let `_utf8_len`'s `.encode()` raise out of the gate: the gate's contract
+        # is to return a Decision, never propagate (the RESOLVE_ERRORS fail-closed rule above).
         try:
-            errors = validate_companion(proposed_text, current)
-        except Exception as e:  # noqa: BLE001 — a blocking gate must fail closed
+            proposed_text.encode("utf-8")
+        except UnicodeEncodeError:
+            artifact = "report.md" if is_report else "investigation.md"
             return Decision(
                 False,
-                f"investigation.md validation errored — failing closed: {e!r}. "
-                "Simplify the invlang and rewrite.",
+                f"{artifact} contains bytes that are not valid UTF-8 (e.g. a lone surrogate) — "
+                "rewrite it as UTF-8 text and retry.",
             )
-        if errors:
-            return Decision(
-                False,
-                "investigation.md failed invlang validation — fix and rewrite:\n"
-                + "\n".join(f"  - {e}" for e in errors),
-            )
+    if is_report:
+        return _decide_report_write(proposed_text)
+    if is_investigation:
+        return _decide_investigation_write(proposed_text, rp)
+    return Decision(True)
+
+
+def _is_run_dir_file(rp: Path, run_dir: Path | None, name: str) -> bool:
+    """True iff the RESOLVED operand `rp` is exactly `<run_dir>/<name>` — the run-dir ROOT,
+    exact basename, symlinks already collapsed into `rp` by the caller's `resolve()`. `run_dir`
+    is resolved here to align with `rp`'s resolution. `None` run_dir (no run root supplied) or a
+    `resolve()` error both return False — the artifact branch then simply does not fire, and the
+    write stands on the generic allowlist decision that already ran above."""
+    if run_dir is None:
+        return False
+    try:
+        return rp == run_dir.resolve() / name
+    except RESOLVE_ERRORS:
+        return False
+
+
+def _utf8_len(text: str) -> int:
+    """Byte length under UTF-8 — the basis for every #629 bound. A multibyte codepoint costs
+    its real transport bytes, so a `len(str)` (codepoint-count) impl would under-count and let
+    a body over the byte bound through; the multibyte fixtures pin exactly that."""
+    return len(text.encode("utf-8"))
+
+
+def _has_duplicate_top_level_key(raw: str) -> bool:
+    """True iff the frontmatter YAML declares the same top-level key twice. PyYAML's `safe_load`
+    silently resolves duplicates last-wins, so a `disposition:` declared twice (a valid member
+    shadowing an invalid one) would pass a plain membership check on the parsed mapping — this
+    catches it at the node level instead. Returns False on any parse trouble: `raw` already
+    parsed once via `split_frontmatter`, so trouble here means no reliable duplicate signal and
+    the other checks stand."""
+    try:
+        node = yaml.compose(raw)
+    except (yaml.YAMLError, RecursionError):
+        return False
+    if not isinstance(node, yaml.MappingNode):
+        return False
+    seen: set[object] = set()
+    for key_node, _value_node in node.value:
+        key = getattr(key_node, "value", None)
+        if key in seen:
+            return True
+        seen.add(key)
+    return False
+
+
+def _decide_report_write(proposed_text: str) -> Decision:
+    """The report.md output-structure gate (#629). Fail-closed on any of: unparseable
+    frontmatter (the one canonical grammar — leading+closing fence, valid YAML, a mapping);
+    a missing / duplicated / non-string / out-of-enum top-level `disposition`; a frontmatter
+    over 512 B or a whole file over 8,192 B (UTF-8); or a literal `</report>` that would break
+    out of the judge's report block. Only `disposition` is required — `case_id`/`confidence`
+    are deliberately unvalidated (the ticket path derives case_id from the run dir; confidence
+    is untyped everywhere). Each deny carries actionable text the tool lane raises as ModelRetry."""
+    try:
+        fm, raw, _body = split_frontmatter(proposed_text)
+    except FrontmatterError as e:
+        return Decision(False, f"report.md frontmatter is malformed — fix and rewrite: {e}")
+    if _has_duplicate_top_level_key(raw):
+        return Decision(
+            False,
+            "report.md frontmatter declares a top-level key more than once — remove the "
+            "duplicate and rewrite.",
+        )
+    disposition = fm.get("disposition")
+    # `isinstance(str)` FIRST: a non-string value (a list / mapping) is unhashable, so a bare
+    # `value in DISPOSITION_ENUM` (a set) would raise TypeError out of the gate instead of denying.
+    if not (isinstance(disposition, str) and disposition in DISPOSITION_ENUM):
+        return Decision(
+            False,
+            "report.md frontmatter must carry a top-level `disposition` in "
+            f"{sorted(DISPOSITION_ENUM)} (got {disposition!r}) — fix and rewrite.",
+        )
+    if _utf8_len(raw) > _REPORT_FRONTMATTER_MAX:
+        return Decision(
+            False,
+            f"report.md frontmatter is {_utf8_len(raw)} bytes, over the "
+            f"{_REPORT_FRONTMATTER_MAX}-byte limit — trim it and rewrite.",
+        )
+    if _utf8_len(proposed_text) > _REPORT_FILE_MAX:
+        return Decision(
+            False,
+            f"report.md is {_utf8_len(proposed_text)} bytes, over the "
+            f"{_REPORT_FILE_MAX}-byte limit — trim it and rewrite.",
+        )
+    if _REPORT_CLOSE_DELIMITER in proposed_text:
+        return Decision(
+            False,
+            f"report.md contains the literal {_REPORT_CLOSE_DELIMITER!r} delimiter, which would "
+            "break out of the judge's report block — remove it and rewrite.",
+        )
+    return Decision(True)
+
+
+def _decide_investigation_write(proposed_text: str, rp: Path) -> Decision:
+    """The investigation.md gate: the #629 byte bound FIRST (size-first short-circuit, so an
+    over-bound document yields a deterministic SIZE-failure reason without the invlang validator
+    ever running on the oversize text), then the pre-existing structural invlang validation
+    against the full proposed text (current on-disk text supplies the append-only baseline).
+    Empty / whitespace-only text is 0-ish bytes under bound and invlang-empty, so it accepts."""
+    if _utf8_len(proposed_text) > _INVESTIGATION_FILE_MAX:
+        return Decision(
+            False,
+            f"investigation.md is {_utf8_len(proposed_text)} bytes, over the "
+            f"{_INVESTIGATION_FILE_MAX}-byte limit — trim it and rewrite.",
+        )
+    current = rp.read_text(encoding="utf-8") if rp.is_file() else None
+    # Fail closed on an internal validator error — same as invlang_validate's
+    # hook, which exits 2 (block) rather than letting the write through.
+    try:
+        errors = validate_companion(proposed_text, current)
+    except Exception as e:  # noqa: BLE001 — a blocking gate must fail closed
+        return Decision(
+            False,
+            f"investigation.md validation errored — failing closed: {e!r}. "
+            "Simplify the invlang and rewrite.",
+        )
+    if errors:
+        return Decision(
+            False,
+            "investigation.md failed invlang validation — fix and rewrite:\n"
+            + "\n".join(f"  - {e}" for e in errors),
+        )
     return Decision(True)
