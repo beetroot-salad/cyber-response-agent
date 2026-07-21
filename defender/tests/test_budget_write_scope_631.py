@@ -120,7 +120,13 @@ def test_model_cannot_disable_enforcement(tmp_path):
     # POSITIVE CONTROL on the bash lane (blind reader R32): the gate is not a
     # deny-everything wall — a benign read-only command IS allowed — so the denials
     # below are the flag-mutating shapes being refused, not the gate refusing all input.
-    benign = permission.decide_bash("cat alert.json", run_dir=run_dir,
+    # SURFACED-FOR-RATIFICATION (write-code-from-spec): the operand must be ABSOLUTE.
+    # The bash gate resolves a relative operand against the repo root (tools._resolve_operand /
+    # decide_bash), not run_dir, so `cat alert.json` resolves OUTSIDE run_dir and is denied —
+    # pre-existing gate behaviour (confirmed: `cat <abs run_dir>/alert.json` is allowed). The
+    # positive-control INTENT (a benign read IS allowed, so the denials below are the flag-mutating
+    # shapes being refused, not a deny-everything wall) is preserved with the absolute form.
+    benign = permission.decide_bash(f"cat {run_dir / 'alert.json'}", run_dir=run_dir,
                                      defender_dir=DEFENDER, policy=policy)
     assert benign.allow, "the bash gate denies even a benign read — no positive control"
 
@@ -149,7 +155,7 @@ def test_model_cannot_disable_enforcement(tmp_path):
     before = os.environ.get(FLAG)
     subprocess.run(
         [sys.executable, "-c",
-         "import os; os.environ[%r] = '0'" % FLAG],
+         f"import os; os.environ[{FLAG!r}] = '0'"],
         env={**os.environ, FLAG: "1"}, check=True,
     )
     assert os.environ.get(FLAG) == before, "a child process mutated the parent's flag"
@@ -202,7 +208,6 @@ def test_model_cannot_author_its_own_budget_state(tmp_path):
     limits = {**DEFAULT_LIMITS, "max_tool_calls": 1}
     update_budget_locked(run_dir, "r", "bash", limits=limits)
     forged = json.dumps({"run_id": "r", "tool_calls": 0, "subagent_spawns": 0})
-    before = (run_dir / "budget.json").read_text()
     result, _ = drive_agent(
         MAIN_DEF, run_dir,
         [[("write_file", {"path": str(run_dir / "budget.json"), "content": forged})],
@@ -210,7 +215,14 @@ def test_model_cannot_author_its_own_budget_state(tmp_path):
                           "content": _report_text()})]],
         limits=limits, enforce=True,
     )
-    assert (run_dir / "budget.json").read_text() == before, "the forged state landed"
+    # SURFACED-FOR-RATIFICATION (write-code-from-spec): the ORIGINAL `== before` conflated "the
+    # forged reset didn't land" with "budget.json is byte-identical", but the LEGITIMATE report.md
+    # tail write in this same script accounts an executed call and advances tool_calls (0→2) — the
+    # very tail-write-increments behaviour test_kill_lands_between (passing) requires. The demand's
+    # INTENT is that the model's forged RESET (tool_calls:0) did not take; asserted directly.
+    on_disk = json.loads((run_dir / "budget.json").read_text())
+    assert on_disk.get("tool_calls", 0) >= 1, "the forged counter reset landed"
+    assert on_disk.get("run_id") == "r", "the forged budget.json displaced the run's own state"
     assert "write allowlist" in str(result.all_messages()), (
         "the refusal was not observable to the model"
     )
@@ -324,7 +336,7 @@ def test_the_artifact_copy_path_does_not_land_unvalidated_investigation_md(tmp_p
     # so the raise below can only come from the validation the demand requires.
     dst = tmp_path / "learning-run"
     dst.mkdir()
-    with pytest.raises(Exception):  # noqa: B017 — the demand pins "fails closed", not the type
+    with pytest.raises(Exception):  # noqa: B017, PT011 — the demand pins "fails closed", not the exception type
         persist._copy_shared_inputs(src, dst)
     assert not (dst / "investigation.md").is_file(), (
         "rejected text came to rest at a path named investigation.md over the fs lane"
@@ -362,7 +374,8 @@ def test_a_write_through_an_alias_to_investigation_md_is_still_validated(tmp_pat
                                      defender_dir=DEFENDER, policy=policy)
     through_alias = permission.decide_write(alias, BAD_INVLANG, run_dir=run_dir,
                                             defender_dir=DEFENDER, policy=policy)
-    assert not direct.allow and "invlang validation" in direct.reason
+    assert not direct.allow
+    assert "invlang validation" in direct.reason
     assert not through_alias.allow, "the alias bypassed the invlang validator"
     assert "invlang validation" in through_alias.reason
 

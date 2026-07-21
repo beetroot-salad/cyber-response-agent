@@ -600,7 +600,8 @@ def test_each_trip_limb_opens_the_same_bounded_report_tail(tmp_path, enforced):
                                           grace_seconds=600),
                             [Turn(tool_calls=[("bash", {"command": "echo a"})]),
                              Turn(tool_calls=[("bash", {"command": "echo b"})])])
-    assert stem in history and rep.is_file()
+    assert stem in history
+    assert rep.is_file()
 
     # SPAWN limb — the arm that had no demand before, driven against the live counter.
     gathers = [Turn(tool_calls=[("gather", {"lead_id": f"l-00{i}", "system": "elastic",
@@ -719,9 +720,9 @@ def test_accounting_runs_regardless_of_posture(tmp_path, monkeypatch, capsys):
         warned[posture] = "Budget warning" in capsys.readouterr().err
 
     assert states["off"]["tool_calls"] == states["on"]["tool_calls"] == 3
-    assert warned["off"] and warned["on"], (
-        "the 75% warning did not fire under both postures — accounting is gated on posture"
-    )
+    _both_warned = "the 75% warning did not fire under both postures — accounting is gated on posture"
+    assert warned["off"], _both_warned
+    assert warned["on"], _both_warned
 
 
 def test_flag_off_leaves_run_unenforced(tmp_path, unenforced, capsys):
@@ -930,7 +931,8 @@ def test_executed_query_writes_a_row(tmp_path, unenforced):
 
     rows = list(read_jsonl_rows(run_dir / "executed_queries.jsonl"))
     assert len(rows) == 1
-    assert rows[0]["lead_id"] == "l-001" and rows[0]["system"] == "elastic"
+    assert rows[0]["lead_id"] == "l-001"
+    assert rows[0]["system"] == "elastic"
     assert recorder.only().params == {"index": "logs"}
 
 
@@ -1029,6 +1031,7 @@ def test_gather_has_no_per_call_timeout(tmp_path, unenforced):
 
     assert "finished after a long call" in "\n".join(main.seen)
     rows = list(read_jsonl_rows(run_dir / "executed_queries.jsonl"))
-    assert rows and rows[0]["exit_code"] == 0, (
+    assert rows, "the completed call wrote no queries row"
+    assert rows[0]["exit_code"] == 0, (
         "a per-call stopwatch synthesized a timeout row for a call that completed"
     )

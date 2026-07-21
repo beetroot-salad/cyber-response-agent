@@ -177,8 +177,18 @@ def test_budget_kill_is_not_control_flow(tmp_path):
         _drive_gather_query(_run_dir(tmp_path, "run2"), KillingRegistry())
 
     # _run_gather's handler: the kill must NOT become the measurement-shaped string.
-    async def killing_factory(agent_id):
-        raise BudgetKill("tail exhausted")
+    # SURFACED-FOR-RATIFICATION (write-code-from-spec): the ORIGINAL factory was `async def`, so
+    # calling it yielded a COROUTINE that never raised on call — `_run_gather` then did
+    # `gagent.run(...)` on a coroutine → AttributeError, never BudgetKill. The demand's INTENT is
+    # that a kill from the nested `gagent.run` propagates PAST `_run_gather`'s widened
+    # `except (UsageLimitExceeded, UnexpectedModelBehavior)` handler (M7) rather than being
+    # converted — so a fake agent whose `run` raises the kill exercises exactly that path.
+    class _KillingAgent:
+        async def run(self, *args, **kwargs):
+            raise BudgetKill("tail exhausted")
+
+    def killing_factory(agent_id):
+        return _KillingAgent()
 
     import asyncio
     deps = bind(MAIN_DEF, run_dir, salt="0011223344556677", defender_dir=DEFENDER)
@@ -239,15 +249,21 @@ def test_enforcement_keys_on_declared_bit(tmp_path):
     deps = bind(MAIN_DEF, _run_dir(tmp_path, "p"), salt="0" * 16, defender_dir=DEFENDER)
     assert deps.policy.budget_enforced is True
 
+    # SURFACED-FOR-RATIFICATION (write-code-from-spec): the script must drive a CORE-tier tool.
+    # read_file is TAIL on MAIN (pinned by test_tier_table_over_the_real_census +
+    # test_same_tool_name_on_two_agents, both passing), so it is NOT refused at a cap-1 trip — it
+    # runs inside the report tail. To observe the posture bit's difference the tool must be
+    # refusable, so this drives core-tier `bash` (echo): the declared-True agent refuses once the
+    # cap trips; the declared-False agent of the same role does not. Same INTENT, refusable tool.
     limits = {**DEFAULT_LIMITS, "max_tool_calls": 1}
     on_dir = _run_dir(tmp_path, "enf-on")
     open_budget(on_dir, "r")
-    on_script = [[("read_file", {"path": str(on_dir / "alert.json")})]] * 3
+    on_script = [[("bash", {"command": f"echo {i}"})] for i in range(3)]
     result_on, _ = drive_agent(MAIN_DEF, on_dir, on_script, limits=limits, enforce=True)
 
     off_dir = _run_dir(tmp_path, "enf-off")
     open_budget(off_dir, "r")
-    off_script = [[("read_file", {"path": str(off_dir / "alert.json")})]] * 3
+    off_script = [[("bash", {"command": f"echo {i}"})] for i in range(3)]
     result_off, _ = drive_agent(MAIN_DEF, off_dir, off_script, limits=limits,
                                 enforce=False)
 
@@ -393,10 +409,10 @@ def test_caps_are_not_operator_configurable(tmp_path, monkeypatch):
     # config file planted in its cwd; its DEFAULT_LIMITS must match this process's.
     probe = (
         "import os, json, sys;"
-        "sys.path.insert(0, %r);"
+        f"sys.path.insert(0, {str(REPO_ROOT)!r});"
         "from defender.hooks.budget_enforcer import DEFAULT_LIMITS;"
         "print(json.dumps(DEFAULT_LIMITS))"
-    ) % str(REPO_ROOT)
+    )
     (tmp_path / "budget_limits.json").write_text(json.dumps({"max_tool_calls": 1}))
     env = {**os.environ, "PYTHONPATH": str(REPO_ROOT)}
     for name in ("DEFENDER_MAX_TOOL_CALLS", "DEFENDER_BUDGET_MAX_TOOL_CALLS",
@@ -596,9 +612,9 @@ def test_enforcement_flag_diverges_across_a_process_boundary(monkeypatch, tmp_pa
     monkeypatch.setenv(FLAG, "true")
     child = subprocess.run(
         [sys.executable, "-c",
-         "import sys; sys.path.insert(0, %r);"
+         f"import sys; sys.path.insert(0, {str(REPO_ROOT)!r});"
          "from defender.runtime import driver;"
-         "print(driver.enforcement_enabled())" % str(REPO_ROOT)],
+         "print(driver.enforcement_enabled())"],
         capture_output=True, text=True,
         env={**os.environ, "PYTHONPATH": str(REPO_ROOT)},
     )
@@ -608,9 +624,9 @@ def test_enforcement_flag_diverges_across_a_process_boundary(monkeypatch, tmp_pa
     monkeypatch.setenv(FLAG, "false")
     child = subprocess.run(
         [sys.executable, "-c",
-         "import sys; sys.path.insert(0, %r);"
+         f"import sys; sys.path.insert(0, {str(REPO_ROOT)!r});"
          "from defender.runtime import driver;"
-         "print(driver.enforcement_enabled())" % str(REPO_ROOT)],
+         "print(driver.enforcement_enabled())"],
         capture_output=True, text=True,
         env={**os.environ, "PYTHONPATH": str(REPO_ROOT)},
     )

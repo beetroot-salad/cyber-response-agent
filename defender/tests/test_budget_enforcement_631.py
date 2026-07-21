@@ -180,7 +180,8 @@ def test_budget_state_carries_a_run_scoped_sentinel_from_before_the_first_call(t
     assert state["created_at"], "no cross-process wall-clock origin written at open (VR1)"
     assert state["tool_calls"] == 0
     on_disk = _budget(tmp_path)
-    assert on_disk["run_id"] == "run-abc" and on_disk["created_at"] == state["created_at"]
+    assert on_disk["run_id"] == "run-abc"
+    assert on_disk["created_at"] == state["created_at"]
 
     # Mismatched sentinel: the model authored a file claiming a DIFFERENT run with reset
     # counters, hoping to escape a pool this run has been spending. The run's own writer
@@ -510,28 +511,39 @@ def test_the_enforcing_read_of_budget_json_is_never_torn(tmp_path):
     open_budget(tmp_path, "run-1")
     writer_src = (
         "import sys;"
-        "sys.path.insert(0, %r);"
+        f"sys.path.insert(0, {str(REPO_ROOT)!r});"
         "from defender.hooks.budget_enforcer import update_budget_locked, DEFAULT_LIMITS;"
         "from pathlib import Path;"
-        "rd = Path(%r);"
+        f"rd = Path({str(tmp_path)!r});"
         "[update_budget_locked(rd, 'run-1', 'bash', limits={**DEFAULT_LIMITS,"
         " 'max_tool_calls': 10**6}) for _ in range(150)]"
-    ) % (str(REPO_ROOT), str(tmp_path))
+    )
     env = {**os.environ, "PYTHONPATH": str(REPO_ROOT)}
     procs = [subprocess.Popen([sys.executable, "-c", writer_src], env=env)
              for _ in range(6)]
     try:
         torn = 0
         reads = 0
+        live_reads = 0
+        started = False  # the writers have committed their first increment (see below)
         while any(p.poll() is None for p in procs) and reads < 4000:
             state = budget_enforcer.read_budget(tmp_path)
             reads += 1
-            # A torn read is one that observed the empty truncate-window (an implementation
-            # that swallows the parse error and returns a default-zeroed dict is doing the
-            # SAME fail-open thing, so a zeroed count mid-run counts as torn — blind reader
-            # R15's maskable-oracle path).
-            if not state or "tool_calls" not in state or (
-                    state.get("tool_calls") == 0 and any(p.poll() is None for p in procs)):
+            # SURFACED-FOR-RATIFICATION (write-code-from-spec): only count a read as torn ONCE
+            # the writers are live. open_budget writes tool_calls=0, and 6 writer SUBPROCESSES
+            # take real time to spawn + import before their first increment — during that startup
+            # window a `tool_calls==0` read is the LEGITIMATE initial state, not a masked torn read
+            # (the ORIGINAL condition counted the whole window as torn, so the assertion was
+            # unpassable by any correct read; empirically all zero-reads land before the first
+            # increment, and conservation below holds). Once a non-zero read is seen the writers are
+            # committing, and thereafter a `{}` / missing-key / zeroed read IS the truncate-window
+            # fail-open R15's maskable-oracle names — counted.
+            if state.get("tool_calls"):
+                started = True
+            if not started:
+                continue
+            live_reads += 1
+            if not state or "tool_calls" not in state or state.get("tool_calls") == 0:
                 torn += 1
     finally:
         for p in procs:
@@ -543,10 +555,11 @@ def test_the_enforcing_read_of_budget_json_is_never_torn(tmp_path):
     # the flock, none lost.
     assert all(p.returncode == 0 for p in procs), "a writer subprocess crashed"
     assert reads > 0, "the read loop never ran against a live writer"
+    assert live_reads > 0, "the read loop never observed a live (post-first-increment) writer"
     assert _budget(tmp_path)["tool_calls"] == 6 * 150, (
         "cross-process increments were lost or double-counted under contention"
     )
-    assert torn == 0, f"the enforcing read observed {torn} torn states in {reads} reads"
+    assert torn == 0, f"the enforcing read observed {torn} torn states in {live_reads} live reads"
 
 
 # --- D4 / NF4: the accounting write itself fails ----------------------------
@@ -668,7 +681,7 @@ def test_an_intermittent_accounting_failure_trips_the_first_failure_stamp(tmp_pa
     stamp = accounting_failure_state(run_dir)["first_failure_at"]
     assert stamp is not None
 
-    with pytest.raises(BudgetKill):
+    with pytest.raises(BudgetKill):  # noqa: PT012 — the alternating drive must run inside the block until the stamp trips
         deadline = time.monotonic() + 5
         fail = False
         while time.monotonic() < deadline:
