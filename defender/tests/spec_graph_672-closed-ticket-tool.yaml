@@ -1,0 +1,969 @@
+# Spec-coverage graph — #672: the benign judge's closed-ticket read as two typed tools.
+# Assembled (phase D) from 10-brief.md + 20-demands.md + 45-dispositions.md; UPDATED at
+# phase E against 70-resolutions.md (the human's 13 decisions) — the suite is
+# test_closed_ticket_tool_672.py, in this directory. `handoff:` filled at phase F.
+#
+# F-ROUND RE-AUTHORING (75-verify-resolutions.md — phase F's 22 findings dispositioned):
+#   V-A the self-key screen EXTENDS to the list path (identity filter) — d23 binds both
+#       tool paths, d24's re-check adds per-item self-key exclusion.
+#   V-B d0's truncation bound is the query tool's EXACT passthrough ceiling + the note.
+#   V-C the two stale teaching docs (runtime-gates.md:42, state-surface-adapters.md) join
+#       d21's census, with the d26 currency test.
+#   V-D the Fork B capture-row sink is MODELLED (judge_queries_table + write edges, d27,
+#       R2 recomputed); brief F3's registration-ORDER half is d28 (50-graph-digest.md:113's
+#       false "rides c11/d21" booking corrected); the salt must be UNPREDICTABLE (a counter
+#       fails the per-bind test).
+#   V-E g11 re-typed behavior, verdict holds on the EXECUTED probe 66-bashlane-probe.md
+#       (drove the real _tool_bash seam: box=None is the single cause); x1's box-denial
+#       half executed by the same probe; x4 + r1/r1-extended stay deferred under d18.
+#   V-F the cross-leg salt half is w3, Demand{form: waiver} — unexercisable, the
+#       adversarial leg has no ticket tools.
+#   V-G JUDGE_REQUEST_LIMIT=45 pinned as claim g20; skills/ticket/SKILL.md's status
+#       vocabulary is the executable demand d29; d21 enumerates its four named stale
+#       tests; SOC_PLAYGROUND_DOCKER_CONTEXT recorded as a no-consequence note (on
+#       TICKET_TIMEOUT_SEC's facet — the config family's carrier).
+#
+# ROUND 3 (76-verify-r2-resolutions.md — round-2 cold findings, all auto-repairs of
+# decided intent, none re-decided):
+#   C5  Fork E applied to BOTH read tools: the LIST path gets its own open-breaker honor
+#       test (test_store_breaker_open_blocks_list_path — immediate failed result, no
+#       transport attempt), and the malformed-list breaker trip is driven ALONE so the
+#       contribution is per-verb attributable (closes C6b too).
+#   C6a d16 pins the teaching INSTRUCTION (cached surface coupled to "context, never
+#       confirmation" + the confirmation-denial), with the explicit note beside d16 that
+#       Fork D's behavioral half is instruction-level, not suite-enforced.
+#   C7  80-author-digest.md's inventory recomputed to the real current counts.
+#   CR-m1 d28 asserts the insertion POSITION (source-order census over register_tools'
+#       presence table) beside the judge-leg projection; CR-m2 d23's list-fault fallback
+#       scoped to the list call's own appended result; CR-m3 the x4 handoff entry split
+#       from the g11/x1 resolution record — x4 stays executed-probe-owed.
+#
+# §7 RESOLUTIONS APPLIED (70-resolutions.md is authoritative; 65-forkd-probe.md executed):
+#   Fork A — key meets a DEFINED minimal schema before any store attempt (d10 amended).
+#   Fork B — demand #0's provisional record-free reading FLIPPED: full query-tool mirror,
+#            capture row + bounded truncation-noted view (d0 de-provisionalized).
+#   Fork C — the case's own key excluded at the tool boundary (d23 minted).
+#   Fork D — only the live closed-only read confirms; cached gather_raw is context (d16).
+#   Fork E — FULL breaker participation: honor + contribute (d6/d8 fixtures amended);
+#            business refusals (exit-1) never contribute.
+#   Fork F — cut loose, documented (d9); an unfinished attempt is the one attempt (d8).
+#   Fork G — client-side per-item closed re-check on the list path (d24 minted).
+#   Fork H — O2 scoped record-wise + the self-key payload screen (d25 minted); the
+#            residual transitive path is the N-note on ticket_store.domain below.
+#   f2     — names CONFIRMED: `closed_tickets`, `get_closed_ticket`, `list_closed_tickets`.
+#   Waivers w1/w2 mint the two open R3 cells as examined declines (see gate note).
+#   Two design corrections fold into M6's rewrite scope: judge/run.py:80's false
+#   "it is open" claim must not survive the rewrite (d15's test pins its absence), and
+#   skills/ticket/SKILL.md advertises statuses the server never had (p1).
+#
+# Name reconciliation (assembler — the graph joins to code BY NAME, schema.md "Coin ids"):
+#   cited_policy_read_section -> _cited_policy_read_section  (judge/run.py:60-94)
+#   judge_deny_reason         -> _JUDGE_DENY_REASON          (engine_pydantic.py:60-68)
+#   judge_bash_grants         -> _judge_bash_shapes          (engine_pydantic.py:111-142)
+#   the surviving ticket CLI  -> ticket_adapter_cli          (scripts/adapters/ticket_adapter.py main;
+#                                distinct from the REMOVED judge-side ticket_cli plumbing below)
+# Negative demands d2/d19 were re-bound from addresses of edges that must NOT exist to the
+# element addresses of the surfaces the negatives sweep: a `binds` address must resolve in
+# structure, and materializing those edges would assert the very thing each demand denies.
+schema_version: 1
+design: "#672 — intent-design-672.md: typed closed-ticket tool for the benign judge"
+base: 07596adfde6ccfb5ef3eab9a727de13c4c52f39c
+
+# ===========================================================================
+# DEMANDS — the spec proper (20-demands.md, verbatim semantics; 20 test + 2 clause
+# at phase D; phase E minted d22-d25 + w1/w2, the F round minted d26-d29 + w3 —
+# now 28 test + 2 clause + 3 waiver).
+# form:test demands are POINTERS — their outcome prose is the docstring seed in
+# 20-demands.md, destined for the named test at phase E.
+# ===========================================================================
+demands:
+
+  # --- #0 THE RETURN CONTRACT — RESOLVED at §7 (Fork B, the flip): the provisional
+  # record-free reading was REJECTED. The tools mirror the query tool FULLY: every call
+  # writes a capture row into the judge run dir's queries table (an audit trail of judge
+  # ticket reads, test-visible, unconditional on result size or outcome), and an
+  # oversized view is bounded with a truncation note + the persisted-payload pointer.
+  # V-B (F round): the bound is the query tool's OWN passthrough ceiling, EXACTLY —
+  # _passthrough_max_bytes() (DEFENDER_GATHER_PASSTHROUGH_MAX_BYTES, shipped 65536;
+  # record_query.py:65-68), computed over the payload's compact-JSON serialization as the
+  # query-tool capture does (query_tool.py:354,406): one byte over truncates with the note
+  # naming the byte size; at the ceiling the view rides inline whole.
+  # The Fork B premises are pinned by the sibling scenario tests
+  # (test_oversized_payload_bounded_view_and_capture_row, test_list_closed_tickets_result_empty);
+  # the sink itself is modelled and demanded at d27 (V-D).
+  - id: d0_tool_result_envelope
+    kind: behavior
+    form: test
+    binds: ["interacts(benign_judge->get_closed_ticket).response", "interacts(benign_judge->list_closed_tickets).response"]
+    discharged_by: test_tool_result_envelope
+
+  - id: d1_benign_registration
+    kind: seam
+    form: test
+    binds: ["closed_tickets", "interacts(benign_judge->get_closed_ticket)", "interacts(benign_judge->list_closed_tickets)", "JudgeWiring.closed_ticket_read"]
+    discharged_by: test_benign_leg_registers_closed_ticket_tools
+    # rejected (to the test, phase E): N6 — presence is a ToolSet bit on the built
+    # definition, never a conditional in a body; defender-policy show stays out of scope.
+
+  - id: d2_adversarial_absent
+    kind: negative      # positive control: d1 (same stage-build seam, wiring bit on)
+    form: test
+    binds: ["adversarial_judge", "get_closed_ticket", "list_closed_tickets", "closed_tickets.domain.distinguished[false]"]
+    discharged_by: test_adversarial_leg_has_no_ticket_tools
+    # rejected: N3 — no runtime direction check; the property is absence by registration.
+
+  - id: d3_schema_closed_by_construction
+    kind: shape         # exactness subsumes the negative (no require_closed, no status)
+    form: test
+    binds: ["interacts(benign_judge->get_closed_ticket).payload", "interacts(benign_judge->list_closed_tickets).payload"]
+    discharged_by: test_tool_schemas_have_no_status_or_require_closed
+    # rejected: N5 — no write verb; adapter stays read-only. Two tools, deliberately no
+    # operation discriminator (M1).
+
+  - id: d4_body_pins_closed
+    kind: behavior
+    form: test
+    binds: ["interacts(get_closed_ticket->ticket_store)", "interacts(list_closed_tickets->ticket_store)"]
+    discharged_by: test_bodies_hardcode_require_closed
+
+  - id: d5_nonclosed_refused_as_fault
+    kind: domain-outcome
+    form: test
+    binds: ["ticket_store.domain.distinguished[open]", "interacts(benign_judge->get_closed_ticket).response"]
+    discharged_by: test_open_ticket_refused_as_failed_result
+
+  - id: d6_unreachable_store_fault
+    kind: behavior
+    form: test
+    binds: ["interacts(get_closed_ticket->ticket_store)", "interacts(benign_judge->get_closed_ticket).response"]
+    discharged_by: test_unreachable_store_is_failed_result
+    # rejected: scale-dive tradeoff — no outer wall-clock budget; the transport's mandatory
+    # inner timeout (x4, TICKET_TIMEOUT_SEC+10) is the only kill, as the query tool accepted.
+    # Fork E RESOLVED (§7, departing from the isolation recommendation): FULL breaker
+    # participation. An infra fault here is RECORDED against the breaker, and an already-open
+    # breaker yields an immediate failed result with NO transport attempt
+    # (test_store_breaker_open_when_judge_reads pins the honor direction on this demand).
+    # ROUND 3 (C5): the honor arm is pinned on BOTH read tools — Fork E's wording is
+    # unqualified over the tool — test_store_breaker_open_blocks_list_path drives the
+    # LIST path against the open breaker (immediate failed result, zero transport
+    # attempts), and the malformed-list contribute arm (on d7's test) is driven with no
+    # sibling get, so list→breaker holds in both directions, per-verb attributable.
+
+  - id: d7_unmapped_fault_enveloped
+    kind: behavior
+    form: test
+    binds: ["interacts(benign_judge->get_closed_ticket).response"]
+    discharged_by: test_unmapped_fault_returns_envelope
+
+  - id: d8_single_attempt_no_retry
+    kind: negative      # positive control: the attempt observed in d5/d6; minted from O4
+    form: test
+    binds: ["interacts(get_closed_ticket->ticket_store)"]
+    discharged_by: test_store_fault_single_attempt
+    # Fork E RESOLVED (§7): the annexed premise's converged "each call pays full price, no
+    # breaker participation" assertion was REWRITTEN, not confirmed — repeated judge-side
+    # infra failures TRIP the breaker and subsequent reads fail fast with no transport
+    # attempt (test_repeated_store_failures_across_one_judge_run pins it on this demand).
+    # Fork F RESOLVED: an unfinished (run-cut-off) attempt still counts as the one attempt.
+
+  - id: d9_control_flow_reraise
+    kind: behavior
+    form: test
+    binds: ["get_closed_ticket", "list_closed_tickets"]
+    discharged_by: test_control_flow_exceptions_propagate
+    # Fork F RESOLVED (§7): cut loose, documented — CancelledError re-raises immediately,
+    # no await-to-clean-stop; the transport thread dies on its own inner timeout.
+
+  - id: d10_model_retry_malformed
+    kind: behavior
+    form: test
+    binds: ["interacts(benign_judge->get_closed_ticket).payload"]
+    discharged_by: test_malformed_key_model_retry
+    # Fork A RESOLVED (§7, refined): the boundary is an explicit, DEFINED key schema —
+    # empty, whitespace-only, and path/URL-significant characters (separators, `..`,
+    # query delimiters, percent-encoded bytes) reject with a retry-class response and
+    # ZERO store attempts; everything else (length, clean non-ASCII) flows opaquely and a
+    # store refusal folds into O4. The silent branch (wrong-JSON-type key) pins the same
+    # model-visible observable LAYER-AGNOSTICALLY — the test must not assert which layer.
+
+  - id: d11_untrusted_wrap
+    kind: shape
+    form: test
+    binds: ["interacts(benign_judge->get_closed_ticket).response", "interacts(benign_judge->list_closed_tickets).response"]
+    discharged_by: test_returns_salt_wrapped_untrusted
+
+  - id: d12_bash_grants_exact
+    kind: behavior      # exactness = positive (cat+defender-sql present) and negative (no ticket shape)
+    form: test
+    binds: ["_judge_bash_shapes"]
+    discharged_by: test_judge_bash_grants_exactly_cat_sql
+
+  - id: d13_in_process_host_side
+    kind: seam
+    form: test          # discharged largely by construction: every drive goes through the deps seam
+    binds: ["get_closed_ticket", "list_closed_tickets", "ticket_adapter_verbs"]
+    discharged_by: test_tools_drive_verbs_in_process_via_deps
+    # rejected: N1 — no network egress through the box (stays --network=none); N4 — the
+    # gather-side VERBS registry and six CLI-less adapters untouched.
+
+  - id: d14_cli_surface_survives
+    kind: survival
+    form: test
+    binds: ["ticket_adapter_cli", "interacts(ticket_seeds->ticket_adapter_cli)", "interacts(verify_forward->ticket_adapter_cli)", "ticket_adapter_cli.domain.distinguished[64]"]
+    discharged_by: test_cli_exit_codes_survive_for_subprocess_consumers
+
+  - id: d15_teaching_teaches_tool
+    kind: behavior
+    form: test
+    binds: ["_cited_policy_read_section", "benign_prompt"]
+    discharged_by: test_teaching_surfaces_teach_tool_not_bash
+    # fork f2 RESOLVED (§7): names kept — the taught strings are `list_closed_tickets` /
+    # `get_closed_ticket`, matching the registered names literally. §7 design correction 1
+    # rides here too: the rewrite must NOT carry forward run.py:80's false "it is open"
+    # claim (contradicted by the unconditional close; the Fork C exclusion is structural
+    # and state-independent, so the teaching no longer asserts the ticket's state).
+
+  - id: d16_cited_seed_instruction_survives
+    kind: survival
+    form: test
+    binds: ["_cited_policy_read_section"]
+    discharged_by: test_cited_seed_instruction_survives
+    # The instruction lives in TWO places (judge/run.py:80-84 inside the rewritten section;
+    # benign.md:148 outside item 7 — x2): the rewrite must orphan neither. Fork D RESOLVED
+    # (§7, probe-backed: 65-forkd-probe.md / p1-p3): only the live closed-only read
+    # satisfies "the store confirmed it" — cached gather_raw payloads are CONTEXT, never
+    # confirmation, and the rewritten section says so in so many words
+    # ("context, never confirmation" — the pinned sentence the test scans for).
+    # ROUND 3 (C6a) — the pin is the INSTRUCTION, not a floating phrase: the test requires
+    # (a) one sentence coupling the cached surface (cached/gather_raw) to "context, never
+    # confirmation", (b) the confirmation-denial anchor "store confirmed", and (c) the
+    # affirmative half "only the live … read". EXPLICIT NOTE (recorded beside this demand,
+    # honestly): Fork D's BEHAVIORAL half — a judge that nonetheless treats a cached
+    # payload as confirmation when reasoning to its verdict — is a property of the model's
+    # verdict reasoning, INSTRUCTION-LEVEL ONLY, not suite-enforceable on this tool's
+    # surface; no unit test here can bind it. The human's Fork D resolution ratified
+    # exactly this prompt-rule shape ("the sentence is wired into the rewritten
+    # _cited_policy_read_section so d16 tests it", 70-resolutions.md) — the blind reader's
+    # cache-context absence (A14) resolves to that §7 record, not to a suite loss.
+
+  - id: d17_deny_reason_matches_grants
+    kind: behavior
+    form: test
+    binds: ["_JUDGE_DENY_REASON", "_judge_bash_shapes"]
+    discharged_by: test_deny_reason_matches_shrunk_grants
+
+  - id: d18_store_route_census
+    kind: negative      # positive control: d1+d4 (the typed tools DO reach the store)
+    form: test
+    binds: ["ticket_store.access[typed-tool]", "ticket_store.access[bash]", "ticket_store.access[read-tool]"]
+    discharged_by: test_benign_store_routes_census
+    cites: [r1, r1-extended]   # the reachability claims this census re-probes against the BUILT policy
+    # rejected: N7 — gather_raw-cached ticket payloads are a pre-existing surface, identical
+    # before and after; the judge reads them by design. O2 governs only the live-store read.
+
+  - id: d19_no_query_tool_on_judge
+    kind: negative      # minted from N2; positive control: d1
+    form: test
+    binds: ["benign_judge", "adversarial_judge", "query_tool"]
+    discharged_by: test_no_query_tool_on_judge_legs
+
+  - id: d20_bash_plumbing_removed
+    kind: negative
+    form: clause        # recorded downgrade: field-level absences are implementation structure;
+                        # their observable consequences are pinned by d12/d15/d17
+    binds: ["RunScope.ticket_cli", "_ticket_grant", "_ticket_cli_path", "policy_cli_judge_demo"]
+    outcome: {nl: "The bash-side plumbing is deleted: _ticket_grant and its wiring branch, the RunScope.ticket_cli / ResolvedRoots.ticket_cli threading, the judge-side carrier with its pinned command text and _ticket_cli_path, and policy_cli.py's judge demo scope — removing its latent wrong-script bug (it points at case_history/case_ticket.py, not the real CLI)."}
+    rejected: [{nl: "No runtime direction check replaces the grant — the adversarial property is absence by registration (N3)."}]
+
+  - id: d21_stale_censuses_updated
+    kind: negative
+    form: clause        # recorded downgrade: suite/graph/prose maintenance, not e2e behavior;
+                        # conservation rides censuses c11/c15 (defender/CLAUDE.md site: GONE, g4/F9)
+    binds: ["ticket_adapter_cli", "_judge_bash_shapes"]
+    outcome: {nl: "Every surface still teaching or checking the deleted bash lane is retired or updated per censuses c11/c15. The four NAMED stale tests (V-G, enumerated so the implementer meets a list, not a pointer): e2e/test_query_tool_611.py:1310-1318 (test_ticket_cli_dual_surface_survives — its 'three consumers incl. the judge's grant' claim goes false with M6), test_judge_sql_idioms_corpus.py:323, test_permission.py:688-751, test_benign_direction.py:569-623; plus the grant-regex tests (test_judge_pydantic_engine.py:215-310, test_grant_gate_575.py:717-748 e1-e3, test_bind_sole_seam_551.py:238-262) and learning/test_loop.py:1837-1857's scope.ticket_cli assertion; the spec-graph nodes across spec_graph_575/551/538/611; and the comment/docstring censuses (adapter docstring three-to-two consumers, permission/bash.py:181,331, grant.py:196-206, policy_cli.py:44-49,77-86, _stub_transport.py:78, engine_pydantic.py:5-6,102 — the defender/CLAUDE.md site is already gone, #673). The teaching-doc surfaces (V-C, all four enumerated): judge/run.py:80's false 'is open' claim (pinned by d15's test); skills/ticket/SKILL.md's status vocabulary — the server's real enum is open|in_progress|closed, p1 (now the executable demand d29); docs/runtime-gates.md:42's 'judge's ticket CLI / mandatory --require-closed lookahead' teaching, false under M6; and docs/state-surface-adapters.md, dispositioned as describing the SURVIVING verb surface. The doc-currency halves are enforced by d26's test."}
+
+  # ===========================================================================
+  # §7-MINTED DEMANDS (70-resolutions.md): the Fork C/G/H mechanisms, the d22
+  # registration census (60-residue.md's test obligation), and the two waivers.
+  # ===========================================================================
+
+  - id: d22_registration_reaches_every_call_site
+    kind: seam
+    form: test          # §7 gate obligation, minted as a STATIC census: all three benign-leg
+                        # drivers funnel through the identical invoke_judge -> stage-build
+                        # call with no bypass, paired with d1/d2's per-leg behavior checks.
+                        # Not the per-entrypoint investigation drive (too heavy); not folded
+                        # into d1 (the tools= threading is brand-new plumbing whose per-site
+                        # completeness had never been demonstrated).
+    binds: ["drives(learning_loop->invoke_judge)", "drives(run_judge_ab->invoke_judge)", "drives(judge_equivalence->invoke_judge)", "closed_tickets", "JudgeWiring.closed_ticket_read"]
+    discharged_by: test_closed_ticket_registration_reaches_every_benign_call_site
+
+  - id: d23_self_key_excluded
+    kind: negative      # positive controls: d0's success path — any other well-formed closed
+                        # key reads through the get edge, and the sibling closed item in the
+                        # same listing is servable (asserted inside the same test).
+    form: test          # Fork C (§7): the circular-confirmation path is closed STRUCTURALLY.
+                        # V-A (F round): EXTENDED to the list path — the self-case's record
+                        # is filtered by IDENTITY, per-item, before the envelope; without it
+                        # a precedent search can return the case itself (cold C2's hole).
+    binds: ["benign_judge", "get_closed_ticket", "list_closed_tickets", "interacts(benign_judge->get_closed_ticket).payload", "interacts(benign_judge->get_closed_ticket).response", "interacts(benign_judge->list_closed_tickets).response"]
+    discharged_by: test_case_own_key_refused_at_tool_boundary
+
+  - id: d24_list_item_recheck
+    kind: behavior      # Fork G (§7): mirrors onto list the body check get already performs
+                        # (c2); keeps O2's outcome wording honest on the response side.
+                        # V-A (F round): the re-check is status + SELF-KEY IDENTITY — the
+                        # case-under-judgment's own record is excluded per-item even when
+                        # genuinely closed; duplicates still survive (no dedup).
+    binds: ["interacts(benign_judge->list_closed_tickets).response", "ticket_store.domain.distinguished[open]", "benign_judge"]
+    form: test
+    discharged_by: test_list_response_non_closed_item_dropped_or_faulted
+
+  - id: d25_self_key_payload_screen
+    kind: negative      # positive controls inside the same test: the other-open-key quote
+                        # rides wrapped (the record-wise N-note half) and a clean payload
+                        # is served (d0's success path).
+    form: test          # Fork H (§7): Fork C's exclusion extended to a closed ticket whose
+                        # payload names the case's own key — the one transitive instance
+                        # whose identifier this seam knows. General free-text screening is
+                        # NOT owed; the residual is the N-note on ticket_store.domain.
+    binds: ["interacts(benign_judge->get_closed_ticket).response", "salt"]
+    discharged_by: test_closed_ticket_naming_self_key_refused
+
+  # ===========================================================================
+  # F-ROUND DEMANDS (75-verify-resolutions.md): the V-C currency test, the V-D
+  # structural pair (capture sink, registration order), the V-G executable pin,
+  # and the V-F waiver.
+  # ===========================================================================
+
+  - id: d26_docs_teach_no_removed_lane
+    kind: negative      # positive control inside the test: runtime-gates.md still teaches
+                        # the live pins_path exemption idiom — the doc survives, the dead
+                        # lane goes.
+    form: test          # V-C: cold C3's two undispositioned teaching surfaces join the M6
+                        # census WITH a currency test — no doc surface still teaches the
+                        # removed judge bash command path.
+    binds: ["runtime_gates_doc", "state_surface_adapters_doc"]
+    discharged_by: test_no_doc_surface_teaches_removed_bash_lane
+
+  - id: d27_capture_row_sink
+    kind: behavior      # V-D (mechanical finding 3): the Fork B sink, now modelled — each
+                        # call appends its capture row to the JUDGE's queries table (call
+                        # order, by-ref payload inside the same run dir), and never to
+                        # gather's table in the investigation run dir: the two tables stay
+                        # distinct writers' tables, R2's recomputation ground.
+    form: test
+    binds: ["interacts(get_closed_ticket->judge_queries_table)", "interacts(list_closed_tickets->judge_queries_table)", "judge_queries_table"]
+    discharged_by: test_capture_row_written_in_judge_run_dir
+
+  - id: d28_registration_order
+    kind: shape         # V-D (mechanical finding 2 / brief F3's order half — previously
+                        # dispositioned nowhere and falsely booked onto c11/d21's census,
+                        # 50-graph-digest.md:113, corrected): the two tools enter
+                        # register_tools' FIXED order at the tail, after query, as
+                        # list_closed_tickets then get_closed_ticket — a SEQUENCE pin
+                        # where d1/d2 deliberately compare sets. ROUND 3 (CR-m1): the
+                        # test now pins the insertion POSITION itself — a source-order
+                        # census over register_tools' presence table (the closed_tickets
+                        # guard dead last, after query) beside the judge-leg roster
+                        # projection (list before get) — because no agent that exists
+                        # carries write_file..query, so the projection alone cannot see
+                        # a wrong insertion position.
+    form: test
+    binds: ["closed_tickets", "get_closed_ticket", "list_closed_tickets"]
+    discharged_by: test_closed_ticket_tools_registration_order
+
+  - id: d29_skill_status_vocabulary
+    kind: behavior      # V-G (mechanical finding 8): §7 design correction 2 becomes
+                        # executable — the correction must not ship prose-only in d21's
+                        # clause. The SKILL's advertised status enum must equal the
+                        # server's real one (open|in_progress|closed).
+    form: test
+    binds: ["ticket_skill_md", "ticket_store.domain"]
+    cites: [p1]
+    discharged_by: test_ticket_skill_status_vocabulary_matches_server
+
+  - id: w3_cross_leg_salt_waived
+    kind: shape
+    form: waiver        # V-F (mechanical finding 1, cross-leg half): an examined decline.
+    binds: ["salt"]
+    cites: [g18]
+    outcome: {nl: "The salt premise's cross-leg half ('per-leg, not derivable across legs') is WAIVED as unexercisable through this delta: the fresh-uuid4-per-stage-bind salt is pre-existing wrap infrastructure (agent_definition.py:387-389, g18) not introduced by #672, and the adversarial leg has no ticket surface (d2/O3), so no ticket-tool drive can observe an adversarial-leg wrap to compare against — the channel that could is outside this spec's delta. The per-bind half IS pinned, including UNPREDICTABILITY (a counter salt fails test_same_case_judged_second_time_fresh_salt_persistent_audit). Recorded as an examined decline, not a silence (75-verify-resolutions V-F)."}
+
+  - id: w1_query_tool_parity_waived
+    kind: parity
+    form: waiver        # §7 Waiver 1 — the N7 carve-out's R3 cell, examined and declined.
+    binds: ["ticket_store.access[query-tool]"]
+    cites: [r1, r1-extended, p2]
+    outcome: {nl: "Closed-only parity on gather's query-tool route to the same verb bodies is WAIVED as out of scope for #672: require_closed defaults False on both verbs (the model chooses, p2 — executed probe), and payloads persist to gather_raw. Recorded as an examined decline, not a silence. Follow-up warranted at handoff: the Fork D probe makes this the live route by which non-closed ticket content reaches the judge; extending closed-only parity onto the query-tool path is a design change beyond this issue — file it as its own issue."}
+
+  - id: w2_subprocess_cli_parity_waived
+    kind: parity
+    form: waiver        # §7 Waiver 2 — converts phase C's silent consensus
+                        # (test_typed_tool_config_env_divergence_from_cli_callers) into an
+                        # examined, human-ratified decline.
+    binds: ["ticket_store.access[subprocess-cli]"]
+    cites: [c6, g2, x4]
+    outcome: {nl: "Constraint parity between the typed tools' ctx.deps-sourced config/env and the ambient environment the two CLI subprocess callers inherit is WAIVED as out of scope for #672: ticket_seeds and verify_forward run at operator trust (the c6/g2 consumer census), the live gap is timeout/env parity (x4 pins the CLI callers' own subprocess timeouts) plus ticket_seeds trusting the server-side --status closed filter without the explicit --require-closed flag — pre-existing, untouched by this design."}
+
+# §7 chose d22's discharge shape as a STATIC census (all three drivers funnel through the
+# one invoke_judge seam, no bypass) paired with d1/d2's per-leg behavior checks — the
+# per-entrypoint investigation drive was explicitly declined as too heavy, so the
+# inspection-only naming of the seam target is a ratified decision, not an oversight.
+exercise_waivers:
+  d22_registration_reaches_every_call_site: ["invoke_judge"]
+
+# PHASE F (mechanical gate): `spec-graph actors` names `defender/evals/harness_lead.py` as an
+# unmodelled driver — it re-executes `lead_author` as a subprocess, relocating the tree anchor
+# onto whatever tree it runs in. The check's subprocess arm is deliberately NOT gated on the
+# changed set (a re-exec context is a standing repo-wide hazard), so it fires on every graph in
+# this repo, not on anything #672 touches. Waived as out of scope, hand-verified: harness_lead
+# drives `learning/leads/lead_author.py` only, and neither that module nor anything under
+# learning/leads/ imports or reaches `invoke_judge` / `engine_pydantic` / `judge/run.py` — the
+# three modules this delta rewrites (verified by grep over defender/learning/leads/ and
+# defender/evals/harness_lead.py, phase F). It drives NO actor of this graph, so no execution
+# context of THIS change is being silenced to go green. The map cannot carry `cites:` (schema),
+# so this rationale is the phase-F hand check rules.md requires.
+actor_waivers:
+  harness_lead: "eval harness for the lead-author stage; re-execs learning/leads/lead_author.py only, reaches no judge module and no actor of this graph — out of scope for #672, not a driver of this delta"
+
+# ===========================================================================
+# STRUCTURE — provenance: code = grounded neighborhood (10-brief.md);
+#             design = demand-implied delta. mode: remove edges are M6's deletions.
+# ===========================================================================
+structure:
+  axes: [ticket_key, lead_id, seq]
+
+  actors:
+    - {id: learning_loop,     frame: composition, provenance: code}   # learning/loop.py — the live judge driver (imports invoke_judge, loop.py:72)
+    - {id: run_judge_ab,      frame: composition, provenance: code}   # evals/run_judge_ab.py — reaches judge/run.py AND engine_pydantic.py in-process
+    - {id: judge_equivalence, frame: composition, provenance: code}   # evals/judge_equivalence.py — third benign-leg call site
+    # dispositions RED FLAG for the gate: registration must reach EVERY benign call site
+    # (the three drivers above); the tools= threading is NEW plumbing (F2) and the doc never
+    # enumerates the call sites — per-site completeness asserted, nowhere demonstrated.
+    # Weigh a census obligation over these drives edges rather than trust the single-seam inference.
+    - {id: invoke_judge,      frame: composition, provenance: code}   # judge/run.py — fans the two legs, concurrently on an inconclusive case
+    - {id: benign_judge,      frame: leg,         provenance: code}   # the leg this change re-tools
+    - {id: adversarial_judge, frame: leg,         provenance: code}   # carries ticket_cli=None end-to-end today (c9)
+    - {id: get_closed_ticket,  frame: leg, provenance: design}        # tool as actor toward the store; also a boundary (the judge-facing seam)
+    - {id: list_closed_tickets, frame: leg, provenance: design}
+    - {id: run_investigation, frame: composition, provenance: code}   # run.py — box starter (run.py:166) AND ticket-store writer (:148/:208); does NOT drive the judge
+    - {id: ticket_enrichment, frame: leg,         provenance: code}   # learning/tickets/ticket_enrichment.py — the second store writer (N5)
+    - {id: gather_dispatch,   frame: leg,         provenance: code}   # the sibling reader: query tool -> same verb bodies via ModuleVerbRegistry
+    - {id: ticket_seeds,      frame: leg,         provenance: code}   # subprocess CLI caller (ticket_seeds.py:65-90)
+    - {id: verify_forward,    frame: leg,         provenance: code}   # subprocess CLI caller (forward.py:119-120)
+    - {id: policy_cli,        frame: leg,         provenance: code}   # defender-policy show|explain, operator-only
+
+  boundaries:
+    - id: get_closed_ticket
+      provenance: design
+      facets:
+        payload:
+          parts: [{role: args, source: model-authored}]
+          invariants: []
+          nl: "the model-facing call schema is exactly {key} — no require_closed, no status parameter (x8 grounds the verb signature); the key is model-chosen and meets Fork A's DEFINED minimal schema at the tool boundary (§7): empty, whitespace-only, and path/URL-significant characters draw a retry-class response with zero store attempts; everything else flows to the store opaquely (length and clean non-ASCII are explicit non-clauses of the written grammar). The case-under-judgment's own key is additionally excluded here regardless of state (Fork C, d23)."
+
+    - id: list_closed_tickets
+      provenance: design
+      facets:
+        payload:
+          parts: [{role: args, source: model-authored}]
+          invariants: []
+          nl: "the model-facing call schema is exactly {label, q} — no require_closed, no status (x8); filter values with shell/URL metacharacters inherit the pre-existing host-side transport's handling (dispositions — the in-process call removes the model-text-to-argv assembly; the asymmetry against Fork A's key screen is CHOSEN: label/q keep riding list_tickets' urlencoding, no new screen). The response side is inside O2's controlled surface (Fork G, §7): each returned item's status is re-checked client-side before the envelope (d24), and — V-A, F round — the case-under-judgment's OWN record is excluded per-item by IDENTITY even when genuinely closed (the get-path screen mirrored onto list, d23/d24); duplicates still survive (no dedup)."
+
+    - id: closed_tickets      # the NEW ToolSet bit (doc-proposed name — fork f2)
+      provenance: design
+      facets:
+        domain:
+          type: bool
+          refinement: {nl: "carries the two closed-ticket tools; set per-leg from JudgeWiring.closed_ticket_read on the stage-build replace seam; every ToolSet bit defaults False (x6), so JUDGE_DEF's frozen static default keeps it off — absence by registration is the adversarial defense (N3)"}
+          default: false
+          distinguished: ["false"]    # the off state MUST be individually exercised (d2)
+          falsy_valid: true
+          documented_alternatives: []
+
+    - id: JudgeWiring.closed_ticket_read
+      provenance: code
+      facets:
+        domain:
+          type: bool
+          refinement: {nl: "learning/core/config.py:389-408, default False; True only on the benign Direction (directions.py:41). The tools= threading from this flag through run_stage/build_stage_agent is NEW plumbing — no tools parameter exists on those signatures today (F2/g12); the replace seam (_pydantic_stage.py:66) and registration-follows-defn.tools (driver.py:218) are the carrier (c12)"}
+          default: false
+          distinguished: []
+          falsy_valid: true
+          documented_alternatives: []
+
+    - id: ticket_store        # HTTP service behind docker-exec curl — never a file (g16)
+      provenance: code
+      facets:
+        identity:
+          key_axes: [ticket_key]
+          evidence: {nl: "ticket key = the run-dir basename (case id): POST /tickets, POST /tickets/{key}/transitions, POST /tickets/{key}/comments — read off the writer call sites run.py:148/208 and ticket_enrichment (g10, spec-graph trace resource ticket_store)"}
+          sharing: unique-key
+        domain:
+          type: enum
+          refinement: {nl: "ticket lifecycle status as the store reports it (the real server enum is open|in_progress|closed — p1, executed probe); the design's contract is BINARY — closed is readable, everything else refuses: open, in_progress, any unenumerated state, and a status-less 200 all fall on the refuse side, as business refusals that never trip the breaker (Fork E's taxonomy line). Fork C RESOLVED (§7): the case-under-judgment's OWN ticket is a protected asset — its key is excluded at the tool boundary even once closed (d23), and — V-A — the protection covers BOTH tool paths: get refuses the key pre-store, list filters the self item by identity before the envelope. Fork H RESOLVED: O2 is scoped RECORD-WISE, with the targeted self-key payload screen (d25); N-NOTE — the residual transitive path (a closed ticket's free text quoting some OTHER non-closed ticket) is accepted: it rides the salted untrusted envelope unredacted, and general free-text screening is not implementable at this seam and not owed."}
+          default: "open"     # the state a ticket is created in (open_case_ticket, run.py:148)
+          distinguished: ["open"]   # the answer-key state — MUST be individually exercised (d5)
+          falsy_valid: false
+          documented_alternatives: []
+        access:
+          constraints_by_via:
+            # the two NEW typed tools, with §7's resolved constraint set: Fork A's key
+            # schema, Fork C/H's self-key exclusion + payload screen, Fork G's per-item
+            # re-check, and Fork B/E's capture row + breaker (the query tool's machinery,
+            # mirrored fully — F4's "seam-only mirror" note is SUPERSEDED).
+            typed-tool:     {trust: attacker-influenced, constraints: [closed-pin, salt-wrap, key-schema, self-key-exclusion, item-recheck, capture-row, circuit-breaker]}
+            # gather's route to the SAME verb bodies: require_closed is MODEL-CHOSEN, default
+            # False — NO closed pin (F6/p2); payloads persist to gather_raw (the N7 carve-out).
+            # Closed-only parity on this cell is WAIVED at §7 (w1) — examined, declined,
+            # follow-up issue owed at handoff.
+            query-tool:     {trust: attacker-influenced, constraints: [verb-allowlist, salt-wrap, capture-row, circuit-breaker]}
+            # the M6-REMOVED judge bash lane (see the mode: remove edge): pattern-pinned argv
+            # + mandatory --require-closed lookahead; DEAD at the executor today (F1 — the
+            # judge binds no box, the inert BoxExecutor refuses first use).
+            bash:           {trust: attacker-influenced, constraints: [shape-pin, require-closed-flag]}
+            # read_file opens mounted files only — the store is HTTP, no file exists (r1);
+            # what this via actually reaches is the gather_raw CACHE, not the live store.
+            read-tool:      {trust: attacker-influenced, constraints: [confine, salt-wrap]}
+            # ticket_seeds + verify_forward through the SURVIVING CLI (M5/d14); ticket_seeds
+            # trusts the server-side --status closed filter (no --require-closed). Parity on
+            # this cell is WAIVED at §7 (w2) — operator trust, pre-existing, untouched.
+            subprocess-cli: {trust: operator, constraints: [exit-code-contract, subprocess-timeout]}
+
+    - id: ticket_adapter_verbs   # the three VERBS bodies (ticket_adapter.py:64-108) M2 reuses in-process
+      provenance: code
+      facets: {}
+
+    - id: ticket_adapter_cli     # the surviving argparse CLI over the same verb bodies (M5)
+      provenance: code
+      facets:
+        domain:
+          type: int
+          refinement: {nl: "the pinned exit-code taxonomy: 0 success, 1 UpstreamFault, 2 TransportFault/ConfigFault, 64 usage error — the classes the subprocess callers and the circuit breaker behind them key on (x3, g8 executed)"}
+          default: 0
+          distinguished: [0, 1, 2, 64]
+          falsy_valid: true
+          documented_alternatives: []
+
+    - id: gather_raw             # shared root 2 — the N7 carve-out, identical before and after (g17)
+      provenance: code
+      facets:
+        identity:
+          key_axes: [lead_id, seq]
+          evidence: {nl: "the query tool's capture writes gather_raw/{lead_id}/{seq}.json, one per query — including unpinned ticket.get-ticket payloads fetched at investigation time (query_tool.py:471-475, g17)"}
+          sharing: unique-key
+        access:
+          constraints_by_via:
+            read-tool: {trust: attacker-influenced, constraints: [confine, salt-wrap]}
+            bash:      {trust: attacker-influenced, constraints: [confine]}
+
+    - id: judge_queries_table    # the Fork B capture sink, MODELLED at the F round (V-D):
+      # executed_queries.jsonl + by-ref payload files in the JUDGE'S learning run dir —
+      # distinct from gather's queries table, which lives in the INVESTIGATION run dir
+      # (the R2 recomputation's ground: no pre-existing boundary instance gains a 2nd
+      # writer; the two new writer edges land on THIS new boundary, whose no-clobber
+      # row identity is pinned by test_two_ticket_calls_one_turn_rows_independent).
+      provenance: design
+      facets:
+        identity:
+          key_axes: [seq]
+          evidence: {nl: "one row appended per tool call to the judge learning run dir's executed_queries.jsonl, in call order, payload persisted by-ref at the row's payload_path INSIDE the same run dir (d27's test observes all three); gather's rows key (lead_id, seq) in the investigation run dir — a different instance with a different writer set, and d27's negative half pins that judge capture never lands there"}
+          sharing: serialized-append
+
+    - id: query_tool             # the generic gather tool — must NOT be registered on either judge leg (d19/N2)
+      provenance: code
+      facets: {}
+
+    - id: _judge_bash_shapes     # the judge's compiled bash grant set — shrinks to cat+defender-sql (O6)
+      provenance: design
+      facets: {}
+
+    - id: _cited_policy_read_section   # judge/run.py:60-94 — REWRITTEN by M6 (taught argv at 78-79 goes; the does-not-survive instruction at 80-84 must stay — x2/d16)
+      provenance: design
+      facets: {}
+
+    - id: benign_prompt          # benign.md — item 7 rewritten to teach the typed tools; :148's fuller instruction untouched (d15/d16)
+      provenance: design
+      facets: {}
+
+    # ---- stale teaching docs joining d21's census at the F round (V-C/V-G; d26/d29 pin) ----
+    - {id: runtime_gates_doc,          provenance: code, facets: {}}   # docs/runtime-gates.md — :42 teaches the judge's ticket CLI grant + mandatory --require-closed lookahead; FALSE under M6 (cold C3); d26's test enforces currency
+    - {id: state_surface_adapters_doc, provenance: code, facets: {}}   # docs/state-surface-adapters.md:113-114 — dispositioned (V-C): describes the SURVIVING verb surface, a genuine no-op for M6; d26 pins it stays free of the removed command path
+    - {id: ticket_skill_md,            provenance: code, facets: {}}   # skills/ticket/SKILL.md — advertises statuses the server never had (p1, executed); d29 is the executable pin on the real enum
+
+    - id: _JUDGE_DENY_REASON     # engine_pydantic.py:60-68 — the stale pinned-closed-ticket-read clause goes; suite net test_grant_gate_575.py:904-916 (F8: the rewrite is forced, not optional)
+      provenance: design
+      facets: {}
+
+    # ---- M6 removals (d20 binds; live test/doc dependents recorded in d21's clause) ----
+    - {id: RunScope.ticket_cli,   provenance: code, facets: {}}   # the ticket_cli threading: JudgeInvocation -> _ToolScope -> RunScope -> ResolvedRoots (agent_definition.py:184,206,246)
+    - {id: _ticket_grant,         provenance: code, facets: {}}   # engine_pydantic.py:116-142 + grant branch :111-113
+    - {id: _ticket_cli_path,      provenance: code, facets: {}}   # judge/run.py:55-57
+    - {id: policy_cli_judge_demo, provenance: code, facets: {}}   # policy_cli.py:50-52 — points at case_history/case_ticket.py, NOT the real CLI: the latent wrong-script bug (F7); same wrong path in test_grant_gate_575's retiring fixture
+
+    - id: salt                   # fresh uuid4 per stage bind (agent_definition.py:387-389, g18); per-leg, not derivable across legs — the envelope's whole anti-forgery defense (dispositions: delimiter-lookalike consensus).
+      # F round: the per-bind half is pinned INCLUDING unpredictability (V-D — a counter
+      # salt fails the assertion); the cross-leg half is w3, an examined decline (V-F).
+      provenance: code
+      facets: {}
+
+    - id: TICKET_TIMEOUT_SEC
+      provenance: code
+      facets:
+        domain:
+          type: int
+          refinement: {nl: "seconds, knowledge/environment/systems/ticket/config.env (shipped 10); per-key run-env override beats the file; missing file/key -> ConfigFault exit-2 class. Subprocess timeout = TIMEOUT_SEC+10 is MANDATORY on every fork and is the ONLY real kill — asyncio.wait_for cannot stop the thread (F5, x4, g16). UNPINNED silences (dispositions): when config resolves relative to calls (per call vs at bind), and parity between the ctx.deps-sourced env and the ambient env the CLI subprocess callers inherit. NO-CONSEQUENCE NOTE (V-G, mechanical finding 6): SOC_PLAYGROUND_DOCKER_CONTEXT (default soc-playground, 10-brief.md:148) retargets the docker context the WHOLE store family's transports exec through — uniformly, not this tool specifically; recorded here on the config family's carrier, not demanded"}
+          default: 10
+          distinguished: []
+          falsy_valid: false
+          documented_alternatives: []
+
+    - id: circuit_breaker        # per-run per-system store protection. Fork E RESOLVED (§7,
+      # departing from the isolation recommendation): the judge's typed tools participate
+      # FULLY — an already-open `ticket` breaker yields an immediate failed result with no
+      # transport attempt (honor), and judge-side infra faults (exit 2/124 classes) trip it
+      # (contribute); business refusals (exit 1: 404, non-closed) never count. F4's
+      # "no queries row, no breaker trip" note is SUPERSEDED along with the record-free d0.
+      provenance: code
+      facets: {}
+
+  interacts:
+    # ---- the delta: the two typed tools (provenance: design) ----
+    - {from: benign_judge, to: get_closed_ticket,   mode: invoke, via: api, provenance: design, sends: payload}
+    - {from: benign_judge, to: list_closed_tickets, mode: invoke, via: api, provenance: design, sends: payload}
+    - {from: get_closed_ticket,   to: ticket_adapter_verbs, mode: invoke, via: api, provenance: design}   # in-process verb call: VerbContext off ctx.deps + asyncio.to_thread (M2/c8)
+    - {from: list_closed_tickets, to: ticket_adapter_verbs, mode: invoke, via: api, provenance: design}
+    - {from: get_closed_ticket,   to: ticket_store, mode: read, via: typed-tool, provenance: design, sends: params}   # require_closed=True HARD-CODED (d4); host-side docker-exec curl under the transport
+    - {from: list_closed_tickets, to: ticket_store, mode: read, via: typed-tool, provenance: design, sends: params}
+    - {from: get_closed_ticket,   to: salt, mode: read, via: api, provenance: design}   # success view AND fault detail ride the salted untrusted envelope (O7/d11)
+    - {from: list_closed_tickets, to: salt, mode: read, via: api, provenance: design}
+    - {from: get_closed_ticket,   to: TICKET_TIMEOUT_SEC, mode: read, via: env, provenance: design}
+    - {from: list_closed_tickets, to: TICKET_TIMEOUT_SEC, mode: read, via: env, provenance: design}
+    # ---- the delta: the Fork B capture sink (modelled at the F round, V-D) ----
+    - {from: get_closed_ticket,   to: judge_queries_table, mode: write, via: fs, provenance: design, interpolates: [seq]}   # one row per call + by-ref payload (d27); the JUDGE's table, never gather's
+    - {from: list_closed_tickets, to: judge_queries_table, mode: write, via: fs, provenance: design, interpolates: [seq]}
+    # ---- the delta: rewritten teaching + deny surfaces (M6) ----
+    - {from: benign_judge, to: _cited_policy_read_section, mode: read, via: llm, provenance: design}
+    - {from: benign_judge, to: benign_prompt,       mode: read, via: llm, provenance: design}
+    - {from: benign_judge, to: _JUDGE_DENY_REASON,  mode: read, via: llm, provenance: design}
+    # ---- the delta: M6 removals (mode: remove) ----
+    - {from: benign_judge, to: ticket_store, mode: remove, via: bash, provenance: design}   # the pattern-pinned --require-closed bash lane goes; DEAD at executor already (F1) — restoration, not preservation (x1)
+    - {from: invoke_judge, to: RunScope.ticket_cli, mode: remove, via: api, provenance: design}
+    - {from: invoke_judge, to: _ticket_cli_path,    mode: remove, via: api, provenance: design}
+    - {from: invoke_judge, to: _ticket_grant,       mode: remove, via: api, provenance: design}   # the grant branch runs at bind/policy-compile under the judge driver
+    - {from: policy_cli,   to: policy_cli_judge_demo, mode: remove, via: api, provenance: design}
+    # ---- grounded neighborhood (provenance: code) ----
+    - {from: run_investigation, to: ticket_store, mode: write, via: http, provenance: code, interpolates: [ticket_key]}   # open/close case tickets (run.py:148/208) — writers are OUTSIDE this change (N5)
+    - {from: ticket_enrichment, to: ticket_store, mode: write, via: http, provenance: code, interpolates: [ticket_key]}   # annotate/enrich (imported :29-31)
+    - {from: gather_dispatch,   to: ticket_store, mode: read,  via: query-tool, provenance: code}   # same verb bodies via ModuleVerbRegistry by-path load (verbs.py:294)
+    - {from: gather_dispatch,   to: ticket_skill_md, mode: read, via: llm, provenance: code}   # the per-system reference the gather subagent queries FROM — d29 pins its status enum against the server's (p1)
+    - {from: gather_dispatch,   to: gather_raw,   mode: write, via: fs, provenance: code, interpolates: [lead_id, seq]}
+    - {from: gather_dispatch,   to: circuit_breaker, mode: invoke, via: api, provenance: code}
+    - {from: benign_judge,      to: gather_raw,   mode: read,  via: read-tool, provenance: code}   # read roots = gather_raw + comparison dirs (g18) — the N7 cached surface, unchanged
+    - {from: ticket_seeds,      to: ticket_adapter_cli, mode: invoke, via: argv, provenance: code}   # list-tickets --status closed --label X, NO --require-closed, 15s timeout, non-fatal empty pool
+    - {from: verify_forward,    to: ticket_adapter_cli, mode: invoke, via: argv, provenance: code}   # get-ticket <id> --require-closed
+
+  drives:
+    - {from: learning_loop,     to: invoke_judge, provenance: code, multiplicity: serial}
+    - {from: run_judge_ab,      to: invoke_judge, provenance: code, multiplicity: serial}
+    - {from: judge_equivalence, to: invoke_judge, provenance: code, multiplicity: serial}
+    - {from: invoke_judge, to: benign_judge,      provenance: code, multiplicity: concurrent}   # per-direction legs run concurrently on an inconclusive case (judge/run.py:110-114)
+    - {from: invoke_judge, to: adversarial_judge, provenance: code, multiplicity: concurrent}
+    - {from: benign_judge, to: get_closed_ticket,   provenance: design, multiplicity: concurrent}   # pydantic-ai parallel tool calls; per-call VerbContext off ctx.deps implies independence (mechanism-implied consensus; no explicit doc guarantee)
+    - {from: benign_judge, to: list_closed_tickets, provenance: design, multiplicity: concurrent}
+    - {from: run_investigation, to: gather_dispatch,  provenance: code, multiplicity: serial}
+    - {from: learning_loop,     to: ticket_enrichment, provenance: code, multiplicity: serial}
+
+# ===========================================================================
+# CLAIMS — the probed ledger: 16 inherited (c1-c15, r1: source discuss, re-verified
+# against this tree), 8 raised at extraction (x1-x8), 20 raised at grounding (g1-g19,
+# r1-extended). g4's frontier verdict "doc-census-stale-safe" is normalized to `holds`
+# (the claim as worded — the correction itself — holds); the correction stays in the text.
+# ===========================================================================
+claims:
+  # ---- inherited from intent-design-672's claims block (source: discuss) ----
+  - {id: c1, source: discuss, kind: referential, claim: "the ticket adapter is deliberately dual-surface: the VERBS mapping and one surviving argparse CLI over the same three verb bodies", probe: "re-read ticket_adapter.py verbs + main (extraction pass)", probe_kind: read, observed: "as claimed", verdict: holds}
+  - {id: c2, source: discuss, kind: behavior, claim: "get_ticket(require_closed=True) refuses a non-closed ticket: UpstreamFault exit-1, no payload (refusal site ticket_adapter.py:95-108)", probe: "re-executed as g5 (in-process, stubbed transport)", probe_kind: executed, observed: "UpstreamFault exit_code=1, no payload", verdict: holds}
+  - {id: c3, source: discuss, kind: behavior, claim: "list_tickets(require_closed=True) pins the OUTGOING query to status=closed, overriding any stray status arg", probe: "re-executed as g6 (captured outgoing params)", probe_kind: executed, observed: "http_get('/tickets', {'status': 'closed'})", verdict: holds}
+  - {id: c4, source: discuss, kind: behavior, claim: "an unreachable/misconfigured store surfaces as the exit-2 infra class with stderr detail", probe: "re-executed as g8 (CLI with missing tree; --bogus-flag)", probe_kind: executed, observed: "exit=2 config detail; exit=64 usage", verdict: holds}
+  - {id: c5, source: discuss, kind: referential, claim: "the three VERBS {get-ticket, health-check, list-tickets} are importable and callable in-process", probe: "re-verified as g7 (import + callable sweep)", probe_kind: read, observed: "all three callable", verdict: holds}
+  - {id: c6, source: discuss, kind: census, claim: "non-test argv consumers of the ticket CLI are exactly three: the judge grant/prompt text, ticket_seeds.py:68-71, verify_forward/forward.py:119-120", probe: "re-run as g2 (grep ticket_adapter|_TICKET_CLI minus tests + read)", probe_kind: search, observed: "those three + prose mentions only", verdict: holds}
+  - {id: c7, source: discuss, kind: referential, claim: "typed tools are authorized by registration alone (ToolSet bit -> register_tools); no grant path exists for non-bash tools; compile_policy never touches registration", probe: "re-read as g13 (tools.py:511-609, agent_definition.py:67-100, :287-306)", probe_kind: read, observed: "as claimed", verdict: holds}
+  - {id: c8, source: discuss, kind: referential, claim: "the query tool's in-process verb dispatch precedent: VerbContext(defender_dir, run_dir, env) off deps + asyncio.to_thread (query_tool.py:436-446)", probe: "re-read as g14", probe_kind: read, observed: "as claimed", verdict: holds}
+  - {id: c9, source: discuss, kind: referential, claim: "the adversarial leg is already ticket-grantless: wiring reaches grants only, ticket_cli=None end-to-end on that leg", probe: "re-read as g15 (directions.py:41, config.py:389-408, test_benign_direction.py:609-623)", probe_kind: read, observed: "as claimed", verdict: holds}
+  - {id: c10, source: discuss, kind: referential, claim: "the box denies network egress: --network=none on both runtimes (box.py:457); DEFENDER_BOX_RUNTIME switches tier only", probe: "re-read box.py:457, :95-105", probe_kind: read, observed: "as claimed", verdict: holds}
+  - {id: c11, source: discuss, kind: census, claim: "the M6 deletion-site census (mechanism, teaching, deny reason, 9 test files, prose comments, spec-graph nodes) as the doc lists it", probe: "re-run as g1 (grep -rln ticket_cli + per-file read); two safe drifts corrected by g4", probe_kind: search, observed: "15 files, split as g1 lists", verdict: holds}
+  - {id: c12, source: discuss, kind: referential, claim: "the per-leg rebind seam exists: replace() at _pydantic_stage.py:66, registration follows defn.tools at driver.py:218; model/effort are today's ONLY per-leg overrides", probe: "re-read as g12 (_pydantic_stage.py:41-157, driver.py:175-219)", probe_kind: read, observed: "signatures carry model/effort/make_model only", verdict: holds}
+  - {id: c13, source: discuss, kind: referential, claim: "the query tool's error seam + salt-wrap envelope idiom as cited (control-flow re-raise :319-322, AdapterFault->(exit_code,detail) :323-324, BaseException catch-all :325-326, _format_bash_result + untrusted wrap :388-409)", probe: "re-read as g14", probe_kind: read, observed: "as claimed; entangled with capture (F4)", verdict: holds}
+  - {id: c14, source: discuss, kind: referential, claim: "two teaching surfaces (benign.md item 7; _cited_policy_read_section) plus _JUDGE_DENY_REASON, all suite-visible (deny-reason net test_grant_gate_575.py:904-916)", probe: "re-read as g15", probe_kind: read, observed: "as claimed", verdict: holds}
+  - {id: c15, source: discuss, kind: census, claim: "spec-graph nodes bound to the bash ticket surface: spec_graph_575:300-319,573-580,729,894,966,1021; 551:44-45,261; 538:366; 611:233,362-367,500,540", probe: "re-run as g3 (grep over defender/tests/spec_graph_*.yaml)", probe_kind: search, observed: "exactly those anchors", verdict: holds}
+  - {id: r1, source: discuss, kind: reachability, claim: "post-M6 the benign judge's only model-reachable routes to the LIVE ticket store are the two typed tools (the doc's surface sweep)", probe: "the doc's sweep over grant/tool surfaces; INSPECTION-GRADE — d18 is the mandated executable re-probe against the built policy", probe_kind: search, observed: "no other live-store surface named", verdict: unrefuted}
+  # ---- raised at extraction (20-demands.md) ----
+  - {id: x1, kind: behavior, claim: "the judge's bash lane executes through the network-denied box today, so the bash-side ticket read is dead in-box and sequencing is restoration, not preservation", probe: "read runtime/tools.py:310 (deps.box.run_parsed), box.py:457 (--network none), _stub_transport.py:188-218; box-denial half EXECUTED at the F round (V-E, 66-bashlane-probe.md): the probe drove the real _tool_bash seam over the judge's exact bind and observed the executor refuse every granted command", probe_kind: executed, observed: "bash tool -> deps.box.run_parsed -> boxed exec; executor inert with no box bound (transport is _unattached), refusal on first use", verdict: holds}
+  - {id: x2, kind: referential, claim: "the 'cited seed the store can't confirm does not survive on that basis' instruction exists today in TWO places", probe: "grep 'not survive|confirm' over the judge package", probe_kind: search, observed: "judge/run.py:80-84 (inside the section M6 rewrites) and benign.md:148 (outside item 7)", verdict: holds}
+  - {id: x3, kind: referential, claim: "exit 64 is the documented usage-error class; the exit-code taxonomy is what the subprocess callers and the circuit breaker key on", probe: "read ticket_adapter.py:31 + main()'s AdapterFault handler comment", probe_kind: read, observed: "as claimed", verdict: holds}
+  - {id: x4, kind: behavior, claim: "the transport's inner timeout is mandatory on every fork, and the CLI consumers hold their own subprocess timeouts today (the pair the scale-dive tradeoff swaps)", probe: "read _stub_transport.py:188,210-218; ticket_seeds.py _LIST_TIMEOUT_SEC=15 at :75; forward.py _POLICY_FETCH_TIMEOUT at :125", probe_kind: read, observed: "as claimed", verdict: holds}
+  - {id: x5, kind: referential, claim: "the forward_check deferred-tool precedent M1 cites exists exactly as cited", probe: "read verify_forward/tool.py:277-290, runtime/tools.py:562-580", probe_kind: read, observed: "as cited", verdict: holds}
+  - {id: x6, kind: referential, claim: "JUDGE_DEF's static tools are ToolSet(read=True, bash=True) and every ToolSet bit defaults False, so a new closed_tickets bit is off by default — M3's premise", probe: "read engine_pydantic.py:153-161, agent_definition.py:68-90", probe_kind: read, observed: "as claimed; judge built via build_stage_agent, i.e. through the replace seam", verdict: holds}
+  - {id: x7, kind: referential, claim: "two doc anchors drifted in location but not content: JudgeWiring is defined at learning/core/config.py:389 (judge/run.py:159-164 is its use site); policy_cli.py is defender/scripts/policy_cli.py and its :51 judge demo scope points at case_history/case_ticket.py — the latent wrong-script bug, live", probe: "grep 'class JudgeWiring'; find policy_cli.py; read scripts/policy_cli.py:43-58", probe_kind: search, observed: "as stated", verdict: holds}
+  - {id: x8, kind: behavior, claim: "the verb signatures ground d3's exact model-facing param sets: list_tickets takes status/label/q/require_closed (tool schema must expose only label/q), get_ticket takes key/require_closed (only key)", probe: "read ticket_adapter.py:85-115; require_closed overrides any stray status into status=closed — behavior half re-executed as g6", probe_kind: executed, observed: "as claimed (g6's captured params confirm the override)", verdict: holds}
+  # ---- raised at grounding (10-brief.md) ----
+  - {id: g1, kind: census, re_verifies: c11, claim: "ticket_cli file census: 15 files — 4 mechanism (engine_pydantic, judge/run, agent_definition, policy_cli) + 2 comment-only (permission/bash, _stub_transport) + 9 test (8 under defender/tests/ + learning/test_loop.py)", probe: "grep -rln ticket_cli --include='*.py' defender/ (2026-07-20, this tree) + per-file read", probe_kind: search, observed: "exactly the 15; split as listed", verdict: holds}
+  - {id: g2, kind: census, re_verifies: c6, claim: "non-test argv consumers of the ticket CLI: judge grant/prompt text (judge/run.py:78-79 via :129), ticket_seeds.py:68-71, verify_forward/forward.py:119-120; rest are docstrings/comments", probe: "grep -rn 'ticket_adapter|_TICKET_CLI' --include='*.py' defender/ minus tests", probe_kind: search, observed: "those three + prose mentions", verdict: holds}
+  - {id: g3, kind: census, re_verifies: c15, claim: "spec-graph nodes bound to the bash ticket surface are exactly the anchors the doc lists", probe: "grep -n 'require-closed|require_closed|ticket_grant|ticket_cli' defender/tests/spec_graph_*.yaml", probe_kind: search, observed: "575:300-319,573-580,729,894,966,1021; 551:44-45,261; 538:366; 611:233,362-367,500,540", verdict: holds}
+  - {id: g4, kind: census, corrects: "M6 prose list", claim: "doc census stale, safe direction: the defender/CLAUDE.md exemption prose is GONE (#673); grant.py's comment sits at 196-206 without the 'Three grants' literal; bash.py mentions at ~181,331 — nothing new appeared, the census only shrank", probe: "grep -rn 'exemption|ticket' defender/CLAUDE.md defender/runtime/permission/*.py", probe_kind: search, observed: "CLAUDE.md: no hits; grant.py:198; bash.py:181,331", verdict: holds}
+  - {id: g5, kind: behavior, re_executes: c2, claim: "get_ticket(require_closed=True) on an open ticket raises UpstreamFault exit 1, no payload", probe: "in-process, stubbed http_get returning status=open (scratchpad probe_verbs.py)", probe_kind: executed, observed: "UpstreamFault exit_code=1 detail=\"SOC-1 is status='open', not 'closed' (--require-closed)\"", verdict: holds}
+  - {id: g6, kind: behavior, re_executes: c3, claim: "list_tickets(require_closed=True) pins outgoing status=closed over a stray status arg", probe: "in-process, captured outgoing params", probe_kind: executed, observed: "http_get('/tickets', {'status': 'closed'})", verdict: holds}
+  - {id: g7, kind: referential, re_executes: c5, claim: "VERBS importable/callable in-process: {get-ticket, health-check, list-tickets}", probe: "import + callable() sweep", probe_kind: read, observed: "all three callable", verdict: holds}
+  - {id: g8, kind: behavior, re_executes: c4, claim: "infra faults are the exit-2 class with stderr detail; usage errors exit 64", probe: "ran the CLI with DEFENDER_DIR pointing at a missing tree (ConfigFault) and with --bogus-flag", probe_kind: executed, observed: "exit=2 'config file not found: …'; exit=64 argparse usage", verdict: holds}
+  - {id: g9, kind: census, claim: "execution contexts reaching the touched modules: engine_pydantic <- loop.py, run_judge_ab; judge/run.py <- loop.py, run_judge_ab, judge_equivalence; _pydantic_stage/agent_definition/tools/ticket_seeds <- 11-13 entrypoints each; scripts/* modules outside codeRoots are floor (registry by-path load verbs.py:294, subprocess callers, operator CLI)", probe: "check_actors._Census engine anchored on the design's touched modules (scratchpad probe_drivers.py — spec-time trace drivers)", probe_kind: search, observed: "as tabulated; replay_actor subproc hit classified as malicious_actor/run.py by read", verdict: holds}
+  - {id: g10, kind: census, claim: "ticket-store writers/readers: writers run.py:148 open / run.py:208 close + ticket_enrichment annotate/enrich (POST /tickets, transitions, comments; key = run-dir basename); readers = the three verb bodies consumed by the gather query tool, the two subprocess CLI callers, the benign judge's bash grant text (dead at executor, F1), plus ticket_writer._fetch_enrich_ticket", probe: "spec-graph trace resource ticket_store (specGraph.resources entry added) + hand classification of every floor line", probe_kind: search, observed: "resolved as listed; floors classified (server-side app.py, same-name health_checks, test doubles, string-path CLI callers)", verdict: holds}
+  - {id: g11, kind: behavior, claim: "only run.py:166 starts a live box; bind() without box= leaves the inert BoxExecutor which refuses on first use as a tool error; the judge's bind passes no box — the judge's whole bash lane is dead-at-executor today (F1)", probe: "EXECUTED at the F round (V-E, 66-bashlane-probe.md — re-typed referential->behavior, closing the typing escape finding 4 named): built the judge deps with the exact bind(JUDGE_DEF, learning_run_dir, scope=RunScope(...)) call _run_judge_pydantic makes (engine_pydantic.py:205-208, no box=) and drove the real _tool_bash seam — cat, defender-sql, the ticket read, and the cat|defender-sql pipe all GATE allow=True but the EXECUTOR refuses ('this box has no container attached — the run was never started through start_box', surfaced as ModelRetry); isolating contrast: same deps + attached box RAN, box=None REFUSED", probe_kind: executed, observed: "DEAD by execution — the whole granted lane refuses at the executor; box=None is the single cause; restoration-not-preservation and R5's removal-costs-nothing pre-discharge substantiated", verdict: holds}
+  - {id: g12, kind: referential, re_verifies: c12, claim: "the per-leg carrier seam exists (replace at _pydantic_stage.py:66; registration follows defn.tools at driver.py:218) but NO tools parameter threads through run_stage/build_stage_agent today (F2)", probe: "read _pydantic_stage.py:41-157, driver.py:175-219", probe_kind: read, observed: "signatures carry model/effort/make_model only", verdict: holds}
+  - {id: g13, kind: referential, re_verifies: c7, claim: "typed tools are authorized by registration alone; no grant path for non-bash tools; no 'closed_tickets' name exists anywhere; deferred-tool idiom is import-at-registration in the owning package", probe: "read tools.py:511-609, agent_definition.py:67-100; grep closed_tickets defender/", probe_kind: read, observed: "as stated; grep empty", verdict: holds}
+  - {id: g14, kind: referential, re_verifies: [c8, c13], claim: "the query tool's error seam + salt-wrap envelope exist as cited, and are ENTANGLED with capture (queries row + circuit breaker, query_tool.py:330-334,385) which M4 does not mirror (F4)", probe: "read query_tool.py:49-60,314-334,388-446,471-475; tools.py:128,269; untrusted.py:20", probe_kind: read, observed: "as stated", verdict: holds}
+  - {id: g15, kind: referential, re_verifies: [c9, c14], claim: "benign-only wiring + teaching surfaces + deny-reason suite net as cited; adversarial leg carries ticket_cli=None end-to-end", probe: "read directions.py:41, config.py:389-408, judge/run.py:60-94,159-186, benign.md:37, engine_pydantic.py:57-68, test_grant_gate_575.py:904-916, test_benign_direction.py:569-623", probe_kind: read, observed: "as stated", verdict: holds}
+  - {id: g16, kind: referential, claim: "ticket config knobs TICKET_{URL_BASE,BASTION_HOST,TIMEOUT_SEC} with defaults http://ticket-server:8080 / web-1 / 10; per-key env override; ConfigFault on missing; transport forks docker-exec curl host-side with mandatory inner timeout TIMEOUT_SEC+10", probe: "read knowledge/environment/systems/ticket/config.env, _stub_transport.py:124-160,163-220", probe_kind: read, observed: "as stated", verdict: holds}
+  - {id: g17, kind: census, claim: "gather's route to the same verb bodies: query tool -> ModuleVerbRegistry by-path load; require_closed model-chosen default False; payloads persist to gather_raw/{lead}/{seq}.json which the judge reads via its read roots (F6/N7)", probe: "read verbs.py:294-330, query_tool.py:423-446,471-475, test_query_tool_611.py:1310-1318; grep gather_raw writers", probe_kind: search, observed: "as stated", verdict: holds}
+  - {id: g18, kind: referential, claim: "JudgeDeps: run_dir = learning run dir; read roots = gather_raw + comparison dirs; stage binds mint a fresh uuid4 salt; JUDGE_DEF tools = read+bash; request cap 45", probe: "read engine_pydantic.py:71-82,153-161,181-215; agent_definition.py:377-423", probe_kind: read, observed: "as stated", verdict: holds}
+  - {id: g19, kind: census, claim: "the full consumer set of the M6-removed plumbing is the brief's 'Consumers of what M6 removes' section; pyrefly resolves _ticket_grant refs to engine_pydantic.py:112,116 + test_judge_pydantic_engine.py:224; attribute-level ticket_cli refs under-resolve in pyrefly, so that census is grep+read (honest tool floor)", probe: "pyrefly-refs on _ticket_grant and ticket_cli (guard tripped) + grep + per-file read of all 15 files", probe_kind: search, observed: "as listed", verdict: holds}
+  - {id: g20, kind: referential, claim: "JUDGE_REQUEST_LIMIT = 45 (engine_pydantic.py:55, threaded as request_limit at :214) is the per-leg model-request cap — the ceiling the repeat/scale premises annexed to d0/d8 reason against (a backstop raised from 30 for multi-lead headroom, not a budget), and so the outer bound on how many closed-ticket reads one judge leg can make", probe: "read engine_pydantic.py:50-55,214 (V-G, mechanical finding 5 — pinned as a claim so the ceiling is explicit in the ledger)", probe_kind: read, observed: "JUDGE_REQUEST_LIMIT = 45; request_limit=JUDGE_REQUEST_LIMIT", verdict: holds}
+  - {id: r1-extended, kind: reachability, claim: "post-M6 the benign judge's model-reachable live-store routes are the two new typed tools and NOTHING else: bash shrinks to cat+defender-sql (file-opening only; the store is HTTP, no file exists), read_file opens files, no query bit on JUDGE_DEF, gather_raw is the N7 cache not a store path", probe: "surface sweep over JUDGE_DEF ToolSet + _judge_bash_shapes minus the ticket branch; INSPECTION-GRADE — phase F must re-probe against the BUILT policy and registered toolset (d18 is the executable census)", probe_kind: search, observed: "no other live-store surface found in this tree", verdict: unrefuted}
+  # ---- raised at the §7 reachability probe (65-forkd-probe.md — Fork D challenged by the
+  #      human as unreachable; refuted by execution). These ground the suite's fault content
+  #      (the in_progress fixtures) and the w1 waiver's follow-up.
+  - {id: p1, kind: behavior, claim: "require_closed refuses a perfectly ordinary non-closed ticket with no race and no failure path — the store's status enum is exactly open|in_progress|closed, and the refusal fires on any status != 'closed'; skills/ticket/SKILL.md advertises two spellings the server never had", probe: "pytest defender/tests/test_ticket_adapter.py (5 passed — both halves of the refusal on the same payload) + read playground/ticket-server/app.py:27 (Status Literal) and skills/ticket/SKILL.md read_guidance", probe_kind: executed, observed: "test_no_flag_allows_any_status + test_require_closed_rejects_open both pass; Literal['open','in_progress','closed']; SKILL advertises in-progress/resolved", verdict: holds}
+  - {id: p2, kind: behavior, claim: "gather reaches the ticket system unrestricted and unpinned: descriptor_catalog() advertises `ticket` to every dispatch, GATHER_DEF has query=True with no system filter, and require_closed defaults False on both verbs — the model chooses; payloads land whole at gather_raw/{lead}/{seq}.json, an add_dir for the judge", probe: "executed: ModuleVerbRegistry systems()/verbs('ticket') + declared_params over the live registry; read driver.py:292-301, query_tool.py:186-216,470-482, judge/run.py:120,131", probe_kind: executed, observed: "get-ticket {'key': str, 'require_closed': (bool, False)}; list-tickets require_closed (bool, False); ticket in every dispatch catalog", verdict: holds}
+  - {id: p3, kind: referential, claim: "a non-closed ticket at judge time needs no race — the producing code paths exist as written: --update-ticket is opt-in default OFF; a concurrent run's ticket is open for its whole gather (both configs resolve the same server); close is a no-op on bad report/config/transport and sits after the try/finally so a driver crash skips it entirely (run.py:207); judge/run.py:80 asserts the in-flight ticket 'is open', contradicted by the unconditional close — the false claim M6's rewrite must not carry forward", probe: "read run.py:69-70,143-149,166-184,207-208; ticket_writer.py:70-98,177-196; knowledge/environment/systems/{ticket,case-history}/config.env", probe_kind: read, observed: "as stated — four independent producers, one race-free", verdict: holds}
+
+# ===========================================================================
+# GATE — phase D's gate leaf (spec-graph gate --residue). Computed 12 mechanical
+# triggers over the formal slots: R1x4, R3x5, R4x2, R5x1 (R2's predicate found no
+# shared-sink delta; R0's formal half — dangling binds, unregistered axes, unheard
+# `unknown`s — is clean). 10 of the 12 are pre-discharged below by demands the
+# artifact already carries; R3's `query-tool` and `subprocess-cli` cells stay open
+# (60-residue.md routes them as waiver candidates — pre-existing surfaces this
+# design does not touch). R0's judgment half (bidirectional prose reconciliation)
+# and R6 (rendered-sink trust walk) are agent-run, not tool-computed; R5's
+# tightening/safe-by-construction extension was walked and found nothing to add.
+# PHASE-E UPDATE: the 2 open R3 cells were resolved at §7 as WAIVERS — w1
+# (`ticket_store.access[query-tool]`) and w2 (`ticket_store.access[subprocess-cli]`)
+# now bind them as Demand{form: waiver} entries, so a bare `spec-graph gate` re-run
+# reports 0 unanswered findings; the one R0 test obligation (registration
+# completeness) is minted as d22. See 60-residue.md for the original routing.
+# ===========================================================================
+gate:
+  evaluated:
+    - {rule: R0, fired: true}    # formal half clean; reconciliation half found one coverage
+                                  # gap (registration completeness across the 3 benign call
+                                  # sites) — routed as a test obligation, 60-residue.md
+    - {rule: R1, fired: true}    # 4/4 pre-discharged below
+    - {rule: R2, fired: true}    # RECOMPUTED at the F round (V-D, mechanical finding 3):
+                                  # phase D's `fired: false` predated Fork B and could not
+                                  # see the then-unmodelled sink. judge_queries_table (new,
+                                  # in the delta) carries two writer edges driven under
+                                  # multiplicity: concurrent — pre-discharged below by d27
+                                  # plus the one-turn row-independence test. No PRE-EXISTING
+                                  # instance gains a 2nd writer: judge rows land in the
+                                  # LEARNING run dir, gather's in the INVESTIGATION run dir
+                                  # (d27's negative half pins exactly that separation).
+    - {rule: R3, fired: true}    # 5 cells; 3/5 pre-discharged below, 2/5 open — 60-residue.md
+    - {rule: R4, fired: true}    # 2/2 pre-discharged below
+    - {rule: R5, fired: true}    # subtraction half: ticket_store, pre-discharged below.
+                                  # tightening/safe-by-construction extension walked: every
+                                  # tightening move here (M2's require_closed hardcode, M3's
+                                  # absence-by-registration default) narrows in the SAFE
+                                  # direction — no caller is left constructible in a newly
+                                  # -unsafe state; nothing to mint from this half
+    - {rule: R6, fired: true}    # the two typed tools' responses are a rendered sink gaining
+                                  # delta content (ticket free text, model-chosen `key`); walk
+                                  # below, 2/2 pre-discharged
+
+  obligations:
+    # ---- R3: the two cells 60-residue routed as waiver candidates, resolved at §7 as
+    # recorded waivers (rules.md: an obligation is discharged by an executable demand OR
+    # a recorded waiver). The waiver demands carry the rationale and its citations.
+    - rule: R3
+      element: "ticket_store.access[query-tool]"
+      witness: "gather reaches the same verb bodies with require_closed model-chosen, default False (p2) — closed-only parity on this via is declined for #672; follow-up issue owed at handoff"
+      discharged_by: w1_query_tool_parity_waived
+    - rule: R3
+      element: "ticket_store.access[subprocess-cli]"
+      witness: "the two CLI subprocess callers run at operator trust; the env/timeout parity gap is pre-existing and untouched by this design"
+      discharged_by: w2_subprocess_cli_parity_waived
+
+  pre_discharged:
+    # ---- R1: unread channel (4/4) ----
+    - rule: R1
+      element: "interacts(benign_judge->get_closed_ticket).payload"
+      by: d3_schema_closed_by_construction
+      edge: "interacts(benign_judge->get_closed_ticket)"
+      cites: [x8]
+      # d3 pins the model-facing schema to exactly {key}; x8 grounds the verb's real param
+      # surface (get_ticket takes key/require_closed — only key is exposed to the model).
+    - rule: R1
+      element: "interacts(benign_judge->list_closed_tickets).payload"
+      by: d3_schema_closed_by_construction
+      edge: "interacts(benign_judge->list_closed_tickets)"
+      cites: [x8]
+      # same demand, same claim: list_tickets takes status/label/q/require_closed — the
+      # schema exposes only {label, q}.
+    - rule: R1
+      element: "interacts(get_closed_ticket->ticket_store).payload"
+      by: d4_body_pins_closed
+      edge: "interacts(get_closed_ticket->ticket_store)"
+      cites: [c2, g5]
+      # d4 asserts the body hardcodes require_closed=True; c2/g5 executed-probe exactly that
+      # behavior (open ticket -> UpstreamFault exit_code=1, no payload).
+    - rule: R1
+      element: "interacts(list_closed_tickets->ticket_store).payload"
+      by: d4_body_pins_closed
+      edge: "interacts(list_closed_tickets->ticket_store)"
+      cites: [c3, g6]
+      # c3/g6 executed-probe list_tickets(require_closed=True) pinning outgoing status=closed
+      # over any stray status arg.
+
+    # ---- R2: shared sink (1/1 — the F-round recompute, V-D) ----
+    - rule: R2
+      element: judge_queries_table
+      by: d27_capture_row_sink
+      edge: "interacts(get_closed_ticket->judge_queries_table)"
+      cites: [g14]
+      # The Fork B sink, modelled at V-D: two writer edges (both typed tools) onto one
+      # append-only table, driven under multiplicity: concurrent. d27 pins the write
+      # itself (call-order append, by-ref payload inside the judge run dir, and the
+      # negative half — nothing lands in gather's table, so no pre-existing instance
+      # gains a second writer); test_two_ticket_calls_one_turn_rows_independent pins
+      # per-call row/payload-path identity under the one-turn two-writer shape. g14
+      # grounds the mirrored capture machinery (queries row + breaker entanglement).
+
+    # ---- R3: cross-via parity, 3 of 5 cells (query-tool, subprocess-cli stay open) ----
+    - rule: R3
+      element: "ticket_store.access[typed-tool]"
+      by: d18_store_route_census
+      cites: [r1, r1-extended]
+      # d18 is the executable re-probe of r1/r1-extended's inspection-grade sweep — it pins
+      # typed-tool as a genuinely live route, the surface the other cells get compared to.
+    - rule: R3
+      element: "ticket_store.access[bash]"
+      by: d18_store_route_census
+      cites: [r1, r1-extended, g11]
+      # the parity question is moot, not silently skipped: d18's census affirmatively excludes
+      # bash from the live route set, and g11 grounds why — the judge's bash lane is
+      # dead-at-executor already (no box bound), so nothing live reaches ticket_store this way
+      # to compare constraints against.
+    - rule: R3
+      element: "ticket_store.access[read-tool]"
+      by: d18_store_route_census
+      cites: [r1, r1-extended]
+      # r1/r1-extended: read_file opens mounted files only — this cell actually reaches
+      # gather_raw (the N7 cache), never the live HTTP store; d18's census pins the non-reach,
+      # so read-tool's missing closed-pin is not a live parity gap on THIS boundary.
+
+    # ---- R4: domain coverage (2/2) ----
+    - rule: R4
+      element: "closed_tickets.domain.distinguished[false]"
+      by: d2_adversarial_absent
+      cites: [x6]
+      # x6 grounds the off-by-default premise (every ToolSet bit defaults False); d2 exercises
+      # the false/off state directly — the adversarial leg built with no ticket tools.
+    - rule: R4
+      element: "ticket_store.domain.distinguished[open]"
+      by: d5_nonclosed_refused_as_fault
+      cites: [c2, g5]
+      # the answer-key state (O2's asset), executed-probed by c2/g5, exercised by d5.
+
+    # ---- R5: subtraction and conservation (1/1) ----
+    - rule: R5
+      element: ticket_store
+      by: d1_benign_registration
+      edge: "interacts(benign_judge->ticket_store)"
+      cites: [g11]
+      # the only dependent whose workflow actually ran THROUGH the removed bash edge is the
+      # benign judge's own ticket read; its substitute is exhaustively covered (d1 registers
+      # it, d4-d9 pin its behavior, d18 censuses its routes). g11 grounds why removal costs
+      # nothing live: the bash lane was dead-at-executor before this change (F1) — restoration,
+      # not preservation. F round: g11 is now EXECUTED (V-E, 66-bashlane-probe.md), so this
+      # pre-discharge no longer rests on a read-grade claim. The trigger's OTHER listed dependents (gather_dispatch,
+      # run_investigation, ticket_enrichment) never routed through the removed edge at all —
+      # they reach ticket_store by unrelated, untouched paths (query-tool, http write) this
+      # delta does not touch, so no survival demand is owed on their account.
+
+    # ---- R6: rendered-sink trust walk (judgment; 2/2) ----
+    - rule: R6
+      element: "interacts(get_closed_ticket->salt)"
+      by: d11_untrusted_wrap
+      cites: [c13, g14]
+      # chooser/sanitizer walk: ticket free text is store-chosen (O2's asset — the answer-key
+      # ticket's content); the tool's own `key` argument is model-chosen (its charset is Fork
+      # A's separate, already-routed question). The sanitizer is untrusted.wrap: content passes
+      # through byte-for-byte, but the FRAME (the `<run-{salt}-tag>` delimiters) is built from
+      # the run's server-minted secret, never from a chooser-influenced value — unlike the
+      # canonical manifest-heading escape, no chooser can forge the closing tag. d11 pins this
+      # for both the success view and the fault detail (c13/g14 ground the mirrored query_tool
+      # idiom this design reuses verbatim).
+    - rule: R6
+      element: "interacts(list_closed_tickets->salt)"
+      by: d11_untrusted_wrap
+      cites: [c13, g14]
+      # same walk; list_closed_tickets can return several tickets in one view — d0's still-
+      # provisional response shape (fork f1/Fork B) must keep the WHOLE rendered view inside
+      # one wrap, not per-item wraps or an unwrapped list frame, whichever shape §7 picks.
+
+# ===========================================================================
+# HANDOFF — written at phase F (the mechanical gate), extended at the F round
+# (75-verify-resolutions.md). The suite is RED by construction (50 red / 2 green
+# at HEAD); write-code-from-spec makes it green.
+# ===========================================================================
+handoff:
+  forks:
+    - "Fork A — the key meets a DEFINED minimal schema before any store attempt (empty, whitespace-only, path/URL-significant characters reject with zero store attempts; length and clean non-ASCII flow opaquely). Human refined the recommendation. -> d10"
+    - "Fork B — demand #0's provisional record-free reading FLIPPED: the tools mirror the query tool FULLY (capture row per call + bounded truncation-noted view). Human DEPARTED from the recommendation. -> d0"
+    - "Fork C — the case-under-judgment's own key is excluded at the tool boundary, state-independent. -> d23"
+    - "Fork D — only the live closed-only read confirms; cached gather_raw payloads are context, never confirmation. Challenged by the human as unreachable; an executed probe (65-forkd-probe.md, claims p1-p3) refuted the challenge. -> d16"
+    - "Fork E — FULL circuit-breaker participation (honor + contribute); business refusals (exit-1) never contribute. Human DEPARTED from the isolation recommendation. -> d6/d8. Round 3 (C5): applied to BOTH read tools — the LIST path has its own open-breaker honor test, and the malformed-list breaker trip is per-verb attributable."
+    - "Fork F — run cutoff cuts the in-flight call loose, documented; an unfinished attempt is the one attempt. -> d9/d8"
+    - "Fork G — the list path re-checks each returned item's status client-side before the envelope. -> d24"
+    - "Fork H — Fork C's exclusion extends to a closed ticket whose payload names the case's own key; any other quoted non-closed ticket rides the envelope unredacted (O2 scoped record-wise). -> d25"
+    - "f2 — tool/bit names CONFIRMED as the doc proposed: closed_tickets, get_closed_ticket, list_closed_tickets."
+    - "Silent branch (wrong-JSON-type key) — pinned LAYER-AGNOSTICALLY: a retry-class response and zero store attempts, whether the framework's schema validation or the tool body rejects. -> d10"
+    - "Waivers w1/w2 — the two open R3 cells resolved as examined declines, not silences."
+    - "V-A (F round) — the self-key screen EXTENDS to the list path: the self-case's record is filtered by IDENTITY, per-item, before the envelope. -> d23 (binds both tool paths) / d24 (per-item exclusion)"
+    - "V-B (F round) — the truncation bound is the query tool's EXACT passthrough ceiling (_passthrough_max_bytes, shipped 65536) plus the note: one byte over truncates, at the ceiling rides whole. -> d0"
+    - "V-C (F round) — docs/runtime-gates.md:42 and docs/state-surface-adapters.md join d21's census; d26's currency test enforces no doc surface still teaches the removed command path."
+    - "V-D (F round) — the Fork B capture sink modelled (judge_queries_table + write edges, R2 recomputed) -> d27; registration ORDER fixed at the tail, list then get -> d28; the salt must be UNPREDICTABLE, a counter fails -> the per-bind salt test."
+    - "V-F (F round) — the cross-leg salt half is w3, Demand{form: waiver}: unexercisable, the adversarial leg has no ticket tools."
+    - "V-G (F round) — JUDGE_REQUEST_LIMIT=45 pinned as claim g20; skills/ticket/SKILL.md's status vocabulary is executable demand d29; d21 enumerates its four named stale tests; SOC_PLAYGROUND_DOCKER_CONTEXT recorded as a no-consequence note on TICKET_TIMEOUT_SEC."
+
+  refuted:
+    - "judge/run.py:80's `_cited_policy_read_section` asserts the in-flight ticket 'is open' — FALSE: run.py:207 closes it unconditionally (claim p3). The M6 rewrite must not carry the claim forward; d15's test pins its absence."
+    - "skills/ticket/SKILL.md advertises ticket statuses the server has never had — the real enum is open|in_progress|closed (claim p1, executed). Folded into d21's clause AND pinned executably at the F round: d29 / test_ticket_skill_status_vocabulary_matches_server fails on the stale vocabulary."
+    - "docs/runtime-gates.md:42 teaches 'the judge's ticket CLI — whose mandatory --require-closed lookahead is its entire security property' — goes FALSE under M6 (the judge grants no ticket shape; the pins_path exemption census shrinks to two). Joined d21's census at V-C; d26's test enforces the currency."
+    - "The doc's M6 census was stale in the SAFE direction: the defender/CLAUDE.md exemption prose is already gone (#673) — claim g4. Census shrank, nothing new appeared."
+
+  deferred:
+    - "r1 / r1-extended (reachability) — 'post-M6 the benign judge's only model-reachable routes to the live ticket store are the two typed tools'. Both are INSPECTION-GRADE (probe_kind: search) because the post-M6 world does not exist yet; rules.md requires an executed probe for a reachability claim, and `spec-graph claims` reports both as INSTRUMENT findings. d18 (test_benign_store_routes_census) IS the mandated executable re-probe — write-code-from-spec must run it and re-stamp both claims once the code exists. Three R3 pre-discharge cells (typed-tool, bash, read-tool) and waiver w1 rest on them."
+    - "x4 (behavior, probe_kind: read) — 'the transport's inner timeout is mandatory on every fork; the CLI consumers hold their own subprocess timeouts'. Closes on reading, which cannot falsify it; carries waiver w2's rationale. STILL DEFERRED — an executed probe is OWED at write-code-from-spec, under d18's mandated re-probe posture (V-E); no F-round probe touched it. (Round 3, CR-m3: this entry previously embedded the g11/x1 resolution mid-paragraph, which a cold reader could parse as resolving x4 itself — split below.)"
+    - "g11 / x1 — a STATUS RECORD, not a deferral (split out of the x4 entry, round 3): RESOLVED at the F round — g11 was re-typed behavior and EXECUTED (66-bashlane-probe.md: the probe drove the real _tool_bash seam over the judge's exact bind; box=None the single cause), and the same probe covers x1's box-denial half directly, so x1 is now probe_kind: executed too. R5's subtraction pre-discharge rests on executed ground. The deferred instrument tail is exactly {x4, r1, r1-extended}."
+    - "w1's follow-up issue (orchestrator action, carried per the cold reconciler's note): the human's Waiver 1 resolution instructs — extending closed-only parity onto the query-tool gather path is a design change beyond this issue; FILE IT AS ITS OWN ISSUE at handoff. The Fork D probe makes gather's route the live path by which non-closed ticket content reaches the judge (p2). Step 10 must carry this into the handoff note and the issue thread."
+
+  drops:
+    - "list_label_empty_string — converged-on-silence, untouched by §7: inherited list_tickets verb-body handling. Fork A's key grammar is scoped to `key` and does not reach filters; this change owns no filter-value semantics."
+    - "list_q_empty_string — same reason: inherited verb-body handling, same scoping."
+    - "list_label_and_q_together — converged-on-silence: an allowed call shape whose combination semantics belong to the store, unspecified by the doc and unowned by this seam."
+    - "list_q_pathologically_long — converged-on-silence: no outgoing-query bound is described anywhere. Fork B bounds the RESPONSE view, not the outgoing query, so the flip does not reach this premise."
+    - "ticket_config_knob_value_changes_between_two_calls_in_one_run — converged-on-silence: when config resolves relative to calls (per call vs fixed at bind) is stated nowhere; environmental, not pinnable as an expected value. Recorded on the TICKET_TIMEOUT_SEC boundary as an unpinned silence."
+    - "ticket_status_transitions_around_the_read — phase-F drop. Its converged content ('one-live-check-per-call granularity; mid-request races are inherited transport behavior; no settled-for-the-run guarantee exists anywhere') is a statement about inherited behavior and an ABSENT guarantee, with no assertable observable at this seam. The suite's premise map previously claimed test_ticket_flips_state_between_list_and_get covered it; that test's assertions do not, and the map was corrected at phase F."
+
+  nullstub_passes:
+    - "test_cli_exit_codes_survive_for_subprocess_consumers — parity. A d14 SURVIVAL demand: it drives the REAL adapter CLI as a subprocess and the two real subprocess consumers, and never imports the stubbed target at all. Nulling the judge engine cannot move it, by construction; that is what a survival net over an untouched surface is."
+    - "test_closed_ticket_registration_reaches_every_benign_call_site — structure. A d22 STATIC CENSUS: it AST-parses the three benign-leg driver source files and asserts they funnel through the one invoke_judge seam with no bypass build. §7 explicitly chose this shape over the per-entrypoint investigation drive (too heavy), and the choice is recorded in exercise_waivers; `spec-graph calls` correspondingly reports it as the suite's one NO-CALL. Inspection-grade by ratified decision, paired with d1/d2's per-leg behavior checks."
+
+  deviations:
+    - "check_stub could not run under its own invocation: pytest's `pythonpath = ['..']` ini setting (defender/pyproject.toml) inserts the real tree at sys.path[0] during load_initial_conftests, AHEAD of the stub dir check_stub hands in via PYTHONPATH — the tool correctly detected the shadow and voided the run (exit 2). Phase F re-ran it with a scratch pytest plugin that restores the stub dir's priority at pytest_configure (after that insert, before any test module import). It changes import resolution ORDER ONLY — not the stub, the suite, or the classification. Every spec in this repo will hit this; the fix belongs in check_stub."
+    - "check_stub's discrimination test under-credits UNMESSAGED asserts: it counts a test as discriminating only when reprcrash.message starts with 'AssertionError'/'Failed', but pytest renders a bare `assert x` as a message starting with 'assert ' (verified empirically at phase F). 20 of the 25 NON-ASSERT findings on this suite are real assertion failures on unmessaged asserts. The substantive residue survives the correction and is recorded in 90-verification.md."
+    - "`spec-graph frontiers` reports 7 findings over the finished chain, all on frontiers earlier than phase E (30-premises-adversarial-input, 30-premises-dependency, 65-forkd-probe: digest length; 45-dispositions, 70-resolutions: echo granularity/naming). Phase F verified the SUBSTANCE reconciles by hand and left the earlier leaves' files untouched, per the checker's own rule (recompute, never copy a side). 80-author-digest.md echoes 45 and 70 correctly and completely."
+    - "`spec-graph actors`' unmodelled-driver finding (defender/evals/harness_lead.py) is waived under actor_waivers — its subprocess arm is deliberately ungated on the changed set, so it fires repo-wide; harness_lead re-execs learning/leads/lead_author.py only and reaches no actor of this graph."
+    - "F round: test_concurrent_closed_ticket_calls_in_one_turn RENAMED to test_two_ticket_calls_one_turn_rows_independent — the blind reader proved the old name overclaimed (sequential execution produces the same observables; nothing establishes overlap). The genuine seq-race is unexercised and UNCLAIMED; what is pinned is per-call row/payload-path independence for the one-turn call shape."
+    - "F round, escape-0 class note for future phase-F runs: the repaired live escape's shape was 'a VerbRecorder built but never read' — a fixture that constructs the observation channel and asserts nothing from it. Worth one grep (`VerbRecorder()` whose binding is never referenced again) at every future phase F."

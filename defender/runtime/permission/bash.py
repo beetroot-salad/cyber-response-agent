@@ -178,8 +178,8 @@ def _allow(
 
 # Sentinel replacing a token's OWN spaces before the argv is joined for shape matching. A plain
 # `" ".join(argv)` is many-to-one: a quoted token carrying a space (`"a b"`) is
-# indistinguishable from two tokens (`a b`), so a shape that asserts an inner token (the judge's
-# `--require-closed` lookahead) or the program name could be spoofed by smuggling that text
+# indistinguishable from two tokens (`a b`), so a shape that asserts an inner token (a pinned
+# script's argv, an actor flag) or the program name could be spoofed by smuggling that text
 # inside a NEIGHBOURING quoted argument — which argparse/exec then binds as a value, not the
 # token the gate matched (the gate would approve a shape the executed argv does not have).
 # Mapping each token's own spaces to a byte that cannot occur in a shell token keeps every space
@@ -328,10 +328,10 @@ def decide_bash(
         return BashDecision(False, policy.deny_reason)
 
     # Reader lane FIRST: the per-agent grants claim any command whose every stage matches an
-    # approved shape — including the judge's pinned `python3 <ticket_cli>` read and the actor's
-    # pinned scripts, adapter-SHAPED commands that must win over adapter classification (the job
-    # the old custom matchers did). A claimed command that fails the scope check / carries an
-    # unsafe construct denies HERE rather than falling through.
+    # approved shape — including the actor's pinned scripts, adapter-SHAPED commands that must
+    # win over adapter classification (the job the old custom matchers did). A claimed command
+    # that fails the scope check / carries an unsafe construct denies HERE rather than falling
+    # through.
     reader = _decide_readers(
         pipelines, policy, run_dir=cwd_anchor if cwd_anchor is not None else run_dir,
     )

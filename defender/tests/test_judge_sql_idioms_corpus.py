@@ -319,8 +319,8 @@ def test_every_command_the_prompt_teaches_passes_the_judges_own_gate(prompt):
 
     # Through the REAL seam (#575): the judge's policy is compiled from its own def, and the
     # prompts' `/abs/path` payloads reach it the way production's do — as a `read_roots` entry
-    # (gather_raw lives under the INVESTIGATION run dir, never the judge's own). The adversarial
-    # leg (no ticket_cli) is the tighter of the two, so a command it allows both legs allow.
+    # (gather_raw lives under the INVESTIGATION run dir, never the judge's own). Both legs compile
+    # the identical bash lane now (#672 moved the one benign-only grant off bash to a typed tool).
     root = Path("/abs/path")
     policy = compile_policy_for(
         JUDGE_DEF, Path("/run"), scope=RunScope(add_dirs=(root,)), defender_dir=_DEFENDER,

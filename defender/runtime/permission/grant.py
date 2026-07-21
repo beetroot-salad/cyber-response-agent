@@ -194,15 +194,14 @@ class Grant:
         `OPENS_NOTHING` program (nothing to check).
       - `route` — what the gate does with a claimed command (`PLAIN` — see `Route`).
       - `pins_path` — the R1 exemption: this grant's operand IS the program (the actor's
-        pinned `python3 <script>`, the lead author's/curator's `rm <path>`, the judge's
-        ticket CLI), so its path legitimately lives in the PATTERN and `resolve()` is the
-        wrong operand model for it (`rm` unlinks the LINK, not the target; a pinned script's
-        own argv is ungated anyway — #565). The invariant is therefore "no UNMARKED grant's
-        pattern embeds a path", which is checkable and true. Load-bearing beyond the audit:
-        the judge's `--require-closed` is a MANDATORY flag and its entire security property
-        (it is what stops the benign judge grading against the live answer key), and a
-        boolean-flag allowlist makes every flag OPTIONAL — so that pattern is kept VERBATIM,
-        lookahead included, rather than mechanically migrated into a flag grammar."""
+        pinned `python3 <script>`, the lead author's/curator's `rm <path>`), so its path
+        legitimately lives in the PATTERN and `resolve()` is the wrong operand model for it
+        (`rm` unlinks the LINK, not the target; a pinned script's own argv is ungated anyway
+        — #565). The invariant is therefore "no UNMARKED grant's pattern embeds a path", which
+        is checkable and true. (The benign judge's closed-ticket read was a third such
+        exemption — a `python3 <ticket-cli> … --require-closed` grant whose mandatory flag was
+        its answer-key defense; #672 moved it off bash into a typed tool, closed-only by
+        construction, so no ticket shape rides any bash pattern now.)"""
 
     program: str
     pattern: re.Pattern[str]

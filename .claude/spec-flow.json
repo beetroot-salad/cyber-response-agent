@@ -35,7 +35,23 @@
       "tools_gather": "gather_dispatch",
       "tools": "tool_write_file"
     },
-    "conceptAliases": {}
+    "conceptAliases": {},
+    "resources": {
+      "ticket_store": {
+        "writers": [
+          "defender/scripts/case_history/ticket_writer.py::open_case_ticket",
+          "defender/scripts/case_history/ticket_writer.py::close_case_ticket",
+          "defender/scripts/case_history/ticket_writer.py::annotate_case_ticket",
+          "defender/scripts/case_history/ticket_writer.py::enrich_case_resolution"
+        ],
+        "readers": [
+          "defender/scripts/adapters/ticket_adapter.py::list_tickets",
+          "defender/scripts/adapters/ticket_adapter.py::get_ticket",
+          "defender/scripts/adapters/ticket_adapter.py::health_check"
+        ],
+        "grep": ["ticket_adapter.py"]
+      }
+    }
   },
   "conventions": {
     "defaultBranch": "main",

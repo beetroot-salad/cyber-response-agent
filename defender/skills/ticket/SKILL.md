@@ -46,7 +46,7 @@ the defender, the author skill, and the actor-reviewer judge.
 
 ### read_guidance
 
-- **`status` ∈ {open, in-progress, resolved, closed}.** Closed
+- **`status` ∈ {open, in_progress, closed}.** Closed
   tickets carry a `resolution` field; open tickets have
   `resolution: null`.
 - **`labels` are short tags.** Common ones: `brute-force`,

@@ -1309,19 +1309,20 @@ def test_record_query_module_survives_its_cli():
 
 def test_ticket_cli_dual_surface_survives():
     """ticket_cli_dual_surface_survives — ticket_cli keeps its argparse CLI over the SAME
-    implementation as its VERBS entry: ticket_seeds and verify_forward/forward (both subprocess
-    callers) and the benign judge's pinned `--require-closed` bash grant all still work. A
-    params-dict cannot express a MANDATORY flag, and that mandate is the judge's entire answer-key
-    defense."""
+    implementation as its VERBS entry: its two remaining subprocess callers, ticket_seeds and
+    verify_forward/forward, still work, and the `--require-closed` flag still parses for them.
+    (#672 moved the benign judge's closed-ticket read off this CLI onto two typed in-process
+    tools, so the judge is no longer a subprocess consumer — but the CLI + its flag survive for
+    the two that remain, d14.)"""
     # 1. The VERBS surface exists.
     verbs = ModuleVerbRegistry(ADAPTERS_DIR).verbs("ticket")
     assert {"list-tickets", "get-ticket"} <= set(verbs)
 
-    # 2. The CLI surface still parses the argvs its three subprocess callers pin.
+    # 2. The CLI surface still parses the argvs its two subprocess callers pin.
     parser = ticket_adapter.build_parser()
     assert parser.parse_args(["list-tickets", "--status", "closed"]).status == "closed"
     assert parser.parse_args(["get-ticket", "SOC-1042"]).key == "SOC-1042"
-    # …including the judge's MANDATORY closed-only flag, which cannot be a params-dict entry.
+    # …including the closed-only flag the subprocess callers still pass on the argv.
     assert parser.parse_args(["get-ticket", "SOC-1042", "--require-closed"]).require_closed is True
     assert parser.parse_args(["list-tickets", "--require-closed"]).require_closed is True
 

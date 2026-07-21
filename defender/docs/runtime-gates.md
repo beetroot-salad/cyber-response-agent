@@ -36,12 +36,12 @@ hooks). The gates:
   bash surface with no recursive-descent primitive and no path-opening program but `cat`.
   Each agent hangs its own grant builder on its own `AgentDefinition.bash_shapes`
   (`compile_policy` composes what the defs bring; `runtime/` enumerates no agents and
-  imports no `learning/` private — the registry lives at `defender/agents.py`). Three
+  imports no `learning/` private — the registry lives at `defender/agents.py`). Two
   grants are `pins_path` exemptions, where the operand IS the program and the pattern is
-  the containment: the actor's pinned `python3 <script>`, the lead author's / curator's
-  `rm <path>`, and the judge's ticket CLI — whose **mandatory** `--require-closed`
-  lookahead is its entire security property (a boolean-flag allowlist would make it
-  optional and drop it silently). Containment is **positive enumeration**: main cannot
+  the containment: the actor's pinned `python3 <script>` and the lead author's / curator's
+  `rm <path>`. (The benign judge's closed-ticket read was a third such exemption; #672
+  moved it off bash into two typed host-side tools, so no ticket shape rides any bash lane
+  now.) Containment is **positive enumeration**: main cannot
   read `gather_raw` because that shape is not in its list — there is no `RAW_MARKER`
   substring clamp over the command text any more — and the read tool enforces the SAME
   tuple OBJECT the `cat` grant carries as its scope (`AgentPolicy.read_allow`), so

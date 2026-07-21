@@ -231,18 +231,18 @@ def test_d0_bind_return_contract(tmp_path):
 # ============================================================================
 
 def test_d1_judge_via_bind(tmp_path):
-    """d1_judge_via_bind: bind(JUDGE_DEF, scope=RunScope(add_dirs, ticket_cli)) yields a policy
-    whose read_roots == add_dirs, whose `cat` grant is SCOPED to those roots (the #575 successor
-    of the `operand_gated` bit: every cat operand is checked against the scope at resolve() time,
-    which is how the judge reaches a gather_raw payload living under the INVESTIGATION run dir —
-    the `raw_reads` bit's whole content), and whose bash lane carries the pinned --require-closed
-    ticket read."""
+    """d1_judge_via_bind: bind(JUDGE_DEF, scope=RunScope(add_dirs)) yields a policy whose
+    read_roots == add_dirs, whose `cat` grant is SCOPED to those roots (the #575 successor of the
+    `operand_gated` bit: every cat operand is checked against the scope at resolve() time, which
+    is how the judge reaches a gather_raw payload living under the INVESTIGATION run dir — the
+    `raw_reads` bit's whole content). The benign closed-ticket read is a typed tool now (#672),
+    not a bash grant, so the bash lane is exactly cat + defender-sql on both legs."""
     # GREEN@HEAD: judge binds off scope alone (no defender_dir); stays green post-#551/#575.
     run = tmp_path / "run"
     cmp = tmp_path / "cmp"
     cmp.mkdir()
     tcli = tmp_path / "ticket_adapter.py"
-    jdeps = bind(JUDGE_DEF, run, scope=RunScope(add_dirs=(cmp,), ticket_cli=("python3", tcli)))
+    jdeps = bind(JUDGE_DEF, run, scope=RunScope(add_dirs=(cmp,)))
     assert isinstance(jdeps, JudgeDeps)
     jpol = jdeps.policy
     assert jpol.read_roots == (cmp,)
@@ -258,9 +258,9 @@ def test_d1_judge_via_bind(tmp_path):
     assert permission.decide_bash(
         f"cat {cmp}/a.json | defender-sql 'SELECT 1'", policy=jpol, run_dir=run, defender_dir=_DEFENDER,
     ).allow
-    # the benign --require-closed ticket read (required flag enforced).
-    assert permission.decide_bash(f"python3 {tcli} list-tickets --require-closed", policy=jpol, run_dir=run, defender_dir=_DEFENDER).allow
-    assert not permission.decide_bash(f"python3 {tcli} list-tickets", policy=jpol, run_dir=run, defender_dir=_DEFENDER).allow
+    # #672: no ticket shape on the bash lane — the closed-ticket read is a typed tool, so the
+    # old `python3 <adapter> list-tickets --require-closed` grant is gone and DENIES.
+    assert not permission.decide_bash(f"python3 {tcli} list-tickets --require-closed", policy=jpol, run_dir=run, defender_dir=_DEFENDER).allow
     # `operand_gated` as a PROPERTY: the operand is gated at resolve() time, not textually — a
     # symlink INSIDE the comparison root pointing OUT of it denies (a textual anchor could not
     # see through it). This is now the model for every agent, so the bit has nothing left to say.

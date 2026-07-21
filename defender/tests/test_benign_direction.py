@@ -596,14 +596,14 @@ def test_build_judge_invocation_benign_injects_scoped_read(tmp_path: Path) -> No
         comparison_dirname="comparison_benign",
         closed_ticket_read=True,
     )
-    # The injected section names the closed-only read, the in-flight key, and the menu.
+    # The injected section names the closed-only typed tools, the in-flight key, and the menu
+    # (#672 — the read is a typed tool now, not a bash CLI).
     assert "<cited_policy_read>" in inv.user_text
-    assert "--require-closed" in inv.user_text
+    assert "get_closed_ticket" in inv.user_text
+    assert "list_closed_tickets" in inv.user_text
+    assert "--require-closed" not in inv.user_text  # no bash argv survives the rewrite
     assert run_dir.name in inv.user_text          # the in-flight key it must never read
     assert "case-OLD" in inv.user_text            # candidate closed case from the menu
-    # The scoped closed-ticket pins ride on the invocation → the in-process judge builds
-    # its closed-only bash grant from them (see engine_pydantic._ticket_grant).
-    assert inv.ticket_cli is not None
 
 
 def test_build_judge_invocation_adversarial_has_no_ticket_read(tmp_path: Path) -> None:
@@ -620,4 +620,6 @@ def test_build_judge_invocation_adversarial_has_no_ticket_read(tmp_path: Path) -
 
     inv = su.build_judge_invocation(run_dir, story, telem, lrd)  # defaults: adversarial
     assert "cited_policy_read" not in inv.user_text
-    assert inv.ticket_cli is None                  # no closed-ticket read on the adversarial leg
+    # no closed-ticket surface on the adversarial leg (#672)
+    assert "get_closed_ticket" not in inv.user_text
+    assert "list_closed_tickets" not in inv.user_text

@@ -1834,12 +1834,13 @@ def test_invoke_judge_benign_is_grounded(tmp_path: Path):
 
     def _fake_judge_fn(prompt_path, model, *args, **kwargs):
         # positional tail mirrors the judge_fn protocol: effort, trace_name, label, user,
-        # learning_run_dir; the read scope (add_dir/ticket_cli) arrives as the scope kwarg.
+        # learning_run_dir; the read scope (add_dir + the closed_ticket_read bit) arrives as the
+        # scope kwarg.
         _effort, _trace, label, user, _lrd = args
         scope = kwargs["scope"]
         captured.update(
             prompt_path=prompt_path, model=model, label=label, user=user,
-            add_dir=scope.add_dir, ticket_cli=scope.ticket_cli,
+            add_dir=scope.add_dir, closed_ticket_read=scope.closed_ticket_read,
         )
         return "outcome: survived\ndefender_findings: []\n"
 
@@ -1851,10 +1852,11 @@ def test_invoke_judge_benign_is_grounded(tmp_path: Path):
     assert out.startswith("outcome:")
     # Grounded surface: per-lead comparison file written; actuals add-dir'd. Benign uses a
     # per-direction comparison dir so a concurrent adversarial leg (inconclusive case,
-    # shared learning_run_dir) can't clobber it, and carries the closed-ticket pins (#338).
+    # shared learning_run_dir) can't clobber it, and carries the closed-ticket read bit that
+    # turns on its two typed closed-ticket tools (#672).
     assert (lrd / "comparison_benign" / "l-001.md").is_file()
     assert set(captured["add_dir"]) == {run / "gather_raw", lrd / "comparison_benign"}
-    assert captured["ticket_cli"] is not None
+    assert captured["closed_ticket_read"] is True
     # Benign prompt/model/label — not the adversarial ones; sourced from the wiring.
     assert captured["prompt_path"] == directions.BENIGN_WIRING.prompt_path
     assert captured["model"] == directions.BENIGN_WIRING.model

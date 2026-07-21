@@ -98,6 +98,12 @@ class ToolSet:
     # constructs the capture capability (``driver.build_agent_core``): the tool and its queries-table
     # row cannot be separated, which is what keeps that table an integrity gate rather than a hint.
     query: bool = False
+    # The benign judge's two closed-ticket tools (#672) — the typed, host-side replacement for
+    # the removed bash ticket lane (#338). Set PER-LEG from ``JudgeWiring.closed_ticket_read`` on
+    # the stage-build ``replace`` seam; the frozen ``JUDGE_DEF`` default keeps it OFF, so the
+    # adversarial leg is built without the tools (absence by registration, not a runtime direction
+    # check). Registration follows this bit and threads the ticket verb registry like ``query``.
+    closed_tickets: bool = False
 
 
 @dataclass(frozen=True)
@@ -181,13 +187,11 @@ class RunScope:
 
       - ``add_dirs`` — judge comparison + gather_raw roots → the policy's ``read_roots``.
       - ``read_confine`` — actor gray-box confine (REPLACES the ``defender_dir`` base).
-      - ``scripts`` — actor pinned lesson scripts → one ``bash_allow`` pattern each.
-      - ``ticket_cli`` — the benign judge's pinned closed-ticket read."""
+      - ``scripts`` — actor pinned lesson scripts → one ``bash_allow`` pattern each."""
 
     add_dirs: tuple[Path, ...] = ()
     read_confine: tuple[Path, ...] = ()
     scripts: tuple[Path, ...] = ()
-    ticket_cli: tuple[str, Path] | None = None
 
 
 # One shared frozen default, anchored in ``bind``'s signature (the endorsed
@@ -209,7 +213,6 @@ class ResolvedRoots:
     read_roots: tuple[Path, ...]
     read_confine: tuple[Path, ...]
     scripts: tuple[Path, ...]
-    ticket_cli: tuple[str, Path] | None
 
 
 def _resolve_corpus_dir(name: str, defender_dir: Path) -> Path:
@@ -249,7 +252,6 @@ def resolve_roots(
         read_roots=tuple(scope.add_dirs),
         read_confine=tuple(scope.read_confine),
         scripts=tuple(scope.scripts),
-        ticket_cli=scope.ticket_cli,
     )
 
 

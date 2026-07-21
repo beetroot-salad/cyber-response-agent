@@ -608,6 +608,18 @@ def _register_deferred_tools(agent, tools: ToolSet, verbs: Any = None) -> None:
             )
         register_query_tool(agent, verbs)
 
+    if tools.closed_tickets:
+        # The benign judge's typed closed-ticket read (#672). Deferred like the others: the tool
+        # module reaches back into this module's result envelope + run-env core, so a
+        # module-scope import would close a cycle. The registry is REQUIRED — a ticket tool with
+        # no store fails at BUILD, like `query`. Registered LAST, so the two tools enter the fixed
+        # order at the tail (list_closed_tickets then get_closed_ticket, d28).
+        from defender.learning.pipeline.judge.closed_ticket_tool import (
+            register_closed_ticket_tools,
+        )
+
+        register_closed_ticket_tools(agent, verbs)
+
 
 # --- gather dispatch ---------------------------------------------------------
 # Lives in tools_gather.py (imports the foundation above). Re-exported here so

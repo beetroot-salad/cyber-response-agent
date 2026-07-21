@@ -685,8 +685,8 @@ def test_command_shape_has_adapter_survives_for_the_deny(cmd, adapter):
 # --- AgentPolicy primitive: read_roots + hand-built grants ------------------
 # The generic mechanism the judge is the first consumer of: an agent brings its
 # capability as DATA (an AgentPolicy carrying Grants). These test the primitive itself
-# with a synthetic policy; the judge's own policy + ticket grant are tested with the
-# judge module.
+# with a synthetic policy; the judge's own policy is tested with the judge module (its
+# closed-ticket read is a typed tool now, not a bash grant — #672).
 
 from defender.runtime.permission import AgentPolicy, Grant  # noqa: E402
 

@@ -2,8 +2,8 @@
 
 The judge was the first learning-loop agent to run in-process on PydanticAI, on the shared
 in-process transport (``pipeline/_pydantic_stage``). Everything judge-specific lives HERE, in the judge's own
-directory: its deps identity, its permission policy (data), its one bit of custom logic (the
-benign closed-ticket matcher), and its thin ``judge_fn``. The generic in-process transport it
+directory: its deps identity, its permission policy (data), its per-leg toolset (the benign-only
+closed-ticket tools, #672), and its thin ``judge_fn``. The generic in-process transport it
 shares with the actor — agent construction, the request-capped one-shot drive, the
 error-mapping ladder — lives in ``pipeline/_pydantic_stage.py``; this module only supplies the
 judge's specifics and delegates.
@@ -14,10 +14,9 @@ import.
 """
 from __future__ import annotations
 
-import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from defender.learning.core.config import JUDGE_EFFORT, JUDGE_MODEL
 from defender.learning.pipeline._pydantic_stage import build_stage_agent, run_stage
@@ -54,17 +53,17 @@ if TYPE_CHECKING:
 # not a budget). Reducing GLM's tool-call count at the source is tracked in #514.
 JUDGE_REQUEST_LIMIT = 45
 
-# PROMPT SURFACE: this names only programs the judge's own lane grants (`cat`, `defender-sql`,
-# and — benign only — the pinned ticket CLI). A reason naming a program the agent cannot run
-# teaches a dead command and burns turns; the suite checks it against the live grant list.
+# PROMPT SURFACE: this names only programs the judge's own lane grants (`cat`, `defender-sql`).
+# A reason naming a program the agent cannot run teaches a dead command and burns turns; the
+# suite checks it against the live grant list. The benign judge's closed-ticket read is a typed
+# tool now (#672), not a bash grant, so the lane is exactly these two programs on both legs.
 _JUDGE_DENY_REASON = (
     "Blocked: the judge is read-only over the grounded evidence — `cat <payload> | "
     "defender-sql '<SQL>'` to aggregate a gather_raw payload (cat's operands must resolve "
     "inside the read roots; the SQL runs in a sealed sandbox), and read_file (with an "
-    "optional substring pattern) for everything else, plus — benign only — the pinned "
-    "closed-ticket read. Nothing else in bash: no data-source adapters, no writes, no "
-    "arbitrary shell. You never need to list a directory: every payload's absolute path is "
-    "named in the comparison files."
+    "optional substring pattern) for everything else. Nothing else in bash: no data-source "
+    "adapters, no writes, no arbitrary shell. You never need to list a directory: every "
+    "payload's absolute path is named in the comparison files."
 )
 
 
@@ -99,46 +98,15 @@ def _judge_bash_shapes(roots: ResolvedRoots) -> tuple[Grant, ...]:
     while `cat X | defender-sql '<SQL>'` is allowed. grep/head/tail fold into ``read_file`` (with
     its optional ``pattern``).
 
-    The benign leg additionally carries the pinned closed-ticket read (``_ticket_grant``)."""
+    The benign judge's closed-ticket read is a typed host-side tool (#672), not a bash grant, so
+    this lane is exactly these two programs on BOTH legs."""
     scope = PathShapes(
         under(r.resolve(), TREE)
         for r in (roots.run_dir, roots.defender_dir, *roots.read_roots)
     )
-    grants = [
+    return (
         Grant(program="cat", pattern=program_shape("cat"), scope=scope),
         Grant(program=SQL_SHIM, pattern=program_shape(SQL_SHIM)),
-    ]
-    if roots.ticket_cli is not None:
-        grants.append(_ticket_grant(*roots.ticket_cli))
-    return tuple(grants)
-
-
-def _ticket_grant(py: str, ticket_cli: Path) -> Grant:
-    """The benign judge's scoped, CLOSED-ONLY case-history read (#338): a single-stage
-    ``<py> <ticket_cli> {list-tickets|get-ticket} … --require-closed …``.
-
-    ``pins_path=True`` — the R1 exemption, and NOT a formality. Two things make "migrate it into
-    a flag allowlist like every other program" wrong here:
-
-      - the operand IS the program (`py`/`ticket_cli` are pinned exact strings from
-        ``build_judge_invocation``, ``re.escape``-d so a `.`/`-` in the path can't widen the
-        match). There is no file operand to resolve, so a scope buys nothing the pattern didn't
-        already have;
-      - **``--require-closed`` is MANDATORY, and it is the entire security property** — it is
-        what stops the benign judge grading against the live, in-flight ticket (the answer key).
-        A boolean-flag allowlist makes every flag OPTIONAL, so a mechanical migration would drop
-        the requirement SILENTLY. The leading lookahead (the flag must appear as a whole
-        space-delimited token — see ``bash._TOKEN_SPACE``, which is what stops it being smuggled
-        inside a neighbouring quoted argument) is kept VERBATIM.
-
-    The adversarial judge is built without this grant, so it can never reach the store."""
-    head = rf"{re.escape(py)} {re.escape(str(ticket_cli))}"
-    return Grant(
-        program="python3",
-        pattern=re.compile(
-            rf"^(?=(?:.* )?--require-closed(?: |$)){head} (?:list-tickets|get-ticket)(?: .*)?$"
-        ),
-        pins_path=True,
     )
 
 
@@ -178,7 +146,7 @@ def build_judge_agent(
     )
 
 
-def _run_judge_pydantic(  # noqa: PLR0913 — the judge_fn protocol signature plus the make_model test seam; every param is load-bearing per-call state
+def _run_judge_pydantic(  # noqa: PLR0913 — the judge_fn protocol signature plus the make_model/verbs test seams; every param is load-bearing per-call state
     prompt_path: Path,
     model: str,
     effort: str,
@@ -189,27 +157,38 @@ def _run_judge_pydantic(  # noqa: PLR0913 — the judge_fn protocol signature pl
     *,
     scope: _ToolScope,
     make_model: MakeModel = providers.build_for_effort,
+    verbs: Any = None,
 ) -> str:
     """The PydanticAI ``judge_fn`` — the judge_fn protocol signature, so it drops into
     ``invoke_judge(..., judge_fn=_run_judge_pydantic)``.
 
     Builds the judge's ``JudgeDeps`` via the single ``bind`` seam (#551) from a ``RunScope``
-    carrying the tool ``scope`` (read roots = the comparison + gather_raw add-dirs; the benign
-    closed-ticket paths) and delegates to the shared ``run_stage`` (agent build + one-shot drive
-    + error mapping + trace logging). ``scope.add_dir`` is the ``JudgeInvocation.add_dirs`` list;
-    ``None``/a lone Path (a direct unit call, unreachable in prod) → empty roots. The model's
-    final text is returned VERBATIM: any prose preamble a reasoning model prepends is left
-    intact for the shared ``normalize_judge_yaml`` on the downstream validate path (every judge
-    consumer — the live loop and the secondary harness — funnels through it) to strip."""
+    carrying the tool ``scope`` (read roots = the comparison + gather_raw add-dirs) and delegates
+    to the shared ``run_stage`` (agent build + one-shot drive + error mapping + trace logging).
+    ``scope.add_dir`` is the ``JudgeInvocation.add_dirs`` list; ``None``/a lone Path (a direct
+    unit call, unreachable in prod) → empty roots.
+
+    ``scope.closed_ticket_read`` (benign only, #672) flips the ``closed_tickets`` ToolSet bit
+    onto the frozen ``JUDGE_DEF`` via the stage-build ``replace`` seam, so the two closed-ticket
+    tools register on the benign leg and NOT the adversarial one — absence by registration.
+    ``verbs`` is the ticket verb registry those tools dispatch against (the ``verbs=`` test seam,
+    #611-style); production resolves the real per-tree ``ModuleVerbRegistry``. The model's final
+    text is returned VERBATIM: any prose preamble a reasoning model prepends is left intact for
+    the shared ``normalize_judge_yaml`` on the downstream validate path (every judge consumer —
+    the live loop and the secondary harness — funnels through it) to strip."""
     read_roots = tuple(scope.add_dir) if isinstance(scope.add_dir, list) else ()
-    deps = bind(
-        JUDGE_DEF, learning_run_dir,
-        scope=RunScope(add_dirs=read_roots, ticket_cli=scope.ticket_cli),
-    )
+    deps = bind(JUDGE_DEF, learning_run_dir, scope=RunScope(add_dirs=read_roots))
+    tools = replace(JUDGE_DEF.tools, closed_tickets=scope.closed_ticket_read)
+    if verbs is None and scope.closed_ticket_read:
+        # Production benign leg: the real per-tree registry, resolved off the RUN's tree (never an
+        # import-time constant — the #551 freeze), exactly as the driver builds gather's.
+        from defender.runtime.verbs import ModuleVerbRegistry
+        verbs = ModuleVerbRegistry(deps.defender_dir / "scripts" / "adapters")
     return run_stage(
         stage="judge",
         prompt_path=prompt_path, model=model, effort=effort,
         trace_name=trace_name, label=label, user=user,
         learning_run_dir=learning_run_dir, deps=deps,
         request_limit=JUDGE_REQUEST_LIMIT, make_model=make_model,
+        tools=tools, verbs=verbs,
     )
