@@ -18,7 +18,6 @@ def test_lock_refuses_concurrent_run(tmp_repo, helpers):
     fh = shared.acquire_flock(lock_file)
     assert fh is not None
     try:
-        # Simulate a concurrent invocation: acquire_flock should return None.
         second = shared.acquire_flock(lock_file)
         assert second is None
     finally:
@@ -40,8 +39,6 @@ def test_repo_lock_held_returns_zero(tmp_repo, helpers):
     helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-A", "benign")
     helpers.write_finding(tmp_repo.paths.pending_file, finding_id="run-A/0", run_id="run-A")
 
-    # Hold the repo lock from a separate fd — the same lock file the config points the
-    # run at — and give the run a 1-second wait so the test doesn't block for half an hour.
     lock_file = tmp_repo.cfg.repo_lock_file
     lock_file.parent.mkdir(parents=True, exist_ok=True)
     holder = lock_file.open("a+")
@@ -63,7 +60,6 @@ def test_repo_lock_held_returns_zero(tmp_repo, helpers):
     assert rc == 0
     assert invoked["count"] == 0, "agent must not run while repo lock is held"
 
-    # Queue still has the original finding — nothing was rotated out.
     pending = [
         json.loads(line)
         for line in tmp_repo.paths.pending_file.read_text().splitlines()
@@ -81,7 +77,7 @@ def test_clean_scope_check_refuses_dirty_lessons(tmp_repo):
 
 def test_clean_scope_passes_when_clean(tmp_repo):
     cfg = tmp_repo.cfg
-    shared.assert_clean_corpus_dir(cfg.repo_root, cfg.lessons_dir, "defender/lessons/")  # no raise
+    shared.assert_clean_corpus_dir(cfg.repo_root, cfg.lessons_dir, "defender/lessons/")
 
 
 def test_ground_truth_gate_holds_inconclusive(tmp_repo, helpers, monkeypatch):
@@ -96,7 +92,6 @@ def test_ground_truth_gate_holds_inconclusive(tmp_repo, helpers, monkeypatch):
     def fake_invoke(findings, batch_id, cfg):
         captured["findings"] = findings
         captured["batch_id"] = batch_id
-        # Simulate skip — no lessons authored, no commit.
         return {
             "committed": [],
             "held_forward_bad": [],
@@ -111,10 +106,8 @@ def test_ground_truth_gate_holds_inconclusive(tmp_repo, helpers, monkeypatch):
     rc = a.run_batch(cfg=cfg)
     assert rc == 0
 
-    # Only the benign finding reached the agent.
     assert [f["finding_id"] for f in captured["findings"]] == ["run-B/0"]
 
-    # The inconclusive finding stayed in the queue (held).
     pending = [
         json.loads(line)
         for line in tmp_repo.paths.pending_file.read_text().splitlines()
@@ -169,10 +162,8 @@ def test_ground_truth_gate_benign_authors_off_malicious(tmp_repo, helpers, monke
     rc = a.run_batch(cfg=cfg)
     assert rc == 0
 
-    # Only the malicious-source benign finding reached the agent.
     assert [f["finding_id"] for f in captured["findings"]] == ["run-M/0"]
 
-    # The benign-source benign finding was held — no confident FP ground truth.
     pending = [
         json.loads(line)
         for line in tmp_repo.paths.pending_file.read_text().splitlines()
@@ -181,9 +172,6 @@ def test_ground_truth_gate_benign_authors_off_malicious(tmp_repo, helpers, monke
     assert [p["finding_id"] for p in pending] == ["run-Bn/0"]
     assert "no_ground_truth" in pending[0]["held_reason"]
 
-    # The malicious-source benign finding rotated OUT to consumed.jsonl as a
-    # consumed_skip — not left in the queue (a skip with no lesson anchor would
-    # otherwise re-author forever). Pins the benign consumed-skip categorization.
     consumed = [
         json.loads(line)
         for line in tmp_repo.cfg.consumed_file.read_text().splitlines()
@@ -199,7 +187,6 @@ def test_idempotency_filter_skips_already_authored(tmp_repo, helpers, monkeypatc
     helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-X", "benign")
     helpers.write_finding(tmp_repo.paths.pending_file, finding_id="run-X/0", run_id="run-X")
 
-    # Pre-existing lesson cites this finding_id — must skip the agent entirely.
     (tmp_repo.paths.lessons_dir / "preexisting.md").write_text(
         "---\n"
         "name: preexisting\n"
@@ -223,7 +210,6 @@ def test_idempotency_filter_skips_already_authored(tmp_repo, helpers, monkeypatc
     assert rc == 0
     assert invoked["called"] is False, "agent must not be invoked when all findings are idempotent"
 
-    # Queue empty (all consumed_idempotent).
     assert tmp_repo.paths.pending_file.read_text().strip() == ""
     consumed = [
         json.loads(line)
@@ -238,7 +224,7 @@ def test_idempotency_filter_skips_already_authored(tmp_repo, helpers, monkeypatc
 def test_empty_queue_is_noop(tmp_repo, monkeypatch):
     a = tmp_repo.author
     tmp_repo.paths.pending_dir.mkdir(parents=True, exist_ok=True)
-    tmp_repo.paths.pending_file.write_text("")  # empty
+    tmp_repo.paths.pending_file.write_text("")
     called = {"n": 0}
 
     def fake_invoke(*args, **kwargs):

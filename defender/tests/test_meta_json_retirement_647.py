@@ -44,23 +44,6 @@ BASE = "be8d2c27"
 DELETED_HOOK = "defender/hooks/tag_tool_results.py"
 NEW_HOME = "defender/runtime/untrusted.py"
 
-# Trees that carry their OWN unrelated `meta.json` / run-manifest vocabulary, or that are
-# deliberately preserved historical record. Each exclusion is claim-backed, not taste:
-#   experiments/            — 22 committed fixture meta.json files, none read via RunPaths,
-#                             none reached by this change (C35, G13, waiver w4).
-#   playground-v2/          — the attack env's own run manifests (C23).
-#   defender/evals/run_judge_ab* — a DIFFERENT meta.json: judge A/B snapshots keyed
-#                             {direction: ...} under a different root (C25).
-#   docs/archive/           — behind a stale banner; rewriting it falsifies the record. Holds
-#                             security-model.md (#650's precedent) AND, after this change, the
-#                             three predecessor-codebase docs the human reclassified from
-#                             "live prose to fix" to "archive": design-v3-init-and-connect.md,
-#                             handlers-refactor-map.md, evaluation-and-chaos-design.md. The
-#                             exclusion is legitimate only BECAUSE they are archived, which is
-#                             itself a demand here (see the archiving test below).
-#   defender/docs/runtime-per-loop-compaction-design.md — an unbuilt proposal.
-#   .claude/                — archived worktrees (C6).
-#   defender/tests/spec_graph_*.yaml — the spec-run records themselves, incl. this graph.
 UNRELATED_TREES = (
     "experiments/",
     "playground-v2/",
@@ -69,25 +52,17 @@ UNRELATED_TREES = (
     "docs/archive/",
     "defender/docs/runtime-per-loop-compaction-design.md",
     ".claude/",
-    # The spec-run records of THIS and earlier changes: an artifact trail is a record,
-    # not live prose, and this change's own graph necessarily names what it removes.
-    # Both homes: graphs live beside the suite they spec, so a run whose spec is an e2e
-    # suite writes into `tests/e2e/`. The bare `tests/` prefix silently missed those —
-    # a path mismatch, not a policy difference (#540's graph is the one that surfaced it).
     "defender/tests/spec_graph_",
     "defender/tests/e2e/spec_graph_",
 )
 HISTORICAL_RECORD = UNRELATED_TREES
 
-# The two modules of THIS suite quote the retired names as string literals in order to
-# assert their absence; a sweep that flagged its own assertions would never go green.
 SUITE_FILES = (
     "defender/tests/test_meta_json_retirement_647.py",
     "defender/tests/test_salt_origin_647.py",
 )
 
 
-# ── the tool-derived sweep primitives ────────────────────────────────────────
 
 
 def repo_grep(pattern: str, *pathspecs: str) -> list[str]:
@@ -101,7 +76,7 @@ def repo_grep(pattern: str, *pathspecs: str) -> list[str]:
     if pathspecs:
         cmd += ["--", *pathspecs]
     r = subprocess.run(cmd, cwd=REPO_ROOT, capture_output=True, text=True, check=False)
-    if r.returncode not in (0, 1):  # 1 == no match; anything else is a broken sweep
+    if r.returncode not in (0, 1):
         raise AssertionError(f"git grep failed ({r.returncode}): {r.stderr.strip()}")
     return [line for line in r.stdout.splitlines() if line.strip()]
 
@@ -154,9 +129,6 @@ def module_level_names_at_base(repo_path: str) -> set[str]:
     return names
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# The return contract, as seen from the caller
-# ═════════════════════════════════════════════════════════════════════════════
 
 
 def test_run_py_unpacks_the_pair_and_threads_both_elements_onward():
@@ -211,9 +183,6 @@ def test_run_py_unpacks_the_pair_and_threads_both_elements_onward():
     )
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# The second, legitimate salt origin — the positive control for the negatives
-# ═════════════════════════════════════════════════════════════════════════════
 
 
 def test_learning_curator_leg_mints_a_fresh_uuid4_salt_distinct_from_the_run_token(tmp_path):
@@ -254,9 +223,6 @@ def test_learning_curator_leg_mints_a_fresh_uuid4_salt_distinct_from_the_run_tok
     )
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# The relocation
-# ═════════════════════════════════════════════════════════════════════════════
 
 
 def test_wrap_is_importable_from_defender_runtime_untrusted():
@@ -294,7 +260,6 @@ def test_relocated_wrap_emits_the_same_delimiter_bytes_for_the_same_inputs():
     assert wrap("BODY", "siem-data", salt) == (
         f"<run-{salt}-siem-data>\nBODY\n</run-{salt}-siem-data>"
     )
-    # Multi-line and empty bodies pass through unmodified — the frame is the only addition.
     assert wrap("a\nb", "untrusted", salt) == f"<run-{salt}-untrusted>\na\nb\n</run-{salt}-untrusted>"
     assert wrap("", "untrusted", salt) == f"<run-{salt}-untrusted>\n\n</run-{salt}-untrusted>"
 
@@ -309,21 +274,17 @@ def test_every_importer_of_the_relocated_wrap_resolves_after_the_move():
     pytest.importorskip("pydantic_ai")
     from defender.runtime import orient, query_tool, tools, tools_gather
     from defender.runtime.untrusted import wrap
-    from defender.learning.author import lesson_read  # transitive via tools._bound_and_wrap
+    from defender.learning.author import lesson_read
 
     assert orient.wrap is wrap
     for mod in (tools, query_tool, tools_gather):
         assert mod._wrap is wrap, f"{mod.__name__} holds a different wrap object"
-    assert lesson_read is not None  # importable: its salted read path still resolves
+    assert lesson_read is not None
 
-    # Derived, not listed: every tracked module that names the new home resolves it.
     importers = live_hits(repo_grep(r"from defender\.runtime\.untrusted import|runtime\.untrusted"))
     assert importers, "no importer of the new module found — the relocation did not land"
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# The deletion closure — surface-general, derived with a tool
-# ═════════════════════════════════════════════════════════════════════════════
 
 
 def test_no_symbol_survives_whose_only_reachability_was_the_deleted_entrypoint():
@@ -347,7 +308,7 @@ def test_no_symbol_survives_whose_only_reachability_was_the_deleted_entrypoint()
     survivors: dict[str, list[str]] = {}
     for name in sorted(orphans):
         if name == "main":
-            continue  # the entrypoint itself; the AST walk collects definitions, not imports
+            continue
         hits = live_hits(repo_grep(rf"\b{re.escape(name)}\b"))
         if hits:
             survivors[name] = hits
@@ -376,16 +337,11 @@ def test_no_module_in_the_repo_still_imports_the_deleted_hook_module():
         "the module is still on disk, so a stale importer would still resolve and hide"
     )
 
-    # Positive control: the substitute import channel resolves, so an empty sweep is a real
-    # result and not a query that matches nothing.
     from defender.runtime.untrusted import wrap
 
     assert wrap("x", "untrusted", "0" * 16).startswith("<run-")
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# The surviving module and the accessor set
-# ═════════════════════════════════════════════════════════════════════════════
 
 
 def test_update_json_locked_survives_the_sibling_removal(tmp_path):
@@ -416,7 +372,6 @@ def test_update_json_locked_survives_the_sibling_removal(tmp_path):
         "entrypoint, and the in-process gates take the run dir from AgentDeps"
     )
 
-    # Its two live consumers still reach the SAME function object — not merely importable.
     from defender.hooks import budget_enforcer
     from defender.runtime import circuit_breaker
 
@@ -467,9 +422,6 @@ def test_no_call_site_anywhere_still_reaches_run_paths_meta_or_the_literal_meta_
     )
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# The repo-wide caller obligation
-# ═════════════════════════════════════════════════════════════════════════════
 
 
 def test_no_module_outside_the_defender_package_imports_run_common():
@@ -489,8 +441,6 @@ def test_no_module_outside_the_defender_package_imports_run_common():
     outside_callers = [
         h for h in caller_hits
         if not h.startswith("defender/")
-        # experiments/advisory-ab defines same-named LOCAL functions; excluded as an
-        # unrelated tree above, so anything left here is a genuine cross-package caller.
     ]
     assert not outside_callers, (
         "a caller of the changed builder survives outside defender/:\n" + "\n".join(outside_callers)
@@ -506,11 +456,6 @@ def test_the_deleted_manual_gather_harness_leaves_no_dependent_behind():
     assert not (REPO_ROOT / "scripts" / "testing" / "gather_only.py").exists(), (
         "scripts/testing/gather_only.py is still on disk"
     )
-    # #540 deleted the file (its fork H3: every bash-enabled role gets a box, and this harness
-    # built deps OUTSIDE `bind`), and its own suite carries the SURVIVAL demand — it names the
-    # path to assert the absence and then drives the substitute workflow. That is the same
-    # reason `SUITE_FILES` exists here: a module quoting a retired name in order to prove it is
-    # gone must not be read as a dependent on it.
     hits = live_hits(
         repo_grep(r"gather_only"),
         extra_excludes=("defender/tests/e2e/test_540_scrub_lifecycle.py",),
@@ -518,9 +463,6 @@ def test_the_deleted_manual_gather_harness_leaves_no_dependent_behind():
     assert not hits, "a dependent on the deleted harness survives:\n" + "\n".join(hits)
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# Model-facing prose
-# ═════════════════════════════════════════════════════════════════════════════
 
 
 def test_no_live_model_facing_prose_names_a_mechanism_with_no_producer():
@@ -572,7 +514,6 @@ def test_prose_site_sweep_is_derived_from_the_repo_not_from_a_fixed_list():
     every negative vacuously, and CI's stale-reference lint catches only one of these sites
     (it drops short generic identifiers and excludes the docs tree entirely), so nothing
     upstream backstops this."""
-    # Non-vacuity: the same instrument, same roots, finds the clause that must survive.
     surviving = live_hits(repo_grep(r"<run-\{salt\}-", "*.md", "*.py"))
     assert surviving, (
         "the sweep matched nothing at all — every absence assertion below would be vacuous"
@@ -622,14 +563,10 @@ def test_the_three_predecessor_codebase_docs_are_archived_rather_than_corrected(
             "precedent is a blockquote marking the doc archived and superseded"
         )
 
-    # Positive control: the precedent this follows is real and still shaped this way.
     precedent = (REPO_ROOT / "docs" / "archive" / "security-model.md").read_text(encoding="utf-8")
     assert "rchiv" in precedent[:600], "the #650 precedent doc no longer carries its banner"
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# The env boundary
-# ═════════════════════════════════════════════════════════════════════════════
 
 
 def test_defender_run_dir_still_crosses_the_subprocess_boundary_for_its_reader(
@@ -684,10 +621,3 @@ def test_the_subprocess_environment_carries_no_path_to_the_run_salt(tmp_path):
     ), "the salt is recoverable from a file inside the exported run dir"
 
 
-# `test_resolve_run_dir_returns_none_when_the_env_var_is_unset` lived here. It pinned the
-# unset/non-directory branch of `resolve_run_dir` as a plain absence — the distinguished
-# member of its domain — against the deleted salt reader's fail-open, which had answered an
-# unresolvable run dir with a freshly minted token no other surface knew. #667 deleted
-# `resolve_run_dir` itself (its last consumer was record_lesson_load's retired entrypoint),
-# so there is no longer a resolver whose unset branch could fail open. The survival assertion
-# in `test_update_json_locked_survives_the_sibling_removal` pins the deletion instead.

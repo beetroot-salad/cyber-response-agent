@@ -18,7 +18,7 @@ from pathlib import Path
 import pytest
 
 pytest.importorskip("pydantic_ai")
-pytest.importorskip("openai")  # the Fireworks path lives behind the openai extra
+pytest.importorskip("openai")
 
 _DEFENDER = Path(__file__).resolve().parents[1]
 if str(_DEFENDER) not in sys.path:
@@ -49,16 +49,14 @@ def _role_settings(provider, role):
     return provider.settings_for_effort(provider.effort_for_role(role))
 
 
-# --- role model defaults ----------------------------------------------------
 
 def test_role_model_defaults(monkeypatch):
     for k in ("DEFENDER_MODEL", "DEFENDER_GATHER_MODEL"):
         monkeypatch.delenv(k, raising=False)
-    assert driver.resolve_main_model() == "glm-5.2"   # MAIN: flagship GLM
-    assert driver.gather_model() == "kimi-k2.6"        # GATHER: cheaper Kimi
+    assert driver.resolve_main_model() == "glm-5.2"
+    assert driver.gather_model() == "kimi-k2.6"
 
 
-# --- provider routing (registry) --------------------------------------------
 
 @pytest.mark.parametrize(("name", "provider"), [
     ("claude-sonnet-4-6", "anthropic"),
@@ -66,7 +64,7 @@ def test_role_model_defaults(monkeypatch):
     ("anthropic:claude-sonnet-4-6", "anthropic"),
     ("glm-5.2", "fireworks"),
     ("glm-5p2", "fireworks"),
-    ("GLM-5.2", "fireworks"),                 # case-insensitive alias
+    ("GLM-5.2", "fireworks"),
     ("kimi-k2.6", "fireworks"),
     ("kimi-k2p6", "fireworks"),
     (f"fireworks:{_GLM_ID}", "fireworks"),
@@ -84,7 +82,6 @@ def test_api_key_vars_covers_both_providers():
     assert providers.api_key_vars() == {"ANTHROPIC_API_KEY", "FIREWORKS_API_KEY"}
 
 
-# --- build_model ------------------------------------------------------------
 
 def test_build_model_routes_claude_to_anthropic(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
@@ -97,9 +94,9 @@ def test_build_model_fireworks_from_alias_or_prefix(name, monkeypatch):
     monkeypatch.setenv("FIREWORKS_API_KEY", "fw-test")
     m = providers.FIREWORKS.build_model(name)
     assert isinstance(m, OpenAIChatModel)
-    assert m.model_name == _GLM_ID              # alias + prefix both resolve to the id
+    assert m.model_name == _GLM_ID
     assert "api.fireworks.ai" in str(m.client.base_url)
-    assert m.client.api_key == "fw-test"        # the sourced key is wired to the client
+    assert m.client.api_key == "fw-test"
 
 
 def test_build_model_fireworks_requires_key(monkeypatch):
@@ -116,8 +113,6 @@ def test_build_model_kimi_alias(monkeypatch):
 
 
 def test_build_pairs_model_with_settings(monkeypatch):
-    # build_for_effort (the single build site) pairs model + settings for a role's resolved
-    # effort (effort_for_role) — MAIN on glm resolves to "low".
     monkeypatch.setenv("FIREWORKS_API_KEY", "fw-test")
     monkeypatch.delenv("DEFENDER_MAIN_REASONING_EFFORT", raising=False)
     built = providers.build_for_effort("glm-5.2", providers.effort_for_role("glm-5.2", AgentRole.MAIN))
@@ -126,15 +121,10 @@ def test_build_pairs_model_with_settings(monkeypatch):
     assert built.settings == {"extra_body": {"reasoning_effort": "low"}}
 
 
-# --- per-provider / per-role settings ---------------------------------------
 
 def test_anthropic_settings_are_the_cache_and_role_invariant():
     s_main = _role_settings(providers.ANTHROPIC, AgentRole.MAIN)
     assert s_main == _CACHE
-    # Role-invariant by VALUE (never None): effort_for_role is None for Anthropic for every
-    # role → the role→settings path settings_for_effort(effort_for_role(role)) is cache-only.
-    # Object identity is not a promise — settings_for_effort builds a fresh object per call
-    # (settings are sent by value); the `is`-identity guarantee was retired with settings(role).
     assert _role_settings(providers.ANTHROPIC, AgentRole.GATHER) == s_main
 
 
@@ -165,34 +155,24 @@ def test_fireworks_default_sentinel_disables_the_param(monkeypatch):
 
 @pytest.mark.parametrize("bad", ["", "lo", "hgih", "off"])
 def test_fireworks_bad_effort_fails_loud(monkeypatch, bad):
-    # A typo'd or empty operator knob surfaces at read (env_str choices), not silently.
     monkeypatch.setenv("DEFENDER_MAIN_REASONING_EFFORT", bad)
     with pytest.raises(FatalConfigError):
         _role_settings(providers.FIREWORKS, AgentRole.MAIN)
 
 
-# --- settings_for_effort: explicit per-call effort (the judge's config seam) --
-# Unlike the role path (`settings_for_effort(effort_for_role(role))`), this takes the
-# effort as an argument (not a role env), so an agent whose two direction legs run
-# concurrently at different efforts can pass each explicitly. Anthropic maps it to
-# `anthropic_effort` (the claude -p --effort lever); Fireworks to `reasoning_effort`.
 
 def test_anthropic_settings_for_effort_adds_effort_to_cache():
     s = providers.ANTHROPIC.settings_for_effort("low")
     assert s == {**_CACHE, "anthropic_effort": "low"}
-    # Must not mutate the memoized cache object (a fresh role→settings build stays cache-only).
     assert _role_settings(providers.ANTHROPIC, AgentRole.MAIN) == _CACHE
 
 
 def test_anthropic_settings_for_effort_default_is_cache_only():
-    # `default` omits the effort override (model default), keeping just the cache.
     assert providers.ANTHROPIC.settings_for_effort("default") == _CACHE
 
 
 @pytest.mark.parametrize("bad", ["", "lo", "none", "off"])
 def test_anthropic_settings_for_effort_bad_fails_loud(bad):
-    # A bad effort passed programmatically is a ValueError (a bug), distinct from the
-    # env-knob FatalConfigError path. "none" is a Fireworks value, not Anthropic's.
     with pytest.raises(ValueError, match="unsupported Anthropic effort"):
         providers.ANTHROPIC.settings_for_effort(bad)
 
@@ -206,7 +186,6 @@ def test_fireworks_settings_for_effort_maps_reasoning_effort():
 
 @pytest.mark.parametrize("bad", ["", "lo", "xhigh"])
 def test_fireworks_settings_for_effort_bad_fails_loud(bad):
-    # "xhigh" is an Anthropic value, not a Fireworks reasoning_effort choice.
     with pytest.raises(ValueError, match="unsupported reasoning_effort"):
         providers.FIREWORKS.settings_for_effort(bad)
 
@@ -217,16 +196,15 @@ def test_build_for_effort_pairs_model_with_effort_settings(monkeypatch):
     assert built.settings == {**_CACHE, "anthropic_effort": "low"}
 
 
-# --- pricing ----------------------------------------------------------------
 
 @pytest.mark.parametrize(("model", "key"), [
-    (_GLM_ID, "glm-5.2"),                          # Fireworks accounts/.../ path
+    (_GLM_ID, "glm-5.2"),
     ("glm-5p2", "glm-5.2"),
     (_KIMI_ID, "kimi-k2.6"),
     ("kimi-k2p6", "kimi-k2.6"),
-    ("kimi-k2p5", "kimi-k2.6"),   # retired id: old-run costing still routes to the kimi rate
+    ("kimi-k2p5", "kimi-k2.6"),
     ("claude-haiku-4-5", "claude-haiku-4-5"),
-    ("claude-sonnet-4-6-20260101", "claude-sonnet-4-6"),  # date suffix
+    ("claude-sonnet-4-6-20260101", "claude-sonnet-4-6"),
     ("", "claude-sonnet-4-6"),
 ])
 def test_pricing_model_key(model, key):
@@ -234,7 +212,6 @@ def test_pricing_model_key(model, key):
 
 
 def test_pricing_glm_uses_fireworks_rates():
-    # 1M uncached input + 1M output + 1M cache-read at $1.40 / $4.40 / $0.14.
     cost = pricing.usage_cost("glm-5p2", {
         "input_tokens": 1_000_000,
         "output_tokens": 1_000_000,
@@ -244,19 +221,16 @@ def test_pricing_glm_uses_fireworks_rates():
 
 
 def test_pricing_kimi_uses_fireworks_rates():
-    # 1M input + 1M output at $0.60 / $3.00 (gather model).
     cost = pricing.usage_cost("kimi-k2p6", {"input_tokens": 1_000_000, "output_tokens": 1_000_000})
     assert cost == pytest.approx(0.60 + 3.00)
 
 
-# --- run.py: FIREWORKS_API_KEY sourcing -------------------------------------
 
 def test_resolve_key_sources_the_fireworks_var(tmp_path, monkeypatch):
     monkeypatch.delenv("DEFENDER_ENV_FILE", raising=False)
     repo = tmp_path / "repo"
     repo.mkdir()
     (repo / ".env").write_text("ANTHROPIC_API_KEY=sk-a\nFIREWORKS_API_KEY=fw-xyz\n")
-    # Both roots injected so resolution is hermetic (see test_run_key.py).
     key, src = run.resolve_first_party_key(
         root=repo, main_repo_root=repo, var="FIREWORKS_API_KEY"
     )
@@ -265,8 +239,6 @@ def test_resolve_key_sources_the_fireworks_var(tmp_path, monkeypatch):
 
 
 def test_source_provider_keys_all_fireworks_needs_no_anthropic(tmp_path, monkeypatch):
-    # The flagless production guarantee: an all-Fireworks run (GLM main + Kimi gather)
-    # requires only FIREWORKS_API_KEY — never ANTHROPIC_API_KEY.
     env = tmp_path / ".env"
     env.write_text("FIREWORKS_API_KEY=fw-only\n")
     monkeypatch.setenv("DEFENDER_ENV_FILE", str(env))
@@ -277,16 +249,11 @@ def test_source_provider_keys_all_fireworks_needs_no_anthropic(tmp_path, monkeyp
 
 
 def test_source_provider_keys_missing_required_key_exits_2(monkeypatch):
-    # A Fireworks run with neither a .env nor an ambient key → exit 2 (fail before the
-    # run). Stub the .env resolver so the test doesn't find the real repo .env.
     monkeypatch.setattr(run, "resolve_first_party_key", lambda **kw: (None, None))  # lint-monkeypatch: ok — isolate from the real repo .env
     monkeypatch.delenv("FIREWORKS_API_KEY", raising=False)
     assert run._source_provider_keys("glm-5.2", "kimi-k2.6") == 2
 
 
 def test_source_provider_keys_unknown_model_exits_2(capsys):
-    # A typo'd model name is unroutable in provider_for; _source_provider_keys catches
-    # the ValueError and exits 2 with a clean `[run.py] ERROR` line — never a raw
-    # traceback (which would be exit 1 and no actionable message).
     assert run._source_provider_keys("glm-5.3", "kimi-k2.6") == 2
     assert "[run.py] ERROR" in capsys.readouterr().err

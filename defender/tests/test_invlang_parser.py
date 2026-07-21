@@ -19,16 +19,12 @@ from defender.skills.invlang.parser import (
 )
 
 
-# ---------------------------------------------------------------------------
-# Cell tokenizer: quoted spans suppress `|` as a delimiter
-# ---------------------------------------------------------------------------
 
 
 def test_split_cells_honors_quoted_pipe():
     row = 'v-002|process|process:bash|bash[pid=42]|flags="EXE_WRITABLE|EXE_LOWER_LAYER";user=root'
     cells = _split_cells(row)
     assert len(cells) == 5
-    # The `|` inside the quoted attrs value stays put.
     assert cells[4] == 'flags="EXE_WRITABLE|EXE_LOWER_LAYER";user=root'
 
 
@@ -37,9 +33,6 @@ def test_split_cells_backslash_escape_still_works():
     assert cells == ["a", "b|c", "d"]
 
 
-# ---------------------------------------------------------------------------
-# Current-schema baseline: parses cleanly, no warnings
-# ---------------------------------------------------------------------------
 
 
 _CONFORMANT = """\
@@ -91,22 +84,17 @@ h-001|--
 def test_conformant_parse_produces_no_warnings():
     body, warnings = parse_dense_companion(_CONFORMANT)
     assert warnings == []
-    # Header projects identity only.
     hyps = body["hypothesize"]["hypotheses"]
     assert [h["id"] for h in hyps] == ["h-001", "h-002"]
     h1 = next(h for h in hyps if h["id"] == "h-001")
-    # Sub-blocks attach to the parent hypothesis by id.
     assert [p["id"] for p in h1["predictions"]] == ["p1", "p2"]
     assert h1["refutation_shape"][0]["refutes_predictions"] == ["p1"]
     assert h1["authorization_contract"][0]["anchor_kind"] == "cmdb"
-    # h-002 has its own preds/refuts but no authz — schema allows omission.
     h2 = next(h for h in hyps if h["id"] == "h-002")
     assert len(h2["predictions"]) == 1
     assert "authorization_contract" not in h2
-    # Quoted attrs value with `|` round-trips intact.
     v2 = next(v for v in body["prologue"]["vertices"] if v["id"] == "v-002")
     assert v2["attributes"]["flags"] == "EXE_WRITABLE|EXE_LOWER_LAYER"
-    # Resolution lands cleanly.
     res = body["findings"][0]["resolutions"][0]
     assert res["after"] == "--"
     assert res["supporting_edges"] == ["e-001"]
@@ -114,9 +102,6 @@ def test_conformant_parse_produces_no_warnings():
 
 
 def test_conclude_subtable_is_accepted_and_ignored():
-    # `:T conclude.*` sub-tables have no machine consumer in defender; a stray
-    # one (here a malformed ceiling_test) must neither warn nor project,
-    # rather than trigger format-fighting against the validator.
     text = """\
 ```invlang
 :T conclude
@@ -130,13 +115,9 @@ out-of-band-human-contact|owner|extra-cell
     body, warnings = parse_dense_companion(text)
     assert warnings == []
     assert body["conclude"]["disposition"] == "benign"
-    # No sub-table key leaks into the projected conclude dict.
     assert set(body["conclude"]) == {"disposition", "confidence"}
 
 
-# ---------------------------------------------------------------------------
-# Parent-attrs sub-block (rare but supported)
-# ---------------------------------------------------------------------------
 
 
 _WITH_PARENT_ATTRS = """\
@@ -195,9 +176,6 @@ def test_parent_attrs_subblock_without_header_uses_key_value_default():
     assert pv["attributes"] == {"kind": "service-account", "team": "data-platform"}
 
 
-# ---------------------------------------------------------------------------
-# Strict rejection of legacy `:H` header (14-col or 11-col)
-# ---------------------------------------------------------------------------
 
 
 _LEGACY_14_COL_H = """\
@@ -230,8 +208,6 @@ h-001|++
 
 def test_legacy_h_header_block_rejected_with_one_warning():
     body, warnings = parse_dense_companion(_LEGACY_14_COL_H)
-    # No hypotheses land; the rest of the file (prologue, findings, conclude)
-    # still parses, so the case is still partially usable.
     assert body.get("hypothesize", {}).get("hypotheses") in (None, [])
     h_warnings = [w for w in warnings if w.block.startswith(":H ")]
     assert len(h_warnings) == 1
@@ -239,10 +215,6 @@ def test_legacy_h_header_block_rejected_with_one_warning():
     assert body["conclude"]["disposition"] == "benign"
 
 
-# ---------------------------------------------------------------------------
-# Unescaped `|` in attrs is now a hard schema violation
-# (must be quoted under the current schema)
-# ---------------------------------------------------------------------------
 
 
 _UNQUOTED_PIPE_IN_ATTRS = """\
@@ -276,22 +248,15 @@ h-001|--
 
 def test_unquoted_pipe_in_attrs_drops_row_and_keeps_rest():
     body, warnings = parse_dense_companion(_UNQUOTED_PIPE_IN_ATTRS)
-    # v-002 is dropped; v-001 still lands.
     assert [v["id"] for v in body["prologue"]["vertices"]] == ["v-001"]
     bad = next(w for w in warnings if w.block == ":V prologue.vertices")
     assert bad.row_index == 1
     assert "6 cells but 5 expected" in bad.reason
-    # The expected header is echoed so the mismatch is self-correcting
-    # without a spec lookup.
     assert "for [id|type|class|ident|attrs]" in bad.reason
-    # The hypothesis and the conclude still land — file remains useful.
     assert body["hypothesize"]["hypotheses"][0]["id"] == "h-001"
     assert body["conclude"]["disposition"] == "malicious"
 
 
-# ---------------------------------------------------------------------------
-# `:T resolutions` missing `⟂` is rejected per row
-# ---------------------------------------------------------------------------
 
 
 def test_resolution_missing_perp_raises():
@@ -303,9 +268,6 @@ def test_resolution_missing_perp_raises():
         )
 
 
-# ---------------------------------------------------------------------------
-# Matched-id extraction on :T resolutions (review note #1)
-# ---------------------------------------------------------------------------
 
 
 def test_resolution_extracts_matched_ids_from_iff_annotation():
@@ -318,7 +280,6 @@ def test_resolution_extracts_matched_ids_from_iff_annotation():
     )
     assert lead_id == "l-001"
     assert rec["hypothesis"] == "h-001"
-    # Alias matches the soc-agent canonical shape.
     assert rec["hypothesis_id"] == "h-001"
     assert rec["matched_prediction_ids"] == ["p1", "p2"]
     assert rec["matched_refutation_ids"] == []
@@ -346,9 +307,6 @@ def test_resolution_negated_iff_literal_still_attributes():
     assert rec["matched_prediction_ids"] == ["p1"]
 
 
-# ---------------------------------------------------------------------------
-# Canonical :R block key mapping (review note #2)
-# ---------------------------------------------------------------------------
 
 
 _AUTHZ_R_BLOCK = """\
@@ -395,18 +353,14 @@ def test_authz_block_emits_canonical_field_names():
     authz_rows = lead["outcome"]["authorization_resolutions"]
     assert len(authz_rows) == 1
     row = authz_rows[0]
-    # Short dense names get rewritten to the canonical companion-dict
-    # forms so downstream consumers indexing on the long names work.
     assert row["fulfills_contract"] == "ac1"
     assert row["resolved_by_lead"] == "l-001"
     assert row["grounding_kind"] == "policy-check"
     assert row["authority_for_question"] == "iam-system"
-    # Semicolon-packed conditioning lands as a list.
     assert row["conditioning_context"] == [
         "effective_window=2026-05-01_to_2026-05-31",
         "principal=svc-x",
     ]
-    # Empty cells are dropped; verdict/anchor still land.
     assert row["verdict"] == "authorized"
     assert row["anchor_kind"] == "iam-policy"
     assert row["anchor_id"] == "policy-742"
@@ -514,9 +468,6 @@ def test_no_perp_resolution_logs_warning_and_keeps_good_sibling():
     assert "`⟂`" in bad.reason
 
 
-# ---------------------------------------------------------------------------
-# Sub-block references an unknown hypothesis — logged, doesn't crash
-# ---------------------------------------------------------------------------
 
 
 _DANGLING_SUBBLOCK = """\
@@ -553,18 +504,11 @@ h-001|+
 def test_subblock_with_unknown_parent_logs_warning():
     body, warnings = parse_dense_companion(_DANGLING_SUBBLOCK)
     assert any("unknown hypothesis" in w.reason for w in warnings)
-    # h-001 still gets through unaffected.
     assert body["hypothesize"]["hypotheses"][0]["id"] == "h-001"
 
 
-# ---------------------------------------------------------------------------
-# Corpus loader: partial vs whole-file rejects still surface correctly
-# ---------------------------------------------------------------------------
 
 
-# ---------------------------------------------------------------------------
-# `:H attached_to` canonicalizes to `anchor`; edge ids rejected
-# ---------------------------------------------------------------------------
 
 
 _H_VERTEX_ANCHOR = """\
@@ -645,10 +589,6 @@ def test_hypothesis_rejects_edge_anchor():
     assert "??" in reason
 
 
-# ---------------------------------------------------------------------------
-# `??` and `{...}` notation round-trips as literal strings (no parser-side
-# decomposition — downstream consumers parse on demand)
-# ---------------------------------------------------------------------------
 
 
 def _wrap_prologue(vertex_row: str) -> str:

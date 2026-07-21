@@ -38,12 +38,7 @@ from defender.skills.invlang.corpus import load_corpus  # noqa: E402
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
 
-# The locale that makes the ambient-encoding bug observable. CPython >=3.7 COERCES a bare C locale
-# to C.UTF-8 (PEP 538) and would hide it, so coercion and UTF-8 mode are both disabled — the same
-# env `test_corpus_fold_584.py::test_d5` and `test_corpus_hardening_586.py` use.
 _C_LOCALE_ENV = {
-    # The running interpreter's dir is on PATH so the `defender-invlang` shim finds a python3 when
-    # the checkout has no `.venv` (a git worktree, e.g.) and falls back to the one on PATH.
     "PATH": f"{Path(sys.executable).parent}:/usr/bin:/bin",
     "PYTHONCOERCECLOCALE": "0",
     "PYTHONUTF8": "0",
@@ -51,8 +46,6 @@ _C_LOCALE_ENV = {
     "LANG": "C",
 }
 
-# A minimal well-formed dense companion — the three keys `_load_one` requires (prologue /
-# findings / conclude), in the real block grammar (see fixtures-e2e/golden-v2sshd).
 _COMPANION = """## ORIENT
 
 ```invlang
@@ -99,14 +92,13 @@ def test_an_undecodable_investigation_is_skipped_not_raised(tmp_path):
     _case(runs, "good")
     _case(runs, "corrupt", investigation=b"```invlang\nprologue:\n  summary: \xff\xfe truncated\n")
 
-    companions, report = load_corpus(runs)  # must not raise
+    companions, report = load_corpus(runs)
 
     assert report.scanned == 2
     assert report.loaded == 1
     assert [c.case_id for c in companions] == ["good"]
     (skipped_path, reason), = report.skipped
     assert skipped_path.parent.name == "corrupt"
-    # The report's message contract — `defender-invlang` prints these skip reasons to the model.
     assert reason.startswith("read error:")
 
 
@@ -122,11 +114,11 @@ def test_an_undecodable_alert_json_degrades_the_signature_it_does_not_sink_the_c
     runs = tmp_path / "runs"
     _case(runs, "badalert", alert=b'{"rule": {"id": "sig-\xff\xfe"}}')
 
-    companions, report = load_corpus(runs)  # must not raise
+    companions, report = load_corpus(runs)
 
     assert report.loaded == 1
     assert companions[0].case_id == "badalert"
-    assert companions[0].signature_id is None  # degraded, not skipped, not raised
+    assert companions[0].signature_id is None
 
 
 def _c_locale_python(script: str) -> subprocess.CompletedProcess:
@@ -186,10 +178,7 @@ def test_the_real_invlang_shim_prints_corpus_text_under_a_c_locale(tmp_path):
 
     assert proc.returncode == 0, f"defender-invlang died under a C locale:\n{proc.stderr}"
     assert "Traceback" not in proc.stderr
-    # The renderer's own header carries an em-dash, so an unpinned stdout dies on the way out even
-    # before the corpus text reaches it...
     assert "—" in proc.stdout, "stdout is still decoding under the ambient locale"
-    # ...and the ?name row proves the em-dash-bearing case was READ, not warn-skipped as malformed.
     assert "?local-process-ssh-to-localhost" in proc.stdout
 
 
@@ -233,7 +222,6 @@ def test_a_lesson_the_runtime_wrote_survives_the_walk_that_reads_it_back(tmp_pat
         "from pathlib import Path\n"
         "from defender.runtime import tools\n"
         "from defender._corpus import iter_lessons\n"
-        # the same scene this module's in-process tests use — one definition, two processes
         "from defender.tests.test_encoding_contract_589 import _curator_deps\n"
         "print('enc=' + locale.getencoding())\n"
         f"deps, corpus = _curator_deps(Path({str(tmp_path)!r}))\n"
@@ -300,9 +288,7 @@ def test_use_utf8_stdio_moves_the_encoding_and_leaves_the_error_handler_alone():
         "use_utf8_stdio()\n"
         "print('handlers=' + sys.stdout.errors + ',' + sys.stderr.errors)\n"
         "print('encodings=' + sys.stdout.encoding + ',' + sys.stderr.encoding)\n"
-        # the em-dash the pin exists for...
         "print('emdash=\\u2014')\n"
-        # ...and the surrogate-bearing path name a strict handler would explode on
         "print('warn: skipping ' + 'caf\\udce9.md', file=sys.stderr)\n"
         "print('survived=True')\n"
     )
@@ -336,7 +322,6 @@ def test_a_vendor_byte_from_a_transport_is_replaced_not_raised(tmp_path):
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     docker = fake_bin / "docker"
-    # A stand-in `docker` whose "exec" output carries a raw non-UTF-8 byte (0xe9, latin-1 'é').
     docker.write_text("#!/bin/sh\nprintf '{\"host\": \"caf\\351-01\"}'\n")
     docker.chmod(0o755)
 
@@ -346,7 +331,7 @@ def test_a_vendor_byte_from_a_transport_is_replaced_not_raised(tmp_path):
     }
     ctx = VerbContext(defender_dir=tmp_path, run_dir=tmp_path, env=env)
 
-    rc, stdout, _stderr = transport.docker_exec_raw(ctx, "bastion", ["cat", "/x"])  # must not raise
+    rc, stdout, _stderr = transport.docker_exec_raw(ctx, "bastion", ["cat", "/x"])
 
     assert rc == 0, "the fake docker exec failed — wrong thing under test"
     assert "�" in stdout, "the undecodable byte was not replaced"

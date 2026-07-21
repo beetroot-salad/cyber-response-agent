@@ -41,7 +41,7 @@ def test_existing_finding_ids_skips_an_undecodable_lesson(tmp_repo, capsys):
         "---\nname: good\ndescription: d\nsource_finding_ids:\n  - r/0\n---\nbody\n"
     )
     (tmp_repo.paths.lessons_dir / "corrupt.md").write_bytes(b"---\nname: c\n---\n\xff\xfe\n")
-    assert a.existing_finding_ids(tmp_repo.cfg) == {"r/0"}  # must not raise
+    assert a.existing_finding_ids(tmp_repo.cfg) == {"r/0"}
     assert "corrupt.md" in capsys.readouterr().err
 
 

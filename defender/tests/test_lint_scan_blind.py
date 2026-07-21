@@ -31,7 +31,6 @@ import pytest
 
 LINT_DIR = Path(__file__).resolve().parents[2] / "scripts" / "lint"
 
-# The gates with a `scope=`/`baseline_path=` seam — drivable against a tmp tree.
 DI_GATES = ["lint_unpinned_text_io", "lint_unsafe_jsonl_io", "lint_hand_rolled_frontmatter"]
 
 
@@ -89,7 +88,6 @@ def test_unreadable_file_in_scope_exits_2(mod_name, tree, capsys):
         victim.chmod(0o644)
 
 
-# ── the shared seam's own contract ───────────────────────────────────────────
 def test_read_and_parse_raises_scanblind_on_syntax_error(tmp_path):
     import _astlib
 
@@ -97,7 +95,6 @@ def test_read_and_parse_raises_scanblind_on_syntax_error(tmp_path):
     p.write_text("def (:\n", encoding="utf-8")
     with pytest.raises(_astlib.ScanBlind) as exc:
         _astlib.read_and_parse(p, "b.py")
-    # The message must name the file — an operator has to know WHICH file went unscanned.
     assert "b.py" in str(exc.value)
 
 
@@ -121,6 +118,6 @@ def test_read_and_parse_still_replaces_undecodable_bytes(tmp_path):
     import _astlib
 
     p = tmp_path / "l.py"
-    p.write_bytes(b'x = "caf\xe9"\n')  # latin-1 é, invalid utf-8
+    p.write_bytes(b'x = "caf\xe9"\n')
     text, _ = _astlib.read_and_parse(p, "l.py")
     assert "�" in text

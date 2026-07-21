@@ -39,7 +39,7 @@ from pathlib import Path
 
 import pytest
 
-pytest.importorskip("pydantic_ai")  # CI installs the runtime extra; skip otherwise
+pytest.importorskip("pydantic_ai")
 
 from defender.agents import GATHER_DEF, JUDGE_DEF, MAIN_DEF  # noqa: E402
 from defender.learning.core import config  # noqa: E402
@@ -54,7 +54,7 @@ from defender.runtime.permission import AgentPolicy  # noqa: E402
 _DEFENDER = config.REPO_ROOT / "defender"
 _ACTOR_DIR = config.LESSONS_ACTOR_DIR
 _ENV_DIR = config.LESSONS_ENVIRONMENT_DIR
-_RUBRIC = _DEFENDER / "learning" / "pipeline" / "judge" / "malicious.md"  # the judge's grading rubric — gray-box target
+_RUBRIC = _DEFENDER / "learning" / "pipeline" / "judge" / "malicious.md"
 _ENV_RETRIEVE = config.LESSONS_ENV_RETRIEVE_SCRIPT
 _ACTOR_INDEX = config.LESSONS_ACTOR_INDEX_SCRIPT
 
@@ -72,9 +72,6 @@ def _policy(*, read_confine=(), bash_allow=(), read_roots=()):
     )
 
 
-# ============================================================================
-# A. decide_read — confine semantics (pure paths; decide_read does not stat)
-# ============================================================================
 
 @pytest.mark.parametrize("path", [_ACTOR_DIR / "T1078.md", _ENV_DIR / "svc-monitoring.md"])
 def test_malicious_reads_within_confine_allowed(tmp_path, path):
@@ -84,8 +81,8 @@ def test_malicious_reads_within_confine_allowed(tmp_path, path):
 
 
 @pytest.mark.parametrize("path", [
-    _RUBRIC,                                                             # the judge rubric — the FN-metric target
-    _DEFENDER / "SKILL.md",                                             # under defender_dir but outside the confine
+    _RUBRIC,
+    _DEFENDER / "SKILL.md",
     _DEFENDER / "learning" / "pipeline" / "judge" / "benign.md",
 ])
 def test_malicious_reads_outside_confine_denied(tmp_path, path):
@@ -107,7 +104,6 @@ def test_confine_replaces_defender_dir_but_run_dir_stays(tmp_path):
     pol = _policy(read_confine=_MALICIOUS_CONFINE)
     assert permission.decide_read(tmp_path / "actor_out.json", run_dir=tmp_path, defender_dir=_DEFENDER, policy=pol).allow
     assert not permission.decide_read(_DEFENDER / "SKILL.md", run_dir=tmp_path, defender_dir=_DEFENDER, policy=pol).allow
-    # rejected: confine ADDS to {run_dir, defender_dir} (additive like read_roots -> would not close the hole)
 
 
 def test_empty_confine_is_legacy_defender_dir_base(tmp_path):
@@ -116,7 +112,6 @@ def test_empty_confine_is_legacy_defender_dir_base(tmp_path):
     inert when empty."""
     pol = _policy(read_confine=())
     assert permission.decide_read(_DEFENDER / "SKILL.md", run_dir=tmp_path, defender_dir=_DEFENDER, policy=pol).allow
-    # rejected: empty confine means "lock to run_dir only" (would break every existing decide_read row)
 
 
 def test_confine_root_dir_itself_allowed(tmp_path):
@@ -124,7 +119,6 @@ def test_confine_root_dir_itself_allowed(tmp_path):
     readable; a plain read of a dir is the tool's not-a-file concern, not the gate's)."""
     pol = _policy(read_confine=_MALICIOUS_CONFINE)
     assert permission.decide_read(_ACTOR_DIR, run_dir=tmp_path, defender_dir=_DEFENDER, policy=pol).allow
-    # rejected: deny the bare root dir (would block search-root validation)
 
 
 def test_nonexistent_in_confine_path_allowed(tmp_path):
@@ -133,7 +127,6 @@ def test_nonexistent_in_confine_path_allowed(tmp_path):
     pol = _policy(read_confine=_MALICIOUS_CONFINE)
     p = _ACTOR_DIR / "does-not-exist.md"
     assert permission.decide_read(p, run_dir=tmp_path, defender_dir=_DEFENDER, policy=pol).allow
-    # rejected: decide_read stats and 404s/denies a nonexistent in-confine path
 
 
 def test_traversal_out_of_confine_denied(tmp_path):
@@ -168,7 +161,6 @@ def test_confined_actor_cannot_reach_gather_raw(tmp_path):
         defender_dir=_DEFENDER, policy=pol).allow
 
 
-# ---- A(fs). resolve()-based escapes: symlink + fail-closed (tmp fs, no pydantic) ----
 
 def _tmp_tree(tmp_path):
     """A tmp defender-like tree: a confine dir + an out-of-confine 'rubric'. Returns (defender_dir, confine, rubric)."""
@@ -198,15 +190,11 @@ def test_resolve_error_fails_closed(tmp_path):
     dfn, conf, _ = _tmp_tree(tmp_path)
     a, b = conf / "a", conf / "b"
     os.symlink(a, b)
-    os.symlink(b, a)  # cycle -> OSError from resolve()
+    os.symlink(b, a)
     pol = _policy(read_confine=(conf,))
     assert not permission.decide_read(a, run_dir=tmp_path / "run", defender_dir=dfn, policy=pol).allow
-    # rejected: let the OSError propagate (a blocking gate must not raise)
 
 
-# ============================================================================
-# B. decide_bash — actor reader surface (empty bash_allow)
-# ============================================================================
 
 @pytest.mark.parametrize("cmd", [
     "cat defender/lessons-actor/x.md",
@@ -235,27 +223,13 @@ def test_reduction_is_per_policy_not_global(tmp_path):
     inv = run / "investigation.md"
     assert not permission.decide_bash(
         f"cat {inv}", policy=_policy(bash_allow=()), run_dir=run, defender_dir=dfn,
-    ).allow                                                                    # actor: no bash reader
+    ).allow
     assert permission.decide_bash(
-        f"cat {inv}", policy=main, run_dir=run, defender_dir=dfn).allow        # main: in-scope ok
+        f"cat {inv}", policy=main, run_dir=run, defender_dir=dfn).allow
     assert permission.decide_bash(
         f"cat {inv} | grep foo", policy=main, run_dir=run, defender_dir=dfn).allow
 
 
-# ============================================================================
-# C. decide_bash — the judge's cat lane
-#    (bash_allow = the `cat` grant, scoped to the judge's read roots, + the
-#    argument-inert `defender-sql`; built from JUDGE_DEF's own bash_shapes)
-#    NOTE: judge is UNCONFINED this slice (read_confine=()), so its scope covers
-#    {run_dir, defender_dir, *read_roots}. The scope check protects against reads
-#    OUTSIDE those (e.g. /etc/passwd), not against the rubric (which is in-roots
-#    until judge confinement lands in a later slice).
-#
-#    `cat` OPENS files, so its operands are resolve()d and scope-checked — since #575
-#    that is not a judge-specific `operand_gated` lane but the one containment model.
-#    `defender-sql` opens none — stdin only, one argv (the SQL), DuckDB sealed before
-#    that SQL runs — so it is `OPENS_NOTHING` and deliberately not scope-checked.
-# ============================================================================
 
 def _judge_gate(cmd, run_dir, *, read_roots=()):
     """The judge's policy off its REAL compile seam (never a hand-copied regex: a copy keeps
@@ -286,7 +260,6 @@ def test_judge_gather_raw_outside_run_dir_via_read_roots_allowed(tmp_path):
     assert _judge_gate(
         f'cat {raw / "l-002" / "0.json"} | defender-sql "{sql}"', learning, read_roots=(raw,),
     ).allow
-    # ...and a sibling of that read_root is still out of bounds
     assert not _judge_gate(
         f'cat {investigation / "secrets" / "x.json"}', learning, read_roots=(raw,),
     ).allow
@@ -357,7 +330,6 @@ def test_judge_relative_operand_gated_against_the_executors_cwd(monkeypatch, tmp
     run = tmp_path / "run"
     neutral = tmp_path / "neutral"
     neutral.mkdir(parents=True)
-    # repo-relative, and really inside `defender_dir` when resolved from the executor's cwd
     inside, escape = "defender/CLAUDE.md", "defender/../../../../../etc/passwd"
 
     verdicts = []
@@ -367,13 +339,12 @@ def test_judge_relative_operand_gated_against_the_executors_cwd(monkeypatch, tmp
             _judge_gate(f"cat {inside}", run).allow,
             _judge_gate(f"cat {escape}", run).allow,
         ))
-    # in-roots relative operand ALLOWED, `..` escape DENIED — from any ambient cwd
     assert verdicts == [(True, False)] * 2, f"verdict moved with the ambient cwd: {verdicts}"
 
 
 @pytest.mark.parametrize("cmd", [
-    'cat {r} | defender-sql \\\n  "SELECT 1"',          # `\`-continuation: dangling escape
-    'cat {r} | defender-sql "SELECT 1\nFROM data"',      # newline inside a quoted argument
+    'cat {r} | defender-sql \\\n  "SELECT 1"',
+    'cat {r} | defender-sql "SELECT 1\nFROM data"',
 ])
 def test_multiline_command_is_denied_with_a_reason_that_says_why(tmp_path, cmd):
     """`bash_exec.parse` lexes each PHYSICAL LINE on its own (an unquoted newline is a
@@ -412,7 +383,6 @@ def test_judge_other_readers_denied(tmp_path, tmpl):
     forms deny for a different reason (#575 took the viewers' file operand away everywhere)."""
     raw = tmp_path / "gather_raw" / "l-002" / "0.json"
     assert not _judge_gate(tmpl.format(r=raw), tmp_path).allow
-    # rejected: judge keeps grep for gather_raw text scans (folded into read_file(pattern=))
 
 
 def test_judge_cat_multiple_operands_one_out_of_roots_denied(tmp_path):
@@ -429,10 +399,10 @@ def test_judge_cat_operand_after_double_dash_still_gated(tmp_path):
 
 
 @pytest.mark.parametrize("cmd", [
-    "cat -f /etc/passwd",       # `-f` is not a cat flag at all -> don't guess, fail closed
-    "cat -nf /etc/passwd",      # a bundle carrying an unknown letter
-    "cat --files0-from=/etc/passwd",  # a real coreutils flag, but `wc`'s — not `cat`'s
-    "cat -L/etc/ssh x",         # attached-value shape
+    "cat -f /etc/passwd",
+    "cat -nf /etc/passwd",
+    "cat --files0-from=/etc/passwd",
+    "cat -L/etc/ssh x",
 ])
 def test_judge_cat_unknown_flag_denied(tmp_path, cmd):
     """any `-`-prefixed token that is not a known boolean bundle -> deny. `cat` has no arg-taking
@@ -448,7 +418,7 @@ def test_judge_cat_denylisted_file_in_roots_denied(tmp_path, name):
     captured .env that read_file refuses. A non-denylisted sibling stays allowed (it's the name, not the dir)."""
     assert not _judge_gate(f"cat {tmp_path / name}", tmp_path).allow, name
     assert not _judge_gate(f"cat {tmp_path / name} | defender-sql 'SELECT 1'", tmp_path).allow, name
-    assert _judge_gate(f"cat {tmp_path / 'payload.json'}", tmp_path).allow  # sibling, not denied
+    assert _judge_gate(f"cat {tmp_path / 'payload.json'}", tmp_path).allow
 
 
 def test_judge_cat_traversal_denied(tmp_path):
@@ -465,13 +435,6 @@ def test_judge_cat_comparison_dir_via_read_roots_allowed(tmp_path):
     assert _judge_gate(f"cat {comp / 'x.md'}", tmp_path, read_roots=(comp,)).allow
 
 
-# ============================================================================
-# D. main/gather — the bash reader lane is PER-RUN, and its scope IS the read
-#    surface (#535 anchored the operands; #575 made the anchor a resolved-path
-#    SCOPE and handed the same object to decide_read). The full allow/deny matrix
-#    is owned by test_read_confine_bash.py; these pin the compile_policy_for
-#    wiring + that decide_read is unaffected by the confine field.
-# ============================================================================
 
 def test_gather_multiline_command_denies_with_the_lexing_reason_not_a_policy_one(tmp_path):
     """The case that motivates a dedicated reason, and it is NOT the judge's.
@@ -499,12 +462,9 @@ def test_gather_multiline_command_denies_with_the_lexing_reason_not_a_policy_one
     denied = permission.decide_bash(multi, policy=pol, run_dir=run, defender_dir=dfn)
     assert not denied.allow
     assert denied.reason == permission.UNTOKENIZABLE_REASON
-    assert denied.reason != pol.deny_reason  # not the misleading policy text
-    # the same query on one line is a normal, allowed aggregation
+    assert denied.reason != pol.deny_reason
     assert permission.decide_bash(flat, policy=pol, run_dir=run, defender_dir=dfn).allow
 
-    # an ADAPTER-shaped multi-liner lexes-denies too: the lex verdict precedes classification, so
-    # the model is not told "use the `query` tool" when its command never tokenized at all.
     adapter_multi = 'defender-elastic esql \'FROM logs-*\n| WHERE host == "db-1"\''
     d = permission.decide_bash(adapter_multi, policy=pol, run_dir=run, defender_dir=dfn)
     assert not d.allow
@@ -523,7 +483,7 @@ def test_main_cat_scope_is_the_read_surface(tmp_path):
     dfn.mkdir()
     main = compile_policy_for(MAIN_DEF, run_dir=run, defender_dir=dfn)
     assert main.bash_allow
-    assert main.read_allow is read_allow_of(main.bash_allow)   # identity, not a second grammar
+    assert main.read_allow is read_allow_of(main.bash_allow)
     assert permission.decide_bash(
         f"cat {run}/investigation.md", policy=main, run_dir=run, defender_dir=dfn).allow
     assert not permission.decide_bash(
@@ -549,10 +509,10 @@ def test_gather_stream_plumbing_anchored(tmp_path):
 
     raw = f"{run}/gather_raw/l-001/0.json"
     assert bash(f"cat {raw} | defender-sql 'SELECT count(*) FROM data'").allow
-    assert not bash("defender-elastic query 'x'").allow   # #611: no adapter on any bash lane
+    assert not bash("defender-elastic query 'x'").allow
     assert bash(f"cat {raw} | wc -c").allow
     assert not bash("cat /tmp/p.json | wc -c").allow
-    assert not bash(f"cat {run}/gather_raw/evil.json").allow   # in-root, but not the raw shape
+    assert not bash(f"cat {run}/gather_raw/evil.json").allow
 
 
 def test_empty_confine_preserves_existing_decide_read_rows(tmp_path):
@@ -567,6 +527,6 @@ def test_empty_confine_preserves_existing_decide_read_rows(tmp_path):
     (dfn / "skills" / "elastic").mkdir(parents=True)
     main = compile_policy_for(MAIN_DEF, run_dir=run, defender_dir=dfn)
     assert permission.decide_read(dfn / "skills" / "elastic" / "SKILL.md", run_dir=run, defender_dir=dfn, policy=main).allow
-    assert not permission.decide_read(dfn / "SKILL.md", run_dir=run, defender_dir=dfn, policy=main).allow  # non-tight corpus → denied
+    assert not permission.decide_read(dfn / "SKILL.md", run_dir=run, defender_dir=dfn, policy=main).allow
     assert not permission.decide_read(Path("/etc/passwd"), run_dir=run, defender_dir=dfn, policy=main).allow
     assert not permission.decide_read(run / "gather_raw" / "l-001" / "0.json", run_dir=run, defender_dir=dfn, policy=main).allow

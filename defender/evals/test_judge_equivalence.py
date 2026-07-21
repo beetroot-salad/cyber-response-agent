@@ -1,8 +1,3 @@
-"""Deterministic unit tests for the judge-equivalence metric core (no model call).
-
-Like test_secondary.py, this is the one CI-collected test in evals/: it pins the
-metric + parsing logic the researcher-cadence A/B relies on.
-"""
 from __future__ import annotations
 
 import sys
@@ -28,7 +23,6 @@ def _v(case, direction, outcome, keys=()):
     return Verdict(case, direction, outcome, frozenset(keys), outcome is not None)
 
 
-# --- parse_judge_verdict -----------------------------------------------------------
 
 def test_parse_verdict_valid_empty_findings():
     v = parse_judge_verdict("outcome: caught\ndefender_findings: []\n", case_id="c1", direction="adversarial")
@@ -45,15 +39,12 @@ def test_parse_verdict_strips_fence():
 
 
 def test_parse_verdict_invalid_is_not_a_crash():
-    # A candidate that emits an unparseable/invalid doc scores parsed_ok=False (itself a
-    # regression signal), never crashes the A/B.
     for bad in ("not yaml: [", "outcome: bogus-keyword\ndefender_findings: []\n", "just prose"):
         v = parse_judge_verdict(bad, case_id="c1", direction="adversarial")
         assert not v.parsed_ok
         assert v.outcome is None
 
 
-# --- metrics -----------------------------------------------------------------
 
 def test_outcome_match_rate():
     ref = [_v("a", "adversarial", "caught"), _v("b", "adversarial", "survived")]
@@ -69,9 +60,9 @@ def test_systematic_flips_only_counts_the_load_bearing_axis():
         _v("c", "benign", "refuted"),
     ]
     cand = [
-        _v("a", "adversarial", "survived"),    # caught↔survived — a real flip
-        _v("b", "adversarial", "undecidable"),  # caught→punt — NOT an axis flip
-        _v("c", "benign", "survived"),          # refuted↔survived — a real flip
+        _v("a", "adversarial", "survived"),
+        _v("b", "adversarial", "undecidable"),
+        _v("c", "benign", "survived"),
     ]
     assert systematic_flips(ref, cand) == ["a", "c"]
 
@@ -79,8 +70,7 @@ def test_systematic_flips_only_counts_the_load_bearing_axis():
 def test_findings_agreement_jaccard():
     ref = [_v("a", "adversarial", "caught", keys={("missed-lead", "x"), ("gap", "y")})]
     cand = [_v("a", "adversarial", "caught", keys={("missed-lead", "x")})]
-    assert findings_agreement(ref, cand) == 0.5  # |∩|=1, |∪|=2
-    # both empty → full agreement
+    assert findings_agreement(ref, cand) == 0.5
     assert findings_agreement([_v("a", "adversarial", "caught")],
                               [_v("a", "adversarial", "caught")]) == 1.0
 
@@ -88,8 +78,8 @@ def test_findings_agreement_jaccard():
 def test_punt_and_parse_failure_rates():
     vs = [_v("a", "adversarial", "caught"), _v("b", "adversarial", "undecidable"),
           _v("c", "adversarial", "incoherent"), _v("d", "adversarial", None)]
-    assert punt_rate(vs) == 0.5          # undecidable + incoherent of 4
-    assert parse_failure_rate(vs) == 0.25  # the None one
+    assert punt_rate(vs) == 0.5
+    assert parse_failure_rate(vs) == 0.25
 
 
 def test_compare_and_report():
@@ -100,8 +90,8 @@ def test_compare_and_report():
     assert cmp.outcome_match == 0.5
     assert cmp.flips == ["b"]
     txt = render_report("Step 1", cmp, self_consistency=0.9)
-    assert "flips: 1" in txt  # the rendered flip count is pinned (one systematic flip)
-    assert "NOT yet equivalent" in txt  # a flip → not equivalent even if within floor
+    assert "flips: 1" in txt
+    assert "NOT yet equivalent" in txt
 
 
 def test_compare_mismatched_lengths_raises():

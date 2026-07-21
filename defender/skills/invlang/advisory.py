@@ -1,25 +1,3 @@
-"""PLAN-time advisory retrieval over the defender invlang corpus.
-
-Composes the three cross-case primitives (`lead_sequence_pattern`,
-`hypothesis_name_wildcard`, `lead_branch_effects`) into a single
-prompt-injection-ready block. This is the load-bearing API surface for
-the upcoming retrieval A/B experiment — all three variants
-(deterministic floor, Haiku NL→structured, in-defender structured)
-call `advisory_recall` and differ only in *how* the call is
-constructed, not what comes back.
-
-Output is rendered markdown by default (defender consumes text
-in-prompt; parsing JSON in-prompt is unnecessary friction). The harness
-gets JSON via `as_json()` for diff/score.
-
-Corpus parsing is cached per `corpus_root` so PLAN- and ANALYZE-time
-calls during the same process share one parse.
-
-Loud-empty is deliberate: when a signature has no past cases (or a
-section yields zero hits), the markdown renders an explicit "no past
-data for this signature" line rather than dropping the section
-silently. Silent empties read as no-signal to the LLM consumer.
-"""
 
 from __future__ import annotations
 
@@ -54,15 +32,10 @@ CAVEAT = (
 )
 
 
-# ---------------------------------------------------------------------------
-# Result container
-# ---------------------------------------------------------------------------
 
 
 @dataclass
 class AdvisorySection:
-    """One per requested class. `hits` carries the data; `note` carries the
-    loud-empty message when there's nothing to show."""
 
     name: str
     hits: list[dict[str, Any]] = field(default_factory=list)
@@ -123,9 +96,6 @@ class AdvisoryResult:
         return "\n".join(lines)
 
 
-# ---------------------------------------------------------------------------
-# Loader cache
-# ---------------------------------------------------------------------------
 
 
 @lru_cache(maxsize=4)
@@ -135,13 +105,9 @@ def _cached_load(corpus_root: str) -> tuple[tuple[Companion, ...], LoadReport]:
 
 
 def clear_cache() -> None:
-    """Drop the corpus-load cache. Tests should call this between fixtures."""
     _cached_load.cache_clear()
 
 
-# ---------------------------------------------------------------------------
-# Main entry point
-# ---------------------------------------------------------------------------
 
 
 def advisory_recall(
@@ -153,20 +119,6 @@ def advisory_recall(
     top_k: int = 3,
     load_fn=_cached_load,
 ) -> AdvisoryResult:
-    """Compose advisory retrieval for one PLAN-time call.
-
-    `corpus_root`     — absolute path; must be explicit (no auto-discovery).
-    `signature_id`    — e.g. "5710" (the alert's bare `rule.id`); used to filter Classes 5/6.
-    `frontier`        — current `?hypothesis` names; routed into Class 8's
-                        `hypothesis_patterns`. When empty, Class 8 surfaces
-                        the top-`top_k` leads by occurrence regardless of
-                        frontier (degenerate but useful for ORIENT-only runs).
-    `classes`         — subset of VALID_CLASSES. Unknown names raise.
-    `top_k`           — applies to Classes 5 (truncate hits) and 6 (truncate
-                        aggregated hypothesis names by occurrence). Class 8
-                        is governed by `frontier` and the primitive's
-                        min_support, not top_k.
-    """
     unknown = [c for c in classes if c not in VALID_CLASSES]
     if unknown:
         raise ValueError(f"unknown advisory classes: {unknown}")
@@ -177,9 +129,6 @@ def advisory_recall(
 
     sections: dict[str, AdvisorySection] = {}
     if sig_count == 0:
-        # Loud-empty short-circuit. Every requested class becomes a
-        # documented miss; the markdown renderer collapses to a single
-        # banner so the LLM sees one clean signal, not three echoes.
         for cls in classes:
             sections[cls] = AdvisorySection(
                 name=cls,
@@ -221,9 +170,6 @@ def advisory_recall(
     )
 
 
-# ---------------------------------------------------------------------------
-# Section builders
-# ---------------------------------------------------------------------------
 
 
 def _build_similar_cases(
@@ -238,10 +184,6 @@ def _build_similar_cases(
 def _build_hypothesis_vocab(
     corpus: list[Companion], *, signature_id: str, top_k: int
 ) -> AdvisorySection:
-    """Aggregate Class 6 hits by hypothesis name. Each row carries the
-    occurrence count + a per-bucket histogram of final weights, so the
-    consumer sees frequency *and* outcome shape at a glance.
-    """
     raw = hypothesis_name_wildcard(corpus, "?*", signature_id=signature_id)
     by_name: dict[str, dict[str, Any]] = defaultdict(
         lambda: {"n": 0, "buckets": Counter(), "unresolved": 0}
@@ -279,11 +221,6 @@ def _build_lead_discrimination(
     frontier: tuple[str, ...],
     top_k: int,
 ) -> AdvisorySection:
-    """Class 8 against the signature-filtered corpus. When a frontier is
-    provided, `lead_branch_effects` restricts the per-hypothesis breakdown
-    to matching names; without one, we still emit the top-`top_k` most-used
-    leads so PLAN gets a baseline view.
-    """
     scoped = [c for c in corpus if c.signature_id == signature_id]
     out = lead_branch_effects(
         scoped,
@@ -305,9 +242,6 @@ def _build_lead_discrimination(
     return AdvisorySection(name=CLASS_LEAD_DISCRIMINATION, hits=leads, note=note)
 
 
-# ---------------------------------------------------------------------------
-# Markdown rendering
-# ---------------------------------------------------------------------------
 
 
 def _render_section(section: AdvisorySection, frontier: list[str]) -> list[str]:

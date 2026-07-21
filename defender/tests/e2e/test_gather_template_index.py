@@ -67,8 +67,6 @@ def test_d17_gather_dispatch_carries_the_template_index_end_to_end(tmp_path):
         Turn(tool_calls=[("write_file", {"path": str(run_dir / "report.md"), "content": report_md})]),
         Turn(text="Investigation complete."),
     ])
-    # Gather binds a template it could only have learned from the index, and tags its id via the
-    # `query` tool's `query_id` param (#611 — no more `--query-id` pseudo-flag on a bash adapter).
     def esql(ctx, *, query: str) -> list[dict]:
         return [{"@timestamp": "2026-01-01T00:00:00Z", "event.action": "sshd-auth"}]
 
@@ -93,17 +91,13 @@ def test_d17_gather_dispatch_carries_the_template_index_end_to_end(tmp_path):
     leaked = sorted(i for i in drafts if i in dispatch)
     assert not leaked, f"draft ids leaked into the dispatch prompt: {leaked[:5]}"
 
-    # all systems, not just the dispatched one (d3)
     assert "cmdb." in dispatch
     assert "host-state." in dispatch
 
-    # the index gives gather the PATH, so it can read the body before it binds the id (d16)
     assert "skills/gather/queries/elastic/sshd-auth-history.md" in dispatch
 
-    # ...and the tool it uses when the index is too coarse (d19's fallback surface)
     assert "template_search" in dispatch
 
-    # SURVIVAL: the lead completed and the bound template id landed in the queries table.
     rows = (run_dir / "executed_queries.jsonl").read_text().strip().splitlines()
     assert rows, "gather executed no query"
     import json

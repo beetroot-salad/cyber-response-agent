@@ -36,14 +36,9 @@ from defender.learning.author import curator, shared
 from defender.learning.author.benign_actor import run as benign_run
 from defender.learning.core.config import LoopPaths
 
-# Workspace root (tests → defender → workspace), mirroring conftest.REAL_REPO — used
-# to hand the state-root subprocess a PYTHONPATH that resolves ``defender.*``.
 _WS_ROOT = Path(__file__).resolve().parents[2]
 
 
-# ---------------------------------------------------------------------------
-# Helpers (findings-author survival) — modeled on test_author_postflight.py
-# ---------------------------------------------------------------------------
 
 
 def _write_lesson(tmp_repo, name: str, finding_id: str) -> None:
@@ -70,9 +65,6 @@ def _head_files(tmp_repo) -> list[str]:
     ).stdout.split()
 
 
-# ===========================================================================
-# survival-partial-write-rollback  (R5 envelope; characterization)
-# ===========================================================================
 
 
 def test_survival_partial_write_rollback(tmp_repo, helpers):
@@ -92,20 +84,14 @@ def test_survival_partial_write_rollback(tmp_repo, helpers):
         return {r["finding_id"] for r in read_jsonl_rows(tmp_repo.paths.pending_file)}
 
     def partial_then_raise(findings, batch_id, cfg):
-        _write_lesson(tmp_repo, "half", "run-P/0")  # partial write, no git
+        _write_lesson(tmp_repo, "half", "run-P/0")
         raise a.AuthorError("run_stage RunUnprocessable mid-batch")
 
     assert a.run_batch(cfg=replace(tmp_repo.cfg, invoke_agent=partial_then_raise)) == 2
-    # no partial commit — HEAD did not advance
     assert _commit_count(tmp_repo) == commits_before
-    # queue NOT rotated — the finding is retryable (its dead-letter attempts counter is bumped,
-    # but it stays queued and is not committed/consumed)
     assert queued_ids() == {"run-P/0"}
     assert not tmp_repo.cfg.consumed_file.exists()
 
-    # The leftover half.md sits UNCOMMITTED in the worktree; the clean-scope gate now
-    # refuses a re-drain (dirty corpus → rc 2) — so the leftover is what the rollback
-    # must clear before the finding can re-author.
     assert tmp_repo.run_git("status", "--porcelain").stdout.strip() != ""
 
     def succeed(findings, batch_id, cfg):
@@ -113,24 +99,19 @@ def test_survival_partial_write_rollback(tmp_repo, helpers):
         return {"committed": ["run-P/0"], "held_forward_bad": [],
                 "consumed_skip": [], "commit_message": "defender: lesson full"}
 
-    assert a.run_batch(cfg=replace(tmp_repo.cfg, invoke_agent=succeed)) == 2  # blocked while dirty
-    assert queued_ids() == {"run-P/0"}  # still retryable — the dirty-corpus pre-flight bailed before authoring
+    assert a.run_batch(cfg=replace(tmp_repo.cfg, invoke_agent=succeed)) == 2
+    assert queued_ids() == {"run-P/0"}
 
-    # The drain's rollback — discard the worktree leftovers.
     tmp_repo.run_git("reset", "--hard", "--quiet")
     tmp_repo.run_git("clean", "-fdq")
-    assert tmp_repo.run_git("status", "--porcelain").stdout.strip() == ""  # corpus git-clean
+    assert tmp_repo.run_git("status", "--porcelain").stdout.strip() == ""
 
-    # Re-drain authors the finding exactly ONCE (no double-author / no double-commit).
     assert a.run_batch(cfg=replace(tmp_repo.cfg, invoke_agent=succeed)) == 0
     assert _commit_count(tmp_repo) == commits_before + 1
     assert _head_files(tmp_repo) == ["defender/lessons/full.md"]
     assert tmp_repo.paths.pending_file.read_text().strip() == ""
 
 
-# ===========================================================================
-# survival-committed-dirty-crosscheck  (R5 envelope; characterization)
-# ===========================================================================
 
 
 def test_survival_committed_dirty_crosscheck(tmp_repo, helpers):
@@ -143,7 +124,6 @@ def test_survival_committed_dirty_crosscheck(tmp_repo, helpers):
     helpers.write_finding(tmp_repo.paths.pending_file, finding_id="run-X/0", run_id="run-X")
     pre = tmp_repo.paths.pending_file.read_text()
 
-    # committed=[id] but the agent wrote NOTHING (corpus clean) → AuthorError → rc 2.
     def committed_but_clean(findings, batch_id, cfg):
         return {"committed": ["run-X/0"], "held_forward_bad": [],
                 "consumed_skip": [], "commit_message": "m"}
@@ -152,7 +132,6 @@ def test_survival_committed_dirty_crosscheck(tmp_repo, helpers):
     assert tmp_repo.paths.pending_file.read_text() == pre
     assert not tmp_repo.cfg.consumed_file.exists()
 
-    # committed=[] but the agent left corpus edits (dirty) → AuthorError → rc 2.
     def dirty_but_no_commit(findings, batch_id, cfg):
         (tmp_repo.paths.lessons_dir / "orphan.md").write_text("uncommitted\n")
         return {"committed": [], "held_forward_bad": [],
@@ -163,7 +142,6 @@ def test_survival_committed_dirty_crosscheck(tmp_repo, helpers):
     assert tmp_repo.paths.pending_file.read_text() == pre
     assert not tmp_repo.cfg.consumed_file.exists()
 
-    # Clear the orphan edit, then the CONSISTENT state (committed=[id] + dirty) commits.
     tmp_repo.run_git("reset", "--hard", "--quiet")
     tmp_repo.run_git("clean", "-fdq")
 
@@ -177,9 +155,6 @@ def test_survival_committed_dirty_crosscheck(tmp_repo, helpers):
     assert tmp_repo.paths.pending_file.read_text().strip() == ""
 
 
-# ===========================================================================
-# survival-scope-gate-strays  (R5 envelope; characterization)
-# ===========================================================================
 
 
 def test_survival_scope_gate_strays(tmp_repo, helpers):
@@ -192,7 +167,6 @@ def test_survival_scope_gate_strays(tmp_repo, helpers):
     helpers.write_finding(tmp_repo.paths.pending_file, finding_id="run-S/0", run_id="run-S")
     pre = tmp_repo.paths.pending_file.read_text()
 
-    # NEW stray outside defender/lessons/ (+ a valid lesson) → scope gate aborts.
     def writes_new_stray(findings, batch_id, cfg):
         (tmp_repo.root / "scratch.txt").write_text("oops")
         _write_lesson(tmp_repo, "in-scope", "run-S/0")
@@ -202,28 +176,23 @@ def test_survival_scope_gate_strays(tmp_repo, helpers):
     assert a.run_batch(cfg=replace(tmp_repo.cfg, invoke_agent=writes_new_stray)) == 2
     assert tmp_repo.paths.pending_file.read_text() == pre
 
-    # Reset the failed batch's leftovers, then pre-stage a stray that exists BEFORE the
-    # agent runs (a sibling curator's draft in the shared index) — the baseline.
     tmp_repo.run_git("reset", "--hard", "--quiet")
     tmp_repo.run_git("clean", "-fdq")
     (tmp_repo.root / "sibling_draft.md").write_text("unrelated staged work\n")
     tmp_repo.run_git("add", "sibling_draft.md")
 
     def writes_lesson_only(findings, batch_id, cfg):
-        _write_lesson(tmp_repo, "in-scope", "run-S/0")  # no NEW stray
+        _write_lesson(tmp_repo, "in-scope", "run-S/0")
         return {"committed": ["run-S/0"], "held_forward_bad": [],
                 "consumed_skip": [], "commit_message": "defender: lesson in-scope"}
 
     assert a.run_batch(cfg=replace(tmp_repo.cfg, invoke_agent=writes_lesson_only)) == 0
     head_files = _head_files(tmp_repo)
-    assert head_files == ["defender/lessons/in-scope.md"]      # baseline stray not blamed
-    assert "sibling_draft.md" not in head_files                # nor swept into the commit
+    assert head_files == ["defender/lessons/in-scope.md"]
+    assert "sibling_draft.md" not in head_files
     assert tmp_repo.paths.pending_file.read_text().strip() == ""
 
 
-# ===========================================================================
-# survival-idempotent-redrain  (R5 envelope; characterization)
-# ===========================================================================
 
 
 def test_survival_idempotent_redrain(tmp_repo, helpers):
@@ -241,28 +210,22 @@ def test_survival_idempotent_redrain(tmp_repo, helpers):
         return {"committed": ["run-I/0"], "held_forward_bad": [],
                 "consumed_skip": [], "commit_message": "lessonI"}
 
-    # Tick 1 (drain): lesson committed, finding HELD (unmerged-PR semantics), stamp stripped.
     assert a.run_batch(hold_committed=True, cfg=replace(tmp_repo.cfg, invoke_agent=author_and_commit)) == 0
-    assert _commit_count(tmp_repo) == commits_before + 1        # authored exactly once
+    assert _commit_count(tmp_repo) == commits_before + 1
     head_after_tick1 = tmp_repo.run_git("rev-parse", "HEAD").stdout.strip()
     assert "run-I/0" in tmp_repo.paths.pending_file.read_text()
 
-    # Tick 2: the finding is now covered by the committed lesson → filtered as idempotent;
-    # the agent is never re-invoked and no new commit lands.
     def must_not_author(findings, batch_id, cfg):
         raise AssertionError("re-authored an already-committed finding")
 
     assert a.run_batch(hold_committed=True, cfg=replace(tmp_repo.cfg, invoke_agent=must_not_author)) == 0
-    assert tmp_repo.run_git("rev-parse", "HEAD").stdout.strip() == head_after_tick1  # no double-commit
+    assert tmp_repo.run_git("rev-parse", "HEAD").stdout.strip() == head_after_tick1
     assert tmp_repo.paths.pending_file.read_text().strip() == ""
     consumed = tmp_repo.cfg.consumed_file.read_text()
     assert "run-I/0" in consumed
     assert "consumed_idempotent" in consumed
 
 
-# ===========================================================================
-# survival-agent-no-git  (R5 envelope; characterization)
-# ===========================================================================
 
 
 def test_survival_agent_no_git(tmp_repo, helpers):
@@ -277,21 +240,16 @@ def test_survival_agent_no_git(tmp_repo, helpers):
     commits_before = _commit_count(tmp_repo)
 
     def writes_lesson_no_git(findings, batch_id, cfg):
-        _write_lesson(tmp_repo, "noGit", "run-G/0")  # writes a lesson, runs NO git
+        _write_lesson(tmp_repo, "noGit", "run-G/0")
         return {"committed": ["run-G/0"], "held_forward_bad": [],
                 "consumed_skip": [], "commit_message": "defender: lesson noGit"}
 
     assert a.run_batch(cfg=replace(tmp_repo.cfg, invoke_agent=writes_lesson_no_git)) == 0
-    # loop is the sole committer: exactly one new commit (the agent contributed none)
     assert _commit_count(tmp_repo) == commits_before + 1
-    # pathspec-scoped: the one commit touched only the corpus .md
     assert _head_files(tmp_repo) == ["defender/lessons/noGit.md"]
     assert tmp_repo.paths.pending_file.read_text().strip() == ""
 
 
-# ===========================================================================
-# env-corpus-two-writers-distinct  (R2 shared sink; characterization)
-# ===========================================================================
 
 
 def _env_repo(tmp_path: Path):
@@ -339,21 +297,16 @@ def test_env_corpus_two_writers_distinct(tmp_path: Path):
     ben = replace(benign_run.build_benign_config(paths), invoke_agent=_committing("lessonC"))
     adv = replace(benign_run.build_adversarial_config(paths), invoke_agent=_committing("lessonD"))
 
-    # Seed each direction's own queue (survived authors benign; caught authors adversarial).
-    # source_run_dir="" sidesteps the held-out / bundle-missing gates (not under test here).
     ben.channel.file.write_text('{"observation_id": "eb/0", "judge_outcome": "survived", "source_run_dir": ""}\n')
     adv.channel.file.write_text('{"observation_id": "ea/0", "judge_outcome": "caught", "source_run_dir": ""}\n')
 
-    # Serial drain: C then D, into the one shared corpus.
     assert curator.run_batch(hold_committed=False, cfg=ben) == 0
     assert curator.run_batch(hold_committed=False, cfg=adv) == 0
 
-    # Distinct content on distinct paths in the shared corpus.
     corpus = repo / "defender" / "lessons-environment"
     assert (corpus / "lessonC.md").is_file()
     assert (corpus / "lessonD.md").is_file()
 
-    # Distinct commit trailers per direction (each carries ITS label, not the sibling's).
     ben_msg = _commit_msg_for(repo, "defender/lessons-environment/lessonC.md")
     adv_msg = _commit_msg_for(repo, "defender/lessons-environment/lessonD.md")
     assert "Benign-Actor-Model:" in ben_msg
@@ -361,14 +314,10 @@ def test_env_corpus_two_writers_distinct(tmp_path: Path):
     assert "Actor-Env-Model:" in adv_msg
     assert "Benign-Actor-Model:" not in adv_msg
 
-    # Generation counters stay per-stream: each advanced by its OWN direction's commit only.
-    assert shared.benign_generation_count(repo) == 2       # advanced by C, not D
-    assert shared.actor_env_generation_count(repo) == 2    # advanced by D, not C
+    assert shared.benign_generation_count(repo) == 2
+    assert shared.actor_env_generation_count(repo) == 2
 
 
-# ===========================================================================
-# runner-teardown  (R5 removal/conservation; STRUCTURAL conservation guard)
-# ===========================================================================
 
 
 def test_runner_teardown_structural():
@@ -383,7 +332,7 @@ def test_runner_teardown_structural():
     That inversion is now owned by ``test_forward_check_tool.py::test_d26_no_curator_resolves_a
     _verifier_interpreter`` (demand d26 in spec_graph_558-forward-check-tool.yaml), which asserts
     ZERO callers — so it is dropped from this #556 teardown guard rather than kept green here."""
-    import defender.learning.author.shared as _anchor  # any author module → the package dir
+    import defender.learning.author.shared as _anchor
 
     author_dir = Path(_anchor.__file__).resolve().parent
     torn_down = ("invoke_claude_print", "curator_allowed_tools", "curator_agent_env")
@@ -403,16 +352,11 @@ def test_runner_teardown_structural():
             if sym in names:
                 referencing[sym].add(rel)
 
-    # Teardown: zero production references to the retired transport symbols.
     assert referencing["invoke_claude_print"] == set()
     assert referencing["curator_allowed_tools"] == set()
     assert referencing["curator_agent_env"] == set()
 
 
-# ===========================================================================
-# Assumed port seam — the in-process curator stage (RED until built).
-# Lazily imported so the characterization tests above still collect/run.
-# ===========================================================================
 
 
 def _spawn_curator(**over):
@@ -421,7 +365,7 @@ def _spawn_curator(**over):
     ``run_author_stage``. The ``run_author`` DI seam captures the trace anchor without
     running the pydantic-ai graph. Signature per the SEAM INTERFACE CONTRACT (assumed)."""
     from defender.learning.author.verify_forward.checks import ENV_CHECK as _ENV_CHECK
-    from defender.learning.author.curator_engine import (  # port target — missing until implemented
+    from defender.learning.author.curator_engine import (
         run_curator_stage,
     )
 
@@ -448,9 +392,6 @@ def _spawn_curator(**over):
     return run_curator_stage(**kw)
 
 
-# ===========================================================================
-# trace-per-spawn-distinct  (R2 uniqueness at the composition frame; RED)
-# ===========================================================================
 
 
 def test_trace_per_spawn_distinct(tmp_path: Path):
@@ -462,7 +403,6 @@ def test_trace_per_spawn_distinct(tmp_path: Path):
     rd = tmp_path / "state" / "_pending"
     rd.mkdir(parents=True)
 
-    # Two spawns in one drain → capture the trace_name each hands the transport.
     seen: list[str] = []
 
     def _cap(**kw):
@@ -472,26 +412,22 @@ def test_trace_per_spawn_distinct(tmp_path: Path):
     for bid in ("batch-C", "batch-D"):
         _spawn_curator(batch_id=bid, learning_run_dir=rd, run_author=_cap)
 
-    assert len(set(seen)) == 2                               # distinct per batch_id
-    assert all(str(os.getpid()) in n for n in seen)          # pid keys concurrent drains
+    assert len(set(seen)) == 2
+    assert all(str(os.getpid()) in n for n in seen)
     assert any("batch-C" in n for n in seen)
     assert any("batch-D" in n for n in seen)
 
-    # Positive control: RequestLogger opens in truncate mode (why distinct names matter).
-    from defender.runtime import observe  # runtime extra — lazy so the survival tests don't need it
+    from defender.runtime import observe
 
     c = rd / "batch-C.7.trace.jsonl"
     d = rd / "batch-D.7.trace.jsonl"
     c.write_text("C-TRACE\n")
     d.write_text("D-TRACE\n")
-    observe.RequestLogger(d).close()          # opening d truncates ONLY d …
-    assert d.read_text() == ""                # … truncate-mode confirmed …
-    assert c.read_text() == "C-TRACE\n"       # … a DISTINCT path is untouched → no collision
+    observe.RequestLogger(d).close()
+    assert d.read_text() == ""
+    assert c.read_text() == "C-TRACE\n"
 
 
-# ===========================================================================
-# trace-persistent-not-worktree  (R2; caller-anchor GREEN + stage-anchor RED)
-# ===========================================================================
 
 
 def test_trace_persistent_not_worktree(tmp_path: Path):
@@ -506,15 +442,13 @@ def test_trace_persistent_not_worktree(tmp_path: Path):
     worktree = tmp_path / "worktree"
     worktree.mkdir()
 
-    # A batch worktree cfg: repo_root moves to the throwaway worktree, the state dir stays.
     paths = LoopPaths(repo_root=orig, state_dir=state).with_repo_root(worktree)
     cfg = benign_run.build_benign_config(paths)
     assert cfg.repo_root == worktree
-    assert cfg.pending_dir == state / "_pending"  # the state dir survives `with_repo_root`
+    assert cfg.pending_dir == state / "_pending"
     with pytest.raises(ValueError, match="subpath"):
-        cfg.pending_dir.relative_to(worktree)     # persistent anchor NOT under the worktree
+        cfg.pending_dir.relative_to(worktree)
 
-    # Stage anchor (RED): the trace lands under learning_run_dir, not repo_root.
     rd = state / "_pending"
     rd.mkdir(parents=True, exist_ok=True)
     captured: dict = {}
@@ -530,15 +464,12 @@ def test_trace_persistent_not_worktree(tmp_path: Path):
         corpus_dir=worktree / "defender" / "lessons-environment",
         run_author=_cap,
     )
-    assert captured["anchor"] == rd               # anchored at the persistent dir …
+    assert captured["anchor"] == rd
     trace_path = captured["anchor"] / captured["name"]
     with pytest.raises(ValueError, match="subpath"):
-        trace_path.relative_to(worktree)          # … so the trace is NOT under the worktree
+        trace_path.relative_to(worktree)
 
 
-# ===========================================================================
-# forward-check-resolves-off-state-root  (deepest cross-file fault)
-# ===========================================================================
 
 
 def _run_forward_snippet(snippet: str, *, state_dir: Path | None, cwd: Path):
@@ -556,10 +487,3 @@ def _run_forward_snippet(snippet: str, *, state_dir: Path | None, cwd: Path):
     )
 
 
-# (#558) test_forward_check_resolves_off_state_root lived here: it drove `vf.load_run_context`
-# in a bare-interpreter subprocess with DEFENDER_LEARNING_STATE_DIR pinned, proving the
-# forward-check SUBPROCESS resolved the real source bundle from a throwaway worktree (#425).
-# There is no subprocess and no `vf.RUNS_DIR` any more — the check reads `runs_dir` off the
-# curator's deps. The surviving contract is owned by
-# test_forward_check_tool.py::test_d16_bundle_resolves_from_deps (the deps-named bundle is read,
-# not a frozen module default) and ::test_d14_no_environ_mutation (no state-dir pin is written).

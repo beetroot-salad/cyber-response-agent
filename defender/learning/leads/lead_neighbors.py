@@ -1,21 +1,4 @@
 #!/usr/bin/env python3
-"""Deterministic top-k neighbor scoring for the defender query catalog.
-
-Used by ``lead_author.py`` to surface candidate sibling templates for
-the lead-author agent to consider when deciding fold / split / skip.
-
-Scores the executed template's ``## Query`` body against every other
-catalog template's ``## Query`` body using a per-variant weighted
-Jaccard with a CLI token firewall and TF-IDF weighting.
-
-Leads whose ``query_id`` doesn't resolve in the catalog are a runtime
-contract violation (per ``defender/CLAUDE.md``: "every id resolves").
-The driver logs and drops them; this module does not handle them.
-
-The regression-pin sanity fixture from the original PR lives in
-``defender/tests/test_lead_neighbors.py`` rather than here, so the
-production module stays free of fixture data.
-"""
 from __future__ import annotations
 
 import argparse
@@ -26,8 +9,6 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
-# Put the workspace root on sys.path so the `defender.*` namespace import below
-# resolves whether this file is imported or run directly (see tests/conftest.py).
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
@@ -35,16 +16,9 @@ from defender._corpus import iter_query_templates
 from defender._paths import PATHS
 
 
-# `start`/`end`/`limit` are REAL declared params of the SIEM's query/alerts verbs (#620) — a
-# query's time window and page size are discriminating facts about the measurement, not plumbing.
-# Dropping them collapsed sibling structured fences that differ only in their window. Only the
-# genuine harness plumbing (a run dir, a positional index, a `window` template token) is dropped.
 PLUMBING_TOKENS = frozenset({"run_dir", "position", "window"})
 
 
-# ---------------------------------------------------------------------------
-# Catalog loading
-# ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -55,27 +29,10 @@ class Template:
     goal: str
     query_variants: tuple[frozenset[str], ...]
     cli: str
-    # The frontmatter value verbatim: "established" | "draft" | "" — NOT defaulted. The pre-fold
-    # walk coalesced an absent key to "established" with `or`, which promoted a draft that had
-    # lost its key; `_corpus.QueryTemplate` fails that closed, so a curation defect now surfaces
-    # here as "" rather than as a silent promotion. Consumers must test positively.
     status: str
 
 
 def _query_variants(query_section: str) -> tuple[frozenset[str], ...]:
-    """Split the ## Query section into per-fence variants, tokenize each.
-
-    Some templates document multiple query forms (e.g. a Lucene one and
-    a JSON+aggs one) inside a single ``## Query`` section. Per-variant
-    tokenization + per-pair max preserves the strength of each variant
-    rather than diluting it across the average.
-
-    The fence label is matched generically (``esql``, ``sql``, ``bash``,
-    ``json``, or none): the ES|QL migration tags query bodies ```` ```esql ````,
-    and a label-specific allowlist would silently fall through to tokenizing
-    the *whole section* — prose, narrowing examples, and all — diluting the
-    similarity signal the curator relies on to spot near-duplicates.
-    """
     variants: list[frozenset[str]] = []
     for m in re.finditer(r"```[\w.+-]*\n(.*?)```", query_section, re.DOTALL):
         body = m.group(1)
@@ -86,23 +43,6 @@ def _query_variants(query_section: str) -> tuple[frozenset[str], ...]:
 
 
 def tokenize_query(text: str) -> frozenset[str]:
-    """Argument-side tokenizer for query-body scoring.
-
-    Splits on punctuation, drops pure-numeric tokens and
-    ``PLUMBING_TOKENS``, lowercases. Two identifier shapes are preserved
-    as single tokens rather than shattered, because each is a strong
-    "same data" signal the scorer would otherwise lose:
-
-    - **Dotted field references** (``rule.id``, ``source.ip``) — so a
-      template scoring on ``source.ip`` matches another using the same
-      field, not just one that happens to mention ``source``.
-    - **Hyphenated index / data-stream names** (``logs-system.auth-*``,
-      ``logs-zeek.conn``) — for ES|QL the data stream a query hits is the
-      single strongest discriminator between measurements; splitting on
-      ``-`` would collapse every ``logs-*`` query onto the common ``logs``
-      token. Trailing glob/hyphen punctuation is normalized off so
-      ``logs-system.auth-*`` and ``logs-system.auth`` are one token.
-    """
     raw = re.split(r"[^\w.\-*]+", text.lower())
     toks: list[str] = []
     for tok in raw:
@@ -119,24 +59,12 @@ def tokenize_query(text: str) -> frozenset[str]:
 
 
 def _resolve_cli(template_id: str) -> str:
-    """Map a template id to its CLI prefix for the firewall."""
     if "." in template_id:
         return template_id.split(".", 1)[0]
     return "unknown"
 
 
 def load_catalog(catalog_dir: Path | None = None) -> list[Template]:
-    """Return one scoring :class:`Template` per template in the catalog.
-
-    A thin consumer of :func:`defender._corpus.iter_query_templates` — the ONE walk over this
-    corpus (#585). This function owns only what the scorer adds on top of a walked record: the
-    per-variant query tokenization and the CLI firewall prefix. It re-globbed the corpus itself
-    until the fold, and it was one of three walks that did.
-
-    ``catalog_dir`` defaults to ``PATHS.catalog_dir`` — this function stays the
-    single owner of the ``None → default`` catalog-dir resolution (#475/#476), so
-    callers forward ``None`` through rather than pre-resolving it.
-    """
     root = catalog_dir if catalog_dir is not None else PATHS.catalog_dir
     return [
         Template(
@@ -152,13 +80,9 @@ def load_catalog(catalog_dir: Path | None = None) -> list[Template]:
     ]
 
 
-# ---------------------------------------------------------------------------
-# Scoring
-# ---------------------------------------------------------------------------
 
 
 def build_idf(token_sets: list[frozenset[str]]) -> dict[str, float]:
-    """Smoothed inverse document frequency over a token-set corpus."""
     n = len(token_sets)
     df: Counter[str] = Counter()
     for ts in token_sets:
@@ -170,7 +94,6 @@ def build_idf(token_sets: list[frozenset[str]]) -> dict[str, float]:
 def weighted_jaccard(
     a: frozenset[str], b: frozenset[str], idf: dict[str, float]
 ) -> float:
-    """IDF-weighted Jaccard similarity. Empty inputs return 0."""
     if not a or not b:
         return 0.0
     inter_w = sum(idf.get(t, 1.0) for t in a & b)
@@ -213,16 +136,6 @@ def top_k_neighbors(
     idf: dict[str, float] | None = None,
     k: int = 3,
 ) -> list[Neighbor]:
-    """Pick the top-k siblings for an executed lead.
-
-    ``query_id`` must resolve in the catalog. Caller is responsible for
-    filtering unresolvable ids before calling — typically by dropping
-    them from the handoff list and logging a corpus-health warning.
-
-    Returns neighbors in descending score order. The executed template
-    itself is excluded. Cross-CLI siblings (siem ↔ host-state) are
-    excluded by the firewall.
-    """
     by_id = {t.id: t for t in catalog}
     src = by_id[query_id]
     weights = idf or build_idf(_all_query_variants(catalog))
@@ -238,9 +151,6 @@ def top_k_neighbors(
     return scored[:k]
 
 
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
 
 
 _HELP_DESCRIPTION = """\

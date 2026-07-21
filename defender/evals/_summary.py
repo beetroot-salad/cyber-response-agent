@@ -1,4 +1,3 @@
-"""Summary and reporting for the secondary-metric harness."""
 from __future__ import annotations
 
 import json
@@ -6,12 +5,10 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-# Ensure evals/ is on sys.path so _secondary_config / _pipeline are importable,
-# and the repo root so `defender.*` resolves, regardless of how this module loads.
 _EVALS_DIR = Path(__file__).resolve().parent
 if str(_EVALS_DIR) not in sys.path:
     sys.path.insert(0, str(_EVALS_DIR))
-_REPO_ROOT = _EVALS_DIR.parents[1]  # defender/evals → repo root
+_REPO_ROOT = _EVALS_DIR.parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
@@ -20,9 +17,6 @@ from _secondary_config import CATCH_OUTCOMES, SKIP_OUTCOME  # noqa: E402
 from _pipeline import AlertResult  # noqa: E402
 
 
-# ---------------------------------------------------------------------------
-# Summary
-# ---------------------------------------------------------------------------
 
 @dataclass
 class SecondarySummary:

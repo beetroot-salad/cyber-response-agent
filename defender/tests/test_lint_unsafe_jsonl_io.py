@@ -30,7 +30,6 @@ LINT_PATH = LINT_DIR / "lint_unsafe_jsonl_io.py"
 
 
 def _load_gate():
-    # scripts/lint is on the gate's own import path (it does `from _baseline import ...`)
     if str(LINT_DIR) not in sys.path:
         sys.path.insert(0, str(LINT_DIR))
     spec = importlib.util.spec_from_file_location("lint_unsafe_jsonl_io", LINT_PATH)
@@ -61,7 +60,6 @@ def _flags(tmp_path: Path, src: str) -> bool:
     return bool(_load_gate()._scan(tree))
 
 
-# --- the two banned idioms, as source templates -----------------------------
 def _reader(imp: str, call: str) -> str:
     """A hand-rolled per-line JSON reader — the #446 torn-line crash shape."""
     return (
@@ -85,9 +83,6 @@ def _appender(imp: str, call: str) -> str:
     )
 
 
-# ===========================================================================
-# Characterization — the detector as it stands. Must stay green.
-# ===========================================================================
 def test_scan_and_ratchet_contract(tmp_path):
     gate = _load_gate()
     tree = tmp_path / "scope"
@@ -98,11 +93,11 @@ def test_scan_and_ratchet_contract(tmp_path):
     assert all("prod.py" in f.fingerprint for f in findings)
 
     empty = tmp_path / "empty.json"
-    assert gate.main([], scope=tree, baseline_path=empty) == 1        # a new finding
+    assert gate.main([], scope=tree, baseline_path=empty) == 1
     bp = tmp_path / "bp.json"
     _write_baseline(bp, [f.fingerprint for f in findings])
-    assert gate.main([], scope=tree, baseline_path=bp) == 0           # all baselined
-    assert gate.main([], scope=tmp_path / "nope") == 2                # scope missing
+    assert gate.main([], scope=tree, baseline_path=bp) == 0
+    assert gate.main([], scope=tmp_path / "nope") == 2
 
 
 def test_flags_the_spelled_reader(tmp_path):
@@ -168,12 +163,6 @@ def test_real_tree_clean():
     assert _load_gate().main([]) == 0
 
 
-# ===========================================================================
-# The bugs, now fixed. Each of these was an xfail(strict=True) in the parent
-# commit — the executable statement of a bug — and landing the resolver flipped
-# every one to XPASS. The deleted markers ARE the proof; these are plain
-# regression tests from here on.
-# ===========================================================================
 def test_aliased_json_reader_is_flagged(tmp_path):
     assert _flags(tmp_path, _reader("import json as j", "j.loads"))
 

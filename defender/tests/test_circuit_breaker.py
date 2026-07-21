@@ -16,16 +16,9 @@ import pytest
 
 _DEFENDER = Path(__file__).resolve().parents[1]
 
-# The workspace root is on sys.path via pytest's `pythonpath = [".."]`, so
-# `defender.*` namespace imports resolve.
 from defender.scripts.adapters import _stub_transport as transport  # noqa: E402
 from defender.runtime import circuit_breaker as cb  # noqa: E402
 
-# #611: six of the seven adapters lost their CLI — a data source is reached through the `query`
-# tool now, so those adapters are VERBS registries with no `main()`/`build_parser()`. Only
-# `ticket_adapter.py` keeps its argparse CLI (three subprocess consumers pin it), so the exit-64
-# usage-error contract is asserted against the ONE surviving CLI. It fails fast at argparse on a
-# bad invocation, before touching docker, so it runs with no environment.
 _ADAPTERS = ["ticket_adapter.py"]
 _ADAPTERS_DIR = _DEFENDER / "scripts" / "adapters"
 
@@ -35,18 +28,17 @@ def test_usage_exit_code_is_reserved():
 
 
 @pytest.mark.parametrize(("exit_code", "counts"), [
-    (0, False),    # success
-    (1, False),    # query error / not-found — agent's to reason about
-    (2, True),     # connectivity / auth / config — the down-system signal
-    (64, False),   # usage error (bad flag) — agent's CLI typo, must not trip
-    (124, True),   # adapter timeout (synthesized by record_query.capture)
+    (0, False),
+    (1, False),
+    (2, True),
+    (64, False),
+    (124, True),
 ])
 def test_is_infra_failure_keys_on_exit_code_only(exit_code, counts):
     assert cb.is_infra_failure(exit_code) is counts
 
 
 def test_argparse_heuristic_is_gone():
-    # The whole point of #301: no stderr-phrase sniffing remains.
     assert not hasattr(cb, "_ARGPARSE_USAGE_RE")
 
 
@@ -64,12 +56,10 @@ def test_adapter_usage_errors_exit_64(adapter, badargs):
 
 
 def test_usage_error_does_not_trip_breaker(tmp_path):
-    # Two usage errors in a row leave the breaker untripped (would trip at 2 if
-    # they were miscounted as infra).
     cb.record_outcome(tmp_path, "elastic", 64)
     cb.record_outcome(tmp_path, "elastic", 64)
     assert not cb.is_tripped(tmp_path, "elastic")
-    assert not (tmp_path / "circuit_breaker.json").exists()  # no-op path writes nothing
+    assert not (tmp_path / "circuit_breaker.json").exists()
 
 
 def test_two_infra_failures_trip_breaker(tmp_path):

@@ -46,7 +46,7 @@ def test_only_gather_counts_as_a_spawn(tmp_path):
 def test_warns_when_over_cap(tmp_path):
     limits = {**DEFAULT_LIMITS, "max_tool_calls": 2}
     _bump(tmp_path, "bash")
-    state = _bump(tmp_path, "bash")  # hits cap (2/2)
+    state = _bump(tmp_path, "bash")
     warnings = check_budgets(state, limits)
     assert any("Budget exceeded: tool_calls at 2/2" in w for w in warnings)
 
@@ -73,8 +73,6 @@ def test_check_budgets_survives_a_budget_missing_started_at(tmp_path):
 
 
 def test_increments_are_serialized(tmp_path):
-    # Sequential invocations all land — the flock path round-trips cleanly
-    # (a smoke check that the read-modify-write doesn't clobber).
     for _ in range(5):
         _bump(tmp_path, "bash")
     budget = json.loads((tmp_path / "budget.json").read_text())

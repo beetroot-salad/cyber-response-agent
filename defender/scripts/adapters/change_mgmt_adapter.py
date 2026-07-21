@@ -1,25 +1,8 @@
-"""Change-mgmt stub adapter — the `change-mgmt` VERBS registry.
-
-Wraps the v2 playground change-management stub. Read-only verbs only —
-the `POST /changes` and transition surfaces are chaos-mode controls,
-not investigation reads.
-
-Verbs (`VERBS` is the whole model-facing surface — there is no CLI):
-    health-check
-    active-changes  host, at
-    get-change      cr_id
-    list-changes    [status] [host] [active_at]
-
-Faults (`faults.py`): ConfigFault/TransportFault = infra (2), UpstreamFault = query
-error (1) — including a non-UTC `at`, which is the agent's mistake to fix.
-"""
 
 from __future__ import annotations
 
 import re
 
-# Put the workspace root on sys.path so `defender.*` namespace imports resolve when the
-# verb registry loads this module BY PATH (see cmdb_adapter.py).
 import sys as _sys
 from pathlib import Path as _Path
 
@@ -33,25 +16,16 @@ from defender.scripts.adapters.faults import UpstreamFault
 SYSTEM = "change-mgmt"
 PREFIX = "CHANGE_MGMT"
 STATUSES = ("planned", "approved", "in_progress", "implemented", "cancelled")
-# UTC ISO 8601 — Z suffix or explicit offset. Loose: caller-side discipline
-# is more useful than a strict parser, but reject obvious "2026-04-24" / local
-# time forms so missing-Z bugs don't reach the upstream silently.
 ISO_UTC_RE = re.compile(
     r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$"
 )
 
 
-# Same name in each stub adapter, closing over that module's SYSTEM/PREFIX: the shared
-# body already lives once in `transport.load_config`, so this is a zero-argument alias,
-# not a copy of any logic.
 def _config(ctx: VerbContext) -> dict[str, str]:  # lint-dup: ok — per-module alias over the shared transport.load_config
     return transport.load_config(ctx, SYSTEM, PREFIX)
 
 
 def _require_utc(value: str) -> str:
-    """A non-UTC timestamp is an `UpstreamFault` (a query error, exit 1) even though we
-    catch it locally: it is the AGENT's mistake, and the digest names the concrete fix —
-    which is exactly what the pitfalls curator reads."""
     if not ISO_UTC_RE.match(value):
         raise UpstreamFault(
             f"`at` must be UTC ISO 8601 (e.g. 2026-04-24T12:00:00Z), got: {value!r} — "
@@ -83,8 +57,6 @@ def list_changes(
 ) -> dict | list:
     params: dict[str, str] = {}
     if status:
-        # The CLI enforced this with argparse `choices`; a verb has no argparse, so the
-        # closed enum is checked here — and a bad value is the agent's to fix (exit 1).
         if status not in STATUSES:
             raise UpstreamFault(
                 f"unknown status {status!r} — change-mgmt statuses are {list(STATUSES)}."

@@ -1,20 +1,3 @@
-"""Runtime view sections (runtime.html).
-
-The defender-run *inspection* page. Above the fold (composed in
-``visualize_run.py``) sit the analysis + metrics cards; this module renders the
-drill-down below it:
-
-  - § Investigation — investigation.md split per ``## PHASE`` header, each with
-    its corrected cost / wall / tool-count stats (the narrative reading).
-  - § Transcript — a searchable, filterable, chronological main-agent transcript
-    built from ``llm_requests.jsonl`` (turns, tool calls + their results, gate
-    retries), with the tool-usage stats doubling as click-to-filter chips.
-  - § Leads & queries — the two-table data trail, read from
-    ``lead_repository.joined`` (NOT scraped from the lossy trace).
-
-The footer lists any concurrent lesson-author commits. A sticky phase sidebar
-(``render_runtime_toc``) navigates the chronological transcript.
-"""
 from __future__ import annotations
 
 import datetime as _dt
@@ -42,7 +25,6 @@ from defender.scripts.visualize.visualize_primitives import (
 
 
 def _short_phase(name: str | None) -> str:
-    """Compact gutter/sidebar tag: ``GATHER (loop 1)`` → ``G1``, ``ORIENT`` → ``OR``."""
     if not name:
         return ""
     verb = phase_verb(name)
@@ -53,9 +35,6 @@ def _short_phase(name: str | None) -> str:
     return f"{abbr}{m.group(1)}" if m else abbr
 
 
-# ---------------------------------------------------------------------------
-# Investigation phase blocks (the narrative reading of investigation.md)
-# ---------------------------------------------------------------------------
 
 
 def render_runtime_investigation(
@@ -64,9 +43,6 @@ def render_runtime_investigation(
     wall_times: dict[str, dict] | None = None,
     phases: list[dict] | None = None,
 ) -> tuple[str, list[dict]]:
-    # ``phases`` may be passed by a caller that already split investigation.md
-    # (the same normalize_phase_names(split_investigation_phases(run_dir))), to
-    # avoid re-reading and re-parsing the file; ``None`` computes it here.
     if phases is None:
         phases = normalize_phase_names(split_investigation_phases(run_dir))
     subtitle = "— investigation.md split by phase"
@@ -109,9 +85,6 @@ def _phase_stats_html(stats: dict, wall: dict | None = None) -> str:
     return f'<div class="phase-stats">{"".join(pieces)}</div>'
 
 
-# ---------------------------------------------------------------------------
-# Transcript: searchable, filterable, chronological (main agent)
-# ---------------------------------------------------------------------------
 
 
 def render_runtime_transcript(
@@ -119,15 +92,6 @@ def render_runtime_transcript(
     tools: list[dict],
     phases: list[dict],
 ) -> tuple[str, int, set[str]]:
-    """The § Transcript section: a filter toolbar, the tool-usage filter chips,
-    and the chronological entry stream.
-
-    Returns ``(html, n_entries, anchored_phases)`` — ``anchored_phases`` is the
-    set of phase names that actually received a ``tx-{anchor}`` target, so the
-    sidebar can route only those into the transcript and fall back to the
-    investigation block for phases the transcript never rendered (e.g. a
-    preamble, or a phase whose header-introducing turn was tagged to a later
-    phase by last-tag-wins)."""
     phase_anchor = {ph["name"]: ph["anchor"] for ph in phases}
     anchored: set[str] = set()
 
@@ -175,14 +139,6 @@ def render_runtime_transcript(
 def _render_tx_groups(
     entries: list[dict], phase_anchor: dict[str, str], anchored: set[str]
 ) -> str:
-    """Group the chronological entries into per-phase collapsible ``<details>``
-    blocks — the transcript's own expandable phase navigation, unified with the
-    sidebar's phases drop-down (both target the same ``tx-{anchor}`` group).
-
-    Groups are open by default (the stream reads as before) and run over
-    *contiguous* same-phase entries; the first group of each phase carries the
-    ``tx-{anchor}`` id + records the phase in ``anchored`` so the sidebar routes
-    to it (later groups of a recurring phase stay anchor-less, as before)."""
     groups: list[tuple[str | None, list[dict]]] = []
     for e in entries:
         ph = e.get("phase")
@@ -269,7 +225,6 @@ def _render_tx_entry(e: dict, anchor_attr: str = "") -> str:
             f'<div class="tx-body"><div class="tx-head">{head}</div>{inner}</div></div>'
         )
 
-    # retry
     content = e.get("content") or ""
     tool = e.get("tool") or ""
     head = '<span class="tx-role">⟲ gate retry</span>' + (
@@ -283,9 +238,6 @@ def _render_tx_entry(e: dict, anchor_attr: str = "") -> str:
     )
 
 
-# ---------------------------------------------------------------------------
-# Leads & queries: the two-table data trail (lead_repository.joined)
-# ---------------------------------------------------------------------------
 
 
 def render_runtime_leads_queries(run_dir: Path, leads: list | None = None) -> tuple[str, int]:
@@ -312,10 +264,6 @@ def render_runtime_leads_queries(run_dir: Path, leads: list | None = None) -> tu
             continue
         for i, q in enumerate(qs):
             params = json.dumps(q.params, ensure_ascii=False) if q.params else "—"
-            # Class off the failure TAXONOMY (error_class), not a binary exit==0 split: an
-            # exit-64 validator reject (agent-fixable — a model param slip) must render a
-            # different class from an exit-2 infra outage (#620). A legacy row with no
-            # error_class was back-filled at load; an unknown value falls back to lq-bad.
             exit_cls = {
                 None: "lq-ok", "infra": "lq-infra", "agent-fixable": "lq-agent",
             }.get(q.error_class, "lq-bad")
@@ -342,18 +290,9 @@ def render_runtime_leads_queries(run_dir: Path, leads: list | None = None) -> tu
     return (section("sec-leads", "defender", "Leads &amp; queries", subtitle, table), len(leads))
 
 
-# ---------------------------------------------------------------------------
-# Sticky sidebar: phase navigation into the transcript + section jumps
-# ---------------------------------------------------------------------------
 
 
 def _toc_dropdown(section_id: str, label: str, sublinks: str, open_: bool = True) -> str:
-    """A nav entry that doubles as a drop-down: the label jumps to the section
-    (JS suppresses the summary toggle on the link), the body lists jump-links into
-    its subsections. Falls back to a plain link when there are no subsections.
-
-    ``open_`` controls the default expand state — the long lists (leads, the
-    transcript phases) start collapsed so the sidebar stays scannable."""
     if not sublinks:
         return f'<li class="item"><a href="#{section_id}">{label}</a></li>'
     open_attr = " open" if open_ else ""
@@ -383,15 +322,9 @@ def render_runtime_toc(
     leads = leads or []
 
     def _tx_target(ph: dict) -> str:
-        # Jump into the transcript only for a phase that actually rendered a
-        # tx-anchor; otherwise fall back to its investigation block (always
-        # present), so phases the transcript skipped don't get a dead link.
         anchor = ph["anchor"]
         return f"#tx-{esc(anchor)}" if ph["name"] in tx_phases else f"#{esc(anchor)}"
 
-    # Transcript → phase groups (scroll-spy tracked); investigation → its per-phase
-    # blocks; leads & queries → each lead row. Each section's nav item is itself
-    # the expandable drop-down listing those jump-links.
     tx_links = "".join(
         _phase_nav_li(ph, _tx_target(ph), f' data-phase-link="{esc(ph["name"])}"') for ph in phases
     )
@@ -421,9 +354,6 @@ def render_runtime_toc(
 """
 
 
-# ---------------------------------------------------------------------------
-# Footer: concurrent lesson commits
-# ---------------------------------------------------------------------------
 
 
 def _lesson_changes(run_dir: Path, run_id: str) -> dict:

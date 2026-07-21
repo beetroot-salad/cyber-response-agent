@@ -1,23 +1,4 @@
 #!/usr/bin/env python3
-"""Case-history ticket mapper — the anti-corruption layer (issue #317, write path).
-
-The defender's *internal* model of a case is `report.md` (+ `alert.json`); the
-*external* model is the ticket-server's frozen v1 schema. These are two separate
-models, and this module is the **only** code that knows both: it parses the internal
-artifacts into a `CaseRecord` and maps that to/from external ticket payloads.
-
-The mapping itself — which internal facts land in which ticket fields, the label and
-resolution conventions — is **configuration, not code**: it lives in
-`knowledge/environment/systems/case-history/mapping.yaml` and is rendered here.
-Change the convention by editing that file; no code change required. Keeping the
-translation in one module + one config means the drivers, the report schema, and
-(PR 2) the learning reader never bind to ticket field names — when the store changes
-(e.g. to a hosted ticket store), only this module, the transport, and the mapping move.
-
-Pure by construction: no network, no transport import. `read_case_record` /
-`_load_mapping` do file reads only. The I/O — posting payloads, the run-dir
-receipt — lives in `ticket_writer.py`, which imports this module.
-"""
 from __future__ import annotations
 
 import contextlib
@@ -30,44 +11,23 @@ from typing import Any
 from defender._frontmatter import FrontmatterError, parse_frontmatter
 from defender._run_paths import RunPaths
 
-# Mirrors defender.learning.core.config.DISPOSITION_ENUM. Defined locally so the
-# write path carries no `defender.learning` import (the runtime/learning decoupling
-# goal of #317); test_case_ticket asserts the two stay in sync.
 DISPOSITION_ENUM = {"benign", "inconclusive", "malicious"}
 
-# The adversarial-probe outcomes (defender.learning.core.config.OUTCOME_ENUM) that
-# make a benign-disposed case a SAFE cover-story seed. Polarity is load-bearing: the
-# benign case ran the *adversarial* leg (hunt the missed attack), so `survived` means
-# the attack got through = the defender MISSED it = a poisonous seed → excluded. Only
-# a `caught` (actuals refuted the attack) or `skip-passthrough` (no coherent attack
-# to even try) marks the benign call trustworthy. `undecidable`/`incoherent` do not
-# qualify. This decision is applied once here, at write time, and stored as the
-# {seed_eligible} boolean; the reader never re-derives it. The local copy keeps the
-# write path free of a `defender.learning` import — test_case_ticket guards the subset.
 _SEED_ELIGIBLE_OUTCOMES = {"caught", "skip-passthrough"}
 
 _MAPPING_RELPATH = "knowledge/environment/systems/case-history/mapping.yaml"
 
-# Fallbacks for internal facts that are absent (not "configuration" — these are how
-# the code behaves when an artifact is thin, which the mapping templates don't cover).
 _SIGNATURE_FALLBACK = "unknown"
 _SUMMARY_FALLBACK = "(no rule description)"
 _CONFIDENCE_FALLBACK = "n/a"
 
 
 class CaseTicketError(Exception):
-    """The internal artifacts (report.md / alert.json) or the mapping config are
-    missing or malformed. Raised here; `ticket_writer` catches it and downgrades to
-    a non-fatal WARN (a crashed run with no report.md leaves the ticket open)."""
+    pass
 
 
 @dataclass(frozen=True)
 class CaseRecord:
-    """The internal model of a finished case — parsed from `report.md` + `alert.json`.
-
-    Deliberately thin (#317 scope 4): the offline loop (PR 2) enriches the stored
-    resolution with grounded predicates + the survival flag; the runtime writes
-    only what it knows at disposition time."""
 
     case_id: str
     signature_id: str
@@ -76,14 +36,9 @@ class CaseRecord:
     reason: str
 
 
-# ---------------------------------------------------------------------------
-# Mapping config (the de-facto schema) — read from a file, not hardcoded
-# ---------------------------------------------------------------------------
 
 
 def _mapping_path() -> Path:
-    """Resolve mapping.yaml. Honors $DEFENDER_DIR (mirrors `_stub_transport`), else
-    resolves relative to this file so it's found regardless of cwd."""
     base = os.environ.get("DEFENDER_DIR")
     root = Path(base) if base else Path(__file__).resolve().parents[2]
     return root / _MAPPING_RELPATH
@@ -93,9 +48,9 @@ def _load_mapping() -> dict[str, Any]:
     path = _mapping_path()
     if not path.is_file():
         raise CaseTicketError(f"case-history mapping not found: {path}")
-    import yaml  # the defender venv's one runtime dep
+    import yaml
 
-    from defender._yaml import safe_load  # lazy like yaml itself
+    from defender._yaml import safe_load
 
     try:
         data = safe_load(path.read_text(encoding="utf-8"))
@@ -107,7 +62,6 @@ def _load_mapping() -> dict[str, Any]:
 
 
 def _dig(obj: Any, dotted: str) -> Any:
-    """Follow a dotted path into a nested mapping; None if any hop is absent."""
     cur = obj
     for key in dotted.split("."):
         if not isinstance(cur, dict) or key not in cur:
@@ -117,7 +71,6 @@ def _dig(obj: Any, dotted: str) -> Any:
 
 
 def _render(value: Any, ctx: dict[str, str]) -> Any:
-    """Recursively render template strings (and lists/dicts of them) against ctx."""
     if isinstance(value, str):
         return value.format_map(ctx)
     if isinstance(value, list):
@@ -128,8 +81,6 @@ def _render(value: Any, ctx: dict[str, str]) -> Any:
 
 
 def _ctx(**kw: str) -> dict[str, str]:
-    """A template context with every placeholder present (so a template referencing
-    a field this call doesn't set renders empty rather than raising KeyError)."""
     base = {k: "" for k in ("case_id", "signature", "summary", "disposition",
                             "reason", "confidence", "outcome", "seed_eligible",
                             "event_time")}
@@ -137,14 +88,9 @@ def _ctx(**kw: str) -> dict[str, str]:
     return base
 
 
-# ---------------------------------------------------------------------------
-# Internal model: report.md (+ alert.json) -> CaseRecord
-# ---------------------------------------------------------------------------
 
 
 def _parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
-    """Return (frontmatter mapping, body), converting the shared parser's
-    FrontmatterError to this layer's CaseTicketError."""
     try:
         return parse_frontmatter(text)
     except FrontmatterError as e:
@@ -154,32 +100,20 @@ def _parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
 def _signature_id(alert: dict[str, Any], mapping: dict[str, Any]) -> str:
     path = _dig(mapping, "source.signature") or "rule.id"
     val = _dig(alert, str(path))
-    # A present-but-empty value (e.g. rule.id == "") is as useless as a missing
-    # one, so fall back on any falsy value, not just None.
     return str(val) if val else _SIGNATURE_FALLBACK
 
 
 def _event_time(alert: dict[str, Any], mapping: dict[str, Any]) -> str:
-    """The SIEM event time from the alert (ISO-8601), or "" if absent. Unlike the
-    signature there is no sentinel fallback: a case with no event time simply can't
-    be windowed, so the reader drops it from the seed pool rather than mis-dating it."""
     path = _dig(mapping, "source.event_time") or "timestamp"
     val = _dig(alert, str(path))
     return str(val) if val else ""
 
 
 def alert_event_time(alert: dict[str, Any]) -> str | None:
-    """The alert's SIEM event time (ISO-8601), or None if absent. The seed sampler
-    anchors its recency window on this — the time the activity happened — so a
-    replayed alert windows against its own date, not wall-clock now."""
     return _event_time(alert, _load_mapping()) or None
 
 
 def read_case_record(run_dir: Path) -> CaseRecord:
-    """Parse the run dir's `report.md` + `alert.json` into a `CaseRecord`.
-
-    Raises `CaseTicketError` if `report.md` is absent/malformed or the disposition
-    is out of enum — the caller (ticket_writer) treats that as "leave it open"."""
     report = RunPaths(run_dir).report
     if not report.is_file():
         raise CaseTicketError(f"report.md not found: {report}")
@@ -190,12 +124,6 @@ def read_case_record(run_dir: Path) -> CaseRecord:
         raise CaseTicketError(
             f"report.md disposition={disposition!r} not in {sorted(DISPOSITION_ENUM)}"
         )
-    # The ticket key is the run-dir basename — the identity open_case_ticket
-    # keyed the create under. open runs at materialize (before report.md
-    # exists), so run_dir.name is the only id it has; close MUST target that
-    # same key. Derive it from the run dir, not the LLM-authored `case_id:`
-    # frontmatter: a divergent value there would transition a key that was
-    # never created (404 → the opened ticket is silently left open forever).
     case_id = run_dir.name
     confidence = str(fm.get("confidence") or "")
 
@@ -203,8 +131,6 @@ def read_case_record(run_dir: Path) -> CaseRecord:
     signature_id = _SIGNATURE_FALLBACK
     alert_path = RunPaths(run_dir).alert
     if alert_path.is_file():
-        # signature stays fallback on a malformed/unreadable alert; non-fatal,
-        # the disposition still records
         with contextlib.suppress(json.JSONDecodeError, OSError):
             signature_id = _signature_id(json.loads(alert_path.read_text(encoding="utf-8")), mapping)
 
@@ -217,40 +143,26 @@ def read_case_record(run_dir: Path) -> CaseRecord:
     )
 
 
-# ---------------------------------------------------------------------------
-# Mapper: internal <-> external ticket payloads (rendered from mapping.yaml)
-# ---------------------------------------------------------------------------
 
 
 def alert_to_open_payload(alert: dict[str, Any], case_id: str) -> dict[str, Any]:
-    """Build the `POST /tickets` body for the bridge create (an OPEN ticket).
-
-    Shape and conventions come from `mapping.yaml` (`open` section + `source.*`)."""
     mapping = _load_mapping()
     signature = _signature_id(alert, mapping)
     summary = _dig(alert, str(_dig(mapping, "source.summary") or "rule.description"))
     ctx = _ctx(
         case_id=case_id,
         signature=signature,
-        # Fall back on a present-but-empty description too, so the open ticket
-        # never ends up with a blank summary.
         summary=str(summary) if summary else _SUMMARY_FALLBACK,
         event_time=_event_time(alert, mapping),
     )
     payload = _render(mapping.get("open") or {}, ctx)
     if isinstance(payload.get("labels"), list):
-        # Drop any convention label whose placeholder rendered empty (e.g. `evt:`
-        # when the alert carries no event time) so no value-less label hits the
-        # store; `sig:` always has a fallback, so only optional stamps are affected.
         bare = {p for p in _open_label_prefixes(mapping) if p}
         payload["labels"] = [lbl for lbl in payload["labels"] if lbl not in bare]
     return payload
 
 
 def _open_label_prefixes(mapping: dict[str, Any]) -> list[str]:
-    """The literal prefix (text before the first ``{``) of every templated
-    `open.labels` entry — used to recognize a label whose placeholder rendered empty
-    (a bare prefix), so the write side can drop it."""
     out = []
     for tmpl in _dig(mapping, "open.labels") or []:
         if isinstance(tmpl, str):
@@ -261,10 +173,6 @@ def _open_label_prefixes(mapping: dict[str, Any]) -> list[str]:
 
 
 def _open_label_prefix(mapping: dict[str, Any], placeholder: str) -> str | None:
-    """The pure-literal prefix of the `open.labels` entry carrying ``{placeholder}``
-    (e.g. ``sig:`` for ``signature``) — the single source of the marker both the
-    write side renders and a reader matches on. None if no such label, or its prefix
-    is not a pure literal (then it can't identify a label unambiguously)."""
     ph = "{" + placeholder + "}"
     for tmpl in _dig(mapping, "open.labels") or []:
         if not isinstance(tmpl, str):
@@ -273,20 +181,13 @@ def _open_label_prefix(mapping: dict[str, Any], placeholder: str) -> str | None:
         if i == -1:
             continue
         prefix = tmpl[:i]
-        if "{" in prefix:  # the prefix must be a pure literal to be a marker
+        if "{" in prefix:
             return None
         return prefix or None
     return None
 
 
 def signature_label(alert: dict[str, Any]) -> str | None:
-    """The ticket label that identifies this alert's signature (e.g. ``sig:5710``),
-    rendered from ``mapping.open.labels`` — the SAME label the bridge create stamps,
-    so a reader (the seed sampler) can filter the store to this signature without
-    knowing the label convention. None if no signature label is configured.
-
-    Matched by its ``sig:`` prefix, not by position, so adding other labels (the
-    ``evt:`` event-time stamp) can't shift which one this returns."""
     mapping = _load_mapping()
     signature = _signature_id(alert, mapping)
     labels = _render(_dig(mapping, "open.labels") or [], _ctx(signature=signature))
@@ -299,9 +200,6 @@ def signature_label(alert: dict[str, Any]) -> str | None:
 
 
 def case_record_to_close(rec: CaseRecord) -> dict[str, Any]:
-    """Build the `POST /tickets/{key}/transitions` body for the close.
-
-    Shape and conventions come from `mapping.yaml` (`close` section)."""
     mapping = _load_mapping()
     ctx = _ctx(
         case_id=rec.case_id,
@@ -314,14 +212,12 @@ def case_record_to_close(rec: CaseRecord) -> dict[str, Any]:
 
 
 def _disposition_separator(mapping: dict[str, Any]) -> str | None:
-    """The literal text that follows {disposition} in the `close.resolution` template
-    — the single source for both encoding (above) and decoding (below)."""
     tmpl = _dig(mapping, "close.resolution")
     if not isinstance(tmpl, str):
         return None
     marker = "{disposition}"
     i = tmpl.find(marker)
-    if i != 0:  # disposition must lead for the decode to be unambiguous
+    if i != 0:
         return None
     rest = tmpl[len(marker):]
     nxt = rest.find("{")
@@ -330,10 +226,6 @@ def _disposition_separator(mapping: dict[str, Any]) -> str | None:
 
 
 def parse_disposition_from_resolution(resolution: str | None) -> str | None:
-    """Inverse of the disposition encoding in `case_record_to_close`.
-
-    Returns the disposition token, or None if the resolution wasn't written by us
-    (e.g. a human-edited close). Seeds PR 2's reader; the round-trip is tested."""
     if not resolution:
         return None
     try:
@@ -346,27 +238,13 @@ def parse_disposition_from_resolution(resolution: str | None) -> str | None:
     return head if head in DISPOSITION_ENUM else None
 
 
-# ---------------------------------------------------------------------------
-# Offline enrichment: adversarial-probe verdict -> seed-eligibility comment
-# ---------------------------------------------------------------------------
 
 
 def outcome_seeds_eligible(outcome: str) -> bool:
-    """Whether an adversarial-probe `outcome` makes the closed case a covering-policy
-    seed — the single source of the polarity `enrichment_to_comment` stamps. The
-    resolution-method enrichment (#338) gates on this too, so the store never carries a
-    grounded covering policy on a case the probe did not confirm benign (e.g. a
-    `survived` flagged-FN case)."""
     return outcome in _SEED_ELIGIBLE_OUTCOMES
 
 
 def enrichment_to_comment(outcome: str) -> dict[str, Any]:
-    """Build the `POST /tickets/{key}/comments` body stamping seed-eligibility.
-
-    `outcome` is the adversarial-probe verdict (an `OUTCOME_ENUM` token). The
-    polarity decision rides `_SEED_ELIGIBLE_OUTCOMES` and is rendered into the
-    {seed_eligible} boolean here, so the reader (`parse_survival_from_comments`)
-    never re-derives it. Shape + conventions come from `mapping.yaml` (`annotate`)."""
     mapping = _load_mapping()
     eligible = outcome_seeds_eligible(outcome)
     ctx = _ctx(outcome=outcome, seed_eligible="true" if eligible else "false")
@@ -374,9 +252,6 @@ def enrichment_to_comment(outcome: str) -> dict[str, Any]:
 
 
 def _seed_marker_and_separator(mapping: dict[str, Any]) -> tuple[str | None, str | None]:
-    """The pure-literal prefix before {seed_eligible} in `annotate.body` (the
-    comment-identity marker) and the literal that follows it (the value separator)
-    — the single source for both encoding (above) and decoding (below)."""
     tmpl = _dig(mapping, "annotate.body")
     if not isinstance(tmpl, str):
         return None, None
@@ -385,7 +260,7 @@ def _seed_marker_and_separator(mapping: dict[str, Any]) -> tuple[str | None, str
     if i == -1:
         return None, None
     marker = tmpl[:i]
-    if "{" in marker:  # the marker must be a pure literal to identify our comment
+    if "{" in marker:
         return None, None
     rest = tmpl[i + len(ph):]
     nxt = rest.find("{")
@@ -394,13 +269,6 @@ def _seed_marker_and_separator(mapping: dict[str, Any]) -> tuple[str | None, str
 
 
 def parse_survival_from_comments(comments: Any) -> bool | None:
-    """Tri-state read of the seed-eligibility flag from a ticket's `comments`.
-
-    Returns True (a covering benign case — safe seed), False (probed, not eligible),
-    or None (no enrichment comment yet — the runtime close-comment is NOT mistaken
-    for one, since only the `annotate.body` marker matches). The latest matching
-    comment wins, so a re-stamp is read consistently. Inverse of
-    `enrichment_to_comment`; the round-trip is tested."""
     try:
         marker, sep = _seed_marker_and_separator(_load_mapping())
     except CaseTicketError:
@@ -421,16 +289,9 @@ def parse_survival_from_comments(comments: Any) -> bool | None:
     return result
 
 
-# ---------------------------------------------------------------------------
-# Offline enrichment: resolution-method grounded predicates (issue #338)
-# ---------------------------------------------------------------------------
 
 
 def _resolution_method_marker(mapping: dict[str, Any]) -> tuple[str | None, str | None]:
-    """The pure-literal prefix before {resolution_method} in
-    `enrich.resolution_method_suffix` (the grounded-segment marker) and the literal
-    that closes it (the segment terminator) — the single source for both the append
-    (encode) and the decode below. Mirrors `_seed_marker_and_separator`."""
     tmpl = _dig(mapping, "enrich.resolution_method_suffix")
     if not isinstance(tmpl, str):
         return None, None
@@ -439,7 +300,7 @@ def _resolution_method_marker(mapping: dict[str, Any]) -> tuple[str | None, str 
     if i == -1:
         return None, None
     marker = tmpl[:i]
-    if "{" in marker:  # the marker must be a pure literal to identify the segment
+    if "{" in marker:
         return None, None
     rest = tmpl[i + len(ph):]
     nxt = rest.find("{")
@@ -448,34 +309,19 @@ def _resolution_method_marker(mapping: dict[str, Any]) -> tuple[str | None, str 
 
 
 def append_resolution_method(resolution: str, method: str) -> str:
-    """Append the grounded resolution-method segment to a close `resolution`, rendered
-    from `mapping.enrich.resolution_method_suffix`. Idempotent: returns the resolution
-    unchanged if it already carries a grounded segment (so a re-drained learn never
-    double-stamps) or if no suffix template / method is configured. The leading
-    `{disposition} — {reason}` form is preserved, so the disposition/reason decoders
-    are unaffected."""
     if not resolution or not method or not method.strip():
         return resolution
     try:
         marker, sep = _resolution_method_marker(_load_mapping())
     except CaseTicketError:
-        return resolution  # no usable mapping ⇒ nothing to stamp (mirrors the decoders)
-    # Idempotent on whether a real grounded SUFFIX is already present (decode-based),
-    # not on a bare `marker in resolution` — an incidental marker in the free-text
-    # reason must not block stamping the real method.
+        return resolution
     if not marker or resolution_method_from_resolution(resolution) is not None:
         return resolution
-    # Collapse internal whitespace so the segment stays one clause (the judge reads it
-    # inline; an embedded newline would split the resolution mid-decode).
     method = " ".join(method.split())
-    # The suffix is exactly the rendered template (marker + {resolution_method} + sep),
-    # so build it from the parts already decoded rather than re-_dig/_render the template.
     return f"{resolution}{marker}{method}{sep or ''}"
 
 
 def resolution_method_from_resolution(resolution: str | None) -> str | None:
-    """The grounded resolution-method segment decoded from a close `resolution`, or
-    None if absent / not written by us. Inverse of `append_resolution_method`."""
     if not resolution:
         return None
     try:
@@ -484,23 +330,13 @@ def resolution_method_from_resolution(resolution: str | None) -> str | None:
         return None
     if not marker or marker not in resolution:
         return None
-    # Our segment is always the appended SUFFIX (`marker + method + sep`), so it must
-    # be the trailing run ending in `sep`. A free-text reason that merely *contains*
-    # the marker but has no trailing terminator is incidental text, not our segment.
     if sep and not resolution.endswith(sep):
         return None
-    # Anchor on the LAST marker — a free-text reason that itself contains the marker
-    # must not shadow our segment.
     tail = resolution.rsplit(marker, 1)[1]
     seg = tail.rsplit(sep, 1)[0] if sep and sep in tail else tail
     return seg.strip() or None
 
 
-# ---------------------------------------------------------------------------
-# Thin external-ticket accessors — so learning-side readers (the seed sampler)
-# call these instead of indexing raw ticket dicts (the anti-corruption boundary:
-# ticket field names stay known only here).
-# ---------------------------------------------------------------------------
 
 
 def ticket_key(ticket: Any) -> str | None:
@@ -508,16 +344,10 @@ def ticket_key(ticket: Any) -> str | None:
 
 
 def ticket_created(ticket: Any) -> str | None:
-    """The ISO-8601 ticket-creation timestamp, set server-side at the bridge open.
-    This is *materialize* time (when we investigated), which drifts from the alert
-    event time under replay — window on `ticket_event_time`, not this."""
     return ticket.get("created") if isinstance(ticket, dict) else None
 
 
 def ticket_event_time(ticket: Any) -> str | None:
-    """The alert's SIEM event time (ISO-8601), read back from the `evt:` label the
-    bridge open stamped — the time the activity happened, the key the seed sampler
-    windows on. None if absent (no label / no event time at open)."""
     if not isinstance(ticket, dict):
         return None
     labels = ticket.get("labels")
@@ -536,18 +366,12 @@ def ticket_event_time(ticket: Any) -> str | None:
 
 
 def ticket_disposition(ticket: Any) -> str | None:
-    """The disposition decoded from the close `resolution` (None if not ours)."""
     if not isinstance(ticket, dict):
         return None
     return parse_disposition_from_resolution(ticket.get("resolution"))
 
 
 def ticket_reason(ticket: Any) -> str | None:
-    """The free-text reason from the close `resolution` (the text after the
-    disposition separator), or None if the resolution wasn't written by us. Any
-    appended grounded resolution-method segment (#338) is stripped, so the reason
-    stays the analyst's clean justification — the grounded conditions are read via
-    `ticket_resolution_method`, not folded into the seed-menu reason line."""
     if not isinstance(ticket, dict):
         return None
     resolution = ticket.get("resolution")
@@ -562,25 +386,18 @@ def ticket_reason(ticket: Any) -> str | None:
         return None
     tail = resolution.split(sep, 1)[1]
     marker, msep = _resolution_method_marker(mapping)
-    # Strip only our appended suffix: the LAST marker, and only when the resolution
-    # actually ends with the segment terminator. A free-text reason that merely
-    # contains the marker (no trailing terminator) is kept verbatim.
     if marker and marker in tail and (not msep or resolution.endswith(msep)):
         tail = tail.rsplit(marker, 1)[0]
     return tail.strip() or None
 
 
 def ticket_resolution_method(ticket: Any) -> str | None:
-    """The grounded resolution-method segment decoded from the close `resolution`
-    (None if absent / not ours) — the policy *conditions* (grounded predicates +
-    policy/authority) the benign judge confirms a cited case against (#338)."""
     if not isinstance(ticket, dict):
         return None
     return resolution_method_from_resolution(ticket.get("resolution"))
 
 
 def ticket_seed_eligible(ticket: Any) -> bool | None:
-    """The seed-eligibility flag decoded from the ticket's enrichment comment."""
     if not isinstance(ticket, dict):
         return None
     return parse_survival_from_comments(ticket.get("comments"))

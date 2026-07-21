@@ -57,9 +57,6 @@ class FakeSubagents:
 
     def judge(self, wiring, run_dir, actor_story_path, projected_telemetry_path,
               learning_run_dir):
-        # One seam method for both directions; the wiring tells them apart.
-        # Compare identity against the real spec, not a magic dirname string, so the
-        # fake can't silently misroute if BENIGN_WIRING's fields are renamed.
         benign = wiring is loop.BENIGN_WIRING
         self._bump("judge_benign" if benign else "judge")
         return self._judge_benign if benign else self._judge
@@ -85,8 +82,6 @@ def _complete_run_dir(tmp_path: Path, disposition: str) -> Path:
         f"---\ncase_id: case\ndisposition: {disposition}\nconfidence: high\n---\nbody\n"
     )
     (run_dir / "investigation.md").write_text("stub\n")
-    # Empty lead/query tables — a no-query run (joined() -> []), which the
-    # stubbed oracle's empty projections match.
     (run_dir / "gather_raw").mkdir()
     (run_dir / "executed_queries.jsonl").write_text("")
     return run_dir
@@ -106,7 +101,7 @@ def test_held_out_fixture_recognised_without_any_label_file(tmp_path: Path) -> N
     fake_set = tmp_path / "held-out"
     (fake_set / "m01").mkdir(parents=True)
     alert = fake_set / "m01" / "alert.json"
-    alert.write_text("{}")  # no ground_truth.yaml beside it
+    alert.write_text("{}")
     assert run_common.is_held_out_fixture(alert, fake_set) is True
 
 
@@ -151,9 +146,8 @@ def test_malicious_dispatches_benign_not_adversarial(tmp_path: Path, monkeypatch
     """Disposition routing: ``malicious`` runs the benign (FP) actor, never the
     adversarial one; the run is enqueued for authoring regardless of disposition
     (lead-author itself now fires later, in the serial author_drain)."""
-    monkeypatch.setenv("FIREWORKS_API_KEY", "test-not-used")  # FakeSubagents: satisfy up-front key-sourcing
+    monkeypatch.setenv("FIREWORKS_API_KEY", "test-not-used")
     run_dir = _complete_run_dir(tmp_path, "malicious")
-    # Benign actor SKIPs → direction short-circuits after persist, no oracle/judge.
     agents = FakeSubagents(story_benign="SKIP: not ours\n")
     paths = loop.LoopPaths(repo_root=tmp_path)
 
@@ -170,9 +164,8 @@ def test_run_one_enqueues_for_authoring_even_when_a_leg_fails(tmp_path: Path, mo
     author-drainer — lead-author (catalog refinement) is leg-independent — and
     then fail loud. Enqueue happens before the re-raise, so the run isn't
     stranded with no author-work marker."""
-    monkeypatch.setenv("FIREWORKS_API_KEY", "test-not-used")  # FakeSubagents: satisfy up-front key-sourcing
+    monkeypatch.setenv("FIREWORKS_API_KEY", "test-not-used")
     run_dir = _complete_run_dir(tmp_path, "benign")
-    # Malformed judge YAML → the adversarial leg raises RunUnprocessable.
     agents = FakeSubagents(judge="outcome: [unterminated\n")
     paths = loop.LoopPaths(repo_root=tmp_path)
 
@@ -195,7 +188,6 @@ def test_direct_learn_refuses_a_held_out_run_dir(tmp_path: Path) -> None:
     (run_dir / "alert.json").write_bytes(fixture_alert.read_bytes())
     paths = loop.LoopPaths(repo_root=tmp_path)
 
-    # No agents needed: the refusal must fire before any actor/oracle/judge work.
     rc = loop.run_one(run_dir, paths=paths, agents=FakeSubagents(judge="outcome: caught\n"))
     assert rc == 0
     assert not paths.pending_file.exists(), "a held-out run must append nothing"

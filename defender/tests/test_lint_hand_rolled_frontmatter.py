@@ -30,18 +30,16 @@ LINT_PATH = LINT_DIR / "lint_hand_rolled_frontmatter.py"
 
 
 def _load_gate():
-    # scripts/lint is on the gate's own import path (it does `from _baseline import ...`)
     if str(LINT_DIR) not in sys.path:
         sys.path.insert(0, str(LINT_DIR))
     spec = importlib.util.spec_from_file_location("lint_hand_rolled_frontmatter", LINT_PATH)
     assert spec is not None
     assert spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)   # RED until the gate lands: FileNotFoundError (missing module)
+    spec.loader.exec_module(mod)
     return mod
 
 
-# --- detector-kind idioms (one function each so they never dedup together) ---
 _FIND = 'def f_find(t):\n    return t.find("\\n---", 4)\n'
 _SPLIT = 'def f_split(t):\n    return t.split("---", 2)\n'
 _STARTS = 'def f_starts(t):\n    return t.startswith("---")\n'
@@ -71,15 +69,12 @@ def _write_baseline(path: Path, fingerprints: list[str]) -> None:
     )
 
 
-# ===========================================================================
-# demand: d0_lint_gate  — the top-level scan + ratchet contract
-# ===========================================================================
 def test_d0_lint_gate(tmp_path):
     gate = _load_gate()
     tree = tmp_path / "scope"
     _pyfile(tree, "prod.py", _FIND)
-    _pyfile(tree, "test_prod.py", _FIND)          # test module: excluded
-    _pyfile(tree, "_frontmatter.py", _FIND)       # canonical module: exempt by name
+    _pyfile(tree, "test_prod.py", _FIND)
+    _pyfile(tree, "_frontmatter.py", _FIND)
 
     findings = gate._scan(tree)
     assert findings, "the production idiom must be flagged"
@@ -88,16 +83,13 @@ def test_d0_lint_gate(tmp_path):
     assert not any("_frontmatter" in f.fingerprint for f in findings)
 
     empty_baseline = tmp_path / "empty.json"
-    assert gate.main([], scope=tree, baseline_path=empty_baseline) == 1   # a new finding
+    assert gate.main([], scope=tree, baseline_path=empty_baseline) == 1
     bp = tmp_path / "bp.json"
     _write_baseline(bp, [f.fingerprint for f in findings])
-    assert gate.main([], scope=tree, baseline_path=bp) == 0               # all baselined
-    assert gate.main([], scope=tmp_path / "does-not-exist") == 2          # scope missing
+    assert gate.main([], scope=tree, baseline_path=bp) == 0
+    assert gate.main([], scope=tmp_path / "does-not-exist") == 2
 
 
-# ===========================================================================
-# demand: d_lint_flags_each_idiom  — POSITIVE CONTROL for the negatives
-# ===========================================================================
 def test_d_lint_flags_each_idiom(tmp_path):
     gate = _load_gate()
     tree = tmp_path / "scope"
@@ -111,9 +103,6 @@ def test_d_lint_flags_each_idiom(tmp_path):
     assert gate.main([], scope=tree, baseline_path=tmp_path / "empty.json") == 1
 
 
-# ===========================================================================
-# demand: d_lint_writer_fstrings_clean  — NEGATIVE + paired positive control
-# ===========================================================================
 def test_d_lint_writer_fstrings_clean(tmp_path):
     gate = _load_gate()
     tree = tmp_path / "scope"
@@ -129,49 +118,35 @@ def test_d_lint_writer_fstrings_clean(tmp_path):
     _pyfile(tree, "writer.py", clean)
     assert gate._scan(tree) == [], "writers/constants/in-checks must not be flagged"
 
-    # paired positive control on the same scanned tree: a real idiom IS flagged
     _pyfile(tree, "reader.py", _FIND)
     findings = gate._scan(tree)
     assert findings
     assert all("reader.py" in f.fingerprint for f in findings)
 
 
-# ===========================================================================
-# demand: d_lint_tests_excluded
-# ===========================================================================
 def test_d_lint_tests_excluded(tmp_path):
     gate = _load_gate()
     tree = tmp_path / "scope"
-    _pyfile(tree, "test_reader.py", _FIND)      # excluded by _is_test_module
+    _pyfile(tree, "test_reader.py", _FIND)
     assert gate._scan(tree) == []
-    # control: the same idiom in a production module IS flagged
     _pyfile(tree, "reader.py", _FIND)
     assert any("reader.py" in f.fingerprint for f in gate._scan(tree))
 
 
-# ===========================================================================
-# demand: d_lint_canonical_exempt
-# ===========================================================================
 def test_d_lint_canonical_exempt(tmp_path):
     gate = _load_gate()
     tree = tmp_path / "scope"
-    _pyfile(tree, "_frontmatter.py", _FIND)     # the canonical module: exempt by name
+    _pyfile(tree, "_frontmatter.py", _FIND)
     assert gate._scan(tree) == []
-    # control: identical fence arithmetic in a different module IS flagged
     _pyfile(tree, "other.py", _FIND)
     assert any("other.py" in f.fingerprint for f in gate._scan(tree))
 
 
-# ===========================================================================
-# demand: d_lint_suppression
-# ===========================================================================
 def test_d_lint_suppression(tmp_path):
     gate = _load_gate()
-    # on-span (same line as the call) suppresses
     on = tmp_path / "on"
     _pyfile(on, "s.py", 'def f(t):\n    return t.find("\\n---", 4)  # lint-frontmatter: ok — canonical-ish\n')
     assert gate._scan(on) == []
-    # off-span (marker not within the node's [lineno..end_lineno]) does NOT suppress
     off = tmp_path / "off"
     _pyfile(off, "s.py",
             "# lint-frontmatter: ok — far above\n"
@@ -180,78 +155,47 @@ def test_d_lint_suppression(tmp_path):
             "    y = 2\n"
             '    return t.find("\\n---", 4)\n')
     assert gate._scan(off), "a marker outside the node span must not suppress"
-    # a bare marker (no reason text) also suppresses (house substring rule)
     bare = tmp_path / "bare"
     _pyfile(bare, "s.py", 'def f(t):\n    return t.find("\\n---", 4)  # lint-frontmatter: ok\n')
     assert gate._scan(bare) == []
 
 
-# ===========================================================================
-# demand: d_lint_real_tree_clean  — SURVIVAL over the real post-fold tree
-# ===========================================================================
 def test_d_lint_real_tree_clean():
-    # main() with defaults scans the REAL defender/ tree against the shipped EMPTY
-    # baseline and exits 0. RED against HEAD: the five hand-rolled sites are still
-    # present (and the module does not yet exist).
     gate = _load_gate()
     assert gate.main([]) == 0
 
 
-# ===========================================================================
-# demand: d_lint_baseline_lifecycle
-# ===========================================================================
 def test_d_lint_baseline_lifecycle(tmp_path):
     gate = _load_gate()
     tree = tmp_path / "scope"
     _pyfile(tree, "prod.py", _FIND)
     bp = tmp_path / "bp.json"
 
-    # --update-baseline merges current fingerprints and exits 0
     assert gate.main(["--update-baseline"], scope=tree, baseline_path=bp) == 0
     assert bp.exists()
-    # a subsequent plain run exits 0 (the finding is now baselined)
     assert gate.main([], scope=tree, baseline_path=bp) == 0
-    # a stale baseline entry (a fixed finding) keeps plain runs at 0
     data = json.loads(bp.read_text(encoding="utf-8"))
     data.setdefault("entries", {})["defender/ghost.py:ghost:find"] = ""
     bp.write_text(json.dumps(data) + "\n", encoding="utf-8")
     assert gate.main([], scope=tree, baseline_path=bp) == 0
-    # a MISSING baseline file behaves as empty -> the current finding is new -> 1
     assert gate.main([], scope=tree, baseline_path=tmp_path / "gone.json") == 1
 
 
-# ===========================================================================
-# demand: d_lint_exit2_scope_missing
-# ===========================================================================
 def test_d_lint_exit2_scope_missing(tmp_path):
     gate = _load_gate()
     assert gate.main([], scope=tmp_path / "not-a-dir") == 2
 
 
-# ===========================================================================
-# demand: d_lint_syntax_error_is_not_clean   (was: d_lint_syntax_error_skipped)
-#
-# INVERTED by #652. The original demand pinned the swallow: a file the gate could not
-# parse was dropped from the corpus and the scan carried on, so `main()` printed
-# "0 finding(s)" and exited 0 over source it never read. That is the #618/#621 class —
-# a gate that cannot look must not report clean — and this test was the executable
-# statement of the bug, which is why the fix could not land without rewriting it.
-#
-# The robustness intent underneath it survives and is still pinned below: one broken
-# file must not produce a traceback or a partial, silently-truncated report. What
-# changes is the answer it produces — ScanBlind, surfaced by main() as exit 2, instead
-# of a quiet skip.
-# ===========================================================================
 def test_d_lint_syntax_error_is_not_clean(tmp_path):
     import _astlib
 
     gate = _load_gate()
     tree = tmp_path / "scope"
-    _pyfile(tree, "broken.py", "def f(:\n    this is not python\n")   # syntax error
+    _pyfile(tree, "broken.py", "def f(:\n    this is not python\n")
     _pyfile(tree, "ok.py", _FIND)
     with pytest.raises(_astlib.ScanBlind) as exc:
         gate._scan(tree)
-    assert "broken.py" in str(exc.value)   # the operator must learn WHICH file went unread
+    assert "broken.py" in str(exc.value)
 
 
 def test_d_lint_clean_tree_still_scans(tmp_path):
@@ -264,21 +208,18 @@ def test_d_lint_clean_tree_still_scans(tmp_path):
     assert any("ok.py" in f.fingerprint for f in gate._scan(tree))
 
 
-# ===========================================================================
-# demand: d_lint_fingerprint_dedup
-# ===========================================================================
 def test_d_lint_fingerprint_dedup(tmp_path):
     gate = _load_gate()
     tree = tmp_path / "scope"
     src = (
         "def same(t):\n"
         '    a = t.find("\\n---", 4)\n'
-        '    b = t.find("\\n---", 8)\n'      # SAME kind, same function -> dedup to 1
+        '    b = t.find("\\n---", 8)\n'
         "    return a, b\n"
         "\n"
         "def two(t):\n"
-        '    a = t.find("\\n---", 4)\n'      # kind: find
-        '    b = t.split("---", 2)\n'        # kind: split -> two findings in one function
+        '    a = t.find("\\n---", 4)\n'
+        '    b = t.split("---", 2)\n'
         "    return a, b\n"
     )
     _pyfile(tree, "dedup.py", src)
@@ -287,11 +228,6 @@ def test_d_lint_fingerprint_dedup(tmp_path):
     assert len(by_func.get("two", [])) == 2
 
 
-# ===========================================================================
-# #602 — the regex detector keys on the SPELLED name `re.`, so an aliased or
-# bare-name import walks straight through it. Each xfail is the executable
-# statement of that bug; deleting the marker is the proof of the fix.
-# ===========================================================================
 def test_aliased_re_import_is_flagged(tmp_path):
     gate = _load_gate()
     tree = tmp_path / "scope"

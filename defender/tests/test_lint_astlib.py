@@ -30,8 +30,6 @@ def _load():
     assert spec is not None
     assert spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
-    # Register BEFORE exec: @dataclass resolves its class's module out of sys.modules,
-    # and module_from_spec does not put it there.
     sys.modules[spec.name] = mod
     spec.loader.exec_module(mod)
     return mod
@@ -46,7 +44,6 @@ def _first_call(src: str):
     return call, env, astlib
 
 
-# --- callee(): every spelling of the same origin -----------------------------
 @pytest.mark.parametrize(
     ("src", "expected"),
     [
@@ -60,10 +57,8 @@ def _first_call(src: str):
         ("import subprocess\nsubprocess.run(c)\n", "subprocess.run"),
         ("import subprocess as sp\nsp.run(c)\n", "subprocess.run"),
         ("from subprocess import run\nrun(c)\n", "subprocess.run"),
-        # `import a.b` binds only `a`
         ("import os.path\nos.path.join(a, b)\n", "os.path.join"),
         ("import os.path as osp\nosp.join(a, b)\n", "os.path.join"),
-        # the builtin, when nothing shadows it
         ("open(p)\n", "builtins.open"),
     ],
 )
@@ -72,14 +67,13 @@ def test_callee_resolves_every_spelling(src, expected):
     assert astlib.callee(call, env) == expected
 
 
-# --- callee(): None is a signal, not a failure -------------------------------
 @pytest.mark.parametrize(
     "src",
     [
-        "def f(p):\n    return p.open('r')\n",        # Path-like: receiver is a value
+        "def f(p):\n    return p.open('r')\n",
         "def f(p):\n    return p.read_text()\n",
-        "def f(zf, n):\n    return zf.open(n)\n",     # a bound handle — same shape
-        "def f(self):\n    return self.run(c)\n",     # a method on a local wrapper
+        "def f(zf, n):\n    return zf.open(n)\n",
+        "def f(self):\n    return self.run(c)\n",
     ],
 )
 def test_callee_is_none_for_a_value_receiver(src):
@@ -128,7 +122,6 @@ def test_function_local_import_is_seen():
     assert astlib.callee(call, env) == "re.search"
 
 
-# --- scoping (#607): a binding reaches exactly as far as Python says it does ---------
 def test_a_function_local_import_does_not_leak_into_a_sibling_function():
     """The other half of #607. Collecting a local import must not BIND it module-wide —
     in a sibling function that name is whatever that function makes it."""
@@ -139,7 +132,7 @@ def test_a_function_local_import_does_not_leak_into_a_sibling_function():
         "    return j.loads('{}')\n"
         "\n"
         "def b(j):\n"
-        "    return j.loads('{}')\n"          # `j` is a PARAMETER here — not the module
+        "    return j.loads('{}')\n"
     )
     env = astlib.module_env(tree)
     calls = [
@@ -173,8 +166,8 @@ def test_a_module_import_still_reaches_into_every_function():
     tree = ast.parse(
         "import json\n"
         "class C:\n"
-        "    def m(self, line):\n"                 # a method: class body is NOT in the chain
-        "        def inner(s):\n"                  # and a nested closure
+        "    def m(self, line):\n"
+        "        def inner(s):\n"
         "            return json.loads(s)\n"
         "        return inner(line)\n"
     )
@@ -204,15 +197,14 @@ def test_a_local_const_rebind_does_not_carry_the_module_value():
     assert astlib.str_args(calls[1], env) == []
 
 
-# --- args ---------------------------------------------------------------------
 def test_str_args_reads_positional_keyword_tuple_and_consts():
     astlib = _load()
     tree = ast.parse(
         'FENCE = "---\\n"\n'
         "def f(t):\n"
-        "    a = t.startswith(FENCE)\n"                 # module const
-        '    b = t.startswith(("---", "+++"))\n'        # tuple, flattened
-        '    c = t.split(sep="---")\n'                  # keyword
+        "    a = t.startswith(FENCE)\n"
+        '    b = t.startswith(("---", "+++"))\n'
+        '    c = t.split(sep="---")\n'
         "    return a, b, c\n"
     )
     env = astlib.module_env(tree)
@@ -246,7 +238,6 @@ def test_str_value_resolves_a_hoisted_mode_constant():
     assert astlib.str_value(astlib.arg_at(call, 1, "mode"), env) == "r"
 
 
-# --- the opener table -----------------------------------------------------------
 def test_opener_table_matches_the_real_signatures():
     """The slot and default in OPENERS are claims about the stdlib. Check them against the
     stdlib rather than against a hand-written table — `tempfile.SpooledTemporaryFile` was
@@ -331,10 +322,10 @@ def test_a_local_shadows_an_import_bound_in_another_function():
 def test_open_mode_falls_back_to_the_callees_own_default():
     astlib = _load()
     cases = [
-        ("import gzip\ngzip.open(p)\n", "rb"),          # binary by default
-        ("open(p)\n", "r"),                             # text by default
+        ("import gzip\ngzip.open(p)\n", "rb"),
+        ("open(p)\n", "r"),
         ("import tempfile\ntempfile.TemporaryFile()\n", "w+b"),
-        ('open(p, "a")\n', "a"),                        # explicit wins
+        ('open(p, "a")\n', "a"),
     ]
     for src, expected in cases:
         tree = ast.parse(src)

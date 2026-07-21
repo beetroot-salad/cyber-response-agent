@@ -34,7 +34,6 @@ LINT_PATH = LINT_DIR / "lint_unpinned_text_io.py"
 
 
 def _load_gate():
-    # scripts/lint is on the gate's own import path (it does `from _baseline import ...`)
     if str(LINT_DIR) not in sys.path:
         sys.path.insert(0, str(LINT_DIR))
     spec = importlib.util.spec_from_file_location("lint_unpinned_text_io", LINT_PATH)
@@ -71,9 +70,6 @@ def _flags(tmp_path: Path, src: str) -> bool:
     return bool(_load_gate()._scan(tree))
 
 
-# ===========================================================================
-# Characterization — the detector as it stands. Must stay green.
-# ===========================================================================
 def test_scan_and_ratchet_contract(tmp_path):
     gate = _load_gate()
     tree = tmp_path / "scope"
@@ -86,11 +82,11 @@ def test_scan_and_ratchet_contract(tmp_path):
     assert not any("test_prod" in f.fingerprint for f in findings), "test modules excluded"
 
     empty = tmp_path / "empty.json"
-    assert gate.main([], scope=tree, baseline_path=empty) == 1        # a new finding
+    assert gate.main([], scope=tree, baseline_path=empty) == 1
     bp = tmp_path / "bp.json"
     _write_baseline(bp, [f.fingerprint for f in findings])
-    assert gate.main([], scope=tree, baseline_path=bp) == 0           # all baselined
-    assert gate.main([], scope=tmp_path / "nope") == 2                # scope missing
+    assert gate.main([], scope=tree, baseline_path=bp) == 0
+    assert gate.main([], scope=tmp_path / "nope") == 2
 
 
 def test_flags_each_idiom(tmp_path):
@@ -198,13 +194,13 @@ def test_multiple_scopes_are_prefixed_and_cannot_collide(tmp_path):
     gate = _load_gate()
     a, b = tmp_path / "treeA", tmp_path / "treeB"
     _pyfile(a, "_config.py", "def f(p):\n    return p.read_text()\n")
-    _pyfile(b, "_config.py", "def f(p):\n    return p.read_text()\n")  # same rel:func:kind in both
+    _pyfile(b, "_config.py", "def f(p):\n    return p.read_text()\n")
     fa = gate._prefixed_scan(a, "defender/")
     fb = gate._prefixed_scan(b, "spec-flow/scripts/")
     assert [f.fingerprint for f in fa] == ["defender/_config.py:f:read"]
     assert [f.fingerprint for f in fb] == ["spec-flow/scripts/_config.py:f:read"]
-    assert not ({f.fingerprint for f in fa} & {f.fingerprint for f in fb})  # no collision
-    assert gate._prefixed_scan(a, "") == gate._scan(a)  # empty prefix = untouched (test seam)
+    assert not ({f.fingerprint for f in fa} & {f.fingerprint for f in fb})
+    assert gate._prefixed_scan(a, "") == gate._scan(a)
 
 
 def test_binary_tempfile_in_the_real_tree_stays_clean(tmp_path):
@@ -218,12 +214,6 @@ def test_binary_tempfile_in_the_real_tree_stays_clean(tmp_path):
     ))
 
 
-# ===========================================================================
-# The bugs, now fixed. Each of these was an xfail(strict=True) in the parent
-# commit — the executable statement of a bug — and landing the resolver flipped
-# every one to XPASS. The deleted markers ARE the proof; these are plain
-# regression tests from here on.
-# ===========================================================================
 def test_from_import_subprocess_is_flagged(tmp_path):
     assert _flags(tmp_path, (
         "from subprocess import run\n"

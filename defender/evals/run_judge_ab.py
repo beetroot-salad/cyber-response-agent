@@ -49,17 +49,9 @@ from defender.evals.judge_equivalence import (  # noqa: E402
 from defender.learning.core import config  # noqa: E402
 from defender.learning.core.directions import BY_NAME  # noqa: E402
 
-# NB: the pydantic_ai engine (``_run_judge_pydantic``) is imported LAZILY inside ``main``,
-# not at module top — it drags in the heavy pydantic-ai graph, and ``load_cases`` (the one
-# unit-tested surface) needs none of it, so the loader stays importable without the runtime
-# extra (mirrors the codebase's lazy-pydantic-ai convention).
 
 
 def load_cases(cases_dir: Path) -> list[FrozenCase]:
-    """Load the frozen snapshots under ``cases_dir`` into ``FrozenCase``s, attaching the
-    base wiring for each case's direction (run_config overrides only model+effort on it).
-    Skips a subdir with a loud warning if it's missing a required artifact — OR carries an
-    unreadable/malformed meta.json — so one bad snapshot doesn't abort the whole A/B."""
     cases: list[FrozenCase] = []
     for case_dir in sorted(p for p in cases_dir.iterdir() if p.is_dir()):
         meta_path = case_dir / "meta.json"
@@ -72,10 +64,6 @@ def load_cases(cases_dir: Path) -> list[FrozenCase]:
         if missing:
             print(f"skip {case_dir.name}: missing {', '.join(missing)}", file=sys.stderr)
             continue
-        # A present-but-corrupt meta.json (truncated/invalid JSON, or an unreadable file)
-        # is a bad snapshot too — skip it loudly rather than letting json.loads/read_text
-        # abort the whole loader (JSONDecodeError subclasses ValueError). A valid-JSON but
-        # non-object payload falls through to the bad-direction skip below (direction=None).
         try:
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
         except (OSError, ValueError) as e:
@@ -83,11 +71,9 @@ def load_cases(cases_dir: Path) -> list[FrozenCase]:
             continue
         direction = meta.get("direction") if isinstance(meta, dict) else None
         if not isinstance(direction, str) or direction not in BY_NAME:
-            # None (non-object payload), or a value that isn't one of the two directions.
             print(f"skip {case_dir.name}: bad direction {direction!r} (expected "
                   "'adversarial' | 'benign')", file=sys.stderr)
             continue
-        # direction is now a valid BY_NAME key (narrowed to str).
         cases.append(FrozenCase(
             case_id=case_dir.name, direction=direction, run_dir=run_dir,
             actor_story_path=story, projected_telemetry_path=telemetry,
@@ -113,17 +99,11 @@ def main(argv: list[str]) -> int:  # pragma: no cover — operator harness over 
         print(f"no runnable cases under {args.cases}", file=sys.stderr)
         return 1
 
-    # Lazy: the in-process engine drags in the pydantic-ai graph — imported here, at the
-    # one point of use, so importing this module for ``load_cases`` never requires it.
     from defender.learning.pipeline.judge.engine_pydantic import _run_judge_pydantic
 
-    # Source the metered key for each distinct model before any call (fails loud on a
-    # missing key → the same FatalConfigError the loop raises, rather than a 401 mid-run).
     for model in {args.ref_model, args.cand_model}:
         config.source_first_party_key(model)
 
-    # Both configs on the in-process engine, so only the model+effort vary. The reference
-    # runs twice (ref-a / ref-b) for the self-consistency floor.
     ref_a = EngineConfig("ref-a", _run_judge_pydantic, args.ref_model, args.ref_effort)
     ref_b = EngineConfig("ref-b", _run_judge_pydantic, args.ref_model, args.ref_effort)
     cand = EngineConfig("cand", _run_judge_pydantic, args.cand_model, args.cand_effort)
@@ -136,7 +116,7 @@ def main(argv: list[str]) -> int:  # pragma: no cover — operator harness over 
     ref_b_v = run_config(cases, ref_b, args.out)
     cand_v = run_config(cases, cand, args.out)
 
-    floor = outcome_match_rate(ref_a_v, ref_b_v)  # same-config self-consistency
+    floor = outcome_match_rate(ref_a_v, ref_b_v)
     print(render_report(
         f"Step-2 model A/B — {args.cand_model}@{args.cand_effort} vs "
         f"{args.ref_model}@{args.ref_effort}",

@@ -1,34 +1,10 @@
 #!/usr/bin/env python3
-"""Environment lessons curator — consumer half of the env-observation queues.
-
-Drains an env-observation queue into the checked-in, **shared** environment corpus
-at ``defender/lessons-environment/`` — the corpus both actors retrieve by
-classification before constructing a story. Two sources feed that one corpus, each
-via its own queue + ``CuratorConfig`` (issue #298):
-
-  - **benign (FP) direction** — ``BENIGN_CONFIG``. The false-positive analog of
-    ``author_actor.py``. Drains ``_pending/environment_observations.jsonl``. Finding-
-    bearing outcome: ``survived`` (the confirmed-FP story whose grounded routine
-    explanation yields reliable standing facts). Commit trailer ``Benign-Actor-Model:``.
-  - **adversarial direction** — ``ADVERSARIAL_CONFIG``. Drains
-    ``_pending/actor_environment_observations.jsonl`` (positive-polarity env facts the
-    adversarial judge extracts from grounded mispredictions). Finding-bearing
-    outcomes: ``caught``/``incoherent``. Commit trailer ``Actor-Env-Model:``. Exposed
-    via the thin ``author_actor_env.py`` entry point.
-
-Both configs share the corpus, the transaction envelope (``_author_curator``), the
-corpus-wide idempotency set, the repo lock, and the ``verify_forward_env.py`` gate —
-only the queue paths, outcome policy, commit trailer + generation counter, and the
-actor model differ.
-"""
 from __future__ import annotations
 
 import functools
 import sys
 from pathlib import Path
 
-# Put the workspace root on sys.path so `defender.*` namespace imports
-# resolve whether this file is imported or run directly (see tests/conftest.py).
 if (_root := str(Path(__file__).resolve().parents[4])) not in sys.path:
     sys.path.insert(0, _root)
 
@@ -47,14 +23,7 @@ from defender.learning.core.config import (
 )
 
 
-# All model/wiring constants come from core.config (one source per env var, no
-# duplicated defaults — cf. #449). AUTHOR_ENV_* is the curator *agent* model/effort/
-# timeout (shared across both env directions). ACTOR_MODEL/BENIGN_ACTOR_MODEL are the
-# actor *stage* models the real actor invocations read (pipeline/*_actor/run.py); this
-# curator only stamps them into the per-source provenance trailer (Benign-Actor-Model:
-# / Actor-Env-Model:), never as authoring input (the curator agent never sees them).
 
-# Re-exported for callers/tests that referenced the curator's fatal error type here.
 AuthorError = _curator.AuthorError
 
 
@@ -63,13 +32,6 @@ def invoke_agent(
     batch_id: str,
     cfg: _curator.CuratorConfig,
 ) -> dict:
-    """Spawn the environment curator agent. Returns the parsed AUTHOR_RESULT dict.
-
-    Both env directions share one deterministic retrieval check, bound onto the curator's deps
-    here; the corpus and the pending queue it retrieves against ride on the deps too, so the
-    check reads the worktree the lesson was just written into. The commit-trailer provenance
-    (including the per-direction trailer label) is stamped by the loop, not the agent, so nothing
-    trailer-related goes in the prompt."""
     from defender.learning.author.verify_forward.checks import ENV_CHECK
 
     return _curator.invoke_curator_agent(
@@ -90,8 +52,6 @@ def _env_config(  # noqa: PLR0913 — every parameter is the per-direction field
     actor_model: str,
     log_prefix: str,
 ) -> _curator.CuratorConfig:
-    """Build a CuratorConfig for the shared lessons-environment/ corpus — only the
-    queue + policy + trailer + actor-model fields vary between the two directions."""
     return _curator.CuratorConfig(
         repo_root=paths.repo_root,
         pending_dir=paths.pending_dir,
@@ -116,8 +76,6 @@ def _env_config(  # noqa: PLR0913 — every parameter is the per-direction field
 
 
 def build_benign_config(paths: LoopPaths = DEFAULT_PATHS) -> _curator.CuratorConfig:
-    """Benign (FP) direction — ``survived`` is the confirmed-FP outcome whose routine
-    story held against the evidence, so the standing facts it grounds are reliable."""
     return _env_config(
         paths,
         channel=paths.environment_observations,
@@ -131,9 +89,6 @@ def build_benign_config(paths: LoopPaths = DEFAULT_PATHS) -> _curator.CuratorCon
 
 
 def build_adversarial_config(paths: LoopPaths = DEFAULT_PATHS) -> _curator.CuratorConfig:
-    """Adversarial direction (issue #298) — env facts the adversarial judge extracts from
-    grounded mispredictions. Finding-bearing outcomes mirror author_actor.py:
-    ``caught``/``incoherent`` (the refutation cited real telemetry)."""
     return _env_config(
         paths,
         channel=paths.actor_environment_observations,
@@ -146,7 +101,6 @@ def build_adversarial_config(paths: LoopPaths = DEFAULT_PATHS) -> _curator.Curat
     )
 
 
-# Production default configs; tests build their own via build_*_config(tmp paths).
 BENIGN_CONFIG = build_benign_config(DEFAULT_PATHS)
 ADVERSARIAL_CONFIG = build_adversarial_config(DEFAULT_PATHS)
 
@@ -157,8 +111,6 @@ def run_batch(
     paths: LoopPaths = DEFAULT_PATHS,
     cfg: _curator.CuratorConfig | None = None,
 ) -> int:
-    # Default to the benign direction built from the injected paths; the adversarial
-    # entry (author_actor_env) passes its own cfg explicitly.
     if cfg is None:
         cfg = build_benign_config(paths)
     return _curator.run_batch(hold_committed=hold_committed, cfg=cfg)

@@ -30,8 +30,7 @@ def test_adversarial_outcome_policy_authors_caught_incoherent() -> None:
     held, consumed_pre, to_author = curator._partition_pre_author(
         _rows(), aenv.ADVERSARIAL_CONFIG
     )
-    assert _ids(to_author) == {"t/0", "t/1"}              # caught + incoherent author
-    # survived/undecidable are skip-by-policy for the adversarial direction.
+    assert _ids(to_author) == {"t/0", "t/1"}
     assert {"t/2", "t/3"} <= _ids(consumed_pre)
 
 
@@ -39,8 +38,8 @@ def test_benign_outcome_policy_authors_only_survived() -> None:
     held, consumed_pre, to_author = curator._partition_pre_author(
         _rows(), aenv.BENIGN_CONFIG
     )
-    assert _ids(to_author) == {"t/2"}                     # only survived authors
-    assert {"t/4", "t/3", "t/1"} <= _ids(consumed_pre)    # refuted/undecidable/incoherent skip
+    assert _ids(to_author) == {"t/2"}
+    assert {"t/4", "t/3", "t/1"} <= _ids(consumed_pre)
 
 
 def test_configs_are_distinct() -> None:
@@ -51,7 +50,6 @@ def test_configs_are_distinct() -> None:
     assert b.channel.lock != a.channel.lock
     assert b.outcome_author == frozenset({"survived"})
     assert a.outcome_author == frozenset({"caught", "incoherent"})
-    # the adversarial entry point delegates with the adversarial config.
     assert author_actor_env.run_batch.__module__ == "defender.learning.author.benign_actor.env"
 
 
@@ -69,8 +67,6 @@ def test_commit_corpus_uses_per_config_label(tmp_path, monkeypatch) -> None:
     subprocess.run(["git", "-C", str(repo), "add", "README"], check=True)
     subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "seed"], check=True)
 
-    # Both directions share the corpus dir; the factories derive it (+ the git
-    # cwd via cfg.repo_root) from the tmp tree, so no module-global patch is needed.
     paths = LoopPaths(repo_root=repo)
     adv = aenv.build_adversarial_config(paths)
     ben = aenv.build_benign_config(paths)
@@ -81,7 +77,7 @@ def test_commit_corpus_uses_per_config_label(tmp_path, monkeypatch) -> None:
             capture_output=True, text=True, check=True,
         ).stdout
 
-    (corpus / "a.md").write_text("x\n")  # agent edit, uncommitted
+    (corpus / "a.md").write_text("x\n")
     curator.commit_corpus(3, "claude-x", "adversarial batch", adv)
     msg = _head_msg()
     assert "Generation: 3" in msg

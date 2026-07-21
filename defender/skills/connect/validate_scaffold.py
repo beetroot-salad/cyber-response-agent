@@ -1,27 +1,4 @@
 #!/usr/bin/env python3
-"""Validate a connected system's onboarding scaffold against the connect
-contract — the mechanical half of `checklist.md`. This is NOT a
-connectivity probe: it checks the files `/connect` generated (the adapter
-module + its `VERBS` registry, the per-system skill, config, templates),
-not whether the live system is reachable.
-
-    python3 defender/skills/connect/validate_scaffold.py <system>
-
-Since #611 an adapter is a Python module `scripts/adapters/<system>_adapter.py`
-exposing a `VERBS` mapping of plain annotated functions — there is no CLI, no
-`--help`, no `bin/` shim, and no exit-code contract to probe. So this validates
-the REGISTRY: the module imports, `VERBS` is non-empty and declares a
-`health-check`, the per-system skill is in place, and every query template's
-`${placeholder}` is a declared param of its verb or a marked body substitution.
-
-Normalizes the spelling split in one invocation: the adapter file uses `_`
-(`change_mgmt_adapter.py`) while the skill / corpus dirs use `-`
-(`skills/change-mgmt/`). `system` is passed hyphenated; the registry maps it to
-the underscore module, and the skill/corpus reads use the hyphen form directly.
-
-Exit 0 if nothing FAILed (WARN is allowed); exit 1 on any FAIL; exit 2 if
-the arguments are malformed.
-"""
 
 from __future__ import annotations
 
@@ -30,9 +7,6 @@ import re
 import sys
 from pathlib import Path
 
-# Put the workspace root on sys.path so the `defender.*` import below resolves when this file is
-# run directly as the CLI in the usage above — where sys.path[0] is this script's own dir and the
-# package would not resolve. Same bootstrap as `scripts/workspace_map.py`.
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
@@ -49,7 +23,6 @@ from defender.runtime.verbs import (  # noqa: E402
 PASS, WARN, FAIL = "PASS", "WARN", "FAIL"
 _GLYPH = {PASS: "✓", WARN: "!", FAIL: "✗"}
 
-# config.env keys that must reference a secret by env-var *name*, never hold the value inline.
 _SECRET_KEYS = re.compile(r"(PASSWORD|PASSWD|SECRET|TOKEN|CREDENTIAL|API[_-]?KEY)$", re.I)
 _ENV_NAME = re.compile(r"^[A-Z][A-Z0-9_]*$")
 _HIGH_ENTROPY = re.compile(r"^[A-Za-z0-9+/=_-]{24,}$")
@@ -81,11 +54,6 @@ def _defender_dir() -> Path:
 
 
 def check_registry(report: Report, defender: Path, system: str):
-    """The adapter module imports and declares a non-empty `VERBS` with a `health-check`.
-
-    The registry maps the hyphenated `system` to the underscore module file, so a single
-    invocation crosses the spelling split. Returns the verb mapping, or None on a hard FAIL —
-    a module that will not import is a broken adapter and exits 1, naming the module."""
     adapter = defender / "scripts" / "adapters" / f"{system.replace('-', '_')}{ADAPTER_SUFFIX}"
     registry = ModuleVerbRegistry(defender / "scripts" / "adapters")
     try:
@@ -135,9 +103,6 @@ def check_config(report: Report, defender: Path, system: str) -> None:
 
 
 def check_skill(report: Report, defender: Path, system: str) -> None:
-    """The per-system skill (read by its HYPHEN name) declares `name: defender-<system>` and
-    points at its execution surface. `execution.md` is optional — a stub system may embed
-    `## Execution` inline in SKILL.md (docs/system-skill-shape.md sanctions it)."""
     skill = defender / "skills" / system / "SKILL.md"
     if not skill.exists():
         report.add(FAIL, f"per-system skill skills/{system}/SKILL.md is missing")
@@ -160,9 +125,6 @@ def check_skill(report: Report, defender: Path, system: str) -> None:
 
 
 def _template_verb(fm: dict, query_body: str) -> str | None:
-    """The verb a template dispatches: the frontmatter `verb:`, else a structured `verb:` line in
-    the ``## Query`` body, else the first token of the first non-comment body line (the bare form
-    a scaffold may seed before frontmatter is added)."""
     if isinstance(fm, dict) and fm.get("verb"):
         return str(fm["verb"])
     m = _VERB_LINE_RE.search(query_body)
@@ -181,11 +143,6 @@ def _body_substitutions(fm: dict) -> set[str]:
 
 
 def check_templates(report: Report, defender: Path, system: str, verbs) -> None:
-    """Every established template of `system` resolves to a declared verb and every `${x}` in its
-    ``## Query`` is a declared param of that verb or a marked body substitution — the same
-    invariant `test_placeholder_is_a_declared_param_or_marked_body_substitution` enforces, checked
-    against the LIVE registry (an engine verb's body placeholders are substitutions into its query
-    language; a param-only verb's must each name a declared param)."""
     qdir = defender / "skills" / "gather" / "queries" / system
     templates = [
         t for t in iter_query_templates(qdir.parent)
@@ -207,7 +164,7 @@ def check_templates(report: Report, defender: Path, system: str, verbs) -> None:
             continue
         placeholders = set(_PLACEHOLDER_RE.findall(t.query))
         if engine_of(verbs[verb_name]) != "none":
-            continue  # an engine verb: every body placeholder is a substitution into its language
+            continue
         allowed = set(declared_params(verbs[verb_name])) | _body_substitutions(fm)
         undeclared = sorted(placeholders - allowed)
         if undeclared:

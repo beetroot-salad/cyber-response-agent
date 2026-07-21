@@ -49,7 +49,7 @@ from types import SimpleNamespace
 
 import pytest
 
-pytest.importorskip("pydantic_ai")  # CI installs the runtime extra; skip otherwise
+pytest.importorskip("pydantic_ai")
 
 from defender._paths import PATHS  # noqa: E402
 from defender.agents import (  # noqa: E402
@@ -84,19 +84,12 @@ from defender.runtime.permission.command_shape import SQL_SHIM  # noqa: E402
 _DEFENDER = PATHS.defender_dir
 _POLICY_CLI = _DEFENDER / "bin" / "defender-policy"
 
-# Real repo scripts — the actor's pinned-script pattern does
-# `script.resolve().relative_to(REPO_ROOT)`, so a synthetic path raises.
 _ENV_RETRIEVE = config.LESSONS_ENV_RETRIEVE_SCRIPT
 _ACTOR_INDEX = config.LESSONS_ACTOR_INDEX_SCRIPT
 _ACTOR_DIR = config.LESSONS_ACTOR_DIR
 _ENV_DIR = config.LESSONS_ENVIRONMENT_DIR
 
 
-# --------------------------------------------------------------------------- #
-# Fixtures — real dirs + real files (resolve() touches the fs now).            #
-# The two reader policies come off the REAL compile seam (compile_policy_for,  #
-# not bind: no discarded salt/deps), the four stage policies off bind.         #
-# --------------------------------------------------------------------------- #
 @pytest.fixture
 def env(tmp_path):
     run = tmp_path / "run"
@@ -192,9 +185,6 @@ def _cat_grant(policy) -> Grant:
     return g
 
 
-# ===========================================================================  #
-# §A — The containment model                                                   #
-# ===========================================================================  #
 
 def test_a1_shape_and_scope_both_required(env):
     """a1: a command is ALLOWED only if it matches a grant's `pattern` AND every operand
@@ -202,10 +192,10 @@ def test_a1_shape_and_scope_both_required(env):
     an in-scope operand under an ungranted SHAPE denies, and a granted shape with an out-of-scope
     operand denies. Only shape ∧ scope allows."""
     inv = f"{env.run}/investigation.md"
-    assert _bash(env, f"cat {inv}", "main").allow                      # shape ∧ scope
-    assert not _bash(env, "cat /etc/passwd", "main").allow             # shape, ✗scope
-    assert not _bash(env, f"strings {inv}", "main").allow              # ✗shape, scope
-    assert not _bash(env, f"nl -ba {inv}", "main").allow               # ✗shape (untabled program)
+    assert _bash(env, f"cat {inv}", "main").allow
+    assert not _bash(env, "cat /etc/passwd", "main").allow
+    assert not _bash(env, f"strings {inv}", "main").allow
+    assert not _bash(env, f"nl -ba {inv}", "main").allow
 
 
 def test_a2_no_unmarked_grant_pattern_embeds_a_path(env):
@@ -228,8 +218,7 @@ def test_a2_no_unmarked_grant_pattern_embeds_a_path(env):
             assert "/" not in src, f"{name}: unmarked grant embeds a path: {src}"
             for root in roots:
                 assert root not in src, f"{name}: unmarked grant embeds {root}: {src}"
-    assert exempt_seen >= 2          # actor script, lead-author/curator rm (judge ticket → #672)
-    # positive control: the anchored roots live in the SCOPE, not the shape
+    assert exempt_seen >= 2
     cat_scope = " ".join(s.pattern for s in _cat_grant(pols["main"]).scope)
     assert str(env.run) in cat_scope or re.escape(str(env.run)) in cat_scope
 
@@ -245,9 +234,9 @@ def test_a3_under_fullmatches_the_resolved_path(env):
     os.symlink(real, link)
     pat = under(real.resolve(), r"a\.md")
     typed = link / "a.md"
-    assert pat.fullmatch(str(typed.resolve()))     # resolved → matches
-    assert not pat.fullmatch(str(typed))           # as typed → does not (containment MUST resolve)
-    assert not pat.fullmatch(str(real / "b.md"))   # tail is a tight shape, not a subtree wildcard
+    assert pat.fullmatch(str(typed.resolve()))
+    assert not pat.fullmatch(str(typed))
+    assert not pat.fullmatch(str(real / "b.md"))
 
 
 def test_a4_path_shapes_are_tight_never_any_char_star(env):
@@ -259,9 +248,9 @@ def test_a4_path_shapes_are_tight_never_any_char_star(env):
         shapes = [s for g in pol.bash_allow for s in g.scope] + list(pol.read_allow)
         for s in shapes:
             assert "[^\\x00]*" not in s.pattern, f"{name}: loose path shape {s.pattern}"
-    assert _bash(env, f"cat {env.run}/gather_raw/l-001/0.json", "gather").allow      # tight, real
-    assert not _bash(env, f"cat {env.run}/gather_raw/l-001/evil.sh", "gather").allow  # not the shape
-    assert not _bash(env, f"cat {env.run}/gather_raw/evil.json", "gather").allow      # wrong depth
+    assert _bash(env, f"cat {env.run}/gather_raw/l-001/0.json", "gather").allow
+    assert not _bash(env, f"cat {env.run}/gather_raw/l-001/evil.sh", "gather").allow
+    assert not _bash(env, f"cat {env.run}/gather_raw/evil.json", "gather").allow
 
 
 def test_a5_symlink_escaping_the_root_denied(env):
@@ -274,7 +263,7 @@ def test_a5_symlink_escaping_the_root_denied(env):
     evil = env.run / "gather_raw" / "l-001" / "9.json"
     os.symlink("/etc/passwd", evil)
     assert not _bash(env, f"cat {evil}", "gather").allow
-    assert _bash(env, f"cat {env.run}/gather_raw/l-001/0.json", "gather").allow  # positive control
+    assert _bash(env, f"cat {env.run}/gather_raw/l-001/0.json", "gather").allow
 
 
 def test_a6_symlink_to_an_in_root_target_allowed(env):
@@ -293,7 +282,7 @@ def test_a7_symlink_loop_fails_closed(env):
     b = env.run / "gather_raw" / "l-002" / "1.json"
     os.symlink(b, a)
     os.symlink(a, b)
-    d = _bash(env, f"cat {a}", "gather")      # must not raise
+    d = _bash(env, f"cat {a}", "gather")
     assert not d.allow
 
 
@@ -304,12 +293,12 @@ def test_a8_missing_and_broken_symlinks_are_judged_by_shape(env):
     broken link whose (missing) target is in-shape ALLOWs, while a broken link whose target escapes
     DENIES. (A gate that denied on non-existence would break every write-then-read flow.)"""
     (env.run / "gather_raw" / "l-003").mkdir()
-    assert _bash(env, f"cat {env.run}/gather_raw/l-003/0.json", "gather").allow   # missing, in-shape
+    assert _bash(env, f"cat {env.run}/gather_raw/l-003/0.json", "gather").allow
     ok = env.run / "gather_raw" / "l-003" / "1.json"
-    os.symlink(env.run / "gather_raw" / "l-003" / "7.json", ok)                   # broken, in-shape
+    os.symlink(env.run / "gather_raw" / "l-003" / "7.json", ok)
     assert _bash(env, f"cat {ok}", "gather").allow
     bad = env.run / "gather_raw" / "l-003" / "2.json"
-    os.symlink("/etc/nope-does-not-exist", bad)                                   # broken, escapes
+    os.symlink("/etc/nope-does-not-exist", bad)
     assert not _bash(env, f"cat {bad}", "gather").allow
 
 
@@ -317,7 +306,7 @@ def test_a9_embedded_nul_operand_denies_without_raising(env):
     """a9: an embedded-NUL operand makes `Path.resolve()` raise `ValueError`, which is in
     `_RESOLVE_ERRORS` → DENY. The tool must not propagate it (a raise out of decide_bash is a
     500 in the driver, not a deny the model can retry)."""
-    d = _bash(env, f"cat {env.run}/inv\x00.md", "main")   # must not raise
+    d = _bash(env, f"cat {env.run}/inv\x00.md", "main")
     assert not d.allow
 
 
@@ -364,12 +353,9 @@ def test_a12_every_pipe_stage_is_gated(env):
     both operands in scope ALLOWs."""
     inv = f"{env.run}/investigation.md"
     assert not _bash(env, f"cat {inv} | cat /etc/passwd", "main").allow
-    assert _bash(env, f"cat {inv} | cat {env.run}/report.md", "main").allow  # positive control
+    assert _bash(env, f"cat {inv} | cat {env.run}/report.md", "main").allow
 
 
-# ===========================================================================  #
-# §B — PROGRAMS, and the OPENS_NOTHING obligation                              #
-# ===========================================================================  #
 
 def test_b1_cat_is_the_sole_opener_in_the_program_table(env):
     """b1: `PROGRAMS["cat"]` is the real extractor (argv → file operands | None); EVERY other
@@ -409,9 +395,9 @@ def test_b3_every_registered_agents_policy_passes_the_table_check(env):
     and never calls `compile_policy` today. It is the one denylist-free lane, so an untabled
     (=ungated) program there is the worst place for the fail-open to hide."""
     pols = _all_policies(env)
-    assert len(AGENTS) == 8                              # the sweep below covers every role
+    assert len(AGENTS) == 8
     assert CORPUS_AUTHOR_DEF in AGENTS.values()
-    assert "corpus_author" in pols                       # …including the un-bindable one
+    assert "corpus_author" in pols
     for name, pol in pols.items():
         for g in pol.bash_allow:
             assert g.program in PROGRAMS, f"{name}: untabled program {g.program!r}"
@@ -504,10 +490,8 @@ def test_b8_opens_nothing_shapes_admit_no_long_option_or_dash_positional(env):
                 for argv in (f"{g.program} {probe}", f"{g.program} x {probe}",
                              f"{g.program} {probe} x"):
                     assert not g.pattern.fullmatch(argv), f"{name}/{g.program}: admits {argv!r}"
-    assert checked >= 5   # grep/head/tail/wc/jq at minimum — never iterate an empty set
+    assert checked >= 5
 
-    # Positive control: the SAME patterns still admit their legitimate short-bundle forms.
-    # Without this the test passes for a grammar that admits nothing at all.
     admits = {
         "grep": "grep -n secret", "head": "head -5", "tail": "tail -3",
         "wc": "wc -l",
@@ -521,9 +505,6 @@ def test_b8_opens_nothing_shapes_admit_no_long_option_or_dash_positional(env):
             )
 
 
-# ===========================================================================  #
-# §C — The lane after the change (the behavior-change ledger — BOTH sides)     #
-# ===========================================================================  #
 
 @pytest.mark.parametrize(("file_form", "pipe_form"), [
     ("grep -n secret {p}", "cat {p} | grep -n secret"),
@@ -551,8 +532,8 @@ def test_c2_ls_and_cd_are_deleted_from_the_lane(env):
         for cmd in ("ls", f"ls {env.run}", f"ls -la {env.run}", f"ls {env.run}/gather_raw",
                     f"cd {env.run}", f"cd {env.dfn} && defender-lessons --tags"):
             assert not _bash(env, cmd, which).allow, f"{which}: {cmd}"
-        assert _bash(env, f"cat {env.run}/investigation.md", which).allow, which    # control
-        assert _bash(env, "defender-lessons --tags", which).allow, which            # control
+        assert _bash(env, f"cat {env.run}/investigation.md", which).allow, which
+        assert _bash(env, "defender-lessons --tags", which).allow, which
 
 
 def test_c3_main_has_no_recursive_descent_primitive(env):
@@ -602,9 +583,6 @@ def test_c6_curator_lane_loses_its_file_operands_and_ls(env):
     assert not _bash(env, f"ls {env.dfn}/lessons", cur).allow
 
 
-# ===========================================================================  #
-# §D — gather_raw, positive enumeration, and the read surface                  #
-# ===========================================================================  #
 
 def test_d1_gather_raw_bash_allow_for_gather_deny_for_main(env):
     """d1 (domain-outcome): `cat {run}/gather_raw/l-001/0.json` → ALLOW for gather, DENY for main —
@@ -627,8 +605,8 @@ def test_d2_decide_read_denies_main_gather_raw_with_the_e2e_reason(env):
     d = _read(env, raw, "main")
     assert not d.allow
     assert "must not read gather_raw" in (d.reason or "")
-    assert _read(env, raw, "gather").allow                                     # positive control
-    assert _read(env, f"{env.run}/gather_summaries/l-001.md", "main").allow    # positive control
+    assert _read(env, raw, "gather").allow
+    assert _read(env, f"{env.run}/gather_summaries/l-001.md", "main").allow
 
 
 def test_d3_gather_raw_stays_untrusted_read(env):
@@ -659,9 +637,9 @@ def test_d4_read_and_bash_scopes_are_the_same_objects(env):
     assert same_objects(env.gather)
     forged = dataclasses.replace(
         env.main,
-        read_allow=tuple(env.main.read_allow),   # equal by value, a DIFFERENT object
+        read_allow=tuple(env.main.read_allow),
     )
-    assert not same_objects(forged)              # the harness can fail → it is not vacuous
+    assert not same_objects(forged)
 
 
 _MATRIX_PATHS = [
@@ -704,9 +682,6 @@ def test_d6_denylist_still_applies_inside_scope(env):
     assert _read(env, ok, "main").allow
 
 
-# ===========================================================================  #
-# §E — The exempt (`pins_path`) grants                                         #
-# ===========================================================================  #
 
 def test_e1_judge_grants_no_ticket_shape_on_either_leg(env):
     """e1 (#672 — retires the old `_ticket_grant` closed-only-lookahead tests): the benign
@@ -739,9 +714,6 @@ def test_e4_actor_script_and_lead_author_rm_survive(env):
     assert not _bash(env, f"rm {env.dfn}/skills/../../etc/passwd", la).allow
 
 
-# ===========================================================================  #
-# §F — Routing, Decision, and layering                                         #
-# ===========================================================================  #
 
 def test_f1_bash_decision_carries_the_single_parse_and_no_adapter_route(env):
     """f1 (demand #0): `BashDecision` carries `pipelines` (the #456 single parse
@@ -754,11 +726,9 @@ def test_f1_bash_decision_carries_the_single_parse_and_no_adapter_route(env):
     assert d.pipelines
     assert not hasattr(d, "adapter_argv")
     assert not hasattr(d, "sql_pipe")
-    # the adapter is unreachable from gather's bash lane; it denies for the query-tool reason
     a = _bash(env, "defender-elastic query 'x'", "gather")
     assert not a.allow
     assert a.reason == permission.ADAPTER_RETIRED_REASON
-    # every grant on every lane is PLAIN — the capture routes were the capability, and it moved
     assert {g.route for g in env.gather.bash_allow} == {Route.PLAIN}
     assert list(Route) == [Route.PLAIN]
     assert _cat_grant(env.gather).route is Route.PLAIN
@@ -804,11 +774,8 @@ def test_f4_adapter_sql_pipe_is_now_tool_then_bash_and_nothing_else(env):
     d = _bash(env, old, "gather")
     assert not d.allow
     assert d.reason == permission.ADAPTER_RETIRED_REASON
-    # the surviving aggregation step, over an in-scope payload
     new = f"cat {env.run}/gather_raw/l-001/0.json | defender-sql 'SELECT count(*) FROM data'"
     assert _bash(env, new, "gather").allow
-    # `adapter | head` — the old "output only into defender-sql, never an arbitrary reader" case —
-    # denies for the adapter reason now (the adapter stage is unreachable, whatever is downstream).
     assert not _bash(env, "defender-elastic query 'x' | head -5", "gather").allow
     assert not _bash(env, old, "main").allow
     assert not _bash(env, new, "main").allow
@@ -838,28 +805,18 @@ def test_f5_runtime_imports_no_learning_private_and_enumerates_no_agent(env):
                     if alias.name.startswith("defender.learning") and "._" in alias.name:
                         offenders.append(f"{py.name}: import {alias.name}")
     assert offenders == [], offenders
-    assert not (runtime_dir / "agents.py").exists()      # the registry left runtime/
-    # positive control: the scan's shape DOES see the relocated registry's def imports
+    assert not (runtime_dir / "agents.py").exists()
     reg = ast.parse((_DEFENDER / "agents.py").read_text())
     imported = {a.name for n in ast.walk(reg) if isinstance(n, ast.ImportFrom) for a in n.names}
     assert {"JUDGE_DEF", "ACTOR_DEF", "ORACLE_DEF", "VERIFY_DEF", "LEAD_AUTHOR_DEF",
             "CORPUS_AUTHOR_DEF"} <= imported
 
 
-# ===========================================================================  #
-# §G — Prompt surface (a dead program named in a prompt teaches a dead command)#
-# ===========================================================================  #
 
-# Words that appear inside backticks / slash-groups in the deny reasons but are NOT program
-# names (paths, English). NEVER a program name — a dead PROGRAM must not be excusable here,
-# which is the whole point of not grepping for a hardcoded dead-name list.
 _NON_PROGRAM_WORDS = frozenset({
     "defender", "lessons", "skills", "examples", "docs", "read", "write", "edit", "file",
     "only", "the", "and", "or", "with", "shims", "viewers", "tool", "tools", "bash", "run",
     "stdin", "pipe", "path", "paths", "dir", "md", "json", "sql", "yaml",
-    # #611: `query` is the name of the TOOL the adapter/gather deny reasons point at, not a bash
-    # program — naming it is the CORRECT prompt surface (the whole point of #611), the mirror of
-    # "read"/"write"/"tool" above. It is deliberately NOT runnable from any bash lane.
     "query",
 })
 _PROGRAMISH = re.compile(r"(?<![\w/.-])([a-z][a-z0-9-]{1,15}(?:/[a-z][a-z0-9-]{1,15})+)(?![\w/.-])")
@@ -893,15 +850,11 @@ def test_g1_no_deny_reason_or_hint_names_a_program_the_agent_cannot_run(env):
             seen += 1
             assert prog in granted, f"{name}: names {prog!r}, which its own lane denies"
 
-    # Positive controls. Without these the test is VACUOUS: it passes for an extractor that
-    # finds no programs at all, and for a reason set that has been emptied to dodge it.
     assert seen >= 3, (
         "_named_programs found no program names in ANY deny reason or overflow hint — "
         "the extractor is blind, so this test proves nothing"
     )
-    # (a) the extractor demonstrably FINDS a program that IS on the lane,
     assert "cat" in _named_programs("only the read-only viewers (cat/grep) are permitted")
-    # (b) and it demonstrably CATCHES a reason naming a program the lane denies.
     assert "ls" in _named_programs("only the read-only viewers (jq/ls/cat) are permitted")
     assert "ls" not in {g.program for g in _all_policies(env)["main"].bash_allow}
 
@@ -925,9 +878,6 @@ def test_g2_overflow_hint_reaches_the_right_branch_through_the_real_seam(env):
     assert "pattern=" in ahint
 
 
-# ===========================================================================  #
-# §H — Lifecycle                                                               #
-# ===========================================================================  #
 
 def _projection(pol) -> tuple:
     """A comparable projection of a policy (Patterns → their source strings)."""
@@ -985,13 +935,10 @@ def test_h3_denylist_contributes_no_regex_lookahead(env):
     for name, pol in _all_policies(env).items():
         for s in [s for g in pol.bash_allow for s in g.scope] + list(pol.read_allow):
             assert "(?!" not in s.pattern, f"{name}: path shape carries a lookahead: {s.pattern}"
-    assert not _bash(env, f"cat {env.dfn}/lessons/.env.md", "main").allow   # still enforced
-    assert _bash(env, f"cat {env.run}/investigation.md", "main").allow      # not bricked
+    assert not _bash(env, f"cat {env.dfn}/lessons/.env.md", "main").allow
+    assert _bash(env, f"cat {env.run}/investigation.md", "main").allow
 
 
-# ===========================================================================  #
-# §I — The audit CLI                                                          #
-# ===========================================================================  #
 
 def _cli(*args, cwd=None) -> subprocess.CompletedProcess:
     return subprocess.run(  # noqa: S603 — the pinned in-repo shim, fixed argv
@@ -1010,10 +957,8 @@ def test_i1_policy_show_prints_grants_and_never_a_misleading_empty_scope(env):
     out = p.stdout
     for word in ("cat", "read", "write", "bash"):
         assert word in out
-    assert str(env.run) in out                      # the scopes are the RESOLVED roots
-    assert "ls" not in _named_programs(out)         # a deleted program is not advertised
-    # #672: the judge's closed-ticket read is a typed tool now, not a bash grant — `show judge`
-    # prints its cat + defender-sql lane and advertises no ticket command anywhere.
+    assert str(env.run) in out
+    assert "ls" not in _named_programs(out)
     j = _cli("show", "judge", "--run-dir", str(env.run))
     assert j.returncode == 0, j.stderr
     assert "cat" in j.stdout
@@ -1045,9 +990,9 @@ def test_i2_policy_explain_is_a_second_consumer_not_a_second_implementation(env,
     d = _bash(env, c, which)
     assert got["allow"] == d.allow, c
     if d.allow:
-        assert got["grant"], c                       # which grant matched
+        assert got["grant"], c
     else:
-        assert got["reason"] == (d.reason or ""), c  # the SAME deny reason the model sees
+        assert got["reason"] == (d.reason or ""), c
 
 
 def test_i3_defender_policy_is_not_a_shim_any_agent_can_run(env):
@@ -1059,18 +1004,9 @@ def test_i3_defender_policy_is_not_a_shim_any_agent_can_run(env):
     assert "defender-policy" not in NON_ADAPTER_SHIMS
     for name, pol in _all_policies(env).items():
         assert not _bash(env, f"defender-policy show main --run-dir {env.run}", pol).allow, name
-    assert _bash(env, "defender-lessons --tags", "main").allow      # positive control
+    assert _bash(env, "defender-lessons --tags", "main").allow
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# §F (cont.) — R1's obligation: the outbound channel to the executor.
-#
-# The gate parses ONCE and the executor runs `decision.pipelines` (#456,
-# tools.py:301 hands `list(decision.pipelines or ())` straight to run_parsed).
-# Nothing today asserts that what the executor RECEIVES is what the gate GATED —
-# and that gap IS the validator/executor parser differential the no-shell lane
-# (#379) exists to close. R1 computed this; no lens volunteered it.
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 @pytest.mark.parametrize(
@@ -1114,16 +1050,6 @@ def test_f6_denied_command_carries_no_executable_pipeline(env):
     assert not denied.pipelines
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# §H (cont.) — h4: the PATHS-relocation hazard (#562).
-#
-# `check_actors` surfaced this: `harness_lead.py` and `replay_actor.py` re-exec
-# as subprocesses and RELOCATE the tree anchor onto whatever tree they run in.
-# LEAD_AUTHOR_DEF is `requires_explicit_tree=True` and is bound with a WORKTREE
-# `defender_dir`. If a grant's scope/pattern is compiled from the module-level
-# `PATHS` constant instead of the threaded `defender_dir`, a worktree run gets
-# grants anchored on the MAIN CHECKOUT — it would delete the wrong tree's files.
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 def test_h4_grants_anchor_on_the_threaded_tree_not_module_paths(tmp_path):
@@ -1147,9 +1073,7 @@ def test_h4_grants_anchor_on_the_threaded_tree_not_module_paths(tmp_path):
 
     assert worktree.resolve() != PATHS.defender_dir.resolve(), "fixture must differ from PATHS"
 
-    # the tree it was BOUND to
     assert verdict(f"rm {worktree}/skills/stale.md")
-    # the tree PATHS points at — the main checkout. A PATHS-anchored grant would allow this.
     assert not verdict(f"rm {PATHS.defender_dir}/skills/stale.md"), (
         "the lead author's rm grant is anchored on the import-time PATHS constant, "
         "not on the defender_dir it was bound with — a worktree run would rm the main checkout"

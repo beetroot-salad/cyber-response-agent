@@ -1,19 +1,4 @@
 #!/usr/bin/env python3
-"""Render the lessons posture view as one self-contained HTML page.
-
-Orchestrator + view template. Calls the api layer (``serialize.build_view``),
-writes the standalone ``lessons.json`` contract, then bakes the same contract
-inline into ``lessons.html`` so the page opens in a browser with no server
-(the run-visualizer pattern). The view renders purely from the injected
-contract — it is the only coupling point to the backend.
-
-Visual language is reused from the run visualizer
-(``defender/scripts/visualize/visualize_run.py`` CSS tokens); HTML escaping +
-markdown rendering happen client-side in the injected template.
-
-Usage:
-    build.py            # write lessons.json + lessons.html
-"""
 from __future__ import annotations
 
 import json
@@ -23,25 +8,17 @@ from pathlib import Path
 HERE = Path(__file__).resolve()
 REPO_ROOT = HERE.parents[3]
 
-# Put the workspace root on sys.path so `defender.*` namespace imports resolve
-# whether this file is imported or run directly (see tests/conftest.py). Must
-# precede the shared import below (and the venv re-exec, when run as a script).
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from defender.scripts._venv import reexec_into_venv  # noqa: E402
 
-# Switch to defender/.venv (for PyYAML, via serialize) before importing serialize
-# so it imports cleanly under the venv. Gated on __main__ — build.py is only ever
-# a CLI entry point, never imported — so importing it never execs the caller away.
 if __name__ == "__main__":
     reexec_into_venv(__file__)
 
 from defender.learning.frontend import serialize  # noqa: E402
 from defender.scripts.visualize.visualize_run import CSS as RUN_CSS  # noqa: E402
 
-# Each group's left-accent reuses the run visualizer's stage palette:
-# defender=blue, actor=red, environment=amber (oracle).
 GROUP_STAGE = {"defender": "stage-defender", "actor": "stage-actor", "environment": "stage-oracle"}
 
 
@@ -250,13 +227,6 @@ document.getElementById("hide-stale").addEventListener("change", applyFilters);
 
 
 def render(view: dict) -> str:
-    # Replace every "<" with its JS unicode escape so no lesson body or
-    # metadata can close the inline <script> early: this covers all
-    # script-end variants ("</script ", "</SCRIPT>", "<!--", ...), not
-    # just the exact "</script>" literal the old code handled. The
-    # decoded JS string is byte-identical, since the escape evaluates
-    # back to "<". __LESSONS_JSON__ is substituted last so the CSS/stage
-    # payloads are never re-scanned for the marker.
     payload = json.dumps(view, ensure_ascii=False).replace("<", "\\u003c")
     return (
         PAGE.replace("__CSS__", RUN_CSS + LESSONS_CSS)

@@ -36,7 +36,6 @@ _DEFENDER = Path(__file__).resolve().parents[1]
 _SQL_PY = _DEFENDER / "scripts" / "gather_tools" / "sql.py"
 _JUDGE = _DEFENDER / "learning" / "pipeline" / "judge"
 
-# The one real, git-tracked gather_raw payload in the repo (the ES|QL shape).
 _REAL_ESQL = (
     _DEFENDER / "evals" / "scenarios_lead" / "underfold-sshd-narrowing"
     / "run" / "run-underfold-001" / "gather_raw" / "l-001" / "0.json"
@@ -57,9 +56,6 @@ def _rows(payload: str, query: str) -> list:
     return json.loads(proc.stdout)
 
 
-# ---------------------------------------------------------------------------
-# the four JSON shapes the judge will meet, with the idiom its prompt teaches
-# ---------------------------------------------------------------------------
 
 _ELASTIC = json.dumps({
     "index": "logs-*", "total": 9189, "returned": 3, "truncated": True,
@@ -85,7 +81,6 @@ def test_elastic_envelope_truncation_columns_are_readable():
     assert _rows(_ELASTIC, "SELECT total, returned, truncated FROM data") == [
         {"total": 9189, "returned": 3, "truncated": True},
     ]
-    # and the absence check itself returns 0 — which, WITH truncated=true, is not absence
     assert _rows(_ELASTIC, "SELECT count(*) AS n FROM (SELECT unnest(hits) h FROM data) WHERE h.user = 'mallory'") \
         == [{"n": 0}]
 
@@ -95,15 +90,11 @@ def test_the_dead_recipe_stays_dead():
     errors, because no adapter emits a `result` wrapper. Pinning the failure keeps anyone
     from reintroducing the recipe on the strength of the old docs."""
     proc = _sql(_ELASTIC, "SELECT count(*) FROM (SELECT unnest(result.hits) h FROM data)")
-    assert proc.returncode == 1  # EXIT_QUERY_ERROR: DuckDB rejected the SQL
-    # the error must be ABOUT the missing `result` wrapper, not some unrelated failure
+    assert proc.returncode == 1
     assert "Binder Error" in proc.stderr
     assert 'Referenced table "result" not found' in proc.stderr
 
 
-# Every authored surface that could re-teach the dead recipe. `test_judge_prompts_*`
-# below covers only the two prompts; the recipe originally survived precisely because
-# it was copied across several docs, so guard all of them at once.
 _IDIOM_SURFACES = (
     _DEFENDER / "scripts" / "gather_tools" / "sql.py",
     _DEFENDER / "skills" / "connect" / "adapter.md",
@@ -141,14 +132,13 @@ def test_esql_values_are_positional_json_not_a_struct():
     shape table must teach positional indexing + a JSON unwrap instead."""
     payload = _REAL_ESQL.read_text()
     doc = json.loads(payload)
-    field = doc["columns"][1]["name"]                       # a real ES|QL column name
+    field = doc["columns"][1]["name"]
 
     struct_idiom = _sql(payload, f"SELECT count(*) FROM (SELECT unnest(values) v FROM data) WHERE v.\"{field}\" = 'x'")
     assert struct_idiom.returncode == 1
     assert "not a struct" in struct_idiom.stderr
 
-    # what the prompt now teaches: 1-based positional index + `->>'$'` to unwrap the JSON
-    wanted = json.loads(json.dumps(doc["values"][0][1]))    # the real value at position 2
+    wanted = json.loads(json.dumps(doc["values"][0][1]))
     assert _rows(payload, f"SELECT count(*) AS n FROM (SELECT unnest(values) v FROM data) WHERE v[2]->>'$' = '{wanted}'") \
         == [{"n": 1}]
 
@@ -174,7 +164,6 @@ def test_truncation_probe_is_shape_specific_not_universal(shape):
     proc = _sql(payload, "SELECT total, returned, truncated FROM data")
     assert proc.returncode == 1
     assert "Binder Error" in proc.stderr
-    # DESCRIBE, by contrast, answers on every shape — which is why it goes first
     assert _rows(payload, "DESCRIBE data")
 
 
@@ -200,11 +189,6 @@ def test_bare_array_is_one_row_per_element():
     assert _rows(payload, "SELECT count(*) AS n FROM data WHERE user = 'alice'") == [{"n": 2}]
 
 
-# ---------------------------------------------------------------------------
-# reactive, payload-grounded guidance: the tool holds the payload the caller does
-# not, so the shape/idiom/truncation advice is emitted on the actual failure rather
-# than pre-taught in the prompt for every shape at once.
-# ---------------------------------------------------------------------------
 
 def test_query_error_on_hits_shape_hint_points_at_the_struct():
     """A wrong field on the search-hits shape: the error carries the idiom fix, naming the
@@ -215,7 +199,7 @@ def test_query_error_on_hits_shape_hint_points_at_the_struct():
     assert proc.returncode == 1
     assert "hint:" in proc.stderr
     assert "columns [total, returned, truncated, hits]" in proc.stderr
-    assert "unnest(hits) h FROM data LIMIT 1" in proc.stderr  # how to see the field names
+    assert "unnest(hits) h FROM data LIMIT 1" in proc.stderr
 
 
 def test_query_error_on_esql_shape_hint_gives_the_positional_map():
@@ -228,7 +212,6 @@ def test_query_error_on_esql_shape_hint_gives_the_positional_map():
                 "SELECT count(*) FROM (SELECT unnest(values) v FROM data) WHERE v.\"source.ip\" = 'x'")
     assert proc.returncode == 1
     assert "POSITIONAL JSON array" in proc.stderr
-    # the real column order, 1-based, is in the hint
     for i, col in enumerate(doc["columns"]):
         assert f"{i + 1}={col['name']}" in proc.stderr
 
@@ -247,7 +230,7 @@ def test_truncated_payload_warns_on_a_SUCCESSFUL_query():
     proc = _sql('{"total":9,"returned":1,"truncated":true,"hits":[{"user":"a"}]}',
                 "SELECT count(*) AS n FROM (SELECT unnest(hits) h FROM data) WHERE h.user = 'mallory'")
     assert proc.returncode == 0
-    assert json.loads(proc.stdout) == [{"n": 0}]     # the query still succeeds
+    assert json.loads(proc.stdout) == [{"n": 0}]
     assert "TRUNCATED" in proc.stderr
     assert "cannot support an absence refutation" in proc.stderr
 
@@ -261,9 +244,6 @@ def test_non_truncated_payload_emits_no_note():
     assert proc.stderr.strip() == ""
 
 
-# ---------------------------------------------------------------------------
-# the two NON-JSON shapes: loud failure, never a silent "absent"
-# ---------------------------------------------------------------------------
 
 def test_empty_payload_is_an_error_not_an_empty_result():
     """41/640 payloads are EMPTY files. `jq` exited 0 and printed nothing — which a refute
@@ -272,7 +252,6 @@ def test_empty_payload_is_an_error_not_an_empty_result():
     proc = _sql("", "SELECT count(*) FROM data")
     assert proc.returncode == 2
     assert "no input on stdin" in proc.stderr
-    # the message must SAY so — the judge reads this stderr and must not treat it as "0 rows"
     assert "NOT an empty result set" in proc.stderr
 
 
@@ -284,9 +263,6 @@ def test_markdown_payload_is_an_input_error():
     assert "not valid JSON" in proc.stderr
 
 
-# ---------------------------------------------------------------------------
-# drift guard: the prompts must teach an idiom that runs
-# ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("prompt", ["malicious.md", "benign.md"])
 def test_judge_prompts_teach_a_live_idiom(prompt):
@@ -297,12 +273,9 @@ def test_judge_prompts_teach_a_live_idiom(prompt):
     assert "unnest(hits)" in text
     assert "unnest(result.hits)" not in text
     assert "jq" not in text
-    assert "truncated" in text  # the absence-check guard
+    assert "truncated" in text
 
 
-# Every `cat … | defender-sql "…"` the prompts show, from fenced blocks and inline
-# backticks alike. Deliberately matches ANY operand, absolute or relative — a regex that
-# only found the absolute form would pass vacuously on exactly the bug it must catch.
 _PROMPT_CMD_RE = re.compile(r"cat \S+ \| defender-sql \"[^\"]*\"")
 
 
@@ -317,10 +290,6 @@ def test_every_command_the_prompt_teaches_passes_the_judges_own_gate(prompt):
     from defender.learning.pipeline.judge.engine_pydantic import JUDGE_DEF
     from defender.runtime.agent_definition import RunScope, compile_policy_for
 
-    # Through the REAL seam (#575): the judge's policy is compiled from its own def, and the
-    # prompts' `/abs/path` payloads reach it the way production's do — as a `read_roots` entry
-    # (gather_raw lives under the INVESTIGATION run dir, never the judge's own). Both legs compile
-    # the identical bash lane now (#672 moved the one benign-only grant off bash to a typed tool).
     root = Path("/abs/path")
     policy = compile_policy_for(
         JUDGE_DEF, Path("/run"), scope=RunScope(add_dirs=(root,)), defender_dir=_DEFENDER,

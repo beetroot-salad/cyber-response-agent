@@ -1,26 +1,3 @@
-"""Minimal CLI over the cross-case query helpers + advisory adapter.
-
-Primitive queries:
-  python -m defender.skills.invlang.cli <corpus_root> sequence [--contains S] [--disposition D] [--signature SIG]
-  python -m defender.skills.invlang.cli <corpus_root> hypotheses <pattern> [--final-weight W] [--disposition D] [--signature SIG]
-  python -m defender.skills.invlang.cli <corpus_root> branch-effects [--hyp PATTERN ...] [--min-support N]
-  python -m defender.skills.invlang.cli <corpus_root> hypothesis-vocabulary --signature SIG [--top-k N] [--json]
-  python -m defender.skills.invlang.cli <corpus_root> hypothesis-shape [--parent-type T] [--parent-class CLASS] [--rel R] [--attached-to-type T] [--json]
-
-Composed PLAN-time advisory recall:
-  python -m defender.skills.invlang.cli <corpus_root> advisory --signature SIG [--frontier ?H ...] [--class C ...] [--top-k 3] [--json]
-
-Controlled-vocabulary lookup (no corpus needed):
-  python -m defender.skills.invlang.cli <corpus_root> enum            # list slot names
-  python -m defender.skills.invlang.cli <corpus_root> enum <slot>      # list values for a slot (e.g. types, relations, compute.role)
-  python -m defender.skills.invlang.cli <corpus_root> enum [<slot>] --json
-
-Primitives emit JSON; `advisory` emits rendered markdown by default with
-a `--json` toggle for the harness. `hypothesis-vocabulary` and
-`hypothesis-shape` emit markdown by default with a `--json` toggle.
-`enum` emits plain newline-delimited values by default with a `--json`
-toggle.
-"""
 
 from __future__ import annotations
 
@@ -41,8 +18,6 @@ from .queries import (
 )
 from . import vocab
 
-# Weight buckets best -> worst with the unassessed (None) bucket keyed "null",
-# derived from the vocab ladder so the shape-lookup histogram order can't drift.
 _WEIGHT_DISPLAY: tuple[str, ...] = tuple(
     b if b is not None else "null"
     for b in sorted(vocab.WEIGHT_ORDER, key=lambda w: vocab.WEIGHT_ORDER[w], reverse=True)
@@ -164,8 +139,6 @@ def _handle_enum_cmd(args) -> int:
 
 
 def _handle_advisory_cmd(args) -> int:
-    # The adapter does its own (cached) corpus load + telemetry; skip
-    # the upfront load + summary print so its own banner isn't shadowed.
     result = advisory_recall(
         args.corpus_root,
         signature_id=args.signature,
@@ -179,11 +152,6 @@ def _handle_advisory_cmd(args) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    # The corpus is model-authored and carries non-ASCII (em-dashes in hypothesis names, `≥` in
-    # the advisory render), and the renderer subcommands stream it straight to stdout. Pinning the
-    # READ without pinning the WRITE just moves the ascii crash from `read_text` to `print` — the
-    # #586 finding, one skill over. (The `--json` paths are already safe by `ensure_ascii=True`,
-    # which is exactly why a C-locale test has to drive a *renderer* subcommand to prove anything.)
     use_utf8_stdio()
     args = _build_parser().parse_args(argv)
 
@@ -270,11 +238,6 @@ def _handle_hypothesis_shape_cmd(args, corpus) -> int:
 
 
 def _hypothesis_vocabulary(corpus, signature_id: str, top_k: int) -> dict:
-    """Aggregate unique ?hypothesis names for one signature.
-
-    Returns {signature, n_cases, vocabulary: [{name, count, example_case_id}]}.
-    Sorted by count desc, then alphabetical.
-    """
     from collections import Counter
 
     counts: Counter[str] = Counter()

@@ -33,7 +33,6 @@ def test_names_all_three_lesson_corpora():
     assert lesson_name("/repo/defender/lessons/a.md") == "a"
     assert lesson_name("/repo/defender/lessons-actor/x.md") == "x"
     assert lesson_name("/repo/defender/lessons-environment/y.md") == "y"
-    # The exported frozenset itself — `learning/author/lesson_read.py` imports it.
     assert sorted(LESSON_CORPORA) == ["lessons", "lessons-actor", "lessons-environment"]
 
 
@@ -55,8 +54,8 @@ def test_runtime_corpora_narrows_to_the_defender_lessons():
 
 
 def test_ignores_nested_and_non_md():
-    assert lesson_name("/repo/defender/lessons/sub/z.md") is None    # nested, parent != lessons
-    assert lesson_name("/repo/defender/lessons/readme.txt") is None  # non-md
+    assert lesson_name("/repo/defender/lessons/sub/z.md") is None
+    assert lesson_name("/repo/defender/lessons/readme.txt") is None
 
 
 def test_ignores_a_corpus_dir_not_under_defender():

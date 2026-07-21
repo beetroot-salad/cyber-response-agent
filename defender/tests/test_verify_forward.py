@@ -8,8 +8,6 @@ import pytest
 
 
 HERE = Path(__file__).resolve().parent
-# Workspace root (parent of ``defender/``) so a freshly-spawned subprocess can
-# ``import defender.*``; in a worktree this is the worktree root (#425).
 _WS_ROOT = HERE.parents[1]
 
 from defender.learning.author.verify_forward import forward as vf  # type: ignore[import-not-found]
@@ -66,27 +64,18 @@ def test_load_run_context_missing_disposition(tmp_path, monkeypatch):
 
 
 def test_data_section_builds_labeled_block():
-    # The verify CLIs build the DATA-only user message from these blocks (instructions ride
-    # in the .md system prompt). `LABEL:\n\n<body>`, body stripped.
     assert vfs.data_section("CASE TRANSCRIPT (raw)", "the transcript\n") == (
         "CASE TRANSCRIPT (raw):\n\nthe transcript"
     )
 
 
 def test_data_section_body_placeholder_is_inert():
-    # Single f-string interpolation: a body containing a literal `{other}` is NOT
-    # re-substituted (the multi-pass str.replace footgun the old render_prompt had).
     assert vfs.data_section("CANDIDATE LESSON", "route to {transcript}") == (
         "CANDIDATE LESSON:\n\nroute to {transcript}"
     )
 
 
 def test_prompt_files_are_instructions_only():
-    # Payload-shape regression pin for the dual-prompt bug: actor.md / forward.md are the
-    # SYSTEM prompt (instructions only). The case data rides in the user message, built via
-    # `section`. A `{placeholder}` left in the .md would mean the raw template is being handed
-    # in AS the system prompt with unsubstituted braces — instructions duplicated across
-    # system+user, garbage `{story}`/`{lesson}` in the system copy.
     import re
     for name in ("actor.md", "forward.md"):
         text = (vf.HERE / name).read_text()
@@ -99,21 +88,12 @@ def test_expected_disposition_direction_aware():
     the recorded disposition. A benign (FP) lesson is authored off a `malicious` source
     it exists to CORRECT toward benign, so the target is `benign` — never the recorded
     `malicious` (which would mark every de-escalation lesson BAD and hold the FP path)."""
-    # Real data flow: the author gate (`_has_confident_ground_truth`) holds any
-    # `inconclusive`-source finding before the forward-check runs, so production only
-    # ever calls this with a `benign`/`malicious` recorded disposition.
     assert vf.expected_disposition("adversarial", "benign") == "benign"
     assert vf.expected_disposition("benign", "malicious") == "benign"
-    # The `inconclusive` rows below are defensive domain-completeness checks (the
-    # function is total over the disposition enum), NOT a reachable production path —
-    # they pin that a future change keeps the pure function well-defined, nothing more.
     assert vf.expected_disposition("adversarial", "inconclusive") == "inconclusive"
     assert vf.expected_disposition("benign", "inconclusive") == "benign"
 
 
-# ---------------------------------------------------------------------------
-# Cited covering policy loading (#338, benign forward-check)
-# ---------------------------------------------------------------------------
 
 
 def test_cited_case_ids_parses_menu(tmp_path, monkeypatch):
@@ -147,7 +127,6 @@ def test_load_cited_policy_neutral_when_unreachable(tmp_path, monkeypatch):
     runs = tmp_path / "runs"
     (runs / "run-B").mkdir(parents=True)
     (runs / "run-B" / "past_tickets.txt").write_text("- case-OLD1: benign — scan\n")
-    # store down: fetch returns None for every cited case
     out = vf.load_cited_policy("run-B", runs_dir=runs, fetch_fn=lambda cid: None)
     assert out == vf._NO_CITED_POLICY
 
@@ -158,19 +137,13 @@ def test_load_cited_policy_neutral_when_no_menu(tmp_path, monkeypatch):
     assert vf.load_cited_policy("run-B", runs_dir=runs) == vf._NO_CITED_POLICY
 
 
-# ---------------------------------------------------------------------------
-# load_observation — reads the pending queue tolerantly (#446)
-# ---------------------------------------------------------------------------
 
 
 def test_load_observation_skips_torn_line(tmp_path):
-    # A torn line (interrupted append) before the target row must be
-    # skipped, not raised — load_observation reads via the shared tolerant
-    # reader, so a half-written record never crashes the forward-check (#446).
     pending = tmp_path / "actor_observations.jsonl"
     pending.write_text(
-        '{"observation_id": "torn"'  # torn: no closing brace
-        + "\n\n"  # + a blank line
+        '{"observation_id": "torn"'
+        + "\n\n"
         + json.dumps({"observation_id": "o-2", "v": 7}) + "\n"
     )
     row = vfs.load_observation("o-2", pending, error_prefix=_PREFIX)
@@ -189,29 +162,5 @@ def test_load_observation_missing_id_raises(tmp_path):
         vfs.load_observation("o-9", pending, error_prefix=_PREFIX)
 
 
-# ---------------------------------------------------------------------------
-# (#558) The three subprocess `-c` state-root cases that used to live here —
-# test_forward_resolves_bundle_off_state_root / test_actor_resolves_story_and
-# _pending_off_state_root / test_env_case_entities_off_state_root — proved the
-# verifier MODULES import + resolve their bundle under a bare interpreter. That
-# constraint dies with the subprocess: the forward-check is now an in-process
-# @agent.tool that reads the bundle/pending/corpus off `CuratorDeps` (demands
-# d16/d17/d20 in spec_graph_558-forward-check-tool.yaml). The pure helpers those
-# cases exercised stay importable and behave unchanged — pinned by
-# test_forward_check_tool.py::test_m9_verify_forward_helpers_survive_as_a_library
-# (and the parser/context tests above). Deleted, not migrated in place.
-# ---------------------------------------------------------------------------
 
 
-# ---------------------------------------------------------------------------
-# (#558) The batch.py confused-deputy cases that used to live here — the
-# `resolve_check_script` / `batch_main_refuses_to_execute_an_arbitrary_script`
-# pins #565 added — die with `batch.py` itself. They guarded a driver whose first
-# positional was a script path it executed, reachable because the curator's bash
-# allowlist can only pin a program token, not its operands. The forward-check is an
-# in-process @agent.tool now: the check is bound onto the curator's deps at spawn, so
-# there is no script operand to pin. Pinned instead by
-# test_forward_check_tool.py::test_d3_no_program_operand_negative (the tool's schema
-# admits no program of the model's choosing) and ::test_d25_no_bash_grant_for_the_verifier
-# (the curator's bash allowlist admits no python interpreter at all).
-# ---------------------------------------------------------------------------

@@ -43,13 +43,10 @@ def _load_trace_lesson():
     spec = importlib.util.spec_from_file_location("trace_lesson_586", TL_PATH)
     mod = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
-    sys.modules[spec.name] = mod  # @dataclass resolves cls.__module__ through sys.modules
+    sys.modules[spec.name] = mod
     spec.loader.exec_module(mod)
     return mod
 
-# The locale that makes the ambient-encoding bug observable. CPython >=3.7 COERCES a bare C locale
-# to C.UTF-8 (PEP 538) and would hide it, so coercion and UTF-8 mode are both disabled — exactly
-# what #584's own d5 test does to drive the read side.
 _C_LOCALE_ENV = {
     "PATH": "/usr/bin:/bin",
     "PYTHONCOERCECLOCALE": "0",
@@ -111,7 +108,7 @@ def test_the_real_lessons_cli_survives_a_c_locale_over_the_real_corpus(tmp_path)
 
     assert proc.returncode == 0, f"defender-lessons died under a C locale:\n{proc.stderr}"
     assert "Traceback" not in proc.stderr
-    assert proc.stdout.count("\n") > 1  # it listed a corpus, it did not stop at the first em-dash
+    assert proc.stdout.count("\n") > 1
 
 
 def test_the_curator_preflight_tolerates_what_the_walk_tolerates(tmp_path, capsys):
@@ -125,10 +122,10 @@ def test_the_curator_preflight_tolerates_what_the_walk_tolerates(tmp_path, capsy
     (d / "good.md").write_text("---\nname: good\nsource_observation_ids: [o-1]\n---\nbody\n")
     (d / "dangling.md").symlink_to(d / "never-existed.md")
 
-    ids = existing_observation_ids(d)  # must not raise
+    ids = existing_observation_ids(d)
 
-    assert ids == {"o-1"}  # the well-formed sibling still contributes its id
-    assert [lesson.path.name for lesson in iter_lessons(d)] == ["good.md"]  # walk agrees
+    assert ids == {"o-1"}
+    assert [lesson.path.name for lesson in iter_lessons(d)] == ["good.md"]
 
 
 def test_the_discovery_rule_has_one_definition(tmp_path):
@@ -143,17 +140,16 @@ def test_the_discovery_rule_has_one_definition(tmp_path):
     d.mkdir()
     (d / "b.md").write_text("---\nname: b\n---\nbody\n")
     (d / "a.md").write_text("---\nname: a\n---\nbody\n")
-    (d / "_TEMPLATE.md").write_text("---\nname: t\n---\nbody\n")  # underscore → skipped
-    (d / "notes.txt").write_text("not markdown")  # non-.md → skipped
-    (d / "unfenced.md").write_text("no fence")  # DISCOVERED, but unparseable
+    (d / "_TEMPLATE.md").write_text("---\nname: t\n---\nbody\n")
+    (d / "notes.txt").write_text("not markdown")
+    (d / "unfenced.md").write_text("no fence")
 
     discovered = iter_lesson_paths(d)
 
-    assert [p.name for p in discovered] == ["a.md", "b.md", "unfenced.md"]  # sorted, `_`/non-md out
-    # Discovery is a superset of the walk by exactly the malformed members — never the reverse.
+    assert [p.name for p in discovered] == ["a.md", "b.md", "unfenced.md"]
     walked = {lesson.path for lesson in iter_lessons(d)}
     assert walked < set(discovered)
-    assert iter_lesson_paths(d / "does-not-exist") == []  # a missing corpus is empty, not an error
+    assert iter_lesson_paths(d / "does-not-exist") == []
 
 
 def test_on_skip_receives_exactly_the_warn_skipped_paths(tmp_path, capsys):
@@ -165,16 +161,16 @@ def test_on_skip_receives_exactly_the_warn_skipped_paths(tmp_path, capsys):
     d = tmp_path / "lessons"
     d.mkdir()
     (d / "good.md").write_text("---\nname: good\n---\nbody\n")
-    (d / "unfenced.md").write_text("no fence")  # discovered, unparseable → skipped
-    (d / "undecodable.md").write_bytes(b"---\nname: u\n---\n\xff")  # discovered, unreadable → skipped
-    (d / "_TEMPLATE.md").write_text("no fence either")  # excluded by discovery → NOT a skip
+    (d / "unfenced.md").write_text("no fence")
+    (d / "undecodable.md").write_bytes(b"---\nname: u\n---\n\xff")
+    (d / "_TEMPLATE.md").write_text("no fence either")
 
     skipped: list[Path] = []
     yielded = [lesson.path.name for lesson in iter_lessons(d, on_skip=skipped.append)]
 
     assert yielded == ["good.md"]
-    assert [p.name for p in skipped] == ["undecodable.md", "unfenced.md"]  # walk (sorted) order
-    assert "_TEMPLATE" not in capsys.readouterr().err  # excluded-by-discovery is not "skipped"
+    assert [p.name for p in skipped] == ["undecodable.md", "unfenced.md"]
+    assert "_TEMPLATE" not in capsys.readouterr().err
 
 
 def test_lesson_raw_is_the_slice_the_parser_consumed(tmp_path):
@@ -189,14 +185,14 @@ def test_lesson_raw_is_the_slice_the_parser_consumed(tmp_path):
     text = "---\nname: x\ndescription: d\n---\n\nbody --- with a fence-like line\n"
     fm, raw, body = split_frontmatter(text)
 
-    assert raw == "name: x\ndescription: d"  # exactly between the fences
-    assert "body" not in raw  # the grep surface cannot see the body
-    assert (fm, body) == parse_frontmatter(text)  # the 2-value view is the same parse
+    assert raw == "name: x\ndescription: d"
+    assert "body" not in raw
+    assert (fm, body) == parse_frontmatter(text)
 
     (corpus := tmp_path / "lessons").mkdir()
     (corpus / "x.md").write_text(text)
     lesson = next(iter(iter_lessons(corpus)))
-    assert lesson.raw == raw  # the walk yields the parser's slice, not its own
+    assert lesson.raw == raw
 
 
 def test_all_windows_each_count_on_the_lessons_created_at(tmp_path, capsys):
@@ -223,13 +219,11 @@ def test_all_windows_each_count_on_the_lessons_created_at(tmp_path, capsys):
     )
     runs = tmp_path / "runs"
     runs.mkdir()
-    # the PREVIOUS incarnation's load — before created_at, must NOT be counted
     _mk_run(runs, "caseOld", disposition="benign",
             loads=[{"lesson_name": "rewritten", "ts": "2026-06-01T00:00:00+00:00"}])
-    # the current incarnation's load — after created_at, must be counted
     _mk_run(runs, "caseNew", disposition="malicious",
             loads=[{"lesson_name": "rewritten", "ts": "2026-06-05T00:00:00+00:00"}])
 
     assert tl.main(["--all", "--lessons-dir", str(corpus), "--runs-dir", str(runs)]) == 0
 
-    assert capsys.readouterr().out.splitlines() == ["rewritten\td\t1"]  # 1, not 2
+    assert capsys.readouterr().out.splitlines() == ["rewritten\td\t1"]

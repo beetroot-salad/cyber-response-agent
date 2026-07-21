@@ -1,29 +1,8 @@
-"""Threat-intel stub adapter — the `threat-intel` VERBS registry.
-
-Wraps the v2 playground threat-intel stub (VT/OTX-shaped offline
-reputation lookup).
-
-IMPORTANT semantics:
-    `/lookup/{value}` never 404s. A miss returns
-    {"value": <q>, "verdict": "unknown", "score": 0, ...}.
-    Treat `verdict: unknown` as *absence of signal*, never as
-    refutation of a hypothesis.
-
-Verbs (`VERBS` is the whole model-facing surface — there is no CLI):
-    health-check
-    lookup            value
-    list-indicators   [verdict] [type] [tag]
-
-Faults (`faults.py`): ConfigFault/TransportFault = infra (2), UpstreamFault = query
-error (1, carrying the stub's own `detail`).
-"""
 
 from __future__ import annotations
 
 import urllib.parse
 
-# Put the workspace root on sys.path so `defender.*` namespace imports resolve when the
-# verb registry loads this module BY PATH (see cmdb_adapter.py).
 import sys as _sys
 from pathlib import Path as _Path
 
@@ -39,9 +18,6 @@ PREFIX = "THREAT_INTEL"
 VERDICTS = ("benign", "suspicious", "malicious", "unknown")
 
 
-# Same name in each stub adapter, closing over that module's SYSTEM/PREFIX: the shared
-# body already lives once in `transport.load_config`, so this is a zero-argument alias,
-# not a copy of any logic.
 def _config(ctx: VerbContext) -> dict[str, str]:  # lint-dup: ok — per-module alias over the shared transport.load_config
     return transport.load_config(ctx, SYSTEM, PREFIX)
 
@@ -51,7 +27,6 @@ def health_check(ctx: VerbContext) -> dict:
 
 
 def lookup(ctx: VerbContext, *, value: str) -> dict:
-    # /lookup/{value:path} — the value may contain dots/colons; quote it.
     quoted = urllib.parse.quote(value, safe="")
     return transport.http_get_obj(ctx, _config(ctx), f"/lookup/{quoted}")
 
@@ -65,8 +40,6 @@ def list_indicators(
 ) -> dict | list:
     params: dict[str, str] = {}
     if verdict:
-        # The CLI enforced this with argparse `choices`; a verb has no argparse, so the
-        # closed enum is checked here, and a bad value is the agent's to fix (exit 1).
         if verdict not in VERDICTS:
             raise UpstreamFault(
                 f"unknown verdict {verdict!r} — threat-intel verdicts are {list(VERDICTS)}."

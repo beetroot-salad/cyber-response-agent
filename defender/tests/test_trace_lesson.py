@@ -14,8 +14,6 @@ def _load():
     spec = importlib.util.spec_from_file_location("trace_lesson", TL_PATH)
     mod = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
-    # Register before exec so the @dataclass decorators can resolve cls.__module__
-    # (dataclasses reads sys.modules[cls.__module__] under `from __future__ annotations`).
     sys.modules[spec.name] = mod
     spec.loader.exec_module(mod)
     return mod
@@ -37,11 +35,11 @@ def test_in_context_cases_windows_on_created_at(tmp_path):
     runs.mkdir()
     created = datetime(2026, 6, 4, tzinfo=UTC)
     _mk_run(runs, "caseA", disposition="benign",
-            loads=[{"lesson_name": "L", "ts": "2026-06-05T00:00:00+00:00"}])  # after → counted
+            loads=[{"lesson_name": "L", "ts": "2026-06-05T00:00:00+00:00"}])
     _mk_run(runs, "caseB", disposition="malicious",
-            loads=[{"lesson_name": "L", "ts": "2026-06-01T00:00:00+00:00"}])  # before → excluded
+            loads=[{"lesson_name": "L", "ts": "2026-06-01T00:00:00+00:00"}])
     _mk_run(runs, "caseC", disposition="benign",
-            loads=[{"lesson_name": "OTHER", "ts": "2026-06-06T00:00:00+00:00"}])  # other lesson
+            loads=[{"lesson_name": "OTHER", "ts": "2026-06-06T00:00:00+00:00"}])
     hits = tl.in_context_cases("L", created, runs)
     assert [(h.case_id, h.disposition) for h in hits] == [("caseA", "benign")]
 
@@ -68,8 +66,8 @@ def test_earliest_load_is_chronological_not_lexicographic(tmp_path):
     runs = tmp_path / "runs"
     runs.mkdir()
     _mk_run(runs, "caseA", disposition="benign", loads=[
-        {"lesson_name": "L", "ts": "2026-06-05T00:00:00+00:00"},  # later instant, sorts first
-        {"lesson_name": "L", "ts": "2026-06-05T08:00:00+09:00"},  # = 2026-06-04T23:00Z, earlier
+        {"lesson_name": "L", "ts": "2026-06-05T00:00:00+00:00"},
+        {"lesson_name": "L", "ts": "2026-06-05T08:00:00+09:00"},
     ])
     hits = tl.in_context_cases("L", None, runs)
     assert [h.loaded_at for h in hits] == ["2026-06-05T08:00:00+09:00"]
@@ -79,7 +77,6 @@ def test_all_flattens_tab_and_newline_in_description(tmp_path, capsys):
     """The description column is LLM-authored; a tab or newline in it would forge a column
     or split the row, so the TSV flattens both (the ``lessons_fm._emit_match`` idiom)."""
     tl = _load()
-    # created_at keeps the row windowed/unmarked — this test's subject is the flatten (#596).
     _mk_lesson(tmp_path / "lessons", "L",
                body_frontmatter='name: L\ndescription: "a\\tb\\nc"\ncreated_at: 2026-06-04')
     runs = tmp_path / "runs"
@@ -88,7 +85,7 @@ def test_all_flattens_tab_and_newline_in_description(tmp_path, capsys):
     rc = tl.main(["--all", "--lessons-dir", str(tmp_path / "lessons"), "--runs-dir", str(runs)])
     assert rc == 0
     lines = capsys.readouterr().out.splitlines()
-    assert lines == ["L\ta b c\t0"]  # one row, three columns
+    assert lines == ["L\ta b c\t0"]
 
 
 def test_in_context_cases_missing_runs_dir_is_empty(tmp_path):
@@ -105,14 +102,13 @@ def _mk_lesson(lessons: Path, stem: str, *, body_frontmatter: str) -> Path:
 
 def test_parse_dt_normalizes_to_aware():
     tl = _load()
-    naive = tl._parse_dt("2026-06-04T00:00:00")        # ISO string, no offset
+    naive = tl._parse_dt("2026-06-04T00:00:00")
     assert naive is not None
     assert naive.tzinfo is not None
     assert tl._parse_dt(date(2026, 6, 4)) == datetime(2026, 6, 4, tzinfo=UTC)
     assert tl._parse_dt("2026-06-04T00:00:00Z").tzinfo is not None
-    # naive datetime (PyYAML for a tz-less timestamp) → aware UTC
     assert tl._parse_dt(datetime(2026, 6, 4)).tzinfo is not None
-    assert tl._parse_dt(123) is None                   # unsupported type
+    assert tl._parse_dt(123) is None
 
 
 def _case_ids(out: str) -> list[str]:
@@ -140,7 +136,7 @@ def test_naive_created_at_does_not_crash_trace(tmp_path, capsys):
 
     rc = tl.main(["L", "--lessons-dir", str(tmp_path / "lessons"), "--runs-dir", str(runs)])
     out = capsys.readouterr().out
-    assert rc == 0  # must not raise TypeError on the naive/aware comparison
+    assert rc == 0
     assert _case_ids(out) == ["caseA"]
     assert "caseA\tbenign" in out
 
@@ -159,9 +155,9 @@ def test_bare_date_created_at_windows_correctly(tmp_path, capsys):
     runs = tmp_path / "runs"
     runs.mkdir()
     _mk_run(runs, "before", disposition="benign",
-            loads=[{"lesson_name": "L", "ts": "2026-06-01T00:00:00+00:00"}])  # excluded
+            loads=[{"lesson_name": "L", "ts": "2026-06-01T00:00:00+00:00"}])
     _mk_run(runs, "after", disposition="benign",
-            loads=[{"lesson_name": "L", "ts": "2026-06-05T00:00:00+00:00"}])  # counted
+            loads=[{"lesson_name": "L", "ts": "2026-06-05T00:00:00+00:00"}])
 
     rc = tl.main(["L", "--lessons-dir", str(tmp_path / "lessons"), "--runs-dir", str(runs)])
     assert rc == 0
@@ -181,7 +177,7 @@ def test_lesson_identity_is_stem_not_frontmatter_name(tmp_path, capsys):
     tl = _load()
     _mk_lesson(
         tmp_path / "lessons", "foo-bar",
-        body_frontmatter="name: foo_bar\ndescription: d",  # frontmatter name != stem
+        body_frontmatter="name: foo_bar\ndescription: d",
     )
     runs = tmp_path / "runs"
     runs.mkdir()
@@ -191,13 +187,10 @@ def test_lesson_identity_is_stem_not_frontmatter_name(tmp_path, capsys):
     rc = tl.main(["foo-bar", "--lessons-dir", str(tmp_path / "lessons"), "--runs-dir", str(runs)])
     out = capsys.readouterr().out
     assert rc == 0
-    assert out.startswith("# foo-bar")  # the stem, not the frontmatter "foo_bar"
+    assert out.startswith("# foo-bar")
     assert _case_ids(out) == ["caseA"]
 
 
-# ---------------------------------------------------------------------------
-# #595 — one undecodable report.md costs one row's disposition, not the audit
-# ---------------------------------------------------------------------------
 
 
 def test_undecodable_report_degrades_to_unknown_disposition(tmp_path, capsys):
@@ -216,7 +209,6 @@ def test_undecodable_report_degrades_to_unknown_disposition(tmp_path, capsys):
 
     hits = tl.in_context_cases("L", None, runs)
     err = capsys.readouterr().err
-    # the broken report costs its own row's disposition; the healthy sibling is untouched
     assert [(h.case_id, h.disposition) for h in hits] == [("caseA", "?"), ("caseB", "malicious")]
     assert "caseA/report.md" in err
 
@@ -225,7 +217,6 @@ def test_all_survives_undecodable_report(tmp_path, capsys):
     """The same property at the seam a user drives: ``--all`` over a runs dir containing an
     undecodable report exits 0 and still prints every lesson's row."""
     tl = _load()
-    # created_at keeps the row windowed/unmarked — this test's subject is read survival (#596).
     _mk_lesson(tmp_path / "lessons", "L",
                body_frontmatter="name: L\ndescription: d\ncreated_at: 2026-06-04")
     runs = tmp_path / "runs"
@@ -239,9 +230,6 @@ def test_all_survives_undecodable_report(tmp_path, capsys):
     assert "L\td\t1" in capsys.readouterr().out.splitlines()
 
 
-# ---------------------------------------------------------------------------
-# #590 — a malformed lesson keeps its audit row (marker), on both output paths
-# ---------------------------------------------------------------------------
 
 
 def test_all_marks_malformed_lesson_instead_of_dropping_it(tmp_path, capsys):
@@ -251,7 +239,6 @@ def test_all_marks_malformed_lesson_instead_of_dropping_it(tmp_path, capsys):
     marker's count is unwindowed (no parseable ``created_at``), and the row says so."""
     tl = _load()
     lessons = tmp_path / "lessons"
-    # created_at keeps the healthy row unmarked — this test's subject is the #590 marker.
     _mk_lesson(lessons, "ok", body_frontmatter="name: ok\ndescription: fine\ncreated_at: 2026-06-04")
     (lessons / "broken.md").write_text("---\ndescription: [unclosed\n---\nbody\n")
     runs = tmp_path / "runs"
@@ -267,7 +254,7 @@ def test_all_marks_malformed_lesson_instead_of_dropping_it(tmp_path, capsys):
     lines = cap.out.splitlines()
     assert "ok\tfine\t1" in lines
     assert "broken\t(malformed lesson — unwindowed count)\t1" in lines
-    assert "skipping broken.md" in cap.err  # the walk's warning still fires
+    assert "skipping broken.md" in cap.err
 
 
 def test_all_marker_pass_inherits_the_discovery_rule(tmp_path, capsys):
@@ -275,7 +262,6 @@ def test_all_marker_pass_inherits_the_discovery_rule(tmp_path, capsys):
     ``_``-prefixed draft is not a "skipped lesson" and gets no marker row."""
     tl = _load()
     lessons = tmp_path / "lessons"
-    # created_at keeps the row unmarked — this test's subject is the discovery rule.
     _mk_lesson(lessons, "ok", body_frontmatter="name: ok\ndescription: fine\ncreated_at: 2026-06-04")
     (lessons / "_draft.md").write_text("not a lesson\n")
     runs = tmp_path / "runs"
@@ -322,7 +308,7 @@ def test_named_path_warns_unwindowed_on_unparseable_created_at(tmp_path, capsys)
     rc = tl.main(["L", "--lessons-dir", str(tmp_path / "lessons"), "--runs-dir", str(runs)])
     cap = capsys.readouterr()
     assert rc == 0
-    assert _case_ids(cap.out) == ["caseA"]  # still traces — unwindowed, not refused
+    assert _case_ids(cap.out) == ["caseA"]
     assert "trace is unwindowed" in cap.err
 
 

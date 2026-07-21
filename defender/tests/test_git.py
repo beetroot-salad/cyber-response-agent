@@ -40,7 +40,6 @@ def test_git_raises_giterror_with_context_on_failure(tmp_path):
 
 def test_git_check_false_swallows_nonzero(tmp_path):
     repo = _repo(tmp_path)
-    # An unknown rev with --quiet prints nothing and exits nonzero; check=False → "".
     assert _git.git(["rev-parse", "--verify", "--quiet", "nope"], cwd=repo, check=False) == ""
 
 
@@ -64,13 +63,11 @@ def test_git_status_survives_non_utf8_path(tmp_path):
     raw, unquoted path bytes, so a strict decode would ``UnicodeDecodeError``). It is
     surrogate-escaped and surfaces as an out-of-corpus record the scope gate quarantines."""
     repo = _repo(tmp_path)
-    # Write a file whose *name* carries the raw byte 0xff (invalid UTF-8) — a bytes path, so
-    # the filesystem stores the byte verbatim rather than re-encoding a decoded str to UTF-8.
     with open(os.path.join(os.fsencode(repo), b"stray-\xff.md"), "wb") as f:
         f.write(b"x\n")
-    records = _git.git_status(repo)  # must not raise
+    records = _git.git_status(repo)
     strays = [p for xy, p in records if xy == "??"]
-    assert strays == ["stray-\udcff.md"]  # raw byte round-tripped via surrogateescape
+    assert strays == ["stray-\udcff.md"]
 
 
 def test_git_status_pathspec_scopes(tmp_path):
@@ -80,14 +77,13 @@ def test_git_status_pathspec_scopes(tmp_path):
     (sub / "x.md").write_text("x\n")
     (repo / "top.md").write_text("y\n")
     scoped = [p for _xy, p in _git.git_status(repo, pathspec=sub)]
-    assert scoped == ["sub/x.md"]  # top.md excluded by the pathspec
+    assert scoped == ["sub/x.md"]
 
 
 def test_git_head_sha_and_rev_list_count(tmp_path):
     repo = _repo(tmp_path)
     assert len(_git.git_head_sha(repo)) == 40
     assert _git.git_rev_list_count(repo) == 1
-    # a grep that matches nothing → 0
     assert _git.git_rev_list_count(repo, grep="^Nonexistent-Trailer:") == 0
 
 
@@ -96,13 +92,13 @@ def test_git_commit_pathspec_scoped_and_trailers(tmp_path):
     (repo / "corpus").mkdir()
     (repo / "corpus" / "lesson.md").write_text("body\n")
     (repo / "stray.txt").write_text("stray\n")
-    _git.git(["add", "stray.txt"], cwd=repo)  # staged outside the pathspec
+    _git.git(["add", "stray.txt"], cwd=repo)
     sha = _git.git_commit(
         repo, repo / "corpus", "batch", trailers=[("Generation", "3")]
     )
     assert sha == _git.git_head_sha(repo)
     files = _git.git(["show", "--name-only", "--pretty=format:", "HEAD"], cwd=repo).split()
-    assert files == ["corpus/lesson.md"]  # stray.txt did NOT ride along
+    assert files == ["corpus/lesson.md"]
     assert "Generation: 3" in _git.git(["log", "-1", "--pretty=%B", "HEAD"], cwd=repo)
 
 
@@ -147,10 +143,10 @@ def test_git_push_sets_upstream(tmp_path):
     _git.git(["add", "-A"], cwd=work)
     _git.git(["commit", "-q", "-m", "feat"], cwd=work)
     _git.git_push(work, "feature/x")
-    assert _git.git(["ls-remote", "--heads", "origin", "feature/x"], cwd=work)  # reached origin
+    assert _git.git(["ls-remote", "--heads", "origin", "feature/x"], cwd=work)
     assert (
         _git.git(["rev-parse", "--abbrev-ref", "feature/x@{upstream}"], cwd=work)
-        == "origin/feature/x"  # upstream was set
+        == "origin/feature/x"
     )
 
 
@@ -164,5 +160,5 @@ def test_git_fetch_advances_tracking_ref(tmp_path):
     _git.git(["add", "-A"], cwd=other)
     _git.git(["commit", "-q", "-m", "second"], cwd=other)
     _git.git(["push", "-q", "origin", "main"], cwd=other)
-    _git.git_fetch(work)  # work's origin/main should now point at the other clone's HEAD
+    _git.git_fetch(work)
     assert _git.git(["rev-parse", "origin/main"], cwd=work) == _git.git_head_sha(other)

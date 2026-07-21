@@ -28,7 +28,7 @@ Five threat classes are addressed, in priority order:
 ### Out of scope (current MVP)
 
 - **Denial of service** (alert flooding) — deferred to SIEM-level rate limiting.
-- **Reproduction escape** — reproduction sandbox not yet implemented. Design in `docs/design-v3-reproduction.md`.
+- **Reproduction escape** — reproduction sandbox not yet implemented. Design in `docs/archive/design-v3-reproduction.md`.
 - **Act mode abuse** — MVP is recommend-only. Mitigation actions gated by `permissions.yaml` when implemented.
 
 ## Defense Layers

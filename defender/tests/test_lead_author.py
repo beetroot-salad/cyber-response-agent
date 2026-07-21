@@ -40,9 +40,6 @@ def _executed_lead(**kw):
     return lead_author.ExecutedLead(**base)
 
 
-# ---------------------------------------------------------------------------
-# Fixtures — write the two live tables (leads sidecar + queries ledger)
-# ---------------------------------------------------------------------------
 
 
 def _write_lead_meta(run_dir: Path, lead_id: str, goal: str, wts=()) -> None:
@@ -126,9 +123,6 @@ def catalog(tmp_path: Path) -> Path:
     return cat
 
 
-# ---------------------------------------------------------------------------
-# extract()
-# ---------------------------------------------------------------------------
 
 
 def test_extract_single_query_per_entry(run_dir: Path):
@@ -163,14 +157,12 @@ def test_extract_multi_query_fans_out(run_dir: Path):
 
 
 def test_extract_skips_query_with_no_payload(run_dir: Path):
-    # Query row present but payload write failed (payload_path null) — skipped.
     _write_lead_meta(run_dir, "l-001", "x")
     _write_query(run_dir, "l-001", 0, "wazuh.auth-events", payload=None)
     assert lead_author.extract(run_dir)[1] == []
 
 
 def test_extract_multi_query_skips_missing_payload(run_dir: Path):
-    # Multi-query with only first payload present — second skipped.
     _write_lead_meta(run_dir, "l-001", "partial fan-out")
     _write_query(run_dir, "l-001", 0, "wazuh.auth-events")
     _write_query(run_dir, "l-001", 1, "wazuh.sudo-commands", payload=None)
@@ -194,9 +186,6 @@ def test_extract_invalid_payload_status_raises(run_dir: Path):
         lead_author.extract(run_dir)
 
 
-# ---------------------------------------------------------------------------
-# build_handoff()
-# ---------------------------------------------------------------------------
 
 
 def test_build_handoff_groups_by_template(run_dir: Path, catalog: Path):
@@ -219,7 +208,6 @@ def test_build_handoff_groups_by_template(run_dir: Path, catalog: Path):
     assert [inv["payload_digest"] for inv in h["invocations"]] == [
         "call-0", "call-1", "call-2",
     ]
-    # JSON-serializable so the prompt builder won't choke.
     json.dumps(h)
 
 
@@ -240,11 +228,7 @@ def test_build_handoff_includes_rendered_query_and_status(run_dir: Path, catalog
     assert inv["payload_status"] == "suspect_empty"
     assert "data.srcip" in inv["payload_digest"]
     assert inv["result_refs"] == ["gather_raw/l-001/0.json"]
-    # rendered_query should contain the substituted params from the
-    # ## Query body — elastic.auth-events references ${window}; unbound
-    # placeholders like ${host_clause} pass through verbatim so the
-    # leak is visible.
-    assert inv["rendered_query"]  # non-empty
+    assert inv["rendered_query"]
     assert "--window 1h" in inv["rendered_query"]
     assert "${host_clause}" in inv["rendered_query"]
 
@@ -274,7 +258,6 @@ def test_build_handoff_drops_unresolved_query_id(run_dir: Path, catalog: Path):
     handoffs = lead_author.build_handoff(
         run_dir, leads, repo_root=catalog.parent, catalog_dir=catalog
     )
-    # Only the resolved lead survives.
     assert len(handoffs) == 1
     assert handoffs[0]["query_id"] == "elastic.auth-events"
 
@@ -296,16 +279,12 @@ def test_build_handoff_one_handoff_per_template_cross_system(run_dir: Path, cata
     handoffs = lead_author.build_handoff(
         run_dir, leads, repo_root=catalog.parent, catalog_dir=catalog
     )
-    # Two handoffs (one per template), each carrying its single invocation.
     assert len(handoffs) == 2
     by_id = {h["query_id"]: h for h in handoffs}
     assert set(by_id) == {"elastic.auth-events", "host-state.process-list"}
     assert len(by_id["elastic.auth-events"]["invocations"]) == 1
 
 
-# ---------------------------------------------------------------------------
-# Gating: locks, sentinels, brakes
-# ---------------------------------------------------------------------------
 
 
 def _claude_should_not_be_called(*args, **kwargs):
@@ -317,7 +296,6 @@ def test_run_missing_run_dir(tmp_path: Path):
 
 
 def test_run_held_queue_lock_returns_zero(run_dir: Path):
-    # Pretend the queue lock is held by injecting an acquire that returns None.
     deps = _deps(
         run_dir.parent,
         acquire_queue_lock=lambda: None,
@@ -339,9 +317,6 @@ def test_run_done_sentinel_short_circuits(run_dir: Path):
     assert lead_author.run(run_dir, deps=deps) == 0
 
 
-# ---------------------------------------------------------------------------
-# path classifiers
-# ---------------------------------------------------------------------------
 
 
 def test_under_draft_classifier():
@@ -354,15 +329,12 @@ def test_under_draft_classifier():
 def test_is_system_skill_md_classifier():
     assert lead_author._is_system_skill_md("defender/skills/elastic/SKILL.md")
     assert lead_author._is_system_skill_md("defender/skills/wazuh/SKILL.md")
-    # Catalog templates are NOT system-skill SKILL.md files.
     assert not lead_author._is_system_skill_md(
         "defender/skills/gather/queries/wazuh/auth-events.md"
     )
-    # The schema doc lives at depth 3, not 2.
     assert not lead_author._is_system_skill_md(
         "defender/skills/gather/queries/SCHEMA.md"
     )
-    # Drafts inside a system skill dir are not the skill itself.
     assert not lead_author._is_system_skill_md(
         "defender/skills/elastic/_draft/foo.md"
     )
@@ -371,11 +343,9 @@ def test_is_system_skill_md_classifier():
 def test_is_system_skill_draft_classifier():
     assert lead_author._is_system_skill_draft("defender/skills/elastic/_draft/foo.md")
     assert lead_author._is_system_skill_draft("defender/skills/cmdb/_draft/bar.md")
-    # Catalog drafts (two segments deeper) are NOT system-skill drafts.
     assert not lead_author._is_system_skill_draft(
         "defender/skills/gather/queries/elastic/_draft/foo.md"
     )
-    # SKILL.md is not a draft.
     assert not lead_author._is_system_skill_draft("defender/skills/elastic/SKILL.md")
 
 
@@ -394,13 +364,10 @@ def test_discover_system_drafts_finds_files_excluding_readme(tmp_path):
     (skills / "elastic" / "_draft" / "README.md").write_text("surface declaration\n")
     (skills / "elastic" / "_draft" / "real-draft.md").write_text("---\nstatus: draft\n---\n")
     (skills / "elastic" / "SKILL.md").write_text("# elastic\n")
-    # Another system with no drafts — must be ignored.
     (skills / "wazuh").mkdir()
     (skills / "wazuh" / "SKILL.md").write_text("# wazuh\n")
-    # A nested catalog draft must NOT be picked up (two levels deeper).
     (skills / "gather" / "queries" / "elastic" / "_draft").mkdir(parents=True)
     (skills / "gather" / "queries" / "elastic" / "_draft" / "ignore.md").write_text("ignore\n")
-    # _TEMPLATE.md in a draft dir should be skipped.
     (skills / "cmdb" / "_draft").mkdir(parents=True)
     (skills / "cmdb" / "_draft" / "_TEMPLATE.md").write_text("template\n")
 
@@ -422,9 +389,6 @@ def test_build_system_draft_handoffs_emits_triple(tmp_path):
     }]
 
 
-# ---------------------------------------------------------------------------
-# _verify_skills_state — loop-side scope gate over the agent's working-tree edits
-# ---------------------------------------------------------------------------
 
 
 def _run_git(cwd: Path, *args: str) -> subprocess.CompletedProcess:
@@ -548,7 +512,6 @@ def test_verify_skills_state_rejects_half_promote(tmp_git_repo: Path):
     (tmp_git_repo / _CATALOG / "wazuh" / "newthing.md").write_text(
         "---\nid: wazuh.newthing\nstatus: established\n---\n"
     )
-    # The promote's ``rm`` of _draft/newthing.md is deliberately omitted.
     with pytest.raises(lead_author.LeadAuthorError, match="half-promote"):
         lead_author._verify_skills_state(tmp_git_repo, baseline_stray=[])
 
@@ -565,9 +528,6 @@ def test_verify_skills_state_ignores_baseline_stray(tmp_git_repo: Path):
     assert changed == []
 
 
-# ---------------------------------------------------------------------------
-# loop is sole committer — run() drives _verify_skills_state + commit_corpus
-# ---------------------------------------------------------------------------
 
 
 def _bypass_tables():
@@ -678,8 +638,6 @@ def test_run_loop_clears_drafts_on_discard_and_promote(tmp_git_repo: Path, tmp_p
     confirm; only the real Claude Code Bash matcher is out of frame here (the grant uses the
     documented ``:*`` form), the loop's commit/clear logic is end-to-end."""
     repo = tmp_git_repo
-    # A second catalog draft to discard — committed, so it stands in for a prior tick's
-    # tracked draft (the case the records-only gate can't see if its `rm` is skipped).
     (repo / _CATALOG / "wazuh" / "_draft" / "olddraft.md").write_text(
         "---\nid: wazuh.olddraft\nstatus: draft\n---\n"
     )
@@ -694,8 +652,8 @@ def test_run_loop_clears_drafts_on_discard_and_promote(tmp_git_repo: Path, tmp_p
 
     def fake_agent(rd, handoffs, pending):
         promoted_est.write_text("---\nid: wazuh.newthing\nstatus: established\n---\n")
-        promoted_draft.unlink()   # promote's rm
-        discarded_draft.unlink()  # discard's rm
+        promoted_draft.unlink()
+        discarded_draft.unlink()
         return 0
 
     deps = _deps(
@@ -708,7 +666,6 @@ def test_run_loop_clears_drafts_on_discard_and_promote(tmp_git_repo: Path, tmp_p
         release_queue_lock=lambda fh: None,
     )
     assert lead_author.run(run_dir, deps=deps) == 0
-    # Drafts actually gone (the live check's core assertion); established remains.
     assert not promoted_draft.exists()
     assert not discarded_draft.exists()
     assert promoted_est.is_file()
@@ -731,7 +688,7 @@ def test_run_quarantines_half_promote(tmp_git_repo: Path, tmp_path: Path):
     def fake_agent(rd, handoffs, pending):
         (repo / _CATALOG / "wazuh" / "newthing.md").write_text(
             "---\nid: wazuh.newthing\nstatus: established\n---\n"
-        )  # _draft/newthing.md deliberately left in place
+        )
         return 0
 
     deps = _deps(
@@ -750,9 +707,6 @@ def test_run_quarantines_half_promote(tmp_git_repo: Path, tmp_path: Path):
     assert not (run_dir / "lead_author" / "done").is_file()
 
 
-# ---------------------------------------------------------------------------
-# _prepare_handoffs — lift threshold + early-exit gates
-# ---------------------------------------------------------------------------
 
 
 def test_prepare_handoffs_below_lift_threshold_returns_empty_drafts(
@@ -791,8 +745,6 @@ def test_prepare_handoffs_at_threshold_surfaces_drafts(
         "executed_template_path": "defender/skills/gather/queries/fake/lead.md",
         "neighbors": [], "invocations": [],
     }]
-    # Seed two real draft files so build_system_draft_handoffs can compute
-    # repo-relative paths (against deps.paths.repo_root=tmp_path).
     skills = tmp_path / "defender" / "skills"
     (skills / "elastic" / "_draft").mkdir(parents=True)
     drafts = [
@@ -821,14 +773,12 @@ def test_prepare_handoffs_drafts_only_no_executed_proceeds(
     run_dir: Path, monkeypatch, tmp_path
 ):
     """No executed leads + drafts at threshold → proceed with drafts only."""
-    # No tables written — extract() returns [].
     skills = tmp_path / "defender" / "skills"
     (skills / "elastic" / "_draft").mkdir(parents=True)
     drafts = [skills / "elastic" / "_draft" / f"d{i}.md" for i in range(2)]
     for d in drafts:
         d.write_text("---\nstatus: draft\n---\n")
     monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "1")
-    # extract stays the real impl (no tables in run_dir → []); only discover is faked.
     deps = _deps(tmp_path, discover_system_drafts=lambda: drafts)
 
     handoffs, pending, rc = lead_author._prepare_handoffs(run_dir, deps)
@@ -850,7 +800,7 @@ def _capture_engine(monkeypatch, *, rc: int = 0, raise_exc=None):
     """Patch the in-process engine seam the spawn spine calls. ``_spawn_author_agent`` looks up
     ``run_author_stage`` on the engine module at call time, so patching the module attr is seen. Captures the kwargs the
     spawn forwards to the engine + returns a canned rc / raises."""
-    from defender.learning.leads import lead_author_engine  # the port target
+    from defender.learning.leads import lead_author_engine
 
     cap: dict = {}
 
@@ -886,18 +836,13 @@ def test_invoke_agent_pending_drafts_reach_engine_user_prompt(run_dir: Path, mon
     assert "skills_dir: defender/skills/" in prompt
 
 
-# ---------------------------------------------------------------------------
-# General-failure collection (Stage 1) — the per-run tick that fills the cross-run
-# pitfalls queue. The Stage-2 execution.md curation that drains it now lives in
-# test_pitfalls_curator.py (issue #513).
-# ---------------------------------------------------------------------------
 
 
 def test_extract_carries_error_class(run_dir: Path):
     """An errored query's row back-fills error_class from exit_code, and extract
     threads it onto the ExecutedLead."""
     _write_lead_meta(run_dir, "l-001", "probe")
-    _write_query(run_dir, "l-001", 0, "elastic.esql", payload_status="error")  # exit 1
+    _write_query(run_dir, "l-001", 0, "elastic.esql", payload_status="error")
     _, leads = lead_author.extract(run_dir)
     assert leads[0].error_class == "agent-fixable"
 
@@ -910,11 +855,11 @@ def test_collect_general_failures_residue_only(tmp_path: Path, catalog: Path):
         _executed_lead(lead_id="l-001", query_index=0, query_id="elastic.esql",
                        error_class="agent-fixable", payload_digest="exit=1; bad pipe"),
         _executed_lead(lead_id="l-002", query_id="elastic.auth-events",
-                       error_class="agent-fixable"),        # template failure → existing fold
+                       error_class="agent-fixable"),
         _executed_lead(lead_id="l-003", query_id="elastic.new-thing",
-                       error_class="agent-fixable"),        # draft candidate → becomes a draft
-        _executed_lead(lead_id="l-004", query_id="elastic.esql", error_class="infra"),  # down system
-        _executed_lead(lead_id="l-005", query_id="elastic.esql", error_class=None),     # ok
+                       error_class="agent-fixable"),
+        _executed_lead(lead_id="l-004", query_id="elastic.esql", error_class="infra"),
+        _executed_lead(lead_id="l-005", query_id="elastic.esql", error_class=None),
     ]
     out = lead_author.collect_general_failures(leads, run_dir, catalog_dir=catalog)
     assert [r["query_id"] for r in out] == ["elastic.esql"]
@@ -959,7 +904,7 @@ def test_run_collects_general_failure_before_early_return(tmp_git_repo: Path, tm
     run_dir = tmp_path / "run-xyz"
     (run_dir / "gather_raw").mkdir(parents=True)
     _write_lead_meta(run_dir, "l-001", "probe")
-    _write_query(run_dir, "l-001", 0, "elastic.esql", payload_status="error")  # general failure
+    _write_query(run_dir, "l-001", 0, "elastic.esql", payload_status="error")
 
     assert lead_author.run(run_dir, deps=deps) == 0
     queue = deps.paths.pitfalls.file
@@ -968,7 +913,6 @@ def test_run_collects_general_failure_before_early_return(tmp_git_repo: Path, tm
     assert rows[0]["error_class"] == "agent-fixable"
     assert (run_dir / "lead_author" / "pitfalls_collected").is_file()
 
-    # Idempotent: clear `done` and re-run — the collected sentinel blocks a re-append.
     (run_dir / "lead_author" / "done").unlink()
     assert lead_author.run(run_dir, deps=deps) == 0
     rows2 = [json.loads(ln) for ln in queue.read_text().splitlines()]
@@ -996,14 +940,10 @@ def test_run_reloads_catalog_after_mint_so_minted_draft_resolves(
     run_dir = tmp_path / "run-mint"
     (run_dir / "gather_raw").mkdir(parents=True)
     _write_lead_meta(run_dir, "l-001", "probe a brand-new verb")
-    # A coined id (suffix != recorded verb) so it drafts — an untagged {system}.{verb} would not.
     _write_query(run_dir, "l-001", 0, "wazuh.brandnew", verb="lookup", payload_status="ok")
 
     assert lead_author.run(run_dir, deps=deps) == 0
-    # synthesize minted the draft on disk this tick...
     assert (tmp_git_repo / _CATALOG / "wazuh" / "_draft" / "brandnew.md").is_file()
-    # ...and build_handoff, seeing the refreshed (post-synthesis) catalog, resolved the
-    # just-minted id into a handoff rather than WARN-and-dropping it.
     assert "wazuh.brandnew" in {h["query_id"] for h in seen["handoffs"]}
 
 
@@ -1018,25 +958,8 @@ def test_collect_general_failures_skips_systemless(tmp_path: Path, catalog: Path
     assert out == []
 
 
-# ===========================================================================
-# #455 Part 1 — behavior-preservation spec for the invoke / verify / commit fold
-# ===========================================================================
-#
-# These pin the observable behavior of the three wrapper *pairs* that the dedup
-# collapses onto shared helpers (`_verify_corpus_scope`, one spawn envelope, one
-# commit-message builder). They characterize CURRENT behavior — they pass against
-# HEAD today — and must stay green after the fold; the public function names + two-
-# arg signatures survive as thin wrappers, so every test binds at that public seam.
-# Fork resolutions (see PR discussion): stray message asserts only the shared
-# "outside" (the fold may unify the per-mode wording); commit messages assert
-# load-bearing substrings, not an exact golden string.
 
 
-# ---------------------------------------------------------------------------
-# verify fold — the shared preamble (stray-gate) runs before the per-path loop,
-# and the returned in-corpus change list is sorted. (Single-violation branches are
-# already covered above; these pin the cross-cutting behavior the extraction risks.)
-# ---------------------------------------------------------------------------
 
 
 def test_verify_skills_stray_wins_over_in_corpus_violation(tmp_git_repo: Path):
@@ -1045,7 +968,7 @@ def test_verify_skills_stray_wins_over_in_corpus_violation(tmp_git_repo: Path):
     loop-first order would surface 'delete-prohibition', which lacks 'outside')."""
     (tmp_git_repo / "defender" / "other").mkdir(parents=True)
     (tmp_git_repo / "defender" / "other" / "stray.md").write_text("stray")
-    (tmp_git_repo / _CATALOG / "wazuh" / "auth-events.md").unlink()  # delete-prohibition
+    (tmp_git_repo / _CATALOG / "wazuh" / "auth-events.md").unlink()
     with pytest.raises(lead_author.LeadAuthorError, match="outside"):
         lead_author._verify_skills_state(tmp_git_repo, baseline_stray=[])
 
@@ -1059,10 +982,10 @@ def test_verify_skills_state_returns_sorted_changed(tmp_git_repo: Path):
     (`.../elastic/...`, sorts EARLY) in raw git order — only `sorted()` flips them.
     A regression to `return changed` would return git order and fail this."""
     (tmp_git_repo / _CATALOG / "wazuh" / "auth-events.md").write_text(
-        "---\nid: wazuh.auth-events\nstatus: established\n---\n# folded\n"  # tracked → " M"
+        "---\nid: wazuh.auth-events\nstatus: established\n---\n# folded\n"
     )
     (tmp_git_repo / "defender" / "skills" / "elastic" / "_draft" / "aa-new.md").write_text(
-        "---\nid: elastic.aa-new\nstatus: draft\n---\n# new\n"  # untracked → "??"
+        "---\nid: elastic.aa-new\nstatus: draft\n---\n# new\n"
     )
     changed = lead_author._verify_skills_state(tmp_git_repo, baseline_stray=[])
     assert changed == [
@@ -1071,12 +994,6 @@ def test_verify_skills_state_returns_sorted_changed(tmp_git_repo: Path):
     ]
 
 
-# ---------------------------------------------------------------------------
-# invoke fold — the per-run invoke_agent spawn wiring (GLM port): it hands the in-process
-# engine the prompt / batch id / repo_root / run_dir trace anchor, passes a per-run rc
-# through, and lets a systemic config fault PROPAGATE (F1). RunnerOptions/allowlist-string
-# are gone. (The pitfalls spawn's mirror lives in test_pitfalls_curator.py, #513.)
-# ---------------------------------------------------------------------------
 
 
 def test_invoke_agent_wires_engine_kwargs(run_dir: Path, tmp_path: Path, monkeypatch):
@@ -1110,11 +1027,6 @@ def test_invoke_agent_passes_through_engine_rc(run_dir: Path, tmp_path: Path, mo
     assert lead_author.invoke_agent(run_dir, [], repo_root=tmp_path) == 124
 
 
-# ---------------------------------------------------------------------------
-# commit-message fold — the loop message's 3-way scope selection + trailer. Pure
-# function; asserted by structural substring (fork #2). (The fixed pitfalls message's
-# spec moved to test_pitfalls_curator.py, #513.)
-# ---------------------------------------------------------------------------
 
 
 def test_loop_commit_message_catalog_only_scope():
@@ -1163,10 +1075,6 @@ def test_loop_commit_message_lists_paths_and_source_run_trailer():
         "defender/skills/gather/queries/wazuh/b.md",
     ]
     msg = lead_author._loop_commit_message(Path("run-123"), changed)
-    # Pin the byte structure the fold risks (the shared skeleton's `\n\n` separators and
-    # the trailer's leading `\n`), not just loose substrings — a `\n\n`→`\n` collapse or a
-    # trailer glued onto the last path line must fail here (fork #2: structural substrings,
-    # not a full golden string).
     assert "git).\n\nPaths:\n- defender/skills/gather/queries/wazuh/a.md\n" in msg
     assert (
         "- defender/skills/gather/queries/wazuh/a.md\n"
@@ -1180,7 +1088,6 @@ def test_loop_commit_message_empty_changed_renders():
     it must render (no catalog/skill ⇒ 'gather catalog') rather than crash."""
     msg = lead_author._loop_commit_message(Path("run-123"), [])
     assert "gather catalog for run-123" in msg
-    # Even with no paths, the trailer keeps its blank-line separator (`\n\nsource-run:`).
     assert "\n\nsource-run: run-123\n" in msg
 
 

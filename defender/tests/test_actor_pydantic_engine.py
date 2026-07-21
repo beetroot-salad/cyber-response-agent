@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-pytest.importorskip("pydantic_ai")  # CI installs the runtime extra; skip otherwise
+pytest.importorskip("pydantic_ai")
 
 from pydantic_ai.exceptions import ModelRetry  # noqa: E402
 from pydantic_ai.models import override_allow_model_requests  # noqa: E402
@@ -33,7 +33,6 @@ _ACTOR_INDEX = config.LESSONS_ACTOR_INDEX_SCRIPT
 _DEFENDER_DIR = config.REPO_ROOT / "defender"
 _ACTOR_DIR = config.LESSONS_ACTOR_DIR
 _ENV_DIR = config.LESSONS_ENVIRONMENT_DIR
-# The malicious leg's read confine (both lesson corpora), as malicious_actor.run wires it.
 _MALICIOUS_CONFINE = (_ACTOR_DIR, _ENV_DIR)
 
 
@@ -53,7 +52,7 @@ def _prompt(tmp_path):
 
 _STORY = "0. Techniques used\n\n1. The adversary logged in with stolen creds and pivoted.\n"
 
-_RUN = Path("/tmp/actor-run")   # absolute (bind's root guard rejects a relative anchor)
+_RUN = Path("/tmp/actor-run")
 
 
 def _actor_policy(scripts, *, read_confine):
@@ -70,7 +69,6 @@ def _actor_policy(scripts, *, read_confine):
     )
 
 
-# --- the engine returns the model's final text verbatim + writes its trace ---
 
 def test_run_actor_pydantic_returns_story_and_writes_trace(tmp_path):
     lrd = _lrd(tmp_path)
@@ -84,12 +82,10 @@ def test_run_actor_pydantic_returns_story_and_writes_trace(tmp_path):
         )
     assert out == _STORY
     assert (lrd / "actor_trace.jsonl").is_file()
-    assert (lrd / "actor_trace.jsonl").read_text().strip()  # at least one request logged
+    assert (lrd / "actor_trace.jsonl").read_text().strip()
 
 
 def test_run_actor_pydantic_returns_skip_verbatim(tmp_path):
-    # A SKIP short-circuit flows back verbatim so is_skip_story sees it (even behind a
-    # GLM reasoning preamble — the hardened is_skip_story scans the first few lines).
     lrd = _lrd(tmp_path)
     fn = _replay([{"text": "Let me consider the menu.\n\nSKIP: no covering initial-access technique"}])
     with override_allow_model_requests(False):
@@ -103,7 +99,6 @@ def test_run_actor_pydantic_returns_skip_verbatim(tmp_path):
     assert is_skip_story(out)
 
 
-# --- the two pinned lessons-script grants ---------------------------------------
 
 def test_script_grant_accepts_pinned_spellings():
     """#575 renamed `_script_pattern` → `_script_grant`, which wraps the same anchored argv regex in
@@ -114,9 +109,8 @@ def test_script_grant_accepts_pinned_spellings():
     sweep this embedded path is deliberate rather than a leaked anchor."""
     g = actor_engine._script_grant(_ENV_RETRIEVE)
     assert g.pins_path is True
-    assert g.scope == ()      # nothing to resolve — the path lives in the pattern
+    assert g.scope == ()
     p = g.pattern
-    # repo-relative (what the prompt types), absolute, and a bare `python` interpreter
     assert p.fullmatch("python3 defender/scripts/lessons/lessons_env_retrieve.py --alert-rule-ids 5712 --entities host:web")
     assert p.fullmatch(f"python3 {_ENV_RETRIEVE} --alert-rule-ids 5712")
     assert p.fullmatch(f"python {_ENV_RETRIEVE} --alert-rule-ids 5712")
@@ -124,27 +118,22 @@ def test_script_grant_accepts_pinned_spellings():
 
 def test_script_grant_rejects_wrong_shape():
     p = actor_engine._script_grant(_ENV_RETRIEVE).pattern
-    assert not p.fullmatch(f"python3 {_ACTOR_INDEX} --techniques T1078")  # different pinned script
-    assert not p.fullmatch("python3 -c print(1)")                         # arbitrary python
-    assert not p.fullmatch("cat /etc/passwd")                             # non-python program
+    assert not p.fullmatch(f"python3 {_ACTOR_INDEX} --techniques T1078")
+    assert not p.fullmatch("python3 -c print(1)")
+    assert not p.fullmatch("cat /etc/passwd")
 
 
 def test_actor_script_pipe_denied_through_gate():
-    # a pipe re-opens no reader surface: the `| cat` stage is claimed by no actor grant → denied.
-    # (`_decide_readers` requires EVERY stage to be claimed, and the actor grants no viewer at all.)
     pol = _actor_policy((_ENV_RETRIEVE,), read_confine=(_ENV_DIR,))
     assert not permission.decide_bash(
         f"python3 {_ENV_RETRIEVE} --alert-rule-ids 5712 | cat", policy=pol).allow
 
 
-# --- the policy through the full gate -------------------------------------------
 
 def test_actor_policy_allows_pinned_scripts_and_denies_offlist():
     pol = _actor_policy((_ENV_RETRIEVE, _ACTOR_INDEX), read_confine=_MALICIOUS_CONFINE)
-    # both pinned lesson scripts are allowed by the actor's grants
     assert permission.decide_bash(f"python3 {_ENV_RETRIEVE} --alert-rule-ids 5712", policy=pol).allow
     assert permission.decide_bash(f"python3 {_ACTOR_INDEX} --techniques T1078", policy=pol).allow
-    # arbitrary python, an unpinned script, a data-source adapter, and arbitrary shell are denied
     assert not permission.decide_bash("python3 -c 'print(1)'", policy=pol).allow
     assert not permission.decide_bash("python3 defender/scripts/lessons/other.py", policy=pol).allow
     assert not permission.decide_bash("defender-elastic query x", policy=pol).allow
@@ -163,53 +152,35 @@ def test_actor_has_no_viewer_surface_at_all():
     pol = _actor_policy((_ENV_RETRIEVE, _ACTOR_INDEX), read_confine=_MALICIOUS_CONFINE)
     assert {g.program for g in pol.bash_allow} == {"python3"}
     assert all(g.pins_path for g in pol.bash_allow)
-    assert pol.read_allow == ()   # no cat grant → no shape filter; the confine bounds the reads
+    assert pol.read_allow == ()
     for cmd in (f"cat {_ACTOR_DIR}/T1078.md", "cat /etc/passwd", "grep -n x /etc/passwd", "ls"):
         assert not permission.decide_bash(cmd, policy=pol).allow, cmd
 
 
 def test_benign_actor_policy_excludes_tradecraft_index():
-    # The benign leg carries only the env-retrieve grant; the tradecraft index stays a
-    # malicious-only capability (the actor-settings.json boundary, now enforced by policy).
     benign = _actor_policy((_ENV_RETRIEVE,), read_confine=(_ENV_DIR,))
     assert permission.decide_bash(f"python3 {_ENV_RETRIEVE} --alert-rule-ids 5712", policy=benign).allow
     assert not permission.decide_bash(f"python3 {_ACTOR_INDEX} --techniques T1078", policy=benign).allow
 
 
-# --- read scope: CONFINED to the lesson corpora (#512) --------------------------
 
 def test_actor_read_scope_is_confined_to_lessons(tmp_path):
-    # #512: the actor's read_confine REPLACES the defender_dir base, so a defender_dir
-    # file OUTSIDE the confine (SKILL.md, the judge rubric) is no longer readable — the
-    # gray-box hole #510 opened. run_dir artifacts and in-confine lessons still are.
-    #
-    # #575: the `raw_reads` / `adapters` capability BITS this used to assert are DELETED — each was
-    # a declared value that could disagree with the lane enforcing it. Both properties are now facts
-    # about the grant list, so they are asserted where they are decided: no adapter grant and no
-    # gather_raw shape means the actor has no ADDRESS for either, not a clamp over a wider one.
     pol = _actor_policy((_ENV_RETRIEVE, _ACTOR_INDEX), read_confine=_MALICIOUS_CONFINE)
     assert set(pol.read_confine) == set(_MALICIOUS_CONFINE)
-    assert pol.read_roots == ()          # confine replaces the corpus base; no widening
-    # gray-box, by positive enumeration: no adapter route and no viewer surface at all
+    assert pol.read_roots == ()
     assert not permission.decide_bash("defender-elastic query x", policy=pol).allow
     assert not permission.decide_bash(
         "defender-elastic query x | defender-sql 'SELECT 1'", policy=pol).allow
-    # the gather_raw half of the old `raw_reads is False` bit still holds — as enumeration now,
-    # not as a bit (see ::test_actor_cannot_read_a_staged_gather_raw_payload below).
     lrd = _lrd(tmp_path)
-    # in-confine lesson: allowed
     assert permission.decide_read(
         _ACTOR_DIR / "T1078.md", run_dir=lrd, defender_dir=_DEFENDER_DIR, policy=pol
     ).allow
-    # under defender_dir but OUTSIDE the confine (SKILL.md): now DENIED
     assert not permission.decide_read(
         _DEFENDER_DIR / "SKILL.md", run_dir=lrd, defender_dir=_DEFENDER_DIR, policy=pol
     ).allow
-    # the actor's own run-dir artifact stays readable (run_dir remains a root)
     assert permission.decide_read(
         lrd / "actor_menu.txt", run_dir=lrd, defender_dir=_DEFENDER_DIR, policy=pol
     ).allow
-    # a file outside {run_dir} ∪ confine is refused
     assert not permission.decide_read(
         tmp_path / "elsewhere.txt", run_dir=lrd, defender_dir=_DEFENDER_DIR, policy=pol
     ).allow
@@ -262,22 +233,17 @@ def test_actor_cannot_read_a_staged_gather_raw_payload(tmp_path):
     assert not permission.decide_read(
         raw, run_dir=lrd, defender_dir=_DEFENDER_DIR, policy=deps.policy
     ).allow, "decide_read admits a gather_raw payload for the gray-box actor"
-    with pytest.raises(ModelRetry):          # the real tool must refuse it, not return it
+    with pytest.raises(ModelRetry):
         runtime_tools._tool_read_file(deps, str(raw))
 
 
 def test_actor_scope_requires_explicit_confine():
-    # #512 fail-loud: read_confine is a required keyword-only field — building an actor scope
-    # WITHOUT it is a construction-time TypeError, not a silent fall back to the full defender_dir
-    # corpus (which would reopen the #510 gray-box hole). There is no unconfined actor.
     with pytest.raises(TypeError):
         _ActorScope((_ENV_RETRIEVE, _ACTOR_INDEX))
-    # …and naming the confine builds the confined scope as before.
     scope = _ActorScope((_ENV_RETRIEVE, _ACTOR_INDEX), read_confine=_MALICIOUS_CONFINE)
     assert scope.read_confine == _MALICIOUS_CONFINE
 
 
-# --- the agent is read-only (no writers) + GLM@low effort plumbing --------------
 
 def test_actor_agent_is_read_only_no_writers():
     logger = observe.RequestLogger(Path("/tmp/does-not-need-to-exist-actor-tools.jsonl"))
@@ -288,14 +254,10 @@ def test_actor_agent_is_read_only_no_writers():
         )
     finally:
         logger.close()
-    # read-only: the actor reads lessons + retrieval scripts, never writes
     assert list(agent._function_toolset.tools) == ["bash", "read_file"]
 
 
 def test_build_actor_agent_applies_glm_low_effort(monkeypatch):
-    # The GLM@low lever this migration ships: effort flows model → providers.build_for_effort →
-    # Fireworks extra_body.reasoning_effort. build_for_effort constructs a REAL OpenAIChatModel
-    # (needs a key at construction; a fake key keeps it hermetic — settings make no request).
     pytest.importorskip("pydantic_ai.models.openai")
     monkeypatch.setenv("FIREWORKS_API_KEY", "fw-test")
     logger = observe.RequestLogger(Path("/tmp/does-not-need-to-exist-actor-effort.jsonl"))
@@ -308,7 +270,6 @@ def test_build_actor_agent_applies_glm_low_effort(monkeypatch):
     assert agent.model_settings["extra_body"]["reasoning_effort"] == "low"
 
 
-# --- InProcessSubagents.actor / .actor_benign run the in-process engine -------
 
 def test_subagents_actor_runs_pydantic_engine(monkeypatch, tmp_path):
     captured = {}
@@ -321,8 +282,6 @@ def test_subagents_actor_runs_pydantic_engine(monkeypatch, tmp_path):
         captured["benign_fn"] = actor_fn
         return _STORY
 
-    # render_actor_view_yaml / extract_case_entities read real run artifacts — stub them so the
-    # routing decision is all that's exercised.
     monkeypatch.setattr(subagents.lead_repository, "render_actor_view_yaml", lambda _rd: "leads: []\n")  # lint-monkeypatch: ok — stub the actor-view projection
     monkeypatch.setattr(subagents, "extract_case_entities", lambda _p: "host:web")  # lint-monkeypatch: ok — stub the entity extraction
     monkeypatch.setattr(subagents, "invoke_actor", _spy_actor)  # lint-monkeypatch: ok — spy the actor_fn routing decision

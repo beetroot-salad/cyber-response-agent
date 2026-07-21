@@ -1,17 +1,3 @@
-"""Dict-level companion walkers shared by the validator and corpus queries.
-
-The parser emits a canonical companion *dict*; both the write-time
-validator (`validate.py`, raw dict) and the corpus queries
-(`queries.py`, via `Companion.body`) need to enumerate "every vertex",
-"every hypothesis", "the final weight per hypothesis", etc. Keeping a
-single definition here means a parser-shape change is patched in one
-place instead of drifting between consumers (the soc-agent analogue is
-`hooks/scripts/invlang_walkers.py`).
-
-Every function takes the raw companion *dict* (`Companion.body` or the
-validator's `companion`), never the `Companion` wrapper, so the module
-has no dependency on `corpus`.
-"""
 
 from __future__ import annotations
 
@@ -27,13 +13,10 @@ from .schema import (
     VertexRecord,
 )
 
-# `--` (strongly refuted) is the only weight that takes a hypothesis out of
-# contention. Sourced from `vocab` so the ladder has one definition.
 REFUTED_WEIGHT = vocab.REFUTED_WEIGHT
 
 
 def all_vertices(companion: CompanionBody) -> list[VertexRecord]:
-    """Every vertex: prologue + per-lead observations, in document order."""
     out: list[VertexRecord] = []
     pro = companion.get("prologue") or {}
     out.extend(v for v in (pro.get("vertices") or []) if isinstance(v, dict))
@@ -46,7 +29,6 @@ def all_vertices(companion: CompanionBody) -> list[VertexRecord]:
 
 
 def all_edges(companion: CompanionBody) -> list[EdgeRecord]:
-    """Every edge: prologue + per-lead observations, in document order."""
     out: list[EdgeRecord] = []
     pro = companion.get("prologue") or {}
     out.extend(e for e in (pro.get("edges") or []) if isinstance(e, dict))
@@ -59,11 +41,6 @@ def all_edges(companion: CompanionBody) -> list[EdgeRecord]:
 
 
 def all_hypotheses(companion: CompanionBody) -> dict[str, HypothesisRecord]:
-    """Hypotheses by id: the PREDICT frontier plus any lead-discovered ones.
-
-    First declaration of an id wins (the frontier outranks a later
-    lead's `new_hypotheses` re-mention).
-    """
     out: dict[str, HypothesisRecord] = {}
     hyps = (companion.get("hypothesize") or {}).get("hypotheses") or []
     for h in hyps:
@@ -81,7 +58,6 @@ def all_hypotheses(companion: CompanionBody) -> dict[str, HypothesisRecord]:
 def iter_resolutions(
     companion: CompanionBody,
 ) -> Iterator[tuple[str, ResolutionRecord]]:
-    """Yield (lead_id, resolution) for every `:T resolutions` row."""
     for lead in companion.get("findings") or []:
         if not isinstance(lead, dict):
             continue
@@ -94,7 +70,6 @@ def iter_resolutions(
 def _iter_outcome_rows(
     companion: CompanionBody, field: str,
 ) -> Iterator[dict[str, Any]]:
-    """Yield every dict row under ``findings[].outcome[field]``, all leads in order."""
     for lead in companion.get("findings") or []:
         if not isinstance(lead, dict):
             continue
@@ -105,17 +80,14 @@ def _iter_outcome_rows(
 
 
 def iter_authz_resolutions(companion: CompanionBody) -> Iterator[dict[str, Any]]:
-    """Yield every `:R authz` resolution row across all leads, in order."""
     return _iter_outcome_rows(companion, "authorization_resolutions")
 
 
 def iter_attr_updates(companion: CompanionBody) -> Iterator[dict[str, Any]]:
-    """Yield every `:R attr_updates` row across all leads, in order."""
     return _iter_outcome_rows(companion, "attribute_updates")
 
 
 def final_weights(companion: CompanionBody) -> dict[str, Any]:
-    """Per-hypothesis weight: declared weight overlaid by the last resolution."""
     final: dict[str, Any] = {
         hid: h.get("weight") for hid, h in all_hypotheses(companion).items()
     }
@@ -127,9 +99,6 @@ def final_weights(companion: CompanionBody) -> dict[str, Any]:
 
 
 def live_hypothesis_ids(companion: CompanionBody) -> list[str]:
-    """Hypothesis ids that survived: final weight is not ``--`` (strongly
-    refuted). Computed from the resolution record; ``:T conclude`` carries
-    no sub-tables to restate this."""
     return [
         hid
         for hid, w in final_weights(companion).items()

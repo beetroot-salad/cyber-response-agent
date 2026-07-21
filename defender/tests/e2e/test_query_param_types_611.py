@@ -75,7 +75,6 @@ def typed(rec: VerbRecorder) -> FakeVerbs:
     return FakeVerbs({"elastic": {"probe": probe}})
 
 
-# ── the teeth: a mistyped param must never look like a broken system ─────────
 
 
 def test_a_mistyped_param_is_a_usage_error_not_an_infra_failure(tmp_path):
@@ -89,8 +88,6 @@ def test_a_mistyped_param_is_a_usage_error_not_an_infra_failure(tmp_path):
 
     assert rec.calls == [], "a mistyped param reached the verb — the type check is not at the boundary"
     row = r.row()
-    # Unvalidated: TypeError inside the verb → the catch-all's DEFAULT_FAULT_EXIT → exit 2,
-    # error_class "infra" — the agent's own slip, filed as a broken data source.
     assert row["exit_code"] == 64, "a model type slip was not filed as a usage error"
     assert row["error_class"] == "agent-fixable"
     assert r.breaker.get("systems", {}) == {}, "a usage error counted against the circuit breaker"
@@ -139,7 +136,6 @@ def test_a_bool_is_not_an_int(tmp_path):
     assert r.row()["exit_code"] == 64
 
 
-# ── the positive control: the check is selective, not a blanket deny ─────────
 
 
 def test_well_typed_params_including_optionals_and_containers_are_admitted(tmp_path):
@@ -159,7 +155,6 @@ def test_well_typed_params_including_optionals_and_containers_are_admitted(tmp_p
     assert r.row()["exit_code"] == 0
 
 
-# ── the same contract, against the REAL adapter signatures ───────────────────
 
 
 @pytest.mark.parametrize(("system", "verb", "params", "why"), [

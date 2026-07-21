@@ -43,16 +43,12 @@ LINT_PATH = LINT_DIR / "lint_stale_refs.py"
 
 
 def _load_gate():
-    # scripts/lint is on the gate's own import path (it does `from _baseline import ...`)
     if str(LINT_DIR) not in sys.path:
         sys.path.insert(0, str(LINT_DIR))
     spec = importlib.util.spec_from_file_location("lint_stale_refs", LINT_PATH)
     assert spec is not None
     assert spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
-    # Register BEFORE exec: a module executed outside sys.modules cannot resolve its own
-    # __module__, and anything that looks it up — `@dataclass` deciding whether an
-    # annotation is a ClassVar, pickle, typing.get_type_hints — dies on the lookup.
     sys.modules[spec.name] = mod
     spec.loader.exec_module(mod)
     return mod
@@ -149,7 +145,7 @@ def _clone(tmp_path: Path, up: Path, *, depth: int | None = None) -> Path:
     _git(tmp_path, *args)
     fetch = ["fetch", "-q", "origin", "main:refs/remotes/origin/main"]
     if depth is not None:
-        fetch += ["--depth=50"]  # ci.yml's old "Fetch base ref" step, verbatim
+        fetch += ["--depth=50"]
     _git(work, *fetch)
     return work
 
@@ -172,9 +168,6 @@ def _run_gate(work: Path, tmp_path: Path, *, argv: list[str] | None = None,
     )
 
 
-# --------------------------------------------------------------------------------------
-# The gate cannot run -> exit 2. Never 0. (Both fail against the pre-#618 module.)
-# --------------------------------------------------------------------------------------
 
 def test_unresolvable_base_ref_exits_2(tmp_path, capsys):
     """No origin at all. The old gate printed a WARN and returned [] -> exit 0."""
@@ -244,9 +237,6 @@ def test_update_baseline_refuses_on_an_unusable_base(tmp_path):
     assert baseline.read_text(encoding="utf-8") == before, "baseline was rewritten anyway"
 
 
-# --------------------------------------------------------------------------------------
-# The gate CAN run: it finds real stale references and only those.
-# --------------------------------------------------------------------------------------
 
 def test_stale_reference_is_flagged(tmp_path):
     """The happy path — same repo and commits as the graft test, only fully cloned."""
@@ -289,9 +279,7 @@ def test_surviving_module_named_in_a_from_package_import_is_not_flagged(tmp_path
         main_files={
             "pkg/__init__.py": "",
             "pkg/shared_taxonomy.py": "NAMES = {'a'}\n",
-            # A surviving importer, committed on main so it is outside the PR's diff.
             "other_importer.py": "from pkg import shared_taxonomy\n\ny = shared_taxonomy.NAMES\n",
-            # The importer the PR will delete — also on main, so `git rm` on pr finds it.
             "doomed_importer.py": "from pkg import shared_taxonomy\n\nz = shared_taxonomy.NAMES\n",
         },
     )
@@ -349,7 +337,7 @@ def test_moved_symbol_is_not_flagged(tmp_path):
 def test_removed_ident_with_no_surviving_reference_exits_0(tmp_path):
     """`git grep` exits 1 on "no match". That is a legitimate empty answer, not a failure
     — an over-eager fail-closed refactor would turn it into a GitError."""
-    up = _upstream(tmp_path, pr_files={"caller.py": None})  # delete the last reference too
+    up = _upstream(tmp_path, pr_files={"caller.py": None})
     work = _clone(tmp_path, up)
 
     assert _run_gate(work, tmp_path) == 0
@@ -360,7 +348,7 @@ def test_empty_diff_exits_0(tmp_path):
     compute" (exit 2) — the entire point of the change."""
     up = _upstream(tmp_path)
     _git(up, "checkout", "-q", "pr")
-    _git(up, "reset", "-q", "--hard", "main")  # pr is now identical to main
+    _git(up, "reset", "-q", "--hard", "main")
     work = _clone(tmp_path, up)
 
     assert _run_gate(work, tmp_path) == 0
@@ -374,9 +362,6 @@ def test_baselined_finding_exits_0(tmp_path):
     ) == 0
 
 
-# --------------------------------------------------------------------------------------
-# Not-a-reference shapes: each is a RULE in the lint, so the baseline can ship empty.
-# --------------------------------------------------------------------------------------
 
 def test_a_dropped_import_line_does_not_condemn_the_MODULE_it_imported(tmp_path):
     """Removing `from pkg_helper_mod import Thing` is evidence about `Thing`, never about
@@ -446,11 +431,6 @@ def test_a_RENAMED_module_keeps_its_name_and_is_not_condemned(tmp_path):
     )
     work = _clone(tmp_path, up)
 
-    # Probe the FIXTURE, not just the gate: the rule under test only engages when git
-    # actually reports an `R`. If similarity detection ever stops pairing these two paths,
-    # the diff degrades to delete+add, the deleted-stem walk fires legitimately, and this
-    # test would fail for a reason that has nothing to do with the rule — or, worse, a
-    # future relaxation would make it pass vacuously.
     status = GATE._git(
         ["diff", "--name-status", "origin/main...HEAD"], cwd=work
     )
@@ -466,11 +446,11 @@ def test_a_RENAMED_module_keeps_its_name_and_is_not_condemned(tmp_path):
 @pytest.mark.parametrize(
     "rel",
     [
-        ".spec/brief.md",                        # spec artifacts quote the old code by design
-        "defender/fixtures-e2e/golden-x/investigation.md",  # sibling of the excluded fixtures/
-        "defender/lessons-environment/l-01.md",  # sibling of the excluded lessons/
-        "defender/tests/spec_graph_551.yaml",    # frozen record of a merged issue
-        "docs/design.md",                        # (pre-existing exclusion — pinned here too)
+        ".spec/brief.md",
+        "defender/fixtures-e2e/golden-x/investigation.md",
+        "defender/lessons-environment/l-01.md",
+        "defender/tests/spec_graph_551.yaml",
+        "docs/design.md",
     ],
 )
 def test_reference_in_an_excluded_path_is_not_flagged(tmp_path, rel):
@@ -485,8 +465,6 @@ def test_reference_in_an_excluded_path_is_not_flagged(tmp_path, rel):
     work = _clone(tmp_path, up)
 
     hits = {f.fingerprint for f in GATE._scan(work, "origin/main")}
-    # A scan that computed NOTHING would satisfy the exclusion assertion vacuously — the
-    # #618 failure passing itself off as a pass. Pin that the scan ran first.
     assert "caller.py:some_removed_helper" in hits, "the scan found nothing at all"
     assert not any(h.startswith(rel) for h in hits), f"{rel} should be excluded"
 
@@ -580,7 +558,7 @@ def test_a_MULTILINE_signature_parameter_does_not_whitelist_the_IDENT(tmp_path):
 
     assert _run_gate(work, tmp_path) == 1
     assert {f.fingerprint for f in GATE._scan(work, "origin/main")} == {
-        "notes.md:some_removed_helper"  # the parameter itself is still not a reference
+        "notes.md:some_removed_helper"
     }
 
 
@@ -642,13 +620,13 @@ def test_a_declaration_does_not_mask_another_dead_ident_on_the_SAME_line(tmp_pat
             "mod2.py": "def a_removed_helper():\n    return 2\n",
             "sig.py": "def f(a_removed_helper, x=some_removed_helper()):\n    return x\n",
         },
-        pr_files={"mod2.py": None, "caller.py": None},  # both defs deleted by the PR
+        pr_files={"mod2.py": None, "caller.py": None},
     )
     work = _clone(tmp_path, up)
 
     assert _run_gate(work, tmp_path) == 1
     assert {f.fingerprint for f in GATE._scan(work, "origin/main")} == {
-        "sig.py:some_removed_helper"  # `a_removed_helper` on that line is the parameter
+        "sig.py:some_removed_helper"
     }
 
 
@@ -669,7 +647,6 @@ def test_inline_marker_suppresses_a_deliberate_dead_name_reference(tmp_path):
     )
     work = _clone(tmp_path, up)
 
-    # The marker suppresses its own line and ONLY its own line.
     hits = {f.fingerprint for f in GATE._scan(work, "origin/main")}
     assert hits == {"t_plain.py:some_removed_helper"}
 
@@ -678,19 +655,15 @@ def test_the_baseline_file_cannot_be_its_own_finding(tmp_path):
     """The baseline necessarily spells the identifiers it tolerates, so it greps as a
     surviving reference to each. A gate must not be able to find itself."""
     rel = "scripts/lint/lint_stale_refs_baseline.json"
-    # The baseline lives INSIDE the repo and on `main` (as it really does), spelling the
-    # ident it tolerates — so it greps as a surviving reference to it.
     up = _upstream(tmp_path, main_files={
         rel: json.dumps({"//": "h", "entries": {"caller.py:some_removed_helper": "tolerated"}}),
     })
     work = _clone(tmp_path, up)
     inside = work / rel
 
-    # Control: without the self-exclusion the baseline reports itself.
     assert f"{rel}:some_removed_helper" in {
         f.fingerprint for f in GATE._scan(work, "origin/main")
     }
-    # With it, the gate cannot find itself.
     findings = GATE._scan(
         work, "origin/main", exclude_files=GATE._self_reference(inside, work)
     )

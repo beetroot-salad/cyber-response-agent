@@ -45,9 +45,6 @@ def _case(
     )
 
 
-# ---------------------------------------------------------------------------
-# Class 5: lead_sequence_pattern
-# ---------------------------------------------------------------------------
 
 
 def test_lead_sequence_pattern_emits_trace_per_case():
@@ -106,9 +103,6 @@ def test_lead_sequence_pattern_sorts_by_lead_count_desc():
     assert [h["case_id"] for h in out["hits"]] == ["long", "short"]
 
 
-# ---------------------------------------------------------------------------
-# Class 6: hypothesis_name_wildcard
-# ---------------------------------------------------------------------------
 
 
 def test_hypothesis_name_wildcard_matches_fnmatch():
@@ -132,7 +126,6 @@ def test_hypothesis_name_wildcard_matches_fnmatch():
     hit = out["hits"][0]
     assert hit["name"] == "?brute-force"
     assert hit["final_weight"] == "--"
-    # investigation-scoped id must not surface
     assert "hypothesis_id" not in hit
 
 
@@ -179,9 +172,6 @@ def test_hypothesis_name_wildcard_sorts_by_final_weight_desc():
     assert [h["case_id"] for h in out["hits"]] == ["c2", "c3", "c1"]
 
 
-# ---------------------------------------------------------------------------
-# Class 8: lead_branch_effects
-# ---------------------------------------------------------------------------
 
 
 def test_lead_branch_effects_aggregates_per_hypothesis():
@@ -220,7 +210,7 @@ def test_lead_branch_effects_empty_rate_counts_missing_observations():
             leads=[
                 {"name": "L", "outcome": {"observations": {"vertices": [], "edges": []}}},
                 {"name": "L", "outcome": {"observations": {"vertices": ["v1"], "edges": []}}},
-                {"name": "L", "outcome": {}},  # no observations block → empty
+                {"name": "L", "outcome": {}},
             ],
         ),
     ]
@@ -259,7 +249,6 @@ def test_lead_branch_effects_frontier_scopes_n_and_empty_rate():
     and empty_rate scoped to that single occurrence.
     """
     corpus = [
-        # Two cases where the lead touched the frontier (resolutions → ?spray).
         _case(
             f"hit-{i}",
             hypotheses=[{"id": "h-001", "name": "?spray", "weight": "+"}],
@@ -270,9 +259,6 @@ def test_lead_branch_effects_frontier_scopes_n_and_empty_rate():
         )
         for i in range(2)
     ] + [
-        # Three cases where the same lead ran but only touched an unrelated
-        # hypothesis. Empty observations in two — under the buggy counter
-        # these would have been reported as 2/5 empty for ?spray.
         _case(
             f"miss-{i}",
             hypotheses=[{"id": "h-002", "name": "?unrelated", "weight": "+"}],
@@ -344,8 +330,6 @@ def test_lead_branch_effects_uncapped_ordering_is_deterministic():
             leads=[{"name": "L", "outcome": {}, "resolutions": resolutions}],
         ),
     ]
-    # No cap (4 hypotheses <= default max), no frontier — exercises the seed
-    # loop directly. Expected: keys in sorted name order.
     out = lead_branch_effects(corpus, max_hypotheses_per_lead=10)
     keys = list(out["leads"][0]["per_hypothesis_effect"].keys())
     assert keys == ["?z0", "?z1", "?z2", "?z3"]
@@ -356,7 +340,6 @@ def test_lead_branch_effects_capped_ordering_is_deterministic_under_ties():
     via max_hypotheses_per_lead, the retained K must be name-sorted, not
     set-iteration-ordered (which varies with PYTHONHASHSEED).
     """
-    # 6 hypotheses, each gets exactly one `++` shift → all tie at count=1.
     hypotheses = [{"id": f"h-{i:03}", "name": f"?z{i}", "weight": "+"} for i in range(6)]
     resolutions = [
         {"hypothesis": h["id"], "before": "+", "after": "++"} for h in hypotheses
@@ -414,9 +397,6 @@ def test_lead_branch_effects_ignores_unknown_assessment_shifts():
     assert bucket == {"++": 1, "+": 0, "-": 0, "--": 0}
 
 
-# ---------------------------------------------------------------------------
-# hypothesis_shape_match
-# ---------------------------------------------------------------------------
 
 
 def _shape_case(
@@ -542,7 +522,6 @@ def test_hypothesis_shape_uses_final_weight_from_resolutions():
     ]
     out = hypothesis_shape_match(corpus, parent_type="compute")
     hit = out["hits"][0]
-    # initial '+' overridden by final '--'
     assert hit["final_weight_distribution"]["--"] == 1
     assert hit["final_weight_distribution"]["+"] == 0
 

@@ -1,24 +1,4 @@
 #!/usr/bin/env python3
-"""Case-history ticket writer — the run.py post-step (issue #317, write path).
-
-Turns the (empty) ticket store into the accruing case-history store: a thin **bridge**
-creates an OPEN ticket when the run materializes, and a post-run step **closes** it
-with the disposition. This is the realistic lifecycle — the ticket pre-exists (raised
-with the alert), the defender responds and closes — and it makes idempotency natural:
-create-once (409 ⇒ already there), close-is-idempotent.
-
-This is NOT the read-side gather adapter (`ticket_adapter.py`, deliberately read-only and
-inside the gather gate regime). It runs as a driver post-step *outside* that regime,
-and it talks to a **separate** config (`CASE_HISTORY_*`) so the case-history store and
-the customer ticketing SoR stay decoupled even when they're the same server today.
-
-Discipline: a post-step must never break the run (matches `cross_check_tables` /
-`visualize`). Every failure — missing config, unreachable stub, HTTP error, missing
-report.md — is a WARN to stderr and a return, never a raise/exit. That's also why this
-uses the low-level `docker_exec_curl` + `split_status` rather than `http_get`/`http_post`,
-which raise an `AdapterFault` on error (correct for a captured verb, wrong for a post-step
-that must degrade).
-"""
 from __future__ import annotations
 
 import json
@@ -33,7 +13,7 @@ from defender._run_paths import RunPaths
 from defender.run_common import run_env
 from defender.runtime.verbs import VerbContext
 from defender.scripts.case_history import case_ticket
-from defender.scripts.adapters import _stub_transport as transport  # shared transport (adapter family)
+from defender.scripts.adapters import _stub_transport as transport
 from defender.scripts.adapters.faults import TransportFault
 
 SYSTEM = "case-history"
@@ -42,16 +22,6 @@ _CONFIG_KEYS = ("URL_BASE", "BASTION_HOST", "TIMEOUT_SEC")
 
 
 def _verb_context() -> VerbContext:
-    """The post-step's own `VerbContext`: this runs in the DRIVER's process at post-step
-    time, outside any verb, so its tree and env are the process's own. (`run_dir` is
-    carriage the transport never reads — the tree and the env are what it resolves config
-    and forks children with.)
-
-    The env is `run_env`'s SCRUBBED copy, not `os.environ`: this runs in the driver, whose
-    environ holds the billable provider keys, and the transport hands `ctx.env` straight to
-    the `docker exec` child it forks. Passing the raw environ here would opt this one caller
-    out of the invariant `VerbContext.env` exists to carry.
-    """
     defender_dir = Path(os.environ.get("DEFENDER_DIR", Path(__file__).resolve().parents[2]))
     run_dir = Path.cwd()
     return VerbContext(
@@ -68,11 +38,6 @@ def _warn(msg: str) -> None:
 
 
 def _load_config() -> dict[str, str] | None:
-    """Load `CASE_HISTORY_*` from the case-history system config, non-fatally.
-
-    Mirrors `transport.load_config` but returns None (a WARN) instead of raising a
-    `ConfigFault`, so a missing/incomplete config under `--update-ticket` degrades the
-    post-step rather than aborting the run."""
     path = transport._config_path(_verb_context(), SYSTEM)
     if not path.exists():
         _warn(f"config not found: {path}; skipping ticket write")
@@ -80,7 +45,6 @@ def _load_config() -> dict[str, str] | None:
     raw = transport._parse_env_file(path)
     cfg: dict[str, str] = {}
     for key in _CONFIG_KEYS:
-        # Env vars override the file for ops convenience (mirrors transport.load_config).
         val = os.environ.get(f"{PREFIX}_{key}") or raw.get(f"{PREFIX}_{key}")
         if val:
             cfg[key] = val
@@ -88,9 +52,6 @@ def _load_config() -> dict[str, str] | None:
     if missing:
         _warn(f"missing config keys {[f'{PREFIX}_{k}' for k in missing]} in {path}; skipping")
         return None
-    # Validate TIMEOUT_SEC here, where we can say *which* key is wrong. Otherwise
-    # a typo'd value (e.g. "10s") only surfaces as a ValueError from int() deep in
-    # _request, which the post-step's broad except swallows into a generic WARN.
     if not cfg["TIMEOUT_SEC"].isdigit():
         _warn(f"{PREFIX}_TIMEOUT_SEC={cfg['TIMEOUT_SEC']!r} is not a non-negative "
               f"integer in {path}; skipping")
@@ -101,10 +62,6 @@ def _load_config() -> dict[str, str] | None:
 def _request(
     config: dict[str, str], method: str, path: str, body: dict | None = None
 ) -> tuple[str | None, str]:
-    """Call the stub via the docker-exec transport, non-fatally.
-
-    Returns (http_status, body_text); http_status is None on a transport-level
-    failure (docker missing / timeout / no response)."""
     url = f"{config['URL_BASE'].rstrip('/')}{path}"
     bastion = config["BASTION_HOST"]
     timeout = int(config.get("TIMEOUT_SEC", "10"))
@@ -122,15 +79,6 @@ def _request(
 
 @dataclass(frozen=True)
 class TicketWriterDeps:
-    """Injected config + transport seam for the case-history write entrypoints.
-
-    Two callables, each defaulted to the production module function, so the
-    entrypoints read `deps.load_config()` / `deps.request(...)` instead of
-    hard-calling module globals. Tests pass a `TicketWriterDeps(load_config=...,
-    request=...)` (or `dataclasses.replace`) instead of monkeypatching the module.
-    Mirrors the `AuthorConfig`/`CuratorConfig` injection shape (#380); there's no
-    path layout to thread, so field defaults are the production wiring — no factory.
-    `request` covers both GET and POST (POST is just `request(config, "POST", ...)`)."""
     load_config: Callable[[], dict[str, str] | None] = _load_config
     request: Callable[..., tuple[str | None, str]] = _request
 
@@ -139,10 +87,6 @@ DEFAULT_DEPS = TicketWriterDeps()
 
 
 def open_case_ticket(run_dir: Path, deps: TicketWriterDeps = DEFAULT_DEPS) -> None:
-    """Bridge: create an OPEN case-history ticket for this alert (call at materialize).
-
-    409 means the ticket already exists (a replay against a populated store) — that's
-    success, not an error. Never raises."""
     try:
         config = deps.load_config()
         if config is None:
@@ -168,11 +112,6 @@ def open_case_ticket(run_dir: Path, deps: TicketWriterDeps = DEFAULT_DEPS) -> No
 
 
 def close_case_ticket(run_dir: Path, deps: TicketWriterDeps = DEFAULT_DEPS) -> None:
-    """Close the case-history ticket with the disposition (call after the run).
-
-    Writes a `ticket_write.json` receipt — the seam the read PR / offline enrichment
-    keys on. A missing/invalid report.md leaves the ticket open (non-fatal). Never
-    raises."""
     try:
         config = deps.load_config()
         if config is None:
@@ -183,9 +122,6 @@ def close_case_ticket(run_dir: Path, deps: TicketWriterDeps = DEFAULT_DEPS) -> N
             _warn(f"no usable report.md; leaving ticket open: {e}")
             return
         payload = case_ticket.case_record_to_close(rec)
-        # Percent-encode the key for the path: run_dir.name carries the alert
-        # filename stem, which can hold spaces / other reserved chars that would
-        # otherwise produce a URL that doesn't match the stored key.
         key = urllib.parse.quote(rec.case_id, safe="")
         status, body = deps.request(config, "POST", f"/tickets/{key}/transitions", payload)
         ok = status is not None and status.startswith("2")
@@ -201,15 +137,6 @@ def close_case_ticket(run_dir: Path, deps: TicketWriterDeps = DEFAULT_DEPS) -> N
 def annotate_case_ticket(
     case_id: str, outcome: str, deps: TicketWriterDeps = DEFAULT_DEPS
 ) -> None:
-    """Stamp the seed-eligibility flag onto a closed case-history ticket (issue
-    #317, offline enrichment). `outcome` is the adversarial-probe verdict; the
-    polarity (which outcomes seed) is decided by the mapper.
-
-    Idempotent at this boundary (mirrors `open_case_ticket`'s 409 handling): GET
-    the ticket, and if a seed-eligibility comment is already present, skip the POST
-    — the store is the source of truth, so a re-drained learn never double-stamps.
-    Non-fatal: every failure (config absent, unreachable, 404, HTTP error) is a WARN
-    and a return. Never raises."""
     try:
         config = deps.load_config()
         if config is None:
@@ -246,9 +173,6 @@ def annotate_case_ticket(
 def _fetch_enrich_ticket(
     case_id: str, key: str, config: dict[str, str], deps: TicketWriterDeps
 ) -> dict | None:
-    """GET the ticket and validate the response for enrichment: returns the parsed
-    ticket dict, or None (with a WARN/LOG) on any failure or skip condition
-    (transport, 404, HTTP error, unparseable, already-grounded)."""
     status, body = deps.request(config, "GET", f"/tickets/{key}")
     if status is None:
         _warn(f"enrich-resolution {case_id}: {body}")
@@ -271,16 +195,12 @@ def _fetch_enrich_ticket(
 
 
 def _enriched_resolution(case_id: str, ticket: dict, method: str) -> str | None:
-    """The new `resolution` string to write, or None if there's nothing to stamp.
-    Only stamps a close-resolution we wrote (disposition decodes) — a missing or
-    human-edited resolution is left untouched (append would corrupt it / be
-    un-decodable downstream)."""
     resolution = ticket.get("resolution")
     if not isinstance(resolution, str) or case_ticket.ticket_disposition(ticket) is None:
         _warn(f"enrich-resolution {case_id}: no decodable close resolution; skipping")
         return None
     new_resolution = case_ticket.append_resolution_method(resolution, method)
-    if new_resolution == resolution:  # nothing to add (no template / already marked)
+    if new_resolution == resolution:
         return None
     return new_resolution
 
@@ -288,19 +208,6 @@ def _enriched_resolution(case_id: str, ticket: dict, method: str) -> str | None:
 def enrich_case_resolution(
     case_id: str, method: str, deps: TicketWriterDeps = DEFAULT_DEPS
 ) -> None:
-    """Stamp the grounded resolution-method onto a closed case-history ticket (issue
-    #338, offline enrichment). `method` is the resolution method the adversarial judge
-    confirmed (grounded predicates + policy/authority); it rides INSIDE the existing
-    `resolution` as a pure-literal-marked suffix — no new field — so the benign judge
-    later reads a cited closed case's grounded conditions.
-
-    Re-uses the close transition (`POST /tickets/{key}/transitions` with `status:
-    closed`, which overwrites `resolution`) — the store exposes no resolution PATCH.
-    Idempotent at this boundary (mirrors `annotate_case_ticket`): GET the ticket, and
-    if a grounded segment is already present, skip the write — the store is the source
-    of truth, so a re-drained learn never double-stamps. Non-fatal: every failure
-    (config absent, unreachable, 404, HTTP error, unwritten/foreign resolution) is a
-    WARN and a return. Never raises."""
     try:
         if not method or not method.strip():
             return

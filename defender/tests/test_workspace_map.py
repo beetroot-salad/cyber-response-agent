@@ -59,8 +59,6 @@ def test_gather_raw_suppressed(tmp_path: Path):
     gr = tmp_path / "gather_raw"
     gr.mkdir()
     (gr / "l-001.lead.json").write_text("{}")
-    # Mask the run-dir path first: a tmp dir named after this test would
-    # otherwise inject "gather_raw" through the `## Run dir — <path>` header.
     out = wm.workspace_map(tmp_path).replace(str(tmp_path), "RUNDIR")
     assert "alert.json" in out
     assert "gather_raw" not in out
