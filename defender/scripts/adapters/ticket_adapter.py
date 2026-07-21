@@ -38,6 +38,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import urllib.parse
 from pathlib import Path
 
 # Put the workspace root on sys.path so `defender.*` namespace imports resolve when the
@@ -55,12 +56,37 @@ from defender.scripts.adapters.faults import AdapterFault, UpstreamFault
 SYSTEM = "ticket"
 PREFIX = "TICKET"
 
+#: This system's required config keys: the shared transport template PLUS the store's KEY
+#: GRAMMAR. The grammar is an ENVIRONMENT fact — what a ticket key looks like in the deployed
+#: store — so it is declared where the environment is described (`TICKET_KEY_PATTERN` in
+#: `knowledge/environment/systems/ticket/config.env`), not hardcoded in a consumer. It is
+#: REQUIRED, on the same rule as every other value here: absent means the system is down
+#: (`ConfigFault`, exit 2), never a silent built-in default that would let a consumer screen
+#: keys against a grammar this environment never agreed to. `elastic_adapter` declares its own
+#: key set for the same reason.
+REQUIRED_CONFIG_KEYS = (*transport.REQUIRED_CONFIG_KEYS_TEMPLATE, "KEY_PATTERN")
+
 
 # Same name in each stub adapter, closing over that module's SYSTEM/PREFIX: the shared
 # body already lives once in `transport.load_config`, so this is a zero-argument alias,
 # not a copy of any logic.
 def _config(ctx: VerbContext) -> dict[str, str]:  # lint-dup: ok — per-module alias over the shared transport.load_config
-    return transport.load_config(ctx, SYSTEM, PREFIX)
+    return transport.load_config(ctx, SYSTEM, PREFIX, REQUIRED_CONFIG_KEYS)
+
+
+def key_pattern(ctx: VerbContext) -> str:
+    """This environment's ticket-key grammar, as an unanchored regex source string.
+
+    A verb rather than an import so every consumer reaches it through the ONE registry seam
+    the store is reached through (`verbs=`), and so a screen built on it can be driven with a
+    fake registry instead of a real config file. Consumers anchor it themselves — the config
+    declares the key SHAPE, not where the match starts and ends.
+
+    The screen that uses it lives at the consumer (the benign judge's `get_closed_ticket`,
+    #672 Fork A) rather than here, because that screen owes a RETRY-class response with zero
+    store attempts, and a fault raised from this module is by contract an exit-code envelope.
+    """
+    return _config(ctx)["KEY_PATTERN"]
 
 
 def health_check(ctx: VerbContext) -> dict:
@@ -101,8 +127,20 @@ def get_ticket(ctx: VerbContext, *, key: str, require_closed: bool = False) -> d
     the alert under judgment (#338). Refusing a non-closed ticket HERE means the read scope
     can't reach the in-flight ticket even by key — the refusal is a query error (exit 1),
     the same code the CLI callers already pin.
+
+    The key is PERCENT-ENCODED into the path (#684), as `ticket_writer` has always encoded
+    the keys it mints (`urllib.parse.quote(case_id, safe="")`). It used to be interpolated
+    raw, which was wrong in both directions: a key the writer can legitimately mint but this
+    reader cannot fetch (anything needing encoding round-tripped to a different URL), and a
+    key carrying `?`/`#`/CR-LF reshaping the REQUEST — a query string, a fragment, or a
+    header break where a path segment was meant. Not a shell surface: the transport passes
+    the URL as one argv element (`docker_exec_curl`, no `shell=True`), so this is an
+    HTTP-semantics fix. `list_tickets` has always urlencoded its filters via `http_get`'s
+    `params=`; encoding here makes the two paths symmetric.
     """
-    payload = transport.http_get_obj(ctx, _config(ctx), f"/tickets/{key}")
+    payload = transport.http_get_obj(
+        ctx, _config(ctx), f"/tickets/{urllib.parse.quote(key, safe='')}",
+    )
     if require_closed and payload.get("status") != "closed":
         raise UpstreamFault(
             f"{key} is status={payload.get('status')!r}, not 'closed' (--require-closed)"
@@ -114,6 +152,7 @@ VERBS = {
     "health-check": health_check,
     "list-tickets": list_tickets,
     "get-ticket": get_ticket,
+    "key-pattern": key_pattern,
 }
 
 
