@@ -3,8 +3,8 @@
 ## Topology
 
 - Three dispatches with single-writer outputs. The mechanical leaf runs first because it may repair the suite; after it completes, the two readers may run in parallel. Reader findings route through §7, never straight into the diff.
-- **Mechanical-gate leaf**: inputs = the suite, the spec_graph, the full frontier chain. Output: `90-mechanical.md`, including the conservation questions for the blind reader.
-- **Blind conservation reader**: inputs = the tests and the generated questions **only** — never the intent doc, and the dispatch prompt must not paraphrase it; the isolation is the instrument. Output: `91-blind.md`.
+- **Mechanical-gate leaf** (Sonnet, high effort — the toolchain computes the findings; Opus here re-buys what the tools already know, the same economy as phase D's gate leaf): inputs = the suite, the spec_graph, the full frontier chain. Output: `90-mechanical.md`, including the conservation questions for the blind reader.
+- **Blind conservation reader** (Sonnet, high effort — the isolation is the instrument, not the model): inputs = the tests and the generated questions **only** — never the intent doc, and the dispatch prompt must not paraphrase it; the isolation is the instrument. Output: `91-blind.md`.
 - **Cold reconciler** (Opus, xhigh effort, fresh — never the orchestrator, never the phase-E author): inputs = the full frontier chain, the artifact, the working diff. Output: `92-reconciliation.md`.
 - Loop: findings → §7; the human's resolutions re-run the affected phase (usually E, sometimes D); this phase re-verifies. Closed when the findings list is empty and every check is green or recorded.
 

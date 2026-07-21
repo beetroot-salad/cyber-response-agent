@@ -3,7 +3,7 @@
 ## Topology
 
 - Five parallel leaves, dispatched only after `10-brief.md` is `complete`. Inputs for all: the intent+design doc, `10-brief.md`, `20-demands.md`. Each writes `30-premises-<lens>.md` (the strong author: `30-premises-author.md`).
-- **4 lensed enumerators** (Sonnet), one lens each as a dispatch parameter: **dependency**, **input surface**, **lifecycle/state**, and a fourth from the design's danger zone — adversarial input, environment/resource, or concurrency; the profile's `conventions.dangerLens` is the standing default unless *this* change's danger zone is plainly elsewhere.
+- **4 lensed enumerators** (Sonnet, high effort — premise coverage is the product), one lens each as a dispatch parameter: **dependency**, **input surface**, **lifecycle/state**, and a fourth from the design's danger zone — adversarial input, environment/resource, or concurrency; the profile's `conventions.dangerLens` is the standing default unless *this* change's danger zone is plainly elsewhere.
 - **1 strong author** (Opus at xhigh effort, unlensed) — not economizable: cross-cutting, grounding-dependent faults are capability-dominated, and the lenses miss them at any prompt quality. If it genuinely cannot be spawned, run the best derivation available and record the degraded unknown-unknown region in `handoff.deviations`.
 - Dispatch prompt names the charge sections: every leaf takes "Charge — every enumerator" plus its role section.
 

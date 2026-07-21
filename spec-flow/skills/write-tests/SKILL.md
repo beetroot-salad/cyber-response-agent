@@ -64,7 +64,7 @@ Body, in order: `## Digest` — the ≤15 lines the leaf returns inline, verbati
 | D | 5–6 graph + gate | assembler leaf (Opus) → gate leaf (Sonnet, over `spec-graph gate --residue`) | phases/graph-gate.md | `spec_graph_<slug>.yaml` + `50-graph-digest.md`, `60-residue.md` |
 | §7 | 7 human seam | spine (AskUserQuestion) | — | `70-resolutions.md` |
 | E | 8 author | one Opus author leaf | phases/author.md | the suite + `80-author-digest.md` |
-| F | 9 verify | mechanical-gate leaf → blind conservation reader ∥ cold reconciler (Opus) | phases/verify.md | `90-mechanical.md`, `91-blind.md`, `92-reconciliation.md` |
+| F | 9 verify | mechanical-gate leaf (Sonnet) → blind conservation reader (Sonnet) ∥ cold reconciler (Opus) | phases/verify.md | `90-mechanical.md`, `91-blind.md`, `92-reconciliation.md` |
 | 10 | hand off | spine | — | — |
 
 Scheduler-enforced constraints: B's five leaves **block on A's finished brief**; the early-exit check runs after A and after any later `design-refuted` flip. C's answerers see only their own shuffled copy. §7 runs after D so the gate's residue reaches the human with the forks; F's findings route back through §7, never straight into the diff. If A's grounding leaf overruns, dispatch a *fresh* probe-backed grounding leaf — never derive the brief on the spine — and reconcile when the slow one lands. Models **and efforts** are named in the contracts and are not economizable where they say Opus; dispatch each leaf at its contract-named effort — the skill's own `effort: medium` is the spine's orchestration budget, and a leaf left to inherit it runs degraded; if one genuinely cannot be spawned, run the best derivation available and **record in `handoff.deviations` that the unknown-unknown region ran degraded**.

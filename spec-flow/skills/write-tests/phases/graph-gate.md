@@ -4,7 +4,7 @@
 
 - Two leaves in sequence. The orchestrator routes the residue afterwards; it produces none of this — assembly is a leaf's job, never the spine's.
 - **Assembler leaf** (Opus, xhigh effort): inputs = `10-brief.md`, `20-demands.md`, `45-dispositions.md`. Outputs: `spec_graph_<slug>.yaml` at its final committed path (the profile's `specGraph.artifacts` names the directory — it is a deliverable, not plumbing) plus `50-graph-digest.md`.
-- **Gate leaf** (Sonnet — the R1–R5 triggers are computed by `spec-graph gate`, so this leaf annotates and judges rather than re-derives; Opus here re-buys what the tool already knows): inputs = the assembled artifact. Outputs: the gate record written into the artifact, plus `60-residue.md`.
+- **Gate leaf** (Sonnet, high effort — the R1–R5 triggers are computed by `spec-graph gate`, so this leaf annotates and judges rather than re-derives; Opus here re-buys what the tool already knows): inputs = the assembled artifact. Outputs: the gate record written into the artifact, plus `60-residue.md`.
 
 ## Charge — the assembler
 
