@@ -179,12 +179,22 @@ demands:
     form: test
     binds: ["interacts(benign_judge->get_closed_ticket).payload"]
     discharged_by: test_malformed_key_model_retry
-    # Fork A RESOLVED (§7, refined): the boundary is an explicit, DEFINED key schema —
-    # empty, whitespace-only, and path/URL-significant characters (separators, `..`,
-    # query delimiters, percent-encoded bytes) reject with a retry-class response and
-    # ZERO store attempts; everything else (length, clean non-ASCII) flows opaquely and a
-    # store refusal folds into O4. The silent branch (wrong-JSON-type key) pins the same
-    # model-visible observable LAYER-AGNOSTICALLY — the test must not assert which layer.
+    # Fork A RESOLVED (§7, refined): the boundary is an explicit, DEFINED key schema.
+    # REWRITTEN at #684/F1 — the schema is a GRAMMAR (`_KEY_RE`,
+    # `[A-Za-z0-9][A-Za-z0-9._-]*`, anchored on the shape case ids are minted in:
+    # run_common.py:98), not the metacharacter blacklist that shipped: a blacklist
+    # under-samples by construction, and the one that shipped let `#`, `&`, `=`,
+    # backtick, an internal space and — the canonical request-reshaping vector —
+    # `SOC-1\r\nHost: …` through to a reader that interpolates `key` into
+    # `/tickets/{key}` UNESCAPED. Anything outside the grammar rejects with a
+    # retry-class response and ZERO store attempts; length remains an explicit
+    # non-clause and a store refusal of a clearing key folds into O4.
+    # The 'clean non-ASCII flows opaquely' half is REVERSED at #684 (`SOC-λ42` now
+    # rejects) — a human decision at that gate, free of cost because the ticket writer
+    # percent-encodes every key it mints (ticket_writer.py:189) while this reader does
+    # not, so a non-ASCII key is unfetchable through this path either way.
+    # The silent branch (wrong-JSON-type key) pins the same model-visible observable
+    # LAYER-AGNOSTICALLY — the test must not assert which layer.
 
   - id: d11_untrusted_wrap
     kind: shape
@@ -306,6 +316,8 @@ demands:
                         # V-A (F round): EXTENDED to the list path — the self-case's record
                         # is filtered by IDENTITY, per-item, before the envelope; without it
                         # a precedent search can return the case itself (cold C2's hole).
+                        # #684/F2: the list half is a CONJUNCTION on that call's own
+                        # response (sibling served AND self record absent) — see d24.
     binds: ["benign_judge", "get_closed_ticket", "list_closed_tickets", "interacts(benign_judge->get_closed_ticket).payload", "interacts(benign_judge->get_closed_ticket).response", "interacts(benign_judge->list_closed_tickets).response"]
     discharged_by: test_case_own_key_refused_at_tool_boundary
 
@@ -315,6 +327,12 @@ demands:
                         # V-A (F round): the re-check is status + SELF-KEY IDENTITY — the
                         # case-under-judgment's own record is excluded per-item even when
                         # genuinely closed; duplicates still survive (no dedup).
+                        # #684/F2: "drop OR fault" is PER ITEM. The demand is asserted as a
+                        # CONJUNCTION on the list call's own response — the good sibling is
+                        # served in the SAME response the bad items are excluded from — so
+                        # faulting the WHOLE listing whenever any item is bad no longer
+                        # discharges it (that reading guts O1's precedent search: a search
+                        # returning the self-case beside good siblings would serve none).
     binds: ["interacts(benign_judge->list_closed_tickets).response", "ticket_store.domain.distinguished[open]", "benign_judge"]
     form: test
     discharged_by: test_list_response_non_closed_item_dropped_or_faulted
@@ -327,6 +345,10 @@ demands:
                         # payload names the case's own key — the one transitive instance
                         # whose identifier this seam knows. General free-text screening is
                         # NOT owed; the residual is the N-note on ticket_store.domain.
+                        # #684/F3: the screen runs over the SERIALIZED WHOLE payload, so the
+                        # test is parametrized over the field carrying the self-key
+                        # (resolution / key / a nested comment) — the old single-field
+                        # fixture (summary) left a summary-scoped screen green.
     binds: ["interacts(benign_judge->get_closed_ticket).response", "salt"]
     discharged_by: test_closed_ticket_naming_self_key_refused
 
@@ -461,7 +483,7 @@ structure:
         payload:
           parts: [{role: args, source: model-authored}]
           invariants: []
-          nl: "the model-facing call schema is exactly {key} — no require_closed, no status parameter (x8 grounds the verb signature); the key is model-chosen and meets Fork A's DEFINED minimal schema at the tool boundary (§7): empty, whitespace-only, and path/URL-significant characters draw a retry-class response with zero store attempts; everything else flows to the store opaquely (length and clean non-ASCII are explicit non-clauses of the written grammar). The case-under-judgment's own key is additionally excluded here regardless of state (Fork C, d23)."
+          nl: "the model-facing call schema is exactly {key} — no require_closed, no status parameter (x8 grounds the verb signature); the key is model-chosen and meets Fork A's DEFINED schema at the tool boundary (§7, rewritten as a GRAMMAR at #684): anything outside `[A-Za-z0-9][A-Za-z0-9._-]*` — empty, whitespace-only, path/URL-significant characters, whitespace and CR/LF, non-ASCII — draws a retry-class response with zero store attempts; length remains an explicit non-clause and flows to the store opaquely. The case-under-judgment's own key is additionally excluded here regardless of state (Fork C, d23)."
 
     - id: list_closed_tickets
       provenance: design
@@ -918,7 +940,7 @@ gate:
 # ===========================================================================
 handoff:
   forks:
-    - "Fork A — the key meets a DEFINED minimal schema before any store attempt (empty, whitespace-only, path/URL-significant characters reject with zero store attempts; length and clean non-ASCII flow opaquely). Human refined the recommendation. -> d10"
+    - "Fork A — the key meets a DEFINED schema before any store attempt (anything outside the grammar rejects with zero store attempts; length flows opaquely). Human refined the recommendation. REWRITTEN at #684: the shipped metacharacter blacklist became the grammar `[A-Za-z0-9][A-Za-z0-9._-]*`, and the 'clean non-ASCII flows opaquely' half was REVERSED by the human at the #684 gate — the writer percent-encodes every key it mints while this reader interpolates unescaped, so a non-ASCII key was never fetchable through this path. -> d10"
     - "Fork B — demand #0's provisional record-free reading FLIPPED: the tools mirror the query tool FULLY (capture row per call + bounded truncation-noted view). Human DEPARTED from the recommendation. -> d0"
     - "Fork C — the case-under-judgment's own key is excluded at the tool boundary, state-independent. -> d23"
     - "Fork D — only the live closed-only read confirms; cached gather_raw payloads are context, never confirmation. Challenged by the human as unreachable; an executed probe (65-forkd-probe.md, claims p1-p3) refuted the challenge. -> d16"

@@ -18,10 +18,12 @@ absence by registration, N3):
 
   - **Closed-pin** — ``require_closed=True`` on the wire; the verb body pins the outgoing
     ``status=closed`` and refuses a non-closed body as a business fault (exit 1).
-  - **Key schema** (Fork A) — ``get`` screens ``key`` before any store attempt: empty,
-    whitespace-only, and path/URL-significant characters draw a retry-class response with ZERO
-    store attempts (``get_ticket`` interpolates ``key`` into the URL path unescaped). ``label``/
-    ``q`` keep riding ``list_tickets``' urlencoding opaquely — the chosen asymmetry.
+  - **Key schema** (Fork A, tightened by #684) — ``get`` screens ``key`` against a defined
+    grammar (``_KEY_RE``, anchored on the shape case ids are minted in) before any store
+    attempt: anything outside it — empty, whitespace-only, path/URL-significant characters,
+    whitespace and CR/LF, non-ASCII — draws a retry-class response with ZERO store attempts
+    (``get_ticket`` interpolates ``key`` into the URL path unescaped). ``label``/``q`` keep
+    riding ``list_tickets``' urlencoding opaquely — the chosen asymmetry.
   - **Self-key exclusion** (Fork C/H) — the case-under-judgment's own key (the judge's learning
     run-dir basename) is refused pre-store on ``get``, filtered per-item by identity on ``list``,
     and — on ``get`` only — screened out of a fetched closed ticket whose free text NAMES it
@@ -44,6 +46,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -77,11 +80,23 @@ TOOL_LIST = "list_closed_tickets"
 _QUERIES_TABLE = "executed_queries.jsonl"
 _PAYLOAD_DIR = "ticket_reads"
 
-#: Characters that make a ``key`` reshape the ``/tickets/{key}`` URL path or defeat the
-#: closed-only read (Fork A). ``get_ticket`` interpolates ``key`` unescaped, so a separator, a
-#: ``..`` segment, a query delimiter, or a percent-encoded byte is rejected BEFORE the store —
-#: length and clean non-ASCII are explicit non-clauses and flow opaquely.
-_KEY_SIGNIFICANT = ("/", "\\", "..", "?", "#", "%", "\x00")
+#: Fork A's ``key`` grammar — an actual schema, not the metacharacter blacklist that used to
+#: stand here (#684/F1: a blacklist under-samples by construction; the old seven tokens let
+#: ``SOC-1#frag``, ``a&b``, ``k=v``, a backtick, an internal space and — the canonical
+#: request-reshaping vector — ``SOC-1\r\nHost: …`` reach the store).
+#:
+#: It is anchored on the shape the store's keys are actually MINTED in: the case id, which is
+#: the run-dir basename ``{%Y%m%dT%H%M%SZ}-{alert_label}`` (run_common.py:98). The asymmetry
+#: that makes this safe to tighten: the ticket WRITER percent-encodes every key it mints
+#: (``urllib.parse.quote(case_id, safe="")``, ticket_writer.py:189) while ``get_ticket``
+#: interpolates ``key`` into ``/tickets/{key}`` UNESCAPED (ticket_adapter.py:105) — so a key
+#: outside this grammar is not fetchable through this path anyway, and rejecting it costs no
+#: readable ticket. A ``..`` traversal needs a separator, which the grammar already rejects.
+#:
+#: Length stays an explicit non-clause. #684 REVERSES #672's "clean non-ASCII flows opaquely"
+#: (d10): a non-ASCII key is not a shape this store mints, and the unescaped reader cannot
+#: fetch one.
+_KEY_RE = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._-]*\Z")
 
 
 def _self_key(deps: AgentDeps) -> str:
@@ -98,10 +113,12 @@ def _key_reject_reason(key: str) -> str | None:
             "closed-ticket key must be a non-empty, non-blank case id (e.g. SOC-1042). "
             "Cite the closed case from the seed menu."
         )
-    if any(tok in key for tok in _KEY_SIGNIFICANT):
+    if _KEY_RE.match(key) is None:
         return (
-            f"closed-ticket key {key!r} carries a path/URL-significant character "
-            "('/', '\\', '..', '?', '#', '%', NUL) — pass a bare case id, not a path or URL."
+            f"closed-ticket key {key!r} is not a bare case id. A key is ASCII letters, "
+            "digits, '.', '_' and '-' only, starting with a letter or digit "
+            "(e.g. SOC-1042, 20260720T0000Z-sshd-672) — no path, URL, whitespace, "
+            "line break, or other punctuation."
         )
     return None
 
