@@ -34,6 +34,13 @@ jobs:
         # orchestrator/loop tests co-located under learning/. The latter were
         # previously dark to CI — only tests/ was collected — so a green run
         # could hide failures in learning/test_loop.py et al.
+        #
+        # DEFENDER_BUDGET_ENFORCE=1 runs the whole collected suite under the BLOCKING
+        # budget posture (#631, M9/D11): flipping the flag in CI is what exercises the
+        # deny branch on real runs (C6 refuted — real runs land at 191/200), so the
+        # enforcement path is executed routinely rather than merely enabled.
+        env:
+          DEFENDER_BUDGET_ENFORCE: "1"
         run: uv run pytest tests/ learning/ -v -m "not live"
 
       # The spec_graph gate checks (check_actors / check_binds) ship with the

@@ -78,6 +78,19 @@ def build_write_allow(root: Path, *, suffix: str = "") -> re.Pattern[str]:
     return re.compile(base + tail)
 
 
+def build_named_write_allow(root: Path, names: tuple[str, ...]) -> tuple[re.Pattern[str], ...]:
+    """A POSITIVE allow-list of EXACTLY `<root>/<name>` for each name — one anchored
+    pattern per basename, matched against the RESOLVED operand (#631, S2). Deliberately
+    tighter than `build_write_allow`'s subtree/`.md`-suffix forms: a suffix filter is a
+    filename filter, not a subtree narrowing (`decide_write` applies no path shapes), so
+    it would admit `gather_raw/evil.md` and `sub/report.md` at depth. Resolving both
+    sides means an alias that resolves to `<root>/investigation.md` matches the
+    investigation.md pattern (and is then invlang-validated on the RESOLVED name), while
+    `<root>/sub/report.md` never matches the report.md pattern."""
+    base = re.escape(str(root.resolve()))
+    return tuple(re.compile(base + "/" + re.escape(name)) for name in names)
+
+
 def read_allowed_path(
     path: str | Path, *, run_dir: Path | None, defender_dir: Path | None,
     policy: AgentPolicy,
@@ -266,8 +279,13 @@ def decide_write(
             "agent's read containment (write ⊆ read roots).",
         )
 
-    if path.name == "investigation.md":
-        current = path.read_text(encoding="utf-8") if path.is_file() else None
+    # Select the invlang validator on the RESOLVED name, not the unresolved operand
+    # (#631, PBW2D): `write_allow` matches `rp`, so a symlink `alias.md` that resolves to
+    # `investigation.md` passes the allowlist — and must then face the same validator the
+    # direct write does, or identical text is refused through the real name and admitted
+    # through the alias. The append-only baseline reads from `rp` for the same reason.
+    if rp.name == "investigation.md":
+        current = rp.read_text(encoding="utf-8") if rp.is_file() else None
         # Fail closed on an internal validator error — same as invlang_validate's
         # hook, which exits 2 (block) rather than letting the write through.
         try:

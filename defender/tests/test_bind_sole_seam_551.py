@@ -394,13 +394,15 @@ def test_d2_write_shapes_field(tmp_path):
 
 def test_d2_main_write_shape_anchors_run_dir(tmp_path):
     """d2_main_write_shape_anchors_run_dir (domain-outcome): MAIN's write shape anchors run_dir —
-    decide_write admits run_dir/x.md and DENIES defender_dir/skills/x.md (a defender_dir-anchored
-    shape would let MAIN author the corpus)."""
+    decide_write admits run_dir/report.md and DENIES defender_dir/skills/report.md (a
+    defender_dir-anchored shape would let MAIN author the corpus)."""
     # GREEN@HEAD: MAIN's run-dir write scope must survive the read_shapes→write_shapes migration.
+    # #631 (S2) narrowed MAIN's scope to exactly {investigation.md, report.md}; report.md is the
+    # run-dir positive control (run/x.md is no longer admitted — see test_main_write_scope_631).
     run = tmp_path / "run"
     pol = bind(MAIN_DEF, run).policy
-    assert permission.decide_write(run / "x.md", "c", policy=pol).allow              # positive control
-    assert not permission.decide_write(_DEFENDER / "skills" / "x.md", "c", policy=pol).allow
+    assert permission.decide_write(run / "report.md", "c", policy=pol).allow          # positive control
+    assert not permission.decide_write(_DEFENDER / "skills" / "report.md", "c", policy=pol).allow
 
 
 def test_d2_lead_author_write_shape_anchors_skills(tmp_path):
@@ -427,13 +429,16 @@ def test_d2_write_shape_resolves_symlinked_root(tmp_path):
     link = tmp_path / "linkrun"
     os.symlink(real, link)
     pol = bind(MAIN_DEF, link).policy
-    assert permission.decide_write(link / "x.md", "c", policy=pol).allow  # link/x.md resolves to real/x.md
+    # report.md is MAIN's writable artifact post-#631 (S2); link/report.md resolves to
+    # real/report.md, so admitting it proves the write shape anchors on the RESOLVED root.
+    assert permission.decide_write(link / "report.md", "c", policy=pol).allow
 
 
 def test_d2_main_lead_shapes_no_cross_contamination(tmp_path):
-    """d2_main_lead_shapes_no_cross_contamination (negative): MAIN's suffix-less run-dir shape admits
-    any basename under run_dir; LEAD's .md skills shape admits only skills/**.md — neither def's shape
-    widens into the other's root/suffix (positive control: each admits its own sanctioned write)."""
+    """d2_main_lead_shapes_no_cross_contamination (negative): MAIN's run-dir shape admits its
+    sanctioned run-dir artifacts (post-#631 S2: exactly {investigation.md, report.md}); LEAD's .md
+    skills shape admits only skills/**.md — neither def's shape widens into the other's root/suffix
+    (positive control: each admits its own sanctioned write)."""
     # RED@HEAD: the LEAD half needs bind(LEAD_AUTHOR_DEF, defender_dir=) → TypeError.
     run = tmp_path / "run"
     wtd = tmp_path / "wt" / "defender"
@@ -441,8 +446,8 @@ def test_d2_main_lead_shapes_no_cross_contamination(tmp_path):
     main_pol = bind(MAIN_DEF, run).policy
     lead_pol = bind(LEAD_AUTHOR_DEF, run, defender_dir=wtd).policy
 
-    assert permission.decide_write(run / "scratch.bin", "c", policy=main_pol).allow      # MAIN: any basename
-    assert not permission.decide_write(skills / "x.md", "c", policy=main_pol).allow      # MAIN doesn't widen into skills
+    assert permission.decide_write(run / "report.md", "c", policy=main_pol).allow        # MAIN: sanctioned run-dir artifact
+    assert not permission.decide_write(skills / "report.md", "c", policy=main_pol).allow # MAIN doesn't widen into skills
     assert permission.decide_write(skills / "gather" / "x.md", "c", policy=lead_pol).allow  # LEAD: sanctioned .md
     assert not permission.decide_write(run / "x.md", "c", policy=lead_pol).allow         # LEAD doesn't widen into run_dir
 

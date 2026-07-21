@@ -154,6 +154,12 @@ class AgentDefinition:
     requires_explicit_tree: bool = False
     bindable: bool = True
     deny_reason: str = _DEFAULT_DENY_REASON
+    # The budget-posture bit (#631, decision M2): True → the budget hook refuses the
+    # over-cap tool and kills the run at tail exhaustion; False (the DEFAULT) → accounting
+    # only. Gated to MAIN/GATHER; every learning stage keeps the default. A safe-by-
+    # construction DATA bit like `requires_confine`/`bindable`, checked generically (no
+    # role branch) — so a new agent that fails open would have to declare the bit True.
+    budget_enforced: bool = False
 
 
 # ── Per-invocation carriage + resolved roots ─────────────────────────────────
@@ -294,6 +300,7 @@ def compile_policy(defn: AgentDefinition, roots: ResolvedRoots) -> AgentPolicy:
         read_confine=roots.read_confine,
         write_allow=tuple(pat for build in defn.write_shapes for pat in build(roots)),
         deny_reason=defn.deny_reason,
+        budget_enforced=defn.budget_enforced,
     )
 
 

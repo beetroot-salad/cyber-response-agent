@@ -186,6 +186,20 @@ class RequestLogger:
         self._seen[agent_id] += 1
         self.n_requests += 1
 
+    def log_budget_refusal(self, *, tool_name: str, agent_id: str = "main") -> None:
+        """Write an explicit budget-refusal record to `llm_requests.jsonl` (#631, P4).
+
+        A call the budget short-circuits preempts QueryCapture entirely (M11 ordering), so
+        it leaves no queries-table row and no breaker record — the refusal has no carrier
+        unless the seam mints one. This is that record: a durable, legible mark that an
+        over-budget call was refused, keyed `kind: "budget_refusal"`. It carries no `id`
+        (so it never collides with a request row) and is not projected into `tool_trace`."""
+        rec = {"event_type": "budget_refusal", "kind": "budget_refusal",
+               "tool_name": tool_name, "agent_id": agent_id}
+        with contextlib.suppress(Exception):
+            self._fh.write(json.dumps(rec) + "\n")
+            self._fh.flush()
+
     def close(self) -> None:
         # logging must never break the run
         with contextlib.suppress(Exception):
