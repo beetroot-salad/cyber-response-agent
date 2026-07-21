@@ -26,7 +26,8 @@ What is driven, and how:
     rejects a ``..`` / symlink via decide_write's RESOLVED-path fullmatch — tested accordingly.
 
 Gate signatures confirmed from ``permission/files.py`` + ``permission/bash.py``:
-  ``decide_write(path, proposed_text="", *, run_dir=None, defender_dir=None, policy)`` → ``Decision``;
+  ``decide_write(path, proposed_text="", *, run_dir, defender_dir, policy)`` → ``Decision``
+  (both roots REQUIRED since #681 — an omitted ``run_dir`` used to skip the #629 artifact gate);
   ``decide_bash(command, *, policy, run_dir=None, defender_dir=None)`` → ``BashDecision``.
 
 Bash operand spelling ASSUMED repo-relative (``defender/<corpus>/...``): the agent's bash runs at

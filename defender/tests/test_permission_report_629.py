@@ -774,6 +774,49 @@ def test_report_frontmatter_yaml_alias_amplification_under_byte_bound(env):
 # regression (finalize / PR #677) — the gate FAILS CLOSED, never raises
 # ═══════════════════════════════════════════════════════════════════════════
 
+def test_report_gate_cannot_be_skipped_by_omitting_the_run_root(env):
+    """#681/1 — the report gate KEYS on `<run_dir>/report.md`, so under the former
+    `run_dir: Path | None = None` a caller that omitted the kwarg lost the ENTIRE gate
+    (disposition + both size bounds + `</report>`) and fell through to Decision(True). The issue's
+    repro — an out-of-enum disposition in a 20 KB file — is pinned here on both spellings of the
+    omission: no kwarg at all is a TypeError at the call site (the roots are required now, so the
+    silent-skip branch has no way to be reached), and an explicit `None` from an untyped caller
+    fails CLOSED at the read-containment check instead of skipping the artifact branch. Positive
+    control: with real roots the same text denies on the report gate itself, naming disposition."""
+    repro = "---\ndisposition: hostile\n---\n" + "x" * 20000
+    with pytest.raises(TypeError):
+        permission.decide_write(env.run / "report.md", repro, policy=env.pol)
+    explicit_none = permission.decide_write(
+        env.run / "report.md", repro, run_dir=None, defender_dir=None, policy=env.pol
+    )
+    assert explicit_none.allow is False
+    assert explicit_none.reason
+    gated = env.decide("report.md", repro)  # positive control — the gate itself, not containment
+    assert gated.allow is False
+    assert "disposition" in gated.reason
+
+
+def test_report_duplicate_key_compares_constructed_keys_not_node_text(env):
+    """#681/2 — duplicates are judged on the CONSTRUCTED key (what `safe_load` would put in the
+    mapping), not the raw scalar node text. The node-text compare was wrong in both directions:
+    it FALSE-POSITIVED on `1:` vs `"1":` (distinct int/str keys that share the node text "1"),
+    denying a structurally valid report; and it FALSE-NEGATIVED on `1:` vs `0x1:` and `yes:` vs
+    `true:` (different text, same constructed key), missing a real last-wins shadowing of exactly
+    the kind the check exists to catch. Each leg re-probes `safe_load`'s own key set, so the
+    fixtures cannot drift from the parser they are asserting about. Positive control: the
+    duplicate `disposition` detection is unchanged."""
+    type_variant = 'disposition: benign\n1: a\n"1": b\n'
+    assert yaml.safe_load(type_variant) == {"disposition": "benign", 1: "a", "1": "b"}, \
+        "re-probe: int 1 and str '1' are DISTINCT keys to safe_load — not a duplicate"
+    assert env.decide("report.md", f"---\n{type_variant}---\nbody\n").allow is True
+    for same_key in ("disposition: benign\n1: a\n0x1: b\n", "disposition: benign\nyes: a\ntrue: b\n"):
+        assert len(yaml.safe_load(same_key)) == 2, \
+            f"re-probe: the two spellings collapse to ONE key — a real duplicate: {same_key!r}"
+        assert env.decide("report.md", f"---\n{same_key}---\nbody\n").allow is False, same_key
+    # positive control: the duplicate this check exists for still denies.
+    assert env.decide("report.md", report(extra_fm="disposition: benign")).allow is False
+
+
 def test_non_utf8_encodable_content_fails_closed_not_raises(env):
     """A lone surrogate (`\\ud800`, reachable from a model tool-call JSON arg —
     `json.loads('"\\\\ud800"')` yields one) is not UTF-8-encodable, so the byte-length basis

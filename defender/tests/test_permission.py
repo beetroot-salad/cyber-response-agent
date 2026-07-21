@@ -420,6 +420,14 @@ def test_alert_is_untrusted():
 # run_dir base — every writer declares its paths (main: its run-dir subtree; the lead
 # author: defender/skills/**.md). Empty write_allow → the agent may write nothing.
 # `build_write_allow(root, suffix=…)` is the shared subtree-pattern builder.
+# Both run roots are REQUIRED arguments (#681) — the former `run_dir=None` default silently
+# skipped the #629 output-structure gate for a caller that forgot the kwarg — so every probe
+# below threads them. They do not loosen or tighten the allowlist assertions: the write⊆read
+# containment guard they enable is a no-op for a target already inside the policy's own roots.
+# `_VALID_REPORT` is the content for run-dir-root report.md probes, which are gated artifacts.
+
+_VALID_REPORT = "---\ndisposition: benign\n---\nConcise analysis.\n"
+
 
 def _run_dir_pol(run_dir):
     """A main-style policy: its one declared write surface is the run-dir subtree."""
@@ -434,14 +442,16 @@ def _skills_pol(skills):
 def test_write_outside_run_dir_denied(tmp_path):
     run_dir = tmp_path / "run"
     run_dir.mkdir()
-    d = permission.decide_write(tmp_path / "evil.txt", "x", policy=_run_dir_pol(run_dir))
+    d = permission.decide_write(tmp_path / "evil.txt", "x", run_dir=run_dir,
+                                defender_dir=tmp_path / "defender", policy=_run_dir_pol(run_dir))
     assert not d.allow
 
 
 def test_write_report_allowed(tmp_path):
     run_dir = tmp_path / "run"
     run_dir.mkdir()
-    d = permission.decide_write(run_dir / "report.md", "disposition: benign\n", policy=_run_dir_pol(run_dir))
+    d = permission.decide_write(run_dir / "report.md", _VALID_REPORT, run_dir=run_dir,
+                                defender_dir=tmp_path / "defender", policy=_run_dir_pol(run_dir))
     assert d.allow
 
 
@@ -450,18 +460,30 @@ def test_write_investigation_invalid_invlang_denied(tmp_path):
     run_dir.mkdir()
     # A ```yaml fence is rejected by the invlang surface check (Rule 0).
     bad = "```yaml\nfoo: bar\n```\n"
-    d = permission.decide_write(run_dir / "investigation.md", bad, policy=_run_dir_pol(run_dir))
+    d = permission.decide_write(run_dir / "investigation.md", bad, run_dir=run_dir,
+                                defender_dir=tmp_path / "defender", policy=_run_dir_pol(run_dir))
     assert not d.allow
     assert "invlang validation" in d.reason
 
 
-def test_decide_write_requires_policy(tmp_path):
-    """decide_write requires an explicit policy — omitting it is a TypeError (the write allowlist
-    lives on the policy, so no caller silently gets a default write scope). Mirrors decide_read."""
+def test_decide_write_requires_policy_and_roots(tmp_path):
+    """decide_write requires an explicit policy AND both run roots — omitting any of the three is
+    a TypeError, never a silent default. The policy carries the write allowlist, so a default
+    would hand the caller an unearned write scope (mirrors decide_read). The roots are required
+    for the mirror-image reason (#681): `run_dir` is what the #629 output-structure gate keys
+    `<run_dir>/report.md` on, so under the former `run_dir: Path | None = None` a caller that
+    forgot the kwarg silently lost the whole gate — an over-bound report with an out-of-enum
+    disposition fell through to Decision(True). Failing at the call site is the only signal that
+    cannot be missed; there is no runtime branch to test because the argument cannot be absent."""
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     with pytest.raises(TypeError):
-        permission.decide_write(run_dir / "x.md", "b\n")  # no policy=
+        permission.decide_write(run_dir / "x.md", "b\n")  # no policy=, no roots
+    with pytest.raises(TypeError):
+        permission.decide_write(run_dir / "x.md", "b\n", policy=_run_dir_pol(run_dir))  # no roots
+    with pytest.raises(TypeError):  # run_dir only — read containment needs BOTH roots
+        permission.decide_write(run_dir / "x.md", "b\n", run_dir=run_dir,
+                                policy=_run_dir_pol(run_dir))
 
 
 def test_write_allow_admits_declared_denies_sibling(tmp_path):
@@ -472,8 +494,11 @@ def test_write_allow_admits_declared_denies_sibling(tmp_path):
     (skills / "elastic").mkdir(parents=True)
     (tmp_path / "defender" / "lessons").mkdir(parents=True)
     pol = _skills_pol(skills)
-    assert permission.decide_write(skills / "elastic" / "x.md", "b\n", policy=pol).allow
-    assert not permission.decide_write(tmp_path / "defender" / "lessons" / "z.md", "b\n", policy=pol).allow
+    dfn = tmp_path / "defender"
+    assert permission.decide_write(skills / "elastic" / "x.md", "b\n", run_dir=tmp_path / "run",
+                                   defender_dir=dfn, policy=pol).allow
+    assert not permission.decide_write(dfn / "lessons" / "z.md", "b\n", run_dir=tmp_path / "run",
+                                       defender_dir=dfn, policy=pol).allow
 
 
 def test_write_allow_md_only_denies_non_md(tmp_path):
@@ -483,8 +508,11 @@ def test_write_allow_md_only_denies_non_md(tmp_path):
     skills = tmp_path / "defender" / "skills"
     (skills / "invlang").mkdir(parents=True)
     pol = _skills_pol(skills)
-    assert permission.decide_write(skills / "elastic.md", "b\n", policy=pol).allow
-    assert not permission.decide_write(skills / "invlang" / "validate.py", "evil\n", policy=pol).allow
+    dfn = tmp_path / "defender"
+    assert permission.decide_write(skills / "elastic.md", "b\n", run_dir=tmp_path / "run",
+                                   defender_dir=dfn, policy=pol).allow
+    assert not permission.decide_write(skills / "invlang" / "validate.py", "evil\n",
+                                       run_dir=tmp_path / "run", defender_dir=dfn, policy=pol).allow
     # rejected: allow any file under skills — that lets the writer clobber invlang/connect .py code,
     #           caught only late by the loop's .md-only scope gate (after the worktree carries it)
 
@@ -499,8 +527,11 @@ def test_write_allow_no_implicit_run_dir(tmp_path):
     skills = tmp_path / "defender" / "skills"
     skills.mkdir(parents=True)
     pol = _skills_pol(skills)
-    assert not permission.decide_write(run_dir / "report.md", "x\n", policy=pol).allow
-    assert permission.decide_write(skills / "x.md", "b\n", policy=pol).allow
+    dfn = tmp_path / "defender"
+    assert not permission.decide_write(run_dir / "report.md", _VALID_REPORT, run_dir=run_dir,
+                                       defender_dir=dfn, policy=pol).allow
+    assert permission.decide_write(skills / "x.md", "b\n", run_dir=run_dir,
+                                   defender_dir=dfn, policy=pol).allow
 
 
 def test_write_allow_traversal_escape_denied(tmp_path):
@@ -511,7 +542,8 @@ def test_write_allow_traversal_escape_denied(tmp_path):
     (tmp_path / "defender" / "lessons").mkdir(parents=True)
     pol = _skills_pol(skills)
     escape = skills / ".." / "lessons" / "z.md"
-    assert not permission.decide_write(escape, "b\n", policy=pol).allow
+    assert not permission.decide_write(escape, "b\n", run_dir=tmp_path / "run",
+                                       defender_dir=tmp_path / "defender", policy=pol).allow
 
 
 def test_write_empty_allow_denies_all(tmp_path):
@@ -521,22 +553,36 @@ def test_write_empty_allow_denies_all(tmp_path):
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     pol = permission.AgentPolicy()  # write_allow=()
-    assert not permission.decide_write(run_dir / "report.md", "x\n", policy=pol).allow
+    assert not permission.decide_write(run_dir / "report.md", _VALID_REPORT, run_dir=run_dir,
+                                       defender_dir=tmp_path / "defender", policy=pol).allow
     # rejected: an implicit run_dir base — it silently granted every agent (incl. read-only
     #           predictors) run-dir writes; deny-by-default forces each writer to declare its paths
 
 
-def test_write_allow_investigation_validation_still_fires(tmp_path):
-    """investigation.md invlang validation is keyed on the filename, so it still fires for a write
-    admitted via write_allow. Positive control: a plain .md alongside it is allowed (the validation
-    is filename-scoped, not a blanket .md check)."""
+def test_write_allow_corpus_file_named_investigation_not_gated(tmp_path):
+    """invlang validation is keyed on `<run_dir>/investigation.md`, so a CORPUS file that merely
+    shares the basename is NOT routed into the validator — it is a lesson, not an invlang work log,
+    and denying it for failing a grammar it was never written in is the allow→deny regression #629
+    F-A2 names for report.md. Both artifacts key the same way since #681: the exact-basename
+    fallback this test used to pin existed only for a `run_dir`-less caller, and both roots are
+    now required, so no such caller exists. Positive control: the SAME invalid text at the run-dir
+    root DOES deny with the invlang reason, so the validator is live, not dead."""
     skills = tmp_path / "defender" / "skills"
     skills.mkdir(parents=True)
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    dfn = tmp_path / "defender"
+    bad = "```yaml\nfoo: bar\n```\n"
     pol = _skills_pol(skills)
-    d = permission.decide_write(skills / "investigation.md", "```yaml\nfoo: bar\n```\n", policy=pol)
+    assert permission.decide_write(skills / "investigation.md", bad, run_dir=run_dir,
+                                   defender_dir=dfn, policy=pol).allow
+    assert permission.decide_write(skills / "note.md", "plain text\n", run_dir=run_dir,
+                                   defender_dir=dfn, policy=pol).allow
+    # positive control: the run-dir root artifact, same text, same gate → denies on invlang.
+    d = permission.decide_write(run_dir / "investigation.md", bad, run_dir=run_dir,
+                                defender_dir=dfn, policy=_run_dir_pol(run_dir))
     assert not d.allow
     assert "invlang validation" in d.reason
-    assert permission.decide_write(skills / "note.md", "plain text\n", policy=pol).allow
 
 
 # --- gather subagent: compute + adapter surface ---
