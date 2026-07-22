@@ -142,7 +142,9 @@ def _tree(tmp_path):
     run = tmp_path / "run"
     run.mkdir()
     pol = AgentPolicy(read_confine=(conf,), bash_allow=(), read_roots=())
-    deps = ActorDeps(run_dir=run, defender_dir=dfn, run_id="r", salt="s", policy=pol)
+    deps = ActorDeps(
+        run_dir=run, defender_dir=dfn, run_id="r", salt="s", policy=pol, cwd_anchor=run,
+    )
     return deps, conf, lesson, rubric
 
 
