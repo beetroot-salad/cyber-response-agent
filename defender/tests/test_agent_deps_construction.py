@@ -1,4 +1,4 @@
-"""Executable spec for #498 — `AgentDeps` (renamed from `RunDeps`) REQUIRES its `policy`.
+"""Executable spec for #498/#666 — `AgentDeps` requires its policy and cwd anchor.
 
 The gate keys on `deps.policy` (capability as DATA), so this refactor removes the
 inheritable `_MAIN_POLICY` default from the deps base: a security-critical subtype can
@@ -16,7 +16,7 @@ The per-stage `for_scope`/`for_run` DEPS FACTORIES this suite once pinned were R
 #551 — every production deps site now obtains its `AgentDeps` via the single `bind` seam, so
 the factory identity/parity/guarded-negative sections moved to `test_bind_sole_seam_551.py`
 (the `d1_*_via_bind` + `d4_*` demands). What remains here is the durable base contract:
-`policy` is required, never silently MAIN-inherited.
+`policy` and the path-resolution anchor are required, never silently defaulted.
 
 Explicitly OUT OF SCOPE (pinned elsewhere): policy ENFORCEMENT (decide_read/decide_bash
 allow/deny — test_read_confine*.py) and the pydantic run loop. Capabilities are unchanged;
@@ -43,8 +43,9 @@ _GATHER_POLICY = compile_policy_for(GATHER_DEF, run_dir=Path("/run"), defender_d
 
 
 def _ident(run_dir: Path) -> dict:
-    """The four identity kwargs every deps construction shares."""
-    return dict(run_dir=run_dir, defender_dir=PATHS.defender_dir, run_id=run_dir.name, salt="s")
+    """The identity and cwd kwargs every valid deps construction shares."""
+    return dict(run_dir=run_dir, defender_dir=PATHS.defender_dir, run_id=run_dir.name, salt="s",
+                cwd_anchor=run_dir)
 
 
 
@@ -52,7 +53,8 @@ def test_agent_deps_requires_policy(tmp_path):
     """AgentDeps(run_dir, defender_dir, run_id, salt) with NO policy= -> TypeError
     (the base has no inheritable default to go silently MAIN-shaped)."""
     with pytest.raises(TypeError):
-        tools.AgentDeps(run_dir=tmp_path, defender_dir=PATHS.defender_dir, run_id="r", salt="s")
+        tools.AgentDeps(run_dir=tmp_path, defender_dir=PATHS.defender_dir, run_id="r", salt="s",
+                        cwd_anchor=tmp_path)
 
 
 def test_agent_deps_accepts_explicit_policy(tmp_path):
@@ -62,13 +64,38 @@ def test_agent_deps_accepts_explicit_policy(tmp_path):
     deps = tools.AgentDeps(**_ident(tmp_path), policy=_MAIN_POLICY)
     assert deps.policy is _MAIN_POLICY
     assert deps.role is AgentRole.MAIN
+    assert deps.cwd_anchor == tmp_path
+
+
+def test_agent_deps_requires_cwd_anchor(tmp_path):
+    """AgentDeps cannot silently resolve relative paths against the ambient process cwd."""
+    with pytest.raises(TypeError):
+        tools.AgentDeps(
+            run_dir=tmp_path, defender_dir=PATHS.defender_dir, run_id="r", salt="s",
+            policy=_MAIN_POLICY,
+        )
+
+
+def test_subtype_requires_cwd_anchor(tmp_path):
+    """AgentDeps subtypes inherit the required cwd-anchor contract."""
+    with pytest.raises(TypeError):
+        ActorDeps(
+            run_dir=tmp_path, defender_dir=PATHS.defender_dir, run_id="r", salt="s",
+            policy=_MAIN_POLICY,
+        )
+
+
+def test_cwd_anchor_is_keyword_only(tmp_path):
+    with pytest.raises(TypeError):
+        tools.AgentDeps(tmp_path, PATHS.defender_dir, "r", "s", tmp_path, policy=_MAIN_POLICY)
 
 
 def test_judge_deps_requires_policy(tmp_path):
     """JudgeDeps inherits the base requiredness: JudgeDeps(4 identity fields) with no policy=
     -> TypeError (a mis-built judge cannot silently get MAIN and lose its grounding roots)."""
     with pytest.raises(TypeError):
-        JudgeDeps(run_dir=tmp_path, defender_dir=PATHS.defender_dir, run_id="r", salt="s")
+        JudgeDeps(run_dir=tmp_path, defender_dir=PATHS.defender_dir, run_id="r", salt="s",
+                  cwd_anchor=tmp_path)
 
 
 def test_actor_deps_requires_policy(tmp_path):
@@ -76,14 +103,16 @@ def test_actor_deps_requires_policy(tmp_path):
     -> TypeError. This is the fail-OPEN case: MAIN's empty read_confine would re-expose the
     judge rubric under defender/ (#512) — so the MAIN-shaped actor must be unconstructable."""
     with pytest.raises(TypeError):
-        ActorDeps(run_dir=tmp_path, defender_dir=PATHS.defender_dir, run_id="r", salt="s")
+        ActorDeps(run_dir=tmp_path, defender_dir=PATHS.defender_dir, run_id="r", salt="s",
+                  cwd_anchor=tmp_path)
 
 
 def test_policy_is_keyword_only(tmp_path):
     """policy is keyword-only: passing it as the 5th POSITIONAL arg -> TypeError. Pins the
     `field(kw_only=True)` shape (matches the _ActorToolScope.read_confine precedent)."""
     with pytest.raises(TypeError):
-        tools.AgentDeps(tmp_path, PATHS.defender_dir, "r", "s", _MAIN_POLICY)
+        tools.AgentDeps(
+            tmp_path, PATHS.defender_dir, "r", "s", _MAIN_POLICY, cwd_anchor=tmp_path)
 
 
 

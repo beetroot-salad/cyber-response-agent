@@ -82,17 +82,16 @@ class AgentDeps:
     run_id: str
     salt: str
     policy: permission.AgentPolicy = field(kw_only=True)
+    cwd_anchor: Path = field(kw_only=True)
     box: box_mod.BoxExecutor = field(kw_only=True, default_factory=box_mod.BoxExecutor)
-    cwd_anchor: Path = field(kw_only=True, default=Path())
 
     role: ClassVar[AgentRole] = AgentRole.MAIN
 
     @classmethod
     def _for_run(
         cls, run_dir: Path, policy: permission.AgentPolicy,
-        *, defender_dir: Path = PATHS.defender_dir, salt: str | None = None,
+        *, cwd_anchor: Path, defender_dir: Path = PATHS.defender_dir, salt: str | None = None,
         box: box_mod.BoxExecutor | None = None,
-        cwd_anchor: Path | None = None,
         **subtype_fields: Any,
     ) -> Self:
         resolved_salt = salt if salt is not None else uuid.uuid4().hex
@@ -100,7 +99,7 @@ class AgentDeps:
             run_dir=run_dir, defender_dir=defender_dir,
             run_id=run_dir.name, salt=resolved_salt, policy=policy,
             box=box if box is not None else box_mod.BoxExecutor(),
-            cwd_anchor=cwd_anchor if cwd_anchor is not None else run_dir,
+            cwd_anchor=cwd_anchor,
             **subtype_fields,
         )
 
