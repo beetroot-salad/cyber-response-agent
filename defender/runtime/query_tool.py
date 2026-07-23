@@ -20,7 +20,7 @@ from pydantic_ai.exceptions import (
 from defender._io import append_jsonl
 from defender._run_paths import RunPaths
 from defender.hooks.budget_enforcer import BudgetKill
-from defender.runtime.untrusted import wrap as _wrap
+from defender._untrusted import wrap as _wrap
 from defender.scripts.adapters.faults import USAGE_EXIT_CODE, AdapterFault
 from defender.scripts.gather_tools.record_query import (
     _is_event_payload,

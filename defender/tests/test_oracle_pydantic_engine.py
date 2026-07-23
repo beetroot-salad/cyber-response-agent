@@ -162,7 +162,7 @@ def test_invoke_oracle_fans_out_per_lead_in_order(monkeypatch, tmp_path):
 
     calls = []
 
-    def fake_oracle_fn(prompt_path, model, effort, trace_name, label, user, learning_run_dir):
+    def fake_oracle_fn(prompt_path, model, effort, trace_name, label, user, learning_run_dir, *, salt):
         calls.append((label, trace_name, learning_run_dir))
         lead_id = label.split(":", 1)[1]
         return f'events:\n  - lead: "{lead_id}"\n'
@@ -201,7 +201,7 @@ def test_invoke_oracle_trace_name_is_per_direction(monkeypatch, tmp_path):
         story = tmp_path / story_name
         story.write_text("the story\n")
 
-        def fake_oracle_fn(prompt_path, model, effort, trace_name, label, user, learning_run_dir):
+        def fake_oracle_fn(prompt_path, model, effort, trace_name, label, user, learning_run_dir, *, salt):
             seen.append(trace_name)
             return 'events:\n  - lead: "l-001"\n'
 

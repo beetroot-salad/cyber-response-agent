@@ -53,10 +53,11 @@ def _run_verify_pydantic(  # noqa: PLR0913 — the transport signature plus the 
     user: str,
     source_run_dir: Path,
     *,
+    salt: str | None = None,
     wall_clock_timeout: int = VERIFIER_TIMEOUT,
     make_model: MakeModel = providers.build_for_effort,
 ) -> str:
-    deps = bind(VERIFY_DEF, source_run_dir)
+    deps = bind(VERIFY_DEF, source_run_dir, salt=salt)
     return run_stage(
         stage="verify_forward",
         prompt_path=prompt_path, model=model, effort=effort,

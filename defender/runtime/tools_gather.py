@@ -21,7 +21,7 @@ from .tools import (
 from defender._corpus import QueryTemplate, iter_query_templates
 from defender.hooks.record_lead import claim_lead as _claim_lead
 from defender.hooks.inject_system_skill_description import descriptor_catalog as _descriptor_catalog
-from defender.runtime.untrusted import wrap as _wrap
+from defender._untrusted import wrap as _wrap
 from defender.scripts.gather_tools.record_query import LEAD_ID_RE as _LEAD_ID_RE
 
 

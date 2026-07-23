@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar
 
+from uuid import uuid4
 from defender.learning.core import config
 from defender.learning.core.config import RunUnprocessable
 from defender.learning.leads.path_validation import SKILLS_REL
@@ -76,10 +77,13 @@ def _run_author_pydantic(  # noqa: PLR0913 — the transport signature plus the 
     learning_run_dir: Path,
     repo_root: Path,
     request_limit: int = config.LEAD_AUTHOR_REQUEST_LIMIT,
+    salt: str | None = None,
     wall_clock_timeout: int = config.LEAD_AUTHOR_TIMEOUT,
     make_model: MakeModel = providers.build_for_effort,
 ) -> str:
-    deps = bind(LEAD_AUTHOR_DEF, learning_run_dir, defender_dir=repo_root / "defender")
+    deps = bind(
+        LEAD_AUTHOR_DEF, learning_run_dir, defender_dir=repo_root / "defender", salt=salt
+    )
     return run_stage(
         stage="lead_author",
         prompt_path=prompt_path, model=model, effort=effort,
@@ -106,8 +110,10 @@ def run_author_stage(  # noqa: PLR0913 — the spawn contract (5 per-mode inputs
     request_limit: int = config.LEAD_AUTHOR_REQUEST_LIMIT,
     source_key: Callable[..., object] = config.source_first_party_key,
     run_author: Callable[..., str] = _run_author_pydantic,
+    salt: str | None = None,
 ) -> int:
     log(f"spawn {log_label} in-process (model={model}, effort={effort}, timeout={timeout}s)")
+    stage_salt = salt if salt is not None else uuid4().hex
     source_key(model, label=log_label)
     trace_name = f"{batch_id}.{os.getpid()}.trace.jsonl"
     try:
@@ -116,6 +122,7 @@ def run_author_stage(  # noqa: PLR0913 — the spawn contract (5 per-mode inputs
             trace_name=trace_name, label=f"{log_label}:{batch_id}", user=user_prompt,
             learning_run_dir=learning_run_dir, repo_root=repo_root,
             request_limit=request_limit, wall_clock_timeout=timeout,
+            salt=stage_salt,
         )
     except RunUnprocessable as e:
         log(f"{log_label} did not complete (per-run fault): {e}")

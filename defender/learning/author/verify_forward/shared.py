@@ -6,10 +6,6 @@ from pathlib import Path
 from defender._io import read_jsonl_rows
 
 
-def data_section(label: str, body: str) -> str:
-    return f"{label}:\n\n{body.strip()}"
-
-
 def parse_verdict(text: str, *, error_prefix: str) -> str:
     for line in reversed(text.strip().splitlines()):
         s = line.strip().strip("*`# ").strip()

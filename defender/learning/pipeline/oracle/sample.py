@@ -3,11 +3,14 @@ from __future__ import annotations
 import json
 import re
 
+from uuid import uuid4
 import yaml
 
+from defender._untrusted import wrap
 from defender._yaml import safe_load
 from defender.learning.core.config import RunUnprocessable
 from defender.learning.core.validate import strip_yaml_fence
+from defender.learning.pipeline._prompt import stage_user_message
 
 
 
@@ -117,7 +120,7 @@ def _query_lines(lead) -> str:
     return "\n".join(lines) if lines else "  (none)"
 
 
-def build_lead_user_prompt(lead, story: str, sample_text: str) -> str:
+def build_lead_user_prompt(lead, story: str, sample_text: str, *, salt: str | None = None) -> str:
     raw_wtc = lead.what_to_summarize
     if isinstance(raw_wtc, str):
         raw_wtc = [raw_wtc]
@@ -128,18 +131,21 @@ def build_lead_user_prompt(lead, story: str, sample_text: str) -> str:
         yaml.safe_dump(san_wtc, default_flow_style=False, allow_unicode=True).rstrip()
         if san_wtc else "  (none)"
     )
-    return (
-        "## The actor's story\n\n"
-        f"{story.rstrip()}\n\n"
-        f"## This lead ({lead.lead_id}) — no goal given\n\n"
+    stage_salt = salt if salt is not None else uuid4().hex
+    lead_body = (
+        f"lead_id: {lead.lead_id}\n"
         "what_to_summarize:\n"
         f"{wtc_block}\n\n"
         "queries:\n"
         f"{_query_lines(lead)}\n\n"
-        "## Sample event one of these queries returned (shape reference; values scrubbed)\n\n"
-        f"{sample_text}\n\n"
         "Emit the events the story's activity would produce that surface through this "
-        "lead's queries, as a signed diff over the baseline.\n"
+        "lead's queries, as a signed diff over the baseline."
+    )
+    return stage_user_message(
+        stage_salt,
+        wrap(story, "actor_story", stage_salt),
+        wrap(lead_body, "lead", stage_salt),
+        wrap(sample_text, "sample_event", stage_salt),
     )
 
 

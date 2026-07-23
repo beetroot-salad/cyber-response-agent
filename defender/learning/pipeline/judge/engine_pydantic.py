@@ -91,11 +91,14 @@ def _run_judge_pydantic(  # noqa: PLR0913 — the judge_fn protocol signature pl
     learning_run_dir: Path,
     *,
     scope: _ToolScope,
+    salt: str | None = None,
     make_model: MakeModel = providers.build_for_effort,
     verbs: Any = None,
 ) -> str:
     read_roots = tuple(scope.add_dir) if isinstance(scope.add_dir, list) else ()
-    deps = bind(JUDGE_DEF, learning_run_dir, scope=RunScope(add_dirs=read_roots))
+    deps = bind(
+        JUDGE_DEF, learning_run_dir, scope=RunScope(add_dirs=read_roots), salt=salt
+    )
     tools = replace(JUDGE_DEF.tools, closed_tickets=scope.closed_ticket_read)
     if verbs is None and scope.closed_ticket_read:
         from defender.runtime.verbs import ModuleVerbRegistry

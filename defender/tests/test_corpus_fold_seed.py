@@ -33,6 +33,7 @@ import ast
 import importlib
 import os
 import random
+import re
 import subprocess
 import sys
 import textwrap
@@ -72,15 +73,24 @@ def _sections(manifest: str) -> list[str]:
 
 
 def _prompt_manifest(prompt: str) -> str:
-    """The manifest slice of a curator user prompt — between the manifest header and the rows block.
+    """The manifest slice inside the curator prompt's invocation-salted context frame.
 
     ``build_curator_user_prompt`` echoes ``batch_id`` into the prompt text, so two prompts built with
     different batch_ids ALWAYS differ; comparing whole prompts would pass for the wrong reason. The
     manifest is the part that must (or must not) move.
     """
-    _, _, rest = prompt.partition("existing lessons (frontmatter manifest):\n")
-    manifest, _, _ = rest.partition("\n\nfindings (")
+    match = re.search(
+        r"<run-(?P<salt>[0-9a-f]+)-curator_context>\n(?P<body>.*?)\n</run-(?P=salt)-curator_context>",
+        prompt,
+        re.S,
+    )
+    assert match, "the curator prompt lost its curator_context frame"
+    _, marker, manifest = match.group("body").partition(
+        "existing lessons (frontmatter manifest):\n"
+    )
+    assert marker
     return manifest
+
 
 
 def _corpus_of(tmp_path: Path, *stems: str) -> Path:

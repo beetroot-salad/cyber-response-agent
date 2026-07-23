@@ -102,12 +102,14 @@ def invoke_curator_agent(
     from defender.learning.author import curator_engine
 
     cfg.pending_dir.mkdir(parents=True, exist_ok=True)
+    stage_salt = uuid.uuid4().hex
     return curator_engine.run_curator_stage(
         system_prompt_file=cfg.author_prompt,
         batch_id=batch_id,
         user_prompt=_shared.build_curator_user_prompt(
             observations, batch_id, corpus_dir=cfg.corpus_dir,
             corpus_dir_rel=cfg.corpus_dir_rel, label="observations",
+            salt=stage_salt,
         ),
         corpus_dir=cfg.corpus_dir,
         check=check,
@@ -123,6 +125,7 @@ def invoke_curator_agent(
         effort=cfg.author_effort,
         request_limit=request_limit,
         timeout=cfg.author_timeout,
+        salt=stage_salt,
     )
 
 

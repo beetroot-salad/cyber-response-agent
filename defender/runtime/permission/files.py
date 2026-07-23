@@ -35,10 +35,10 @@ _REPORT_FRONTMATTER_MAX = 512
 _REPORT_FILE_MAX = 8192
 _INVESTIGATION_FILE_MAX = 65536
 
-# The judge splices report.md verbatim into a `<report>…</report>` block with no
-# tag-delimiter escaping (learning/pipeline/judge/run.py + pipeline/_prompt.py::_section),
-# so a literal closing delimiter in the report could close the tag early and forge an
-# adjacent prompt section — deny it fail-closed alongside the size bounds (#629 cc7).
+# Preserve #629's fail-closed output-structure policy for the legacy report delimiter.
+# The judge now places report bytes inside an invocation-salted frame via
+# defender._untrusted.wrap, but accepting the formerly forbidden sequence would loosen
+# the report contract independently of that prompt-layer hardening.
 _REPORT_CLOSE_DELIMITER = "</report>"
 
 # Everything `Path.resolve()` can throw on a hostile operand, so every gate that

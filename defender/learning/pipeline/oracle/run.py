@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+from uuid import uuid4
 
 from defender.learning import lead_repository
 from defender.learning.core.config import (
@@ -20,12 +21,14 @@ from defender.learning.pipeline.oracle.sample import (
 
 
 def invoke_oracle_lead(lead, story: str, sample_text: str, learning_run_dir: Path,
-                       *, trace_prefix: str, oracle_fn) -> list:
-    user = build_lead_user_prompt(lead, story, sample_text)
+                       *, trace_prefix: str, oracle_fn, salt: str | None = None) -> list:
+    stage_salt = salt if salt is not None else uuid4().hex
+    user = build_lead_user_prompt(lead, story, sample_text, salt=stage_salt)
     raw = oracle_fn(
         ORACLE_PROMPT, ORACLE_MODEL, ORACLE_EFFORT,
         f"oracle_{trace_prefix}_{lead.lead_id}.trace.jsonl", f"oracle:{lead.lead_id}",
         user, learning_run_dir,
+        salt=stage_salt,
     )
     return parse_lead_events(raw, lead.lead_id)
 
