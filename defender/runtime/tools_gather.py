@@ -21,7 +21,7 @@ from .tools import (
 from defender._corpus import QueryTemplate, iter_query_templates
 from defender.hooks.record_lead import claim_lead as _claim_lead
 from defender.hooks.inject_system_skill_description import descriptor_catalog as _descriptor_catalog
-from defender.runtime.untrusted import wrap as _wrap
+from defender._untrusted import wrap as _wrap
 from defender.scripts.gather_tools.record_query import LEAD_ID_RE as _LEAD_ID_RE
 
 
@@ -276,7 +276,12 @@ async def _run_gather(
         GATHER_DEF, deps.run_dir, salt=deps.salt, defender_dir=deps.defender_dir, box=deps.box,
     )
     assert isinstance(gbase, GatherDeps)
-    gdeps = replace(gbase, run_id=deps.run_id, lead_id=lead_id)
+    gdeps = replace(
+        gbase,
+        run_id=deps.run_id,
+        lead_id=lead_id,
+        budget_started_monotonic=deps.budget_started_monotonic,
+    )
     prompt = _gather_prompt(deps, request, catalog)
     try:
         result = await gagent.run(

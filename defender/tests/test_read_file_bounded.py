@@ -220,6 +220,7 @@ def _read_file_tool_output(run_dir: Path, path: Path, salt: str) -> str:
     deps = tools.AgentDeps(
         run_dir=run_dir, defender_dir=_DEFENDER, run_id="t", salt=salt,
         policy=compile_policy_for(MAIN_DEF, run_dir=run_dir, defender_dir=_DEFENDER),
+        cwd_anchor=run_dir,
     )
     result = asyncio.run(agent.run("go", deps=deps, model=FunctionModel(_model_fn)))
 

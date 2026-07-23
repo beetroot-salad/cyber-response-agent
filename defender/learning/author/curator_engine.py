@@ -8,14 +8,18 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import ClassVar
 
+from uuid import uuid4
+
 from pydantic_ai.exceptions import ModelRetry
 
+from defender._untrusted import wrap
 from defender.learning.author import shared as _shared
 from defender.learning.author.verify_forward.checks import ForwardCheck
 from defender.learning.author.verify_forward.engine import _run_verify_pydantic
 from defender.learning.core import config
 from defender.learning.core.config import RunUnprocessable
 from defender.learning.pipeline._pydantic_stage import run_stage
+from defender.learning.pipeline._prompt import stage_user_message
 from defender.runtime import providers
 from defender.runtime.agent_definition import AgentDefinition, ResolvedRoots, RunScope, ToolSet, bind
 from defender.runtime.agent_role import AgentRole
@@ -176,6 +180,7 @@ class CuratorDeps(AgentDeps):
         cls, run_dir: Path, repo_root: Path, corpus_dir: Path,
         *, check: ForwardCheck, runs_dir: Path, pending: Path,
         queued_ids: frozenset[str], run_verify: Callable[..., str] = _run_verify_pydantic,
+        salt: str | None = None,
     ) -> CuratorDeps:
         """A thin wrapper over `bind` (M9): resolves the corpus NAME off `corpus_dir`'s own
         basename and binds through the one seam, then attaches the forward-check config into
@@ -192,7 +197,7 @@ class CuratorDeps(AgentDeps):
                 (defender_dir / name).resolve() for name in SHIPPED_LESSON_CORPORA
             ),
         )
-        deps = bind(CORPUS_AUTHOR_DEF, run_dir, scope=scope, defender_dir=defender_dir)
+        deps = bind(CORPUS_AUTHOR_DEF, run_dir, scope=scope, defender_dir=defender_dir, salt=salt)
         assert isinstance(deps, CuratorDeps)
         return replace(deps, tool_config=cfg)
 
@@ -233,6 +238,7 @@ def _run_curator_pydantic(  # noqa: PLR0913 — the transport signature plus the
     pending: Path,
     queued_ids: frozenset[str],
     run_verify: Callable[..., str] = _run_verify_pydantic,
+    salt: str | None = None,
     request_limit: int = config.AUTHOR_REQUEST_LIMIT,
     wall_clock_timeout: int = config.AUTHOR_TIMEOUT,
     make_model: MakeModel = providers.build_for_effort,
@@ -240,7 +246,7 @@ def _run_curator_pydantic(  # noqa: PLR0913 — the transport signature plus the
     deps = CuratorDeps.for_run(
         learning_run_dir, repo_root, corpus_dir,
         check=check, runs_dir=runs_dir, pending=pending,
-        queued_ids=queued_ids, run_verify=run_verify,
+        queued_ids=queued_ids, run_verify=run_verify, salt=salt,
     )
     return run_stage(
         stage="curator",
@@ -273,8 +279,14 @@ def run_curator_stage(  # noqa: PLR0913 — the spawn contract (per-spawn inputs
     source_key: Callable[..., object] = config.source_first_party_key,
     run_author: Callable[..., str] = _run_curator_pydantic,
     run_verify: Callable[..., str] = _run_verify_pydantic,
+    salt: str | None = None,
 ) -> dict:
     log(f"spawn curator {batch_id} in-process (model={model}, effort={effort}, timeout={timeout}s)")
+    stage_salt = salt if salt is not None else uuid4().hex
+    if f"<run-{stage_salt}-" not in user_prompt:
+        user_prompt = stage_user_message(
+            stage_salt, wrap(user_prompt, "lesson_rows", stage_salt)
+        )
     source_key(model, label="curator")
     if check.prompt_path is not None and (
         providers.provider_for(config.VERIFIER_MODEL).api_key_var
@@ -290,6 +302,7 @@ def run_curator_stage(  # noqa: PLR0913 — the spawn contract (per-spawn inputs
             corpus_dir=corpus_dir, check=check, runs_dir=runs_dir, pending=pending,
             queued_ids=queued_ids, run_verify=run_verify,
             request_limit=request_limit, wall_clock_timeout=timeout,
+            salt=stage_salt,
         )
     except RunUnprocessable as e:
         raise AuthorError(f"curator ({batch_id}) did not complete: {e}") from e

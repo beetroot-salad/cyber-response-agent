@@ -302,7 +302,13 @@ def test_a_lesson_the_curator_can_write_it_can_read_back(tmp_path):
     assert not bash_decision(deps, "cat " + out_of_class).allow
     with pytest.raises(ModelRetry):
         write_file(deps, out_of_class, "body\n")     # RED today: the write tail admits the space
-    # positive control: an in-class name — write admits AND both read surfaces read it back
+    # positive control: an in-class name — write admits AND both read surfaces read it back.
+    # The read-back is driven through a FRESH deps bound to the same corpus (a different
+    # invocation): main's #700 (landed after this test) denies a learning role reading a path
+    # it authored within the SAME invocation, after it has learned its own stage salt — a
+    # different axis (self-authored-read hardening) from MD-7's read/write filename parity
+    # this test pins, so the two are deliberately isolated here.
     write_file(deps, rel("lessons", "good.md"), "hello\n")
     assert bash_decision(deps, "cat " + rel("lessons", "good.md")).allow
-    assert "hello" in lesson_read(deps, rel("lessons", "good.md"))
+    reader = curator_deps(wt, rd, "lessons")
+    assert "hello" in lesson_read(reader, rel("lessons", "good.md"))

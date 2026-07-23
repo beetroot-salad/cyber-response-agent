@@ -3,19 +3,21 @@ from __future__ import annotations
 
 import argparse
 import functools
-import json
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender.learning.author import shared as _author_shared
+from defender._untrusted import wrap
 from defender.learning.core import config as _loop_config
 from defender.learning.core import persist as _loop_persist
+from defender.learning.pipeline._prompt import stage_user_message, structured_json_body
 from defender.learning.leads import lead_neighbors
 from defender.learning.leads import lead_render
 from defender.runtime.verbs import engine_for
@@ -219,24 +221,34 @@ def invoke_agent(
     pending_drafts: list[dict] | None = None,
     *,
     repo_root: Path = REPO_ROOT,
+    spawn: Callable[..., int] = _spawn_author_agent,
+    salt: str | None = None,
 ) -> int:
     pending_drafts = pending_drafts or []
-    user_prompt = (
+    stage_salt = salt if salt is not None else uuid4().hex
+    context = (
         f"run_dir: {run_dir}\n"
         f"catalog_dir: {CATALOG_REL}\n"
-        f"skills_dir: {SKILLS_REL}\n"
-        f"executed_template_handoffs ({len(handoffs)}):\n"
-        f"{json.dumps(handoffs, indent=2)}\n"
-        f"pending_system_drafts ({len(pending_drafts)}):\n"
-        f"{json.dumps(pending_drafts, indent=2)}\n"
+        f"skills_dir: {SKILLS_REL}"
     )
-    return _spawn_author_agent(
+    user_prompt = stage_user_message(
+        stage_salt,
+        wrap(context, "lead_author_context", stage_salt),
+        wrap(structured_json_body(handoffs), "handoffs", stage_salt),
+        wrap(
+            structured_json_body(pending_drafts),
+            "pending_system_drafts",
+            stage_salt,
+        ),
+    )
+    return spawn(
         system_prompt_file=LEAD_AUTHOR_PROMPT,
         batch_id=run_dir.name,
         user_prompt=user_prompt,
         repo_root=repo_root,
         learning_run_dir=run_dir,
         log_label="lead author",
+        salt=stage_salt,
     )
 
 

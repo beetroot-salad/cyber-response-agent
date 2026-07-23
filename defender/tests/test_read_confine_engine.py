@@ -20,6 +20,7 @@ pytest.importorskip("pydantic_ai")
 from pydantic_ai import ModelRetry  # noqa: E402
 
 from defender.learning.core import config  # noqa: E402
+from defender._untrusted import wrap  # noqa: E402
 from defender.learning.pipeline.actor_engine import ACTOR_DEF, ActorDeps  # noqa: E402
 from defender.runtime import permission, tools  # noqa: E402
 from defender.runtime.agent_definition import RunScope, compile_policy_for  # noqa: E402
@@ -142,7 +143,9 @@ def _tree(tmp_path):
     run = tmp_path / "run"
     run.mkdir()
     pol = AgentPolicy(read_confine=(conf,), bash_allow=(), read_roots=())
-    deps = ActorDeps(run_dir=run, defender_dir=dfn, run_id="r", salt="s", policy=pol)
+    deps = ActorDeps(
+        run_dir=run, defender_dir=dfn, run_id="r", salt="s", policy=pol, cwd_anchor=run,
+    )
     return deps, conf, lesson, rubric
 
 
@@ -182,9 +185,12 @@ def test_tool_pattern_search_returns_matches_only(tmp_path):
 
 
 def test_tool_pattern_no_match_returns_empty_not_error(tmp_path):
-    """read_file(in-confine file, pattern='zzz') -> empty result, NOT ModelRetry (no-match is a valid outcome)."""
+    """A no-match remains a valid empty result rather than ModelRetry, represented as an
+    observable empty body in the learning reader's salted frame."""
     deps, conf, lesson, rubric = _tree(tmp_path)
-    assert tools._tool_read_file(deps, str(lesson), pattern="zzz").strip() == ""
+    assert tools._tool_read_file(deps, str(lesson), pattern="zzz") == wrap(
+        "", "untrusted", deps.salt
+    )
 
 
 def test_tool_pattern_over_denied_path_raises(tmp_path):

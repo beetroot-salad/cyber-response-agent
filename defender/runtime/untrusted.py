@@ -1,6 +1,5 @@
+"""Compatibility import for callers outside the production tree."""
 
-from __future__ import annotations
+from defender._untrusted import wrap
 
-
-def wrap(content: str, tag: str, salt: str) -> str:
-    return f"<run-{salt}-{tag}>\n{content}\n</run-{salt}-{tag}>"
+__all__ = ["wrap"]

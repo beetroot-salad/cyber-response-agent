@@ -840,7 +840,10 @@ def test_d6_writers_pass_roots(tmp_path):
     escape_pol = AgentPolicy(
         write_allow=(permission.build_write_allow(escape, suffix=".md"),), deny_reason="d",
     )
-    deps = AgentDeps(run_dir=run, defender_dir=dfn, run_id="r", salt="s", policy=escape_pol)
+    deps = AgentDeps(
+        run_dir=run, defender_dir=dfn, run_id="r", salt="s", policy=escape_pol,
+        cwd_anchor=run,
+    )
     # RED@#551-HEAD: _tool_write_file called decide_write WITHOUT roots → guard dormant → allowed.
     with pytest.raises(ModelRetry):
         _tool_write_file(deps, str(escape / "x.md"), "content")

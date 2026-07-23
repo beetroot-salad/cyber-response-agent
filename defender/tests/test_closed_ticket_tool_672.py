@@ -251,7 +251,7 @@ _YAML = "outcome: skip-passthrough\ndefender_findings: []\n"
 DONE = Turn(text=_YAML)
 
 # The case id doubles as the in-flight ticket key: the learning run dir's basename is the
-# key the judge's deps carry (run_id) and the key `_cited_policy_read_section` names.
+# key the judge's deps carry (run_id); the closed-ticket tools refuse it structurally.
 CASE = "20260720T0000Z-sshd-672"
 
 # One well-known closed ticket every happy-path fake returns. The marker strings are what
@@ -1883,9 +1883,13 @@ def test_cached_open_payload_beside_live_refusal(tmp_path):
 
 
 def _cited_section(user_text: str) -> str:
-    m = re.search(r"<cited_policy_read>\n(.*?)</cited_policy_read>", user_text, re.S)
+    m = re.search(
+        r"<run-(?P<salt>[0-9a-f]+)-cited_policy_read>\n(?P<body>.*?)\n</run-(?P=salt)-cited_policy_read>",
+        user_text,
+        re.S,
+    )
     assert m, "the benign invocation lost its cited_policy_read section"
-    return m.group(1)
+    return m.group("body")
 
 
 def _benign_invocation_text(tmp_path: Path) -> str:
@@ -1898,26 +1902,17 @@ def _benign_invocation_text(tmp_path: Path) -> str:
 
 
 def test_teaching_surfaces_teach_tool_not_bash(tmp_path):
-    """[d15_teaching_teaches_tool] The benign judge's teaching surfaces — the rewritten
-    _cited_policy_read_section and benign.md's item 7 — instruct the TYPED closed-ticket
-    tools by their frozen names (list_closed_tickets / get_closed_ticket — fork f2: the
-    taught names must match the registered names) and carry NO bash command text: no
-    ticket_adapter.py invocation, no --require-closed argv, no `list-tickets --status
-    closed` command line. They keep the in-flight-key warning and the candidate seed menu —
-    but the rewrite must NOT carry forward the false 'it is open' claim (§7 design
-    correction 1: run.py's unconditional close contradicts it; the exclusion is now
-    structural, Fork C, and does not depend on the ticket's state). Teaching stays
-    benign-scoped: the adversarial invocation teaches neither tool."""
+    """[d15_teaching_teaches_tool] The trusted benign prompt teaches the typed tools,
+    while the salted cited-policy frame carries only candidate source rows and no removed
+    Bash lane."""
     text = _benign_invocation_text(tmp_path)
     section = _cited_section(text)
-    assert TOOL_LIST in section
-    assert TOOL_GET in section
+    assert TOOL_LIST not in section
+    assert TOOL_GET not in section
     assert "ticket_adapter" not in section
     assert "--require-closed" not in section
     assert "--status closed" not in section
-    assert CASE in section                        # the in-flight key warning survives
-    assert "it is open" not in section            # the falsehood does not
-    assert OTHER_KEY in text                      # the seed menu survives
+    assert OTHER_KEY in section
 
     # The taught names ARE the registered names (fork f2 — no rename drift).
     run = _drive(tmp_path, [DONE], registry=_ticket_registry(VerbRecorder()),
@@ -1941,43 +1936,24 @@ def test_teaching_surfaces_teach_tool_not_bash(tmp_path):
 
 
 def test_cited_seed_instruction_survives(tmp_path):
-    """[d16_cited_seed_instruction_survives] The instruction that a cited seed the store
-    can't confirm, or whose grounded conditions the actuals contradict, does not survive on
-    that basis CONTINUES to govern after the M6 rewrite — present in the rewritten
-    _cited_policy_read_section, with benign.md:148's fuller statement untouched — and the
-    rewritten section now carries Fork D's resolved rule in so many words: cached
-    gather_raw payloads are CONTEXT, never confirmation — only the live closed-only read
-    satisfies 'the store confirmed it' (uniform, unbypassable; the alternative makes O2
-    decorative for every ticket that was open at gather time).
-
-    ROUND 3 (C6a): the pin is the teaching INSTRUCTION, not a floating phrase — one
-    sentence must COUPLE the cached surface to the rule, and the section must deny the
-    cache confirmation standing in the resolution's own words. Recorded honestly: the
-    BEHAVIORAL half of Fork D (a judge that nonetheless treats a cached payload as
-    confirmation when reasoning to its verdict) is a property of the model's verdict
-    reasoning — instruction-level only, NOT suite-enforceable on this tool surface; the
-    human's Fork D resolution ratified exactly this prompt-rule shape (70-resolutions.md),
-    which is where the blind reader's cache-context absence resolves."""
+    """[d16_cited_seed_instruction_survives] Seed-survival and cache-confirmation rules
+    remain trusted system instructions, disjoint from the salted cited-policy source rows."""
     section = _cited_section(_benign_invocation_text(tmp_path))
-    assert "does not survive" in section
-    # The coupling sentence: the cached surface and the rule in ONE sentence, so a
-    # section carrying the phrase detached from cached payloads cannot pass.
-    assert re.search(
-        r"[^.\n]*(?:cached|gather_raw)[^.\n]*context, never confirmation", section, re.I), (
-        "the rewritten section must state, in one sentence, that cached gather_raw "
-        "payloads are context, never confirmation"
-    )
-    # The confirmation-denial half: what a cached payload does NOT satisfy, and what does.
-    assert "store confirmed" in section, (
-        "the section must name what the cache fails to satisfy — 'the store confirmed it'"
-    )
-    assert re.search(r"only the live[^\n]*read", section, re.I), (
-        "the section must teach that only the live closed-only read confirms"
-    )
+    assert "does not survive" not in section
+    assert OTHER_KEY in section
 
     benign_md = (DEFENDER / "learning" / "pipeline" / "judge" / "benign.md").read_text(
         encoding="utf-8")
     assert "does not survive on the strength of that citation" in benign_md
+    assert re.search(
+        r"[^.\n]*(?:cached|gather_raw)[^.\n]*context\s+—\s+never confirmation",
+        benign_md,
+        re.I,
+    ), (
+        "the system prompt must state that cached gather_raw payloads are context, never confirmation"
+    )
+    assert TOOL_LIST in benign_md
+    assert TOOL_GET in benign_md
 
 
 def test_no_doc_surface_teaches_removed_bash_lane():

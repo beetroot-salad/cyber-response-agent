@@ -16,6 +16,7 @@ REPO_ROOT = DEFENDER_DIR.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from defender._run_id import RUN_ID_ALLOWED, is_valid_run_id  # noqa: E402
 from defender._run_paths import RunPaths  # noqa: E402
 
 VISUALIZE_SCRIPT = DEFENDER_DIR / "scripts" / "visualize" / "visualize_run.py"
@@ -48,10 +49,12 @@ def _alert_label(alert: Path) -> str:
 def materialize_run_dir(alert: Path, run_id: str | None) -> tuple[Path, str]:
     if not alert.is_file():
         sys.exit(f"alert not found: {alert}")
-    runs_base = resolve_runs_base()
     if run_id is None:
         ts = _dt.datetime.now(_dt.UTC).strftime("%Y%m%dT%H%M%SZ")
         run_id = f"{ts}-{_alert_label(alert)}"
+    if not is_valid_run_id(run_id):
+        sys.exit(f"invalid run id {run_id!r} (allowed: {RUN_ID_ALLOWED})")
+    runs_base = resolve_runs_base()
     run_dir = runs_base / run_id
     if run_dir.exists():
         sys.exit(f"run dir already exists: {run_dir}")

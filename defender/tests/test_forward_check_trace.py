@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import threading
 import time
 from pathlib import Path
@@ -142,8 +143,14 @@ def test_d11_trace_names_distinct_per_check(tmp_path):
     assert len(traces) == 2, f"same-stem checks did not write DISTINCT trace files: {traces}"
     contents = [t.read_text() for t in traces]
     assert all(c.strip() for c in contents)
-    assert sum(r"DISPOSITION:\n\nmalicious" in c for c in contents) == 1
-    assert sum(r"DISPOSITION:\n\nbenign" in c for c in contents) == 1
+    def carries(disposition: str, content: str) -> bool:
+        return bool(re.search(
+            rf"<run-(?P<salt>[0-9a-f]+)-case_ground_truth_disposition>\\n{disposition}\\n</run-(?P=salt)-case_ground_truth_disposition>",
+            content,
+        ))
+
+    assert sum(carries("malicious", content) for content in contents) == 1
+    assert sum(carries("benign", content) for content in contents) == 1
     assert peak[0] >= 2, "the two same-stem checks did not genuinely interleave"
 
 

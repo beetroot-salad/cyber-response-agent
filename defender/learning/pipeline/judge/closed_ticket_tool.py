@@ -71,7 +71,7 @@ from defender.runtime.query_tool import (
     _fault_exit,
 )
 from defender.runtime.tools import AgentDeps, _bash_env, _format_bash_result
-from defender.runtime.untrusted import wrap as _wrap
+from defender._untrusted import wrap as _wrap
 from defender.runtime.verbs import VerbContext
 from defender.scripts.adapters.faults import AdapterFault
 from defender.scripts.gather_tools.record_query import (

@@ -171,8 +171,11 @@ def test_budget_kill_is_not_control_flow(tmp_path):
     with pytest.raises(BudgetKill):
         _drive_gather_query(_run_dir(tmp_path, "run2"), KillingRegistry())
 
+    seen_gather_deps = []
+
     class _KillingAgent:
         async def run(self, *args, **kwargs):
+            seen_gather_deps.append(kwargs["deps"])
             raise BudgetKill("tail exhausted")
 
     def killing_factory(agent_id):
@@ -185,6 +188,7 @@ def test_budget_kill_is_not_control_flow(tmp_path):
             deps, killing_factory, 40,
             GatherRequest("l-001", "elastic", "goal", ("what",)),
         ))
+    assert seen_gather_deps[0].budget_started_monotonic == deps.budget_started_monotonic
 
 
 def _drive_gather_query(run_dir: Path, registry):

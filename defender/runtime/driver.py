@@ -78,11 +78,15 @@ def _user_prompt(run_dir: Path, alert_path: Path, defender_dir: Path, salt: str)
     )
 
 
+def _budget_state_for_enforcement(state: dict, deps: AgentDeps) -> dict:
+    return {**state, "started_monotonic": deps.budget_started_monotonic}
+
+
 def _budget_short_circuit(
     deps: AgentDeps, tool_name: str, limits: dict,
     logger: observe.RequestLogger, agent_id: str,
 ) -> str | None:
-    state = read_budget(deps.run_dir)
+    state = _budget_state_for_enforcement(read_budget(deps.run_dir), deps)
     if tail_exhausted(state, limits):
         raise BudgetKill(f"budget tail exhausted at {tool_name}")
     if should_refuse(state, tool_name, tier(tool_name, deps.role), limits):
@@ -98,6 +102,7 @@ def _account_executed_call(deps: AgentDeps, tool_name: str, *, active: bool, lim
             state = account_call(deps.run_dir, deps.run_id, tool_name, limits=limits, tier=call_tier)
         else:
             state = update_budget_locked(deps.run_dir, deps.run_id, tool_name, limits=limits)
+        state = _budget_state_for_enforcement(state, deps)
         for w in check_budgets(state, limits):
             print(f"[run.py] {w}", file=sys.stderr)
     except BudgetKill:
@@ -182,7 +187,7 @@ def build_agent_core(  # noqa: PLR0913 — the single build site's config + 3 DI
         instructions=instructions,
         capabilities=capabilities,
         model_settings=built.settings,
-        retries=DEFAULT_TOOL_RETRIES,
+        retries={"tools": DEFAULT_TOOL_RETRIES, "output": 0},
     )
     register_tools(agent, defn.tools, verbs)
     return agent
@@ -381,13 +386,16 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     adapters = defender_dir / "scripts" / "adapters"
     verbs = verbs if verbs is not None else ModuleVerbRegistry(adapters)  # lint-default: ok — DI seam owning its default (tree-derived; no signature default possible)
     limits = limits if limits is not None else DEFAULT_LIMITS  # lint-default: ok — DI seam owning its default (the cap table, threaded inward)
+    budget_started_monotonic = time.monotonic()
     open_budget(run_dir, run_id)
     logger = observe.RequestLogger(run_dir / "llm_requests.jsonl")
     agent = build_agent(
         defender_dir, logger, make_model, main_model=model_name, verbs=verbs, limits=limits,
     )
     deps = replace(
-        bind(MAIN_DEF, run_dir, salt=salt, defender_dir=defender_dir, box=box), run_id=run_id,
+        bind(MAIN_DEF, run_dir, salt=salt, defender_dir=defender_dir, box=box),
+        run_id=run_id,
+        budget_started_monotonic=budget_started_monotonic,
     )
     prompt = _user_prompt(run_dir, alert_path, defender_dir, salt)
 

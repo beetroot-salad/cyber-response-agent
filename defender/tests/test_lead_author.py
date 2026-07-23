@@ -10,6 +10,7 @@ the code.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from dataclasses import replace
 from pathlib import Path
@@ -830,8 +831,8 @@ def test_invoke_agent_pending_drafts_reach_engine_user_prompt(run_dir: Path, mon
     rc = lead_author.invoke_agent(run_dir, handoffs, pending)
     assert rc == 0
     prompt = cap["user_prompt"]
-    assert "executed_template_handoffs (1)" in prompt
-    assert "pending_system_drafts (1)" in prompt
+    assert re.search(r"<run-[0-9a-f]+-handoffs>", prompt)
+    assert re.search(r"<run-[0-9a-f]+-pending_system_drafts>", prompt)
     assert "elastic/_draft/falco-na.md" in prompt
     assert "skills_dir: defender/skills/" in prompt
 

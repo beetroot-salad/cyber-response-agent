@@ -46,9 +46,10 @@ def _run_oracle_pydantic(  # noqa: PLR0913 — the oracle_fn protocol signature 
     user: str,
     learning_run_dir: Path,
     *,
+    salt: str | None = None,
     make_model: MakeModel = providers.build_for_effort,
 ) -> str:
-    deps = bind(ORACLE_DEF, learning_run_dir)
+    deps = bind(ORACLE_DEF, learning_run_dir, salt=salt)
     return run_stage(
         stage="oracle",
         prompt_path=prompt_path, model=model, effort=effort,

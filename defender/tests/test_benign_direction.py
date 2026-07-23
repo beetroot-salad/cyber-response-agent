@@ -3,6 +3,7 @@ findings append, environment-observation append, and the shared author gate."""
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -533,12 +534,12 @@ def test_build_judge_invocation_benign_injects_scoped_read(tmp_path: Path) -> No
         comparison_dirname="comparison_benign",
         closed_ticket_read=True,
     )
-    assert "<cited_policy_read>" in inv.user_text
-    assert "get_closed_ticket" in inv.user_text
-    assert "list_closed_tickets" in inv.user_text
+    assert re.search(r"<run-[0-9a-f]+-cited_policy_read>", inv.user_text)
+    assert "get_closed_ticket" not in inv.user_text
+    assert "list_closed_tickets" not in inv.user_text
     assert "--require-closed" not in inv.user_text
-    assert run_dir.name in inv.user_text
     assert "case-OLD" in inv.user_text
+    assert "nightly scan" in inv.user_text
 
 
 def test_build_judge_invocation_adversarial_has_no_ticket_read(tmp_path: Path) -> None:

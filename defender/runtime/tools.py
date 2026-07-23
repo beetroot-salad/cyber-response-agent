@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import subprocess
+import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -19,7 +20,7 @@ from . import permission
 from .agent_definition import ResolvedRoots, ToolSet
 from .agent_role import AgentRole
 
-from defender.runtime.untrusted import wrap as _wrap
+from defender._untrusted import wrap as _wrap
 from defender.scripts.gather_tools.record_query import (
     _passthrough_max_bytes as _read_char_cap,
 )
@@ -82,8 +83,12 @@ class AgentDeps:
     run_id: str
     salt: str
     policy: permission.AgentPolicy = field(kw_only=True)
+    cwd_anchor: Path = field(kw_only=True)
     box: box_mod.BoxExecutor = field(kw_only=True, default_factory=box_mod.BoxExecutor)
-    cwd_anchor: Path = field(kw_only=True, default=Path())
+    budget_started_monotonic: float = field(kw_only=True, default_factory=time.monotonic)
+    authored_paths: set[Path] = field(
+        kw_only=True, default_factory=set, compare=False, repr=False
+    )
     roots: ResolvedRoots | None = field(kw_only=True, default=None)
     tool_config: Any = field(kw_only=True, default=None)
 
@@ -92,9 +97,8 @@ class AgentDeps:
     @classmethod
     def _for_run(
         cls, run_dir: Path, policy: permission.AgentPolicy,
-        *, defender_dir: Path = PATHS.defender_dir, salt: str | None = None,
+        *, cwd_anchor: Path, defender_dir: Path = PATHS.defender_dir, salt: str | None = None,
         box: box_mod.BoxExecutor | None = None,
-        cwd_anchor: Path | None = None,
         roots: ResolvedRoots | None = None,
         tool_config: Any = None,
         **subtype_fields: Any,
@@ -104,7 +108,7 @@ class AgentDeps:
             run_dir=run_dir, defender_dir=defender_dir,
             run_id=run_dir.name, salt=resolved_salt, policy=policy,
             box=box if box is not None else box_mod.BoxExecutor(),
-            cwd_anchor=cwd_anchor if cwd_anchor is not None else run_dir,
+            cwd_anchor=cwd_anchor,
             roots=roots, tool_config=tool_config,
             **subtype_fields,
         )
@@ -144,6 +148,7 @@ def _tool_bash(deps: AgentDeps, command: str) -> str:
     )
     if not decision.allow:
         raise ModelRetry(decision.reason)
+    _deny_authored_bash_read(deps, decision)
     try:
         result = deps.box.run_parsed(
             list(decision.pipelines or ()),
@@ -155,9 +160,12 @@ def _tool_bash(deps: AgentDeps, command: str) -> str:
         raise ModelRetry(f"command timed out after {_BASH_TIMEOUT_S}s: {command}") from e
     except box_mod.BoxFault as e:
         raise ModelRetry(f"the sandbox could not run this command: {e}") from e
-    return _format_bash_result(
+    formatted = _format_bash_result(
         result.rc, result.out.decode("utf-8", "replace"), result.err.decode("utf-8", "replace"),
     )
+    if _is_learning_role(deps):
+        return _wrap(formatted, "untrusted", deps.salt)
+    return formatted
 
 
 def _grep_lines(text: str, pattern: str) -> str:
@@ -167,6 +175,54 @@ def _grep_lines(text: str, pattern: str) -> str:
 def _resolve_operand(deps: AgentDeps, path: str) -> Path:
     p = Path(path)
     return p if p.is_absolute() else deps.cwd_anchor / p
+
+
+def _is_learning_role(deps: AgentDeps) -> bool:
+    return deps.role not in {AgentRole.MAIN, AgentRole.GATHER}
+
+
+def _resolved(path: Path) -> Path:
+    return path.resolve()
+
+
+def _deny_authored_read(deps: AgentDeps, path: Path) -> None:
+    if _is_learning_role(deps) and _resolved(path) in deps.authored_paths:
+        raise ModelRetry(
+            "cannot read content authored by this learning invocation after its "
+            "stage salt was disclosed"
+        )
+
+
+def _deny_authored_bash_read(
+    deps: AgentDeps, decision: permission.BashDecision
+) -> None:
+    if not _is_learning_role(deps):
+        return
+    stages = permission.command_shape.flat_stages(list(decision.pipelines or ()))
+    for argv, grant in zip(stages, decision.grants, strict=True):
+        opened = permission.PROGRAMS[grant.program](argv)
+        for operand in opened or ():
+            _deny_authored_read(deps, _resolve_operand(deps, operand))
+
+
+def _under(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return True
+
+
+def _is_cross_agent_read(deps: AgentDeps, path: Path) -> bool:
+    resolved = _resolved(path)
+    roots = (*deps.policy.read_roots, *deps.policy.read_confine)
+    corpus_dir = getattr(deps, "corpus_dir", None)
+    if corpus_dir is not None:
+        roots = (*roots, Path(corpus_dir))
+    if any(_under(resolved, _resolved(root)) for root in roots):
+        return True
+    role_name = str(getattr(deps.role, "value", "")).replace("_", "-")
+    return bool(role_name) and resolved.name == f"{role_name}.md"
 
 
 def _gated_read(
@@ -181,6 +237,7 @@ def _gated_read(
         raise ModelRetry(decision.reason)
     if not p.is_file():
         raise ModelRetry(f"file not found: {path}")
+    _deny_authored_read(deps, p)
     try:
         text = read_text_utf8(p)
     except UnicodeDecodeError:
@@ -199,7 +256,9 @@ def _bound_and_wrap(
         filter_hint=_overflow_filter_hint(path, deps.policy, read_tool),
         read_tool=read_tool,
     )
-    if permission.is_untrusted_read(p):
+    if permission.is_untrusted_read(p) or (
+        _is_learning_role(deps) and _is_cross_agent_read(deps, p)
+    ):
         return _wrap(text, "untrusted", deps.salt)
     return text
 
@@ -220,6 +279,7 @@ def _tool_write_file(deps: AgentDeps, path: str, content: str) -> str:
         raise ModelRetry(decision.reason)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(content, encoding="utf-8")
+    deps.authored_paths.add(_resolved(p))
     return f"wrote {path} ({len(content)} bytes)"
 
 
@@ -255,6 +315,7 @@ def _tool_edit_file(deps: AgentDeps, path: str, old_string: str, new_string: str
         raise ModelRetry(decision.reason)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(new_text, encoding="utf-8")
+    deps.authored_paths.add(_resolved(p))
     return f"edited {path} ({len(new_text)} bytes)"
 
 
