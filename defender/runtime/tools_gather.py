@@ -276,7 +276,12 @@ async def _run_gather(
         GATHER_DEF, deps.run_dir, salt=deps.salt, defender_dir=deps.defender_dir, box=deps.box,
     )
     assert isinstance(gbase, GatherDeps)
-    gdeps = replace(gbase, run_id=deps.run_id, lead_id=lead_id)
+    gdeps = replace(
+        gbase,
+        run_id=deps.run_id,
+        lead_id=lead_id,
+        budget_started_monotonic=deps.budget_started_monotonic,
+    )
     prompt = _gather_prompt(deps, request, catalog)
     try:
         result = await gagent.run(
