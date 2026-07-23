@@ -2992,3 +2992,37 @@ def test_gate_r1_bound_and_wrap_output_shape(tmp_path):
     body = "captured inbound body"
     out = _bound_and_wrap(deps, artifact, str(artifact), body, read_tool="read_file")
     assert out == _expected_frame(body, "untrusted")
+
+
+def test_revert_lesson_driver_holds_shared_author_lock_and_calls_through(
+    tmp_path,
+):
+    """The operator driver still crosses the shared author lock before reverting."""
+    from defender.learning.ops import revert_lesson
+    from unittest.mock import patch
+
+    seen = []
+
+    class HeldLock:
+        def __enter__(self):
+            return True
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+    def fake_lock(path):
+        seen.append(("lock", path))
+        return HeldLock()
+
+    def fake_revert(rel, lesson_name):
+        seen.append(("revert", rel, lesson_name))
+        return "https://example.invalid/pr/680"
+
+    paths = SimpleNamespace(author_drain_lock_file=tmp_path / "author-drain.lock")
+    branch = SimpleNamespace(revert_lesson_pr=fake_revert)
+    with patch.object(author_shared, "flock_or_skip", fake_lock):
+        assert revert_lesson.revert("bad", branch=branch, paths=paths) == 0
+    assert seen == [
+        ("lock", paths.author_drain_lock_file),
+        ("revert", "defender/lessons/bad.md", "bad"),
+    ]
