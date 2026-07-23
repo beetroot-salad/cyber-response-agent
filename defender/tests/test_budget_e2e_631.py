@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -359,6 +360,42 @@ def test_stopped_tool_is_refused_not_withdrawn(tmp_path, enforced):
     assert budget(run_dir)["tool_calls"] == 1, (
         "the refused call's handler ran — the seam did not short-circuit"
     )
+
+
+def test_real_run_uses_a_local_monotonic_origin_after_a_backward_clock_step(
+    tmp_path, enforced,
+):
+    run_dir = materialize(tmp_path, GOLDEN)
+
+    class BackwardClockStep(ReplayFn):
+        def __call__(self, messages, info):
+            if self.calls == 0:
+                state = budget(run_dir)
+                future = (datetime.now(UTC) + timedelta(days=30)).isoformat()
+                state["created_at"] = future
+                state["started_at"] = future
+                (run_dir / "budget.json").write_text(
+                    json.dumps(state, indent=2), encoding="utf-8",
+                )
+            return super().__call__(messages, info)
+
+    replay = BackwardClockStep([
+        Turn(tool_calls=[("bash", {"command": "echo must-not-run"})]),
+        Turn(text="Acknowledged."),
+    ])
+    drive(
+        run_dir,
+        run_id="clock-step",
+        salt=SALT,
+        main=replay,
+        limits=caps(max_tool_calls=100, wall_clock_timeout=0, grace_seconds=600),
+    )
+
+    history = "\n".join(replay.seen)
+    on_disk = budget(run_dir)
+    assert refusal_stem() in history, "the backward wall-clock step disabled refusal"
+    assert on_disk["tool_calls"] == 0, "the clock-defeated tool reached its handler"
+    assert "started_monotonic" not in on_disk, "the process-local origin leaked to budget.json"
 
 
 def test_repeated_reissue_accumulates_no_retries(tmp_path, enforced):

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import subprocess
+import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -84,6 +85,7 @@ class AgentDeps:
     policy: permission.AgentPolicy = field(kw_only=True)
     cwd_anchor: Path = field(kw_only=True)
     box: box_mod.BoxExecutor = field(kw_only=True, default_factory=box_mod.BoxExecutor)
+    budget_started_monotonic: float = field(kw_only=True, default_factory=time.monotonic)
 
     role: ClassVar[AgentRole] = AgentRole.MAIN
 
