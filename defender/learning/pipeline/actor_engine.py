@@ -80,11 +80,13 @@ def _run_actor_pydantic(  # noqa: PLR0913 — the actor_fn protocol signature pl
     learning_run_dir: Path,
     *,
     scope: _ActorScope,
+    salt: str | None = None,
     make_model: MakeModel = providers.build_for_effort,
 ) -> str:
     deps = bind(
         ACTOR_DEF, learning_run_dir,
         scope=RunScope(scripts=scope.scripts, read_confine=scope.read_confine),
+        salt=salt,
     )
     return run_stage(
         stage="actor",

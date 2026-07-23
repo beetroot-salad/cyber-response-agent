@@ -23,6 +23,7 @@ this spec is agnostic to where that spine lands (issue #513 leaves it open).
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from pathlib import Path
 
@@ -254,7 +255,7 @@ def test_invoke_pitfalls_agent_prompt_reaches_engine(tmp_path: Path, monkeypatch
     rc = pitfalls_curator._invoke_pitfalls_agent(handoffs, repo_root=tmp_path)
     assert rc == 0
     prompt = cap["user_prompt"]
-    assert "pitfalls_handoffs (1)" in prompt
+    assert re.search(r"<run-[0-9a-f]+-pitfalls_handoffs>", prompt)
     assert "skills_dir: defender/skills/" in prompt
     assert "run_dir" not in prompt
     assert "catalog_dir" not in prompt

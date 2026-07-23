@@ -12,6 +12,7 @@ _WS_ROOT = HERE.parents[1]
 
 from defender.learning.author.verify_forward import forward as vf  # type: ignore[import-not-found]
 from defender.learning.author.verify_forward import shared as vfs  # type: ignore[import-not-found]
+from defender._untrusted import wrap
 
 _PREFIX = "verify_forward"
 
@@ -63,15 +64,19 @@ def test_load_run_context_missing_disposition(tmp_path, monkeypatch):
         vf.load_run_context("rid", runs_dir=runs)
 
 
-def test_data_section_builds_labeled_block():
-    assert vfs.data_section("CASE TRANSCRIPT (raw)", "the transcript\n") == (
-        "CASE TRANSCRIPT (raw):\n\nthe transcript"
+def test_wrap_builds_salted_labeled_block():
+    assert wrap("the transcript\n", "case_transcript", "ab" * 16) == (
+        f"<run-{'ab' * 16}-case_transcript>\n"
+        "the transcript\n\n"
+        f"</run-{'ab' * 16}-case_transcript>"
     )
 
 
-def test_data_section_body_placeholder_is_inert():
-    assert vfs.data_section("CANDIDATE LESSON", "route to {transcript}") == (
-        "CANDIDATE LESSON:\n\nroute to {transcript}"
+def test_wrap_body_placeholder_is_inert():
+    assert wrap("route to {transcript}", "candidate_lesson", "cd" * 16) == (
+        f"<run-{'cd' * 16}-candidate_lesson>\n"
+        "route to {transcript}\n"
+        f"</run-{'cd' * 16}-candidate_lesson>"
     )
 
 

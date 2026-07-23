@@ -1,14 +1,15 @@
 from __future__ import annotations
 
-import json
 from collections.abc import Callable
+from uuid import uuid4
 from dataclasses import dataclass
 from pathlib import Path
 
+from defender._untrusted import wrap
 from defender.learning import lead_repository
 from defender._run_paths import RunPaths
 from defender.learning.core.config import JudgeWiring
-from defender.learning.pipeline._prompt import _section
+from defender.learning.pipeline._prompt import stage_user_message
 from defender.learning.pipeline.judge.compare import (
     build_comparison,
     parse_investigation_companion,
@@ -16,7 +17,6 @@ from defender.learning.pipeline.judge.compare import (
     render_synthesis,
     write_comparison_files,
 )
-from defender.scripts.case_history import case_ticket
 
 
 @dataclass(frozen=True)
@@ -34,35 +34,9 @@ class JudgeInvocation:
     comparison_paths: list
 
 
-def _cited_policy_read_section(run_dir: Path, learning_run_dir: Path) -> str:
-    inflight_key = learning_run_dir.name
-    try:
-        alert = json.loads(RunPaths(run_dir).alert.read_text(encoding="utf-8"))
-        sig_label = case_ticket.signature_label(alert) or "<sig:RULE_ID>"
-    except Exception:  # noqa: BLE001 — the label is a convenience hint only
-        sig_label = "<sig:RULE_ID>"
+def _cited_policy_read_body(learning_run_dir: Path) -> str:
     menu_path = learning_run_dir / "past_tickets.txt"
-    seed_menu = menu_path.read_text(encoding="utf-8").strip() if menu_path.is_file() else ""
-    body = (
-        "Confirm a CITED past case against the case-history store with the closed-only "
-        "typed tools — closed cases only, by construction:\n"
-        f"  list_closed_tickets(label=\"{sig_label}\") — find the precedent among closed cases\n"
-        "  get_closed_ticket(key=\"<case-id>\") — confirm the one you cite\n"
-        f"The in-flight ticket for the alert you are scoring is `{inflight_key}` — never read "
-        "it; both tools refuse it (it is the answer key). Cached gather_raw payloads are "
-        "context, never confirmation: only the live closed-only read can say 'the store "
-        "confirmed it'. A cited seed the store can't confirm, or whose grounded conditions "
-        "these actuals contradict, does not survive on that basis."
-    )
-    if seed_menu:
-        body += (
-            "\n\nCandidate closed cases the actor was offered as covering-policy seeds "
-            "(its citations should be among these):\n" + seed_menu
-        )
-    return _section(
-        "cited_policy_read", body,
-        "closed-ticket tools — confirm a cited closed case's policy here",
-    )
+    return menu_path.read_bytes().decode("utf-8") if menu_path.is_file() else ""
 
 
 def build_judge_invocation(
@@ -73,6 +47,7 @@ def build_judge_invocation(
     *,
     comparison_dirname: str = "comparison",
     closed_ticket_read: bool = False,
+    salt: str | None = None,
 ) -> JudgeInvocation:
     run_dir = Path(run_dir)
     learning_run_dir = Path(learning_run_dir)
@@ -86,34 +61,32 @@ def build_judge_invocation(
     add_dirs = [d for d in (gather_raw, comparison_dir) if d.is_dir()]
 
     report = RunPaths(run_dir).report
-    user = (
-        _section("alert", RunPaths(run_dir).alert.read_text(encoding="utf-8"))
-        + _section(
-            "report", report.read_text(encoding="utf-8") if report.is_file() else "(report.md missing)",
-            "the defender's disposition + rationale — the claim you are scoring",
-        )
-        + _section("actor_story", actor_story_path.read_text(encoding="utf-8"))
-        + _section(
-            "synthesis", render_synthesis(companion),
-            "the defender's cross-lead hypotheses, belief movement, authorization "
-            "reasoning, and conclusion — WHY it reached the disposition",
-        )
-        + _section(
-            "coverage_manifest", lead_repository.render_joined_yaml(run_dir),
-            "the authoritative record of what was queried per lead (id, params, "
-            "status) — ground truth for coverage",
-        )
-        + _section(
-            "comparison_files", render_manifest(comparisons),
-            f"per-lead projection-vs-actual files under {comparison_dir} — read each at "
-            f"its turn; query the full payloads under {gather_raw} by piping one into "
-            "defender-sql (`cat <payload> | defender-sql '<SQL>'`, table `data`) to check "
-            "absence (the refute primitive), never inferring it from the sample, and "
-            "never reading a truncated or empty payload as absence",
-        )
-    )
+    stage_salt = salt if salt is not None else uuid4().hex
+    sections = [
+        wrap(RunPaths(run_dir).alert.read_text(encoding="utf-8"), "alert", stage_salt),
+        wrap(
+            report.read_text(encoding="utf-8")
+            if report.is_file()
+            else "(report.md missing)",
+            "report",
+            stage_salt,
+        ),
+        wrap(actor_story_path.read_text(encoding="utf-8"), "actor_story", stage_salt),
+        wrap(render_synthesis(companion), "synthesis", stage_salt),
+        wrap(
+            lead_repository.render_joined_yaml(run_dir), "coverage_manifest", stage_salt
+        ),
+        wrap(render_manifest(comparisons), "comparison_files", stage_salt),
+    ]
     if closed_ticket_read:
-        user += _cited_policy_read_section(run_dir, learning_run_dir)
+        sections.append(
+            wrap(
+                _cited_policy_read_body(learning_run_dir),
+                "cited_policy_read",
+                stage_salt,
+            )
+        )
+    user = stage_user_message(stage_salt, *sections)
     return JudgeInvocation(
         user_text=user, add_dirs=add_dirs, comparison_paths=comparison_paths,
     )
@@ -121,11 +94,13 @@ def build_judge_invocation(
 
 def invoke_judge(wiring: JudgeWiring, run_dir: Path, actor_story_path: Path,
                  projected_telemetry_path: Path, learning_run_dir: Path,
-                 *, judge_fn: Callable[..., str]) -> str:
+                 *, judge_fn: Callable[..., str], salt: str | None = None) -> str:
+    stage_salt = salt if salt is not None else uuid4().hex
     inv = build_judge_invocation(
         run_dir, actor_story_path, projected_telemetry_path, learning_run_dir,
         comparison_dirname=wiring.comparison_dirname,
         closed_ticket_read=wiring.closed_ticket_read,
+        salt=stage_salt,
     )
     return judge_fn(
         wiring.prompt_path, wiring.model, wiring.effort, wiring.trace_name, wiring.label,
@@ -133,4 +108,5 @@ def invoke_judge(wiring: JudgeWiring, run_dir: Path, actor_story_path: Path,
         scope=_ToolScope(
             add_dir=inv.add_dirs, closed_ticket_read=wiring.closed_ticket_read,
         ),
+        salt=stage_salt,
     )

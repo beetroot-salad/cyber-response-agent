@@ -187,7 +187,7 @@ def build_agent_core(  # noqa: PLR0913 — the single build site's config + 3 DI
         instructions=instructions,
         capabilities=capabilities,
         model_settings=built.settings,
-        retries=DEFAULT_TOOL_RETRIES,
+        retries={"tools": DEFAULT_TOOL_RETRIES, "output": 0},
     )
     register_tools(agent, defn.tools, verbs)
     return agent

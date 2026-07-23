@@ -121,11 +121,14 @@ def existing_finding_ids(cfg: AuthorConfig) -> set[str]:
 
 
 
-def build_user_prompt(findings: list[dict], batch_id: str, cfg: AuthorConfig) -> str:
+def build_user_prompt(
+    findings: list[dict], batch_id: str, cfg: AuthorConfig, *, salt: str | None = None
+) -> str:
     return _shared.build_curator_user_prompt(
         findings, batch_id, corpus_dir=cfg.lessons_dir,
         corpus_dir_rel=cfg.lessons_dir_rel, label="findings",
         manifest_seed=cfg.manifest_seed,
+        salt=salt,
     )
 
 
@@ -134,10 +137,11 @@ def invoke_agent(findings: list[dict], batch_id: str, cfg: AuthorConfig) -> dict
     from defender.learning.author.verify_forward.checks import FINDINGS_CHECK
 
     cfg.pending_dir.mkdir(parents=True, exist_ok=True)
+    stage_salt = uuid.uuid4().hex
     return curator_engine.run_curator_stage(
         system_prompt_file=cfg.author_prompt,
         batch_id=batch_id,
-        user_prompt=build_user_prompt(findings, batch_id, cfg),
+        user_prompt=build_user_prompt(findings, batch_id, cfg, salt=stage_salt),
         corpus_dir=cfg.lessons_dir,
         check=FINDINGS_CHECK,
         runs_dir=cfg.runs_dir,
@@ -150,6 +154,7 @@ def invoke_agent(findings: list[dict], batch_id: str, cfg: AuthorConfig) -> dict
         effort=cfg.author_effort,
         request_limit=AUTHOR_REQUEST_LIMIT,
         timeout=cfg.author_timeout,
+        salt=stage_salt,
     )
 
 

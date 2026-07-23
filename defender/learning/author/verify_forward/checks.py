@@ -4,14 +4,16 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from uuid import uuid4
 from defender._run_paths import resolve_run_bundle
+from defender._untrusted import wrap
 from defender.learning.author.verify_forward import actor, env, forward
 from defender.learning.author.verify_forward.shared import (
-    data_section,
     load_observation,
     parse_verdict,
 )
 from defender.learning.core import config
+from defender.learning.pipeline._prompt import stage_user_message
 
 
 @dataclass(frozen=True)
@@ -38,7 +40,7 @@ class ForwardCheck:
     run: Callable[[CheckContext], str]
 
 
-def _verify(ctx: CheckContext, user: str, source_run_dir: Path) -> str:
+def _verify(ctx: CheckContext, user: str, source_run_dir: Path, *, salt: str) -> str:
     stem = ctx.lesson_path.stem
     prefix = ctx.check.error_prefix
     raw = ctx.run_verify(
@@ -50,11 +52,13 @@ def _verify(ctx: CheckContext, user: str, source_run_dir: Path) -> str:
         user=user,
         source_run_dir=source_run_dir,
         wall_clock_timeout=config.VERIFIER_TIMEOUT,
+        salt=salt,
     )
     return parse_verdict(raw, error_prefix=prefix)
 
 
-def _run_findings(ctx: CheckContext) -> str:
+def _run_findings(ctx: CheckContext, *, salt: str | None = None) -> str:
+    stage_salt = salt if salt is not None else uuid4().hex
     transcript, recorded = forward.load_run_context(ctx.source_id, runs_dir=ctx.runs_dir)
     disposition = forward.expected_disposition(ctx.direction, recorded)
     cited_policy = (
@@ -62,16 +66,18 @@ def _run_findings(ctx: CheckContext) -> str:
         if ctx.direction == "benign"
         else forward._NO_CITED_POLICY
     )
-    user = "\n\n".join((
-        data_section("CASE TRANSCRIPT (the original investigation, including its actual evidence and disposition)", transcript),
-        data_section("CANDIDATE LESSON", ctx.lesson_text),
-        data_section("CASE GROUND-TRUTH DISPOSITION", disposition),
-        data_section("CITED COVERING POLICY (closed prior cases this lesson's routing may lean on; benign/FP lessons only — adversarial lessons cite none)", cited_policy),
-    ))
-    return _verify(ctx, user, ctx.runs_dir / ctx.source_id)
+    user = stage_user_message(
+        stage_salt,
+        wrap(transcript, "case_transcript", stage_salt),
+        wrap(ctx.lesson_text, "candidate_lesson", stage_salt),
+        wrap(disposition, "case_ground_truth_disposition", stage_salt),
+        wrap(cited_policy, "cited_covering_policy", stage_salt),
+    )
+    return _verify(ctx, user, ctx.runs_dir / ctx.source_id, salt=stage_salt)
 
 
-def _run_actor(ctx: CheckContext) -> str:
+def _run_actor(ctx: CheckContext, *, salt: str | None = None) -> str:
+    stage_salt = salt if salt is not None else uuid4().hex
     prefix = ctx.check.error_prefix
     row = load_observation(ctx.source_id, ctx.pending, error_prefix=prefix)
     observation_text = (row.get("observation") or "").strip()
@@ -79,12 +85,13 @@ def _run_actor(ctx: CheckContext) -> str:
     if not observation_text or not src:
         raise SystemExit(f"{prefix}: observation row missing observation/source_run_dir: {row!r}")
     bundle = resolve_run_bundle(ctx.runs_dir, src)
-    user = "\n\n".join((
-        data_section("ACTOR STORY (the original Section 0 + body the judge graded)", actor.load_story(bundle)),
-        data_section("JUDGE OBSERVATION (the failure the lesson is trying to teach against)", observation_text),
-        data_section("CANDIDATE LESSON", ctx.lesson_text),
-    ))
-    return _verify(ctx, user, bundle)
+    user = stage_user_message(
+        stage_salt,
+        wrap(actor.load_story(bundle), "actor_story", stage_salt),
+        wrap(observation_text, "judge_observation", stage_salt),
+        wrap(ctx.lesson_text, "candidate_lesson", stage_salt),
+    )
+    return _verify(ctx, user, bundle, salt=stage_salt)
 
 
 def _run_env(ctx: CheckContext) -> str:

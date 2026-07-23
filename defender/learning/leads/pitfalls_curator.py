@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import json
 import sys
 from collections.abc import Callable
 from pathlib import Path
 
+from uuid import uuid4
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender.learning.author import shared as _author_shared
+from defender._untrusted import wrap
 from defender.learning.core import config as _loop_config
 from defender.learning.core import persist as _loop_persist
 from defender.learning.leads._lead_spine import (
@@ -20,6 +21,7 @@ from defender.learning.leads._lead_spine import (
     _verify_corpus_scope,
 )
 from defender.learning.leads.lead_extraction import LeadAuthorError
+from defender.learning.pipeline._prompt import stage_user_message, structured_json_body
 from defender.learning.leads.path_validation import (
     LEARNING_DIR,
     SKILLS_REL,
@@ -55,19 +57,25 @@ def _build_pitfalls_handoffs(rows: list[dict]) -> list[dict]:
     return out
 
 
-def _invoke_pitfalls_agent(handoffs: list[dict], *, repo_root: Path) -> int:
-    user_prompt = (
-        f"skills_dir: {SKILLS_REL}\n"
-        f"pitfalls_handoffs ({len(handoffs)}):\n"
-        f"{json.dumps(handoffs, indent=2)}\n"
+def _invoke_pitfalls_agent(
+    handoffs: list[dict], *, repo_root: Path,
+    spawn: Callable[..., int] = _spawn_author_agent,
+    salt: str | None = None,
+) -> int:
+    stage_salt = salt if salt is not None else uuid4().hex
+    user_prompt = stage_user_message(
+        stage_salt,
+        wrap(f"skills_dir: {SKILLS_REL}", "pitfalls_context", stage_salt),
+        wrap(structured_json_body(handoffs), "pitfalls_handoffs", stage_salt),
     )
-    return _spawn_author_agent(
+    return spawn(
         system_prompt_file=LEAD_PITFALLS_PROMPT,
         batch_id="pitfalls",
         user_prompt=user_prompt,
         repo_root=repo_root,
         learning_run_dir=PENDING_DIR,
         log_label="pitfalls curator",
+        salt=stage_salt,
     )
 
 

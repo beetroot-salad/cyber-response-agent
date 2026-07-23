@@ -8,11 +8,14 @@ import re
 import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
+from uuid import uuid4
 from typing import Any
 
 import yaml
 
 from defender import _git
+from defender.learning.pipeline._prompt import stage_user_message, structured_json_body
+from defender._untrusted import wrap
 from defender._corpus import iter_lessons
 from defender.learning.core.config import REPO_LOCK_WAIT_SECONDS  # noqa: F401 — re-export
 
@@ -332,13 +335,25 @@ def build_corpus_manifest(corpus_dir: Path, *, seed: str | None = None) -> str:
 def build_curator_user_prompt(
     rows: list[dict], batch_id: str, *, corpus_dir: Path, corpus_dir_rel: str, label: str,
     manifest_seed: str | None = None,
+    salt: str | None = None,
 ) -> str:
     seed = manifest_seed if manifest_seed is not None else batch_id
     manifest = build_corpus_manifest(corpus_dir, seed=seed) or "(none — the corpus is empty)"
-    return (
+    manifest_stems = "\n".join(
+        line.removeprefix("## ")
+        for line in manifest.splitlines()
+        if line.startswith("## ")
+    )
+    context = (
         f"batch_id: {batch_id}\n"
         f"lessons_dir: {corpus_dir_rel}\n"
-        f"\nexisting lessons (frontmatter manifest):\n{manifest}\n\n"
-        f"{label} ({len(rows)}):\n"
-        f"{json.dumps(rows, indent=2)}\n"
+        f"{label} ({len(rows)}): in the lesson_rows frame\n\n"
+        f"existing lessons (frontmatter manifest):\n{manifest}"
+    )
+    stage_salt = salt if salt is not None else uuid4().hex
+    return stage_user_message(
+        stage_salt,
+        wrap(context, "curator_context", stage_salt),
+        wrap(manifest_stems, "corpus_manifest", stage_salt),
+        wrap(structured_json_body(rows) if rows else "", "lesson_rows", stage_salt),
     )

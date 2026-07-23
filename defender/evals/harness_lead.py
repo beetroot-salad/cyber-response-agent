@@ -37,6 +37,10 @@ def materialize(scenario: Path, tmp: Path) -> Path:
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(path, dst)
 
+    # The copied learning tree imports this shared frame primitive directly.
+    # Keep the relocated harness self-contained for the changed import boundary.
+    shutil.copy(REAL_DEFENDER / "_untrusted.py", tmp / "defender" / "_untrusted.py")
+
     shutil.copytree(
         REAL_DEFENDER / "skills" / "gather" / "queries",
         tmp / "defender" / "skills" / "gather" / "queries",

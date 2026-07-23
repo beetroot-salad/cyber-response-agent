@@ -251,6 +251,12 @@ jobs:
       - name: Unanchored-default gate (single-source param defaults — baseline-ratcheted)
         run: defender/.venv/bin/python scripts/lint/lint_unanchored_default.py
 
+      # Learning-stage prompt sections must be rendered through the shared salted
+      # frame primitive. The check is construction-based rather than a vocabulary
+      # of known tags/headings, so a newly invented raw delimiter still fails.
+      - name: Stage-prompt-frame gate (wrap-only boundaries — baseline-ratcheted)
+        run: defender/.venv/bin/python scripts/lint/lint_stage_prompt_frames.py
+
       # Hand-rolled frontmatter fence arithmetic under defender/ that bypasses the
       # canonical grammar in defender/_frontmatter.py (#591): find/split/startswith/
       # regex fence-parse call sites. Five readers each re-derived the fence offsets

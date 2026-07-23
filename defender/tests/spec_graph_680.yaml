@@ -1,0 +1,1308 @@
+schema_version: 1
+design: "#680 — systemic salted framing for learning-stage prompts and cross-agent tool returns"
+base: a748165986bc153fd215219383dea0237bc3867f
+
+# Phase-D assembler output. Test-form demands are pointers: their observable prose
+# remains in 20-demands.md until phase E authors the named test docstrings.
+demands:
+  - id: wrap_return_contract
+    kind: behavior
+    form: test
+    binds: [wrap, "interacts(wrap->stage_user_message).response"]
+    discharged_by: test_d0_wrap_returns_exact_salted_frame
+
+  - id: shared_wrap_seam
+    kind: seam
+    form: test
+    binds: [wrap, stage_user_message, defender._untrusted]
+    discharged_by: test_d1_shared_wrap_seam
+
+  - id: legacy_frame_helpers_retired
+    kind: negative
+    form: test
+    binds: [_section, data_section, wrap, defender._untrusted]
+    discharged_by: test_d2_legacy_frame_helpers_are_unreachable
+
+  - id: stage_prompt_flows_survive_unified_frame
+    kind: survival
+    form: test
+    binds: [_section, data_section, wrap]
+    discharged_by: test_d3_stage_prompt_flows_survive_via_wrap
+
+  - id: cross_agent_section_boundaries_unforgeable
+    kind: negative
+    form: test
+    binds:
+      - "interacts(build_judge_invocation->stage_user_message).payload"
+      - "interacts(invoke_actor->stage_user_message).payload"
+      - "interacts(invoke_actor_benign->stage_user_message).payload"
+      - "interacts(build_lead_user_prompt->stage_user_message).payload"
+      - "interacts(_run_findings->stage_user_message).payload"
+      - "interacts(_run_actor->stage_user_message).payload"
+      - "interacts(build_curator_user_prompt->stage_user_message).payload"
+      - "interacts(lead_author.invoke_agent->stage_user_message).payload"
+      - "interacts(_invoke_pitfalls_agent->stage_user_message).payload"
+    discharged_by: test_d4_e2e_cross_agent_bytes_cannot_forge_stage_sections
+
+  - id: harness_sections_remain_distinguishable
+    kind: behavior
+    form: test
+    binds:
+      - "interacts(build_judge_invocation->stage_user_message).payload"
+      - "interacts(invoke_actor->stage_user_message).payload"
+      - "interacts(invoke_actor_benign->stage_user_message).payload"
+      - "interacts(build_lead_user_prompt->stage_user_message).payload"
+      - "interacts(_run_findings->stage_user_message).payload"
+      - "interacts(_run_actor->stage_user_message).payload"
+      - "interacts(build_curator_user_prompt->stage_user_message).payload"
+      - "interacts(lead_author.invoke_agent->stage_user_message).payload"
+      - "interacts(_invoke_pitfalls_agent->stage_user_message).payload"
+    discharged_by: test_d5_real_harness_sections_remain_distinguishable
+
+  - id: all_stage_grammars_share_wrap
+    kind: parity
+    form: test
+    binds:
+      - wrap
+      - "interacts(build_judge_invocation->stage_user_message).payload"
+      - "interacts(invoke_actor->stage_user_message).payload"
+      - "interacts(invoke_actor_benign->stage_user_message).payload"
+      - "interacts(build_lead_user_prompt->stage_user_message).payload"
+      - "interacts(_run_findings->stage_user_message).payload"
+      - "interacts(_run_actor->stage_user_message).payload"
+      - "interacts(build_curator_user_prompt->stage_user_message).payload"
+      - "interacts(lead_author.invoke_agent->stage_user_message).payload"
+      - "interacts(_invoke_pitfalls_agent->stage_user_message).payload"
+    discharged_by: test_d6_every_stage_boundary_grammar_uses_wrap
+
+  - id: stage_salt_single_per_invocation
+    kind: shape
+    form: test
+    binds: [stage_salt, run_salt, AgentDeps, stage_user_message.payload]
+    discharged_by: test_d7_one_stage_salt_reaches_frames_and_tool_wraps
+
+  - id: stage_salt_separate_from_run_salt
+    kind: negative
+    form: test
+    binds: [stage_salt, run_salt, AgentDeps, stage_user_message.payload]
+    discharged_by: test_d8_stage_salt_is_never_the_run_salt
+
+  - id: salt_not_reused_with_body_author
+    kind: negative
+    form: test
+    binds: [stage_salt, AgentDeps, stage_user_message.payload]
+    discharged_by: test_d9_stage_never_frames_output_from_an_author_told_its_salt
+
+  - id: frame_contract_first_in_user_message
+    kind: shape
+    form: test
+    binds: [stage_user_message.payload, instructions.payload, stage_salt]
+    discharged_by: test_d10_reader_contract_is_first_framed_user_section
+
+  - id: lint_rejects_raw_prompt_grammar
+    kind: negative
+    form: test
+    binds: [lint_stage_prompt_frames, stage_user_message]
+    discharged_by: test_d11_lint_rejects_new_raw_prompt_boundary_grammar
+
+  - id: lint_accepts_unified_prompt_grammar
+    kind: behavior
+    form: test
+    binds: [lint_stage_prompt_frames, stage_user_message]
+    discharged_by: test_d12_lint_accepts_wrap_only_prompt_builders
+
+  - id: learning_cross_agent_reads_tagged
+    kind: behavior
+    form: test
+    binds:
+      - _tool_read_file
+      - _bound_and_wrap
+      - is_untrusted_read
+      - "interacts(_tool_read_file->learning_tool_output).response"
+      - "read_trust.access[read-file]"
+      - cross_agent_run_output
+      - stage_salt
+    discharged_by: test_d13_learning_stage_cross_agent_read_is_salt_tagged
+
+  - id: raw_cross_agent_read_file_unobservable
+    kind: negative
+    form: test
+    binds:
+      - _tool_read_file
+      - _bound_and_wrap
+      - is_untrusted_read
+      - "interacts(_tool_read_file->learning_tool_output).response"
+      - "read_trust.access[read-file]"
+      - cross_agent_run_output
+      - stage_salt
+    discharged_by: test_d14_learning_stage_cannot_observe_raw_cross_agent_read
+
+  - id: main_self_artifacts_remain_trusted
+    kind: behavior
+    form: test
+    binds: [is_untrusted_read, "read_trust.access[main]", report_md, investigation_md]
+    discharged_by: test_d15_main_self_reads_report_and_investigation_without_wrap
+
+  - id: report_close_delimiter_deny_retained
+    kind: survival
+    form: test
+    binds: [_decide_report_write, report_md]
+    discharged_by: test_d16_report_close_delimiter_deny_survives_systemic_frame
+
+  - id: legal_artifacts_not_newly_denied
+    kind: behavior
+    form: test
+    binds: [_decide_report_write, _decide_investigation_write, report_md, investigation_md]
+    discharged_by: test_d17_legal_artifacts_gain_no_new_deny_or_modelretry
+
+  - id: run_stage_contract_survives_revision
+    kind: survival
+    form: test
+    binds: [run_stage, stage_user_message]
+    discharged_by: test_d18_run_stage_still_accepts_prejoined_user_string
+
+  - id: logical_section_names_survive_salted_frames
+    kind: survival
+    form: test
+    binds: [stage_user_message.payload, judge_citation_source]
+    discharged_by: test_d19_logical_section_names_and_judge_source_enum_stay_stable
+
+  - id: learning_cross_agent_bash_outputs_tagged
+    kind: behavior
+    form: test
+    binds:
+      - _tool_bash
+      - _format_bash_result
+      - "interacts(_tool_bash->learning_tool_output).response"
+      - "read_trust.access[bash]"
+      - cross_agent_run_output
+      - stage_salt
+    discharged_by: test_d20_learning_stage_bash_output_is_salt_tagged
+
+  - id: raw_cross_agent_bash_output_unobservable
+    kind: negative
+    form: test
+    binds:
+      - _tool_bash
+      - _format_bash_result
+      - "interacts(_tool_bash->learning_tool_output).response"
+      - "read_trust.access[bash]"
+      - cross_agent_run_output
+      - stage_salt
+    discharged_by: test_d21_learning_stage_cannot_observe_raw_bash_output
+
+  # Phase-C consensus assertions conserved as executable demand pointers.
+  - id: premise_hostile_body_replays_a_complete_frame_from_another_stage_invocation
+    kind: negative
+    form: test
+    binds: ["stage_user_message.payload"]
+    discharged_by: test_hostile_body_replays_a_complete_frame_from_another_stage_invocation
+
+  - id: premise_hostile_body_impersonates_the_reader_contract_declaration
+    kind: negative
+    form: test
+    binds: ["stage_user_message.payload"]
+    discharged_by: test_hostile_body_impersonates_the_reader_contract_declaration
+
+  - id: premise_hostile_body_places_contract_lookalikes_before_and_after_real_content
+    kind: negative
+    form: test
+    binds: ["stage_user_message.payload"]
+    discharged_by: test_hostile_body_places_contract_lookalikes_before_and_after_real_content
+
+  - id: premise_hostile_body_uses_mismatched_nested_frame_markers
+    kind: negative
+    form: test
+    binds: ["stage_user_message.payload"]
+    discharged_by: test_hostile_body_uses_mismatched_nested_frame_markers
+
+  - id: premise_hostile_body_ends_with_a_partial_delimiter_before_the_next_section
+    kind: negative
+    form: test
+    binds: ["stage_user_message.payload"]
+    discharged_by: test_hostile_body_ends_with_a_partial_delimiter_before_the_next_section
+
+  - id: premise_hostile_structured_value_breaks_out_of_a_prompt_section
+    kind: negative
+    form: test
+    binds: ["stage_user_message.payload"]
+    discharged_by: test_hostile_structured_value_breaks_out_of_a_prompt_section
+
+  - id: premise_hostile_text_uses_unicode_confusables_and_bidi_controls_around_delimiters
+    kind: negative
+    form: test
+    binds: ["stage_user_message.payload"]
+    discharged_by: test_hostile_text_uses_unicode_confusables_and_bidi_controls_around_delimiters
+
+  - id: premise_hostile_text_contains_nul_and_nonprinting_control_characters_with_markers
+    kind: negative
+    form: test
+    binds: ["stage_user_message.payload"]
+    discharged_by: test_hostile_text_contains_nul_and_nonprinting_control_characters_with_markers
+
+  - id: premise_hostile_alert_payload_targets_each_stage_grammar_family
+    kind: negative
+    form: test
+    binds: ["stage_user_message.payload"]
+    discharged_by: test_hostile_alert_payload_targets_each_stage_grammar_family
+
+  - id: premise_malicious_actor_return_attempts_to_reframe_an_oracle_prompt
+    kind: negative
+    form: test
+    binds: ["stage_user_message.payload"]
+    discharged_by: test_malicious_actor_return_attempts_to_reframe_an_oracle_prompt
+
+  - id: premise_hostile_body_contains_the_runtime_run_token_while_stage_tokens_are_fresh
+    kind: negative
+    form: test
+    binds: ["stage_user_message.payload"]
+    discharged_by: test_hostile_body_contains_the_runtime_run_token_while_stage_tokens_are_fresh
+
+  - id: premise_judge_synthesis_with_hostile_invlang_free_text
+    kind: negative
+    form: test
+    binds: ["stage_user_message.payload"]
+    discharged_by: test_judge_synthesis_with_hostile_invlang_free_text
+
+  - id: premise_malicious_actor_alert_with_boundary_lookalike
+    kind: negative
+    form: test
+    binds: ["stage_user_message.payload"]
+    discharged_by: test_malicious_actor_alert_with_boundary_lookalike
+
+  - id: premise_benign_actor_past_tickets_many_and_hostile
+    kind: negative
+    form: test
+    binds: ["stage_user_message.payload"]
+    discharged_by: test_benign_actor_past_tickets_many_and_hostile
+
+  - id: premise_oracle_actor_story_contains_markdown_heading
+    kind: negative
+    form: test
+    binds: ["stage_user_message.payload"]
+    discharged_by: test_oracle_actor_story_contains_markdown_heading
+
+  - id: premise_verify_forward_transcript_contains_prose_label
+    kind: negative
+    form: test
+    binds: ["stage_user_message.payload"]
+    discharged_by: test_verify_forward_transcript_contains_prose_label
+
+  - id: premise_curator_lesson_fields_contain_row_label_lookalikes
+    kind: negative
+    form: test
+    binds: ["stage_user_message.payload"]
+    discharged_by: test_curator_lesson_fields_contain_row_label_lookalikes
+
+  - id: premise_lead_author_handoff_json_contains_path_label
+    kind: negative
+    form: test
+    binds: ["stage_user_message.payload"]
+    discharged_by: test_lead_author_handoff_json_contains_path_label
+
+  - id: premise_pitfalls_handoff_json_contains_sibling_label
+    kind: negative
+    form: test
+    binds: ["stage_user_message.payload"]
+    discharged_by: test_pitfalls_handoff_json_contains_sibling_label
+
+  - id: premise_stage_body_carries_a_guessed_stage_token_literal
+    kind: negative
+    form: test
+    binds: ["stage_user_message.payload"]
+    discharged_by: test_stage_body_carries_a_guessed_stage_token_literal
+
+  - id: premise_migrated_prompt_body_has_edge_whitespace_and_a_harness_annotation
+    kind: behavior
+    form: test
+    binds: ["stage_user_message.payload"]
+    discharged_by: test_migrated_prompt_body_has_edge_whitespace_and_a_harness_annotation
+
+  - id: premise_frame_empty_body
+    kind: behavior
+    form: test
+    binds: ["stage_user_message.payload"]
+    discharged_by: test_frame_empty_body
+
+  - id: premise_frame_whitespace_only_body
+    kind: behavior
+    form: test
+    binds: ["stage_user_message.payload"]
+    discharged_by: test_frame_whitespace_only_body
+
+  - id: premise_frame_body_contains_legacy_close_tag
+    kind: behavior
+    form: test
+    binds: ["stage_user_message.payload"]
+    discharged_by: test_frame_body_contains_legacy_close_tag
+
+  - id: premise_frame_body_mixes_all_known_boundary_grammars
+    kind: behavior
+    form: test
+    binds: ["stage_user_message.payload"]
+    discharged_by: test_frame_body_mixes_all_known_boundary_grammars
+
+  - id: premise_frame_body_contains_unicode_and_line_ending_variants
+    kind: behavior
+    form: test
+    binds: ["stage_user_message.payload"]
+    discharged_by: test_frame_body_contains_unicode_and_line_ending_variants
+
+  - id: premise_judge_optional_cited_policy_empty
+    kind: behavior
+    form: test
+    binds: ["stage_user_message.payload"]
+    discharged_by: test_judge_optional_cited_policy_empty
+
+  - id: premise_oracle_actor_story_is_empty
+    kind: behavior
+    form: test
+    binds: ["stage_user_message.payload"]
+    discharged_by: test_oracle_actor_story_is_empty
+
+  - id: premise_curator_empty_lesson_collection
+    kind: behavior
+    form: test
+    binds: ["stage_user_message.payload"]
+    discharged_by: test_curator_empty_lesson_collection
+
+  - id: premise_first_user_section_declaration_with_empty_following_section
+    kind: shape
+    form: test
+    binds: ["stage_user_message.payload", "instructions.payload"]
+    discharged_by: test_first_user_section_declaration_with_empty_following_section
+
+  - id: premise_concurrent_oracle_body_replays_another_oracles_frame
+    kind: negative
+    form: test
+    binds: ["stage_salt.identity", "stage_user_message.payload"]
+    discharged_by: test_concurrent_oracle_body_replays_another_oracles_frame
+
+  - id: premise_cached_anthropic_stage_calls_use_fresh_user_frame_contracts
+    kind: uniqueness
+    form: test
+    binds: ["stage_salt.identity", "stage_user_message.payload"]
+    discharged_by: test_cached_anthropic_stage_calls_use_fresh_user_frame_contracts
+
+  - id: premise_two_oracle_invocations_receive_distinct_stage_inputs_concurrently
+    kind: uniqueness
+    form: test
+    binds: ["stage_salt.identity", "stage_user_message.payload"]
+    discharged_by: test_two_oracle_invocations_receive_distinct_stage_inputs_concurrently
+
+  - id: premise_concurrent_oracle_leads_finish_in_reverse_creation_order
+    kind: uniqueness
+    form: test
+    binds: ["stage_salt.identity", "stage_user_message.payload"]
+    discharged_by: test_concurrent_oracle_leads_finish_in_reverse_creation_order
+
+  - id: premise_sequential_stage_invocations_share_a_learning_run_directory
+    kind: uniqueness
+    form: test
+    binds: ["stage_salt.identity", "stage_user_message.payload"]
+    discharged_by: test_sequential_stage_invocations_share_a_learning_run_directory
+
+  - id: premise_curator_runs_successive_batches_via_its_non_bindable_lifetime
+    kind: uniqueness
+    form: test
+    binds: ["stage_salt.identity", "stage_user_message.payload"]
+    discharged_by: test_curator_runs_successive_batches_via_its_non_bindable_lifetime
+
+  - id: premise_prior_ticket_text_impersonates_a_judge_section
+    kind: behavior
+    form: test
+    binds: ["interacts(_tool_read_file->learning_tool_output).response", "read_trust.access[read-file]", "cross_agent_run_output"]
+    discharged_by: test_prior_ticket_text_impersonates_a_judge_section
+
+  - id: premise_comparison_artifact_contains_model_authored_frame_forgery_via_read_file
+    kind: behavior
+    form: test
+    binds: ["interacts(_tool_read_file->learning_tool_output).response", "read_trust.access[read-file]", "cross_agent_run_output"]
+    discharged_by: test_comparison_artifact_contains_model_authored_frame_forgery_via_read_file
+
+  - id: premise_corpus_author_reads_a_lesson_written_by_an_earlier_model_via_lesson_read
+    kind: behavior
+    form: test
+    binds: ["interacts(_tool_read_file->learning_tool_output).response", "read_trust.access[read-file]", "cross_agent_run_output"]
+    discharged_by: test_corpus_author_reads_a_lesson_written_by_an_earlier_model_via_lesson_read
+
+  - id: premise_learning_reader_reaches_cross_agent_artifact_through_an_indirect_path
+    kind: behavior
+    form: test
+    binds: ["interacts(_tool_read_file->learning_tool_output).response", "read_trust.access[read-file]", "cross_agent_run_output"]
+    discharged_by: test_learning_reader_reaches_cross_agent_artifact_through_an_indirect_path
+
+  - id: premise_learning_read_file_empty_cross_agent_artifact
+    kind: behavior
+    form: test
+    binds: ["interacts(_tool_read_file->learning_tool_output).response", "read_trust.access[read-file]", "cross_agent_run_output"]
+    discharged_by: test_learning_read_file_empty_cross_agent_artifact
+
+  - id: premise_learning_read_file_cross_agent_artifact_with_frame_lookalike
+    kind: behavior
+    form: test
+    binds: ["interacts(_tool_read_file->learning_tool_output).response", "read_trust.access[read-file]", "cross_agent_run_output"]
+    discharged_by: test_learning_read_file_cross_agent_artifact_with_frame_lookalike
+
+  - id: premise_learning_read_file_new_derived_artifact_outside_known_path_shape
+    kind: behavior
+    form: test
+    binds: ["interacts(_tool_read_file->learning_tool_output).response", "read_trust.access[read-file]", "cross_agent_run_output"]
+    discharged_by: test_learning_read_file_new_derived_artifact_outside_known_path_shape
+
+  - id: premise_actor_read_file_cross_agent_artifact
+    kind: behavior
+    form: test
+    binds: ["interacts(_tool_read_file->learning_tool_output).response", "read_trust.access[read-file]", "cross_agent_run_output"]
+    discharged_by: test_actor_read_file_cross_agent_artifact
+
+  - id: premise_lead_author_read_file_cross_agent_artifact
+    kind: behavior
+    form: test
+    binds: ["interacts(_tool_read_file->learning_tool_output).response", "read_trust.access[read-file]", "cross_agent_run_output"]
+    discharged_by: test_lead_author_read_file_cross_agent_artifact
+
+  - id: premise_comparison_artifact_contains_model_authored_frame_forgery_via_bash
+    kind: behavior
+    form: test
+    binds: ["interacts(_tool_bash->learning_tool_output).response", "read_trust.access[bash]", "cross_agent_run_output"]
+    discharged_by: test_comparison_artifact_contains_model_authored_frame_forgery_via_bash
+
+  - id: premise_admitted_bash_streams_split_a_frame_forgery_across_stdout_and_stderr
+    kind: behavior
+    form: test
+    binds: ["interacts(_tool_bash->learning_tool_output).response", "read_trust.access[bash]", "cross_agent_run_output"]
+    discharged_by: test_admitted_bash_streams_split_a_frame_forgery_across_stdout_and_stderr
+
+  - id: premise_learning_bash_returns_success_stdout_and_hostile_stderr_on_a_nonzero_exit
+    kind: behavior
+    form: test
+    binds: ["interacts(_tool_bash->learning_tool_output).response", "read_trust.access[bash]", "cross_agent_run_output"]
+    discharged_by: test_learning_bash_returns_success_stdout_and_hostile_stderr_on_a_nonzero_exit
+
+  - id: premise_one_stage_uses_read_file_and_bash_for_cross_agent_artifacts
+    kind: behavior
+    form: test
+    binds: ["interacts(_tool_bash->learning_tool_output).response", "read_trust.access[bash]", "cross_agent_run_output"]
+    discharged_by: test_one_stage_uses_read_file_and_bash_for_cross_agent_artifacts
+
+  - id: premise_learning_bash_stdout_only_contains_cross_agent_text
+    kind: behavior
+    form: test
+    binds: ["interacts(_tool_bash->learning_tool_output).response", "read_trust.access[bash]", "cross_agent_run_output"]
+    discharged_by: test_learning_bash_stdout_only_contains_cross_agent_text
+
+  - id: premise_learning_bash_stdout_and_stderr_both_contain_boundary_lookalikes
+    kind: behavior
+    form: test
+    binds: ["interacts(_tool_bash->learning_tool_output).response", "read_trust.access[bash]", "cross_agent_run_output"]
+    discharged_by: test_learning_bash_stdout_and_stderr_both_contain_boundary_lookalikes
+
+  - id: premise_learning_bash_empty_success_result
+    kind: behavior
+    form: test
+    binds: ["interacts(_tool_bash->learning_tool_output).response", "read_trust.access[bash]", "cross_agent_run_output"]
+    discharged_by: test_learning_bash_empty_success_result
+
+  - id: premise_actor_bash_reads_cross_agent_artifact
+    kind: behavior
+    form: test
+    binds: ["interacts(_tool_bash->learning_tool_output).response", "read_trust.access[bash]", "cross_agent_run_output"]
+    discharged_by: test_actor_bash_reads_cross_agent_artifact
+
+  - id: premise_lead_author_bash_reads_cross_agent_artifact
+    kind: behavior
+    form: test
+    binds: ["interacts(_tool_bash->learning_tool_output).response", "read_trust.access[bash]", "cross_agent_run_output"]
+    discharged_by: test_lead_author_bash_reads_cross_agent_artifact
+
+  - id: premise_corpus_author_bash_reads_cross_agent_artifact
+    kind: behavior
+    form: test
+    binds: ["interacts(_tool_bash->learning_tool_output).response", "read_trust.access[bash]", "cross_agent_run_output"]
+    discharged_by: test_corpus_author_bash_reads_cross_agent_artifact
+
+  - id: premise_judge_reissues_an_admitted_bash_read_after_a_prior_result
+    kind: behavior
+    form: test
+    binds: ["interacts(_tool_bash->learning_tool_output).response", "read_trust.access[bash]", "cross_agent_run_output"]
+    discharged_by: test_judge_reissues_an_admitted_bash_read_after_a_prior_result
+
+  - id: premise_stage_invocation_finishes_after_bash_writes_only_to_stderr
+    kind: behavior
+    form: test
+    binds: ["interacts(_tool_bash->learning_tool_output).response", "read_trust.access[bash]", "cross_agent_run_output"]
+    discharged_by: test_stage_invocation_finishes_after_bash_writes_only_to_stderr
+
+  # Phase-F repair: every human-approved non-consensus premise is executable.
+  - {id: premise_current_frame_closer_scoped_to_undisclosed_token, kind: behavior, form: test, binds: [stage_salt, stage_user_message.payload], discharged_by: test_hostile_body_contains_the_current_frame_closer_and_a_sibling_opener}
+  - {id: premise_current_token_wrong_tag_scoped_to_undisclosed_token, kind: behavior, form: test, binds: [stage_salt, stage_user_message.payload], discharged_by: test_hostile_body_contains_current_token_with_the_wrong_logical_tag}
+  - {id: premise_admitted_bash_impersonation_wrapped, kind: behavior, form: test, binds: ["interacts(_tool_bash->learning_tool_output).response", "read_trust.access[bash]"], discharged_by: test_admitted_bash_result_impersonates_a_tool_envelope_and_reader_contract}
+  - {id: premise_non_run_file_scope_preserved, kind: behavior, form: test, binds: ["read_trust.access[read-file]"], discharged_by: test_learning_role_reads_an_attacker_controlled_non_run_file}
+  - {id: premise_post_disclosure_body_read_denied, kind: negative, form: test, binds: [stage_salt, stage_user_message.payload, "read_trust.access[lesson-read]", "read_trust.access[bash]"], discharged_by: test_stage_body_is_authored_after_its_reader_token_was_disclosed}
+  - {id: premise_corpus_self_reread_denied, kind: negative, form: test, binds: [stage_salt, "read_trust.access[lesson-read]", "read_trust.access[bash]"], discharged_by: test_corpus_author_reopens_a_lesson_it_authored_after_learning_the_stage_salt}
+  - {id: premise_cache_contract_first, kind: shape, form: test, binds: [stage_user_message.payload, instructions.payload, stage_salt], discharged_by: test_cacheable_instructions_are_preceded_by_hostile_contract_lookalikes_in_user_input}
+  - {id: premise_main_bash_forgery_raw, kind: behavior, form: test, binds: ["read_trust.access[main]", "read_trust.access[bash]"], discharged_by: test_main_bash_result_contains_a_learning_frame_forgery}
+  - {id: premise_main_shared_bash_survives, kind: survival, form: test, binds: [_tool_bash, "read_trust.access[main]"], discharged_by: test_main_uses_shared_bash_after_learning_stage_bash_protection_changes}
+  - {id: premise_main_before_after_learning_raw, kind: parity, form: test, binds: [_tool_bash, "read_trust.access[main]", "read_trust.access[bash]"], discharged_by: test_main_bash_call_occurs_before_and_after_a_learning_bash_call}
+  - {id: premise_new_learning_role_inherits_protection, kind: parity, form: test, binds: [stage_user_message.payload, "read_trust.access[read-file]", "read_trust.access[bash]"], discharged_by: test_new_learning_role_is_registered_with_read_and_bash_tools}
+  - {id: premise_lint_delimiter_independent, kind: negative, form: test, binds: [lint_stage_prompt_frames, stage_user_message], discharged_by: test_new_stage_assembles_a_raw_boundary_grammar_outside_the_lint_vocabulary}
+  - {id: premise_curator_fixed_lesson_tag, kind: shape, form: test, binds: [stage_user_message.payload], discharged_by: test_curator_manifest_contains_a_model_authored_lesson_stem_with_boundary_syntax}
+  - {id: premise_closed_ticket_lazy_relocation, kind: survival, form: test, binds: [defender._untrusted], discharged_by: test_judge_registers_closed_ticket_tools_after_the_wrap_helper_moves}
+  - {id: premise_closed_ticket_failure_relocation, kind: survival, form: test, binds: [defender._untrusted, learning_tool_output.payload], discharged_by: test_judge_closed_ticket_dependency_reports_a_failure_after_wrap_relocation}
+  - {id: premise_first_stage_import_relocation, kind: survival, form: test, binds: [defender._untrusted, stage_user_message.payload], discharged_by: test_stage_imports_the_relocated_shared_frame_on_its_first_invocation}
+  - {id: premise_harness_lead_relocated_frame_dependency, kind: survival, form: test, binds: [harness_lead, defender._untrusted, "drives(harness_lead->lead_author.invoke_agent)"], discharged_by: test_lead_author_harness_materializes_relocated_frame_dependency}
+  - {id: premise_revert_lesson_shared_author_survival, kind: survival, form: test, binds: [revert_lesson, flock_or_skip, "drives(revert_lesson->flock_or_skip)"], discharged_by: test_revert_lesson_driver_holds_shared_author_lock_and_calls_through}
+  - {id: premise_env_driver_survival, kind: survival, form: test, binds: [env, benign_actor.run_batch, "drives(env->benign_actor.run_batch)"], discharged_by: test_dispatch_at_threshold_drain_completes}
+  - {id: premise_run_judge_ab_driver_survival, kind: survival, form: test, binds: [run_judge_ab, judge_equivalence.run_config, "drives(run_judge_ab->judge_equivalence.run_config)"], discharged_by: test_closed_ticket_registration_reaches_every_benign_call_site}
+  - {id: premise_parallel_retry_fresh_identity, kind: uniqueness, form: test, binds: [stage_salt.identity, AgentDeps, run_stage], discharged_by: test_parallel_oracle_leads_overlap_while_one_invocation_is_retried}
+  - {id: premise_failed_attempt_trace_identity, kind: survival, form: test, binds: [stage_salt.identity, AgentDeps, run_stage], discharged_by: test_failed_stage_attempt_leaves_a_salted_trace_before_the_same_work_is_retried}
+  - {id: premise_multiturn_one_identity, kind: behavior, form: test, binds: [stage_salt.identity, AgentDeps, run_stage], discharged_by: test_stage_makes_multiple_model_and_tool_turns_before_completing}
+  - {id: premise_model_failure_caller_retry_fresh, kind: behavior, form: test, binds: [stage_salt.identity, AgentDeps, run_stage], discharged_by: test_stage_retries_after_a_model_request_failure_before_any_output}
+  - {id: premise_tool_result_caller_retry_fresh, kind: behavior, form: test, binds: [stage_salt.identity, AgentDeps, run_stage], discharged_by: test_stage_retries_after_a_tool_call_has_returned_framed_text}
+  - {id: premise_empty_output_caller_retry_fresh, kind: behavior, form: test, binds: [stage_salt.identity, AgentDeps, run_stage], discharged_by: test_stage_attempt_returns_empty_output_then_is_retried}
+  - {id: premise_timeout_caller_retry_fresh, kind: behavior, form: test, binds: [stage_salt.identity, AgentDeps, run_stage], discharged_by: test_stage_attempt_times_out_while_a_model_request_is_in_flight}
+  - {id: premise_process_restart_fresh_identity, kind: survival, form: test, binds: [stage_salt.identity, AgentDeps, run_stage], discharged_by: test_stage_restarts_after_process_interruption_before_completion}
+  - {id: premise_judge_both_lanes_one_lifetime, kind: behavior, form: test, binds: [stage_salt.identity, AgentDeps, "read_trust.access[read-file]", "read_trust.access[bash]"], discharged_by: test_judge_uses_both_artifact_read_lanes_during_one_stage_lifetime}
+  - {id: premise_missing_read_modelretry, kind: behavior, form: test, binds: [_tool_read_file, "read_trust.access[read-file]"], discharged_by: test_learning_reader_opens_a_missing_cross_agent_artifact}
+  - {id: premise_replacement_latest_bytes, kind: behavior, form: test, binds: [_tool_read_file, cross_agent_run_output], discharged_by: test_cross_agent_artifact_changes_between_admission_and_read}
+  - {id: premise_bash_pre_result_modelretry, kind: behavior, form: test, binds: [_tool_bash, "read_trust.access[bash]"], discharged_by: test_learning_bash_dependency_fails_before_a_result_is_available}
+  - {id: premise_direct_publication_preserved, kind: behavior, form: test, binds: [write_comparison_files, judge_comparison_files], discharged_by: test_producer_artifact_is_read_while_producer_has_not_finished_its_stage}
+  - {id: premise_reader_retry_latest_bytes, kind: behavior, form: test, binds: [_tool_read_file, cross_agent_run_output], discharged_by: test_reader_retries_after_producer_replaces_its_artifact}
+  - {id: premise_wrap_empty_tag_rejected, kind: domain-outcome, form: test, binds: [wrap], discharged_by: test_wrap_empty_tag_argument}
+  - {id: premise_wrap_empty_salt_rejected, kind: domain-outcome, form: test, binds: [wrap], discharged_by: test_wrap_empty_salt_argument}
+  - {id: premise_wrap_non_string_rejected, kind: domain-outcome, form: test, binds: [wrap], discharged_by: test_wrap_non_string_argument}
+  - {id: premise_judge_optional_absent_omitted, kind: behavior, form: test, binds: [stage_user_message.payload], discharged_by: test_judge_optional_cited_policy_absent}
+  - {id: premise_benign_optional_absent_omitted, kind: behavior, form: test, binds: [stage_user_message.payload], discharged_by: test_benign_actor_past_tickets_absent}
+  - {id: premise_read_invalid_utf8_modelretry, kind: behavior, form: test, binds: [_tool_read_file, "read_trust.access[read-file]"], discharged_by: test_learning_read_file_undecodable_artifact}
+  - {id: premise_bash_invalid_utf8_replacement_wrapped, kind: behavior, form: test, binds: [_tool_bash, "read_trust.access[bash]"], discharged_by: test_learning_bash_undecodable_output}
+  - {id: d14_author_cannot_obtain_receiving_token, kind: negative, form: test, binds: [stage_salt.identity, AgentDeps, stage_user_message.payload, "drives(invoke_actor->build_judge_invocation)"], discharged_by: test_author_cannot_obtain_receiving_token_before_authorship}
+
+  - {id: gate_r1_wrap_stage_message_shape, kind: shape, form: test, binds: ["interacts(wrap->stage_user_message).payload"], discharged_by: test_gate_r1_wrap_stage_message_shape}
+  - {id: gate_r1_build_judge_invocation_shape, kind: shape, form: test, binds: ["interacts(build_judge_invocation->stage_user_message).payload"], discharged_by: test_repair_gate_r1_build_judge_invocation_shape}
+  - {id: gate_r1_invoke_actor_shape, kind: shape, form: test, binds: ["interacts(invoke_actor->stage_user_message).payload"], discharged_by: test_repair_gate_r1_invoke_actor_shape}
+  - {id: gate_r1_invoke_actor_benign_shape, kind: shape, form: test, binds: ["interacts(invoke_actor_benign->stage_user_message).payload"], discharged_by: test_repair_gate_r1_invoke_actor_benign_shape}
+  - {id: gate_r1_build_lead_user_prompt_shape, kind: shape, form: test, binds: ["interacts(build_lead_user_prompt->stage_user_message).payload"], discharged_by: test_repair_gate_r1_build_lead_user_prompt_shape}
+  - {id: gate_r1_run_findings_shape, kind: shape, form: test, binds: ["interacts(_run_findings->stage_user_message).payload"], discharged_by: test_repair_gate_r1_run_findings_shape}
+  - {id: gate_r1_run_actor_shape, kind: shape, form: test, binds: ["interacts(_run_actor->stage_user_message).payload"], discharged_by: test_repair_gate_r1_run_actor_shape}
+  - {id: gate_r1_build_curator_user_prompt_shape, kind: shape, form: test, binds: ["interacts(build_curator_user_prompt->stage_user_message).payload"], discharged_by: test_repair_gate_r1_build_curator_user_prompt_shape}
+  - {id: gate_r1_lead_author_invoke_agent_shape, kind: shape, form: test, binds: ["interacts(lead_author.invoke_agent->stage_user_message).payload"], discharged_by: test_repair_gate_r1_lead_author_invoke_agent_shape}
+  - {id: gate_r1_invoke_pitfalls_agent_shape, kind: shape, form: test, binds: ["interacts(_invoke_pitfalls_agent->stage_user_message).payload"], discharged_by: test_repair_gate_r1_invoke_pitfalls_agent_shape}
+  - {id: gate_r1_tool_read_file_output_shape, kind: shape, form: test, binds: ["interacts(_tool_read_file->learning_tool_output).payload"], discharged_by: test_gate_r1_tool_read_file_output_shape}
+  - {id: gate_r1_tool_bash_output_shape, kind: shape, form: test, binds: ["interacts(_tool_bash->learning_tool_output).payload"], discharged_by: test_gate_r1_tool_bash_output_shape}
+  - {id: gate_r1_bound_and_wrap_output_shape, kind: shape, form: test, binds: ["interacts(_bound_and_wrap->learning_tool_output).payload"], discharged_by: test_gate_r1_bound_and_wrap_output_shape}
+  - {id: gate_r5_section_removal_survival, kind: survival, form: test, binds: ["interacts(_section->stage_user_message)", wrap], discharged_by: test_repair_gate_r5_section_removal_survival}
+  - {id: gate_r5_data_section_removal_survival, kind: survival, form: test, binds: ["interacts(data_section->stage_user_message)", wrap], discharged_by: test_repair_gate_r5_data_section_removal_survival}
+structure:
+  # `model_context` is retained from spec_graph_647's salt identity; the two
+  # comparison-file axes are read directly from compare.py's path construction.
+  axes: [model_context, run_id, direction, lead_id]
+
+  actors:
+    - {id: wrap, frame: leg, provenance: design}
+    - {id: _section, frame: leg, provenance: code}
+    - {id: data_section, frame: leg, provenance: code}
+    - {id: build_judge_invocation, frame: composition, provenance: code}
+    - {id: invoke_actor, frame: composition, provenance: code}
+    - {id: invoke_actor_benign, frame: composition, provenance: code}
+    - {id: build_lead_user_prompt, frame: composition, provenance: code}
+    - {id: _run_findings, frame: composition, provenance: code}
+    - {id: _run_actor, frame: composition, provenance: code}
+    - {id: build_curator_user_prompt, frame: composition, provenance: code}
+    - {id: lead_author.invoke_agent, frame: composition, provenance: code}
+    - {id: _invoke_pitfalls_agent, frame: composition, provenance: code}
+    - {id: harness_lead, frame: composition, provenance: code}
+    - {id: revert_lesson, frame: composition, provenance: code}
+    - {id: flock_or_skip, frame: leg, provenance: code}
+    - {id: env, frame: composition, provenance: code}
+    - {id: benign_actor.run_batch, frame: composition, provenance: code}
+    - {id: run_judge_ab, frame: composition, provenance: code}
+    - {id: judge_equivalence.run_config, frame: composition, provenance: code}
+    - {id: lint_stage_prompt_frames, frame: leg, provenance: design}
+    - {id: run_stage, frame: composition, provenance: code}
+    - {id: _tool_read_file, frame: leg, provenance: code}
+    - {id: _bound_and_wrap, frame: leg, provenance: code}
+    - {id: is_untrusted_read, frame: leg, provenance: code}
+    - {id: _tool_bash, frame: leg, provenance: code}
+    - {id: _format_bash_result, frame: leg, provenance: code}
+    - {id: _tool_lesson_read, frame: leg, provenance: code}
+    - {id: _tool_template_search, frame: leg, provenance: code}
+    - {id: _decide_report_write, frame: leg, provenance: code}
+    - {id: _decide_investigation_write, frame: leg, provenance: code}
+    - {id: run_investigation, frame: composition, provenance: code}
+    - {id: write_comparison_files, frame: composition, provenance: code}
+    - {id: orient, frame: leg, provenance: code}
+    - {id: tool_write_file, frame: leg, provenance: code}
+    - {id: query_tool, frame: leg, provenance: code}
+    - {id: gather_dispatch, frame: leg, provenance: code}
+    - {id: list_closed_tickets, frame: leg, provenance: code}
+    - {id: get_closed_ticket, frame: leg, provenance: code}
+
+  boundaries:
+    - id: stage_user_message
+      provenance: design
+      facets:
+        payload:
+          parts:
+            - {role: reader_contract, source: template:STAGE_READER_CONTRACT, slots: {salt: stage_salt}}
+            - {role: logical_section, source: template:STAGE_SECTION, slots: {content: cross_agent_run_output}}
+          invariants: [roles-disjoint-sources, all-slots-bound]
+          nl: "The prejoined learning-stage user string starts with the reader contract and contains every logical section as an exact-body salted frame."
+
+    - id: instructions
+      provenance: code
+      facets:
+        payload:
+          parts:
+            - {role: system, source: template:STAGE_SYSTEM_PROMPT}
+          invariants: [roles-disjoint-sources, all-slots-bound]
+          nl: "The cacheable stage system instructions remain independent of the fresh per-invocation salt."
+
+    - id: stage_salt
+      provenance: design
+      facets:
+        domain:
+          type: str
+          refinement: {nl: "A fresh uuid4 hexadecimal token minted once for one learning-stage dependency lifetime and never derived from the runtime run token."}
+          default: null
+          distinguished: []
+          falsy_valid: false
+          documented_alternatives: []
+        identity:
+          key_axes: [model_context]
+          evidence: {nl: "AgentDeps._for_run resolves one salt per dependency object, and RG-C4's executed multi-turn drive retained that object and salt for the full run_stage call."}
+          derivations: []
+          sharing: unique-key
+
+    - id: run_salt
+      provenance: code
+      facets:
+        domain:
+          type: str
+          refinement: {nl: "The runtime investigation token disclosed to MAIN and shared with GATHER, distinct from every learning-stage token."}
+          default: null
+          distinguished: []
+          falsy_valid: false
+          documented_alternatives: []
+        identity:
+          key_axes: [run_id]
+          evidence: {nl: "spec_graph_647 and the runtime bind seam establish one run token for the investigation run id."}
+          derivations: []
+          sharing: unique-key
+
+    - {id: AgentDeps, provenance: code, facets: {}}
+    - {id: defender._untrusted, provenance: design, facets: {}}
+
+    - id: learning_tool_output
+      provenance: design
+      facets:
+        payload:
+          parts:
+            - {role: status, source: template:TOOL_RESULT_STATUS}
+            - {role: body, source: template:TOOL_RESULT_BODY, slots: {content: cross_agent_run_output}}
+          invariants: [roles-disjoint-sources, all-slots-bound]
+          nl: "A model-visible learning tool result whose complete ordinary envelope is one untrusted body under the receiving stage salt."
+
+    - id: read_trust
+      provenance: design
+      facets:
+        access:
+          constraints_by_via:
+            read-file: {trust: attacker-influenced, constraints: [role-classify, cross-agent-default, salt-wrap]}
+            bash: {trust: attacker-influenced, constraints: [role-classify, cross-agent-default, salt-wrap]}
+            main: {trust: derived, constraints: [same-agent-raw]}
+            lesson-read: {trust: attacker-influenced, constraints: [role-classify, cross-agent-default, salt-wrap]}
+            template-search: {trust: attacker-influenced, constraints: [path-classify, salt-wrap]}
+
+    - {id: cross_agent_run_output, provenance: code, facets: {}}
+    - {id: report_md, provenance: code, facets: {}}
+    - {id: investigation_md, provenance: code, facets: {}}
+    - {id: judge_citation_source, provenance: code, facets: {}}
+
+    - id: judge_comparison_files
+      provenance: code
+      facets:
+        identity:
+          key_axes: [direction, lead_id]
+          evidence: {nl: "compare.py writes <learning_run_dir>/<comparison|comparison_benign>/<lead_id>.md, so direction and lead_id are the full resource key."}
+          derivations: []
+          sharing: unique-key
+
+  interacts:
+    - {from: wrap, to: stage_user_message, mode: write, via: api, provenance: design, sends: payload}
+    - {from: _section, to: stage_user_message, mode: remove, via: api, provenance: design}
+    - {from: data_section, to: stage_user_message, mode: remove, via: api, provenance: design}
+
+    - {from: build_judge_invocation, to: stage_user_message, mode: write, via: api, provenance: design, sends: payload}
+    - {from: invoke_actor, to: stage_user_message, mode: write, via: api, provenance: design, sends: payload}
+    - {from: invoke_actor_benign, to: stage_user_message, mode: write, via: api, provenance: design, sends: payload}
+    - {from: build_lead_user_prompt, to: stage_user_message, mode: write, via: api, provenance: design, sends: payload}
+    - {from: _run_findings, to: stage_user_message, mode: write, via: api, provenance: design, sends: payload}
+    - {from: _run_actor, to: stage_user_message, mode: write, via: api, provenance: design, sends: payload}
+    - {from: build_curator_user_prompt, to: stage_user_message, mode: write, via: api, provenance: design, sends: payload}
+    - {from: lead_author.invoke_agent, to: stage_user_message, mode: write, via: api, provenance: design, sends: payload}
+    - {from: _invoke_pitfalls_agent, to: stage_user_message, mode: write, via: api, provenance: design, sends: payload}
+    - {from: run_stage, to: stage_user_message, mode: read, via: api, provenance: design}
+    - {from: run_stage, to: instructions, mode: read, via: fs, provenance: code}
+    - {from: lint_stage_prompt_frames, to: stage_user_message, mode: read, via: fs, provenance: design}
+
+    - {from: wrap, to: stage_salt, mode: read, via: api, provenance: design}
+    - {from: run_stage, to: AgentDeps, mode: read, via: api, provenance: code}
+    - {from: _bound_and_wrap, to: stage_salt, mode: read, via: api, provenance: design}
+    - {from: _tool_bash, to: stage_salt, mode: read, via: api, provenance: design}
+
+    - {from: _tool_read_file, to: learning_tool_output, mode: write, via: read-file, provenance: design, sends: payload}
+    - {from: _tool_bash, to: learning_tool_output, mode: write, via: bash, provenance: design, sends: payload}
+    - {from: _bound_and_wrap, to: learning_tool_output, mode: write, via: api, provenance: design, sends: payload}
+    - {from: _tool_read_file, to: read_trust, mode: read, via: read-file, provenance: design}
+    - {from: _tool_bash, to: read_trust, mode: read, via: bash, provenance: design}
+    - {from: run_investigation, to: read_trust, mode: read, via: main, provenance: code}
+    - {from: _tool_lesson_read, to: read_trust, mode: read, via: lesson-read, provenance: code}
+    - {from: _tool_template_search, to: read_trust, mode: read, via: template-search, provenance: code}
+    - {from: _tool_read_file, to: cross_agent_run_output, mode: read, via: fs, provenance: design}
+    - {from: _tool_bash, to: cross_agent_run_output, mode: read, via: bash, provenance: design}
+
+    - {from: _decide_report_write, to: report_md, mode: write, via: fs, provenance: code}
+    - {from: _decide_investigation_write, to: investigation_md, mode: write, via: fs, provenance: code}
+    - {from: run_investigation, to: report_md, mode: read, via: fs, provenance: code}
+    - {from: run_investigation, to: investigation_md, mode: read, via: fs, provenance: code}
+    - {from: build_judge_invocation, to: judge_citation_source, mode: read, via: api, provenance: code}
+
+    - {from: write_comparison_files, to: judge_comparison_files, mode: write, via: fs, provenance: code, interpolates: [direction, lead_id]}
+    - {from: _tool_read_file, to: judge_comparison_files, mode: read, via: read-file, provenance: code}
+    - {from: _tool_bash, to: judge_comparison_files, mode: read, via: bash, provenance: code}
+
+    # The relocation neighborhood: every direct production importer now reads the
+    # shared top-level module; lesson_read reaches it through _bound_and_wrap.
+    - {from: orient, to: defender._untrusted, mode: read, via: api, provenance: design}
+    - {from: tool_write_file, to: defender._untrusted, mode: read, via: api, provenance: design}
+    - {from: query_tool, to: defender._untrusted, mode: read, via: api, provenance: design}
+    - {from: gather_dispatch, to: defender._untrusted, mode: read, via: api, provenance: design}
+    - {from: _bound_and_wrap, to: defender._untrusted, mode: read, via: api, provenance: design}
+    - {from: list_closed_tickets, to: defender._untrusted, mode: read, via: api, provenance: design}
+    - {from: get_closed_ticket, to: defender._untrusted, mode: read, via: api, provenance: design}
+
+  drives:
+    - {from: invoke_actor, to: build_judge_invocation, provenance: code, multiplicity: serial}
+    - {from: build_judge_invocation, to: wrap, provenance: design, multiplicity: serial}
+    - {from: invoke_actor, to: wrap, provenance: design, multiplicity: serial}
+    - {from: invoke_actor_benign, to: wrap, provenance: design, multiplicity: serial}
+    - {from: build_lead_user_prompt, to: wrap, provenance: design, multiplicity: serial}
+    - {from: _run_findings, to: wrap, provenance: design, multiplicity: serial}
+    - {from: _run_actor, to: wrap, provenance: design, multiplicity: serial}
+    - {from: build_curator_user_prompt, to: wrap, provenance: design, multiplicity: serial}
+    - {from: lead_author.invoke_agent, to: wrap, provenance: design, multiplicity: serial}
+    - {from: _invoke_pitfalls_agent, to: wrap, provenance: design, multiplicity: serial}
+    - {from: harness_lead, to: lead_author.invoke_agent, provenance: code, multiplicity: serial}
+    - {from: revert_lesson, to: flock_or_skip, provenance: code, multiplicity: serial}
+    - {from: env, to: benign_actor.run_batch, provenance: code, multiplicity: serial}
+    - {from: run_judge_ab, to: judge_equivalence.run_config, provenance: code, multiplicity: serial}
+    - {from: _tool_read_file, to: _bound_and_wrap, provenance: code, multiplicity: serial}
+    - {from: _tool_lesson_read, to: _bound_and_wrap, provenance: code, multiplicity: serial}
+    - {from: _bound_and_wrap, to: is_untrusted_read, provenance: code, multiplicity: serial}
+    - {from: _tool_template_search, to: is_untrusted_read, provenance: code, multiplicity: serial}
+    - {from: _bound_and_wrap, to: wrap, provenance: design, multiplicity: serial}
+    - {from: _tool_bash, to: _format_bash_result, provenance: code, multiplicity: serial}
+    - {from: _tool_bash, to: wrap, provenance: design, multiplicity: serial}
+    - {from: list_closed_tickets, to: wrap, provenance: code, multiplicity: serial}
+    - {from: get_closed_ticket, to: wrap, provenance: code, multiplicity: serial}
+    - {from: run_stage, to: _tool_read_file, provenance: code, multiplicity: serial}
+    - {from: run_stage, to: _tool_bash, provenance: code, multiplicity: serial}
+
+claims:
+  # Inherited design claims (ids retained from 20-demands.md).
+  - id: C1
+    kind: behavior
+    claim: "A poisoned investigation hypothesis name carrying </synthesis> passes the real write gate and forges a coverage-manifest sibling in the rendered judge prompt."
+    probe: "Real decide_write -> parse_investigation_companion -> render_synthesis -> _section harness over the shipped golden, independently repeated by cold review."
+    probe_kind: executed
+    observed: "The gate allowed the body; two synthesis close tags and the forged coverage manifest were present."
+    verdict: holds
+  - id: C2
+    kind: behavior
+    claim: "The yaml.safe_dump conclusion path independently carries the same synthesis breakout."
+    probe: "Poisoned the :T conclude impact_verdict in the same real harness."
+    probe_kind: executed
+    observed: "The gate allowed the body; two close tags and the forged coverage manifest were present."
+    verdict: holds
+  - id: C3
+    kind: behavior
+    claim: "MAIN can read the runtime run salt verbatim from its own orientation prompt."
+    probe: "Called orient.orientation with a known salt and searched the result; cold review repeated it."
+    probe_kind: executed
+    observed: "The exact salt and matching run-untrusted open and close tags were present."
+    verdict: holds
+  - id: C4
+    kind: behavior
+    claim: "is_untrusted_read is false for report.md and investigation.md and true for alert.json and gather_raw payloads."
+    probe: "Called is_untrusted_read on all four path shapes."
+    probe_kind: executed
+    observed: "False, false, true, and true respectively."
+    verdict: holds
+  - id: C5a
+    kind: referential
+    claim: "bind accepts salt and AgentDeps._for_run mints uuid4 hex when salt is absent."
+    probe: "Read runtime/agent_definition.py and runtime/tools.py."
+    probe_kind: read
+    observed: "The keyword exists and resolved_salt falls back to uuid.uuid4().hex."
+    verdict: holds
+  - id: C5b
+    kind: behavior
+    claim: "Independent stage binds produce distinct 32-hex-character salts."
+    probe: "Bound ORACLE_DEF twice over the same run directory and compared deps.salt."
+    probe_kind: executed
+    observed: "The two 32-character values were distinct."
+    verdict: holds
+  - id: C6
+    kind: census
+    claim: "run_stage is the sole model drive in the learning tree, but not the sole model drive in the repository."
+    probe: "Searched .run, .iter, and run_sync across learning, runtime, and evals, excluding tests."
+    probe_kind: search
+    observed: "The learning drive is in _pydantic_stage.py; GATHER agent.run and MAIN agent.iter are separate runtime drives."
+    verdict: holds
+  - id: C7
+    kind: census
+    claim: "The production bind-call census contains eight sites, including five fresh stage binds and two runtime salt-carrying binds, while curator uses CuratorDeps.for_run."
+    probe: "Searched production defender code for bind assignments and MAIN/GATHER bind calls."
+    probe_kind: search
+    observed: "MAIN and GATHER carry the run salt; judge, actor, oracle, verifier, and lead-author take fresh uuid4 values; curator bypasses bind but uses _for_run."
+    verdict: holds
+  - id: C8
+    kind: census
+    claim: "Literal tag prompt churn is five references across four Markdown prompt files."
+    probe: "Searched pipeline and author Markdown prompts for literal section tags."
+    probe_kind: search
+    observed: "Judge malicious and benign, benign actor, and malicious actor prompts contain the five references."
+    verdict: holds
+  - id: C9
+    kind: referential
+    claim: "FrozenCase says build_judge_invocation is a pure function of frozen inputs, while judge_equivalence actually compares Verdict sequences rather than prompt bytes."
+    probe: "Read evals/judge_equivalence.py, especially compare and FrozenCase, with revision comment 5038468588."
+    probe_kind: read
+    observed: "compare measures outcomes, flips, findings agreement, punt rates, and parse failures and never diffs prompt text; the older prompt-byte inference is refuted."
+    verdict: holds
+  - id: C10
+    kind: census
+    claim: "The judge frame carries several model- or telemetry-controlled bodies, and actor_story, alert, and coverage_manifest have no artifact write gate."
+    probe: "Traced every _section body in judge, malicious-actor, and benign-actor prompt assembly to its source."
+    probe_kind: search
+    observed: "Report, synthesis, actor story, coverage manifest, alert, comparison files, cited policy, and past tickets reach prompt frames with the source-specific gates recorded."
+    verdict: holds
+  - id: C11
+    kind: reachability
+    claim: "An artifact author cannot derive or read the fresh learning-stage salt that will frame its output."
+    probe: "Executed test_cross_agent_artifact_changes_between_admission_and_read with a real atomic replacement racing the admitted read, and audited producer-to-reader salt topology."
+    probe_kind: executed
+    observed: "The read returned one complete acquired version under the receiver salt, but the race does not force replacement between authorization and byte acquisition and therefore does not prove the universal claim."
+    verdict: unrefuted
+  - id: C12
+    kind: census
+    claim: "data_section prose labels admit breakout and the findings verifier joins an entire investigation with a report-derived policy string."
+    probe: "Read verify_forward/shared.py and checks.py and traced every body source."
+    probe_kind: search
+    observed: "Four plain-English labeled bodies are joined without framing or a gate on labels."
+    verdict: holds
+  - id: C13
+    kind: census
+    claim: "comparison/{lead_id}.md carries investigation-derived text to the judge as a trusted read-tool result."
+    probe: "Traced render, write, add-dir, read_file, and is_untrusted_read path matching."
+    probe_kind: search
+    observed: "Comparison files are reachable by the judge and do not match current untrusted path shapes."
+    verdict: holds
+  - id: C14
+    kind: census
+    claim: "All seven learning-stage prompt families currently assemble user text before dependency binding."
+    probe: "Compared prompt assembly and bind/for_run order for judge, actor, oracle, verifier, lead-author, and curator variants."
+    probe_kind: search
+    observed: "Every family is prompt-first; the revised design makes the order non-load-bearing by minting above both operations."
+    verdict: holds
+  - id: C15
+    kind: census
+    claim: "No learning-stage system prompt currently teaches the run-salt delimiter convention."
+    probe: "Searched all Markdown prompts for salt and run-salt tag shapes."
+    probe_kind: search
+    observed: "Only MAIN's defender/SKILL.md describes the convention."
+    verdict: holds
+  - id: C16
+    kind: behavior
+    claim: "An alert containing FRONTIER_SENTINEL flips the pre-first-freeze marker from None to zero, bypasses one shrink guard, and self-corrects on the next post-freeze call."
+    probe: "Called driver._frontier_index over clean, poisoned, and post-freeze synthetic histories."
+    probe_kind: executed
+    observed: "The results were None, zero, and one respectively."
+    verdict: holds
+  - id: C17
+    kind: behavior
+    claim: "Retiring _section and data_section alone leaves oracle heading breakout live."
+    probe: "Called build_lead_user_prompt with an actor story embedding its own sample-event heading."
+    probe_kind: executed
+    observed: "The heading appeared twice; curator and lead-author use the same grammar family."
+    verdict: holds
+  - id: C18
+    kind: behavior
+    claim: "The MAIN-to-GATHER dispatch is breakout-live and cannot be protected with MAIN's salt because GATHER is bound with that same salt."
+    probe: "Read the raw fenced splice and salt propagation; cold review executed a forged dispatch."
+    probe_kind: executed
+    observed: "A hostile goal produced two Dispatch blocks, and the author knew the shared salt."
+    verdict: holds
+  - id: C19
+    kind: referential
+    claim: "Putting the per-call salt declaration in Anthropic instructions would force an instruction-cache miss for each call."
+    probe: "Read runtime/providers/anthropic.py cache settings."
+    probe_kind: read
+    observed: "Instructions and tool definitions use one-hour cache settings, and judge_equivalence can route the judge to Claude."
+    verdict: holds
+  - id: C20
+    kind: behavior
+    claim: "The current wrap helper returns the exact salted open tag, original content, and salted close tag without escaping an embedded old close tag."
+    probe: "Called defender.runtime.untrusted.wrap with an embedded synthesis close tag and forged coverage-manifest text."
+    probe_kind: executed
+    observed: "Exact equality held against open tag plus original body plus close tag."
+    verdict: holds
+  - id: C21
+    kind: behavior
+    claim: "The judge read tool reaches _bound_and_wrap with a JudgeDeps role, but trust classification is path-only and leaves comparison files raw."
+    probe: "Called is_untrusted_read on comparison, report, and alert paths while inspecting the live JUDGE_DEF and JudgeDeps seam."
+    probe_kind: executed
+    observed: "comparison and report returned false, alert returned true, and JUDGE_DEF enables read with role JUDGE."
+    verdict: holds
+  - id: C22
+    kind: referential
+    claim: "wrap currently lives only in defender/runtime/untrusted.py, defender/_untrusted.py is absent, and defender has eleven existing underscore-prefixed shared modules."
+    probe: "Searched for wrap definitions and listed defender/_*.py at commit a7481659."
+    probe_kind: search
+    observed: "One wrap definition exists under runtime and eleven peer shared modules exist under defender."
+    verdict: holds
+  - id: C23
+    kind: referential
+    claim: "run_stage currently accepts user as str, while each stage engine creates deps immediately before calling run_stage."
+    probe: "Read _pydantic_stage.py and the judge, actor, oracle, verifier, lead-author, and curator engines."
+    probe_kind: read
+    observed: "Every engine passes a prebuilt string and deps; no Section tuple or builder salt parameter exists."
+    verdict: holds
+  - id: C24
+    kind: behavior
+    claim: "The retained cc7 gate denies an otherwise valid report containing literal </report> while allowing an opening-tag lookalike and ordinary prose."
+    probe: "Ran test_report_body_containing_closing_report_sequence_denied from test_permission_report_629.py against the worktree."
+    probe_kind: executed
+    observed: "The focused test passed at a7481659."
+    verdict: holds
+  - id: C25
+    kind: referential
+    claim: "The extraction worktree is exactly at the design document's base commit a7481659."
+    probe: "Ran git rev-parse HEAD in the issue-680 worktree."
+    probe_kind: read
+    observed: "a748165986bc153fd215219383dea0237bc3867f"
+    verdict: holds
+  - id: C26
+    kind: referential
+    claim: "AgentDeps and every learning-stage deps subtype expose role as a ClassVar at the read-tool wrapping seam."
+    probe: "Searched AgentDeps, JudgeDeps, ActorDeps, OracleDeps, VerifierDeps, LeadAuthorDeps, and CuratorDeps definitions and read _bound_and_wrap's deps parameter."
+    probe_kind: search
+    observed: "The role discriminator is available from deps without new transport plumbing."
+    verdict: holds
+  - id: C27
+    kind: behavior
+    claim: "A policy-admitted judge Bash cat of an investigation-derived comparison file returns model-authored bytes without a stage-salt wrapper and bypasses the role-aware read_file seam."
+    probe: "Bound real JUDGE_DEF with a comparison add_dir, injected a fake BoxExecutor result, and called the real _tool_bash with the admitted comparison path."
+    probe_kind: executed
+    observed: "The admitted call returned the marker bare in the exit/stdout envelope; _tool_bash returned _format_bash_result directly."
+    verdict: holds
+
+  # Grounding claims raised by 10-brief.md.
+  - id: G1
+    kind: census
+    claim: "The sole production learning model drive is _pydantic_stage.agent.run, reached by exactly six production run_stage adapters; runtime has two separate model drives and no subprocess drives a learning stage."
+    probe: "rg for .run/.iter/run_sync and run_stage across production learning/runtime/evals, followed across harness and subprocess boundaries."
+    probe_kind: search
+    observed: "The six adapters are judge, actor, oracle, verify-forward, lead-author, and curator; runtime drives are tools_gather and driver."
+    verdict: holds
+  - id: G2
+    kind: census
+    claim: "Exactly five boundary-grammar families reach the common learning model drive."
+    probe: "Seeded at every run_stage user argument and searched _section, data_section, Markdown headings, uppercase labels, curator rows, and lead labels across production learning code."
+    probe_kind: search
+    observed: "The five families are XML-like sections, oracle Markdown headings, verify-forward prose labels, curator manifest/row labels, and lead-author/pitfalls labels."
+    verdict: holds
+  - id: G3
+    kind: census
+    claim: "Five stage adapters call bind without salt and curator uses CuratorDeps.for_run; every current prompt is assembled before dependency construction."
+    probe: "Traced each prompt producer through its adapter and searched production bind and CuratorDeps.for_run sites."
+    probe_kind: search
+    observed: "Default construction mints uuid4 hex; two default binds were distinct 32-character tokens and an explicit token survived verbatim."
+    verdict: holds
+  - id: G4
+    kind: census
+    claim: "runtime.untrusted.wrap has eight production calls in five importing modules, and relocation has five live import consumers including lazy closed-ticket tooling."
+    probe: "Searched production wrap calls and every runtime.untrusted import across code, tests, docs, and committed graphs."
+    probe_kind: search
+    observed: "Importers are orient, tools, query_tool, tools_gather, and closed_ticket_tool; the existing relocation test misses the fifth importer."
+    verdict: holds
+  - id: G5
+    kind: census
+    claim: "_section has exactly three production importers and data_section has exactly one; oracle, curator, and lead grammars use neither helper."
+    probe: "Repository-wide searches for _prompt import _section, _section calls, data_section, and prose references."
+    probe_kind: search
+    observed: "Judge and the two actor builders import _section; verify_forward imports data_section."
+    verdict: holds
+  - id: G6
+    kind: census
+    claim: "_bound_and_wrap has exactly two consumers, generic read_file and curator lesson_read, while is_untrusted_read has the additional template-search caller."
+    probe: "Traced _bound_and_wrap and is_untrusted_read references and enumerated read-enabled and lesson-read-enabled role definitions."
+    probe_kind: search
+    observed: "Six roles can reach the shared read half; comparison files are outside the current true path set."
+    verdict: holds
+  - id: G7
+    kind: census
+    claim: "Exactly one generic Bash registration reaches exactly one _tool_bash return seam, which carries both stdout and stderr; four learning roles admit Bash and MAIN/GATHER are the runtime exclusions."
+    probe: "Searched _tool_bash, registration, formatter, and ToolSet bash flags; executed the live AGENTS registry inventory."
+    probe_kind: search
+    observed: "Learning Bash roles are JUDGE, ACTOR, LEAD_AUTHOR, and CORPUS_AUTHOR; infrastructure faults raise ModelRetry before an envelope."
+    verdict: holds
+  - id: G8
+    kind: census
+    claim: "JUDGE's only deferred remote-text tools are list_closed_tickets and get_closed_ticket, and both already wrap success and fault details."
+    probe: "Enumerated JUDGE_DEF deferred registrations and searched all closed_ticket_tool and query_tool returns."
+    probe_kind: search
+    observed: "No third judge artifact-read tool surfaced; forward_check returns decisions rather than source artifact bodies."
+    verdict: holds
+  - id: G9
+    kind: census
+    claim: "Twelve system-prompt files serve the learning stage variants and none teaches the new salted-frame contract."
+    probe: "Resolved prompt constants and call sites, then searched every prompt for salt/tag language and read Anthropic cache settings."
+    probe_kind: search
+    observed: "Only defender/SKILL.md teaches MAIN's convention; instructions and tool definitions cache for one hour and messages for five minutes."
+    verdict: holds
+  - id: G10
+    kind: census
+    claim: "judge_equivalence compares only parsed Verdict fields and never compares user-prompt bytes."
+    probe: "Read and searched evals/judge_equivalence.py run_config, compare, and FrozenCase for prompt or text comparisons."
+    probe_kind: search
+    observed: "Comparison consumes outcome, flips, finding-key Jaccard, punt rate, and parse-failure rate."
+    verdict: holds
+
+  # Re-grounded facts consumed by final 47-dispositions.md (3 + 12 + 5).
+  - id: RG-C1
+    kind: behavior
+    claim: "An admitted shared read whose file disappears after is_file and before acquisition raises ModelRetry and produces no model-visible text."
+    probe: "Executed the 46-reground-io real JUDGE_DEF filesystem race until _gated_read reached its post-is_file OSError branch."
+    probe_kind: executed
+    observed: "ModelRetry: could not read ... No such file or directory; _bound_and_wrap was not reached."
+    verdict: holds
+  - id: RG-C2
+    kind: behavior
+    claim: "A permitted read_file artifact containing invalid UTF-8 raises ModelRetry before bounded-read processing or wrapping."
+    probe: "Executed _tool_read_file with real JUDGE_DEF over admitted alert.json bytes ff fe 62 61 64 0a."
+    probe_kind: executed
+    observed: "ModelRetry reported invalid UTF-8 text; no replacement text or normal return was produced."
+    verdict: holds
+  - id: RG-C3
+    kind: primitive
+    claim: "_tool_bash decodes stdout and stderr independently with UTF-8 replacement before formatting one ordinary result."
+    probe: "Executed the real policy, BoxExecutor codec, stream decoding, and formatter with only the expensive transport boundary faked."
+    probe_kind: executed
+    observed: "Undecodable stdout and stderr each yielded U+FFFD inside one bare exit/stdout/stderr result."
+    verdict: holds
+
+  - id: RG-C4-cache
+    kind: behavior
+    claim: "Anthropic stage settings retain one-hour instruction/tool caches and a five-minute message cache while settings_for_effort returns fresh settings mappings."
+    probe: "Executed AnthropicProvider.settings_for_effort twice and printed values plus object identities."
+    probe_kind: executed
+    observed: "Cache values were 1h, 1h, and 5m; settings mappings were distinct and the cache object was reused."
+    verdict: holds
+  - id: RG-C4-drive
+    kind: behavior
+    claim: "One run_stage call creates one logger, performs one supplied dependency drive, and returns final output without trimming."
+    probe: "Executed the 46-reground-lifecycle hermetic stage harness with a whitespace-padded final result."
+    probe_kind: executed
+    observed: "The returned repr was '  final  ' and one drive/logger lifetime was observed."
+    verdict: holds
+  - id: RG-C4-trace
+    kind: behavior
+    claim: "Stage request logging records each model response and feeds a tool result into the next request within the same drive."
+    probe: "Executed a real two-turn judge FunctionModel drive and inspected its JSONL trace and second model call."
+    probe_kind: executed
+    observed: "Four records were flushed and the second call received the prior artifact tool result."
+    verdict: holds
+  - id: RG-C4-faults
+    kind: behavior
+    claim: "run_stage has no internal retry loop and maps empty output, timeout, usage-limit, and ordinary faults to RunUnprocessable."
+    probe: "Executed an empty-output run_stage attempt and inspected the timeout, usage-limit, and exception branches."
+    probe_kind: executed
+    observed: "The empty attempt raised RunUnprocessable and left a two-line trace; no retry occurred."
+    verdict: holds
+  - id: RG-C4-fresh-deps
+    kind: behavior
+    claim: "A caller re-attempt constructs a fresh dependency object, a fresh stage salt, and a new trace."
+    probe: "Executed two binds and two run_stage attempts for the same run directory."
+    probe_kind: executed
+    observed: "The dependency objects and salts differed and each attempt wrote its own two-record trace."
+    verdict: holds
+  - id: RG-C4-multiturn
+    kind: behavior
+    claim: "One run_stage drive retains one supplied dependency object and one stage salt across every model/tool-feedback turn."
+    probe: "Executed a two-model-call judge drive with a read_file feedback turn."
+    probe_kind: executed
+    observed: "Both calls and the tool feedback used the one supplied deps salt; the transport regression set passed 71 tests."
+    verdict: holds
+  - id: RG-C4-curator
+    kind: census
+    claim: "CuratorDeps.for_run delegates to _for_run without a salt and no current stage factory restores a persisted token or dependency object."
+    probe: "Searched bind, CuratorDeps.for_run, _for_run, run directory, and trace restoration paths."
+    probe_kind: search
+    observed: "Curator has a separate construction front door but the same fresh fallback, and no restoration input exists."
+    verdict: holds
+
+  - id: RG-C5-order
+    kind: referential
+    claim: "_gated_read performs permission resolution, is_file, and then read_text_utf8 without retaining or rechecking file identity."
+    probe: "Read runtime/tools.py _gated_read and permission/files.py decide_read in execution order."
+    probe_kind: read
+    observed: "No fd, inode, version, or post-admission resolution is retained."
+    verdict: holds
+  - id: RG-C5-replacement
+    kind: behavior
+    claim: "Replacing an admitted comparison artifact at the acquisition seam causes the read to return the replacement bytes."
+    probe: "Executed the 46-reground-lifecycle real-seam hook that changed OLD to NEW immediately before read_text_utf8."
+    probe_kind: executed
+    observed: "The admitted path remained permitted and the acquired text was NEW."
+    verdict: holds
+  - id: RG-C5-publication
+    kind: census
+    claim: "write_comparison_files publishes each final lead path with direct write_text and has no temporary file, atomic replace, lock, fsync, or completion transaction."
+    probe: "Searched and read write_comparison_files for write and publication primitives, then executed it over a temporary comparison root."
+    probe_kind: search
+    observed: "direct write_text was present; temp, replace, lock, fsync, and coordination mechanisms were absent."
+    verdict: holds
+  - id: RG-C5-exposure
+    kind: referential
+    claim: "build_judge_invocation returns comparison paths only after each direct write returns, while later reads simply acquire the then-current bytes."
+    probe: "Read build_judge_invocation, invoke_judge, and write_comparison_files ordering."
+    probe_kind: read
+    observed: "The reader is invoked after builder return, but there is no producer-stage commit boundary or later snapshot identity."
+    verdict: holds
+  - id: RG-C5-persistence
+    kind: census
+    claim: "Run directories and trace JSONL files do not restore a prior producer or reader dependency lifetime."
+    probe: "Searched stage factories, bind/_for_run, CuratorDeps.for_run, run directories, and trace readers for token/dependency restoration."
+    probe_kind: search
+    observed: "Every current lifetime is reconstructed; no persisted-token input or deps restoration path exists."
+    verdict: holds
+
+  - id: RG-C6-gate
+    kind: behavior
+    claim: "When judge closed_ticket_read is false, build_judge_invocation omits cited_policy_read entirely."
+    probe: "Executed the 46-reground-optional judge builder harness with closed_ticket_read=false."
+    probe_kind: executed
+    observed: "The cited-policy section was absent."
+    verdict: holds
+  - id: RG-C6-menu
+    kind: behavior
+    claim: "With closed_ticket_read true, missing and zero-byte past_tickets.txt inputs produce byte-identical nonempty cited-policy sections without candidate-menu prose."
+    probe: "Executed the judge builder with the gate true before and after creating a zero-byte menu file."
+    probe_kind: executed
+    observed: "Both prompts retained instructions, omitted candidate text, and were byte-identical."
+    verdict: holds
+  - id: RG-C6-benign-absent
+    kind: behavior
+    claim: "When benign sample_seeds returns an empty list, invoke_actor_benign omits past_tickets and creates no menu file."
+    probe: "Executed the benign builder harness with sample_seeds replaced by an empty-list source."
+    probe_kind: executed
+    observed: "The prompt had no past_tickets section and no menu file was created."
+    verdict: holds
+  - id: RG-C6-explicit-empty
+    kind: behavior
+    claim: "A truthy benign seed collection whose formatter explicitly returns an empty string writes one newline and emits an empty past_tickets frame."
+    probe: "Executed the benign builder with a nonempty seed list and a formatter seam returning an empty string."
+    probe_kind: executed
+    observed: "The file contained one newline and the prompt contained <past_tickets> followed by an empty body and close tag."
+    verdict: holds
+  - id: RG-C6-formatter
+    kind: behavior
+    claim: "The normal format_seeds implementation produces one nonempty line for every Seed, so explicit-empty content is not reached from a normal nonempty seed list."
+    probe: "Executed test_format_seeds_one_line_each alongside the optional-source harness."
+    probe_kind: executed
+    observed: "The focused test passed; explicit-empty input required substituting the formatter seam."
+    verdict: holds
+
+gate:
+  # R0/R5/R6 retain their judgment work as open human-routed holes below; none is
+  # self-certified clean by this gate pass.
+  evaluated:
+    - {rule: R0, fired: true}
+    - {rule: R1, fired: true}
+    - {rule: R2, fired: false}
+    - {rule: R3, fired: true}
+    - {rule: R4, fired: false}
+    - {rule: R5, fired: true}
+    - {rule: R6, fired: true}
+  obligations:
+    - {rule: R1, element: "interacts(wrap->stage_user_message).payload", witness: "`wrap` writes the shared stage message, but no executable shape demand binds this outbound payload to require disjoint sources and fully substituted slots.", discharged_by: gate_r1_wrap_stage_message_shape}
+    - {rule: R1, element: "interacts(build_judge_invocation->stage_user_message).payload", witness: "`build_judge_invocation` emits a stage user message, but no executable shape demand binds this outbound payload to require disjoint sources and fully substituted slots.", discharged_by: gate_r1_build_judge_invocation_shape}
+    - {rule: R1, element: "interacts(invoke_actor->stage_user_message).payload", witness: "`invoke_actor` emits a stage user message, but no executable shape demand binds this outbound payload to require disjoint sources and fully substituted slots.", discharged_by: gate_r1_invoke_actor_shape}
+    - {rule: R1, element: "interacts(invoke_actor_benign->stage_user_message).payload", witness: "`invoke_actor_benign` emits a stage user message, but no executable shape demand binds this outbound payload to require disjoint sources and fully substituted slots.", discharged_by: gate_r1_invoke_actor_benign_shape}
+    - {rule: R1, element: "interacts(build_lead_user_prompt->stage_user_message).payload", witness: "`build_lead_user_prompt` emits a stage user message, but no executable shape demand binds this outbound payload to require disjoint sources and fully substituted slots.", discharged_by: gate_r1_build_lead_user_prompt_shape}
+    - {rule: R1, element: "interacts(_run_findings->stage_user_message).payload", witness: "`_run_findings` emits a stage user message, but no executable shape demand binds this outbound payload to require disjoint sources and fully substituted slots.", discharged_by: gate_r1_run_findings_shape}
+    - {rule: R1, element: "interacts(_run_actor->stage_user_message).payload", witness: "`_run_actor` emits a stage user message, but no executable shape demand binds this outbound payload to require disjoint sources and fully substituted slots.", discharged_by: gate_r1_run_actor_shape}
+    - {rule: R1, element: "interacts(build_curator_user_prompt->stage_user_message).payload", witness: "`build_curator_user_prompt` emits a stage user message, but no executable shape demand binds this outbound payload to require disjoint sources and fully substituted slots.", discharged_by: gate_r1_build_curator_user_prompt_shape}
+    - {rule: R1, element: "interacts(lead_author.invoke_agent->stage_user_message).payload", witness: "`lead_author.invoke_agent` emits a stage user message, but no executable shape demand binds this outbound payload to require disjoint sources and fully substituted slots.", discharged_by: gate_r1_lead_author_invoke_agent_shape}
+    - {rule: R1, element: "interacts(_invoke_pitfalls_agent->stage_user_message).payload", witness: "`_invoke_pitfalls_agent` emits a stage user message, but no executable shape demand binds this outbound payload to require disjoint sources and fully substituted slots.", discharged_by: gate_r1_invoke_pitfalls_agent_shape}
+    - {rule: R1, element: "interacts(_tool_read_file->learning_tool_output).payload", witness: "`_tool_read_file` emits a model-visible tool result, but no executable shape demand binds this outbound payload to require disjoint sources and fully substituted slots.", discharged_by: gate_r1_tool_read_file_output_shape}
+    - {rule: R1, element: "interacts(_tool_bash->learning_tool_output).payload", witness: "`_tool_bash` emits a model-visible tool result, but no executable shape demand binds this outbound payload to require disjoint sources and fully substituted slots.", discharged_by: gate_r1_tool_bash_output_shape}
+    - {rule: R1, element: "interacts(_bound_and_wrap->learning_tool_output).payload", witness: "`_bound_and_wrap` emits a model-visible tool result, but no executable shape demand binds this outbound payload to require disjoint sources and fully substituted slots.", discharged_by: gate_r1_bound_and_wrap_output_shape}
+    - {rule: R5, element: stage_user_message, witness: "Removing `_section` leaves live stage-message dependents, and no executable survival demand binds the removed edge and its `wrap` substitute.", discharged_by: gate_r5_section_removal_survival}
+    - {rule: R5, element: stage_user_message, witness: "Removing `data_section` leaves live stage-message dependents, and no executable survival demand binds the removed edge and its `wrap` substitute.", discharged_by: gate_r5_data_section_removal_survival}
+  holes:
+    - {rule: R0, element: "R0.design-to-delta-reconciliation", witness: "The design-to-delta and delta-to-design prose reconciliation is judgment-only, so a human must confirm that every normative sentence and every design delta element is represented before treating the graph as complete.", resolution: "Executable stage-flow coverage", resolved_to: stage_prompt_flows_survive_unified_frame, cites: [C10]}
+    - {rule: R0, element: "claims[C11]", witness: "C11 remains an unrefuted universal reachability claim and is not spent; the approved actor-to-judge topology is instead safe by construction and executable through D14.", resolution: "Executable safe-by-construction producer-to-reader topology", resolved_to: d14_author_cannot_obtain_receiving_token, cites: [RG-C4-fresh-deps]}
+    - {rule: R3, element: "read_trust.access[read-file]", witness: "`read-file` is one of five read-trust vias, but the graph gives it cross-agent wrapping constraints while `main` retains same-agent raw access; a human must decide whether this deliberate policy difference is exempt or needs a per-cell parity demand.", resolution: "Intentional per-via policy", resolved_to: learning_cross_agent_reads_tagged, cites: [C21, RG-C5-replacement]}
+    - {rule: R3, element: "read_trust.access[bash]", witness: "`bash` is one of five read-trust vias, but the graph gives it cross-agent wrapping constraints while `main` retains same-agent raw access; a human must decide whether this deliberate policy difference is exempt or needs a per-cell parity demand.", resolution: "Intentional per-via policy", resolved_to: learning_cross_agent_bash_outputs_tagged, cites: [C27, RG-C3]}
+    - {rule: R3, element: "read_trust.access[main]", witness: "`main` retains same-agent raw access while its sibling vias impose cross-agent wrapping constraints; a human must decide whether this is an intentional exemption or requires a per-cell parity demand.", resolution: "Same-agent exemption", resolved_to: main_self_artifacts_remain_trusted, cites: [C4]}
+    - {rule: R3, element: "read_trust.access[lesson-read]", witness: "`lesson-read` is one of five read-trust vias, but the graph gives it cross-agent wrapping constraints while `main` retains same-agent raw access; a human must decide whether this deliberate policy difference is exempt or needs a per-cell parity demand.", resolution: "Corpus self-reread is denied", resolved_to: premise_corpus_self_reread_denied, cites: [G6]}
+    - {rule: R3, element: "read_trust.access[template-search]", witness: "`template-search` differs from the other cross-agent vias by using path classification; a human must decide whether that distinction is sufficient or requires a per-cell parity demand.", resolution: "Path classification retained", resolved_to: learning_cross_agent_reads_tagged, cites: [G6]}
+    - {rule: R5, element: "R5.tightening-safe-by-construction", witness: "Systemic framing tightens model-visible read handling, and a human must decide whether any security-critical caller can still be constructed with an unsafe raw configuration and therefore needs a constructor-raises demand.", resolution: "Future roles inherit safe defaults", resolved_to: premise_new_learning_role_inherits_protection, cites: [C26]}
+    - {rule: R6, element: "stage_user_message.payload", witness: "The rendered stage frame accepts `cross_agent_run_output`, which can be model- or attacker-influenced; a human must classify its chooser and every sanitizer, including the frame, before deciding whether hostile-value coverage is sufficient.", resolution: "Tokenized frame makes hostile values inert", resolved_to: cross_agent_section_boundaries_unforgeable, cites: [C10, RG-C4-fresh-deps]}
+    - {rule: R6, element: "learning_tool_output.payload", witness: "The rendered learning tool envelope accepts `cross_agent_run_output`, which can be model- or attacker-influenced; a human must classify its chooser and every sanitizer, including the status and body frame, before deciding whether hostile-value coverage is sufficient.", resolution: "Tokenized result envelope makes hostile values inert", resolved_to: raw_cross_agent_bash_output_unobservable, cites: [C27, RG-C3]}
+  pre_discharged: []
+
+handoff:
+  forks:
+    - {decision: D1, resolved_to: [premise_current_frame_closer_scoped_to_undisclosed_token, premise_current_token_wrong_tag_scoped_to_undisclosed_token]}
+    - {decision: D2, resolved_to: [premise_admitted_bash_impersonation_wrapped, premise_main_bash_forgery_raw]}
+    - {decision: D3, resolved_to: [premise_non_run_file_scope_preserved, learning_cross_agent_reads_tagged]}
+    - {decision: D4, resolved_to: [premise_post_disclosure_body_read_denied, premise_corpus_self_reread_denied]}
+    - {decision: D5, resolved_to: [premise_cache_contract_first]}
+    - {decision: D6, resolved_to: [premise_new_learning_role_inherits_protection, premise_lint_delimiter_independent]}
+    - {decision: D7, resolved_to: [premise_curator_fixed_lesson_tag]}
+    - {decision: D8, resolved_to: [premise_closed_ticket_lazy_relocation, premise_closed_ticket_failure_relocation, premise_first_stage_import_relocation]}
+    - {decision: D9, resolved_to: [premise_multiturn_one_identity, premise_model_failure_caller_retry_fresh, premise_parallel_retry_fresh_identity]}
+    - {decision: D10, resolved_to: [premise_missing_read_modelretry, premise_replacement_latest_bytes, premise_bash_pre_result_modelretry, premise_direct_publication_preserved, premise_reader_retry_latest_bytes]}
+    - {decision: D11, resolved_to: [premise_frame_empty_body, premise_wrap_empty_tag_rejected, premise_wrap_empty_salt_rejected, premise_wrap_non_string_rejected]}
+    - {decision: D12, resolved_to: [premise_judge_optional_absent_omitted, premise_benign_optional_absent_omitted, premise_judge_optional_cited_policy_empty]}
+    - {decision: D13, resolved_to: [premise_read_invalid_utf8_modelretry, premise_bash_invalid_utf8_replacement_wrapped]}
+    - {decision: D14, resolved_to: [d14_author_cannot_obtain_receiving_token]}
+  refuted:
+    - "C9 correction: judge_equivalence compares Verdict sequences, not prompt bytes; its superseded prompt-byte-stability inference must not constrain this spec."
+    - "RG-C1/RG-C2: missing-after-admission and undecodable read_file inputs raise ModelRetry before any normal text reaches _bound_and_wrap, refuting framed-normal-return premises for those cases."
+    - "G7: a Bash executor infrastructure failure raises ModelRetry before a result envelope exists, so there is no Bash result to frame."
+    - "RG-C6: absent benign past tickets omit the section; only explicitly supplied empty formatted content emits an empty frame."
+  deferred:
+    - "After the production diff exists, run the planned execution-context census for lint_stage_prompt_frames: trace every caller and CI driver across imports, subprocess re-entry, harnesses, and workflow entrypoints, and record the complete hit list."
+  drops: []
+  nullstub_passes:
+    - "test_judge_closed_ticket_dependency_reports_a_failure_after_wrap_relocation — reuse"
+    - "test_d15_main_self_reads_report_and_investigation_without_wrap — structure"
+    - "test_d16_report_close_delimiter_deny_survives_systemic_frame — reuse"
+    - "test_d17_legal_artifacts_gain_no_new_deny_or_modelretry — parity"
+    - "test_d18_run_stage_still_accepts_prejoined_user_string — reuse"
+    - "test_judge_registers_closed_ticket_tools_after_the_wrap_helper_moves — structure"
+    - "test_learning_bash_dependency_fails_before_a_result_is_available — reuse"
+    - "test_learning_read_file_undecodable_artifact — reuse"
+    - "test_learning_reader_opens_a_missing_cross_agent_artifact — reuse"
+    - "test_learning_role_reads_an_attacker_controlled_non_run_file — parity"
+    - "test_main_bash_result_contains_a_learning_frame_forgery — parity"
+    - "test_main_uses_shared_bash_after_learning_stage_bash_protection_changes — reuse"
+    - "test_producer_artifact_is_read_while_producer_has_not_finished_its_stage — reuse"
+  deviations:
+    - "Third answerer used Terra-low because Haiku was unavailable."
+    - "Spec-flow CLIs were invoked by absolute path because they were absent from PATH."

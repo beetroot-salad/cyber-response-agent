@@ -298,8 +298,9 @@ def test_l10_oversized_lesson_bounded_by_shared_cap(tmp_path):
 
 
 def test_l11_trusted_lesson_returned_raw_no_wrap(tmp_path):
-    """demand: L11 — a lesson is not is_untrusted_read, so lesson_read returns raw body/full with no
-    salted untrusted wrap (the reused wrap tail is inert for the trusted corpus)."""
+    """demand L11 as superseded by #680 — the legacy path classifier still does not mark
+    lessons untrusted, but a learning-role lesson_read frames cross-agent authored bytes at
+    the stronger model boundary."""
     scene = _scene(tmp_path)
     lp = _lesson(scene.corpus, "l11", body="L11-RAW-BODY")
     assert permission.is_untrusted_read(scene.corpus / "l11.md") is False
@@ -310,7 +311,8 @@ def test_l11_trusted_lesson_returned_raw_no_wrap(tmp_path):
     finally:
         logger.close()
     assert "L11-RAW-BODY" in out
-    assert f"<run-{deps.salt}-untrusted>" not in out
+    assert out.startswith(f"<run-{deps.salt}-untrusted>\n")
+    assert out.endswith(f"\n</run-{deps.salt}-untrusted>")
 
 
 def test_l12_records_lesson_load_across_all_three_corpora(tmp_path):

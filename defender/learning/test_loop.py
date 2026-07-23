@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -1581,7 +1582,8 @@ def test_build_judge_invocation_assembles_grounded_call(tmp_path: Path):
 
     assert (lrd / "comparison" / "l-001.md") in inv.comparison_paths
     assert set(inv.add_dirs) == {run / "gather_raw", lrd / "comparison"}
-    assert str(run / "gather_raw") in inv.user_text
+    assert re.search(r"<run-[0-9a-f]+-comparison_files>", inv.user_text)
+    assert "l-001.md" in inv.user_text
     assert "disposition: benign" in inv.user_text
     assert "scripted automation" not in inv.user_text
     assert "comparison" in inv.user_text.lower()
@@ -1621,4 +1623,4 @@ def test_invoke_judge_benign_is_grounded(tmp_path: Path):
     assert "<investigation>" not in captured["user"]
     assert "<lead_sequence>" not in captured["user"]
     assert "disposition: malicious" in captured["user"]
-    assert "<comparison_files>" in captured["user"]
+    assert re.search(r"<run-[0-9a-f]+-comparison_files>", captured["user"])

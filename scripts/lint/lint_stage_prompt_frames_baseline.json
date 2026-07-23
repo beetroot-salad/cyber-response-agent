@@ -1,0 +1,4 @@
+{
+  "//": "lint_stage_prompt_frames baseline — prompt section boundaries must be constructed with defender._untrusted.wrap; delimiter-independent and empty by design.",
+  "entries": {}
+}

@@ -58,6 +58,21 @@ async def _drive(
         timeout=timeout,
     )
 
+def _last_response_is_empty_text(messages: list[dict]) -> bool:
+    """Whether the latest model response contains only empty text parts."""
+    for record in reversed(messages):
+        if record.get("kind") != "response":
+            continue
+        message = record.get("message") or {}
+        parts = message.get("parts") or []
+        return bool(parts) and all(
+            part.get("part_kind") == "text"
+            and not str(part.get("content") or "").strip()
+            for part in parts
+        )
+    return False
+
+
 
 def run_stage(  # noqa: PLR0913 — every param is load-bearing per-call transport state
     *,
@@ -91,10 +106,14 @@ def run_stage(  # noqa: PLR0913 — every param is load-bearing per-call transpo
             _drive(agent, user, deps, request_limit, wall_clock_timeout)
         )
     except (TimeoutError, UsageLimitExceeded) as e:
+        if require_output and _last_response_is_empty_text(logger.messages):
+            raise RunUnprocessable(f"{stage} ({label}) returned empty output") from e
         raise RunUnprocessable(f"{stage} ({label}) did not complete: {e!r}") from e
     except (StageAbort, FatalConfigError):
         raise
     except Exception as e:
+        if require_output and _last_response_is_empty_text(logger.messages):
+            raise RunUnprocessable(f"{stage} ({label}) returned empty output") from e
         raise RunUnprocessable(f"{stage} ({label}) failed: {e!r}") from e
     finally:
         logger.close()
