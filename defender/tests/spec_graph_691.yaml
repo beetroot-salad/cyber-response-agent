@@ -1,0 +1,944 @@
+schema_version: 1
+design: "691"
+base: a7481659   # the fork commit write-code-from-spec's gate diffs against
+
+# ---------------------------------------------------------------------------
+# The spec is written against the AMENDED contract, not design-691.md's original:
+#   15-corrections R1/R2/K1-K9, 36-resolutions R4 (SUPERSEDES R1: O6 = read_confine =
+#   the three lesson corpora, read_allow EMPTY, cat grant untouched) / R5 / R6,
+#   35-reground (r1/r3/r4/f8/g19), 47-consolidated (6 minted MD demands, M7/M8 target
+#   behaviour, ResolvedRoots.corpus_roots dead code, benign_actor/env.py the 4th
+#   entrypoint). Provisional structure ids (RunScope.corpus_name, AgentDeps.roots,
+#   AgentDeps.tool_config, ResolvedRoots spawn-corpus field) carry forks f1-f4/f7 — the
+#   name is the join key; write-code-from-spec reconciles the code's spelling.
+# ---------------------------------------------------------------------------
+
+demands:
+
+  # ================= #0 : return contract + the binding seam =================
+  - {id: d0_bind_returns_scoped_curator_deps, kind: behavior, form: test,
+     discharged_by: test_bind_returns_a_corpus_scoped_curator_deps,
+     binds: ["interacts(bind->CORPUS_AUTHOR_DEF)", "interacts(bind->RunScope)",
+             "interacts(bind->ResolvedRoots)", "interacts(bind->CuratorDeps)",
+             "CuratorDeps", "corpus_dir"]}
+  - {id: lower_level_seam_parity, kind: seam, form: test,
+     discharged_by: test_the_policy_is_compiled_through_the_lower_level_entry_point,
+     binds: ["interacts(bind->CuratorDeps)", "CuratorDeps"]}
+  - {id: deps_copied_with_one_field_replaced, kind: behavior, form: test,
+     discharged_by: test_a_bound_deps_is_copied_with_one_field_replaced,
+     binds: ["CuratorDeps", "ResolvedRoots"]}
+  - {id: binding_the_same_spawn_twice, kind: behavior, form: test,
+     discharged_by: test_binding_the_same_spawn_twice,
+     binds: ["interacts(bind->CuratorDeps)", "ResolvedRoots"]}
+  - {id: bind_idempotent_across_retry, kind: behavior, form: test,
+     discharged_by: test_bind_is_idempotent_across_a_retried_spawn,
+     binds: ["interacts(bind->CuratorDeps)", "ResolvedRoots"]}
+  - {id: for_run_called_twice, kind: behavior, form: test,
+     discharged_by: test_for_run_called_twice_for_the_same_spawn,
+     binds: ["CuratorDeps", "tool_config"]}
+  - {id: cwd_anchor_and_tree_reproduce_todays, kind: behavior, form: test,
+     discharged_by: test_bound_curator_anchoring_matches_the_for_run_anchoring,
+     binds: ["CuratorDeps", "interacts(bind->ResolvedRoots)"]}
+
+  # ================= O1 / M9 : the generic census ============================
+  - {id: bash_census_enumerates_the_curator, kind: behavior, form: test,
+     discharged_by: test_the_generic_bash_census_enumerates_the_curator,
+     binds: ["AGENTS", "drives(role_census->bind)", "CORPUS_AUTHOR_DEF"]}
+  - {id: census_prose_and_predicate_disagree, kind: behavior, form: test,
+     discharged_by: test_the_census_prose_and_the_census_predicate_disagree,
+     binds: ["AGENTS", "CORPUS_AUTHOR_DEF"]}
+  - {id: second_census_hiding_inside_the_first, kind: behavior, form: test,
+     discharged_by: test_the_second_census_hiding_inside_the_first,
+     binds: ["AGENTS", "CORPUS_AUTHOR_DEF"]}
+  - {id: bindable_field_is_gone, kind: shape, form: test,
+     discharged_by: test_agent_definition_has_no_bindable_field,
+     binds: ["CORPUS_AUTHOR_DEF", "AGENTS"]}
+  - {id: no_registered_def_is_refused_by_bind, kind: negative, form: test,
+     discharged_by: test_bind_refuses_no_registered_role_for_being_unbindable,
+     binds: ["interacts(bind->CORPUS_AUTHOR_DEF)", "AGENTS"]}
+  - {id: registry_validates_curator_at_import, kind: behavior, form: test,
+     discharged_by: test_the_registry_validates_the_curator_at_import_time,
+     binds: ["AGENTS", "CORPUS_AUTHOR_DEF"]}
+  - {id: workflow_that_depended_on_unbindable, kind: survival, form: test,
+     discharged_by: test_the_workflow_that_depended_on_this_role_being_unbindable,
+     binds: ["CORPUS_AUTHOR_DEF", "AGENTS"]}
+
+  # ================= O2 / S1 / S2 / S4 : the write scope =====================
+  - {id: write_allow_roots_at_corpus_not_run_dir, kind: behavior, form: test,
+     discharged_by: test_write_allow_roots_at_the_worktree_corpus_not_run_dir,
+     binds: ["interacts(curator_agent->corpus_dir)", "corpus_dir.identity", "run_dir"]}
+  - {id: run_dir_and_authored_tree_are_distinct, kind: behavior, form: test,
+     discharged_by: test_the_run_directory_and_the_authored_tree_are_the_same_tree,
+     binds: ["run_dir", "corpus_dir"]}
+  - {id: writes_outside_the_spawn_corpus_denied, kind: negative, form: test,
+     discharged_by: test_the_curator_cannot_write_outside_its_own_corpus,
+     binds: ["corpus_dir.access[write-tool]", "interacts(curator_agent->sibling_corpus)",
+             "interacts(curator_agent->run_dir)", "main_checkout"]}
+  - {id: non_md_writes_are_denied, kind: negative, form: test,
+     discharged_by: test_the_curator_cannot_write_a_non_md_path,
+     binds: ["corpus_dir.access[write-tool]", "corpus_dir.identity"]}
+  - {id: write_filename_is_the_empty_string, kind: negative, form: test,
+     discharged_by: test_a_write_operand_filename_is_the_empty_string,
+     binds: ["corpus_dir.access[write-tool]"]}
+  - {id: write_filename_has_no_extension, kind: negative, form: test,
+     discharged_by: test_a_write_operand_filename_has_no_extension,
+     binds: ["corpus_dir.access[write-tool]"]}
+  - {id: write_filename_case_differs_from_md, kind: negative, form: test,
+     discharged_by: test_a_write_operand_filename_extension_differs_only_in_letter_case_from_md,
+     binds: ["corpus_dir.access[write-tool]"]}
+  - {id: write_operand_leading_dot_slash, kind: behavior, form: test,
+     discharged_by: test_a_write_operand_path_is_given_relative_with_a_leading_dot_slash,
+     binds: ["corpus_dir.access[write-tool]"]}
+  # --- MD-1 (RG-1 / RF1 → §7 D1): a write scope rooting outside its own read confine is unbuildable.
+  #     §7 D1 RESOLVED F18/F20 to REFUSE AT BIND (safe-by-construction — a scope that cannot author is
+  #     unbuildable), NOT the silent runtime denial the pre-§7 name implied; and STRUCK R4's "write
+  #     byte-identical to today" clause (RG-1 refuted it). Discharged by the ISOLATING witness (F-1,
+  #     92-reconciliation): a SHIPPED name (MD-6-accepted) bound with a read_confine that EXCLUDES it,
+  #     so ONLY MD-1's confine-containment check can refuse it — independent of MD-6's membership rule.
+  #     (The earlier non-shipped `skills` witness, test_a_non_shipped_corpus_name_write_is_denied_by_
+  #     confine_containment, is subsumed by MD-6's bind-rejection test and retained as a redundant pin.)
+  - {id: md1_non_shipped_name_write_denied_by_confine, kind: negative, form: test,
+     discharged_by: test_a_shipped_corpus_write_is_denied_when_its_read_confine_excludes_it,
+     binds: ["interacts(bind->CORPUS_AUTHOR_DEF)", "corpus_dir.access[write-tool]", "read_confine"],
+     cites: [RG-1]}
+
+  # ================= S3 / M7 : the rm lane + the four write-capable lanes =====
+  - {id: rm_lane_scoped_to_same_corpus_as_write, kind: parity, form: test,
+     discharged_by: test_the_rm_lane_is_scoped_to_the_same_corpus_as_the_write_lane,
+     binds: ["corpus_dir.access[bash-rm]", "corpus_dir.access[write-tool]"]}
+  # --- MD-3 (RG-adv4, the standout): the rm grant never resolve()s, so a symlink out of
+  #     corpus the other three write lanes DENY, rm deletes. A real correctness fix.
+  - {id: md3_four_write_lanes_deny_a_symlink_out_of_corpus, kind: parity, form: test,
+     discharged_by: test_all_four_write_lanes_deny_a_symlink_out_of_corpus,
+     binds: ["corpus_dir.access[bash-rm]", "corpus_dir.access[write-tool]",
+             "corpus_dir.access[edit-tool]", "corpus_dir.access[forward-check]"]}
+  # --- MD-4 (RG-adv3): rm matches the shell-TOKENIZED argv; $()/backtick DENY because
+  #     the tokenizer splits them before _claim, NOT because of _stage_unsafe (dead code).
+  - {id: md4_rm_grant_matches_shell_tokenized_argv, kind: behavior, form: test,
+     discharged_by: test_the_rm_grant_matches_the_shell_tokenized_argv,
+     binds: ["corpus_dir.access[bash-rm]"]}
+  # --- MD-5 (RG-ispo4): the positive control the degenerate-name negative (below) lacks.
+  - {id: md5_single_operand_in_corpus_rm_admitted, kind: behavior, form: test,
+     discharged_by: test_a_single_operand_in_corpus_rm_is_admitted,
+     binds: ["corpus_dir.access[bash-rm]"]}
+  - {id: rm_under_a_degenerate_empty_or_dot_name, kind: negative, form: test,
+     discharged_by: test_the_rm_grant_under_a_degenerate_empty_or_dot_corpus_name,
+     binds: ["corpus_dir.access[bash-rm]", "corpus_name.domain.distinguished[]"]}
+  - {id: single_rm_naming_two_corpora_denied, kind: negative, form: test,
+     discharged_by: test_a_single_rm_naming_two_corpora_is_denied,
+     binds: ["corpus_dir.access[bash-rm]"]}
+
+  # ================= M7 : the corpus-name domain =============================
+  - {id: corpus_name_is_the_empty_string, kind: domain-outcome, form: test,
+     discharged_by: test_corpus_name_is_the_empty_string,
+     binds: ["corpus_name.domain.distinguished[]"]}
+  - {id: corpus_name_is_a_single_dot, kind: domain-outcome, form: test,
+     discharged_by: test_corpus_name_is_a_single_dot,
+     binds: ["corpus_name.domain.distinguished[.]"]}
+  - {id: corpus_name_has_two_segments, kind: domain-outcome, form: test,
+     discharged_by: test_corpus_name_has_two_segments,
+     binds: ["corpus_name.domain.distinguished[a/b]"]}
+  - {id: corpus_name_is_an_absolute_path, kind: domain-outcome, form: test,
+     discharged_by: test_corpus_name_is_an_absolute_path,
+     binds: ["corpus_name.domain.distinguished[/etc/passwd]"]}
+  - {id: corpus_name_contains_parent_segments, kind: domain-outcome, form: test,
+     discharged_by: test_corpus_name_contains_parent_directory_segments,
+     binds: ["corpus_name.domain.distinguished[..]"]}
+  - {id: corpus_name_leading_dot_slash_normalises, kind: domain-outcome, form: test,
+     discharged_by: test_the_spawn_corpus_name_dot_slash_normalises_to_one_segment,
+     binds: ["corpus_name.domain.distinguished[./x]"]}
+  - {id: corpus_name_has_a_trailing_slash, kind: domain-outcome, form: test,
+     discharged_by: test_corpus_name_has_a_trailing_slash,
+     binds: ["corpus_name.domain"]}
+  - {id: names_that_resolve_to_the_tree_itself, kind: negative, form: test,
+     discharged_by: test_the_names_that_resolve_to_the_tree_itself,
+     binds: ["corpus_name.domain.distinguished[]", "corpus_name.domain.distinguished[.]",
+             "corpus_dir.access[write-tool]"]}
+  - {id: standing_prohibition_whole_tree_scope, kind: negative, form: test,
+     discharged_by: test_the_standing_prohibition_on_a_whole_tree_authoring_scope,
+     binds: ["corpus_name.domain", "corpus_dir.access[write-tool]"], cites: [g23]}
+  - {id: front_door_handed_a_nested_corpus, kind: behavior, form: test,
+     discharged_by: test_the_front_door_is_handed_a_corpus_nested_below_the_tree,
+     binds: ["corpus_name.domain.distinguished[a/b]", "CORPUS_AUTHOR_DEF"], cites: [c16, g9]}
+  # --- MD-6 / F30 / P109 (§7 D2 PINNED it — upgraded from a fork-gated clause to a form:test):
+  #     M7 as a shape rule accepts `skills`/`learning` (real non-lesson dirs); `learning` roots
+  #     write_allow over the production state tree. §7 D2 ADDS an exact-match membership rule against
+  #     the three shipped corpora, REJECTING such a name at bind (also closes F108 homoglyphs as a
+  #     side effect). The def declares no corpus_dirs, so the rule cannot reuse a static list (RG-PO5)
+  #     — it matches against the three shipped names directly.
+  - {id: corpus_name_owns_a_non_lesson_directory, kind: domain-outcome, form: test,
+     discharged_by: test_a_single_segment_name_that_is_not_a_shipped_corpus_is_rejected,
+     binds: ["corpus_name.domain.distinguished[skills]",
+             "corpus_name.domain.distinguished[learning]"],
+     cites: [RG-1, RG-PO5, RG-aP10]}
+
+  # ================= M3 / N3 : the explicit tree ============================
+  - {id: main_checkout_authoring_state_unbuildable, kind: negative, form: test,
+     discharged_by: test_binding_the_curator_without_an_explicit_tree_raises,
+     binds: ["interacts(bind->CORPUS_AUTHOR_DEF)", "main_checkout", "CORPUS_AUTHOR_DEF"]}
+  - {id: defender_dir_is_none_raises, kind: behavior, form: test,
+     discharged_by: test_defender_dir_is_none_for_a_role_that_requires_an_explicit_tree,
+     binds: ["interacts(bind->CORPUS_AUTHOR_DEF)", "CORPUS_AUTHOR_DEF"]}
+  - {id: defender_dir_is_the_main_checkout_raises, kind: behavior, form: test,
+     discharged_by: test_defender_dir_is_the_main_checkout_paths_value,
+     binds: ["interacts(bind->CORPUS_AUTHOR_DEF)", "main_checkout"]}
+  - {id: operator_entrypoint_against_the_checkout, kind: behavior, form: test,
+     discharged_by: test_an_operator_runs_a_curator_entrypoint_against_the_working_checkout,
+     binds: ["drives(operator_entrypoint->bind)", "main_checkout"]}
+  # entrypoint_invoked_with_no_tree_arg DROPPED (91-blind T045): its test only re-ran _bind_no_tree(None),
+  #   byte-identical to test_binding_the_curator_without_an_explicit_tree_raises — it drove no CLI/argv, so
+  #   it discharged no obligation beyond the M3 tree-check the other tests already pin. The
+  #   drives(operator_entrypoint->bind) edge stays covered by operator_entrypoint_against_the_checkout.
+  - {id: drain_still_authors_after_entrypoints_break, kind: survival, form: test,
+     discharged_by: test_the_drain_path_still_authors_after_the_entrypoints_break,
+     binds: ["drives(author_drain->curator_agent)", "corpus_dir"], cites: [c5]}
+  - {id: every_curator_spawn_same_run_identity, kind: behavior, form: test,
+     discharged_by: test_every_curator_spawn_reports_the_same_run_identity,
+     binds: ["run_dir", "drives(author_drain->curator_agent)"]}
+
+  # ================= O3 / M5 : bind constructs every role, slot inert/loud ====
+  - {id: bind_constructs_with_the_slot_unset, kind: behavior, form: test,
+     discharged_by: test_bind_constructs_a_policy_correct_curator_with_no_tool_config,
+     binds: ["tool_config", "interacts(bind->CuratorDeps)"]}
+  - {id: tool_config_slot_unset_full_lifecycle, kind: behavior, form: test,
+     discharged_by: test_tool_config_slot_unset_across_full_lifecycle,
+     binds: ["tool_config", "interacts(forward_check->tool_config)"]}
+  # F50 open: the exception CATEGORY (retryable ModelRetry vs fatal abort) is §7's.
+  - {id: forward_check_raises_on_an_unset_slot, kind: behavior, form: test,
+     discharged_by: test_forward_check_raises_a_named_error_when_its_config_is_unset,
+     binds: ["interacts(forward_check->tool_config)", "tool_config"]}
+  - {id: every_role_binds_from_a_generic_scope, kind: seam, form: test,
+     discharged_by: test_every_role_in_the_registry_binds_through_the_one_seam,
+     binds: ["AGENTS", "drives(role_census->bind)", "RunScope"]}
+  - {id: corpus_name_supplied_to_a_non_declaring_role, kind: behavior, form: test,
+     discharged_by: test_a_corpus_name_is_supplied_to_a_role_that_declares_no_corpus,
+     binds: ["RunScope", "corpus_name"]}
+  - {id: one_shared_request_drives_every_role, kind: survival, form: test,
+     discharged_by: test_one_shared_spawn_request_drives_every_role_in_the_registry,
+     binds: ["drives(role_census->bind)", "RunScope"], cites: [c19, g19]}
+  - {id: shared_runscope_reused_across_iterations, kind: behavior, form: test,
+     discharged_by: test_shared_runscope_reused_across_role_loop_iterations,
+     binds: ["RunScope", "drives(role_census->bind)"]}
+
+  # ================= O4 / M4 : the named tool-config slot ====================
+  - {id: agent_deps_has_a_named_tool_config_slot, kind: seam, form: test,
+     discharged_by: test_agent_deps_carries_a_named_tool_config_slot,
+     binds: ["AgentDeps", "tool_config", "CuratorDeps", "ForwardCheckConfig"]}
+  - {id: runtime_does_not_import_learning, kind: shape, form: test,
+     discharged_by: test_importing_runtime_does_not_import_the_learning_stages,
+     binds: ["tool_config", "AgentDeps"]}
+  - {id: forward_check_config_round_trips, kind: shape, form: test,
+     discharged_by: test_forward_check_repacks_the_config_slot_into_check_context,
+     binds: ["interacts(forward_check->tool_config)", "ForwardCheckConfig"], cites: [c3, g2]}
+  - {id: forward_check_repeated_sees_same_policy, kind: behavior, form: test,
+     discharged_by: test_forward_check_repeated_calls_see_the_same_compiled_policy,
+     binds: ["interacts(forward_check->tool_config)", "ResolvedRoots"]}
+  - {id: spawn_identity_fields_stay_bare, kind: shape, form: test,
+     discharged_by: test_spawn_identity_fields_do_not_move_into_the_tool_config_slot,
+     binds: ["AgentDeps", "tool_config"]}
+  - {id: tool_config_survives_two_replace_calls, kind: shape, form: test,
+     discharged_by: test_tool_config_slot_survives_two_successive_replace_calls,
+     binds: ["tool_config", "CuratorDeps"]}
+  # F51 (clause, human still owns): ForwardCheckConfig carries no corpus.
+  - {id: forward_check_config_carries_no_corpus, kind: shape, form: clause,
+     binds: ["ForwardCheckConfig", "corpus_dir"],
+     outcome: {nl: "ForwardCheckConfig carries the five non-corpus fields (check, runs_dir,
+       pending, queued_ids, run_verify) only; the check reads deps.corpus_dir off the deps
+       (via M6), never a corpus riding in the slot — c3/g2's single consumer family preserved,
+       not duplicated. c3's 'the config carries a separate corpus' reading is refuted."},
+     cites: [c3, g2]}
+
+  # ================= O5 / M6 / M1 : roots retained, corpus found by name ======
+  - {id: deps_retains_the_compiled_resolved_roots, kind: seam, form: test,
+     discharged_by: test_bound_deps_retain_the_compiled_resolved_roots,
+     binds: ["AgentDeps", "ResolvedRoots", "interacts(bind->ResolvedRoots)"]}
+  - {id: every_other_role_carries_the_new_record, kind: behavior, form: test,
+     discharged_by: test_every_role_this_change_does_not_mention_carries_the_new_record,
+     binds: ["AgentDeps", "ResolvedRoots"]}
+  - {id: the_spawn_corpus_is_found_by_name, kind: behavior, form: test,
+     discharged_by: test_the_spawn_corpus_is_resolved_by_name_not_by_position,
+     binds: ["ResolvedRoots", "corpus_name", "corpus_dir"], cites: [x5, RG-PO5]}
+  - {id: spawn_record_asked_for_the_named_corpus, kind: behavior, form: test,
+     discharged_by: test_the_spawn_record_is_asked_for_the_corpus_the_spawn_names,
+     binds: ["ResolvedRoots", "corpus_dir", "corpus_name"]}
+  - {id: corpus_dir_derivation_unchanged_for_commit, kind: behavior, form: test,
+     discharged_by: test_corpus_dir_derivation_is_unchanged_for_the_git_commit_consumer,
+     binds: ["corpus_dir", "ResolvedRoots"], cites: [c10, g8]}
+
+  # ================= O6 / R4 : the read scope (read_confine) =================
+  - {id: curator_declares_requires_confine, kind: seam, form: test,
+     discharged_by: test_the_curator_declares_requires_confine_over_the_three_corpora,
+     binds: ["CORPUS_AUTHOR_DEF", "read_confine"]}
+  - {id: read_view_three_corpora_shell_stays_one, kind: behavior, form: test,
+     discharged_by: test_the_read_view_must_span_three_corpora_while_the_shell_view_stays_at_one,
+     binds: ["corpus_dir.access[lesson-read]", "corpus_dir.access[bash-cat]"]}
+  - {id: read_inside_tree_outside_every_corpus, kind: negative, form: test,
+     discharged_by: test_a_read_inside_the_spawns_tree_but_outside_every_lesson_corpus,
+     binds: ["corpus_dir.access[lesson-read]", "read_confine", "run_dir"]}
+  - {id: cross_corpus_reads_allowed_writes_refused, kind: behavior, form: test,
+     discharged_by: test_two_spawns_in_one_batch_reach_into_each_others_corpora,
+     binds: ["interacts(curator_agent->sibling_corpus)", "corpus_dir.access[lesson-read]",
+             "corpus_dir.access[write-tool]"]}
+  - {id: committed_read_vs_shell_reachability_diff, kind: behavior, form: test,
+     discharged_by: test_the_committed_reachability_difference_between_the_read_surface_and_the_shell_surface,
+     binds: ["corpus_dir.access[lesson-read]", "corpus_dir.access[bash-cat]"]}
+  - {id: fourth_corpus_denied_while_recorded, kind: behavior, form: test,
+     discharged_by: test_a_lesson_corpus_is_added_to_the_tree_after_the_scope_was_written,
+     binds: ["read_confine", "lessons_loaded_jsonl"]}
+  - {id: read_allow_stays_single_confine_narrows, kind: behavior, form: test,
+     discharged_by: test_read_allow_stays_single_corpus_after_r4_and_the_confine_carries_the_narrowing,
+     binds: ["corpus_dir.access[lesson-read]", "read_confine"], cites: [x2, g10]}
+  - {id: spawn_reads_the_queue_it_was_spawned_over, kind: behavior, form: test,
+     discharged_by: test_a_spawn_reads_the_queue_it_was_spawned_over,
+     binds: ["run_dir", "corpus_dir.access[lesson-read]"]}
+  - {id: corpus_name_names_no_shipped_corpus_read_reach, kind: behavior, form: test,
+     discharged_by: test_corpus_name_names_no_corpus_among_the_three_shipped_lesson_corpora,
+     binds: ["read_confine", "corpus_name.domain"]}
+  - {id: forward_check_gate_after_read_widens, kind: behavior, form: test,
+     discharged_by: test_the_forward_checks_own_lesson_gate_after_the_read_scope_widens,
+     binds: ["interacts(forward_check->corpus_dir)", "corpus_dir.access[forward-check]"],
+     cites: [x4]}
+  - {id: schema_doc_no_longer_reached, kind: behavior, form: test,
+     discharged_by: test_the_curator_reads_no_longer_reach_defender_docs,
+     binds: ["corpus_dir.access[lesson-read]"], cites: [g13]}
+  # F52 (clause): the first read refusal carries MAIN's hardcoded prose.
+  - {id: read_refusal_prose_describes_wrong_scope, kind: behavior, form: clause,
+     binds: ["corpus_dir.access[lesson-read]"],
+     outcome: {nl: "The curator's first-ever read refusal (permission/files.py:190-194) carries
+       MAIN/GATHER's hardcoded 'its own run dir + the corpus .md under lessons/skills/examples'
+       prose — a scope that is not the curator's own. F52 open: parametrize the deny reason
+       per-role (else the model's only recovery signal is a lie), or accept it. Left a clause."},
+     cites: [x2]}
+  # MD-2 / RF5 / P80 (clause, route to the strong author): an unowned read widening.
+  - {id: no_cat_grant_confined_reads_shape_free, kind: behavior, form: clause,
+     binds: ["read_confine", "corpus_dir.access[bash-cat]"],
+     outcome: {nl: "A def with requires_confine=True whose bash_shapes omit a cat grant compiles
+       to read_allow==() (f13/P1) yet still gets the confine's root narrowing — so it reads ANY
+       file inside the three corpora with no filename-shape restriction, strictly wider within
+       the corpora than a cat-granted role. No demand binds this widening; the curator itself has
+       a cat grant, so this is a strong-author finding on the mechanism, not a curator bug (RF5)."},
+     cites: [RG-2]}
+
+  # ================= M8 : the corpus name is demanded, legibly ================
+  - {id: missing_corpus_name_is_legible, kind: behavior, form: test,
+     discharged_by: test_binding_a_corpus_requiring_role_without_a_name_raises_legibly,
+     binds: ["CORPUS_AUTHOR_DEF", "interacts(bind->RunScope)", "corpus_name"]}
+  - {id: corpus_name_absent_for_declaring_role, kind: behavior, form: test,
+     discharged_by: test_corpus_name_absent_for_a_role_that_declares_it_needs_one,
+     binds: ["CORPUS_AUTHOR_DEF", "corpus_name"]}
+  - {id: policy_cli_missing_corpus_name_argument, kind: behavior, form: test,
+     discharged_by: test_policy_cli_is_given_a_role_that_requires_a_corpus_with_no_corpus_name_argument,
+     binds: ["drives(policy_cli->bind)", "corpus_name"]}
+  - {id: the_three_generic_callers_still_work, kind: survival, form: test,
+     discharged_by: test_the_generic_bind_callers_survive_the_corpus_requirement,
+     binds: ["drives(role_census->bind)", "drives(policy_cli->bind)", "RunScope"], cites: [c19]}
+
+  # ================= M9 : for_run collapses, the CLI compiles ================
+  - {id: for_run_is_a_thin_wrapper_over_bind, kind: behavior, form: test,
+     discharged_by: test_curator_deps_for_run_is_a_thin_wrapper_over_bind,
+     binds: ["drives(curator_spawn->bind)", "CuratorDeps", "tool_config"]}
+  - {id: policy_cli_prints_a_compiled_curator, kind: behavior, form: test,
+     discharged_by: test_policy_cli_prints_a_compiled_curator_policy,
+     binds: ["drives(policy_cli->bind)", "CORPUS_AUTHOR_DEF"]}
+
+  # ================= f7 / F77 : write-lane / read-lane name parity ===========
+  - {id: write_lane_and_read_lane_admit_same_names, kind: parity, form: test,
+     discharged_by: test_a_lesson_the_curator_can_write_it_can_read_back,
+     binds: ["corpus_dir.access[write-tool]", "corpus_dir.access[lesson-read]",
+             "corpus_dir.access[bash-cat]"], cites: [x6]}
+  # F37 / P33 (clause): a fifth corpus-name spelling M1 does not reconcile. §7 D4 UPGRADED this
+  # from a follow-up to a PINNED demand (MD-9, below) — the clause is kept as the drift FACT record.
+  - {id: four_spellings_of_one_corpus_name, kind: behavior, form: clause,
+     binds: ["corpus_dir.identity"],
+     outcome: {nl: "The corpus name has FOUR derivations: the authoring gate build_write_allow,
+       the rm-lane _corpus_spellings, the cat-scope under(corpus) — all functions of corpus_dir —
+       plus verify_agent_state's changes_outside audit prefix, a hardcoded ClassVar
+       (DefenderPaths.*_dir_rel) that is NOT derived from corpus_dir. M1 changes corpus_dir's
+       derivation but not the ClassVar, a fifth enforcement point that can drift. §7 D4 pinned the
+       agreement as MD-9; unify-lists vs reconcile-prefix stays the implementer's."},
+     cites: [g9]}
+
+  # ================= §7 D4 : the three scope-expansion pins beyond bindability =========
+  #  The human pinned ALL FOUR Q4 findings (70-resolutions D4), widening #691's scope. MD-8/MD-9
+  #  pin an OBSERVABLE while leaving the MECHANISM to the implementer (70-resolutions Red flags);
+  #  MD-10 could not be written deterministically from any executed claim and is RED-FLAGGED with a
+  #  probe request rather than invented as a timing test (author fault-hierarchy rule 3).
+  # --- MD-8 (F11): the forward_check verifier spawned from a worktree curator must not resolve its
+  #     roots to the MAIN checkout. OBSERVABLE pinned; requires_explicit_tree on VERIFY_DEF vs
+  #     threading the curator's tree is the implementer's (g19/P6: engine.py:59 binds VERIFY_DEF
+  #     with no tree, falling back to PATHS.defender_dir today).
+  - {id: md8_verifier_does_not_reach_main_checkout, kind: negative, form: test,
+     discharged_by: test_the_forward_check_verifier_does_not_reach_the_main_checkout,
+     binds: ["interacts(bind->CORPUS_AUTHOR_DEF)", "main_checkout"], cites: [g19]}
+  # --- MD-9 (F37/P33/S120): the post-run audit's corpus derivation (verify_agent_state ->
+  #     changes_outside) agrees with the write-lane gate's for every accepted name. OBSERVABLE
+  #     pinned; unify-lists vs reconcile-prefix is the implementer's. Regression pin: agreement
+  #     holds today for the three shipped names (the drift MD-6 forecloses for the accepted set) —
+  #     drives BOTH real primitives and requires their inside/outside verdicts to match.
+  - {id: md9_audit_derivation_agrees_with_gate, kind: parity, form: test,
+     discharged_by: test_the_post_run_audit_agrees_with_the_write_gate_for_every_accepted_name,
+     binds: ["corpus_dir.identity", "corpus_dir.access[write-tool]"], cites: [g9]}
+  # --- MD-10 (F40): concurrent same-corpus spawns must not corrupt the shared _pending sink. §7 D4
+  #     pinned the observable and PREFERRED a deterministic single-writer-lock demand. NO executed
+  #     ledger claim establishes a lock or a deterministic interleaving on _pending (RG-aP10/RG-PO7
+  #     observe the shared sink but probe no concurrency invariant), so per the author charge this is
+  #     a form:clause carrying a PROBE REQUEST, not an invented flaky timing test. See handoff.forks
+  #     + 80-author-digest.md ## Red flags.
+  - {id: md10_concurrent_same_corpus_spawns_probe_request, kind: uniqueness, form: clause,
+     binds: ["corpus_dir.identity", "drives(author_drain->curator_agent)"],
+     outcome: {nl: "PROBE REQUESTED (NOT authored — author fault-hierarchy rule 3). Two spawn
+       configs (author_actor_benign, author_actor_env) author lessons-environment in one batch and
+       every spawn shares one <MAIN>/defender/learning/_pending sink (RG-aP10). §7 D4 pinned that
+       concurrent same-corpus spawns must not corrupt it, preferring a deterministic single-writer-
+       lock demand. No executed claim establishes whether _pending writes are lock-serialized or
+       interleaved, so a deterministic demand cannot be authored: a probe must execute two
+       concurrent same-corpus drains against one _pending and observe whether the sink is
+       lock-guarded (deterministic demand owed) or racy (a genuine-interleaving demand owed).
+       write-code-from-spec/the human minute this once the probe lands — do NOT ship a timing test."},
+     cites: [RG-aP10]}
+
+claims:
+  # ---- inherited from the design doc (discuss sweep), re-derived at a7481659 ----
+  - {id: c1, source: discuss, kind: referential,
+     claim: "CORPUS_AUTHOR_DEF is bindable=False; bind's refusal lives in compile_policy_for.",
+     probe: "read curator_engine.py:149, agent_definition.py:151-156", probe_kind: read,
+     observed: "both present; refusal in compile_policy_for, which bind calls", verdict: holds}
+  - {id: c2, source: discuss, kind: referential,
+     claim: "RunScope carries only add_dirs, read_confine, scripts.",
+     probe: "read agent_definition.py:57-62", probe_kind: read,
+     observed: "exactly those three fields", verdict: holds}
+  - {id: c3, source: discuss, kind: census,
+     claim: "the six extra CuratorDeps fields have exactly one consumer family, the forward_check tool.",
+     probe: "grep deps.<field> repo-wide excluding tests", probe_kind: search,
+     observed: "only verify_forward/tool.py:87 (queued_ids) and :103-116 (rest, repacked into CheckContext)",
+     verdict: holds}
+  - {id: c4, source: discuss, kind: census,
+     claim: "6 of 7 AgentDeps subclasses are field-free; GatherDeps.lead_id is the only other extra field.",
+     probe: "grep 'class .*Deps(AgentDeps)' -A14 excluding tests", probe_kind: search,
+     observed: "corrected to 5 field-free (K5); only lead_id besides CuratorDeps's six", verdict: holds}
+  - {id: c5, source: discuss, kind: census,
+     claim: "the only production curator DRAIN path runs inside a worktree (four CLI entrypoints excepted, K2).",
+     probe: "trace author_drain -> _run_worktree_batch -> with_repo_root(wt)", probe_kind: search,
+     observed: "orchestrate.py:513,549-569 in-worktree; four __main__ CLI entrypoints reach the MAIN checkout (K2)",
+     verdict: holds}
+  - {id: c6, source: discuss, kind: census,
+     claim: "all three curator corpora are defender_dir/<single-segment name>.",
+     probe: "grep the CuratorCfg call sites, cross-read _paths.py:38-46", probe_kind: search,
+     observed: "lessons, lessons-actor, lessons-environment (but FOUR spawn configs over three corpora, f9)",
+     verdict: holds}
+  - {id: c7, source: discuss, kind: behavior,
+     claim: "bind(CORPUS_AUTHOR_DEF, ...) raises ValueError carrying the documented reason.",
+     probe: "probe A - bind() against a tmp run dir and worktree tree", probe_kind: executed,
+     observed: "ValueError: bind(CORPUS_AUTHOR_DEF, ...) is not supported ...", verdict: holds}
+  - {id: c8, source: discuss, kind: behavior,
+     claim: "flipping bindable=True alone fails at the write co-constraint, before deps construction.",
+     probe: "probe B - replace(bindable=True, deps_cls=CuratorDeps), then bind()", probe_kind: executed,
+     observed: "ValueError: a writer ToolSet (write=True) must declare non-empty write_shapes", verdict: holds}
+  - {id: c9, source: discuss, kind: behavior,
+     claim: "with write/bash shapes declared, bind still cannot construct CuratorDeps (forwards no subtype_fields).",
+     probe: "probe C - as B plus corpus_dirs and shapes", probe_kind: executed,
+     observed: "TypeError: CuratorDeps.__init__() missing 6 required kw-only args", verdict: holds}
+  - {id: c10, source: discuss, kind: behavior,
+     claim: "corpus_dirs + an explicit tree already root write_allow at the worktree corpus, not run_dir.",
+     probe: "probe D - compile_policy_for(corpus_dirs=('lessons',), defender_dir=<wt>/defender)", probe_kind: executed,
+     observed: "write_allow = <wt>/defender/lessons/[^\\x00]*\\.md ; run_dir elsewhere", verdict: holds}
+  - {id: c11, source: discuss, kind: referential,
+     claim: "bind-then-dataclasses.replace is an existing production idiom for attaching per-spawn fields.",
+     probe: "read tools_gather.py:275-279", probe_kind: read,
+     observed: "gbase = bind(GATHER_DEF, ...); gdeps = replace(gbase, run_id=..., lead_id=...)", verdict: holds}
+  - {id: c12, source: discuss, kind: referential,
+     claim: "deps.lead_id is spawn identity consumed for attribution, not tool configuration.",
+     probe: "read query_tool.py:208-218 and tools_gather.py:279", probe_kind: read,
+     observed: "branches on deps.lead_id is None; set alongside run_id", verdict: holds}
+  - {id: c13, source: discuss, kind: census,
+     claim: "bindable has 13 references; exactly one sets False; every other site must be retired or rewritten by M9.",
+     probe: "grep -rn bindable --include=*.py (full hit list)", probe_kind: search,
+     observed: "13 hits; sole False curator_engine.py:149; incl. test_540:687,699 (a second read) and test_budget_seams_631:225",
+     verdict: holds}
+  - {id: c14, source: discuss, kind: reachability,
+     claim: "a relative corpus name in the carrier cannot escape the spawn's tree.",
+     probe: "probe E - _resolve_corpus_dir against '../../etc', '/etc/passwd', 'lessons/../../..', './x', 'a/b'",
+     probe_kind: executed,
+     observed: "absolute and '..' forms rejected; './x' normalises under the tree; 'a/b' accepted (a separate S3 defect)",
+     verdict: unrefuted}
+  - {id: c15, source: discuss, kind: census,
+     claim: "CuratorDeps.for_run / _corpus_author_policy reach 8 modules (K6), one production - M9's blast radius.",
+     probe: "pyrefly-refs (K6/g18)", probe_kind: search,
+     observed: "for_run 14 refs/8 files, sole prod call curator_engine.py:174; M9's union blast radius 13 modules",
+     verdict: holds}
+  - {id: c16, source: discuss, kind: behavior,
+     claim: "under a multi-segment corpus name the rm grant admits a sibling path and misses the real corpus - a live S3 violation.",
+     probe: "probe F - _corpus_author_grants at <tree>/lessons and <tree>/a/b", probe_kind: executed,
+     observed: "corpus <tree>/a/b: 'rm defender/b/x.md' MATCH (sibling), 'rm defender/a/b/x.md' NO MATCH; cause _corpus_spellings uses corpus_dir.name",
+     verdict: holds}
+  - {id: c17, source: discuss, kind: behavior,
+     claim: "M2 changes read_allow from empty (widening) to the corpus shape, narrowing lesson_read.",
+     probe: "probe G - _corpus_author_policy vs compile_policy_for", probe_kind: executed,
+     observed: "today [] (empty==widening); superseded by R4 - read_allow stays EMPTY, the confine narrows the roots half",
+     verdict: refuted}
+  - {id: c18, source: discuss, kind: referential,
+     claim: "M3's flags reproduce the curator's current tree and cwd anchoring exactly.",
+     probe: "read agent_definition.py:196-198 against curator_engine.py:128-133", probe_kind: read,
+     observed: "bind's cwd_anchor=_resolved_tree(defender_dir).parent == for_run's cwd_anchor=repo_root", verdict: holds}
+  - {id: c19, source: discuss, kind: census,
+     claim: "three existing callers pass a scope carrying no corpus name and would break without M8.",
+     probe: "read the generic bind call sites", probe_kind: search,
+     observed: "test_540:685-694 (one shared RunScope); policy_cli.py:44-51; test_bind_sole_seam_551.py:534", verdict: holds}
+  - {id: c20, source: discuss, kind: behavior,
+     claim: "no curator prompt depends on lesson_read reaching outside its own corpus, so O6's narrowing is safe at runtime.",
+     probe: "settled at spec time by x1/x2/g12", probe_kind: executed,
+     observed: "prompt half holds (x1); the runtime-SAFETY conclusion is refuted - the committed suite (L8/L12) pins cross-corpus reads (x2/x3/g12); R4 KEEPS them",
+     verdict: refuted}
+  # ---- raised at grounding (brief) ----
+  - {id: g1, kind: census, claim: "bindable has exactly 13 references; one sets False; the doc's site list is exact.",
+     probe: "grep -rn bindable over the worktree", probe_kind: search,
+     observed: "13/13 identical to c13", verdict: holds}
+  - {id: g2, kind: census, claim: "the six CuratorDeps fields have exactly one consumer family - the forward_check tool.",
+     probe: "grep -rn 'deps\\.<field>' per field, excluding tests", probe_kind: search,
+     observed: "verify_forward/tool.py only; zero other production hits", verdict: holds}
+  - {id: g3, kind: census, claim: "AgentDeps has 7 subclasses; only GatherDeps.lead_id and CuratorDeps' six add fields.",
+     probe: "grep -rn 'class .*Deps(AgentDeps)' -A14", probe_kind: search,
+     observed: "5 field-free (RF6/K5); GatherDeps lead_id; CuratorDeps six", verdict: holds}
+  - {id: g4, kind: census, claim: "all curator corpora are defender_dir/<single-segment name>.",
+     probe: "grep the CuratorConfig sites + read _paths.py:36-47", probe_kind: search,
+     observed: "three names; FOUR spawn configs over them (f9)", verdict: holds}
+  - {id: g5, kind: behavior, claim: "bind(CORPUS_AUTHOR_DEF, ...) raises ValueError with the documented reason.",
+     probe: "probe P1", probe_kind: executed, observed: "ValueError, documented reason", verdict: holds}
+  - {id: g6, kind: behavior, claim: "bindable=True alone fails at the write co-constraint, before deps construction.",
+     probe: "probe P2", probe_kind: executed, observed: "ValueError: write=True must declare non-empty write_shapes", verdict: holds}
+  - {id: g7, kind: behavior, claim: "with shapes declared, bind still cannot construct CuratorDeps - forwards no subtype_fields.",
+     probe: "probe P3", probe_kind: executed, observed: "TypeError missing 6 kw-only args", verdict: holds}
+  - {id: g8, kind: behavior, claim: "corpus_dirs + an explicit tree already root write_allow at the worktree corpus, not run_dir.",
+     probe: "probe P4", probe_kind: executed,
+     observed: "write_allow=<wt>/defender/lessons/[^\\x00]*\\.md; read_allow=<wt>/defender/lessons/[\\w.@=+-]+(?:/…)*; run_dir in neither",
+     verdict: holds}
+  - {id: g9, kind: behavior, claim: "under a multi-segment name the rm grant admits a sibling and misses the real corpus.",
+     probe: "probe P6", probe_kind: executed,
+     observed: "corpus <tree>/a/b: 'rm defender/b/x.md' MATCH (sibling), 'rm defender/a/b/x.md' NO MATCH; _corpus_spellings uses corpus_dir.name",
+     verdict: holds}
+  - {id: g10, kind: behavior, claim: "M2 changes read_allow from empty (widening) to the corpus shape.",
+     probe: "probe P7", probe_kind: executed,
+     observed: "today read_allow==[]; superseded by R4 (read_allow stays empty, confine narrows roots)", verdict: refuted}
+  - {id: g11, kind: referential, claim: "M3's flags reproduce the curator's current tree/cwd anchoring exactly.",
+     probe: "read agent_definition.py:194-199 vs curator_engine.py:129-134; probe P11", probe_kind: read,
+     observed: "equal when defender_dir==repo_root/'defender'", verdict: holds}
+  - {id: g12, kind: behavior,
+     claim: "#559's L8/L9/L12/L12b/L12c pin the curator's CROSS-CORPUS lesson_read as deliberate; an own-corpus-only read_allow (R1's rejected reading) denies every one.",
+     probe: "probe H (scratchpad/probe_o6.py) + pytest tests/test_lesson_read_tool.py at a7481659", probe_kind: executed,
+     observed: "18/18 green at base; module docstring calls the reach deliberate; R4 KEEPS them green (read_allow stays empty)",
+     verdict: holds}
+  - {id: g13, kind: census, claim: "no curator prompt depends on lesson_read reaching outside its own corpus; one prose path is named.",
+     probe: "grep the three curator prompts for path literals", probe_kind: search,
+     observed: "malicious_actor/prompt.md:9 names defender/lessons-actor/_TEMPLATE.md + defender/docs/…; denied after the confine; R5 updates the prompt line",
+     verdict: refuted}
+  - {id: g14, kind: behavior, claim: "_resolve_corpus_dir accepts a degenerate name that resolves the corpus to defender_dir itself.",
+     probe: "probe P5 over 15 names", probe_kind: executed,
+     observed: "'' and '.' -> <tree>/defender; 'a/b' -> nested; '..','/etc' rejected; 'a\\nb' accepted", verdict: holds}
+  - {id: g15, kind: census, claim: "ResolvedRoots.corpus_roots has ZERO production consumers at a7481659.",
+     probe: "grep -rn 'corpus_roots'", probe_kind: search,
+     observed: "producers agent_definition.py:73,93,97; consumers tests only; compile_policy never reads it; live reach is policies/_common.py:16 _CORPUS_SUBDIRS",
+     verdict: holds}
+  - {id: g16, kind: census, claim: "four __main__ entrypoints spawn the curator against the MAIN checkout via DEFAULT_PATHS.",
+     probe: "grep 'def main|__main__|DEFAULT_PATHS' over learning/author/*/run.py + benign_actor/env.py; read main() bodies (P10 corroborates)", probe_kind: search,
+     observed: "lessons/run.py, malicious_actor/run.py, benign_actor/run.py, benign_actor/env.py; each run_batch(DEFAULT_PATHS)",
+     verdict: holds}
+  - {id: g17, kind: census, claim: "the curator's corpus paths pass through FOUR write-capable lanes, not two.",
+     probe: "read register_tools + grep decide_write callers", probe_kind: search,
+     observed: "write_file, edit_file, bash rm grant, forward_check's _gate_lesson_path; curator has NO read_file", verdict: holds}
+  - {id: g18, kind: census, claim: "M9's blast radius, resolved not grepped.",
+     probe: "pyrefly-refs (a defs/refs resolve) on for_run/_for_run/_corpus_author_policy/CORPUS_AUTHOR_DEF", probe_kind: search,
+     observed: "for_run 14 refs/8 files (sole prod :174); union with bindable sites = 13 modules (3 prod + 10 test)",
+     verdict: holds}
+  - {id: g19, kind: census, claim: "the generic bind callers M8 must protect (+ verify_forward/engine.py:59, amended).",
+     probe: "grep -rn '\\bbind(' + read variable-first-arg sites", probe_kind: search,
+     observed: "test_540:687-694, policy_cli:53-62+44-51, test_bind_sole_seam_551:534; build_registry drops if d.bindable; plus engine.py:59 bind(VERIFY_DEF) on the curator path (35-reground g19 amendment)",
+     verdict: holds}
+  - {id: g20, kind: census, claim: "the CORPUS_AUTHOR role is already consumed generically in production at spawn time.",
+     probe: "grep -rn AGENTS minus tests; read _pydantic_stage.py:24-49", probe_kind: search,
+     observed: "build_stage_agent:36-41 does replace(AGENTS[deps_type.role], **overrides) - every curator spawn already goes through the registry",
+     verdict: holds}
+  - {id: g21, kind: referential, claim: "decide_write does NOT apply the read-side path SHAPES, so O6's read narrowing cannot narrow writes.",
+     probe: "read permission/files.py:264-290 and :74-87", probe_kind: read,
+     observed: "write_allow fullmatch plus read CONTAINMENT + denylist; NOT read_allow shapes. NOTE RF1/RG-1: the CONTAINMENT half IS narrowed by read_confine",
+     verdict: holds}
+  - {id: g22, kind: census, claim: "no spec_graph declares the lesson corpora as a resource; the profile declares only ticket_store.",
+     probe: "spec-graph trace resource; grep specGraph.resources in .claude/spec-flow.json", probe_kind: search,
+     observed: "only ticket_store; the three corpora undeclared, so r1 was established by hand (d1 proposed, not written)", verdict: holds}
+  - {id: g23, kind: census, claim: "an existing spec_graph demand already forbids exactly the widening g14 opens.",
+     probe: "grep spec_graph_*.yaml for CORPUS_AUTHOR/curator/bindable; read spec_graph_curator-glm-port.yaml:102-112", probe_kind: search,
+     observed: "curator-glm-port.yaml:112 forbids a whole-defender_dir write_allow; g14's ''/'.' name produces precisely that", verdict: holds}
+  - {id: g24, kind: census, claim: "spec-graph trace drivers cannot census this change at spec time.",
+     probe: "read the CLI usage; no production diff at a7481659", probe_kind: executed,
+     observed: "deferred to write-code-from-spec's spec-graph actors run", verdict: deferred}
+  # ---- raised at extraction ----
+  - {id: x1, kind: census, claim: "no curator prompt instructs a cross-corpus read; two name out-of-corpus paths in prose.",
+     probe: "read all three curator prompts; grep for lesson_read/cat/defender/lessons*/docs", probe_kind: search,
+     observed: "zero lesson_read occurrences; every read instruction is a cat of the own corpus; two out-of-corpus refs are prose only",
+     verdict: holds}
+  - {id: x2, kind: behavior,
+     claim: "under M2's OWN-corpus read_allow the curator's lesson_read is denied on a sibling corpus, defender/docs, and run_dir; allowed today.",
+     probe: "build today's policy and an M2-shaped compile_policy; drive _tool_lesson_read/decide_read", probe_kind: executed,
+     observed: "TODAY read_allow=[] admits all; own-corpus read_allow denies sibling/docs/run_dir. SUPERSEDED by R4: the confine keeps siblings ALLOW, denies docs/SKILL, keeps run_dir",
+     verdict: holds}
+  - {id: x3, kind: census, claim: "the committed suite pins the curator's cross-corpus lesson_read.",
+     probe: "grep the blast-radius tests; run test_lesson_read_tool.py -k l12", probe_kind: search,
+     observed: "test_l12 drives lesson_read at lessons-actor/ and lessons-environment/ asserting three loads land; LESSON_CORPORA exists for exactly this",
+     verdict: holds}
+  - {id: x4, kind: behavior, claim: "forward_check's lesson-path gate is decide_WRITE, so it is already corpus-scoped and O6 does not change it.",
+     probe: "read verify_forward/tool.py:72-81; drive _gate_lesson_path under today's and M2's policy", probe_kind: executed,
+     observed: "own corpus ADMITTED, sibling DENIED under BOTH policies, identical message", verdict: holds}
+  - {id: x5, kind: behavior, claim: "after M9 the d.tools.bash census is six roles; today's census is five.",
+     probe: "import defender.agents; dump every AGENTS entry's tools/bindable/deps_cls/corpus_dirs", probe_kind: executed,
+     observed: "bash=True: MAIN, GATHER, JUDGE, ACTOR, LEAD_AUTHOR, CORPUS_AUTHOR (6); only CORPUS_AUTHOR bindable=False; MAIN/GATHER declare three static corpus_dirs",
+     verdict: holds}
+  - {id: x6, kind: behavior, claim: "after M2 the curator can write own-corpus names it cannot read back.",
+     probe: "fullmatch build_write_allow(corpus,'.md') and under(corpus,TREE) over six names", probe_kind: executed,
+     observed: "'my lesson.md' write=True read=False; 'x\\ny.md' write=True read=False; read class [\\w.@=+-]+, write tail [^\\x00]*\\.md",
+     verdict: holds}
+  - {id: x7, kind: behavior, claim: "M7's single-segment rule admits all three shipped names and normalises './x' to one segment.",
+     probe: "_resolve_corpus_dir over lessons, lessons-actor, lessons-environment, a/b, ./x, ../x, /etc", probe_kind: executed,
+     observed: "three shipped resolve parts==1; 'a/b' parts==2 (M7 must refuse); './x' parts==1; '../x','/etc' already ValueError",
+     verdict: holds}
+  - {id: x8, kind: referential, claim: "the doc's citations resolve at base a7481659, and c13's 13-reference bindable census holds there.",
+     probe: "grep -rn bindable; read each cited span", probe_kind: search,
+     observed: "exactly 13 bindable hits; all cited spans verified", verdict: holds}
+  - {id: x9, kind: referential, claim: "the lead author is a template for M2/M3 but not for M1 - its shape builders hardcode a static subdir.",
+     probe: "read lead_author_engine.py:30-66", probe_kind: read,
+     observed: "_lead_author_*_shapes build off roots.defender_dir / 'skills' - a literal; the curator needs the SPAWN corpus off the roots (f3 load-bearing)",
+     verdict: holds}
+  - {id: x10, kind: behavior, claim: "an M2-shaped def reproduces today's curator write_allow exactly.",
+     probe: "compile_policy over replace(bindable=True, corpus_dirs=(name,), shapes) vs _corpus_author_policy", probe_kind: executed,
+     observed: "write_allow identical; bash_allow the same rm/cat/grep triple; read_allow the only difference (the whole scope delta is the read lane)",
+     verdict: holds}
+  # ---- reground / consolidation probes (executed at a7481659) ----
+  - {id: RG-1, kind: reachability,
+     claim: "read_confine narrows decide_write's containment for a non-shipped M7-admitted name, so R4's 'write byte-identical' is false.",
+     probe: "compile M2-shaped policy, read_confine=three corpora, name 'skills'; decide_write(<tree>/defender/skills/x.md)",
+     probe_kind: executed,
+     observed: "DENY under the confine; empty-confine control ALLOW; shipped 'lessons' control ALLOW. _resolved_read_roots REPLACES the defender_dir base",
+     verdict: refuted}
+  - {id: RG-2, kind: behavior,
+     claim: "a confined def whose bash_shapes omit a cat grant reads any in-corpus file with no filename-shape restriction.",
+     probe: "read_allow==() + read_confine=three; decide_read on oddly-named/.bin/nested in-corpus files", probe_kind: executed,
+     observed: "every in-corpus file ALLOW regardless of shape; only outside-confine DENY - strictly wider than a cat-granted role", verdict: holds}
+  - {id: RG-3, kind: behavior, claim: "a direct compile_policy call produces the same policy as the front door for one corpus.",
+     probe: "compose roots + compile_policy vs bind/for_run for corpus 'lessons'", probe_kind: executed,
+     observed: "full AgentPolicy equal - seam parity", verdict: holds}
+  - {id: RG-P7, kind: reachability, claim: "a mismatched (tree, corpus_dir) pair binds clean, then denies at call time (runtime denial, not structural).",
+     probe: "drive the front door with a corpus from one checkout and a tree from another", probe_kind: executed,
+     observed: "binds clean; decide_write/decide_read DENY via write⊆read-roots at call time; M1 not built at base", verdict: unrefuted}
+  - {id: RG-PO5, kind: behavior, claim: "by-name corpus lookup for an unlisted name is pure path arithmetic - no KeyError, no membership check.",
+     probe: "_resolve_corpus_dir('docs'/'not-a-corpus') against CORPUS_AUTHOR (empty corpus_dirs) and MAIN (three static)", probe_kind: executed,
+     observed: "pure path arithmetic; corpus_roots is a positional tuple not a name-keyed dict; curator path DISTINCT from MAIN/GATHER", verdict: holds}
+  - {id: RG-adv1, kind: reachability, claim: "the corpus name is re.escape'd into the write/read/rm patterns; a trailing-newline name is inert.",
+     probe: "compile grants for pure-metacharacter and 'a\\nb' names; match crafted commands", probe_kind: executed,
+     observed: "name IS re.escaped (metachar forgeries fail); newline inert - bash_exec._parse splits raw \\n into a separate pipeline before _claim (DENY, unclaimed)",
+     verdict: unrefuted}
+  - {id: RG-adv2, kind: reachability, claim: "_resolved_read_roots containment is path-segment (relative_to), not a string prefix.",
+     probe: "decide_read on 'lessons2/x.md' and 'lessons/../skills/evil.md'", probe_kind: executed,
+     observed: "'lessons2/x.md' DENY (path-segment, not prefix); '../skills' resolves out -> DENY; no defeat", verdict: unrefuted}
+  - {id: RG-adv3, kind: behavior, claim: "the rm grant matches the shell-tokenized argv; $()/backtick DENY via the tokenizer, not _stage_unsafe (dead code for this shape).",
+     probe: "match the compiled pattern against quoted, $(), and ;-joined rm commands", probe_kind: executed,
+     observed: "quotes stripped by the tokenizer (one segment); $()/backtick split apart before _claim; ;-join DENY (echo ungranted); _stage_unsafe's '$(' check is dead for this shape",
+     verdict: holds}
+  - {id: RG-adv4, kind: reachability,
+     claim: "the rm grant never resolve()s, so a symlink out of corpus the other three write lanes DENY, rm deletes - a live demonstrated defeat.",
+     probe: "plant lessons/escape -> lessons-actor symlink; present lessons/escape/secret.md to all four write lanes", probe_kind: executed,
+     observed: "write_file/edit_file/forward_check DENY; rm-grant allow=True and the sibling file survives (a real rm deletes outside-corpus data). c16/g9 confirmed live",
+     verdict: refuted}
+  - {id: RG-adv5, kind: behavior, claim: "the compiled write/read/rm patterns are not backtracking-vulnerable (ReDoS).",
+     probe: "re.fullmatch under timeout against 1000 stacked segments (81KB) and 500 near-miss dot-segments", probe_kind: executed,
+     observed: "<0.001s; the /-delimiter removes the backtracking ambiguity - no ReDoS demand owed", verdict: holds}
+  - {id: RG-ispo4, kind: behavior, claim: "the rm grant is evaluated once per command with a single-operand grammar; a two-operand rm is denied.",
+     probe: "match against 'rm defender/lessons/x.md defender/lessons-actor/y.md' and same-corpus two-file rm", probe_kind: executed,
+     observed: "cross-corpus AND same-corpus two-file rm both DENY; single-operand in-corpus rm ALLOW (positive control for the degenerate-name demand)",
+     verdict: holds}
+  - {id: RG-PO1, kind: behavior, claim: "_record_lesson_load fires only AFTER decide_read allows; a refused read leaves no jsonl row.",
+     probe: "drive _tool_lesson_read outside all three / on a sibling under the confine; inspect lessons_loaded.jsonl", probe_kind: executed,
+     observed: "refused read -> no row (file not created); in-confine sibling records unchanged", verdict: holds}
+  - {id: RG-po1, kind: behavior, claim: "_resolve_corpus_dir is existence-independent and case-sensitive; a read under a named-but-absent-but-in-confine root is ALLOWED.",
+     probe: "resolve + decide_read over absent/case-variant/named-but-absent roots", probe_kind: executed,
+     observed: "existence-independent (PF's .git accepted); lessons != Lessons distinct paths; read under a named-but-absent in-confine root ALLOWED (lexical containment)",
+     verdict: holds}
+  - {id: RG-po2, kind: behavior, claim: "_record_lesson_load is append-only with no dedup; two reads produce two rows.",
+     probe: "drive one lesson_read twice; count rows", probe_kind: executed,
+     observed: "append-only unconditional (2 -> 3 rows observed)", verdict: holds}
+  - {id: RG-po3, kind: behavior, claim: "dataclasses.replace(AGENTS[role], **overrides) never mutates the shared frozen registry entry.",
+     probe: "construct two divergent spawns of one role; compare the shared entry", probe_kind: executed,
+     observed: "AgentDefinition frozen; AGENTS[GATHER] is orig after two divergent spawns - no residue", verdict: holds}
+  - {id: RG-po5, kind: behavior, claim: "reading a retained-root-derived path after worktree teardown fails cleanly, no stale-content leak.",
+     probe: "build a deps, rmtree(wt), read a derived path", probe_kind: executed,
+     observed: "decide_read still ALLOW (existence-independent) but _gated_read's p.is_file() raises a clean ModelRetry - no crash, no leak", verdict: holds}
+  - {id: RG-PO6, kind: behavior, claim: "M7/M8 do not exist in code; CuratorDeps.for_run never calls bind()/compile_policy_for() - a ..-bearing corpus_dir reaches curator_engine.py:174 unvalidated.",
+     probe: "drive for_run; trace curator_engine.py:124-174", probe_kind: executed,
+     observed: "M7/M8 absent at base; for_run -> _corpus_author_policy bypasses bind; target-behavior demand #0, NOT an already-true property", verdict: holds}
+  - {id: RG-po6, kind: behavior, claim: "of the real precondition checks requires_confine raises before requires_explicit_tree; no production def sets both; M7/M8 have no order to place.",
+     probe: "bind a def failing all three; read agent_definition.py:162-199", probe_kind: executed,
+     observed: "requires_confine before requires_explicit_tree; M7/M8 don't exist - order is target-behavior once they land", verdict: holds}
+  - {id: RG-aP9, kind: behavior, claim: "CORPUS_AUTHOR_DEF.bindable=False, so M3 fires on NONE of the four curator entrypoints; M3 is exclusive to LEAD_AUTHOR_DEF and only off-drain.",
+     probe: "trace run_batch -> _run_worktree_batch -> the curator bind", probe_kind: executed,
+     observed: "the curator entrypoints never call bind(); M3 fires on none of them today; the 'entrypoints raise under M3' premise is target-behavior",
+     verdict: holds}
+  - {id: RG-aP10, kind: census, claim: "four hardcoded-literal choosers pass a corpus name; ResolvedRoots.corpus_roots is dead code (O4/M4 drift hazard).",
+     probe: "trace the four orchestrate spawn configs; grep RunScope( sites", probe_kind: search,
+     observed: "LEAD_AUTHOR->skills + 3x for_run->lessons/lessons-actor/lessons-environment; benign_actor/env.py shares benign's chooser (F40); corpus_dirs->_resolve_corpus_dir->corpus_roots has zero prod readers",
+     verdict: holds}
+  - {id: RG-PO7, kind: census, claim: "_CORPUS_DIRS, _CORPUS_SUBDIRS, LESSON_CORPORA are all hand-maintained, none derived; no test pins equality; drift fails silently.",
+     probe: "grep each of the four corpus-list sources; read the sites", probe_kind: search,
+     observed: "all hand-maintained; drift fails closed (deny) or drops an observability row; unifying is out of the doc's stated scope (S120/F37)",
+     verdict: holds}
+
+structure:
+  axes: [corpus_name, lesson_slug]
+
+  actors:
+    - {id: bind,                frame: leg,         provenance: design}   # the one binding seam (modified: threads roots, requires_corpus)
+    - {id: curator_agent,       frame: leg,         provenance: design}   # the in-process GLM spawn (writes .md, runs bash, reads lessons)
+    - {id: curator_spawn,       frame: leg,         provenance: code}     # CuratorDeps.for_run at curator_engine.py:174 (M9: thin wrapper over bind)
+    - {id: role_census,         frame: composition, provenance: code}     # test_540_exec_seam census iterating AGENTS.values()
+    - {id: policy_cli,          frame: leg,         provenance: code}     # scripts/policy_cli.py operator tool
+    - {id: forward_check,       frame: leg,         provenance: code}     # the curator's forward_check @agent.tool (reads tool_config, gates a write)
+    - {id: author_drain,        frame: composition, provenance: code}     # the drain that fans the four spawn configs serially
+    - {id: operator_entrypoint, frame: leg,         provenance: code}     # the four __main__ CLI entrypoints (incl. benign_actor/env.py)
+
+  boundaries:
+    - {id: CORPUS_AUTHOR_DEF, provenance: design, facets: {}}   # requires_explicit_tree/anchors_on_tree/requires_confine/requires_corpus/deps_cls/write_shapes/bash_shapes
+    - {id: RunScope,          provenance: design, facets: {}}   # grows corpus_name (provisional id, fork f6/F89: a bind INPUT)
+    - {id: AgentDeps,         provenance: design, facets: {}}   # grows roots (f2) + tool_config (f4)
+    - {id: CuratorDeps,       provenance: design, facets: {}}   # the six bare fields collapse: five into tool_config, corpus_dir derived (f1)
+    - {id: ResolvedRoots,     provenance: design, facets: {}}   # retained on deps (M6); grows a spawn-corpus field (f3). corpus_roots is dead code (RG-aP10)
+    - {id: tool_config,       provenance: design, facets: {}}   # the named slot (M4, provisional id): inert-by-default, loud at first use (M5)
+    - {id: ForwardCheckConfig, provenance: design, facets: {}}  # occupies the slot; carries the five non-corpus fields only (F51)
+    - {id: AGENTS,            provenance: code,   facets: {}}    # the role registry
+    - {id: read_confine,      provenance: design, facets: {}}   # requires_confine=(lessons, lessons-actor, lessons-environment) - R4's O6 mechanism
+    - {id: main_checkout,     provenance: code,   facets: {}}   # PATHS.defender_dir - S4's asset (r3, amended: also the run_dir's state root)
+    - {id: run_dir,           provenance: code,   facets: {}}   # <MAIN>/defender/learning/_pending; run_id=='_pending' for all four spawns (r4 amended)
+    - {id: lessons_loaded_jsonl, provenance: code, facets: {}}  # <run_dir>/lessons_loaded.jsonl (f8); L12 asserts on it
+    - {id: sibling_corpus,    provenance: code,   facets: {}}   # a corpus other than the spawn's own (read ALLOW under the confine, write/rm DENY)
+    - id: corpus_name
+      provenance: design
+      facets:
+        domain:
+          type: str
+          refinement: {nl: "the per-spawn corpus name: relative, single-segment (len(Path(name).parts)==1); M7 rejects '', '.', multi-segment, absolute, '..'-bearing; §7 D2 (MD-6) ADDS exact-match membership against the three shipped corpora, so a single-segment NON-shipped name (skills, learning) is now also rejected, and a name whose shape normalises to a non-shipped single segment (./x -> x) is a membership reject too — the ./x member's accept case is exercised on a shipped name (./lessons); a strict char class is the write-vs-read parity tightening (MD-7/D3)"}
+          default: null           # F83 → optional-with-sentinel: corpus_name is an optional RunScope field whose sentinel is None ("no corpus named"). None ≠ '' — M8 owns None (missing name, legible raise for a declaring role; a bare RunScope() non-corpus caller survives), M7 owns '' and every supplied degenerate value (F86). The R0 unknown is CLOSED.
+          distinguished: ["", ".", "a/b", "..", "/etc/passwd", "./x", "skills", "learning"]
+          falsy_valid: false
+          documented_alternatives: []
+    - id: corpus_dir
+      provenance: code            # the existing lesson-corpus resource; its write/read scoping is what the design re-anchors (design-provenance edges)
+      facets:
+        identity:
+          key_axes: [corpus_name, lesson_slug]
+          evidence: {nl: "one flat <corpus>/<slug>.md per lesson - read off the three prompts ('one flat corpus, no subdirectories') and build_write_allow(corpus_dir, suffix='.md') whose tail is /[^\\x00]*\\.md (brief r1). Two of the four spawn configs (author_actor_benign, author_actor_env) both write corpus_name=lessons-environment (f9/F40), so corpus_name is a full-key axis, not a spawn identifier"}
+          sharing: unique-key
+        access:
+          constraints_by_via:
+            write-tool:    {trust: attacker-influenced, constraints: [confine]}   # write_file -> decide_write, resolved-path fullmatch vs <corpus>/**.md
+            edit-tool:     {trust: attacker-influenced, constraints: [confine]}   # edit_file -> decide_read THEN decide_write (f5); read gate means O6 narrows edits too
+            bash-rm:       {trust: attacker-influenced, constraints: [confine]}   # the rm grant (pins_path, no scope) - DOES NOT resolve() today (RG-adv4/MD-3)
+            forward-check: {trust: attacker-influenced, constraints: [confine]}   # _gate_lesson_path -> decide_write with no content (x4/K3, unchanged by O6)
+            lesson-read:   {trust: attacker-influenced, constraints: [confine]}   # decide_read - spans the three-corpus confine (siblings ALLOW), docs/SKILL DENY
+            bash-cat:      {trust: attacker-influenced, constraints: [confine]}   # decide_bash cat scope - own corpus only (sibling DENY): the deliberate divergence from lesson-read
+
+  interacts:
+    - {from: bind, to: CORPUS_AUTHOR_DEF, mode: read,   via: api, provenance: design}
+    - {from: bind, to: RunScope,          mode: read,   via: api, provenance: design}
+    - {from: bind, to: corpus_name,       mode: read,   via: api, provenance: design}   # R4: read of a domain-facet boundary
+    - {from: bind, to: ResolvedRoots,     mode: invoke, via: api, provenance: design}   # compiles + retains the roots (M6)
+    - {from: bind, to: CuratorDeps,       mode: invoke, via: api, provenance: design}   # constructs the policy-correct deps, slot unset (M5)
+    - {from: curator_agent, to: corpus_dir, mode: write,  via: write-tool,   provenance: design, interpolates: [corpus_name, lesson_slug]}
+    - {from: curator_agent, to: corpus_dir, mode: write,  via: edit-tool,    provenance: design, interpolates: [corpus_name, lesson_slug]}
+    - {from: curator_agent, to: corpus_dir, mode: remove, via: bash-rm,      provenance: design, interpolates: [corpus_name, lesson_slug]}
+    - {from: curator_agent, to: corpus_dir, mode: read,   via: lesson-read,  provenance: design}
+    - {from: curator_agent, to: corpus_dir, mode: read,   via: bash-cat,     provenance: design}
+    - {from: forward_check, to: corpus_dir, mode: write,  via: forward-check, provenance: code}   # the fourth write-capable lane (unchanged by O6, in the census)
+    - {from: curator_agent, to: sibling_corpus, mode: read,  via: lesson-read, provenance: design}   # cross-corpus read ALLOW under the confine (L8/L12)
+    - {from: curator_agent, to: sibling_corpus, mode: write, via: write-tool, provenance: design}   # DENY (S1)
+    - {from: curator_agent, to: run_dir,    mode: write, via: write-tool, provenance: design}       # DENY (the regression the done-criterion names)
+    - {from: curator_agent, to: run_dir,    mode: read,  via: lesson-read, provenance: design}      # own run dir stays ALLOW under R4
+    - {from: curator_agent, to: main_checkout, mode: write, via: write-tool, provenance: design}    # DENY (S4)
+    - {from: curator_agent, to: lessons_loaded_jsonl, mode: write, via: fs, provenance: code}       # _record_lesson_load, fires only after decide_read allows (RG-PO1)
+    - {from: forward_check, to: tool_config, mode: read, via: api, provenance: design}
+    - {from: role_census,   to: AGENTS,      mode: read, via: api, provenance: code}
+
+  drives:
+    - {from: role_census,         to: bind,          provenance: design, multiplicity: serial}
+    - {from: policy_cli,          to: bind,          provenance: design, multiplicity: serial}
+    - {from: curator_spawn,       to: bind,          provenance: design, multiplicity: serial}
+    - {from: operator_entrypoint, to: bind,          provenance: design, multiplicity: serial}
+    - {from: author_drain,        to: curator_agent, provenance: code,   multiplicity: serial}   # fans the four spawn configs; two into lessons-environment (R2)
+
+gate:
+  evaluated:
+    - {rule: R0, fired: true}    # mechanical: one uncited invariant (corpus_name.domain.default); bidirectional prose
+                                 # reconciliation (judgment half) run — no phantom design sentence, no untraced delta
+                                 # element found beyond the tracked forks (F40/F30/f7 already carried in handoff)
+    - {rule: R1, fired: false}   # clean: no payload-facet boundary exists anywhere in this graph (an access-scoping
+                                 # spec, not a content/prompt-splice one) — same reason R1 prints zero hits under --residue
+    - {rule: R2, fired: true}
+    - {rule: R3, fired: true}
+    - {rule: R4, fired: true}
+    - {rule: R5, fired: true, cites: [RG-1, RG-adv4]}   # judgment extension considered: MD-1/MD-3 are exactly the
+                                 # tightening/safe-by-construction shape (a name the old surface silently served is
+                                 # now a denied writer, and a lane that silently defeated containment now must resolve()
+                                 # + recheck) — both already encoded as form:test demands, not merely believed
+    - {rule: R6, fired: true, cites: [x6]}   # judgment trust walk run over every rendered sink corpus_name/lesson_slug
+                                 # reach (compiled write/read/rm patterns, bash argv) — mostly pre-discharged; one open
+                                 # finding (the write-lane's permissive filename tail vs the read-lane, x6) routes to
+                                 # the existing f7/F77 fork, already labelled R6 in handoff.forks
+
+  obligations: []   # every mechanical hit below either already has a discharging test (pre_discharged) or is a
+                     # decision the human must make before a test can be written (holes) — the assembler's reground
+                     # mints (MD-1..MD-6) already cover every fresh test this delta owes
+
+  holes:
+    - {rule: R0, element: corpus_name.domain.default,
+       resolution: "F83 — CLOSED at §7 to optional-with-sentinel: corpus_name is an OPTIONAL RunScope
+         field defaulting to the None sentinel ('no corpus named'), preserving every bare RunScope()
+         caller (c19/g19: three exist). The graph's lone `unknown` is now a decided value
+         (corpus_name.domain.default = null). None ≠ '' — M8 owns None (a declaring role with no name
+         raises legibly), M7 owns '' and every supplied degenerate value (F86).",
+       resolved_to: corpus_name_supplied_to_a_non_declaring_role, cites: [c19, g19]}
+    - {rule: R2, element: corpus_dir.identity,
+       resolution: "F40 — §7 D4 PINNED the observable (concurrent same-corpus spawns must not corrupt
+         the shared _pending sink; a deterministic single-writer-lock demand preferred). Key coverage is
+         not the gap — both writer edges interpolate [corpus_name, lesson_slug], spanning the rule's axes.
+         The uniqueness/ordering demand at the composition frame (author_drain) COULD NOT be authored
+         deterministically: no executed claim establishes a lock or interleaving on _pending, so a probe
+         is requested (MD-10, form:clause) rather than a flaky timing test invented (author charge). See
+         80-author-digest.md ## Red flags.",
+       resolved_to: md10_concurrent_same_corpus_spawns_probe_request, cites: [RG-aP10]}
+    - {rule: R4, element: "corpus_name.domain.distinguished[skills]",
+       resolution: "F30/MD-6 — §7 D2 DECIDED to ADD the exact-match membership rule (reject any name not
+         exactly in the three shipped corpora). `corpus_name_owns_a_non_lesson_directory` is now a
+         form:test pinning the rejection of `skills` at bind (F30/P64/P109/F108 closed together).",
+       resolved_to: corpus_name_owns_a_non_lesson_directory}
+    - {rule: R4, element: "corpus_name.domain.distinguished[learning]",
+       resolution: "Same decision as [skills] (F30/MD-6, §7 D2) — sharper impact: `learning` roots the
+         write scope over defender/learning/_pending, a production state directory, not merely another
+         lesson-shaped corpus; the membership rule rejects it at bind.",
+       resolved_to: corpus_name_owns_a_non_lesson_directory}
+    - {rule: R6, element: "corpus_dir.access[write-tool]",
+       resolution: "f7/F77 — the write lane's filename tail ([^\\x00]*\\.md) admits a newline/arbitrary-byte
+         lesson filename the read lane then denies (x6: 'x\\ny.md' write=True read=False). §7 D3 DECIDED
+         the direction: NARROW the write lane to the read segment class ([\\w.@=+-]+), via one shared
+         derivation, foreclosing the frame-injection channel. The parity demand
+         (write_lane_and_read_lane_admit_same_names) pins that the two lanes admit exactly the same names;
+         its test pins the correction (write REFUSES a name outside the read class — not the refuted x6
+         write=True behavior).",
+       resolved_to: write_lane_and_read_lane_admit_same_names, cites: [x6]}
+
+  pre_discharged:
+    - {rule: R3, element: "corpus_dir.access[write-tool]", by: md1_non_shipped_name_write_denied_by_confine,
+       edge: "interacts(curator_agent->corpus_dir via write-tool)", cites: [RG-1]}
+    - {rule: R3, element: "corpus_dir.access[edit-tool]", by: md3_four_write_lanes_deny_a_symlink_out_of_corpus,
+       edge: "interacts(curator_agent->corpus_dir via edit-tool)", cites: [RG-adv4]}
+    - {rule: R3, element: "corpus_dir.access[bash-rm]", by: rm_lane_scoped_to_same_corpus_as_write,
+       edge: "interacts(curator_agent->corpus_dir via bash-rm)", cites: [c16, g9]}
+    - {rule: R3, element: "corpus_dir.access[forward-check]", by: md3_four_write_lanes_deny_a_symlink_out_of_corpus,
+       edge: "interacts(forward_check->corpus_dir via forward-check)", cites: [RG-adv4, x4]}
+    - {rule: R3, element: "corpus_dir.access[lesson-read]", by: read_view_three_corpora_shell_stays_one,
+       edge: "interacts(curator_agent->corpus_dir via lesson-read)", cites: [x2, g12]}
+    - {rule: R3, element: "corpus_dir.access[bash-cat]", by: committed_read_vs_shell_reachability_diff,
+       edge: "interacts(curator_agent->corpus_dir via bash-cat)", cites: [x2, g12]}
+
+    - {rule: R4, element: "corpus_name.domain.distinguished[]", by: corpus_name_is_the_empty_string,
+       edge: "interacts(bind->corpus_name)", cites: [g14, g23]}
+    - {rule: R4, element: "corpus_name.domain.distinguished[.]", by: corpus_name_is_a_single_dot,
+       edge: "interacts(bind->corpus_name)", cites: [g14]}
+    - {rule: R4, element: "corpus_name.domain.distinguished[a/b]", by: corpus_name_has_two_segments,
+       edge: "interacts(bind->corpus_name)", cites: [c16, x7]}
+    - {rule: R4, element: "corpus_name.domain.distinguished[/etc/passwd]", by: corpus_name_is_an_absolute_path,
+       edge: "interacts(bind->corpus_name)", cites: [c14, x7]}
+    - {rule: R4, element: "corpus_name.domain.distinguished[..]", by: corpus_name_contains_parent_segments,
+       edge: "interacts(bind->corpus_name)", cites: [c14, x7]}
+    - {rule: R4, element: "corpus_name.domain.distinguished[./x]", by: corpus_name_leading_dot_slash_normalises,
+       edge: "interacts(bind->corpus_name)", cites: [c14, x7]}
+
+    - {rule: R5, element: corpus_dir, by: drain_still_authors_after_entrypoints_break,
+       edge: "drives(author_drain->curator_agent)", cites: [c5]}
+    - {rule: R5, element: corpus_dir, by: forward_check_gate_after_read_widens,
+       edge: "interacts(forward_check->corpus_dir)", cites: [x4]}
+
+    - {rule: R6, element: "corpus_dir.access[bash-rm]", by: md4_rm_grant_matches_shell_tokenized_argv,
+       edge: "interacts(curator_agent->corpus_dir via bash-rm)", cites: [RG-adv3]}
+    - {rule: R6, element: "corpus_dir.access[bash-rm]", by: rm_under_a_degenerate_empty_or_dot_name,
+       edge: "interacts(curator_agent->corpus_dir via bash-rm)", cites: [RG-adv1]}
+    - {rule: R6, element: "corpus_dir.access[write-tool]", by: standing_prohibition_whole_tree_scope,
+       edge: "interacts(curator_agent->corpus_dir via write-tool)", cites: [RG-adv5, g23]}
+
+handoff:
+  # §7 RESOLVED STATE (70-resolutions.md). A COLD write-code-from-spec reads THIS block first: every
+  # fork below carries its §7 resolution, not an open human question.
+  scope_expansion: "#691's scope GREW by human choice at §7 D4: beyond 'make the curator bindable', ALL
+    FOUR Q4 findings were pinned (MD-3, MD-8, MD-9, MD-10), not just the recommended rm-lane fix. Flagged
+    for implementer + reviewer."
+  decisions:
+    - "D1 (F18/F20/F64, RG-1) RESOLVED -> MD-1: REFUSE AT BIND a curator whose compiled write scope roots
+       OUTSIDE its read confine (safe-by-construction — a scope that cannot author is unbuildable). STRUCK
+       R4's 'write byte-identical to today' clause. MD-1 discharged by the ISOLATING witness (a SHIPPED
+       name bound with a read_confine that EXCLUDES it) — independent of MD-6's membership rule."
+    - "D2 (F30/P64/P109, F108) RESOLVED -> MD-6: ADD an exact-match membership rule rejecting any corpus
+       name not exactly in {lessons, lessons-actor, lessons-environment} at bind; the def declares no
+       corpus_dirs (RG-PO5) so it matches the three shipped names directly. Closes F108 homoglyphs as a
+       side effect (a homoglyph is not an exact match)."
+    - "D3 (f7/F77/F6/F111) RESOLVED -> MD-7: NARROW the write lane to the read segment class [\\w.@=+-]+
+       via ONE shared derivation, so write and read lanes admit exactly the same lesson filenames;
+       forecloses the [^\\x00]* newline frame-injection channel (x6)."
+    - "D4 (Q4) RESOLVED -> ALL FOUR pinned: MD-3 (rm resolve()+recheck containment; the four write-capable
+       lanes agree on a crafted operand), MD-8 (F11 verifier ⊄ MAIN checkout), MD-9 (F37/S120 audit
+       derivation agrees with the write-lane gate), MD-10 (F40 concurrency probe-request)."
+  mechanism_open: "The author pinned the OBSERVABLE and left the MECHANISM to the implementer for: MD-8
+    (requires_explicit_tree on VERIFY_DEF vs thread the curator's tree — engine.py:59 binds VERIFY_DEF
+    with no tree today, falling back to PATHS.defender_dir); MD-9 (unify the four hand-maintained corpus
+    lists _CORPUS_DIRS/_CORPUS_SUBDIRS/LESSON_CORPORA vs reconcile the audit ClassVar prefix); MD-7 (the
+    single shared corpus/filename derivation the two lanes share)."
+  probe_request: "MD-10 (F40) is a form:clause carrying a PROBE REQUEST, NOT an authored test: no executed
+    claim establishes whether the shared <MAIN>/defender/learning/_pending sink is lock-serialized or
+    interleaved. write-code-from-spec/the human must RUN the concurrency probe FIRST (two concurrent
+    same-corpus drains against one _pending, observe whether the sink is lock-guarded), THEN minute a
+    deterministic single-writer-lock demand (preferred) or a genuine-interleaving demand — do NOT ship a
+    timing test."
+  forks:
+    - "f1 (d0) - is deps.corpus_dir a derived property over the retained ResolvedRoots or a threaded field? Provisional: derived (M6 says the retained roots are what make it derivable; a field leaves c9's TypeError). Structure-spelling fork; write-code-from-spec reconciles the code's name (the name is the join key)."
+    - "f2 (deps_retains_the_compiled_resolved_roots) - what is the retained-roots field on AgentDeps called? The name is the join key. Provisional: AgentDeps.roots, kw_only no default. Structure-spelling fork; write-code-from-spec reconciles."
+    - "f3 (the_spawn_corpus_is_found_by_name) - does ResolvedRoots grow the corpus NAMES or a dedicated spawn-corpus field? ResolvedRoots carries only resolved corpus_roots paths today (dead code, RG-aP10). Provisional: a dedicated spawn-corpus field. Structure-spelling fork; write-code-from-spec reconciles."
+    - "f4 (agent_deps_has_a_named_tool_config_slot) - the slot's name and base type (runtime-side Protocol vs opaque field). Provisional: AgentDeps.tool_config, a runtime-side Protocol with an inert default. F50 confirms retryable inert-then-loud (M5)."
+    - "f6/F89 - RESOLVED (§7): the corpus name arrives as a bind INPUT (the corpus-scoped policy exists when bind returns), not a post-hoc bind-then-replace."
+    - "f7/F77 - RESOLVED (§7 D3 -> MD-7): NARROW the write lane to the read class [\\w.@=+-]+ (not widen read_allow) via one shared derivation; the parity demand pins agreement, forecloses the newline frame-injection channel (R6)."
+    - "F18/F20 [CORRECTNESS, RG-1] - RESOLVED (§7 D1 -> MD-1): refuse AT BIND a write scope rooting outside its own read confine (unbuildable), NOT the silent runtime denial. R4's 'write byte-identical' clause is STRUCK."
+    - "F30/P64/P109 [MD-6] - RESOLVED (§7 D2 -> MD-6): ADD the exact-match membership rule against the three shipped corpora, rejecting skills/learning (learning would root the write scope over the state tree) at bind."
+    - "F104/F111 [CORRECTNESS, RG-adv4] - RESOLVED (§7 D4 -> MD-3): the four write-capable lanes must agree; the rm grant (the one that never resolve()s) resolve()s+rechecks containment via a single shared membership derivation."
+    - "F37/P33/S120 - RESOLVED (§7 D4 -> MD-9): the audit ClassVar prefix (verify_agent_state->changes_outside) must AGREE with the write-lane gate for every accepted name. OBSERVABLE pinned; unify-lists vs reconcile-prefix is the implementer's (mechanism_open)."
+    - "F40/F41/F96 - RESOLVED (§7 D4 -> MD-10, probe-request): author_actor_benign and author_actor_env both author lessons-environment; all spawns share one _pending sink. Concurrent same-corpus spawns must not corrupt it — deterministic single-writer-lock demand preferred, but a probe must execute first (probe_request)."
+    - "F50 - RESOLVED (§7): forward_check advertised with an unset slot raises a RETRYABLE ModelRetry naming the slot (inert-then-loud, M5), not a fatal abort."
+    - "F51 - RESOLVED (§7, clause): ForwardCheckConfig carries NO corpus; the check reads deps.corpus_dir only (c3's separate-corpus reading refuted)."
+    - "F52 - RESOLVED (§7, clause): parametrize the deny reason per-role so the curator's first read refusal names its OWN scope, not MAIN's hardcoded prose (permission/files.py:190-194)."
+    - "F83 - RESOLVED (§7): corpus_name is optional-with-sentinel (None) — preserves every bare RunScope() caller; the corpus_name.domain.default=unknown R0 hole is CLOSED (default=null)."
+    - "F11 - RESOLVED (§7 D4 -> MD-8): the forward_check verifier (bind(VERIFY_DEF, ...) at engine.py:59, no tree, falls back to the MAIN checkout) must not reach the MAIN checkout. OBSERVABLE pinned; requires_explicit_tree-on-VERIFY_DEF vs thread-the-curator's-tree is the implementer's (mechanism_open)."
+    - "F107 - DEFERRED to follow-up (§7, not pinned in #691): edit_file TOCTOU (filesystem entry swapped between decide_read and decide_write); adjacent to MD-3 but a distinct lane. Human may pull it in at PR review."
+    - "F108 - RESOLVED (§7 D2, side effect of MD-6): a Unicode homoglyph corpus name is not an exact match of the three shipped names, so MD-6's exact-match membership rejects it; any canonicalization beyond membership is out of scope."
+    - "R2 shared-sink (corpus_dir.identity) - RESOLVED (§7 D4 -> MD-10): two curator_agent invocations write lessons-environment in one batch sharing one _pending sink; routed to MD-10's probe-request (probe_request), not an authored uniqueness test."
+  refuted:
+    - "O6/M2 as originally worded (own-corpus read_allow) refuted: #559's committed cross-corpus lesson_read (L8/L9/L12/L12b/L12c) is deliberate (g12/x2/x3). R4 supersedes: read_allow stays EMPTY, requires_confine=(three corpora) narrows the roots half; siblings stay ALLOW, docs/SKILL DENY, own run dir ALLOW."
+    - "c17/g10 (M2 narrows read_allow to the corpus shape) refuted by R4 - read_allow is untouched, the confine carries the narrowing on the roots half."
+    - "c20's runtime-safety CONCLUSION refuted (the suite pins the cross-corpus reads); its prompt-level claim (x1) holds."
+    - "RG-1 refutes R4's 'write byte-identical to today' clause for every non-shipped M7-admitted name (write DENY by the containment half)."
+    - "RG-adv4 refutes 'all four write lanes refuse a symlink out of corpus' - the rm grant deletes; c16/g9 live."
+    - "P84/RG-PO5 refutes 'by-name lookup raises KeyError' - pure path arithmetic. P102/P103/RG-adv3 refutes the rm shell-smuggling readings - the tokenizer, not the gate level, denies."
+  deferred:
+    - "c20/g24 - the execution-context census: spec-graph trace drivers cannot census this change at spec time (no production diff at a7481659); DEFERRED to write-code-from-spec §3's `spec-graph actors` run, which does it once the code exists."
+    - "M7/M8 are target-behavior (demand #0): they do not exist at base and CuratorDeps.for_run bypasses bind (RG-PO6). Phase D binds no coverage node to an M7/M8 raise as an already-true property; write-code-from-spec builds them and probes the uniform-propagation (F117) + stable-order (F85/F13) properties then."
+  drops:
+    - "P72 - forward_check with an empty queued_ids: pre-existing tool behaviour, M4 relocates the five fields without changing semantics. No demand (recorded no)."
+    - "P73 - forward_check with a duplicate id in queued_ids: same as P72; dedup/double-processing is existing behaviour. No demand."
+    - "P81 - build_stage_agent asked for a role absent from AGENTS: the AGENTS[role] lookup (g20) is pre-existing and unmodified; a miss raises KeyError as today. No demand."
+    - "d8 (single-segment) folded into the per-member corpus_name.domain demands. d19/d20 (own-corpus reads / L12 retirement) DROPPED as originally framed - superseded by R4 (cross-corpus reads KEPT); re-expressed as the read_confine demands + the cross_corpus_reads_allowed regression."
+  nullstub_passes:
+    - "test_importing_runtime_does_not_import_the_learning_stages - structure: a module-coupling invariant (runtime/ never imports learning/) driven via a fresh subprocess; orthogonal to the bind-by-name mechanism under test, so it stays green against real HEAD and against every null-stub variant tried alike. Legitimate."
+    - "test_the_generic_bind_callers_survive_the_corpus_requirement - structure: a deliberately weak 'still binds, does not raise' smoke check for a non-corpus role (GATHER) driven through a bare RunScope(); its stronger sibling (test_a_corpus_name_is_supplied_to_a_role_that_declares_no_corpus) carries the exact-equality pin. Legitimate, paired with the stronger check."
+    - "test_binding_the_same_spawn_twice / test_bind_is_idempotent_across_a_retried_spawn - REPAIRED, not recorded as accepted: both asserted only cross-call EQUALITY (a == b == c), which a null/degenerate stub trivially satisfies (nothing equals nothing). Added a non-degeneracy assertion (assert first.policy.write_allow) before each equality chain so the comparison cannot be satisfied by two vacuous values; verified red-for-the-original-reason at real HEAD and newly-discriminating against a manual null-stub simulation (spec-graph nullstub itself cannot run here - see Red flags)."
+  deviations:
+    - "The lesson corpora are not declared under specGraph.resources (d1), so r1 was censused by hand, not by spec-graph trace resource; the profile is configuration outside this worktree."
+    - "corpus_name.domain.default is unknown (F83): the required-vs-optional API shape is undecided - an R0 hole, routed to section 7, not a silent null."
