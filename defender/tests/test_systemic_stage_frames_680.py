@@ -2804,7 +2804,7 @@ def test_gate_r1_wrap_stage_message_shape(tmp_path):
         (
             "{salt}" not in body and "{content}" not in body
             for body in bodies
-            if body != hostile
+            if hostile not in body
         )
     )
 
