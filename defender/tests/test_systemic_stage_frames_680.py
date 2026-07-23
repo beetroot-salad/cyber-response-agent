@@ -353,66 +353,60 @@ def _curator_prompt(
     )
 
 
-def _capture_spawn(monkeypatch, target, call, *, salt: str):
-    from defender.learning.leads import lead_author_engine
-
+def _capture_spawn(call, *, salt: str):
     captured = {}
 
     def fake(**kwargs):
         captured.update(kwargs)
         return 0
 
-    if "spawn" in inspect.signature(call).parameters:
-        call(spawn=fake, salt=salt)
-    else:
-        monkeypatch.setattr(  # lint-monkeypatch: ok — pins the missing production DI seam
-            lead_author_engine, "run_author_stage", fake
-        )
-        call()
-    return captured["user_prompt"]
+    call(spawn=fake, salt=salt)
+    return captured["user_prompt"], captured["salt"]
 
 
 def _lead_author_prompt(
-    tmp_path: Path, monkeypatch, *, hostile="HANDOFF-BODY", salt="5a" * 16
+    tmp_path: Path, _monkeypatch, *, hostile="HANDOFF-BODY", salt="5a" * 16
 ):
     run = tmp_path / "run"
     run.mkdir(parents=True)
 
-    def call(**seams):
+    def call(*, spawn, salt):
         return lead_author.invoke_agent(
             run,
             [{"goal": hostile}],
             repo_root=tmp_path,
-            **seams,
+            spawn=spawn,
+            salt=salt,
         )
 
-    prompt = _capture_spawn(monkeypatch, lead_author, call, salt=salt)
+    prompt, actual_salt = _capture_spawn(call, salt=salt)
     return PromptObservation(
         "lead_author.invoke_agent",
         prompt,
         ("reader_contract", "lead_author_context", "handoffs", "pending_system_drafts"),
         (hostile,),
-        salt,
+        actual_salt,
     )
 
 
 def _pitfalls_prompt(
-    tmp_path: Path, monkeypatch, *, hostile="PITFALL-BODY", salt="5a" * 16
+    tmp_path: Path, _monkeypatch, *, hostile="PITFALL-BODY", salt="5a" * 16
 ):
-    def call(**seams):
+    def call(*, spawn, salt):
         return pitfalls_curator._invoke_pitfalls_agent(
             [{"system": "test", "stderr_digest": hostile}],
             repo_root=tmp_path,
-            **seams,
+            spawn=spawn,
+            salt=salt,
         )
 
-    prompt = _capture_spawn(monkeypatch, pitfalls_curator, call, salt=salt)
+    prompt, actual_salt = _capture_spawn(call, salt=salt)
     return PromptObservation(
         "_invoke_pitfalls_agent",
         prompt,
         ("reader_contract", "pitfalls_context", "pitfalls_handoffs"),
         (hostile,),
-        salt,
+        actual_salt,
     )
 
 
