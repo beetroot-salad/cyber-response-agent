@@ -14,9 +14,11 @@ red, at run time, not at collection.
 from __future__ import annotations
 
 import asyncio
+import os
 import subprocess
 import sys
 from dataclasses import fields, replace
+from pathlib import Path
 
 import pytest
 
@@ -229,7 +231,13 @@ def test_importing_runtime_does_not_import_the_learning_stages():
         "leaked = [m for m in sys.modules if m.startswith('defender.learning.author')]; "
         "assert not leaked, leaked"
     )
-    r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    # repo root is 2 parents up from this test file (<repo_root>/defender/tests/...) — set
+    # PYTHONPATH explicitly for the fresh interpreter rather than relying on the invoker's
+    # ambient env (pytest's own `pythonpath = [".."]` ini setting resolves `import defender`
+    # for THIS process; a bare subprocess.run([sys.executable, "-c", ...]) does not inherit it).
+    repo_root = Path(__file__).resolve().parents[2]
+    env = {**os.environ, "PYTHONPATH": str(repo_root)}
+    r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=env)
     assert r.returncode == 0, r.stderr
 
 
