@@ -1668,10 +1668,10 @@ def test_d6_every_stage_boundary_grammar_uses_wrap(tmp_path, monkeypatch):
     assert [row[0] for row in actual] == [o.expected_tags for o in observations]
     assert all((any((hostile in body for body in row[1])) for row in actual))
     producer_files = {
-        "judge/run.py",
-        "malicious_actor/run.py",
-        "benign_actor/run.py",
-        "oracle/sample.py",
+        "pipeline/judge/run.py",
+        "pipeline/malicious_actor/run.py",
+        "pipeline/benign_actor/run.py",
+        "pipeline/oracle/sample.py",
         "author/verify_forward/checks.py",
         "author/shared.py",
         "leads/lead_author.py",
