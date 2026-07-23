@@ -551,6 +551,7 @@ demands:
   - {id: premise_closed_ticket_lazy_relocation, kind: survival, form: test, binds: [defender._untrusted], discharged_by: test_judge_registers_closed_ticket_tools_after_the_wrap_helper_moves}
   - {id: premise_closed_ticket_failure_relocation, kind: survival, form: test, binds: [defender._untrusted, learning_tool_output.payload], discharged_by: test_judge_closed_ticket_dependency_reports_a_failure_after_wrap_relocation}
   - {id: premise_first_stage_import_relocation, kind: survival, form: test, binds: [defender._untrusted, stage_user_message.payload], discharged_by: test_stage_imports_the_relocated_shared_frame_on_its_first_invocation}
+  - {id: premise_harness_lead_relocated_frame_dependency, kind: survival, form: test, binds: [harness_lead, defender._untrusted, "drives(harness_lead->lead_author.invoke_agent)"], discharged_by: test_lead_author_harness_materializes_relocated_frame_dependency}
   - {id: premise_parallel_retry_fresh_identity, kind: uniqueness, form: test, binds: [stage_salt.identity, AgentDeps, run_stage], discharged_by: test_parallel_oracle_leads_overlap_while_one_invocation_is_retried}
   - {id: premise_failed_attempt_trace_identity, kind: survival, form: test, binds: [stage_salt.identity, AgentDeps, run_stage], discharged_by: test_failed_stage_attempt_leaves_a_salted_trace_before_the_same_work_is_retried}
   - {id: premise_multiturn_one_identity, kind: behavior, form: test, binds: [stage_salt.identity, AgentDeps, run_stage], discharged_by: test_stage_makes_multiple_model_and_tool_turns_before_completing}
@@ -607,6 +608,7 @@ structure:
     - {id: build_curator_user_prompt, frame: composition, provenance: code}
     - {id: lead_author.invoke_agent, frame: composition, provenance: code}
     - {id: _invoke_pitfalls_agent, frame: composition, provenance: code}
+    - {id: harness_lead, frame: composition, provenance: code}
     - {id: lint_stage_prompt_frames, frame: leg, provenance: design}
     - {id: run_stage, frame: composition, provenance: code}
     - {id: _tool_read_file, frame: leg, provenance: code}
@@ -782,6 +784,7 @@ structure:
     - {from: build_curator_user_prompt, to: wrap, provenance: design, multiplicity: serial}
     - {from: lead_author.invoke_agent, to: wrap, provenance: design, multiplicity: serial}
     - {from: _invoke_pitfalls_agent, to: wrap, provenance: design, multiplicity: serial}
+    - {from: harness_lead, to: lead_author.invoke_agent, provenance: code, multiplicity: serial}
     - {from: _tool_read_file, to: _bound_and_wrap, provenance: code, multiplicity: serial}
     - {from: _tool_lesson_read, to: _bound_and_wrap, provenance: code, multiplicity: serial}
     - {from: _bound_and_wrap, to: is_untrusted_read, provenance: code, multiplicity: serial}

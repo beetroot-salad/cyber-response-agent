@@ -1065,6 +1065,54 @@ def test_stage_imports_the_relocated_shared_frame_on_its_first_invocation(tmp_pa
     assert all(not gap.strip() for gap in gaps)
 
 
+def test_lead_author_harness_materializes_relocated_frame_dependency(tmp_path):
+    """The real lead-author eval harness copies the shared frame module into its relocated tree, whose script imports and starts there."""
+    import os
+    import subprocess
+    import sys
+
+    evals_dir = DEFENDER / "evals"
+    spec = importlib.util.spec_from_file_location(
+        "issue_680_harness_lead", evals_dir / "harness_lead.py"
+    )
+    assert spec is not None and spec.loader is not None
+    harness = importlib.util.module_from_spec(spec)
+    sys.path.insert(0, str(evals_dir))
+    try:
+        spec.loader.exec_module(harness)
+    finally:
+        sys.path.remove(str(evals_dir))
+
+    scenario = (
+        evals_dir
+        / "scenarios_lead"
+        / "underfold-sshd-narrowing"
+    )
+    tree = tmp_path / "relocated"
+    run_dir = harness.materialize(scenario, tree)
+    shared_frame = tree / "defender" / "_untrusted.py"
+    assert shared_frame.read_bytes() == (DEFENDER / "_untrusted.py").read_bytes()
+
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(tree)
+    assert run_dir.is_dir()
+
+    probe = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import defender._untrusted as module; print(module.__file__)",
+        ],
+        cwd=tree,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=True,
+    )
+    assert Path(probe.stdout.strip()).resolve() == shared_frame.resolve()
+
+
 def test_parallel_oracle_leads_overlap_while_one_invocation_is_retried(tmp_path):
     """Two actual run_stage attempts overlap; the failed one is caller-retried and all three model-bound attempts carry distinct real identities."""
     from concurrent.futures import ThreadPoolExecutor

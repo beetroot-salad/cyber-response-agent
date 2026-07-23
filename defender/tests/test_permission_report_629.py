@@ -43,9 +43,9 @@ import pytest
 import yaml
 
 from defender._frontmatter import parse_frontmatter_or_none, split_frontmatter
+from defender._untrusted import wrap
 from defender.evals.held_out import predicted_disposition
 from defender.learning.core.validate import RunUnprocessable, normalize_disposition
-from defender.learning.pipeline._prompt import _section
 from defender.runtime import permission
 from defender.scripts.case_history.case_ticket import CaseTicketError, read_case_record
 
@@ -564,7 +564,7 @@ def test_report_body_encodes_high_entropy_payload_within_bound(env):
     payload = os.urandom(2000).hex()  # high-entropy, in-bound
     text = report(body=payload + "\n")
     assert env.decide("report.md", text).allow is True
-    assert payload in _section("report", split_frontmatter(text)[2])  # rides unescaped
+    assert payload in wrap(split_frontmatter(text)[2], "report", "00" * 16)
 
 
 def test_report_frontmatter_extraneous_key_rides_to_judge_verbatim(env):
