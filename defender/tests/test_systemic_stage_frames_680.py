@@ -1544,7 +1544,12 @@ def _drive_learning_bash(
 
 
 def _python_sources() -> list[Path]:
-    return [p for p in DEFENDER.rglob("*.py") if ".venv" not in p.parts]
+    return [
+        p
+        for p in DEFENDER.rglob("*.py")
+        if ".venv" not in p.parts
+        and "tests" not in p.relative_to(DEFENDER).parts
+    ]
 
 
 def test_d0_wrap_returns_exact_salted_frame():
