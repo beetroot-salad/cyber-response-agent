@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import ClassVar, Protocol
 
+from defender._run_id import RUN_ID_ALLOWED, is_valid_run_id
 from defender.runtime import bash_exec
 
 
@@ -242,16 +243,9 @@ _NAME_PREFIX = "defender-run-"
 
 
 def container_name(run_id: str) -> str:
-    ok = (
-        bool(run_id)
-        and run_id.isascii()
-        and run_id[0].isalnum()
-        and all(c.isalnum() or c in "_.-" for c in run_id)
-    )
-    if not ok:
+    if not is_valid_run_id(run_id):
         raise ValueError(
-            f"run id {run_id!r} cannot name a container (allowed: ASCII alphanumerics, "
-            "'_', '.', '-', starting alphanumeric)"
+            f"run id {run_id!r} cannot name a container (allowed: {RUN_ID_ALLOWED})"
         )
     return f"{_NAME_PREFIX}{run_id}"
 
