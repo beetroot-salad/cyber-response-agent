@@ -1008,10 +1008,14 @@ def test_hostile_run_id_fails_rather_than_splitting_the_bind_spec(tmp_path, monk
     alert = fixture / "evil:x:ro,y --privileged.json"
     alert.write_text('{"id": "a"}\n', encoding="utf-8")
 
-    run, _salt = run_common.materialize_run_dir(alert, None)
-    assert ":" in run.name, "the mint did not carry the hostile stem through"
-    assert " " in run.name, "the mint did not carry the hostile stem through"
+    with pytest.raises(SystemExit, match="invalid run id"):
+        run_common.materialize_run_dir(alert, None)
+    assert list(runs_base.iterdir()) == [], (
+        "the hostile id created run artifacts before it was refused"
+    )
 
+    run = runs_base / "evil:x:ro,y --privileged"
+    run.mkdir()
     with pytest.raises((BoxFault, ValueError)) as e:
         container_name(run.name)
     assert type(e.value).__name__ in ("BoxFault", "ValueError")
