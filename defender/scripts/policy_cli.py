@@ -52,12 +52,6 @@ def _scope_for(role: AgentRole, defender_dir: Path) -> RunScope:
 
 
 def _policy(defn: AgentDefinition, run_dir: Path, defender_dir: Path) -> AgentPolicy:
-    if not defn.bindable:
-        raise SystemExit(
-            f"{defn.role.name.lower()} builds its policy per-spawn from a worktree corpus dir "
-            "(bindable=False) — there is nothing to compile from a run dir alone. Read "
-            "learning/author/curator_engine._corpus_author_policy."
-        )
     return compile_policy_for(
         defn, run_dir, scope=_scope_for(defn.role, defender_dir), defender_dir=defender_dir,
     )

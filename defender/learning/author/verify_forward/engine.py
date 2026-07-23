@@ -35,6 +35,7 @@ class VerifierDeps(AgentDeps):
 
 VERIFY_DEF = AgentDefinition(
     anchors_on_tree=True,
+    requires_explicit_tree=True,
     role=AgentRole.VERIFIER,
     model=lambda: VERIFIER_MODEL,
     effort=VERIFIER_EFFORT,
@@ -53,10 +54,11 @@ def _run_verify_pydantic(  # noqa: PLR0913 — the transport signature plus the 
     user: str,
     source_run_dir: Path,
     *,
+    defender_dir: Path,
     wall_clock_timeout: int = VERIFIER_TIMEOUT,
     make_model: MakeModel = providers.build_for_effort,
 ) -> str:
-    deps = bind(VERIFY_DEF, source_run_dir)
+    deps = bind(VERIFY_DEF, source_run_dir, defender_dir=defender_dir)
     return run_stage(
         stage="verify_forward",
         prompt_path=prompt_path, model=model, effort=effort,

@@ -11,7 +11,7 @@ from defender.runtime import bash_exec
 from . import command_shape
 from .decision import Decision
 from .files import RESOLVE_ERRORS, denylisted
-from .grant import OPENS_NOTHING, PROGRAMS, Grant, Route
+from .grant import OPENS_NOTHING, PROGRAMS, Grant, Route, rm_target_files
 from .policy import AgentPolicy
 
 
@@ -99,8 +99,14 @@ def _claim(argv: list[str], policy: AgentPolicy) -> Grant | None:
 
 def _in_scope(argv: list[str], grant: Grant, *, run_dir: Path | None) -> bool:
     extract = PROGRAMS[grant.program]
-    if extract is OPENS_NOTHING:
+    if extract is OPENS_NOTHING and not grant.resolve_operand:
         return True
+    if extract is OPENS_NOTHING and grant.resolve_operand:
+        # #691 MD-3: this grant opted IN to a resolve()+scope recheck on its own operand (e.g.
+        # the curator's `rm`, whose PROGRAM-level extractor stays OPENS_NOTHING for every other
+        # rm grant) — a symlink inside the corpus pointing outside it must be caught by resolving
+        # the operand, not merely by the pattern matching the pre-resolution text.
+        extract = rm_target_files
     files = extract(argv)
     if files is None:
         return False

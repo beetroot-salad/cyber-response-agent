@@ -58,7 +58,7 @@ def test_the_generic_bash_census_enumerates_the_curator(tmp_path):
     deps = bind_curator(wt, rd, "lessons")  # RED today: bindable=False raises
     assert any(pat.fullmatch(str((wt / "defender" / "lessons" / "x.md").resolve()))
                for pat in deps.policy.write_allow)
-    with pytest.raises(ValueError):  # the co-constraint fires at bind, not at a census assertion
+    with pytest.raises(ValueError):  # noqa: PT011 - the co-constraint fires at bind, not at a census assertion
         build_registry((_misconfigured_writer_def(),))
 
 
@@ -96,7 +96,7 @@ def test_bind_refuses_no_registered_role_for_being_unbindable(tmp_path):
     (complementary condition, so the negative is not vacuous): an UNREGISTERED misconfigured def
     still raises at bind. RED today: the curator is the one registered role still unbindable."""
     assert all(d.bindable for d in AGENTS.values())  # RED today (curator is False)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError):  # noqa: PT011
         build_registry((_misconfigured_writer_def(),))  # the control still refuses
 
 
@@ -107,7 +107,7 @@ def test_the_registry_validates_the_curator_at_import_time(tmp_path):
     the co-constraint at import). RED today: the curator carries no ``write_shapes`` (it builds them
     per-spawn, bindable=False). Positive control: the real AGENTS import succeeded."""
     assert CORPUS_AUTHOR_DEF.write_shapes != ()  # RED today (empty)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError):  # noqa: PT011
         build_registry((_misconfigured_writer_def(),))  # the un-skipped validation bites
     assert CORPUS_AUTHOR_DEF in AGENTS.values()
 
@@ -250,7 +250,7 @@ def test_corpus_name_absent_for_a_role_that_declares_it_needs_one(tmp_path):
     IndexError. Positive control: the curator bound WITH a name binds. RED today."""
     from defender.runtime.agent_definition import RunScope
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError):  # noqa: PT011
         bind(CORPUS_AUTHOR_DEF, rd, scope=RunScope(), defender_dir=wt / "defender")
     bind_curator(wt, rd, "lessons")  # positive control (RED today: bindable)
 

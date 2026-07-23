@@ -6,7 +6,7 @@ You will receive an observations JSON array in the user prompt. Each row is self
 
 ## Lesson shape
 
-One flat corpus at `defender/lessons-actor/*.md`. No subdirectories. Each lesson is a frontmatter+body markdown file; full schema is in `defender/lessons-actor/_TEMPLATE.md` and the design doc at `defender/docs/lessons-actor-schema-v2.md`.
+One flat corpus at `defender/lessons-actor/*.md`. No subdirectories. Each lesson is a frontmatter+body markdown file; full schema is in `defender/lessons-actor/_TEMPLATE.md`.
 
 There is **one** lesson shape here — a **pattern lesson**: the body describes an attacker shape that fails or succeeds against the deployment ("staggering the spray below the volume detector still surfaces if creds are in the breach corpus"). Frontmatter requires `techniques:` and `mutable: false`. `subject:` is omitted unless the pattern is bound to one specific deployment referent. `applies_to:` may list environment-fact subjects (in `defender/lessons-environment/`) the pattern exploits or is bounded by — a human cross-reference, not a fold target here.
 

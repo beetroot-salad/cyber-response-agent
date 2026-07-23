@@ -267,7 +267,7 @@ def test_the_rm_grant_under_a_degenerate_empty_or_dot_corpus_name(tmp_path):
     for degenerate in ("", "."):
         # strict ValueError (M7's rejection), NOT a bare TypeError from the not-yet-built
         # corpus_name field — else this negative passes vacuously against HEAD.
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError):  # noqa: PT011
             bind_curator(wt, rd, degenerate)
 
 

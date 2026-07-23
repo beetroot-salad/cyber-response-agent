@@ -70,6 +70,11 @@ def _field(value: str) -> str:
 
 
 def _gate_lesson_path(deps: CuratorDeps, operand: str) -> Path:
+    if deps.tool_config is None:
+        raise ModelRetry(
+            "forward_check: this curator spawn's tool_config is not set — attach a "
+            "ForwardCheckConfig before calling forward_check."
+        )
     path = _resolve_operand(deps, operand)
     decision = permission.decide_write(
         path, run_dir=deps.run_dir, defender_dir=deps.defender_dir, policy=deps.policy,

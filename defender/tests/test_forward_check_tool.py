@@ -970,12 +970,14 @@ def test_m5_verifier_timeout_zero_is_honored(tmp_path):
         _run_verify_pydantic(
             _prompt(tmp_path), config.VERIFIER_MODEL, config.VERIFIER_EFFORT,
             "vf.0.trace.jsonl", "l", "u", src,
+            defender_dir=tmp_path / "wt" / "defender",
             wall_clock_timeout=0, make_model=_fake_model(_replay(_VERDICT_GOOD)),
         )
     with override_allow_model_requests(False):
         out = _run_verify_pydantic(
             _prompt(tmp_path), config.VERIFIER_MODEL, config.VERIFIER_EFFORT,
             "vf.big.trace.jsonl", "l", "u", src,
+            defender_dir=tmp_path / "wt" / "defender",
             wall_clock_timeout=180, make_model=_fake_model(_replay(_VERDICT_GOOD)),
         )
     assert "GOOD" in out
@@ -1057,7 +1059,7 @@ def test_d25_no_bash_grant_for_the_verifier(tmp_path):
         assert not d.allow, f"a python-interpreter command was admitted: {cmd!r}"
     ok = permission.decide_bash(
         "rm defender/lessons/draft.md", policy=deps.policy,
-        run_dir=deps.run_dir, defender_dir=deps.defender_dir,
+        run_dir=deps.run_dir, defender_dir=deps.defender_dir, cwd_anchor=deps.cwd_anchor,
     )
     assert ok.allow
 

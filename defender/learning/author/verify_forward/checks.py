@@ -49,6 +49,7 @@ def _verify(ctx: CheckContext, user: str, source_run_dir: Path) -> str:
         label=f"{prefix}:{stem}",
         user=user,
         source_run_dir=source_run_dir,
+        defender_dir=ctx.repo_root / "defender",
         wall_clock_timeout=config.VERIFIER_TIMEOUT,
     )
     return parse_verdict(raw, error_prefix=prefix)

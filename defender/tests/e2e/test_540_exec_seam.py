@@ -684,20 +684,31 @@ def test_every_bash_enabled_role_executes_through_a_box(tmp_path):
     run_dir = _run_dir(tmp_path)
     scope = RunScope(read_confine=(run_dir,), scripts=(), add_dirs=(run_dir,))
 
-    bash_roles = [d for d in agents_registry.AGENTS.values() if d.bindable and d.tools.bash]
+    bash_roles = [d for d in agents_registry.AGENTS.values() if d.tools.bash]
     assert bash_roles, "the registry reports no bash-enabled role — the census cannot be empty"
 
     for defn in bash_roles:
         tree = tmp_path / "tree" / "defender" if defn.requires_explicit_tree else DEFENDER
         if defn.requires_explicit_tree:
             tree.mkdir(parents=True, exist_ok=True)
-        deps = bind(defn, run_dir, scope=scope, salt=SALT, defender_dir=tree)
+        if defn.requires_corpus:
+            corpora = ("lessons", "lessons-actor", "lessons-environment")
+            for name in corpora:
+                (tree / name).mkdir(parents=True, exist_ok=True)
+            role_scope = RunScope(
+                corpus_name="lessons",
+                read_confine=tuple((tree / name).resolve() for name in corpora),
+            )
+        else:
+            role_scope = scope
+        deps = bind(defn, run_dir, scope=role_scope, salt=SALT, defender_dir=tree)
         assert isinstance(deps.box, box.BoxExecutor), \
             f"{defn.role.name} has bash but no box on its deps"
 
-    for defn in agents_registry.AGENTS.values():
-        if defn.bindable and not defn.tools.bash:
-            assert not defn.tools.bash
+    # a second, non-tautological census: the non-bash roles are disjoint from the bash census
+    # above (the `d.tools.bash` predicate is the only gate — there is no second, narrower one).
+    non_bash_roles = {d.role for d in agents_registry.AGENTS.values() if not d.tools.bash}
+    assert non_bash_roles.isdisjoint({d.role for d in bash_roles})
 
 
 def test_the_existing_e2e_bash_corpus_completes_through_the_box(tmp_path):

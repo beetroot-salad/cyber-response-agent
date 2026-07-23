@@ -12,6 +12,7 @@ from .bash import (
 from .decision import Decision
 from .files import (
     build_named_write_allow,
+    build_scoped_write_allow,
     build_write_allow,
     decide_read,
     decide_write,
@@ -35,6 +36,7 @@ __all__ = [
     "Grant",
     "Route",
     "build_named_write_allow",
+    "build_scoped_write_allow",
     "build_write_allow",
     "command_shape",
     "decide_bash",

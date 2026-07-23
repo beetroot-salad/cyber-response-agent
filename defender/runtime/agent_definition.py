@@ -48,7 +48,8 @@ class AgentDefinition:
     requires_confine: bool = False
     requires_explicit_tree: bool = False
     anchors_on_tree: bool = False
-    bindable: bool = True
+    requires_corpus: bool = False
+    read_allow_override: PathShapes | None = None
     deny_reason: str = _DEFAULT_DENY_REASON
     budget_enforced: bool = False
 
@@ -60,6 +61,7 @@ class RunScope:
     add_dirs: tuple[Path, ...] = ()
     read_confine: tuple[Path, ...] = ()
     scripts: tuple[Path, ...] = ()
+    corpus_name: str | None = None
 
 
 _DEFAULT_SCOPE = RunScope()
@@ -74,16 +76,17 @@ class ResolvedRoots:
     read_roots: tuple[Path, ...]
     read_confine: tuple[Path, ...]
     scripts: tuple[Path, ...]
+    corpus_dir: Path | None = None
 
 
 def _resolve_corpus_dir(name: str, defender_dir: Path) -> Path:
     p = Path(name)
-    if p.is_absolute() or ".." in p.parts:
+    if p.is_absolute() or ".." in p.parts or len(p.parts) != 1:
         raise ValueError(
-            f"corpus dir {name!r} must be a clean relative name under defender_dir "
-            "(no '..' segment, not absolute)"
+            f"corpus name {name!r} must be a single clean relative path segment under "
+            "defender_dir (no '..' segment, not absolute, exactly one path component)"
         )
-    return defender_dir / name
+    return defender_dir / p.parts[0]
 
 
 def resolve_roots(
@@ -91,6 +94,10 @@ def resolve_roots(
     defender_dir: Path = PATHS.defender_dir,
 ) -> ResolvedRoots:
     corpus_roots = tuple(_resolve_corpus_dir(name, defender_dir) for name in corpus_dirs)
+    corpus_dir = (
+        _resolve_corpus_dir(scope.corpus_name, defender_dir)
+        if scope.corpus_name is not None else None
+    )
     return ResolvedRoots(
         run_dir=run_dir,
         defender_dir=defender_dir,
@@ -98,6 +105,7 @@ def resolve_roots(
         read_roots=tuple(scope.add_dirs),
         read_confine=tuple(scope.read_confine),
         scripts=tuple(scope.scripts),
+        corpus_dir=corpus_dir,
     )
 
 
@@ -124,9 +132,13 @@ def read_allow_of(bash_allow: tuple[Grant, ...]) -> PathShapes:
 def compile_policy(defn: AgentDefinition, roots: ResolvedRoots) -> AgentPolicy:
     _require_write_co_constraint(defn.tools, defn.write_shapes)
     bash_allow = tuple(g for build in defn.bash_shapes for g in build(roots))
+    read_allow = (
+        read_allow_of(bash_allow) if defn.read_allow_override is None
+        else defn.read_allow_override
+    )
     return AgentPolicy(
         bash_allow=bash_allow,
-        read_allow=read_allow_of(bash_allow),
+        read_allow=read_allow,
         read_roots=roots.read_roots,
         read_confine=roots.read_confine,
         write_allow=tuple(pat for build in defn.write_shapes for pat in build(roots)),
@@ -144,27 +156,14 @@ def _resolved_tree(defender_dir: Path | None) -> Path:
     return defender_dir if defender_dir is not None else PATHS.defender_dir
 
 
-def compile_policy_for(
-    defn: AgentDefinition, run_dir: Path, *,
-    scope: RunScope = _DEFAULT_SCOPE, defender_dir: Path | None = None,
-) -> AgentPolicy:
-    if not defn.bindable:
-        raise ValueError(
-            f"bind({defn.role.name}_DEF, …) is not supported — this agent's per-spawn policy needs "
-            "run inputs RunScope cannot carry (its worktree corpus dir), so compiling it here would "
-            "root its write_allow at run_dir; build it via its own front door instead."
-        )
+def _build_roots(
+    defn: AgentDefinition, run_dir: Path, scope: RunScope, defender_dir: Path | None,
+) -> ResolvedRoots:
     _require_absolute_root("run_dir", run_dir)
     if defender_dir is not None:
         _require_absolute_root("defender_dir", defender_dir)
     for member in (*scope.add_dirs, *scope.read_confine, *scope.scripts):
         _require_absolute_root("scope read root", member)
-    if defn.requires_confine and not scope.read_confine:
-        raise ValueError(
-            f"bind({defn.role.name}_DEF, …) requires a non-empty read_confine in the RunScope — "
-            "an empty confine widens the agent's reads to the whole defender_dir (the #512 "
-            "gray-box rubric leak); name the confine explicitly (there is no unconfined agent)."
-        )
     if defn.requires_explicit_tree and (
         defender_dir is None or Path(defender_dir).resolve() == PATHS.defender_dir.resolve()
     ):
@@ -173,9 +172,36 @@ def compile_policy_for(
             "worktree tree its write scope anchors on; a None/PATHS tree would author the MAIN "
             "checkout, not the worktree (the main-checkout-authoring state is unbuildable)."
         )
+    if defn.requires_corpus and scope.corpus_name is None:
+        raise ValueError(
+            f"bind({defn.role.name}_DEF, …) requires a corpus_name in its RunScope — this "
+            "agent's per-spawn corpus; there is no default corpus to fall back on."
+        )
+    if defn.requires_confine and not scope.read_confine:
+        raise ValueError(
+            f"bind({defn.role.name}_DEF, …) requires a non-empty read_confine in the RunScope — "
+            "an empty confine widens the agent's reads to the whole defender_dir (the #512 "
+            "gray-box rubric leak); name the confine explicitly (there is no unconfined agent)."
+        )
     roots = resolve_roots(
         run_dir, defn.corpus_dirs, scope, defender_dir=_resolved_tree(defender_dir),
     )
+    if defn.requires_corpus:
+        assert roots.corpus_dir is not None
+        if not any(roots.corpus_dir.is_relative_to(c) for c in roots.read_confine):
+            raise ValueError(
+                f"bind({defn.role.name}_DEF, …) corpus {scope.corpus_name!r} resolves to "
+                f"{roots.corpus_dir} which is outside this agent's read confine/scope — a write "
+                "scope that cannot author within its own read containment is unbuildable."
+            )
+    return roots
+
+
+def compile_policy_for(
+    defn: AgentDefinition, run_dir: Path, *,
+    scope: RunScope = _DEFAULT_SCOPE, defender_dir: Path | None = None,
+) -> AgentPolicy:
+    roots = _build_roots(defn, run_dir, scope, defender_dir)
     return compile_policy(defn, roots)
 
 
@@ -184,7 +210,8 @@ def bind(
     scope: RunScope = _DEFAULT_SCOPE, salt: str | None = None, defender_dir: Path | None = None,
     box: Any = None,
 ) -> AgentDeps:
-    policy = compile_policy_for(defn, run_dir, scope=scope, defender_dir=defender_dir)
+    roots = _build_roots(defn, run_dir, scope, defender_dir)
+    policy = compile_policy(defn, roots)
     if defn.deps_cls is None:
         raise ValueError(
             f"{defn.role.name}_DEF declares no deps_cls — a bindable def must name the "
@@ -192,10 +219,9 @@ def bind(
             "importing the learning stages to look it up)."
         )
     return defn.deps_cls._for_run(
-        run_dir, policy, defender_dir=_resolved_tree(defender_dir), salt=salt, box=box,
-        cwd_anchor=(
-            _resolved_tree(defender_dir).parent if defn.anchors_on_tree else run_dir
-        ),
+        run_dir, policy, defender_dir=roots.defender_dir, salt=salt, box=box,
+        cwd_anchor=(roots.defender_dir.parent if defn.anchors_on_tree else run_dir),
+        roots=roots,
     )
 
 
@@ -204,8 +230,7 @@ def build_registry(defs: tuple[AgentDefinition, ...]) -> dict[AgentRole, AgentDe
     for d in defs:
         if d.role in registry:
             raise ValueError(f"duplicate agent role {d.role!r} in the definition registry")
-        if d.bindable:
-            _require_write_co_constraint(d.tools, d.write_shapes)
+        _require_write_co_constraint(d.tools, d.write_shapes)
         registry[d.role] = d
     return registry
 

@@ -331,7 +331,7 @@ def test_forward_check_raises_a_named_error_when_its_config_is_unset(tmp_path):
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
     (corpus(wt, "lessons") / "x.md").write_text("x\n", encoding="utf-8")
     unset = bind_curator(wt, rd, "lessons")                # slot unset
-    with pytest.raises(Exception) as exc:
+    with pytest.raises(Exception) as exc:  # noqa: PT011 - message asserted below, category deliberately open (F50)
         forward_check_gate(unset, rel("lessons", "x.md"))
     assert "config" in str(exc.value).lower() or "forward" in str(exc.value).lower()
     # positive control: config SET → the same operand admits

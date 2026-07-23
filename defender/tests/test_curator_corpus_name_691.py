@@ -42,7 +42,7 @@ def _assert_bind_rejects_name(wt, run_dir, name: str) -> None:
     """The OBSERVABLE reject: binding the curator with `name` raises ValueError at bind, and the
     message is about the name (not an unrelated crash). RED at HEAD (TypeError from the missing
     RunScope.corpus_name field surfaces instead — the #0 mechanism that is not built)."""
-    with pytest.raises(ValueError) as exc:
+    with pytest.raises(ValueError) as exc:  # noqa: PT011 - message shape asserted below
         bind_curator(wt, run_dir, name)
     msg = str(exc.value)
     assert any(tok in msg.lower() for tok in _NAME_REJECT_TOKENS) or repr(name) in msg, (
@@ -145,7 +145,7 @@ def test_the_standing_prohibition_on_a_whole_tree_authoring_scope(tmp_path):
     deps = bind_curator(wt, rd, "lessons")
     write_file(deps, "defender/lessons/lesson.md")  # in-corpus write lands (positive control)
     assert (wt / "defender" / "lessons" / "lesson.md").is_file()
-    with pytest.raises(Exception):  # a whole-tree write is NOT admitted for any accepted name
+    with pytest.raises(Exception):  # noqa: PT011, B017 - the write surface may raise ModelRetry or ValueError
         write_file(deps, "defender/toplevel.md")
 
 

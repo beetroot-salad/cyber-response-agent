@@ -16,7 +16,7 @@ from pydantic_ai.exceptions import ModelRetry
 from defender._io import append_jsonl, read_text_utf8
 from . import box as box_mod
 from . import permission
-from .agent_definition import ToolSet
+from .agent_definition import ResolvedRoots, ToolSet
 from .agent_role import AgentRole
 
 from defender.runtime.untrusted import wrap as _wrap
@@ -84,6 +84,8 @@ class AgentDeps:
     policy: permission.AgentPolicy = field(kw_only=True)
     box: box_mod.BoxExecutor = field(kw_only=True, default_factory=box_mod.BoxExecutor)
     cwd_anchor: Path = field(kw_only=True, default=Path())
+    roots: ResolvedRoots | None = field(kw_only=True, default=None)
+    tool_config: Any = field(kw_only=True, default=None)
 
     role: ClassVar[AgentRole] = AgentRole.MAIN
 
@@ -93,6 +95,8 @@ class AgentDeps:
         *, defender_dir: Path = PATHS.defender_dir, salt: str | None = None,
         box: box_mod.BoxExecutor | None = None,
         cwd_anchor: Path | None = None,
+        roots: ResolvedRoots | None = None,
+        tool_config: Any = None,
         **subtype_fields: Any,
     ) -> Self:
         resolved_salt = salt if salt is not None else uuid.uuid4().hex
@@ -101,6 +105,7 @@ class AgentDeps:
             run_id=run_dir.name, salt=resolved_salt, policy=policy,
             box=box if box is not None else box_mod.BoxExecutor(),
             cwd_anchor=cwd_anchor if cwd_anchor is not None else run_dir,
+            roots=roots, tool_config=tool_config,
             **subtype_fields,
         )
 
