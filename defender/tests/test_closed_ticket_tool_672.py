@@ -251,7 +251,7 @@ _YAML = "outcome: skip-passthrough\ndefender_findings: []\n"
 DONE = Turn(text=_YAML)
 
 # The case id doubles as the in-flight ticket key: the learning run dir's basename is the
-# key the judge's deps carry (run_id) and the key `_cited_policy_read_section` names.
+# key the judge's deps carry (run_id); the closed-ticket tools refuse it structurally.
 CASE = "20260720T0000Z-sshd-672"
 
 # One well-known closed ticket every happy-path fake returns. The marker strings are what

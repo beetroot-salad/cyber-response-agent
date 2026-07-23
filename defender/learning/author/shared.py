@@ -347,7 +347,7 @@ def build_curator_user_prompt(
     context = (
         f"batch_id: {batch_id}\n"
         f"lessons_dir: {corpus_dir_rel}\n"
-        f"{label} ({len(rows)}):\n\n"
+        f"{label} ({len(rows)}): in the lesson_rows frame\n\n"
         f"existing lessons (frontmatter manifest):\n{manifest}"
     )
     stage_salt = salt if salt is not None else uuid4().hex

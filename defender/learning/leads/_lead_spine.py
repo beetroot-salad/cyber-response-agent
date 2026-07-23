@@ -41,6 +41,7 @@ def _spawn_author_agent(
         salt=salt,
     )
 
+
 def _verify_corpus_scope(
     repo_root: Path,
     baseline_stray: list[str],
