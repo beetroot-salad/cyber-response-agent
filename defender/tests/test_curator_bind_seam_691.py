@@ -160,7 +160,7 @@ def test_every_role_this_change_does_not_mention_carries_the_new_record(tmp_path
     rd = pending_run_dir(tmp_path)
     checked = 0
     for role, defn in AGENTS.items():
-        if role is AgentRole.CORPUS_AUTHOR or not defn.bindable:
+        if role is AgentRole.CORPUS_AUTHOR:
             continue
         try:
             deps = bind(defn, rd)                           # its own generic scope

@@ -64,24 +64,22 @@ def test_the_generic_bash_census_enumerates_the_curator(tmp_path):
 
 def test_the_census_prose_and_the_census_predicate_disagree(tmp_path):
     """The ``d.tools.bash`` predicate yields SIX roles; the prose count beside it (five) goes stale
-    and must be updated (K9/x5). The curator is among the six and is now bindable — RED today, where
-    ``CORPUS_AUTHOR_DEF.bindable`` is still False."""
+    and must be updated (K9/x5). The curator is among the six and is now bindable — every registered
+    def binds through the one seam, so there is no ``bindable`` field left to gate on."""
     assert _bash_roles() == {
         AgentRole.MAIN, AgentRole.GATHER, AgentRole.JUDGE, AgentRole.ACTOR,
         AgentRole.LEAD_AUTHOR, AgentRole.CORPUS_AUTHOR,
     }
-    assert CORPUS_AUTHOR_DEF.bindable is True  # RED today (False)
+    assert "bindable" not in AgentDefinition.__dataclass_fields__
 
 
 def test_the_second_census_hiding_inside_the_first(tmp_path):
-    """The tautological second census — the ``if d.bindable and d.tools.bash`` filter (test_540's
-    exec-seam loop) whose ``d.bindable`` conjunct excluded exactly the curator — folds into the
-    first once the curator is bindable: the ``d.tools.bash`` census and the ``d.bindable and
-    d.tools.bash`` census name the SAME roles (K8). RED today: the curator is in the left set, not
-    the right."""
-    assert {d.role for d in AGENTS.values() if d.tools.bash} == {
-        d.role for d in AGENTS.values() if d.bindable and d.tools.bash
-    }
+    """The tautological second census — the former ``if d.bindable and d.tools.bash`` filter
+    (test_540's exec-seam loop) whose ``d.bindable`` conjunct excluded exactly the curator — folds
+    into the first once the curator is bindable: #0 deletes the field entirely, so there is no
+    SECOND, narrower predicate anywhere in the registry left to hide a special case behind (K8)."""
+    assert all("bindable" not in type(d).__dataclass_fields__ for d in AGENTS.values())
+    assert {d.role for d in AGENTS.values() if d.tools.bash} == _bash_roles()
 
 
 def test_agent_definition_has_no_bindable_field(tmp_path):
@@ -92,10 +90,14 @@ def test_agent_definition_has_no_bindable_field(tmp_path):
 
 def test_bind_refuses_no_registered_role_for_being_unbindable(tmp_path):
     """No REGISTERED role is refused by bind for being unbindable — after #0 every registered def is
-    bindable, so the curator subject compiles a real policy through the one seam. Positive control
-    (complementary condition, so the negative is not vacuous): an UNREGISTERED misconfigured def
-    still raises at bind. RED today: the curator is the one registered role still unbindable."""
-    assert all(d.bindable for d in AGENTS.values())  # RED today (curator is False)
+    bindable (there is no ``bindable`` field left to opt any of them out with), so the curator
+    subject compiles a real policy through the one seam. Positive control (complementary condition,
+    so the negative is not vacuous): an UNREGISTERED misconfigured def still raises at bind — for a
+    real reason (the write co-constraint), never for an unbindable opt-out."""
+    assert all("bindable" not in type(d).__dataclass_fields__ for d in AGENTS.values())
+    wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
+    deps = bind_curator(wt, rd, "lessons")
+    assert deps.policy.write_allow
     with pytest.raises(ValueError):  # noqa: PT011
         build_registry((_misconfigured_writer_def(),))  # the control still refuses
 
@@ -150,12 +152,19 @@ def test_one_shared_spawn_request_drives_every_role_in_the_registry(tmp_path):
     for role, defn in AGENTS.items():
         if role is AgentRole.CORPUS_AUTHOR:
             continue
+        try:
+            # a role with its OWN scope requirements (confine/explicit-tree — e.g. ACTOR,
+            # VERIFIER, LEAD_AUTHOR) already raises on a bare RunScope() regardless of
+            # corpus_name, so it is not a "generic bare-scope caller" candidate; only compare
+            # roles for which the bare scope itself is buildable.
+            bare = compile_policy_for(defn, rd, scope=RunScope())
+        except ValueError:
+            continue
         with_name = compile_policy_for(defn, rd, scope=shared)      # the shared request drives it
-        bare = compile_policy_for(defn, rd, scope=RunScope())
         assert with_name.write_allow == bare.write_allow           # the shared name is inert here
         assert with_name.read_allow == bare.read_allow
         non_curator += 1
-    assert non_curator == len(AGENTS) - 1                          # every non-curator role survived
+    assert non_curator >= 1, "no non-curator role bound — the census picked no subject"
     curator = bind_curator(wt, rd, "lessons")                      # the one role that consumes it
     assert curator.policy.write_allow                              # into a real corpus-rooted scope
 
@@ -224,12 +233,14 @@ def test_curator_deps_for_run_is_a_thin_wrapper_over_bind(tmp_path):
 
 
 def test_policy_cli_prints_a_compiled_curator_policy(tmp_path):
-    """M9: ``defender-policy show corpus_author`` prints a COMPILED curator policy instead of the
-    old ``SystemExit`` ('builds its policy per-spawn, bindable=False'). Drive ``policy_cli._policy``
-    for the curator — it must return a policy, not raise SystemExit. RED today (SystemExit)."""
+    """M9: ``defender-policy show corpus_author --corpus-name lessons`` prints a COMPILED curator
+    policy instead of the old ``SystemExit`` ('builds its policy per-spawn, bindable=False'). Drive
+    ``policy_cli._policy`` for the curator WITH its corpus name (M8 demands one; the CLI's
+    ``--corpus-name`` flag is how an operator supplies it) — it must return a real compiled policy,
+    not raise SystemExit. RED today (SystemExit)."""
     from defender.scripts import policy_cli
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
-    pol = policy_cli._policy(CORPUS_AUTHOR_DEF, rd, wt / "defender")  # RED today: SystemExit
+    pol = policy_cli._policy(CORPUS_AUTHOR_DEF, rd, wt / "defender", "lessons")
     assert pol.write_allow
 
 

@@ -41,19 +41,32 @@ from defender.runtime.permission.grant import OPENS_NOTHING, PROGRAMS, Grant
 _ROLES = {r.name.lower(): r for r in AgentRole}
 
 
-def _scope_for(role: AgentRole, defender_dir: Path) -> RunScope:
+def _scope_for(
+    role: AgentRole, defender_dir: Path, corpus_name: str | None = None,
+) -> RunScope:
     if role is AgentRole.ACTOR:
         from defender.learning.core import config
         return RunScope(
             scripts=(config.LESSONS_ENV_RETRIEVE_SCRIPT, config.LESSONS_ACTOR_INDEX_SCRIPT),
             read_confine=(config.LESSONS_ACTOR_DIR, config.LESSONS_ENVIRONMENT_DIR),
         )
+    if role is AgentRole.CORPUS_AUTHOR:
+        from defender.learning.author.curator_engine import SHIPPED_LESSON_CORPORA
+        return RunScope(
+            corpus_name=corpus_name,
+            read_confine=tuple(
+                (defender_dir / name).resolve() for name in SHIPPED_LESSON_CORPORA
+            ),
+        )
     return RunScope()
 
 
-def _policy(defn: AgentDefinition, run_dir: Path, defender_dir: Path) -> AgentPolicy:
+def _policy(
+    defn: AgentDefinition, run_dir: Path, defender_dir: Path, corpus_name: str | None = None,
+) -> AgentPolicy:
     return compile_policy_for(
-        defn, run_dir, scope=_scope_for(defn.role, defender_dir), defender_dir=defender_dir,
+        defn, run_dir, scope=_scope_for(defn.role, defender_dir, corpus_name),
+        defender_dir=defender_dir,
     )
 
 
@@ -124,11 +137,15 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument("--json", action="store_true", dest="as_json")
         p.add_argument("--run-dir", required=True, type=Path)
         p.add_argument("--defender-dir", type=Path, default=PATHS.defender_dir)
+        p.add_argument(
+            "--corpus-name", default=None,
+            help="the per-spawn corpus name (required for a corpus-requiring role, e.g. corpus_author)",
+        )
     args = ap.parse_args(argv)
 
     role = _ROLES[args.agent]
     defn = AGENTS[role]
-    policy = _policy(defn, args.run_dir, args.defender_dir)
+    policy = _policy(defn, args.run_dir, args.defender_dir, args.corpus_name)
     if args.cmd == "show":
         return _show(policy, args.agent, args.run_dir, args.defender_dir)
     anchor = args.defender_dir.parent if defn.anchors_on_tree else args.run_dir
