@@ -66,6 +66,7 @@ from defender import agents as agents_registry  # noqa: E402
 from defender.runtime import bash_exec, box, permission  # noqa: E402
 from defender.runtime import tools as runtime_tools  # noqa: E402
 from defender.runtime.agent_definition import RunScope, bind  # noqa: E402
+from defender.runtime.agent_role import AgentRole  # noqa: E402
 from defender.runtime.driver import MAIN_DEF  # noqa: E402
 
 pytestmark = pytest.mark.e2e
@@ -684,20 +685,33 @@ def test_every_bash_enabled_role_executes_through_a_box(tmp_path):
     run_dir = _run_dir(tmp_path)
     scope = RunScope(read_confine=(run_dir,), scripts=(), add_dirs=(run_dir,))
 
-    bash_roles = [d for d in agents_registry.AGENTS.values() if d.bindable and d.tools.bash]
+    bash_roles = [d for d in agents_registry.AGENTS.values() if d.tools.bash]
     assert bash_roles, "the registry reports no bash-enabled role — the census cannot be empty"
 
     for defn in bash_roles:
         tree = tmp_path / "tree" / "defender" if defn.requires_explicit_tree else DEFENDER
         if defn.requires_explicit_tree:
             tree.mkdir(parents=True, exist_ok=True)
-        deps = bind(defn, run_dir, scope=scope, salt=SALT, defender_dir=tree)
+        if defn.requires_corpus:
+            corpora = ("lessons", "lessons-actor", "lessons-environment")
+            for name in corpora:
+                (tree / name).mkdir(parents=True, exist_ok=True)
+            role_scope = RunScope(
+                corpus_name="lessons",
+                read_confine=tuple((tree / name).resolve() for name in corpora),
+            )
+        else:
+            role_scope = scope
+        deps = bind(defn, run_dir, scope=role_scope, salt=SALT, defender_dir=tree)
         assert isinstance(deps.box, box.BoxExecutor), \
             f"{defn.role.name} has bash but no box on its deps"
 
-    for defn in agents_registry.AGENTS.values():
-        if defn.bindable and not defn.tools.bash:
-            assert not defn.tools.bash
+    # The census's real content: the curator — bash=True but excluded under the RETIRED
+    # `d.bindable` conjunct — is now enumerated by the single `d.tools.bash` predicate. A
+    # reintroduced narrower gate would drop it and fail here. (The former assertion — non-bash
+    # roles disjoint from the bash census — was tautological: any predicate partitions the
+    # registry into disjoint sets, so it could never fail and proved nothing.)
+    assert AgentRole.CORPUS_AUTHOR in {d.role for d in bash_roles}
 
 
 def test_the_existing_e2e_bash_corpus_completes_through_the_box(tmp_path):

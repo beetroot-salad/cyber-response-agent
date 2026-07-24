@@ -4,12 +4,16 @@ import json
 import os
 import re
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import ClassVar
 
-from defender._untrusted import wrap
 from uuid import uuid4
+
+from pydantic_ai.exceptions import ModelRetry
+
+from defender._untrusted import wrap
+from defender.hooks.record_lesson_load import LESSON_CORPORA as _LESSON_CORPORA
 from defender.learning.author import shared as _shared
 from defender.learning.author.verify_forward.checks import ForwardCheck
 from defender.learning.author.verify_forward.engine import _run_verify_pydantic
@@ -18,10 +22,10 @@ from defender.learning.core.config import RunUnprocessable
 from defender.learning.pipeline._pydantic_stage import run_stage
 from defender.learning.pipeline._prompt import stage_user_message
 from defender.runtime import providers
-from defender.runtime.agent_definition import AgentDefinition, ToolSet
+from defender.runtime.agent_definition import AgentDefinition, ResolvedRoots, RunScope, ToolSet, bind
 from defender.runtime.agent_role import AgentRole
 from defender.runtime.driver import MakeModel
-from defender.runtime.permission import AgentPolicy, build_write_allow
+from defender.runtime.permission import build_scoped_write_allow
 from defender.runtime.permission.grant import (
     TREE,
     Grant,
@@ -78,20 +82,35 @@ _CORPUS_AUTHOR_DENY_REASON = (
 )
 
 
+# The three lesson corpora ever shipped — the curator's fixed R4 read confine AND, by
+# construction, its MD-6 exact-match corpus-name membership set: a name that does not resolve
+# INTO this confine can never bind (the generic MD-1 confine-containment check in `bind`
+# refuses it), so no separate membership list is needed. DERIVED from the one canonical set
+# (`hooks/record_lesson_load.LESSON_CORPORA`, the author-side superset of RUNTIME_LESSON_CORPORA)
+# so the shipped-corpus roster has a single source of truth; sorted for a deterministic order
+# (containment is order-independent).
+SHIPPED_LESSON_CORPORA: tuple[str, ...] = tuple(sorted(_LESSON_CORPORA))
+
+
 def _corpus_spellings(corpus_dir: Path) -> str:
     rel = f"defender/{corpus_dir.name}"
     return "|".join(re.escape(s) for s in (rel, str(corpus_dir)))
 
 
 def _rm_grant(corpus_dir: Path) -> Grant:
+    corpus = corpus_dir.resolve()
     return Grant(
         program="rm",
         pattern=re.compile(rf"^rm (?:{_corpus_spellings(corpus_dir)})(?:/{_SEG})+$"),
+        scope=PathShapes([under(corpus, TREE)]),
         pins_path=True,
+        resolve_operand=True,
     )
 
 
-def _corpus_author_grants(corpus_dir: Path) -> tuple[Grant, ...]:
+def _corpus_author_grants(roots: ResolvedRoots) -> tuple[Grant, ...]:
+    assert roots.corpus_dir is not None
+    corpus_dir = roots.corpus_dir
     corpus = corpus_dir.resolve()
     scope = PathShapes([under(corpus, TREE)])
     return (
@@ -101,14 +120,23 @@ def _corpus_author_grants(corpus_dir: Path) -> tuple[Grant, ...]:
     )
 
 
-def _corpus_author_policy(corpus_dir: Path) -> AgentPolicy:
-    return AgentPolicy(
-        bash_allow=_corpus_author_grants(corpus_dir),
-        read_roots=(),
-        read_confine=(),
-        write_allow=(build_write_allow(corpus_dir, suffix=".md"),),
-        deny_reason=_CORPUS_AUTHOR_DENY_REASON,
-    )
+def _corpus_author_write_shapes(roots: ResolvedRoots) -> tuple[re.Pattern[str], ...]:
+    assert roots.corpus_dir is not None
+    return (build_scoped_write_allow(roots.corpus_dir, suffix=".md"),)
+
+
+@dataclass(frozen=True)
+class ForwardCheckConfig:
+    """The curator's tool-config slot payload (#691 M4): the five per-spawn forward-check
+    inputs, collapsed off `CuratorDeps`' bare fields and onto the base `AgentDeps.tool_config`
+    slot. Carries NO corpus (F51) — `corpus_dir` stays derived off the retained `roots` (M6),
+    read directly off `deps`, never duplicated into this config."""
+
+    check: ForwardCheck
+    runs_dir: Path
+    pending: Path
+    queued_ids: frozenset[str]
+    run_verify: Callable[..., str] = _run_verify_pydantic
 
 
 @dataclass(frozen=True)
@@ -116,12 +144,39 @@ class CuratorDeps(AgentDeps):
 
     role: ClassVar[AgentRole] = AgentRole.CORPUS_AUTHOR
 
-    corpus_dir: Path = field(kw_only=True)
-    check: ForwardCheck = field(kw_only=True)
-    runs_dir: Path = field(kw_only=True)
-    pending: Path = field(kw_only=True)
-    queued_ids: frozenset[str] = field(kw_only=True)
-    run_verify: Callable[..., str] = field(kw_only=True)
+    @property
+    def corpus_dir(self) -> Path:
+        assert self.roots is not None
+        assert self.roots.corpus_dir is not None
+        return self.roots.corpus_dir
+
+    def _forward_check_config(self) -> ForwardCheckConfig:
+        if self.tool_config is None:
+            raise ModelRetry(
+                "forward_check: this curator spawn's tool_config is not set — bind() leaves it "
+                "unset by default (M5); attach a ForwardCheckConfig before calling forward_check."
+            )
+        return self.tool_config
+
+    @property
+    def check(self) -> ForwardCheck:
+        return self._forward_check_config().check
+
+    @property
+    def runs_dir(self) -> Path:
+        return self._forward_check_config().runs_dir
+
+    @property
+    def pending(self) -> Path:
+        return self._forward_check_config().pending
+
+    @property
+    def queued_ids(self) -> frozenset[str]:
+        return self._forward_check_config().queued_ids
+
+    @property
+    def run_verify(self) -> Callable[..., str]:
+        return self._forward_check_config().run_verify
 
     @classmethod
     def for_run(  # noqa: PLR0913 — the spawn's roots + its bound check + the transport seam
@@ -130,20 +185,24 @@ class CuratorDeps(AgentDeps):
         queued_ids: frozenset[str], run_verify: Callable[..., str] = _run_verify_pydantic,
         salt: str | None = None,
     ) -> CuratorDeps:
+        """A thin wrapper over `bind` (M9): resolves the corpus NAME off `corpus_dir`'s own
+        basename and binds through the one seam, then attaches the forward-check config into
+        the base `tool_config` slot. `corpus_dir` stays the caller's contract (unchanged from
+        before #691) — only its *derivation* moved onto `bind`."""
         defender_dir = repo_root / "defender"
-        return cls._for_run(
-            run_dir,
-            _corpus_author_policy(corpus_dir),
-            defender_dir=defender_dir,
-            cwd_anchor=repo_root,
-            salt=salt,
-            corpus_dir=corpus_dir,
-            check=check,
-            runs_dir=runs_dir,
-            pending=pending,
-            queued_ids=queued_ids,
-            run_verify=run_verify,
+        cfg = ForwardCheckConfig(
+            check=check, runs_dir=runs_dir, pending=pending,
+            queued_ids=queued_ids, run_verify=run_verify,
         )
+        scope = RunScope(
+            corpus_name=corpus_dir.name,
+            read_confine=tuple(
+                (defender_dir / name).resolve() for name in SHIPPED_LESSON_CORPORA
+            ),
+        )
+        deps = bind(CORPUS_AUTHOR_DEF, run_dir, scope=scope, defender_dir=defender_dir, salt=salt)
+        assert isinstance(deps, CuratorDeps)
+        return replace(deps, tool_config=cfg)
 
 
 CORPUS_AUTHOR_DEF = AgentDefinition(
@@ -151,7 +210,17 @@ CORPUS_AUTHOR_DEF = AgentDefinition(
     model=lambda: config.AUTHOR_MODEL,
     effort=config.AUTHOR_EFFORT,
     tools=ToolSet(bash=True, write=True, forward_check=True, lesson_read=True),
-    bindable=False,
+    bash_shapes=(_corpus_author_grants,),
+    write_shapes=(_corpus_author_write_shapes,),
+    deps_cls=CuratorDeps,
+    requires_confine=True,
+    requires_explicit_tree=True,
+    anchors_on_tree=True,
+    requires_corpus=True,
+    # R4/O6: the read VIEW spans the three-corpus confine while the shell (cat) VIEW stays at one
+    # corpus — a deliberate divergence, so read_allow is forced empty rather than derived from the
+    # cat grant's own-corpus scope (the read↔bash parity every OTHER role keeps).
+    read_allow_override=PathShapes(),
     deny_reason=_CORPUS_AUTHOR_DENY_REASON,
 )
 

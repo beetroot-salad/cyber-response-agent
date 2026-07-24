@@ -391,9 +391,9 @@ def test_b2_compile_policy_raises_on_an_untabled_program(env):
 
 def test_b3_every_registered_agents_policy_passes_the_table_check(env):
     """b3: EVERY AgentPolicy in the registry passes the program-table validation — INCLUDING
-    CORPUS_AUTHOR's, which is built directly by `_corpus_author_policy` (via `CuratorDeps.for_run`)
-    and never calls `compile_policy` today. It is the one denylist-free lane, so an untabled
-    (=ungated) program there is the worst place for the fail-open to hide."""
+    CORPUS_AUTHOR's, built via `CuratorDeps.for_run` (a thin wrapper over `bind`/`compile_policy`,
+    #691). It is the one denylist-free lane, so an untabled (=ungated) program there is the worst
+    place for the fail-open to hide."""
     pols = _all_policies(env)
     assert len(AGENTS) == 8
     assert CORPUS_AUTHOR_DEF in AGENTS.values()

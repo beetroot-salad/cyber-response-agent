@@ -318,11 +318,12 @@ def test_d1_verifier_via_bind(tmp_path):
     """d1_verifier_via_bind (survival): bind(VERIFY_DEF, source_run_dir) yields deny-all."""
     # GREEN@HEAD: same deny-all-via-empty-ToolSet path as the oracle.
     run = tmp_path / "source-run"
-    vpol = bind(VERIFY_DEF, run).policy
-    assert isinstance(bind(VERIFY_DEF, run), VerifierDeps)
-    assert not permission.decide_bash(f"cat {run}/report.md", policy=vpol, run_dir=run, defender_dir=_DEFENDER).allow
+    wtd = tmp_path / "wt" / "defender"
+    vpol = bind(VERIFY_DEF, run, defender_dir=wtd).policy
+    assert isinstance(bind(VERIFY_DEF, run, defender_dir=wtd), VerifierDeps)
+    assert not permission.decide_bash(f"cat {run}/report.md", policy=vpol, run_dir=run, defender_dir=wtd).allow
     assert not permission.decide_write(
-        run / "x.md", "c", run_dir=run, defender_dir=_DEFENDER, policy=vpol).allow
+        run / "x.md", "c", run_dir=run, defender_dir=wtd, policy=vpol).allow
 
 
 def test_d1_lead_author_via_bind(tmp_path):
@@ -522,7 +523,7 @@ def test_d2_deps_class_maps_every_bindable_role(tmp_path):
         (bind(JUDGE_DEF, tmp_path), JudgeDeps),
         (bind(ACTOR_DEF, tmp_path, scope=RunScope(read_confine=(tmp_path / "env",))), ActorDeps),
         (bind(ORACLE_DEF, tmp_path), OracleDeps),
-        (bind(VERIFY_DEF, tmp_path), VerifierDeps),
+        (bind(VERIFY_DEF, tmp_path, defender_dir=tmp_path / "vwt" / "defender"), VerifierDeps),
         (bind(LEAD_AUTHOR_DEF, tmp_path / "run", defender_dir=tmp_path / "wt" / "defender"),
          LeadAuthorDeps),
     ]
@@ -655,9 +656,9 @@ def test_d3_corpus_traversal_guard_survives(tmp_path):
     defence is on the NAME, independent of which tree it anchors."""
     # GREEN@HEAD: the guard exists today; the defender_dir thread must not weaken it.
     run = tmp_path / "run"
-    with pytest.raises(ValueError, match="clean relative name"):
+    with pytest.raises(ValueError, match="clean relative path segment"):
         resolve_roots(run, ("../evil",), RunScope())
-    with pytest.raises(ValueError, match="clean relative name"):
+    with pytest.raises(ValueError, match="clean relative path segment"):
         resolve_roots(run, ("/abs",), RunScope())
     assert resolve_roots(run, ("lessons",), RunScope()).corpus_roots  # positive control (clean name)
 
@@ -750,12 +751,13 @@ def test_d5_oracle_verify_denyall_via_compile_policy(tmp_path):
     # GREEN@HEAD: bind already compiles both from their empty ToolSets; stays green.
     run = tmp_path / "run"
     for defn in (ORACLE_DEF, VERIFY_DEF):
-        pol = bind(defn, run).policy
+        dfn = _DEFENDER if defn is ORACLE_DEF else tmp_path / "vwt" / "defender"
+        pol = bind(defn, run, defender_dir=dfn).policy
         assert pol.bash_allow == ()
         assert pol.write_allow == ()
-        assert not permission.decide_bash("cat x", policy=pol, run_dir=run, defender_dir=_DEFENDER).allow
+        assert not permission.decide_bash("cat x", policy=pol, run_dir=run, defender_dir=dfn).allow
         assert not permission.decide_write(
-            run / "x.md", "c", run_dir=run, defender_dir=_DEFENDER, policy=pol).allow
+            run / "x.md", "c", run_dir=run, defender_dir=dfn, policy=pol).allow
 
 
 def test_d5_judge_actor_bash_lane_preserved(tmp_path):

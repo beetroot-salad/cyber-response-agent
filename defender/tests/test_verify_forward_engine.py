@@ -57,6 +57,7 @@ def test_run_verify_pydantic_returns_text_verbatim_and_writes_trace(tmp_path):
         out = _run_verify_pydantic(
             _prompt(tmp_path), config.VERIFIER_MODEL, config.VERIFIER_EFFORT,
             "vf.run-X.trace.jsonl", "verify:X", "predict this case", src,
+            defender_dir=tmp_path / "wt" / "defender",
             make_model=_fake_model(_replay(_VERDICT)),
         )
     assert out == _VERDICT
@@ -69,13 +70,14 @@ def test_run_verify_pydantic_empty_output_is_unprocessable(tmp_path):
         _run_verify_pydantic(
             _prompt(tmp_path), config.VERIFIER_MODEL, config.VERIFIER_EFFORT,
             "vf.trace.jsonl", "verify:X", "predict this case", _src(tmp_path),
+            defender_dir=tmp_path / "wt" / "defender",
             make_model=_fake_model(_replay("")),
         )
 
 
 
-def test_verify_policy_denies_adapters_and_shell():
-    pol = bind(VERIFY_DEF, Path("/tmp/verify-run")).policy
+def test_verify_policy_denies_adapters_and_shell(tmp_path):
+    pol = bind(VERIFY_DEF, Path("/tmp/verify-run"), defender_dir=tmp_path / "wt" / "defender").policy
     assert pol.bash_allow == ()
     assert pol.read_allow == ()
     assert pol.read_roots == ()

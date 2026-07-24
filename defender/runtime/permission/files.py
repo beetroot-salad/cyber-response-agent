@@ -100,6 +100,23 @@ def build_write_allow(root: Path, *, suffix: str = "") -> re.Pattern[str]:
     return re.compile(base + tail)
 
 
+def build_scoped_write_allow(root: Path, *, suffix: str = "") -> re.Pattern[str]:
+    """Build one `AgentPolicy.write_allow` pattern admitting `root` and everything under it,
+    narrowed to the SAME filename segment class the read side's `Grant.scope` shapes use
+    (`grant.SEG`, `[\\w.@=+-]+`, one-or-more nested segments) rather than `build_write_allow`'s
+    `[^\\x00]*` — so a write and its matching read-back admit EXACTLY the same names (#691 MD-7),
+    foreclosing a space/newline write-only name from the frame-injection channel a wide tail would
+    otherwise open. `root` is `resolve()`d to align with the RESOLVED operand `decide_write`
+    matches against, same as `build_write_allow`."""
+    from .grant import SEG
+
+    base = re.escape(str(root.resolve()))
+    tail = rf"/{SEG}(?:/{SEG})*"
+    if suffix:
+        tail += re.escape(suffix)
+    return re.compile(base + tail)
+
+
 def build_named_write_allow(root: Path, names: tuple[str, ...]) -> tuple[re.Pattern[str], ...]:
     """A POSITIVE allow-list of EXACTLY `<root>/<name>` for each name — one anchored
     pattern per basename, matched against the RESOLVED operand (#631, S2). Deliberately

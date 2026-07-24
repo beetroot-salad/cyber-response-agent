@@ -41,34 +41,51 @@ from defender.runtime.permission.grant import OPENS_NOTHING, PROGRAMS, Grant
 _ROLES = {r.name.lower(): r for r in AgentRole}
 
 
-def _scope_for(role: AgentRole, defender_dir: Path) -> RunScope:
+def _scope_for(
+    role: AgentRole, defender_dir: Path, corpus_name: str | None = None,
+) -> RunScope:
     if role is AgentRole.ACTOR:
         from defender.learning.core import config
         return RunScope(
             scripts=(config.LESSONS_ENV_RETRIEVE_SCRIPT, config.LESSONS_ACTOR_INDEX_SCRIPT),
             read_confine=(config.LESSONS_ACTOR_DIR, config.LESSONS_ENVIRONMENT_DIR),
         )
+    if role is AgentRole.CORPUS_AUTHOR:
+        from defender.learning.author.curator_engine import SHIPPED_LESSON_CORPORA
+        return RunScope(
+            corpus_name=corpus_name,
+            read_confine=tuple(
+                (defender_dir / name).resolve() for name in SHIPPED_LESSON_CORPORA
+            ),
+        )
     return RunScope()
 
 
-def _policy(defn: AgentDefinition, run_dir: Path, defender_dir: Path) -> AgentPolicy:
-    if not defn.bindable:
-        raise SystemExit(
-            f"{defn.role.name.lower()} builds its policy per-spawn from a worktree corpus dir "
-            "(bindable=False) — there is nothing to compile from a run dir alone. Read "
-            "learning/author/curator_engine._corpus_author_policy."
-        )
+def _policy(
+    defn: AgentDefinition, run_dir: Path, defender_dir: Path, corpus_name: str | None = None,
+) -> AgentPolicy:
     return compile_policy_for(
-        defn, run_dir, scope=_scope_for(defn.role, defender_dir), defender_dir=defender_dir,
+        defn, run_dir, scope=_scope_for(defn.role, defender_dir, corpus_name),
+        defender_dir=defender_dir,
     )
+
+
+def _shapes(g: Grant) -> str:
+    return "[" + ", ".join(s.pattern for s in g.scope) + "]"
 
 
 def _containment(g: Grant) -> str:
     if g.pins_path:
-        return f"scope: the pattern pins the path (pins_path) — {g.pattern.pattern}"
+        base = f"scope: the pattern pins the path (pins_path) — {g.pattern.pattern}"
+        # A pins_path grant that ALSO opted into a resolve()+scope recheck on its operand (the
+        # curator's `rm`, #691 MD-3) is not pattern-pinned alone: surface the recheck so the audit
+        # does not hide a real containment the gate applies.
+        if g.resolve_operand:
+            base += f"; operand resolve()d + rechecked against {_shapes(g)}"
+        return base
     if PROGRAMS[g.program] is OPENS_NOTHING:
         return "scope: opens nothing (its shape admits no file-opening flag)"
-    return "scope: [" + ", ".join(s.pattern for s in g.scope) + "]"
+    return "scope: " + _shapes(g)
 
 
 def _show(policy: AgentPolicy, name: str, run_dir: Path, defender_dir: Path) -> int:
@@ -130,11 +147,15 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument("--json", action="store_true", dest="as_json")
         p.add_argument("--run-dir", required=True, type=Path)
         p.add_argument("--defender-dir", type=Path, default=PATHS.defender_dir)
+        p.add_argument(
+            "--corpus-name", default=None,
+            help="the per-spawn corpus name (required for a corpus-requiring role, e.g. corpus_author)",
+        )
     args = ap.parse_args(argv)
 
     role = _ROLES[args.agent]
     defn = AGENTS[role]
-    policy = _policy(defn, args.run_dir, args.defender_dir)
+    policy = _policy(defn, args.run_dir, args.defender_dir, args.corpus_name)
     if args.cmd == "show":
         return _show(policy, args.agent, args.run_dir, args.defender_dir)
     anchor = args.defender_dir.parent if defn.anchors_on_tree else args.run_dir
