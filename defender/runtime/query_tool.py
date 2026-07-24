@@ -31,6 +31,14 @@ from defender.scripts.gather_tools.record_query import (
 )
 
 from . import circuit_breaker
+from .ticket_screen import (
+    TICKET_GET,
+    TICKET_LIST,
+    TICKET_SYSTEM,
+    screen_get,
+    screen_list,
+    self_case_key,
+)
 from .verbs import VerbContext, validate_params
 
 TOOL_NAME = "query"
@@ -47,11 +55,6 @@ CONTROL_FLOW_EXCEPTIONS: tuple[type[BaseException], ...] = (
 DEFAULT_FAULT_EXIT = 2
 
 _QID_TRAVERSAL = ("/", "\\", "..", "\x00")
-
-_TICKET_SYSTEM = "ticket"
-_TICKET_GET = "get-ticket"
-_TICKET_LIST = "list-tickets"
-_TICKET_POLICY_REFUSAL_EXIT = 1
 
 
 def resolve_query_id(system: str, verb: str, model_query_id: str | None) -> str:
@@ -93,19 +96,16 @@ def _raw_command(system: str, verb: str, params: dict) -> str:
 
 
 def _self_ticket_reject_reason(
-    run_id: str, system: str, verb: str, params: dict,
+    self_key: str, system: str, verb: str, params: dict,
 ) -> str | None:
     """Reject a direct gather read of its own case before the ticket store is contacted.
 
     Gather deliberately retains unrestricted access to OTHER tickets — including open and
     in-progress records used for correlation. The protected identity is only this run's case
-    key, which is carried explicitly on deps rather than inferred from a filesystem path.
+    key, which is carried explicitly on deps rather than inferred from a filesystem path
+    (``ticket_screen.self_case_key``).
     """
-    if (
-        system == _TICKET_SYSTEM
-        and verb == _TICKET_GET
-        and params.get("key") == run_id
-    ):
+    if system == TICKET_SYSTEM and verb == TICKET_GET and params.get("key") == self_key:
         return (
             "that key is the current investigation's own ticket and cannot be read through "
             "gather. Correlate a different ticket; open and in-progress related cases remain "
@@ -115,53 +115,41 @@ def _self_ticket_reject_reason(
 
 
 def _screen_ticket_payload(
-    run_id: str, system: str, verb: str, payload: Any,
+    self_key: str, system: str, verb: str, payload: Any,
 ) -> tuple[Any, int, str]:
     """Apply gather's current-case exclusion before capture and model display.
 
-    This is intentionally identity-only: another ticket may mention ``run_id`` in free text and
-    remains useful correlation evidence. Lifecycle state is likewise untouched. A record whose
-    key cannot be established is withheld, because it cannot be proved distinct from the current
-    case.
+    The shape checks and the ``(payload, exit_code, detail)`` contract are the shared ticket
+    screen (``ticket_screen``); what is bound here is gather's own predicate, which is
+    intentionally IDENTITY-ONLY. Another ticket may mention ``self_key`` in its free text and
+    remains useful correlation evidence — unlike the judge, gather is not scoring the case, so
+    a mention is not an answer key. Lifecycle state is likewise untouched. A record whose key
+    cannot be established is withheld, because it cannot be proved distinct from this case.
     """
-    if system != _TICKET_SYSTEM:
+    if system != TICKET_SYSTEM:
         return payload, 0, ""
 
-    if verb == _TICKET_GET:
-        if not isinstance(payload, dict) or not isinstance(payload.get("key"), str):
-            return (
-                None,
-                DEFAULT_FAULT_EXIT,
-                "malformed ticket store response: expected a ticket object with a string key",
-            )
-        if payload["key"] == run_id:
-            return (
-                None,
-                _TICKET_POLICY_REFUSAL_EXIT,
+    if verb == TICKET_GET:
+        return screen_get(
+            payload,
+            require_key=True,
+            withhold=lambda ticket: (
                 "the ticket store returned the current investigation's own ticket; its "
-                "content was withheld from gather.",
-            )
-        return payload, 0, ""
+                "content was withheld from gather."
+                if ticket["key"] == self_key else None
+            ),
+        )
 
-    if verb == _TICKET_LIST:
-        if not (isinstance(payload, dict) and isinstance(payload.get("tickets"), list)):
-            return (
-                None,
-                DEFAULT_FAULT_EXIT,
-                "malformed ticket store response: 'tickets' is not a list",
-            )
-        kept = [
-            ticket
-            for ticket in payload["tickets"]
-            if (
-                isinstance(ticket, dict)
-                and isinstance(ticket.get("key"), str)
-                and ticket["key"] != run_id
-            )
-        ]
-        return {**payload, "tickets": kept, "total": len(kept)}, 0, ""
+    if verb == TICKET_LIST:
+        return screen_list(
+            payload,
+            keep=lambda ticket: (
+                isinstance(ticket.get("key"), str) and ticket["key"] != self_key
+            ),
+        )
 
     return payload, 0, ""
+
 
 class QueryCapture(AbstractCapability[Any]):
 
@@ -232,6 +220,7 @@ class QueryCapture(AbstractCapability[Any]):
         verb = _as_str(args.get("verb"))
         params = _as_dict(args.get("params"))
         model_query_id = args.get("query_id")
+        self_key = self_case_key(deps)
 
         tripped = _tripped_message(deps, system)
         if tripped is not None:
@@ -246,7 +235,7 @@ class QueryCapture(AbstractCapability[Any]):
             )
             return self._model_view(deps, row, text, DEFAULT_FAULT_EXIT, load_error)
         if reason is None:
-            reason = _self_ticket_reject_reason(deps.run_id, system, verb, params)
+            reason = _self_ticket_reject_reason(self_key, system, verb, params)
         if reason is not None:
             await self._record(
                 deps, system=system, verb=verb,
@@ -262,7 +251,7 @@ class QueryCapture(AbstractCapability[Any]):
         try:
             payload = await handler(args)
             payload, exit_code, detail = _screen_ticket_payload(
-                deps.run_id, system, verb, payload,
+                self_key, system, verb, payload,
             )
         except CONTROL_FLOW_EXCEPTIONS:
             raise

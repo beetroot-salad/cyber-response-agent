@@ -254,7 +254,12 @@ def test_get_response_that_resolves_to_self_is_withheld_before_capture(tmp_path)
     )
 
     assert rec.only().params["key"] == OTHER
-    assert run.rows[0]["exit_code"] == 1
+    # A policy withhold files its OWN exit code (3), distinct from the adapter's generic
+    # business code (1, a 404 / query error), so the queries table distinguishes "withheld
+    # the current case" from "no such ticket" without parsing the free-text detail. It stays
+    # outside the infra set, so the breaker is untouched.
+    assert run.rows[0]["exit_code"] == 3
+    assert run.rows[0]["error_class"] == "agent-fixable"
     assert run.payload_text() == ""
     assert "MISROUTED-SELF-SECRET" not in run.all_model_text
     assert run.breaker.get("total_failures", 0) == 0

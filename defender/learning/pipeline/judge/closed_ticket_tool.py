@@ -34,11 +34,15 @@ absence by registration, N3):
     says cannot exist, and an audit trail without garbage in it. ``label``/``q`` need no
     screen for the same reason they never did — ``list_tickets`` urlencodes them — so the two
     paths are now symmetric rather than the deliberate asymmetry #672 recorded.
-  - **Self-key exclusion** (Fork C/H) — the case-under-judgment's own key (the judge's learning
-    run-dir basename) is refused pre-store on ``get``, filtered per-item by identity on ``list``,
-    and — on ``get`` only — screened out of a fetched closed ticket whose free text NAMES it
-    (Fork H is ``get``-scoped; the ``list`` path carries the status + identity screens only, so a
-    listed sibling's free text that names the self-case is NOT redacted — the graph's N-note).
+  - **Self-key exclusion** (Fork C/H) — the case-under-judgment's own key (``deps.run_id``, via
+    the shared ``runtime.ticket_screen.self_case_key`` — the SAME definition gather screens on,
+    so the two answer-key defenses cannot drift apart) is refused pre-store on ``get``, filtered
+    per-item by identity on ``list``, and — on ``get`` only — screened out of a fetched closed
+    ticket whose free text NAMES it. That last withhold files the dedicated non-infra
+    ``POLICY_REFUSAL_EXIT``, not the adapter's generic business code, so the audit trail tells a
+    withheld self-read apart from a genuine 404 (Fork H is ``get``-scoped; the ``list`` path
+    carries the status + identity screens only, so a listed sibling's free text that names the
+    self-case is NOT redacted — the graph's N-note).
   - **Item re-check** (Fork G) — ``list`` re-checks each returned item's status client-side and
     drops non-closed (or self-key) records before the envelope.
 
@@ -70,6 +74,7 @@ from defender.runtime.query_tool import (
     DEFAULT_FAULT_EXIT,
     _fault_exit,
 )
+from defender.runtime.ticket_screen import screen_get, screen_list, self_case_key
 from defender.runtime.tools import AgentDeps, _bash_env, _format_bash_result
 from defender.runtime.untrusted import wrap as _wrap
 from defender.runtime.verbs import VerbContext
@@ -95,13 +100,6 @@ _PAYLOAD_DIR = "ticket_reads"
 #: resolved through the SAME registry seam as the store reads, so the screen has no second
 #: route to the environment and tests drive it with the same fake.
 _KEY_PATTERN_VERB = "key-pattern"
-
-
-def _self_key(deps: AgentDeps) -> str:
-    """The case-under-judgment's key — the judge's learning run-dir basename, which is also the
-    open in-flight ticket's key (``run_id``). The leg's deps already identify it, so the
-    self-exclusion is state-independent (Fork C)."""
-    return Path(deps.run_dir).name
 
 
 def _key_reject_reason(key: str, grammar: re.Pattern[str]) -> str | None:
@@ -273,15 +271,20 @@ def _capture_and_view(
     return _go()
 
 
-def _screen_listing(payload: dict, self_key: str) -> dict:
+def _screen_listing(deps: AgentDeps, payload: Any) -> tuple[Any, int, str]:
     """Fork G + V-A: keep only genuinely-closed items that are not the self-case's own record,
-    per-item, before the envelope. Duplicates survive (the re-check is status + self-key
-    identity, never a dedup). A non-dict item is dropped as unreadable."""
-    kept = [
-        t for t in payload.get("tickets", [])
-        if isinstance(t, dict) and t.get("status") == "closed" and t.get("key") != self_key
-    ]
-    return {**payload, "tickets": kept}
+    per-item, before the envelope.
+
+    The envelope shape check and the ``(payload, exit_code, detail)`` contract are the shared
+    ticket screen (``runtime.ticket_screen``); bound here is the judge's own predicate, whose
+    CLOSED-only half is the judge's alone — gather keeps every lifecycle state because it is
+    correlating, not scoring. Duplicates survive (the re-check is status + self-key identity,
+    never a dedup); a non-dict item is dropped as unreadable."""
+    self_key = self_case_key(deps)
+    return screen_list(
+        payload,
+        keep=lambda t: t.get("status") == "closed" and t.get("key") != self_key,
+    )
 
 
 async def _list_body(deps: AgentDeps, lock: asyncio.Lock, verbs: Any,
@@ -294,13 +297,7 @@ async def _list_body(deps: AgentDeps, lock: asyncio.Lock, verbs: Any,
         deps, verbs, "list-tickets", {"label": label, "q": q, "require_closed": True},
     )
     if exit_code == 0:
-        if not (isinstance(payload, dict) and isinstance(payload.get("tickets"), list)):
-            payload, exit_code, detail = (
-                None, DEFAULT_FAULT_EXIT,
-                "malformed ticket store response: 'tickets' is not a list",
-            )
-        else:
-            payload = _screen_listing(payload, _self_key(deps))
+        payload, exit_code, detail = _screen_listing(deps, payload)
     return await _capture_and_view(
         deps, lock, "list-tickets", {"label": label, "q": q}, payload, exit_code, detail,
     )
@@ -327,7 +324,7 @@ async def _get_body(deps: AgentDeps, lock: asyncio.Lock, verbs: Any, key: str) -
     reason = _key_reject_reason(key, grammar)
     if reason is not None:
         raise ModelRetry(reason)
-    if key == _self_key(deps):
+    if key == self_case_key(deps):
         raise ModelRetry(
             "that key is the in-flight ticket for the case you are scoring — it is the answer "
             "key, never readable through this confirm. Cite a past CLOSED case."
@@ -346,16 +343,20 @@ def _screen_fetched_ticket(deps: AgentDeps, payload: Any) -> tuple[Any, int, str
     """A successfully-fetched ``get`` payload → its (payload, exit_code, detail): a non-object
     body is a malformed infra fault, and a genuinely-closed ticket whose free text NAMES the
     case's own key is withheld (Fork H — a business refusal, so it never trips the breaker; the
-    one transitive answer-key path whose identifier this seam knows)."""
-    if not isinstance(payload, dict):
-        return None, DEFAULT_FAULT_EXIT, "malformed ticket store response: expected a ticket object"
-    if _self_key(deps) in json.dumps(payload, default=str):
-        return (
-            None, 1,
+    one transitive answer-key path whose identifier this seam knows).
+
+    The predicate runs over the SERIALIZED WHOLE payload, not one field: the self-key may ride
+    in a resolution, a nested comment, or the key itself. That is strictly wider than gather's
+    identity-only screen, and deliberately so — gather correlates, the judge scores."""
+    self_key = self_case_key(deps)
+    return screen_get(
+        payload,
+        withhold=lambda ticket: (
             "the fetched ticket references the case under judgment; its content is withheld "
-            "to keep the answer key unreadable.",
-        )
-    return payload, 0, ""
+            "to keep the answer key unreadable."
+            if self_key in json.dumps(ticket, default=str) else None
+        ),
+    )
 
 
 def register_closed_ticket_tools(agent: Any, verbs: Any) -> None:
