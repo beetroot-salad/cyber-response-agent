@@ -1657,9 +1657,12 @@ def test_closed_ticket_naming_self_key_refused(tmp_path, field):
         "the SERIALIZED WHOLE payload, not one field"
     )
     assert "duplicate of in-flight" not in run.all_text, "the quoting free text leaked"
-    # The withheld read is a BUSINESS refusal: its own row files exit-1 and the breaker
-    # stays clean (shipping it as an infra fault would trip the breaker on three cases).
-    assert run.rows()[0]["exit_code"] == 1
+    # The withheld read is a BUSINESS refusal: the breaker stays clean (shipping it as an
+    # infra fault would trip the breaker on three cases). It files the dedicated policy code
+    # (3), NOT the adapter's generic business code (1) — a withheld self-read and a genuine
+    # 404 must not be indistinguishable in the audit trail. Non-infra either way.
+    assert run.rows()[0]["exit_code"] == 3
+    assert run.rows()[0]["error_class"] == "agent-fixable"
     assert not run.breaker().get("systems", {}).get("ticket", {}).get("failures")
     # The N-note half: other-ticket quotes ride wrapped, unredacted.
     assert "TKT-QUOTES-OTHER" in run.all_text

@@ -31,6 +31,14 @@ from defender.scripts.gather_tools.record_query import (
 )
 
 from . import circuit_breaker
+from .ticket_screen import (
+    TICKET_GET,
+    TICKET_LIST,
+    TICKET_SYSTEM,
+    screen_get,
+    screen_list,
+    self_case_key,
+)
 from .verbs import VerbContext, validate_params
 
 TOOL_NAME = "query"
@@ -85,6 +93,62 @@ def _payload_status(exit_code: int, payload: Any) -> str:
 
 def _raw_command(system: str, verb: str, params: dict) -> str:
     return shlex.join([system, verb, *(f"{k}={v}" for k, v in params.items())])
+
+
+def _self_ticket_reject_reason(
+    self_key: str, system: str, verb: str, params: dict,
+) -> str | None:
+    """Reject a direct gather read of its own case before the ticket store is contacted.
+
+    Gather deliberately retains unrestricted access to OTHER tickets — including open and
+    in-progress records used for correlation. The protected identity is only this run's case
+    key, which is carried explicitly on deps rather than inferred from a filesystem path
+    (``ticket_screen.self_case_key``).
+    """
+    if system == TICKET_SYSTEM and verb == TICKET_GET and params.get("key") == self_key:
+        return (
+            "that key is the current investigation's own ticket and cannot be read through "
+            "gather. Correlate a different ticket; open and in-progress related cases remain "
+            "available."
+        )
+    return None
+
+
+def _screen_ticket_payload(
+    self_key: str, system: str, verb: str, payload: Any,
+) -> tuple[Any, int, str]:
+    """Apply gather's current-case exclusion before capture and model display.
+
+    The shape checks and the ``(payload, exit_code, detail)`` contract are the shared ticket
+    screen (``ticket_screen``); what is bound here is gather's own predicate, which is
+    intentionally IDENTITY-ONLY. Another ticket may mention ``self_key`` in its free text and
+    remains useful correlation evidence — unlike the judge, gather is not scoring the case, so
+    a mention is not an answer key. Lifecycle state is likewise untouched. A record whose key
+    cannot be established is withheld, because it cannot be proved distinct from this case.
+    """
+    if system != TICKET_SYSTEM:
+        return payload, 0, ""
+
+    if verb == TICKET_GET:
+        return screen_get(
+            payload,
+            require_key=True,
+            withhold=lambda ticket: (
+                "the ticket store returned the current investigation's own ticket; its "
+                "content was withheld from gather."
+                if ticket["key"] == self_key else None
+            ),
+        )
+
+    if verb == TICKET_LIST:
+        return screen_list(
+            payload,
+            keep=lambda ticket: (
+                isinstance(ticket.get("key"), str) and ticket["key"] != self_key
+            ),
+        )
+
+    return payload, 0, ""
 
 
 class QueryCapture(AbstractCapability[Any]):
@@ -156,6 +220,7 @@ class QueryCapture(AbstractCapability[Any]):
         verb = _as_str(args.get("verb"))
         params = _as_dict(args.get("params"))
         model_query_id = args.get("query_id")
+        self_key = self_case_key(deps)
 
         tripped = _tripped_message(deps, system)
         if tripped is not None:
@@ -169,6 +234,8 @@ class QueryCapture(AbstractCapability[Any]):
                 exit_code=DEFAULT_FAULT_EXIT, detail=load_error,
             )
             return self._model_view(deps, row, text, DEFAULT_FAULT_EXIT, load_error)
+        if reason is None:
+            reason = _self_ticket_reject_reason(self_key, system, verb, params)
         if reason is not None:
             await self._record(
                 deps, system=system, verb=verb,
@@ -183,6 +250,9 @@ class QueryCapture(AbstractCapability[Any]):
         payload: Any = None
         try:
             payload = await handler(args)
+            payload, exit_code, detail = _screen_ticket_payload(
+                self_key, system, verb, payload,
+            )
         except CONTROL_FLOW_EXCEPTIONS:
             raise
         except (BudgetKill, KeyboardInterrupt, GeneratorExit, asyncio.CancelledError):
@@ -191,8 +261,6 @@ class QueryCapture(AbstractCapability[Any]):
             exit_code, detail = e.exit_code, e.detail
         except BaseException as e:  # noqa: BLE001 — the point: an unmapped fault still writes a row
             exit_code, detail = _fault_exit(e), str(e) or type(e).__name__
-        else:
-            exit_code, detail = 0, ""
 
         row, text = await self._record(
             deps, system=system, verb=verb, query_id=query_id, params=params,

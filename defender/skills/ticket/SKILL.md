@@ -50,6 +50,11 @@ the defender, the author skill, and the actor-reviewer judge.
 - **`status` ∈ {open, in_progress, closed}.** Closed
   tickets carry a `resolution` field; open tickets have
   `resolution: null`.
+- **The current investigation's own ticket is excluded by identity.**
+  Gather rejects a direct `get-ticket` for its run id and removes that record
+  from `list-tickets` results before the payload is cached. Other open and
+  in-progress tickets remain available for correlation, including tickets
+  whose free text references the current case.
 - **`labels` are short tags.** Common ones: `brute-force`,
   `false-positive`, `change-window`, `escalated`. Treat them as
   curator-supplied hypothesis hints, not refutations.
@@ -105,7 +110,11 @@ every `list-tickets` param is an optional filter.
 systems catalog in your dispatch prompt is the authoritative surface, and a call
 with an unknown/missing/mistyped param is rejected with the declared list anyway.
 
-Each verb returns the upstream JSON response unchanged.
+The adapter returns the upstream JSON response unchanged. At gather's query
+boundary, the current run's own ticket is removed before both the model-facing
+view and `gather_raw` capture. This is an identity exclusion, not a closed-only
+filter: other open and in-progress tickets are valid correlation context, while
+closed-only actor/judge reads remain the confirmation path for precedent.
 
 ### Connectivity
 
