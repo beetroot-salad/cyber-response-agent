@@ -1,6 +1,6 @@
 # Closing with the design doc
 
-You reach here as the discussion settles — but first check *which way* it settled. Won't-fix, or already resolved by a later merge, ends in a short disposition in chat, not in the doc below. Only when the issue is genuinely heading to implementation do you compile what was decided into **one issue comment**: the intent+design doc write-tests consumes.
+You reach here as the discussion settles — but first check *which way* it settled. Won't-fix, or already resolved by a later merge, ends in a short disposition comment — that is the state the issue needs — not in the doc below. Only when the issue is genuinely heading to implementation do you compile what was decided into **one issue comment**: the intent+design doc write-tests consumes.
 
 Write it for the agent that reads it cold, not for the user — the user's version was the conversation. The value is conservation: the typing survives into the spec stage, and a flat prose summary loses exactly what the downstream checks stand on. Scale it to the issue — a one-line fix earns a short doc.
 
