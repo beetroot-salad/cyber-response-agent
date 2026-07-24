@@ -70,12 +70,22 @@ def _policy(
     )
 
 
+def _shapes(g: Grant) -> str:
+    return "[" + ", ".join(s.pattern for s in g.scope) + "]"
+
+
 def _containment(g: Grant) -> str:
     if g.pins_path:
-        return f"scope: the pattern pins the path (pins_path) — {g.pattern.pattern}"
+        base = f"scope: the pattern pins the path (pins_path) — {g.pattern.pattern}"
+        # A pins_path grant that ALSO opted into a resolve()+scope recheck on its operand (the
+        # curator's `rm`, #691 MD-3) is not pattern-pinned alone: surface the recheck so the audit
+        # does not hide a real containment the gate applies.
+        if g.resolve_operand:
+            base += f"; operand resolve()d + rechecked against {_shapes(g)}"
+        return base
     if PROGRAMS[g.program] is OPENS_NOTHING:
         return "scope: opens nothing (its shape admits no file-opening flag)"
-    return "scope: [" + ", ".join(s.pattern for s in g.scope) + "]"
+    return "scope: " + _shapes(g)
 
 
 def _show(policy: AgentPolicy, name: str, run_dir: Path, defender_dir: Path) -> int:

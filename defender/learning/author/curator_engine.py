@@ -13,6 +13,7 @@ from uuid import uuid4
 from pydantic_ai.exceptions import ModelRetry
 
 from defender._untrusted import wrap
+from defender.hooks.record_lesson_load import LESSON_CORPORA as _LESSON_CORPORA
 from defender.learning.author import shared as _shared
 from defender.learning.author.verify_forward.checks import ForwardCheck
 from defender.learning.author.verify_forward.engine import _run_verify_pydantic
@@ -81,12 +82,14 @@ _CORPUS_AUTHOR_DENY_REASON = (
 )
 
 
-# The three lesson corpora ever shipped (RUNTIME_LESSON_CORPORA's author-side superset,
-# hooks/record_lesson_load.LESSON_CORPORA) — the curator's fixed R4 read confine AND, by
+# The three lesson corpora ever shipped — the curator's fixed R4 read confine AND, by
 # construction, its MD-6 exact-match corpus-name membership set: a name that does not resolve
 # INTO this confine can never bind (the generic MD-1 confine-containment check in `bind`
-# refuses it), so no separate membership list is needed.
-SHIPPED_LESSON_CORPORA: tuple[str, ...] = ("lessons", "lessons-actor", "lessons-environment")
+# refuses it), so no separate membership list is needed. DERIVED from the one canonical set
+# (`hooks/record_lesson_load.LESSON_CORPORA`, the author-side superset of RUNTIME_LESSON_CORPORA)
+# so the shipped-corpus roster has a single source of truth; sorted for a deterministic order
+# (containment is order-independent).
+SHIPPED_LESSON_CORPORA: tuple[str, ...] = tuple(sorted(_LESSON_CORPORA))
 
 
 def _corpus_spellings(corpus_dir: Path) -> str:

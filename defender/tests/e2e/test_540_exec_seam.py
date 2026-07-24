@@ -66,6 +66,7 @@ from defender import agents as agents_registry  # noqa: E402
 from defender.runtime import bash_exec, box, permission  # noqa: E402
 from defender.runtime import tools as runtime_tools  # noqa: E402
 from defender.runtime.agent_definition import RunScope, bind  # noqa: E402
+from defender.runtime.agent_role import AgentRole  # noqa: E402
 from defender.runtime.driver import MAIN_DEF  # noqa: E402
 
 pytestmark = pytest.mark.e2e
@@ -705,10 +706,12 @@ def test_every_bash_enabled_role_executes_through_a_box(tmp_path):
         assert isinstance(deps.box, box.BoxExecutor), \
             f"{defn.role.name} has bash but no box on its deps"
 
-    # a second, non-tautological census: the non-bash roles are disjoint from the bash census
-    # above (the `d.tools.bash` predicate is the only gate — there is no second, narrower one).
-    non_bash_roles = {d.role for d in agents_registry.AGENTS.values() if not d.tools.bash}
-    assert non_bash_roles.isdisjoint({d.role for d in bash_roles})
+    # The census's real content: the curator — bash=True but excluded under the RETIRED
+    # `d.bindable` conjunct — is now enumerated by the single `d.tools.bash` predicate. A
+    # reintroduced narrower gate would drop it and fail here. (The former assertion — non-bash
+    # roles disjoint from the bash census — was tautological: any predicate partitions the
+    # registry into disjoint sets, so it could never fail and proved nothing.)
+    assert AgentRole.CORPUS_AUTHOR in {d.role for d in bash_roles}
 
 
 def test_the_existing_e2e_bash_corpus_completes_through_the_box(tmp_path):

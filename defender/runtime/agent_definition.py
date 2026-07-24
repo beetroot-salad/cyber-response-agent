@@ -188,10 +188,17 @@ def _build_roots(
     )
     if defn.requires_corpus:
         assert roots.corpus_dir is not None
-        if not any(roots.corpus_dir.is_relative_to(c) for c in roots.read_confine):
+        # Compare RESOLVED to RESOLVED, the same collapse `decide_write`'s containment half applies
+        # at runtime (`_resolved_read_roots` resolves the confine; `build_scoped_write_allow` roots
+        # the write scope at `corpus_dir.resolve()`). A lexical `is_relative_to` on the UNresolved
+        # corpus_dir would spuriously reject every bind whenever the tree path carries a symlink
+        # component (a symlinked worktree base, macOS `/tmp`→`/private/tmp`) — the resolved confine
+        # and the unresolved corpus would never share a prefix.
+        resolved_corpus = roots.corpus_dir.resolve()
+        if not any(resolved_corpus.is_relative_to(c.resolve()) for c in roots.read_confine):
             raise ValueError(
                 f"bind({defn.role.name}_DEF, …) corpus {scope.corpus_name!r} resolves to "
-                f"{roots.corpus_dir} which is outside this agent's read confine/scope — a write "
+                f"{resolved_corpus} which is outside this agent's read confine/scope — a write "
                 "scope that cannot author within its own read containment is unbuildable."
             )
     return roots
