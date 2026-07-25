@@ -1,0 +1,19 @@
+# Negative control (#693: "unrelated stories/leads should project zero").
+# The leads are case-001's exact envelopes — their query windows physically
+# contain the brute-force burst — but the story is unrelated authorized activity
+# that touches none of them. Ground truth: every lead is 0. Any +event is the
+# oracle copying from the window/salience rather than reasoning from the story.
+case_id: neg-001-unrelated-story
+kind: negative-control
+base_case: case-001-ssh-bruteforce-canary   # oracle_visible leads copied from here
+result_classes_covered: ["0"]
+leads:
+  l-001: { system: elastic,      template: sshd-auth-history,   class: "0" }
+  l-002: { system: elastic,      template: sshd-auth-history,   class: "0" }
+  l-003: { system: cmdb,         template: host-trust-edges,    class: "0" }
+  l-004: { system: elastic,      template: zeek-ssh-by-ip,      class: "0" }
+  l-005: { system: threat-intel, template: ip-reputation-lookup, class: "0" }
+  l-006: { system: elastic,      template: sshd-auth-history,   class: "0" }
+  l-007: { system: cmdb,         template: host-trust-edges,    class: "0" }
+  l-008: { system: identity,     template: access-check,        class: "0" }
+  l-009: { system: change-mgmt,  template: active-changes,      class: "0" }

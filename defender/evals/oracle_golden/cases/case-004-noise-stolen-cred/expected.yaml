@@ -1,0 +1,38 @@
+# Ground-truth labels for case-004 (the +noise / additive-indistinguishable
+# class). The attacker logged into db-1 as sre.alice from jump-box-1 (172.18.0.6)
+# — identical in every queried field to sre.alice's routine maintenance access.
+# The auth telemetry folds the malicious login into ONE aggregate row alongside
+# the concurrent routine logins (accepted=5, one source, one method); nothing
+# distinguishes it. See hidden/controls.yaml.
+#
+# The discriminating test: the activity DOES light l-001's envelope (so not 0),
+# but with a baseline-shape event and no distinguishing field (so not +event) ->
+# +noise. A projection of +event here would be OVER-projection (manufacturing a
+# catch from authorized-looking traffic); a projection of 0 would miss that the
+# activity touches the lead at all.
+case_id: case-004-noise-stolen-cred
+kind: observed
+result_classes_covered: ["+noise", "0"]
+lead_source: authored
+notes: >
+  This is the hardest class: the correct answer is "the story lights this lead
+  but adds only baseline-shaped events". The malice is in intent + post-login
+  recon, which sshd auth does not capture. A syscall/file lead on db-1 MIGHT
+  distinguish the recon (e.g. Falco "Read sensitive file"), which would be a
+  +event on a different envelope — deliberately not included here to keep the
+  +noise test on the auth envelope clean.
+leads:
+  l-001:
+    system: elastic
+    template: sshd-auth-history
+    class: "+noise"
+    baseline_shape: "Accepted password for sre.alice from 172.18.0.6 (jump-box-1) — routine SRE maintenance path"
+  l-002:
+    system: elastic
+    template: sshd-auth-history
+    class: "0"
+    note: "failed-auth query — the stealthy op produced no failures / novel source"
+  l-003:
+    system: cmdb
+    template: host-trust-edges
+    class: "0"

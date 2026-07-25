@@ -1,0 +1,20 @@
+case_id: case-002-authorized-keys-falco
+kind: observed
+disposition_class: malicious
+activity_family: persistence / T1098.004 (SSH authorized_keys)
+attack:
+  scenario: persistence-authorized-keys
+  seed: 7
+  runner_run_id: persistence-authorized-keys-7-16ce01ca
+  target: canary-1 (container 1df4bcd65ee4)
+  event_at: "2026-07-25T09:29:02Z"
+  alert_rule: v2-falco-authorized-keys-modification
+env: {stack: playground-v2, snapshot: "412421678", captured: "2026-07-25"}
+result_classes_covered: ["+event", "0"]
+lead_source: authored
+new_coverage: "Falco system / falco-alerts template (case-001 covers sshd-auth + zeek)"
+projections:
+  - tag: glm-5.2_effort-none
+    oracle_model: glm-5.2
+    oracle_effort: none
+    produced_by: replay.py (production oracle seam, oracle_visible only)

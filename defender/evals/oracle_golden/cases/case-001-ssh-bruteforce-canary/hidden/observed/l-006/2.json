@@ -1,0 +1,1 @@
+{"query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-24T07:45:35.000Z\" AND @timestamp < \"2026-07-25T07:45:35.000Z\"\n        AND source.ip == \"172.18.0.15\"\n        AND event.outcome IS NOT NULL\n| STATS total = COUNT(*)\n| LIMIT 1", "columns": [{"name": "total", "type": "long"}], "row_count": 1, "values": [{"total": 0}]}

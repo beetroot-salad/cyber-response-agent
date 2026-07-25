@@ -1,0 +1,55 @@
+case_id: case-003-suppression-devws
+kind: observed
+disposition_class: malicious
+activity_family: "defense-evasion / T1562.001 (impair defenses: stop monitoring agent)"
+
+# The suppression was performed live and captured; no catalog scenario covers
+# agent-stop, so the action was run directly and the leads are authored (a
+# realistic dev-ws-1 investigation surface).
+suppression:
+  action: "pkill -TERM elastic-agent inside dev-ws-1"
+  host: dev-ws-1
+  at: "2026-07-25T09:34:34Z"
+  last_shipped_event: "2026-07-25T09:34:29Z"
+  restored_at: "~2026-07-25T09:46Z (agent restarted to leave env healthy)"
+env:
+  stack: playground-v2
+  snapshot: "412421678 (lever-down 2026-07-25T08:12Z)"
+  captured: "2026-07-25"
+
+result_classes_covered: ["-noise", "0"]
+lead_source: authored
+
+# The discriminating property, AS ORIGINALLY CLAIMED: l-001 (-noise) and l-003 (0)
+# both have EMPTY observed results, differing only in the story and the control
+# baseline (dev-ws-1 normally reports; web-1 is alive).
+#
+# Re-measurement withdrew that claim (hidden/controls.yaml `revision`): under each
+# lead's own predicate neither host reports in the window, so the control baseline
+# is not a discriminator here — only the story is. l-001 was relabelled `-noise`
+# -> `0` (its envelope has no baseline to remove), which makes the recorded
+# projection's suppression marker a FALSE SUPPRESSION. That is the finding, not a
+# defect to paper over: the case now records a real oracle error rather than a
+# pass earned by a mis-measured control.
+
+projections:
+  - tag: glm-5.2_effort-none
+    oracle_model: glm-5.2
+    oracle_effort: none
+    oracle_prompt: defender/learning/pipeline/oracle/prompt.md
+    produced_by: replay.py (production oracle seam, oracle_visible only)
+    result: "3/4 class after relabel; 1 false suppression (l-001) -> slice is no-update"
+
+caveats:
+  - Suppression is at the shipper (Elastic Agent), so ES-side streams stop
+    updating; host-local files are not the blinded surface (the leads read the
+    store). Stopping the shipper DELAYS file-sourced telemetry — dev-ws-1's
+    in-window auth lines were ingested at 09:47:04 once the agent restarted — and
+    permanently removes only agent-generated telemetry. A durable `-noise` capture
+    needs a stream of the latter kind, or an action that destroys data at source
+    (clearing the log, disabling auditd).
+  - The originally recorded "web-1 alive in-window (237 docs)" is a host-level
+    count across nginx/metricbeat/auth (~395 per re-measurement); under l-003's
+    own predicate web-1 is 0 in the window.
+  - This case should be re-captured on a weekday, on a lead whose envelope has a
+    measured non-zero baseline, before its `-noise` slice is treated as calibrated.

@@ -1,0 +1,63 @@
+case_id: case-001-ssh-bruteforce-canary
+kind: observed                    # observed | negative-control | mutation
+disposition_class: malicious
+activity_family: brute-force / T1110.001 (password guessing)
+
+# Provenance — the real operation this case captures.
+attack:
+  scenario: ssh-brute-force-canary
+  seed: 42
+  runner_run_id: ssh-brute-force-canary-42-e7d87435
+  source: office-ws-1 (172.18.0.15)
+  target: canary-1 (172.18.0.9)
+  window: ["2026-07-25T07:45:35Z", "2026-07-25T07:48:40Z"]
+  alert_rule: v2-sshd-failed-auth-burst
+env:
+  stack: playground-v2
+  snapshot: "409583061 (lever-down 2026-07-17)"
+  captured: "2026-07-25"
+
+# The defender run whose leads form the oracle-visible envelope.
+defender_run:
+  run_id: oracle-fidelity-1
+  model: glm-5.2
+  leads: 9
+  systems: [elastic, cmdb, identity, threat-intel, change-mgmt]
+  disposition: malicious           # correct
+
+result_classes_covered: ["+event", "0"]
+result_classes_absent: ["+noise", "-noise"]
+
+# Recorded projections live in projections/<tag>.yaml; scores in scores/<tag>.json.
+projections:
+  - tag: glm-5.2_effort-none
+    oracle_model: glm-5.2
+    oracle_effort: none
+    oracle_prompt: defender/learning/pipeline/oracle/prompt.md
+    produced_by: production path (invoke_oracle / _run_oracle_pydantic)
+    # Carried over from the #707 probe, which predates replay.py — so this one
+    # tag was NOT produced by the documented `replay.py` command. Both drive the
+    # same seam (invoke_oracle_lead -> _run_oracle_pydantic) over the same
+    # oracle-visible inputs, so it is comparable; it just is not re-derivable by
+    # running the tool. Re-record under replay.py on the next oracle change.
+    reproducible_by_replay_py: false
+    result: "7/9 class agreement; +event recall 0.50; 0 wrong fields; 0 false-suppression"
+
+caveats:
+  - >
+    Oracle-visible samples are all empty ("(no schema sample available)"). Not an
+    artifact of aggregate ES|QL: redact_exemplar needs a "### Raw Sample Events"
+    header that playground-v2 payloads never carry, so production is equally
+    exemplar-less. Field grounding here tests inference from query bodies.
+  - Single disposition class; +noise / -noise unexercised (need other attacks).
+  - >
+    Container IPs are reassigned on every lever-up: 172.18.0.15 was db-1 until
+    2026-07-13 and office-ws-1 from ~07-17. The IP-scoped envelopes (l-004, l-006)
+    therefore carry another host's history alongside the attack. Story vs. runner
+    record and vs. inventory both check out (office-ws-1 / dev.dana, 8 bursts x 6
+    passwords, 07:45:32-07:48:40, no success, trust_edges_out []).
+  - >
+    Counts in the payloads are per-ingest and the environment re-ships each host's
+    on-disk logs at every lever-up, so a raw count is multiplied by the number of
+    restores since capture. The 96 failures here are NOT such a duplicate: they
+    are 48 attempts x 2 sshd log lines, verified per ingest hour.

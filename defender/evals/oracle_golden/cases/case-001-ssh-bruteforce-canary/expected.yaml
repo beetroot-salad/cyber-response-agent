@@ -1,0 +1,117 @@
+# Ground-truth labels for case-001, derived from hidden/ observed telemetry +
+# hidden/controls.yaml. Authoritative target for scoring — independent of any
+# oracle output.
+#
+# `class` is the ENVELOPE truth: the four-way category the lead's queries
+# physically surface as a signed diff over baseline (0 | +noise | +event |
+# -noise). It is objective — it comes from the observed rows, not from the
+# lead's stated intent. Where a lead's stated purpose (`intent_note`) would
+# scope a narrower answer, that is recorded but is NOT the ground truth; it
+# explains predictable oracle divergence, it does not excuse it.
+#
+# `fields` (on +event leads) are the distinguishing concrete values an accurate
+# projection must commit to. `<...>` placeholders in a projection are scored
+# `unknown`, never `wrong` — the story does not state them.
+
+case_id: case-001-ssh-bruteforce-canary
+kind: observed
+result_classes_covered: ["+event", "0"]     # NOT exercised: +noise, -noise
+notes: >
+  Every oracle-visible sample skeleton is empty ("(no schema sample available)"),
+  so field grounding here tests the oracle's inference from QUERY BODIES, not from
+  a schema exemplar. This is NOT specific to aggregate ES|QL, as first recorded:
+  redact_exemplar looks for a "### Raw Sample Events" markdown header, and the
+  playground-v2 query tool writes raw JSON payloads that never carry one, so
+  lead_sample_text returns the placeholder for every lead of every run — verified
+  in the #707 probe's own request trace, and again by case-002, which IS
+  doc-returning (KEEP ... SORT) and still has no exemplar. The suite is faithful
+  to production here; exercising the exemplar channel needs a payload-format
+  change, not another case.
+
+  IP identity is not stable across lever-ups. 172.18.0.15 belonged to db-1 through
+  2026-07-13 and to office-ws-1 from ~07-17, so the historical rows inside the
+  IP-scoped envelopes (l-004, l-006) describe a DIFFERENT host than the one the
+  story names. That is why the defender run looked up db-1 in CMDB (l-007) and
+  asked change-mgmt about brute-force testing "from db-1" (l-009). The in-window
+  rows are the real attack and the +event labels stand; the surrounding "baseline"
+  in those two payloads does not belong to office-ws-1.
+
+leads:
+  l-001:
+    system: elastic
+    template: sshd-auth-history
+    class: "+event"
+    heterogeneous: true          # 4 queries: 3 surface the burst, 1 is empty
+    fields:
+      source.ip: "172.18.0.15"
+      user.name: "root"
+      host.name: "canary-1"
+      event.outcome: "failure"
+
+  l-002:
+    system: elastic
+    template: [detection-alerts, sshd-auth-history]
+    class: "+event"
+    heterogeneous: true          # seq0 alert=0 ; seq1 wide auth query carries the burst
+    intent_note: >
+      Lead is framed as a SUCCESS hunt (what_to_summarize = Accepted/success).
+      The attack produced 0 successes, so a projection of [] answers the lead's
+      question (prompt Example A) but under-emits the failure rows seq1 surfaces.
+    fields:
+      source.ip: "172.18.0.15"
+      user.name: "root"
+      event.outcome: "failure"
+
+  l-003:
+    system: cmdb
+    template: host-trust-edges
+    class: "0"                    # state/lookup — current config, no event stream
+
+  l-004:
+    system: elastic
+    template: [zeek-ssh-by-ip, zeek-ssh-client-from-source, zeek-ssh-field-check]
+    class: "+event"
+    heterogeneous: true          # historical-baseline zeek queries = 0 ; in-window = burst
+    fields:
+      source.ip: "172.18.0.15"
+      destination.ip: "172.18.0.9"
+      destination.port: 22
+
+  l-005:
+    system: threat-intel
+    template: ip-reputation-lookup
+    class: "0"                    # lookup — reputation verdict, no event stream
+
+  l-006:
+    system: elastic
+    template: sshd-auth-history
+    class: "+event"
+    heterogeneous: true          # baseline windows = 0/+noise ; attack-window buckets = burst
+    intent_note: >
+      Lead is framed as pre-alert BASELINE establishment; oracle read it +noise
+      (the source's apparent routine to other hosts). Its attack-window
+      sub-queries still surface the burst, so envelope truth is +event. NB the
+      "routine" those sub-queries return — accepted logins from 172.18.0.15 to
+      web-1/web-2/db-1/jump-box-1 in June — is db-1's history under the same IP
+      (see `notes`), not office-ws-1's. Inventory gives office-ws-1 no outbound
+      trust edges, matching the story; the telemetry disagrees only because the
+      address was reassigned between lever-ups.
+    fields:
+      user.name: "root"
+      host.name: "canary-1"
+      event.outcome: "failure"
+
+  l-007:
+    system: cmdb
+    template: host-trust-edges
+    class: "0"
+
+  l-008:
+    system: identity
+    template: [access-check, user-authorization, list-all-users]
+    class: "0"                    # 20 identity lookups — current authorization state
+
+  l-009:
+    system: change-mgmt
+    template: [active-changes, list-changes]
+    class: "0"                    # change records — state, no event stream

@@ -1,0 +1,138 @@
+{
+  "projection": "glm-5.2_effort-none.yaml",
+  "n_leads": 9,
+  "class_agreement": "9/9",
+  "by_system": {
+    "change-mgmt": "1/1",
+    "cmdb": "2/2",
+    "elastic": "4/4",
+    "identity": "1/1",
+    "threat-intel": "1/1"
+  },
+  "plus_event_recall": 1.0,
+  "zero_precision": 1.0,
+  "field_grades": {
+    "correct": 6
+  },
+  "contradiction_grades": {
+    "wrong(got 1)": 1
+  },
+  "wrong_concrete_fields": 1,
+  "false_suppression": 0,
+  "malformed_projections": 0,
+  "forbidden_emitted": [],
+  "missing_leads": [],
+  "unscored_leads": [],
+  "duplicate_leads": [],
+  "rows": [
+    {
+      "lead": "l-001",
+      "system": "elastic",
+      "expected": "+event",
+      "predicted": "+event",
+      "class_match": true,
+      "heterogeneous": false,
+      "fields": {
+        "source.ip": "correct",
+        "user.name": "correct",
+        "host.name": "correct",
+        "event.outcome": "correct"
+      },
+      "contradictions": {},
+      "intent_note": false
+    },
+    {
+      "lead": "l-002",
+      "system": "elastic",
+      "expected": "+event",
+      "predicted": "+event",
+      "class_match": true,
+      "heterogeneous": false,
+      "fields": {
+        "source.ip": "correct",
+        "user.name": "correct"
+      },
+      "contradictions": {
+        "alerts": "wrong(got 1)"
+      },
+      "intent_note": false
+    },
+    {
+      "lead": "l-003",
+      "system": "cmdb",
+      "expected": "0",
+      "predicted": "0",
+      "class_match": true,
+      "heterogeneous": false,
+      "fields": {},
+      "contradictions": {},
+      "intent_note": false
+    },
+    {
+      "lead": "l-004",
+      "system": "elastic",
+      "expected": "0",
+      "predicted": "0",
+      "class_match": true,
+      "heterogeneous": false,
+      "fields": {},
+      "contradictions": {},
+      "intent_note": false
+    },
+    {
+      "lead": "l-005",
+      "system": "threat-intel",
+      "expected": "0",
+      "predicted": "0",
+      "class_match": true,
+      "heterogeneous": false,
+      "fields": {},
+      "contradictions": {},
+      "intent_note": false
+    },
+    {
+      "lead": "l-006",
+      "system": "elastic",
+      "expected": "0",
+      "predicted": "0",
+      "class_match": true,
+      "heterogeneous": false,
+      "fields": {},
+      "contradictions": {},
+      "intent_note": false
+    },
+    {
+      "lead": "l-007",
+      "system": "cmdb",
+      "expected": "0",
+      "predicted": "0",
+      "class_match": true,
+      "heterogeneous": false,
+      "fields": {},
+      "contradictions": {},
+      "intent_note": false
+    },
+    {
+      "lead": "l-008",
+      "system": "identity",
+      "expected": "0",
+      "predicted": "0",
+      "class_match": true,
+      "heterogeneous": false,
+      "fields": {},
+      "contradictions": {},
+      "intent_note": false
+    },
+    {
+      "lead": "l-009",
+      "system": "change-mgmt",
+      "expected": "0",
+      "predicted": "0",
+      "class_match": true,
+      "heterogeneous": false,
+      "fields": {},
+      "contradictions": {},
+      "intent_note": false
+    }
+  ]
+}

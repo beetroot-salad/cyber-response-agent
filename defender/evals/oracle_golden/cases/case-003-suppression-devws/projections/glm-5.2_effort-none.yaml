@@ -1,0 +1,15 @@
+projections:
+- lead_id: l-001
+  events:
+  - '<suppressed: the attacker stopped the Elastic Agent on dev-ws-1 at <alert-time>,
+    halting the host''s auth stream before the window — no sshd auth events ship during
+    2026-07-25T09:35:00Z–09:45:00Z>'
+- lead_id: l-002
+  events:
+  - '<suppressed: the attacker stopped the Elastic Agent on dev-ws-1 at <alert-time>,
+    halting all syslog/auth/metric shipping from that host; dev-ws-1''s data streams
+    go dark for the query window>'
+- lead_id: l-003
+  events: []
+- lead_id: l-004
+  events: []

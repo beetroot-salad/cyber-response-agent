@@ -1,0 +1,6 @@
+{
+  "_note": "state lookup; not an event stream",
+  "params": {
+    "host": "dev-ws-1"
+  }
+}
