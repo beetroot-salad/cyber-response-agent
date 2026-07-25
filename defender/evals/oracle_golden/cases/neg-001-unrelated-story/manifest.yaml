@@ -1,0 +1,34 @@
+case_id: neg-001-unrelated-story
+kind: negative-control
+base_case: case-001-ssh-bruteforce-canary
+
+# A DERIVED case: no environment, no capture, no new telemetry. It reuses
+# case-001's oracle_visible/ envelope byte-for-byte and swaps only the story, so
+# there is no hidden/ tree — the ground truth is definitional (an unrelated story
+# touches none of these leads, so every lead is 0), not measured.
+derivation:
+  from: case-001-ssh-bruteforce-canary/oracle_visible
+  changed: story.md only — replaced with unrelated authorized activity
+  unchanged: leads.jsonl + samples/ (identical envelopes, same query windows)
+
+# What this case discriminates: case-001's query windows PHYSICALLY CONTAIN the
+# brute-force burst. A projection that reads salience off the window rather than
+# reasoning from the story emits +event anyway, and fails. Emptiness here is the
+# correct answer, and it is only correct because the story does not cause it.
+discriminates: window-copying / salience-copying vs. story-caused projection
+
+result_classes_covered: ["0"]
+lead_source: inherited from case-001 (captured from defender run oracle-fidelity-1)
+
+projections:
+  - tag: glm-5.2_effort-none
+    oracle_model: glm-5.2
+    oracle_effort: none
+    oracle_prompt: defender/learning/pipeline/oracle/prompt.md
+    produced_by: replay.py (production oracle seam, oracle_visible only)
+    result: "9/9 class agreement; all-zero; no window-copying"
+
+caveats:
+  - An all-`0` case is the one shape a truncated or empty projection could pass
+    by accident, so score.py's lead-set integrity check (missing_leads) is what
+    makes this result meaningful — not the 9/9 on its own.

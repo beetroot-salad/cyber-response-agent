@@ -1,7 +1,7 @@
 case_id: case-003-suppression-devws
 kind: observed
 disposition_class: malicious
-activity_family: defense-evasion / T1562.001 (impair defenses: stop monitoring agent)
+activity_family: "defense-evasion / T1562.001 (impair defenses: stop monitoring agent)"
 
 # The suppression was performed live and captured; no catalog scenario covers
 # agent-stop, so the action was run directly and the leads are authored (a

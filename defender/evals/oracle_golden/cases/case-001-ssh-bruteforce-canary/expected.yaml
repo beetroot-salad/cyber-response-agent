@@ -14,6 +14,7 @@
 # `unknown`, never `wrong` — the story does not state them.
 
 case_id: case-001-ssh-bruteforce-canary
+kind: observed
 result_classes_covered: ["+event", "0"]     # NOT exercised: +noise, -noise
 notes: >
   Every oracle-visible sample skeleton is empty ("(no schema sample available)")

@@ -35,6 +35,12 @@ projections:
     oracle_effort: none
     oracle_prompt: defender/learning/pipeline/oracle/prompt.md
     produced_by: production path (invoke_oracle / _run_oracle_pydantic)
+    # Carried over from the #707 probe, which predates replay.py — so this one
+    # tag was NOT produced by the documented `replay.py` command. Both drive the
+    # same seam (invoke_oracle_lead -> _run_oracle_pydantic) over the same
+    # oracle-visible inputs, so it is comparable; it just is not re-derivable by
+    # running the tool. Re-record under replay.py on the next oracle change.
+    reproducible_by_replay_py: false
     result: "7/9 class agreement; +event recall 0.50; 0 wrong fields; 0 false-suppression"
 
 caveats:

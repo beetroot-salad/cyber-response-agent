@@ -6,11 +6,16 @@
     "cmdb": "1/1",
     "elastic": "3/3"
   },
-  "plus_event_recall": 0.0,
+  "plus_event_recall": null,
   "zero_precision": 1.0,
   "field_grades": {},
   "wrong_concrete_fields": 0,
   "false_suppression": 0,
+  "malformed_projections": 0,
+  "forbidden_emitted": [],
+  "missing_leads": [],
+  "unscored_leads": [],
+  "duplicate_leads": [],
   "rows": [
     {
       "lead": "l-001",

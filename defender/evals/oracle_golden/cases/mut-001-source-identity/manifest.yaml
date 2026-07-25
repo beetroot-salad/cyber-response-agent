@@ -1,0 +1,41 @@
+case_id: mut-001-source-identity
+kind: mutation
+base_case: case-001-ssh-bruteforce-canary
+
+# A DERIVED case: no environment, no capture, no new telemetry. The mutated
+# operation was never fired, so there is no hidden/ tree — a mutation case scores
+# the PROJECTION's response to a story edit, not observed ground truth. The
+# labels in expected.yaml are the mutated values the projection must carry.
+derivation:
+  from: case-001-ssh-bruteforce-canary/oracle_visible
+  changed: story.md only — two causal entities altered
+  unchanged: leads.jsonl + samples/ (still scoped to canary-1, same query windows)
+
+mutation:
+  source.ip: 172.18.0.15 -> 172.18.0.30
+  user.name: root -> admin
+
+# What this case discriminates: the envelopes still point at the ORIGINAL
+# operation's window. A projection that copies case-001 or reads off the query
+# window emits the old values; one that reasons from the story emits the new
+# ones. `must_not_emit` in expected.yaml is the leak check for the former.
+discriminates: entity-copying vs. story-tracking projection
+
+result_classes_covered: ["+event", "0"]
+lead_source: inherited from case-001 (captured from defender run oracle-fidelity-1)
+
+projections:
+  - tag: glm-5.2_effort-none
+    oracle_model: glm-5.2
+    oracle_effort: none
+    oracle_prompt: defender/learning/pipeline/oracle/prompt.md
+    produced_by: replay.py (production oracle seam, oracle_visible only)
+    result: "7/9 class agreement; mutated src/user emitted; originals CLEAN (no leak)"
+
+caveats:
+  - Class agreement is NOT comparable to case-001's 7/9 — the two runs diverge on
+    different borderline heterogeneous leads (case-001 misses l-002/l-006, this
+    misses l-004/l-006). See the README note on heterogeneous-lead jitter.
+  - The leak check matches whole emitted values and their whitespace-delimited
+    tokens, never bare substrings — so a forbidden token like `root` is not
+    tripped by an unrelated path such as `/root/.ssh/authorized_keys`.
