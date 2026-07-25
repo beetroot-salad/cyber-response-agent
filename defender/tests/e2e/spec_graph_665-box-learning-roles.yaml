@@ -1,0 +1,1817 @@
+schema_version: 1
+design: '#665 (issue body + design doc; phase-C dispositions 47-dispositions-final.md)'
+base: bc1db8eb
+demands:
+- id: return_contract
+  kind: behavior
+  form: test
+  binds:
+  - interacts(actor->run_cycle_box).response
+  - interacts(curator->drain_box).response
+  discharged_by: test_boxed_lane_returns_command_output
+  disposition: resolved
+  fork: F0
+  resolution: 'R9 CORRECTED by RF-D1 (Phase-F seam): the boxed learning bash lane matches the runtime
+    boxed lane byte-for-byte modulo the untrusted wrap (clause a stands). An EXECUTED command (ANY exit
+    code, non-zero included) returns _wrap(_format_bash_result(rc,out,err), untrusted, salt); a TRANSPORT
+    fault (container gone / undeliverable exec / unparseable reply — decode_response raises BoxFault)
+    RAISES ModelRetry, inherited free per M4 (the learning agent-run loop catches ModelRetry natively via
+    pydantic_ai, rc2, exactly as the runtime driver does). Clause (b) — "every fault subtype inside the
+    envelope" — is STRUCK: it contradicted clause (a) and the phase-C 3/3 consensus and would have mandated
+    a learning-only BoxFault->wrap divergence the runtime lane lacks. The executed->wrap / transport->raise
+    split is pinned by test_bash_lane_nonzero_exit_returns_wrapped_envelope (positive) and
+    test_bash_lane_transport_fault_raises_not_wrapped (negative); the judge is identical
+    (test_judge_boxed_output_wrap_is_the_intended_zero_shape).'
+- id: run_cycle_box_delivered
+  kind: seam
+  form: test
+  binds:
+  - interacts(run_one->run_cycle_box)
+  - drives(run_one->actor)
+  - drives(run_one->judge)
+  discharged_by: test_run_one_creates_run_cycle_box_and_delivers_to_actor_and_judge
+  disposition: consensus
+- id: drain_box_delivered
+  kind: seam
+  form: test
+  binds:
+  - interacts(run_worktree_batch->drain_box)
+  - drives(run_worktree_batch->curator)
+  - drives(run_worktree_batch->lead_author)
+  discharged_by: test_drain_batch_creates_own_box_and_delivers_to_triggered_roles
+  disposition: consensus
+- id: census_observes_attachment
+  kind: behavior
+  form: test
+  binds:
+  - census_seam
+  - actor
+  - judge
+  - curator
+  - lead_author
+  discharged_by: test_census_observes_box_attachment_on_production_path
+  rejected:
+  - nl: 'Strengthening isinstance(deps.box, BoxExecutor) in place cannot work: the census builds deps
+      via its own bind(), which supplies the inert default (N5 preserves it), so an attachment assertion
+      over a test-local bind is red forever. The seam must observe deps on the production construction
+      path via the injectable stage runner (decision 6).'
+  disposition: consensus
+- id: subagents_box_param
+  kind: seam
+  form: test
+  binds:
+  - drives(run_one->actor)
+  - drives(run_one->judge)
+  discharged_by: test_box_threaded_as_percall_param_through_subagents
+  disposition: consensus
+- id: test_invoke_actor_box_required_no_silent_inert_default
+  kind: behavior
+  form: test
+  binds:
+  - drives(run_one->actor)
+  - census_seam
+  discharged_by: test_invoke_actor_box_required_no_silent_inert_default
+  disposition: resolved
+  fork: F1
+  resolution: 'repair-2 (recon F2, R1 completeness): the box=-required negative (keyword-only, no
+    inert default → loud TypeError when omitted) is pinned at invoke_actor, not only at
+    CuratorDeps.for_run — else F1 re-opens on 3 of the 4 seams the human made loud. Positive control:
+    test_box_threaded_as_percall_param_through_subagents (a supplied box threads to the engine fn).'
+- id: test_invoke_actor_benign_box_required_no_silent_inert_default
+  kind: behavior
+  form: test
+  binds:
+  - drives(run_one->actor)
+  - census_seam
+  discharged_by: test_invoke_actor_benign_box_required_no_silent_inert_default
+  disposition: resolved
+  fork: F1
+  resolution: 'repair-2 (recon F2, R1 completeness): box= required (keyword-only, no default) on the
+    benign actor leg too. Positive control: test_box_reaches_both_actor_legs_and_both_drain_chains.'
+- id: test_invoke_judge_box_required_no_silent_inert_default
+  kind: behavior
+  form: test
+  binds:
+  - drives(run_one->judge)
+  - census_seam
+  discharged_by: test_invoke_judge_box_required_no_silent_inert_default
+  disposition: resolved
+  fork: F1
+  resolution: 'repair-2 (recon F2, R1 completeness): box= required (keyword-only, no default) on the
+    judge seam too. Positive control: test_box_threaded_as_percall_param_through_subagents.'
+- id: curator_for_run_box_passthrough
+  kind: seam
+  form: test
+  binds:
+  - drives(run_worktree_batch->curator)
+  discharged_by: test_curator_for_run_threads_box_to_bind
+  disposition: consensus
+- id: mount_covers_scope
+  kind: behavior
+  form: test
+  binds:
+  - run_cycle_box.identity
+  - drain_box.identity
+  discharged_by: test_mount_covers_union_gate_scope_and_cwd_anchor
+  disposition: consensus
+  correction: 'DC2: coverage rule amended — cwd_anchor may be inside a mount OR the auto-created ro parent
+    of a mount whose subtree the granted commands resolve into (po44); a mount-parent anchor is accepted
+    as covered.'
+- id: no_mount_wider_than_justified
+  kind: behavior
+  form: test
+  binds:
+  - run_cycle_box.identity
+  - drain_box.identity
+  discharged_by: test_every_mount_justified_by_scope_or_infra
+  disposition: consensus
+- id: gather_raw_readonly
+  kind: negative
+  form: test
+  binds:
+  - interacts(judge->gather_raw)
+  - run_cycle_box.identity
+  discharged_by: test_run_cycle_box_mounts_gather_raw_readonly
+  disposition: consensus
+- id: drain_rw_confined_to_leaf
+  kind: negative
+  form: test
+  binds:
+  - interacts(curator->corpus)
+  - interacts(lead_author->corpus)
+  - drain_box.identity
+  discharged_by: test_drain_rw_trees_inside_worktree_leaf_only
+  disposition: consensus
+- id: drain_mounts_only_triggered
+  kind: behavior
+  form: test
+  binds:
+  - interacts(curator->corpus)
+  - drain_box.identity
+  discharged_by: test_drain_box_mounts_only_triggered_corpora
+  disposition: consensus
+- id: actor_cwd_anchor_repo_root
+  kind: behavior
+  form: test
+  binds:
+  - cwd_anchor
+  - interacts(actor->run_cycle_box)
+  discharged_by: test_actor_cwd_anchor_is_repo_root
+  rejected:
+  - nl: '2nd cwd_anchor consumer — the gate''s rebase root for relative bash operands (bash.py) — is INERT
+      here: the actor''s only grant is pins_path=True, so no operand resolution occurs. Not a behavior
+      change; no test.'
+  disposition: consensus
+- id: actor_read_file_resolves_repo_root
+  kind: behavior
+  form: test
+  binds:
+  - interacts(actor->cwd_anchor)
+  discharged_by: test_actor_read_file_resolves_relative_against_repo_root
+  disposition: consensus
+- id: box_request_geography
+  kind: shape
+  form: test
+  binds:
+  - box_request
+  discharged_by: test_box_request_renders_mounts_and_no_tier_discriminator
+  disposition: consensus
+- id: env_filtered_no_credential
+  kind: negative
+  form: test
+  binds:
+  - box_request.env
+  - run_cycle_box.env
+  - drain_box.env
+  discharged_by: test_box_env_filtered_by_key_no_host_credential
+  disposition: consensus
+- id: infra_env_from_shared_helper
+  kind: parity
+  form: test
+  binds:
+  - run_cycle_box.env
+  - drain_box.env
+  - runtime_box.env
+  discharged_by: test_path_pythonpath_from_one_shared_helper
+  disposition: consensus
+- id: startup_fault_aborts_loud
+  kind: negative
+  form: test
+  binds:
+  - interacts(run_one->run_cycle_box)
+  - interacts(run_worktree_batch->drain_box)
+  discharged_by: test_box_startup_failure_aborts_batch_loudly
+  rejected:
+  - nl: No AUTOMATIC degradation to host execution on any production path. The only host lane is the loud,
+      operator-driven DEFENDER_ALLOW_UNSANDBOXED opt-out — the paired positive control for this negative.
+  disposition: consensus
+- id: uniform_opt_out
+  kind: behavior
+  form: test
+  binds:
+  - unboxed_opt_out
+  - unboxed_opt_out.domain.distinguished[1]
+  - interacts(run_one->run_cycle_box)
+  - interacts(run_worktree_batch->drain_box)
+  discharged_by: test_unsandboxed_opt_out_uniform_across_tiers
+  disposition: consensus
+- id: sandboxed_derived_from_transport
+  kind: behavior
+  form: test
+  binds:
+  - sandboxed
+  discharged_by: test_sandboxed_is_derived_not_settable
+  disposition: consensus
+- id: box_start_probes_interpreter
+  kind: behavior
+  form: test
+  binds:
+  - venv_probe
+  - interacts(run_one->run_cycle_box)
+  - interacts(run_worktree_batch->drain_box)
+  discharged_by: test_box_start_runs_granted_programs_and_refuses_on_failure
+  disposition: consensus
+  live_probe: c12 discharged live (po63/c12/c14 executed, holds) — interpreter match + native dep import
+    confirmed; drain needs no venv.
+- id: box_names_no_collision
+  kind: uniqueness
+  form: test
+  binds:
+  - run_cycle_box.identity
+  - drain_box.identity
+  - runtime_box.identity
+  discharged_by: test_box_names_distinct_no_runtime_collision
+  disposition: consensus
+- id: teardown_within_batch
+  kind: behavior
+  form: test
+  binds:
+  - interacts(run_worktree_batch->drain_box)
+  - interacts(run_one->run_cycle_box)
+  - run_cycle_box.identity
+  discharged_by: test_box_torn_down_within_batch_ordered
+  disposition: consensus
+- id: scan_before_supply_chain
+  kind: behavior
+  form: test
+  binds:
+  - interacts(run_worktree_batch->drain_box)
+  - interacts(curator->corpus)
+  discharged_by: test_rw_tree_scan_lands_before_commit_push
+  disposition: consensus
+- id: sentinel_probes_every_mount
+  kind: behavior
+  form: test
+  binds:
+  - sentinel
+  - run_cycle_box.identity
+  - drain_box.identity
+  discharged_by: test_sentinel_probes_every_mount_ro_readback
+  disposition: consensus
+  correction: 'DC1: M11''s ''absent bind source silently materialises an empty dir at rc=0'' is REFUTED
+    (po1) — the sentinel''s residual scope narrows to catching a bind that SUCCEEDED but mapped the WRONG
+    or EMPTY tree (the DooD path-translation mismatch); an absent --mount type=bind source is a loud create-time
+    BoxFault, pinned by test_mount_source_directory_absent_at_box_creation. The empty-present case is
+    silent branch SB2.'
+- id: no_box_egress
+  kind: negative
+  form: test
+  binds:
+  - run_cycle_box.identity
+  - drain_box.identity
+  discharged_by: test_no_box_has_network_egress
+  disposition: consensus
+- id: tmpfs_noexec_capped
+  kind: behavior
+  form: test
+  binds:
+  - run_cycle_box.identity
+  - drain_box.identity
+  discharged_by: test_tmp_is_noexec_size_capped_tmpfs
+  disposition: consensus
+- id: lesson_scripts_no_arbitrary_read
+  kind: negative
+  form: test
+  binds:
+  - interacts(actor->lesson_script)
+  - lesson_script
+  discharged_by: test_pinned_lesson_scripts_reject_arbitrary_argv_read
+  disposition: consensus
+  live_probe: Hostile-argv over the pinned scripts (po12/po50/po51) was NOT run in the re-ground round
+    — STILL OWED at the suite's first live box run; a hermetic pass does not discharge it.
+- id: actor_no_file_opening_grant
+  kind: negative
+  form: test
+  binds:
+  - interacts(actor->run_cycle_box)
+  - bash_grant
+  discharged_by: test_actor_bash_grant_has_no_file_opening_verb
+  disposition: consensus
+- id: host_tools_do_not_cross_box
+  kind: negative
+  form: test
+  binds:
+  - interacts(curator->write_file)
+  - interacts(actor->run_cycle_box)
+  discharged_by: test_host_side_write_tools_write_live_tree_in_process
+  disposition: consensus
+- id: test_box_reaches_both_actor_legs_and_both_drain_chains
+  kind: seam
+  form: test
+  binds:
+  - drives(run_one->actor)
+  - drives(run_one->judge)
+  - drives(run_worktree_batch->curator)
+  - drives(run_worktree_batch->lead_author)
+  discharged_by: test_box_reaches_both_actor_legs_and_both_drain_chains
+  disposition: consensus
+- id: test_one_drain_box_must_serve_more_than_one_dispatched_module_in_a_batch
+  kind: seam
+  form: test
+  binds:
+  - interacts(run_worktree_batch->drain_box)
+  - drives(run_worktree_batch->curator)
+  - drives(run_worktree_batch->lead_author)
+  discharged_by: test_one_drain_box_must_serve_more_than_one_dispatched_module_in_a_batch
+  disposition: consensus
+- id: test_role_keyed_census_blind_to_caller_constructed_boxless_instance
+  kind: behavior
+  form: test
+  binds:
+  - census_seam
+  - actor
+  discharged_by: test_role_keyed_census_blind_to_caller_constructed_boxless_instance
+  disposition: consensus
+- id: test_dispatched_callable_not_updated_for_the_new_call_shape
+  kind: seam
+  form: test
+  binds:
+  - drives(run_one->actor)
+  - drives(run_worktree_batch->curator)
+  discharged_by: test_dispatched_callable_not_updated_for_the_new_call_shape
+  disposition: consensus
+- id: test_cwd_anchor_wholly_outside_every_declared_mount
+  kind: behavior
+  form: test
+  binds:
+  - cwd_anchor
+  - run_cycle_box.identity
+  discharged_by: test_cwd_anchor_wholly_outside_every_declared_mount
+  disposition: consensus
+- id: test_a_gate_approved_operand_resolves_to_a_path_absent_from_every_declared_mount
+  kind: behavior
+  form: test
+  binds:
+  - run_cycle_box.identity
+  - bash_grant
+  discharged_by: test_a_gate_approved_operand_resolves_to_a_path_absent_from_every_declared_mount
+  disposition: consensus
+- id: test_drain_box_mount_set_regresses_to_full_corpus_union_instead_of_triggered_subset
+  kind: behavior
+  form: test
+  binds:
+  - drain_box.identity
+  - interacts(curator->corpus)
+  discharged_by: test_drain_box_mount_set_regresses_to_full_corpus_union_instead_of_triggered_subset
+  disposition: consensus
+- id: test_drain_leaf_mount_source_resolved_at_a_different_time_than_leaf_creation
+  kind: behavior
+  form: test
+  binds:
+  - drain_box.identity
+  discharged_by: test_drain_leaf_mount_source_resolved_at_a_different_time_than_leaf_creation
+  disposition: consensus
+- id: test_run_cycle_box_mount_union_leaks_a_sibling_batchs_learning_run_dir
+  kind: behavior
+  form: test
+  binds:
+  - run_cycle_box.identity
+  discharged_by: test_run_cycle_box_mount_union_leaks_a_sibling_batchs_learning_run_dir
+  disposition: consensus
+- id: test_judge_cat_operand_reaches_defender_dir_beyond_its_declared_gate_roots
+  kind: behavior
+  form: test
+  binds:
+  - run_cycle_box.identity
+  - interacts(judge->run_cycle_box)
+  discharged_by: test_judge_cat_operand_reaches_defender_dir_beyond_its_declared_gate_roots
+  disposition: consensus
+- id: test_judge_granted_program_computes_an_output_path_that_resolves_inside_gather_raw
+  kind: behavior
+  form: test
+  binds:
+  - interacts(judge->gather_raw)
+  - run_cycle_box.identity
+  discharged_by: test_judge_granted_program_computes_an_output_path_that_resolves_inside_gather_raw
+  disposition: consensus
+- id: test_gather_raw_mount_omitted_when_evidence_dir_legitimately_absent_at_request_time
+  kind: behavior
+  form: test
+  binds:
+  - interacts(judge->gather_raw)
+  - run_cycle_box.identity
+  discharged_by: test_gather_raw_mount_omitted_when_evidence_dir_legitimately_absent_at_request_time
+  disposition: consensus
+- id: test_lead_author_rm_traversal_lands_on_readonly_sibling_rather_than_no_host_tree
+  kind: behavior
+  form: test
+  binds:
+  - interacts(lead_author->corpus)
+  - drain_box.identity
+  discharged_by: test_lead_author_rm_traversal_lands_on_readonly_sibling_rather_than_no_host_tree
+  disposition: consensus
+- id: test_curator_rm_grant_argv_traverses_from_its_corpus_scope_into_a_sibling_mount
+  kind: behavior
+  form: test
+  binds:
+  - interacts(curator->corpus)
+  - drain_box.identity
+  discharged_by: test_curator_rm_grant_argv_traverses_from_its_corpus_scope_into_a_sibling_mount
+  disposition: consensus
+- id: test_box_request_caller_omits_network_isolation_and_gets_a_default_network
+  kind: behavior
+  form: test
+  binds:
+  - box_request
+  - run_cycle_box.identity
+  discharged_by: test_box_request_caller_omits_network_isolation_and_gets_a_default_network
+  disposition: consensus
+- id: test_box_request_with_empty_mounts_list
+  kind: behavior
+  form: test
+  binds:
+  - box_request
+  discharged_by: test_box_request_with_empty_mounts_list
+  disposition: consensus
+- id: test_box_request_workdir_not_among_its_own_mounts
+  kind: behavior
+  form: test
+  binds:
+  - box_request
+  discharged_by: test_box_request_workdir_not_among_its_own_mounts
+  disposition: consensus
+- id: test_infra_env_helper_supplies_module_path_on_every_tier
+  kind: parity
+  form: test
+  binds:
+  - run_cycle_box.env
+  - drain_box.env
+  - runtime_box.env
+  discharged_by: test_infra_env_helper_supplies_module_path_on_every_tier
+  disposition: consensus
+- id: test_env_reaching_the_program_differs_between_the_boxed_path_and_the_loud_fallback
+  kind: parity
+  form: test
+  binds:
+  - run_cycle_box.env
+  - unboxed_opt_out
+  discharged_by: test_env_reaching_the_program_differs_between_the_boxed_path_and_the_loud_fallback
+  disposition: consensus
+- id: test_caller_env_omits_a_key_the_shared_helper_is_supposed_to_always_set
+  kind: behavior
+  form: test
+  binds:
+  - run_cycle_box.env
+  - box_request.env
+  discharged_by: test_caller_env_omits_a_key_the_shared_helper_is_supposed_to_always_set
+  disposition: consensus
+- id: test_allowlisted_env_key_carries_a_credential_shaped_or_wrong_value
+  kind: behavior
+  form: test
+  binds:
+  - box_request.env
+  - run_cycle_box.env
+  discharged_by: test_allowlisted_env_key_carries_a_credential_shaped_or_wrong_value
+  disposition: consensus
+- id: test_container_exits_between_create_and_sentinel
+  kind: behavior
+  form: test
+  binds:
+  - interacts(run_one->run_cycle_box)
+  - sentinel
+  discharged_by: test_container_exits_between_create_and_sentinel
+  disposition: consensus
+- id: test_docker_binary_unavailable_at_box_startup
+  kind: behavior
+  form: test
+  binds:
+  - interacts(run_one->run_cycle_box)
+  - interacts(run_worktree_batch->drain_box)
+  discharged_by: test_docker_binary_unavailable_at_box_startup
+  disposition: consensus
+- id: test_box_startup_failure_unwinds_the_resources_created_before_it
+  kind: behavior
+  form: test
+  binds:
+  - interacts(run_worktree_batch->drain_box)
+  discharged_by: test_box_startup_failure_unwinds_the_resources_created_before_it
+  disposition: consensus
+- id: test_partial_multi_mount_sentinel_validation_leaves_box_in_ambiguous_state
+  kind: behavior
+  form: test
+  binds:
+  - sentinel
+  - interacts(run_one->run_cycle_box)
+  discharged_by: test_partial_multi_mount_sentinel_validation_leaves_box_in_ambiguous_state
+  disposition: consensus
+- id: test_box_becomes_unreachable_mid_batch
+  kind: behavior
+  form: test
+  binds:
+  - interacts(actor->run_cycle_box).response
+  discharged_by: test_box_becomes_unreachable_mid_batch
+  disposition: consensus
+- id: test_learning_role_bash_call_receives_a_response_the_transport_cannot_parse
+  kind: behavior
+  form: test
+  binds:
+  - interacts(actor->run_cycle_box).response
+  discharged_by: test_learning_role_bash_call_receives_a_response_the_transport_cannot_parse
+  disposition: consensus
+- id: test_venv_interpreter_does_not_match_the_image
+  kind: behavior
+  form: test
+  binds:
+  - venv_probe
+  - interacts(run_one->run_cycle_box)
+  discharged_by: test_venv_interpreter_does_not_match_the_image
+  disposition: consensus
+- id: test_interpreter_matches_but_a_native_dependency_inside_the_venv_is_broken
+  kind: behavior
+  form: test
+  binds:
+  - venv_probe
+  - interacts(run_one->run_cycle_box)
+  discharged_by: test_interpreter_matches_but_a_native_dependency_inside_the_venv_is_broken
+  disposition: consensus
+- id: test_drain_tier_repertoire_grows_to_need_the_dangling_venv
+  kind: behavior
+  form: test
+  binds:
+  - venv_probe
+  - interacts(run_worktree_batch->drain_box)
+  discharged_by: test_drain_tier_repertoire_grows_to_need_the_dangling_venv
+  disposition: consensus
+- id: test_run_cycle_box_name_distinct_from_runtime_box_and_grammar_valid
+  kind: uniqueness
+  form: test
+  binds:
+  - run_cycle_box.identity
+  - runtime_box.identity
+  discharged_by: test_run_cycle_box_name_distinct_from_runtime_box_and_grammar_valid
+  disposition: consensus
+- id: test_run_cycle_box_self_collides_across_its_own_concurrent_direction_legs
+  kind: uniqueness
+  form: test
+  binds:
+  - run_cycle_box.identity
+  - drives(run_one->actor)
+  discharged_by: test_run_cycle_box_self_collides_across_its_own_concurrent_direction_legs
+  disposition: consensus
+- id: test_run_one_leaks_box_on_an_exceptional_exit_not_already_anticipated
+  kind: behavior
+  form: test
+  binds:
+  - interacts(run_one->run_cycle_box)
+  - run_cycle_box.identity
+  discharged_by: test_run_one_leaks_box_on_an_exceptional_exit_not_already_anticipated
+  disposition: consensus
+- id: test_box_torn_down_before_finish_batch_regardless_of_where_it_was_created
+  kind: behavior
+  form: test
+  binds:
+  - interacts(run_worktree_batch->drain_box)
+  - interacts(curator->corpus)
+  discharged_by: test_box_torn_down_before_finish_batch_regardless_of_where_it_was_created
+  disposition: consensus
+- id: test_worktree_or_scan_races_a_not_yet_released_box_bind
+  kind: behavior
+  form: test
+  binds:
+  - interacts(run_worktree_batch->drain_box)
+  - interacts(curator->corpus)
+  discharged_by: test_worktree_or_scan_races_a_not_yet_released_box_bind
+  disposition: consensus
+- id: test_git_reset_hard_runs_between_sequential_markers_under_one_live_box
+  kind: behavior
+  form: test
+  binds:
+  - interacts(run_worktree_batch->drain_box)
+  discharged_by: test_git_reset_hard_runs_between_sequential_markers_under_one_live_box
+  disposition: consensus
+- id: test_scan_step_walks_the_full_written_tree_versus_only_a_diff
+  kind: behavior
+  form: test
+  binds:
+  - interacts(run_worktree_batch->drain_box)
+  - interacts(curator->corpus)
+  discharged_by: test_scan_step_walks_the_full_written_tree_versus_only_a_diff
+  disposition: consensus
+- id: test_two_concurrent_drain_invocations_mint_leaves_whose_paths_collide
+  kind: uniqueness
+  form: test
+  binds:
+  - drain_box.identity
+  discharged_by: test_two_concurrent_drain_invocations_mint_leaves_whose_paths_collide
+  disposition: consensus
+- id: test_per_mount_sentinel_coverage_across_a_box_with_three_or_more_mounts
+  kind: behavior
+  form: test
+  binds:
+  - sentinel
+  - run_cycle_box.identity
+  discharged_by: test_per_mount_sentinel_coverage_across_a_box_with_three_or_more_mounts
+  disposition: consensus
+- id: test_gather_raw_appears_after_the_run_cycle_box_already_started_without_it
+  kind: behavior
+  form: test
+  binds:
+  - interacts(judge->gather_raw)
+  - run_cycle_box.identity
+  discharged_by: test_gather_raw_appears_after_the_run_cycle_box_already_started_without_it
+  disposition: consensus
+- id: test_actor_bash_grant_opens_no_file_over_any_reachable_in_box_tree
+  kind: behavior
+  form: test
+  binds:
+  - interacts(actor->run_cycle_box)
+  - bash_grant
+  discharged_by: test_actor_bash_grant_opens_no_file_over_any_reachable_in_box_tree
+  disposition: consensus
+- id: test_cross_leg_shared_writable_surface_is_bounded
+  kind: behavior
+  form: test
+  binds:
+  - interacts(actor->run_cycle_box)
+  - run_cycle_box.identity
+  discharged_by: test_cross_leg_shared_writable_surface_is_bounded
+  disposition: consensus
+- id: test_pinned_lesson_script_argv_cannot_redirect_read_target
+  kind: behavior
+  form: test
+  binds:
+  - interacts(actor->lesson_script)
+  - lesson_script
+  discharged_by: test_pinned_lesson_script_argv_cannot_redirect_read_target
+  disposition: consensus
+- id: test_pinned_script_argv_carries_extra_arguments_beyond_the_pinned_path
+  kind: behavior
+  form: test
+  binds:
+  - interacts(actor->lesson_script)
+  - lesson_script
+  discharged_by: test_pinned_script_argv_carries_extra_arguments_beyond_the_pinned_path
+  disposition: consensus
+- id: test_tmpfs_contents_persist_across_execs_within_one_box_lifetime
+  kind: behavior
+  form: test
+  binds:
+  - run_cycle_box.identity
+  discharged_by: test_tmpfs_contents_persist_across_execs_within_one_box_lifetime
+  disposition: consensus
+- id: test_legs_sharing_one_box_tmpfs_see_each_others_writes_cross_exec
+  kind: behavior
+  form: test
+  binds:
+  - run_cycle_box.identity
+  - drives(run_one->actor)
+  discharged_by: test_legs_sharing_one_box_tmpfs_see_each_others_writes_cross_exec
+  disposition: consensus
+  resolution: 'repair-10 (recon blind#6): renamed from ...can_starve_or_observe_each_other — the body
+    is a SEQUENTIAL cross-exec visibility check (live-gated), not a concurrency/starvation drive. The
+    name now matches what is asserted.'
+- id: test_run_cycle_in_run_consumer_reads_a_file_a_concurrent_leg_can_still_mutate
+  kind: behavior
+  form: test
+  binds:
+  - run_cycle_box.identity
+  - interacts(run_one->run_cycle_box)
+  discharged_by: test_run_cycle_in_run_consumer_reads_a_file_a_concurrent_leg_can_still_mutate
+  disposition: consensus
+- id: test_actor_pinned_script_operand_spelling_survives_anchor_move
+  kind: behavior
+  form: test
+  binds:
+  - cwd_anchor
+  - interacts(actor->run_cycle_box)
+  discharged_by: test_actor_pinned_script_operand_spelling_survives_anchor_move
+  disposition: consensus
+- id: test_actor_read_tool_rebase_stays_within_read_confine
+  kind: behavior
+  form: test
+  binds:
+  - interacts(actor->cwd_anchor)
+  discharged_by: test_actor_read_tool_rebase_stays_within_read_confine
+  disposition: consensus
+- id: test_a_symlink_left_in_the_corpus_tree_is_refused_by_the_s7_scan_before_commit
+  kind: behavior
+  form: test
+  binds:
+  - interacts(curator->corpus)
+  - interacts(run_worktree_batch->drain_box)
+  discharged_by: test_a_symlink_left_in_the_corpus_tree_is_refused_by_the_s7_scan_before_commit
+  disposition: consensus
+  resolution: 'repair-10 (recon blind#4): renamed from ...is_committed_and_pushed — the body proves
+    the OPPOSITE (box_mod.scrub raises RunTainted; the symlink is refused, never committed). The name
+    now matches the asserted outcome.'
+- id: test_worktree_leaf_contains_a_symlink_that_resolves_outside_the_leaf
+  kind: behavior
+  form: test
+  binds:
+  - venv_probe
+  - drain_box.identity
+  discharged_by: test_worktree_leaf_contains_a_symlink_that_resolves_outside_the_leaf
+  disposition: consensus
+- id: test_docker_create_partially_applies_mounts_when_one_mount_spec_is_malformed
+  kind: behavior
+  form: test
+  binds:
+  - sentinel
+  - run_cycle_box.identity
+  discharged_by: test_docker_create_partially_applies_mounts_when_one_mount_spec_is_malformed
+  disposition: consensus
+- id: test_two_mounts_with_nested_or_overlapping_sources_and_targets
+  kind: behavior
+  form: test
+  binds:
+  - drain_box.identity
+  discharged_by: test_two_mounts_with_nested_or_overlapping_sources_and_targets
+  disposition: consensus
+- id: test_single_non_overlapping_readonly_mount_refuses_a_direct_in_box_write
+  kind: behavior
+  form: test
+  binds:
+  - run_cycle_box.identity
+  - interacts(judge->gather_raw)
+  discharged_by: test_single_non_overlapping_readonly_mount_refuses_a_direct_in_box_write
+  disposition: consensus
+- id: test_box_delivery_absence_does_not_silently_re_dead_the_lane
+  kind: behavior
+  form: test
+  binds:
+  - drives(run_one->actor)
+  - census_seam
+  discharged_by: test_box_delivery_absence_does_not_silently_re_dead_the_lane
+  disposition: resolved
+  fork: F1
+  cluster: cluster1
+- id: test_fifth_bash_enabled_role_outside_the_four_named_construction_paths
+  kind: behavior
+  form: test
+  binds:
+  - census_seam
+  discharged_by: test_fifth_bash_enabled_role_outside_the_four_named_construction_paths
+  disposition: resolved
+  fork: F11
+  cluster: cluster1
+- id: test_sibling_direction_leg_continues_against_a_shared_box_after_the_other_leg_faults
+  kind: behavior
+  form: test
+  binds:
+  - run_cycle_box.identity
+  - drives(run_one->actor)
+  discharged_by: test_sibling_direction_leg_continues_against_a_shared_box_after_the_other_leg_faults
+  disposition: resolved
+  fork: F2
+  cluster: cluster2
+- id: test_stale_run_cycle_container_from_a_prior_crashed_attempt_at_the_same_run_id
+  kind: behavior
+  form: test
+  binds:
+  - run_cycle_box.identity
+  - interacts(run_one->run_cycle_box)
+  discharged_by: test_stale_run_cycle_container_from_a_prior_crashed_attempt_at_the_same_run_id
+  disposition: resolved
+  fork: F3
+  cluster: cluster2
+- id: test_a_retried_drain_invocation_reuses_a_batch_id_whose_prior_container_still_exists
+  kind: behavior
+  form: test
+  binds:
+  - drain_box.identity
+  discharged_by: test_a_retried_drain_invocation_reuses_a_batch_id_whose_prior_container_still_exists
+  disposition: resolved
+  fork: F6
+  cluster: cluster2
+- id: test_box_teardown_failure_blocks_or_permits_subsequent_lifecycle_steps
+  kind: behavior
+  form: test
+  binds:
+  - interacts(run_worktree_batch->drain_box)
+  - interacts(curator->corpus)
+  discharged_by: test_box_teardown_failure_blocks_or_permits_subsequent_lifecycle_steps
+  disposition: resolved
+  fork: F13
+  cluster: cluster2
+- id: test_orphaned_worktree_and_box_survive_a_hard_kill_before_any_finally_runs
+  kind: behavior
+  form: test
+  binds:
+  - interacts(run_worktree_batch->drain_box)
+  - drain_box.identity
+  discharged_by: test_orphaned_worktree_and_box_survive_a_hard_kill_before_any_finally_runs
+  disposition: resolved
+  fork: F15
+  cluster: cluster2
+- id: test_startup_fault_absorbed_by_an_existing_per_item_continue_idiom
+  kind: behavior
+  form: test
+  binds:
+  - interacts(run_worktree_batch->drain_box)
+  discharged_by: test_startup_fault_absorbed_by_an_existing_per_item_continue_idiom
+  disposition: resolved
+  fork: F4
+  cluster: cluster3
+- id: test_run_cycle_writable_mount_has_an_in_box_justifier
+  kind: behavior
+  form: test
+  binds:
+  - run_cycle_box.identity
+  discharged_by: test_run_cycle_writable_mount_has_an_in_box_justifier
+  disposition: resolved
+  fork: F5
+  cluster: cluster4
+- id: test_drain_infra_mount_exposes_non_triggered_corpus_to_gate_approved_read
+  kind: behavior
+  form: test
+  binds:
+  - drain_box.identity
+  - interacts(curator->corpus)
+  discharged_by: test_drain_infra_mount_exposes_non_triggered_corpus_to_gate_approved_read
+  disposition: resolved
+  fork: F10
+  cluster: cluster4
+- id: test_curator_relative_operand_rebased_at_cwd_anchor_escapes_corpus
+  kind: behavior
+  form: test
+  binds:
+  - cwd_anchor
+  - interacts(curator->corpus)
+  discharged_by: test_curator_relative_operand_rebased_at_cwd_anchor_escapes_corpus
+  disposition: resolved
+  fork: F9
+  cluster: cluster4
+- id: test_box_creation_deferred_past_multiple_independent_threshold_checks_in_one_tick
+  kind: behavior
+  form: test
+  binds:
+  - interacts(run_worktree_batch->drain_box)
+  - drain_box.identity
+  discharged_by: test_box_creation_deferred_past_multiple_independent_threshold_checks_in_one_tick
+  disposition: resolved
+  fork: F7
+  cluster: cluster7
+- id: test_composed_container_name_fails_the_naming_grammar
+  kind: behavior
+  form: test
+  binds:
+  - run_cycle_box.identity
+  - box_request
+  discharged_by: test_composed_container_name_fails_the_naming_grammar
+  disposition: resolved
+  fork: F8
+  cluster: cluster8
+- id: test_unboxed_opt_out_env_receives_no_allowlist_filtering
+  kind: behavior
+  form: test
+  binds:
+  - unboxed_opt_out
+  - run_cycle_box.env
+  discharged_by: test_unboxed_opt_out_env_receives_no_allowlist_filtering
+  disposition: resolved
+  fork: F17
+  cluster: cluster9
+- id: test_unsandboxed_opt_out_leg_runs_with_full_host_network_reachability
+  kind: behavior
+  form: test
+  binds:
+  - unboxed_opt_out
+  - run_cycle_box.identity
+  discharged_by: test_unsandboxed_opt_out_leg_runs_with_full_host_network_reachability
+  disposition: resolved
+  fork: F18
+  cluster: cluster9
+- id: test_judge_boxed_output_wrap_is_the_intended_zero_shape
+  kind: behavior
+  form: test
+  binds:
+  - interacts(judge->run_cycle_box)
+  - interacts(actor->run_cycle_box).response
+  discharged_by: test_judge_boxed_output_wrap_is_the_intended_zero_shape
+  disposition: resolved
+  fork: F12
+  cluster: return-contract
+- id: test_mount_source_symlink_target_resolves_outside_worktree_leaf
+  kind: behavior
+  form: test
+  binds:
+  - drain_box.identity
+  discharged_by: test_mount_source_symlink_target_resolves_outside_worktree_leaf
+  disposition: resolved
+  fork: F-symlink
+  cluster: mount-source-symlink
+- id: test_judge_gate_scope_read_roots_may_include_a_path_not_snapshotted_at_box_creation
+  kind: behavior
+  form: test
+  binds:
+  - interacts(judge->gather_raw)
+  - run_cycle_box.identity
+  discharged_by: test_judge_gate_scope_read_roots_may_include_a_path_not_snapshotted_at_box_creation
+  disposition: resolved
+  fork: F-po43
+  cluster: elevated-gap-1
+- id: test_caller_env_dict_key_collides_with_the_shared_infra_helpers_derived_key
+  kind: behavior
+  form: test
+  binds:
+  - run_cycle_box.env
+  - box_request.env
+  discharged_by: test_caller_env_dict_key_collides_with_the_shared_infra_helpers_derived_key
+  disposition: resolved
+  fork: F-po10
+  cluster: elevated-gap-2
+- id: test_curator_gate_scope_includes_untriggered_sibling_corpora_the_mount_deliberately_excludes
+  kind: behavior
+  form: test
+  binds:
+  - interacts(curator->corpus)
+  - drain_box.identity
+  discharged_by: test_curator_gate_scope_includes_untriggered_sibling_corpora_the_mount_deliberately_excludes
+  disposition: resolved
+  silent_branch: SB1
+- id: test_gather_raw_mount_exists_but_has_no_entry_to_read_back_at_sentinel_time
+  kind: behavior
+  form: test
+  binds:
+  - sentinel
+  - interacts(judge->gather_raw)
+  - run_cycle_box.identity
+  discharged_by: test_gather_raw_mount_exists_but_has_no_entry_to_read_back_at_sentinel_time
+  disposition: resolved
+  silent_branch: SB2
+- id: test_bash_lane_transport_fault_raises_not_wrapped
+  kind: behavior
+  form: test
+  binds:
+  - interacts(actor->run_cycle_box).response
+  - interacts(curator->drain_box).response
+  discharged_by: test_bash_lane_transport_fault_raises_not_wrapped
+  disposition: resolved
+  silent_branch: SB-return
+  resolution: 'RF-D1 (corrects R9 clause b): a TRANSPORT fault is NOT wrapped into the #0 envelope —
+    it RAISES ModelRetry (BoxFault->ModelRetry, inherited free per M4, caught natively by the learning
+    agent-run loop, rc2). Was test_bash_lane_fault_returns_the_zero_contract_shape (the struck
+    everything-wrapped over-read). Negative; positive control is the executed->wrap path
+    (test_bash_lane_nonzero_exit_returns_wrapped_envelope + the healthy-transport control in-body).'
+- id: test_bash_lane_nonzero_exit_returns_wrapped_envelope
+  kind: behavior
+  form: test
+  binds:
+  - interacts(actor->run_cycle_box).response
+  - interacts(curator->drain_box).response
+  discharged_by: test_bash_lane_nonzero_exit_returns_wrapped_envelope
+  disposition: resolved
+  silent_branch: SB-return
+  resolution: 'RF-D1 (return-contract split): the executed->wrap half — an EXECUTED command with a
+    NON-ZERO exit is still wrapped in the #0 untrusted envelope (any exit code), the positive control
+    paired with test_bash_lane_transport_fault_raises_not_wrapped.'
+- id: mount_source_absent_refused
+  kind: behavior
+  form: test
+  binds:
+  - interacts(run_one->run_cycle_box)
+  - run_cycle_box.identity
+  discharged_by: test_mount_source_directory_absent_at_box_creation
+  disposition: design_correction
+  correction: DC1
+  live_probe: po1 executed live — an absent --mount type=bind source is refused at create (rc=125, BoxFault
+    via box.py:319-322), NOT silently emptied; the -v silent-empty behavior is unreachable from box.py.
+- id: role_anchor_mount_parent_resolves
+  kind: behavior
+  form: test
+  binds:
+  - cwd_anchor
+  - run_cycle_box.identity
+  - interacts(actor->run_cycle_box)
+  discharged_by: test_role_anchor_that_is_a_mount_parent_not_inside_any_mount
+  disposition: design_correction
+  correction: DC2
+  live_probe: po44 executed live — under --read-only the auto-created ro parent of the defender mount
+    is a usable exec -w workdir; cwd=repo_root + relative `python3 defender/...` resolves into the ro
+    mount; the parent is read-only (writes refused rc=2). Fork F16 closed; asserts the WORKING mechanism,
+    not an open fork.
+structure:
+  axes:
+  - run_id
+  - batch_id
+  - triggered_corpus
+  actors:
+  - id: actor
+    frame: leg
+    provenance: code
+  - id: judge
+    frame: leg
+    provenance: code
+  - id: curator
+    frame: leg
+    provenance: code
+  - id: lead_author
+    frame: leg
+    provenance: code
+  - id: run_one
+    frame: composition
+    provenance: code
+  - id: run_worktree_batch
+    frame: composition
+    provenance: code
+  - id: runtime_run
+    frame: composition
+    provenance: code
+  boundaries:
+  - id: run_cycle_box
+    provenance: design
+    facets:
+      identity:
+        key_axes:
+        - run_id
+        evidence:
+          nl: the run-cycle container name is caller-composed from run_id plus a tier-distinguishing component
+            (M8); the mount set derives from run_id (learning_run_dir = runs_dir/run_id, rw) plus the
+            judged run's ro gather_raw. Read off orchestrate.py:281 and box.py:245-250/269-293.
+        derivations:
+        - value: container_name
+          fn_of: run_id
+          injective: true
+        sharing: unique-key
+  - id: drain_box
+    provenance: design
+    facets:
+      identity:
+        key_axes:
+        - batch_id
+        - triggered_corpus
+        evidence:
+          nl: the drain container name is batch_id=uuid4().hex[:12] (orchestrate.py:507, satisfies is_valid_run_id);
+            the mount set is the TRIGGERED corpora under the worktree leaf repo_root/.worktrees/{slug}-{batch_id}
+            (branch.py:63), keyed per invocation. Read off g8/g10.
+        derivations:
+        - value: container_name
+          fn_of: batch_id
+          injective: true
+        sharing: unique-key
+  - id: runtime_box
+    provenance: code
+    facets:
+      identity:
+        key_axes:
+        - run_id
+        evidence:
+          nl: 'the runtime container name keys on run_id alone (box.py:245-250, grammar-restricted per
+            #698); learning_run_dir.name == run_dir.name == run_id, so a run-cycle box would claim this
+            same name absent a caller-distinguishing component (M8/O7).'
+        derivations:
+        - value: container_name
+          fn_of: run_id
+          injective: false
+        sharing: unique-key
+  - id: run_cycle_box.env
+    provenance: design
+    facets: {}
+  - id: drain_box.env
+    provenance: design
+    facets: {}
+  - id: runtime_box.env
+    provenance: code
+    facets: {}
+  - id: box_request
+    provenance: design
+    facets: {}
+  - id: box_request.env
+    provenance: design
+    facets: {}
+  - id: sandboxed
+    provenance: design
+    facets: {}
+  - id: cwd_anchor
+    provenance: design
+    facets: {}
+  - id: census_seam
+    provenance: design
+    facets: {}
+  - id: unboxed_opt_out
+    provenance: design
+    facets:
+      domain:
+        type: str
+        refinement:
+          nl: DEFENDER_ALLOW_UNSANDBOXED — unset (empty) means a box is REQUIRED; the loud opt-out value
+            '1' reaches unboxed_executor (box.py:341). Operator-only, greppable.
+        default: ''
+        distinguished:
+        - '1'
+        falsy_valid: false
+        documented_alternatives: []
+  - id: sentinel
+    provenance: design
+    facets: {}
+  - id: venv_probe
+    provenance: design
+    facets: {}
+  - id: gather_raw
+    provenance: code
+    facets: {}
+  - id: corpus
+    provenance: code
+    facets: {}
+  - id: write_file
+    provenance: code
+    facets: {}
+  - id: lesson_script
+    provenance: code
+    facets: {}
+  - id: bash_grant
+    provenance: code
+    facets: {}
+  interacts:
+  - from: actor
+    to: run_cycle_box
+    mode: invoke
+    via: subprocess
+    provenance: design
+  - from: judge
+    to: run_cycle_box
+    mode: invoke
+    via: subprocess
+    provenance: design
+  - from: curator
+    to: drain_box
+    mode: invoke
+    via: subprocess
+    provenance: design
+  - from: lead_author
+    to: drain_box
+    mode: invoke
+    via: subprocess
+    provenance: design
+  - from: judge
+    to: gather_raw
+    mode: read
+    via: fs
+    provenance: design
+  - from: actor
+    to: cwd_anchor
+    mode: read
+    via: fs
+    provenance: design
+  - from: actor
+    to: lesson_script
+    mode: invoke
+    via: subprocess
+    provenance: design
+  - from: curator
+    to: corpus
+    mode: write
+    via: fs
+    provenance: design
+  - from: lead_author
+    to: corpus
+    mode: write
+    via: fs
+    provenance: design
+  - from: curator
+    to: write_file
+    mode: write
+    via: fs
+    provenance: code
+  - from: run_one
+    to: run_cycle_box
+    mode: write
+    via: api
+    provenance: design
+    interpolates:
+    - run_id
+  - from: run_worktree_batch
+    to: drain_box
+    mode: write
+    via: api
+    provenance: design
+    interpolates:
+    - batch_id
+    - triggered_corpus
+  - from: runtime_run
+    to: runtime_box
+    mode: write
+    via: api
+    provenance: code
+    interpolates:
+    - run_id
+  - from: run_one
+    to: unboxed_opt_out
+    mode: read
+    via: env
+    provenance: design
+  - from: run_worktree_batch
+    to: unboxed_opt_out
+    mode: read
+    via: env
+    provenance: design
+  drives:
+  - from: run_one
+    to: actor
+    provenance: design
+    multiplicity: concurrent
+  - from: run_one
+    to: judge
+    provenance: design
+    multiplicity: concurrent
+  - from: run_worktree_batch
+    to: curator
+    provenance: design
+    multiplicity: serial
+  - from: run_worktree_batch
+    to: lead_author
+    provenance: design
+    multiplicity: serial
+claims:
+- id: g1
+  kind: census
+  claim: Exactly four bash=True learning roles build deps with NO box=; all bind through `bind` (curator
+    via for_run). oracle/verify_forward have empty ToolSets.
+  probe: enumerate + read the four bind sites + ToolSet decls at HEAD (search backs the exactly-four completeness,
+    see g13)
+  probe_kind: search
+  observed: actor_engine.py:86, judge/engine_pydantic.py:99, lead_author_engine.py:84, curator_engine.py:203
+    — none pass box=.
+  verdict: holds
+  reverifies:
+  - c1
+  - r1
+- id: g2
+  kind: census
+  claim: deps.box is reached at exactly one execution site; write/edit tools run in-process with no transport.
+    One existing box= passthrough precedent exists.
+  probe: grep deps.box across runtime/learning/evals/run.py excluding tests
+  probe_kind: search
+  observed: runtime/tools.py:153 deps.box.run_parsed sole executor; _tool_write_file/_tool_edit_file write
+    in-process; tools_gather.py:276 threads box=deps.box.
+  verdict: holds
+  reverifies:
+  - c4
+- id: g3
+  kind: referential
+  claim: The inert default lives on AgentDeps._for_run which bind funnels through; box defaulted to a
+    fresh inert BoxExecutor when absent.
+  probe: read tools.py:84-111, agent_definition.py:215-231
+  probe_kind: read
+  observed: box field default_factory=BoxExecutor (tools.py:87); _for_run box=box if not None else BoxExecutor()
+    (:110); bind passes box= and cwd_anchor.
+  verdict: holds
+  reverifies:
+  - c3
+- id: g4
+  kind: referential
+  claim: The inert transport raises BoxFault mapped to ModelRetry at the tool boundary.
+  probe: read box.py:188-192, tools.py:143-167
+  probe_kind: read
+  observed: _unattached raises BoxFault (box.py:188); _tool_bash catches → ModelRetry (tools.py:161-162);
+    a denied command refused earlier at permission.decide_bash.
+  verdict: holds
+  reverifies:
+  - c2
+- id: g5
+  kind: referential
+  claim: _create_argv binds ONLY run_dir rw + defender_dir ro; entrypoint resolves off PYTHONPATH=defender_dir.parent
+    and PATH=defender_dir/bin. gather_raw is a third tree not mounted; comparison_dir is inside the rw
+    mount.
+  probe: read box.py:269-293,:362-377; judge/run.py:48-61
+  probe_kind: read
+  observed: --mount run_dir rw, defender_dir readonly, tmpfs /tmp noexec, --network none, --read-only,
+    --workdir run_dir; gather_raw OUTSIDE learning_run_dir, comparison_dir inside rw; add_dirs is_dir()-gated.
+  verdict: holds
+  reverifies:
+  - c5
+  - c6
+- id: g6
+  kind: census
+  claim: Across all four roles the only granted program that can mutate a bind-mounted tree is `rm`; every
+    other granted program is read-only or writes only to tmpfs.
+  probe: enumerate each role's bash_shapes builder across all four roles at HEAD
+  probe_kind: search
+  observed: 'curator: rm(scoped)+cat(scoped)+grep; lead_author: single rm under defender/skills; actor:
+    python3 pinned scripts, no file verb; judge: cat(scoped)+defender-sql. write/edit tools host-side.'
+  verdict: holds
+  reverifies:
+  - c9
+- id: g7
+  kind: referential
+  claim: cwd_anchor is derived once in bind from anchors_on_tree; curator & lead-author anchor at repo_root;
+    actor does NOT (anchors at learning_run_dir). ResolvedRoots carries no anchor.
+  probe: 'read agent_definition.py:50,71-91,229-231; the three DEFs; #697'
+  probe_kind: read
+  observed: anchors_on_tree default False; bind sets cwd_anchor=(defender_dir.parent if anchors_on_tree
+    else run_dir); CORPUS_AUTHOR/LEAD_AUTHOR anchors_on_tree=True; ACTOR anchors at learning_run_dir.
+  verdict: holds
+  reverifies:
+  - c7
+- id: g8
+  kind: census
+  claim: Two drains never share worktree/branch prefix/lock; three disjoint lesson corpora; which curators
+    wake is a per-tick threshold decision inside do_work.
+  probe: read orchestrate.py:386-393,491-534,549-604; branch.py:41-65; curator_engine.py:92; hooks/record_lesson_load.py:5
+  probe_kind: search
+  observed: author_drain + lead_author_drain both route through _run_worktree_batch; SHIPPED_LESSON_CORPORA={lessons,lessons-actor,lessons-environment};
+    wake = _maybe_trigger_author threshold inside do_work.
+  verdict: holds
+  reverifies:
+  - c8
+- id: g9
+  kind: referential
+  claim: The census test enumerates all four roles (bindable retired) but asserts box TYPE not attachment,
+    over a test-local box-less bind — un-fixable in place. Startup repertoire asserted by a separate one-role
+    test.
+  probe: read test_540_exec_seam.py:674-714; test_540_box_boundary.py:932-940
+  probe_kind: read
+  observed: predicate d.tools.bash; deps via test-local bind with no box= → inert default; assertion isinstance(deps.box,
+    BoxExecutor); CORPUS_AUTHOR enumerated; repertoire test is MAIN_DEF only.
+  verdict: holds
+  reverifies:
+  - c10
+  - c15
+  - r3
+- id: g10
+  kind: referential
+  claim: 'container_name keys on run_id ALONE (grammar-restricted #698); learning_run_dir.name==run_dir.name==run_id
+    → run-cycle box collides with runtime box. No teardown at either new site. Drain batch_id=uuid4().hex[:12]
+    passes the grammar.'
+  probe: read box.py:245-250,264-267,308-330; orchestrate.py:281,316,507; run.py:129-149; _run_id.py:4-8
+  probe_kind: read
+  observed: container_name f'{prefix}{run_id}' guarded by is_valid_run_id; run_one ends `raise errors[0][1]`
+    (:316) with NO try/finally; runtime pins start/stop/scrub; batch_id ASCII-alnum passes.
+  verdict: holds
+  reverifies:
+  - c11
+  - r5
+- id: g11
+  kind: referential
+  claim: sandboxed is a settable field defaulted True with NO production reader; box.py is domain-free
+    in deps, runtime-shaped in interface.
+  probe: read box.py:200,329,400; grep .sandboxed readers
+  probe_kind: read
+  observed: 'sandboxed: bool = True (box.py:200); _start_boxed passes sandboxed=True; unboxed_executor
+    sandboxed=False; sole reader is a test.'
+  verdict: holds
+  reverifies:
+  - c16
+- id: g12
+  kind: census
+  claim: Only the loud DEFENDER_ALLOW_UNSANDBOXED=1 opt-out reaches unboxed_executor in production; the
+    two other sites are hermetic test harnesses.
+  probe: grep unboxed_executor( across defender
+  probe_kind: search
+  observed: box.py:348 (opt-out, gated on env==1 else re-raises BoxFault); two test harnesses. Not re-checked
+    against the two new creation sites (do not exist yet).
+  verdict: unrefuted
+  reverifies:
+  - c17
+- id: g13
+  kind: census
+  claim: No box delivery seam exists between creation sites and the four construction sites; the Subagents
+    Protocol has 4 methods (3 bash-reaching) and multiple implementers the signature change must reach.
+  probe: grep box param under defender/learning; read subagents.py:1-60; find Subagents implementers
+  probe_kind: search
+  observed: no box parameter under defender/learning; Protocol methods actor/actor_benign/oracle/judge
+    (oracle empty-ToolSet exempt); InProcessSubagents constructs deps internally; box rides via for_run/importlib/lead-author
+    chains, NOT the run_one-defaulted `agents` param.
+  verdict: holds
+  reverifies:
+  - c14
+- id: g14
+  kind: behavior
+  claim: 'Interpreter-coupling (venv minor==image) and traversal-containment — inherited as the design''s
+    FIRST LIVE PROBE — now SETTLED live (c12/c14, c13/po63): this env is docker-outside-of-Docker, so
+    host-path translation runs the exact argv.'
+  probe: 're-ground live: run the real box argv with sources translated to host paths (46-reground-live)'
+  probe_kind: executed
+  observed: venv .venv/bin/python3 -> image python 3.11.15 == image; duckdb 1.5.4 imports; defender.runtime.bash_exec
+    imports via PYTHONPATH; ro-bind write refused rc=2; `..` lands on ro rootfs, no host tree, write refused.
+    c12/c13 DISCHARGED (not deferred).
+  verdict: holds
+  reverifies:
+  - c12
+  - c13
+- id: rc1
+  kind: behavior
+  claim: 'The boxed learning bash lane matches the runtime boxed lane byte-for-byte modulo the untrusted
+    wrap (RF-D1): an EXECUTED command (any exit code) returns _wrap(_format_bash_result(rc,out,err),
+    untrusted, salt); a TRANSPORT fault (BoxFault) RAISES ModelRetry, never wrapped. Clause (b) — every
+    fault subtype inside the envelope — is struck. This is demand #0''s corrected reading; byte-identity
+    of the wired learning lane is write-code-from-spec''s probe.'
+  probe: read runtime/tools.py:70-73,143-168; box.py:30-36,202-220 (byte-identity to the runtime lane
+    is the not-yet-written wiring)
+  probe_kind: read
+  observed: _tool_bash returns _wrap(_format_bash_result(...),'untrusted',salt) for an executed learning-role
+    command (rc=0 and non-zero alike) and raises ModelRetry on a BoxFault (tools.py:161-162); the granted
+    (unattached) path currently raises BoxFault. The learning boxed lane is not wired yet — byte-identity is
+    write-code-from-spec's probe; §7/RF-D1 fix the contract (F0, transport->raise / executed->wrap split).
+  verdict: deferred
+- id: rc2
+  kind: referential
+  claim: 'The learning-stage run loop (run_stage -> _drive -> Agent.run) registers _tool_bash as the
+    pydantic_ai `bash` @agent.tool via the SAME register_tools/build_agent_core path the runtime driver
+    uses, and pydantic_ai''s ToolManager._call_tool wraps a tool-raised ModelRetry into a
+    ToolRetryError/RetryPromptPart — so a ModelRetry raised by _tool_bash on a BoxFault is a retry prompt
+    for learning roles too, not a fatal escape. RF-D1''s transport->raise reading rests on this.'
+  probe: 'read learning/pipeline/_pydantic_stage.py:53-59,77-123 (run_stage->_drive->agent.run);
+    runtime/tools.py:322-331 (register_tools registers _tool_bash as the @agent.tool bash);
+    runtime/driver.py:159-192 (build_agent_core->register_tools, shared by runtime driver + build_stage_agent);
+    .venv/.../pydantic_ai/tool_manager.py:306,356,365 (except (ValidationError, ModelRetry) ->
+    _wrap_error_as_retry -> ToolRetryError/RetryPromptPart)'
+  probe_kind: read
+  observed: 'both the runtime driver and build_stage_agent call build_agent_core -> register_tools, which
+    registers _tool_bash under the bash tool; ToolManager._call_tool catches ModelRetry and converts it to a
+    RetryPromptPart (default_max_retries=1). The learning agent-run loop therefore handles a raised ModelRetry
+    identically to the runtime lane — the transport-fault raise is caught, not fatal.'
+  verdict: holds
+- id: po1
+  kind: primitive
+  claim: Under `--mount type=bind,source=<absent>` docker REFUSES at create (rc=125, no container), with
+    or without --read-only; the silent empty-dir-at-rc=0 belongs ONLY to the -v/--volume auto-create path.
+  probe: 'live: run the real argv with an absent --mount type=bind source, and separately with -v, host-path
+    translated'
+  probe_kind: executed
+  observed: --mount type=bind absent source -> `bind source path does not exist`, rc=125, no container;
+    -v absent -> empty dir present, rc=0. box.py uses --mount type=bind exclusively.
+  verdict: holds
+- id: po44
+  kind: primitive
+  claim: Under --read-only dockerd auto-creates a nested bind target's missing parents (as READ-ONLY),
+    and a mount's PARENT is a usable `docker exec -w` workdir.
+  probe: 'live: box with defender ro at host path + run_dir rw, --read-only, --workdir <repo_root> (the
+    mount''s parent)'
+  probe_kind: executed
+  observed: create rc=0; exec -w repo_root pwd returns repo_root; python3 -c import defender.runtime.bash_exec
+    OK; relative `cat defender/SKILL.md` reads the ro-bound file; write to the parent refused rc=2 (read-only).
+    Decision-1 mount-parent anchor is sound.
+  verdict: holds
+- id: po63
+  kind: reachability
+  claim: A write to a readonly bind's own target is refused (rc=2, distinct from the --read-only rootfs);
+    a `..` escape lands on the ro rootfs / ro infra mount (image /etc/passwd, mount skeleton only, no
+    host tree); a write via `..` is refused. Traversal-containment holds (c13).
+  probe: 'live break-attempt: in-box write to ro target, deep `..` traversal read+write'
+  probe_kind: executed
+  observed: ro-target write -> Read-only file system rc=2; `..` deep cat -> image /etc/passwd (ro rootfs);
+    ls shows only the auto-created mount skeleton; `..` write refused rc=2. The mount, not the gate regex,
+    is the authoritative backstop.
+  verdict: unrefuted
+- id: po48
+  kind: primitive
+  claim: 'docker create is all-or-nothing on mount specs: a good ro mount + a malformed (absent-source)
+    mount errors (rc=1) and leaves NO container.'
+  probe: 'live: docker create with good+absent mounts; docker ps -a'
+  probe_kind: executed
+  observed: rc=1, no container. Confirms M11's per-mount sentinel is a backstop atop an already-atomic
+    create.
+  verdict: holds
+- id: po19
+  kind: primitive
+  claim: 'Nested/overlapping mounts: the deeper (more-specific) mount governs its subtree with its own
+    flags — rw-inside-ro works (the drain''s shape).'
+  probe: 'live: outer ro at /m, inner rw at /m/inner; write both'
+  probe_kind: executed
+  observed: write /m/o2 (outer) refused rc=2; write /m/inner/n.txt (inner) OK. Deeper mount's flags win.
+  verdict: holds
+- id: po47
+  kind: primitive
+  claim: '`docker rm -f` releases the kernel bind synchronously — a subsequent host rm -rf of the formerly-bound
+    source does not race (no EBUSY).'
+  probe: 'live: rm -f the box, then host rm -rf the bound source'
+  probe_kind: executed
+  observed: SOURCE_REMOVED_OK, no EBUSY. Confirms dec8 teardown order (stop_box before scan/worktree-removal)
+    does not race a held bind.
+  verdict: holds
+- id: po46
+  kind: primitive
+  claim: tmpfs persists across execs within one box lifetime and is visible cross-exec (concurrent legs
+    observe each other); per-container isolated; starvable at its size cap.
+  probe: 'live: exec1 writes /tmp/shared, exec2 reads; second box; dd 40m into 16m tmpfs'
+  probe_kind: executed
+  observed: exec2 reads exec1's file; a second box does not; dd truncates at 16 MiB. Cross-leg visibility
+    accepted per dec2/S6.
+  verdict: holds
+- id: po35
+  kind: primitive
+  claim: A host-side file mutation (e.g. git reset --hard) between sequential markers IS reflected into
+    a live rw bind.
+  probe: 'live: in-box read of a live rw bind, host edit, next in-box read'
+  probe_kind: executed
+  observed: first read `orig`, after host edit next read `changed-on-host`. M8's 'must be pinned' flag
+    on _discard_worktree_changes under a live bind is real.
+  verdict: holds
+- id: po18
+  kind: primitive
+  claim: A resolving symlink bind source is FOLLOWED by docker to its target (rc=0, resolved in the DAEMON
+    namespace); a dangling-symlink source is refused (rc=125, exactly like an absent source).
+  probe: 'live: bind source that is a resolving symlink, and a dangling symlink'
+  probe_kind: executed
+  observed: resolving symlink -> target content read rc=0; dangling -> `bind source path does not exist`
+    rc=125. Mount sources are design-controlled leaves — a symlink outside the leaf is not a reachable
+    production case; residual is defense-in-depth (bounded).
+  verdict: holds
+- id: po53
+  kind: referential
+  claim: decide_read's confine check takes (policy, run_dir, defender_dir), never cwd_anchor; the anchor
+    feeds only _resolve_operand to rebase a relative operand before the anchor-blind check runs — moving
+    the actor anchor cannot widen/narrow read_confine.
+  probe: read permission/files.py:74-87,157-219; tools.py:175-177; agent_definition.py:139-147,230
+  probe_kind: read
+  observed: no cwd_anchor parameter on decide_read; read_confine derives from RunScope.read_confine; flipping
+    anchors_on_tree leaves read_confine bit-for-bit unchanged. Gate-independence holds (c2/c3 consensus).
+  verdict: holds
+- id: po43
+  kind: referential
+  claim: gather_raw's path is knowable at run_one's top (orchestrate.py:260, before learning_run_dir at
+    :281), but its is_dir() gate and comparison_dir's creation run inside build_judge_invocation (judge/run.py:41-61)
+    dispatched per-leg AFTER M1's stated box-creation point — the O3 sequencing gap is real in the code
+    as written.
+  probe: read orchestrate.py:259-297; judge/run.py:41-61; judge/engine_pydantic.py:96-100
+  probe_kind: read
+  observed: comparison_dir late arrival is harmless (subpath of rw learning_run_dir); gather_raw's ro-mount
+    need is the exposure — the only is_dir() check lives per-leg, after box creation; mounts cannot be
+    added to a running container. Elevated gap 1.
+  verdict: holds
+- id: po4
+  kind: referential
+  claim: _is_running (box.py:264-266) returns False identically for 'absent' and 'the inspect call itself
+    failed' (reads returncode+stdout only); _start_boxed reaps unconditionally on False with no ownership/cause
+    check.
+  probe: read box.py:264-266,308-317
+  probe_kind: read
+  observed: the reap has no ownership check and a liveness read that cannot tell 'safe to reap' from 'we
+    do not know'. Grounds forks F3/F6 as real (not discounted copy3 IS-assertions).
+  verdict: holds
+- id: po10
+  kind: referential
+  claim: 'run_env (run_common.py:67-77) — M2''s cited precedent — has no single merge policy: it OVERWRITES
+    DEFENDER_DIR/RUN_DIR/RUNS_BASE, ADDITIVELY COMPOSES PATH, and NEVER TOUCHES PYTHONPATH (RF1); boxed
+    _create_argv has zero caller-env input today. No precedent resolves caller-vs-helper precedence.'
+  probe: read run_common.py:67-77; box.py:269-292
+  probe_kind: read
+  observed: three key-classes, three behaviors; the box side has no caller input to merge against. test_caller_env_dict_key_collides
+    cannot be authored against an inherited precedent — the precedence must be pinned at §7/author (elevated
+    gap 2). test_caller_env_omits_a_key stays firm consensus (helper unconditionally supplies infra keys).
+  verdict: holds
+- id: f12
+  kind: primitive
+  claim: 'M11/c5/f12 design premise: ''under docker-outside-of-Docker an absent bind source is silently
+    materialised as an empty directory at rc=0'' — the SOLE stated rationale for the M11 per-mount sentinel
+    and the ''silently-empty gather_raw reads as absence, judge confidently wrong'' hazard.'
+  probe: 'live po1: --mount type=bind absent source, with/without --read-only'
+  probe_kind: executed
+  observed: 'REFUTED for the code path: --mount type=bind refuses an absent source loudly (rc=125, BoxFault
+    at create); only -v auto-creates empty. The hazard cannot arise from an absent source. Sentinel residual
+    narrows to a succeeded-but-wrong/empty bind (DC1).'
+  verdict: refuted
+- id: lesson_script_hostile_argv
+  kind: reachability
+  claim: 'The pinned lesson scripts cannot be driven to read an arbitrary path via their argv (S6): the
+    gate passes argv unexamined via pins_path, so the scripts themselves are the last line.'
+  probe: 'OWED at the suite''s first live box run: drive each pinned lesson script with hostile argv in
+    a live box (po12/po50/po51)'
+  observed: NOT attempted in the re-ground round — a hermetic pass does not discharge it; this is the
+    suite's first-live-probe obligation for lesson_scripts_no_arbitrary_read / pinned_script_argv tests.
+  verdict: unprobed
+- id: g15
+  kind: referential
+  claim: 'Every O1-O8/M1-M11/S1-S8/N1-N7/decision-1..10 sentence in the design (#665 body + all 7 comments,
+    consolidated doc pinned 5ecf9e4c, re-grounded bc1db8eb) binds at least one artifact element (a demand,
+    a fork placeholder, or a rejected/background note), and every design-provenance structure element
+    (actor/boundary/edge) traces to the design''s own coined address vocabulary (20-demands.md''s ''Address
+    vocabulary'') or an existing code-provenance element; DC1/DC2''s corrected design sentences (M11, M3a)
+    remain bound to their original demands (sentinel_probes_every_mount, mount_covers_scope) via a corrected
+    reading, not left dangling. R0 bidirectional reconciliation (gate leaf, phase D).'
+  probe: 'read issue #665 body + all 7 comments against 20-demands.md''s Sort/conservation section and
+    the final artifact''s demands/structure/handoff blocks; cross-checked the 19 fork placeholders and 2
+    design-correction demands'' inline citations against the design''s M#/O#/S#/decision# labels'
+  probe_kind: read
+  observed: 'O1-O8, M1-M11, S1-S8 all map per 20-demands.md''s own conservation table; N1-N7 map to rejected
+    or minted demands; decisions 1-10 and ''Remaining open'' map to demands, forks, or background; every
+    fork/design-correction demand carries an inline correction or rejected-note citing a named M#/O#/S#/decision#
+    or po-id. No design sentence found binding nothing; no structure or demand element found untraceable
+    to the design or to existing code (provenance: code).'
+  verdict: holds
+- id: g16
+  kind: referential
+  claim: 'No value reaching box.py''s mount-source render step (`--mount type=bind,source=...`) or its
+    env-value render step (`--env KEY=VALUE`) is model- or attacker-influenced: every mount source is either
+    author-fixed (defender_dir, the worktree base) or restricted to a comma/equals-free grammar (run_id
+    via is_valid_run_id, batch_id via uuid4().hex[:12]) or a closed name vocabulary (SHIPPED_LESSON_CORPORA);
+    every env value derives from those same paths, and the boxed lane''s env allowlist (BOX_ENV_ALLOWLIST)
+    is a fixed 7-key author list with no caller-chosen key; argv values reach docker as discrete subprocess
+    argv elements, never through a shell. R6 chooser/sanitizer walk (gate leaf, phase D) discharging RF-I.'
+  probe: 'read box.py:228-292 (_create_argv, BOX_ENV_ALLOWLIST), _run_id.py (is_valid_run_id), _run_paths.py
+    (RunPaths.gather_raw), run_common.py:45-77 (materialize_run_dir, _alert_label, run_env), learning/author/branch.py:56-63
+    (_worktree_path), learning/author/curator_engine.py:87-92,195-201 (SHIPPED_LESSON_CORPORA, RunScope)'
+  probe_kind: read
+  observed: '_create_argv builds `type=bind,source={run_dir},target={run_dir}` and the defender_dir mount
+    as single subprocess argv elements (no shell interpolation); run_dir/defender_dir compose from a run_id
+    gated by is_valid_run_id (ASCII alnum + `_.-`, no comma/equals) BEFORE materialize_run_dir accepts it
+    — even the alert-derived auto label (`_alert_label`) passes through that gate, sys.exit''ing on failure
+    — or from the fixed repo checkout; BOX_ENV_ALLOWLIST is a 7-key closed tuple whose values come from
+    those same paths; the drain box''s mount sources are `<worktree_base>/{slug}-{batch_id}` (slug fixed,
+    batch_id uuid4 hex) plus corpus dirs drawn from the closed SHIPPED_LESSON_CORPORA tuple. The only caller-supplied
+    env merge found (run_common.run_env''s `dict(os.environ)`) belongs to the loud, operator-driven unboxed
+    opt-out, not the boxed render path RF-I named, and is already routed (cluster 9 / F17-F18). No model/attacker-chosen
+    value was found reaching either render step; RF-I''s ''author/implementer grounding-read'' is now that
+    read.'
+  verdict: holds
+gate:
+  evaluated:
+  - rule: R0
+    fired: false
+    cites: [g15]
+  - rule: R1
+    fired: false
+  - rule: R2
+    fired: false
+  - rule: R3
+    fired: false
+  - rule: R4
+    fired: true
+  - rule: R5
+    fired: false
+    cites: [g11]
+  - rule: R6
+    fired: false
+    cites: [g16]
+  obligations: []
+  holes: []
+  pre_discharged:
+  - rule: R4
+    element: unboxed_opt_out.domain.distinguished[1]
+    witness: 'unboxed_opt_out''s sole distinguished member `''1''` (DEFENDER_ALLOW_UNSANDBOXED) is read
+      by both interacts(run_one->unboxed_opt_out) and interacts(run_worktree_batch->unboxed_opt_out); R4''s
+      obligation (an executable demand per distinguished member) is already met — demand `uniform_opt_out`
+      binds unboxed_opt_out.domain.distinguished[1] exactly, discharged_by test_unsandboxed_opt_out_uniform_across_tiers,
+      which drives the opt-out through both new creation sites.'
+    by: uniform_opt_out
+    edge: 'interacts(run_one->unboxed_opt_out); interacts(run_worktree_batch->unboxed_opt_out)'
+    cites: [g12]
+handoff:
+  forks:
+  - 'RESOLVED §7 R1 (F1 box_delivery_absence, F11 fifth_bash_enabled_role): box= is REQUIRED — a loud
+    TypeError at construction — on the 3 bash-reaching Subagents/invoke seams and the CuratorDeps.for_run->bind
+    passthrough; the inert BoxExecutor() stays only as N5''s fail-closed default elsewhere. The M6/O6 census
+    asserts attachment on the production construction seam. A future fifth path is an N7-style recorded
+    residual. Tests: test_box_delivery_absence_does_not_silently_re_dead_the_lane,
+    test_fifth_bash_enabled_role_outside_the_four_named_construction_paths, test_census_observes_box_attachment_on_production_path.'
+  - 'RESOLVED §7 R2 (F2, F3, F6, F13, F15 — teardown/lifetime/identity): (F2) keep the shared run-cycle
+    box alive until BOTH legs finish, tear down once at run end. (F13) a failed stop_box BLOCKS finish_batch/cleanup
+    and aborts loudly (S7). (F3) refuse-and-surface a LIVE same-name; a stopped-own reap is logged loudly
+    (po4: the liveness read cannot tell safe-to-reap from unknown → an ownership/cause signal is owed).
+    (F6/F15) accepted residuals CONTINGENT on decision-5 ''not scheduled'' (handoff note, not a test).'
+  - 'RESOLVED §7 R3 (F4 startup-fault-absorbed): loud abort with the startup-BoxFault class added to the
+    systemic-fault set so it bypasses the drain''s per-item logged-skip-returns-0 idiom (matches dec5).
+    ''Not scheduled'' contingency flagged. Test: test_startup_fault_absorbed_by_an_existing_per_item_continue_idiom.'
+  - 'RESOLVED §7 R4 (F5, F10, F9, SB1 — mount scope): (F5) tighten the run-cycle learning_run_dir mount
+    rw->RO (no in-box writer; parity is not a justification). (F10/SB1) accept read-reachability of untriggered
+    siblings via the whole-<wt> ro infra mount as a recorded cost; pin the WRITE-refused observable. (F9)
+    bind containment to BOTH the gate''s textual anti-traversal AND the mount (authoritative backstop, po63).'
+  - 'RESOLVED §7 R5 (SB2 empty-present gather_raw): add decision-9''s third case — dir-absent -> host-side
+    is_dir() skip BEFORE composing --mount (an absent --mount type=bind source is refused at create, DC1);
+    present-with-entries -> read one back; present-empty -> mount, SKIP readback, record the host-side
+    existence check as the non-absence proof. Test: test_gather_raw_mount_exists_but_has_no_entry_to_read_back_at_sentinel_time.'
+  - 'RESOLVED §7 R6 (F7 box placement vs fused dispatch): REFACTOR the drain dispatch to decide-all ->
+    create one box over the triggered union -> run-all (a control-flow change to _maybe_trigger_author,
+    not a threaded parameter), preserving decision-2 granularity and M1''s triggered-only mount set. Test:
+    test_box_creation_deferred_past_multiple_independent_threshold_checks_in_one_tick.'
+  - 'RESOLVED §7 R7 (F8 composed-name validation): validate the caller-composed container name in box.py''s
+    render/request path (O8 boundary concern), raising before transport; the is_valid_run_id grammar (#698)
+    stays in box.py. Test: test_composed_container_name_fails_the_naming_grammar.'
+  - 'RESOLVED §7 R8 (F17, F18 — unboxed opt-out): the DEFENDER_ALLOW_UNSANDBOXED=1 host lane is an accepted
+    NO-confinement escape — S2 (--network=none) and S8 (allowlist) do NOT bind it (mitigation is loud/greppable/operator-driven,
+    M9) — BUT it still strips providers.api_key_vars(). Recorded as an explicit non-obligation, not an implication.'
+  - 'RESOLVED §7 R9 (F0, F12, SB-return), CORRECTED at Phase F by RF-D1: the boxed learning lane matches
+    the runtime lane byte-for-byte modulo the untrusted wrap (clause a). An EXECUTED command (any exit code)
+    returns _format_bash_result wrapped in the untrusted frame; a TRANSPORT fault (container gone /
+    undeliverable exec / unparseable reply) RAISES ModelRetry, inherited free per M4 (the learning agent-run
+    loop catches ModelRetry natively via pydantic_ai, rc2). Clause (b) "EVERY fault subtype sits inside that
+    envelope" is STRUCK — it contradicted clause (a) + the phase-C 3/3 consensus and would have mandated a
+    learning-only BoxFault->wrap divergence the runtime lane lacks. Split pinned by
+    test_bash_lane_nonzero_exit_returns_wrapped_envelope (executed->wrap) and
+    test_bash_lane_transport_fault_raises_not_wrapped (transport->raise); judge identical
+    (test_judge_boxed_output_wrap_is_the_intended_zero_shape). No Phase-C re-classification.'
+  - 'RESOLVED §7 R12 (F-symlink): accept as a bounded defense-in-depth residual (po18 — resolving symlink
+    followed in the daemon namespace, dangling refused). Mount sources are design-controlled leaves; a
+    realpath/is_symlink check is added later only IF sources become externally influenced. Test (live):
+    test_mount_source_symlink_target_resolves_outside_worktree_leaf.'
+  - 'RESOLVED §7 R10 (F-po43 elevated gap 1): SNAPSHOT read_roots at box creation — hoist an early
+    gather_raw.is_dir() check to run_one''s top (from run_dir alone) and mount the ro gather_raw conditionally
+    BEFORE box creation (docker cannot add mounts to a running container). comparison_dir''s late arrival
+    stays harmless. Test: test_judge_gate_scope_read_roots_may_include_a_path_not_snapshotted_at_box_creation.'
+  - 'RESOLVED §7 R11 (F-po10 elevated gap 2): helper-WINS-for-infra-keys on collision (PATH/PYTHONPATH/DEFENDER_*),
+    consistent with run_env''s first three keys and S8; resolve PATH''s compose-vs-override inconsistency
+    at the same seam; the shared helper must ADD PYTHONPATH (RF1). Test: test_caller_env_dict_key_collides_with_the_shared_infra_helpers_derived_key.'
+  refuted:
+  - 'DC1 — M11/c5/f12''s ''an absent bind source silently materialises as an empty dir at rc=0'' is REFUTED
+    by po1 (executed): `--mount type=bind` refuses an absent source loudly (rc=125, BoxFault at create
+    via box.py:319-322); only `-v`/`--volume` auto-creates. Correction: (i) test_mount_source_directory_absent_at_box_creation
+    pins the LOUD refusal, not a sentinel-caught silent-empty; (ii) the M11 sentinel''s residual NARROWS
+    to catching a bind that SUCCEEDED but mapped the wrong/empty tree; (iii) an empty-present mount is
+    a faithful empty source (SB2, still owed a spec statement).'
+  - 'DC2 — M3a''s ''every ... cwd_anchor lies inside some mount'' is CORRECTED by po44 (executed): the
+    auto-created READ-ONLY parent of a mount is a usable `docker exec -w` workdir into which relative
+    `defender/...` resolves. Restated: cwd_anchor must be inside a mount, OR the immediate (auto-created,
+    read-only) parent of a mount whose subtree the granted commands resolve into. Decision-1''s mount-parent
+    anchor is mechanically sound; fork F16 CLOSED; the coupled drop test_binding_a_nested_path...writable_parent...
+    has its ''writable'' premise refuted (parents are read-only — the safe outcome).'
+  deferred:
+  - 'rc1 (demand #0 return_contract) — the boxed learning bash lane''s return shape can only be settled
+    once the implementation wires the learning boxed lane; write-code-from-spec probes byte-identity to
+    the runtime lane (modulo the untrusted wrap). §7/RF-D1 fix the contract (F0: executed->wrap /
+    transport->raise). Corrected reading recorded (rc1); the ModelRetry-catch grounding is rc2 (holds).'
+  - 'actors / execution-context census (recon F5, repair-8a) — `spec-graph actors` over the two new
+    box-creation sites (run_one, _run_worktree_batch) and their drivers (the subprocess re-exec /
+    entrypoints reaching run_one / _run_worktree_batch) is absent pre-implementation; DEFERRED to
+    write-code-from-spec §3, which runs it against real code to catch an unmodelled execution context
+    reaching a box-creation site.'
+  - 'lesson_script_hostile_argv (S6, po12/po50/po51, repair-8b) — the pinned lesson scripts'' own
+    hostile-argv containment was NOT run in the re-ground round (claim lesson_script_hostile_argv,
+    unprobed); OWED at the suite''s first live box run (test_pinned_lesson_scripts_reject_arbitrary_argv_read
+    / test_pinned_lesson_script_argv_cannot_redirect_read_target, each now carrying an in-body positive
+    control so the negative cannot pass vacuously). A hermetic pass does not discharge it.'
+  - 'box.py null-stub gap (RF-D2, repair-8c) — `spec-graph nullstub` cannot merge a stub for
+    defender.runtime.box: the pre-existing empty defender/runtime/__init__.py makes runtime a regular
+    package, so real box.py shadows the PYTHONPATH stub. ACCEPTED for this spec — the box.py-targeting
+    tests'' discrimination rests on Phase-F manual spot-check + human PR review; no production change.
+    (Namespace-package conversion and a partial-null nullstub extension were offered and declined; may be
+    filed as follow-ups.)'
+  drops:
+  - test_box_teardown_fails_when_its_own_transport_is_gone — docker-daemon-gone-at-teardown; teardown-failure
+    sub-case (po40).
+  - test_duplicate_env_key_different_casing_bypasses_allowlist_match — allowlist case-sensitivity unstated
+    (po26).
+  - test_duplicate_mount_source_conflicting_writable_flags — M2 renders not validates; docker precedence
+    (po19).
+  - test_dynamic_curator_module_import_fails — pre-existing dispatch behavior, orthogonal to box delivery
+    (po7).
+  - test_env_key_itself_contains_an_equals_sign — render-step key validation (po29); keys are the 7-member
+    hardcoded BOX_ENV_ALLOWLIST, never caller-chosen — gate-leaf R6 walk, g16 (holds).
+  - test_env_value_contains_argv_or_shell_breaking_characters — render-step value escaping (RF-I, security-adjacent)
+    (po28); DISCHARGED by the gate-leaf R6 chooser/sanitizer walk (g16, holds) — every value reaching this
+    render step is author-fixed or grammar-restricted (run_id/batch_id), never model/attacker-chosen, and
+    argv reaches docker as discrete subprocess elements with no shell. RF-I''s ''author/implementer grounding-read''
+    is g16.
+  - test_gather_raw_existence_disagrees_between_mount_time_and_read_time — TOCTOU between two is_dir reads
+    (po9).
+  - test_mount_source_is_dangling_symlink — docker symlink-at-source behavior; couples to po1/po18 (refused
+    identically to absent).
+  - test_mount_source_supplied_as_relative_path — M2 renders not validates; absolute-source validation
+    (po23).
+  - test_mount_source_existence_changes_between_sentinel_probe_and_a_later_bash_call — M11 startup-only
+    probe; mid-batch host mutation out of modeled scope.
+  - test_docker_cli_call_hangs_during_startup — no timeout mechanism; M4 startup taxonomy assumes returning
+    calls (po2).
+  - test_mount_source_path_contains_a_mount_flag_delimiter_character — render-step escaping (RF-I) (po24);
+    DISCHARGED by the gate-leaf R6 walk (g16, holds) — mount sources are author-fixed paths or a comma-free
+    grammar (run_id/batch_id/SHIPPED_LESSON_CORPORA), so no chooser can smuggle a comma into the `type=bind,source=...`
+    micro-syntax.
+  - 'test_binding_a_nested_path_target_implicitly_creates_writable_parent_directories_in_the_readonly_rootfs
+    — docker auto-create-parent; SETTLED-refused (po44: parents auto-created READ-ONLY, the ''writable''
+    premise is false — the safe outcome). Couples to DC2/F16.'
+  - test_liveness_check_cannot_distinguish_absence_from_its_own_failure — _is_running false-negative;
+    GROUNDED (po4), bears on M8 reaping (F3/F6); the design does not own the fix, routed as forks.
+  deviations:
+  - 'The `gate:` block is left EMPTY for the gate leaf (phases/graph-gate.md topology): the assembler
+    materializes structure + demands + claims; `spec-graph gate --residue` computes the R1-R5 firings
+    the gate leaf annotates, and R0/R5/R6 judgment halves are its charge.'
+  - 'Census-instrument reconciliation: the grounding brief marked g1/g6/g8 census-by-`read`; a census
+    closes on `probe_kind: search` (check_claims). Re-labelled to `search` — the completeness (exactly-four
+    roles, single rm mutator, disjoint corpora) is search-backed (g13''s grep across defender/learning),
+    not weakened.'
+  - 'First-live-probe DISCHARGED, not deferred: c12/c13 (venv-coupling, traversal-containment) — inherited
+    from the design as write-tests'' first live probe — were executed live via docker-outside-of-Docker
+    host-path translation (46-reground-live: c12/c14, c13/po63, verdict holds/unrefuted). g14 updated
+    to probe_kind: executed. NOT carried to write-code-from-spec as deferred.'
+  - 'STILL-OWED live probe: the pinned lesson-script hostile-argv probe (po12/po50/po51) was NOT in the
+    re-ground round (claim lesson_script_hostile_argv is unprobed) — owed at the suite''s first live box
+    run; a hermetic pass does not discharge lesson_scripts_no_arbitrary_read / the pinned_script_argv
+    consensus tests.'
+  - 'Inherited claim text: c1-c17/r1-r5 arrive only as ids re-verified by the grounding brief''s g1-g14
+    (`reverifies:`), not as standalone ledger entries — the brief did not carry their original prose;
+    each c/r id is traceable through the g-claim that re-probed it at HEAD.'
+  - 'Environment premise corrected (46-reground): the design''s ''this daemon cannot bind the repo tree''
+    is imprecise — the daemon binds the repo at its HOST path; the code''s /workspace-namespace `--mount`
+    sources are absent in the daemon namespace (a DooD path-translation gap). The box suite still legitimately
+    SKIPS under the unmodified code here (green can mean ''did not run''), but every docker mechanism
+    is-question was settleable and is settled live.'
+  - 'Gate leaf (phase D) completed: `gate.evaluated` records all seven rules (R4 the sole mechanical firing,
+    pre-discharged by uniform_opt_out over g12; R1-R3 and R5''s mechanical half clean — additive design,
+    no removals); R0''s bidirectional reconciliation and R5''s tightening/safe-by-construction extension
+    both ran and found no uncovered gap (R5''s one relevant instance, `sandboxed` settable→derived, is already
+    discharged by sandboxed_derived_from_transport over g11); R6''s chooser/sanitizer walk over the box
+    env allowlist, the mount-source render step, and the bash-command argv discharged RF-I (g16) rather
+    than leaving it an uncited drop — the bash-argv sink itself stays extensively covered by existing demands
+    plus the one already-tracked STILL-OWED live probe (lesson_script_hostile_argv). Two claims minted (g15,
+    g16), both kind: referential / probe_kind: read / verdict: holds. Re-ran `spec-graph gate` (no --residue)
+    after filling the block: exits clean.'
