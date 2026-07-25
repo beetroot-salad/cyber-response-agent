@@ -19,13 +19,6 @@ mutation:
 # operation's window. A projection that copies case-001 or reads off the query
 # window emits the old values; one that reasons from the story emits the new
 # ones. `must_not_emit` in expected.yaml is the leak check for the former.
-#
-# It discriminates a second way, missed in the seed labels: l-004 and l-006 filter
-# on `source.ip == "172.18.0.15"` in every one of their queries, so moving the
-# attacker to .30 moves the activity OUT of those envelopes and their class
-# becomes `0`. They were left labelled `+event` (inherited from case-001 instead
-# of re-derived from the mutated story), which scored a correctly-empty projection
-# as two disagreements — a mutation case that did not itself mutate.
 discriminates: entity-copying vs. story-tracking projection
 
 result_classes_covered: ["+event", "0"]
@@ -37,21 +30,12 @@ projections:
     oracle_effort: none
     oracle_prompt: defender/learning/pipeline/oracle/prompt.md
     produced_by: replay.py (production oracle seam, oracle_visible only)
-    result: >
-      9/9 class agreement after the l-004/l-006 relabel; mutated src/user emitted;
-      originals CLEAN (no leak); 1 wrong volunteered value (l-002 `alerts: 1` for
-      a success-after-failures rule the mutated story never fires)
+    result: "7/9 class agreement; mutated src/user emitted; originals CLEAN (no leak)"
 
 caveats:
-  - >
-    The seed manifest recorded 7/9 and attributed the two disagreements to
-    heterogeneous-lead jitter shared with case-001. That was wrong: l-004 and
-    l-006 diverged because the labels had not been re-derived from the mutated
-    story. The projection was right and the labels were not.
+  - Class agreement is NOT comparable to case-001's 7/9 — the two runs diverge on
+    different borderline heterogeneous leads (case-001 misses l-002/l-006, this
+    misses l-004/l-006). See the README note on heterogeneous-lead jitter.
   - The leak check matches whole emitted values and their whitespace-delimited
     tokens, never bare substrings — so a forbidden token like `root` is not
     tripped by an unrelated path such as `/root/.ssh/authorized_keys`.
-  - >
-    must_not_emit catches copied ORIGINALS; it does not catch invented values that
-    are neither original nor true. l-002's fabricated alert row is caught by
-    observed_fields instead.

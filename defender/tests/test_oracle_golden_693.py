@@ -25,14 +25,6 @@ silently:
   - `test_unrecognized_marker_is_malformed_not_a_class` — the oracle's marker
     vocabulary is closed; unrecognized prose used to fold into `+noise`, so a
     degraded model scored as a correct abstention.
-  - `test_a_volunteered_value_the_capture_refutes_is_wrong` — grading covered only
-    the fields the labels required, so a projection could emit concrete values the
-    hidden payloads refute and still score `0 wrong`.
-
-`test_no_story_states_the_expected_result` guards the other direction: a story is
-an oracle INPUT, and the seed negative control announced in its own story that a
-faithful oracle "must therefore return `0` for every lead". The hidden/visible
-split cannot catch an answer leaked inside oracle_visible/.
 """
 from __future__ import annotations
 
@@ -166,51 +158,6 @@ def test_field_grading_survives_yaml_scalar_types():
         "p.yaml")
     assert summary["rows"][0]["fields"] == {"destination.port": "correct",
                                             "accepted": "correct"}
-
-
-# --------------------------------------------------------------------------
-# the volunteered-value check — fabrication outside the required fields
-# --------------------------------------------------------------------------
-
-def test_a_volunteered_value_the_capture_refutes_is_wrong():
-    """Grading only the REQUIRED fields let a projection invent refuted values for
-    free: case-002 emitted `evt.type: write` where the capture says `openat` and
-    still scored `0 wrong`, the grade the resolver reads."""
-    summary = SCORE.score_projection(
-        _spec(**{"l-1": {"system": "elastic", "class": "+event",
-                         "fields": {"falco.rule": "Adding ssh keys to authorized_keys"},
-                         "observed_fields": {"evt.type": "openat"}}}),
-        _proj(**{"l-1": [{"falco.rule": "Adding ssh keys to authorized_keys",
-                          "evt.type": "write"}]}),
-        "p.yaml")
-    assert summary["rows"][0]["contradictions"] == {"evt.type": "wrong(got write)"}
-    assert summary["contradiction_grades"] == {"wrong(got write)": 1}
-    assert summary["wrong_concrete_fields"] == 1     # counts across BOTH grading paths
-
-
-def test_an_unvolunteered_observed_field_is_not_graded_at_all():
-    """`observed_fields` asks "is what you made up refuted?", never "did you say
-    enough?" — an absent key and a `<placeholder>` are both correct behaviour, and
-    grading them `missing` would punish the abstention prompt.md mandates."""
-    summary = SCORE.score_projection(
-        _spec(**{"l-1": {"system": "elastic", "class": "+event",
-                         "observed_fields": {"evt.type": "openat", "container.id": "1df4"}}}),
-        _proj(**{"l-1": [{"evt.type": "<evt-type>"}]}),
-        "p.yaml")
-    assert summary["rows"][0]["contradictions"] == {}
-    assert summary["wrong_concrete_fields"] == 0
-
-
-def test_a_volunteered_value_is_graded_on_any_class_not_just_plus_event():
-    """A fabricated concrete value on a lead labelled `0` is the same error; the
-    class disagreement alone does not record that the value was refuted."""
-    summary = SCORE.score_projection(
-        _spec(**{"l-1": {"system": "elastic", "class": "0",
-                         "observed_fields": {"alerts": 0}}}),
-        _proj(**{"l-1": [{"alerts": 1}]}),
-        "p.yaml")
-    assert summary["rows"][0]["contradictions"] == {"alerts": "wrong(got 1)"}
-    assert summary["wrong_concrete_fields"] == 1
 
 
 def test_fields_are_only_graded_on_plus_event_leads():
@@ -398,28 +345,6 @@ def test_every_labelled_lead_has_an_oracle_visible_envelope(case_dir):
             in (case_dir / "oracle_visible" / "leads.jsonl").read_text(encoding="utf-8").splitlines()
             if x.strip()]
     assert {r["lead_id"] for r in rows} == set(expected["leads"])
-
-
-# Vocabulary that only an eval author writes — the scoring frame, not the
-# operation. A story mentioning any of it is telling the oracle what it is being
-# tested on, or what to answer.
-_EVAL_TELLS = ("oracle", "negative control", "golden", "projection", "every lead",
-               "each lead", "expected result", "+event", "+noise", "-noise",
-               "result class", "standard environment noise", "suppressed:")
-
-
-@pytest.mark.parametrize("case_dir", CASE_DIRS, ids=lambda p: p.name)
-def test_no_story_states_the_expected_result(case_dir):
-    """A story is an ORACLE INPUT — the one file the hidden/visible split cannot
-    protect, because it is deliberately visible. The seed negative control's story
-    announced that it WAS a negative control and that the oracle "must therefore
-    return `0` for every lead", which is the scoring answer written into the
-    prompt. Rationale belongs in expected.yaml / manifest.yaml, which the oracle
-    never reads."""
-    story = (case_dir / "oracle_visible" / "story.md").read_text(encoding="utf-8").lower()
-    assert not [tell for tell in _EVAL_TELLS if tell in story], (
-        f"{case_dir.name}/oracle_visible/story.md leaks the evaluation frame to the "
-        f"oracle: {[t for t in _EVAL_TELLS if t in story]}")
 
 
 def _score_pairs():

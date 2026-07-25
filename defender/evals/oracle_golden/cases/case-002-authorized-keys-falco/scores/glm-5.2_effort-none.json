@@ -13,7 +13,11 @@
   },
   "wrong_concrete_fields": 0,
   "false_suppression": 0,
+  "malformed_projections": 0,
   "forbidden_emitted": [],
+  "missing_leads": [],
+  "unscored_leads": [],
+  "duplicate_leads": [],
   "rows": [
     {
       "lead": "l-001",
