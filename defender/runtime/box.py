@@ -264,6 +264,10 @@ _ALLOW_UNSANDBOXED = "DEFENDER_ALLOW_UNSANDBOXED"
 _BOX_PATH = "/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin"
 _NAME_PREFIX = "defender-run-"
 
+# The encoding/clock contract every tier's box renders (#589): a `C` locale inside the box
+# would decode a granted program's UTF-8 output differently than the host does.
+_LOCALE_ENV: dict[str, str] = {"LANG": "C.UTF-8", "TZ": "UTC"}
+
 
 def container_name(run_id: str) -> str:
     if not is_valid_run_id(run_id):
@@ -286,22 +290,27 @@ def infra_env(defender_dir: Path, run_dir: Path) -> dict[str, str]:
     }
 
 
-_INFRA_ENV_KEYS: tuple[str, ...] = ("DEFENDER_DIR", "PATH", "PYTHONPATH")
+def _derived_infra_env(workdir: Path) -> dict[str, str]:
+    """The three INFRA keys box.py derives off the request's own workdir — the convention
+    every box-carrying role anchors at `defender_dir.parent`. These always win (R11)."""
+    defender_dir = Path(workdir) / "defender"
+    return {
+        "DEFENDER_DIR": str(defender_dir),
+        "PATH": f"{defender_dir / 'bin'}:{_BOX_PATH}",
+        "PYTHONPATH": str(workdir),
+    }
 
 
 def _render_env(request_env: Mapping[str, str], workdir: Path) -> dict[str, str]:
     """S8: a positive allowlist by key. R11: on a collision with an INFRA key
     (DEFENDER_DIR/PATH/PYTHONPATH, derived off the request's workdir — the convention every
     box-carrying role anchors at `defender_dir.parent`) the derived value wins; any other
-    allowlisted key the caller supplies passes through unexamined (value-blind, RF-G)."""
-    defender_dir = Path(workdir) / "defender"
-    derived = {
-        "DEFENDER_DIR": str(defender_dir),
-        "PATH": f"{defender_dir / 'bin'}:{_BOX_PATH}",
-        "PYTHONPATH": str(workdir),
-    }
-    merged = {k: v for k, v in request_env.items() if k in BOX_ENV_ALLOWLIST}
-    merged.update(derived)
+    allowlisted key the caller supplies passes through unexamined (value-blind, RF-G).
+    `LANG`/`TZ` keep the encoding/clock contract the two-arg `_create_argv` tier has always
+    rendered (#589) — supplied as DEFAULTS, so a caller that names them still wins."""
+    merged = dict(_LOCALE_ENV)
+    merged.update({k: v for k, v in request_env.items() if k in BOX_ENV_ALLOWLIST})
+    merged.update(_derived_infra_env(workdir))
     return merged
 
 
@@ -319,7 +328,10 @@ DockerFn = Callable[..., subprocess.CompletedProcess]
 def _call(docker: DockerFn, argv: list[str]) -> subprocess.CompletedProcess:
     try:
         return docker(argv)
-    except OSError as e:
+    except (OSError, subprocess.SubprocessError) as e:
+        # SubprocessError covers `_docker`'s own `timeout=120` (TimeoutExpired), which is NOT
+        # an OSError — an unclassified TimeoutExpired would escape both the loud
+        # DEFENDER_ALLOW_UNSANDBOXED fallback and orchestrate's _SYSTEMIC_FAULTS classification.
         raise BoxFault(f"could not invoke docker ({argv[:2]}): {e}") from e
 
 
@@ -329,15 +341,7 @@ def _is_running(docker: DockerFn, name: str) -> bool:
 
 
 def _create_argv(name: str, run_dir: Path, defender_dir: Path, spec: BoxSpec) -> list[str]:
-    env_pairs = {
-        "DEFENDER_DIR": str(defender_dir),
-        "DEFENDER_RUN_DIR": str(run_dir),
-        "DEFENDER_RUNS_BASE": str(run_dir.parent),
-        "PATH": f"{defender_dir / 'bin'}:{_BOX_PATH}",
-        "PYTHONPATH": str(defender_dir.parent),
-        "LANG": "C.UTF-8",
-        "TZ": "UTC",
-    }
+    env_pairs = {**infra_env(defender_dir, run_dir), **_LOCALE_ENV}
     argv = [
         "docker", "run", "--detach", "--name", name,
         "--runtime", spec.runtime,
@@ -354,17 +358,45 @@ def _create_argv(name: str, run_dir: Path, defender_dir: Path, spec: BoxSpec) ->
     return argv
 
 
-def _plant_sentinel(run_dir: Path, docker: DockerFn, name: str) -> None:
-    token = uuid.uuid4().hex
-    sentinel = run_dir / ".box-sentinel"
-    sentinel.write_text(token, encoding="utf-8")
-    proc = _call(docker, ["docker", "exec", name, "cat", str(sentinel)])
-    if proc.returncode != 0 or (proc.stdout or "").strip() != token:
+def _plant(sentinel: Path, token: str) -> None:
+    """Host-side half of a sentinel probe. An unwritable/absent SOURCE is a box-startup fault
+    like any other (BoxFault), not a bare OSError that would escape start_box's classification
+    and the loud DEFENDER_ALLOW_UNSANDBOXED fallback."""
+    try:
+        sentinel.write_text(token, encoding="utf-8")
+    except OSError as e:
         raise BoxFault(
-            f"the box could not read back the startup sentinel at {sentinel} — the run dir "
-            "is not the same tree inside the box as it is on the host"
-        )
+            f"could not plant the startup sentinel at {sentinel} — the bind source is not "
+            f"writable by this process: {e}"
+        ) from e
+
+
+def _probe_sentinel(
+    source: Path, target: Path, docker: DockerFn, name: str, sentinel_name: str,
+    *, unlink_on_fault: bool,
+) -> None:
+    token = uuid.uuid4().hex
+    sentinel = source / sentinel_name
+    _plant(sentinel, token)
+    try:
+        proc = _call(docker, ["docker", "exec", name, "cat", str(target / sentinel_name)])
+        if proc.returncode != 0 or (proc.stdout or "").strip() != token:
+            raise BoxFault(
+                f"the box could not read back the startup sentinel at {sentinel} — the tree "
+                "inside the box does not match the host"
+            )
+    except BaseException:
+        # The run-dir tier deliberately LEAVES its sentinel behind on a fault (pinned by
+        # test_540_scrub_lifecycle: the residue is the evidence the probe really wrote); the
+        # per-mount tier cleans up, because its sources include the live repo/worktree trees.
+        if unlink_on_fault:
+            sentinel.unlink(missing_ok=True)
+        raise
     sentinel.unlink(missing_ok=True)
+
+
+def _plant_sentinel(run_dir: Path, docker: DockerFn, name: str) -> None:
+    _probe_sentinel(run_dir, run_dir, docker, name, ".box-sentinel", unlink_on_fault=False)
 
 
 def _check_mount_sentinel(mount: Mount, docker: DockerFn, name: str) -> None:
@@ -372,20 +404,10 @@ def _check_mount_sentinel(mount: Mount, docker: DockerFn, name: str) -> None:
     run_dir: a host-planted token, read back through the box, proves the tree inside the
     container is the tree on the host (an absent bind SOURCE is caught earlier, at create —
     DC1; this catches a bind that SUCCEEDED but mapped the wrong/empty tree)."""
-    source = Path(mount.source)
-    token = uuid.uuid4().hex
-    sentinel = source / f".box-sentinel-{token}"
-    target_sentinel = Path(mount.target) / sentinel.name
-    sentinel.write_text(token, encoding="utf-8")
-    try:
-        proc = _call(docker, ["docker", "exec", name, "cat", str(target_sentinel)])
-        if proc.returncode != 0 or (proc.stdout or "").strip() != token:
-            raise BoxFault(
-                f"the box could not read back the startup sentinel at mount {source} — the "
-                "tree inside the box does not match the host"
-            )
-    finally:
-        sentinel.unlink(missing_ok=True)
+    _probe_sentinel(
+        Path(mount.source), Path(mount.target), docker, name,
+        f".box-sentinel-{uuid.uuid4().hex}", unlink_on_fault=True,
+    )
 
 
 def _start_boxed(
@@ -463,38 +485,60 @@ def _start_boxed_request(request: BoxRequest, docker: DockerFn) -> BoxExecutor:
     )
 
 
+def _opt_out_or_raise(fault: BoxFault) -> None:
+    """M9: the ONE loud host lane. Without the env var a startup fault aborts; with it, the
+    caller degrades to `unboxed_executor` after a greppable warning."""
+    if os.environ.get(_ALLOW_UNSANDBOXED) != "1":
+        raise fault
+    print(
+        f"[box] WARNING: {_ALLOW_UNSANDBOXED}=1 — running UNSANDBOXED. The bash lane "
+        "executes on the host with no filesystem or network boundary.",
+        file=sys.stderr,
+    )
+
+
+def _host_fallback_env(request: BoxRequest) -> dict[str, str]:
+    """R8: the unboxed opt-out is a bare HOST subprocess, so it inherits the host env (minus
+    provider keys) exactly as `run_common.run_env` does for the two-arg tier — NOT the box's
+    key-allowlisted, container-shaped `_render_env` (which carries no HOME and a `_BOX_PATH`
+    that does not exist on the host)."""
+    from defender.runtime import providers
+
+    env = dict(os.environ)
+    for var in providers.api_key_vars():
+        env.pop(var, None)
+    env.update({k: v for k, v in request.env.items() if k in BOX_ENV_ALLOWLIST})
+    defender_dir = Path(request.workdir) / "defender"
+    env["DEFENDER_DIR"] = str(defender_dir)
+    env["PATH"] = f"{defender_dir / 'bin'}{os.pathsep}{env.get('PATH', '')}"
+    env["PYTHONPATH"] = str(request.workdir)
+    return env
+
+
 def start_box(
     run_dir_or_request: Path | BoxRequest, defender_dir: Path | None = None, *,
     spec: BoxSpec = DEFAULT_SPEC, docker: DockerFn = _docker,
 ) -> BoxExecutor:
     if isinstance(run_dir_or_request, BoxRequest):
         request = run_dir_or_request
+        if spec is not DEFAULT_SPEC:
+            raise TypeError(
+                "start_box(request, spec=…) is ambiguous — a BoxRequest carries its own spec; "
+                "set it on the request (BoxRequest(..., spec=…)) instead of the call"
+            )
         try:
             return _start_boxed_request(request, docker)
-        except BoxFault:
-            if os.environ.get(_ALLOW_UNSANDBOXED) != "1":
-                raise
-        print(
-            f"[box] WARNING: {_ALLOW_UNSANDBOXED}=1 — running UNSANDBOXED. The bash lane "
-            "executes on the host with no filesystem or network boundary.",
-            file=sys.stderr,
-        )
-        return unboxed_executor(
-            request.spec, env=_render_env(request.env, Path(request.workdir)),
-        )
+        except BoxFault as e:
+            _opt_out_or_raise(e)
+        return unboxed_executor(request.spec, env=_host_fallback_env(request))
 
     run_dir = run_dir_or_request
-    assert defender_dir is not None, "start_box(run_dir, defender_dir, ...) needs defender_dir"
+    if defender_dir is None:
+        raise TypeError("start_box(run_dir, defender_dir, ...) needs defender_dir")
     try:
         return _start_boxed(run_dir, defender_dir, spec, docker)
-    except BoxFault:
-        if os.environ.get(_ALLOW_UNSANDBOXED) != "1":
-            raise
-    print(
-        f"[box] WARNING: {_ALLOW_UNSANDBOXED}=1 — running UNSANDBOXED. The bash lane "
-        "executes on the host with no filesystem or network boundary.",
-        file=sys.stderr,
-    )
+    except BoxFault as e:
+        _opt_out_or_raise(e)
     from defender import run_common
     return unboxed_executor(spec, env=run_common.run_env(defender_dir, run_dir))
 

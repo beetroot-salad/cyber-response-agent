@@ -275,7 +275,7 @@ def test_replay_actor_uses_stable_case_id_for_seed(tmp_path: Path):
             return f"seed-of-{run_id}"
 
         @staticmethod
-        def invoke_actor(alert_path, actor_input_path, learning_run_dir):
+        def invoke_actor(alert_path, actor_input_path, learning_run_dir, *, box=None):
             captured["seed"] = fake_loop._actor_seed(learning_run_dir.name)
             captured["learning_run_dir"] = str(learning_run_dir)
             return "STORY\n"

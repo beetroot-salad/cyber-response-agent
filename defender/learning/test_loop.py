@@ -833,7 +833,7 @@ def test_lead_author_drain_quarantines_on_nonzero_rc(tmp_path: Path, monkeypatch
     run_dir.mkdir(parents=True)
     orch._enqueue_for_authoring(run_dir, paths)
     # lint-monkeypatch: ok — drives the real _invoke_lead_author; _run_curator_module
-    monkeypatch.setattr(la, "run", lambda rd, paths=None: 2)  # lint-monkeypatch: ok
+    monkeypatch.setattr(la, "run", lambda rd, paths=None, box=None: 2)  # lint-monkeypatch: ok
     orch.lead_author_drain(paths, branch=_FakeBranch(prefix="lead-author/"), start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub)
     assert not (paths.author_queue_dir / "case-rc.json").exists()
     failed = paths.author_queue_dir / "failed" / "case-rc.json"

@@ -286,7 +286,9 @@ def _run_cycle_box_request(
         name=f"{_RUN_CYCLE_NAME_PREFIX}{learning_run_dir.name}",
         mounts=tuple(mounts),
         workdir=defender_dir.parent,
-        env={},
+        # M2/RF1: the shared infra helper, so the box carries DEFENDER_RUN_DIR/RUNS_BASE too —
+        # box.py re-derives DEFENDER_DIR/PATH/PYTHONPATH off the workdir to the same values.
+        env=box_mod.infra_env(defender_dir, learning_run_dir),
     )
 
 
@@ -317,6 +319,19 @@ def _dispatch_directions(
             except Exception as e:
                 errors.append((name, e))
     return errors
+
+
+def _stop_and_hold(stop_box: Callable[..., None], box: Any) -> BaseException | None:
+    """Tear the run-cycle box down and HOLD any fault instead of raising it here (O7): the
+    fault still propagates, but only after the run has reached the author queue — a box fault
+    must not silently drop the case from authoring, the same invariant a failed LEG keeps."""
+    if box is None:
+        return None
+    try:
+        stop_box(box)
+    except Exception as e:  # noqa: BLE001 — held, re-raised by the caller after the enqueue
+        return e
+    return None
 
 
 def run_one(
@@ -360,14 +375,14 @@ def run_one(
         box = start_box(_run_cycle_box_request(
             run_dir, learning_run_dir, PATHS.defender_dir,
         ))
+    teardown_fault: BaseException | None = None
     try:
         errors = _dispatch_directions(
             directions, dirs, disposition, alert_rule_key, run_id,
             paths=paths, agents=agents, box=box,
         )
     finally:
-        if box is not None:
-            stop_box(box)
+        teardown_fault = _stop_and_hold(stop_box, box)
 
     adversarial_ok = "adversarial" in directions and not any(
         name == "adversarial" for name, _ in errors
@@ -376,6 +391,10 @@ def run_one(
         enrich_case_ticket(run_dir, learning_run_dir)
 
     _enqueue_for_authoring(run_dir, paths)
+
+    if teardown_fault is not None:
+        _log(f"run-cycle box teardown failed: {teardown_fault!r}")
+        raise teardown_fault
 
     if errors:
         for name, exc in errors:
@@ -697,7 +716,9 @@ def _lead_author_pr_body(branch: str) -> str:
 def author_drain(
     paths: LoopPaths = DEFAULT_PATHS,
     *,
-    trigger_author: Callable[[LoopPaths, Path, str, str, str], None] | None = None,
+    # `(paths, pending_file, threshold_env, module_name, pending_label, *, box)` — `box=` is
+    # threaded per call (R1), so the seam is not the old fixed 5-positional signature.
+    trigger_author: Callable[..., None] | None = None,
     branch: AuthorBranch | None = None,
     start_box: Callable[..., Any] = box_mod.start_box,
     stop_box: Callable[..., None] = box_mod.stop_box,
