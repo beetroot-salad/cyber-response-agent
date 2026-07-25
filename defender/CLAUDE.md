@@ -54,6 +54,14 @@ python3 defender/run.py <alert.json>                 # one investigation → run
 python3 defender/learning/loop.py <run_dir>          # LEARN one run; --learn-drain / --author-drain / --lead-author-drain are the workers
 ```
 
+**Running the suite as root fails four tests that are not broken.** The
+accounting-failure tests in `tests/test_budget_enforcement_631.py`
+(`test_one_failed_accounting_write_costs_one_call_of_overshoot` and its three
+siblings) simulate a failing write by chmod'ing the run dir to `r-x`, and root
+ignores permission bits — so the write lands and the test asserts "the failed
+write landed anyway". CI runs non-root and they pass there. Confirm against CI
+before chasing them; don't "fix" the tests.
+
 ## Run dir + the two tables
 
 Each run writes to `$DEFENDER_RUNS_BASE/{run_id}/` (default `/tmp/defender-runs/`): `alert.json` (read-only input), `investigation.md` (invlang work log), `report.md` (YAML frontmatter — `disposition: benign|inconclusive|malicious` — is the headline the learning loop parses), `llm_requests.jsonl` + `tool_trace.jsonl` (observability), `transcript.html`, and the **two append-only tables**, written live during the run:
