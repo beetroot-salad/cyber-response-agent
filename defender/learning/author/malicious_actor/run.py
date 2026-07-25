@@ -39,7 +39,9 @@ def invoke_agent(
     )
 
 
-def build_actor_config(paths: LoopPaths = DEFAULT_PATHS) -> _curator.CuratorConfig:
+def build_actor_config(
+    paths: LoopPaths = DEFAULT_PATHS, *, box=None,
+) -> _curator.CuratorConfig:
     return _curator.CuratorConfig(
         repo_root=paths.repo_root,
         pending_dir=paths.pending_dir,
@@ -60,11 +62,14 @@ def build_actor_config(paths: LoopPaths = DEFAULT_PATHS) -> _curator.CuratorConf
         author_timeout=AUTHOR_ACTOR_TIMEOUT,
         author_effort=AUTHOR_ACTOR_EFFORT,
         invoke_agent=invoke_agent,
+        box=box,
     )
 
 
-def run_batch(*, hold_committed: bool = False, paths: LoopPaths = DEFAULT_PATHS) -> int:
-    return _curator.run_batch(hold_committed=hold_committed, cfg=build_actor_config(paths))
+def run_batch(
+    *, hold_committed: bool = False, paths: LoopPaths = DEFAULT_PATHS, box=None,
+) -> int:
+    return _curator.run_batch(hold_committed=hold_committed, cfg=build_actor_config(paths, box=box))
 
 
 def main(argv: list[str]) -> int:

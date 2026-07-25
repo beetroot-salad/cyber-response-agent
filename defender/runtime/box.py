@@ -180,6 +180,24 @@ def decode_response(data: bytes) -> BoxResult:
 
 
 
+@dataclass(frozen=True)
+class Mount:
+
+    source: Path
+    target: Path
+    writable: bool = False
+
+
+@dataclass(frozen=True)
+class BoxRequest:
+
+    name: str
+    mounts: tuple[Mount, ...] = ()
+    workdir: Path = Path(".")
+    env: dict[str, str] = field(default_factory=dict)
+    spec: BoxSpec = field(default_factory=BoxSpec)
+
+
 class Transport(Protocol):
 
     def __call__(self, frame: bytes, /, *, cwd: Path, timeout: float) -> RawExec: ...
@@ -197,7 +215,12 @@ class BoxExecutor:
     spec: BoxSpec = field(default_factory=BoxSpec)
     transport: Transport = _unattached
     name: str = ""
-    sandboxed: bool = True
+
+    @property
+    def sandboxed(self) -> bool:
+        # Derived from the transport (M5/O5), never independently settable: only a
+        # transport that actually confines a process may claim the boundary.
+        return isinstance(self.transport, _DockerTransport)
 
     def run_parsed(
         self, pipelines: Sequence[bash_exec.Pipeline], *,
@@ -250,6 +273,38 @@ def container_name(run_id: str) -> str:
     return f"{_NAME_PREFIX}{run_id}"
 
 
+def infra_env(defender_dir: Path, run_dir: Path) -> dict[str, str]:
+    """The infra env every tier's box needs (M2): the shims + package location. One shared
+    helper — a caller composing a BoxRequest merges this in (or box.py's own request render
+    derives the same shape off the request's workdir, §_render_env)."""
+    return {
+        "DEFENDER_DIR": str(defender_dir),
+        "DEFENDER_RUN_DIR": str(run_dir),
+        "DEFENDER_RUNS_BASE": str(run_dir.parent),
+        "PATH": f"{defender_dir / 'bin'}:{_BOX_PATH}",
+        "PYTHONPATH": str(defender_dir.parent),
+    }
+
+
+_INFRA_ENV_KEYS: tuple[str, ...] = ("DEFENDER_DIR", "PATH", "PYTHONPATH")
+
+
+def _render_env(request_env: Mapping[str, str], workdir: Path) -> dict[str, str]:
+    """S8: a positive allowlist by key. R11: on a collision with an INFRA key
+    (DEFENDER_DIR/PATH/PYTHONPATH, derived off the request's workdir — the convention every
+    box-carrying role anchors at `defender_dir.parent`) the derived value wins; any other
+    allowlisted key the caller supplies passes through unexamined (value-blind, RF-G)."""
+    defender_dir = Path(workdir) / "defender"
+    derived = {
+        "DEFENDER_DIR": str(defender_dir),
+        "PATH": f"{defender_dir / 'bin'}:{_BOX_PATH}",
+        "PYTHONPATH": str(workdir),
+    }
+    merged = {k: v for k, v in request_env.items() if k in BOX_ENV_ALLOWLIST}
+    merged.update(derived)
+    return merged
+
+
 def _docker(argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess:
     return subprocess.run(
         argv, capture_output=True, text=True, check=False, timeout=120,
@@ -261,8 +316,15 @@ def _docker(argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess:
 DockerFn = Callable[..., subprocess.CompletedProcess]
 
 
+def _call(docker: DockerFn, argv: list[str]) -> subprocess.CompletedProcess:
+    try:
+        return docker(argv)
+    except OSError as e:
+        raise BoxFault(f"could not invoke docker ({argv[:2]}): {e}") from e
+
+
 def _is_running(docker: DockerFn, name: str) -> bool:
-    proc = docker(["docker", "inspect", "-f", "{{.State.Status}}", name])
+    proc = _call(docker, ["docker", "inspect", "-f", "{{.State.Status}}", name])
     return proc.returncode == 0 and "running" in (proc.stdout or "")
 
 
@@ -296,13 +358,34 @@ def _plant_sentinel(run_dir: Path, docker: DockerFn, name: str) -> None:
     token = uuid.uuid4().hex
     sentinel = run_dir / ".box-sentinel"
     sentinel.write_text(token, encoding="utf-8")
-    proc = docker(["docker", "exec", name, "cat", str(sentinel)])
+    proc = _call(docker, ["docker", "exec", name, "cat", str(sentinel)])
     if proc.returncode != 0 or (proc.stdout or "").strip() != token:
         raise BoxFault(
             f"the box could not read back the startup sentinel at {sentinel} — the run dir "
             "is not the same tree inside the box as it is on the host"
         )
     sentinel.unlink(missing_ok=True)
+
+
+def _check_mount_sentinel(mount: Mount, docker: DockerFn, name: str) -> None:
+    """M11 — every mount is individually probed at start, not only the original single rw
+    run_dir: a host-planted token, read back through the box, proves the tree inside the
+    container is the tree on the host (an absent bind SOURCE is caught earlier, at create —
+    DC1; this catches a bind that SUCCEEDED but mapped the wrong/empty tree)."""
+    source = Path(mount.source)
+    token = uuid.uuid4().hex
+    sentinel = source / f".box-sentinel-{token}"
+    target_sentinel = Path(mount.target) / sentinel.name
+    sentinel.write_text(token, encoding="utf-8")
+    try:
+        proc = _call(docker, ["docker", "exec", name, "cat", str(target_sentinel)])
+        if proc.returncode != 0 or (proc.stdout or "").strip() != token:
+            raise BoxFault(
+                f"the box could not read back the startup sentinel at mount {source} — the "
+                "tree inside the box does not match the host"
+            )
+    finally:
+        sentinel.unlink(missing_ok=True)
 
 
 def _start_boxed(
@@ -314,8 +397,8 @@ def _start_boxed(
             f"a LIVE container named {name} already exists — refusing rather than reaping "
             "it, because that box belongs to another run still writing its artifacts"
         )
-    docker(["docker", "rm", "-f", name])
-    created = docker(_create_argv(name, run_dir, defender_dir, spec))
+    _call(docker, ["docker", "rm", "-f", name])
+    created = _call(docker, _create_argv(name, run_dir, defender_dir, spec))
     if created.returncode != 0:
         raise BoxFault(
             f"could not create the box {name}: {(created.stderr or '').strip()}"
@@ -323,17 +406,85 @@ def _start_boxed(
     try:
         _plant_sentinel(run_dir, docker, name)
     except BaseException:
-        docker(["docker", "rm", "-f", name])
+        _call(docker, ["docker", "rm", "-f", name])
+        raise
+    return BoxExecutor(spec=spec, transport=_DockerTransport(name, spec), name=name)
+
+
+def _render_argv(request: BoxRequest) -> list[str]:
+    argv = [
+        "docker", "run", "--detach", "--name", request.name,
+        "--runtime", request.spec.runtime,
+        "--network", "none",
+        "--read-only",
+    ]
+    for m in request.mounts:
+        spec_str = f"type=bind,source={m.source},target={m.target}"
+        if not m.writable:
+            spec_str += ",readonly"
+        argv += ["--mount", spec_str]
+    argv += [
+        "--tmpfs", f"/tmp:rw,noexec,nosuid,mode=1777,size={request.spec.tmpfs_size}",
+        "--workdir", str(request.workdir),
+    ]
+    env = _render_env(request.env, Path(request.workdir))
+    for key in sorted(env):
+        argv += ["--env", f"{key}={env[key]}"]
+    argv += [request.spec.rootfs, "sleep", "infinity"]
+    return argv
+
+
+def _start_boxed_request(request: BoxRequest, docker: DockerFn) -> BoxExecutor:
+    if not is_valid_run_id(request.name):
+        raise BoxFault(
+            f"composed container name {request.name!r} fails the run-id grammar "
+            f"(allowed: {RUN_ID_ALLOWED})"
+        )
+    if _is_running(docker, request.name):
+        raise BoxFault(
+            f"a LIVE container named {request.name} already exists — refusing rather than "
+            "reaping it, because that box belongs to another batch still writing its artifacts"
+        )
+    _call(docker, ["docker", "rm", "-f", request.name])
+    created = _call(docker, _render_argv(request))
+    if created.returncode != 0:
+        raise BoxFault(
+            f"could not create the box {request.name}: {(created.stderr or '').strip()}"
+        )
+    try:
+        for m in request.mounts:
+            _check_mount_sentinel(m, docker, request.name)
+    except BaseException:
+        _call(docker, ["docker", "rm", "-f", request.name])
         raise
     return BoxExecutor(
-        spec=spec, transport=_DockerTransport(name, spec), name=name, sandboxed=True,
+        spec=request.spec, transport=_DockerTransport(request.name, request.spec),
+        name=request.name,
     )
 
 
 def start_box(
-    run_dir: Path, defender_dir: Path, *,
+    run_dir_or_request: Path | BoxRequest, defender_dir: Path | None = None, *,
     spec: BoxSpec = DEFAULT_SPEC, docker: DockerFn = _docker,
 ) -> BoxExecutor:
+    if isinstance(run_dir_or_request, BoxRequest):
+        request = run_dir_or_request
+        try:
+            return _start_boxed_request(request, docker)
+        except BoxFault:
+            if os.environ.get(_ALLOW_UNSANDBOXED) != "1":
+                raise
+        print(
+            f"[box] WARNING: {_ALLOW_UNSANDBOXED}=1 — running UNSANDBOXED. The bash lane "
+            "executes on the host with no filesystem or network boundary.",
+            file=sys.stderr,
+        )
+        return unboxed_executor(
+            request.spec, env=_render_env(request.env, Path(request.workdir)),
+        )
+
+    run_dir = run_dir_or_request
+    assert defender_dir is not None, "start_box(run_dir, defender_dir, ...) needs defender_dir"
     try:
         return _start_boxed(run_dir, defender_dir, spec, docker)
     except BoxFault:
@@ -351,7 +502,7 @@ def start_box(
 def stop_box(box: BoxExecutor, *, docker: DockerFn = _docker) -> None:
     if not box.name:
         return
-    proc = docker(["docker", "rm", "-f", box.name])
+    proc = _call(docker, ["docker", "rm", "-f", box.name])
     if proc.returncode != 0:
         raise BoxFault(
             f"could not tear down the box {box.name}: {(proc.stderr or '').strip()}"
@@ -397,7 +548,7 @@ def unboxed_executor(
     return BoxExecutor(
         spec=spec,
         transport=_HostTransport(dict(env) if env is not None else dict(os.environ)),
-        name="", sandboxed=False,
+        name="",
     )
 
 

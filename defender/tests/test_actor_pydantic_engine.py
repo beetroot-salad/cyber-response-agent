@@ -274,11 +274,11 @@ def test_build_actor_agent_applies_glm_low_effort(monkeypatch):
 def test_subagents_actor_runs_pydantic_engine(monkeypatch, tmp_path):
     captured = {}
 
-    def _spy_actor(alert_path, actor_input_path, learning_run_dir, *, actor_fn=None):
+    def _spy_actor(alert_path, actor_input_path, learning_run_dir, *, actor_fn=None, box=None):
         captured["actor_fn"] = actor_fn
         return _STORY
 
-    def _spy_benign(alert_path, case_entities, alert_rule_key, learning_run_dir, *, actor_fn=None):
+    def _spy_benign(alert_path, case_entities, alert_rule_key, learning_run_dir, *, actor_fn=None, box=None):
         captured["benign_fn"] = actor_fn
         return _STORY
 

@@ -61,6 +61,7 @@ def _invoke_pitfalls_agent(
     handoffs: list[dict], *, repo_root: Path,
     spawn: Callable[..., int] = _spawn_author_agent,
     salt: str | None = None,
+    box=None,
 ) -> int:
     stage_salt = salt if salt is not None else uuid4().hex
     user_prompt = stage_user_message(
@@ -75,7 +76,7 @@ def _invoke_pitfalls_agent(
         repo_root=repo_root,
         learning_run_dir=PENDING_DIR,
         log_label="pitfalls curator",
-        salt=stage_salt,
+        salt=stage_salt, box=box,
     )
 
 
@@ -111,6 +112,7 @@ def run_pitfalls(
     *,
     paths: _loop_config.LoopPaths = _loop_config.DEFAULT_PATHS,
     invoke: Callable[..., int] | None = None,
+    box=None,
 ) -> int:
     rows = _loop_persist.read_pitfalls(paths)
     threshold = _loop_config.pitfalls_threshold()
@@ -131,7 +133,7 @@ def run_pitfalls(
     baseline_stray = _author_shared.changes_outside(repo_root, SKILLS_REL)
     _log(f"pitfalls curation: {len(rows)} failure(s) across {len(handoffs)} system(s)")
 
-    rc = (invoke or _invoke_pitfalls_agent)(handoffs, repo_root=repo_root)
+    rc = (invoke or _invoke_pitfalls_agent)(handoffs, repo_root=repo_root, box=box)
     if rc != 0:
         _log(f"FATAL: pitfalls curator exited rc={rc}; leaving queue intact")
         return 2

@@ -16,31 +16,31 @@ __all__ = ["InProcessSubagents", "Subagents", "is_skip_story"]
 
 
 class Subagents(Protocol):
-    def actor(self, run_dir: Path, learning_run_dir: Path) -> str: ...
+    def actor(self, run_dir: Path, learning_run_dir: Path, *, box=None) -> str: ...
     def actor_benign(self, run_dir: Path, learning_run_dir: Path,
-                     alert_rule_key: str) -> str: ...
+                     alert_rule_key: str, *, box=None) -> str: ...
     def oracle(self, run_dir: Path, actor_story_path: Path,
                learning_run_dir: Path) -> str: ...
     def judge(self, wiring: JudgeWiring, run_dir: Path, actor_story_path: Path,
-              projected_telemetry_path: Path, learning_run_dir: Path) -> str: ...
+              projected_telemetry_path: Path, learning_run_dir: Path, *, box=None) -> str: ...
 
 
 class InProcessSubagents:
 
-    def actor(self, run_dir: Path, learning_run_dir: Path) -> str:
+    def actor(self, run_dir: Path, learning_run_dir: Path, *, box=None) -> str:
         from defender.learning.pipeline.actor_engine import _run_actor_pydantic
         actor_input_path = learning_run_dir / "actor_input.yaml"
         actor_input_path.write_text(lead_repository.render_actor_view_yaml(run_dir), encoding="utf-8")
         return invoke_actor(RunPaths(run_dir).alert, actor_input_path, learning_run_dir,
-                            actor_fn=_run_actor_pydantic)
+                            actor_fn=_run_actor_pydantic, box=box)
 
     def actor_benign(self, run_dir: Path, learning_run_dir: Path,
-                     alert_rule_key: str) -> str:
+                     alert_rule_key: str, *, box=None) -> str:
         from defender.learning.pipeline.actor_engine import _run_actor_pydantic
         case_entities = extract_case_entities(RunPaths(run_dir).investigation)
         return invoke_actor_benign(
             RunPaths(run_dir).alert, case_entities, alert_rule_key, learning_run_dir,
-            actor_fn=_run_actor_pydantic,
+            actor_fn=_run_actor_pydantic, box=box,
         )
 
     def oracle(self, run_dir: Path, actor_story_path: Path,
@@ -50,9 +50,9 @@ class InProcessSubagents:
                              oracle_fn=_run_oracle_pydantic)
 
     def judge(self, wiring: JudgeWiring, run_dir: Path, actor_story_path: Path,
-              projected_telemetry_path: Path, learning_run_dir: Path) -> str:
+              projected_telemetry_path: Path, learning_run_dir: Path, *, box=None) -> str:
         from defender.learning.pipeline.judge.engine_pydantic import _run_judge_pydantic
         return invoke_judge(
             wiring, run_dir, actor_story_path, projected_telemetry_path,
-            learning_run_dir, judge_fn=_run_judge_pydantic,
+            learning_run_dir, judge_fn=_run_judge_pydantic, box=box,
         )

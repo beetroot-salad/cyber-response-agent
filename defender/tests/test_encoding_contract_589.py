@@ -199,7 +199,7 @@ def _curator_deps(tmp_path: Path):
     pending.write_text("", encoding="utf-8")
     deps = CuratorDeps.for_run(
         pending.parent, repo, corpus, check=FINDINGS_CHECK, runs_dir=runs,
-        pending=pending, queued_ids=frozenset(), run_verify=lambda **kw: "",
+        pending=pending, queued_ids=frozenset(), run_verify=lambda **kw: "", box=None,
     )
     return deps, corpus
 

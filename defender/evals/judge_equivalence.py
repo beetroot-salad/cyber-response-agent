@@ -216,7 +216,7 @@ def run_config(
         lrd.mkdir(parents=True, exist_ok=True)
         raw = invoke_judge(
             wiring, case.run_dir, case.actor_story_path, case.projected_telemetry_path,
-            lrd, judge_fn=config.judge_fn,
+            lrd, judge_fn=config.judge_fn, box=None,
         )
         verdicts.append(parse_judge_verdict(raw, case_id=case.case_id, direction=case.direction))
     return verdicts

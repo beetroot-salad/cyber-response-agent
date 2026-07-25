@@ -258,7 +258,7 @@ def test_forward_check_repacks_the_config_slot_into_check_context(tmp_path):
     deps = CuratorDeps.for_run(
         rd, wt, corpus(wt, "lessons"),
         check=rec_check, runs_dir=wt / "runs",
-        pending=wt / "_pending" / "f.jsonl", queued_ids=frozenset({sid}),
+        pending=wt / "_pending" / "f.jsonl", queued_ids=frozenset({sid}), box=None,
     )
     (corpus(wt, "lessons") / "lesson.md").write_text("x\n", encoding="utf-8")
     asyncio.run(run_forward_check(deps, [Pair(lesson_path=rel("lessons", "lesson.md"), source_id=sid)]))

@@ -2,7 +2,7 @@
 
 The lead author is the FIRST *writer* port onto the shared ``_pydantic_stage`` transport
 (after the read-only judge/actor/oracle/verify predictors). These drive the REAL engine
-(``_run_author_pydantic`` deps build + write gate + observe trace; ``run_author_stage``
+(``_run_lead_author_pydantic`` deps build + write gate + observe trace; ``run_author_stage``
 key-sourcing + fault mapping) with a ``FunctionModel`` injected through the ``make_model`` DI
 seam, under ``override_allow_model_requests(False)`` so any real provider call raises. Pins the
 port's load-bearing decisions:
@@ -46,7 +46,7 @@ from defender.learning.core.config import (  # noqa: E402
 from defender.learning.leads.lead_author_engine import (  # noqa: E402
     LEAD_AUTHOR_DEF,
     LeadAuthorDeps,
-    _run_author_pydantic,
+    _run_lead_author_pydantic,
     run_author_stage,
 )
 from defender.learning.pipeline import _pydantic_stage  # noqa: E402
@@ -341,7 +341,7 @@ def test_relative_write_lands_in_worktree_not_process_cwd(tmp_path, monkeypatch)
     """F2 (the sharpest correctness fault), pinned as the OBSERVABLE (impl-agnostic — chdir or
     resolve-against-deps both pass). Process cwd is chdir'd to a DECOY dir that ITSELF holds a
     defender/skills tree; the model issues write_file('defender/skills/.../new.md', body)
-    through the REAL _run_author_pydantic(repo_root=<worktree>). The file must land under the
+    through the REAL _run_lead_author_pydantic(repo_root=<worktree>). The file must land under the
     WORKTREE (allowed by write_allow) with content==body, and NOTHING is written under the
     decoy — the write resolves against repo_root, never the ambient cwd. (The bash lane already
     runs at the worktree via _tool_bash cwd=deps.defender_dir.parent; the FILE tools must too.)"""
@@ -352,7 +352,7 @@ def test_relative_write_lands_in_worktree_not_process_cwd(tmp_path, monkeypatch)
     rel = "defender/skills/gather/queries/foo/new.md"
     fn = _tool_then_text([("write_file", {"path": rel, "content": "BODY-42"})], "done")
     with override_allow_model_requests(False):
-        out = _run_author_pydantic(
+        out = _run_lead_author_pydantic(
             prompt_path=_prompt(tmp_path), model="m", effort=None, trace_name="f2.jsonl",
             label="la", user="u", learning_run_dir=rd, repo_root=wt, request_limit=6,
             make_model=_fake_model(fn))
@@ -374,7 +374,7 @@ def test_write_into_new_subtree_creates_parents(tmp_path):
     assert not (wt / "defender" / "skills" / "newsys").exists()
     fn = _tool_then_text([("write_file", {"path": rel, "content": "PROMOTED"})], "done")
     with override_allow_model_requests(False):
-        out = _run_author_pydantic(
+        out = _run_lead_author_pydantic(
             prompt_path=_prompt(tmp_path), model="m", effort=None, trace_name="newdir.jsonl",
             label="la", user="u", learning_run_dir=rd, repo_root=wt, request_limit=6,
             make_model=_fake_model(fn))
@@ -386,7 +386,7 @@ def test_write_into_new_subtree_creates_parents(tmp_path):
 def test_engine_run_does_not_leak_process_cwd(tmp_path, monkeypatch):
     """If the port fixes F2 via os.chdir(repo_root), that mutation is PROCESS-GLOBAL and would
     corrupt sibling lead+pitfalls spawns / concurrent stages. Pin the observable: after a full
-    _run_author_pydantic run, os.getcwd() is UNCHANGED (absolute-ize AND chdir-with-restore both
+    _run_lead_author_pydantic run, os.getcwd() is UNCHANGED (absolute-ize AND chdir-with-restore both
     pass; a leaked chdir fails)."""
     wt, rd = _worktree(tmp_path), _run_dir(tmp_path)
     decoy = tmp_path / "decoy2"
@@ -394,7 +394,7 @@ def test_engine_run_does_not_leak_process_cwd(tmp_path, monkeypatch):
     monkeypatch.chdir(decoy)
     before = os.getcwd()
     with override_allow_model_requests(False):
-        _run_author_pydantic(
+        _run_lead_author_pydantic(
             prompt_path=_prompt(tmp_path), model="m", effort=None, trace_name="cwd.jsonl",
             label="la", user="u", learning_run_dir=rd, repo_root=wt, request_limit=4,
             make_model=_fake_model(_replay("done")))
@@ -414,7 +414,7 @@ def test_writer_contentless_final_after_write_is_success(tmp_path):
     rel = "defender/skills/gather/queries/foo/e.md"
     fn = _tool_then_text([("write_file", {"path": rel, "content": "X"})], "  ")
     with override_allow_model_requests(False):
-        out = _run_author_pydantic(
+        out = _run_lead_author_pydantic(
             prompt_path=_prompt(tmp_path), model="m", effort=None, trace_name="e.jsonl",
             label="la", user="u", learning_run_dir=rd, repo_root=wt, request_limit=6,
             make_model=_fake_model(fn))
@@ -507,7 +507,7 @@ def test_two_distinct_traces_into_one_dir_both_survive(tmp_path):
     rd, wt = _run_dir(tmp_path), _worktree(tmp_path)
     with override_allow_model_requests(False):
         for name in ("run-A.7.trace.jsonl", "run-B.7.trace.jsonl"):
-            _run_author_pydantic(
+            _run_lead_author_pydantic(
                 prompt_path=_prompt(tmp_path), model="m", effort=None, trace_name=name,
                 label="la", user="u", learning_run_dir=rd, repo_root=wt, request_limit=4,
                 make_model=_fake_model(_replay("done")))
@@ -553,7 +553,7 @@ def test_claude_none_effort_becomes_fatal_config(tmp_path, monkeypatch):
     pytest.importorskip("pydantic_ai.models.openai")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
     with override_allow_model_requests(False), pytest.raises(FatalConfigError):
-        _run_author_pydantic(
+        _run_lead_author_pydantic(
             prompt_path=_prompt(tmp_path), model="claude-sonnet-4-6", effort="none",
             trace_name="cfg.jsonl", label="la", user="u",
             learning_run_dir=_run_dir(tmp_path), repo_root=_worktree(tmp_path), request_limit=4)

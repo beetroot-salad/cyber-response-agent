@@ -47,6 +47,7 @@ class CuratorConfig:
     author_timeout: int
     author_effort: str
     invoke_agent: Callable[[list[dict], str, CuratorConfig], dict]
+    box: Any = None
 
     @property
     def run_log(self) -> Path:
@@ -125,7 +126,7 @@ def invoke_curator_agent(
         effort=cfg.author_effort,
         request_limit=request_limit,
         timeout=cfg.author_timeout,
-        salt=stage_salt,
+        salt=stage_salt, box=cfg.box,
     )
 
 

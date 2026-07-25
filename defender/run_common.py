@@ -74,6 +74,7 @@ def run_env(defender_dir: Path, run_dir: Path) -> dict[str, str]:
     env["DEFENDER_RUN_DIR"] = str(run_dir)
     env["DEFENDER_RUNS_BASE"] = str(run_dir.parent)
     env["PATH"] = f"{defender_dir / 'bin'}{os.pathsep}{env.get('PATH', '')}"
+    env["PYTHONPATH"] = str(defender_dir.parent)
     return env
 
 

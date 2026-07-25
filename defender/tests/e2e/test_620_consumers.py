@@ -770,7 +770,7 @@ def test_pitfall_for_a_system_without_execution_md_does_not_dead_end(tmp_path, m
     exec_md = repo / "defender" / "skills" / "host-state" / "execution.md"
     assert not exec_md.exists(), "precondition: host-state has no execution.md"
 
-    def synthesizing_curator(handoffs, *, repo_root):
+    def synthesizing_curator(handoffs, *, repo_root, box=None):
         assert handoffs[0]["system"] == "host-state"
         assert handoffs[0]["execution_md_path"] == "defender/skills/host-state/execution.md"
         p = repo_root / "defender" / "skills" / "host-state" / "execution.md"

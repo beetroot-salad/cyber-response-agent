@@ -434,6 +434,22 @@ def _read_jsonl(path: Path) -> list[dict]:
     return _io.read_jsonl_rows(path)
 
 
+def _noop_start_box(request, **_kw):
+    """A no-op box lifecycle for drain tests predating #665's box wiring — these tests exercise
+    the worktree/branch/queue mechanics, not the (separately spec'd) box lifecycle."""
+    from types import SimpleNamespace
+
+    return SimpleNamespace(name=request.name)
+
+
+def _noop_stop_box(_box, **_kw):
+    pass
+
+
+def _noop_scrub(_path, **_kw):
+    pass
+
+
 def _isolate(tmp_path: Path) -> tuple[object, Path]:
     paths = LoopPaths(repo_root=tmp_path)
     learning_run_dir = paths.runs_dir / "case-x"
@@ -611,9 +627,9 @@ def test_author_drain_triggers_all_curators(tmp_path: Path):
     triggered: list[str] = []
     orch.author_drain(
         paths,
-        trigger_author=lambda paths, pending_file, env, module, label: triggered.append(module),
+        trigger_author=lambda paths, pending_file, env, module, label, **_kw: triggered.append(module),
         branch=_FakeBranch(),
-    )
+     start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub)
     assert triggered == [
         "author", "author_actor", "author_actor_env", "author_actor_benign",
     ]
@@ -626,9 +642,9 @@ def test_author_drain_skips_when_lease_held(tmp_path: Path):
     branch = _FakeBranch(pr_exists=True)
     rc = orch.author_drain(
         paths,
-        trigger_author=lambda *a: triggered.append(a),
+        trigger_author=lambda *a, **_kw: triggered.append(a),
         branch=branch,
-    )
+     start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub)
     assert rc == 0
     assert triggered == []
     assert "start" not in branch.events
@@ -640,9 +656,9 @@ def test_author_drain_skips_when_no_work(tmp_path: Path):
     branch = _FakeBranch()
     rc = orch.author_drain(
         paths,
-        trigger_author=lambda *a: triggered.append(a),
+        trigger_author=lambda *a, **_kw: triggered.append(a),
         branch=branch,
-    )
+     start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub)
     assert rc == 0
     assert branch.events == []
     assert triggered == []
@@ -652,7 +668,7 @@ def test_author_drain_no_commits_opens_no_pr_but_cleans_up(tmp_path: Path):
     paths, _ = _isolate(tmp_path)
     _seed_curator_findings(paths)
     branch = _FakeBranch(commits=0)
-    rc = orch.author_drain(paths, trigger_author=lambda *a: None, branch=branch)
+    rc = orch.author_drain(paths, trigger_author=lambda *a, **_kw: None, branch=branch, start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub)
     assert rc == 0
     assert "finish" in branch.events
     assert branch.events[-1] == "cleanup"
@@ -670,9 +686,9 @@ def test_author_drain_singleton_lock_exits_without_work(tmp_path: Path):
         worked: list[str] = []
         rc = orch.author_drain(
             paths,
-            trigger_author=lambda *a: worked.append("trigger"),
+            trigger_author=lambda *a, **_kw: worked.append("trigger"),
             branch=_FakeBranch(),
-        )
+         start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub)
         assert rc == 0
         assert worked == []
     finally:
@@ -691,9 +707,9 @@ def test_lead_author_drain_runs_lead_author_then_clears_marker(tmp_path: Path):
     branch = _FakeBranch(prefix="lead-author/")
     orch.lead_author_drain(
         paths,
-        run_lead_author=lambda wt_paths, rd: seen.append((wt_paths.repo_root, rd)),
+        run_lead_author=lambda wt_paths, rd, **_kw: seen.append((wt_paths.repo_root, rd)),
         branch=branch,
-    )
+     start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub)
     assert [rd for _, rd in seen] == [run_dir.resolve()]
     assert str(seen[0][0]).startswith("/tmp/wt-")
     assert not (paths.author_queue_dir / "case-b.json").exists()
@@ -708,10 +724,10 @@ def test_lead_author_drain_runs_pitfalls_after_markers(tmp_path: Path):
     order: list[str] = []
     orch.lead_author_drain(
         paths,
-        run_lead_author=lambda wt_paths, rd: order.append("marker"),
-        run_pitfalls=lambda wt_paths: (order.append("pitfalls"), 0)[1],
+        run_lead_author=lambda wt_paths, rd, **_kw: order.append("marker"),
+        run_pitfalls=lambda wt_paths, **_kw: (order.append("pitfalls"), 0)[1],
         branch=_FakeBranch(prefix="lead-author/"),
-    )
+     start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub)
     assert order == ["marker", "pitfalls"]
 
 
@@ -736,9 +752,9 @@ def test_lead_author_drain_marks_artifact_missing(tmp_path: Path):
     seen: list[Path] = []
     orch.lead_author_drain(
         paths,
-        run_lead_author=lambda wt_paths, rd: seen.append(rd),
+        run_lead_author=lambda wt_paths, rd, **_kw: seen.append(rd),
         branch=_FakeBranch(prefix="lead-author/"),
-    )
+     start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub)
     assert seen == [run_dir.resolve()]
     assert not (paths.author_queue_dir / "case-gone.json").exists()
     failed = paths.author_queue_dir / "failed" / "case-gone.json"
@@ -753,8 +769,8 @@ def test_lead_author_drain_skips_when_lease_held(tmp_path: Path):
     seen: list = []
     branch = _FakeBranch(prefix="lead-author/", pr_exists=True)
     rc = orch.lead_author_drain(
-        paths, run_lead_author=lambda wt_paths, rd: seen.append(rd), branch=branch
-    )
+        paths, run_lead_author=lambda wt_paths, rd, **_kw: seen.append(rd), branch=branch
+    , start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub)
     assert rc == 0
     assert seen == []
     assert "start" not in branch.events
@@ -775,9 +791,9 @@ def test_lead_author_drain_singleton_lock_distinct_from_lessons(tmp_path: Path):
         seen: list = []
         rc = orch.lead_author_drain(
             paths,
-            run_lead_author=lambda wt_paths, rd: seen.append(rd),
+            run_lead_author=lambda wt_paths, rd, **_kw: seen.append(rd),
             branch=_FakeBranch(prefix="lead-author/"),
-        )
+         start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub)
         assert rc == 0
         assert seen == [run_dir.resolve()]
     finally:
@@ -795,14 +811,14 @@ def test_lead_author_drain_quarantines_poison_run_dir(tmp_path: Path):
     orch._enqueue_for_authoring(good, paths)
     seen: list[Path] = []
 
-    def maybe_boom(wt_paths, rd: Path) -> None:
+    def maybe_boom(wt_paths, rd: Path, *, box=None) -> None:
         if rd.name == "case-poison":
             raise RuntimeError("lead-author blew up")
         seen.append(rd)
 
     orch.lead_author_drain(
         paths, run_lead_author=maybe_boom, branch=_FakeBranch(prefix="lead-author/")
-    )
+    , start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub)
     assert seen == [good.resolve()]
     assert not (paths.author_queue_dir / "case-poison.json").exists()
     failed = paths.author_queue_dir / "failed" / "case-poison.json"
@@ -818,7 +834,7 @@ def test_lead_author_drain_quarantines_on_nonzero_rc(tmp_path: Path, monkeypatch
     orch._enqueue_for_authoring(run_dir, paths)
     # lint-monkeypatch: ok — drives the real _invoke_lead_author; _run_curator_module
     monkeypatch.setattr(la, "run", lambda rd, paths=None: 2)  # lint-monkeypatch: ok
-    orch.lead_author_drain(paths, branch=_FakeBranch(prefix="lead-author/"))
+    orch.lead_author_drain(paths, branch=_FakeBranch(prefix="lead-author/"), start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub)
     assert not (paths.author_queue_dir / "case-rc.json").exists()
     failed = paths.author_queue_dir / "failed" / "case-rc.json"
     assert json.loads(failed.read_text())["failed"].startswith("lead-author-error")
@@ -833,7 +849,7 @@ def test_lead_author_drain_bounded_retry_then_quarantine(tmp_path: Path, monkeyp
     orch._enqueue_for_authoring(run_dir, paths)
     monkeypatch.setenv("LEAD_AUTHOR_MAX_RETRIES", "3")
 
-    def boom(rd, paths=None):
+    def boom(rd, paths=None, box=None):
         raise OSError("disk hiccup")
 
     # lint-monkeypatch: ok — same intentional seam as the rc=2 test above: drives the
@@ -842,12 +858,12 @@ def test_lead_author_drain_bounded_retry_then_quarantine(tmp_path: Path, monkeyp
     failed = paths.author_queue_dir / "failed" / "case-transient.json"
 
     for expected in (1, 2):
-        orch.lead_author_drain(paths, branch=_FakeBranch(prefix="lead-author/"))
+        orch.lead_author_drain(paths, branch=_FakeBranch(prefix="lead-author/"), start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub)
         assert marker.exists()
         assert json.loads(marker.read_text())["attempts"] == expected
         assert not failed.exists()
 
-    orch.lead_author_drain(paths, branch=_FakeBranch(prefix="lead-author/"))
+    orch.lead_author_drain(paths, branch=_FakeBranch(prefix="lead-author/"), start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub)
     assert not marker.exists()
     assert json.loads(failed.read_text())["failed"].startswith("transient-exhausted")
 
@@ -865,14 +881,14 @@ def test_lead_author_drain_opens_distinct_lead_author_pr(tmp_path: Path):
         worktree_base=tmp_path / "wt",
     )
 
-    def _author(wt_paths, rd):
+    def _author(wt_paths, rd, *, box=None):
         f = wt_paths.repo_root / "defender" / "skills" / "note.md"
         f.parent.mkdir(parents=True, exist_ok=True)
         f.write_text("edit\n")
         _real(wt_paths.repo_root, "add", "-A")
         _real(wt_paths.repo_root, "commit", "-q", "-m", "lead edit")
 
-    rc = orch.lead_author_drain(paths, run_lead_author=_author, branch=branch)
+    rc = orch.lead_author_drain(paths, run_lead_author=_author, branch=branch, start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub)
     assert rc == 0
     assert forge.open_calls[0]["head"].startswith("lead-author/")
     assert not forge.open_calls[0]["head"].startswith("lessons/")
@@ -900,7 +916,7 @@ def test_lead_author_drain_resets_worktree_between_markers(tmp_path: Path):
 
     clean_at_entry: dict[str, bool] = {}
 
-    def run_lead_author(p, rd: Path) -> None:
+    def run_lead_author(p, rd: Path, *, box=None) -> None:
         st = _subprocess.run(
             ["git", "-C", str(p.repo_root), "status", "--porcelain"],
             capture_output=True, text=True,
@@ -1610,7 +1626,7 @@ def test_invoke_judge_benign_is_grounded(tmp_path: Path):
 
     out = subagents.invoke_judge(
         directions.BENIGN_WIRING, run, story, proj, lrd,
-        judge_fn=_fake_judge_fn,
+        judge_fn=_fake_judge_fn, box=None,
     )
 
     assert out.startswith("outcome:")

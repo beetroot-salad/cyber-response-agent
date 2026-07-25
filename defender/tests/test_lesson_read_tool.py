@@ -90,7 +90,7 @@ def _deps(scene) -> CuratorDeps:
     return CuratorDeps.for_run(
         scene.curdir, scene.repo, scene.corpus,
         check=FINDINGS_CHECK, runs_dir=scene.runs, pending=scene.pending,
-        queued_ids=frozenset(), run_verify=lambda **kw: "",
+        queued_ids=frozenset(), run_verify=lambda **kw: "", box=None,
     )
 
 

@@ -92,12 +92,13 @@ def _run_judge_pydantic(  # noqa: PLR0913 — the judge_fn protocol signature pl
     *,
     scope: _ToolScope,
     salt: str | None = None,
+    box: Any = None,
     make_model: MakeModel = providers.build_for_effort,
     verbs: Any = None,
 ) -> str:
     read_roots = tuple(scope.add_dir) if isinstance(scope.add_dir, list) else ()
     deps = bind(
-        JUDGE_DEF, learning_run_dir, scope=RunScope(add_dirs=read_roots), salt=salt
+        JUDGE_DEF, learning_run_dir, scope=RunScope(add_dirs=read_roots), salt=salt, box=box,
     )
     tools = replace(JUDGE_DEF.tools, closed_tickets=scope.closed_ticket_read)
     if verbs is None and scope.closed_ticket_read:

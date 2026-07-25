@@ -176,7 +176,7 @@ def test_run_pitfalls_at_threshold_commits_and_rotates(tmp_git_repo: Path, tmp_p
     paths = LoopPaths(repo_root=tmp_git_repo, state_dir=tmp_path / "state")
     _seed_pitfalls(paths, 2)
 
-    def fake_invoke(handoffs, *, repo_root):
+    def fake_invoke(handoffs, *, repo_root, box=None):
         assert handoffs[0]["system"] == "elastic"
         assert handoffs[0]["execution_md_path"] == "defender/skills/elastic/execution.md"
         assert len(handoffs[0]["failures"]) == 2
@@ -201,7 +201,9 @@ def test_run_pitfalls_no_edit_tick_still_rotates(tmp_git_repo: Path, tmp_path: P
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
     paths = LoopPaths(repo_root=tmp_git_repo, state_dir=tmp_path / "state")
     _seed_pitfalls(paths, 2)
-    rc = pitfalls_curator.run_pitfalls(paths=paths, invoke=lambda handoffs, *, repo_root: 0)
+    rc = pitfalls_curator.run_pitfalls(
+        paths=paths, invoke=lambda handoffs, *, repo_root, box=None: 0
+    )
     assert rc == 0
     assert persist.read_pitfalls(paths) == []
     assert _run_git(tmp_git_repo, "status", "--porcelain").stdout == ""

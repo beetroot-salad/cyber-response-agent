@@ -94,7 +94,7 @@ def build_judge_invocation(
 
 def invoke_judge(wiring: JudgeWiring, run_dir: Path, actor_story_path: Path,
                  projected_telemetry_path: Path, learning_run_dir: Path,
-                 *, judge_fn: Callable[..., str], salt: str | None = None) -> str:
+                 *, box, judge_fn: Callable[..., str], salt: str | None = None) -> str:
     stage_salt = salt if salt is not None else uuid4().hex
     inv = build_judge_invocation(
         run_dir, actor_story_path, projected_telemetry_path, learning_run_dir,
@@ -108,5 +108,5 @@ def invoke_judge(wiring: JudgeWiring, run_dir: Path, actor_story_path: Path,
         scope=_ToolScope(
             add_dir=inv.add_dirs, closed_ticket_read=wiring.closed_ticket_read,
         ),
-        salt=stage_salt,
+        salt=stage_salt, box=box,
     )

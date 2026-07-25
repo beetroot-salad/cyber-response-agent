@@ -549,7 +549,7 @@ def test_run_loop_commits_agent_edits(tmp_git_repo: Path, tmp_path: Path):
     run_dir = tmp_path / "lead-run"
     run_dir.mkdir()
 
-    def fake_agent(rd, handoffs, pending):
+    def fake_agent(rd, handoffs, pending, *, box=None):
         (repo / _CATALOG / "wazuh" / "newthing.md").write_text(
             "---\nid: wazuh.newthing\nstatus: established\n---\n"
         )
@@ -586,7 +586,7 @@ def test_run_raises_and_skips_commit_on_scope_violation(tmp_git_repo: Path, tmp_
     run_dir = tmp_path / "lead-run"
     run_dir.mkdir()
 
-    def fake_agent(rd, handoffs, pending):
+    def fake_agent(rd, handoffs, pending, *, box=None):
         (repo / "defender" / "other").mkdir(parents=True, exist_ok=True)
         (repo / "defender" / "other" / "stray.md").write_text("stray")
         return 0
@@ -617,7 +617,7 @@ def test_run_returns_rc2_on_nonzero_agent_exit(tmp_git_repo: Path, tmp_path: Pat
     deps = _deps(
         repo,
         **_bypass_tables(),
-        invoke_agent=lambda rd, handoffs, pending: 124,
+        invoke_agent=lambda rd, handoffs, pending, **_kw: 124,
         build_handoff=lambda rd, ex, jl=None, **_: [{"query_id": "x.y"}],
         discover_system_drafts=lambda: [],
         acquire_queue_lock=lambda: object(),
@@ -651,7 +651,7 @@ def test_run_loop_clears_drafts_on_discard_and_promote(tmp_git_repo: Path, tmp_p
     promoted_draft = repo / _CATALOG / "wazuh" / "_draft" / "newthing.md"
     discarded_draft = repo / _CATALOG / "wazuh" / "_draft" / "olddraft.md"
 
-    def fake_agent(rd, handoffs, pending):
+    def fake_agent(rd, handoffs, pending, *, box=None):
         promoted_est.write_text("---\nid: wazuh.newthing\nstatus: established\n---\n")
         promoted_draft.unlink()
         discarded_draft.unlink()
@@ -686,7 +686,7 @@ def test_run_quarantines_half_promote(tmp_git_repo: Path, tmp_path: Path):
     run_dir = tmp_path / "lead-run"
     run_dir.mkdir()
 
-    def fake_agent(rd, handoffs, pending):
+    def fake_agent(rd, handoffs, pending, *, box=None):
         (repo / _CATALOG / "wazuh" / "newthing.md").write_text(
             "---\nid: wazuh.newthing\nstatus: established\n---\n"
         )
@@ -936,7 +936,7 @@ def test_run_reloads_catalog_after_mint_so_minted_draft_resolves(
         lead_author.build_lead_author_deps(paths),
         acquire_queue_lock=lambda: object(),
         release_queue_lock=lambda fh: None,
-        invoke_agent=lambda rd, handoffs, pending: seen.update(handoffs=handoffs) or 0,
+        invoke_agent=lambda rd, handoffs, pending, **_kw: seen.update(handoffs=handoffs) or 0,
     )
     run_dir = tmp_path / "run-mint"
     (run_dir / "gather_raw").mkdir(parents=True)

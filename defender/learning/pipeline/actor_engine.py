@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from defender.learning.core.config import ACTOR_EFFORT, ACTOR_MODEL, REPO_ROOT
 from defender.learning.pipeline._pydantic_stage import run_stage
@@ -66,6 +66,11 @@ ACTOR_DEF = AgentDefinition(
     bash_shapes=(_actor_bash_shapes,),
     deps_cls=ActorDeps,
     requires_confine=True,
+    # #665 decision 1: the actor's cwd_anchor moves to repo_root (defender_dir.parent) — the
+    # box's `--workdir`, per DC2, is the auto-created ro PARENT of the defender infra mount, so
+    # a relative `python3 defender/...` operand resolves there instead of at learning_run_dir
+    # (where no `defender/` exists — the issue's own M3a failure mode).
+    anchors_on_tree=True,
     deny_reason=_ACTOR_DENY_REASON,
 )
 
@@ -81,12 +86,13 @@ def _run_actor_pydantic(  # noqa: PLR0913 — the actor_fn protocol signature pl
     *,
     scope: _ActorScope,
     salt: str | None = None,
+    box: Any = None,
     make_model: MakeModel = providers.build_for_effort,
 ) -> str:
     deps = bind(
         ACTOR_DEF, learning_run_dir,
         scope=RunScope(scripts=scope.scripts, read_confine=scope.read_confine),
-        salt=salt,
+        salt=salt, box=box,
     )
     return run_stage(
         stage="actor",

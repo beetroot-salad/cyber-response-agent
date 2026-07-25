@@ -86,7 +86,7 @@ def test_lead_author_max_retries_bad_value_raises_fatal_config(tmp_path, monkeyp
     run_dir.mkdir()
     orchestrate._enqueue_for_authoring(run_dir, paths)
     with pytest.raises(FatalConfigError, match="LEAD_AUTHOR_MAX_RETRIES"):
-        orchestrate._drain_lead_author_markers(paths, lambda _p, _rd: None)
+        orchestrate._drain_lead_author_markers(paths, lambda _p, _rd, *, box=None: None)
 
 
 
@@ -203,7 +203,7 @@ def test_lead_author_marker_drain_reraises_fatal_lift_threshold(tmp_path, monkey
     run_dir.mkdir()
     orchestrate._enqueue_for_authoring(run_dir, paths)
 
-    def _run_lead_author(_paths, _run_dir):
+    def _run_lead_author(_paths, _run_dir, *, box=None):
         lead_author._lift_threshold()
 
     with pytest.raises(FatalConfigError):
@@ -219,7 +219,7 @@ def test_drain_pitfalls_reraises_fatal_config_error(tmp_path):
     curation hiccup, but a FatalConfigError must propagate to exit 2, not be swallowed."""
     paths = LoopPaths(repo_root=tmp_path)
 
-    def _run_pitfalls(_paths):
+    def _run_pitfalls(_paths, *, box=None):
         raise FatalConfigError("systemic")
 
     with pytest.raises(FatalConfigError):
@@ -237,7 +237,7 @@ def test_lead_author_drain_unlinks_marker_on_success(tmp_path, monkeypatch):
     run_dir.mkdir()
     orchestrate._enqueue_for_authoring(run_dir, paths)
 
-    orchestrate._drain_lead_author_markers(paths, lambda _p, _rd: None)
+    orchestrate._drain_lead_author_markers(paths, lambda _p, _rd, *, box=None: None)
 
     assert not (paths.author_queue_dir / f"{run_dir.name}.json").exists()
     assert not (paths.author_queue_dir / "failed" / f"{run_dir.name}.json").exists()
@@ -252,7 +252,7 @@ def test_lead_author_drain_quarantines_a_plain_failure(tmp_path, monkeypatch):
     run_dir.mkdir()
     orchestrate._enqueue_for_authoring(run_dir, paths)
 
-    def _run_lead_author(_paths, _run_dir):
+    def _run_lead_author(_paths, _run_dir, *, box=None):
         raise RuntimeError("poison run dir")
 
     orchestrate._drain_lead_author_markers(paths, _run_lead_author)
@@ -274,7 +274,7 @@ def test_lead_author_drain_requeues_a_transient_with_bumped_attempts(tmp_path, m
     run_dir.mkdir()
     orchestrate._enqueue_for_authoring(run_dir, paths)
 
-    def _run_lead_author(_paths, _run_dir):
+    def _run_lead_author(_paths, _run_dir, *, box=None):
         raise orchestrate._LeadAuthorRetry("rc=None transient")
 
     orchestrate._drain_lead_author_markers(paths, _run_lead_author)
@@ -291,7 +291,7 @@ def test_drain_pitfalls_swallows_a_plain_curation_error(tmp_path):
     path is the sibling reraise test)."""
     paths = LoopPaths(repo_root=tmp_path)
 
-    def _run_pitfalls(_paths):
+    def _run_pitfalls(_paths, *, box=None):
         raise RuntimeError("curation hiccup")
 
     orchestrate._drain_pitfalls(paths, _run_pitfalls)
@@ -403,7 +403,7 @@ def test_lead_author_drain_bad_lift_threshold_is_fatal_two(tmp_path, monkeypatch
     wt = tmp_path / "wt"
     wt.mkdir()
 
-    def _run_lead_author(_paths, _run_dir):
+    def _run_lead_author(_paths, _run_dir, *, box=None):
         lead_author._lift_threshold()
 
     rc = orchestrate._run_stage(

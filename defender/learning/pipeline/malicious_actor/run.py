@@ -43,7 +43,7 @@ def is_skip_story(actor_story: str) -> bool:
 
 
 def invoke_actor(alert_path: Path, actor_input_path: Path, learning_run_dir: Path,
-                 *, actor_fn=None, salt: str | None = None) -> str:
+                 *, box, actor_fn=None, salt: str | None = None) -> str:
     rng = random.Random(_actor_seed(learning_run_dir.name))
     archetype = rng.choice(["internal", "external"])
     menu_text = mitre_corpus.format_menu(mitre_corpus.sample_menu(rng))
@@ -69,5 +69,5 @@ def invoke_actor(alert_path: Path, actor_input_path: Path, learning_run_dir: Pat
             (LESSONS_ENV_RETRIEVE_SCRIPT, LESSONS_ACTOR_INDEX_SCRIPT),
             read_confine=(LESSONS_ACTOR_DIR, LESSONS_ENVIRONMENT_DIR),
         ),
-        salt=stage_salt,
+        salt=stage_salt, box=box,
     )
