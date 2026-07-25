@@ -6,17 +6,12 @@
     "cmdb": "1/1",
     "elastic": "2/2"
   },
-  "plus_event_recall": null,
+  "plus_event_recall": 0.0,
   "zero_precision": 1.0,
   "field_grades": {},
-  "contradiction_grades": {},
   "wrong_concrete_fields": 0,
   "false_suppression": 0,
-  "malformed_projections": 0,
   "forbidden_emitted": [],
-  "missing_leads": [],
-  "unscored_leads": [],
-  "duplicate_leads": [],
   "rows": [
     {
       "lead": "l-001",
@@ -26,7 +21,6 @@
       "class_match": true,
       "heterogeneous": false,
       "fields": {},
-      "contradictions": {},
       "intent_note": false
     },
     {
@@ -37,7 +31,6 @@
       "class_match": true,
       "heterogeneous": false,
       "fields": {},
-      "contradictions": {},
       "intent_note": false
     },
     {
@@ -48,7 +41,6 @@
       "class_match": true,
       "heterogeneous": false,
       "fields": {},
-      "contradictions": {},
       "intent_note": false
     }
   ]
