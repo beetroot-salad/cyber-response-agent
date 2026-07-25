@@ -68,9 +68,13 @@ def main() -> None:
     if "--json" in sys.argv:
         json_out = Path(sys.argv[sys.argv.index("--json") + 1])
 
-    expected = yaml.safe_load((case_dir / "expected.yaml").read_text())["leads"]
+    spec = yaml.safe_load((case_dir / "expected.yaml").read_text())
+    expected = spec["leads"]
+    forbidden = spec.get("must_not_emit", [])   # mutation cases: original values that must not leak
     proj = yaml.safe_load(proj_path.read_text())
     preds = {p["lead_id"]: p["events"] for p in proj["projections"]}
+    proj_blob = json.dumps(proj)
+    forbidden_hits = [v for v in forbidden if v in proj_blob]
 
     rows = []
     by_system = {}
@@ -111,6 +115,7 @@ def main() -> None:
         "field_grades": {g: all_field_grades.count(g) for g in sorted(set(all_field_grades))},
         "wrong_concrete_fields": len(wrong),
         "false_suppression": len(false_suppress),
+        "forbidden_emitted": forbidden_hits,   # mutation: original values that leaked (should be [])
         "rows": rows,
     }
 
@@ -121,6 +126,9 @@ def main() -> None:
     print(f"by system: {summary['by_system']}")
     print(f"field grounding: {summary['field_grades']}   "
           f"WRONG concrete: {len(wrong)}   false-suppression: {len(false_suppress)}")
+    if forbidden:
+        verdict = "CLEAN" if not forbidden_hits else f"LEAKED {forbidden_hits}"
+        print(f"mutation — forbidden original values: {verdict}")
     print()
     for r in rows:
         tag = "ok " if r["class_match"] else "DIS"

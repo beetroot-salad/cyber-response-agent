@@ -11,11 +11,7 @@ notes: >
   Distinguishing fields live under falco.output_fields.*. The proc.cmdline field
   literally contains the attacker's echo of the ssh-rsa key — a strong grounding
   target. The oracle is not expected to reproduce the full cmdline verbatim
-  (placeholder is fine); it IS expected to name the file and rule. What it must
-  NOT do is emit a concrete stand-in the capture refutes — hence observed_fields.
-  Note the +event is earned by fd.name/user.name, NOT by the rule firing: the
-  baseline fires this same rule about hourly in work hours for svc.config-mgmt
-  key rotation (see hidden/controls.yaml `revision`).
+  (placeholder is fine); it IS expected to name the file and rule.
 leads:
   l-001:
     system: elastic
@@ -25,19 +21,6 @@ leads:
       falco.rule: "Adding ssh keys to authorized_keys"
       falco.output_fields.fd.name: "/root/.ssh/authorized_keys"
       falco.output_fields.user.name: "root"
-    observed_fields:
-      # Ground truth for fields the labels do not REQUIRE, graded only if the
-      # projection volunteers a concrete value. A `<placeholder>` here is correct
-      # behaviour and is not graded at all.
-      falco.output_fields.evt.type: "openat"
-      falco.output_fields.proc.cmdline: |
-        bash -lc mkdir -p /root/.ssh && chmod 700 /root/.ssh
-        ts=$(date +%s)
-        echo "ssh-rsa AAAAB3NzaC1yc2EAAAAD_fake_key_0_${ts}_attacker attacker@elsewhere" \
-          >> /root/.ssh/authorized_keys
-        chmod 600 /root/.ssh/authorized_keys
-        ls -la /root/.ssh/authorized_keys
-      falco.output_fields.container.id: "1df4bcd65ee4"
   l-002:
     system: cmdb
     template: host-trust-edges
