@@ -1,8 +1,17 @@
 # Held-out alert set
 
-24 alerts with human-applied ground-truth disposition labels — 8 per class
-(`benign | malicious | inconclusive`). Used as the primary eval surface for
-the actor-learning workstream (see
+**This set is currently EMPTY.** It held 24 hand-authored Wazuh-format alerts
+(8 per class); those were retired when the Wazuh-shaped fixtures were dropped
+in favour of the v2 Elastic alert schema, and no Elastic-format replacements
+have been authored yet. Until they are, the primary metric has no denominator:
+`evals/held_out.py` runs and reports `no held-out fixtures found`.
+
+The layout, the schema and the contamination nets below are all still live —
+this file documents the contract a replacement set must satisfy, and its
+presence is what keeps the directory (and so the harness's directory walk)
+intact. Alerts with human-applied ground-truth disposition labels, 8 per class
+(`benign | malicious | inconclusive`), are the primary eval surface for the
+actor-learning workstream (see
 `defender/docs/learning-loop-actor-learning.md` §Metrics).
 
 Each subdirectory contains:
@@ -48,6 +57,8 @@ prefix, or a suffix at a `-` boundary (`evals/held_out.index_runs`).
 
 ## Class balance
 
+Target for a replacement set (the retired Wazuh set met it):
+
 | class | count | sizing rationale |
 |---|---|---|
 | `benign` | 8 | per-class recall floor 70% |
@@ -60,20 +71,23 @@ ship-blocker. This is intended.
 
 ## Synthesis caveat
 
-This is a **bootstrap** held-out set: alerts are hand-authored synthetic
-shapes inspired by real signatures (Wazuh rules 5710/550/553/554/5715,
-Falco container-shell/reverse-shell, Sysmon LSASS-access patterns, etc.)
-plus a one-paragraph rationale per case. They are *not* drawn from a
-production alert stream.
+The retired set was a **bootstrap** one: hand-authored synthetic shapes in the
+Wazuh alert format, inspired by real signatures (Wazuh rules
+5710/550/553/554/5715, Falco container-shell/reverse-shell, Sysmon
+LSASS-access patterns, etc.) plus a one-paragraph rationale per case. They were
+*not* drawn from a production alert stream — and their `agent`/`data.srcip`
+vocabulary and synthetic `172.22.0.x` addressing had no counterpart in the v2
+Elastic index, which is why retiring them cost less than it appears.
 
-The labels are deliberate teaching cases — each one isolates a single
+Its labels were deliberate teaching cases — each isolating a single
 load-bearing discriminator (e.g. source-host identity, file location +
-ownership, command shape, timing relative to package activity). They are
-designed so a competent investigator with normal SIEM access could
-disposition each one correctly.
+ownership, command shape, timing relative to package activity), designed so a
+competent investigator with normal SIEM access could disposition each one
+correctly. Keep that property in a replacement set.
 
-Replace with real labeled production alerts when available; the file
-layout and `ground_truth.yaml` schema are the contract that downstream
+Prefer real labeled production alerts; failing that, author v2 Elastic-shaped
+synthetic ones (see `defender/fixtures/v2-*/alert.json` for the schema). The
+file layout and `ground_truth.yaml` schema below are the contract downstream
 harnesses depend on.
 
 ## Schema

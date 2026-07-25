@@ -21,6 +21,11 @@ Algorithm:
      import) ANYWHERE in the post-PR tree — they were moved, re-exported, or
      their import line merely reflowed (single→multi-line), not removed. A
      genuine stale ref is a symbol defined NOWHERE yet still referenced.
+     Idents harvested from PATHS (step 2's component/stem walk) are skipped on
+     the same principle by `_path_named`: a name still carried by a tracked
+     directory or file has not been removed, so emptying a directory but keeping
+     one file in it must not condemn every reference to the directory. Archival
+     trees (`_ARCHIVAL_DIRS`) hold frozen copies and cannot vouch for a name.
   5. Grep the tree ONCE for all survivors, word-boundary (`git grep -w -F -e A
      -e B ...`) — `-w` so a removed `_by_id` does not match
      `template_path_by_id`. Steps 4 and 5 read the same grep. Idents with >50
@@ -80,7 +85,7 @@ import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import lru_cache
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from _baseline import Finding, gate
 
@@ -104,6 +109,12 @@ GENERIC_NAMES = {
     "Callable", "Iterable", "Iterator", "Optional", "Union", "Any",
     "typing", "dataclass", "field", "Path", "List", "Dict",
 }
+
+# Trees that hold FROZEN copies of things the live tree may since have deleted: a name
+# surviving only here is not evidence it survives in the live tree, so `_path_named` does
+# not let them vouch for one. Distinct from EXCLUDED_GREP_DIRS below, which answers a
+# different question ("is this dir a reference SOURCE") and includes live dirs.
+_ARCHIVAL_DIRS = ("experiments/", ".claude/worktrees/", "docs/archive/", ".spec/")
 
 EXCLUDED_GREP_DIRS = (
     ".git", ".venv", "__pycache__", "node_modules",
@@ -507,6 +518,41 @@ def _module_named(repo_root: Path, ident: str) -> bool:
     )
 
 
+def _path_named(repo_root: Path, ident: str) -> bool:
+    """Whether `ident` still names a tracked DIRECTORY component or file stem.
+
+    `_scan` harvests idents from the path components and stems of removed files, so it
+    reads a name as removed when the paths carrying it are gone. That is wrong whenever
+    the name outlives those particular paths — emptying a directory but keeping one file
+    in it, or deleting one `foo.xml` while a different `foo.yaml` lives elsewhere. The
+    directory case is the sharp one: delete 24 of the 25 files under `held-out/` and every
+    surviving reference to a directory that STILL EXISTS reads as stale at once.
+
+    Survival is asked of git-TRACKED paths, so an untracked copy in `.worktrees/` or a
+    vendored checkout cannot mask a real deletion.
+
+    It is NOT asked through `_is_excluded_path`, unlike `_module_named`: that list is
+    `EXCLUDED_GREP_DIRS`, which says "do not read this dir as a REFERENCE source"
+    (historical prose), never "this dir does not exist". `defender/fixtures` is on it and
+    is a live directory — routing survival through it would keep the exact false positive
+    this function exists to remove. What is excluded instead is the narrower set of
+    ARCHIVAL trees, which hold frozen copies of things the live tree may have deleted and
+    so must not vouch for a name's survival.
+
+    A genuinely deleted path is still caught: nothing tracked carries its name afterwards.
+    What this deliberately gives up is the ambiguous case where a name survives only in an
+    unrelated file — there the gate cannot tell which thing a bare textual mention meant,
+    and `_module_named` already resolves that same ambiguity in favour of the survivor."""
+    tracked = _tracked_paths(repo_root)
+    for rel in tracked:
+        if rel.startswith(_ARCHIVAL_DIRS) or rel in _ARCHIVAL_DIRS:
+            continue
+        pure = PurePosixPath(rel)
+        if ident in pure.parts[:-1] or pure.stem == ident:
+            return True
+    return False
+
+
 def _still_defined(
     idents: list[str], hits: list[tuple[str, int, str]], py: _PySources,
     repo_root: Path | None = None,
@@ -533,6 +579,7 @@ def _still_defined(
                 defined.add(ident)
     if repo_root is not None:
         defined.update(i for i in idents if i not in defined and _module_named(repo_root, i))
+        defined.update(i for i in idents if i not in defined and _path_named(repo_root, i))
     return defined
 
 

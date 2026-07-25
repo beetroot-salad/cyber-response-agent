@@ -8,10 +8,16 @@ discovered_in: test_runtime_smoke0
 
 # Fixture `agent.name` / IP subnet mismatch vs v2 Elastic index
 
+> **The fixture half of this note is now moot:** the WAZUH-format fixtures it
+> describes were deleted, so no run can hit the mismatch from a fixture any
+> more. Kept for the **real-alert** case below — a genuine WAZUH alert still
+> carries `agent.name`/`agent.ip`, and the vocabulary gap in *Root cause 1* and
+> the `host-agent-by-ip` workaround are unchanged.
+
 ## Pattern
 
-WAZUH-format alert fixtures (e.g. `r2a-narrow-paths`, `r4d-near-miss`,
-`r5b-composition`) use:
+The retired WAZUH-format alert fixtures (`r2a-narrow-paths`, `r4d-near-miss`,
+`r5b-composition`, …) used:
 
 ```json
 "agent": {"name": "target-endpoint", "id": "002", "ip": "172.22.0.13"}

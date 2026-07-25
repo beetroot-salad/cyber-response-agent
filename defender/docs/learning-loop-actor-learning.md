@@ -715,7 +715,12 @@ baseline is measured):
     mode that matters most.
 - **Class balance in held-out.** At least 8 alerts per
   `disposition` class (`benign | malicious | inconclusive`), 24–30
-  alerts total. Sizing rationale: with 8 per class and a 90% recall
+  alerts total. *The committed set is currently EMPTY — the Wazuh-format
+  bootstrap set was retired and no v2 Elastic-shaped replacement has been
+  authored, so the primary metric reports no denominator until one is (see
+  `defender/fixtures/held-out/README.md`). The floors below are the contract
+  that set must meet, not a description of one that exists.*
+  Sizing rationale: with 8 per class and a 90% recall
   floor on malicious, the floor effectively requires **8/8 malicious
   correct** — 7/8 = 87.5%, already below floor. This is intended:
   any malicious miss on the held-out set is a ship-blocker, which

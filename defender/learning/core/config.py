@@ -52,6 +52,10 @@ class LoopPaths:
         return self.defender.lessons_environment_dir
 
     @property
+    def held_out_fixtures(self) -> Path:
+        return self.defender.held_out_fixtures
+
+    @property
     def lessons_dir_rel(self) -> str:
         return DefenderPaths.lessons_dir_rel
 
