@@ -93,7 +93,7 @@ def _curator_for_run(tmp_path, *, box):
     for name in SHIPPED_LESSON_CORPORA:
         (dtree / name).mkdir(parents=True, exist_ok=True)
     run_dir = tmp_path / "lrd"
-    run_dir.mkdir()
+    run_dir.mkdir(exist_ok=True)  # both curator helpers may run against one tmp_path
     check = ForwardCheck(error_prefix="spec", prompt_path=None, run=lambda ctx: "")
     return CuratorDeps.for_run(
         run_dir, repo, dtree / "lessons",
@@ -143,7 +143,7 @@ def _curator_for_run_no_box(tmp_path):
     for name in SHIPPED_LESSON_CORPORA:
         (dtree / name).mkdir(parents=True, exist_ok=True)
     run_dir = tmp_path / "lrd"
-    run_dir.mkdir()
+    run_dir.mkdir(exist_ok=True)  # both curator helpers may run against one tmp_path
     check = ForwardCheck(error_prefix="spec", prompt_path=None, run=lambda ctx: "")
     return CuratorDeps.for_run(  # box= omitted → must raise (required), never inert-default
         run_dir, repo, dtree / "lessons",
@@ -191,6 +191,10 @@ def test_box_threaded_as_percall_param_through_subagents(tmp_path):
     lrd.mkdir()
     (tmp_path / "alert.json").write_text("{}", encoding="utf-8")
     (tmp_path / "ai.yaml").write_text("x: 1\n", encoding="utf-8")
+    # invoke_judge builds its prompt from the story and telemetry on disk before it ever
+    # reaches judge_fn — both are inputs the real seam reads (judge/run.py:74, :58).
+    (tmp_path / "story.md").write_text("1. Routine story\n", encoding="utf-8")
+    (tmp_path / "telemetry.yaml").write_text("projections: []\n", encoding="utf-8")
 
     invoke_actor(tmp_path / "alert.json", tmp_path / "ai.yaml", lrd,
                  box=delivered, actor_fn=rec)
@@ -285,7 +289,9 @@ def test_box_reaches_both_actor_legs_and_both_drain_chains(tmp_path):
 
     invoke_actor(tmp_path / "alert.json", tmp_path / "ai.yaml", lrd,
                  box=delivered, actor_fn=rec("actor"))
-    invoke_actor_benign(tmp_path / "alert.json", {}, "rule.key", lrd,
+    # case_entities is a str on the benign seam (benign_actor/run.py:21) — it is wrapped
+    # into a prompt section, so a dict is rejected before the box is ever threaded.
+    invoke_actor_benign(tmp_path / "alert.json", "", "rule.key", lrd,
                         box=delivered, actor_fn=rec("actor_benign"))
     # drain chain 1 — curator via for_run
     curator_deps = _curator_for_run(tmp_path, box=delivered)

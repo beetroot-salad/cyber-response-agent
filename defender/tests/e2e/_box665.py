@@ -416,10 +416,33 @@ def drive_worktree_batch(tmp_path, rec, *, do_work, has_work=None, branch=None,
     )
 
 
+def _path_matches(value, needle: str) -> bool:
+    """Does `value` (a path) match `needle`?
+
+    An ABSOLUTE needle matches by path identity (it, or a tree under it). A RELATIVE needle
+    is a path COMPONENT and must match a whole component — never a bare substring. The
+    substring spelling was non-discriminating in the false-POSITIVE direction: pytest names
+    `tmp_path` after the test function, so under `test_gather_raw_.../` every mount's path
+    contains the literal "gather_raw" and `mount_for(req, "gather_raw")` answered with an
+    unrelated mount instead of None. Same distinction the gate draws at
+    runtime/permission/files.py:222-228 (the `gather_raw` path component vs. the word).
+    """
+    p = Path(str(value))
+    n = Path(needle)
+    if n.is_absolute():
+        return p == n or p.is_relative_to(n)
+    return needle in p.parts
+
+
 def mount_for(request, needle: str):
-    """The Mount on `request` whose source or target contains `needle` (None if unmounted)."""
+    """The Mount on `request` whose source or target matches `needle` (None if unmounted).
+
+    `needle` is an absolute path (matched by identity) or a single path component (matched
+    whole — see `_path_matches`).
+    """
     for m in getattr(request, "mounts", ()):
-        if needle in str(getattr(m, "source", "")) or needle in str(getattr(m, "target", "")):
+        if _path_matches(getattr(m, "source", ""), needle) or \
+                _path_matches(getattr(m, "target", ""), needle):
             return m
     return None
 
