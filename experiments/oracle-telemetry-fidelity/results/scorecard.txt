@@ -1,0 +1,78 @@
+== distinguishability (canary-1 failures from 172.18.0.15) [recorded pre-teardown] ==
+  attack        : 96
+  C1-today-pre  : 0
+  C2-14d        : 0
+  C3-21d        : 0
+  => attack rows off-baseline: True
+
+== per-query actual categories → aggregated lead truth vs oracle ==
+
+  l-001  pred=+event  actual=+event  MATCH  (heterogeneous lead)
+      seq0 elastic.sshd-auth-history        +event  in-window failure burst / attacker src present
+      seq1 elastic.sshd-auth-history        +event  in-window failure burst / attacker src present
+      seq2 elastic.sshd-auth-history        0       rows present but no attack delta
+      seq3 elastic.sshd-auth-history        +event  in-window failure burst / attacker src present
+
+  l-002  pred=0       actual=+event  DIVERGE  (heterogeneous lead)
+      seq0 elastic.detection-alerts         0       no such alert (0 rows)
+      seq1 elastic.sshd-auth-history        +event  in-window failure burst / attacker src present
+
+  l-003  pred=0       actual=0       MATCH
+      seq0 cmdb.host-trust-edges            0       state/lookup — current config, no event stream
+
+  l-004  pred=+event  actual=+event  MATCH  (heterogeneous lead)
+      seq0 elastic.zeek-ssh-by-ip           0       empty (attack never touched this window/filter)
+      seq1 elastic.zeek-outbound-by-source  0       rows present but no attack delta
+      seq2 elastic.ip-to-host-search        0       rows present but no attack delta
+      seq3 elastic.zeek-ssh-field-check     +event  in-window failure burst / attacker src present
+      seq4 elastic.zeek-ssh-client-from-source +event  in-window failure burst / attacker src present
+      seq5 elastic.zeek-ssh-by-ip           +event  in-window failure burst / attacker src present
+
+  l-005  pred=0       actual=0       MATCH
+      seq0 threat-intel.ip-reputation-lookup 0       state/lookup — current config, no event stream
+
+  l-006  pred=+noise  actual=+event  DIVERGE  (heterogeneous lead)
+      seq0 elastic.sshd-auth-history        0       empty (attack never touched this window/filter)
+      seq1 elastic.sshd-auth-history        +event  in-window failure burst / attacker src present
+      seq2 elastic.sshd-auth-history        0       rows present but no attack delta
+      seq3 elastic.sshd-auth-history        0       empty (attack never touched this window/filter)
+      seq4 elastic.sshd-auth-history        +event  in-window failure burst / attacker src present
+      seq5 elastic.sshd-auth-history        +event  in-window failure burst / attacker src present
+      seq6 elastic.sshd-auth-history        +event  in-window failure burst / attacker src present
+
+  l-007  pred=0       actual=0       MATCH
+      seq0 cmdb.host-trust-edges            0       state/lookup — current config, no event stream
+
+  l-008  pred=0       actual=0       MATCH
+      seq0 identity.access-check            0       state/lookup — current config, no event stream
+      seq1 identity.list-all-users          0       state/lookup — current config, no event stream
+      seq2 identity.access-check            0       state/lookup — current config, no event stream
+      seq3 identity.access-check            0       state/lookup — current config, no event stream
+      seq4 identity.user-authorization      0       state/lookup — current config, no event stream
+      seq5 identity.user-authorization      0       state/lookup — current config, no event stream
+      seq6 identity.user-authorization      0       state/lookup — current config, no event stream
+      seq7 identity.user-authorization      0       state/lookup — current config, no event stream
+      seq8 identity.user-authorization      0       state/lookup — current config, no event stream
+      seq9 identity.user-authorization      0       state/lookup — current config, no event stream
+      seq10 identity.user-authorization      0       state/lookup — current config, no event stream
+      seq11 identity.user-authorization      0       state/lookup — current config, no event stream
+      seq12 identity.user-authorization      0       state/lookup — current config, no event stream
+      seq13 identity.user-authorization      0       state/lookup — current config, no event stream
+      seq14 identity.user-authorization      0       state/lookup — current config, no event stream
+      seq15 identity.user-authorization      0       state/lookup — current config, no event stream
+      seq16 identity.user-authorization      0       state/lookup — current config, no event stream
+      seq17 identity.user-authorization      0       state/lookup — current config, no event stream
+      seq18 identity.user-authorization      0       state/lookup — current config, no event stream
+      seq19 identity.user-authorization      0       state/lookup — current config, no event stream
+
+  l-009  pred=0       actual=0       MATCH
+      seq0 change-mgmt.active-changes       0       state/lookup — current config, no event stream
+      seq1 change-mgmt.list-changes         0       state/lookup — current config, no event stream
+      seq2 change-mgmt.list-changes         0       state/lookup — current config, no event stream
+      seq3 change-mgmt.active-changes       0       state/lookup — current config, no event stream
+
+  lead-level category agreement: 7/9
+
+== field grounding (+event leads) — concrete values only ==
+  l-001: source.ip=172.18.0.15, user.name=root, host.name=canary-1, event.outcome=failure, sample_message=Failed password for root from 172.18.0.15 port <port> ssh2
+  l-004: source.ip=172.18.0.15, destination.ip=172.18.0.9, data_stream.dataset=zeek.ssh, destination.port=22

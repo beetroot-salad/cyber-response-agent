@@ -1,0 +1,46 @@
+{
+  "alert_id": "f36a7cbb6be991c132717edff30ed65407a73738e10d5368a3656ba4154f33ec",
+  "alert_timestamp": "2026-07-25T07:48:37.065Z",
+  "rule": {
+    "id": "v2-sshd-failed-auth-burst",
+    "name": "v2 sshd failed-auth burst",
+    "type": "threshold",
+    "severity": "medium",
+    "risk_score": 47,
+    "tags": [
+      "v2",
+      "auth",
+      "ssh",
+      "brute-force"
+    ],
+    "description": "Five or more sshd authentication failures on a single host within 5 minutes. The threshold groups by host.name; pivot on source.ip / user.name to determine whether failures came from one source or many.",
+    "language": "lucene",
+    "query": "process.name:sshd AND event.outcome:failure"
+  },
+  "reason": "event on canary-1 created medium alert v2 sshd failed-auth burst.",
+  "host": {
+    "name": "canary-1"
+  },
+  "user": {
+    "name": null
+  },
+  "ancestor_events": [
+    {
+      "id": "eef223ff-0980-56b8-9daa-094c67ae9918",
+      "type": "event",
+      "index": "logs-system.auth-*",
+      "depth": 0
+    }
+  ],
+  "signal_index": ".internal.alerts-security.alerts-default-*",
+  "threshold_result": {
+    "count": 89,
+    "from": "2026-07-25T07:45:35.000Z",
+    "terms": [
+      {
+        "field": "host.name",
+        "value": "canary-1"
+      }
+    ]
+  }
+}
