@@ -9,6 +9,7 @@
   "plus_event_recall": null,
   "zero_precision": 1.0,
   "field_grades": {},
+  "contradiction_grades": {},
   "wrong_concrete_fields": 0,
   "false_suppression": 0,
   "malformed_projections": 0,
@@ -25,6 +26,7 @@
       "class_match": true,
       "heterogeneous": false,
       "fields": {},
+      "contradictions": {},
       "intent_note": false
     },
     {
@@ -35,6 +37,7 @@
       "class_match": true,
       "heterogeneous": false,
       "fields": {},
+      "contradictions": {},
       "intent_note": false
     },
     {
@@ -45,6 +48,7 @@
       "class_match": true,
       "heterogeneous": false,
       "fields": {},
+      "contradictions": {},
       "intent_note": false
     }
   ]

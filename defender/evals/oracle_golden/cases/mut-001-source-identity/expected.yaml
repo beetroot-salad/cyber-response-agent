@@ -9,11 +9,26 @@
 # No new telemetry was captured (the mutated operation was not fired) — a
 # mutation test scores the PROJECTION's response to the story edit, not observed
 # ground truth. `fields` are the mutated values the projection must carry.
+#
+# THE MUTATION MOVES TWO LEADS OUT OF THEIR ENVELOPE. l-004 (6 of 6 queries) and
+# l-006 (7 of 7) hard-filter `source.ip == "172.18.0.15"`. Moving the attacker to
+# 172.18.0.30 puts the activity outside those filters, so the mutated operation
+# writes nothing they surface: their class changes +event -> `0`, and demanding
+# `source.ip: 172.18.0.30` there would demand a value the query cannot return.
+# That envelope shift is a second, sharper discriminator than the field swap —
+# a projection that copies case-001 emits the old burst; one that reasons from
+# the story emits nothing, because the story's source no longer matches the
+# filter. These two leads were labelled `+event` in the seed set (inherited from
+# case-001 rather than re-derived from the mutated story), which scored a correct
+# empty projection as two disagreements.
 case_id: mut-001-source-identity
 kind: mutation
 base_case: case-001-ssh-bruteforce-canary
 mutation: "source.ip 172.18.0.15 -> 172.18.0.30 ; user.name root -> admin"
 result_classes_covered: ["+event", "0"]
+mutation_effect:
+  reclassified: ["l-004", "l-006"]   # +event -> 0: the mutation leaves their filter
+  field_swap:   ["l-001", "l-002"]   # still +event, must carry the mutated values
 must_not_emit: ["172.18.0.15", "root"]   # the original values — their presence = copying
 
 leads:
@@ -26,22 +41,34 @@ leads:
       user.name: "admin"
       host.name: "canary-1"
       event.outcome: "failure"
-  l-002: { system: elastic, template: sshd-auth-history, class: "+event",
-           fields: { source.ip: "172.18.0.30", user.name: "admin" } }
+  l-002:
+    system: elastic
+    template: sshd-auth-history
+    class: "+event"
+    fields: { source.ip: "172.18.0.30", user.name: "admin" }
+    observed_fields:
+      # The lead's first query counts hits on rule v2-sshd-success-after-failures.
+      # The mutated story still produces no successful login, so the rule does not
+      # fire — case-001's capture of this same query returned 0 rows. A projection
+      # that volunteers a concrete alert count here has manufactured a catch.
+      alerts: 0
   l-003: { system: cmdb, template: host-trust-edges, class: "0" }
   l-004:
     system: elastic
     template: zeek-ssh-by-ip
-    class: "+event"
-    fields:
-      source.ip: "172.18.0.30"
-      destination.ip: "172.18.0.9"
+    class: "0"                    # every query filters source.ip == 172.18.0.15
+    note: >
+      All 6 queries are scoped to the ORIGINAL source IP. The mutated attacker
+      (172.18.0.30) writes nothing these queries match, so the delta is 0. The
+      baseline rows they return are undisturbed by the story.
   l-005: { system: threat-intel, template: ip-reputation-lookup, class: "0" }
   l-006:
     system: elastic
     template: sshd-auth-history
-    class: "+event"
-    fields: { user.name: "admin", host.name: "canary-1", event.outcome: "failure" }
+    class: "0"                    # all 7 queries filter source.ip == 172.18.0.15
+    note: >
+      Same envelope shift as l-004: the lead establishes a baseline FOR
+      172.18.0.15, and the mutated operation never touches that source.
   l-007: { system: cmdb, template: host-trust-edges, class: "0" }
   l-008: { system: identity, template: access-check, class: "0" }
   l-009: { system: change-mgmt, template: active-changes, class: "0" }

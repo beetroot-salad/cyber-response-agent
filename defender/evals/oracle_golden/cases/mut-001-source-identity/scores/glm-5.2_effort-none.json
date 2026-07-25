@@ -1,21 +1,23 @@
 {
   "projection": "glm-5.2_effort-none.yaml",
   "n_leads": 9,
-  "class_agreement": "7/9",
+  "class_agreement": "9/9",
   "by_system": {
     "change-mgmt": "1/1",
     "cmdb": "2/2",
-    "elastic": "2/4",
+    "elastic": "4/4",
     "identity": "1/1",
     "threat-intel": "1/1"
   },
-  "plus_event_recall": 0.5,
+  "plus_event_recall": 1.0,
   "zero_precision": 1.0,
   "field_grades": {
-    "correct": 6,
-    "missing": 5
+    "correct": 6
   },
-  "wrong_concrete_fields": 0,
+  "contradiction_grades": {
+    "wrong(got 1)": 1
+  },
+  "wrong_concrete_fields": 1,
   "false_suppression": 0,
   "malformed_projections": 0,
   "forbidden_emitted": [],
@@ -36,6 +38,7 @@
         "host.name": "correct",
         "event.outcome": "correct"
       },
+      "contradictions": {},
       "intent_note": false
     },
     {
@@ -49,6 +52,9 @@
         "source.ip": "correct",
         "user.name": "correct"
       },
+      "contradictions": {
+        "alerts": "wrong(got 1)"
+      },
       "intent_note": false
     },
     {
@@ -59,19 +65,18 @@
       "class_match": true,
       "heterogeneous": false,
       "fields": {},
+      "contradictions": {},
       "intent_note": false
     },
     {
       "lead": "l-004",
       "system": "elastic",
-      "expected": "+event",
+      "expected": "0",
       "predicted": "0",
-      "class_match": false,
+      "class_match": true,
       "heterogeneous": false,
-      "fields": {
-        "source.ip": "missing",
-        "destination.ip": "missing"
-      },
+      "fields": {},
+      "contradictions": {},
       "intent_note": false
     },
     {
@@ -82,20 +87,18 @@
       "class_match": true,
       "heterogeneous": false,
       "fields": {},
+      "contradictions": {},
       "intent_note": false
     },
     {
       "lead": "l-006",
       "system": "elastic",
-      "expected": "+event",
+      "expected": "0",
       "predicted": "0",
-      "class_match": false,
+      "class_match": true,
       "heterogeneous": false,
-      "fields": {
-        "user.name": "missing",
-        "host.name": "missing",
-        "event.outcome": "missing"
-      },
+      "fields": {},
+      "contradictions": {},
       "intent_note": false
     },
     {
@@ -106,6 +109,7 @@
       "class_match": true,
       "heterogeneous": false,
       "fields": {},
+      "contradictions": {},
       "intent_note": false
     },
     {
@@ -116,6 +120,7 @@
       "class_match": true,
       "heterogeneous": false,
       "fields": {},
+      "contradictions": {},
       "intent_note": false
     },
     {
@@ -126,6 +131,7 @@
       "class_match": true,
       "heterogeneous": false,
       "fields": {},
+      "contradictions": {},
       "intent_note": false
     }
   ]
