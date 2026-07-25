@@ -15,22 +15,19 @@ Usage: replay.py <case_dir> [--tag <label>]
 """
 from __future__ import annotations
 
-import argparse
 import json
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from uuid import uuid4
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
+sys.path.insert(0, "/workspace")
 
-from defender._io import read_text_utf8  # noqa: E402
-from defender.learning.core.config import oracle_effort, oracle_model  # noqa: E402
-from defender.learning.core.validate import dump_oracle_doc  # noqa: E402
-from defender.learning.pipeline.oracle.run import invoke_oracle_lead  # noqa: E402
-from defender.learning.pipeline.oracle.sample import assemble_oracle_doc  # noqa: E402
-from defender.learning.pipeline.oracle_engine import _run_oracle_pydantic  # noqa: E402
+from defender.learning.core.config import ORACLE_EFFORT, ORACLE_MODEL
+from defender.learning.core.validate import dump_oracle_doc
+from defender.learning.pipeline.oracle.run import invoke_oracle_lead
+from defender.learning.pipeline.oracle.sample import assemble_oracle_doc
+from defender.learning.pipeline.oracle_engine import _run_oracle_pydantic
 
 
 @dataclass(frozen=True)
@@ -49,8 +46,7 @@ class _Lead:
 
 
 def load_visible_leads(case_dir: Path) -> list[_Lead]:
-    text = read_text_utf8(case_dir / "oracle_visible" / "leads.jsonl")
-    rows = [json.loads(line) for line in text.splitlines() if line.strip()]
+    rows = [json.loads(l) for l in (case_dir / "oracle_visible" / "leads.jsonl").read_text().splitlines() if l.strip()]
     return [
         _Lead(r["lead_id"], r.get("goal"), r.get("what_to_summarize") or [],
               [_Query(q["query_id"], q.get("params") or {}) for q in r.get("queries", [])])
@@ -58,37 +54,31 @@ def load_visible_leads(case_dir: Path) -> list[_Lead]:
     ]
 
 
-def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(description=__doc__,
-                                formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("case_dir", type=Path, help="golden case directory")
-    p.add_argument("--tag", default=f"{oracle_model()}_effort-{oracle_effort()}",
-                   help="projection tag (default: <model>_effort-<effort>)")
-    ns = p.parse_args(argv)
+def main() -> None:
+    case_dir = Path(sys.argv[1]).resolve()   # bind() requires an absolute trace root
+    tag = None
+    if "--tag" in sys.argv:
+        tag = sys.argv[sys.argv.index("--tag") + 1]
+    tag = tag or f"{ORACLE_MODEL}_effort-{ORACLE_EFFORT}"
 
-    case_dir = ns.case_dir.resolve()   # bind() requires an absolute trace root
-    tag = ns.tag
-
-    story = read_text_utf8(case_dir / "oracle_visible" / "story.md")
+    story = (case_dir / "oracle_visible" / "story.md").read_text(encoding="utf-8")
     leads = load_visible_leads(case_dir)
     learning_dir = case_dir / "projections" / f"_trace_{tag}"
     learning_dir.mkdir(parents=True, exist_ok=True)
 
     projections = []
     for lead in leads:
-        sample = read_text_utf8(case_dir / "oracle_visible" / "samples" / f"{lead.lead_id}.txt")
-        # `salt` is left to invoke_oracle_lead's own per-stage default — one anchor.
+        sample = (case_dir / "oracle_visible" / "samples" / f"{lead.lead_id}.txt").read_text(encoding="utf-8")
         events = invoke_oracle_lead(
             lead, story, sample, learning_dir,
-            trace_prefix=tag, oracle_fn=_run_oracle_pydantic)
+            trace_prefix=tag, oracle_fn=_run_oracle_pydantic, salt=uuid4().hex)
         projections.append((lead.lead_id, events))
         print(f"  {lead.lead_id}: {len(events)} event(s)")
 
     out = case_dir / "projections" / f"{tag}.yaml"
     out.write_text(dump_oracle_doc(assemble_oracle_doc(projections)), encoding="utf-8")
     print(f"wrote {out}")
-    return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()

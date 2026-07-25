@@ -10,72 +10,44 @@ A case binds four things (#693):
 
 The hidden/visible split is enforced at the FILE level: `oracle_visible/` is
 exactly what a projection may read; `hidden/` is the scoring target. `replay.py`
-reads only `oracle_visible/`. `score.py` reads neither — it scores against
-`expected.yaml`, the labels a human authors *from* `hidden/`.
+reads only `oracle_visible/`; `score.py` reads `hidden/`.
 
 Redaction reuses the production seam (`oracle.sample.lead_sample_text`) so the
 stored oracle-visible sample is byte-identical to what the live oracle receives.
 
-The case id is the output directory's name — one anchor, rather than an id
-argument that can drift from the path it is written to.
-
 Usage:
-  build_case.py <run_dir> <story.md> <controls.yaml> <out_dir>
+  build_case.py <case_id> <run_dir> <story.md> <controls.yaml> <out_dir>
 
 controls.yaml (hand-authored from the capture session) is copied verbatim into
 hidden/ and is the record of the shape-matched control-window measurements.
-
-NOTE: no scrubbing happens here. Everything under `hidden/observed/` is committed
-verbatim, which is correct for the synthetic `playground-v2` stack and ONLY for
-it — never point this at a run over real telemetry.
 """
 from __future__ import annotations
 
-import argparse
 import json
 import shutil
 import sys
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
+sys.path.insert(0, "/workspace")
 
-from defender.learning import lead_repository  # noqa: E402
-from defender.learning.pipeline.oracle.sample import lead_sample_text  # noqa: E402
+from defender.learning import lead_repository
+from defender.learning.pipeline.oracle.sample import lead_sample_text
 
 
-def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(description=__doc__,
-                                formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("run_dir", type=Path, help="defender run dir to capture leads/queries from")
-    p.add_argument("story", type=Path, help="hand-authored ground-truth story.md")
-    p.add_argument("controls", type=Path, help="hand-authored control-window controls.yaml")
-    p.add_argument("out_dir", type=Path, help="cases/<case-id> — its name IS the case id")
-    ns = p.parse_args(argv)
-
-    out = ns.out_dir
-    case_id = out.name
+def main() -> None:
+    case_id, run_dir_s, story_s, controls_s, out_s = sys.argv[1:6]
+    run_dir, out = Path(run_dir_s), Path(out_s)
     vis = out / "oracle_visible"
     hidden = out / "hidden"
-
-    # Re-capturing overwrites in place, so clear the two trees this script OWNS
-    # first — otherwise a lead dropped since the last capture keeps a stale
-    # sample and stale observed payloads, and the case silently describes a run
-    # that no longer exists. Hand-authored siblings (expected.yaml, manifest.yaml,
-    # projections/, scores/) are never touched.
-    for owned in (vis / "samples", hidden / "observed"):
-        if owned.exists():
-            shutil.rmtree(owned)
     (vis / "samples").mkdir(parents=True, exist_ok=True)
     (hidden / "observed").mkdir(parents=True, exist_ok=True)
 
     # Story — oracle-visible.
-    shutil.copyfile(ns.story, vis / "story.md")
+    shutil.copyfile(story_s, vis / "story.md")
     # Controls — hidden ground-truth baseline.
-    shutil.copyfile(ns.controls, hidden / "controls.yaml")
+    shutil.copyfile(controls_s, hidden / "controls.yaml")
 
-    leads = lead_repository.joined(ns.run_dir)
+    leads = lead_repository.joined(run_dir)
     leads_rows = []
     for jl in leads:
         # ORACLE-VISIBLE: exactly the fields build_lead_user_prompt consumes.
@@ -101,10 +73,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"built case {case_id} at {out}")
     print(f"  leads: {len(leads_rows)}  "
           f"(oracle-visible: story + leads.jsonl + {len(leads_rows)} samples)")
-    print("  hidden: observed payloads + controls.yaml")
-    print(f"  next: author {out / 'expected.yaml'} and {out / 'manifest.yaml'} from hidden/")
-    return 0
+    print(f"  hidden: observed payloads + controls.yaml")
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()

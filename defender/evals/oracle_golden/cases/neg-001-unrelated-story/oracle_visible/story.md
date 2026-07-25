@@ -18,6 +18,10 @@ the account's authorized scope and matches its established daily cadence.
 
 2. Bypass
 
-Not applicable — this is authorized routine automation, not an operation
-seeking cover. The job runs on its normal schedule with its normal
-credential and makes no attempt to hide.
+Not applicable — this is authorized routine automation, not an operation seeking
+cover. It is included as a NEGATIVE CONTROL: the defender's leads for an
+UNRELATED canary brute-force alert (their query windows happen to contain a
+failure burst) are shown to this story. A faithful oracle projects the delta THIS
+story writes — which touches none of those leads — and must therefore return `0`
+for every lead. Any `+event` it emits is a projection copied from the query
+window or salience hint, not caused by the story.

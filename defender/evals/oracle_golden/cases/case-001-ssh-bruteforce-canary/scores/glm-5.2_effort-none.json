@@ -15,14 +15,8 @@
     "correct": 7,
     "missing": 6
   },
-  "contradiction_grades": {},
   "wrong_concrete_fields": 0,
   "false_suppression": 0,
-  "malformed_projections": 0,
-  "forbidden_emitted": [],
-  "missing_leads": [],
-  "unscored_leads": [],
-  "duplicate_leads": [],
   "rows": [
     {
       "lead": "l-001",
@@ -37,7 +31,6 @@
         "host.name": "correct",
         "event.outcome": "correct"
       },
-      "contradictions": {},
       "intent_note": false
     },
     {
@@ -52,7 +45,6 @@
         "user.name": "missing",
         "event.outcome": "missing"
       },
-      "contradictions": {},
       "intent_note": true
     },
     {
@@ -63,7 +55,6 @@
       "class_match": true,
       "heterogeneous": false,
       "fields": {},
-      "contradictions": {},
       "intent_note": false
     },
     {
@@ -78,7 +69,6 @@
         "destination.ip": "correct",
         "destination.port": "correct"
       },
-      "contradictions": {},
       "intent_note": false
     },
     {
@@ -89,7 +79,6 @@
       "class_match": true,
       "heterogeneous": false,
       "fields": {},
-      "contradictions": {},
       "intent_note": false
     },
     {
@@ -104,7 +93,6 @@
         "host.name": "missing",
         "event.outcome": "missing"
       },
-      "contradictions": {},
       "intent_note": true
     },
     {
@@ -115,7 +103,6 @@
       "class_match": true,
       "heterogeneous": false,
       "fields": {},
-      "contradictions": {},
       "intent_note": false
     },
     {
@@ -126,7 +113,6 @@
       "class_match": true,
       "heterogeneous": false,
       "fields": {},
-      "contradictions": {},
       "intent_note": false
     },
     {
@@ -137,7 +123,6 @@
       "class_match": true,
       "heterogeneous": false,
       "fields": {},
-      "contradictions": {},
       "intent_note": false
     }
   ]
