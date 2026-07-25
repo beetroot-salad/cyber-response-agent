@@ -64,7 +64,7 @@ def run_one(out_dir, i, actor_only):
         actor_input = ldir / "actor_input.yaml"
         actor_input.write_text(LR.render_actor_view_yaml(str(FX)))
         print(f"[run{i}] actor... (lesson_present={RETIRED_LESSON.is_file()})", flush=True)
-        story = S.invoke_actor(FX / "alert.json", actor_input, ldir)
+        story = S.invoke_actor(FX / "alert.json", actor_input, ldir, box=None)
         (ldir / "actor_story.md").write_text(story)
         if _is_skip(story):
             result.update(status="skip", outcome="skip-passthrough", story_bytes=len(story))
@@ -79,7 +79,7 @@ def run_one(out_dir, i, actor_only):
         proj = ldir / "projected_telemetry.yaml"
         proj.write_text(_strip(S.invoke_oracle(FX, ldir / "actor_story.md")))
         print(f"[run{i}] judge...", flush=True)
-        jstr = _strip(S.invoke_judge(FX, ldir / "actor_story.md", proj, ldir))
+        jstr = _strip(S.invoke_judge(FX, ldir / "actor_story.md", proj, ldir, box=None))
         (ldir / "judge_findings.yaml").write_text(jstr)
         try:
             doc = yaml.safe_load(jstr)

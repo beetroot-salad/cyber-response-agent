@@ -511,7 +511,12 @@ def _host_fallback_env(request: BoxRequest) -> dict[str, str]:
     defender_dir = Path(request.workdir) / "defender"
     env["DEFENDER_DIR"] = str(defender_dir)
     env["PATH"] = f"{defender_dir / 'bin'}{os.pathsep}{env.get('PATH', '')}"
-    env["PYTHONPATH"] = str(request.workdir)
+    # PREPENDED like PATH above, not assigned: a bare host subprocess keeps whatever
+    # PYTHONPATH the operator's shell set (the whole point of "inherits the host env").
+    inherited = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = (
+        f"{request.workdir}{os.pathsep}{inherited}" if inherited else str(request.workdir)
+    )
     return env
 
 
@@ -521,10 +526,18 @@ def start_box(
 ) -> BoxExecutor:
     if isinstance(run_dir_or_request, BoxRequest):
         request = run_dir_or_request
-        if spec is not DEFAULT_SPEC:
+        # Compared by VALUE, not identity: BoxSpec is a frozen value object and
+        # `BoxSpec.from_env({})` legitimately returns a fresh-but-equal default, which an
+        # `is not` check would reject as "ambiguous" even though it names nothing.
+        if spec != DEFAULT_SPEC:
             raise TypeError(
                 "start_box(request, spec=…) is ambiguous — a BoxRequest carries its own spec; "
                 "set it on the request (BoxRequest(..., spec=…)) instead of the call"
+            )
+        if defender_dir is not None:
+            raise TypeError(
+                "start_box(request, defender_dir) is ambiguous — a BoxRequest carries its own "
+                "geography; put the tree in its mounts/workdir instead of the call"
             )
         try:
             return _start_boxed_request(request, docker)

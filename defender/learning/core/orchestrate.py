@@ -587,27 +587,36 @@ def _validate_merge_mode() -> None:
     merge_mode()
 
 
-_CORPUS_FOR_TRIGGER_MODULE = {
-    "author_actor": "lessons-actor",
-    "author_actor_benign": "lessons-environment",
-    "author_actor_env": "lessons-environment",
+# Trigger module → the LoopPaths attribute that already owns that curator's corpus dir. The
+# directory NAMES live in `DefenderPaths` alone (`_paths.py`); re-spelling them here would let
+# a rename there turn every drain box into an absent-bind-source create failure.
+_CORPUS_ATTR_FOR_TRIGGER_MODULE = {
+    "author_actor": "lessons_actor_dir",
+    "author_actor_benign": "lessons_environment_dir",
+    "author_actor_env": "lessons_environment_dir",
 }
 
 
-def _drain_triggered_corpora(paths: LoopPaths) -> tuple[str, ...]:
+def _drain_triggered_corpora(paths: LoopPaths) -> tuple[Path, ...]:
     """R6 — decide-all-triggered before the box is created: the base lessons corpus is the
     one `author_drain`'s has_work gate always answers for (`_has_curator_work`'s primary
     check); the actor/environment siblings join only when THEIR own threshold independently
     fires. Evaluated once, before `_run_worktree_batch` composes the drain box's mount set —
-    never a static union of all three (M1)."""
-    triggered = ["lessons"]
+    never a static union of all three (M1).
+
+    Corpus dirs come off `paths`, so pass the WORKTREE-rooted LoopPaths: `with_repo_root`
+    preserves `state_root`, so the queue counts are the same files either way."""
+    triggered = [paths.lessons_dir]
     for direction in BY_NAME.values():
         for t in (direction.obs_trigger, *direction.extra_obs_triggers):
             threshold = env_int(t.threshold_env, 5)
             if _pending_queue_count(t.pending_file(paths)) >= threshold:
-                corpus = _CORPUS_FOR_TRIGGER_MODULE.get(t.module_name)
-                if corpus is not None and corpus not in triggered:
-                    triggered.append(corpus)
+                attr = _CORPUS_ATTR_FOR_TRIGGER_MODULE.get(t.module_name)
+                if attr is None:
+                    continue
+                corpus_dir = getattr(paths, attr)
+                if corpus_dir not in triggered:
+                    triggered.append(corpus_dir)
     return tuple(triggered)
 
 
@@ -618,15 +627,14 @@ def _drain_box_request(
     `<wt>/defender` and is both drain roles' cwd_anchor), rw ONLY over what this batch actually
     needs — the triggered lesson corpora for `author_drain`, `<wt>/defender/skills` for
     `lead_author_drain` — never a static union (M1), never anything outside the leaf (S3)."""
+    wt_paths = paths.with_repo_root(wt)
     mounts = [box_mod.Mount(source=wt, target=wt, writable=False)]
     if label == "lead_author_drain":
-        skills_dir = wt / "defender" / "skills"
-        mounts.append(box_mod.Mount(source=skills_dir, target=skills_dir, writable=True))
+        rw_dirs: tuple[Path, ...] = (wt_paths.skills_dir,)
     else:
-        defender_dir = wt / "defender"
-        for corpus in _drain_triggered_corpora(paths):
-            corpus_dir = defender_dir / corpus
-            mounts.append(box_mod.Mount(source=corpus_dir, target=corpus_dir, writable=True))
+        rw_dirs = _drain_triggered_corpora(wt_paths)
+    for d in rw_dirs:
+        mounts.append(box_mod.Mount(source=d, target=d, writable=True))
     return box_mod.BoxRequest(
         name=f"defender-drain-{batch_id}", mounts=tuple(mounts), workdir=wt, env={},
     )

@@ -420,18 +420,27 @@ def _path_matches(value, needle: str) -> bool:
     """Does `value` (a path) match `needle`?
 
     An ABSOLUTE needle matches by path identity (it, or a tree under it). A RELATIVE needle
-    is a path COMPONENT and must match a whole component — never a bare substring. The
-    substring spelling was non-discriminating in the false-POSITIVE direction: pytest names
+    is a run of whole path COMPONENTS and must match component-wise — never a bare substring.
+    The substring spelling was non-discriminating in the false-POSITIVE direction: pytest names
     `tmp_path` after the test function, so under `test_gather_raw_.../` every mount's path
     contains the literal "gather_raw" and `mount_for(req, "gather_raw")` answered with an
     unrelated mount instead of None. Same distinction the gate draws at
     runtime/permission/files.py:222-228 (the `gather_raw` path component vs. the word).
+
+    A MULTI-component relative needle ("defender/skills") is matched as a contiguous run of
+    components. Testing the raw needle string against `p.parts` could never match one, so an
+    `is None` assertion over such a needle would pass vacuously.
     """
     p = Path(str(value))
     n = Path(needle)
     if n.is_absolute():
         return p == n or p.is_relative_to(n)
-    return needle in p.parts
+    want, have = n.parts, p.parts
+    if not want:
+        return False
+    return any(
+        have[i:i + len(want)] == want for i in range(len(have) - len(want) + 1)
+    )
 
 
 def mount_for(request, needle: str):

@@ -629,7 +629,8 @@ def test_author_drain_triggers_all_curators(tmp_path: Path):
         paths,
         trigger_author=lambda paths, pending_file, env, module, label, **_kw: triggered.append(module),
         branch=_FakeBranch(),
-     start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub)
+        start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub,
+    )
     assert triggered == [
         "author", "author_actor", "author_actor_env", "author_actor_benign",
     ]
@@ -644,7 +645,8 @@ def test_author_drain_skips_when_lease_held(tmp_path: Path):
         paths,
         trigger_author=lambda *a, **_kw: triggered.append(a),
         branch=branch,
-     start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub)
+        start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub,
+    )
     assert rc == 0
     assert triggered == []
     assert "start" not in branch.events
@@ -658,7 +660,8 @@ def test_author_drain_skips_when_no_work(tmp_path: Path):
         paths,
         trigger_author=lambda *a, **_kw: triggered.append(a),
         branch=branch,
-     start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub)
+        start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub,
+    )
     assert rc == 0
     assert branch.events == []
     assert triggered == []
@@ -688,7 +691,8 @@ def test_author_drain_singleton_lock_exits_without_work(tmp_path: Path):
             paths,
             trigger_author=lambda *a, **_kw: worked.append("trigger"),
             branch=_FakeBranch(),
-         start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub)
+            start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub,
+        )
         assert rc == 0
         assert worked == []
     finally:
@@ -709,7 +713,8 @@ def test_lead_author_drain_runs_lead_author_then_clears_marker(tmp_path: Path):
         paths,
         run_lead_author=lambda wt_paths, rd, **_kw: seen.append((wt_paths.repo_root, rd)),
         branch=branch,
-     start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub)
+        start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub,
+    )
     assert [rd for _, rd in seen] == [run_dir.resolve()]
     assert str(seen[0][0]).startswith("/tmp/wt-")
     assert not (paths.author_queue_dir / "case-b.json").exists()
@@ -727,7 +732,8 @@ def test_lead_author_drain_runs_pitfalls_after_markers(tmp_path: Path):
         run_lead_author=lambda wt_paths, rd, **_kw: order.append("marker"),
         run_pitfalls=lambda wt_paths, **_kw: (order.append("pitfalls"), 0)[1],
         branch=_FakeBranch(prefix="lead-author/"),
-     start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub)
+        start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub,
+    )
     assert order == ["marker", "pitfalls"]
 
 
@@ -754,7 +760,8 @@ def test_lead_author_drain_marks_artifact_missing(tmp_path: Path):
         paths,
         run_lead_author=lambda wt_paths, rd, **_kw: seen.append(rd),
         branch=_FakeBranch(prefix="lead-author/"),
-     start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub)
+        start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub,
+    )
     assert seen == [run_dir.resolve()]
     assert not (paths.author_queue_dir / "case-gone.json").exists()
     failed = paths.author_queue_dir / "failed" / "case-gone.json"
@@ -769,8 +776,9 @@ def test_lead_author_drain_skips_when_lease_held(tmp_path: Path):
     seen: list = []
     branch = _FakeBranch(prefix="lead-author/", pr_exists=True)
     rc = orch.lead_author_drain(
-        paths, run_lead_author=lambda wt_paths, rd, **_kw: seen.append(rd), branch=branch
-    , start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub)
+        paths, run_lead_author=lambda wt_paths, rd, **_kw: seen.append(rd),
+        branch=branch, start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub,
+    )
     assert rc == 0
     assert seen == []
     assert "start" not in branch.events
@@ -793,7 +801,8 @@ def test_lead_author_drain_singleton_lock_distinct_from_lessons(tmp_path: Path):
             paths,
             run_lead_author=lambda wt_paths, rd, **_kw: seen.append(rd),
             branch=_FakeBranch(prefix="lead-author/"),
-         start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub)
+            start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub,
+        )
         assert rc == 0
         assert seen == [run_dir.resolve()]
     finally:
@@ -817,8 +826,9 @@ def test_lead_author_drain_quarantines_poison_run_dir(tmp_path: Path):
         seen.append(rd)
 
     orch.lead_author_drain(
-        paths, run_lead_author=maybe_boom, branch=_FakeBranch(prefix="lead-author/")
-    , start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub)
+        paths, run_lead_author=maybe_boom, branch=_FakeBranch(prefix="lead-author/"),
+        start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub,
+    )
     assert seen == [good.resolve()]
     assert not (paths.author_queue_dir / "case-poison.json").exists()
     failed = paths.author_queue_dir / "failed" / "case-poison.json"

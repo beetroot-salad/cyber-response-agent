@@ -275,6 +275,7 @@ def generate(variant: str, fixture: str, seed: int) -> Path:
             alert_path=fx / "alert.json",
             actor_input_path=fx / "actor_input.yaml",
             learning_run_dir=seeded,
+            box=None,
         )
     finally:
         loop.ACTOR_PROMPT = orig_prompt
