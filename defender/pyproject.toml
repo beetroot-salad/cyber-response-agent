@@ -25,6 +25,16 @@ runtime = [
     # is needed. Sources with a native aggregating query language
     # (elastic → ES|QL) never reach for it.
     "duckdb>=1.5,<2",
+    # sqlite — the session store (per-case message log + recorded views, the
+    # substrate compaction and session forking both select over) uses the
+    # STDLIB `sqlite3`, so there is deliberately NO pip entry for it here. Two
+    # things it does constrain, neither expressible as a pip dep: the
+    # interpreter must have been built with the `sqlite3` extension module
+    # (both the devcontainer's python:3.11-slim and CI's uv-managed 3.11 are),
+    # and the libsqlite3 it links must be >= 3.37 for STRICT tables (WAL and
+    # json1 are much older); both ship 3.46. The `sqlite3` CLI binary is for
+    # human inspection only — nothing shells out to it — and is installed in
+    # .devcontainer/Dockerfile.dev for that purpose.
 ]
 dev = [
     "pytest>=8.0",
