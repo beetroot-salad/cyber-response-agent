@@ -1,0 +1,21 @@
+signal: "sre.alice accepted sshd logins to db-1 from jump-box-1 (172.18.0.6)"
+operation_window: ["2026-07-25T10:33:05Z", "2026-07-25T10:33:26Z"]
+logins_generated:
+  - {t: "2026-07-25T10:33:07Z", kind: routine,   cmd: "uptime && df -h /"}
+  - {t: "2026-07-25T10:33:13Z", kind: routine,   cmd: "uptime && df -h /"}
+  - {t: "2026-07-25T10:33:20Z", kind: MALICIOUS, cmd: "id; cat /etc/passwd; ls /var/lib/postgresql; ss -tlnp"}
+  - {t: "2026-07-25T10:33:26Z", kind: routine,   cmd: "uptime && df -h /"}
+observed_l001:
+  # all logins fold into ONE aggregate row — the malicious one is not separable
+  accepted: 5            # 4 generated + 1 concurrent baseline sre-multihop
+  failed: 0
+  source_ip: "172.18.0.6"
+  user: "sre.alice"
+  auth_method: "password"
+baseline:
+  note: >
+    sre.alice -> db-1 from the jump host is authorized routine (sre-multihop-ssh
+    baseline; historical accepted logins present). The malicious login shares
+    every queried field (source.ip, user.name, host.name, auth_method, outcome)
+    with routine access — no distinguishing field exists in this envelope.
+distinguishable: false   # THIS is why the class is +noise, not +event

@@ -1,0 +1,18 @@
+case_id: case-004-noise-stolen-cred
+kind: observed
+disposition_class: malicious
+activity_family: valid-accounts / T1078.004 + T1021.004 (stolen-credential lateral access)
+operation:
+  method: "sre.alice SSH jump-box-1 -> db-1, recon payload, run live"
+  window: ["2026-07-25T10:33:05Z", "2026-07-25T10:33:26Z"]
+  source: "jump-box-1 (172.18.0.6)"
+  target: "db-1 (172.18.0.21)"
+env: {stack: playground-v2, snapshot: "412422251", captured: "2026-07-25"}
+result_classes_covered: ["+noise", "0"]
+lead_source: authored
+new_coverage: "+noise result class — the last of the four; malice hidden in baseline-shape auth"
+projections:
+  - tag: glm-5.2_effort-none
+    oracle_model: glm-5.2
+    oracle_effort: none
+    produced_by: replay.py (production oracle seam, oracle_visible only)
