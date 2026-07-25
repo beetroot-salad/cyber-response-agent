@@ -1,0 +1,15 @@
+{
+  "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-25T09:35:00.000Z\" AND @timestamp < \"2026-07-25T09:45:00.000Z\"\n        AND host.name == \"dev-ws-1\"\n| STATS events = COUNT(*) BY data_stream.dataset\n| SORT events DESC",
+  "columns": [
+    {
+      "name": "events",
+      "type": "long"
+    },
+    {
+      "name": "data_stream.dataset",
+      "type": "keyword"
+    }
+  ],
+  "row_count": 0,
+  "values": []
+}

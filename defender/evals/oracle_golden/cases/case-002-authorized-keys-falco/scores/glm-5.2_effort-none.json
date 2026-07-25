@@ -1,0 +1,43 @@
+{
+  "projection": "glm-5.2_effort-none.yaml",
+  "n_leads": 2,
+  "class_agreement": "2/2",
+  "by_system": {
+    "cmdb": "1/1",
+    "elastic": "1/1"
+  },
+  "plus_event_recall": 1.0,
+  "zero_precision": 1.0,
+  "field_grades": {
+    "correct": 3
+  },
+  "wrong_concrete_fields": 0,
+  "false_suppression": 0,
+  "forbidden_emitted": [],
+  "rows": [
+    {
+      "lead": "l-001",
+      "system": "elastic",
+      "expected": "+event",
+      "predicted": "+event",
+      "class_match": true,
+      "heterogeneous": false,
+      "fields": {
+        "falco.rule": "correct",
+        "falco.output_fields.fd.name": "correct",
+        "falco.output_fields.user.name": "correct"
+      },
+      "intent_note": false
+    },
+    {
+      "lead": "l-002",
+      "system": "cmdb",
+      "expected": "0",
+      "predicted": "0",
+      "class_match": true,
+      "heterogeneous": false,
+      "fields": {},
+      "intent_note": false
+    }
+  ]
+}

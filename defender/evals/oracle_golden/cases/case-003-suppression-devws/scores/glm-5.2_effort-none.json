@@ -1,0 +1,56 @@
+{
+  "projection": "glm-5.2_effort-none.yaml",
+  "n_leads": 4,
+  "class_agreement": "4/4",
+  "by_system": {
+    "cmdb": "1/1",
+    "elastic": "3/3"
+  },
+  "plus_event_recall": 0.0,
+  "zero_precision": 1.0,
+  "field_grades": {},
+  "wrong_concrete_fields": 0,
+  "false_suppression": 0,
+  "rows": [
+    {
+      "lead": "l-001",
+      "system": "elastic",
+      "expected": "-noise",
+      "predicted": "-noise",
+      "class_match": true,
+      "heterogeneous": false,
+      "fields": {},
+      "intent_note": false
+    },
+    {
+      "lead": "l-002",
+      "system": "elastic",
+      "expected": "-noise",
+      "predicted": "-noise",
+      "class_match": true,
+      "heterogeneous": false,
+      "fields": {},
+      "intent_note": false
+    },
+    {
+      "lead": "l-003",
+      "system": "elastic",
+      "expected": "0",
+      "predicted": "0",
+      "class_match": true,
+      "heterogeneous": false,
+      "fields": {},
+      "intent_note": false
+    },
+    {
+      "lead": "l-004",
+      "system": "cmdb",
+      "expected": "0",
+      "predicted": "0",
+      "class_match": true,
+      "heterogeneous": false,
+      "fields": {},
+      "intent_note": false
+    }
+  ]
+}

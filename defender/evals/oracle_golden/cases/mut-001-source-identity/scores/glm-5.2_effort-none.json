@@ -1,0 +1,128 @@
+{
+  "projection": "glm-5.2_effort-none.yaml",
+  "n_leads": 9,
+  "class_agreement": "7/9",
+  "by_system": {
+    "change-mgmt": "1/1",
+    "cmdb": "2/2",
+    "elastic": "2/4",
+    "identity": "1/1",
+    "threat-intel": "1/1"
+  },
+  "plus_event_recall": 0.5,
+  "zero_precision": 1.0,
+  "field_grades": {
+    "correct": 6,
+    "missing": 5
+  },
+  "wrong_concrete_fields": 0,
+  "false_suppression": 0,
+  "forbidden_emitted": [],
+  "rows": [
+    {
+      "lead": "l-001",
+      "system": "elastic",
+      "expected": "+event",
+      "predicted": "+event",
+      "class_match": true,
+      "heterogeneous": false,
+      "fields": {
+        "source.ip": "correct",
+        "user.name": "correct",
+        "host.name": "correct",
+        "event.outcome": "correct"
+      },
+      "intent_note": false
+    },
+    {
+      "lead": "l-002",
+      "system": "elastic",
+      "expected": "+event",
+      "predicted": "+event",
+      "class_match": true,
+      "heterogeneous": false,
+      "fields": {
+        "source.ip": "correct",
+        "user.name": "correct"
+      },
+      "intent_note": false
+    },
+    {
+      "lead": "l-003",
+      "system": "cmdb",
+      "expected": "0",
+      "predicted": "0",
+      "class_match": true,
+      "heterogeneous": false,
+      "fields": {},
+      "intent_note": false
+    },
+    {
+      "lead": "l-004",
+      "system": "elastic",
+      "expected": "+event",
+      "predicted": "0",
+      "class_match": false,
+      "heterogeneous": false,
+      "fields": {
+        "source.ip": "missing",
+        "destination.ip": "missing"
+      },
+      "intent_note": false
+    },
+    {
+      "lead": "l-005",
+      "system": "threat-intel",
+      "expected": "0",
+      "predicted": "0",
+      "class_match": true,
+      "heterogeneous": false,
+      "fields": {},
+      "intent_note": false
+    },
+    {
+      "lead": "l-006",
+      "system": "elastic",
+      "expected": "+event",
+      "predicted": "0",
+      "class_match": false,
+      "heterogeneous": false,
+      "fields": {
+        "user.name": "missing",
+        "host.name": "missing",
+        "event.outcome": "missing"
+      },
+      "intent_note": false
+    },
+    {
+      "lead": "l-007",
+      "system": "cmdb",
+      "expected": "0",
+      "predicted": "0",
+      "class_match": true,
+      "heterogeneous": false,
+      "fields": {},
+      "intent_note": false
+    },
+    {
+      "lead": "l-008",
+      "system": "identity",
+      "expected": "0",
+      "predicted": "0",
+      "class_match": true,
+      "heterogeneous": false,
+      "fields": {},
+      "intent_note": false
+    },
+    {
+      "lead": "l-009",
+      "system": "change-mgmt",
+      "expected": "0",
+      "predicted": "0",
+      "class_match": true,
+      "heterogeneous": false,
+      "fields": {},
+      "intent_note": false
+    }
+  ]
+}

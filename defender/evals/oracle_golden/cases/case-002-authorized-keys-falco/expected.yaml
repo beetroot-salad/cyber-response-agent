@@ -1,0 +1,27 @@
+# Ground-truth labels for case-002 (a +event on the FALCO system / falco-alerts
+# template — a system/template case-001 does not exercise). The authorized_keys
+# write fired Falco rule "Adding ssh keys to authorized_keys"; control baseline
+# is 0 on canary-1 in every comparison window (see hidden/controls.yaml), so the
+# event is distinguishable.
+case_id: case-002-authorized-keys-falco
+kind: observed
+result_classes_covered: ["+event", "0"]
+lead_source: authored
+notes: >
+  Distinguishing fields live under falco.output_fields.*. The proc.cmdline field
+  literally contains the attacker's echo of the ssh-rsa key — a strong grounding
+  target. The oracle is not expected to reproduce the full cmdline verbatim
+  (placeholder is fine); it IS expected to name the file and rule.
+leads:
+  l-001:
+    system: elastic
+    template: falco-alerts
+    class: "+event"
+    fields:
+      falco.rule: "Adding ssh keys to authorized_keys"
+      falco.output_fields.fd.name: "/root/.ssh/authorized_keys"
+      falco.output_fields.user.name: "root"
+  l-002:
+    system: cmdb
+    template: host-trust-edges
+    class: "0"

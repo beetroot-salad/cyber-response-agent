@@ -1,0 +1,47 @@
+# Mutation case (#693: "remove or alter a causal action/entity and require the
+# projection to change accordingly"). Base = case-001, with two causal ENTITIES
+# altered in the story: source IP 172.18.0.15 -> 172.18.0.30, user root -> admin.
+# The lead envelopes are byte-identical to case-001 (still scoped to canary-1),
+# so a projection that COPIES case-001 or the query windows emits the OLD values
+# (172.18.0.15 / root) and fails; one that reasons from the story emits the NEW
+# values. This is the discriminator against window/salience copying.
+#
+# No new telemetry was captured (the mutated operation was not fired) — a
+# mutation test scores the PROJECTION's response to the story edit, not observed
+# ground truth. `fields` are the mutated values the projection must carry.
+case_id: mut-001-source-identity
+kind: mutation
+base_case: case-001-ssh-bruteforce-canary
+mutation: "source.ip 172.18.0.15 -> 172.18.0.30 ; user.name root -> admin"
+result_classes_covered: ["+event", "0"]
+must_not_emit: ["172.18.0.15", "root"]   # the original values — their presence = copying
+
+leads:
+  l-001:
+    system: elastic
+    template: sshd-auth-history
+    class: "+event"
+    fields:
+      source.ip: "172.18.0.30"
+      user.name: "admin"
+      host.name: "canary-1"
+      event.outcome: "failure"
+  l-002: { system: elastic, template: sshd-auth-history, class: "+event",
+           fields: { source.ip: "172.18.0.30", user.name: "admin" } }
+  l-003: { system: cmdb, template: host-trust-edges, class: "0" }
+  l-004:
+    system: elastic
+    template: zeek-ssh-by-ip
+    class: "+event"
+    fields:
+      source.ip: "172.18.0.30"
+      destination.ip: "172.18.0.9"
+  l-005: { system: threat-intel, template: ip-reputation-lookup, class: "0" }
+  l-006:
+    system: elastic
+    template: sshd-auth-history
+    class: "+event"
+    fields: { user.name: "admin", host.name: "canary-1", event.outcome: "failure" }
+  l-007: { system: cmdb, template: host-trust-edges, class: "0" }
+  l-008: { system: identity, template: access-check, class: "0" }
+  l-009: { system: change-mgmt, template: active-changes, class: "0" }

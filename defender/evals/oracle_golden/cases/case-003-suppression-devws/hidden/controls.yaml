@@ -1,0 +1,28 @@
+# Baseline for case-003, measured live 2026-07-25. The -noise signature is that
+# a stream normally reporting steadily goes empty in the attack window. These
+# controls establish "normally reporting steadily".
+suppression:
+  action: "stopped dev-ws-1 Elastic Agent (pkill -TERM elastic-agent)"
+  at: "2026-07-25T09:34:34Z"
+  last_shipped_event: "2026-07-25T09:34:29Z"    # host dark from here
+attack_window: ["2026-07-25T09:35:00Z", "2026-07-25T09:45:00Z"]
+
+dev_ws_1:            # the blinded host (l-001 auth stream, l-002 all streams)
+  pre_stop_today:
+    all_streams: {window: ["2026-07-25T09:20:00Z", "2026-07-25T09:34:00Z"], count: 470}
+    auth:        {window: ["2026-07-25T09:20:00Z", "2026-07-25T09:34:00Z"], count: 18}
+  control_prior_saturday:
+    auth: {window: ["2026-07-11T09:34:00Z", "2026-07-11T09:44:00Z"], count: 44}
+  attack_window:     # captured in hidden/observed — empty (dark)
+    all_streams: 0
+    auth: 0
+
+web_1:               # l-003 control host — alive, untouched by the story
+  auth_pre: {window: ["2026-07-25T09:20:00Z", "2026-07-25T09:36:00Z"], count: 10}
+
+interpretation: >
+  dev-ws-1 ships ~470 docs / 14 min routinely (18 auth) and 44 auth in the same
+  clock window a prior Saturday, but 0 across every stream in the attack window —
+  distinguishable darkness. web-1 keeps reporting (10 auth), so the environment
+  as a whole is not quiet: only dev-ws-1 was blinded. The -noise call on the
+  dev-ws-1 leads is earned; a -noise call on web-1 would be a false suppression.

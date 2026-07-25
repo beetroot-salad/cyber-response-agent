@@ -1,0 +1,42 @@
+# Ground-truth labels for case-003 (the -noise / suppression class).
+# The attacker stopped dev-ws-1's Elastic Agent at 2026-07-25T09:34:34Z; the
+# host's last shipped event was 09:34:29Z, and every dev-ws-1 stream is empty
+# afterward (see hidden/controls.yaml). The suppression is REAL and captured.
+#
+# The discriminating test is two-sided:
+#   - the two dev-ws-1 leads read a stream the story explicitly blinds -> -noise
+#     (baseline minus itself; the absence is the signature);
+#   - the web-1 lead reads a live, untouched stream, and a state lookup returns
+#     config -> both 0. A faithful oracle must NOT over-generalize the
+#     suppression to leads the story never touches.
+case_id: case-003-suppression-devws
+kind: observed
+result_classes_covered: ["-noise", "0"]
+lead_source: authored   # realistic leads for a dev-ws-1 investigation; no v2 rule fires on agent-stop
+notes: >
+  Suppression is at the SHIPPER: stopping the host Elastic Agent halts shipping to
+  the central store, so ES-side streams for dev-ws-1 go dark. Local files on the
+  host are irrelevant — the leads read the central store, which is what the story
+  blinds. Samples are empty (aggregate queries), as in case-001.
+
+leads:
+  l-001:
+    system: elastic
+    template: sshd-auth-history
+    class: "-noise"
+    suppressed_stream: "logs-system.auth-* for host.name=dev-ws-1"
+  l-002:
+    system: elastic
+    template: syslog-ip-search
+    class: "-noise"
+    suppressed_stream: "all logs-* for host.name=dev-ws-1"
+  l-003:
+    system: elastic
+    template: sshd-auth-history
+    class: "0"
+    note: "web-1 is alive and untouched by the story; must NOT be suppressed"
+  l-004:
+    system: cmdb
+    template: host-trust-edges
+    class: "0"
+    note: "state/lookup — returns current config; agent-stop does not blind it"

@@ -1,0 +1,9 @@
+signal: 'Falco rule "Adding ssh keys to authorized_keys" on canary-1 (container 1df4bcd65ee4)'
+attack_window: ["2026-07-25T09:28:00Z", "2026-07-25T09:31:00Z"]
+attack_event_at: "2026-07-25T09:29:02Z"
+attack_window_count: 1
+controls:
+  - {name: today-pre-attack, window: ["2026-07-25T09:00:00Z", "2026-07-25T09:28:00Z"], count: 0}
+  - {name: C2-14d,           window: ["2026-07-11T09:00:00Z", "2026-07-11T10:00:00Z"], count: 0}
+  - {name: C3-21d,           window: ["2026-07-04T09:00:00Z", "2026-07-04T10:00:00Z"], count: 0}
+distinguishable: true   # authorized_keys modification never occurs in baseline

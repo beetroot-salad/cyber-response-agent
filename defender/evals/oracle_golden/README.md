@@ -130,16 +130,33 @@ calibration and must not substitute for a trusted slice.
 
 ## Current coverage
 
-| case | kind | classes | result |
-|---|---|---|---|
-| `case-001-ssh-bruteforce-canary` | observed | `+event`, `0` | 7/9 class agreement; +event recall 0.50; 0 wrong fields; 0 false-suppression (`glm-5.2_effort-none`) |
-| `neg-001-unrelated-story` | negative-control | `0` | 9/9 — oracle abstained on all leads; no window-copying |
+Results below are `glm-5.2_effort-none`.
 
-**Not yet exercised** (the capture campaign, all env-dependent for the observed
-half): `-noise` suppression (a sensor-blinding attack), stealthy `+noise` (malice
-hidden in baseline-shape events), routine **benign** operations, and additional
-systems/templates for by-template stratification. Mutation cases are offline and
-pending.
+| case | kind | classes | system(s) / template(s) | result |
+|---|---|---|---|---|
+| `case-001-ssh-bruteforce-canary` | observed | `+event`, `0` | elastic sshd-auth + zeek; cmdb; identity; threat-intel; change-mgmt | 7/9 class; +event recall 0.50; 0 wrong; 0 false-suppress |
+| `case-002-authorized-keys-falco` | observed | `+event`, `0` | elastic **falco-alerts**; cmdb | 2/2 class; +event recall 1.00; 0 wrong |
+| `case-003-suppression-devws` | observed | `-noise`, `0` | elastic sshd-auth + syslog; cmdb | **4/4** class; correct suppression + no over-suppression; 0 false-suppress |
+| `neg-001-unrelated-story` | negative-control | `0` | (case-001 leads) | 9/9 — oracle abstained; no window-copying |
+| `mut-001-source-identity` | mutation | `+event`, `0` | (case-001 leads) | forbidden originals **CLEAN**; mutated src/user emitted correctly |
+
+**Result-class coverage: `+event`, `0`, `-noise` exercised; `+noise` (stealthy —
+malice in baseline-shape events) is the remaining gap.** Also pending: routine
+**benign** observed cases, host-state / identity as `+event` surfaces, and more
+mutation entities. `+noise` and benign need an env; more mutations are offline.
+
+### Notes surfaced by these cases
+
+- **Suppression discrimination is real:** in case-003, `l-001` (`-noise`) and
+  `l-003` (`0`) both have *empty* observed results — the oracle told them apart
+  from the story alone (dev-ws-1 blinded, web-1 not), and did not over-suppress.
+- **Projections track the story, not the window:** `neg-001` (unrelated story →
+  all-`0`) and `mut-001` (mutated entities → emitted verbatim, originals never
+  leaked) both hold.
+- **Heterogeneous-lead emission has run-to-run variance:** across case-001 and
+  mut-001 (same leads), *which* of the borderline heterogeneous leads emit
+  `+event` vs `0`/`+noise` shifts between runs. The disposition-bearing leads are
+  stable; the borderline ones are a jitter source worth tracking per model/prompt.
 
 Reports are keyed by projection tag (`<model>_effort-<effort>`) so results stay
 versioned by oracle model + prompt.

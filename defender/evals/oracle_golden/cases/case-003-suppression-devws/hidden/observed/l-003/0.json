@@ -1,0 +1,23 @@
+{
+  "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-25T09:35:00.000Z\" AND @timestamp < \"2026-07-25T09:45:00.000Z\"\n        AND host.name == \"web-1\"\n        AND event.outcome IS NOT NULL\n| STATS accepted = COUNT(*) WHERE event.outcome == \"success\",\n        failed = COUNT(*) WHERE event.outcome == \"failure\"\n        BY source.ip, user.name\n| SORT accepted DESC",
+  "columns": [
+    {
+      "name": "accepted",
+      "type": "long"
+    },
+    {
+      "name": "failed",
+      "type": "long"
+    },
+    {
+      "name": "source.ip",
+      "type": "ip"
+    },
+    {
+      "name": "user.name",
+      "type": "keyword"
+    }
+  ],
+  "row_count": 0,
+  "values": []
+}

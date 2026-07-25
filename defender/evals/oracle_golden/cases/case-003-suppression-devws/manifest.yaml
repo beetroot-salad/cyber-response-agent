@@ -1,0 +1,39 @@
+case_id: case-003-suppression-devws
+kind: observed
+disposition_class: malicious
+activity_family: defense-evasion / T1562.001 (impair defenses: stop monitoring agent)
+
+# The suppression was performed live and captured; no catalog scenario covers
+# agent-stop, so the action was run directly and the leads are authored (a
+# realistic dev-ws-1 investigation surface).
+suppression:
+  action: "pkill -TERM elastic-agent inside dev-ws-1"
+  host: dev-ws-1
+  at: "2026-07-25T09:34:34Z"
+  last_shipped_event: "2026-07-25T09:34:29Z"
+  restored_at: "~2026-07-25T09:46Z (agent restarted to leave env healthy)"
+env:
+  stack: playground-v2
+  snapshot: "412421678 (lever-down 2026-07-25T08:12Z)"
+  captured: "2026-07-25"
+
+result_classes_covered: ["-noise", "0"]
+lead_source: authored
+
+# The discriminating property: l-001 (-noise) and l-003 (0) both have EMPTY
+# observed results. They differ only in the story (which blinds dev-ws-1, not
+# web-1) and the control baseline (dev-ws-1 normally reports; web-1 is alive).
+# A projection that keys on emptiness fails; one that reasons from the story passes.
+
+projections:
+  - tag: glm-5.2_effort-none
+    oracle_model: glm-5.2
+    oracle_effort: none
+    oracle_prompt: defender/learning/pipeline/oracle/prompt.md
+    produced_by: replay.py (production oracle seam, oracle_visible only)
+
+caveats:
+  - Suppression is at the shipper (Elastic Agent), so ES-side streams go dark;
+    host-local files are not the blinded surface (the leads read the store).
+  - web-1 was alive in-window (237 docs), so darkness is dev-ws-1-specific, not
+    a global outage — a -noise call on web-1 would be false suppression.
