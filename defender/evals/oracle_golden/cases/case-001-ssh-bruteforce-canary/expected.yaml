@@ -1,0 +1,98 @@
+# Ground-truth labels for case-001, derived from hidden/ observed telemetry +
+# hidden/controls.yaml. Authoritative target for scoring — independent of any
+# oracle output.
+#
+# `class` is the ENVELOPE truth: the four-way category the lead's queries
+# physically surface as a signed diff over baseline (0 | +noise | +event |
+# -noise). It is objective — it comes from the observed rows, not from the
+# lead's stated intent. Where a lead's stated purpose (`intent_note`) would
+# scope a narrower answer, that is recorded but is NOT the ground truth; it
+# explains predictable oracle divergence, it does not excuse it.
+#
+# `fields` (on +event leads) are the distinguishing concrete values an accurate
+# projection must commit to. `<...>` placeholders in a projection are scored
+# `unknown`, never `wrong` — the story does not state them.
+
+case_id: case-001-ssh-bruteforce-canary
+result_classes_covered: ["+event", "0"]     # NOT exercised: +noise, -noise
+notes: >
+  Every oracle-visible sample skeleton is empty ("(no schema sample available)")
+  because the leads run aggregate ES|QL (STATS ... BY ...), which is not captured
+  in the exemplar shape redact_exemplar reads. So field grounding here tests the
+  oracle's inference from QUERY BODIES, not from a schema exemplar. A doc-returning
+  case (e.g. a raw sshd auth fetch) is needed to exercise the exemplar channel.
+
+leads:
+  l-001:
+    system: elastic
+    template: sshd-auth-history
+    class: "+event"
+    heterogeneous: true          # 4 queries: 3 surface the burst, 1 is empty
+    fields:
+      source.ip: "172.18.0.15"
+      user.name: "root"
+      host.name: "canary-1"
+      event.outcome: "failure"
+
+  l-002:
+    system: elastic
+    template: [detection-alerts, sshd-auth-history]
+    class: "+event"
+    heterogeneous: true          # seq0 alert=0 ; seq1 wide auth query carries the burst
+    intent_note: >
+      Lead is framed as a SUCCESS hunt (what_to_summarize = Accepted/success).
+      The attack produced 0 successes, so a projection of [] answers the lead's
+      question (prompt Example A) but under-emits the failure rows seq1 surfaces.
+    fields:
+      source.ip: "172.18.0.15"
+      user.name: "root"
+      event.outcome: "failure"
+
+  l-003:
+    system: cmdb
+    template: host-trust-edges
+    class: "0"                    # state/lookup — current config, no event stream
+
+  l-004:
+    system: elastic
+    template: [zeek-ssh-by-ip, zeek-ssh-client-from-source, zeek-ssh-field-check]
+    class: "+event"
+    heterogeneous: true          # historical-baseline zeek queries = 0 ; in-window = burst
+    fields:
+      source.ip: "172.18.0.15"
+      destination.ip: "172.18.0.9"
+      destination.port: 22
+
+  l-005:
+    system: threat-intel
+    template: ip-reputation-lookup
+    class: "0"                    # lookup — reputation verdict, no event stream
+
+  l-006:
+    system: elastic
+    template: sshd-auth-history
+    class: "+event"
+    heterogeneous: true          # baseline windows = 0/+noise ; attack-window buckets = burst
+    intent_note: >
+      Lead is framed as pre-alert BASELINE establishment; oracle read it +noise
+      (the source's routine to other hosts). Its attack-window sub-queries still
+      surface the burst, so envelope truth is +event.
+    fields:
+      user.name: "root"
+      host.name: "canary-1"
+      event.outcome: "failure"
+
+  l-007:
+    system: cmdb
+    template: host-trust-edges
+    class: "0"
+
+  l-008:
+    system: identity
+    template: [access-check, user-authorization, list-all-users]
+    class: "0"                    # 20 identity lookups — current authorization state
+
+  l-009:
+    system: change-mgmt
+    template: [active-changes, list-changes]
+    class: "0"                    # change records — state, no event stream

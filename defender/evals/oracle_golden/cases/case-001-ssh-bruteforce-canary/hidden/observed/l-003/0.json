@@ -1,0 +1,1 @@
+{"name": "canary-1", "role": "canary", "criticality": "sandbox", "owner": "team.sre", "change_window": null, "os": {"distro": "ubuntu", "version": "22.04"}, "service": null, "trust_edges_out": [], "users": [{"username": "svc.monitoring", "shell": "/usr/sbin/nologin", "sudo": false}, {"username": "svc.config-mgmt", "shell": "/bin/bash", "sudo": true}]}

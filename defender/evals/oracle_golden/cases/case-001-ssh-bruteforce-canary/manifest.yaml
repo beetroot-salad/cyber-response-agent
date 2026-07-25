@@ -1,0 +1,44 @@
+case_id: case-001-ssh-bruteforce-canary
+kind: observed                    # observed | negative-control | mutation
+disposition_class: malicious
+activity_family: brute-force / T1110.001 (password guessing)
+
+# Provenance — the real operation this case captures.
+attack:
+  scenario: ssh-brute-force-canary
+  seed: 42
+  runner_run_id: ssh-brute-force-canary-42-e7d87435
+  source: office-ws-1 (172.18.0.15)
+  target: canary-1 (172.18.0.9)
+  window: ["2026-07-25T07:45:35Z", "2026-07-25T07:48:40Z"]
+  alert_rule: v2-sshd-failed-auth-burst
+env:
+  stack: playground-v2
+  snapshot: "409583061 (lever-down 2026-07-17)"
+  captured: "2026-07-25"
+
+# The defender run whose leads form the oracle-visible envelope.
+defender_run:
+  run_id: oracle-fidelity-1
+  model: glm-5.2
+  leads: 9
+  systems: [elastic, cmdb, identity, threat-intel, change-mgmt]
+  disposition: malicious           # correct
+
+result_classes_covered: ["+event", "0"]
+result_classes_absent: ["+noise", "-noise"]
+
+# Recorded projections live in projections/<tag>.yaml; scores in scores/<tag>.json.
+projections:
+  - tag: glm-5.2_effort-none
+    oracle_model: glm-5.2
+    oracle_effort: none
+    oracle_prompt: defender/learning/pipeline/oracle/prompt.md
+    produced_by: production path (invoke_oracle / _run_oracle_pydantic)
+    result: "7/9 class agreement; +event recall 0.50; 0 wrong fields; 0 false-suppression"
+
+caveats:
+  - Oracle-visible samples are all empty ("(no schema sample available)") — the
+    aggregate ES|QL leads are not in the exemplar shape; field grounding here
+    tests inference from query bodies, not from a schema exemplar.
+  - Single disposition class; +noise / -noise unexercised (need other attacks).

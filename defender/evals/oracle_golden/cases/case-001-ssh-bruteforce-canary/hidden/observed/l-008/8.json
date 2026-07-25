@@ -1,0 +1,1 @@
+{"username": "dev.ethan", "email": "ethan@soc-playground.local", "first_name": "Ethan", "last_name": "Novak", "enabled": true, "realm_role": "developer", "authorized_hosts": ["dev-ws-1", "jump-box-1", "office-ws-2"], "sudo_hosts": ["office-ws-2"]}

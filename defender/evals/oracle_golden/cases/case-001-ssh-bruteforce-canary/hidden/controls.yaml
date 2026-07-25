@@ -1,0 +1,22 @@
+# Control-window baseline for case-001, measured live on 2026-07-25 before the
+# playground-v2 env was levered down. The signal these controls establish: is an
+# in-window row a genuine +event delta, or baseline-shaped noise that the routine
+# environment produces anyway? Shape-matched = same clock window on prior
+# Saturdays (weekend baseline shape multiplier 0.05) + a pre-attack window today.
+signal: "canary-1 sshd failures from source.ip 172.18.0.15 (the attacker)"
+attack_window:
+  window: ["2026-07-25T07:45:00Z", "2026-07-25T07:50:00Z"]
+  count: 96
+controls:
+  - name: C1-today-pre
+    window: ["2026-07-25T06:00:00Z", "2026-07-25T07:44:00Z"]
+    count: 0
+  - name: C2-14d
+    window: ["2026-07-11T07:30:00Z", "2026-07-11T08:30:00Z"]
+    count: 0
+  - name: C3-21d
+    window: ["2026-07-04T07:30:00Z", "2026-07-04T08:30:00Z"]
+    count: 0
+distinguishable: true   # attack_window > 0 and every control == 0
+# Zeek corroboration (l-004): the pair 172.18.0.15 -> 172.18.0.9:22 produced
+# 96 docs in-window (48 zeek.connection + 48 zeek.ssh), 0 in the pre-attack control.

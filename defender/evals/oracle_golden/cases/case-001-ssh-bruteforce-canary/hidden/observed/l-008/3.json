@@ -1,0 +1,1 @@
+{"authorized": true, "via": "override", "role": "service-account", "shell": "/usr/sbin/nologin", "sudo": false}
