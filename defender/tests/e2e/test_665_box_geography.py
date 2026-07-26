@@ -61,6 +61,25 @@ def _run_cycle_mounts(run_dir: Path):
     )
 
 
+def _populate_mount_sources(mounts, tmp_path: Path) -> None:
+    """Make each mount source NON-EMPTY — the contrast case against the present-empty
+    gather_raw above — for the sources this test owns, i.e. those under `tmp_path`.
+
+    The DEFENDER mount is deliberately skipped. `_run_cycle_mounts` sources it from the real
+    checked-out tree, so it is non-empty by construction and needs no marker; the inline loops
+    this replaces wrote their `entry.txt` into it anyway, leaving an untracked file in the repo
+    after every run of this suite — a suite about read-only mount discipline littering the
+    source tree it declares `writable=False`. The marker is setup, never read: `_probe_sentinel`
+    plants and cats back its own `.box-sentinel-<uuid>`, so only NON-EMPTINESS is being modeled
+    here, not this file's contents."""
+    for m in mounts:
+        source = Path(m.source)
+        if not source.is_relative_to(tmp_path):
+            continue
+        source.mkdir(parents=True, exist_ok=True)
+        (source / "entry.txt").write_text("x", encoding="utf-8")
+
+
 def _request(run_dir: Path, *, name="defender-runcycle-abc", env=None, mounts=None, workdir=None):
     return BoxRequest(
         name=name,
@@ -304,9 +323,7 @@ def test_partial_multi_mount_sentinel_validation_leaves_box_in_ambiguous_state(t
     startup fault → decision 5 loud abort + unwind), never observed or used half-checked.
     Asserts a sentinel fault raises and the box is reaped (docker rm -f)."""
     run_dir = make_run_dir(tmp_path)
-    for m in _run_cycle_mounts(run_dir):
-        Path(m.source).mkdir(parents=True, exist_ok=True)
-        (Path(m.source) / "entry.txt").write_text("x", encoding="utf-8")
+    _populate_mount_sources(_run_cycle_mounts(run_dir), tmp_path)
     rec = RecordingDocker(sentinel=DockerFault(rc=1, stderr="mount 2 read-back failed", cite="po48"))
     with pytest.raises(box_mod.BoxFault):
         start_box_request(_request(run_dir), docker=rec)
@@ -398,9 +415,7 @@ def test_per_mount_sentinel_coverage_across_a_box_with_three_or_more_mounts(tmp_
     single-mount sentinel knew about. Asserts a read-back per bind mount over a 3-mount box."""
     run_dir = make_run_dir(tmp_path)
     mounts = _run_cycle_mounts(run_dir)
-    for m in mounts:
-        Path(m.source).mkdir(parents=True, exist_ok=True)
-        (Path(m.source) / "entry.txt").write_text("x", encoding="utf-8")
+    _populate_mount_sources(mounts, tmp_path)
     rec = RecordingDocker()
     start_box_request(_request(run_dir, mounts=mounts), docker=rec)
     readbacks = [c for c in rec.calls if len(c) > 1 and c[1] == "exec"]
