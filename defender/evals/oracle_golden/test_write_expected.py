@@ -85,17 +85,17 @@ def test_existing_ground_truth_is_never_silently_regenerated(tmp_path):
 # record_held_out
 # --------------------------------------------------------------------------
 
-def _ledger(tmp_path: Path, monkeypatch) -> Path:
+def _ledger(tmp_path: Path) -> Path:
+    """A throwaway ledger, reached through the CLI's own `--ledger` option."""
     path = tmp_path / "ledger.yaml"
     path.write_text("# why this ledger exists\nentries: []\n", encoding="utf-8")
-    monkeypatch.setattr(RECORD, "LEDGER", path)
     return path
 
 
-def test_a_held_out_result_is_recorded_with_its_hash(tmp_path, monkeypatch):
+def test_a_held_out_result_is_recorded_with_its_hash(tmp_path):
     case = _case(tmp_path)
-    ledger = _ledger(tmp_path, monkeypatch)
-    assert RECORD.main([str(case), "t"]) == 0
+    ledger = _ledger(tmp_path)
+    assert RECORD.main([str(case), "t", "--ledger", str(ledger)]) == 0
     entries = yaml.safe_load(ledger.read_text(encoding="utf-8"))["entries"]
     assert entries[0]["case"] == "case-x"
     assert entries[0]["sha256"] == hashlib.sha256(
@@ -103,17 +103,17 @@ def test_a_held_out_result_is_recorded_with_its_hash(tmp_path, monkeypatch):
     assert "why this ledger exists" in ledger.read_text(encoding="utf-8")
 
 
-def test_the_same_tag_cannot_be_recorded_twice(tmp_path, monkeypatch):
+def test_the_same_tag_cannot_be_recorded_twice(tmp_path):
     """There is deliberately no flag to replace an entry: re-running a held-out
     case under one tag until the number improves is how a held-out set stops
     being held out."""
     case = _case(tmp_path)
-    _ledger(tmp_path, monkeypatch)
-    assert RECORD.main([str(case), "t"]) == 0
-    assert RECORD.main([str(case), "t"]) == 1
+    ledger = _ledger(tmp_path)
+    assert RECORD.main([str(case), "t", "--ledger", str(ledger)]) == 0
+    assert RECORD.main([str(case), "t", "--ledger", str(ledger)]) == 1
 
 
-def test_a_dev_case_is_not_ledgered(tmp_path, monkeypatch):
+def test_a_dev_case_is_not_ledgered(tmp_path):
     case = _case(tmp_path, split="dev")
-    _ledger(tmp_path, monkeypatch)
-    assert RECORD.main([str(case), "t"]) == 1
+    ledger = _ledger(tmp_path)
+    assert RECORD.main([str(case), "t", "--ledger", str(ledger)]) == 1

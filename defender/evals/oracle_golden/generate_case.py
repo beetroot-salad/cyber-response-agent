@@ -43,6 +43,7 @@ import os
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from datetime import datetime, timedelta, UTC
 from pathlib import Path
 
@@ -52,6 +53,11 @@ RUNNER = REPO_ROOT / "playground-v2" / "attacks" / "runner.py"
 RUNS_DIR = REPO_ROOT / "playground-v2" / "attacks" / "runs"
 EXTRACT_ALERT = REPO_ROOT / "experiments" / "oracle-telemetry-fidelity" / "extract_alert.py"
 DEFENDER_RUN = REPO_ROOT / "defender" / "run.py"
+
+#: The subprocess seam. Injected in tests so the alert-selection rule can be
+#: exercised without a live stack — it is the piece that produced the
+#: campaign's one silently-wrong case, so it needs to be testable.
+Runner = Callable[..., subprocess.CompletedProcess]
 
 
 def _run(cmd: list[str | Path], *, timeout: int, label: str) -> str:
@@ -83,7 +89,8 @@ def fire(scenario: str, *, seed: int, user: str | None, target: str | None,
     return RUNS_DIR / new[-1]
 
 
-def rules_fired_since(since: datetime, target_host: str | None = None) -> list[str]:
+def rules_fired_since(since: datetime, target_host: str | None = None, *,
+                      run: Runner = subprocess.run) -> list[str]:
     """Detection rules that actually fired since `since`, most relevant first.
 
     The generator does NOT predict which rule a cell will trip. `cross-tier-ssh-probe`
@@ -105,7 +112,7 @@ def rules_fired_since(since: datetime, target_host: str | None = None) -> list[s
         "query": {"range": {"@timestamp": {"gte": stamp}}},
         "_source": ["kibana.alert.rule.rule_id", "host.name"],
     })
-    proc = subprocess.run(
+    proc = run(
         [str(REPO_ROOT / "infra" / "bin" / "es.sh"),
          "/.internal.alerts-security.alerts-default-*/_search",
          "-H", "Content-Type: application/json", "-d", body],
@@ -132,7 +139,7 @@ def rules_fired_since(since: datetime, target_host: str | None = None) -> list[s
 
 
 def wait_for_alert(rule_id: str | None, since: datetime, out_path: Path, *,
-                   target_host: str | None = None,
+                   target_host: str | None = None, run: Runner = subprocess.run,
                    attempts: int = 20, interval: int = 30) -> str | None:
     """Poll until a rule fires; return the rule id captured, or `None`.
 
@@ -144,7 +151,7 @@ def wait_for_alert(rule_id: str | None, since: datetime, out_path: Path, *,
     stamp = since.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     for attempt in range(1, attempts + 1):
         candidates = ([rule_id] if rule_id
-                      else rules_fired_since(since, target_host))
+                      else rules_fired_since(since, target_host, run=run))
         for candidate in candidates:
             try:
                 _run([sys.executable, EXTRACT_ALERT, candidate, stamp, str(out_path)],

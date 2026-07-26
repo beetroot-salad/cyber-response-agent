@@ -254,7 +254,8 @@ def check_causes(case_dir: Path, tag: str, summary: dict) -> list[str]:
     return problems
 
 
-def check_held_out_ledger(cases: list[tuple[Path, dict]]) -> list[str]:
+def check_held_out_ledger(cases: list[tuple[Path, dict]],
+                         ledger_path: Path = LEDGER) -> list[str]:
     """AC 2: a held-out result is written once per (case, tag) and never rewritten.
 
     No code seam can stop someone reading a held-out case while editing the
@@ -263,10 +264,11 @@ def check_held_out_ledger(cases: list[tuple[Path, dict]]) -> list[str]:
     detecting a result that changed after the fact, and that is what this does.
     """
     problems = []
-    ledger = yaml.safe_load(LEDGER.read_text(encoding="utf-8")) if LEDGER.is_file() else {}
+    ledger = (yaml.safe_load(ledger_path.read_text(encoding="utf-8"))
+              if ledger_path.is_file() else {})
     entries = {(e["case"], e["tag"]): e for e in (ledger or {}).get("entries") or []}
     if len(entries) != len((ledger or {}).get("entries") or []):
-        problems.append("held_out_ledger.yaml: duplicate (case, tag) entries")
+        problems.append(f"{ledger_path.name}: duplicate (case, tag) entries")
 
     seen = set()
     for case_dir, manifest in cases:

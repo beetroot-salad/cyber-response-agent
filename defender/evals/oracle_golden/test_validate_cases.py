@@ -159,45 +159,45 @@ def test_a_cause_entry_without_a_code_is_caught(tmp_path):
 # the held-out ledger (AC 2)
 # --------------------------------------------------------------------------
 
-def _ledger(tmp_path: Path, entries: list[dict]) -> None:
-    VALIDATE.LEDGER = tmp_path / "ledger.yaml"
-    VALIDATE.LEDGER.write_text(yaml.safe_dump({"entries": entries}), encoding="utf-8")
+def _ledger(tmp_path: Path, entries: list[dict] | None = None) -> Path:
+    """A throwaway ledger, passed in rather than patched — `check_held_out_ledger`
+    takes its path as a parameter precisely so a test never has to reach into the
+    module."""
+    path = tmp_path / "ledger.yaml"
+    path.write_text("# why this ledger exists\n" +
+                    yaml.safe_dump({"entries": entries or []}), encoding="utf-8")
+    return path
 
 
-def test_a_held_out_score_with_no_ledger_entry_is_caught(tmp_path, monkeypatch):
+def test_a_held_out_score_with_no_ledger_entry_is_caught(tmp_path):
     case = _make_case(tmp_path, "case-a", manifest={"split": "held-out"})
-    monkeypatch.setattr(VALIDATE, "LEDGER", tmp_path / "ledger.yaml")
-    (tmp_path / "ledger.yaml").write_text(yaml.safe_dump({"entries": []}), encoding="utf-8")
+    ledger = _ledger(tmp_path)
     manifest = yaml.safe_load((case / "manifest.yaml").read_text(encoding="utf-8"))
-    problems = VALIDATE.check_held_out_ledger([(case, manifest)])
+    problems = VALIDATE.check_held_out_ledger([(case, manifest)], ledger)
     assert any("no ledger entry" in p for p in problems)
 
 
-def test_a_rewritten_held_out_score_is_caught(tmp_path, monkeypatch):
+def test_a_rewritten_held_out_score_is_caught(tmp_path):
     """The mechanism behind "results appended and never overwritten": a held-out
     run kept for a second, better attempt under the same tag no longer matches
     its recorded hash."""
     case = _make_case(tmp_path, "case-a", manifest={"split": "held-out"})
     score_path = case / "scores" / "t.json"
-    monkeypatch.setattr(VALIDATE, "LEDGER", tmp_path / "ledger.yaml")
-    (tmp_path / "ledger.yaml").write_text(yaml.safe_dump({"entries": [
-        {"case": "case-a", "tag": "t",
-         "sha256": hashlib.sha256(score_path.read_bytes()).hexdigest()}]}),
-        encoding="utf-8")
+    ledger = _ledger(tmp_path, [{"case": "case-a", "tag": "t",
+                                 "sha256": hashlib.sha256(score_path.read_bytes()).hexdigest()}])
     manifest = yaml.safe_load((case / "manifest.yaml").read_text(encoding="utf-8"))
-    assert VALIDATE.check_held_out_ledger([(case, manifest)]) == []
+    assert VALIDATE.check_held_out_ledger([(case, manifest)], ledger) == []
 
     score_path.write_text(score_path.read_text(encoding="utf-8") + " ", encoding="utf-8")
-    problems = VALIDATE.check_held_out_ledger([(case, manifest)])
+    problems = VALIDATE.check_held_out_ledger([(case, manifest)], ledger)
     assert any("does not match its ledger hash" in p for p in problems)
 
 
-def test_a_dev_case_needs_no_ledger_entry(tmp_path, monkeypatch):
+def test_a_dev_case_needs_no_ledger_entry(tmp_path):
     case = _make_case(tmp_path, "case-a")
-    monkeypatch.setattr(VALIDATE, "LEDGER", tmp_path / "ledger.yaml")
-    (tmp_path / "ledger.yaml").write_text(yaml.safe_dump({"entries": []}), encoding="utf-8")
+    ledger = _ledger(tmp_path)
     manifest = yaml.safe_load((case / "manifest.yaml").read_text(encoding="utf-8"))
-    assert VALIDATE.check_held_out_ledger([(case, manifest)]) == []
+    assert VALIDATE.check_held_out_ledger([(case, manifest)], ledger) == []
 
 
 def test_the_replay_boundary_check_is_not_vacuous():

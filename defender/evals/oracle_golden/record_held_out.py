@@ -28,7 +28,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("case_dir", type=Path)
     p.add_argument("tag")
     p.add_argument("--recorded", default="", help="ISO date; free text, for the reader")
+    p.add_argument("--ledger", type=Path, default=None,
+                   help="ledger to append to (default: the suite's own)")
     ns = p.parse_args(argv)
+    ledger_path = ns.ledger if ns.ledger is not None else LEDGER
 
     manifest = yaml.safe_load((ns.case_dir / "manifest.yaml").read_text(encoding="utf-8")) or {}
     if manifest.get("split") != "held-out":
@@ -41,7 +44,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"!! no {score_path}", file=sys.stderr)
         return 1
 
-    doc = yaml.safe_load(LEDGER.read_text(encoding="utf-8")) or {}
+    doc = yaml.safe_load(ledger_path.read_text(encoding="utf-8")) or {}
     entries = doc.get("entries") or []
     key = (ns.case_dir.name, ns.tag)
     for entry in entries:
@@ -60,8 +63,8 @@ def main(argv: list[str] | None = None) -> int:
     # Keep the file's explanatory header (everything before `entries:`) and
     # re-serialize the list — the header is the only place that says why this
     # ledger exists, and a rewrite that dropped it would leave a bare hash list.
-    head = LEDGER.read_text(encoding="utf-8").split("entries:")[0]
-    LEDGER.write_text(
+    head = ledger_path.read_text(encoding="utf-8").split("entries:")[0]
+    ledger_path.write_text(
         head + yaml.safe_dump({"entries": entries}, sort_keys=False, width=100),
         encoding="utf-8")
     print(f"recorded {key[0]}/{key[1]}")
