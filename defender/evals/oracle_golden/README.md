@@ -24,18 +24,30 @@ it is scored against:
 
 ```
 cases/<case-id>/
-  manifest.yaml            # provenance, classes covered, lead_source, recorded projections
+  manifest.yaml            # provenance, split, unit, capture_environment, state_classes
   oracle_visible/          # ← the ONLY thing a projection may read
     story.md               #   ground-truth story (the oracle's story input)
     leads.jsonl            #   per lead: {lead_id, goal, what_to_summarize, queries[{query_id, params}]}
     samples/<lead>.txt     #   the redacted sample skeleton the production oracle sees
   hidden/                  # ← the scoring target; never an oracle input. OBSERVED CASES ONLY
     observed/<lead>/<seq>.json   #   full observed query payloads (ground truth)
-    controls.yaml          #   shape-matched control-window baseline (see below)
+    controls/<lead>/<seq>.json   #   PER-QUERY controls: the lead's own query, bounds moved
+    controls.yaml          #   the capture session's control notes / provenance
   expected.yaml            # authoritative labels: per-lead 4-way class + key fields
   projections/<tag>.yaml   # oracle output for a given model/prompt (tag = <model>_effort-<e>)
   scores/<tag>.json        # scored dimensions for that projection
+  scores/<tag>.causes.yaml # cause code per lead the score reports an error on
+held_out_ledger.yaml       # append-only: sha256 of every held-out score, once per (case, tag)
 ```
+
+`manifest.yaml` carries the three fields the reporter reads (#711):
+
+| field | why |
+|---|---|
+| `split: dev \| held-out` | case-level; a derived case inherits its base's |
+| `unit: {activity_family, host_pair}` | the independent unit the interval is computed at; seeds pool within it |
+| `capture_environment` | two cases from one restored snapshot are ONE environment |
+| `state_classes` | declared class per state/lookup system — undeclared is `needs-label`, never `0` |
 
 Two details the layout does not show:
 
@@ -181,6 +193,33 @@ python3 defender/evals/oracle_golden/replay.py cases/<case_id> [--tag <model>_ef
 # Exits non-zero on a lead-set mismatch — a partial projection is not a result.
 python3 defender/evals/oracle_golden/score.py cases/<case_id> \
     cases/<case_id>/projections/<tag>.yaml --json cases/<case_id>/scores/<tag>.json
+
+# ---- #711 ------------------------------------------------------------------
+
+# Generate a whole case against the LIVE stack: fire -> capture -> investigate ->
+# story -> assemble -> controls. `--split` is set BEFORE the first replay, which
+# is what makes held-out honest.
+python3 defender/evals/oracle_golden/generate_case.py \
+    --scenario <id> --case-id cases/<case_id> --split held-out \
+    --activity-family <family> [--target <host>] [--user <identity>]
+
+# Measure per-query controls for an existing case: each control IS the lead's own
+# query with only its two @timestamp bounds moved.
+python3 defender/evals/oracle_golden/controls.py cases/<case_id>
+
+# Calibrate the LABELER against the hand-derived labels before trusting it.
+# Non-zero on a class divergence — which is resolved by re-measuring the
+# environment, never by adjusting the labeler until it agrees.
+python3 defender/evals/oracle_golden/audit_labels.py
+
+# Lint the case tree: split present and inherited, heterogeneous matching the
+# envelope, cause sidecars covering exactly the reported errors, held-out scores
+# matching their ledger hashes, no story leaking the answer. Non-zero on any.
+python3 defender/evals/oracle_golden/validate_cases.py
+
+# Roll up: intervals at n_units, dev and held-out kept apart, `insufficient`
+# below the unit floor.
+python3 defender/evals/oracle_golden/report.py [--target-lower-bound 0.90]
 ```
 
 `replay.py` drives the exact production seam (`invoke_oracle_lead` →
@@ -230,11 +269,17 @@ filter changes the lead's class, not just its field values.
 Calibration exists to gate learning. A **slice** = (system × template ×
 result-class). A slice is:
 
-- **trusted** — enough calibrated cases (≥ N, currently a stub threshold) with
-  class agreement ≥ threshold, **zero** wrong concrete fields, **zero** false
+- **trusted** — the slice's Wilson **lower bound** at `n = n_units` clears the
+  stated threshold, with **zero** wrong concrete fields, **zero** false
   suppression, and **zero** malformed projections on that slice;
-- **no-update** — below threshold, or any wrong-field / false-suppression /
+- **no-update** — below the bound, or any wrong-field / false-suppression /
   malformed output observed, or the slice is simply unexercised.
+
+`N` is no longer a stub. It is **derived** from the interval width the policy
+needs (`stats.py:required_n`): a ≥0.90 lower bound at 95% confidence takes **35
+units at a perfect observed rate**, 69 at 0.97, 127 at 0.95, and is unreachable
+below 0.90 because the bound converges to the rate. Units, not leads and not
+runs — see `defender/docs/oracle-calibration.md`.
 
 A slice is unexercised when the metric is `null`, not when it is `0.0` — the two
 are different states and `score.py` keeps them distinct. Any score whose
@@ -257,6 +302,14 @@ calibration and must not substitute for a trusted slice.
 
 Results below are `glm-5.2_effort-none`.
 
+> **Read the per-case results as description, not certification.** Run
+> `report.py` for the number that counts: it computes at `n_units`, and the six
+> seed cases are **4 units across 3 environments**, all of them `dev`. Overall
+> class agreement is 33/36 = 0.92, whose 95% interval at 4 units is
+> **[0.51, 1.00]** — every slice reads `insufficient` or `no-update`, and no
+> held-out case carries this tag at all. That is the honest state of the suite,
+> and #711 AC 9 is answered by the reporter saying so.
+
 | case | kind | classes | lead_source | system(s) / template(s) | result |
 |---|---|---|---|---|---|
 | `case-001-ssh-bruteforce-canary` | observed | `+event`, `0` | captured | elastic sshd-auth + zeek; cmdb; identity; threat-intel; change-mgmt | 7/9 class; +event recall 0.50; 0 wrong; 0 false-suppress |
@@ -268,6 +321,20 @@ Results below are `glm-5.2_effort-none`.
 
 `+event recall` is `null` in `scores/*.json` for case-003, case-004 and neg-001 —
 those cases label no `+event` lead, so the metric is undefined, not zero.
+
+**Units, not cases (#711).** The six rows above are four independent units:
+`case-001`, `mut-001` and `neg-001` share one capture (brute-force ×
+office-ws-1→canary-1), and `case-002`/`case-003` share one restored snapshot.
+Adding a seventh case that reuses an existing envelope would add a row here and
+nothing to `n_units`.
+
+**One hand-set flag was corrected on 2026-07-26** by mechanical derivation:
+`case-001 l-001` was marked `heterogeneous: true` with the note "3 surface the
+burst, 1 is empty", but all four of its sub-queries carry byte-identical `WHERE`
+clauses over the same window and all four surface the burst (95 / 48 / per-minute
+13-32-28 / 95). Nothing in that lead is empty. The derived heterogeneous set is
+`{l-002, l-006}` — which is exactly the set of `+event` misses, and exactly the
+set carrying `intent_note`.
 
 **These numbers were revised on 2026-07-25** by re-measuring every control against
 the restored capture snapshot (hcloud image `412461512`) and re-deriving the
