@@ -3,6 +3,30 @@ kind: observed                    # observed | negative-control | mutation
 disposition_class: malicious
 activity_family: brute-force / T1110.001 (password guessing)
 
+# --- calibration metadata (#711) — see defender/docs/oracle-calibration.md ---
+# Assigned at CASE level; a derived case inherits its base's, so one envelope
+# never straddles the split. The six seed cases are all `dev` because they were
+# visible while the oracle prompt was being iterated. Held-out is forward-only.
+split: dev
+# The independent unit the reporter computes its interval over. Seeds and re-runs
+# POOL within a unit — only a different activity family or host pair makes a new
+# one, which is why automation raises the capture count but not the unit count.
+unit:
+  activity_family: brute-force/T1110.001
+  host_pair: office-ws-1->canary-1
+# The environment state this telemetry came from. Two cases captured from one
+# restored snapshot are ONE environment, however different their stories.
+capture_environment: playground-v2@409583061
+# Declared class per state/lookup system. No window comparison can decide these
+# (they return current configuration, not an event stream), so the case declares
+# them. `label.py` emits `needs-label` for any system missing here rather than
+# defaulting to `0` — a free pass on exactly the cells #711 wants recruited.
+state_classes:
+  cmdb: "0"
+  identity: "0"
+  threat-intel: "0"
+  change-mgmt: "0"
+
 # Provenance — the real operation this case captures.
 attack:
   scenario: ssh-brute-force-canary

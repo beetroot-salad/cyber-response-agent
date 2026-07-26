@@ -3,6 +3,15 @@ kind: observed
 disposition_class: malicious
 activity_family: "defense-evasion / T1562.001 (impair defenses: stop monitoring agent)"
 
+# --- calibration metadata (#711) — see defender/docs/oracle-calibration.md ---
+split: dev
+unit:
+  activity_family: defense-evasion/T1562.001
+  host_pair: dev-ws-1->dev-ws-1        # the agent was stopped in place
+capture_environment: playground-v2@412421678   # same snapshot as case-002
+state_classes:
+  cmdb: "0"
+
 # The suppression was performed live and captured; no catalog scenario covers
 # agent-stop, so the action was run directly and the leads are authored (a
 # realistic dev-ws-1 investigation surface).

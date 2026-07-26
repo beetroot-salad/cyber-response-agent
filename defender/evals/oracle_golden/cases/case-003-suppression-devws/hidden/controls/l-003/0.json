@@ -1,0 +1,93 @@
+{
+  "lead_id": "l-003",
+  "seq": 0,
+  "controls": [
+    {
+      "name": "C-7d",
+      "window": [
+        "2026-07-18T09:10:00.000Z",
+        "2026-07-18T10:10:00.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-18T09:10:00.000Z\" AND @timestamp < \"2026-07-18T10:10:00.000Z\"\n        AND host.name == \"web-1\"\n        AND event.outcome IS NOT NULL\n| STATS accepted = COUNT(*) WHERE event.outcome == \"success\",\n        failed = COUNT(*) WHERE event.outcome == \"failure\"\n        BY source.ip, user.name\n| SORT accepted DESC",
+      "live": false,
+      "payload": null
+    },
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-11T09:10:00.000Z",
+        "2026-07-11T10:10:00.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-11T09:10:00.000Z\" AND @timestamp < \"2026-07-11T10:10:00.000Z\"\n        AND host.name == \"web-1\"\n        AND event.outcome IS NOT NULL\n| STATS accepted = COUNT(*) WHERE event.outcome == \"success\",\n        failed = COUNT(*) WHERE event.outcome == \"failure\"\n        BY source.ip, user.name\n| SORT accepted DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-11T09:10:00.000Z\" AND @timestamp < \"2026-07-11T10:10:00.000Z\"\n        AND host.name == \"web-1\"\n        AND event.outcome IS NOT NULL\n| STATS accepted = COUNT(*) WHERE event.outcome == \"success\",\n        failed = COUNT(*) WHERE event.outcome == \"failure\"\n        BY source.ip, user.name\n| SORT accepted DESC",
+        "columns": [
+          {
+            "name": "accepted",
+            "type": "long"
+          },
+          {
+            "name": "failed",
+            "type": "long"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 2,
+        "values": [
+          {
+            "accepted": 6,
+            "failed": 0,
+            "source.ip": "172.18.0.14",
+            "user.name": "svc.config-mgmt"
+          },
+          {
+            "accepted": 0,
+            "failed": 72,
+            "source.ip": "172.18.0.6",
+            "user.name": "svc.reports"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-04T09:10:00.000Z",
+        "2026-07-04T10:10:00.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-04T09:10:00.000Z\" AND @timestamp < \"2026-07-04T10:10:00.000Z\"\n        AND host.name == \"web-1\"\n        AND event.outcome IS NOT NULL\n| STATS accepted = COUNT(*) WHERE event.outcome == \"success\",\n        failed = COUNT(*) WHERE event.outcome == \"failure\"\n        BY source.ip, user.name\n| SORT accepted DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-04T09:10:00.000Z\" AND @timestamp < \"2026-07-04T10:10:00.000Z\"\n        AND host.name == \"web-1\"\n        AND event.outcome IS NOT NULL\n| STATS accepted = COUNT(*) WHERE event.outcome == \"success\",\n        failed = COUNT(*) WHERE event.outcome == \"failure\"\n        BY source.ip, user.name\n| SORT accepted DESC",
+        "columns": [
+          {
+            "name": "accepted",
+            "type": "long"
+          },
+          {
+            "name": "failed",
+            "type": "long"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    }
+  ]
+}

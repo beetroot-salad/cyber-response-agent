@@ -1,0 +1,72 @@
+{
+  "lead_id": "l-002",
+  "seq": 0,
+  "controls": [
+    {
+      "name": "C-7d",
+      "window": [
+        "2026-07-18T10:03:30.000Z",
+        "2026-07-18T11:03:30.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-18T10:03:30.000Z\" AND @timestamp < \"2026-07-18T11:03:30.000Z\"\n        AND host.name == \"db-1\"\n        AND event.outcome == \"failure\"\n| STATS failed = COUNT(*) BY source.ip, user.name\n| SORT failed DESC",
+      "live": false,
+      "payload": null
+    },
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-11T10:03:30.000Z",
+        "2026-07-11T11:03:30.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-11T10:03:30.000Z\" AND @timestamp < \"2026-07-11T11:03:30.000Z\"\n        AND host.name == \"db-1\"\n        AND event.outcome == \"failure\"\n| STATS failed = COUNT(*) BY source.ip, user.name\n| SORT failed DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-11T10:03:30.000Z\" AND @timestamp < \"2026-07-11T11:03:30.000Z\"\n        AND host.name == \"db-1\"\n        AND event.outcome == \"failure\"\n| STATS failed = COUNT(*) BY source.ip, user.name\n| SORT failed DESC",
+        "columns": [
+          {
+            "name": "failed",
+            "type": "long"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-04T10:03:30.000Z",
+        "2026-07-04T11:03:30.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-04T10:03:30.000Z\" AND @timestamp < \"2026-07-04T11:03:30.000Z\"\n        AND host.name == \"db-1\"\n        AND event.outcome == \"failure\"\n| STATS failed = COUNT(*) BY source.ip, user.name\n| SORT failed DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-04T10:03:30.000Z\" AND @timestamp < \"2026-07-04T11:03:30.000Z\"\n        AND host.name == \"db-1\"\n        AND event.outcome == \"failure\"\n| STATS failed = COUNT(*) BY source.ip, user.name\n| SORT failed DESC",
+        "columns": [
+          {
+            "name": "failed",
+            "type": "long"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    }
+  ]
+}

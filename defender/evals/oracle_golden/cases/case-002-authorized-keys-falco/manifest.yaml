@@ -2,6 +2,18 @@ case_id: case-002-authorized-keys-falco
 kind: observed
 disposition_class: malicious
 activity_family: persistence / T1098.004 (SSH authorized_keys)
+
+# --- calibration metadata (#711) — see defender/docs/oracle-calibration.md ---
+split: dev
+unit:
+  activity_family: persistence/T1098.004
+  host_pair: canary-1->canary-1        # a local write, not a cross-host operation
+# Shares a restored snapshot with case-003 — one environment, two captures. The
+# reporter counts environments, so these two do not read as independent settings.
+capture_environment: playground-v2@412421678
+state_classes:
+  cmdb: "0"
+
 attack:
   scenario: persistence-authorized-keys
   seed: 7

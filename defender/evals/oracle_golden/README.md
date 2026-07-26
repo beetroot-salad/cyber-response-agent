@@ -11,6 +11,12 @@ observed telemetry are all known.
 Motivating probe + method write-up: `experiments/oracle-telemetry-fidelity/`
 (PR #707). This directory is the durable, reusable form of that probe.
 
+**This README is the format reference — file layout, tools, current coverage.
+The procedure that produces and verifies a case lives in
+`defender/docs/oracle-calibration.md`**: how to capture, how to measure a control
+so the class is right, how to derive a mutation without inheriting its labels,
+how to read a score, and how the result gates learning.
+
 ## The one hard rule: hidden vs. oracle-visible
 
 Each case splits its files so a projection **cannot** peek at the ground truth

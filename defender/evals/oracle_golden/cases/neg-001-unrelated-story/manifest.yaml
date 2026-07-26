@@ -2,6 +2,21 @@ case_id: neg-001-unrelated-story
 kind: negative-control
 base_case: case-001-ssh-bruteforce-canary
 
+# --- calibration metadata (#711) — see defender/docs/oracle-calibration.md ---
+# INHERITED from the base case: same envelopes, so the same side of the split and
+# the same unit. Three of the suite's six cases are this one capture.
+split: dev
+unit:
+  activity_family: brute-force/T1110.001
+  host_pair: office-ws-1->canary-1
+capture_environment: playground-v2@409583061
+# An unrelated story touches no system, state ones included.
+state_classes:
+  cmdb: "0"
+  identity: "0"
+  threat-intel: "0"
+  change-mgmt: "0"
+
 # A DERIVED case: no environment, no capture, no new telemetry. It reuses
 # case-001's oracle_visible/ envelope byte-for-byte and swaps only the story, so
 # there is no hidden/ tree — the ground truth is definitional (an unrelated story

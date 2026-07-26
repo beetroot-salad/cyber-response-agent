@@ -1,0 +1,78 @@
+{
+  "lead_id": "l-006",
+  "seq": 2,
+  "controls": [
+    {
+      "name": "C-7d",
+      "window": [
+        "2026-07-17T07:45:35.000Z",
+        "2026-07-18T07:45:35.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-17T07:45:35.000Z\" AND @timestamp < \"2026-07-18T07:45:35.000Z\"\n        AND source.ip == \"172.18.0.15\"\n        AND event.outcome IS NOT NULL\n| STATS total = COUNT(*)\n| LIMIT 1",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-17T07:45:35.000Z\" AND @timestamp < \"2026-07-18T07:45:35.000Z\"\n        AND source.ip == \"172.18.0.15\"\n        AND event.outcome IS NOT NULL\n| STATS total = COUNT(*)\n| LIMIT 1",
+        "columns": [
+          {
+            "name": "total",
+            "type": "long"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "total": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-10T07:45:35.000Z",
+        "2026-07-11T07:45:35.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-10T07:45:35.000Z\" AND @timestamp < \"2026-07-11T07:45:35.000Z\"\n        AND source.ip == \"172.18.0.15\"\n        AND event.outcome IS NOT NULL\n| STATS total = COUNT(*)\n| LIMIT 1",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-10T07:45:35.000Z\" AND @timestamp < \"2026-07-11T07:45:35.000Z\"\n        AND source.ip == \"172.18.0.15\"\n        AND event.outcome IS NOT NULL\n| STATS total = COUNT(*)\n| LIMIT 1",
+        "columns": [
+          {
+            "name": "total",
+            "type": "long"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "total": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-03T07:45:35.000Z",
+        "2026-07-04T07:45:35.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-03T07:45:35.000Z\" AND @timestamp < \"2026-07-04T07:45:35.000Z\"\n        AND source.ip == \"172.18.0.15\"\n        AND event.outcome IS NOT NULL\n| STATS total = COUNT(*)\n| LIMIT 1",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-03T07:45:35.000Z\" AND @timestamp < \"2026-07-04T07:45:35.000Z\"\n        AND source.ip == \"172.18.0.15\"\n        AND event.outcome IS NOT NULL\n| STATS total = COUNT(*)\n| LIMIT 1",
+        "columns": [
+          {
+            "name": "total",
+            "type": "long"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "total": 0
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -2,6 +2,22 @@ case_id: mut-001-source-identity
 kind: mutation
 base_case: case-001-ssh-bruteforce-canary
 
+# --- calibration metadata (#711) — see defender/docs/oracle-calibration.md ---
+# INHERITED from the base case, and required to be: this case reuses case-001's
+# envelopes byte-for-byte, so putting it on the other side of the split would put
+# one capture on both sides. For the same reason it is not a second unit — it is
+# case-001's unit shown again, and the reporter must not count it twice.
+split: dev
+unit:
+  activity_family: brute-force/T1110.001
+  host_pair: office-ws-1->canary-1
+capture_environment: playground-v2@409583061
+state_classes:
+  cmdb: "0"
+  identity: "0"
+  threat-intel: "0"
+  change-mgmt: "0"
+
 # A DERIVED case: no environment, no capture, no new telemetry. The mutated
 # operation was never fired, so there is no hidden/ tree — a mutation case scores
 # the PROJECTION's response to a story edit, not observed ground truth. The

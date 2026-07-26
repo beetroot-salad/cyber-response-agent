@@ -2,6 +2,16 @@ case_id: case-004-noise-stolen-cred
 kind: observed
 disposition_class: malicious
 activity_family: valid-accounts / T1078.004 + T1021.004 (stolen-credential lateral access)
+
+# --- calibration metadata (#711) — see defender/docs/oracle-calibration.md ---
+split: dev
+unit:
+  activity_family: valid-accounts/T1078.004
+  host_pair: jump-box-1->db-1
+capture_environment: playground-v2@412422251
+state_classes:
+  cmdb: "0"
+
 operation:
   method: "sre.alice SSH jump-box-1 -> db-1, recon payload, run live"
   window: ["2026-07-25T10:33:05Z", "2026-07-25T10:33:26Z"]

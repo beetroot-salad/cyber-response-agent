@@ -1,0 +1,104 @@
+{
+  "lead_id": "l-001",
+  "seq": 3,
+  "controls": [
+    {
+      "name": "C-7d",
+      "window": [
+        "2026-07-18T07:17:06.032Z",
+        "2026-07-18T08:17:06.032Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-18T07:17:06.032Z\" AND @timestamp < \"2026-07-18T08:17:06.032Z\"\n        AND host.name == \"canary-1\"\n        AND event.outcome == \"failure\"\n| STATS total_failed = COUNT(*),\n        distinct_src_ips = COUNT_DISTINCT(source.ip),\n        distinct_users = COUNT_DISTINCT(user.name),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n| LIMIT 1",
+      "live": false,
+      "payload": null
+    },
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-11T07:17:06.032Z",
+        "2026-07-11T08:17:06.032Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-11T07:17:06.032Z\" AND @timestamp < \"2026-07-11T08:17:06.032Z\"\n        AND host.name == \"canary-1\"\n        AND event.outcome == \"failure\"\n| STATS total_failed = COUNT(*),\n        distinct_src_ips = COUNT_DISTINCT(source.ip),\n        distinct_users = COUNT_DISTINCT(user.name),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n| LIMIT 1",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-11T07:17:06.032Z\" AND @timestamp < \"2026-07-11T08:17:06.032Z\"\n        AND host.name == \"canary-1\"\n        AND event.outcome == \"failure\"\n| STATS total_failed = COUNT(*),\n        distinct_src_ips = COUNT_DISTINCT(source.ip),\n        distinct_users = COUNT_DISTINCT(user.name),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n| LIMIT 1",
+        "columns": [
+          {
+            "name": "total_failed",
+            "type": "long"
+          },
+          {
+            "name": "distinct_src_ips",
+            "type": "long"
+          },
+          {
+            "name": "distinct_users",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "total_failed": 0,
+            "distinct_src_ips": 0,
+            "distinct_users": 0,
+            "first_seen": null,
+            "last_seen": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-04T07:17:06.032Z",
+        "2026-07-04T08:17:06.032Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-04T07:17:06.032Z\" AND @timestamp < \"2026-07-04T08:17:06.032Z\"\n        AND host.name == \"canary-1\"\n        AND event.outcome == \"failure\"\n| STATS total_failed = COUNT(*),\n        distinct_src_ips = COUNT_DISTINCT(source.ip),\n        distinct_users = COUNT_DISTINCT(user.name),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n| LIMIT 1",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-04T07:17:06.032Z\" AND @timestamp < \"2026-07-04T08:17:06.032Z\"\n        AND host.name == \"canary-1\"\n        AND event.outcome == \"failure\"\n| STATS total_failed = COUNT(*),\n        distinct_src_ips = COUNT_DISTINCT(source.ip),\n        distinct_users = COUNT_DISTINCT(user.name),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n| LIMIT 1",
+        "columns": [
+          {
+            "name": "total_failed",
+            "type": "long"
+          },
+          {
+            "name": "distinct_src_ips",
+            "type": "long"
+          },
+          {
+            "name": "distinct_users",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "total_failed": 0,
+            "distinct_src_ips": 0,
+            "distinct_users": 0,
+            "first_seen": null,
+            "last_seen": null
+          }
+        ]
+      }
+    }
+  ]
+}

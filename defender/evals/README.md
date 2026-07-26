@@ -17,6 +17,7 @@ never the reverse.
 |---|---|---|
 | `held_out.py` | **Primary** — disposition accuracy | Does the *current* defender's disposition match ground truth on the labeled held-out alerts? This is the loop's north-star metric. |
 | `secondary.py` | **Secondary** — frozen-actor replay catch rate | Would the current defender's lead sequence refute stories an *older* (gen N−K) actor writes? |
+| `oracle_golden/` | **Oracle calibration** — per-lead result-class agreement + field grounding | Does the telemetry oracle project what the activity really wrote? Unlike the two above it scores a *loop stage*, not the defender, and it gates learning: an uncalibrated slice must not move a lesson score. Procedure: `defender/docs/oracle-calibration.md`; format + coverage: `oracle_golden/README.md`. |
 
 Run them by hand:
 

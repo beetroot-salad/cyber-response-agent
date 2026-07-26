@@ -21,7 +21,7 @@
 | **lessons** | `defender/lessons/` (+ `lessons-actor/`, `lessons-environment/`) — authored by the loop, retrieved at PLAN time via the `defender-lessons` shim (grep, no index) |
 | **the agents / registry** | `defender/agents.py` — role → `AgentDefinition` (each brings its own grants + deps); `runtime/agent_definition.py` is the seam |
 | **the frontend** / **the visualizations** | rendered HTML, not a web app: `scripts/visualize/` emits `transcript.html` (judge view) + `runtime.html` (run inspection) per run; `learning/frontend/build.py` emits the standalone `lessons.html` posture view |
-| **evals** | `defender/evals/` — measurement layer (scores, not CI): `held_out.py` is the north-star metric, `secondary.py` the frozen-actor replay; see `evals/README.md` |
+| **evals** | `defender/evals/` — measurement layer (scores, not CI): `held_out.py` is the north-star metric, `secondary.py` the frozen-actor replay, `oracle_golden/` the oracle-calibration suite that gates learning (procedure: `docs/oracle-calibration.md`); see `evals/README.md` |
 
 ## Layout (one line each)
 

@@ -1,0 +1,321 @@
+{
+  "lead_id": "l-004",
+  "seq": 2,
+  "controls": [
+    {
+      "name": "C-7d",
+      "window": [
+        "2026-07-18T07:17:07.500Z",
+        "2026-07-18T08:17:07.500Z"
+      ],
+      "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-18T07:17:07.500Z\" AND @timestamp < \"2026-07-18T08:17:07.500Z\"\n| WHERE source.ip == \"172.18.0.15\" OR client.ip == \"172.18.0.15\" OR host.ip == \"172.18.0.15\" OR destination.ip == \"172.18.0.15\"\n| STATS events = COUNT(*), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp) BY host.name, data_stream.dataset\n| SORT events DESC\n| LIMIT 1000",
+      "live": false,
+      "payload": null
+    },
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-11T07:17:07.500Z",
+        "2026-07-11T08:17:07.500Z"
+      ],
+      "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-11T07:17:07.500Z\" AND @timestamp < \"2026-07-11T08:17:07.500Z\"\n| WHERE source.ip == \"172.18.0.15\" OR client.ip == \"172.18.0.15\" OR host.ip == \"172.18.0.15\" OR destination.ip == \"172.18.0.15\"\n| STATS events = COUNT(*), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp) BY host.name, data_stream.dataset\n| SORT events DESC\n| LIMIT 1000",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-11T07:17:07.500Z\" AND @timestamp < \"2026-07-11T08:17:07.500Z\"\n| WHERE source.ip == \"172.18.0.15\" OR client.ip == \"172.18.0.15\" OR host.ip == \"172.18.0.15\" OR destination.ip == \"172.18.0.15\"\n| STATS events = COUNT(*), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp) BY host.name, data_stream.dataset\n| SORT events DESC\n| LIMIT 1000",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "data_stream.dataset",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 11,
+        "values": [
+          {
+            "events": 2880,
+            "first_seen": "2026-07-11T07:17:17.158Z",
+            "last_seen": "2026-07-11T08:17:07.160Z",
+            "host.name": "db-1",
+            "data_stream.dataset": "postgresql.log"
+          },
+          {
+            "events": 1800,
+            "first_seen": "2026-07-11T07:17:14.070Z",
+            "last_seen": "2026-07-11T08:17:07.160Z",
+            "host.name": "db-1",
+            "data_stream.dataset": "elastic_agent.metricbeat"
+          },
+          {
+            "events": 1282,
+            "first_seen": "2026-07-11T07:17:14.889Z",
+            "last_seen": "2026-07-11T08:17:07.161Z",
+            "host.name": null,
+            "data_stream.dataset": "zeek.connection"
+          },
+          {
+            "events": 1243,
+            "first_seen": "2026-07-11T07:17:14.889Z",
+            "last_seen": "2026-07-11T08:17:07.162Z",
+            "host.name": null,
+            "data_stream.dataset": "zeek.ssl"
+          },
+          {
+            "events": 114,
+            "first_seen": "2026-07-11T07:30:05.000Z",
+            "last_seen": "2026-07-11T08:17:01.000Z",
+            "host.name": "office-ws-1",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 92,
+            "first_seen": "2026-07-11T07:17:24.000Z",
+            "last_seen": "2026-07-11T08:17:01.000Z",
+            "host.name": "db-1",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 31,
+            "first_seen": "2026-07-11T07:17:24.946Z",
+            "last_seen": "2026-07-11T08:15:45.294Z",
+            "host.name": null,
+            "data_stream.dataset": "zeek.ssh"
+          },
+          {
+            "events": 10,
+            "first_seen": "2026-07-11T07:22:57.039Z",
+            "last_seen": "2026-07-11T08:04:16.326Z",
+            "host.name": "db-1",
+            "data_stream.dataset": "elastic_agent"
+          },
+          {
+            "events": 4,
+            "first_seen": "2026-07-11T07:22:09.752Z",
+            "last_seen": "2026-07-11T08:17:05.037Z",
+            "host.name": "db-1",
+            "data_stream.dataset": "elastic_agent.filebeat"
+          },
+          {
+            "events": 2,
+            "first_seen": "2026-07-11T08:17:01.000Z",
+            "last_seen": "2026-07-11T08:17:01.000Z",
+            "host.name": "office-ws-1",
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-11T08:17:01.000Z",
+            "last_seen": "2026-07-11T08:17:01.000Z",
+            "host.name": "db-1",
+            "data_stream.dataset": "system.syslog"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-04T07:17:07.500Z",
+        "2026-07-04T08:17:07.500Z"
+      ],
+      "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-04T07:17:07.500Z\" AND @timestamp < \"2026-07-04T08:17:07.500Z\"\n| WHERE source.ip == \"172.18.0.15\" OR client.ip == \"172.18.0.15\" OR host.ip == \"172.18.0.15\" OR destination.ip == \"172.18.0.15\"\n| STATS events = COUNT(*), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp) BY host.name, data_stream.dataset\n| SORT events DESC\n| LIMIT 1000",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-04T07:17:07.500Z\" AND @timestamp < \"2026-07-04T08:17:07.500Z\"\n| WHERE source.ip == \"172.18.0.15\" OR client.ip == \"172.18.0.15\" OR host.ip == \"172.18.0.15\" OR destination.ip == \"172.18.0.15\"\n| STATS events = COUNT(*), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp) BY host.name, data_stream.dataset\n| SORT events DESC\n| LIMIT 1000",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "data_stream.dataset",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 11,
+        "values": [
+          {
+            "events": 2880,
+            "first_seen": "2026-07-04T07:17:17.165Z",
+            "last_seen": "2026-07-04T08:17:07.159Z",
+            "host.name": "db-1",
+            "data_stream.dataset": "postgresql.log"
+          },
+          {
+            "events": 1800,
+            "first_seen": "2026-07-04T07:17:14.070Z",
+            "last_seen": "2026-07-04T08:17:07.159Z",
+            "host.name": "db-1",
+            "data_stream.dataset": "elastic_agent.metricbeat"
+          },
+          {
+            "events": 1256,
+            "first_seen": "2026-07-04T07:17:11.492Z",
+            "last_seen": "2026-07-04T08:17:05.061Z",
+            "host.name": null,
+            "data_stream.dataset": "zeek.connection"
+          },
+          {
+            "events": 1211,
+            "first_seen": "2026-07-04T07:17:11.493Z",
+            "last_seen": "2026-07-04T08:17:05.061Z",
+            "host.name": null,
+            "data_stream.dataset": "zeek.ssl"
+          },
+          {
+            "events": 148,
+            "first_seen": "2026-07-04T07:17:56.000Z",
+            "last_seen": "2026-07-04T08:17:01.000Z",
+            "host.name": "db-1",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 126,
+            "first_seen": "2026-07-04T07:19:58.000Z",
+            "last_seen": "2026-07-04T08:17:01.000Z",
+            "host.name": "office-ws-1",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 33,
+            "first_seen": "2026-07-04T07:17:56.921Z",
+            "last_seen": "2026-07-04T08:16:53.458Z",
+            "host.name": null,
+            "data_stream.dataset": "zeek.ssh"
+          },
+          {
+            "events": 14,
+            "first_seen": "2026-07-04T07:18:21.356Z",
+            "last_seen": "2026-07-04T08:15:59.427Z",
+            "host.name": "db-1",
+            "data_stream.dataset": "elastic_agent"
+          },
+          {
+            "events": 2,
+            "first_seen": "2026-07-04T07:22:07.369Z",
+            "last_seen": "2026-07-04T08:17:02.669Z",
+            "host.name": "db-1",
+            "data_stream.dataset": "elastic_agent.filebeat"
+          },
+          {
+            "events": 2,
+            "first_seen": "2026-07-04T08:17:01.000Z",
+            "last_seen": "2026-07-04T08:17:01.000Z",
+            "host.name": "office-ws-1",
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-04T08:17:01.000Z",
+            "last_seen": "2026-07-04T08:17:01.000Z",
+            "host.name": "db-1",
+            "data_stream.dataset": "system.syslog"
+          }
+        ]
+      }
+    }
+  ],
+  "attack_contribution": {
+    "window": [
+      "2026-07-25T07:45:35.000Z",
+      "2026-07-25T07:48:40.000Z"
+    ],
+    "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-25T07:45:35.000Z\" AND @timestamp < \"2026-07-25T07:48:40.000Z\"\n| WHERE source.ip == \"172.18.0.15\" OR client.ip == \"172.18.0.15\" OR host.ip == \"172.18.0.15\" OR destination.ip == \"172.18.0.15\"\n| STATS events = COUNT(*), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp) BY host.name, data_stream.dataset\n| SORT events DESC\n| LIMIT 1000",
+    "payload": {
+      "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-25T07:45:35.000Z\" AND @timestamp < \"2026-07-25T07:48:40.000Z\"\n| WHERE source.ip == \"172.18.0.15\" OR client.ip == \"172.18.0.15\" OR host.ip == \"172.18.0.15\" OR destination.ip == \"172.18.0.15\"\n| STATS events = COUNT(*), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp) BY host.name, data_stream.dataset\n| SORT events DESC\n| LIMIT 1000",
+      "columns": [
+        {
+          "name": "events",
+          "type": "long"
+        },
+        {
+          "name": "first_seen",
+          "type": "date"
+        },
+        {
+          "name": "last_seen",
+          "type": "date"
+        },
+        {
+          "name": "host.name",
+          "type": "keyword"
+        },
+        {
+          "name": "data_stream.dataset",
+          "type": "keyword"
+        }
+      ],
+      "row_count": 6,
+      "values": [
+        {
+          "events": 288,
+          "first_seen": "2026-07-25T07:45:35.000Z",
+          "last_seen": "2026-07-25T07:48:39.000Z",
+          "host.name": "canary-1",
+          "data_stream.dataset": "system.auth"
+        },
+        {
+          "events": 81,
+          "first_seen": "2026-07-25T07:45:35.516Z",
+          "last_seen": "2026-07-25T07:48:37.064Z",
+          "host.name": null,
+          "data_stream.dataset": "zeek.connection"
+        },
+        {
+          "events": 48,
+          "first_seen": "2026-07-25T07:45:35.517Z",
+          "last_seen": "2026-07-25T07:48:37.065Z",
+          "host.name": null,
+          "data_stream.dataset": "zeek.ssh"
+        },
+        {
+          "events": 33,
+          "first_seen": "2026-07-25T07:45:38.595Z",
+          "last_seen": "2026-07-25T07:48:34.915Z",
+          "host.name": null,
+          "data_stream.dataset": "zeek.ssl"
+        },
+        {
+          "events": 19,
+          "first_seen": "2026-07-25T07:45:38.594Z",
+          "last_seen": "2026-07-25T07:48:38.593Z",
+          "host.name": "office-ws-1",
+          "data_stream.dataset": "elastic_agent.metricbeat"
+        },
+        {
+          "events": 1,
+          "first_seen": "2026-07-25T07:46:57.525Z",
+          "last_seen": "2026-07-25T07:46:57.525Z",
+          "host.name": "office-ws-1",
+          "data_stream.dataset": "elastic_agent.filebeat"
+        }
+      ]
+    }
+  }
+}
