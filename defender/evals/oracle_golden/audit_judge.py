@@ -121,20 +121,24 @@ def run_audit(case_names: tuple[str, ...], repeats: int, jobs: int, *,
     for (case_dir, lead_id, _hand, _lead, _rep), label in zip(work, results, strict=True):
         by_lead.setdefault((case_dir.name, lead_id), []).append(label)
 
-    rows, divergences, agreements = [], 0, []
+    rows, agreements = [], []
     for case_dir, lead_id, hand, lead in entries:
         labels = by_lead[(case_dir.name, lead_id)]
         kinds = [x["delta_kind"] for x in labels]
-        counts = Counter(kinds)
-        modal, modal_n = counts.most_common(1)[0]
+        modal, modal_n = Counter(kinds).most_common(1)[0]
         accepted = expected_delta_kinds(hand, lead)
+        # An ABSTENTION is not a divergence, and conflating them charges the judge for
+        # its own honesty. A divergence is the judge asserting a class the hand label
+        # rules out; `undecidable` asserts nothing, and the design excludes it from
+        # every denominator and tallies it separately.
+        abstained = modal == "undecidable"
         agrees = modal in accepted
-        divergences += 0 if agrees else 1
         agreements.append(modal_n / len(kinds))
         rows.append({
             "case": case_dir.name, "lead": lead_id,
             "hand_class": hand, "accepted_delta_kinds": list(accepted),
-            "modal_delta_kind": modal, "agrees": agrees,
+            "modal_delta_kind": modal, "agrees": agrees, "abstained": abstained,
+            "diverges": not agrees and not abstained,
             "self_agreement": round(modal_n / len(kinds), 3),
             "labels": kinds,
             "undecidable_reasons": [x["undecidable_reason"] for x in labels
@@ -150,15 +154,16 @@ def run_audit(case_names: tuple[str, ...], repeats: int, jobs: int, *,
     costs = [label["cost_usd"] for labels in by_lead.values() for label in labels
              if label.get("cost_usd") is not None]
 
-    decided = [r for r in rows if r["modal_delta_kind"] != "undecidable"]
+    decided = [r for r in rows if not r["abstained"]]
     return {
         "judge_model": resolved.pop(), "judge_effort": effort,
         "tag_suffix": judge.tag_suffix(model, effort),
         "cost_usd": round(sum(costs), 4) if costs else None,
         "prompts_sha8": judge.prompts_sha8(), "repeats": repeats,
         "leads": len(rows),
+        "decided": len(decided),
         "agreeing": sum(1 for r in rows if r["agrees"]),
-        "divergences": divergences,
+        "divergences": sum(1 for r in rows if r["diverges"]),
         "abstentions": len(rows) - len(decided),
         "mean_self_agreement": round(sum(agreements) / len(agreements), 3) if agreements else None,
         "rows": rows,
@@ -170,13 +175,14 @@ def render(report: dict) -> str:
         f"judge: {report['judge_model']} effort={report['judge_effort']} "
         f"prompts={report['prompts_sha8']} repeats={report['repeats']}"
         + (f" cost=${report['cost_usd']}" if report.get("cost_usd") else ""),
-        f"calibration: {report['agreeing']}/{report['leads']} agree with the hand labels, "
-        f"{report['divergences']} divergences, {report['abstentions']} abstentions",
+        f"calibration: {report['agreeing']}/{report['decided']} of the DECIDED leads agree "
+        f"with the hand labels ({report['divergences']} class divergences); "
+        f"{report['abstentions']}/{report['leads']} abstained",
         f"mean self-agreement: {report['mean_self_agreement']}",
         "",
     ]
     for r in report["rows"]:
-        mark = "ok " if r["agrees"] else "!! "
+        mark = "?? " if r["abstained"] else ("ok " if r["agrees"] else "!! ")
         lines.append(
             f"{mark}{r['case']}/{r['lead']:6} hand={r['hand_class']:8} "
             f"-> {r['modal_delta_kind']:19} (accepted: {','.join(r['accepted_delta_kinds'])}; "
@@ -188,6 +194,13 @@ def render(report: dict) -> str:
             "A divergence is adjudicated by RE-MEASUREMENT — re-read the telemetry and",
             "decide which side is wrong. Never tune the prompt until it agrees: a judge",
             "fitted to this set calibrates nothing.",
+        ]
+    if report["abstentions"]:
+        lines += [
+            "",
+            "An abstention is not a divergence. Read its `evidence`: it names the payload",
+            "that would have settled the lead, which is a statement about the INSTRUMENT.",
+            "A set that abstains more than it decides is not a calibration.",
         ]
     return "\n".join(lines)
 

@@ -474,6 +474,50 @@ def test_the_audit_reports_the_resolved_judge_and_what_it_cost():
     assert report["tag_suffix"] == judge.tag_suffix("claude-opus-5", "high")
 
 
+# ------------------------------------------------------- the committed calibration
+
+AUDITS = judge.GOLDEN_DIR / "audits"
+
+
+def _committed_calibrations() -> list[dict]:
+    return [json.loads(p.read_text(encoding="utf-8")) for p in sorted(AUDITS.glob("*.json"))]
+
+
+def test_the_committed_calibration_was_produced_by_the_prompts_in_the_tree():
+    """A calibration describes the judge that produced it. Edit either prompt and it
+    stops describing the judge that would run now — so the sweep is re-run, exactly as a
+    held-out result is re-scored under a new tag rather than quietly inherited."""
+    calibrations = _committed_calibrations()
+    assert calibrations, "no calibration is committed — the judge is unmeasured"
+    assert any(c["prompts_sha8"] == judge.prompts_sha8() for c in calibrations), (
+        f"the prompts hash to {judge.prompts_sha8()} but the committed calibrations were "
+        f"produced by {sorted({c['prompts_sha8'] for c in calibrations})} — "
+        f"re-run audit_judge.py --repeats 5"
+    )
+
+
+def test_the_calibration_for_the_current_prompts_has_no_class_divergence():
+    """#711 step 2's gate. An abstention is not a divergence and does not fail this;
+    the judge asserting a class the hand label rules out does."""
+    current = [c for c in _committed_calibrations()
+               if c["prompts_sha8"] == judge.prompts_sha8()]
+    for calibration in current:
+        assert calibration["divergences"] == 0, [
+            r for r in calibration["rows"] if r["diverges"]
+        ]
+        assert calibration["agreeing"] == calibration["decided"]
+
+
+def test_every_open_abstention_kept_the_evidence_that_would_settle_it():
+    """An abstention is a claim about the instrument, so the payload it asked for has to
+    survive in the artifact — otherwise it is just a gap."""
+    for calibration in _committed_calibrations():
+        for row in calibration["rows"]:
+            if row["abstained"]:
+                assert row["undecidable_reasons"], row["lead"]
+                assert len(row["evidence"]) > 200, row["lead"]
+
+
 def test_the_report_serialises_for_the_committed_artifact():
     report = audit_judge.run_audit(("case-002-authorized-keys-falco",), repeats=1, jobs=1,
                                    model="m", effort="high", call=_call(LABEL_OK))
