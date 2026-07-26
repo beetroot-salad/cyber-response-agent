@@ -49,10 +49,6 @@ class CuratorConfig:
     invoke_agent: Callable[[list[dict], str, CuratorConfig], dict]
     box: Any = None
 
-    @property
-    def run_log(self) -> Path:
-        return self.pending_dir / f"{self.log_prefix}_run.jsonl"
-
 
 
 

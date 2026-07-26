@@ -1212,12 +1212,22 @@ def test_shim_flags_and_non_adapter_shims_are_removed_together():
 
 def test_record_query_module_survives_its_cli():
     """record_query_module_survives_its_cli — record_query.py survives the deletion of
-    main()/parse_params/_derive_verb: runtime/tools.py imports derive_system AND
-    _passthrough_max_bytes from it, and the latter is the character cap for the read_file tool —
-    unrelated to adapters, and pinned by test_read_file_bounded."""
-    assert callable(record_query.derive_system)
+    main()/parse_params/_derive_verb because two runtime modules still import from it:
+    runtime/tools.py takes _passthrough_max_bytes as the read_file character cap (unrelated to
+    adapters, pinned by test_read_file_bounded), and runtime/query_tool.py takes the four
+    payload-recording helpers.
+
+    derive_system is NOT one of them. This docstring used to claim runtime/tools.py imported it
+    alongside _passthrough_max_bytes; it does not, and never has on this branch. The matching
+    `assert callable(record_query.derive_system)` passed on the symbol merely existing, so the
+    test vouched for a live import that was not there while being incapable of noticing. Its only
+    consumers are in tests/ (test_record_query.py), which is why the vulture gate reports it as
+    test-only surface — see #712. Pin what actually holds the module up instead."""
     assert callable(record_query._passthrough_max_bytes)
     assert runtime_tools._read_char_cap is record_query._passthrough_max_bytes
+    for live in ("_is_event_payload", "_next_seq", "build_truncated_view", "payload_digest"):
+        assert callable(getattr(record_query, live, None)), \
+            f"runtime/query_tool.py imports {live} — the module no longer provides it"
 
     for dead in ("main", "parse_params", "_derive_verb"):
         assert not hasattr(record_query, dead), f"record_query.{dead} outlived its CLI"

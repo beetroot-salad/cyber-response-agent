@@ -5,12 +5,8 @@ CAT_BOOL = "AbeEnstTuv"
 
 WC_BOOL = "clLmw"
 
-LS_BOOL = "aAbBcCdDfFgGhHiklLmnNopqQrRsStuUvxXZ1"
-LS_RECURSE = "R"
-
 GREP_BOOL = "nicovwxHhsEFabz"
 GREP_LIST = "lL"
-GREP_RECURSE = "rR"
 
 TAIL_HEAD_BOOL = "cnqvz"
 DIGITS = "0123456789"

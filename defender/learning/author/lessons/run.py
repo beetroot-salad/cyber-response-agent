@@ -53,7 +53,6 @@ class AuthorConfig:
     repo_lock_file: Path
     repo_lock_wait_seconds: int
     held_report: Path
-    author_run_log: Path
     author_prompt: Path
     invoke_agent: Callable[[list[dict], str, AuthorConfig], dict]
     author_model: str = AUTHOR_MODEL
@@ -79,7 +78,6 @@ def build_author_config(
         repo_lock_file=paths.author_lock_file,
         repo_lock_wait_seconds=_shared.REPO_LOCK_WAIT_SECONDS,
         held_report=paths.pending_dir / "held_report.log",
-        author_run_log=paths.pending_dir / "author_run.jsonl",
         author_prompt=paths.learning_dir / "author" / "lessons" / "prompt.md",
         invoke_agent=invoke_agent,
         manifest_seed=manifest_seed,
