@@ -206,8 +206,8 @@ def test_actor_cannot_read_a_staged_gather_raw_payload(tmp_path):
     And its run_dir really does hold payloads — this is reachable, not theoretical. The actor's
     `run_dir` IS the *learning* run dir, and `persist._copy_shared_inputs` →
     `lead_repository.stage_tables` COPIES the investigation's whole `gather_raw/` tree into it. The
-    two direction legs SHARE one `learning_run_dir` (`orchestrate.py:433`) and run CONCURRENTLY
-    (`ThreadPoolExecutor(max_workers=2)`, `orchestrate.py:450`) as actor → oracle → judge → persist,
+    two direction legs SHARE one `learning_run_dir` (`core/run_cycle.py`, `run_one`) and run CONCURRENTLY
+    (`ThreadPoolExecutor(max_workers=2)`, `core/run_cycle._dispatch_directions`) as actor → oracle → judge → persist,
     so on an `inconclusive` case leg A's persist stages the payloads while leg B's actor is still
     running. `ops/replay_actor.py` replays the actor over an already-staged bundle outright.
 

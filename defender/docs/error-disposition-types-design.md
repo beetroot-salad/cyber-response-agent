@@ -8,7 +8,7 @@
 ## What this is
 
 The learning-loop stages raise two kinds of failure, and the boundary that
-maps exceptions to process exit codes (`core/orchestrate._run_stage`) must tell
+maps exceptions to process exit codes (`core/cli._run_stage`) must tell
 them apart:
 
 - **`StageAbort`** — a systemic fault: the whole stage is doomed, abort with the
@@ -43,10 +43,10 @@ old inverted hierarchy (the *more*-fatal type subclassing the *less*-fatal one,
 purely so one `except` caught both). The ~30 per-run sites
 (`core/validate.py`, `core/persist.py`, `core/runner.py`,
 `pipeline/oracle/sample.py`, and `_validate_judge_yaml` in
-`core/orchestrate.py`) re-tag `LoopError → RunUnprocessable`.
+`core/run_cycle.py`) re-tag `LoopError → RunUnprocessable`.
 
 **The stage boundary splits by unit-of-work** — the load-bearing decision
-(`core/orchestrate._run_stage`):
+(`core/cli._run_stage`):
 
 ```python
 def _run_stage(stage, *, allow_run_error=False):

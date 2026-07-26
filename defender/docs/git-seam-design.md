@@ -34,7 +34,7 @@ It exposes git verbs that return parsed Python values, with a low-level escape
 hatch for one-offs:
 
 ```python
-def git(args, *, cwd=REPO_ROOT, check=True) -> str        # escape hatch (log/show, the orchestrate scrub)
+def git(args, *, cwd=REPO_ROOT, check=True) -> str        # escape hatch (log/show, the drain scrub)
 def git_status(cwd, *, pathspec=None) -> list[tuple[str, str]]   # the single -z porcelain reader
 def git_head_sha(cwd) -> str
 def git_rev_list_count(cwd, *, grep=None, rev_range=None) -> int
@@ -110,13 +110,13 @@ brittle, locale-bound stderr parsing):
 | Operation | Class | Disposition |
 |---|---|---|
 | `status`, `rev-parse`, `rev-list`, `add`, `commit`, `diff`, `worktree add/remove` | local-state → **systemic** | `GitError` **enrolled alongside `StageAbort`/`FatalConfigError`** → **exit 2, loud** |
-| `push`, `fetch`, `gh pr create` | remote/forge → plausibly transient | the **existing** `BranchError` catch-and-skip in `_run_worktree_batch` (`orchestrate.py:774,786`) — left untouched |
+| `push`, `fetch`, `gh pr create` | remote/forge → plausibly transient | the **existing** `BranchError` catch-and-skip in `_run_worktree_batch` (`core/drains.py`) — left untouched |
 
 A local-state git failure means a broken tree/repo/config/disk — it dooms the
 *whole batch*, not one marker, so it is a `StageAbort`-class systemic fault
 (`defender/docs/error-disposition-types-design.md`). `GitError` is **enrolled alongside**
-`StageAbort` in `_run_or_dead_letter`'s reraise tuple (`orchestrate.py:507`) and
-the `:1090` catch — not subclassed under it, because (like `FatalConfigError`,
+`StageAbort` in `faults.run_or_dead_letter`'s reraise tuple (`core/faults.py`) and
+`cli._run_stage`'s catch — not subclassed under it, because (like `FatalConfigError`,
 #468) the exit-2 *response* is learning-only while the *condition* is layer-neutral.
 
 Net change from today: the local-state sites go from *crash with a bare
@@ -155,7 +155,7 @@ re-grinding the queue every tick.
 **In scope.** `defender/_git.py` (the facade + `GitError`); the `Forge` port +
 `GhForge` adapter; migrating every raw `subprocess.run([...git...])` site —
 `author/shared.py`, `leads/path_validation.py`, `evals/_generation.py` +
-`evals/_harness_util.py` + `evals/harness*.py`, `core/orchestrate.py`,
+`evals/_harness_util.py` + `evals/harness*.py`, `core/drains.py`,
 `scripts/visualize/visualize_runtime.py`, `run.py` — onto the seam; collapsing
 the three porcelain parsers to one `-z` reader and the two worktree managers to
 one; dropping `AuthorBranch`'s git injection (keeping the forge injection);

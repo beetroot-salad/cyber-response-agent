@@ -393,7 +393,7 @@ def drive_run_one(tmp_path, monkeypatch, rec, *, agents=None, disposition="incon
                   gather_raw=True, **kw):
     """Drive the REAL run_one with the future injectable start_box/stop_box seams. TypeError
     at HEAD (no such kwargs); the recorder captures the composed run-cycle box request."""
-    from defender.learning.core.orchestrate import run_one
+    from defender.learning.core.run_cycle import run_one
 
     satisfy_engine_keys(monkeypatch, disposition)
     run_dir = make_run_dir(tmp_path, disposition=disposition, gather_raw=gather_raw)
@@ -406,7 +406,7 @@ def drive_run_one(tmp_path, monkeypatch, rec, *, agents=None, disposition="incon
 def drive_worktree_batch(tmp_path, rec, *, do_work, has_work=None, branch=None,
                          label="author_drain", **kw):
     """Drive the REAL _run_worktree_batch with the future injectable box seams."""
-    from defender.learning.core.orchestrate import _run_worktree_batch
+    from defender.learning.core.drains import _run_worktree_batch
 
     paths = loop_paths(tmp_path)
     branch = branch or RecordingBranch(tmp_path / "wt", events=rec.events)
@@ -462,7 +462,7 @@ def satisfy_engine_keys(monkeypatch, disposition: str = "inconclusive") -> None:
     setattr — the sanctioned env seam)."""
     from defender.learning.core.config import ORACLE_MODEL
     from defender.learning.core.directions import BY_NAME
-    from defender.learning.core.orchestrate import _directions_for
+    from defender.learning.core.run_cycle import _directions_for
     from defender.runtime import providers
 
     models = {ORACLE_MODEL}

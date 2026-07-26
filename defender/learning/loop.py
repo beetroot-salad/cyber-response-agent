@@ -23,12 +23,14 @@ from defender.learning.core.directions import (  # noqa: E402
     ADVERSARIAL_WIRING,
     BENIGN_WIRING,
 )
-from defender.learning.core.orchestrate import (  # noqa: E402
+from defender.learning.core.cli import main  # noqa: E402
+from defender.learning.core.drains import (  # noqa: E402
     author_drain,
-    enqueue_for_learning,
     lead_author_drain,
+)
+from defender.learning.core.markers import enqueue_for_learning  # noqa: E402
+from defender.learning.core.run_cycle import (  # noqa: E402
     learn_drain,
-    main,
     run_one,
     _directions_for,
     _prepare_engines_for,

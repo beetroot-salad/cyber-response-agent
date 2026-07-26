@@ -57,7 +57,7 @@ def _run_one(tmp_path, monkeypatch, rec, *, agents=None, disposition="inconclusi
     """Drive the REAL run_one with the future injectable `start_box`/`stop_box` seams.
     TypeError at HEAD (run_one has no such kwargs) — the red the box-creation site does not
     yet exist; the recorded assertions define the contract it is built against."""
-    from defender.learning.core.orchestrate import run_one
+    from defender.learning.core.run_cycle import run_one
 
     satisfy_engine_keys(monkeypatch, disposition)
     run_dir = make_run_dir(tmp_path, disposition=disposition)
@@ -70,7 +70,7 @@ def _run_one(tmp_path, monkeypatch, rec, *, agents=None, disposition="inconclusi
 def _worktree_batch(tmp_path, rec, *, do_work, has_work=None, branch=None,
                     label="author_drain", **kw):
     """Drive the REAL _run_worktree_batch with the future injectable box seams."""
-    from defender.learning.core.orchestrate import _run_worktree_batch
+    from defender.learning.core.drains import _run_worktree_batch
 
     paths = _paths(tmp_path)
     branch = branch or RecordingBranch(tmp_path / "wt", events=rec.events)
@@ -428,7 +428,7 @@ def test_run_cycle_box_name_distinct_from_runtime_box_and_grammar_valid(tmp_path
     run_id = run_dir.name
     runtime_name = box_mod.container_name(run_id)
     satisfy_engine_keys(monkeypatch, "inconclusive")
-    from defender.learning.core.orchestrate import run_one
+    from defender.learning.core.run_cycle import run_one
 
     run_one(run_dir, paths=_paths(tmp_path), agents=RecordingSubagents(),
             start_box=rec.start_box, stop_box=rec.stop_box)
@@ -445,7 +445,7 @@ def test_box_names_distinct_no_runtime_collision(tmp_path, monkeypatch):
     rc = BoxLifecycleRecorder()
     run_dir = make_run_dir(tmp_path, disposition="inconclusive")
     satisfy_engine_keys(monkeypatch, "inconclusive")
-    from defender.learning.core.orchestrate import run_one
+    from defender.learning.core.run_cycle import run_one
 
     run_one(run_dir, paths=_paths(tmp_path), agents=RecordingSubagents(),
             start_box=rc.start_box, stop_box=rc.stop_box)
@@ -577,7 +577,7 @@ def test_startup_fault_absorbed_by_an_existing_per_item_continue_idiom(tmp_path)
 
 
 def _worktree_batch_start(tmp_path, *, do_work, start_box):
-    from defender.learning.core.orchestrate import _run_worktree_batch
+    from defender.learning.core.drains import _run_worktree_batch
 
     paths = _paths(tmp_path)
     branch = RecordingBranch(tmp_path / "wt")
@@ -592,7 +592,7 @@ def test_box_startup_failure_unwinds_the_resources_created_before_it(tmp_path):
     fails, the resources created before it (the worktree leaf / branch) are unwound (M1):
     the batch does not leave an orphaned worktree behind a failed box. Asserts branch.cleanup
     runs even though start_box faulted before any work."""
-    from defender.learning.core.orchestrate import _run_worktree_batch
+    from defender.learning.core.drains import _run_worktree_batch
 
     paths = _paths(tmp_path)
     branch = RecordingBranch(tmp_path / "wt")

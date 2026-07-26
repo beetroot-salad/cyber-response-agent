@@ -331,7 +331,7 @@ def _call(docker: DockerFn, argv: list[str]) -> subprocess.CompletedProcess:
     except (OSError, subprocess.SubprocessError) as e:
         # SubprocessError covers `_docker`'s own `timeout=120` (TimeoutExpired), which is NOT
         # an OSError — an unclassified TimeoutExpired would escape both the loud
-        # DEFENDER_ALLOW_UNSANDBOXED fallback and orchestrate's _SYSTEMIC_FAULTS classification.
+        # DEFENDER_ALLOW_UNSANDBOXED fallback and core/faults.py's SYSTEMIC_FAULTS classification.
         raise BoxFault(f"could not invoke docker ({argv[:2]}): {e}") from e
 
 

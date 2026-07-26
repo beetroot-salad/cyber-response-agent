@@ -366,7 +366,7 @@ Current disposition behavior:
 
 - The disposition selects which direction(s) run through actor/oracle/judge:
   `benign` → adversarial only (FN hunt), `malicious` → benign only (FP hunt),
-  `inconclusive` → both. (`_loop_orchestrate.py` `_directions_for`, gating on
+  `inconclusive` → both. (`core/run_cycle.py` `_directions_for`, gating on
   `ADVERSARIAL_DISPOSITIONS` / `BENIGN_DISPOSITIONS` in `_loop_config.py`.)
 - Author promotion only proceeds for findings whose source disposition is
   `benign`; `inconclusive` findings are held as no-ground-truth because the

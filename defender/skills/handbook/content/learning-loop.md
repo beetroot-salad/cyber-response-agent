@@ -80,7 +80,7 @@ already caught the attack. There is a parallel **benign** direction
 that hunts false positives (could legitimate activity have produced this
 picture?).
 
-The **disposition selects which direction(s) run** (`core/orchestrate.py`
+The **disposition selects which direction(s) run** (`core/run_cycle.py`
 `_directions_for`, gating on the `ADVERSARIAL_DISPOSITIONS` /
 `BENIGN_DISPOSITIONS` sets in `_loop_config.py`):
 
@@ -107,7 +107,8 @@ pipelines — don't assume one shared `lessons/`:
 So "both directions feed the same corpus" holds only for defender findings;
 the actor/environment corpora are direction-specific. The canonical
 enumeration of queues, thresholds, dispositions, and finding types is
-`defender/learning/core/config.py` and `core/orchestrate.py`.
+`defender/learning/core/config.py`, `core/run_cycle.py` (dispatch) and
+`core/drains.py` (queues, thresholds).
 
 ## Why a forward-check gate but no runtime validators
 
