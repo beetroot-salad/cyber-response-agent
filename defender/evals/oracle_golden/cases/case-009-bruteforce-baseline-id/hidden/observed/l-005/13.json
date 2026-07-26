@@ -1,1 +1,0 @@
-{"username": "svc.deploy", "email": "svc-deploy@soc-playground.local", "first_name": "Deploy", "last_name": "Service", "enabled": true, "realm_role": "service-account", "authorized_hosts": ["ci-1", "web-1", "web-2"], "sudo_hosts": ["web-1", "web-2"]}

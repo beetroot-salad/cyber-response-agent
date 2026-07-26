@@ -1,1 +1,0 @@
-{"query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-26T09:22:52Z\" AND @timestamp < \"2026-07-26T09:23:37Z\"\n  AND host.name == \"db-1\"\n  AND process.name == \"sshd\"\n  AND event.outcome == \"failure\"\n  AND message LIKE \"*Failed password*\"\n| STATS total = COUNT(*)", "columns": [{"name": "total", "type": "long"}], "row_count": 1, "values": [{"total": 12}]}

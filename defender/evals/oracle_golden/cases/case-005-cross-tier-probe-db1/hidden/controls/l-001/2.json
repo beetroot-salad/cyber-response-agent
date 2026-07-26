@@ -1,0 +1,154 @@
+{
+  "lead_id": "l-001",
+  "seq": 2,
+  "controls": [
+    {
+      "name": "C-7d",
+      "window": [
+        "2026-07-19T10:40:00.000Z",
+        "2026-07-19T11:40:00.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-19T10:40:00.000Z\" AND @timestamp < \"2026-07-19T11:40:00.000Z\"\n        AND host.name == \"db-1\"\n        AND process.name == \"sshd\"\n        AND event.outcome == \"success\"\n        AND message LIKE \"*Accepted*\"\n| KEEP @timestamp, source.ip, user.name, message\n| SORT @timestamp ASC\n| LIMIT 100",
+      "live": false,
+      "payload": null
+    },
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T10:40:00.000Z",
+        "2026-07-12T11:40:00.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-12T10:40:00.000Z\" AND @timestamp < \"2026-07-12T11:40:00.000Z\"\n        AND host.name == \"db-1\"\n        AND process.name == \"sshd\"\n        AND event.outcome == \"success\"\n        AND message LIKE \"*Accepted*\"\n| KEEP @timestamp, source.ip, user.name, message\n| SORT @timestamp ASC\n| LIMIT 100",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-12T10:40:00.000Z\" AND @timestamp < \"2026-07-12T11:40:00.000Z\"\n        AND host.name == \"db-1\"\n        AND process.name == \"sshd\"\n        AND event.outcome == \"success\"\n        AND message LIKE \"*Accepted*\"\n| KEEP @timestamp, source.ip, user.name, message\n| SORT @timestamp ASC\n| LIMIT 100",
+        "columns": [
+          {
+            "name": "@timestamp",
+            "type": "date"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          },
+          {
+            "name": "message",
+            "type": "text"
+          }
+        ],
+        "row_count": 6,
+        "values": [
+          {
+            "@timestamp": "2026-07-12T11:01:53.000Z",
+            "source.ip": "172.18.0.17",
+            "user.name": "sre.ben",
+            "message": "Accepted password for sre.ben from 172.18.0.17 port 48238 ssh2"
+          },
+          {
+            "@timestamp": "2026-07-12T11:01:53.000Z",
+            "source.ip": "172.18.0.17",
+            "user.name": "sre.ben",
+            "message": "Accepted password for sre.ben from 172.18.0.17 port 48238 ssh2"
+          },
+          {
+            "@timestamp": "2026-07-12T11:01:53.000Z",
+            "source.ip": "172.18.0.17",
+            "user.name": "sre.ben",
+            "message": "Accepted password for sre.ben from 172.18.0.17 port 48238 ssh2"
+          },
+          {
+            "@timestamp": "2026-07-12T11:01:53.000Z",
+            "source.ip": "172.18.0.17",
+            "user.name": "sre.ben",
+            "message": "Accepted password for sre.ben from 172.18.0.17 port 48238 ssh2"
+          },
+          {
+            "@timestamp": "2026-07-12T11:01:53.000Z",
+            "source.ip": "172.18.0.17",
+            "user.name": "sre.ben",
+            "message": "Accepted password for sre.ben from 172.18.0.17 port 48238 ssh2"
+          },
+          {
+            "@timestamp": "2026-07-12T11:01:53.000Z",
+            "source.ip": "172.18.0.17",
+            "user.name": "sre.ben",
+            "message": "Accepted password for sre.ben from 172.18.0.17 port 48238 ssh2"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T10:40:00.000Z",
+        "2026-07-05T11:40:00.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-05T10:40:00.000Z\" AND @timestamp < \"2026-07-05T11:40:00.000Z\"\n        AND host.name == \"db-1\"\n        AND process.name == \"sshd\"\n        AND event.outcome == \"success\"\n        AND message LIKE \"*Accepted*\"\n| KEEP @timestamp, source.ip, user.name, message\n| SORT @timestamp ASC\n| LIMIT 100",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-05T10:40:00.000Z\" AND @timestamp < \"2026-07-05T11:40:00.000Z\"\n        AND host.name == \"db-1\"\n        AND process.name == \"sshd\"\n        AND event.outcome == \"success\"\n        AND message LIKE \"*Accepted*\"\n| KEEP @timestamp, source.ip, user.name, message\n| SORT @timestamp ASC\n| LIMIT 100",
+        "columns": [
+          {
+            "name": "@timestamp",
+            "type": "date"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          },
+          {
+            "name": "message",
+            "type": "text"
+          }
+        ],
+        "row_count": 6,
+        "values": [
+          {
+            "@timestamp": "2026-07-05T11:37:05.000Z",
+            "source.ip": "172.18.0.17",
+            "user.name": "sre.ben",
+            "message": "Accepted password for sre.ben from 172.18.0.17 port 47508 ssh2"
+          },
+          {
+            "@timestamp": "2026-07-05T11:37:05.000Z",
+            "source.ip": "172.18.0.17",
+            "user.name": "sre.ben",
+            "message": "Accepted password for sre.ben from 172.18.0.17 port 47508 ssh2"
+          },
+          {
+            "@timestamp": "2026-07-05T11:37:05.000Z",
+            "source.ip": "172.18.0.17",
+            "user.name": "sre.ben",
+            "message": "Accepted password for sre.ben from 172.18.0.17 port 47508 ssh2"
+          },
+          {
+            "@timestamp": "2026-07-05T11:37:05.000Z",
+            "source.ip": "172.18.0.17",
+            "user.name": "sre.ben",
+            "message": "Accepted password for sre.ben from 172.18.0.17 port 47508 ssh2"
+          },
+          {
+            "@timestamp": "2026-07-05T11:37:05.000Z",
+            "source.ip": "172.18.0.17",
+            "user.name": "sre.ben",
+            "message": "Accepted password for sre.ben from 172.18.0.17 port 47508 ssh2"
+          },
+          {
+            "@timestamp": "2026-07-05T11:37:05.000Z",
+            "source.ip": "172.18.0.17",
+            "user.name": "sre.ben",
+            "message": "Accepted password for sre.ben from 172.18.0.17 port 47508 ssh2"
+          }
+        ]
+      }
+    }
+  ]
+}

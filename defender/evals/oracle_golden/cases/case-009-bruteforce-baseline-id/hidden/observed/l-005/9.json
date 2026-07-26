@@ -1,1 +1,0 @@
-{"username": "svc.reports", "email": "svc-reports@soc-playground.local", "first_name": "Reports", "last_name": "Service", "enabled": true, "realm_role": "service-account", "authorized_hosts": ["web-1", "web-2"], "sudo_hosts": []}

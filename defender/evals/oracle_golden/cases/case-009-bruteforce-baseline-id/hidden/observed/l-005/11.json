@@ -1,1 +1,0 @@
-{"username": "svc.security", "email": "svc-security@soc-playground.local", "first_name": "Security", "last_name": "Service", "enabled": true, "realm_role": "service-account", "authorized_hosts": ["scanner-1"], "sudo_hosts": ["scanner-1"]}

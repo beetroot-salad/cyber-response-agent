@@ -1,0 +1,277 @@
+{
+  "lead_id": "l-003",
+  "seq": 6,
+  "controls": [
+    {
+      "name": "C-7d",
+      "window": [
+        "2026-07-19T10:00:00.000Z",
+        "2026-07-19T13:00:00.000Z"
+      ],
+      "query": "FROM .internal.alerts-security.alerts-default-*\n| WHERE @timestamp >= \"2026-07-19T10:00:00.000Z\" AND @timestamp < \"2026-07-19T13:00:00.000Z\"\n| STATS alerts     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule     = kibana.alert.rule.name,\n           rule_id  = kibana.alert.rule.rule_id,\n           severity = kibana.alert.severity,\n           host.name\n| SORT alerts DESC",
+      "live": false,
+      "payload": null
+    },
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T10:00:00.000Z",
+        "2026-07-12T13:00:00.000Z"
+      ],
+      "query": "FROM .internal.alerts-security.alerts-default-*\n| WHERE @timestamp >= \"2026-07-12T10:00:00.000Z\" AND @timestamp < \"2026-07-12T13:00:00.000Z\"\n| STATS alerts     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule     = kibana.alert.rule.name,\n           rule_id  = kibana.alert.rule.rule_id,\n           severity = kibana.alert.severity,\n           host.name\n| SORT alerts DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM .internal.alerts-security.alerts-default-*\n| WHERE @timestamp >= \"2026-07-12T10:00:00.000Z\" AND @timestamp < \"2026-07-12T13:00:00.000Z\"\n| STATS alerts     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule     = kibana.alert.rule.name,\n           rule_id  = kibana.alert.rule.rule_id,\n           severity = kibana.alert.severity,\n           host.name\n| SORT alerts DESC",
+        "columns": [
+          {
+            "name": "alerts",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "rule",
+            "type": "keyword"
+          },
+          {
+            "name": "rule_id",
+            "type": "keyword"
+          },
+          {
+            "name": "severity",
+            "type": "keyword"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 6,
+        "values": [
+          {
+            "alerts": 640,
+            "first_seen": "2026-07-12T10:01:44.129Z",
+            "last_seen": "2026-07-12T12:56:46.738Z",
+            "rule": "v2 Falco: suspicious network tool in container",
+            "rule_id": "v2-falco-suspicious-network-tool",
+            "severity": "medium",
+            "host.name": "soc-playground"
+          },
+          {
+            "alerts": 20,
+            "first_seen": "2026-07-12T10:01:44.140Z",
+            "last_seen": "2026-07-12T12:56:43.749Z",
+            "rule": "v2 internal port-scan burst",
+            "rule_id": "v2-internal-port-scan",
+            "severity": "medium",
+            "host.name": null
+          },
+          {
+            "alerts": 15,
+            "first_seen": "2026-07-12T10:11:32.032Z",
+            "last_seen": "2026-07-12T12:11:31.778Z",
+            "rule": "v2 sshd success after failures",
+            "rule_id": "v2-sshd-success-after-failures",
+            "severity": "high",
+            "host.name": "jump-box-1"
+          },
+          {
+            "alerts": 7,
+            "first_seen": "2026-07-12T10:16:44.039Z",
+            "last_seen": "2026-07-12T12:21:43.755Z",
+            "rule": "v2 bulk SSH success from single source",
+            "rule_id": "v2-bulk-ssh-success",
+            "severity": "medium",
+            "host.name": null
+          },
+          {
+            "alerts": 4,
+            "first_seen": "2026-07-12T10:21:32.056Z",
+            "last_seen": "2026-07-12T12:26:31.756Z",
+            "rule": "v2 sudo activity burst",
+            "rule_id": "v2-off-hours-sudo",
+            "severity": "medium",
+            "host.name": "soc-playground"
+          },
+          {
+            "alerts": 3,
+            "first_seen": "2026-07-12T10:11:32.059Z",
+            "last_seen": "2026-07-12T12:11:31.795Z",
+            "rule": "v2 sshd failed-auth burst",
+            "rule_id": "v2-sshd-failed-auth-burst",
+            "severity": "medium",
+            "host.name": "jump-box-1"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T10:00:00.000Z",
+        "2026-07-05T13:00:00.000Z"
+      ],
+      "query": "FROM .internal.alerts-security.alerts-default-*\n| WHERE @timestamp >= \"2026-07-05T10:00:00.000Z\" AND @timestamp < \"2026-07-05T13:00:00.000Z\"\n| STATS alerts     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule     = kibana.alert.rule.name,\n           rule_id  = kibana.alert.rule.rule_id,\n           severity = kibana.alert.severity,\n           host.name\n| SORT alerts DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM .internal.alerts-security.alerts-default-*\n| WHERE @timestamp >= \"2026-07-05T10:00:00.000Z\" AND @timestamp < \"2026-07-05T13:00:00.000Z\"\n| STATS alerts     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule     = kibana.alert.rule.name,\n           rule_id  = kibana.alert.rule.rule_id,\n           severity = kibana.alert.severity,\n           host.name\n| SORT alerts DESC",
+        "columns": [
+          {
+            "name": "alerts",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "rule",
+            "type": "keyword"
+          },
+          {
+            "name": "rule_id",
+            "type": "keyword"
+          },
+          {
+            "name": "severity",
+            "type": "keyword"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 13,
+        "values": [
+          {
+            "alerts": 718,
+            "first_seen": "2026-07-05T10:01:39.023Z",
+            "last_seen": "2026-07-05T12:56:38.577Z",
+            "rule": "v2 Falco: suspicious network tool in container",
+            "rule_id": "v2-falco-suspicious-network-tool",
+            "severity": "medium",
+            "host.name": "soc-playground"
+          },
+          {
+            "alerts": 18,
+            "first_seen": "2026-07-05T10:06:42.046Z",
+            "last_seen": "2026-07-05T12:51:41.587Z",
+            "rule": "v2 internal port-scan burst",
+            "rule_id": "v2-internal-port-scan",
+            "severity": "medium",
+            "host.name": null
+          },
+          {
+            "alerts": 15,
+            "first_seen": "2026-07-05T10:16:23.989Z",
+            "last_seen": "2026-07-05T11:51:23.764Z",
+            "rule": "v2 sshd success after failures",
+            "rule_id": "v2-sshd-success-after-failures",
+            "severity": "high",
+            "host.name": "jump-box-1"
+          },
+          {
+            "alerts": 5,
+            "first_seen": "2026-07-05T10:16:24.005Z",
+            "last_seen": "2026-07-05T10:16:24.019Z",
+            "rule": "v2 sshd success after failures",
+            "rule_id": "v2-sshd-success-after-failures",
+            "severity": "high",
+            "host.name": "web-1"
+          },
+          {
+            "alerts": 5,
+            "first_seen": "2026-07-05T11:31:23.794Z",
+            "last_seen": "2026-07-05T11:31:23.801Z",
+            "rule": "v2 sshd success after failures",
+            "rule_id": "v2-sshd-success-after-failures",
+            "severity": "high",
+            "host.name": "web-2"
+          },
+          {
+            "alerts": 5,
+            "first_seen": "2026-07-05T10:16:24.029Z",
+            "last_seen": "2026-07-05T12:51:23.579Z",
+            "rule": "v2 sudo activity burst",
+            "rule_id": "v2-off-hours-sudo",
+            "severity": "medium",
+            "host.name": "soc-playground"
+          },
+          {
+            "alerts": 4,
+            "first_seen": "2026-07-05T10:16:24.043Z",
+            "last_seen": "2026-07-05T11:31:23.803Z",
+            "rule": "v2 sshd failed-auth burst",
+            "rule_id": "v2-sshd-failed-auth-burst",
+            "severity": "medium",
+            "host.name": "web-1"
+          },
+          {
+            "alerts": 3,
+            "first_seen": "2026-07-05T10:16:24.043Z",
+            "last_seen": "2026-07-05T11:51:23.786Z",
+            "rule": "v2 sshd failed-auth burst",
+            "rule_id": "v2-sshd-failed-auth-burst",
+            "severity": "medium",
+            "host.name": "jump-box-1"
+          },
+          {
+            "alerts": 2,
+            "first_seen": "2026-07-05T11:06:23.847Z",
+            "last_seen": "2026-07-05T11:26:23.808Z",
+            "rule": "v2 sshd failed-auth burst",
+            "rule_id": "v2-sshd-failed-auth-burst",
+            "severity": "medium",
+            "host.name": "web-2"
+          },
+          {
+            "alerts": 1,
+            "first_seen": "2026-07-05T12:16:41.680Z",
+            "last_seen": "2026-07-05T12:16:41.680Z",
+            "rule": "v2 bulk SSH success from single source",
+            "rule_id": "v2-bulk-ssh-success",
+            "severity": "medium",
+            "host.name": null
+          },
+          {
+            "alerts": 1,
+            "first_seen": "2026-07-05T11:26:41.809Z",
+            "last_seen": "2026-07-05T11:26:41.809Z",
+            "rule": "v2 cross-tier SSH pivot",
+            "rule_id": "v2-cross-tier-ssh-pivot",
+            "severity": "high",
+            "host.name": "web-2"
+          },
+          {
+            "alerts": 1,
+            "first_seen": "2026-07-05T11:26:41.808Z",
+            "last_seen": "2026-07-05T11:26:41.808Z",
+            "rule": "v2 cross-tier SSH pivot",
+            "rule_id": "v2-cross-tier-ssh-pivot",
+            "severity": "high",
+            "host.name": "dev-ws-1"
+          },
+          {
+            "alerts": 1,
+            "first_seen": "2026-07-05T11:26:41.811Z",
+            "last_seen": "2026-07-05T11:26:41.811Z",
+            "rule": "v2 cross-tier SSH pivot",
+            "rule_id": "v2-cross-tier-ssh-pivot",
+            "severity": "high",
+            "host.name": null
+          }
+        ]
+      }
+    }
+  ]
+}

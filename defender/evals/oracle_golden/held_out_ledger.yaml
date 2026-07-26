@@ -16,3 +16,12 @@ entries:
   tag: glm-5.2_effort-none_prompt-711
   sha256: 6fcf8a9e50bb4a0132e5a855d835facf365eed58bd816ff8c74938edc3fb685d
   recorded: '2026-07-26'
+  retired: The case's story was rendered by a pre-fix story_from_run.py that included the catalog's static
+    description, which names the scenario's DEFAULT target. So the oracle was handed one input saying
+    the target was db-1 (the resolved fact) and canary-1 (the description). Its 3/6 measures that contradiction,
+    not the oracle. The case is removed from cases/; this entry stays because a held-out result is never
+    silently unmade -- retiring one is a recorded act.
+- case: case-005-cross-tier-probe-db1
+  tag: glm-5.2_effort-none_prompt-711
+  sha256: 5ee49ccfc99dad7ffebaa022566e8d5934b43c9d026faa3f3769d3036cb0dbe0
+  recorded: '2026-07-26'

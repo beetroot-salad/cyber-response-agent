@@ -1,0 +1,86 @@
+{
+  "lead_id": "l-010",
+  "seq": 2,
+  "controls": [
+    {
+      "name": "C-7d",
+      "window": [
+        "2026-07-19T10:34:24.500Z",
+        "2026-07-19T11:34:24.500Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-19T10:34:24.500Z\" AND @timestamp < \"2026-07-19T11:34:24.500Z\"\n| WHERE user.name == \"dev.dana\"\n        AND source.ip == \"172.18.0.11\"\n        AND event.outcome == \"success\"\n| STATS accepted_count = COUNT(*)\n| LIMIT 10",
+      "live": false,
+      "payload": null
+    },
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T10:34:24.500Z",
+        "2026-07-12T11:34:24.500Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-12T10:34:24.500Z\" AND @timestamp < \"2026-07-12T11:34:24.500Z\"\n| WHERE user.name == \"dev.dana\"\n        AND source.ip == \"172.18.0.11\"\n        AND event.outcome == \"success\"\n| STATS accepted_count = COUNT(*)\n| LIMIT 10",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-12T10:34:24.500Z\" AND @timestamp < \"2026-07-12T11:34:24.500Z\"\n| WHERE user.name == \"dev.dana\"\n        AND source.ip == \"172.18.0.11\"\n        AND event.outcome == \"success\"\n| STATS accepted_count = COUNT(*)\n| LIMIT 10",
+        "columns": [
+          {
+            "name": "accepted_count",
+            "type": "long"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "accepted_count": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T10:34:24.500Z",
+        "2026-07-05T11:34:24.500Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-05T10:34:24.500Z\" AND @timestamp < \"2026-07-05T11:34:24.500Z\"\n| WHERE user.name == \"dev.dana\"\n        AND source.ip == \"172.18.0.11\"\n        AND event.outcome == \"success\"\n| STATS accepted_count = COUNT(*)\n| LIMIT 10",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-05T10:34:24.500Z\" AND @timestamp < \"2026-07-05T11:34:24.500Z\"\n| WHERE user.name == \"dev.dana\"\n        AND source.ip == \"172.18.0.11\"\n        AND event.outcome == \"success\"\n| STATS accepted_count = COUNT(*)\n| LIMIT 10",
+        "columns": [
+          {
+            "name": "accepted_count",
+            "type": "long"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "accepted_count": 0
+          }
+        ]
+      }
+    }
+  ],
+  "attack_contribution": {
+    "window": [
+      "2026-07-26T11:04:03.000Z",
+      "2026-07-26T11:04:46.000Z"
+    ],
+    "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-26T11:04:03.000Z\" AND @timestamp < \"2026-07-26T11:04:46.000Z\"\n| WHERE user.name == \"dev.dana\"\n        AND source.ip == \"172.18.0.11\"\n        AND event.outcome == \"success\"\n| STATS accepted_count = COUNT(*)\n| LIMIT 10",
+    "payload": {
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-26T11:04:03.000Z\" AND @timestamp < \"2026-07-26T11:04:46.000Z\"\n| WHERE user.name == \"dev.dana\"\n        AND source.ip == \"172.18.0.11\"\n        AND event.outcome == \"success\"\n| STATS accepted_count = COUNT(*)\n| LIMIT 10",
+      "columns": [
+        {
+          "name": "accepted_count",
+          "type": "long"
+        }
+      ],
+      "row_count": 1,
+      "values": [
+        {
+          "accepted_count": 0
+        }
+      ]
+    }
+  }
+}

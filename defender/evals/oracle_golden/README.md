@@ -309,13 +309,18 @@ Results below are `glm-5.2_effort-none`.
 > **[0.51, 1.00]** — every slice reads `insufficient` or `no-update`. That is the
 > honest state of the suite, and #711 AC 9 is answered by the reporter saying so.
 >
-> **And the first held-out case says the dev number is optimistic.**
-> `case-009-bruteforce-baseline-id` (generated, held-out, a new unit) scores
-> **3/6 class agreement and `+event` recall 0.25**, against 0.92 and 0.71 on dev.
+> **And the held-out case says the dev number is optimistic.**
+> `case-005-cross-tier-probe-db1` (generated, held-out, a new unit) scores
+> **6/11 class agreement and `+event` recall 0.38**, against 0.92 and 0.71 on dev.
 > One case at one unit is `insufficient` and the reporter refuses to publish an
-> interval for it — but the direction is exactly what a held-out set is for, and
-> it is the first evidence that iterating the prompt against the seed six left a
-> mark on them.
+> interval for it — but the direction is exactly what a held-out set is for.
+>
+> Read its history too. The same projection scored **8/11** on a first story that
+> still carried the attack catalog's static description — *"the signal is
+> cross-credential-anomaly regardless of whether auth succeeds"*. That is the
+> scenario author telling the oracle what to look for, inside an oracle **input**.
+> Removing it cost two leads. An eval whose story hints at the answer measures the
+> hint, which is why `story_from_run.py` renders only the runner's resolved facts.
 
 | case | kind | classes | lead_source | system(s) / template(s) | result |
 |---|---|---|---|---|---|
@@ -325,7 +330,7 @@ Results below are `glm-5.2_effort-none`.
 | `case-004-noise-stolen-cred` | observed | `+noise`, `0` | authored | elastic sshd-auth; cmdb | **3/3** class; correctly `+noise`, no over-projection to `+event` |
 | `neg-001-unrelated-story` | negative-control | `0` | inherited (case-001) | (case-001 leads) | 9/9 — oracle abstained; no window-copying (re-earned on the de-leaked story) |
 | `mut-001-source-identity` | mutation | `+event`, `0` | inherited (case-001) | (case-001 leads) | **9/9** class; recall 1.00; originals **CLEAN**; 1 wrong volunteered value |
-| `case-009-bruteforce-baseline-id` | observed, **held-out** | `+event`, `0` | **captured, generated** | elastic sshd-auth + ip-to-host; cmdb; identity | **3/6** class; recall **0.25**; 0 wrong; 0 false-suppress — 3 under-projections |
+| `case-005-cross-tier-probe-db1` | observed, **held-out** | `+event`, `0` | **captured, generated** | elastic sshd-auth + zeek; cmdb; identity | **6/11** class; recall **0.38**; 0 wrong; 0 false-suppress — 4 heterogeneous under-projections + 1 **malformed** |
 
 `+event recall` is `null` in `scores/*.json` for case-003, case-004 and neg-001 —
 those cases label no `+event` lead, so the metric is undefined, not zero.

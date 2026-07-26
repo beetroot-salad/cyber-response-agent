@@ -94,3 +94,35 @@ def test_every_checked_in_run_record_renders_cleanly(meta_path):
     assert STORY.leaks(story) == []
     assert (meta.get("resolved") or {}).get("target_host", "") in story
     assert len(story.splitlines()) > 5
+
+
+def test_the_catalog_description_is_not_rendered():
+    """A retargeted run's catalog description names the scenario's DEFAULT target,
+    so rendering it puts two different targets in one oracle input. `--target db-1`
+    on ssh-brute-force-canary produced a story whose header said db-1 and whose
+    description said "hammers canary-1's SSH". Any projection over that measures
+    the contradiction, not the oracle — two #711 pilot cases were retired for it."""
+    meta = {**META, "description": "hammers canary-1's SSH from a workstation",
+            "resolved": {"source_user": "sre.alice", "target_host": "db-1"},
+            "steps": [{**META["steps"][0], "cmd": "ssh root@db-1 true"}]}
+    story = STORY.render_story(meta)
+    assert "canary-1" not in story, "the scenario's DEFAULT target leaked into the story"
+    assert "db-1" in story
+
+
+@pytest.mark.parametrize("meta_path", RUN_RECORDS, ids=lambda p: p.parent.name)
+def test_no_checked_in_record_renders_a_second_target(meta_path):
+    """Whatever else a story says, the only host it may name as the target is the
+    one the runner resolved."""
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    target = (meta.get("resolved") or {}).get("target_host")
+    if not target:
+        pytest.skip("record carries no resolved target")
+    story = STORY.render_story(meta)
+    others = {s.get("source_host") for s in meta.get("steps") or []} - {None}
+    hosts = {"canary-1", "db-1", "web-1", "web-2", "jump-box-1",
+             "dev-ws-1", "office-ws-1", "office-ws-2"}
+    named = {h for h in hosts if h in story}
+    assert named <= ({target} | others), (
+        f"story names hosts beyond the resolved target and its sources: "
+        f"{sorted(named - ({target} | others))}")

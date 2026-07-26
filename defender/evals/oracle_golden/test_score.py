@@ -353,3 +353,44 @@ def test_a_forbidden_value_inside_a_suppression_marker_leaks():
     assert summary["forbidden_emitted"] == ["office-ws-1"]
 
 
+
+
+# --------------------------------------------------------------------------
+# partially-placeholdered values — found by the #711 held-out captures
+# --------------------------------------------------------------------------
+
+def test_a_value_with_an_embedded_placeholder_is_not_a_concrete_claim():
+    """prompt.md mandates a placeholder for what the story does not state, and a
+    projection obeying it often states PART of a value and abstains on the rest.
+    Grading `"SSH-2.0-OpenSSH_<openssh-version>"` as `wrong` because it is not the
+    literal captured build punishes that abstention — and `wrong` gates a slice to
+    `no-update`. Two such values really occurred in case-005 and case-009."""
+    summary = SCORE.score_projection(
+        _spec(**{"l-1": {"system": "elastic", "class": "+event",
+                         "observed_fields": {"zeek.ssh.client": "SSH-2.0-OpenSSH_8.9p1"}}}),
+        _proj(**{"l-1": [{"zeek.ssh.client": "SSH-2.0-OpenSSH_<openssh-version>"}]}),
+        "p.yaml")
+    assert summary["rows"][0]["contradictions"] == {}
+    assert summary["wrong_concrete_fields"] == 0
+
+
+def test_a_required_field_emitted_with_an_embedded_placeholder_is_unknown():
+    summary = SCORE.score_projection(
+        _spec(**{"l-1": {"system": "elastic", "class": "+event",
+                         "fields": {"message": "Failed password for root from 10.0.0.1"}}}),
+        _proj(**{"l-1": [{"message": "Failed password for root from <source-ip>"}]}),
+        "p.yaml")
+    assert summary["rows"][0]["fields"] == {"message": "unknown"}
+    assert summary["wrong_concrete_fields"] == 0
+
+
+def test_a_fully_concrete_fabrication_is_still_wrong():
+    """The fix must not blunt the check it shares code with: a value carrying no
+    placeholder at all is still a claim, and case-002's `evt.type: write` must
+    still grade `wrong`."""
+    summary = SCORE.score_projection(
+        _spec(**{"l-1": {"system": "elastic", "class": "+event",
+                         "observed_fields": {"evt.type": "openat"}}}),
+        _proj(**{"l-1": [{"evt.type": "write"}]}),
+        "p.yaml")
+    assert summary["wrong_concrete_fields"] == 1

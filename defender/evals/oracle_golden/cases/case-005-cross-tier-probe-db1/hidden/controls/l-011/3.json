@@ -1,0 +1,2506 @@
+{
+  "lead_id": "l-011",
+  "seq": 3,
+  "controls": [
+    {
+      "name": "C-7d",
+      "window": [
+        "2026-07-19T10:34:24.500Z",
+        "2026-07-19T11:34:24.500Z"
+      ],
+      "query": "FROM logs-zeek.ssh-*\n| WHERE @timestamp >= \"2026-07-19T10:34:24.500Z\" AND @timestamp < \"2026-07-19T11:34:24.500Z\"\n| LIMIT 5",
+      "live": false,
+      "payload": null
+    },
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T10:34:24.500Z",
+        "2026-07-12T11:34:24.500Z"
+      ],
+      "query": "FROM logs-zeek.ssh-*\n| WHERE @timestamp >= \"2026-07-12T10:34:24.500Z\" AND @timestamp < \"2026-07-12T11:34:24.500Z\"\n| LIMIT 5",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-zeek.ssh-*\n| WHERE @timestamp >= \"2026-07-12T10:34:24.500Z\" AND @timestamp < \"2026-07-12T11:34:24.500Z\"\n| LIMIT 5",
+        "columns": [
+          {
+            "name": "@timestamp",
+            "type": "date"
+          },
+          {
+            "name": "agent.ephemeral_id",
+            "type": "keyword"
+          },
+          {
+            "name": "agent.id",
+            "type": "keyword"
+          },
+          {
+            "name": "agent.name",
+            "type": "keyword"
+          },
+          {
+            "name": "agent.name.text",
+            "type": "text"
+          },
+          {
+            "name": "agent.type",
+            "type": "keyword"
+          },
+          {
+            "name": "agent.version",
+            "type": "keyword"
+          },
+          {
+            "name": "cloud.account.id",
+            "type": "keyword"
+          },
+          {
+            "name": "cloud.availability_zone",
+            "type": "keyword"
+          },
+          {
+            "name": "cloud.image.id",
+            "type": "keyword"
+          },
+          {
+            "name": "cloud.instance.id",
+            "type": "keyword"
+          },
+          {
+            "name": "cloud.instance.name",
+            "type": "keyword"
+          },
+          {
+            "name": "cloud.machine.type",
+            "type": "keyword"
+          },
+          {
+            "name": "cloud.project.id",
+            "type": "keyword"
+          },
+          {
+            "name": "cloud.provider",
+            "type": "keyword"
+          },
+          {
+            "name": "cloud.region",
+            "type": "keyword"
+          },
+          {
+            "name": "cloud.service.name",
+            "type": "keyword"
+          },
+          {
+            "name": "cloud.service.name.text",
+            "type": "text"
+          },
+          {
+            "name": "container.id",
+            "type": "keyword"
+          },
+          {
+            "name": "container.image.name",
+            "type": "keyword"
+          },
+          {
+            "name": "container.name",
+            "type": "keyword"
+          },
+          {
+            "name": "data_stream.dataset",
+            "type": "keyword"
+          },
+          {
+            "name": "data_stream.namespace",
+            "type": "keyword"
+          },
+          {
+            "name": "data_stream.type",
+            "type": "keyword"
+          },
+          {
+            "name": "destination.address",
+            "type": "keyword"
+          },
+          {
+            "name": "destination.as.number",
+            "type": "long"
+          },
+          {
+            "name": "destination.as.organization.name",
+            "type": "keyword"
+          },
+          {
+            "name": "destination.as.organization.name.text",
+            "type": "text"
+          },
+          {
+            "name": "destination.geo.city_name",
+            "type": "keyword"
+          },
+          {
+            "name": "destination.geo.continent_name",
+            "type": "keyword"
+          },
+          {
+            "name": "destination.geo.country_iso_code",
+            "type": "keyword"
+          },
+          {
+            "name": "destination.geo.country_name",
+            "type": "keyword"
+          },
+          {
+            "name": "destination.geo.location",
+            "type": "geo_point"
+          },
+          {
+            "name": "destination.geo.name",
+            "type": "keyword"
+          },
+          {
+            "name": "destination.geo.region_iso_code",
+            "type": "keyword"
+          },
+          {
+            "name": "destination.geo.region_name",
+            "type": "keyword"
+          },
+          {
+            "name": "destination.ip",
+            "type": "ip"
+          },
+          {
+            "name": "destination.port",
+            "type": "long"
+          },
+          {
+            "name": "ecs.version",
+            "type": "keyword"
+          },
+          {
+            "name": "elastic_agent.id",
+            "type": "keyword"
+          },
+          {
+            "name": "elastic_agent.snapshot",
+            "type": "boolean"
+          },
+          {
+            "name": "elastic_agent.version",
+            "type": "keyword"
+          },
+          {
+            "name": "error.message",
+            "type": "text"
+          },
+          {
+            "name": "event.agent_id_status",
+            "type": "keyword"
+          },
+          {
+            "name": "event.category",
+            "type": "keyword"
+          },
+          {
+            "name": "event.created",
+            "type": "date"
+          },
+          {
+            "name": "event.dataset",
+            "type": "keyword"
+          },
+          {
+            "name": "event.id",
+            "type": "keyword"
+          },
+          {
+            "name": "event.ingested",
+            "type": "date"
+          },
+          {
+            "name": "event.kind",
+            "type": "keyword"
+          },
+          {
+            "name": "event.module",
+            "type": "keyword"
+          },
+          {
+            "name": "event.outcome",
+            "type": "keyword"
+          },
+          {
+            "name": "event.type",
+            "type": "keyword"
+          },
+          {
+            "name": "host.architecture",
+            "type": "keyword"
+          },
+          {
+            "name": "host.containerized",
+            "type": "boolean"
+          },
+          {
+            "name": "host.domain",
+            "type": "keyword"
+          },
+          {
+            "name": "host.hostname",
+            "type": "keyword"
+          },
+          {
+            "name": "host.id",
+            "type": "keyword"
+          },
+          {
+            "name": "host.ip",
+            "type": "ip"
+          },
+          {
+            "name": "host.mac",
+            "type": "keyword"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "host.os.build",
+            "type": "keyword"
+          },
+          {
+            "name": "host.os.codename",
+            "type": "keyword"
+          },
+          {
+            "name": "host.os.family",
+            "type": "keyword"
+          },
+          {
+            "name": "host.os.kernel",
+            "type": "keyword"
+          },
+          {
+            "name": "host.os.name",
+            "type": "keyword"
+          },
+          {
+            "name": "host.os.name.text",
+            "type": "text"
+          },
+          {
+            "name": "host.os.platform",
+            "type": "keyword"
+          },
+          {
+            "name": "host.os.version",
+            "type": "keyword"
+          },
+          {
+            "name": "host.type",
+            "type": "keyword"
+          },
+          {
+            "name": "input.type",
+            "type": "keyword"
+          },
+          {
+            "name": "log.file.path",
+            "type": "keyword"
+          },
+          {
+            "name": "log.flags",
+            "type": "keyword"
+          },
+          {
+            "name": "log.offset",
+            "type": "long"
+          },
+          {
+            "name": "network.community_id",
+            "type": "keyword"
+          },
+          {
+            "name": "network.protocol",
+            "type": "keyword"
+          },
+          {
+            "name": "network.transport",
+            "type": "keyword"
+          },
+          {
+            "name": "related.ip",
+            "type": "ip"
+          },
+          {
+            "name": "source.address",
+            "type": "keyword"
+          },
+          {
+            "name": "source.as.number",
+            "type": "long"
+          },
+          {
+            "name": "source.as.organization.name",
+            "type": "keyword"
+          },
+          {
+            "name": "source.as.organization.name.text",
+            "type": "text"
+          },
+          {
+            "name": "source.geo.city_name",
+            "type": "keyword"
+          },
+          {
+            "name": "source.geo.continent_name",
+            "type": "keyword"
+          },
+          {
+            "name": "source.geo.country_iso_code",
+            "type": "keyword"
+          },
+          {
+            "name": "source.geo.country_name",
+            "type": "keyword"
+          },
+          {
+            "name": "source.geo.location",
+            "type": "geo_point"
+          },
+          {
+            "name": "source.geo.name",
+            "type": "keyword"
+          },
+          {
+            "name": "source.geo.region_iso_code",
+            "type": "keyword"
+          },
+          {
+            "name": "source.geo.region_name",
+            "type": "keyword"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "source.port",
+            "type": "long"
+          },
+          {
+            "name": "tags",
+            "type": "keyword"
+          },
+          {
+            "name": "zeek.session_id",
+            "type": "keyword"
+          },
+          {
+            "name": "zeek.ssh.algorithm.cipher",
+            "type": "keyword"
+          },
+          {
+            "name": "zeek.ssh.algorithm.compression",
+            "type": "keyword"
+          },
+          {
+            "name": "zeek.ssh.algorithm.host_key",
+            "type": "keyword"
+          },
+          {
+            "name": "zeek.ssh.algorithm.key_exchange",
+            "type": "keyword"
+          },
+          {
+            "name": "zeek.ssh.algorithm.mac",
+            "type": "keyword"
+          },
+          {
+            "name": "zeek.ssh.auth.attempts",
+            "type": "long"
+          },
+          {
+            "name": "zeek.ssh.auth.success",
+            "type": "boolean"
+          },
+          {
+            "name": "zeek.ssh.client",
+            "type": "keyword"
+          },
+          {
+            "name": "zeek.ssh.direction",
+            "type": "keyword"
+          },
+          {
+            "name": "zeek.ssh.host_key",
+            "type": "keyword"
+          },
+          {
+            "name": "zeek.ssh.server",
+            "type": "keyword"
+          },
+          {
+            "name": "zeek.ssh.version",
+            "type": "long"
+          }
+        ],
+        "row_count": 5,
+        "values": [
+          {
+            "@timestamp": "2026-07-12T11:33:30.090Z",
+            "agent.ephemeral_id": "d33fe44d-c451-4c09-b4e6-2a4bbe24fb78",
+            "agent.id": "bfaae2d3-4889-4c77-b214-8d6f00a0b730",
+            "agent.name": "soc-playground",
+            "agent.name.text": "soc-playground",
+            "agent.type": "filebeat",
+            "agent.version": "9.3.3",
+            "cloud.account.id": null,
+            "cloud.availability_zone": "nbg1-dc3",
+            "cloud.image.id": null,
+            "cloud.instance.id": "147100598",
+            "cloud.instance.name": "soc-playground",
+            "cloud.machine.type": null,
+            "cloud.project.id": null,
+            "cloud.provider": "hetzner",
+            "cloud.region": "eu-central",
+            "cloud.service.name": "Cloud",
+            "cloud.service.name.text": "Cloud",
+            "container.id": "soc-playground_zeek_logs",
+            "container.image.name": null,
+            "container.name": null,
+            "data_stream.dataset": "zeek.ssh",
+            "data_stream.namespace": "default",
+            "data_stream.type": "logs",
+            "destination.address": "172.18.0.17",
+            "destination.as.number": null,
+            "destination.as.organization.name": null,
+            "destination.as.organization.name.text": null,
+            "destination.geo.city_name": null,
+            "destination.geo.continent_name": null,
+            "destination.geo.country_iso_code": null,
+            "destination.geo.country_name": null,
+            "destination.geo.location": null,
+            "destination.geo.name": null,
+            "destination.geo.region_iso_code": null,
+            "destination.geo.region_name": null,
+            "destination.ip": "172.18.0.17",
+            "destination.port": 22,
+            "ecs.version": "8.17.0",
+            "elastic_agent.id": "bfaae2d3-4889-4c77-b214-8d6f00a0b730",
+            "elastic_agent.snapshot": false,
+            "elastic_agent.version": "9.3.3",
+            "error.message": null,
+            "event.agent_id_status": "verified",
+            "event.category": "network",
+            "event.created": "2026-07-12T11:33:40.809Z",
+            "event.dataset": "zeek.ssh",
+            "event.id": "CVEr2k3we7WXg6jjla",
+            "event.ingested": "2026-07-12T11:33:47.000Z",
+            "event.kind": "event",
+            "event.module": "zeek",
+            "event.outcome": null,
+            "event.type": [
+              "connection",
+              "protocol"
+            ],
+            "host.architecture": null,
+            "host.containerized": null,
+            "host.domain": null,
+            "host.hostname": null,
+            "host.id": null,
+            "host.ip": null,
+            "host.mac": null,
+            "host.name": null,
+            "host.os.build": null,
+            "host.os.codename": null,
+            "host.os.family": null,
+            "host.os.kernel": null,
+            "host.os.name": null,
+            "host.os.name.text": null,
+            "host.os.platform": null,
+            "host.os.version": null,
+            "host.type": null,
+            "input.type": "log",
+            "log.file.path": "/var/lib/docker/volumes/soc-playground_zeek_logs/_data/ssh.log",
+            "log.flags": null,
+            "log.offset": 9063516,
+            "network.community_id": "1:yhRHp3fCHg/XNVa0FWZdK82/EhA=",
+            "network.protocol": "ssh",
+            "network.transport": "tcp",
+            "related.ip": [
+              "172.18.0.17",
+              "172.18.0.23"
+            ],
+            "source.address": "172.18.0.23",
+            "source.as.number": null,
+            "source.as.organization.name": null,
+            "source.as.organization.name.text": null,
+            "source.geo.city_name": null,
+            "source.geo.continent_name": null,
+            "source.geo.country_iso_code": null,
+            "source.geo.country_name": null,
+            "source.geo.location": null,
+            "source.geo.name": null,
+            "source.geo.region_iso_code": null,
+            "source.geo.region_name": null,
+            "source.ip": "172.18.0.23",
+            "source.port": 59272,
+            "tags": [
+              "forwarded",
+              "zeek-ssh"
+            ],
+            "zeek.session_id": "CVEr2k3we7WXg6jjla",
+            "zeek.ssh.algorithm.cipher": null,
+            "zeek.ssh.algorithm.compression": null,
+            "zeek.ssh.algorithm.host_key": null,
+            "zeek.ssh.algorithm.key_exchange": null,
+            "zeek.ssh.algorithm.mac": null,
+            "zeek.ssh.auth.attempts": 0,
+            "zeek.ssh.auth.success": null,
+            "zeek.ssh.client": null,
+            "zeek.ssh.direction": null,
+            "zeek.ssh.host_key": null,
+            "zeek.ssh.server": "SSH-2.0-OpenSSH_9.6p1 Ubuntu-3ubuntu13.16",
+            "zeek.ssh.version": null
+          },
+          {
+            "@timestamp": "2026-07-12T11:33:15.048Z",
+            "agent.ephemeral_id": "d33fe44d-c451-4c09-b4e6-2a4bbe24fb78",
+            "agent.id": "bfaae2d3-4889-4c77-b214-8d6f00a0b730",
+            "agent.name": "soc-playground",
+            "agent.name.text": "soc-playground",
+            "agent.type": "filebeat",
+            "agent.version": "9.3.3",
+            "cloud.account.id": null,
+            "cloud.availability_zone": "nbg1-dc3",
+            "cloud.image.id": null,
+            "cloud.instance.id": "147100598",
+            "cloud.instance.name": "soc-playground",
+            "cloud.machine.type": null,
+            "cloud.project.id": null,
+            "cloud.provider": "hetzner",
+            "cloud.region": "eu-central",
+            "cloud.service.name": "Cloud",
+            "cloud.service.name.text": "Cloud",
+            "container.id": "soc-playground_zeek_logs",
+            "container.image.name": null,
+            "container.name": null,
+            "data_stream.dataset": "zeek.ssh",
+            "data_stream.namespace": "default",
+            "data_stream.type": "logs",
+            "destination.address": "172.18.0.15",
+            "destination.as.number": null,
+            "destination.as.organization.name": null,
+            "destination.as.organization.name.text": null,
+            "destination.geo.city_name": null,
+            "destination.geo.continent_name": null,
+            "destination.geo.country_iso_code": null,
+            "destination.geo.country_name": null,
+            "destination.geo.location": null,
+            "destination.geo.name": null,
+            "destination.geo.region_iso_code": null,
+            "destination.geo.region_name": null,
+            "destination.ip": "172.18.0.15",
+            "destination.port": 22,
+            "ecs.version": "8.17.0",
+            "elastic_agent.id": "bfaae2d3-4889-4c77-b214-8d6f00a0b730",
+            "elastic_agent.snapshot": false,
+            "elastic_agent.version": "9.3.3",
+            "error.message": null,
+            "event.agent_id_status": "verified",
+            "event.category": "network",
+            "event.created": "2026-07-12T11:33:25.805Z",
+            "event.dataset": "zeek.ssh",
+            "event.id": "COM3zT1KJjIcnaSSz3",
+            "event.ingested": "2026-07-12T11:33:27.000Z",
+            "event.kind": "event",
+            "event.module": "zeek",
+            "event.outcome": null,
+            "event.type": [
+              "connection",
+              "protocol"
+            ],
+            "host.architecture": null,
+            "host.containerized": null,
+            "host.domain": null,
+            "host.hostname": null,
+            "host.id": null,
+            "host.ip": null,
+            "host.mac": null,
+            "host.name": null,
+            "host.os.build": null,
+            "host.os.codename": null,
+            "host.os.family": null,
+            "host.os.kernel": null,
+            "host.os.name": null,
+            "host.os.name.text": null,
+            "host.os.platform": null,
+            "host.os.version": null,
+            "host.type": null,
+            "input.type": "log",
+            "log.file.path": "/var/lib/docker/volumes/soc-playground_zeek_logs/_data/ssh.log",
+            "log.flags": null,
+            "log.offset": 9063310,
+            "network.community_id": "1:CqaxV8bO1XRNNkbLq5U9CKHlFN4=",
+            "network.protocol": "ssh",
+            "network.transport": "tcp",
+            "related.ip": [
+              "172.18.0.6",
+              "172.18.0.15"
+            ],
+            "source.address": "172.18.0.6",
+            "source.as.number": null,
+            "source.as.organization.name": null,
+            "source.as.organization.name.text": null,
+            "source.geo.city_name": null,
+            "source.geo.continent_name": null,
+            "source.geo.country_iso_code": null,
+            "source.geo.country_name": null,
+            "source.geo.location": null,
+            "source.geo.name": null,
+            "source.geo.region_iso_code": null,
+            "source.geo.region_name": null,
+            "source.ip": "172.18.0.6",
+            "source.port": 45606,
+            "tags": [
+              "forwarded",
+              "zeek-ssh"
+            ],
+            "zeek.session_id": "COM3zT1KJjIcnaSSz3",
+            "zeek.ssh.algorithm.cipher": null,
+            "zeek.ssh.algorithm.compression": null,
+            "zeek.ssh.algorithm.host_key": null,
+            "zeek.ssh.algorithm.key_exchange": null,
+            "zeek.ssh.algorithm.mac": null,
+            "zeek.ssh.auth.attempts": 0,
+            "zeek.ssh.auth.success": null,
+            "zeek.ssh.client": null,
+            "zeek.ssh.direction": null,
+            "zeek.ssh.host_key": null,
+            "zeek.ssh.server": "SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.15",
+            "zeek.ssh.version": null
+          },
+          {
+            "@timestamp": "2026-07-12T11:32:59.976Z",
+            "agent.ephemeral_id": "d33fe44d-c451-4c09-b4e6-2a4bbe24fb78",
+            "agent.id": "bfaae2d3-4889-4c77-b214-8d6f00a0b730",
+            "agent.name": "soc-playground",
+            "agent.name.text": "soc-playground",
+            "agent.type": "filebeat",
+            "agent.version": "9.3.3",
+            "cloud.account.id": null,
+            "cloud.availability_zone": "nbg1-dc3",
+            "cloud.image.id": null,
+            "cloud.instance.id": "147100598",
+            "cloud.instance.name": "soc-playground",
+            "cloud.machine.type": null,
+            "cloud.project.id": null,
+            "cloud.provider": "hetzner",
+            "cloud.region": "eu-central",
+            "cloud.service.name": "Cloud",
+            "cloud.service.name.text": "Cloud",
+            "container.id": "soc-playground_zeek_logs",
+            "container.image.name": null,
+            "container.name": null,
+            "data_stream.dataset": "zeek.ssh",
+            "data_stream.namespace": "default",
+            "data_stream.type": "logs",
+            "destination.address": "172.18.0.8",
+            "destination.as.number": null,
+            "destination.as.organization.name": null,
+            "destination.as.organization.name.text": null,
+            "destination.geo.city_name": null,
+            "destination.geo.continent_name": null,
+            "destination.geo.country_iso_code": null,
+            "destination.geo.country_name": null,
+            "destination.geo.location": null,
+            "destination.geo.name": null,
+            "destination.geo.region_iso_code": null,
+            "destination.geo.region_name": null,
+            "destination.ip": "172.18.0.8",
+            "destination.port": 22,
+            "ecs.version": "8.17.0",
+            "elastic_agent.id": "bfaae2d3-4889-4c77-b214-8d6f00a0b730",
+            "elastic_agent.snapshot": false,
+            "elastic_agent.version": "9.3.3",
+            "error.message": null,
+            "event.agent_id_status": "verified",
+            "event.category": "network",
+            "event.created": "2026-07-12T11:33:10.802Z",
+            "event.dataset": "zeek.ssh",
+            "event.id": "Cm030o3GThcsV4eXwj",
+            "event.ingested": "2026-07-12T11:33:17.000Z",
+            "event.kind": "event",
+            "event.module": "zeek",
+            "event.outcome": null,
+            "event.type": [
+              "connection",
+              "protocol"
+            ],
+            "host.architecture": null,
+            "host.containerized": null,
+            "host.domain": null,
+            "host.hostname": null,
+            "host.id": null,
+            "host.ip": null,
+            "host.mac": null,
+            "host.name": null,
+            "host.os.build": null,
+            "host.os.codename": null,
+            "host.os.family": null,
+            "host.os.kernel": null,
+            "host.os.name": null,
+            "host.os.name.text": null,
+            "host.os.platform": null,
+            "host.os.version": null,
+            "host.type": null,
+            "input.type": "log",
+            "log.file.path": "/var/lib/docker/volumes/soc-playground_zeek_logs/_data/ssh.log",
+            "log.flags": null,
+            "log.offset": 9063104,
+            "network.community_id": "1:Ko8NmzUxRtAuIsXW5OgMN15WBUU=",
+            "network.protocol": "ssh",
+            "network.transport": "tcp",
+            "related.ip": [
+              "172.18.0.8",
+              "172.18.0.17"
+            ],
+            "source.address": "172.18.0.17",
+            "source.as.number": null,
+            "source.as.organization.name": null,
+            "source.as.organization.name.text": null,
+            "source.geo.city_name": null,
+            "source.geo.continent_name": null,
+            "source.geo.country_iso_code": null,
+            "source.geo.country_name": null,
+            "source.geo.location": null,
+            "source.geo.name": null,
+            "source.geo.region_iso_code": null,
+            "source.geo.region_name": null,
+            "source.ip": "172.18.0.17",
+            "source.port": 51314,
+            "tags": [
+              "forwarded",
+              "zeek-ssh"
+            ],
+            "zeek.session_id": "Cm030o3GThcsV4eXwj",
+            "zeek.ssh.algorithm.cipher": null,
+            "zeek.ssh.algorithm.compression": null,
+            "zeek.ssh.algorithm.host_key": null,
+            "zeek.ssh.algorithm.key_exchange": null,
+            "zeek.ssh.algorithm.mac": null,
+            "zeek.ssh.auth.attempts": 0,
+            "zeek.ssh.auth.success": null,
+            "zeek.ssh.client": null,
+            "zeek.ssh.direction": null,
+            "zeek.ssh.host_key": null,
+            "zeek.ssh.server": "SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.15",
+            "zeek.ssh.version": null
+          },
+          {
+            "@timestamp": "2026-07-12T11:32:57.071Z",
+            "agent.ephemeral_id": "d33fe44d-c451-4c09-b4e6-2a4bbe24fb78",
+            "agent.id": "bfaae2d3-4889-4c77-b214-8d6f00a0b730",
+            "agent.name": "soc-playground",
+            "agent.name.text": "soc-playground",
+            "agent.type": "filebeat",
+            "agent.version": "9.3.3",
+            "cloud.account.id": null,
+            "cloud.availability_zone": "nbg1-dc3",
+            "cloud.image.id": null,
+            "cloud.instance.id": "147100598",
+            "cloud.instance.name": "soc-playground",
+            "cloud.machine.type": null,
+            "cloud.project.id": null,
+            "cloud.provider": "hetzner",
+            "cloud.region": "eu-central",
+            "cloud.service.name": "Cloud",
+            "cloud.service.name.text": "Cloud",
+            "container.id": "soc-playground_zeek_logs",
+            "container.image.name": null,
+            "container.name": null,
+            "data_stream.dataset": "zeek.ssh",
+            "data_stream.namespace": "default",
+            "data_stream.type": "logs",
+            "destination.address": "172.18.0.6",
+            "destination.as.number": null,
+            "destination.as.organization.name": null,
+            "destination.as.organization.name.text": null,
+            "destination.geo.city_name": null,
+            "destination.geo.continent_name": null,
+            "destination.geo.country_iso_code": null,
+            "destination.geo.country_name": null,
+            "destination.geo.location": null,
+            "destination.geo.name": null,
+            "destination.geo.region_iso_code": null,
+            "destination.geo.region_name": null,
+            "destination.ip": "172.18.0.6",
+            "destination.port": 22,
+            "ecs.version": "8.17.0",
+            "elastic_agent.id": "bfaae2d3-4889-4c77-b214-8d6f00a0b730",
+            "elastic_agent.snapshot": false,
+            "elastic_agent.version": "9.3.3",
+            "error.message": null,
+            "event.agent_id_status": "verified",
+            "event.category": "network",
+            "event.created": "2026-07-12T11:33:10.802Z",
+            "event.dataset": "zeek.ssh",
+            "event.id": "CvYfnU1lWYP0fm2Kpi",
+            "event.ingested": "2026-07-12T11:33:17.000Z",
+            "event.kind": "event",
+            "event.module": "zeek",
+            "event.outcome": null,
+            "event.type": [
+              "connection",
+              "protocol"
+            ],
+            "host.architecture": null,
+            "host.containerized": null,
+            "host.domain": null,
+            "host.hostname": null,
+            "host.id": null,
+            "host.ip": null,
+            "host.mac": null,
+            "host.name": null,
+            "host.os.build": null,
+            "host.os.codename": null,
+            "host.os.family": null,
+            "host.os.kernel": null,
+            "host.os.name": null,
+            "host.os.name.text": null,
+            "host.os.platform": null,
+            "host.os.version": null,
+            "host.type": null,
+            "input.type": "log",
+            "log.file.path": "/var/lib/docker/volumes/soc-playground_zeek_logs/_data/ssh.log",
+            "log.flags": null,
+            "log.offset": 9062898,
+            "network.community_id": "1:5h2M3MTIzjRpfWCPm/w/uw2oGig=",
+            "network.protocol": "ssh",
+            "network.transport": "tcp",
+            "related.ip": [
+              "172.18.0.6",
+              "172.18.0.20"
+            ],
+            "source.address": "172.18.0.20",
+            "source.as.number": null,
+            "source.as.organization.name": null,
+            "source.as.organization.name.text": null,
+            "source.geo.city_name": null,
+            "source.geo.continent_name": null,
+            "source.geo.country_iso_code": null,
+            "source.geo.country_name": null,
+            "source.geo.location": null,
+            "source.geo.name": null,
+            "source.geo.region_iso_code": null,
+            "source.geo.region_name": null,
+            "source.ip": "172.18.0.20",
+            "source.port": 34152,
+            "tags": [
+              "forwarded",
+              "zeek-ssh"
+            ],
+            "zeek.session_id": "CvYfnU1lWYP0fm2Kpi",
+            "zeek.ssh.algorithm.cipher": null,
+            "zeek.ssh.algorithm.compression": null,
+            "zeek.ssh.algorithm.host_key": null,
+            "zeek.ssh.algorithm.key_exchange": null,
+            "zeek.ssh.algorithm.mac": null,
+            "zeek.ssh.auth.attempts": 0,
+            "zeek.ssh.auth.success": null,
+            "zeek.ssh.client": null,
+            "zeek.ssh.direction": null,
+            "zeek.ssh.host_key": null,
+            "zeek.ssh.server": "SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.15",
+            "zeek.ssh.version": null
+          },
+          {
+            "@timestamp": "2026-07-12T11:32:03.500Z",
+            "agent.ephemeral_id": "d33fe44d-c451-4c09-b4e6-2a4bbe24fb78",
+            "agent.id": "bfaae2d3-4889-4c77-b214-8d6f00a0b730",
+            "agent.name": "soc-playground",
+            "agent.name.text": "soc-playground",
+            "agent.type": "filebeat",
+            "agent.version": "9.3.3",
+            "cloud.account.id": null,
+            "cloud.availability_zone": "nbg1-dc3",
+            "cloud.image.id": null,
+            "cloud.instance.id": "147100598",
+            "cloud.instance.name": "soc-playground",
+            "cloud.machine.type": null,
+            "cloud.project.id": null,
+            "cloud.provider": "hetzner",
+            "cloud.region": "eu-central",
+            "cloud.service.name": "Cloud",
+            "cloud.service.name.text": "Cloud",
+            "container.id": "soc-playground_zeek_logs",
+            "container.image.name": null,
+            "container.name": null,
+            "data_stream.dataset": "zeek.ssh",
+            "data_stream.namespace": "default",
+            "data_stream.type": "logs",
+            "destination.address": "172.18.0.15",
+            "destination.as.number": null,
+            "destination.as.organization.name": null,
+            "destination.as.organization.name.text": null,
+            "destination.geo.city_name": null,
+            "destination.geo.continent_name": null,
+            "destination.geo.country_iso_code": null,
+            "destination.geo.country_name": null,
+            "destination.geo.location": null,
+            "destination.geo.name": null,
+            "destination.geo.region_iso_code": null,
+            "destination.geo.region_name": null,
+            "destination.ip": "172.18.0.15",
+            "destination.port": 22,
+            "ecs.version": "8.17.0",
+            "elastic_agent.id": "bfaae2d3-4889-4c77-b214-8d6f00a0b730",
+            "elastic_agent.snapshot": false,
+            "elastic_agent.version": "9.3.3",
+            "error.message": null,
+            "event.agent_id_status": "verified",
+            "event.category": "network",
+            "event.created": "2026-07-12T11:32:15.797Z",
+            "event.dataset": "zeek.ssh",
+            "event.id": "CaOGSg1JaGZdgW2dT",
+            "event.ingested": "2026-07-12T11:32:17.000Z",
+            "event.kind": "event",
+            "event.module": "zeek",
+            "event.outcome": null,
+            "event.type": [
+              "connection",
+              "protocol"
+            ],
+            "host.architecture": null,
+            "host.containerized": null,
+            "host.domain": null,
+            "host.hostname": null,
+            "host.id": null,
+            "host.ip": null,
+            "host.mac": null,
+            "host.name": null,
+            "host.os.build": null,
+            "host.os.codename": null,
+            "host.os.family": null,
+            "host.os.kernel": null,
+            "host.os.name": null,
+            "host.os.name.text": null,
+            "host.os.platform": null,
+            "host.os.version": null,
+            "host.type": null,
+            "input.type": "log",
+            "log.file.path": "/var/lib/docker/volumes/soc-playground_zeek_logs/_data/ssh.log",
+            "log.flags": null,
+            "log.offset": 9062693,
+            "network.community_id": "1:WNuUyUxTYaWGWtXbw7Nc34V2Des=",
+            "network.protocol": "ssh",
+            "network.transport": "tcp",
+            "related.ip": [
+              "172.18.0.8",
+              "172.18.0.15"
+            ],
+            "source.address": "172.18.0.8",
+            "source.as.number": null,
+            "source.as.organization.name": null,
+            "source.as.organization.name.text": null,
+            "source.geo.city_name": null,
+            "source.geo.continent_name": null,
+            "source.geo.country_iso_code": null,
+            "source.geo.country_name": null,
+            "source.geo.location": null,
+            "source.geo.name": null,
+            "source.geo.region_iso_code": null,
+            "source.geo.region_name": null,
+            "source.ip": "172.18.0.8",
+            "source.port": 39596,
+            "tags": [
+              "forwarded",
+              "zeek-ssh"
+            ],
+            "zeek.session_id": "CaOGSg1JaGZdgW2dT",
+            "zeek.ssh.algorithm.cipher": null,
+            "zeek.ssh.algorithm.compression": null,
+            "zeek.ssh.algorithm.host_key": null,
+            "zeek.ssh.algorithm.key_exchange": null,
+            "zeek.ssh.algorithm.mac": null,
+            "zeek.ssh.auth.attempts": 0,
+            "zeek.ssh.auth.success": null,
+            "zeek.ssh.client": null,
+            "zeek.ssh.direction": null,
+            "zeek.ssh.host_key": null,
+            "zeek.ssh.server": "SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.15",
+            "zeek.ssh.version": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T10:34:24.500Z",
+        "2026-07-05T11:34:24.500Z"
+      ],
+      "query": "FROM logs-zeek.ssh-*\n| WHERE @timestamp >= \"2026-07-05T10:34:24.500Z\" AND @timestamp < \"2026-07-05T11:34:24.500Z\"\n| LIMIT 5",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-zeek.ssh-*\n| WHERE @timestamp >= \"2026-07-05T10:34:24.500Z\" AND @timestamp < \"2026-07-05T11:34:24.500Z\"\n| LIMIT 5",
+        "columns": [
+          {
+            "name": "@timestamp",
+            "type": "date"
+          },
+          {
+            "name": "agent.ephemeral_id",
+            "type": "keyword"
+          },
+          {
+            "name": "agent.id",
+            "type": "keyword"
+          },
+          {
+            "name": "agent.name",
+            "type": "keyword"
+          },
+          {
+            "name": "agent.name.text",
+            "type": "text"
+          },
+          {
+            "name": "agent.type",
+            "type": "keyword"
+          },
+          {
+            "name": "agent.version",
+            "type": "keyword"
+          },
+          {
+            "name": "cloud.account.id",
+            "type": "keyword"
+          },
+          {
+            "name": "cloud.availability_zone",
+            "type": "keyword"
+          },
+          {
+            "name": "cloud.image.id",
+            "type": "keyword"
+          },
+          {
+            "name": "cloud.instance.id",
+            "type": "keyword"
+          },
+          {
+            "name": "cloud.instance.name",
+            "type": "keyword"
+          },
+          {
+            "name": "cloud.machine.type",
+            "type": "keyword"
+          },
+          {
+            "name": "cloud.project.id",
+            "type": "keyword"
+          },
+          {
+            "name": "cloud.provider",
+            "type": "keyword"
+          },
+          {
+            "name": "cloud.region",
+            "type": "keyword"
+          },
+          {
+            "name": "cloud.service.name",
+            "type": "keyword"
+          },
+          {
+            "name": "cloud.service.name.text",
+            "type": "text"
+          },
+          {
+            "name": "container.id",
+            "type": "keyword"
+          },
+          {
+            "name": "container.image.name",
+            "type": "keyword"
+          },
+          {
+            "name": "container.name",
+            "type": "keyword"
+          },
+          {
+            "name": "data_stream.dataset",
+            "type": "keyword"
+          },
+          {
+            "name": "data_stream.namespace",
+            "type": "keyword"
+          },
+          {
+            "name": "data_stream.type",
+            "type": "keyword"
+          },
+          {
+            "name": "destination.address",
+            "type": "keyword"
+          },
+          {
+            "name": "destination.as.number",
+            "type": "long"
+          },
+          {
+            "name": "destination.as.organization.name",
+            "type": "keyword"
+          },
+          {
+            "name": "destination.as.organization.name.text",
+            "type": "text"
+          },
+          {
+            "name": "destination.geo.city_name",
+            "type": "keyword"
+          },
+          {
+            "name": "destination.geo.continent_name",
+            "type": "keyword"
+          },
+          {
+            "name": "destination.geo.country_iso_code",
+            "type": "keyword"
+          },
+          {
+            "name": "destination.geo.country_name",
+            "type": "keyword"
+          },
+          {
+            "name": "destination.geo.location",
+            "type": "geo_point"
+          },
+          {
+            "name": "destination.geo.name",
+            "type": "keyword"
+          },
+          {
+            "name": "destination.geo.region_iso_code",
+            "type": "keyword"
+          },
+          {
+            "name": "destination.geo.region_name",
+            "type": "keyword"
+          },
+          {
+            "name": "destination.ip",
+            "type": "ip"
+          },
+          {
+            "name": "destination.port",
+            "type": "long"
+          },
+          {
+            "name": "ecs.version",
+            "type": "keyword"
+          },
+          {
+            "name": "elastic_agent.id",
+            "type": "keyword"
+          },
+          {
+            "name": "elastic_agent.snapshot",
+            "type": "boolean"
+          },
+          {
+            "name": "elastic_agent.version",
+            "type": "keyword"
+          },
+          {
+            "name": "error.message",
+            "type": "text"
+          },
+          {
+            "name": "event.agent_id_status",
+            "type": "keyword"
+          },
+          {
+            "name": "event.category",
+            "type": "keyword"
+          },
+          {
+            "name": "event.created",
+            "type": "date"
+          },
+          {
+            "name": "event.dataset",
+            "type": "keyword"
+          },
+          {
+            "name": "event.id",
+            "type": "keyword"
+          },
+          {
+            "name": "event.ingested",
+            "type": "date"
+          },
+          {
+            "name": "event.kind",
+            "type": "keyword"
+          },
+          {
+            "name": "event.module",
+            "type": "keyword"
+          },
+          {
+            "name": "event.outcome",
+            "type": "keyword"
+          },
+          {
+            "name": "event.type",
+            "type": "keyword"
+          },
+          {
+            "name": "host.architecture",
+            "type": "keyword"
+          },
+          {
+            "name": "host.containerized",
+            "type": "boolean"
+          },
+          {
+            "name": "host.domain",
+            "type": "keyword"
+          },
+          {
+            "name": "host.hostname",
+            "type": "keyword"
+          },
+          {
+            "name": "host.id",
+            "type": "keyword"
+          },
+          {
+            "name": "host.ip",
+            "type": "ip"
+          },
+          {
+            "name": "host.mac",
+            "type": "keyword"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "host.os.build",
+            "type": "keyword"
+          },
+          {
+            "name": "host.os.codename",
+            "type": "keyword"
+          },
+          {
+            "name": "host.os.family",
+            "type": "keyword"
+          },
+          {
+            "name": "host.os.kernel",
+            "type": "keyword"
+          },
+          {
+            "name": "host.os.name",
+            "type": "keyword"
+          },
+          {
+            "name": "host.os.name.text",
+            "type": "text"
+          },
+          {
+            "name": "host.os.platform",
+            "type": "keyword"
+          },
+          {
+            "name": "host.os.version",
+            "type": "keyword"
+          },
+          {
+            "name": "host.type",
+            "type": "keyword"
+          },
+          {
+            "name": "input.type",
+            "type": "keyword"
+          },
+          {
+            "name": "log.file.path",
+            "type": "keyword"
+          },
+          {
+            "name": "log.flags",
+            "type": "keyword"
+          },
+          {
+            "name": "log.offset",
+            "type": "long"
+          },
+          {
+            "name": "network.community_id",
+            "type": "keyword"
+          },
+          {
+            "name": "network.protocol",
+            "type": "keyword"
+          },
+          {
+            "name": "network.transport",
+            "type": "keyword"
+          },
+          {
+            "name": "related.ip",
+            "type": "ip"
+          },
+          {
+            "name": "source.address",
+            "type": "keyword"
+          },
+          {
+            "name": "source.as.number",
+            "type": "long"
+          },
+          {
+            "name": "source.as.organization.name",
+            "type": "keyword"
+          },
+          {
+            "name": "source.as.organization.name.text",
+            "type": "text"
+          },
+          {
+            "name": "source.geo.city_name",
+            "type": "keyword"
+          },
+          {
+            "name": "source.geo.continent_name",
+            "type": "keyword"
+          },
+          {
+            "name": "source.geo.country_iso_code",
+            "type": "keyword"
+          },
+          {
+            "name": "source.geo.country_name",
+            "type": "keyword"
+          },
+          {
+            "name": "source.geo.location",
+            "type": "geo_point"
+          },
+          {
+            "name": "source.geo.name",
+            "type": "keyword"
+          },
+          {
+            "name": "source.geo.region_iso_code",
+            "type": "keyword"
+          },
+          {
+            "name": "source.geo.region_name",
+            "type": "keyword"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "source.port",
+            "type": "long"
+          },
+          {
+            "name": "tags",
+            "type": "keyword"
+          },
+          {
+            "name": "zeek.session_id",
+            "type": "keyword"
+          },
+          {
+            "name": "zeek.ssh.algorithm.cipher",
+            "type": "keyword"
+          },
+          {
+            "name": "zeek.ssh.algorithm.compression",
+            "type": "keyword"
+          },
+          {
+            "name": "zeek.ssh.algorithm.host_key",
+            "type": "keyword"
+          },
+          {
+            "name": "zeek.ssh.algorithm.key_exchange",
+            "type": "keyword"
+          },
+          {
+            "name": "zeek.ssh.algorithm.mac",
+            "type": "keyword"
+          },
+          {
+            "name": "zeek.ssh.auth.attempts",
+            "type": "long"
+          },
+          {
+            "name": "zeek.ssh.auth.success",
+            "type": "boolean"
+          },
+          {
+            "name": "zeek.ssh.client",
+            "type": "keyword"
+          },
+          {
+            "name": "zeek.ssh.direction",
+            "type": "keyword"
+          },
+          {
+            "name": "zeek.ssh.host_key",
+            "type": "keyword"
+          },
+          {
+            "name": "zeek.ssh.server",
+            "type": "keyword"
+          },
+          {
+            "name": "zeek.ssh.version",
+            "type": "long"
+          }
+        ],
+        "row_count": 5,
+        "values": [
+          {
+            "@timestamp": "2026-07-05T11:33:37.664Z",
+            "agent.ephemeral_id": "d33fe44d-c451-4c09-b4e6-2a4bbe24fb78",
+            "agent.id": "bfaae2d3-4889-4c77-b214-8d6f00a0b730",
+            "agent.name": "soc-playground",
+            "agent.name.text": "soc-playground",
+            "agent.type": "filebeat",
+            "agent.version": "9.3.3",
+            "cloud.account.id": null,
+            "cloud.availability_zone": "nbg1-dc3",
+            "cloud.image.id": null,
+            "cloud.instance.id": "147100598",
+            "cloud.instance.name": "soc-playground",
+            "cloud.machine.type": null,
+            "cloud.project.id": null,
+            "cloud.provider": "hetzner",
+            "cloud.region": "eu-central",
+            "cloud.service.name": "Cloud",
+            "cloud.service.name.text": "Cloud",
+            "container.id": "soc-playground_zeek_logs",
+            "container.image.name": null,
+            "container.name": null,
+            "data_stream.dataset": "zeek.ssh",
+            "data_stream.namespace": "default",
+            "data_stream.type": "logs",
+            "destination.address": "172.18.0.17",
+            "destination.as.number": null,
+            "destination.as.organization.name": null,
+            "destination.as.organization.name.text": null,
+            "destination.geo.city_name": null,
+            "destination.geo.continent_name": null,
+            "destination.geo.country_iso_code": null,
+            "destination.geo.country_name": null,
+            "destination.geo.location": null,
+            "destination.geo.name": null,
+            "destination.geo.region_iso_code": null,
+            "destination.geo.region_name": null,
+            "destination.ip": "172.18.0.17",
+            "destination.port": 22,
+            "ecs.version": "8.17.0",
+            "elastic_agent.id": "bfaae2d3-4889-4c77-b214-8d6f00a0b730",
+            "elastic_agent.snapshot": false,
+            "elastic_agent.version": "9.3.3",
+            "error.message": null,
+            "event.agent_id_status": "verified",
+            "event.category": "network",
+            "event.created": "2026-07-05T11:33:44.877Z",
+            "event.dataset": "zeek.ssh",
+            "event.id": "CrEtxf3KB1qaPyISi1",
+            "event.ingested": "2026-07-05T11:33:49.000Z",
+            "event.kind": "event",
+            "event.module": "zeek",
+            "event.outcome": null,
+            "event.type": [
+              "connection",
+              "protocol"
+            ],
+            "host.architecture": null,
+            "host.containerized": null,
+            "host.domain": null,
+            "host.hostname": null,
+            "host.id": null,
+            "host.ip": null,
+            "host.mac": null,
+            "host.name": null,
+            "host.os.build": null,
+            "host.os.codename": null,
+            "host.os.family": null,
+            "host.os.kernel": null,
+            "host.os.name": null,
+            "host.os.name.text": null,
+            "host.os.platform": null,
+            "host.os.version": null,
+            "host.type": null,
+            "input.type": "log",
+            "log.file.path": "/var/lib/docker/volumes/soc-playground_zeek_logs/_data/ssh.log",
+            "log.flags": null,
+            "log.offset": 2855838,
+            "network.community_id": "1:mGx2/UkuLC8oF35/6f+3UOWZSaM=",
+            "network.protocol": "ssh",
+            "network.transport": "tcp",
+            "related.ip": [
+              "172.18.0.17",
+              "172.18.0.23"
+            ],
+            "source.address": "172.18.0.23",
+            "source.as.number": null,
+            "source.as.organization.name": null,
+            "source.as.organization.name.text": null,
+            "source.geo.city_name": null,
+            "source.geo.continent_name": null,
+            "source.geo.country_iso_code": null,
+            "source.geo.country_name": null,
+            "source.geo.location": null,
+            "source.geo.name": null,
+            "source.geo.region_iso_code": null,
+            "source.geo.region_name": null,
+            "source.ip": "172.18.0.23",
+            "source.port": 57966,
+            "tags": [
+              "forwarded",
+              "zeek-ssh"
+            ],
+            "zeek.session_id": "CrEtxf3KB1qaPyISi1",
+            "zeek.ssh.algorithm.cipher": null,
+            "zeek.ssh.algorithm.compression": null,
+            "zeek.ssh.algorithm.host_key": null,
+            "zeek.ssh.algorithm.key_exchange": null,
+            "zeek.ssh.algorithm.mac": null,
+            "zeek.ssh.auth.attempts": 0,
+            "zeek.ssh.auth.success": null,
+            "zeek.ssh.client": null,
+            "zeek.ssh.direction": null,
+            "zeek.ssh.host_key": null,
+            "zeek.ssh.server": "SSH-2.0-OpenSSH_9.6p1 Ubuntu-3ubuntu13.16",
+            "zeek.ssh.version": null
+          },
+          {
+            "@timestamp": "2026-07-05T11:33:16.124Z",
+            "agent.ephemeral_id": "d33fe44d-c451-4c09-b4e6-2a4bbe24fb78",
+            "agent.id": "bfaae2d3-4889-4c77-b214-8d6f00a0b730",
+            "agent.name": "soc-playground",
+            "agent.name.text": "soc-playground",
+            "agent.type": "filebeat",
+            "agent.version": "9.3.3",
+            "cloud.account.id": null,
+            "cloud.availability_zone": "nbg1-dc3",
+            "cloud.image.id": null,
+            "cloud.instance.id": "147100598",
+            "cloud.instance.name": "soc-playground",
+            "cloud.machine.type": null,
+            "cloud.project.id": null,
+            "cloud.provider": "hetzner",
+            "cloud.region": "eu-central",
+            "cloud.service.name": "Cloud",
+            "cloud.service.name.text": "Cloud",
+            "container.id": "soc-playground_zeek_logs",
+            "container.image.name": null,
+            "container.name": null,
+            "data_stream.dataset": "zeek.ssh",
+            "data_stream.namespace": "default",
+            "data_stream.type": "logs",
+            "destination.address": "172.18.0.23",
+            "destination.as.number": null,
+            "destination.as.organization.name": null,
+            "destination.as.organization.name.text": null,
+            "destination.geo.city_name": null,
+            "destination.geo.continent_name": null,
+            "destination.geo.country_iso_code": null,
+            "destination.geo.country_name": null,
+            "destination.geo.location": null,
+            "destination.geo.name": null,
+            "destination.geo.region_iso_code": null,
+            "destination.geo.region_name": null,
+            "destination.ip": "172.18.0.23",
+            "destination.port": 22,
+            "ecs.version": "8.17.0",
+            "elastic_agent.id": "bfaae2d3-4889-4c77-b214-8d6f00a0b730",
+            "elastic_agent.snapshot": false,
+            "elastic_agent.version": "9.3.3",
+            "error.message": null,
+            "event.agent_id_status": "verified",
+            "event.category": "network",
+            "event.created": "2026-07-05T11:33:29.874Z",
+            "event.dataset": "zeek.ssh",
+            "event.id": "CjdkHxNjvXo1AFLKh",
+            "event.ingested": "2026-07-05T11:33:39.000Z",
+            "event.kind": "event",
+            "event.module": "zeek",
+            "event.outcome": null,
+            "event.type": [
+              "connection",
+              "protocol"
+            ],
+            "host.architecture": null,
+            "host.containerized": null,
+            "host.domain": null,
+            "host.hostname": null,
+            "host.id": null,
+            "host.ip": null,
+            "host.mac": null,
+            "host.name": null,
+            "host.os.build": null,
+            "host.os.codename": null,
+            "host.os.family": null,
+            "host.os.kernel": null,
+            "host.os.name": null,
+            "host.os.name.text": null,
+            "host.os.platform": null,
+            "host.os.version": null,
+            "host.type": null,
+            "input.type": "log",
+            "log.file.path": "/var/lib/docker/volumes/soc-playground_zeek_logs/_data/ssh.log",
+            "log.flags": null,
+            "log.offset": 2855631,
+            "network.community_id": "1:w8wkK/wAoEjXqyoG7EQkHsWCqo8=",
+            "network.protocol": "ssh",
+            "network.transport": "tcp",
+            "related.ip": [
+              "172.18.0.14",
+              "172.18.0.23"
+            ],
+            "source.address": "172.18.0.14",
+            "source.as.number": null,
+            "source.as.organization.name": null,
+            "source.as.organization.name.text": null,
+            "source.geo.city_name": null,
+            "source.geo.continent_name": null,
+            "source.geo.country_iso_code": null,
+            "source.geo.country_name": null,
+            "source.geo.location": null,
+            "source.geo.name": null,
+            "source.geo.region_iso_code": null,
+            "source.geo.region_name": null,
+            "source.ip": "172.18.0.14",
+            "source.port": 39486,
+            "tags": [
+              "forwarded",
+              "zeek-ssh"
+            ],
+            "zeek.session_id": "CjdkHxNjvXo1AFLKh",
+            "zeek.ssh.algorithm.cipher": null,
+            "zeek.ssh.algorithm.compression": null,
+            "zeek.ssh.algorithm.host_key": null,
+            "zeek.ssh.algorithm.key_exchange": null,
+            "zeek.ssh.algorithm.mac": null,
+            "zeek.ssh.auth.attempts": 0,
+            "zeek.ssh.auth.success": null,
+            "zeek.ssh.client": null,
+            "zeek.ssh.direction": null,
+            "zeek.ssh.host_key": null,
+            "zeek.ssh.server": "SSH-2.0-OpenSSH_9.6p1 Ubuntu-3ubuntu13.16",
+            "zeek.ssh.version": null
+          },
+          {
+            "@timestamp": "2026-07-05T11:32:24.633Z",
+            "agent.ephemeral_id": "d33fe44d-c451-4c09-b4e6-2a4bbe24fb78",
+            "agent.id": "bfaae2d3-4889-4c77-b214-8d6f00a0b730",
+            "agent.name": "soc-playground",
+            "agent.name.text": "soc-playground",
+            "agent.type": "filebeat",
+            "agent.version": "9.3.3",
+            "cloud.account.id": null,
+            "cloud.availability_zone": "nbg1-dc3",
+            "cloud.image.id": null,
+            "cloud.instance.id": "147100598",
+            "cloud.instance.name": "soc-playground",
+            "cloud.machine.type": null,
+            "cloud.project.id": null,
+            "cloud.provider": "hetzner",
+            "cloud.region": "eu-central",
+            "cloud.service.name": "Cloud",
+            "cloud.service.name.text": "Cloud",
+            "container.id": "soc-playground_zeek_logs",
+            "container.image.name": null,
+            "container.name": null,
+            "data_stream.dataset": "zeek.ssh",
+            "data_stream.namespace": "default",
+            "data_stream.type": "logs",
+            "destination.address": "172.18.0.12",
+            "destination.as.number": null,
+            "destination.as.organization.name": null,
+            "destination.as.organization.name.text": null,
+            "destination.geo.city_name": null,
+            "destination.geo.continent_name": null,
+            "destination.geo.country_iso_code": null,
+            "destination.geo.country_name": null,
+            "destination.geo.location": null,
+            "destination.geo.name": null,
+            "destination.geo.region_iso_code": null,
+            "destination.geo.region_name": null,
+            "destination.ip": "172.18.0.12",
+            "destination.port": 22,
+            "ecs.version": "8.17.0",
+            "elastic_agent.id": "bfaae2d3-4889-4c77-b214-8d6f00a0b730",
+            "elastic_agent.snapshot": false,
+            "elastic_agent.version": "9.3.3",
+            "error.message": null,
+            "event.agent_id_status": "verified",
+            "event.category": "network",
+            "event.created": "2026-07-05T11:32:34.870Z",
+            "event.dataset": "zeek.ssh",
+            "event.id": "Cx3pOcV5nKNsn9Adc",
+            "event.ingested": "2026-07-05T11:32:39.000Z",
+            "event.kind": "event",
+            "event.module": "zeek",
+            "event.outcome": null,
+            "event.type": [
+              "connection",
+              "protocol"
+            ],
+            "host.architecture": null,
+            "host.containerized": null,
+            "host.domain": null,
+            "host.hostname": null,
+            "host.id": null,
+            "host.ip": null,
+            "host.mac": null,
+            "host.name": null,
+            "host.os.build": null,
+            "host.os.codename": null,
+            "host.os.family": null,
+            "host.os.kernel": null,
+            "host.os.name": null,
+            "host.os.name.text": null,
+            "host.os.platform": null,
+            "host.os.version": null,
+            "host.type": null,
+            "input.type": "log",
+            "log.file.path": "/var/lib/docker/volumes/soc-playground_zeek_logs/_data/ssh.log",
+            "log.flags": null,
+            "log.offset": 2855424,
+            "network.community_id": "1:qFkdTinwQkkAf+3JKTdzP5sWE/E=",
+            "network.protocol": "ssh",
+            "network.transport": "tcp",
+            "related.ip": [
+              "172.18.0.12",
+              "172.18.0.22"
+            ],
+            "source.address": "172.18.0.22",
+            "source.as.number": null,
+            "source.as.organization.name": null,
+            "source.as.organization.name.text": null,
+            "source.geo.city_name": null,
+            "source.geo.continent_name": null,
+            "source.geo.country_iso_code": null,
+            "source.geo.country_name": null,
+            "source.geo.location": null,
+            "source.geo.name": null,
+            "source.geo.region_iso_code": null,
+            "source.geo.region_name": null,
+            "source.ip": "172.18.0.22",
+            "source.port": 60924,
+            "tags": [
+              "forwarded",
+              "zeek-ssh"
+            ],
+            "zeek.session_id": "Cx3pOcV5nKNsn9Adc",
+            "zeek.ssh.algorithm.cipher": null,
+            "zeek.ssh.algorithm.compression": null,
+            "zeek.ssh.algorithm.host_key": null,
+            "zeek.ssh.algorithm.key_exchange": null,
+            "zeek.ssh.algorithm.mac": null,
+            "zeek.ssh.auth.attempts": 0,
+            "zeek.ssh.auth.success": null,
+            "zeek.ssh.client": null,
+            "zeek.ssh.direction": null,
+            "zeek.ssh.host_key": null,
+            "zeek.ssh.server": "SSH-2.0-OpenSSH_9.6p1 Ubuntu-3ubuntu13.16",
+            "zeek.ssh.version": null
+          },
+          {
+            "@timestamp": "2026-07-05T11:31:06.347Z",
+            "agent.ephemeral_id": "d33fe44d-c451-4c09-b4e6-2a4bbe24fb78",
+            "agent.id": "bfaae2d3-4889-4c77-b214-8d6f00a0b730",
+            "agent.name": "soc-playground",
+            "agent.name.text": "soc-playground",
+            "agent.type": "filebeat",
+            "agent.version": "9.3.3",
+            "cloud.account.id": null,
+            "cloud.availability_zone": "nbg1-dc3",
+            "cloud.image.id": null,
+            "cloud.instance.id": "147100598",
+            "cloud.instance.name": "soc-playground",
+            "cloud.machine.type": null,
+            "cloud.project.id": null,
+            "cloud.provider": "hetzner",
+            "cloud.region": "eu-central",
+            "cloud.service.name": "Cloud",
+            "cloud.service.name.text": "Cloud",
+            "container.id": "soc-playground_zeek_logs",
+            "container.image.name": null,
+            "container.name": null,
+            "data_stream.dataset": "zeek.ssh",
+            "data_stream.namespace": "default",
+            "data_stream.type": "logs",
+            "destination.address": "172.18.0.15",
+            "destination.as.number": null,
+            "destination.as.organization.name": null,
+            "destination.as.organization.name.text": null,
+            "destination.geo.city_name": null,
+            "destination.geo.continent_name": null,
+            "destination.geo.country_iso_code": null,
+            "destination.geo.country_name": null,
+            "destination.geo.location": null,
+            "destination.geo.name": null,
+            "destination.geo.region_iso_code": null,
+            "destination.geo.region_name": null,
+            "destination.ip": "172.18.0.15",
+            "destination.port": 22,
+            "ecs.version": "8.17.0",
+            "elastic_agent.id": "bfaae2d3-4889-4c77-b214-8d6f00a0b730",
+            "elastic_agent.snapshot": false,
+            "elastic_agent.version": "9.3.3",
+            "error.message": null,
+            "event.agent_id_status": "verified",
+            "event.category": "network",
+            "event.created": "2026-07-05T11:31:19.863Z",
+            "event.dataset": "zeek.ssh",
+            "event.id": "CV7U5LwP6T7rSRik",
+            "event.ingested": "2026-07-05T11:31:28.000Z",
+            "event.kind": "event",
+            "event.module": "zeek",
+            "event.outcome": null,
+            "event.type": [
+              "connection",
+              "protocol"
+            ],
+            "host.architecture": null,
+            "host.containerized": null,
+            "host.domain": null,
+            "host.hostname": null,
+            "host.id": null,
+            "host.ip": null,
+            "host.mac": null,
+            "host.name": null,
+            "host.os.build": null,
+            "host.os.codename": null,
+            "host.os.family": null,
+            "host.os.kernel": null,
+            "host.os.name": null,
+            "host.os.name.text": null,
+            "host.os.platform": null,
+            "host.os.version": null,
+            "host.type": null,
+            "input.type": "log",
+            "log.file.path": "/var/lib/docker/volumes/soc-playground_zeek_logs/_data/ssh.log",
+            "log.flags": null,
+            "log.offset": 2855220,
+            "network.community_id": "1:wMrgbBKWd8+XXJDhI0Arfq97Lbo=",
+            "network.protocol": "ssh",
+            "network.transport": "tcp",
+            "related.ip": [
+              "172.18.0.8",
+              "172.18.0.15"
+            ],
+            "source.address": "172.18.0.8",
+            "source.as.number": null,
+            "source.as.organization.name": null,
+            "source.as.organization.name.text": null,
+            "source.geo.city_name": null,
+            "source.geo.continent_name": null,
+            "source.geo.country_iso_code": null,
+            "source.geo.country_name": null,
+            "source.geo.location": null,
+            "source.geo.name": null,
+            "source.geo.region_iso_code": null,
+            "source.geo.region_name": null,
+            "source.ip": "172.18.0.8",
+            "source.port": 34668,
+            "tags": [
+              "forwarded",
+              "zeek-ssh"
+            ],
+            "zeek.session_id": "CV7U5LwP6T7rSRik",
+            "zeek.ssh.algorithm.cipher": null,
+            "zeek.ssh.algorithm.compression": null,
+            "zeek.ssh.algorithm.host_key": null,
+            "zeek.ssh.algorithm.key_exchange": null,
+            "zeek.ssh.algorithm.mac": null,
+            "zeek.ssh.auth.attempts": 0,
+            "zeek.ssh.auth.success": null,
+            "zeek.ssh.client": null,
+            "zeek.ssh.direction": null,
+            "zeek.ssh.host_key": null,
+            "zeek.ssh.server": "SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.15",
+            "zeek.ssh.version": null
+          },
+          {
+            "@timestamp": "2026-07-05T11:30:33.715Z",
+            "agent.ephemeral_id": "d33fe44d-c451-4c09-b4e6-2a4bbe24fb78",
+            "agent.id": "bfaae2d3-4889-4c77-b214-8d6f00a0b730",
+            "agent.name": "soc-playground",
+            "agent.name.text": "soc-playground",
+            "agent.type": "filebeat",
+            "agent.version": "9.3.3",
+            "cloud.account.id": null,
+            "cloud.availability_zone": "nbg1-dc3",
+            "cloud.image.id": null,
+            "cloud.instance.id": "147100598",
+            "cloud.instance.name": "soc-playground",
+            "cloud.machine.type": null,
+            "cloud.project.id": null,
+            "cloud.provider": "hetzner",
+            "cloud.region": "eu-central",
+            "cloud.service.name": "Cloud",
+            "cloud.service.name.text": "Cloud",
+            "container.id": "soc-playground_zeek_logs",
+            "container.image.name": null,
+            "container.name": null,
+            "data_stream.dataset": "zeek.ssh",
+            "data_stream.namespace": "default",
+            "data_stream.type": "logs",
+            "destination.address": "172.18.0.8",
+            "destination.as.number": null,
+            "destination.as.organization.name": null,
+            "destination.as.organization.name.text": null,
+            "destination.geo.city_name": null,
+            "destination.geo.continent_name": null,
+            "destination.geo.country_iso_code": null,
+            "destination.geo.country_name": null,
+            "destination.geo.location": null,
+            "destination.geo.name": null,
+            "destination.geo.region_iso_code": null,
+            "destination.geo.region_name": null,
+            "destination.ip": "172.18.0.8",
+            "destination.port": 22,
+            "ecs.version": "8.17.0",
+            "elastic_agent.id": "bfaae2d3-4889-4c77-b214-8d6f00a0b730",
+            "elastic_agent.snapshot": false,
+            "elastic_agent.version": "9.3.3",
+            "error.message": null,
+            "event.agent_id_status": "verified",
+            "event.category": "network",
+            "event.created": "2026-07-05T11:30:34.858Z",
+            "event.dataset": "zeek.ssh",
+            "event.id": "Cfv1kF4UbLbiHN2Sq9",
+            "event.ingested": "2026-07-05T11:30:38.000Z",
+            "event.kind": "event",
+            "event.module": "zeek",
+            "event.outcome": "success",
+            "event.type": [
+              "connection",
+              "protocol"
+            ],
+            "host.architecture": null,
+            "host.containerized": null,
+            "host.domain": null,
+            "host.hostname": null,
+            "host.id": null,
+            "host.ip": null,
+            "host.mac": null,
+            "host.name": null,
+            "host.os.build": null,
+            "host.os.codename": null,
+            "host.os.family": null,
+            "host.os.kernel": null,
+            "host.os.name": null,
+            "host.os.name.text": null,
+            "host.os.platform": null,
+            "host.os.version": null,
+            "host.type": null,
+            "input.type": "log",
+            "log.file.path": "/var/lib/docker/volumes/soc-playground_zeek_logs/_data/ssh.log",
+            "log.flags": null,
+            "log.offset": 2854686,
+            "network.community_id": "1:hx2tBMcxSiUhbQrNCBXNpr3oFIM=",
+            "network.protocol": "ssh",
+            "network.transport": "tcp",
+            "related.ip": [
+              "172.18.0.8",
+              "172.18.0.17"
+            ],
+            "source.address": "172.18.0.17",
+            "source.as.number": null,
+            "source.as.organization.name": null,
+            "source.as.organization.name.text": null,
+            "source.geo.city_name": null,
+            "source.geo.continent_name": null,
+            "source.geo.country_iso_code": null,
+            "source.geo.country_name": null,
+            "source.geo.location": null,
+            "source.geo.name": null,
+            "source.geo.region_iso_code": null,
+            "source.geo.region_name": null,
+            "source.ip": "172.18.0.17",
+            "source.port": 42296,
+            "tags": [
+              "forwarded",
+              "zeek-ssh"
+            ],
+            "zeek.session_id": "Cfv1kF4UbLbiHN2Sq9",
+            "zeek.ssh.algorithm.cipher": "chacha20-poly1305@openssh.com",
+            "zeek.ssh.algorithm.compression": "none",
+            "zeek.ssh.algorithm.host_key": "ssh-ed25519",
+            "zeek.ssh.algorithm.key_exchange": "sntrup761x25519-sha512@openssh.com",
+            "zeek.ssh.algorithm.mac": "umac-64-etm@openssh.com",
+            "zeek.ssh.auth.attempts": 1,
+            "zeek.ssh.auth.success": true,
+            "zeek.ssh.client": "SSH-2.0-OpenSSH_9.6p1 Ubuntu-3ubuntu13.16",
+            "zeek.ssh.direction": null,
+            "zeek.ssh.host_key": "03:fd:5c:6e:e0:27:9a:20:bc:bb:33:a9:05:ed:61:41",
+            "zeek.ssh.server": "SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.15",
+            "zeek.ssh.version": 2
+          }
+        ]
+      }
+    }
+  ],
+  "attack_contribution": {
+    "window": [
+      "2026-07-26T11:04:03.000Z",
+      "2026-07-26T11:04:46.000Z"
+    ],
+    "query": "FROM logs-zeek.ssh-*\n| WHERE @timestamp >= \"2026-07-26T11:04:03.000Z\" AND @timestamp < \"2026-07-26T11:04:46.000Z\"\n| LIMIT 5",
+    "payload": {
+      "query": "FROM logs-zeek.ssh-*\n| WHERE @timestamp >= \"2026-07-26T11:04:03.000Z\" AND @timestamp < \"2026-07-26T11:04:46.000Z\"\n| LIMIT 5",
+      "columns": [
+        {
+          "name": "@timestamp",
+          "type": "date"
+        },
+        {
+          "name": "agent.ephemeral_id",
+          "type": "keyword"
+        },
+        {
+          "name": "agent.id",
+          "type": "keyword"
+        },
+        {
+          "name": "agent.name",
+          "type": "keyword"
+        },
+        {
+          "name": "agent.name.text",
+          "type": "text"
+        },
+        {
+          "name": "agent.type",
+          "type": "keyword"
+        },
+        {
+          "name": "agent.version",
+          "type": "keyword"
+        },
+        {
+          "name": "cloud.account.id",
+          "type": "keyword"
+        },
+        {
+          "name": "cloud.availability_zone",
+          "type": "keyword"
+        },
+        {
+          "name": "cloud.image.id",
+          "type": "keyword"
+        },
+        {
+          "name": "cloud.instance.id",
+          "type": "keyword"
+        },
+        {
+          "name": "cloud.instance.name",
+          "type": "keyword"
+        },
+        {
+          "name": "cloud.machine.type",
+          "type": "keyword"
+        },
+        {
+          "name": "cloud.project.id",
+          "type": "keyword"
+        },
+        {
+          "name": "cloud.provider",
+          "type": "keyword"
+        },
+        {
+          "name": "cloud.region",
+          "type": "keyword"
+        },
+        {
+          "name": "cloud.service.name",
+          "type": "keyword"
+        },
+        {
+          "name": "cloud.service.name.text",
+          "type": "text"
+        },
+        {
+          "name": "container.id",
+          "type": "keyword"
+        },
+        {
+          "name": "container.image.name",
+          "type": "keyword"
+        },
+        {
+          "name": "container.name",
+          "type": "keyword"
+        },
+        {
+          "name": "data_stream.dataset",
+          "type": "keyword"
+        },
+        {
+          "name": "data_stream.namespace",
+          "type": "keyword"
+        },
+        {
+          "name": "data_stream.type",
+          "type": "keyword"
+        },
+        {
+          "name": "destination.address",
+          "type": "keyword"
+        },
+        {
+          "name": "destination.as.number",
+          "type": "long"
+        },
+        {
+          "name": "destination.as.organization.name",
+          "type": "keyword"
+        },
+        {
+          "name": "destination.as.organization.name.text",
+          "type": "text"
+        },
+        {
+          "name": "destination.geo.city_name",
+          "type": "keyword"
+        },
+        {
+          "name": "destination.geo.continent_name",
+          "type": "keyword"
+        },
+        {
+          "name": "destination.geo.country_iso_code",
+          "type": "keyword"
+        },
+        {
+          "name": "destination.geo.country_name",
+          "type": "keyword"
+        },
+        {
+          "name": "destination.geo.location",
+          "type": "geo_point"
+        },
+        {
+          "name": "destination.geo.name",
+          "type": "keyword"
+        },
+        {
+          "name": "destination.geo.region_iso_code",
+          "type": "keyword"
+        },
+        {
+          "name": "destination.geo.region_name",
+          "type": "keyword"
+        },
+        {
+          "name": "destination.ip",
+          "type": "ip"
+        },
+        {
+          "name": "destination.port",
+          "type": "long"
+        },
+        {
+          "name": "ecs.version",
+          "type": "keyword"
+        },
+        {
+          "name": "elastic_agent.id",
+          "type": "keyword"
+        },
+        {
+          "name": "elastic_agent.snapshot",
+          "type": "boolean"
+        },
+        {
+          "name": "elastic_agent.version",
+          "type": "keyword"
+        },
+        {
+          "name": "error.message",
+          "type": "text"
+        },
+        {
+          "name": "event.agent_id_status",
+          "type": "keyword"
+        },
+        {
+          "name": "event.category",
+          "type": "keyword"
+        },
+        {
+          "name": "event.created",
+          "type": "date"
+        },
+        {
+          "name": "event.dataset",
+          "type": "keyword"
+        },
+        {
+          "name": "event.id",
+          "type": "keyword"
+        },
+        {
+          "name": "event.ingested",
+          "type": "date"
+        },
+        {
+          "name": "event.kind",
+          "type": "keyword"
+        },
+        {
+          "name": "event.module",
+          "type": "keyword"
+        },
+        {
+          "name": "event.outcome",
+          "type": "keyword"
+        },
+        {
+          "name": "event.type",
+          "type": "keyword"
+        },
+        {
+          "name": "host.architecture",
+          "type": "keyword"
+        },
+        {
+          "name": "host.containerized",
+          "type": "boolean"
+        },
+        {
+          "name": "host.domain",
+          "type": "keyword"
+        },
+        {
+          "name": "host.hostname",
+          "type": "keyword"
+        },
+        {
+          "name": "host.id",
+          "type": "keyword"
+        },
+        {
+          "name": "host.ip",
+          "type": "ip"
+        },
+        {
+          "name": "host.mac",
+          "type": "keyword"
+        },
+        {
+          "name": "host.name",
+          "type": "keyword"
+        },
+        {
+          "name": "host.os.build",
+          "type": "keyword"
+        },
+        {
+          "name": "host.os.codename",
+          "type": "keyword"
+        },
+        {
+          "name": "host.os.family",
+          "type": "keyword"
+        },
+        {
+          "name": "host.os.kernel",
+          "type": "keyword"
+        },
+        {
+          "name": "host.os.name",
+          "type": "keyword"
+        },
+        {
+          "name": "host.os.name.text",
+          "type": "text"
+        },
+        {
+          "name": "host.os.platform",
+          "type": "keyword"
+        },
+        {
+          "name": "host.os.version",
+          "type": "keyword"
+        },
+        {
+          "name": "host.type",
+          "type": "keyword"
+        },
+        {
+          "name": "input.type",
+          "type": "keyword"
+        },
+        {
+          "name": "log.file.path",
+          "type": "keyword"
+        },
+        {
+          "name": "log.flags",
+          "type": "keyword"
+        },
+        {
+          "name": "log.offset",
+          "type": "long"
+        },
+        {
+          "name": "network.community_id",
+          "type": "keyword"
+        },
+        {
+          "name": "network.protocol",
+          "type": "keyword"
+        },
+        {
+          "name": "network.transport",
+          "type": "keyword"
+        },
+        {
+          "name": "related.ip",
+          "type": "ip"
+        },
+        {
+          "name": "source.address",
+          "type": "keyword"
+        },
+        {
+          "name": "source.as.number",
+          "type": "long"
+        },
+        {
+          "name": "source.as.organization.name",
+          "type": "keyword"
+        },
+        {
+          "name": "source.as.organization.name.text",
+          "type": "text"
+        },
+        {
+          "name": "source.geo.city_name",
+          "type": "keyword"
+        },
+        {
+          "name": "source.geo.continent_name",
+          "type": "keyword"
+        },
+        {
+          "name": "source.geo.country_iso_code",
+          "type": "keyword"
+        },
+        {
+          "name": "source.geo.country_name",
+          "type": "keyword"
+        },
+        {
+          "name": "source.geo.location",
+          "type": "geo_point"
+        },
+        {
+          "name": "source.geo.name",
+          "type": "keyword"
+        },
+        {
+          "name": "source.geo.region_iso_code",
+          "type": "keyword"
+        },
+        {
+          "name": "source.geo.region_name",
+          "type": "keyword"
+        },
+        {
+          "name": "source.ip",
+          "type": "ip"
+        },
+        {
+          "name": "source.port",
+          "type": "long"
+        },
+        {
+          "name": "tags",
+          "type": "keyword"
+        },
+        {
+          "name": "zeek.session_id",
+          "type": "keyword"
+        },
+        {
+          "name": "zeek.ssh.algorithm.cipher",
+          "type": "keyword"
+        },
+        {
+          "name": "zeek.ssh.algorithm.compression",
+          "type": "keyword"
+        },
+        {
+          "name": "zeek.ssh.algorithm.host_key",
+          "type": "keyword"
+        },
+        {
+          "name": "zeek.ssh.algorithm.key_exchange",
+          "type": "keyword"
+        },
+        {
+          "name": "zeek.ssh.algorithm.mac",
+          "type": "keyword"
+        },
+        {
+          "name": "zeek.ssh.auth.attempts",
+          "type": "long"
+        },
+        {
+          "name": "zeek.ssh.auth.success",
+          "type": "boolean"
+        },
+        {
+          "name": "zeek.ssh.client",
+          "type": "keyword"
+        },
+        {
+          "name": "zeek.ssh.direction",
+          "type": "keyword"
+        },
+        {
+          "name": "zeek.ssh.host_key",
+          "type": "keyword"
+        },
+        {
+          "name": "zeek.ssh.server",
+          "type": "keyword"
+        },
+        {
+          "name": "zeek.ssh.version",
+          "type": "long"
+        }
+      ],
+      "row_count": 0,
+      "values": []
+    }
+  }
+}

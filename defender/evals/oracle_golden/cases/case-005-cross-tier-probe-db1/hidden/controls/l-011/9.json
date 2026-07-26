@@ -1,0 +1,120 @@
+{
+  "lead_id": "l-011",
+  "seq": 9,
+  "controls": [
+    {
+      "name": "C-7d",
+      "window": [
+        "2026-07-18T08:00:00.000Z",
+        "2026-07-18T12:00:00.000Z"
+      ],
+      "query": "FROM logs-zeek.ssh-*\n| WHERE @timestamp >= \"2026-07-18T08:00:00.000Z\" AND @timestamp < \"2026-07-18T12:00:00.000Z\"\n        AND source.ip == \"172.18.0.11\"\n| STATS events = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY destination.ip, destination.port, zeek.ssh.client, zeek.ssh.auth.success, zeek.ssh.algorithm.cipher, zeek.ssh.algorithm.mac\n| SORT events DESC, last_seen DESC",
+      "live": false,
+      "payload": null
+    },
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-11T08:00:00.000Z",
+        "2026-07-11T12:00:00.000Z"
+      ],
+      "query": "FROM logs-zeek.ssh-*\n| WHERE @timestamp >= \"2026-07-11T08:00:00.000Z\" AND @timestamp < \"2026-07-11T12:00:00.000Z\"\n        AND source.ip == \"172.18.0.11\"\n| STATS events = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY destination.ip, destination.port, zeek.ssh.client, zeek.ssh.auth.success, zeek.ssh.algorithm.cipher, zeek.ssh.algorithm.mac\n| SORT events DESC, last_seen DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-zeek.ssh-*\n| WHERE @timestamp >= \"2026-07-11T08:00:00.000Z\" AND @timestamp < \"2026-07-11T12:00:00.000Z\"\n        AND source.ip == \"172.18.0.11\"\n| STATS events = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY destination.ip, destination.port, zeek.ssh.client, zeek.ssh.auth.success, zeek.ssh.algorithm.cipher, zeek.ssh.algorithm.mac\n| SORT events DESC, last_seen DESC",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "destination.ip",
+            "type": "ip"
+          },
+          {
+            "name": "destination.port",
+            "type": "long"
+          },
+          {
+            "name": "zeek.ssh.client",
+            "type": "keyword"
+          },
+          {
+            "name": "zeek.ssh.auth.success",
+            "type": "boolean"
+          },
+          {
+            "name": "zeek.ssh.algorithm.cipher",
+            "type": "keyword"
+          },
+          {
+            "name": "zeek.ssh.algorithm.mac",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-04T08:00:00.000Z",
+        "2026-07-04T12:00:00.000Z"
+      ],
+      "query": "FROM logs-zeek.ssh-*\n| WHERE @timestamp >= \"2026-07-04T08:00:00.000Z\" AND @timestamp < \"2026-07-04T12:00:00.000Z\"\n        AND source.ip == \"172.18.0.11\"\n| STATS events = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY destination.ip, destination.port, zeek.ssh.client, zeek.ssh.auth.success, zeek.ssh.algorithm.cipher, zeek.ssh.algorithm.mac\n| SORT events DESC, last_seen DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-zeek.ssh-*\n| WHERE @timestamp >= \"2026-07-04T08:00:00.000Z\" AND @timestamp < \"2026-07-04T12:00:00.000Z\"\n        AND source.ip == \"172.18.0.11\"\n| STATS events = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY destination.ip, destination.port, zeek.ssh.client, zeek.ssh.auth.success, zeek.ssh.algorithm.cipher, zeek.ssh.algorithm.mac\n| SORT events DESC, last_seen DESC",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "destination.ip",
+            "type": "ip"
+          },
+          {
+            "name": "destination.port",
+            "type": "long"
+          },
+          {
+            "name": "zeek.ssh.client",
+            "type": "keyword"
+          },
+          {
+            "name": "zeek.ssh.auth.success",
+            "type": "boolean"
+          },
+          {
+            "name": "zeek.ssh.algorithm.cipher",
+            "type": "keyword"
+          },
+          {
+            "name": "zeek.ssh.algorithm.mac",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    }
+  ]
+}

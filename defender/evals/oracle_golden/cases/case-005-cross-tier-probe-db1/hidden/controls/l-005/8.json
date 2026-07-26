@@ -1,0 +1,64 @@
+{
+  "lead_id": "l-005",
+  "seq": 8,
+  "controls": [
+    {
+      "name": "C-7d",
+      "window": [
+        "2026-07-19T10:35:00.000Z",
+        "2026-07-19T11:35:00.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE host.name == \"db-1\" AND @timestamp >= \"2026-07-19T10:35:00.000Z\" AND @timestamp <= \"2026-07-19T11:35:00.000Z\" AND event.outcome == \"failure\"\n| STATS BY source.ip, user.name\n| SORT source.ip",
+      "live": false,
+      "payload": null
+    },
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T10:35:00.000Z",
+        "2026-07-12T11:35:00.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE host.name == \"db-1\" AND @timestamp >= \"2026-07-12T10:35:00.000Z\" AND @timestamp <= \"2026-07-12T11:35:00.000Z\" AND event.outcome == \"failure\"\n| STATS BY source.ip, user.name\n| SORT source.ip",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE host.name == \"db-1\" AND @timestamp >= \"2026-07-12T10:35:00.000Z\" AND @timestamp <= \"2026-07-12T11:35:00.000Z\" AND event.outcome == \"failure\"\n| STATS BY source.ip, user.name\n| SORT source.ip",
+        "columns": [
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T10:35:00.000Z",
+        "2026-07-05T11:35:00.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE host.name == \"db-1\" AND @timestamp >= \"2026-07-05T10:35:00.000Z\" AND @timestamp <= \"2026-07-05T11:35:00.000Z\" AND event.outcome == \"failure\"\n| STATS BY source.ip, user.name\n| SORT source.ip",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE host.name == \"db-1\" AND @timestamp >= \"2026-07-05T10:35:00.000Z\" AND @timestamp <= \"2026-07-05T11:35:00.000Z\" AND event.outcome == \"failure\"\n| STATS BY source.ip, user.name\n| SORT source.ip",
+        "columns": [
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    }
+  ]
+}

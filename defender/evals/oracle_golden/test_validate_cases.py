@@ -204,3 +204,20 @@ def test_the_replay_boundary_check_is_not_vacuous():
     """It asserts on the REAL replay.py, and the check itself guards against
     finding no literals at all."""
     assert VALIDATE.check_replay_boundary() == []
+
+
+def test_a_ledgered_result_cannot_vanish_without_a_reason(tmp_path):
+    """The failure this catches: a held-out score deleted because someone did not
+    like the number. The ledger entry outlives the file, so its absence is loud."""
+    ledger = _ledger(tmp_path, [{"case": "gone", "tag": "t", "sha256": "abc"}])
+    problems = VALIDATE.check_held_out_ledger([], ledger)
+    assert any("carries no `retired:` reason" in p for p in problems)
+
+
+def test_a_retired_entry_may_have_no_file(tmp_path):
+    """Retiring is how a DEFECTIVE case leaves the suite — #711 retired two whose
+    stories contradicted themselves. The entry stays with its reason, so the
+    result is recorded as retired rather than unmade."""
+    ledger = _ledger(tmp_path, [{"case": "gone", "tag": "t", "sha256": "abc",
+                                 "retired": "story named two different targets"}])
+    assert VALIDATE.check_held_out_ledger([], ledger) == []

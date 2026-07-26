@@ -124,11 +124,18 @@ def _field_sets(case_dir: Path, lead_id: str, queries: list[dict]) -> tuple[dict
                 continue
             key = (tuple(json.dumps(row.get(k), sort_keys=True, default=str) for k in keys)
                    if keys else None)
-            distinguishing = key is not None and key not in baseline
+            if key is not None and key in baseline:
+                # A BASELINE row. Its values are true of the envelope but are not
+                # attributable to the activity, and grading a projection against
+                # them measures the baseline instead. case-005's `l-011` asserted
+                # `zeek.ssh.auth.success: True` from a routine connection to
+                # jump-box-1, marking the projection `wrong` for correctly saying
+                # the db-1 attempt failed. Neither field set may come from here.
+                continue
             for column, value in row.items():
                 if column in _NOT_GROUND_TRUTH or not _scalar(value):
                     continue
-                if distinguishing and keys and column in keys:
+                if keys and column in keys:
                     fields.setdefault(column, value)
                 else:
                     observed.setdefault(column, value)

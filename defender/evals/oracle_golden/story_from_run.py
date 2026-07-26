@@ -64,8 +64,17 @@ def render_story(meta: dict) -> str:
         f"It began at {meta.get('started_at', 'an unrecorded time')} and finished at "
         f"{meta.get('finished_at', 'an unrecorded time')}.",
     ]
-    if meta.get("description"):
-        out += ["", " ".join(str(meta["description"]).split())]
+    # The catalog `description` is NOT rendered, and that is load-bearing. It
+    # describes the scenario's DEFAULT configuration, so a retargeted run gets a
+    # story that contradicts itself: `ssh-brute-force-canary --target db-1`
+    # produced a story whose header said db-1 and whose description said
+    # "hammers canary-1's SSH ... failed auth events on canary-1's sshd". The
+    # oracle then has two different targets in one input, and any projection it
+    # makes is a measurement of the contradiction rather than of the oracle.
+    # Two #711 pilot cases were retired for exactly this.
+    #
+    # Only the runner's RESOLVED facts are rendered. A renderer that cannot
+    # reach static catalog prose cannot leak a default into a story.
     if meta.get("aborted"):
         out += ["", "The run was aborted before completing every step."]
 

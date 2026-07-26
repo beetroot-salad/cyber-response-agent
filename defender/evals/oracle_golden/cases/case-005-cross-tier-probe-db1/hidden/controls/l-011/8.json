@@ -1,0 +1,116 @@
+{
+  "lead_id": "l-011",
+  "seq": 8,
+  "controls": [
+    {
+      "name": "C-7d",
+      "window": [
+        "2026-07-19T10:34:24.500Z",
+        "2026-07-19T11:34:24.500Z"
+      ],
+      "query": "FROM logs-zeek.ssh-*\n| WHERE @timestamp >= \"2026-07-19T10:34:24.500Z\" AND @timestamp < \"2026-07-19T11:34:24.500Z\"\n| STATS min_ts = MIN(@timestamp), max_ts = MAX(@timestamp), total_events = COUNT(*)",
+      "live": false,
+      "payload": null
+    },
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T10:34:24.500Z",
+        "2026-07-12T11:34:24.500Z"
+      ],
+      "query": "FROM logs-zeek.ssh-*\n| WHERE @timestamp >= \"2026-07-12T10:34:24.500Z\" AND @timestamp < \"2026-07-12T11:34:24.500Z\"\n| STATS min_ts = MIN(@timestamp), max_ts = MAX(@timestamp), total_events = COUNT(*)",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-zeek.ssh-*\n| WHERE @timestamp >= \"2026-07-12T10:34:24.500Z\" AND @timestamp < \"2026-07-12T11:34:24.500Z\"\n| STATS min_ts = MIN(@timestamp), max_ts = MAX(@timestamp), total_events = COUNT(*)",
+        "columns": [
+          {
+            "name": "min_ts",
+            "type": "date"
+          },
+          {
+            "name": "max_ts",
+            "type": "date"
+          },
+          {
+            "name": "total_events",
+            "type": "long"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "min_ts": "2026-07-12T10:35:00.782Z",
+            "max_ts": "2026-07-12T11:33:30.090Z",
+            "total_events": 96
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T10:34:24.500Z",
+        "2026-07-05T11:34:24.500Z"
+      ],
+      "query": "FROM logs-zeek.ssh-*\n| WHERE @timestamp >= \"2026-07-05T10:34:24.500Z\" AND @timestamp < \"2026-07-05T11:34:24.500Z\"\n| STATS min_ts = MIN(@timestamp), max_ts = MAX(@timestamp), total_events = COUNT(*)",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-zeek.ssh-*\n| WHERE @timestamp >= \"2026-07-05T10:34:24.500Z\" AND @timestamp < \"2026-07-05T11:34:24.500Z\"\n| STATS min_ts = MIN(@timestamp), max_ts = MAX(@timestamp), total_events = COUNT(*)",
+        "columns": [
+          {
+            "name": "min_ts",
+            "type": "date"
+          },
+          {
+            "name": "max_ts",
+            "type": "date"
+          },
+          {
+            "name": "total_events",
+            "type": "long"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "min_ts": "2026-07-05T10:35:07.050Z",
+            "max_ts": "2026-07-05T11:33:37.664Z",
+            "total_events": 111
+          }
+        ]
+      }
+    }
+  ],
+  "attack_contribution": {
+    "window": [
+      "2026-07-26T11:04:03.000Z",
+      "2026-07-26T11:04:46.000Z"
+    ],
+    "query": "FROM logs-zeek.ssh-*\n| WHERE @timestamp >= \"2026-07-26T11:04:03.000Z\" AND @timestamp < \"2026-07-26T11:04:46.000Z\"\n| STATS min_ts = MIN(@timestamp), max_ts = MAX(@timestamp), total_events = COUNT(*)",
+    "payload": {
+      "query": "FROM logs-zeek.ssh-*\n| WHERE @timestamp >= \"2026-07-26T11:04:03.000Z\" AND @timestamp < \"2026-07-26T11:04:46.000Z\"\n| STATS min_ts = MIN(@timestamp), max_ts = MAX(@timestamp), total_events = COUNT(*)",
+      "columns": [
+        {
+          "name": "min_ts",
+          "type": "date"
+        },
+        {
+          "name": "max_ts",
+          "type": "date"
+        },
+        {
+          "name": "total_events",
+          "type": "long"
+        }
+      ],
+      "row_count": 1,
+      "values": [
+        {
+          "min_ts": null,
+          "max_ts": null,
+          "total_events": 0
+        }
+      ]
+    }
+  }
+}

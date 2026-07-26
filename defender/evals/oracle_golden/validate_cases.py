@@ -288,7 +288,17 @@ def check_held_out_ledger(cases: list[tuple[Path, dict]],
                     f"ledger hash. A held-out result is recorded once per tag; to record a "
                     f"new oracle version, add a NEW tag rather than re-running this one")
     for key in sorted(set(entries) - seen):
-        problems.append(f"ledger names {key[0]}/{key[1]} but that score file is absent")
+        # A `retired` entry is allowed to have no file: retiring a held-out result
+        # is how a DEFECTIVE case leaves the suite, and the entry stays behind with
+        # its reason so the result is never silently unmade. An entry with no file
+        # and no reason is the failure this catches — a held-out score deleted
+        # because someone did not like it.
+        if entries[key].get("retired"):
+            continue
+        problems.append(
+            f"ledger names {key[0]}/{key[1]} but that score file is absent, and the "
+            f"entry carries no `retired:` reason — a held-out result is never removed "
+            f"without one")
     return problems
 
 
