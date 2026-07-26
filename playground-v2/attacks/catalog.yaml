@@ -32,9 +32,20 @@
 # Reproducibility: runner hashes (scenario.id, seed, step_index, iteration)
 # to seed a per-step PRNG — same seed + same catalog → same dispatches.
 #
-# IMPORTANT: run scenarios with baseline activity disabled
-# (V2_BASELINE_ENABLED=false + compose up -d --force-recreate <hosts>) so
-# synthetic benign traffic doesn't contaminate the fixture-capture window.
+# Baseline activity: leave it ON unless you are capturing an ALERT FIXTURE.
+#
+#   - capturing a fixture (a clean alert.json to replay offline): disabling the
+#     generators (V2_BASELINE_ENABLED=false + compose up -d --force-recreate
+#     <hosts>) keeps synthetic benign traffic out of the capture window. This is
+#     what the original note here meant, and it is still right for that job.
+#   - capturing for ORACLE CALIBRATION (defender/evals/oracle_golden/): leave the
+#     generators running. The oracle's answer is a signed diff over baseline, so
+#     with them off `+noise` cannot occur at all and `+event` is easier than
+#     production — the suite would be calibrating against an environment that
+#     does not exist. `generate_case.py` therefore runs with baseline on.
+#
+# `docs/runbook.md` (attack runs deliberately leave baseline on) is the newer
+# statement and the one to follow by default.
 
 scenarios:
 
