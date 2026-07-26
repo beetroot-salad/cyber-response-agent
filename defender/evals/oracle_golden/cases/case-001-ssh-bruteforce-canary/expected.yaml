@@ -17,11 +17,24 @@ case_id: case-001-ssh-bruteforce-canary
 kind: observed
 result_classes_covered: ["+event", "0"]     # NOT exercised: +noise, -noise
 notes: >
-  Every oracle-visible sample skeleton is empty ("(no schema sample available)")
-  because the leads run aggregate ES|QL (STATS ... BY ...), which is not captured
-  in the exemplar shape redact_exemplar reads. So field grounding here tests the
-  oracle's inference from QUERY BODIES, not from a schema exemplar. A doc-returning
-  case (e.g. a raw sshd auth fetch) is needed to exercise the exemplar channel.
+  Every oracle-visible sample skeleton is empty ("(no schema sample available)"),
+  so field grounding here tests the oracle's inference from QUERY BODIES, not from
+  a schema exemplar. This is NOT specific to aggregate ES|QL, as first recorded:
+  redact_exemplar looks for a "### Raw Sample Events" markdown header, and the
+  playground-v2 query tool writes raw JSON payloads that never carry one, so
+  lead_sample_text returns the placeholder for every lead of every run — verified
+  in the #707 probe's own request trace, and again by case-002, which IS
+  doc-returning (KEEP ... SORT) and still has no exemplar. The suite is faithful
+  to production here; exercising the exemplar channel needs a payload-format
+  change, not another case.
+
+  IP identity is not stable across lever-ups. 172.18.0.15 belonged to db-1 through
+  2026-07-13 and to office-ws-1 from ~07-17, so the historical rows inside the
+  IP-scoped envelopes (l-004, l-006) describe a DIFFERENT host than the one the
+  story names. That is why the defender run looked up db-1 in CMDB (l-007) and
+  asked change-mgmt about brute-force testing "from db-1" (l-009). The in-window
+  rows are the real attack and the +event labels stand; the surrounding "baseline"
+  in those two payloads does not belong to office-ws-1.
 
 leads:
   l-001:
@@ -76,8 +89,13 @@ leads:
     heterogeneous: true          # baseline windows = 0/+noise ; attack-window buckets = burst
     intent_note: >
       Lead is framed as pre-alert BASELINE establishment; oracle read it +noise
-      (the source's routine to other hosts). Its attack-window sub-queries still
-      surface the burst, so envelope truth is +event.
+      (the source's apparent routine to other hosts). Its attack-window
+      sub-queries still surface the burst, so envelope truth is +event. NB the
+      "routine" those sub-queries return — accepted logins from 172.18.0.15 to
+      web-1/web-2/db-1/jump-box-1 in June — is db-1's history under the same IP
+      (see `notes`), not office-ws-1's. Inventory gives office-ws-1 no outbound
+      trust edges, matching the story; the telemetry disagrees only because the
+      address was reassigned between lever-ups.
     fields:
       user.name: "root"
       host.name: "canary-1"

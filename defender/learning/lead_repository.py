@@ -200,7 +200,8 @@ def stage_tables(src_run_dir: Path, dst_dir: Path) -> None:
         shutil.copy2(queries_src, RunPaths(dst_dir).executed_queries)
     gather_src = RunPaths(src_run_dir).gather_raw
     if gather_src.is_dir():
-        shutil.copytree(gather_src, RunPaths(dst_dir).gather_raw, dirs_exist_ok=True)
+        shutil.copytree(gather_src, RunPaths(dst_dir).gather_raw, symlinks=True,
+                       dirs_exist_ok=True)
 
 
 

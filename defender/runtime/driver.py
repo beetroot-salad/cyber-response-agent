@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import os
+import sqlite3
 import sys
 import time
+import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import replace
 from pathlib import Path
@@ -13,14 +15,15 @@ from pydantic_ai import Agent, RunContext
 from pydantic_ai.capabilities import ProcessHistory
 from pydantic_ai.capabilities.hooks import Hooks
 from pydantic_ai.exceptions import UsageLimitExceeded
-from pydantic_ai.messages import ModelMessagesTypeAdapter
+from pydantic_ai.messages import ModelResponse
 from pydantic_ai.usage import UsageLimits
 
-from . import compaction
 from . import observe
 from . import orient
 from . import permission
 from . import providers
+from . import selection
+from . import session_store
 from .agent_definition import AgentDefinition, ResolvedRoots, ToolSet, bind
 from .agent_role import AgentRole
 from .circuit_breaker import RunAborted
@@ -35,7 +38,6 @@ from .tools import (
 from .verbs import ModuleVerbRegistry
 
 from defender._env import env_bool
-from defender._run_paths import RunPaths
 from defender.hooks.budget_enforcer import (
     DEFAULT_LIMITS,
     BudgetKill,
@@ -113,6 +115,7 @@ def _account_executed_call(deps: AgentDeps, tool_name: str, *, active: bool, lim
 
 def _make_hooks(
     logger: observe.RequestLogger, agent_id: str, *, enforce: bool, limits: dict = DEFAULT_LIMITS,
+    session_id: str | None = None,
 ) -> Hooks[Any]:
     hooks = Hooks()
 
@@ -139,6 +142,7 @@ def _make_hooks(
                 run_step=int(getattr(ctx, "run_step", 0) or 0),
                 duration_ms=(time.time() - t0) * 1000.0,
                 agent_id=agent_id,
+                session_id=session_id,
             )
         except Exception as e:  # noqa: BLE001
             print(f"[run.py] request logging skipped: {e!r}", file=sys.stderr)
@@ -167,10 +171,12 @@ def build_agent_core(  # noqa: PLR0913 — the single build site's config + 3 DI
     make_model: MakeModel = providers.build_for_effort,
     verbs: Any = None,
     limits: dict = DEFAULT_LIMITS,
+    session_id: str | None = None,
 ) -> Agent[Any, str]:
     built = make_model(defn.model(), defn.effort)
     capabilities: list[Any] = [
-        _make_hooks(logger, agent_id, enforce=defn.budget_enforced, limits=limits),
+        _make_hooks(logger, agent_id, enforce=defn.budget_enforced, limits=limits,
+                    session_id=session_id),
         *extra_capabilities,
     ]
     if defn.tools.query:
@@ -242,11 +248,13 @@ def _gather_instructions(defender_dir: Path) -> str:
     return (defender_dir / "skills" / "gather" / "SKILL.md").read_text(encoding="utf-8")
 
 
-def build_gather_agent(
+def build_gather_agent(  # noqa: PLR0913 — composition root, same shape as build_agent
     defender_dir: Path, logger: observe.RequestLogger, agent_id: str,
     make_model: MakeModel = providers.build_for_effort,
     verbs: Any = None,
     limits: dict = DEFAULT_LIMITS,
+    extra_capabilities: Sequence[Any] = (),
+    session_id: str | None = None,
 ) -> Agent[GatherDeps, str]:
     name = gather_model()
     return build_agent_core(
@@ -259,9 +267,11 @@ def build_gather_agent(
         instructions=_gather_instructions(defender_dir),
         logger=logger,
         agent_id=agent_id,
+        extra_capabilities=extra_capabilities,
         make_model=make_model,
         verbs=verbs,
         limits=limits,
+        session_id=session_id,
     )
 
 
@@ -278,60 +288,56 @@ def _summary_pointers(run_dir: Path) -> dict[str, str]:
     return {p.stem: str(p) for p in sorted(d.glob("*.md"))}
 
 
-def _frontier_index(messages: list) -> int | None:
-    for i in range(len(messages) - 1, -1, -1):
-        for part in getattr(messages[i], "parts", []):
-            if getattr(part, "part_kind", None) == "user-prompt":
-                content = getattr(part, "content", "")
-                if isinstance(content, str) and compaction.FRONTIER_SENTINEL in content:
-                    return i
-    return None
-
-
-def _compact_messages(messages: list, run_dir: Path) -> list:
-    inv = RunPaths(run_dir).investigation
-    inv_text = inv.read_text(encoding="utf-8") if inv.is_file() else ""
-    fold = compaction.fold_boundary(inv_text)
-    marker = _frontier_index(messages)
-    if fold <= 0:
-        return messages
-
-    frontier_md = compaction._frontier_through(inv_text, fold)
-    frontier_dict = compaction.render_frontier_message(frontier_md)
-    frontier_obj = ModelMessagesTypeAdapter.validate_python([frontier_dict])[0]
-
-    orientation = messages[0]
-    tail = messages[marker + 1:] if marker is not None else []
-    rewritten = [orientation, frontier_obj] + tail
-    if marker is None and len(rewritten) >= len(messages):
-        return messages
-    return rewritten
-
-
-def _make_compaction_processor():
+def _make_store_render_processor(store: Any, session_id: str, *, fold: bool):
     async def process(ctx: RunContext[AgentDeps], messages: list) -> list:
-        try:
-            return _compact_messages(messages, ctx.deps.run_dir)
-        except Exception as e:  # noqa: BLE001 — compaction must never break the run
-            print(f"[run.py] compaction skipped: {e!r}", file=sys.stderr)
+        # The framework appends this round's own request to state history and only
+        # THEN checks the request limit (pydantic_ai's `_prepare_request`), so by the
+        # time this processor runs the doomed round's continuation is already in
+        # `messages`. Mirror the same check here and withhold it from the store —
+        # otherwise a round that never actually happens gets committed anyway, and the
+        # run-end flush can never recover the true terminal response.
+        usage = getattr(ctx, "usage", None)
+        requests = int(getattr(usage, "requests", 0) or 0)
+        if requests >= DEFAULT_REQUEST_LIMIT:
+            selection.ingest(store, session_id, messages[:-1], agent_id="main")
             return messages
+        selection.ingest(store, session_id, messages, agent_id="main")
+        return selection.render(
+            store, session_id, messages, agent_id="main", fold=fold,
+            run_step=int(getattr(ctx, "run_step", 0) or 0), duration_ms=0.0,
+            run_id=getattr(ctx, "run_id", None), conversation_id=getattr(ctx, "conversation_id", None),
+        )
 
     return process
 
 
-def _main_extra_capabilities() -> list[ProcessHistory[Any]]:
-    if not _compaction_enabled():
-        return []
-    print("[run.py] per-loop compaction ENABLED (DEFENDER_COMPACTION)", file=sys.stderr)
-    return [ProcessHistory(_make_compaction_processor())]
+def _make_gather_recorder(store: Any, session_id: str, agent_id: str):
+    async def process(ctx: RunContext[GatherDeps], messages: list) -> list:
+        selection.ingest(store, session_id, messages, agent_id=agent_id)
+        return messages
+
+    return process
 
 
-def build_agent(
+def _main_extra_capabilities(store: Any, session_id: str) -> list[ProcessHistory[Any]]:
+    return [ProcessHistory(
+        _make_store_render_processor(store, session_id, fold=_compaction_enabled()))]
+
+
+def _gather_extra_capabilities(store: Any, session_id: str, agent_id: str) -> list[ProcessHistory[Any]]:
+    return [ProcessHistory(_make_gather_recorder(store, session_id, agent_id))]
+
+
+def build_agent(  # noqa: PLR0913 — composition root: config + DI seams + the store's identity
     defender_dir: Path, logger: observe.RequestLogger,
     make_model: MakeModel = providers.build_for_effort,
     *, main_model: str | None = None, verbs: Any = None, limits: dict = DEFAULT_LIMITS,
+    store: Any = None, session_id: str | None = None,
 ) -> Agent[AgentDeps, str]:
-    extra = _main_extra_capabilities()
+    extra: list[ProcessHistory[Any]] = []
+    if store is not None:
+        assert session_id is not None, "a store requires its session_id (build_agent's own contract)"
+        extra = _main_extra_capabilities(store, session_id)
     _override = " (DEFENDER_GATHER_MODEL override)" if os.environ.get("DEFENDER_GATHER_MODEL") else ""
     print(f"[run.py] gather model: {gather_model()}{_override}", file=sys.stderr)
     name = resolve_main_model(main_model)
@@ -348,14 +354,21 @@ def build_agent(
         extra_capabilities=extra,
         make_model=make_model,
         limits=limits,
+        session_id=session_id,
     )
-    register_gather_tool(
-        agent,
-        lambda agent_id: build_gather_agent(
+
+    def _build_gather(agent_id: str) -> Agent[GatherDeps, str]:
+        gather_extra: Sequence[Any] = ()
+        gather_session_id: str | None = None
+        if store is not None:
+            gather_session_id = store.new_session(agent_id=agent_id)
+            gather_extra = _gather_extra_capabilities(store, gather_session_id, agent_id)
+        return build_gather_agent(
             defender_dir, logger, agent_id, make_model, verbs, limits,
-        ),
-        GATHER_REQUEST_LIMIT,
-    )
+            extra_capabilities=gather_extra, session_id=gather_session_id,
+        )
+
+    register_gather_tool(agent, _build_gather, GATHER_REQUEST_LIMIT)
     return agent
 
 
@@ -366,6 +379,72 @@ def _log_node(node: Any) -> None:
         print("[run.py] · tool calls", file=sys.stderr)
     elif Agent.is_end_node(node):
         print("[run.py] · end", file=sys.stderr)
+
+
+StoreFactory = Callable[[str, Path], Any]
+
+
+def _default_store_factory(case_id: str, run_dir: Path) -> Any:
+    return session_store.open_store(case_id=case_id, runs_base=run_dir.parent)
+
+
+def _flush_run_end(run: Any, store: Any, session_id: str, truncated_by: str | None) -> None:
+    """R11's true `finally`: capture the terminal exchange (whatever `run` actually holds
+    on ANY exit, clean or not) and stamp `truncated_by`, both best-effort so a broken
+    store cannot mask the exit that got us here."""
+    if run is not None:
+        try:
+            live = run.ctx.state.message_history
+            for i in range(len(live) - 1, -1, -1):
+                if isinstance(live[i], ModelResponse):
+                    live = live[: i + 1]
+                    break
+            selection.ingest(store, session_id, live, agent_id="main")
+        except Exception as e:  # noqa: BLE001 — the run-end flush is best-effort
+            print(f"[run.py] run-end flush skipped: {e!r}", file=sys.stderr)
+    if truncated_by is not None:
+        try:
+            store.set_truncated_by(session_id, truncated_by)
+        except Exception as e:  # noqa: BLE001 — the store may already be the reason we're here
+            print(f"[run.py] truncated_by write skipped: {e!r}", file=sys.stderr)
+
+
+async def _drive_agent(
+    agent: Agent[AgentDeps, str], prompt: str, deps: AgentDeps, store: Any, session_id: str,
+) -> tuple[Any, str | None, str | None]:
+    """Runs the bare `async for node in run` loop and classifies the four caught exits
+    into `(truncated_by, exit_reason)`; returns the (possibly unfinished) `run` alongside
+    them so the caller can still read `run.result`/`run.ctx` on a clean exit."""
+    truncated_by: str | None = None
+    exit_reason: str | None = None
+    run: Any = None
+    try:
+        async with agent.iter(
+            prompt, deps=deps,
+            usage_limits=UsageLimits(request_limit=DEFAULT_REQUEST_LIMIT),
+        ) as run:
+            async for node in run:
+                _log_node(node)
+    except UsageLimitExceeded as e:
+        print(f"[run.py] request limit reached ({e}); writing partial trace",
+              file=sys.stderr)
+        truncated_by = "request-limit"
+        exit_reason = "UsageLimitExceeded"
+    except RunAborted as e:
+        print(f"[run.py] {e}; writing partial trace", file=sys.stderr)
+        truncated_by = "aborted"
+        exit_reason = "RunAborted"
+    except BudgetKill as e:
+        print(f"[run.py] {e}; writing partial trace", file=sys.stderr)
+        truncated_by = "budget"
+        exit_reason = "BudgetKill"
+    except (sqlite3.Error, session_store.StoreAppendError) as e:
+        print(f"[run.py] store append failed ({e!r}); stopping the run", file=sys.stderr)
+        truncated_by = "store"
+        exit_reason = "StoreAppendError"
+    finally:
+        _flush_run_end(run, store, session_id, truncated_by)
+    return run, truncated_by, exit_reason
 
 
 async def run_investigation(  # noqa: PLR0913 — a composition root: every parameter is a
@@ -380,6 +459,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     verbs: Any = None,
     limits: dict | None = None,
     box: Any = None,
+    store_factory: StoreFactory | None = None,
 ) -> dict:
     model_name = resolve_main_model(model_name)
     make_model = make_model or providers.build_for_effort
@@ -389,8 +469,16 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     budget_started_monotonic = time.monotonic()
     open_budget(run_dir, run_id)
     logger = observe.RequestLogger(run_dir / "llm_requests.jsonl")
+
+    case_id = uuid.uuid4().hex
+    factory = store_factory if store_factory is not None else _default_store_factory  # lint-default: ok — DI seam owning its default (R12's fifth seam)
+    store = factory(case_id, run_dir)
+    session_store.write_case_pointer(run_dir, case_id=case_id, store_path=store.path)
+    session_id = store.new_session(agent_id="main")
+
     agent = build_agent(
         defender_dir, logger, make_model, main_model=model_name, verbs=verbs, limits=limits,
+        store=store, session_id=session_id,
     )
     deps = replace(
         bind(MAIN_DEF, run_dir, salt=salt, defender_dir=defender_dir, box=box),
@@ -400,29 +488,19 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     prompt = _user_prompt(run_dir, alert_path, defender_dir, salt)
 
     t0 = time.time()
-    truncated_by: str | None = None
-    try:
-        async with agent.iter(
-            prompt, deps=deps,
-            usage_limits=UsageLimits(request_limit=DEFAULT_REQUEST_LIMIT),
-        ) as run:
-            async for node in run:
-                _log_node(node)
-    except UsageLimitExceeded as e:
-        print(f"[run.py] request limit reached ({e}); writing partial trace",
-              file=sys.stderr)
-    except RunAborted as e:
-        print(f"[run.py] {e}; writing partial trace", file=sys.stderr)
-    except BudgetKill as e:
-        print(f"[run.py] {e}; writing partial trace", file=sys.stderr)
-        truncated_by = "budget"
+    run, truncated_by, exit_reason = await _drive_agent(agent, prompt, deps, store, session_id)
     wall_ms = (time.time() - t0) * 1000.0
 
-    result = run.result
-    observe.write_trace(run_dir, logger.messages, wall_ms=wall_ms)
+    result = run.result if run is not None else None
+    try:
+        observe.write_trace(run_dir, store=store, session_id=session_id, wall_ms=wall_ms)
+    except Exception as e:  # noqa: BLE001 — a broken store must not swallow the artifact entirely
+        print(f"[run.py] write_trace failed ({e!r}); writing an empty trace", file=sys.stderr)
+        (run_dir / "tool_trace.jsonl").write_text("", encoding="utf-8")
     logger.close()
     output = result.output if result is not None else None
     return {
         "output": output, "model": model_name, "requests": logger.n_requests,
-        "truncated_by": truncated_by,
+        "truncated_by": truncated_by, "exit_reason": exit_reason,
+        "case_id": case_id, "store_path": store.path,
     }

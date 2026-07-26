@@ -542,7 +542,14 @@ def test_replayed_message_zero_listing_matches_the_production_run_dir_file_set(
 
     assert "meta.json" not in listed, "the replayed message 0 still advertises the removed file"
     production_names = {p.name for p in prod_dir.iterdir()}
-    assert set(listed) <= production_names | {"llm_requests.jsonl", "tool_trace.jsonl"}, (
+    # `production_names` is `materialize_run_dir`'s snapshot, taken BEFORE
+    # `run_investigation` starts; `llm_requests.jsonl`/`tool_trace.jsonl` and (#705)
+    # `session_store_pointer.json` are all written by `run_investigation` itself, between
+    # that snapshot and message 0 — present in a real run by the time the model sees the
+    # listing, just not in this earlier snapshot.
+    assert set(listed) <= production_names | {
+        "llm_requests.jsonl", "tool_trace.jsonl", "session_store_pointer.json",
+    }, (
         f"the replayed listing names files a production run dir never has: "
         f"{set(listed) - production_names}"
     )

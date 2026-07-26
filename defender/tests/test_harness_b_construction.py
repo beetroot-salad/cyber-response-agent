@@ -293,23 +293,27 @@ def test_build_agent_main_has_gather_dispatch_and_writers(monkeypatch, logger):
     assert "gather" in tools
 
 
-def test_main_extra_capabilities_empty_when_compaction_off(monkeypatch):
-    """SEAM CONTRACT (compaction toggle observable): with DEFENDER_COMPACTION off, MAIN's
-    assembled extra_capabilities is EMPTY → build_agent_core gets extra_capabilities=(),
-    byte-identical to today's no-compaction MAIN. (The [hooks, *extra] ordering + its
-    wiring into the live agent is pinned by the e2e replay suite, not here — pydantic-ai
-    exposes no public capabilities surface.)"""
+def test_main_extra_capabilities_is_unconditional(tmp_path, monkeypatch):
+    """SEAM CONTRACT, overturned by #705 (O20, R2/M8 — not preserved): MAIN's assembled
+    extra_capabilities is exactly ONE `ProcessHistory` (the store-backed renderer)
+    REGARDLESS of `DEFENDER_COMPACTION` — the flag now gates only whether a fold is
+    applied inside that one capability, not whether a second capability exists. See
+    `tests/test_store_driver_705.py::test_the_pre_change_construction_assertions_are_overturned`,
+    the canonical replacement for the two pre-#705 assertions this test used to make."""
+    from defender.runtime import session_store
+
+    store = session_store.open_store(case_id="case-harness", runs_base=tmp_path / "runs")
+    session_id = store.new_session(agent_id="main")
+
     monkeypatch.delenv("DEFENDER_COMPACTION", raising=False)
-    assert list(driver._main_extra_capabilities()) == []
-
-
-def test_main_extra_capabilities_has_one_process_history_when_on(monkeypatch):
-    """SEAM CONTRACT: with DEFENDER_COMPACTION on, MAIN assembles exactly one ProcessHistory
-    capability (the per-loop compaction), which build_agent passes as extra_capabilities."""
+    off = list(driver._main_extra_capabilities(store, session_id))
     monkeypatch.setenv("DEFENDER_COMPACTION", "on")
-    caps = list(driver._main_extra_capabilities())
-    assert len(caps) == 1
-    assert isinstance(caps[0], driver.ProcessHistory)
+    on = list(driver._main_extra_capabilities(store, session_id))
+
+    assert len(off) == 1, f"the capability is unconditional; unset gave {off}"
+    assert len(on) == 1, f"the flag must not add a SECOND capability; set gave {on}"
+    assert isinstance(off[0], driver.ProcessHistory)
+    assert isinstance(on[0], driver.ProcessHistory)
 
 
 def test_build_judge_agent_thin_wrapper_still_applies_per_leg_effort(monkeypatch, logger):

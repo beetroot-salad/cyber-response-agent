@@ -41,6 +41,26 @@ _FULL_INVESTIGATION = (
 )
 
 
+def _seed_session_store(run: Path, messages: list[dict]) -> None:
+    """`render_runtime_page`/`render_judge_page` now open the run's own session store
+    (R4/#705) — this fixture predates the store, so give it a real one seeded from the
+    same `messages` it already writes to `llm_requests.jsonl`, rather than fabricating a
+    run dir the new render path cannot resolve."""
+    from pydantic_ai.messages import ModelMessagesTypeAdapter
+
+    from defender.runtime import session_store as ss
+
+    store = ss.open_store(case_id="visualize-runtime-fixture", runs_base=run.parent)
+    ss.write_case_pointer(run, case_id=store.case_id, store_path=store.path)
+    sessions: dict[str, str] = {}
+    for rec in messages:
+        agent_id = rec.get("agent_id", "main")
+        session_id = sessions.setdefault(agent_id, store.new_session(agent_id=agent_id))
+        message = ModelMessagesTypeAdapter.validate_python([rec["message"]])[0]
+        store.append(session_id, [message], agent_id=agent_id)
+    store.close()
+
+
 def _build_run(tmp: Path) -> Path:
     run = tmp / "run"
     (run / "gather_raw" / "l-001").mkdir(parents=True)
@@ -95,6 +115,7 @@ def _build_run(tmp: Path) -> Path:
 
     (run / "tool_trace.jsonl").write_text("".join(json.dumps(e) + "\n" for e in trace))
     (run / "llm_requests.jsonl").write_text("".join(json.dumps(m) + "\n" for m in messages))
+    _seed_session_store(run, messages)
 
     queries = [
         {"lead_id": "l-001", "seq": 0, "system": "elastic", "verb": "search", "query_id": "elastic.ssh-auth",

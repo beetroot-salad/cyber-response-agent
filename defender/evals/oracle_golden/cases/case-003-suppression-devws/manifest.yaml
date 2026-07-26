@@ -20,10 +20,17 @@ env:
 result_classes_covered: ["-noise", "0"]
 lead_source: authored
 
-# The discriminating property: l-001 (-noise) and l-003 (0) both have EMPTY
-# observed results. They differ only in the story (which blinds dev-ws-1, not
-# web-1) and the control baseline (dev-ws-1 normally reports; web-1 is alive).
-# A projection that keys on emptiness fails; one that reasons from the story passes.
+# The discriminating property, AS ORIGINALLY CLAIMED: l-001 (-noise) and l-003 (0)
+# both have EMPTY observed results, differing only in the story and the control
+# baseline (dev-ws-1 normally reports; web-1 is alive).
+#
+# Re-measurement withdrew that claim (hidden/controls.yaml `revision`): under each
+# lead's own predicate neither host reports in the window, so the control baseline
+# is not a discriminator here — only the story is. l-001 was relabelled `-noise`
+# -> `0` (its envelope has no baseline to remove), which makes the recorded
+# projection's suppression marker a FALSE SUPPRESSION. That is the finding, not a
+# defect to paper over: the case now records a real oracle error rather than a
+# pass earned by a mis-measured control.
 
 projections:
   - tag: glm-5.2_effort-none
@@ -31,9 +38,18 @@ projections:
     oracle_effort: none
     oracle_prompt: defender/learning/pipeline/oracle/prompt.md
     produced_by: replay.py (production oracle seam, oracle_visible only)
+    result: "3/4 class after relabel; 1 false suppression (l-001) -> slice is no-update"
 
 caveats:
-  - Suppression is at the shipper (Elastic Agent), so ES-side streams go dark;
-    host-local files are not the blinded surface (the leads read the store).
-  - web-1 was alive in-window (237 docs), so darkness is dev-ws-1-specific, not
-    a global outage — a -noise call on web-1 would be false suppression.
+  - Suppression is at the shipper (Elastic Agent), so ES-side streams stop
+    updating; host-local files are not the blinded surface (the leads read the
+    store). Stopping the shipper DELAYS file-sourced telemetry — dev-ws-1's
+    in-window auth lines were ingested at 09:47:04 once the agent restarted — and
+    permanently removes only agent-generated telemetry. A durable `-noise` capture
+    needs a stream of the latter kind, or an action that destroys data at source
+    (clearing the log, disabling auditd).
+  - The originally recorded "web-1 alive in-window (237 docs)" is a host-level
+    count across nginx/metricbeat/auth (~395 per re-measurement); under l-003's
+    own predicate web-1 is 0 in the window.
+  - This case should be re-captured on a weekday, on a lead whose envelope has a
+    measured non-zero baseline, before its `-noise` slice is treated as calibrated.

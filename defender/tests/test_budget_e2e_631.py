@@ -177,19 +177,22 @@ def test_a_budget_killed_run_carries_truncated_by_budget(tmp_path, enforced):
 def test_only_the_budget_kill_marks_truncated_by_budget(tmp_path, enforced):
     """Only the budget kill sets truncated_by: "budget" — the PRE-EXISTING
     request-limit termination (UsageLimitExceeded, which run_investigation already
-    catches) does NOT, so a run that ends because the model would not stop is not
-    mislabelled as budget-truncated.
+    catches) sets its OWN distinct value, so a run that ends because the model would
+    not stop is not mislabelled as budget-truncated.
 
-    R27: truncated_by's domain is otherwise pinned only at {"budget", None}; this
-    exercises the None member under a DIFFERENT, non-budget terminator, so an
-    implementation that stamped "budget" on every non-clean exit would fail. The
-    positive control is test_a_budget_killed_run_carries_truncated_by_budget."""
+    R27 (as originally written) pinned truncated_by's domain at {"budget", None} and
+    this exercised the None member; #705 (R4/R11) widens the domain to name every
+    caught exit distinctly — {"budget", "request-limit", "aborted", "store", None} — so
+    a request-limit termination stamps "request-limit", not None. The property this
+    test actually protects — a non-budget exit is never mislabelled "budget" — is
+    unchanged; only the non-budget value's spelling is. The positive control is
+    test_a_budget_killed_run_carries_truncated_by_budget."""
     from defender.tests.e2e._replay_harness import NeverEndsModel
 
     run_dir = materialize(tmp_path, GOLDEN)
     summary = drive(run_dir, run_id="reqlimit", salt=SALT,
                     main=NeverEndsModel(run_dir), limits=caps())
-    assert summary["truncated_by"] is None, (
+    assert summary["truncated_by"] == "request-limit", (
         "a request-limit termination was mislabelled as a budget truncation"
     )
     assert budget(run_dir)["tool_calls"] < DEFAULT_LIMITS["max_tool_calls"], (

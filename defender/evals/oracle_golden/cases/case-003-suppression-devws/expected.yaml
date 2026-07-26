@@ -1,17 +1,32 @@
 # Ground-truth labels for case-003 (the -noise / suppression class).
 # The attacker stopped dev-ws-1's Elastic Agent at 2026-07-25T09:34:34Z; the
-# host's last shipped event was 09:34:29Z, and every dev-ws-1 stream is empty
-# afterward (see hidden/controls.yaml). The suppression is REAL and captured.
+# host's last shipped event was 09:34:29Z. The action is REAL and captured.
 #
-# The discriminating test is two-sided:
-#   - the two dev-ws-1 leads read a stream the story explicitly blinds -> -noise
-#     (baseline minus itself; the absence is the signature);
-#   - the web-1 lead reads a live, untouched stream, and a state lookup returns
-#     config -> both 0. A faithful oracle must NOT over-generalize the
-#     suppression to leads the story never touches.
+# CORRECTED after re-measuring against the environment (see hidden/controls.yaml,
+# `revision` block). Two corrections matter:
+#
+#   1. l-001 is `0`, not `-noise`. Its query carries `event.outcome IS NOT NULL`,
+#      and dev-ws-1 has NO outcome-bearing auth events in the pre-window, in the
+#      prior-Saturday control window, or anywhere on the capture day. There is no
+#      baseline in THAT envelope for the suppression to remove, so the delta is 0
+#      whether or not the agent runs. Emptiness alone did not earn `-noise`; the
+#      control that was recorded (44 auth docs) was measured on a broader
+#      predicate than the lead actually runs.
+#   2. Suppression at the SHIPPER delays file-sourced telemetry rather than
+#      destroying it. The dev-ws-1 auth lines written during the dark window were
+#      ingested at 09:47:04, right after the agent restarted — a query run after
+#      that returns them, with their original timestamps. What never arrives is
+#      the agent's own live-generated telemetry (elastic_agent, metricbeat,
+#      filebeat), which is why l-002 keeps `-noise` and l-001 does not.
+#
+# The discriminating test that remains:
+#   - l-002 reads every stream on the blinded host; the agent-generated datasets
+#     are permanently absent -> -noise;
+#   - the web-1 lead and the state lookup are 0. A faithful oracle must NOT
+#     over-generalize the suppression to leads the story never touches.
 case_id: case-003-suppression-devws
 kind: observed
-result_classes_covered: ["-noise", "0"]
+result_classes_covered: ["-noise", "0"]   # -noise now on l-002 only
 lead_source: authored   # realistic leads for a dev-ws-1 investigation; no v2 rule fires on agent-stop
 notes: >
   Suppression is at the SHIPPER: stopping the host Elastic Agent halts shipping to
@@ -23,18 +38,34 @@ leads:
   l-001:
     system: elastic
     template: sshd-auth-history
-    class: "-noise"
-    suppressed_stream: "logs-system.auth-* for host.name=dev-ws-1"
+    class: "0"
+    note: >
+      Envelope has no baseline to remove: `event.outcome IS NOT NULL` on dev-ws-1
+      returns 0 rows in the pre-window and in the prior-Saturday control, and
+      dev-ws-1 logged no outcome-bearing auth event on the capture day at all.
+      The captured empty result is what this query returns on an ordinary day.
+      A `-noise` prediction here is a FALSE SUPPRESSION and is scored as one.
   l-002:
     system: elastic
     template: syslog-ip-search
     class: "-noise"
     suppressed_stream: "all logs-* for host.name=dev-ws-1"
+    note: >
+      The earned suppression. Pre-window the host ships ~470 docs / 14 min across
+      5 datasets; in-window the agent-generated ones (elastic_agent,
+      elastic_agent.metricbeat, elastic_agent.filebeat) never arrive at all.
+      Caveat: the file-sourced system.auth lines DO arrive late (ingested 09:47:04,
+      after the agent restart), so the captured all-zero payload is the view from
+      inside the outage, not the permanent state.
   l-003:
     system: elastic
     template: sshd-auth-history
     class: "0"
-    note: "web-1 is alive and untouched by the story; must NOT be suppressed"
+    note: >
+      web-1 is untouched by the story; must NOT be suppressed. Note the envelope
+      truth is 0 because the story never touches web-1, NOT because the query is
+      empty — re-measured, web-1's own count under this lead's exact predicate is
+      also 0 in the window, so emptiness does not distinguish it from l-001.
   l-004:
     system: cmdb
     template: host-trust-edges

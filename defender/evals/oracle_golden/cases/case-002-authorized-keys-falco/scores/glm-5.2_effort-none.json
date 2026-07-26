@@ -11,7 +11,11 @@
   "field_grades": {
     "correct": 3
   },
-  "wrong_concrete_fields": 0,
+  "contradiction_grades": {
+    "wrong(got bash)": 1,
+    "wrong(got write)": 1
+  },
+  "wrong_concrete_fields": 2,
   "false_suppression": 0,
   "malformed_projections": 0,
   "forbidden_emitted": [],
@@ -31,6 +35,10 @@
         "falco.output_fields.fd.name": "correct",
         "falco.output_fields.user.name": "correct"
       },
+      "contradictions": {
+        "falco.output_fields.evt.type": "wrong(got write)",
+        "falco.output_fields.proc.cmdline": "wrong(got bash)"
+      },
       "intent_note": false
     },
     {
@@ -41,6 +49,7 @@
       "class_match": true,
       "heterogeneous": false,
       "fields": {},
+      "contradictions": {},
       "intent_note": false
     }
   ]

@@ -11,6 +11,19 @@ derivation:
   changed: story.md only — replaced with unrelated authorized activity
   unchanged: leads.jsonl + samples/ (identical envelopes, same query windows)
 
+# The seed version of story.md announced its own purpose to the oracle: its
+# Bypass section said the story was a NEGATIVE CONTROL and that a faithful oracle
+# "must therefore return `0` for every lead". That is the answer, written into an
+# ORACLE-VISIBLE file — the hidden/visible split cannot catch a leak that lives
+# inside oracle_visible/. The section now reads as ordinary actor prose.
+#
+# The result survived the fix: replaying the production oracle over the de-leaked
+# story returned all-zero again (that replay IS the recorded projection here). So
+# the 9/9 is now evidence about the oracle rather than about the prompt — but note
+# it was re-earned, not assumed, and any future model must be run against THIS
+# story, never the seed one.
+answer_leak_removed: "2026-07-25 — Bypass section rewritten; projection re-derived by replay.py"
+
 # What this case discriminates: case-001's query windows PHYSICALLY CONTAIN the
 # brute-force burst. A projection that reads salience off the window rather than
 # reasoning from the story emits +event anyway, and fails. Emptiness here is the
@@ -26,9 +39,13 @@ projections:
     oracle_effort: none
     oracle_prompt: defender/learning/pipeline/oracle/prompt.md
     produced_by: replay.py (production oracle seam, oracle_visible only)
+    story_version: de-leaked (see answer_leak_removed)
     result: "9/9 class agreement; all-zero; no window-copying"
 
 caveats:
   - An all-`0` case is the one shape a truncated or empty projection could pass
     by accident, so score.py's lead-set integrity check (missing_leads) is what
     makes this result meaningful — not the 9/9 on its own.
+  - Every case's story is an oracle INPUT, so no story may state, hint at, or
+    justify the expected result. Rationale belongs in expected.yaml / manifest.yaml,
+    which the oracle never reads.

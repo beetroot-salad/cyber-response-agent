@@ -18,6 +18,7 @@ from defender.scripts.visualize.visualize_primitives import (
     REPO_ROOT,
     block,
     esc,
+    esc_untrusted,
     fmt_duration,
     pre_text,
     section,
@@ -191,7 +192,7 @@ def _render_tx_entry(e: dict, anchor_attr: str = "") -> str:
         body: list[str] = []
         for t in e.get("texts") or []:
             if t and t.strip():
-                body.append(f'<div class="tx-text">{esc(t)}</div>')
+                body.append(f'<div class="tx-text">{esc_untrusted(t)}</div>')
         for th in e.get("thinks") or []:
             if th and th.strip():
                 body.append(block("tx-think", "thinking", pre_text(th)))

@@ -85,6 +85,11 @@ def _prepend(head: str, tail: str | None) -> str:
     return f"{head}{os.pathsep}{tail}" if tail else head
 
 
+class VisualizeFailed(Exception):
+    """The visualizer subprocess exited non-zero; the caller must not treat the run dir
+    as rendered — a page left over from a prior render is not proof this one succeeded."""
+
+
 def visualize(run_dir: Path) -> None:
     proc = subprocess.run(
         [sys.executable, str(VISUALIZE_SCRIPT), str(run_dir)],
@@ -93,6 +98,8 @@ def visualize(run_dir: Path) -> None:
     sys.stderr.write(proc.stdout)
     if proc.returncode != 0:
         sys.stderr.write(f"[run.py] visualize_run failed: {proc.stderr}")
+        raise VisualizeFailed(
+            f"visualize_run failed for {run_dir} (exit {proc.returncode}): {proc.stderr}")
 
 
 def cross_check_tables(run_dir: Path) -> None:

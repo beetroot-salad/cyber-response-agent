@@ -7,6 +7,10 @@ Reports the #693 dimensions, not one accuracy number:
   - field/value grounding on +event leads: concrete-correct / wrong / unknown
     (placeholder) / missing — `wrong` is the dangerous error, placeholders are
     never `wrong`;
+  - the volunteered-value check (`observed_fields`): ground truth for fields the
+    labels do NOT require, graded only where the projection emitted a concrete
+    value for the key. Grading only the required fields lets a projection invent
+    refuted values for free — the fabrication that manufactures a catch;
   - occurrence precision/recall: emitted +event where expected (recall), stayed
     empty where expected 0 (precision) — `null` when the case has no lead of
     that class, never 0.0, so aggregating slices cannot read "undefined" as
@@ -134,6 +138,29 @@ def grade_fields(expected: dict, got: dict[str, set[str]], events: list) -> dict
     return result
 
 
+def grade_contradictions(observed: dict, got: dict[str, set[str]]) -> dict:
+    """Ground truth for fields the labels do NOT require the projection to commit to.
+
+    Graded only where the projection volunteered a concrete value for the key —
+    never `missing`, never `unknown`. `fields` asks "did you commit to the
+    distinguishing values?"; this asks the separate question "is anything else you
+    made up contradicted by the telemetry?". Without it a projection scores a clean
+    `0 wrong` while emitting concrete values the hidden payloads refute (case-002
+    emits `evt.type: write` where the capture says `openat`), and inventing a
+    concrete value is exactly what prompt.md forbids and what manufactures a catch
+    downstream.
+    """
+    result = {}
+    for k, want in observed.items():
+        key = str(k)
+        values = got.get(key)
+        if not values:      # absent, or emitted only as a `<placeholder>` — not a claim
+            continue
+        result[key] = ("correct" if _norm(want) in values
+                       else f"wrong(got {', '.join(sorted(values))})")
+    return result
+
+
 def emitted_values(events: list) -> list[str]:
     """Every value a projection emits — mapping values and marker strings.
 
@@ -223,12 +250,18 @@ def score_projection(spec: dict, proj: dict, projection_name: str) -> dict:
         exp_c = exp["class"]
         system = exp["system"]
         match = pred_c == exp_c
-        fields = (grade_fields(exp.get("fields", {}), concrete_values(events), events)
+        concrete = concrete_values(events)
+        fields = (grade_fields(exp.get("fields", {}), concrete, events)
                   if exp_c == "+event" else {})
+        # Contradictions are graded on EVERY class: a fabricated concrete value on a
+        # lead labelled `0` is the same error as one on a `+event` lead, and the
+        # class disagreement alone does not say the value was refuted.
+        contradictions = grade_contradictions(exp.get("observed_fields", {}), concrete)
         rows.append({
             "lead": lead_id, "system": system, "expected": exp_c, "predicted": pred_c,
             "class_match": match, "heterogeneous": exp.get("heterogeneous", False),
-            "fields": fields, "intent_note": bool(exp.get("intent_note")),
+            "fields": fields, "contradictions": contradictions,
+            "intent_note": bool(exp.get("intent_note")),
         })
         st = by_system.setdefault(system, {"n": 0, "match": 0})
         st["n"] += 1
@@ -242,7 +275,10 @@ def score_projection(spec: dict, proj: dict, projection_name: str) -> dict:
     recall = _ratio(sum(r["predicted"] == "+event" for r in ev_expected), len(ev_expected))
     precision_zero = _ratio(sum(r["predicted"] == "0" for r in zero_expected), len(zero_expected))
     all_field_grades = [g for r in rows for g in r["fields"].values()]
-    wrong = [g for g in all_field_grades if g.startswith("wrong")]
+    all_contradiction_grades = [g for r in rows for g in r["contradictions"].values()]
+    # `wrong` gates a slice to `no-update`, so it spans both grading paths: a refuted
+    # value is no less wrong for being one the labels did not ask for.
+    wrong = [g for g in all_field_grades + all_contradiction_grades if g.startswith("wrong")]
     false_suppress = [r for r in rows if r["predicted"] == "-noise" and r["expected"] != "-noise"]
     malformed = [r for r in rows if r["predicted"] == MALFORMED]
 
@@ -254,6 +290,8 @@ def score_projection(spec: dict, proj: dict, projection_name: str) -> dict:
         "plus_event_recall": recall,
         "zero_precision": precision_zero,
         "field_grades": {g: all_field_grades.count(g) for g in sorted(set(all_field_grades))},
+        "contradiction_grades": {g: all_contradiction_grades.count(g)
+                                 for g in sorted(set(all_contradiction_grades))},
         "wrong_concrete_fields": len(wrong),
         "false_suppression": len(false_suppress),
         "malformed_projections": len(malformed),
@@ -272,6 +310,7 @@ def print_report(summary: dict, case_name: str, forbidden: list) -> None:
           f"0 precision: {_fmt(summary['zero_precision'])}")
     print(f"by system: {summary['by_system']}")
     print(f"field grounding: {summary['field_grades']}   "
+          f"volunteered-value check: {summary['contradiction_grades']}   "
           f"WRONG concrete: {summary['wrong_concrete_fields']}   "
           f"false-suppression: {summary['false_suppression']}   "
           f"malformed: {summary['malformed_projections']}")
@@ -288,9 +327,10 @@ def print_report(summary: dict, case_name: str, forbidden: list) -> None:
         tag = "ok " if r["class_match"] else "DIS"
         het = " het" if r["heterogeneous"] else ""
         fld = ("  fields=" + json.dumps(r["fields"])) if r["fields"] else ""
+        con = ("  volunteered=" + json.dumps(r["contradictions"])) if r["contradictions"] else ""
         note = "  [intent-scoped divergence]" if (not r["class_match"] and r["intent_note"]) else ""
         print(f"  {tag} {r['lead']:<6} {r['system']:<12} exp={r['expected']:<7} "
-              f"pred={r['predicted']:<9}{het}{fld}{note}")
+              f"pred={r['predicted']:<9}{het}{fld}{con}{note}")
 
 
 def main(argv: list[str] | None = None) -> int:

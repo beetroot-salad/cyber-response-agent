@@ -26,3 +26,57 @@ interpretation: >
   distinguishable darkness. web-1 keeps reporting (10 auth), so the environment
   as a whole is not quiet: only dev-ws-1 was blinded. The -noise call on the
   dev-ws-1 leads is earned; a -noise call on web-1 would be a false suppression.
+
+# ---------------------------------------------------------------------------
+# REVISION — re-measured 2026-07-25T11:50Z against the restored capture snapshot
+# (hcloud image 412461512). Everything above is left exactly as first recorded so
+# the original measurement and its correction stay comparable; where the two
+# disagree, THIS block is the ground truth expected.yaml is labelled from.
+# ---------------------------------------------------------------------------
+revision:
+  why: >
+    The counts above were taken with a BROADER predicate than the leads run:
+    they count every auth doc for the host, while l-001 filters
+    `event.outcome IS NOT NULL`. Re-measured under each lead's own predicate, the
+    picture changes — and so does one label. A control has to be measured on the
+    envelope it is a control FOR.
+
+  measurement_hazard: >
+    Every lever-up re-ships each host's on-disk logs, so a doc is re-ingested once
+    per restore and a raw count is multiplied by the number of restores since the
+    event. Verified on case-001's attack window: the same 164 docs ingested at
+    07:00, again at 09:00, again at 11:00. Counts below are per distinct ingest.
+
+  dev_ws_1_under_l001_predicate:      # event.outcome IS NOT NULL — the lead's filter
+    pre_stop_today: 0                 # all 17 distinct pre-window auth docs carry a null outcome
+    control_prior_saturday: 0         # the "44" above is 11 distinct docs x 4 re-ingests,
+                                      # none of them outcome-bearing
+    capture_day_total: 0              # dev-ws-1 logged none at all on 2026-07-25
+    other_days: "60-665/day across 07-01..07-17 — a weekday re-capture could earn -noise"
+    conclusion: "no baseline in this envelope to remove -> l-001 is `0`, not `-noise`"
+
+  dev_ws_1_under_l002_predicate:      # FROM logs-* ... BY data_stream.dataset
+    pre_stop_today_datasets:
+      elastic_agent: 321
+      elastic_agent.metricbeat: 76
+      elastic_agent.filebeat: 47
+      system.auth: 17                 # per distinct ingest
+      system.syslog: 8                # per distinct ingest
+    attack_window_datasets:
+      system.auth: 15                 # ARRIVED LATE: first ingested 2026-07-25T09:47:04Z,
+                                      # after the agent restart, timestamps unchanged
+      # every agent-generated dataset: absent, and still absent today
+    conclusion: >
+      -noise is earned here, with a caveat the capture could not see from inside
+      the outage: stopping a SHIPPER delays file-sourced telemetry (it backfills
+      from the on-disk log when the agent restarts) and permanently removes only
+      what the agent generates itself. The captured all-zero payload is the view
+      during the outage; the same query after 09:47 returns the auth lines.
+
+  web_1_under_l003_predicate:
+    attack_window: 0                  # emptiness does NOT distinguish web-1 from dev-ws-1
+    attack_window_other_datasets: "~395 docs (nginx.access 189, metricbeat 122, auth 48, ...)"
+    conclusion: >
+      web-1 is alive at host level but silent in THIS envelope, so the manifest's
+      "dev-ws-1 dark / web-1 alive" contrast does not hold at lead level. l-003
+      stays `0` because the story never touches web-1 — not because it is empty.

@@ -2,15 +2,26 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
+import os
 from pathlib import Path
 from typing import Any
 
-from pydantic_ai.messages import ModelMessagesTypeAdapter
+from pydantic_ai.messages import (
+    ModelMessagesTypeAdapter,
+    ModelResponse,
+    TextPart,
+    ThinkingPart,
+    ToolCallPart,
+    ToolReturnPart,
+)
 
 from defender._env import env_int
 
 from defender.scripts.pricing import usage_cost
+
+WIRE_LOG_ENSURE_ASCII = True
 
 
 
@@ -42,14 +53,41 @@ def _usage_dict(usage: Any) -> dict[str, int]:
     }
 
 
+def encode_wire_record(record: dict) -> str:
+    return json.dumps(record, ensure_ascii=WIRE_LOG_ENSURE_ASCII)
+
+
+def _wire_digest(messages: list[Any]) -> str:
+    dumped = ModelMessagesTypeAdapter.dump_python(messages, mode="json")
+    text = json.dumps(dumped, sort_keys=True, ensure_ascii=True)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+_ACTIVE_PATHS: set[str] = set()
+#: Paths a RequestLogger has EVER opened in this process, never removed (unlike
+#: `_ACTIVE_PATHS`) — distinguishes "this path is a fresh log target" (truncate, mode="w";
+#: a file some OTHER writer left there is not this logger's history to preserve) from
+#: "this process already logged here and closed" (append, so the second construction
+#: doesn't silently clobber the first's lines — the discharge
+#: test_two_wire_log_constructions_under_one_key_do_not_silently_clobber_each_other allows).
+_EVER_LOGGER_PATHS: set[str] = set()
+
+
 class RequestLogger:
 
     def __init__(self, path: Path):
         self.path = path
-        self._fh = path.open("w", encoding="utf-8")
+        key = None if str(path) == os.devnull else str(Path(path).resolve())
+        if key is not None and key in _ACTIVE_PATHS:
+            raise FileExistsError(f"a RequestLogger has already opened {path}")
+        mode = "a" if key is not None and key in _EVER_LOGGER_PATHS else "w"
+        if key is not None:
+            _ACTIVE_PATHS.add(key)
+            _EVER_LOGGER_PATHS.add(key)
+        self._key = key
+        self._fh = path.open(mode, encoding="utf-8")
         self._cap = _max_chars()
         self.messages: list[dict] = []
-        self._seen: dict[str, int] = {}
         self._seq: dict[str, int] = {}
         self.n_requests = 0
 
@@ -69,27 +107,22 @@ class RequestLogger:
         }
         self.messages.append(rec)
         disk = {**rec, "message": _trim(message, cap)} if cap > 0 else rec
-        # ensure_ascii=True is load-bearing, not the default we happen to get: a lone
-        # UTF-16 surrogate (reachable from a provider response body via a `\udXXX`
-        # escape) survives dump_python and this encode, but raises UnicodeEncodeError
-        # at the point a raw str would be utf-8-encoded (issue #724). Pinned explicitly
-        # so a future edit can't flip it and reopen a content-triggered availability halt.
-        self._fh.write(json.dumps(disk, default=str, ensure_ascii=True) + "\n")
+        # encode_wire_record pins ensure_ascii=True (WIRE_LOG_ENSURE_ASCII, above) — load-
+        # bearing, not the default we happen to get: a lone UTF-16 surrogate (reachable
+        # from a provider response body via a `\udXXX` escape) survives dump_python and
+        # this encode, but raises UnicodeEncodeError at the point a raw str would be
+        # utf-8-encoded (issue #724). Pinned explicitly so a future edit can't flip it and
+        # reopen a content-triggered availability halt.
+        self._fh.write(encode_wire_record(disk) + "\n")
         self._fh.flush()
 
     def log(
         self, *, request_messages: list[Any], response: Any, run_step: int = 0,
-        duration_ms: float = 0.0, agent_id: str = "main",
+        duration_ms: float = 0.0, agent_id: str = "main", session_id: str | None = None,
     ) -> None:
         cap = self._cap
-        seen = self._seen.get(agent_id, 0)
-        if seen > len(request_messages):
-            seen = 0
-        for dumped in ModelMessagesTypeAdapter.dump_python(
-            request_messages[seen:], mode="json"
-        ):
-            self._emit(agent_id, dumped.get("kind", "request"), dumped, cap)
-        self._seen[agent_id] = len(request_messages)
+        for dumped in ModelMessagesTypeAdapter.dump_python(request_messages, mode="json"):
+            self._emit(agent_id, "request", dumped, cap)
         resp_dump = ModelMessagesTypeAdapter.dump_python([response], mode="json")[0]
         self._emit(
             agent_id, "response", resp_dump, cap,
@@ -97,8 +130,9 @@ class RequestLogger:
             usage=_usage_dict(getattr(response, "usage", None)),
             duration_ms=round(duration_ms, 1),
             run_step=run_step,
+            session_id=session_id,
+            wire_sha=_wire_digest(request_messages),
         )
-        self._seen[agent_id] += 1
         self.n_requests += 1
 
     def log_budget_refusal(self, *, tool_name: str, agent_id: str = "main") -> None:
@@ -109,105 +143,98 @@ class RequestLogger:
             self._fh.flush()
 
     def close(self) -> None:
+        if self._key is not None:
+            _ACTIVE_PATHS.discard(self._key)
         with contextlib.suppress(Exception):
             self._fh.close()
 
 
 
-def _main_messages(messages: list[dict]) -> list[dict]:
-    return [m for m in messages if m.get("agent_id", "main") == "main"]
-
-
-def _tool_args(part: dict) -> dict:
-    args = part.get("args")
-    if isinstance(args, str):
+def _tool_args(value: Any) -> dict:
+    if isinstance(value, str):
         try:
-            args = json.loads(args)
+            value = json.loads(value)
         except (json.JSONDecodeError, ValueError):
             return {}
-    return args if isinstance(args, dict) else {}
+    return value if isinstance(value, dict) else {}
 
 
-def _assistant_event(rec: dict) -> dict:
-    msg = rec.get("message") or {}
+def _iso(ts: Any) -> Any:
+    return ts.isoformat() if hasattr(ts, "isoformat") else ts
+
+
+def _assistant_event(message: ModelResponse, coord: str) -> dict:
     content: list[dict] = []
-    for part in msg.get("parts", []):
-        pk = part.get("part_kind")
-        if pk == "text":
-            content.append({"type": "text", "text": part.get("content", "")})
-        elif pk == "tool-call":
+    for part in message.parts:
+        if isinstance(part, TextPart):
+            content.append({"type": "text", "text": part.content})
+        elif isinstance(part, ToolCallPart):
             content.append({
-                "type": "tool_use",
-                "name": part.get("tool_name", ""),
-                "id": part.get("tool_call_id", ""),
-                "input": _tool_args(part),
+                "type": "tool_use", "name": part.tool_name,
+                "id": part.tool_call_id, "input": _tool_args(part.args),
             })
-        elif pk == "thinking":
+        elif isinstance(part, ThinkingPart):
             content.append({"type": "thinking"})
     ev = {
         "type": "assistant",
         "message": {
-            "id": rec.get("id"),
-            "model": rec.get("model") or "",
-            "usage": rec.get("usage") or {},
+            "id": coord,
+            "model": message.model_name or "",
+            "usage": _usage_dict(message.usage),
             "content": content,
         },
     }
-    if msg.get("timestamp"):
-        ev["timestamp"] = msg["timestamp"]
+    if getattr(message, "timestamp", None):
+        ev["timestamp"] = _iso(message.timestamp)
     return ev
 
 
-def _user_event(rec: dict) -> dict | None:
-    msg = rec.get("message") or {}
-    returns = [p for p in msg.get("parts", []) if p.get("part_kind") == "tool-return"]
+def _user_event(message: Any) -> dict | None:
+    returns = [p for p in getattr(message, "parts", []) if isinstance(p, ToolReturnPart)]
     if not returns:
         return None
     ev = {
         "type": "user",
-        "message": {"content": [{"type": "tool_result", "tool_name": p.get("tool_name", "")} for p in returns]},
+        "message": {"content": [{"type": "tool_result", "tool_name": p.tool_name}
+                                for p in returns]},
     }
-    ts = next((p.get("timestamp") for p in returns if p.get("timestamp")), None)
+    ts = next((getattr(p, "timestamp", None) for p in returns if getattr(p, "timestamp", None)), None)
     if ts:
-        ev["timestamp"] = ts
+        ev["timestamp"] = _iso(ts)
     return ev
 
 
-def _trace_events(messages: list[dict]) -> list[dict]:
+def write_trace(run_dir: Path, *, store: Any, session_id: str, wall_ms: float) -> None:
+    from . import session_store as ss  # local import — avoids a cycle at module load
+
+    messages = ss.hydrate(store, session_id, role="analysis")
+    coords = ss.hydrate(store, session_id, role="actor")
+
     events: list[dict] = []
-    for rec in _main_messages(messages):
-        if rec.get("kind") == "response":
-            events.append(_assistant_event(rec))
+    for message, row in zip(messages, coords, strict=True):
+        if isinstance(message, ModelResponse):
+            events.append(_assistant_event(message, row["coord"]))
         else:
-            user = _user_event(rec)
+            user = _user_event(message)
             if user:
                 events.append(user)
-    return events
 
-
-def _usage_totals(messages: list[dict]) -> dict[str, int]:
+    responses = [m for m in messages if isinstance(m, ModelResponse)]
     keys = ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
-    return {
-        k: sum(int((r.get("usage") or {}).get(k, 0) or 0)
-               for r in messages if r.get("kind") == "response")
-        for k in keys
-    }
+    totals = {k: 0 for k in keys}
+    total_cost = 0.0
+    for m in responses:
+        d = _usage_dict(m.usage)
+        for k in keys:
+            totals[k] += d.get(k, 0)
+        total_cost += usage_cost(m.model_name or "", d)
 
-
-def write_trace(run_dir: Path, messages: list[dict], *, wall_ms: float) -> None:
-    events = _trace_events(messages)
-    totals = _usage_totals(messages)
-    total_cost = sum(
-        usage_cost(r.get("model") or "", r.get("usage") or {})
-        for r in messages if r.get("kind") == "response"
-    )
-    main_responses = sum(1 for r in _main_messages(messages) if r.get("kind") == "response")
     events.append({
         "type": "result",
         "duration_ms": round(wall_ms),
         "duration_api_ms": round(wall_ms),
         "total_cost_usd": round(total_cost, 6),
-        "num_turns": main_responses,
+        "num_turns": len(responses),
         "usage": totals,
     })
     (run_dir / "tool_trace.jsonl").write_text("".join(json.dumps(e) + "\n" for e in events), encoding="utf-8")
