@@ -57,6 +57,7 @@ RUNNER = REPO_ROOT / "playground-v2" / "attacks" / "runner.py"
 RUNS_DIR = REPO_ROOT / "playground-v2" / "attacks" / "runs"
 EXTRACT_ALERT = REPO_ROOT / "experiments" / "oracle-telemetry-fidelity" / "extract_alert.py"
 DEFENDER_RUN = REPO_ROOT / "defender" / "run.py"
+ENVIRONMENT_TEMPLATE = HERE / "environment_template.yaml"
 
 #: The subprocess seam. Injected in tests so alert selection and synthesis can be
 #: exercised without a live stack — it is the piece that produced the campaign's one
@@ -234,6 +235,19 @@ def investigate(alert: Path, run_id: str) -> Path:
     return run_dir
 
 
+def write_environment(path: Path, capture_environment: str) -> None:
+    """Emit the case's `environment.yaml` — a REQUIRED judge input, not a nicety.
+
+    Both judge passes read it, and it is what carries the facts that decide whether a
+    cross-window difference is real at all: which columns rotate across lever-ups, how
+    the controls were built, what `window_live: false` means. A case without it is a
+    case the judge cannot read. Rendered from one template so the seven hand-written
+    ones and every recruited one say the same thing.
+    """
+    body = ENVIRONMENT_TEMPLATE.read_text(encoding="utf-8")
+    path.write_text(body.format(capture_environment=capture_environment), encoding="utf-8")
+
+
 def write_manifest(  # noqa: PLR0913 — the manifest's fields, each an independent fact
                    path: Path, *, case_id: str, split: str, activity_family: str,
                    capture_environment: str, scenario: str, seed: int, meta: dict,
@@ -345,6 +359,7 @@ def main(argv: list[str] | None = None) -> int:
     _run([sys.executable, HERE / "build_case.py", run_dir, story, controls_yaml, case_dir],
          timeout=600, label="assemble")
 
+    write_environment(case_dir / "environment.yaml", ns.capture_environment)
     write_manifest(case_dir / "manifest.yaml", case_id=ns.case_id, split=ns.split,
                    activity_family=ns.activity_family,
                    capture_environment=ns.capture_environment, scenario=ns.scenario,

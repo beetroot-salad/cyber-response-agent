@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 
 import pytest
+import yaml
 
 from defender.evals.oracle_golden import generate_case
 
@@ -184,3 +185,29 @@ def test_the_offsets_reach_controls_py(tmp_path, monkeypatch):
     assert controls, "controls.py was never invoked"
     assert "--offsets-days" in controls[0]
     assert controls[0][controls[0].index("--offsets-days") + 1] == "14,21,28"
+
+
+def test_a_recruited_case_gets_the_environment_notes_the_judge_requires(tmp_path):
+    """`environment.yaml` is a REQUIRED judge input — `load_lead_inputs` reads it, and
+    it carries the facts that decide whether a cross-window difference is real at all.
+    A recruited case without one is a case the judge cannot read."""
+    out = tmp_path / "environment.yaml"
+    generate_case.write_environment(out, "playground-v2@412854206-restore-20260726")
+    notes = yaml.safe_load(out.read_text(encoding="utf-8"))
+    assert notes["capture_environment"] == "playground-v2@412854206-restore-20260726"
+    assert "source.ip" in notes["unstable_identifiers"]["columns"]
+    assert notes["baseline_construction"]["liveness"]
+
+
+def test_the_hand_written_and_generated_environment_notes_are_one_template(tmp_path):
+    """Seven cases were written by hand before the template existed. They must not drift
+    from what the recruiter now emits, or two cases in the same suite would be telling
+    the judge different things about the same environment."""
+    from defender.evals.oracle_golden import judge
+    out = tmp_path / "environment.yaml"
+    generate_case.write_environment(out, "playground-v2@409583061")
+    generated = yaml.safe_load(out.read_text(encoding="utf-8"))
+    hand = yaml.safe_load(
+        (judge.GOLDEN_DIR / "cases" / "case-001-ssh-bruteforce-canary" / "environment.yaml")
+        .read_text(encoding="utf-8"))
+    assert generated == hand
