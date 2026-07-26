@@ -54,6 +54,15 @@ UNRELATED_TREES = (
     ".claude/",
     "defender/tests/spec_graph_",
     "defender/tests/e2e/spec_graph_",
+    # The oracle-calibration story renderer reads the ATTACK RUNNER's record,
+    # `playground-v2/attacks/runs/<id>/meta.json` — a live file that merely shares
+    # a name with the run-dir metadata #647 deleted. `playground-v2/` above excludes
+    # the runner's own tree; these are the same vocabulary read from inside
+    # defender/, including the corpus of runner records the renderer is swept over.
+    "defender/evals/oracle_golden/story_from_run.py",
+    "defender/tests/evals/test_story_from_run.py",
+    "defender/tests/evals/_run_records/",
+    "defender/docs/oracle-calibration.md",
 )
 HISTORICAL_RECORD = UNRELATED_TREES
 
@@ -429,7 +438,8 @@ def test_no_call_site_anywhere_still_reaches_run_paths_meta_or_the_literal_meta_
     because a symbol-scoped census structurally cannot see a string literal, and that is the
     exact trap that hid a caller from two prior sweeps. Unrelated trees that carry their own
     `meta.json` vocabulary — the experiment fixtures, the judge A/B snapshots, the attack
-    playground — keep theirs untouched and are excluded by name."""
+    playground and the oracle-calibration renderer that reads the playground's records —
+    keep theirs untouched and are excluded by name."""
     accessor_hits = live_hits(
         repo_grep(r"RunPaths\([^)]*\)\.meta\b|\)\.meta\.write_text|\bpaths\.meta\b", "*.py")
     )

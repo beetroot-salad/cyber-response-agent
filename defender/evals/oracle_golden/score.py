@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -59,6 +60,16 @@ NOT_PROJECTED = "missing"
 # A whole `<placeholder>` is exempt (see _tokens): trimming those would turn the
 # placeholder vocabulary into bare words and let `<port>` collide with `port`.
 _TOKEN_TRIM = "\"'`,;:()[]{}<>"
+
+# An `<angle-placeholder>` ANYWHERE in a value, not only at the start. prompt.md
+# mandates a placeholder for a value the story does not state, and a projection
+# obeying it often states part of a value and abstains on the rest —
+# `"Failed password for root from <office-ws-1-ip> port <source-port> ssh2"`, or
+# `"SSH-2.0-OpenSSH_<openssh-version>"`. Grading those `wrong` because the
+# placeholder is not the literal captured text punishes exactly the abstention the
+# prompt asks for, and `wrong` is the grade that gates a slice to `no-update`.
+# Both shapes really occurred in the #711 held-out captures.
+_PLACEHOLDER = re.compile(r"<[^<>]+>")
 
 
 def _norm(value: object) -> str:
@@ -115,7 +126,7 @@ def concrete_values(events: list) -> dict[str, set[str]]:
             continue
         for k, v in e.items():
             text = _norm(v)
-            if not text.startswith("<"):  # `<placeholder>` = stated-unknown, not a value
+            if not _PLACEHOLDER.search(text):   # any placeholder = stated-unknown
                 out.setdefault(str(k), set()).add(text)
     return out
 
