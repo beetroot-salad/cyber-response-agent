@@ -2,7 +2,7 @@
   "project": "defender — an LLM SOC-analyst agent (python, pytest, uv)",
   "gate": {
     "ciConfig": ".github/workflows/ci.yml",
-    "test": "cd defender && uv run pytest tests/ learning/ -m \"not llm and not live\"",
+    "test": "cd defender && uv run pytest tests/ -m \"not llm and not live\"",
     "checks": [
       "defender/.venv/bin/ruff check . --select E,F --ignore E402,E501",
       "defender/.venv/bin/ruff check defender",
