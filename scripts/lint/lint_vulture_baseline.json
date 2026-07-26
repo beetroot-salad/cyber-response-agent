@@ -21,7 +21,7 @@
     "defender/runtime/compaction.py: unused variable 'action' (60% confidence)": "false-positive: CompactionStep frozen-dataclass field, read off instances",
     "defender/runtime/driver.py: unused function '_budget' (60% confidence)": "false-positive: @hooks.on.tool_execute registration — invoked by the pydantic-ai hook dispatcher",
     "defender/runtime/driver.py: unused function '_log_request' (60% confidence)": "false-positive: @hooks.on.model_request registration — invoked by the pydantic-ai hook dispatcher",
-    "defender/runtime/driver.py: unused function '_summary_pointers' (60% confidence)": "test-only: tests/test_compaction_driver.py. Belongs to the same unwired compaction work as compact/apply_writes above",
+    "defender/runtime/driver.py: unused function '_summary_pointers' (60% confidence)": "UNWIRED: tests/test_compaction_driver.py is its only consumer, but it belongs to the same unwired compaction work as compact/apply_writes above — tagged with them rather than with the test-only entries, so it is resolved when that design is finished or retired (#712), not skimmed as ordinary test-driven surface",
     "defender/runtime/query_tool.py: unused method 'wrap_tool_execute' (60% confidence)": "false-positive: pydantic-ai toolset wrapper hook — the framework calls it around every tool execution",
     "defender/runtime/query_tool.py: unused method 'wrap_tool_validate' (60% confidence)": "false-positive: pydantic-ai toolset wrapper hook — the framework calls it around arg validation",
     "defender/runtime/tools.py: unused function 'edit_file' (60% confidence)": "false-positive: @agent.tool registration — pydantic-ai dispatches it by tool name, never by symbol",
