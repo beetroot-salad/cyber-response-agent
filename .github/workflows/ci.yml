@@ -50,10 +50,14 @@ jobs:
 
       - name: Run unit tests
         working-directory: defender
-        # Collect both the learning-loop invariant suite (tests/) AND the
-        # orchestrator/loop tests co-located under learning/. The latter were
-        # previously dark to CI — only tests/ was collected — so a green run
-        # could hide failures in learning/test_loop.py et al.
+        # ONE collection root. This used to read `tests/ learning/`, because test
+        # modules sat in the source tree beside what they cover and each root had
+        # to be named here — a list that was only ever extended after a suite was
+        # FOUND dark (learning/test_loop.py was, once). #720 moved all four under
+        # tests/, which retires the list and the failure mode with it: the three
+        # evals/test_*.py modules had never been collected by any CI run, because
+        # nobody noticed evals/ was missing from this line. Anything under tests/
+        # is collected; nothing else is a test.
         #
         # DEFENDER_BUDGET_ENFORCE=1 runs the whole collected suite under the BLOCKING
         # budget posture (#631, M9/D11): flipping the flag in CI is what exercises the
@@ -61,7 +65,7 @@ jobs:
         # enforcement path is executed routinely rather than merely enabled.
         env:
           DEFENDER_BUDGET_ENFORCE: "1"
-        run: uv run pytest tests/ learning/ -v -m "not live"
+        run: uv run pytest tests/ -v -m "not live"
 
       # The spec_graph gate checks (check_actors / check_binds) ship with the
       # spec-flow plugin and were dark to CI — only defender/ was collected, so a

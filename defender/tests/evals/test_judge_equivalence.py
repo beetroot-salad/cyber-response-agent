@@ -1,12 +1,6 @@
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
-if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
-    sys.path.insert(0, _root)
-
-from defender.evals.judge_equivalence import (  # noqa: E402
+from defender.evals.judge_equivalence import (
     Verdict,
     compare,
     findings_agreement,

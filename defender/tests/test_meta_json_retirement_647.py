@@ -48,7 +48,7 @@ UNRELATED_TREES = (
     "experiments/",
     "playground-v2/",
     "defender/evals/run_judge_ab",
-    "defender/evals/test_run_judge_ab",
+    "defender/tests/evals/test_run_judge_ab",
     "docs/archive/",
     "defender/docs/runtime-per-loop-compaction-design.md",
     ".claude/",

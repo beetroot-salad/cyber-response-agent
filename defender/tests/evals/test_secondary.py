@@ -10,7 +10,11 @@ import pytest
 import yaml
 
 
-_HERE = Path(__file__).resolve().parent
+# .../defender/tests/evals/test_secondary.py -> .../defender. `secondary.py` and
+# `replay_actor.py` are by-path scripts, not importable modules, so the tests reach
+# them by location the way their CLIs do.
+DEFENDER = Path(__file__).resolve().parents[2]
+EVALS = DEFENDER / "evals"
 
 
 def _load(name: str, path: Path):
@@ -21,7 +25,7 @@ def _load(name: str, path: Path):
     return mod
 
 
-sec = _load("eval_secondary_t", _HERE / "secondary.py")
+sec = _load("eval_secondary_t", EVALS / "secondary.py")
 
 
 
@@ -260,7 +264,7 @@ def test_write_summary_emits_md_per_alert_json_and_index_jsonl(tmp_path: Path):
 
 
 def test_replay_actor_uses_stable_case_id_for_seed(tmp_path: Path):
-    replay = _load("replay_actor_t", _HERE.parent / "learning" / "ops" / "replay_actor.py")
+    replay = _load("replay_actor_t", DEFENDER / "learning" / "ops" / "replay_actor.py")
 
     captured: dict = {}
 

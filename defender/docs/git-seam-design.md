@@ -81,7 +81,7 @@ the porcelain-parsing bug class). So:
 
 - **git → direct import.** `branch.py` drops its git injection and routes through
   `_git.py`; its remaining fake-runner assertions migrate to the real-tmp-repo
-  style already present in `learning/test_loop.py`.
+  style already present in `tests/learning/test_loop.py`.
 - **`gh` → injected `Forge` port.** A protocol (`open_pr`, `list_open_prs`) with a
   `GhForge` adapter, injected into `AuthorBranch`. This is the genuine
   provider-swap boundary (GitHub today, GitLab/Gitea conceivable) and the only
