@@ -57,14 +57,6 @@ def pre_text(text: str) -> str:
     return f'<pre class="text">{esc(text)}</pre>'
 
 
-def pre_json(obj) -> str:
-    try:
-        rendered = json.dumps(obj, indent=2, ensure_ascii=False)
-    except (TypeError, ValueError):
-        rendered = str(obj)
-    return f'<pre class="json">{esc(rendered)}</pre>'
-
-
 _JSON_TOKEN_RE = re.compile(
     r'"(?:\\.|[^"\\])*"(?:\s*:)?'
     r'|\b(?:true|false|null)\b'
@@ -107,112 +99,6 @@ def fmt_duration(ms: float | int) -> str:
     if s < 60:
         return f"{s}s"
     return f"{s // 60}m{s % 60:02d}s"
-
-
-
-
-def render_tool_use(blk: dict) -> str:
-    return block(
-        "tool-use",
-        f"→ {blk.get('name', '?')}  ({blk.get('id', '')})",
-        pre_json(blk.get("input", {})),
-    )
-
-
-def flatten_tool_result_content(content) -> str:
-    if isinstance(content, list):
-        parts: list[str] = []
-        for c in content:
-            if isinstance(c, dict) and c.get("type") == "text":
-                parts.append(c.get("text", ""))
-            else:
-                parts.append(json.dumps(c))
-        return "\n".join(parts)
-    return str(content)
-
-
-def render_tool_result(blk: dict) -> str:
-    is_error = blk.get("is_error", False)
-    body = flatten_tool_result_content(blk.get("content", ""))
-    label = "← tool_result" + (" [error]" if is_error else "")
-    return block(
-        "tool-result" + (" error" if is_error else ""),
-        f"{label}  ({blk.get('tool_use_id', '')})",
-        pre_text(body),
-    )
-
-
-def render_thinking(blk: dict) -> str:
-    return block("thinking", "thinking", pre_text(blk.get("thinking", "")))
-
-
-def render_text_block(blk: dict) -> str:
-    return f'<div class="text-block">{esc(blk.get("text", ""))}</div>'
-
-
-def render_assistant(message: dict) -> str:
-    parts: list[str] = []
-    for blk in message.get("content", []):
-        t = blk.get("type")
-        if t == "text":
-            parts.append(render_text_block(blk))
-        elif t == "thinking":
-            parts.append(render_thinking(blk))
-        elif t == "tool_use":
-            parts.append(render_tool_use(blk))
-        else:
-            parts.append(pre_json(blk))
-    return "\n".join(parts)
-
-
-def render_user(message: dict) -> str:
-    content = message.get("content", [])
-    if isinstance(content, str):
-        return pre_text(content)
-    parts: list[str] = []
-    for blk in content:
-        if not isinstance(blk, dict):
-            parts.append(pre_json(blk))
-            continue
-        if blk.get("type") == "tool_result":
-            parts.append(render_tool_result(blk))
-        else:
-            parts.append(pre_json(blk))
-    return "\n".join(parts)
-
-
-def render_event(event: dict) -> str:
-    t = event.get("type", "?")
-    if t == "system":
-        return block(
-            "system",
-            f"system: {event.get('subtype', '')}",
-            pre_json({k: v for k, v in event.items() if k != "type"}),
-        )
-    if t == "assistant":
-        return block("assistant", "assistant", render_assistant(event.get("message", {})), open_=True)
-    if t == "user":
-        return block("user", "user / tool results", render_user(event.get("message", {})), open_=True)
-    if t == "result":
-        cost = event.get("total_cost_usd")
-        usage = event.get("usage") or {}
-        title = f"result: {event.get('subtype', '')}"
-        if cost is not None:
-            title += f"  ${cost:.4f}"
-        if usage:
-            title += (
-                f"  in={usage.get('input_tokens', 0)}"
-                f" out={usage.get('output_tokens', 0)}"
-                f" cache_r={usage.get('cache_read_input_tokens', 0)}"
-                f" cache_w={usage.get('cache_creation_input_tokens', 0)}"
-            )
-        body = pre_text(event.get("result", "")) + pre_json(
-            {k: v for k, v in event.items() if k not in ("type", "result")}
-        )
-        return block("result", title, body, open_=True)
-    if t == "hook":
-        return block("hook", f"hook: {event.get('hook_event_name', '')}", pre_json(event))
-    return block(t, t, pre_json(event))
 
 
 

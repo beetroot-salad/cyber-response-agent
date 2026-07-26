@@ -161,20 +161,12 @@ def invoke_agent(findings: list[dict], batch_id: str, cfg: AuthorConfig) -> dict
 
 
 
-def git_head_sha(repo_root: Path) -> str:
-    return _shared.git_head_sha(repo_root)
-
-
 def changes_outside_lessons(cfg: AuthorConfig) -> list[str]:
     return _shared.changes_outside(cfg.repo_root, cfg.lessons_dir_rel)
 
 
 def commit_lessons(cfg: AuthorConfig, message: str) -> str | None:
     return _shared.commit_corpus(cfg.repo_root, cfg.lessons_dir, message)
-
-
-def lessons_dir_clean(cfg: AuthorConfig) -> bool:
-    return _shared.corpus_dir_clean(cfg.repo_root, cfg.lessons_dir)
 
 
 def _result_list(result: dict, key: str) -> list[Any]:
