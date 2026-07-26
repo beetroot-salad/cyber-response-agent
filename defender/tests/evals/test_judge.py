@@ -9,6 +9,8 @@ projection is later graded against.
 from __future__ import annotations
 
 import json
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -19,14 +21,15 @@ CASES = judge.GOLDEN_DIR / "cases"
 CASE = CASES / "case-003-suppression-devws"
 
 
-def _call(*responses: str):
+def _call(*responses: str, resolved: str | None = None):
     """A stub call seam cycling through canned text, recording what it was sent."""
     sent = []
 
-    def call(instructions: str, user: str, model: str, effort: str) -> str:
+    def call(instructions: str, user: str, model: str, effort: str) -> judge.CallResult:
         sent.append({"instructions": instructions, "user": user,
                      "model": model, "effort": effort})
-        return responses[(len(sent) - 1) % len(responses)]
+        return judge.CallResult(text=responses[(len(sent) - 1) % len(responses)],
+                                model=resolved or model, effort=effort, cost_usd=0.01)
 
     call.sent = sent  # type: ignore[attr-defined]
     return call
@@ -245,6 +248,110 @@ def test_the_prompt_is_sent_as_instructions_so_it_stays_a_cacheable_prefix():
     assert "<observed>" in sent["user"], "only the per-lead payload varies"
 
 
+# ------------------------------------------------------------- the headless runner
+
+def _fake_run(monkeypatch, report: dict, *, returncode: int = 0, stdout: str | None = None):
+    """Capture the argv/env/cwd `call_model` would hand to `claude -p`."""
+    seen: dict = {}
+
+    def fake(argv, **kw):
+        seen["argv"] = argv
+        seen.update(kw)
+        # The temp dir is gone by the time the call returns, so look while it exists.
+        seen["cwd_contents"] = sorted(p.name for p in Path(kw["cwd"]).iterdir())
+        return SimpleNamespace(
+            returncode=returncode,
+            stdout=json.dumps(report) if stdout is None else stdout,
+            stderr="",
+        )
+
+    monkeypatch.setattr(judge.subprocess, "run", fake)
+    return seen
+
+
+OK_REPORT = {"is_error": False, "subtype": "success", "result": LABEL_OK,
+             "total_cost_usd": 0.0058, "modelUsage": {"claude-opus-5": {}}}
+
+
+def test_the_judge_is_invoked_with_no_tools_at_all(monkeypatch):
+    """A judge that can read the filesystem can read `expected.yaml`, and a measurement
+    that consulted the answer key is not a measurement."""
+    seen = _fake_run(monkeypatch, OK_REPORT)
+    judge.call_model("instructions", "payload", "claude-opus-5", "high")
+    argv = seen["argv"]
+    assert argv[argv.index("--allowed-tools") + 1] == ""
+    denied = argv[argv.index("--disallowed-tools") + 1]
+    for tool in ("Bash", "Read", "Glob", "Grep", "Task"):
+        assert tool in denied
+    assert "--strict-mcp-config" in argv
+
+
+def test_the_judge_runs_from_a_directory_that_holds_nothing(monkeypatch):
+    """No CLAUDE.md, no git status, no repo listing — which keeps the case tree out of
+    reach by a second route AND keeps the cacheable prefix byte-identical per call."""
+    seen = _fake_run(monkeypatch, OK_REPORT)
+    judge.call_model("instructions", "payload", "claude-opus-5", "high")
+    assert seen["cwd_contents"] == []
+
+
+def test_the_dead_api_key_is_not_inherited_by_the_runner(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-whatever")
+    seen = _fake_run(monkeypatch, OK_REPORT)
+    judge.call_model("instructions", "payload", "claude-opus-5", "high")
+    assert "ANTHROPIC_API_KEY" not in seen["env"]
+
+
+def test_the_prompt_goes_in_as_the_system_prompt_and_the_payload_on_stdin(monkeypatch):
+    seen = _fake_run(monkeypatch, OK_REPORT)
+    judge.call_model("the instructions", "the payload", "claude-opus-5", "high")
+    argv = seen["argv"]
+    assert argv[argv.index("--system-prompt") + 1] == "the instructions"
+    assert seen["input"] == "the payload"
+    assert argv[argv.index("--effort") + 1] == "high"
+
+
+def test_a_run_that_answered_on_another_model_is_refused(monkeypatch):
+    """`--fallback-model` and outages both silently substitute. A verdict ledgered under
+    a tag naming a model that did not answer is a mislabelled artifact."""
+    _fake_run(monkeypatch, {**OK_REPORT, "modelUsage": {"claude-sonnet-5": {}}})
+    with pytest.raises(RuntimeError, match="asked for"):
+        judge.call_model("instructions", "payload", "claude-opus-5", "high")
+
+
+@pytest.mark.parametrize(("report", "rc", "stdout", "why"), [
+    (OK_REPORT, 1, None, "non-zero exit"),
+    (OK_REPORT, 0, "not json at all", "unparseable runner output"),
+    ({**OK_REPORT, "is_error": True}, 0, None, "the runner reports an error"),
+    ({**OK_REPORT, "subtype": "error_max_turns"}, 0, None, "a non-success subtype"),
+])
+def test_a_broken_run_raises_rather_than_scoring(monkeypatch, report, rc, stdout, why):
+    _fake_run(monkeypatch, report, returncode=rc, stdout=stdout)
+    with pytest.raises(RuntimeError):
+        judge.call_model("instructions", "payload", "claude-opus-5", "high")
+
+
+def test_the_call_reports_what_it_cost(monkeypatch):
+    _fake_run(monkeypatch, OK_REPORT)
+    assert judge.call_model("i", "p", "claude-opus-5", "high").cost_usd == 0.0058
+
+
+# ------------------------------------------------------------------- provenance
+
+def test_each_lead_records_the_judge_that_actually_answered():
+    got = judge.label_lead(judge.load_lead_inputs(CASE, "l-001"), model="claude-opus-5",
+                           effort="high", call=_call(LABEL_OK))
+    assert got["judge_model"] == "claude-opus-5"
+    assert got["judge_effort"] == "high"
+    assert got["cost_usd"] == 0.01
+
+
+def test_provenance_is_read_back_rather_than_echoed_from_the_request():
+    """The tag must name the judge that ran, not the one that was configured."""
+    got = judge.label_lead(judge.load_lead_inputs(CASE, "l-001"), model="claude-opus-5",
+                           effort="high", call=_call(LABEL_OK, resolved="claude-sonnet-5"))
+    assert got["judge_model"] == "claude-sonnet-5"
+
+
 # -------------------------------------------------------------------------- tags
 
 def test_the_tag_carries_the_resolved_model_effort_and_both_prompts():
@@ -343,6 +450,28 @@ def test_an_abstention_is_counted_and_not_charged_as_a_divergence():
                                    model="m", effort="high", call=_call(raw))
     assert report["abstentions"] == report["leads"]
     assert report["rows"][0]["undecidable_reasons"] == ["insufficient-baseline"]
+
+
+def test_the_audit_refuses_a_sweep_that_ran_on_more_than_one_judge():
+    """A mid-sweep fallback produces two judges' answers under one tag."""
+    drifting = iter(("claude-opus-5", "claude-sonnet-5"))
+
+    def call(instructions, user, model, effort):
+        return judge.CallResult(text=LABEL_OK, model=next(drifting, "claude-sonnet-5"),
+                                effort=effort, cost_usd=0.01)
+
+    with pytest.raises(RuntimeError, match="more than one judge"):
+        audit_judge.run_audit(("case-002-authorized-keys-falco",), repeats=1, jobs=1,
+                              model="claude-opus-5", effort="high", call=call)
+
+
+def test_the_audit_reports_the_resolved_judge_and_what_it_cost():
+    report = audit_judge.run_audit(("case-002-authorized-keys-falco",), repeats=1, jobs=1,
+                                   model="claude-opus-5", effort="high",
+                                   call=_call(LABEL_OK))
+    assert report["judge_model"] == "claude-opus-5"
+    assert report["cost_usd"] == 0.02, "two leads at a penny each"
+    assert report["tag_suffix"] == judge.tag_suffix("claude-opus-5", "high")
 
 
 def test_the_report_serialises_for_the_committed_artifact():

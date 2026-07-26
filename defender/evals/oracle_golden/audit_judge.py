@@ -142,9 +142,19 @@ def run_audit(case_names: tuple[str, ...], repeats: int, jobs: int, *,
             "evidence": labels[0]["evidence"],
         })
 
+    # The resolved judge, read back from every call rather than echoed from the request.
+    # A run that fell back mid-sweep produced two judges' answers under one tag.
+    resolved = {label["judge_model"] for labels in by_lead.values() for label in labels}
+    if len(resolved) != 1:
+        raise RuntimeError(f"the sweep ran on more than one judge: {sorted(resolved)}")
+    costs = [label["cost_usd"] for labels in by_lead.values() for label in labels
+             if label.get("cost_usd") is not None]
+
     decided = [r for r in rows if r["modal_delta_kind"] != "undecidable"]
     return {
-        "judge_model": model, "judge_effort": effort,
+        "judge_model": resolved.pop(), "judge_effort": effort,
+        "tag_suffix": judge.tag_suffix(model, effort),
+        "cost_usd": round(sum(costs), 4) if costs else None,
         "prompts_sha8": judge.prompts_sha8(), "repeats": repeats,
         "leads": len(rows),
         "agreeing": sum(1 for r in rows if r["agrees"]),
@@ -158,7 +168,8 @@ def run_audit(case_names: tuple[str, ...], repeats: int, jobs: int, *,
 def render(report: dict) -> str:
     lines = [
         f"judge: {report['judge_model']} effort={report['judge_effort']} "
-        f"prompts={report['prompts_sha8']} repeats={report['repeats']}",
+        f"prompts={report['prompts_sha8']} repeats={report['repeats']}"
+        + (f" cost=${report['cost_usd']}" if report.get("cost_usd") else ""),
         f"calibration: {report['agreeing']}/{report['leads']} agree with the hand labels, "
         f"{report['divergences']} divergences, {report['abstentions']} abstentions",
         f"mean self-agreement: {report['mean_self_agreement']}",

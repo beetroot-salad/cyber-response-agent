@@ -12,6 +12,9 @@ The judge is `claude-opus-5`, deliberately not the oracle's own `glm-5.2`: a sam
 judge shares the failure modes this suite exists to catch — inferring suppression from
 absence, accepting a plausible-shaped event the telemetry does not carry.
 
+It is reached through `claude -p` rather than the Anthropic API — see `call_model` for
+what that changes and what keeps it honest.
+
 Because the judge runs at score time, the score is non-deterministic and the judge is
 part of the tag: `tag_suffix()` carries the resolved model, the effort, and a hash over
 BOTH prompts, so editing either is a new tag requiring a re-score.
@@ -21,6 +24,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import subprocess
+import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -321,24 +326,88 @@ def parse_verdict(raw: str) -> dict:
 
 # ----------------------------------------------------------------------------- calls
 
-#: `(instructions, user, model, effort) -> raw text`. The seam tests inject through.
-CallFn = Callable[[str, str, str, str], str]
+@dataclass(frozen=True)
+class CallResult:
+    """What one judge call produced, plus who actually produced it.
+
+    `model` is read back from the runner rather than echoed from the request: the
+    design's rule is that a tag records the RESOLVED judge, so that two machines cannot
+    mint identically-named tags from different models.
+    """
+
+    text: str
+    model: str
+    effort: str
+    cost_usd: float | None = None
 
 
-def call_model(instructions: str, user: str, model: str, effort: str) -> str:
-    """One single-turn, tool-free call. The instructions are byte-identical across
-    every lead, so they sit in the cacheable prefix and only `user` varies."""
-    import asyncio
+#: `(instructions, user, model, effort) -> CallResult`. The seam tests inject through.
+CallFn = Callable[[str, str, str, str], CallResult]
 
-    from pydantic_ai import Agent
+CLAUDE_BIN = os.environ.get("CLAUDE_BIN") or "claude"
+CALL_TIMEOUT_SECONDS = 900
 
-    from defender.runtime.providers import build_for_effort
+#: Every tool the runner would otherwise offer. A judge that can read the filesystem can
+#: read `expected.yaml`, and a measurement that consulted the answer key is not one. The
+#: empty allowlist is the guard; this denylist is the belt to its braces.
+_DENIED_TOOLS = (
+    "Bash,Read,Write,Edit,Glob,Grep,WebFetch,WebSearch,Task,TodoWrite,NotebookEdit,"
+    "BashOutput,KillShell,SlashCommand,Skill"
+)
 
-    built = build_for_effort(model, effort)
-    agent: Agent[None, str] = Agent(
-        built.model, model_settings=built.settings, instructions=instructions
-    )
-    return asyncio.run(agent.run(user)).output
+
+def call_model(instructions: str, user: str, model: str, effort: str) -> CallResult:
+    """One single-turn, tool-free judge call, through `claude -p`.
+
+    NOT a bare API call, and the difference is worth stating: the judge runs inside the
+    Claude Code harness, so ~11k tokens of runner scaffolding precede our instructions.
+    That prefix is byte-identical across every lead, so it is created once and read from
+    cache thereafter (~$0.006/call) — but it is there, and a prompt-level finding about
+    this judge is a finding about the judge-inside-the-runner.
+
+    Three things keep it honest:
+
+    * **No tools.** An empty allowlist plus an explicit denylist. Verified: asked to read
+      a file, it answers that it has no file-reading tool.
+    * **A neutral working directory.** Run from an empty temp dir, so no CLAUDE.md, git
+      status or repo listing is discovered — which both stabilises the cacheable prefix
+      and keeps the case tree out of the judge's reach by a second route.
+    * **No inherited API key.** `ANTHROPIC_API_KEY` is dropped from the child's
+      environment so the runner uses its own credentials.
+    """
+    with tempfile.TemporaryDirectory(prefix="oracle-judge-") as neutral:
+        env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
+        proc = subprocess.run(
+            [CLAUDE_BIN, "-p",
+             "--model", model,
+             "--effort", effort,
+             "--system-prompt", instructions,
+             "--allowed-tools", "",
+             "--disallowed-tools", _DENIED_TOOLS,
+             "--strict-mcp-config",
+             "--no-session-persistence",
+             "--output-format", "json"],
+            input=user, capture_output=True, text=True, encoding="utf-8",
+            cwd=neutral, env=env, timeout=CALL_TIMEOUT_SECONDS, check=False,
+        )
+    if proc.returncode != 0:
+        raise RuntimeError(f"{CLAUDE_BIN} exited {proc.returncode}: {proc.stderr.strip()[:400]}")
+    try:
+        report = json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"{CLAUDE_BIN} did not emit JSON: {proc.stdout[:400]}") from exc
+    if report.get("is_error") or report.get("subtype") != "success":
+        raise RuntimeError(f"judge call failed: {report.get('result') or report}")
+
+    # Read the model back rather than trusting the request. A run that silently fell
+    # back to another model must not be ledgered under the tag we asked for.
+    used = [name for name in report.get("modelUsage") or {} if name == model]
+    if not used:
+        raise RuntimeError(
+            f"asked for {model!r} but the run reports {sorted(report.get('modelUsage') or {})}"
+        )
+    return CallResult(text=report["result"], model=model, effort=effort,
+                      cost_usd=report.get("total_cost_usd"))
 
 
 def _pass(prompt_path: Path, user: str, parse, *, model: str, effort: str,
@@ -350,9 +419,15 @@ def _pass(prompt_path: Path, user: str, parse, *, model: str, effort: str,
     """
     instructions = prompt_path.read_text(encoding="utf-8")
     try:
-        return parse(call(instructions, user, model, effort))
+        result = call(instructions, user, model, effort)
+        parsed = parse(result.text)
     except GrammarError:
-        return parse(call(instructions, user, model, effort))
+        result = call(instructions, user, model, effort)
+        parsed = parse(result.text)
+    # Provenance, not grammar: which judge actually answered, recorded per lead so the
+    # committed artifact can be checked against the tag it was filed under.
+    return {**parsed, "judge_model": result.model, "judge_effort": result.effort,
+            "cost_usd": result.cost_usd}
 
 
 def label_lead(inputs: LeadInputs, *, model: str | None = None, effort: str | None = None,
