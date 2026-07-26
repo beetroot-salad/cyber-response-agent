@@ -517,14 +517,51 @@ bind mount resolves, so the box cannot start. `DEFENDER_ALLOW_UNSANDBOXED=1` is
 the documented local escape hatch (`runtime-sandbox-design.md`); the permission
 gate still applies, only the container boundary is dropped.
 
+## What the 2026-07-26 pilot campaign measured
+
+Six stratified cells were fired against a live stack restored from snapshot
+`412461512`. The result is a constraint worth more than the cases would have been:
+
+> **The catalog's scenarios raise a detection rule reliably only on their DEFAULT
+> targets.** Retargeting them — the main lever for growing the unit count, since a
+> unit is (activity family × host pair) — fires activity that trips nothing.
+
+| cell | outcome |
+|---|---|
+| `ssh-brute-force-canary --target db-1 --user sre.alice` | fired `v2-sshd-failed-auth-burst` on db-1 → **case-009**, held-out |
+| `cross-tier-ssh-probe --target db-1` (its default) | fired |
+| `persistence-authorized-keys --target db-1` | no rule fired in 10 min of polling |
+| `living-off-the-land --target web-1` | no rule fired in 10 min of polling |
+| `ssh-brute-force-canary --target web-1` | captured a **baseline** alert on another host — voided |
+| `cross-tier-ssh-probe --target web-2 --user sre.alice` | no usable alert |
+
+Two consequences for anyone recruiting next:
+
+- **Check that a cell's activity is detectable before spending an LLM run on it.**
+  The generator now prefers an alert naming the operation's target host, which
+  turns the third row above from a silently-wrong case into a voided cell — but it
+  cannot conjure a rule that does not fire.
+- **A `+noise` cell needs the identity AND the host pair to be baseline.**
+  case-009 was aimed at `+noise` by running an attack as a routine SRE account,
+  and it landed as `+event`: `office-ws-1` has `trust_edges_out: []`, so no route
+  from it is a baseline route. case-004's `jump-box-1 → db-1` is the shape that
+  works.
+
 ## Status
 
 `defender/evals/oracle_golden/README.md` carries the current coverage table and
 per-case results. Open work, in the order it matters:
 
-1. wire the trust resolver into lesson scoring (the safety criterion);
-2. re-capture `-noise` against a stream with a measured non-zero baseline in its
+1. **make retargeted scenarios detectable** — until then the unit count cannot
+   grow, and every number here stays `insufficient` (see the pilot above);
+2. wire the trust resolver into lesson scoring (the safety criterion);
+3. **find out whether the held-out/dev gap is real.** The first held-out case
+   scores 3/6 against 0.92 on dev. One case at one unit proves nothing, and the
+   reporter says so — but if it holds up, the dev number was never a measurement;
+4. re-capture `-noise` against a stream with a measured non-zero baseline in its
    own envelope — the class currently rests on one lead whose darkness is partial;
-3. routine **benign** observed cases (the suite is malicious-heavy);
-4. host-state / identity as `+event` surfaces, and more mutation entities;
-5. stratify reports by activity family once enough cases exist to support it.
+5. routine **benign** observed cases (the suite is malicious-heavy);
+6. host-state / identity as `+event` surfaces, and more mutation entities;
+7. stratify reports by activity family once enough cases exist to support it;
+8. a remedy for `C-SUPPRESS-UNBASELINED` that actually moves a projection — the
+   prompt fix did not (see above), so the mechanism is still unknown.
