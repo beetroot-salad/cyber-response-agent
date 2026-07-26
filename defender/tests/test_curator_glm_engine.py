@@ -173,6 +173,17 @@ def test_marker_parse_from_last_occurrence_balanced_and_faults(tmp_path):
 
 
 
+def test_content_less_curator_text_is_no_edits_not_a_missing_marker(tmp_path):
+    """A curator turn that produced nothing readable is "made no edits" ({}), not a
+    marker-parse failure. The branch keyed off `text.strip()`, so a reply of one
+    zero-width space raised "emitted no AUTHOR_RESULT marker" instead (#722). Control: a
+    reply carrying real prose but no marker is still the loud error."""
+    for blank in ("", "  ", "\u200b", "\ufeff", "\x00", "\u00a0"):
+        assert _stage(tmp_path, run_author=lambda _b=blank, **kw: _b) == {}
+    with pytest.raises(AuthorError, match="emitted no AUTHOR_RESULT marker"):
+        _stage(tmp_path, run_author=lambda **kw: "I decided not to author anything.")
+
+
 def test_marker_empty_commit_message_rejected(tmp_path):
     """A parsed result with non-empty committed but a whitespace-only commit_message trips the
     KEPT envelope guard (_commit_message) → AuthorError; never a silent empty-message commit.

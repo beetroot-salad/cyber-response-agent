@@ -245,6 +245,13 @@ def _validate_environment_observation(i: int, o: Any) -> None:
             f"environment_observations[{i}].alert_rule_ids must be a non-empty "
             "list (the retrieval anchor)"
         )
+    # A list of ids that render as nothing is as anchorless as an empty list, and
+    # `persist.py` stores these as THE retrieval anchor for the fact (#722).
+    if any(not isinstance(r, str) or is_content_less(r) for r in rule_ids):
+        raise RunUnprocessable(
+            f"environment_observations[{i}].alert_rule_ids entries must be "
+            "non-empty strings (the retrieval anchor)"
+        )
     for k in ("relevance_criteria", "fact"):
         if not isinstance(o[k], str) or is_content_less(o[k]):
             raise RunUnprocessable(

@@ -13,6 +13,7 @@ from collections.abc import Callable
 import yaml
 
 from defender._clock import now_iso
+from defender._text import is_content_less
 from defender._io import append_jsonl, read_jsonl_rows, write_atomic
 from defender.learning.core.config import (
     ADVERSARIAL_AUDIT_ONLY_FINDING_TYPES,
@@ -361,7 +362,9 @@ def append_actor_observations(
 
 def _anchor_with_case_key(judge_rule_ids: Any, alert_rule_key: str) -> list[str]:
     ids = judge_rule_ids if isinstance(judge_rule_ids, list) else [judge_rule_ids]
-    ids = [str(r) for r in ids if str(r).strip()]
+    # is_content_less, not `.strip()`: an id that renders as nothing must not survive
+    # into the stored anchor, and `.strip()` cannot see the zero-width ones (#722).
+    ids = [str(r) for r in ids if not is_content_less(str(r))]
     if alert_rule_key and alert_rule_key not in ids:
         ids = [alert_rule_key, *ids]
     return ids

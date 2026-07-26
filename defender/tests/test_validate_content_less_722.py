@@ -129,6 +129,41 @@ def test_an_environment_observation_field_that_renders_as_nothing_is_rejected(ke
 
 
 @pytest.mark.parametrize(("tag", "text"), CONTENT_LESS, ids=_IDS)
+def test_a_rule_id_anchor_that_renders_as_nothing_is_rejected(tag, text):
+    """`alert_rule_ids` is the fact's retrieval anchor, and only the LIST was checked for
+    emptiness — its entries never were. A list holding one zero-width id is as anchorless
+    as `[]`, and `persist.py` would store it as the anchor."""
+    doc = _judge_doc(environment_observations=[_environment_observation(alert_rule_ids=[text])])
+    with pytest.raises(RunUnprocessable, match="alert_rule_ids entries must be non-empty"):
+        loop.validate_judge_doc(doc)
+
+
+@pytest.mark.parametrize(("tag", "text"), CONTENT_LESS, ids=_IDS)
+def test_one_content_less_rule_id_among_real_ones_is_rejected(tag, text):
+    """Not just the all-blank case: a blank id riding along with a real one is rejected
+    too, so the anchor list cannot be padded with ids that render as nothing."""
+    doc = _judge_doc(
+        environment_observations=[_environment_observation(alert_rule_ids=["rule-42", text])]
+    )
+    with pytest.raises(RunUnprocessable, match="alert_rule_ids entries must be non-empty"):
+        loop.validate_judge_doc(doc)
+
+
+def test_real_rule_id_anchors_still_validate():
+    """The controls: real ids pass, and so does an id that merely CARRIES an invisible
+    character. A non-string id is rejected by the same gate."""
+    assert loop.validate_judge_doc(
+        _judge_doc(environment_observations=[
+            _environment_observation(alert_rule_ids=["rule-42", "﻿v2-falco-net-tool"])
+        ])
+    )
+    with pytest.raises(RunUnprocessable, match="alert_rule_ids entries must be non-empty"):
+        loop.validate_judge_doc(
+            _judge_doc(environment_observations=[_environment_observation(alert_rule_ids=[42])])
+        )
+
+
+@pytest.mark.parametrize(("tag", "text"), CONTENT_LESS, ids=_IDS)
 def test_a_resolution_method_that_renders_as_nothing_is_rejected(tag, text):
     with pytest.raises(RunUnprocessable, match="resolution_method` must be a non-empty string"):
         loop.validate_judge_doc(_judge_doc(resolution_method=text))

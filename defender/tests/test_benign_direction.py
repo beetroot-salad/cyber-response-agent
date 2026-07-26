@@ -190,6 +190,16 @@ def test_anchor_with_case_key_dedups_and_normalizes() -> None:
     assert loop._anchor_with_case_key([" ", "b"], "a") == ["a", "b"]
 
 
+def test_anchor_with_case_key_drops_ids_that_render_as_nothing() -> None:
+    """The stored retrieval anchor for an env fact. The filter was `str(r).strip()`, which
+    cannot see the zero-width characters (#722), so an id rendering as nothing survived
+    into the anchor beside the real ones. Control: real ids, and an id that merely CARRIES
+    an invisible character, still survive."""
+    for blank in ("\u200b", "\ufeff", "\u00ad", "\x00", "\u00a0", " "):
+        assert loop._anchor_with_case_key([blank, "b"], "a") == ["a", "b"]
+    assert loop._anchor_with_case_key(["\ufeffb"], "a") == ["a", "\ufeffb"]
+
+
 def test_append_environment_observations_skip_passthrough(loop_paths) -> None:
     paths, lrd = loop_paths
     doc = {"outcome": "skip-passthrough", "outcome_rationale": "x",
