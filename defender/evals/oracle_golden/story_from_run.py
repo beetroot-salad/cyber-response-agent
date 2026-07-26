@@ -17,7 +17,8 @@ the oracle "wrong" for a reason that is not the oracle's fault.
 The rendered story states only: the resolved identity and host pair, each command
 as the runner issued it, its return code, when it ran, and what it printed. That
 is what the procedure doc asks a human for ("state only what happened"), and it
-is exactly what `meta.json` holds.
+is exactly what `playground-v2/attacks/runs/<id>/meta.json` holds. (That record is
+the attack runner's own, unrelated to the defender run metadata #647 retired.)
 
 Belt and braces: the renderer lints its OWN output against the evaluation
 vocabulary and refuses to write a story that trips it, so a scenario whose

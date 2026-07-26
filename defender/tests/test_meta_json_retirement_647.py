@@ -81,9 +81,28 @@ def repo_grep(pattern: str, *pathspecs: str) -> list[str]:
     return [line for line in r.stdout.splitlines() if line.strip()]
 
 
+#: The ATTACK PLAYGROUND keeps its own `meta.json` — `playground-v2/attacks/runs/
+#: <id>/meta.json`, the runner's record of what it fired — and this suite already
+#: says so ("the attack playground ... keeps theirs untouched"). `UNRELATED_TREES`
+#: excludes files INSIDE `playground-v2/`; it cannot exclude a `defender/` file
+#: that legitimately REFERENCES that record. The oracle-calibration generator does
+#: exactly that: it renders each case's story from the runner's record (#711), so
+#: naming the file is the point.
+#:
+#: Listed file by file, like `SUITE_FILES`, rather than by tree — these four are
+#: wholly about the playground runner, and a NEW reference to the retired defender
+#: metadata anywhere else still trips the sweep.
+PLAYGROUND_RECORD_READERS = (
+    "defender/evals/oracle_golden/story_from_run.py",
+    "defender/evals/oracle_golden/generate_case.py",
+    "defender/evals/oracle_golden/test_story_from_run.py",
+    "defender/docs/oracle-calibration.md",
+)
+
+
 def live_hits(hits: list[str], *, extra_excludes: tuple[str, ...] = ()) -> list[str]:
     """`hits` minus the historical-record and unrelated trees, minus this suite's own files."""
-    excluded = HISTORICAL_RECORD + SUITE_FILES + extra_excludes
+    excluded = HISTORICAL_RECORD + SUITE_FILES + PLAYGROUND_RECORD_READERS + extra_excludes
     return [h for h in hits if not any(h.startswith(p) for p in excluded)]
 
 
