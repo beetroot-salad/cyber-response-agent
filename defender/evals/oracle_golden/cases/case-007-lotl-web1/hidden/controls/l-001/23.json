@@ -1,0 +1,465 @@
+{
+  "lead_id": "l-001",
+  "seq": 23,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-11T07:00:00.000Z",
+        "2026-07-11T11:00:00.000Z"
+      ],
+      "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-11T07:00:00.000Z\" AND @timestamp < \"2026-07-11T11:00:00.000Z\"\n        AND host.name == \"soc-playground\"\n        AND (falco.output_fields.proc.cmdline LIKE \"*nginx*\" OR falco.output_fields.proc.cmdline LIKE \"*web*\" OR falco.output_fields.proc.name == \"nginx\")\n| STATS events = COUNT(*)\n        BY falco.output_fields.container.id, falco.output_fields.proc.name, falco.output_fields.proc.cmdline\n| SORT events DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-11T07:00:00.000Z\" AND @timestamp < \"2026-07-11T11:00:00.000Z\"\n        AND host.name == \"soc-playground\"\n        AND (falco.output_fields.proc.cmdline LIKE \"*nginx*\" OR falco.output_fields.proc.cmdline LIKE \"*web*\" OR falco.output_fields.proc.name == \"nginx\")\n| STATS events = COUNT(*)\n        BY falco.output_fields.container.id, falco.output_fields.proc.name, falco.output_fields.proc.cmdline\n| SORT events DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "falco.output_fields.container.id",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.proc.name",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.proc.cmdline",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 20,
+        "values": [
+          {
+            "events": 25,
+            "falco.output_fields.container.id": "45388dd0bf3a",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 web-2 22"
+          },
+          {
+            "events": 25,
+            "falco.output_fields.container.id": "45388dd0bf3a",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 web-1 22"
+          },
+          {
+            "events": 13,
+            "falco.output_fields.container.id": "ed96a85a7480",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 web-1 22"
+          },
+          {
+            "events": 10,
+            "falco.output_fields.container.id": "7e76d1cea7c4",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 web-2 22"
+          },
+          {
+            "events": 9,
+            "falco.output_fields.container.id": "7e76d1cea7c4",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 web-1 22"
+          },
+          {
+            "events": 9,
+            "falco.output_fields.container.id": "ed96a85a7480",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 web-2 22"
+          },
+          {
+            "events": 7,
+            "falco.output_fields.container.id": "c58bf05facac",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 web-1 22"
+          },
+          {
+            "events": 6,
+            "falco.output_fields.container.id": "7e76d1cea7c4",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 web-1 443"
+          },
+          {
+            "events": 6,
+            "falco.output_fields.container.id": "7e76d1cea7c4",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 web-2 8080"
+          },
+          {
+            "events": 6,
+            "falco.output_fields.container.id": "7e76d1cea7c4",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 web-1 8080"
+          },
+          {
+            "events": 6,
+            "falco.output_fields.container.id": "7e76d1cea7c4",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 web-2 443"
+          },
+          {
+            "events": 6,
+            "falco.output_fields.container.id": "7e76d1cea7c4",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 web-2 80"
+          },
+          {
+            "events": 6,
+            "falco.output_fields.container.id": "7e76d1cea7c4",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 web-1 5432"
+          },
+          {
+            "events": 6,
+            "falco.output_fields.container.id": "7e76d1cea7c4",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 web-1 80"
+          },
+          {
+            "events": 6,
+            "falco.output_fields.container.id": "7e76d1cea7c4",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 web-2 5432"
+          },
+          {
+            "events": 5,
+            "falco.output_fields.container.id": "c58bf05facac",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 web-2 22"
+          },
+          {
+            "events": 4,
+            "falco.output_fields.container.id": "922f03f16a11",
+            "falco.output_fields.proc.name": "curl",
+            "falco.output_fields.proc.cmdline": "curl -sf -o /dev/null http://web-1/"
+          },
+          {
+            "events": 4,
+            "falco.output_fields.container.id": "922f03f16a11",
+            "falco.output_fields.proc.name": "curl",
+            "falco.output_fields.proc.cmdline": "curl -sf -o /dev/null http://web-2/"
+          },
+          {
+            "events": 3,
+            "falco.output_fields.container.id": "2c1e2ec93d17",
+            "falco.output_fields.proc.name": "curl",
+            "falco.output_fields.proc.cmdline": "curl -sf -o /dev/null http://web-2/"
+          },
+          {
+            "events": 3,
+            "falco.output_fields.container.id": "2c1e2ec93d17",
+            "falco.output_fields.proc.name": "curl",
+            "falco.output_fields.proc.cmdline": "curl -sf -o /dev/null http://web-1/"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-04T07:00:00.000Z",
+        "2026-07-04T11:00:00.000Z"
+      ],
+      "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-04T07:00:00.000Z\" AND @timestamp < \"2026-07-04T11:00:00.000Z\"\n        AND host.name == \"soc-playground\"\n        AND (falco.output_fields.proc.cmdline LIKE \"*nginx*\" OR falco.output_fields.proc.cmdline LIKE \"*web*\" OR falco.output_fields.proc.name == \"nginx\")\n| STATS events = COUNT(*)\n        BY falco.output_fields.container.id, falco.output_fields.proc.name, falco.output_fields.proc.cmdline\n| SORT events DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-04T07:00:00.000Z\" AND @timestamp < \"2026-07-04T11:00:00.000Z\"\n        AND host.name == \"soc-playground\"\n        AND (falco.output_fields.proc.cmdline LIKE \"*nginx*\" OR falco.output_fields.proc.cmdline LIKE \"*web*\" OR falco.output_fields.proc.name == \"nginx\")\n| STATS events = COUNT(*)\n        BY falco.output_fields.container.id, falco.output_fields.proc.name, falco.output_fields.proc.cmdline\n| SORT events DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "falco.output_fields.container.id",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.proc.name",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.proc.cmdline",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 20,
+        "values": [
+          {
+            "events": 23,
+            "falco.output_fields.container.id": "45388dd0bf3a",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 web-1 22"
+          },
+          {
+            "events": 20,
+            "falco.output_fields.container.id": "45388dd0bf3a",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 web-2 22"
+          },
+          {
+            "events": 20,
+            "falco.output_fields.container.id": "7e76d1cea7c4",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 web-1 22"
+          },
+          {
+            "events": 19,
+            "falco.output_fields.container.id": "7e76d1cea7c4",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 web-2 22"
+          },
+          {
+            "events": 12,
+            "falco.output_fields.container.id": "7e76d1cea7c4",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 web-1 443"
+          },
+          {
+            "events": 12,
+            "falco.output_fields.container.id": "7e76d1cea7c4",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 web-1 5432"
+          },
+          {
+            "events": 12,
+            "falco.output_fields.container.id": "7e76d1cea7c4",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 web-1 80"
+          },
+          {
+            "events": 12,
+            "falco.output_fields.container.id": "ed96a85a7480",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 web-2 22"
+          },
+          {
+            "events": 12,
+            "falco.output_fields.container.id": "7e76d1cea7c4",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 web-2 443"
+          },
+          {
+            "events": 12,
+            "falco.output_fields.container.id": "7e76d1cea7c4",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 web-2 8080"
+          },
+          {
+            "events": 12,
+            "falco.output_fields.container.id": "7e76d1cea7c4",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 web-2 5432"
+          },
+          {
+            "events": 12,
+            "falco.output_fields.container.id": "7e76d1cea7c4",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 web-2 80"
+          },
+          {
+            "events": 12,
+            "falco.output_fields.container.id": "7e76d1cea7c4",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 web-1 8080"
+          },
+          {
+            "events": 9,
+            "falco.output_fields.container.id": "ed96a85a7480",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 web-1 22"
+          },
+          {
+            "events": 4,
+            "falco.output_fields.container.id": "c58bf05facac",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 web-2 22"
+          },
+          {
+            "events": 4,
+            "falco.output_fields.container.id": "c58bf05facac",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 web-1 22"
+          },
+          {
+            "events": 2,
+            "falco.output_fields.container.id": "2c1e2ec93d17",
+            "falco.output_fields.proc.name": "curl",
+            "falco.output_fields.proc.cmdline": "curl -sf -o /dev/null http://web-2/"
+          },
+          {
+            "events": 2,
+            "falco.output_fields.container.id": "2c1e2ec93d17",
+            "falco.output_fields.proc.name": "curl",
+            "falco.output_fields.proc.cmdline": "curl -sf -o /dev/null http://web-1/"
+          },
+          {
+            "events": 1,
+            "falco.output_fields.container.id": "922f03f16a11",
+            "falco.output_fields.proc.name": "curl",
+            "falco.output_fields.proc.cmdline": "curl -sf -o /dev/null http://web-2/"
+          },
+          {
+            "events": 1,
+            "falco.output_fields.container.id": "922f03f16a11",
+            "falco.output_fields.proc.name": "curl",
+            "falco.output_fields.proc.cmdline": "curl -sf -o /dev/null http://web-1/"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-27T07:00:00.000Z",
+        "2026-06-27T11:00:00.000Z"
+      ],
+      "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-06-27T07:00:00.000Z\" AND @timestamp < \"2026-06-27T11:00:00.000Z\"\n        AND host.name == \"soc-playground\"\n        AND (falco.output_fields.proc.cmdline LIKE \"*nginx*\" OR falco.output_fields.proc.cmdline LIKE \"*web*\" OR falco.output_fields.proc.name == \"nginx\")\n| STATS events = COUNT(*)\n        BY falco.output_fields.container.id, falco.output_fields.proc.name, falco.output_fields.proc.cmdline\n| SORT events DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-06-27T07:00:00.000Z\" AND @timestamp < \"2026-06-27T11:00:00.000Z\"\n        AND host.name == \"soc-playground\"\n        AND (falco.output_fields.proc.cmdline LIKE \"*nginx*\" OR falco.output_fields.proc.cmdline LIKE \"*web*\" OR falco.output_fields.proc.name == \"nginx\")\n| STATS events = COUNT(*)\n        BY falco.output_fields.container.id, falco.output_fields.proc.name, falco.output_fields.proc.cmdline\n| SORT events DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "falco.output_fields.container.id",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.proc.name",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.proc.cmdline",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 20,
+        "values": [
+          {
+            "events": 22,
+            "falco.output_fields.container.id": "45388dd0bf3a",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 web-2 22"
+          },
+          {
+            "events": 19,
+            "falco.output_fields.container.id": "45388dd0bf3a",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 web-1 22"
+          },
+          {
+            "events": 16,
+            "falco.output_fields.container.id": "7e76d1cea7c4",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 web-1 22"
+          },
+          {
+            "events": 12,
+            "falco.output_fields.container.id": "ed96a85a7480",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 web-1 22"
+          },
+          {
+            "events": 12,
+            "falco.output_fields.container.id": "ed96a85a7480",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 web-2 22"
+          },
+          {
+            "events": 10,
+            "falco.output_fields.container.id": "c58bf05facac",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 web-1 22"
+          },
+          {
+            "events": 8,
+            "falco.output_fields.container.id": "7e76d1cea7c4",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 web-2 22"
+          },
+          {
+            "events": 5,
+            "falco.output_fields.container.id": "2c1e2ec93d17",
+            "falco.output_fields.proc.name": "curl",
+            "falco.output_fields.proc.cmdline": "curl -sf -o /dev/null http://web-1/"
+          },
+          {
+            "events": 5,
+            "falco.output_fields.container.id": "2c1e2ec93d17",
+            "falco.output_fields.proc.name": "curl",
+            "falco.output_fields.proc.cmdline": "curl -sf -o /dev/null http://web-2/"
+          },
+          {
+            "events": 5,
+            "falco.output_fields.container.id": "c58bf05facac",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 web-2 22"
+          },
+          {
+            "events": 4,
+            "falco.output_fields.container.id": "d1daf6f3b7c6",
+            "falco.output_fields.proc.name": null,
+            "falco.output_fields.proc.cmdline": "sudo -n systemctl restart nginx"
+          },
+          {
+            "events": 4,
+            "falco.output_fields.container.id": "d1daf6f3b7c6",
+            "falco.output_fields.proc.name": null,
+            "falco.output_fields.proc.cmdline": "sudo -n curl -fsS http://web-1/ -o /tmp/deploy.tgz"
+          },
+          {
+            "events": 4,
+            "falco.output_fields.container.id": "45388dd0bf3a",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 web-1 80"
+          },
+          {
+            "events": 4,
+            "falco.output_fields.container.id": "d1daf6f3b7c6",
+            "falco.output_fields.proc.name": null,
+            "falco.output_fields.proc.cmdline": "sudo -n journalctl -u nginx -n 5"
+          },
+          {
+            "events": 4,
+            "falco.output_fields.container.id": "d8fb0192a17f",
+            "falco.output_fields.proc.name": null,
+            "falco.output_fields.proc.cmdline": "sudo -n journalctl -u nginx -n 5"
+          },
+          {
+            "events": 4,
+            "falco.output_fields.container.id": "d8fb0192a17f",
+            "falco.output_fields.proc.name": null,
+            "falco.output_fields.proc.cmdline": "sudo -n systemctl restart nginx"
+          },
+          {
+            "events": 4,
+            "falco.output_fields.container.id": "d8fb0192a17f",
+            "falco.output_fields.proc.name": null,
+            "falco.output_fields.proc.cmdline": "sudo -n curl -fsS http://web-1/ -o /tmp/deploy.tgz"
+          },
+          {
+            "events": 4,
+            "falco.output_fields.container.id": "45388dd0bf3a",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 web-2 80"
+          },
+          {
+            "events": 3,
+            "falco.output_fields.container.id": "7e76d1cea7c4",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 web-1 443"
+          },
+          {
+            "events": 3,
+            "falco.output_fields.container.id": "7e76d1cea7c4",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 web-1 5432"
+          }
+        ]
+      }
+    }
+  ]
+}

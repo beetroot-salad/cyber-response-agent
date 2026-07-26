@@ -1,0 +1,1 @@
+{"query": "FROM logs-falco.alerts-*\n| STATS count = COUNT(*)\n        BY host.name\n| SORT count DESC\n| LIMIT 10", "columns": [{"name": "count", "type": "long"}, {"name": "host.name", "type": "keyword"}], "row_count": 1, "values": [{"count": 1966877, "host.name": "soc-playground"}]}

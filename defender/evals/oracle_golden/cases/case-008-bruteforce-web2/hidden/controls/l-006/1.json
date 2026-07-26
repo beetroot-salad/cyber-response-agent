@@ -1,0 +1,581 @@
+{
+  "lead_id": "l-006",
+  "seq": 1,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T19:25:00.000Z",
+        "2026-07-12T20:25:00.000Z"
+      ],
+      "query": "FROM logs-zeek.*\n| WHERE @timestamp >= \"2026-07-12T19:25:00.000Z\" AND @timestamp < \"2026-07-12T20:25:00.000Z\"\n        AND (source.ip == \"172.18.0.6\" OR destination.ip == \"172.18.0.6\")\n| STATS events = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY data_stream.dataset, source.ip, destination.ip, destination.port\n| SORT events DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-zeek.*\n| WHERE @timestamp >= \"2026-07-12T19:25:00.000Z\" AND @timestamp < \"2026-07-12T20:25:00.000Z\"\n        AND (source.ip == \"172.18.0.6\" OR destination.ip == \"172.18.0.6\")\n| STATS events = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY data_stream.dataset, source.ip, destination.ip, destination.port\n| SORT events DESC",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "data_stream.dataset",
+            "type": "keyword"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "destination.ip",
+            "type": "ip"
+          },
+          {
+            "name": "destination.port",
+            "type": "long"
+          }
+        ],
+        "row_count": 22,
+        "values": [
+          {
+            "events": 865,
+            "first_seen": "2026-07-12T19:25:04.697Z",
+            "last_seen": "2026-07-12T20:24:48.385Z",
+            "data_stream.dataset": "zeek.connection",
+            "source.ip": "172.18.0.6",
+            "destination.ip": "172.18.0.7",
+            "destination.port": 9200
+          },
+          {
+            "events": 865,
+            "first_seen": "2026-07-12T19:25:04.697Z",
+            "last_seen": "2026-07-12T20:24:48.385Z",
+            "data_stream.dataset": "zeek.ssl",
+            "source.ip": "172.18.0.6",
+            "destination.ip": "172.18.0.7",
+            "destination.port": 9200
+          },
+          {
+            "events": 12,
+            "first_seen": "2026-07-12T19:25:33.246Z",
+            "last_seen": "2026-07-12T20:21:04.742Z",
+            "data_stream.dataset": "zeek.connection",
+            "source.ip": "172.18.0.6",
+            "destination.ip": "172.18.0.15",
+            "destination.port": 22
+          },
+          {
+            "events": 12,
+            "first_seen": "2026-07-12T19:25:33.253Z",
+            "last_seen": "2026-07-12T20:21:04.751Z",
+            "data_stream.dataset": "zeek.ssh",
+            "source.ip": "172.18.0.6",
+            "destination.ip": "172.18.0.15",
+            "destination.port": 22
+          },
+          {
+            "events": 6,
+            "first_seen": "2026-07-12T19:39:08.717Z",
+            "last_seen": "2026-07-12T20:05:43.693Z",
+            "data_stream.dataset": "zeek.connection",
+            "source.ip": "172.18.0.6",
+            "destination.ip": "172.18.0.15",
+            "destination.port": 5432
+          },
+          {
+            "events": 6,
+            "first_seen": "2026-07-12T19:39:08.720Z",
+            "last_seen": "2026-07-12T20:05:43.696Z",
+            "data_stream.dataset": "zeek.ssl",
+            "source.ip": "172.18.0.6",
+            "destination.ip": "172.18.0.15",
+            "destination.port": 5432
+          },
+          {
+            "events": 5,
+            "first_seen": "2026-07-12T19:51:47.749Z",
+            "last_seen": "2026-07-12T20:22:18.601Z",
+            "data_stream.dataset": "zeek.ssh",
+            "source.ip": "172.18.0.20",
+            "destination.ip": "172.18.0.6",
+            "destination.port": 22
+          },
+          {
+            "events": 5,
+            "first_seen": "2026-07-12T19:51:47.741Z",
+            "last_seen": "2026-07-12T20:22:18.593Z",
+            "data_stream.dataset": "zeek.connection",
+            "source.ip": "172.18.0.20",
+            "destination.ip": "172.18.0.6",
+            "destination.port": 22
+          },
+          {
+            "events": 3,
+            "first_seen": "2026-07-12T19:41:05.386Z",
+            "last_seen": "2026-07-12T20:09:05.115Z",
+            "data_stream.dataset": "zeek.connection",
+            "source.ip": "172.18.0.14",
+            "destination.ip": "172.18.0.6",
+            "destination.port": 22
+          },
+          {
+            "events": 3,
+            "first_seen": "2026-07-12T19:41:05.387Z",
+            "last_seen": "2026-07-12T20:09:05.123Z",
+            "data_stream.dataset": "zeek.ssh",
+            "source.ip": "172.18.0.14",
+            "destination.ip": "172.18.0.6",
+            "destination.port": 22
+          },
+          {
+            "events": 2,
+            "first_seen": "2026-07-12T19:57:11.228Z",
+            "last_seen": "2026-07-12T20:18:05.732Z",
+            "data_stream.dataset": "zeek.ssh",
+            "source.ip": "172.18.0.22",
+            "destination.ip": "172.18.0.6",
+            "destination.port": 22
+          },
+          {
+            "events": 2,
+            "first_seen": "2026-07-12T19:57:11.220Z",
+            "last_seen": "2026-07-12T20:18:05.724Z",
+            "data_stream.dataset": "zeek.connection",
+            "source.ip": "172.18.0.22",
+            "destination.ip": "172.18.0.6",
+            "destination.port": 22
+          },
+          {
+            "events": 2,
+            "first_seen": "2026-07-12T19:42:40.279Z",
+            "last_seen": "2026-07-12T19:43:35.985Z",
+            "data_stream.dataset": "zeek.connection",
+            "source.ip": "172.18.0.17",
+            "destination.ip": "172.18.0.6",
+            "destination.port": 22
+          },
+          {
+            "events": 2,
+            "first_seen": "2026-07-12T19:42:40.287Z",
+            "last_seen": "2026-07-12T19:43:35.993Z",
+            "data_stream.dataset": "zeek.ssh",
+            "source.ip": "172.18.0.17",
+            "destination.ip": "172.18.0.6",
+            "destination.port": 22
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-12T19:57:11.226Z",
+            "last_seen": "2026-07-12T19:57:11.226Z",
+            "data_stream.dataset": "zeek.connection",
+            "source.ip": "172.18.0.22",
+            "destination.ip": "172.18.0.6",
+            "destination.port": 5432
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-12T19:57:11.228Z",
+            "last_seen": "2026-07-12T19:57:11.228Z",
+            "data_stream.dataset": "zeek.connection",
+            "source.ip": "172.18.0.22",
+            "destination.ip": "172.18.0.6",
+            "destination.port": 8080
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-12T19:26:12.854Z",
+            "last_seen": "2026-07-12T19:26:12.854Z",
+            "data_stream.dataset": "zeek.http",
+            "source.ip": "172.18.0.12",
+            "destination.ip": "172.18.0.6",
+            "destination.port": 80
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-12T19:26:12.853Z",
+            "last_seen": "2026-07-12T19:26:12.853Z",
+            "data_stream.dataset": "zeek.connection",
+            "source.ip": "172.18.0.12",
+            "destination.ip": "172.18.0.6",
+            "destination.port": 80
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-12T19:36:06.643Z",
+            "last_seen": "2026-07-12T19:36:06.643Z",
+            "data_stream.dataset": "zeek.connection",
+            "source.ip": "172.18.0.13",
+            "destination.ip": "172.18.0.6",
+            "destination.port": 80
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-12T19:57:11.222Z",
+            "last_seen": "2026-07-12T19:57:11.222Z",
+            "data_stream.dataset": "zeek.connection",
+            "source.ip": "172.18.0.22",
+            "destination.ip": "172.18.0.6",
+            "destination.port": 80
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-12T19:57:11.224Z",
+            "last_seen": "2026-07-12T19:57:11.224Z",
+            "data_stream.dataset": "zeek.connection",
+            "source.ip": "172.18.0.22",
+            "destination.ip": "172.18.0.6",
+            "destination.port": 443
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-12T19:36:06.643Z",
+            "last_seen": "2026-07-12T19:36:06.643Z",
+            "data_stream.dataset": "zeek.http",
+            "source.ip": "172.18.0.13",
+            "destination.ip": "172.18.0.6",
+            "destination.port": 80
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T19:25:00.000Z",
+        "2026-07-05T20:25:00.000Z"
+      ],
+      "query": "FROM logs-zeek.*\n| WHERE @timestamp >= \"2026-07-05T19:25:00.000Z\" AND @timestamp < \"2026-07-05T20:25:00.000Z\"\n        AND (source.ip == \"172.18.0.6\" OR destination.ip == \"172.18.0.6\")\n| STATS events = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY data_stream.dataset, source.ip, destination.ip, destination.port\n| SORT events DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-zeek.*\n| WHERE @timestamp >= \"2026-07-05T19:25:00.000Z\" AND @timestamp < \"2026-07-05T20:25:00.000Z\"\n        AND (source.ip == \"172.18.0.6\" OR destination.ip == \"172.18.0.6\")\n| STATS events = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY data_stream.dataset, source.ip, destination.ip, destination.port\n| SORT events DESC",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "data_stream.dataset",
+            "type": "keyword"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "destination.ip",
+            "type": "ip"
+          },
+          {
+            "name": "destination.port",
+            "type": "long"
+          }
+        ],
+        "row_count": 27,
+        "values": [
+          {
+            "events": 925,
+            "first_seen": "2026-07-05T19:25:05.415Z",
+            "last_seen": "2026-07-05T20:24:55.895Z",
+            "data_stream.dataset": "zeek.connection",
+            "source.ip": "172.18.0.6",
+            "destination.ip": "172.18.0.7",
+            "destination.port": 9200
+          },
+          {
+            "events": 925,
+            "first_seen": "2026-07-05T19:25:05.415Z",
+            "last_seen": "2026-07-05T20:24:55.896Z",
+            "data_stream.dataset": "zeek.ssl",
+            "source.ip": "172.18.0.6",
+            "destination.ip": "172.18.0.7",
+            "destination.port": 9200
+          },
+          {
+            "events": 11,
+            "first_seen": "2026-07-05T19:26:52.035Z",
+            "last_seen": "2026-07-05T20:19:25.168Z",
+            "data_stream.dataset": "zeek.connection",
+            "source.ip": "172.18.0.6",
+            "destination.ip": "172.18.0.15",
+            "destination.port": 22
+          },
+          {
+            "events": 11,
+            "first_seen": "2026-07-05T19:26:52.043Z",
+            "last_seen": "2026-07-05T20:19:25.176Z",
+            "data_stream.dataset": "zeek.ssh",
+            "source.ip": "172.18.0.6",
+            "destination.ip": "172.18.0.15",
+            "destination.port": 22
+          },
+          {
+            "events": 8,
+            "first_seen": "2026-07-05T19:27:46.927Z",
+            "last_seen": "2026-07-05T20:16:37.074Z",
+            "data_stream.dataset": "zeek.connection",
+            "source.ip": "172.18.0.6",
+            "destination.ip": "172.18.0.15",
+            "destination.port": 5432
+          },
+          {
+            "events": 8,
+            "first_seen": "2026-07-05T19:30:53.915Z",
+            "last_seen": "2026-07-05T20:13:42.500Z",
+            "data_stream.dataset": "zeek.ssh",
+            "source.ip": "172.18.0.20",
+            "destination.ip": "172.18.0.6",
+            "destination.port": 22
+          },
+          {
+            "events": 8,
+            "first_seen": "2026-07-05T19:27:46.930Z",
+            "last_seen": "2026-07-05T20:16:37.078Z",
+            "data_stream.dataset": "zeek.ssl",
+            "source.ip": "172.18.0.6",
+            "destination.ip": "172.18.0.15",
+            "destination.port": 5432
+          },
+          {
+            "events": 8,
+            "first_seen": "2026-07-05T19:30:53.907Z",
+            "last_seen": "2026-07-05T20:13:42.489Z",
+            "data_stream.dataset": "zeek.connection",
+            "source.ip": "172.18.0.20",
+            "destination.ip": "172.18.0.6",
+            "destination.port": 22
+          },
+          {
+            "events": 6,
+            "first_seen": "2026-07-05T19:31:42.109Z",
+            "last_seen": "2026-07-05T19:31:58.597Z",
+            "data_stream.dataset": "zeek.ssh",
+            "source.ip": "172.18.0.6",
+            "destination.ip": "172.18.0.8",
+            "destination.port": 22
+          },
+          {
+            "events": 6,
+            "first_seen": "2026-07-05T19:31:42.109Z",
+            "last_seen": "2026-07-05T19:31:58.596Z",
+            "data_stream.dataset": "zeek.connection",
+            "source.ip": "172.18.0.6",
+            "destination.ip": "172.18.0.8",
+            "destination.port": 22
+          },
+          {
+            "events": 5,
+            "first_seen": "2026-07-05T19:47:57.852Z",
+            "last_seen": "2026-07-05T20:08:31.229Z",
+            "data_stream.dataset": "zeek.connection",
+            "source.ip": "172.18.0.6",
+            "destination.ip": "172.18.0.19",
+            "destination.port": 8080
+          },
+          {
+            "events": 5,
+            "first_seen": "2026-07-05T19:47:57.852Z",
+            "last_seen": "2026-07-05T20:08:31.229Z",
+            "data_stream.dataset": "zeek.http",
+            "source.ip": "172.18.0.6",
+            "destination.ip": "172.18.0.19",
+            "destination.port": 8080
+          },
+          {
+            "events": 4,
+            "first_seen": "2026-07-05T19:27:40.637Z",
+            "last_seen": "2026-07-05T19:46:52.343Z",
+            "data_stream.dataset": "zeek.connection",
+            "source.ip": "172.18.0.22",
+            "destination.ip": "172.18.0.6",
+            "destination.port": 22
+          },
+          {
+            "events": 4,
+            "first_seen": "2026-07-05T19:27:40.645Z",
+            "last_seen": "2026-07-05T19:46:52.351Z",
+            "data_stream.dataset": "zeek.ssh",
+            "source.ip": "172.18.0.22",
+            "destination.ip": "172.18.0.6",
+            "destination.port": 22
+          },
+          {
+            "events": 4,
+            "first_seen": "2026-07-05T19:42:52.791Z",
+            "last_seen": "2026-07-05T20:13:30.129Z",
+            "data_stream.dataset": "zeek.connection",
+            "source.ip": "172.18.0.17",
+            "destination.ip": "172.18.0.6",
+            "destination.port": 22
+          },
+          {
+            "events": 4,
+            "first_seen": "2026-07-05T19:42:52.799Z",
+            "last_seen": "2026-07-05T20:13:30.138Z",
+            "data_stream.dataset": "zeek.ssh",
+            "source.ip": "172.18.0.17",
+            "destination.ip": "172.18.0.6",
+            "destination.port": 22
+          },
+          {
+            "events": 3,
+            "first_seen": "2026-07-05T19:28:52.655Z",
+            "last_seen": "2026-07-05T19:46:52.345Z",
+            "data_stream.dataset": "zeek.connection",
+            "source.ip": "172.18.0.22",
+            "destination.ip": "172.18.0.6",
+            "destination.port": 80
+          },
+          {
+            "events": 3,
+            "first_seen": "2026-07-05T19:28:52.657Z",
+            "last_seen": "2026-07-05T19:46:52.347Z",
+            "data_stream.dataset": "zeek.connection",
+            "source.ip": "172.18.0.22",
+            "destination.ip": "172.18.0.6",
+            "destination.port": 443
+          },
+          {
+            "events": 3,
+            "first_seen": "2026-07-05T19:28:52.659Z",
+            "last_seen": "2026-07-05T19:46:52.348Z",
+            "data_stream.dataset": "zeek.connection",
+            "source.ip": "172.18.0.22",
+            "destination.ip": "172.18.0.6",
+            "destination.port": 5432
+          },
+          {
+            "events": 3,
+            "first_seen": "2026-07-05T19:28:52.661Z",
+            "last_seen": "2026-07-05T19:46:52.350Z",
+            "data_stream.dataset": "zeek.connection",
+            "source.ip": "172.18.0.22",
+            "destination.ip": "172.18.0.6",
+            "destination.port": 8080
+          },
+          {
+            "events": 2,
+            "first_seen": "2026-07-05T19:35:49.408Z",
+            "last_seen": "2026-07-05T19:42:09.901Z",
+            "data_stream.dataset": "zeek.connection",
+            "source.ip": "172.18.0.14",
+            "destination.ip": "172.18.0.6",
+            "destination.port": 22
+          },
+          {
+            "events": 2,
+            "first_seen": "2026-07-05T19:25:19.090Z",
+            "last_seen": "2026-07-05T20:11:38.884Z",
+            "data_stream.dataset": "zeek.http",
+            "source.ip": "172.18.0.12",
+            "destination.ip": "172.18.0.6",
+            "destination.port": 80
+          },
+          {
+            "events": 2,
+            "first_seen": "2026-07-05T19:25:19.090Z",
+            "last_seen": "2026-07-05T20:11:38.884Z",
+            "data_stream.dataset": "zeek.connection",
+            "source.ip": "172.18.0.12",
+            "destination.ip": "172.18.0.6",
+            "destination.port": 80
+          },
+          {
+            "events": 2,
+            "first_seen": "2026-07-05T19:35:49.417Z",
+            "last_seen": "2026-07-05T19:42:09.909Z",
+            "data_stream.dataset": "zeek.ssh",
+            "source.ip": "172.18.0.14",
+            "destination.ip": "172.18.0.6",
+            "destination.port": 22
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-05T19:42:09.627Z",
+            "last_seen": "2026-07-05T19:42:09.627Z",
+            "data_stream.dataset": "zeek.connection",
+            "source.ip": "172.18.0.20",
+            "destination.ip": "172.18.0.6",
+            "destination.port": 80
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-05T19:59:32.039Z",
+            "last_seen": "2026-07-05T19:59:32.039Z",
+            "data_stream.dataset": "zeek.connection",
+            "source.ip": "172.18.0.13",
+            "destination.ip": "172.18.0.6",
+            "destination.port": 80
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-05T19:59:32.039Z",
+            "last_seen": "2026-07-05T19:59:32.039Z",
+            "data_stream.dataset": "zeek.http",
+            "source.ip": "172.18.0.13",
+            "destination.ip": "172.18.0.6",
+            "destination.port": 80
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-28T19:25:00.000Z",
+        "2026-06-28T20:25:00.000Z"
+      ],
+      "query": "FROM logs-zeek.*\n| WHERE @timestamp >= \"2026-06-28T19:25:00.000Z\" AND @timestamp < \"2026-06-28T20:25:00.000Z\"\n        AND (source.ip == \"172.18.0.6\" OR destination.ip == \"172.18.0.6\")\n| STATS events = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY data_stream.dataset, source.ip, destination.ip, destination.port\n| SORT events DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-zeek.*\n| WHERE @timestamp >= \"2026-06-28T19:25:00.000Z\" AND @timestamp < \"2026-06-28T20:25:00.000Z\"\n        AND (source.ip == \"172.18.0.6\" OR destination.ip == \"172.18.0.6\")\n| STATS events = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY data_stream.dataset, source.ip, destination.ip, destination.port\n| SORT events DESC",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "data_stream.dataset",
+            "type": "keyword"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "destination.ip",
+            "type": "ip"
+          },
+          {
+            "name": "destination.port",
+            "type": "long"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    }
+  ]
+}

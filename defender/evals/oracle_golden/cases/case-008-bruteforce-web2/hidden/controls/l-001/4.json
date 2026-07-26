@@ -1,0 +1,78 @@
+{
+  "lead_id": "l-001",
+  "seq": 4,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-11T19:50:00.000Z",
+        "2026-07-12T19:50:00.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-11T19:50:00.000Z\" AND @timestamp < \"2026-07-12T19:50:00.000Z\"\n  AND host.name == \"web-2\"\n  AND event.outcome == \"failure\"\n  AND process.name == \"sshd\"\n  AND message LIKE \"*Failed password*\"\n| STATS failures = COUNT(*)",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-11T19:50:00.000Z\" AND @timestamp < \"2026-07-12T19:50:00.000Z\"\n  AND host.name == \"web-2\"\n  AND event.outcome == \"failure\"\n  AND process.name == \"sshd\"\n  AND message LIKE \"*Failed password*\"\n| STATS failures = COUNT(*)",
+        "columns": [
+          {
+            "name": "failures",
+            "type": "long"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "failures": 336
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-04T19:50:00.000Z",
+        "2026-07-05T19:50:00.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-04T19:50:00.000Z\" AND @timestamp < \"2026-07-05T19:50:00.000Z\"\n  AND host.name == \"web-2\"\n  AND event.outcome == \"failure\"\n  AND process.name == \"sshd\"\n  AND message LIKE \"*Failed password*\"\n| STATS failures = COUNT(*)",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-04T19:50:00.000Z\" AND @timestamp < \"2026-07-05T19:50:00.000Z\"\n  AND host.name == \"web-2\"\n  AND event.outcome == \"failure\"\n  AND process.name == \"sshd\"\n  AND message LIKE \"*Failed password*\"\n| STATS failures = COUNT(*)",
+        "columns": [
+          {
+            "name": "failures",
+            "type": "long"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "failures": 504
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-27T19:50:00.000Z",
+        "2026-06-28T19:50:00.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-27T19:50:00.000Z\" AND @timestamp < \"2026-06-28T19:50:00.000Z\"\n  AND host.name == \"web-2\"\n  AND event.outcome == \"failure\"\n  AND process.name == \"sshd\"\n  AND message LIKE \"*Failed password*\"\n| STATS failures = COUNT(*)",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-27T19:50:00.000Z\" AND @timestamp < \"2026-06-28T19:50:00.000Z\"\n  AND host.name == \"web-2\"\n  AND event.outcome == \"failure\"\n  AND process.name == \"sshd\"\n  AND message LIKE \"*Failed password*\"\n| STATS failures = COUNT(*)",
+        "columns": [
+          {
+            "name": "failures",
+            "type": "long"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "failures": 432
+          }
+        ]
+      }
+    }
+  ]
+}

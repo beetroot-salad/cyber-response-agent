@@ -1,0 +1,446 @@
+{
+  "lead_id": "l-006",
+  "seq": 0,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T19:25:00.000Z",
+        "2026-07-12T20:25:00.000Z"
+      ],
+      "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-12T19:25:00.000Z\" AND @timestamp < \"2026-07-12T20:25:00.000Z\"\n        AND (source.ip == \"172.18.0.6\" OR client.ip == \"172.18.0.6\" OR host.ip == \"172.18.0.6\")\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY host.name, data_stream.dataset\n| SORT events DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-12T19:25:00.000Z\" AND @timestamp < \"2026-07-12T20:25:00.000Z\"\n        AND (source.ip == \"172.18.0.6\" OR client.ip == \"172.18.0.6\" OR host.ip == \"172.18.0.6\")\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY host.name, data_stream.dataset\n| SORT events DESC",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "data_stream.dataset",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 17,
+        "values": [
+          {
+            "events": 883,
+            "first_seen": "2026-07-12T19:25:04.697Z",
+            "last_seen": "2026-07-12T20:24:48.385Z",
+            "host.name": null,
+            "data_stream.dataset": "zeek.connection"
+          },
+          {
+            "events": 871,
+            "first_seen": "2026-07-12T19:25:04.697Z",
+            "last_seen": "2026-07-12T20:24:48.385Z",
+            "host.name": null,
+            "data_stream.dataset": "zeek.ssl"
+          },
+          {
+            "events": 740,
+            "first_seen": "2026-07-12T19:25:04.000Z",
+            "last_seen": "2026-07-12T20:24:58.000Z",
+            "host.name": "web-1",
+            "data_stream.dataset": "nginx.access"
+          },
+          {
+            "events": 720,
+            "first_seen": "2026-07-12T19:25:00.437Z",
+            "last_seen": "2026-07-12T20:24:58.383Z",
+            "host.name": "web-1",
+            "data_stream.dataset": "elastic_agent.metricbeat"
+          },
+          {
+            "events": 166,
+            "first_seen": "2026-07-12T19:25:04.000Z",
+            "last_seen": "2026-07-12T20:22:18.000Z",
+            "host.name": "web-1",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 107,
+            "first_seen": "2026-07-12T19:27:44.809Z",
+            "last_seen": "2026-07-12T20:22:34.751Z",
+            "host.name": "jump-box-1",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 63,
+            "first_seen": "2026-07-12T19:30:41.000Z",
+            "last_seen": "2026-07-12T20:21:18.000Z",
+            "host.name": "office-ws-1",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 46,
+            "first_seen": "2026-07-12T19:25:12.872Z",
+            "last_seen": "2026-07-12T20:18:39.403Z",
+            "host.name": "office-ws-2",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 26,
+            "first_seen": "2026-07-12T19:29:37.995Z",
+            "last_seen": "2026-07-12T20:17:54.162Z",
+            "host.name": "config-mgmt-1",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 12,
+            "first_seen": "2026-07-12T19:26:08.198Z",
+            "last_seen": "2026-07-12T20:15:22.195Z",
+            "host.name": "web-1",
+            "data_stream.dataset": "elastic_agent"
+          },
+          {
+            "events": 12,
+            "first_seen": "2026-07-12T19:25:33.253Z",
+            "last_seen": "2026-07-12T20:21:04.751Z",
+            "host.name": null,
+            "data_stream.dataset": "zeek.ssh"
+          },
+          {
+            "events": 4,
+            "first_seen": "2026-07-12T19:32:21.727Z",
+            "last_seen": "2026-07-12T20:22:11.954Z",
+            "host.name": "web-1",
+            "data_stream.dataset": "elastic_agent.filebeat"
+          },
+          {
+            "events": 2,
+            "first_seen": "2026-07-12T20:17:01.000Z",
+            "last_seen": "2026-07-12T20:17:01.000Z",
+            "host.name": "web-1",
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-12T20:17:01.000Z",
+            "last_seen": "2026-07-12T20:17:01.000Z",
+            "host.name": "office-ws-1",
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-12T20:17:01.551Z",
+            "last_seen": "2026-07-12T20:17:01.551Z",
+            "host.name": "office-ws-2",
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-12T20:17:01.135Z",
+            "last_seen": "2026-07-12T20:17:01.135Z",
+            "host.name": "jump-box-1",
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-12T20:17:01.295Z",
+            "last_seen": "2026-07-12T20:17:01.295Z",
+            "host.name": "config-mgmt-1",
+            "data_stream.dataset": "system.syslog"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T19:25:00.000Z",
+        "2026-07-05T20:25:00.000Z"
+      ],
+      "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-05T19:25:00.000Z\" AND @timestamp < \"2026-07-05T20:25:00.000Z\"\n        AND (source.ip == \"172.18.0.6\" OR client.ip == \"172.18.0.6\" OR host.ip == \"172.18.0.6\")\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY host.name, data_stream.dataset\n| SORT events DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-05T19:25:00.000Z\" AND @timestamp < \"2026-07-05T20:25:00.000Z\"\n        AND (source.ip == \"172.18.0.6\" OR client.ip == \"172.18.0.6\" OR host.ip == \"172.18.0.6\")\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY host.name, data_stream.dataset\n| SORT events DESC",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "data_stream.dataset",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 19,
+        "values": [
+          {
+            "events": 955,
+            "first_seen": "2026-07-05T19:25:05.415Z",
+            "last_seen": "2026-07-05T20:24:55.895Z",
+            "host.name": null,
+            "data_stream.dataset": "zeek.connection"
+          },
+          {
+            "events": 933,
+            "first_seen": "2026-07-05T19:25:05.415Z",
+            "last_seen": "2026-07-05T20:24:55.896Z",
+            "host.name": null,
+            "data_stream.dataset": "zeek.ssl"
+          },
+          {
+            "events": 744,
+            "first_seen": "2026-07-05T19:25:08.000Z",
+            "last_seen": "2026-07-05T20:24:58.000Z",
+            "host.name": "web-1",
+            "data_stream.dataset": "nginx.access"
+          },
+          {
+            "events": 720,
+            "first_seen": "2026-07-05T19:25:00.436Z",
+            "last_seen": "2026-07-05T20:24:58.384Z",
+            "host.name": "web-1",
+            "data_stream.dataset": "elastic_agent.metricbeat"
+          },
+          {
+            "events": 320,
+            "first_seen": "2026-07-05T19:26:52.000Z",
+            "last_seen": "2026-07-05T20:21:38.000Z",
+            "host.name": "web-1",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 103,
+            "first_seen": "2026-07-05T19:25:02.939Z",
+            "last_seen": "2026-07-05T20:17:10.479Z",
+            "host.name": "jump-box-1",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 84,
+            "first_seen": "2026-07-05T19:31:42.000Z",
+            "last_seen": "2026-07-05T19:32:00.000Z",
+            "host.name": "web-2",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 59,
+            "first_seen": "2026-07-05T19:28:52.000Z",
+            "last_seen": "2026-07-05T20:17:01.000Z",
+            "host.name": "office-ws-1",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 48,
+            "first_seen": "2026-07-05T19:25:19.081Z",
+            "last_seen": "2026-07-05T20:24:07.062Z",
+            "host.name": "office-ws-2",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 32,
+            "first_seen": "2026-07-05T19:29:07.668Z",
+            "last_seen": "2026-07-05T20:24:17.172Z",
+            "host.name": "config-mgmt-1",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 17,
+            "first_seen": "2026-07-05T19:26:52.043Z",
+            "last_seen": "2026-07-05T20:19:25.176Z",
+            "host.name": null,
+            "data_stream.dataset": "zeek.ssh"
+          },
+          {
+            "events": 14,
+            "first_seen": "2026-07-05T19:38:12.769Z",
+            "last_seen": "2026-07-05T20:20:23.215Z",
+            "host.name": "web-1",
+            "data_stream.dataset": "elastic_agent"
+          },
+          {
+            "events": 5,
+            "first_seen": "2026-07-05T19:47:57.852Z",
+            "last_seen": "2026-07-05T20:08:31.229Z",
+            "host.name": null,
+            "data_stream.dataset": "zeek.http"
+          },
+          {
+            "events": 2,
+            "first_seen": "2026-07-05T20:17:06.663Z",
+            "last_seen": "2026-07-05T20:22:11.701Z",
+            "host.name": "web-1",
+            "data_stream.dataset": "elastic_agent.filebeat"
+          },
+          {
+            "events": 2,
+            "first_seen": "2026-07-05T20:17:01.000Z",
+            "last_seen": "2026-07-05T20:17:01.000Z",
+            "host.name": "web-1",
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-05T20:17:01.057Z",
+            "last_seen": "2026-07-05T20:17:01.057Z",
+            "host.name": "office-ws-2",
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-05T20:17:01.566Z",
+            "last_seen": "2026-07-05T20:17:01.566Z",
+            "host.name": "jump-box-1",
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-05T20:17:01.000Z",
+            "last_seen": "2026-07-05T20:17:01.000Z",
+            "host.name": "office-ws-1",
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-05T20:17:01.782Z",
+            "last_seen": "2026-07-05T20:17:01.782Z",
+            "host.name": "config-mgmt-1",
+            "data_stream.dataset": "system.syslog"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-28T19:25:00.000Z",
+        "2026-06-28T20:25:00.000Z"
+      ],
+      "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-06-28T19:25:00.000Z\" AND @timestamp < \"2026-06-28T20:25:00.000Z\"\n        AND (source.ip == \"172.18.0.6\" OR client.ip == \"172.18.0.6\" OR host.ip == \"172.18.0.6\")\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY host.name, data_stream.dataset\n| SORT events DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-06-28T19:25:00.000Z\" AND @timestamp < \"2026-06-28T20:25:00.000Z\"\n        AND (source.ip == \"172.18.0.6\" OR client.ip == \"172.18.0.6\" OR host.ip == \"172.18.0.6\")\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY host.name, data_stream.dataset\n| SORT events DESC",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "data_stream.dataset",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 11,
+        "values": [
+          {
+            "events": 758,
+            "first_seen": "2026-06-28T19:25:00.000Z",
+            "last_seen": "2026-06-28T20:24:50.000Z",
+            "host.name": "web-1",
+            "data_stream.dataset": "nginx.access"
+          },
+          {
+            "events": 242,
+            "first_seen": "2026-06-28T19:25:37.000Z",
+            "last_seen": "2026-06-28T20:24:43.000Z",
+            "host.name": "web-1",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 72,
+            "first_seen": "2026-06-28T19:26:28.095Z",
+            "last_seen": "2026-06-28T20:22:10.332Z",
+            "host.name": "jump-box-1",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 65,
+            "first_seen": "2026-06-28T19:27:28.000Z",
+            "last_seen": "2026-06-28T20:24:55.000Z",
+            "host.name": "office-ws-1",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 59,
+            "first_seen": "2026-06-28T19:27:04.048Z",
+            "last_seen": "2026-06-28T20:23:41.069Z",
+            "host.name": "office-ws-2",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 38,
+            "first_seen": "2026-06-28T19:35:13.634Z",
+            "last_seen": "2026-06-28T20:24:55.380Z",
+            "host.name": "config-mgmt-1",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 2,
+            "first_seen": "2026-06-28T20:17:01.000Z",
+            "last_seen": "2026-06-28T20:17:01.000Z",
+            "host.name": "web-1",
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-28T20:17:01.764Z",
+            "last_seen": "2026-06-28T20:17:01.764Z",
+            "host.name": "jump-box-1",
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-28T20:17:01.000Z",
+            "last_seen": "2026-06-28T20:17:01.000Z",
+            "host.name": "office-ws-1",
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-28T20:17:01.960Z",
+            "last_seen": "2026-06-28T20:17:01.960Z",
+            "host.name": "office-ws-2",
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-28T20:17:01.596Z",
+            "last_seen": "2026-06-28T20:17:01.596Z",
+            "host.name": "config-mgmt-1",
+            "data_stream.dataset": "system.syslog"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,138 @@
+{
+  "lead_id": "l-007",
+  "seq": 1,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T19:02:22.000Z",
+        "2026-07-12T20:02:22.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-12T19:02:22.000Z\" AND @timestamp < \"2026-07-12T20:02:22.000Z\"\n        AND host.name == \"web-1\"\n        AND (message LIKE \"*session opened*\" OR message LIKE \"*session closed*\")\n| STATS opened     = COUNT(*) WHERE message LIKE \"*session opened*\",\n        closed     = COUNT(*) WHERE message LIKE \"*session closed*\",\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY host.name",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-12T19:02:22.000Z\" AND @timestamp < \"2026-07-12T20:02:22.000Z\"\n        AND host.name == \"web-1\"\n        AND (message LIKE \"*session opened*\" OR message LIKE \"*session closed*\")\n| STATS opened     = COUNT(*) WHERE message LIKE \"*session opened*\",\n        closed     = COUNT(*) WHERE message LIKE \"*session closed*\",\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY host.name",
+        "columns": [
+          {
+            "name": "opened",
+            "type": "long"
+          },
+          {
+            "name": "closed",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "opened": 203,
+            "closed": 203,
+            "first_seen": "2026-07-12T19:04:25.000Z",
+            "last_seen": "2026-07-12T20:00:30.000Z",
+            "host.name": "web-1"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T19:02:22.000Z",
+        "2026-07-05T20:02:22.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-05T19:02:22.000Z\" AND @timestamp < \"2026-07-05T20:02:22.000Z\"\n        AND host.name == \"web-1\"\n        AND (message LIKE \"*session opened*\" OR message LIKE \"*session closed*\")\n| STATS opened     = COUNT(*) WHERE message LIKE \"*session opened*\",\n        closed     = COUNT(*) WHERE message LIKE \"*session closed*\",\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY host.name",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-05T19:02:22.000Z\" AND @timestamp < \"2026-07-05T20:02:22.000Z\"\n        AND host.name == \"web-1\"\n        AND (message LIKE \"*session opened*\" OR message LIKE \"*session closed*\")\n| STATS opened     = COUNT(*) WHERE message LIKE \"*session opened*\",\n        closed     = COUNT(*) WHERE message LIKE \"*session closed*\",\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY host.name",
+        "columns": [
+          {
+            "name": "opened",
+            "type": "long"
+          },
+          {
+            "name": "closed",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "opened": 196,
+            "closed": 196,
+            "first_seen": "2026-07-05T19:03:01.000Z",
+            "last_seen": "2026-07-05T20:01:37.000Z",
+            "host.name": "web-1"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-28T19:02:22.000Z",
+        "2026-06-28T20:02:22.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-28T19:02:22.000Z\" AND @timestamp < \"2026-06-28T20:02:22.000Z\"\n        AND host.name == \"web-1\"\n        AND (message LIKE \"*session opened*\" OR message LIKE \"*session closed*\")\n| STATS opened     = COUNT(*) WHERE message LIKE \"*session opened*\",\n        closed     = COUNT(*) WHERE message LIKE \"*session closed*\",\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY host.name",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-28T19:02:22.000Z\" AND @timestamp < \"2026-06-28T20:02:22.000Z\"\n        AND host.name == \"web-1\"\n        AND (message LIKE \"*session opened*\" OR message LIKE \"*session closed*\")\n| STATS opened     = COUNT(*) WHERE message LIKE \"*session opened*\",\n        closed     = COUNT(*) WHERE message LIKE \"*session closed*\",\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY host.name",
+        "columns": [
+          {
+            "name": "opened",
+            "type": "long"
+          },
+          {
+            "name": "closed",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "opened": 224,
+            "closed": 224,
+            "first_seen": "2026-06-28T19:05:19.000Z",
+            "last_seen": "2026-06-28T19:54:59.000Z",
+            "host.name": "web-1"
+          }
+        ]
+      }
+    }
+  ]
+}

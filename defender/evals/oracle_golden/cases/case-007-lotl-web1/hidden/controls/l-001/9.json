@@ -1,0 +1,93 @@
+{
+  "lead_id": "l-001",
+  "seq": 9,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-11T00:00:00.000Z",
+        "2026-07-13T00:00:00.000Z"
+      ],
+      "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-11T00:00:00.000Z\" AND @timestamp < \"2026-07-13T00:00:00.000Z\"\n| STATS events = COUNT(*)\n        BY host.name\n| SORT events DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-11T00:00:00.000Z\" AND @timestamp < \"2026-07-13T00:00:00.000Z\"\n| STATS events = COUNT(*)\n        BY host.name\n| SORT events DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "events": 72087,
+            "host.name": "soc-playground"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-04T00:00:00.000Z",
+        "2026-07-06T00:00:00.000Z"
+      ],
+      "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-04T00:00:00.000Z\" AND @timestamp < \"2026-07-06T00:00:00.000Z\"\n| STATS events = COUNT(*)\n        BY host.name\n| SORT events DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-04T00:00:00.000Z\" AND @timestamp < \"2026-07-06T00:00:00.000Z\"\n| STATS events = COUNT(*)\n        BY host.name\n| SORT events DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "events": 73229,
+            "host.name": "soc-playground"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-27T00:00:00.000Z",
+        "2026-06-29T00:00:00.000Z"
+      ],
+      "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-06-27T00:00:00.000Z\" AND @timestamp < \"2026-06-29T00:00:00.000Z\"\n| STATS events = COUNT(*)\n        BY host.name\n| SORT events DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-06-27T00:00:00.000Z\" AND @timestamp < \"2026-06-29T00:00:00.000Z\"\n| STATS events = COUNT(*)\n        BY host.name\n| SORT events DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "events": 68926,
+            "host.name": "soc-playground"
+          }
+        ]
+      }
+    }
+  ]
+}

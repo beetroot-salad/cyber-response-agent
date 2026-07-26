@@ -1,0 +1,140 @@
+{
+  "lead_id": "l-006",
+  "seq": 15,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T19:02:19.500Z",
+        "2026-07-12T20:02:19.500Z"
+      ],
+      "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-12T19:02:19.500Z\" AND @timestamp < \"2026-07-12T20:02:19.500Z\"\n| WHERE host.name == \"soc-playground\"\n| STATS count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n| SORT count DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-12T19:02:19.500Z\" AND @timestamp < \"2026-07-12T20:02:19.500Z\"\n| WHERE host.name == \"soc-playground\"\n| STATS count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n| SORT count DESC",
+        "columns": [
+          {
+            "name": "count",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "count": 1459,
+            "first_seen": "2026-07-12T19:02:44.452Z",
+            "last_seen": "2026-07-12T20:02:02.098Z"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T19:02:19.500Z",
+        "2026-07-05T20:02:19.500Z"
+      ],
+      "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-05T19:02:19.500Z\" AND @timestamp < \"2026-07-05T20:02:19.500Z\"\n| WHERE host.name == \"soc-playground\"\n| STATS count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n| SORT count DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-05T19:02:19.500Z\" AND @timestamp < \"2026-07-05T20:02:19.500Z\"\n| WHERE host.name == \"soc-playground\"\n| STATS count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n| SORT count DESC",
+        "columns": [
+          {
+            "name": "count",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "count": 1607,
+            "first_seen": "2026-07-05T19:02:38.496Z",
+            "last_seen": "2026-07-05T20:02:14.170Z"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-28T19:02:19.500Z",
+        "2026-06-28T20:02:19.500Z"
+      ],
+      "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-06-28T19:02:19.500Z\" AND @timestamp < \"2026-06-28T20:02:19.500Z\"\n| WHERE host.name == \"soc-playground\"\n| STATS count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n| SORT count DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-06-28T19:02:19.500Z\" AND @timestamp < \"2026-06-28T20:02:19.500Z\"\n| WHERE host.name == \"soc-playground\"\n| STATS count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n| SORT count DESC",
+        "columns": [
+          {
+            "name": "count",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "count": 1362,
+            "first_seen": "2026-06-28T19:02:28.865Z",
+            "last_seen": "2026-06-28T20:01:53.720Z"
+          }
+        ]
+      }
+    }
+  ],
+  "attack_contribution": {
+    "window": [
+      "2026-07-26T19:32:17.000Z",
+      "2026-07-26T19:32:22.000Z"
+    ],
+    "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-26T19:32:17.000Z\" AND @timestamp < \"2026-07-26T19:32:22.000Z\"\n| WHERE host.name == \"soc-playground\"\n| STATS count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n| SORT count DESC",
+    "payload": {
+      "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-26T19:32:17.000Z\" AND @timestamp < \"2026-07-26T19:32:22.000Z\"\n| WHERE host.name == \"soc-playground\"\n| STATS count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n| SORT count DESC",
+      "columns": [
+        {
+          "name": "count",
+          "type": "long"
+        },
+        {
+          "name": "first_seen",
+          "type": "date"
+        },
+        {
+          "name": "last_seen",
+          "type": "date"
+        }
+      ],
+      "row_count": 1,
+      "values": [
+        {
+          "count": 0,
+          "first_seen": null,
+          "last_seen": null
+        }
+      ]
+    }
+  }
+}

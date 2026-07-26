@@ -1,0 +1,1275 @@
+{
+  "lead_id": "l-006",
+  "seq": 21,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T19:02:22.000Z",
+        "2026-07-12T20:02:22.000Z"
+      ],
+      "query": "FROM logs-nginx.access-*\n| WHERE @timestamp >= \"2026-07-12T19:02:22.000Z\" AND @timestamp < \"2026-07-12T20:02:22.000Z\"\n        AND host.name == \"web-1\"\n        AND user_agent.original LIKE \"*curl*\"\n| KEEP @timestamp, url.original, source.ip, user_agent.original\n| SORT @timestamp ASC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-nginx.access-*\n| WHERE @timestamp >= \"2026-07-12T19:02:22.000Z\" AND @timestamp < \"2026-07-12T20:02:22.000Z\"\n        AND host.name == \"web-1\"\n        AND user_agent.original LIKE \"*curl*\"\n| KEEP @timestamp, url.original, source.ip, user_agent.original\n| SORT @timestamp ASC",
+        "columns": [
+          {
+            "name": "@timestamp",
+            "type": "date"
+          },
+          {
+            "name": "url.original",
+            "type": "keyword"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "user_agent.original",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 55,
+        "values": [
+          {
+            "@timestamp": "2026-07-12T19:06:11.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-12T19:06:11.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-12T19:06:11.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-12T19:06:11.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-12T19:06:11.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-12T19:07:07.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-12T19:07:07.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-12T19:07:07.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-12T19:07:07.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-12T19:07:07.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-12T19:11:38.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-12T19:11:38.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-12T19:11:38.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-12T19:11:38.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-12T19:11:38.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-12T19:16:35.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-12T19:16:35.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-12T19:16:35.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-12T19:16:35.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-12T19:16:35.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-12T19:22:58.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-12T19:22:58.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-12T19:22:58.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-12T19:22:58.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-12T19:22:58.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-12T19:23:45.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-12T19:23:45.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-12T19:23:45.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-12T19:23:45.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-12T19:23:45.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-12T19:25:04.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-12T19:25:04.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-12T19:25:04.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-12T19:25:04.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-12T19:25:04.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-12T19:26:12.000Z",
+            "url.original": "/",
+            "source.ip": "172.18.0.12",
+            "user_agent.original": "curl/8.5.0"
+          },
+          {
+            "@timestamp": "2026-07-12T19:26:12.000Z",
+            "url.original": "/",
+            "source.ip": "172.18.0.12",
+            "user_agent.original": "curl/8.5.0"
+          },
+          {
+            "@timestamp": "2026-07-12T19:26:12.000Z",
+            "url.original": "/",
+            "source.ip": "172.18.0.12",
+            "user_agent.original": "curl/8.5.0"
+          },
+          {
+            "@timestamp": "2026-07-12T19:26:12.000Z",
+            "url.original": "/",
+            "source.ip": "172.18.0.12",
+            "user_agent.original": "curl/8.5.0"
+          },
+          {
+            "@timestamp": "2026-07-12T19:26:12.000Z",
+            "url.original": "/",
+            "source.ip": "172.18.0.12",
+            "user_agent.original": "curl/8.5.0"
+          },
+          {
+            "@timestamp": "2026-07-12T19:27:09.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-12T19:27:09.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-12T19:27:09.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-12T19:27:09.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-12T19:27:09.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-12T19:36:06.000Z",
+            "url.original": "/",
+            "source.ip": "172.18.0.13",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-12T19:36:06.000Z",
+            "url.original": "/",
+            "source.ip": "172.18.0.13",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-12T19:36:06.000Z",
+            "url.original": "/",
+            "source.ip": "172.18.0.13",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-12T19:36:06.000Z",
+            "url.original": "/",
+            "source.ip": "172.18.0.13",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-12T19:36:06.000Z",
+            "url.original": "/",
+            "source.ip": "172.18.0.13",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-12T19:42:49.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-12T19:42:49.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-12T19:42:49.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-12T19:42:49.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-12T19:42:49.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T19:02:22.000Z",
+        "2026-07-05T20:02:22.000Z"
+      ],
+      "query": "FROM logs-nginx.access-*\n| WHERE @timestamp >= \"2026-07-05T19:02:22.000Z\" AND @timestamp < \"2026-07-05T20:02:22.000Z\"\n        AND host.name == \"web-1\"\n        AND user_agent.original LIKE \"*curl*\"\n| KEEP @timestamp, url.original, source.ip, user_agent.original\n| SORT @timestamp ASC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-nginx.access-*\n| WHERE @timestamp >= \"2026-07-05T19:02:22.000Z\" AND @timestamp < \"2026-07-05T20:02:22.000Z\"\n        AND host.name == \"web-1\"\n        AND user_agent.original LIKE \"*curl*\"\n| KEEP @timestamp, url.original, source.ip, user_agent.original\n| SORT @timestamp ASC",
+        "columns": [
+          {
+            "name": "@timestamp",
+            "type": "date"
+          },
+          {
+            "name": "url.original",
+            "type": "keyword"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "user_agent.original",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 50,
+        "values": [
+          {
+            "@timestamp": "2026-07-05T19:03:58.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-05T19:03:58.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-05T19:03:58.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-05T19:03:58.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-05T19:03:58.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-05T19:14:49.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-05T19:14:49.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-05T19:14:49.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-05T19:14:49.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-05T19:14:49.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-05T19:22:00.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-05T19:22:00.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-05T19:22:00.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-05T19:22:00.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-05T19:22:00.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-05T19:25:19.000Z",
+            "url.original": "/",
+            "source.ip": "172.18.0.12",
+            "user_agent.original": "curl/8.5.0"
+          },
+          {
+            "@timestamp": "2026-07-05T19:25:19.000Z",
+            "url.original": "/",
+            "source.ip": "172.18.0.12",
+            "user_agent.original": "curl/8.5.0"
+          },
+          {
+            "@timestamp": "2026-07-05T19:25:19.000Z",
+            "url.original": "/",
+            "source.ip": "172.18.0.12",
+            "user_agent.original": "curl/8.5.0"
+          },
+          {
+            "@timestamp": "2026-07-05T19:25:19.000Z",
+            "url.original": "/",
+            "source.ip": "172.18.0.12",
+            "user_agent.original": "curl/8.5.0"
+          },
+          {
+            "@timestamp": "2026-07-05T19:25:19.000Z",
+            "url.original": "/",
+            "source.ip": "172.18.0.12",
+            "user_agent.original": "curl/8.5.0"
+          },
+          {
+            "@timestamp": "2026-07-05T19:27:13.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-05T19:27:13.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-05T19:27:13.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-05T19:27:13.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-05T19:27:13.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-05T19:28:16.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-05T19:28:16.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-05T19:28:16.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-05T19:28:16.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-05T19:28:16.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-05T19:37:15.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-05T19:37:15.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-05T19:37:15.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-05T19:37:15.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-05T19:37:15.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-05T19:41:48.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-05T19:41:48.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-05T19:41:48.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-05T19:41:48.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-05T19:41:48.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-05T19:54:29.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-05T19:54:29.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-05T19:54:29.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-05T19:54:29.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-05T19:54:29.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-05T19:59:32.000Z",
+            "url.original": "/",
+            "source.ip": "172.18.0.13",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-05T19:59:32.000Z",
+            "url.original": "/",
+            "source.ip": "172.18.0.13",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-05T19:59:32.000Z",
+            "url.original": "/",
+            "source.ip": "172.18.0.13",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-05T19:59:32.000Z",
+            "url.original": "/",
+            "source.ip": "172.18.0.13",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-07-05T19:59:32.000Z",
+            "url.original": "/",
+            "source.ip": "172.18.0.13",
+            "user_agent.original": "curl/7.81.0"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-28T19:02:22.000Z",
+        "2026-06-28T20:02:22.000Z"
+      ],
+      "query": "FROM logs-nginx.access-*\n| WHERE @timestamp >= \"2026-06-28T19:02:22.000Z\" AND @timestamp < \"2026-06-28T20:02:22.000Z\"\n        AND host.name == \"web-1\"\n        AND user_agent.original LIKE \"*curl*\"\n| KEEP @timestamp, url.original, source.ip, user_agent.original\n| SORT @timestamp ASC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-nginx.access-*\n| WHERE @timestamp >= \"2026-06-28T19:02:22.000Z\" AND @timestamp < \"2026-06-28T20:02:22.000Z\"\n        AND host.name == \"web-1\"\n        AND user_agent.original LIKE \"*curl*\"\n| KEEP @timestamp, url.original, source.ip, user_agent.original\n| SORT @timestamp ASC",
+        "columns": [
+          {
+            "name": "@timestamp",
+            "type": "date"
+          },
+          {
+            "name": "url.original",
+            "type": "keyword"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "user_agent.original",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 90,
+        "values": [
+          {
+            "@timestamp": "2026-06-28T19:05:19.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:05:19.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:05:19.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:05:19.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:05:19.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:05:19.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:13:51.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:13:51.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:13:51.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:13:51.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:13:51.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:13:51.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:14:16.000Z",
+            "url.original": "/",
+            "source.ip": "172.18.0.24",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:14:16.000Z",
+            "url.original": "/",
+            "source.ip": "172.18.0.24",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:14:16.000Z",
+            "url.original": "/",
+            "source.ip": "172.18.0.24",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:14:16.000Z",
+            "url.original": "/",
+            "source.ip": "172.18.0.24",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:14:16.000Z",
+            "url.original": "/",
+            "source.ip": "172.18.0.24",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:14:16.000Z",
+            "url.original": "/",
+            "source.ip": "172.18.0.24",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:15:52.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:15:52.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:15:52.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:15:52.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:15:52.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:15:52.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:20:56.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:20:56.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:20:56.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:20:56.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:20:56.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:20:56.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:25:37.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:25:37.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:25:37.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:25:37.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:25:37.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:25:37.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:26:48.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:26:48.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:26:48.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:26:48.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:26:48.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:26:48.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:27:04.000Z",
+            "url.original": "/",
+            "source.ip": "172.18.0.25",
+            "user_agent.original": "curl/8.5.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:27:04.000Z",
+            "url.original": "/",
+            "source.ip": "172.18.0.25",
+            "user_agent.original": "curl/8.5.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:27:04.000Z",
+            "url.original": "/",
+            "source.ip": "172.18.0.25",
+            "user_agent.original": "curl/8.5.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:27:04.000Z",
+            "url.original": "/",
+            "source.ip": "172.18.0.25",
+            "user_agent.original": "curl/8.5.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:27:04.000Z",
+            "url.original": "/",
+            "source.ip": "172.18.0.25",
+            "user_agent.original": "curl/8.5.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:27:04.000Z",
+            "url.original": "/",
+            "source.ip": "172.18.0.25",
+            "user_agent.original": "curl/8.5.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:32:53.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:32:53.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:32:53.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:32:53.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:32:53.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:32:53.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:36:17.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:36:17.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:36:17.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:36:17.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:36:17.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:36:17.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:36:20.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:36:20.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:36:20.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:36:20.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:36:20.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:36:20.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:44:42.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:44:42.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:44:42.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:44:42.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:44:42.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:44:42.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:46:14.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:46:14.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:46:14.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:46:14.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:46:14.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:46:14.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:50:49.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:50:49.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:50:49.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:50:49.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:50:49.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:50:49.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:54:34.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:54:34.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:54:34.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:54:34.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:54:34.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          },
+          {
+            "@timestamp": "2026-06-28T19:54:34.000Z",
+            "url.original": "/",
+            "source.ip": "127.0.0.1",
+            "user_agent.original": "curl/7.81.0"
+          }
+        ]
+      }
+    }
+  ]
+}

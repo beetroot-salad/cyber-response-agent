@@ -1,0 +1,1 @@
+{"query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-25T19:50:00Z\" AND @timestamp < \"2026-07-26T19:50:00Z\"\n  AND host.name == \"web-2\"\n  AND event.outcome == \"failure\"\n  AND process.name == \"sshd\"\n| STATS failures = COUNT(*)", "columns": [{"name": "failures", "type": "long"}], "row_count": 1, "values": [{"failures": 48}]}

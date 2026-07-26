@@ -1,0 +1,127 @@
+{
+  "lead_id": "l-001",
+  "seq": 11,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T19:02:19.500Z",
+        "2026-07-12T20:02:19.500Z"
+      ],
+      "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-12T19:02:19.500Z\" AND @timestamp < \"2026-07-12T20:02:19.500Z\"\n| WHERE host.name == \"soc-playground\"\n| STATS events = COUNT(*)\n        BY hour = DATE_TRUNC(1 hour, @timestamp)\n| SORT hour DESC\n| LIMIT 50",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-12T19:02:19.500Z\" AND @timestamp < \"2026-07-12T20:02:19.500Z\"\n| WHERE host.name == \"soc-playground\"\n| STATS events = COUNT(*)\n        BY hour = DATE_TRUNC(1 hour, @timestamp)\n| SORT hour DESC\n| LIMIT 50",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "hour",
+            "type": "date"
+          }
+        ],
+        "row_count": 2,
+        "values": [
+          {
+            "events": 64,
+            "hour": "2026-07-12T20:00:00.000Z"
+          },
+          {
+            "events": 1395,
+            "hour": "2026-07-12T19:00:00.000Z"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T19:02:19.500Z",
+        "2026-07-05T20:02:19.500Z"
+      ],
+      "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-05T19:02:19.500Z\" AND @timestamp < \"2026-07-05T20:02:19.500Z\"\n| WHERE host.name == \"soc-playground\"\n| STATS events = COUNT(*)\n        BY hour = DATE_TRUNC(1 hour, @timestamp)\n| SORT hour DESC\n| LIMIT 50",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-05T19:02:19.500Z\" AND @timestamp < \"2026-07-05T20:02:19.500Z\"\n| WHERE host.name == \"soc-playground\"\n| STATS events = COUNT(*)\n        BY hour = DATE_TRUNC(1 hour, @timestamp)\n| SORT hour DESC\n| LIMIT 50",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "hour",
+            "type": "date"
+          }
+        ],
+        "row_count": 2,
+        "values": [
+          {
+            "events": 57,
+            "hour": "2026-07-05T20:00:00.000Z"
+          },
+          {
+            "events": 1550,
+            "hour": "2026-07-05T19:00:00.000Z"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-28T19:02:19.500Z",
+        "2026-06-28T20:02:19.500Z"
+      ],
+      "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-06-28T19:02:19.500Z\" AND @timestamp < \"2026-06-28T20:02:19.500Z\"\n| WHERE host.name == \"soc-playground\"\n| STATS events = COUNT(*)\n        BY hour = DATE_TRUNC(1 hour, @timestamp)\n| SORT hour DESC\n| LIMIT 50",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-06-28T19:02:19.500Z\" AND @timestamp < \"2026-06-28T20:02:19.500Z\"\n| WHERE host.name == \"soc-playground\"\n| STATS events = COUNT(*)\n        BY hour = DATE_TRUNC(1 hour, @timestamp)\n| SORT hour DESC\n| LIMIT 50",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "hour",
+            "type": "date"
+          }
+        ],
+        "row_count": 2,
+        "values": [
+          {
+            "events": 40,
+            "hour": "2026-06-28T20:00:00.000Z"
+          },
+          {
+            "events": 1322,
+            "hour": "2026-06-28T19:00:00.000Z"
+          }
+        ]
+      }
+    }
+  ],
+  "attack_contribution": {
+    "window": [
+      "2026-07-26T19:32:17.000Z",
+      "2026-07-26T19:32:22.000Z"
+    ],
+    "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-26T19:32:17.000Z\" AND @timestamp < \"2026-07-26T19:32:22.000Z\"\n| WHERE host.name == \"soc-playground\"\n| STATS events = COUNT(*)\n        BY hour = DATE_TRUNC(1 hour, @timestamp)\n| SORT hour DESC\n| LIMIT 50",
+    "payload": {
+      "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-26T19:32:17.000Z\" AND @timestamp < \"2026-07-26T19:32:22.000Z\"\n| WHERE host.name == \"soc-playground\"\n| STATS events = COUNT(*)\n        BY hour = DATE_TRUNC(1 hour, @timestamp)\n| SORT hour DESC\n| LIMIT 50",
+      "columns": [
+        {
+          "name": "events",
+          "type": "long"
+        },
+        {
+          "name": "hour",
+          "type": "date"
+        }
+      ],
+      "row_count": 0,
+      "values": []
+    }
+  }
+}

@@ -1,0 +1,1 @@
+{"query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-26T19:45:00Z\" AND @timestamp < \"2026-07-26T20:15:00Z\"\n        AND host.name == \"web-2\"\n        AND message LIKE \"*Accepted*\"\n| STATS accepted_count = COUNT(*)\n| KEEP accepted_count", "columns": [{"name": "accepted_count", "type": "long"}], "row_count": 1, "values": [{"accepted_count": 0}]}

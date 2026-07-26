@@ -1,0 +1,201 @@
+{
+  "lead_id": "l-001",
+  "seq": 30,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T19:02:22.000Z",
+        "2026-07-12T20:02:22.000Z"
+      ],
+      "query": "FROM logs-nginx.access-*\n| WHERE @timestamp >= \"2026-07-12T19:02:22.000Z\" AND @timestamp < \"2026-07-12T20:02:22.000Z\"\n        AND host.name == \"web-1\"\n| STATS events = COUNT(*)\n        BY url.path, http.request.method, source.ip, http.response.status_code\n| SORT events DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-nginx.access-*\n| WHERE @timestamp >= \"2026-07-12T19:02:22.000Z\" AND @timestamp < \"2026-07-12T20:02:22.000Z\"\n        AND host.name == \"web-1\"\n| STATS events = COUNT(*)\n        BY url.path, http.request.method, source.ip, http.response.status_code\n| SORT events DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "url.path",
+            "type": "keyword"
+          },
+          {
+            "name": "http.request.method",
+            "type": "keyword"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "http.response.status_code",
+            "type": "long"
+          }
+        ],
+        "row_count": 4,
+        "values": [
+          {
+            "events": 1800,
+            "url.path": "/nginx_status",
+            "http.request.method": "GET",
+            "source.ip": "127.0.0.1",
+            "http.response.status_code": 404
+          },
+          {
+            "events": 45,
+            "url.path": "/",
+            "http.request.method": "GET",
+            "source.ip": "127.0.0.1",
+            "http.response.status_code": 200
+          },
+          {
+            "events": 5,
+            "url.path": "/",
+            "http.request.method": "GET",
+            "source.ip": "172.18.0.12",
+            "http.response.status_code": 200
+          },
+          {
+            "events": 5,
+            "url.path": "/",
+            "http.request.method": "GET",
+            "source.ip": "172.18.0.13",
+            "http.response.status_code": 200
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T19:02:22.000Z",
+        "2026-07-05T20:02:22.000Z"
+      ],
+      "query": "FROM logs-nginx.access-*\n| WHERE @timestamp >= \"2026-07-05T19:02:22.000Z\" AND @timestamp < \"2026-07-05T20:02:22.000Z\"\n        AND host.name == \"web-1\"\n| STATS events = COUNT(*)\n        BY url.path, http.request.method, source.ip, http.response.status_code\n| SORT events DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-nginx.access-*\n| WHERE @timestamp >= \"2026-07-05T19:02:22.000Z\" AND @timestamp < \"2026-07-05T20:02:22.000Z\"\n        AND host.name == \"web-1\"\n| STATS events = COUNT(*)\n        BY url.path, http.request.method, source.ip, http.response.status_code\n| SORT events DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "url.path",
+            "type": "keyword"
+          },
+          {
+            "name": "http.request.method",
+            "type": "keyword"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "http.response.status_code",
+            "type": "long"
+          }
+        ],
+        "row_count": 4,
+        "values": [
+          {
+            "events": 1800,
+            "url.path": "/nginx_status",
+            "http.request.method": "GET",
+            "source.ip": "127.0.0.1",
+            "http.response.status_code": 404
+          },
+          {
+            "events": 40,
+            "url.path": "/",
+            "http.request.method": "GET",
+            "source.ip": "127.0.0.1",
+            "http.response.status_code": 200
+          },
+          {
+            "events": 5,
+            "url.path": "/",
+            "http.request.method": "GET",
+            "source.ip": "172.18.0.12",
+            "http.response.status_code": 200
+          },
+          {
+            "events": 5,
+            "url.path": "/",
+            "http.request.method": "GET",
+            "source.ip": "172.18.0.13",
+            "http.response.status_code": 200
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-28T19:02:22.000Z",
+        "2026-06-28T20:02:22.000Z"
+      ],
+      "query": "FROM logs-nginx.access-*\n| WHERE @timestamp >= \"2026-06-28T19:02:22.000Z\" AND @timestamp < \"2026-06-28T20:02:22.000Z\"\n        AND host.name == \"web-1\"\n| STATS events = COUNT(*)\n        BY url.path, http.request.method, source.ip, http.response.status_code\n| SORT events DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-nginx.access-*\n| WHERE @timestamp >= \"2026-06-28T19:02:22.000Z\" AND @timestamp < \"2026-06-28T20:02:22.000Z\"\n        AND host.name == \"web-1\"\n| STATS events = COUNT(*)\n        BY url.path, http.request.method, source.ip, http.response.status_code\n| SORT events DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "url.path",
+            "type": "keyword"
+          },
+          {
+            "name": "http.request.method",
+            "type": "keyword"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "http.response.status_code",
+            "type": "long"
+          }
+        ],
+        "row_count": 4,
+        "values": [
+          {
+            "events": 2160,
+            "url.path": "/nginx_status",
+            "http.request.method": "GET",
+            "source.ip": "127.0.0.1",
+            "http.response.status_code": 404
+          },
+          {
+            "events": 78,
+            "url.path": "/",
+            "http.request.method": "GET",
+            "source.ip": "127.0.0.1",
+            "http.response.status_code": 200
+          },
+          {
+            "events": 6,
+            "url.path": "/",
+            "http.request.method": "GET",
+            "source.ip": "172.18.0.24",
+            "http.response.status_code": 200
+          },
+          {
+            "events": 6,
+            "url.path": "/",
+            "http.request.method": "GET",
+            "source.ip": "172.18.0.25",
+            "http.response.status_code": 200
+          }
+        ]
+      }
+    }
+  ]
+}

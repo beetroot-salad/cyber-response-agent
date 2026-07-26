@@ -1,0 +1,321 @@
+{
+  "lead_id": "l-001",
+  "seq": 22,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T19:02:22.000Z",
+        "2026-07-12T20:02:22.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-12T19:02:22.000Z\" AND @timestamp < \"2026-07-12T20:02:22.000Z\"\n        AND host.name == \"web-1\"\n| STATS events = COUNT(*)\n        BY message\n| SORT events DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-12T19:02:22.000Z\" AND @timestamp < \"2026-07-12T20:02:22.000Z\"\n        AND host.name == \"web-1\"\n| STATS events = COUNT(*)\n        BY message\n| SORT events DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "message",
+            "type": "text"
+          }
+        ],
+        "row_count": 20,
+        "values": [
+          {
+            "events": 154,
+            "message": "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)"
+          },
+          {
+            "events": 154,
+            "message": "pam_unix(runuser:session): session closed for user svc.monitoring"
+          },
+          {
+            "events": 63,
+            "message": "error: kex_exchange_identification: Connection closed by remote host"
+          },
+          {
+            "events": 35,
+            "message": "pam_unix(runuser:session): session opened for user svc.reports(uid=1004) by (uid=0)"
+          },
+          {
+            "events": 35,
+            "message": "pam_unix(runuser:session): session closed for user svc.reports"
+          },
+          {
+            "events": 7,
+            "message": "Received disconnect from 172.18.0.14 port 49772:11: disconnected by user"
+          },
+          {
+            "events": 7,
+            "message": "pam_env(sshd:session): Unable to open env file: /etc/default/locale: No such file or directory"
+          },
+          {
+            "events": 7,
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)"
+          },
+          {
+            "events": 7,
+            "message": "Accepted password for svc.config-mgmt from 172.18.0.14 port 49772 ssh2"
+          },
+          {
+            "events": 7,
+            "message": "pam_unix(cron:session): session opened for user root(uid=0) by (uid=0)"
+          },
+          {
+            "events": 7,
+            "message": "Connection closed by 172.18.0.17 port 51468"
+          },
+          {
+            "events": 7,
+            "message": "Connection closed by 172.18.0.17 port 33184"
+          },
+          {
+            "events": 7,
+            "message": "Connection closed by 172.18.0.14 port 42524"
+          },
+          {
+            "events": 7,
+            "message": "Disconnected from user svc.config-mgmt 172.18.0.14 port 49772"
+          },
+          {
+            "events": 7,
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt"
+          },
+          {
+            "events": 7,
+            "message": "Connection closed by 172.18.0.20 port 50570"
+          },
+          {
+            "events": 7,
+            "message": "Connection closed by 172.18.0.17 port 38884"
+          },
+          {
+            "events": 7,
+            "message": "pam_env(cron:session): Unable to open env file: /etc/default/locale: No such file or directory"
+          },
+          {
+            "events": 7,
+            "message": "Connection closed by 172.18.0.22 port 40062"
+          },
+          {
+            "events": 7,
+            "message": "Connection closed by 172.18.0.20 port 44430"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T19:02:22.000Z",
+        "2026-07-05T20:02:22.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-05T19:02:22.000Z\" AND @timestamp < \"2026-07-05T20:02:22.000Z\"\n        AND host.name == \"web-1\"\n| STATS events = COUNT(*)\n        BY message\n| SORT events DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-05T19:02:22.000Z\" AND @timestamp < \"2026-07-05T20:02:22.000Z\"\n        AND host.name == \"web-1\"\n| STATS events = COUNT(*)\n        BY message\n| SORT events DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "message",
+            "type": "text"
+          }
+        ],
+        "row_count": 20,
+        "values": [
+          {
+            "events": 126,
+            "message": "error: kex_exchange_identification: Connection closed by remote host"
+          },
+          {
+            "events": 119,
+            "message": "pam_unix(runuser:session): session closed for user svc.monitoring"
+          },
+          {
+            "events": 119,
+            "message": "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)"
+          },
+          {
+            "events": 56,
+            "message": "pam_unix(runuser:session): session closed for user svc.reports"
+          },
+          {
+            "events": 56,
+            "message": "pam_unix(runuser:session): session opened for user svc.reports(uid=1004) by (uid=0)"
+          },
+          {
+            "events": 42,
+            "message": "pam_unix(sudo:auth): conversation failed"
+          },
+          {
+            "events": 42,
+            "message": "pam_unix(sudo:auth): auth could not identify password for [svc.deploy]"
+          },
+          {
+            "events": 42,
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.6  user=svc.reports"
+          },
+          {
+            "events": 14,
+            "message": "pam_env(sshd:session): Unable to open env file: /etc/default/locale: No such file or directory"
+          },
+          {
+            "events": 14,
+            "message": "pam_unix(sshd:session): session opened for user svc.deploy(uid=1006) by (uid=0)"
+          },
+          {
+            "events": 14,
+            "message": "svc.deploy : a password is required ; PWD=/home/svc.deploy ; USER=root ; COMMAND=journalctl -u nginx -n 5"
+          },
+          {
+            "events": 14,
+            "message": "pam_unix(sshd:session): session closed for user svc.deploy"
+          },
+          {
+            "events": 14,
+            "message": "svc.deploy : a password is required ; PWD=/home/svc.deploy ; USER=root ; COMMAND=systemctl restart nginx"
+          },
+          {
+            "events": 14,
+            "message": "svc.deploy : a password is required ; PWD=/home/svc.deploy ; USER=root ; COMMAND=/usr/bin/curl -fsS http://web-1/ -o /tmp/deploy.tgz"
+          },
+          {
+            "events": 7,
+            "message": "Connection closed by 172.18.0.17 port 56562"
+          },
+          {
+            "events": 7,
+            "message": "Accepted password for svc.deploy from 172.18.0.20 port 38838 ssh2"
+          },
+          {
+            "events": 7,
+            "message": "Disconnected from user svc.deploy 172.18.0.20 port 38838"
+          },
+          {
+            "events": 7,
+            "message": "Connection closed by 172.18.0.17 port 57850"
+          },
+          {
+            "events": 7,
+            "message": "Received disconnect from 172.18.0.20 port 38838:11: disconnected by user"
+          },
+          {
+            "events": 7,
+            "message": "Connection closed by 172.18.0.22 port 59428"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-28T19:02:22.000Z",
+        "2026-06-28T20:02:22.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-28T19:02:22.000Z\" AND @timestamp < \"2026-06-28T20:02:22.000Z\"\n        AND host.name == \"web-1\"\n| STATS events = COUNT(*)\n        BY message\n| SORT events DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-28T19:02:22.000Z\" AND @timestamp < \"2026-06-28T20:02:22.000Z\"\n        AND host.name == \"web-1\"\n| STATS events = COUNT(*)\n        BY message\n| SORT events DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "message",
+            "type": "text"
+          }
+        ],
+        "row_count": 20,
+        "values": [
+          {
+            "events": 152,
+            "message": "error: kex_exchange_identification: Connection closed by remote host"
+          },
+          {
+            "events": 136,
+            "message": "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)"
+          },
+          {
+            "events": 136,
+            "message": "pam_unix(runuser:session): session closed for user svc.monitoring"
+          },
+          {
+            "events": 80,
+            "message": "pam_unix(runuser:session): session closed for user svc.reports"
+          },
+          {
+            "events": 80,
+            "message": "pam_unix(runuser:session): session opened for user svc.reports(uid=1004) by (uid=0)"
+          },
+          {
+            "events": 8,
+            "message": "Connection closed by 172.18.0.9 port 55560"
+          },
+          {
+            "events": 8,
+            "message": "Connection closed by 172.18.0.19 port 47622"
+          },
+          {
+            "events": 8,
+            "message": "Connection closed by 172.18.0.9 port 45634"
+          },
+          {
+            "events": 8,
+            "message": "Connection closed by 172.18.0.19 port 35994"
+          },
+          {
+            "events": 8,
+            "message": "pam_env(cron:session): Unable to open env file: /etc/default/locale: No such file or directory"
+          },
+          {
+            "events": 8,
+            "message": "Connection closed by 172.18.0.9 port 46062"
+          },
+          {
+            "events": 8,
+            "message": "Connection closed by 172.18.0.9 port 48230"
+          },
+          {
+            "events": 8,
+            "message": "Connection closed by 172.18.0.21 port 49016"
+          },
+          {
+            "events": 8,
+            "message": "Connection closed by 172.18.0.21 port 45298"
+          },
+          {
+            "events": 8,
+            "message": "Connection closed by 172.18.0.21 port 49334"
+          },
+          {
+            "events": 8,
+            "message": "Connection closed by 172.18.0.19 port 39366"
+          },
+          {
+            "events": 8,
+            "message": "Connection closed by 172.18.0.21 port 34232"
+          },
+          {
+            "events": 8,
+            "message": "Connection closed by 172.18.0.9 port 34546"
+          },
+          {
+            "events": 8,
+            "message": "Connection closed by 172.18.0.20 port 57074"
+          },
+          {
+            "events": 8,
+            "message": "Connection closed by 172.18.0.20 port 58498"
+          }
+        ]
+      }
+    }
+  ]
+}

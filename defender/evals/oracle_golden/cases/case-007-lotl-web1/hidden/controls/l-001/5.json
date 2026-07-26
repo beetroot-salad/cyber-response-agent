@@ -1,0 +1,153 @@
+{
+  "lead_id": "l-001",
+  "seq": 5,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T19:02:22.000Z",
+        "2026-07-12T20:02:22.000Z"
+      ],
+      "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-12T19:02:22.000Z\" AND @timestamp < \"2026-07-12T20:02:22.000Z\"\n        AND host.name == \"web-1\"\n| STATS events = COUNT(*)\n        BY data_stream.dataset\n| SORT events DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-12T19:02:22.000Z\" AND @timestamp < \"2026-07-12T20:02:22.000Z\"\n        AND host.name == \"web-1\"\n| STATS events = COUNT(*)\n        BY data_stream.dataset\n| SORT events DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "data_stream.dataset",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 6,
+        "values": [
+          {
+            "events": 1855,
+            "data_stream.dataset": "nginx.access"
+          },
+          {
+            "events": 720,
+            "data_stream.dataset": "elastic_agent.metricbeat"
+          },
+          {
+            "events": 567,
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 12,
+            "data_stream.dataset": "elastic_agent"
+          },
+          {
+            "events": 7,
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 4,
+            "data_stream.dataset": "elastic_agent.filebeat"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T19:02:22.000Z",
+        "2026-07-05T20:02:22.000Z"
+      ],
+      "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-05T19:02:22.000Z\" AND @timestamp < \"2026-07-05T20:02:22.000Z\"\n        AND host.name == \"web-1\"\n| STATS events = COUNT(*)\n        BY data_stream.dataset\n| SORT events DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-05T19:02:22.000Z\" AND @timestamp < \"2026-07-05T20:02:22.000Z\"\n        AND host.name == \"web-1\"\n| STATS events = COUNT(*)\n        BY data_stream.dataset\n| SORT events DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "data_stream.dataset",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 6,
+        "values": [
+          {
+            "events": 1850,
+            "data_stream.dataset": "nginx.access"
+          },
+          {
+            "events": 959,
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 720,
+            "data_stream.dataset": "elastic_agent.metricbeat"
+          },
+          {
+            "events": 16,
+            "data_stream.dataset": "elastic_agent"
+          },
+          {
+            "events": 7,
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 2,
+            "data_stream.dataset": "elastic_agent.filebeat"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-28T19:02:22.000Z",
+        "2026-06-28T20:02:22.000Z"
+      ],
+      "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-06-28T19:02:22.000Z\" AND @timestamp < \"2026-06-28T20:02:22.000Z\"\n        AND host.name == \"web-1\"\n| STATS events = COUNT(*)\n        BY data_stream.dataset\n| SORT events DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-06-28T19:02:22.000Z\" AND @timestamp < \"2026-06-28T20:02:22.000Z\"\n        AND host.name == \"web-1\"\n| STATS events = COUNT(*)\n        BY data_stream.dataset\n| SORT events DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "data_stream.dataset",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 6,
+        "values": [
+          {
+            "events": 2250,
+            "data_stream.dataset": "nginx.access"
+          },
+          {
+            "events": 760,
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 720,
+            "data_stream.dataset": "elastic_agent.metricbeat"
+          },
+          {
+            "events": 12,
+            "data_stream.dataset": "elastic_agent"
+          },
+          {
+            "events": 8,
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 4,
+            "data_stream.dataset": "elastic_agent.filebeat"
+          }
+        ]
+      }
+    }
+  ]
+}

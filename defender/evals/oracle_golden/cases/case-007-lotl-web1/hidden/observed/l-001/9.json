@@ -1,0 +1,1 @@
+{"query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-25T00:00:00Z\" AND @timestamp < \"2026-07-27T00:00:00Z\"\n| STATS events = COUNT(*)\n        BY host.name\n| SORT events DESC\n| LIMIT 20", "columns": [{"name": "events", "type": "long"}, {"name": "host.name", "type": "keyword"}], "row_count": 1, "values": [{"events": 11818, "host.name": "soc-playground"}]}

@@ -1,0 +1,137 @@
+{
+  "lead_id": "l-001",
+  "seq": 2,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T19:25:00.000Z",
+        "2026-07-12T20:25:00.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-12T19:25:00.000Z\" AND @timestamp < \"2026-07-12T20:25:00.000Z\"\n  AND host.name == \"web-2\"\n  AND event.outcome == \"failure\"\n  AND process.name == \"sshd\"\n| STATS failures = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp),\n        sample_msg = MIN(message)\n    BY minute = DATE_TRUNC(1 minute, @timestamp)\n| SORT minute",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-12T19:25:00.000Z\" AND @timestamp < \"2026-07-12T20:25:00.000Z\"\n  AND host.name == \"web-2\"\n  AND event.outcome == \"failure\"\n  AND process.name == \"sshd\"\n| STATS failures = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp),\n        sample_msg = MIN(message)\n    BY minute = DATE_TRUNC(1 minute, @timestamp)\n| SORT minute",
+        "columns": [
+          {
+            "name": "failures",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "sample_msg",
+            "type": "keyword"
+          },
+          {
+            "name": "minute",
+            "type": "date"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "failures": 84,
+            "first_seen": "2026-07-12T19:32:17.000Z",
+            "last_seen": "2026-07-12T19:32:33.000Z",
+            "sample_msg": "Failed password for svc.reports from 172.18.0.8 port 49594 ssh2",
+            "minute": "2026-07-12T19:32:00.000Z"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T19:25:00.000Z",
+        "2026-07-05T20:25:00.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-05T19:25:00.000Z\" AND @timestamp < \"2026-07-05T20:25:00.000Z\"\n  AND host.name == \"web-2\"\n  AND event.outcome == \"failure\"\n  AND process.name == \"sshd\"\n| STATS failures = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp),\n        sample_msg = MIN(message)\n    BY minute = DATE_TRUNC(1 minute, @timestamp)\n| SORT minute",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-05T19:25:00.000Z\" AND @timestamp < \"2026-07-05T20:25:00.000Z\"\n  AND host.name == \"web-2\"\n  AND event.outcome == \"failure\"\n  AND process.name == \"sshd\"\n| STATS failures = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp),\n        sample_msg = MIN(message)\n    BY minute = DATE_TRUNC(1 minute, @timestamp)\n| SORT minute",
+        "columns": [
+          {
+            "name": "failures",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "sample_msg",
+            "type": "keyword"
+          },
+          {
+            "name": "minute",
+            "type": "date"
+          }
+        ],
+        "row_count": 2,
+        "values": [
+          {
+            "failures": 77,
+            "first_seen": "2026-07-05T19:31:42.000Z",
+            "last_seen": "2026-07-05T19:31:58.000Z",
+            "sample_msg": "Failed password for svc.reports from 172.18.0.6 port 33980 ssh2",
+            "minute": "2026-07-05T19:31:00.000Z"
+          },
+          {
+            "failures": 7,
+            "first_seen": "2026-07-05T19:32:00.000Z",
+            "last_seen": "2026-07-05T19:32:00.000Z",
+            "sample_msg": "Failed password for svc.reports from 172.18.0.6 port 53212 ssh2",
+            "minute": "2026-07-05T19:32:00.000Z"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-28T19:25:00.000Z",
+        "2026-06-28T20:25:00.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-28T19:25:00.000Z\" AND @timestamp < \"2026-06-28T20:25:00.000Z\"\n  AND host.name == \"web-2\"\n  AND event.outcome == \"failure\"\n  AND process.name == \"sshd\"\n| STATS failures = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp),\n        sample_msg = MIN(message)\n    BY minute = DATE_TRUNC(1 minute, @timestamp)\n| SORT minute",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-28T19:25:00.000Z\" AND @timestamp < \"2026-06-28T20:25:00.000Z\"\n  AND host.name == \"web-2\"\n  AND event.outcome == \"failure\"\n  AND process.name == \"sshd\"\n| STATS failures = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp),\n        sample_msg = MIN(message)\n    BY minute = DATE_TRUNC(1 minute, @timestamp)\n| SORT minute",
+        "columns": [
+          {
+            "name": "failures",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "sample_msg",
+            "type": "keyword"
+          },
+          {
+            "name": "minute",
+            "type": "date"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    }
+  ]
+}

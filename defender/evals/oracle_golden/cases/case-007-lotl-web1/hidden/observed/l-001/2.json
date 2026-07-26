@@ -1,0 +1,1 @@
+{"query": "FROM logs-falco.alerts-*\n| STATS min_ts = MIN(@timestamp), max_ts = MAX(@timestamp), count = COUNT(*)\n| LIMIT 1", "columns": [{"name": "min_ts", "type": "date"}, {"name": "max_ts", "type": "date"}, {"name": "count", "type": "long"}], "row_count": 1, "values": [{"min_ts": "2026-04-24T04:34:45.739Z", "max_ts": "2026-07-25T10:37:30.907Z", "count": 1966877}]}

@@ -1,0 +1,7 @@
+# Per-query controls are measured mechanically into hidden/controls/ by
+# controls.py: each is the lead's own query with only its @timestamp bounds
+# moved to a shape-matched window. This file records that provenance; it is
+# not a hand-measured baseline.
+measured_by: controls.py
+generated_for: case-008-bruteforce-web2
+operation_window: ["2026-07-26T19:52:20+00:00", "2026-07-26T19:55:24+00:00"]
