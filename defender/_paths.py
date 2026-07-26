@@ -47,6 +47,10 @@ class DefenderPaths:
         return self.defender_dir / "lessons-environment"
 
     @property
+    def held_out_fixtures(self) -> Path:
+        return self.defender_dir / "fixtures" / "held-out"
+
+    @property
     def worktree_base(self) -> Path:
         return self.repo_root / ".worktrees"
 

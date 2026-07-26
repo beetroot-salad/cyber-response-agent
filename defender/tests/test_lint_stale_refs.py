@@ -478,6 +478,76 @@ def test_the_same_reference_at_a_non_excluded_path_IS_flagged(tmp_path):
     assert "src/notes.md:some_removed_helper" in hits
 
 
+# The reference these three plant names ONLY `held-back`. `_batch_grep` attributes a hit
+# line to a single ident, so a line that also spelled `defender/fixtures/` would be claimed
+# by `defender` — itself a harvested component of the deleted path in a repo this small —
+# and `held-back` would come back empty whatever the rule under test did.
+_HELD_BACK_REF = "src/notes.md"
+_HELD_BACK_REF_BODY = "the harness walks the held-back set for members\n"
+
+
+def test_a_directory_keeping_one_tracked_file_is_not_read_as_removed(tmp_path):
+    """`_scan` harvests idents from the path COMPONENTS of removed files, so emptying a
+    directory but keeping one file in it used to mark the directory's own name removed —
+    and every surviving reference to a directory that STILL EXISTS went red at once (44 of
+    them, when `fixtures/held-out/` was emptied down to its README).
+
+    The survivor is planted under `defender/fixtures/`, which is in EXCLUDED_GREP_DIRS:
+    that list answers "is this a reference SOURCE", never "does this path exist", so a
+    survivor sitting there must still vouch for the name.
+    """
+    up = _upstream(
+        tmp_path,
+        main_files={
+            "defender/fixtures/held-back/README.md": "the set lives here\n",
+            "defender/fixtures/held-back/m01.json": "{}\n",
+            _HELD_BACK_REF: _HELD_BACK_REF_BODY,
+        },
+        pr_files={"defender/fixtures/held-back/m01.json": None},
+    )
+    work = _clone(tmp_path, up)
+
+    hits = {f.fingerprint for f in GATE._scan(work, "origin/main")}
+    assert "caller.py:some_removed_helper" in hits, "the scan found nothing at all"
+    assert f"{_HELD_BACK_REF}:held-back" not in hits
+
+
+def test_a_directory_losing_every_tracked_file_IS_read_as_removed(tmp_path):
+    """Control for the test above — without it, that one could pass because `held-back` was
+    never collected as an ident at all rather than because a survivor vouched for it."""
+    up = _upstream(
+        tmp_path,
+        main_files={
+            "defender/fixtures/held-back/m01.json": "{}\n",
+            _HELD_BACK_REF: _HELD_BACK_REF_BODY,
+        },
+        pr_files={"defender/fixtures/held-back/m01.json": None},
+    )
+    work = _clone(tmp_path, up)
+
+    hits = {f.fingerprint for f in GATE._scan(work, "origin/main")}
+    assert f"{_HELD_BACK_REF}:held-back" in hits
+
+
+def test_an_archival_copy_does_not_vouch_for_a_deleted_directory(tmp_path):
+    """`_path_named` reads survival from the LIVE tree only. `experiments/` holds frozen
+    records, so a like-named directory there must not keep a genuinely deleted production
+    directory's references green."""
+    up = _upstream(
+        tmp_path,
+        main_files={
+            "experiments/old-run/held-back/m01.json": "{}\n",
+            "defender/fixtures/held-back/m01.json": "{}\n",
+            _HELD_BACK_REF: _HELD_BACK_REF_BODY,
+        },
+        pr_files={"defender/fixtures/held-back/m01.json": None},
+    )
+    work = _clone(tmp_path, up)
+
+    hits = {f.fingerprint for f in GATE._scan(work, "origin/main")}
+    assert f"{_HELD_BACK_REF}:held-back" in hits
+
+
 def test_frontmatter_name_is_a_declaration_but_the_body_is_a_reference(tmp_path):
     """A skill keeps its own `name:` after the like-named shim is deleted. That line is a
     declaration. The rule is LINE-scoped, so an instruction in the same file that still

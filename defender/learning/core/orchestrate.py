@@ -267,7 +267,7 @@ def run_one(
 
     run_id = run_dir.name
     src = RunPaths(run_dir)
-    if is_held_out_alert_copy(src.alert):
+    if is_held_out_alert_copy(src.alert, paths.held_out_fixtures):
         _log(f"run_id={run_id} alert is a held-out eval fixture — REFUSING to learn "
              f"(its findings must never feed a corpus it is scored against)")
         return 0

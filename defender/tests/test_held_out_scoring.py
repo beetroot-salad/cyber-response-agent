@@ -119,8 +119,24 @@ def test_unlabeled_dir_is_excluded_quietly(tmp_path: Path, capsys):
 
 
 def test_un_run_fixtures_are_surfaced_not_scored(tmp_path: Path):
-    fixtures = load_held_out_fixtures(HELD_OUT_FIXTURES)
-    assert fixtures, "the real held-out set must be loadable"
+    """A fixture with no run is surfaced as not-run, never folded into the score — the
+    denominator counts what was actually investigated.
+
+    The set is built here rather than read from `HELD_OUT_FIXTURES`: the committed set is
+    empty since the Wazuh-shaped bootstrap fixtures were retired, and this accounting rule
+    is a property of the harness, independent of who is in the set.
+    """
+    fixtures_dir = tmp_path / "held-out"
+    for slug, disposition in (("b01-case", "benign"), ("m01-case", "malicious")):
+        member = fixtures_dir / slug
+        member.mkdir(parents=True)
+        (member / "alert.json").write_text("{}", encoding="utf-8")
+        (member / "ground_truth.yaml").write_text(
+            f"held_out: true\ndisposition: {disposition}\n", encoding="utf-8"
+        )
+
+    fixtures = load_held_out_fixtures(fixtures_dir)
+    assert len(fixtures) == 2, "both labeled members must load"
     scored = score(fixtures, tmp_path / "empty-runs")
     assert scored.total == 0
     assert len(scored.not_run) == len(fixtures)

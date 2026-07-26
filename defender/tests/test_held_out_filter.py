@@ -137,7 +137,8 @@ def test_net_is_narrow(tmp_path: Path) -> None:
     ratchets against.
     """
     assert run_common.is_held_out_fixture(tmp_path / "alert.json") is False
-    ordinary = run_common.DEFENDER_DIR / "fixtures" / "gtest-01-auth" / "alert.json"
+    ordinary = (run_common.DEFENDER_DIR / "fixtures"
+                / "v2-sshd-success-after-failures" / "alert.json")
     assert ordinary.is_file(), "control must point at a real non-held-out fixture"
     assert run_common.is_held_out_fixture(ordinary) is False
 
@@ -182,11 +183,21 @@ def test_direct_learn_refuses_a_held_out_run_dir(tmp_path: Path) -> None:
 
     Asked by CONTENT: the run dir's alert.json is a verbatim copy of the fixture's, so its
     digest still identifies the fixture even though the run dir carries no provenance.
+
+    The held-out member is built HERE, under the injected `repo_root`, rather than read
+    from the committed set — that set is empty since the Wazuh-shaped bootstrap fixtures
+    were retired, and the digest net is a property of the mechanism, not of who is in the
+    set. Reading the real set would also have made the assertion silently vacuous the
+    moment the set emptied: with no members there is no digest to match, so the refusal
+    would never fire and the test would still be green.
     """
     run_dir = _complete_run_dir(tmp_path, "benign")
-    fixture_alert = run_common.HELD_OUT_FIXTURES / "m05-lsass-access" / "alert.json"
-    (run_dir / "alert.json").write_bytes(fixture_alert.read_bytes())
     paths = loop.LoopPaths(repo_root=tmp_path)
+    fixture = paths.held_out_fixtures / "m05-lsass-access"
+    fixture.mkdir(parents=True)
+    fixture_alert = fixture / "alert.json"
+    fixture_alert.write_text(json.dumps({"rule": {"id": "5711"}}), encoding="utf-8")
+    (run_dir / "alert.json").write_bytes(fixture_alert.read_bytes())
 
     rc = loop.run_one(run_dir, paths=paths, agents=FakeSubagents(judge="outcome: caught\n"))
     assert rc == 0
