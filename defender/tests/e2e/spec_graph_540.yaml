@@ -108,6 +108,8 @@ demands:
      binds: ["drives(run_main->run_investigation)", "interacts(scrub->run_dir)", "interacts(run_main->run_dir)"]}
   - {id: d_no_consumer_runs_on_a_tainted_tree, kind: negative, form: test, discharged_by: test_no_consumer_runs_when_the_scrub_raises,
      binds: ["interacts(run_main->run_dir)", "interacts(visualize_run->run_dir)", "interacts(persist_copy_shared_inputs->run_dir)"]}
+  - {id: d_scrub_survives_a_crashed_driver, kind: behavior, form: test, discharged_by: test_the_scrub_survives_a_crashed_investigation,
+     binds: ["drives(run_main->run_investigation)", "interacts(scrub->run_dir)", "interacts(run_main->run_dir)"]}   # #738: ORDER cannot see reachability
 
   # ---- O10 / O11 — lifecycle, fail-closed, teardown ----
   - {id: d_construction_failure_refuses_the_run, kind: behavior, form: test, discharged_by: test_box_construction_failure_refuses_the_run,

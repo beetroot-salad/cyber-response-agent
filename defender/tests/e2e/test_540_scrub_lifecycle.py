@@ -577,6 +577,32 @@ def test_no_consumer_runs_when_the_scrub_raises(tmp_path):
         assert order.index("scrub") < order.index(consumer)
 
 
+def test_the_scrub_survives_a_crashed_investigation(tmp_path):
+    """d_scrub_survives_a_crashed_driver — the scrub reaps EVERY exit from the investigation,
+    not only the one that falls through. A driver that raises must not carry control past the
+    walk: the tree a crashed run leaves behind is exactly the tree most likely to hold what the
+    box planted, and it is the one a human then opens by hand.
+
+    REACHABILITY, which is what the two order demands above cannot see. `_call_order` reads the
+    entrypoint's statement sequence, and a `scrub` sited AFTER the `try` still occupies the
+    right position in it while a raise inside the try jumps clean over the call (#738) — so
+    d_scrub_precedes_first_consumer and d_box_torn_down_on_crash both stayed green over a
+    scrub that never ran. The assertion here is MEMBERSHIP in the finalizer, the property that
+    actually makes it run on the exception path, and `_enclosing_finally` allows the scrub no
+    site outside one.
+
+    The teardown still dominates it: the order leg keeps the scrub behind `stop_box`, so the
+    scrub's whole justification — no live writer — survives the move. A scrub hoisted above the
+    teardown to make this demand go green would race a live box and be a check in name only."""
+    fn = _fn_node(RUN_PY, "main")
+    order = _call_order(fn)
+    assert "scrub" in order, "the entrypoint never calls the scrub"
+    assert _enclosing_finally(fn, "scrub"), \
+        "the scrub is not finally-guaranteed, so a crashed driver leaves its tree unwalked"
+    assert order.index("stop_box") < order.index("scrub"), \
+        "the scrub must stay behind the teardown: an unstopped box makes the walk a race"
+
+
 
 
 def test_box_construction_failure_refuses_the_run(tmp_path):

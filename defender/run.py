@@ -128,6 +128,7 @@ def main(argv: list[str]) -> int:
 
     box = box_mod.start_box(run_dir, DEFENDER_DIR)
     investigation_ok = False
+    box_down = False
     try:
         summary = asyncio.run(driver.run_investigation(
             alert_path=RunPaths(run_dir).alert,
@@ -142,11 +143,22 @@ def main(argv: list[str]) -> int:
     finally:
         if investigation_ok:
             box_mod.stop_box(box)
+            box_down = True
         else:
             with contextlib.suppress(box_mod.BoxFault):
                 box_mod.stop_box(box)
-
-    box_mod.scrub(run_dir)
+                box_down = True
+        # #738: the scrub reaps EVERY exit from the investigation, not just the one that
+        # falls through — sited after the `try` it was jumped clean over by a raising
+        # driver, leaving the crash's tree (the one most likely to hold what the box
+        # planted) unwalked. It stays BEHIND the teardown, and runs only once the box is
+        # known dead: "no live writer" is the scrub's whole justification, so a teardown
+        # whose fault was suppressed above leaves that unproven and the walk is skipped
+        # rather than raced. A taint raised here on the crash path deliberately WINS over
+        # the investigation's own failure — a tainted tree is the worse signal — and
+        # Python's implicit chaining keeps the original on `__context__`.
+        if box_down:
+            box_mod.scrub(run_dir)
 
     out = str(summary.get("output") or "")
     print(f"[run.py] done ({summary.get('requests')} model requests); "
