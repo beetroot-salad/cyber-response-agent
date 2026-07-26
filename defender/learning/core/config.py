@@ -4,14 +4,13 @@ import os
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
-from functools import cached_property
 from pathlib import Path
 
 from defender._clock import now_iso  # noqa: F401 — re-export: core.config stays the loop's import surface
 from defender._env import env_int, env_str
-from defender._env import FatalConfigError  # noqa: F401 — re-export; enrolled as stage-fatal in orchestrate
+from defender._env import FatalConfigError  # noqa: F401 — re-export; enrolled as stage-fatal in core/faults.py
 from defender._run_paths import RunPaths  # noqa: F401 — re-export
-from defender._paths import DefenderPaths  # noqa: F401 — used by LoopPaths + re-export
+from defender._paths import DefenderPaths  # noqa: F401 — LoopPaths' base class + re-export
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -26,58 +25,17 @@ class QueueChannel:
 
 
 @dataclass(frozen=True)
-class LoopPaths:
+class LoopPaths(DefenderPaths):
+    """The loop's paths: every checked-in tree `DefenderPaths` locates, PLUS the mutable
+    learning state (queues, locks, run artifacts) rooted at `state_root`.
 
-    repo_root: Path
+    It INHERITS the repo-tree paths rather than forwarding them — eleven one-line
+    pass-throughs used to shadow `DefenderPaths`, so every path added to `_paths.py` had
+    to be declared twice or it was invisible here. Inheriting keeps `getattr(paths, name)`
+    (drains.py resolves each curator's corpus dir that way) answering for the whole set,
+    and keeps the directory NAMES owned by `_paths.py` alone."""
+
     state_dir: Path | None = None
-
-    @cached_property
-    def defender(self) -> DefenderPaths:
-        return DefenderPaths(self.repo_root)
-
-    @property
-    def learning_dir(self) -> Path:
-        return self.defender.learning_dir
-
-    @property
-    def lessons_dir(self) -> Path:
-        return self.defender.lessons_dir
-
-    @property
-    def lessons_actor_dir(self) -> Path:
-        return self.defender.lessons_actor_dir
-
-    @property
-    def lessons_environment_dir(self) -> Path:
-        return self.defender.lessons_environment_dir
-
-    @property
-    def held_out_fixtures(self) -> Path:
-        return self.defender.held_out_fixtures
-
-    @property
-    def lessons_dir_rel(self) -> str:
-        return DefenderPaths.lessons_dir_rel
-
-    @property
-    def lessons_actor_dir_rel(self) -> str:
-        return DefenderPaths.lessons_actor_dir_rel
-
-    @property
-    def lessons_environment_dir_rel(self) -> str:
-        return DefenderPaths.lessons_environment_dir_rel
-
-    @property
-    def catalog_dir(self) -> Path:
-        return self.defender.catalog_dir
-
-    @property
-    def skills_dir(self) -> Path:
-        return self.defender.skills_dir
-
-    @property
-    def worktree_base(self) -> Path:
-        return self.defender.worktree_base
 
     @property
     def state_root(self) -> Path:
