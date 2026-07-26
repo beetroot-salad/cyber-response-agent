@@ -41,8 +41,8 @@ from pydantic_ai.models import override_allow_model_requests  # noqa: E402
 from defender.learning.core import config  # noqa: E402
 from defender.learning.core.config import RunUnprocessable  # noqa: E402
 from defender.learning.leads.lead_author_engine import LEAD_AUTHOR_DEF  # noqa: E402
+from defender._text import is_content_less  # noqa: E402
 from defender.learning.pipeline._pydantic_stage import (  # noqa: E402
-    _is_content_less,
     _last_response_is_empty_text,
     run_stage,
 )
@@ -180,14 +180,14 @@ def test_content_less_classifies_by_rendering_not_by_isspace():
     for ch in ("​", "﻿", "­", "⁠", "\x00"):
         assert not ch.isspace()
         assert ch.strip() == ch  # strip() cannot see these
-        assert _is_content_less(ch)
+        assert is_content_less(ch)
     for ch in (" ", "　", " "):
         assert ch.isspace()
         assert ch.strip() == ""   # strip() already saw these
-        assert _is_content_less(ch)
-    assert _is_content_less("")
-    assert not _is_content_less("x")
-    assert not _is_content_less("​﻿x ")
+        assert is_content_less(ch)
+    assert is_content_less("")
+    assert not is_content_less("x")
+    assert not is_content_less("​﻿x ")
 
 
 # ===========================================================================
