@@ -15,6 +15,7 @@ import yaml
 
 from defender import _git
 from defender.learning.pipeline._prompt import stage_user_message, structured_json_body
+from defender._text import is_content_less
 from defender._untrusted import wrap
 from defender._corpus import iter_lessons
 
@@ -164,7 +165,9 @@ def _result_list(result: dict, key: str) -> list[Any]:
 
 def _commit_message(result: dict, noun: str) -> str:
     msg = result.get("commit_message")
-    if not isinstance(msg, str) or not msg.strip():
+    # A commit message that renders as nothing is no message at all -- and this gate is
+    # what stands between the loop and committing a lesson edit unexplained (#722).
+    if not isinstance(msg, str) or is_content_less(msg):
         raise AuthorError(
             f"AUTHOR_RESULT reported committed {noun} without a non-empty "
             "commit_message; refusing to commit"
@@ -174,7 +177,7 @@ def _commit_message(result: dict, noun: str) -> str:
 
 def _result_entry_id(bucket: str, entry: Any, id_key: str) -> str:
     if bucket == "committed":
-        if not isinstance(entry, str) or not entry:
+        if not isinstance(entry, str) or is_content_less(entry):
             raise AuthorError(
                 f"AUTHOR_RESULT committed entries must be non-empty {id_key} strings"
             )
@@ -182,7 +185,7 @@ def _result_entry_id(bucket: str, entry: Any, id_key: str) -> str:
     if not isinstance(entry, dict):
         raise AuthorError(f"AUTHOR_RESULT {bucket} entries must be objects")
     rid = entry.get(id_key)
-    if not isinstance(rid, str) or not rid:
+    if not isinstance(rid, str) or is_content_less(rid):
         raise AuthorError(
             f"AUTHOR_RESULT {bucket} entries must include a non-empty {id_key}"
         )

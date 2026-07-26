@@ -8,6 +8,7 @@ import yaml
 
 from defender._yaml import safe_load
 from defender._frontmatter import FrontmatterError, parse_frontmatter
+from defender._text import is_content_less, strip_zero_width
 from defender.learning.core.config import (
     ACTOR_OBSERVATION_TYPES,
     ALL_FINDING_TYPES,
@@ -31,6 +32,11 @@ def normalize_disposition(report_path: Path) -> str:
         head = "\n".join(text.splitlines()[:30])
         raise RunUnprocessable(f"report.md {e}\n--- {report_path} (head) ---\n{head}") from e
     disp = fm.get("disposition")
+    if isinstance(disp, str):
+        # The report is written by a model reading attacker-influenced alert data;
+        # a zero-width character clinging to the keyword must not decide whether the
+        # case is processable at all (#722). Match on what the value renders as.
+        disp = strip_zero_width(disp).strip()
     if disp not in DISPOSITION_ENUM:
         raise RunUnprocessable(
             f"report.md disposition={disp!r} not in {sorted(DISPOSITION_ENUM)}"
@@ -88,7 +94,11 @@ def normalize_judge_yaml(text: str) -> str:
 def _outcome_keyword_in(outcome_value: Any, enum: set[str]) -> str:
     if not isinstance(outcome_value, str):
         raise RunUnprocessable(f"judge `outcome` is not a string: {type(outcome_value)}")
-    first = re.split(r"[\s.,;:]", outcome_value.strip(), maxsplit=1)[0]
+    # strip_zero_width before the split, not after: the zero-width characters are the
+    # ones `.strip()` cannot see, and one of them clinging to `caught` must not turn a
+    # judged case unprocessable (#722). Whitespace survives it, so the split still cuts
+    # the keyword off the rationale that follows.
+    first = re.split(r"[\s.,;:]", strip_zero_width(outcome_value).strip(), maxsplit=1)[0]
     if first not in enum:
         raise RunUnprocessable(f"judge outcome keyword {first!r} not in {sorted(enum)}")
     return first
@@ -143,7 +153,7 @@ def _validate_judge_resolution_method(doc: dict[str, Any]) -> None:
     if "resolution_method" not in doc:
         return
     rm = doc["resolution_method"]
-    if not isinstance(rm, str) or not rm.strip():
+    if not isinstance(rm, str) or is_content_less(rm):
         raise RunUnprocessable("judge `resolution_method` must be a non-empty string")
 
 
@@ -177,7 +187,7 @@ def _validate_finding(i: int, f: Any, allowed_types: set[str]) -> None:
             raise RunUnprocessable(f"finding[{i}] missing key: {k}")
     for k in ("subject_anchor", "subject_topic"):
         v = f[k]
-        if not isinstance(v, str) or not v.strip():
+        if not isinstance(v, str) or is_content_less(v):
             raise RunUnprocessable(f"finding[{i}].{k} must be a non-empty string")
     if f["type"] not in allowed_types:
         raise RunUnprocessable(
@@ -194,7 +204,7 @@ def _validate_actor_observation(i: int, o: Any) -> None:
         if k not in o:
             raise RunUnprocessable(f"actor_observations[{i}] missing key: {k}")
         v = o[k]
-        if not isinstance(v, str) or not v.strip():
+        if not isinstance(v, str) or is_content_less(v):
             raise RunUnprocessable(f"actor_observations[{i}].{k} must be a non-empty string")
     if o["type"] not in ACTOR_OBSERVATION_TYPES:
         raise RunUnprocessable(
@@ -235,8 +245,15 @@ def _validate_environment_observation(i: int, o: Any) -> None:
             f"environment_observations[{i}].alert_rule_ids must be a non-empty "
             "list (the retrieval anchor)"
         )
+    # A list of ids that render as nothing is as anchorless as an empty list, and
+    # `persist.py` stores these as THE retrieval anchor for the fact (#722).
+    if any(not isinstance(r, str) or is_content_less(r) for r in rule_ids):
+        raise RunUnprocessable(
+            f"environment_observations[{i}].alert_rule_ids entries must be "
+            "non-empty strings (the retrieval anchor)"
+        )
     for k in ("relevance_criteria", "fact"):
-        if not isinstance(o[k], str) or not o[k].strip():
+        if not isinstance(o[k], str) or is_content_less(o[k]):
             raise RunUnprocessable(
                 f"environment_observations[{i}].{k} must be a non-empty string"
             )

@@ -330,3 +330,49 @@ def test_acquire_flock_closes_handle_when_error_propagates(tmp_path: Path, monke
         shared.acquire_flock(lock)
     assert opened, "acquire_flock never opened the lock file"
     assert all(fh.closed for fh in opened), "acquire_flock leaked the lock-file handle"
+
+
+# ===========================================================================
+# content-less gates — the #722 defect class on the author's own result fields
+# ===========================================================================
+
+_CONTENT_LESS = [
+    ("ascii-space", " "),
+    ("U+00A0-no-break-space", " "),
+    ("U+200B-zero-width-space", "​"),
+    ("U+FEFF-byte-order-mark", "﻿"),
+    ("U+0000-nul", "\x00"),
+]
+_CL_IDS = [t for t, _ in _CONTENT_LESS]
+
+
+@pytest.mark.parametrize(("tag", "text"), _CONTENT_LESS, ids=_CL_IDS)
+def test_commit_message_rejects_a_message_that_renders_as_nothing(tag, text):
+    """This gate is what stands between the loop and committing a lesson edit with no
+    explanation. `not msg.strip()` let the zero-width spellings through (#722), so a
+    curator could commit under a message a reviewer sees as blank."""
+    with pytest.raises(shared.AuthorError, match="without a non-empty"):
+        shared._commit_message({"commit_message": text}, "findings")
+
+
+def test_commit_message_still_accepts_a_real_message_verbatim():
+    """The control — including a message that merely CARRIES an invisible character."""
+    assert shared._commit_message({"commit_message": "﻿fold two findings"}, "findings") == (
+        "﻿fold two findings"
+    )
+
+
+@pytest.mark.parametrize(("tag", "text"), _CONTENT_LESS, ids=_CL_IDS)
+def test_result_entry_ids_that_render_as_nothing_are_rejected(tag, text):
+    """Both arms of `_result_entry_id`. The old truthiness check (`not entry`) was even
+    blinder than `.strip()`: a lone ASCII space passed as an entry id."""
+    with pytest.raises(shared.AuthorError, match="committed entries must be non-empty"):
+        shared._result_entry_id("committed", text, "finding_id")
+    with pytest.raises(shared.AuthorError, match="must include a non-empty"):
+        shared._result_entry_id("skipped", {"finding_id": text}, "finding_id")
+
+
+def test_result_entry_ids_still_accept_real_ids():
+    assert shared._result_entry_id("committed", "run-1/0", "finding_id") == "run-1/0"
+    assert shared._result_entry_id(
+        "skipped", {"finding_id": "run-1/0"}, "finding_id") == "run-1/0"

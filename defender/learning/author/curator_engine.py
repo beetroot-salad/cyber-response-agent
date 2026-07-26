@@ -12,6 +12,7 @@ from uuid import uuid4
 
 from pydantic_ai.exceptions import ModelRetry
 
+from defender._text import is_content_less
 from defender._untrusted import wrap
 from defender.hooks.record_lesson_load import LESSON_CORPORA as _LESSON_CORPORA
 from defender.learning.author import shared as _shared
@@ -322,7 +323,7 @@ def run_curator_stage(  # noqa: PLR0913 — the spawn contract (per-spawn inputs
         raise AuthorError(f"curator ({batch_id}) did not complete: {e}") from e
     body = extract_marked_result(text, "AUTHOR_RESULT:")
     if body is None:
-        if not text.strip():
+        if is_content_less(text):
             return {}
         raise AuthorError(
             f"curator ({batch_id}) emitted no AUTHOR_RESULT marker:\n{text[-2000:]}"

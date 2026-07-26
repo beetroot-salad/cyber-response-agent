@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import asyncio
-import unicodedata
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from defender._text import is_content_less
 from defender.learning.core.config import (
     FatalConfigError,
     RunUnprocessable,
@@ -59,31 +59,6 @@ async def _drive(
     )
 
 
-# Unicode categories whose members occupy no visual space: Cc (controls, incl. NUL),
-# Cf (formats — U+200B ZERO WIDTH SPACE, U+FEFF, U+00AD SOFT HYPHEN, the tag block),
-# Cs (lone surrogates). Deliberately excludes Co/Cn — private-use and codepoints this
-# CPython's UCD has not seen yet can carry a glyph, and "empty" must not depend on the
-# interpreter's Unicode version.
-_INVISIBLE_CATEGORIES = frozenset({"Cc", "Cf", "Cs"})
-
-
-def _is_content_less(text: str) -> bool:
-    """Whether `text` carries no visible character — this pipeline's "empty output" test.
-
-    NOT ``not text.strip()``. strip() keys off ``str.isspace()``, which splits the
-    invisible characters the wrong way in both directions: True for the visible-width
-    separators (U+00A0, U+3000, U+2028, U+0085, U+001C-1F), False for the zero-width
-    ones (U+200B, U+FEFF, U+00AD, U+2060) and for NUL. So a response rendering as
-    nothing at all passed the guard as real stage output, while one carrying only
-    spacing did not — and a stage's own text is steerable by the attacker-influenced
-    alert/gather text it was asked to analyze, which made the "did this stage produce
-    output" decision steerable with it (#722). One visible character is content.
-    """
-    return all(
-        ch.isspace() or unicodedata.category(ch) in _INVISIBLE_CATEGORIES for ch in text
-    )
-
-
 def _last_response_is_empty_text(messages: list[dict]) -> bool:
     """Whether the latest model response contains only content-less text parts."""
     for record in reversed(messages):
@@ -93,7 +68,7 @@ def _last_response_is_empty_text(messages: list[dict]) -> bool:
         parts = message.get("parts") or []
         return bool(parts) and all(
             part.get("part_kind") == "text"
-            and _is_content_less(str(part.get("content") or ""))
+            and is_content_less(str(part.get("content") or ""))
             for part in parts
         )
     return False
@@ -146,6 +121,6 @@ def run_stage(  # noqa: PLR0913 — every param is load-bearing per-call transpo
     finally:
         logger.close()
     out = str(result.output or "")
-    if require_output and _is_content_less(out):
+    if require_output and is_content_less(out):
         raise RunUnprocessable(f"{stage} ({label}) returned empty output")
     return out
