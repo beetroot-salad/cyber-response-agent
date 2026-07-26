@@ -1,0 +1,429 @@
+{
+  "lead_id": "l-010",
+  "seq": 0,
+  "controls": [
+    {
+      "name": "C-7d",
+      "window": [
+        "2026-06-19T11:08:28.000Z",
+        "2026-07-19T11:08:28.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-19T11:08:28.000Z\" AND @timestamp < \"2026-07-19T11:08:28.000Z\"\n        AND user.name == \"dev.dana\"\n        AND event.outcome IS NOT NULL\n| STATS accepted   = COUNT(*) WHERE event.outcome == \"success\",\n        failed     = COUNT(*) WHERE event.outcome == \"failure\",\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY auth_method = CASE(message LIKE \"*publickey*\", \"publickey\",\n                              message LIKE \"*password*\",  \"password\", \"other\"),\n           source.ip, host.name\n| SORT accepted DESC, failed DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-19T11:08:28.000Z\" AND @timestamp < \"2026-07-19T11:08:28.000Z\"\n        AND user.name == \"dev.dana\"\n        AND event.outcome IS NOT NULL\n| STATS accepted   = COUNT(*) WHERE event.outcome == \"success\",\n        failed     = COUNT(*) WHERE event.outcome == \"failure\",\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY auth_method = CASE(message LIKE \"*publickey*\", \"publickey\",\n                              message LIKE \"*password*\",  \"password\", \"other\"),\n           source.ip, host.name\n| SORT accepted DESC, failed DESC",
+        "columns": [
+          {
+            "name": "accepted",
+            "type": "long"
+          },
+          {
+            "name": "failed",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "auth_method",
+            "type": "keyword"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 7,
+        "values": [
+          {
+            "accepted": 1477,
+            "failed": 1620,
+            "first_seen": "2026-06-19T11:47:39.714Z",
+            "last_seen": "2026-07-02T02:10:12.923Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.15",
+            "host.name": "jump-box-1"
+          },
+          {
+            "accepted": 1092,
+            "failed": 1386,
+            "first_seen": "2026-07-02T11:57:54.968Z",
+            "last_seen": "2026-07-13T10:27:51.587Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.23",
+            "host.name": "jump-box-1"
+          },
+          {
+            "accepted": 10,
+            "failed": 30,
+            "first_seen": "2026-07-17T14:25:19.284Z",
+            "last_seen": "2026-07-17T15:22:40.206Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.20",
+            "host.name": "jump-box-1"
+          },
+          {
+            "accepted": 0,
+            "failed": 1620,
+            "first_seen": "2026-06-19T11:47:37.711Z",
+            "last_seen": "2026-07-02T01:28:36.722Z",
+            "auth_method": "other",
+            "source.ip": "172.18.0.15",
+            "host.name": "jump-box-1"
+          },
+          {
+            "accepted": 0,
+            "failed": 1386,
+            "first_seen": "2026-07-02T11:57:52.741Z",
+            "last_seen": "2026-07-12T20:06:35.597Z",
+            "auth_method": "other",
+            "source.ip": "172.18.0.23",
+            "host.name": "jump-box-1"
+          },
+          {
+            "accepted": 0,
+            "failed": 30,
+            "first_seen": "2026-07-17T14:25:16.702Z",
+            "last_seen": "2026-07-17T15:22:37.878Z",
+            "auth_method": "other",
+            "source.ip": "172.18.0.20",
+            "host.name": "jump-box-1"
+          },
+          {
+            "accepted": 0,
+            "failed": 24,
+            "first_seen": "2026-07-03T12:05:20.000Z",
+            "last_seen": "2026-07-03T12:05:55.000Z",
+            "auth_method": "other",
+            "source.ip": "172.18.0.13",
+            "host.name": "db-1"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-06-12T11:08:28.000Z",
+        "2026-07-12T11:08:28.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-12T11:08:28.000Z\" AND @timestamp < \"2026-07-12T11:08:28.000Z\"\n        AND user.name == \"dev.dana\"\n        AND event.outcome IS NOT NULL\n| STATS accepted   = COUNT(*) WHERE event.outcome == \"success\",\n        failed     = COUNT(*) WHERE event.outcome == \"failure\",\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY auth_method = CASE(message LIKE \"*publickey*\", \"publickey\",\n                              message LIKE \"*password*\",  \"password\", \"other\"),\n           source.ip, host.name\n| SORT accepted DESC, failed DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-12T11:08:28.000Z\" AND @timestamp < \"2026-07-12T11:08:28.000Z\"\n        AND user.name == \"dev.dana\"\n        AND event.outcome IS NOT NULL\n| STATS accepted   = COUNT(*) WHERE event.outcome == \"success\",\n        failed     = COUNT(*) WHERE event.outcome == \"failure\",\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY auth_method = CASE(message LIKE \"*publickey*\", \"publickey\",\n                              message LIKE \"*password*\",  \"password\", \"other\"),\n           source.ip, host.name\n| SORT accepted DESC, failed DESC",
+        "columns": [
+          {
+            "name": "accepted",
+            "type": "long"
+          },
+          {
+            "name": "failed",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "auth_method",
+            "type": "keyword"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 10,
+        "values": [
+          {
+            "accepted": 1687,
+            "failed": 1851,
+            "first_seen": "2026-06-18T15:29:42.456Z",
+            "last_seen": "2026-07-02T02:10:12.923Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.15",
+            "host.name": "jump-box-1"
+          },
+          {
+            "accepted": 1074,
+            "failed": 1350,
+            "first_seen": "2026-07-02T11:57:54.968Z",
+            "last_seen": "2026-07-12T10:58:38.725Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.23",
+            "host.name": "jump-box-1"
+          },
+          {
+            "accepted": 963,
+            "failed": 1134,
+            "first_seen": "2026-06-14T20:34:53.196Z",
+            "last_seen": "2026-06-18T14:25:25.514Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.25",
+            "host.name": "jump-box-1"
+          },
+          {
+            "accepted": 22,
+            "failed": 33,
+            "first_seen": "2026-06-13T20:15:09.413Z",
+            "last_seen": "2026-06-14T01:55:07.590Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.6",
+            "host.name": "jump-box-1"
+          },
+          {
+            "accepted": 14,
+            "failed": 0,
+            "first_seen": "2026-06-12T15:55:04.801Z",
+            "last_seen": "2026-06-12T15:55:04.801Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.11",
+            "host.name": "jump-box-1"
+          },
+          {
+            "accepted": 0,
+            "failed": 1851,
+            "first_seen": "2026-06-18T16:24:27.254Z",
+            "last_seen": "2026-07-02T01:28:36.722Z",
+            "auth_method": "other",
+            "source.ip": "172.18.0.15",
+            "host.name": "jump-box-1"
+          },
+          {
+            "accepted": 0,
+            "failed": 1350,
+            "first_seen": "2026-07-02T11:57:52.741Z",
+            "last_seen": "2026-07-12T10:58:34.301Z",
+            "auth_method": "other",
+            "source.ip": "172.18.0.23",
+            "host.name": "jump-box-1"
+          },
+          {
+            "accepted": 0,
+            "failed": 1134,
+            "first_seen": "2026-06-14T20:34:51.477Z",
+            "last_seen": "2026-06-18T12:14:41.394Z",
+            "auth_method": "other",
+            "source.ip": "172.18.0.25",
+            "host.name": "jump-box-1"
+          },
+          {
+            "accepted": 0,
+            "failed": 33,
+            "first_seen": "2026-06-13T20:15:07.782Z",
+            "last_seen": "2026-06-13T20:15:12.474Z",
+            "auth_method": "other",
+            "source.ip": "172.18.0.6",
+            "host.name": "jump-box-1"
+          },
+          {
+            "accepted": 0,
+            "failed": 24,
+            "first_seen": "2026-07-03T12:05:20.000Z",
+            "last_seen": "2026-07-03T12:05:55.000Z",
+            "auth_method": "other",
+            "source.ip": "172.18.0.13",
+            "host.name": "db-1"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-06-05T11:08:28.000Z",
+        "2026-07-05T11:08:28.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-05T11:08:28.000Z\" AND @timestamp < \"2026-07-05T11:08:28.000Z\"\n        AND user.name == \"dev.dana\"\n        AND event.outcome IS NOT NULL\n| STATS accepted   = COUNT(*) WHERE event.outcome == \"success\",\n        failed     = COUNT(*) WHERE event.outcome == \"failure\",\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY auth_method = CASE(message LIKE \"*publickey*\", \"publickey\",\n                              message LIKE \"*password*\",  \"password\", \"other\"),\n           source.ip, host.name\n| SORT accepted DESC, failed DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-05T11:08:28.000Z\" AND @timestamp < \"2026-07-05T11:08:28.000Z\"\n        AND user.name == \"dev.dana\"\n        AND event.outcome IS NOT NULL\n| STATS accepted   = COUNT(*) WHERE event.outcome == \"success\",\n        failed     = COUNT(*) WHERE event.outcome == \"failure\",\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY auth_method = CASE(message LIKE \"*publickey*\", \"publickey\",\n                              message LIKE \"*password*\",  \"password\", \"other\"),\n           source.ip, host.name\n| SORT accepted DESC, failed DESC",
+        "columns": [
+          {
+            "name": "accepted",
+            "type": "long"
+          },
+          {
+            "name": "failed",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "auth_method",
+            "type": "keyword"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 15,
+        "values": [
+          {
+            "accepted": 1687,
+            "failed": 1851,
+            "first_seen": "2026-06-18T15:29:42.456Z",
+            "last_seen": "2026-07-02T02:10:12.923Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.15",
+            "host.name": "jump-box-1"
+          },
+          {
+            "accepted": 1241,
+            "failed": 765,
+            "first_seen": "2026-06-05T13:26:43.907Z",
+            "last_seen": "2026-06-10T04:16:56.512Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.14",
+            "host.name": "jump-box-1"
+          },
+          {
+            "accepted": 963,
+            "failed": 1134,
+            "first_seen": "2026-06-14T20:34:53.196Z",
+            "last_seen": "2026-06-18T14:25:25.514Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.25",
+            "host.name": "jump-box-1"
+          },
+          {
+            "accepted": 402,
+            "failed": 396,
+            "first_seen": "2026-07-02T11:57:54.968Z",
+            "last_seen": "2026-07-05T02:01:48.012Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.23",
+            "host.name": "jump-box-1"
+          },
+          {
+            "accepted": 22,
+            "failed": 33,
+            "first_seen": "2026-06-13T20:15:09.413Z",
+            "last_seen": "2026-06-14T01:55:07.590Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.6",
+            "host.name": "jump-box-1"
+          },
+          {
+            "accepted": 16,
+            "failed": 0,
+            "first_seen": "2026-06-10T18:25:52.290Z",
+            "last_seen": "2026-06-10T18:25:52.290Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.7",
+            "host.name": "jump-box-1"
+          },
+          {
+            "accepted": 14,
+            "failed": 0,
+            "first_seen": "2026-06-12T15:55:04.801Z",
+            "last_seen": "2026-06-12T15:55:04.801Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.11",
+            "host.name": "jump-box-1"
+          },
+          {
+            "accepted": 0,
+            "failed": 1851,
+            "first_seen": "2026-06-18T16:24:27.254Z",
+            "last_seen": "2026-07-02T01:28:36.722Z",
+            "auth_method": "other",
+            "source.ip": "172.18.0.15",
+            "host.name": "jump-box-1"
+          },
+          {
+            "accepted": 0,
+            "failed": 1134,
+            "first_seen": "2026-06-14T20:34:51.477Z",
+            "last_seen": "2026-06-18T12:14:41.394Z",
+            "auth_method": "other",
+            "source.ip": "172.18.0.25",
+            "host.name": "jump-box-1"
+          },
+          {
+            "accepted": 0,
+            "failed": 765,
+            "first_seen": "2026-06-05T18:13:08.066Z",
+            "last_seen": "2026-06-09T23:28:13.957Z",
+            "auth_method": "other",
+            "source.ip": "172.18.0.14",
+            "host.name": "jump-box-1"
+          },
+          {
+            "accepted": 0,
+            "failed": 396,
+            "first_seen": "2026-07-02T11:57:52.741Z",
+            "last_seen": "2026-07-04T16:35:13.183Z",
+            "auth_method": "other",
+            "source.ip": "172.18.0.23",
+            "host.name": "jump-box-1"
+          },
+          {
+            "accepted": 0,
+            "failed": 64,
+            "first_seen": "2026-06-08T06:36:05.000Z",
+            "last_seen": "2026-06-08T06:36:32.000Z",
+            "auth_method": "other",
+            "source.ip": "172.18.0.21",
+            "host.name": "db-1"
+          },
+          {
+            "accepted": 0,
+            "failed": 60,
+            "first_seen": "2026-06-08T06:36:37.000Z",
+            "last_seen": "2026-06-08T06:37:05.000Z",
+            "auth_method": "other",
+            "source.ip": "172.18.0.21",
+            "host.name": "web-1"
+          },
+          {
+            "accepted": 0,
+            "failed": 33,
+            "first_seen": "2026-06-13T20:15:07.782Z",
+            "last_seen": "2026-06-13T20:15:12.474Z",
+            "auth_method": "other",
+            "source.ip": "172.18.0.6",
+            "host.name": "jump-box-1"
+          },
+          {
+            "accepted": 0,
+            "failed": 24,
+            "first_seen": "2026-07-03T12:05:20.000Z",
+            "last_seen": "2026-07-03T12:05:55.000Z",
+            "auth_method": "other",
+            "source.ip": "172.18.0.13",
+            "host.name": "db-1"
+          }
+        ]
+      }
+    }
+  ]
+}

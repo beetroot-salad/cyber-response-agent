@@ -1,0 +1,96 @@
+{
+  "lead_id": "l-005",
+  "seq": 23,
+  "controls": [
+    {
+      "name": "C-7d",
+      "window": [
+        "2026-07-19T10:34:24.500Z",
+        "2026-07-19T11:34:24.500Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-19T10:34:24.500Z\" AND @timestamp < \"2026-07-19T11:34:24.500Z\"\n| WHERE host.name == \"db-1\" AND event.outcome == \"success\"\n| STATS BY source.ip, user.name\n| SORT source.ip, user.name",
+      "live": false,
+      "payload": null
+    },
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T10:34:24.500Z",
+        "2026-07-12T11:34:24.500Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-12T10:34:24.500Z\" AND @timestamp < \"2026-07-12T11:34:24.500Z\"\n| WHERE host.name == \"db-1\" AND event.outcome == \"success\"\n| STATS BY source.ip, user.name\n| SORT source.ip, user.name",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-12T10:34:24.500Z\" AND @timestamp < \"2026-07-12T11:34:24.500Z\"\n| WHERE host.name == \"db-1\" AND event.outcome == \"success\"\n| STATS BY source.ip, user.name\n| SORT source.ip, user.name",
+        "columns": [
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "source.ip": "172.18.0.17",
+            "user.name": "sre.ben"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T10:34:24.500Z",
+        "2026-07-05T11:34:24.500Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-05T10:34:24.500Z\" AND @timestamp < \"2026-07-05T11:34:24.500Z\"\n| WHERE host.name == \"db-1\" AND event.outcome == \"success\"\n| STATS BY source.ip, user.name\n| SORT source.ip, user.name",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-05T10:34:24.500Z\" AND @timestamp < \"2026-07-05T11:34:24.500Z\"\n| WHERE host.name == \"db-1\" AND event.outcome == \"success\"\n| STATS BY source.ip, user.name\n| SORT source.ip, user.name",
+        "columns": [
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    }
+  ],
+  "attack_contribution": {
+    "window": [
+      "2026-07-26T11:04:03.000Z",
+      "2026-07-26T11:04:46.000Z"
+    ],
+    "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-26T11:04:03.000Z\" AND @timestamp < \"2026-07-26T11:04:46.000Z\"\n| WHERE host.name == \"db-1\" AND event.outcome == \"success\"\n| STATS BY source.ip, user.name\n| SORT source.ip, user.name",
+    "payload": {
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-26T11:04:03.000Z\" AND @timestamp < \"2026-07-26T11:04:46.000Z\"\n| WHERE host.name == \"db-1\" AND event.outcome == \"success\"\n| STATS BY source.ip, user.name\n| SORT source.ip, user.name",
+      "columns": [
+        {
+          "name": "source.ip",
+          "type": "ip"
+        },
+        {
+          "name": "user.name",
+          "type": "keyword"
+        }
+      ],
+      "row_count": 1,
+      "values": [
+        {
+          "source.ip": null,
+          "user.name": null
+        }
+      ]
+    }
+  }
+}

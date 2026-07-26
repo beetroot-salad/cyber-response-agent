@@ -1,0 +1,301 @@
+{
+  "lead_id": "l-004",
+  "seq": 1,
+  "controls": [
+    {
+      "name": "C-7d",
+      "window": [
+        "2026-07-18T07:17:07.500Z",
+        "2026-07-18T08:17:07.500Z"
+      ],
+      "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-07-18T07:17:07.500Z\" AND @timestamp < \"2026-07-18T08:17:07.500Z\"\n| WHERE source.ip == \"172.18.0.15\" OR destination.ip == \"172.18.0.15\"\n| STATS conns = COUNT(*), bytes_out = SUM(source.bytes), bytes_in = SUM(destination.bytes), dest_ips = COUNT_DISTINCT(destination.ip), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp) BY destination.ip, destination.port\n| SORT conns DESC\n| LIMIT 1000",
+      "live": false,
+      "payload": null
+    },
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-11T07:17:07.500Z",
+        "2026-07-11T08:17:07.500Z"
+      ],
+      "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-07-11T07:17:07.500Z\" AND @timestamp < \"2026-07-11T08:17:07.500Z\"\n| WHERE source.ip == \"172.18.0.15\" OR destination.ip == \"172.18.0.15\"\n| STATS conns = COUNT(*), bytes_out = SUM(source.bytes), bytes_in = SUM(destination.bytes), dest_ips = COUNT_DISTINCT(destination.ip), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp) BY destination.ip, destination.port\n| SORT conns DESC\n| LIMIT 1000",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-07-11T07:17:07.500Z\" AND @timestamp < \"2026-07-11T08:17:07.500Z\"\n| WHERE source.ip == \"172.18.0.15\" OR destination.ip == \"172.18.0.15\"\n| STATS conns = COUNT(*), bytes_out = SUM(source.bytes), bytes_in = SUM(destination.bytes), dest_ips = COUNT_DISTINCT(destination.ip), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp) BY destination.ip, destination.port\n| SORT conns DESC\n| LIMIT 1000",
+        "columns": [
+          {
+            "name": "conns",
+            "type": "long"
+          },
+          {
+            "name": "bytes_out",
+            "type": "long"
+          },
+          {
+            "name": "bytes_in",
+            "type": "long"
+          },
+          {
+            "name": "dest_ips",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "destination.ip",
+            "type": "ip"
+          },
+          {
+            "name": "destination.port",
+            "type": "long"
+          }
+        ],
+        "row_count": 6,
+        "values": [
+          {
+            "conns": 1229,
+            "bytes_out": 7312498,
+            "bytes_in": 4614966,
+            "dest_ips": 1,
+            "first_seen": "2026-07-11T07:17:14.889Z",
+            "last_seen": "2026-07-11T08:17:07.161Z",
+            "destination.ip": "172.18.0.7",
+            "destination.port": 9200
+          },
+          {
+            "conns": 31,
+            "bytes_out": 6324,
+            "bytes_in": 6386,
+            "dest_ips": 1,
+            "first_seen": "2026-07-11T07:17:24.938Z",
+            "last_seen": "2026-07-11T08:15:45.286Z",
+            "destination.ip": "172.18.0.15",
+            "destination.port": 22
+          },
+          {
+            "conns": 16,
+            "bytes_out": 28990,
+            "bytes_in": 39510,
+            "dest_ips": 1,
+            "first_seen": "2026-07-11T07:17:45.993Z",
+            "last_seen": "2026-07-11T08:16:40.334Z",
+            "destination.ip": "172.18.0.15",
+            "destination.port": 5432
+          },
+          {
+            "conns": 2,
+            "bytes_out": 120,
+            "bytes_in": 80,
+            "dest_ips": 1,
+            "first_seen": "2026-07-11T07:49:55.547Z",
+            "last_seen": "2026-07-11T07:51:52.473Z",
+            "destination.ip": "172.18.0.15",
+            "destination.port": 80
+          },
+          {
+            "conns": 2,
+            "bytes_out": 120,
+            "bytes_in": 80,
+            "dest_ips": 1,
+            "first_seen": "2026-07-11T07:49:55.548Z",
+            "last_seen": "2026-07-11T07:51:52.475Z",
+            "destination.ip": "172.18.0.15",
+            "destination.port": 443
+          },
+          {
+            "conns": 2,
+            "bytes_out": 120,
+            "bytes_in": 80,
+            "dest_ips": 1,
+            "first_seen": "2026-07-11T07:49:55.552Z",
+            "last_seen": "2026-07-11T07:51:52.479Z",
+            "destination.ip": "172.18.0.15",
+            "destination.port": 8080
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-04T07:17:07.500Z",
+        "2026-07-04T08:17:07.500Z"
+      ],
+      "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-07-04T07:17:07.500Z\" AND @timestamp < \"2026-07-04T08:17:07.500Z\"\n| WHERE source.ip == \"172.18.0.15\" OR destination.ip == \"172.18.0.15\"\n| STATS conns = COUNT(*), bytes_out = SUM(source.bytes), bytes_in = SUM(destination.bytes), dest_ips = COUNT_DISTINCT(destination.ip), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp) BY destination.ip, destination.port\n| SORT conns DESC\n| LIMIT 1000",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-07-04T07:17:07.500Z\" AND @timestamp < \"2026-07-04T08:17:07.500Z\"\n| WHERE source.ip == \"172.18.0.15\" OR destination.ip == \"172.18.0.15\"\n| STATS conns = COUNT(*), bytes_out = SUM(source.bytes), bytes_in = SUM(destination.bytes), dest_ips = COUNT_DISTINCT(destination.ip), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp) BY destination.ip, destination.port\n| SORT conns DESC\n| LIMIT 1000",
+        "columns": [
+          {
+            "name": "conns",
+            "type": "long"
+          },
+          {
+            "name": "bytes_out",
+            "type": "long"
+          },
+          {
+            "name": "bytes_in",
+            "type": "long"
+          },
+          {
+            "name": "dest_ips",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "destination.ip",
+            "type": "ip"
+          },
+          {
+            "name": "destination.port",
+            "type": "long"
+          }
+        ],
+        "row_count": 6,
+        "values": [
+          {
+            "conns": 1196,
+            "bytes_out": 7213979,
+            "bytes_in": 4532176,
+            "dest_ips": 1,
+            "first_seen": "2026-07-04T07:17:11.492Z",
+            "last_seen": "2026-07-04T08:17:05.061Z",
+            "destination.ip": "172.18.0.7",
+            "destination.port": 9200
+          },
+          {
+            "conns": 33,
+            "bytes_out": 6732,
+            "bytes_in": 6798,
+            "dest_ips": 1,
+            "first_seen": "2026-07-04T07:17:56.913Z",
+            "last_seen": "2026-07-04T08:16:53.449Z",
+            "destination.ip": "172.18.0.15",
+            "destination.port": 22
+          },
+          {
+            "conns": 18,
+            "bytes_out": 31020,
+            "bytes_in": 42582,
+            "dest_ips": 1,
+            "first_seen": "2026-07-04T07:22:42.680Z",
+            "last_seen": "2026-07-04T08:13:47.224Z",
+            "destination.ip": "172.18.0.15",
+            "destination.port": 5432
+          },
+          {
+            "conns": 3,
+            "bytes_out": 180,
+            "bytes_in": 120,
+            "dest_ips": 1,
+            "first_seen": "2026-07-04T07:29:55.810Z",
+            "last_seen": "2026-07-04T08:10:18.822Z",
+            "destination.ip": "172.18.0.15",
+            "destination.port": 80
+          },
+          {
+            "conns": 3,
+            "bytes_out": 180,
+            "bytes_in": 120,
+            "dest_ips": 1,
+            "first_seen": "2026-07-04T07:29:55.812Z",
+            "last_seen": "2026-07-04T08:10:18.824Z",
+            "destination.ip": "172.18.0.15",
+            "destination.port": 443
+          },
+          {
+            "conns": 3,
+            "bytes_out": 180,
+            "bytes_in": 120,
+            "dest_ips": 1,
+            "first_seen": "2026-07-04T07:29:55.815Z",
+            "last_seen": "2026-07-04T08:10:18.828Z",
+            "destination.ip": "172.18.0.15",
+            "destination.port": 8080
+          }
+        ]
+      }
+    }
+  ],
+  "attack_contribution": {
+    "window": [
+      "2026-07-25T07:45:35.000Z",
+      "2026-07-25T07:48:40.000Z"
+    ],
+    "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-07-25T07:45:35.000Z\" AND @timestamp < \"2026-07-25T07:48:40.000Z\"\n| WHERE source.ip == \"172.18.0.15\" OR destination.ip == \"172.18.0.15\"\n| STATS conns = COUNT(*), bytes_out = SUM(source.bytes), bytes_in = SUM(destination.bytes), dest_ips = COUNT_DISTINCT(destination.ip), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp) BY destination.ip, destination.port\n| SORT conns DESC\n| LIMIT 1000",
+    "payload": {
+      "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-07-25T07:45:35.000Z\" AND @timestamp < \"2026-07-25T07:48:40.000Z\"\n| WHERE source.ip == \"172.18.0.15\" OR destination.ip == \"172.18.0.15\"\n| STATS conns = COUNT(*), bytes_out = SUM(source.bytes), bytes_in = SUM(destination.bytes), dest_ips = COUNT_DISTINCT(destination.ip), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp) BY destination.ip, destination.port\n| SORT conns DESC\n| LIMIT 1000",
+      "columns": [
+        {
+          "name": "conns",
+          "type": "long"
+        },
+        {
+          "name": "bytes_out",
+          "type": "long"
+        },
+        {
+          "name": "bytes_in",
+          "type": "long"
+        },
+        {
+          "name": "dest_ips",
+          "type": "long"
+        },
+        {
+          "name": "first_seen",
+          "type": "date"
+        },
+        {
+          "name": "last_seen",
+          "type": "date"
+        },
+        {
+          "name": "destination.ip",
+          "type": "ip"
+        },
+        {
+          "name": "destination.port",
+          "type": "long"
+        }
+      ],
+      "row_count": 2,
+      "values": [
+        {
+          "conns": 48,
+          "bytes_out": 118688,
+          "bytes_in": 120480,
+          "dest_ips": 1,
+          "first_seen": "2026-07-25T07:45:35.516Z",
+          "last_seen": "2026-07-25T07:48:37.064Z",
+          "destination.ip": "172.18.0.9",
+          "destination.port": 22
+        },
+        {
+          "conns": 33,
+          "bytes_out": 238778,
+          "bytes_in": 140179,
+          "dest_ips": 1,
+          "first_seen": "2026-07-25T07:45:38.594Z",
+          "last_seen": "2026-07-25T07:48:34.915Z",
+          "destination.ip": "172.18.0.19",
+          "destination.port": 9200
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,1 @@
+{"query": "FROM logs-zeek.ssh-*\n| STATS min_ts = MIN(@timestamp), max_ts = MAX(@timestamp), total_events = COUNT(*)", "columns": [{"name": "min_ts", "type": "date"}, {"name": "max_ts", "type": "date"}, {"name": "total_events", "type": "long"}], "row_count": 1, "values": [{"min_ts": "2026-05-24T06:04:49.792Z", "max_ts": "2026-07-25T10:35:43.717Z", "total_events": 143371}]}

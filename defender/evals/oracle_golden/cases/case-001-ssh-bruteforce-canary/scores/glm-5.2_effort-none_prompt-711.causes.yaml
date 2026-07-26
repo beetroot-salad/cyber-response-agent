@@ -1,0 +1,46 @@
+# Cause codes for `scores/glm-5.2_effort-none_prompt-711.json` (#711 M5).
+#
+# This tag re-records every projection against the prompt.md change that added
+# the missing baseline-existence condition to the suppression rule (#711 H3).
+# **It changed nothing.** Every lead in every case projected identically to
+# `glm-5.2_effort-none` -- including case-003 `l-001`, the false suppression the change was
+# written for. The errors below are therefore the same errors, unmoved.
+#
+# That is the finding, not a disappointment: the case-003 error is NOT explained
+# by the prompt's silence on baseline existence, so C-SUPPRESS-UNBASELINED needs a
+# different remedy and now needs ordinary evidence (>=5 instances across >=3
+# units) like any other cause, rather than the specification-defect exemption it
+# was carrying.
+projection: glm-5.2_effort-none
+causes:
+  l-002:
+    error: class                 # expected +event, projected 0
+    cause: C-INTENT-SCOPE
+    confounded_with: [C-HETERO-UNDER]
+    note: >
+      The lead is framed as a success hunt (what_to_summarize = Accepted/success)
+      and the attack produced no successes, so `[]` answers the lead's dominant
+      framing. Its seq1 sub-query is a wide auth query that carries the failure
+      burst, so the envelope is +event. Suspected mechanism: the projection
+      answers the framing rather than the union of the envelope.
+  l-006:
+    error: class                 # expected +event, projected +noise
+    cause: C-INTENT-SCOPE
+    confounded_with: [C-HETERO-UNDER]
+    note: >
+      Framed as pre-alert baseline establishment, and the projection read the
+      source's apparent routine to other hosts as +noise. Four of its seven
+      sub-queries cover the attack window and surface the burst.
+
+# Why both entries carry `confounded_with`, and why that is not hedging:
+#
+# After deriving `heterogeneous` mechanically (#711 M4), case-001's heterogeneous
+# leads are l-002, l-004 and l-006 — and the leads carrying an `intent_note` are
+# l-002 and l-006, which are exactly the two misses. H1 (heterogeneous-lead
+# under-projection) and H2 (intent-scoped answering) therefore have the same
+# witness set on the whole suite. They are one two-lead observation stated twice,
+# and no amount of re-reading these cases separates them.
+#
+# Separating them needs CROSSED recruitment: a heterogeneous lead with no
+# intent-scoping, and an intent-scoped lead that is homogeneous. #711 does not
+# promise that, and this file records the confound rather than picking a winner.

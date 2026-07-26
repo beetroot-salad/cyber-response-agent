@@ -1,0 +1,38 @@
+# Cause codes for `scores/glm-5.2_effort-none_prompt-711.json` (#711 M5).
+#
+# This tag re-records every projection against the prompt.md change that added
+# the missing baseline-existence condition to the suppression rule (#711 H3).
+# **It changed nothing.** Every lead in every case projected identically to
+# `glm-5.2_effort-none` -- including case-003 `l-001`, the false suppression the change was
+# written for. The errors below are therefore the same errors, unmoved.
+#
+# That is the finding, not a disappointment: the case-003 error is NOT explained
+# by the prompt's silence on baseline existence, so C-SUPPRESS-UNBASELINED needs a
+# different remedy and now needs ordinary evidence (>=5 instances across >=3
+# units) like any other cause, rather than the specification-defect exemption it
+# was carrying.
+projection: glm-5.2_effort-none
+causes:
+  l-002:
+    error: contradiction         # 9/9 on class; one volunteered value is refuted
+    cause: C-FABRICATED-VALUE
+    fields: ["alerts"]
+    note: >
+      The projection emitted `alerts: 1` for the detection-alerts sub-query — a
+      manufactured detection inside a lead whose class it called correctly. The
+      mutated story never performs a successful login, so the
+      `v2-sshd-success-after-failures` rule this sub-query counts never fires.
+
+      This is the sharpest instance of why class agreement is not enough: the case
+      scores a perfect 9/9 and the mutation leak check is CLEAN, and the only thing
+      that catches an invented alert row is `observed_fields`. `must_not_emit`
+      cannot: it catches copied ORIGINALS, and this value is neither an original
+      nor true.
+
+# Exempt from the evidence bar for the same reason as case-002: already graded
+# into `wrong_concrete_fields` (#711 M6).
+#
+# Note this case contributes NO independent evidence toward any cause's unit
+# count. mut-001 reuses case-001's envelopes byte-for-byte, so the reporter counts
+# it inside case-001's unit — which is the point of counting units rather than
+# cases.

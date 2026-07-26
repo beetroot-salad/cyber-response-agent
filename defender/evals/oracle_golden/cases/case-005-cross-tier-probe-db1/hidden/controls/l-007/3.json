@@ -1,0 +1,80 @@
+{
+  "lead_id": "l-007",
+  "seq": 3,
+  "controls": [
+    {
+      "name": "C-7d",
+      "window": [
+        "2026-07-19T08:00:00.000Z",
+        "2026-07-19T12:00:00.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-19T08:00:00.000Z\" AND @timestamp < \"2026-07-19T12:00:00.000Z\"\n        AND host.name == \"db-1\"\n        AND event.outcome == \"success\"\n        AND process.name == \"sshd\"\n        AND source.ip == \"172.18.0.11\"\n| STATS count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY message\n| SORT count DESC\n| LIMIT 20",
+      "live": false,
+      "payload": null
+    },
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T08:00:00.000Z",
+        "2026-07-12T12:00:00.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-12T08:00:00.000Z\" AND @timestamp < \"2026-07-12T12:00:00.000Z\"\n        AND host.name == \"db-1\"\n        AND event.outcome == \"success\"\n        AND process.name == \"sshd\"\n        AND source.ip == \"172.18.0.11\"\n| STATS count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY message\n| SORT count DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-12T08:00:00.000Z\" AND @timestamp < \"2026-07-12T12:00:00.000Z\"\n        AND host.name == \"db-1\"\n        AND event.outcome == \"success\"\n        AND process.name == \"sshd\"\n        AND source.ip == \"172.18.0.11\"\n| STATS count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY message\n| SORT count DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "count",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "message",
+            "type": "text"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T08:00:00.000Z",
+        "2026-07-05T12:00:00.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-05T08:00:00.000Z\" AND @timestamp < \"2026-07-05T12:00:00.000Z\"\n        AND host.name == \"db-1\"\n        AND event.outcome == \"success\"\n        AND process.name == \"sshd\"\n        AND source.ip == \"172.18.0.11\"\n| STATS count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY message\n| SORT count DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-05T08:00:00.000Z\" AND @timestamp < \"2026-07-05T12:00:00.000Z\"\n        AND host.name == \"db-1\"\n        AND event.outcome == \"success\"\n        AND process.name == \"sshd\"\n        AND source.ip == \"172.18.0.11\"\n| STATS count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY message\n| SORT count DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "count",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "message",
+            "type": "text"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    }
+  ]
+}

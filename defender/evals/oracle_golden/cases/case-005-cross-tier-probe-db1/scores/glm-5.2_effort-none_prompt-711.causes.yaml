@@ -1,0 +1,61 @@
+# Cause codes for `scores/glm-5.2_effort-none_prompt-711.json` (#711 M5).
+#
+# The suite's held-out result: **6/11 class agreement, `+event` recall 0.38**,
+# against 0.92 and 0.71 on the dev pool the prompt was iterated against. One case
+# at one unit is `insufficient` and the reporter refuses to publish an interval for
+# it. The direction is why a held-out set exists.
+#
+# Read the history of this number, because it matters more than the number:
+# the same projection scored **8/11** on a first story that included the attack
+# catalog's static description — "the signal is cross-credential-anomaly
+# regardless of whether auth succeeds". That is the scenario author telling the
+# oracle what to look for, inside an oracle INPUT. Removing it cost two leads.
+# An eval whose story hints at the answer measures the hint.
+projection: glm-5.2_effort-none_prompt-711
+causes:
+  l-002:
+    error: class                 # expected +event, projected `malformed`
+    cause: C-MALFORMED
+    note: >
+      The projection emitted a paragraph of prose as a single list item —
+      "+ 4 sshd \"Failed password for dev.dana ...\" events on db-1 ... adds to the
+      daily_count bucket ..." — which is neither an event mapping nor one of the two
+      marker strings prompt.md's closed grammar allows. `score.py` folds it to
+      `malformed` rather than into a real class, so it scores as a disagreement
+      instead of passing as a `+noise` abstention.
+
+      Notably the CONTENT is right: four failed password events on db-1 in the
+      window is the correct projection. Only the form is wrong. That distinction
+      matters for the fix — this is a grammar failure, not a reasoning failure.
+  l-003:
+    error: class                 # expected +event, projected 0
+    cause: C-HETERO-UNDER
+    note: >
+      Heterogeneous (derived): sub-queries whose observed classes differ. The
+      projection emitted nothing while sub-queries covering the operation window
+      carry its failed-auth rows.
+  l-007:
+    error: class                 # expected +event, projected 0
+    cause: C-HETERO-UNDER
+    note: Same shape as l-003 — heterogeneous lead, empty projection.
+  l-005:
+    error: class                 # expected +event, projected +noise
+    cause: C-HETERO-UNDER
+    note: >
+      Heterogeneous, and read as baseline-shaped. `dev.dana` reaching db-1 is
+      off-baseline in both directions the inventory records: `office-ws-1` has
+      `trust_edges_out: []`, and db-1's own accepted logins come from jump-box-1
+      and config-mgmt. The failures are distinguishable and every live control
+      window lacks them.
+  l-010:
+    error: class                 # expected +event, projected +noise
+    cause: C-HETERO-UNDER
+    note: Same shape as l-005.
+
+# Bar status (report.py): C-HETERO-UNDER now stands at 4 instances across 2 units
+# — case-001's l-002/l-006 and this case's four — still short of >=5 across >=3
+# units. It is the closest any cause has come, and it is the one to watch.
+#
+# C-MALFORMED is new at 1 instance in 1 unit. Worth noting that the seed six
+# produced ZERO malformed output across 36 leads, so the first genuinely unseen
+# envelope produced the first grammar violation.

@@ -1,0 +1,1 @@
+{"name": "dev-ws-1", "role": "dev-ws", "criticality": "dev", "owner": "team.dev", "change_window": null, "os": {"distro": "ubuntu", "version": "24.04"}, "service": null, "trust_edges_out": ["jump-box-1"], "users": [{"username": "svc.monitoring", "shell": "/usr/sbin/nologin", "sudo": false}, {"username": "svc.config-mgmt", "shell": "/bin/bash", "sudo": true}]}

@@ -1,0 +1,97 @@
+{
+  "lead_id": "l-002",
+  "seq": 0,
+  "controls": [
+    {
+      "name": "C-7d",
+      "window": [
+        "2026-06-19T00:00:00.000Z",
+        "2026-07-19T11:08:28.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-19T00:00:00.000Z\" AND @timestamp < \"2026-07-19T11:08:28.000Z\"\n        AND host.name == \"db-1\"\n        AND event.outcome == \"failure\"\n        AND message LIKE \"*Failed password*\"\n| STATS daily_count = COUNT(*)\n        BY day = DATE_TRUNC(1 day, @timestamp)\n| SORT day ASC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-19T00:00:00.000Z\" AND @timestamp < \"2026-07-19T11:08:28.000Z\"\n        AND host.name == \"db-1\"\n        AND event.outcome == \"failure\"\n        AND message LIKE \"*Failed password*\"\n| STATS daily_count = COUNT(*)\n        BY day = DATE_TRUNC(1 day, @timestamp)\n| SORT day ASC",
+        "columns": [
+          {
+            "name": "daily_count",
+            "type": "long"
+          },
+          {
+            "name": "day",
+            "type": "date"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "daily_count": 24,
+            "day": "2026-07-03T00:00:00.000Z"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-06-12T00:00:00.000Z",
+        "2026-07-12T11:08:28.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-12T00:00:00.000Z\" AND @timestamp < \"2026-07-12T11:08:28.000Z\"\n        AND host.name == \"db-1\"\n        AND event.outcome == \"failure\"\n        AND message LIKE \"*Failed password*\"\n| STATS daily_count = COUNT(*)\n        BY day = DATE_TRUNC(1 day, @timestamp)\n| SORT day ASC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-12T00:00:00.000Z\" AND @timestamp < \"2026-07-12T11:08:28.000Z\"\n        AND host.name == \"db-1\"\n        AND event.outcome == \"failure\"\n        AND message LIKE \"*Failed password*\"\n| STATS daily_count = COUNT(*)\n        BY day = DATE_TRUNC(1 day, @timestamp)\n| SORT day ASC",
+        "columns": [
+          {
+            "name": "daily_count",
+            "type": "long"
+          },
+          {
+            "name": "day",
+            "type": "date"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "daily_count": 24,
+            "day": "2026-07-03T00:00:00.000Z"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-06-05T00:00:00.000Z",
+        "2026-07-05T11:08:28.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-05T00:00:00.000Z\" AND @timestamp < \"2026-07-05T11:08:28.000Z\"\n        AND host.name == \"db-1\"\n        AND event.outcome == \"failure\"\n        AND message LIKE \"*Failed password*\"\n| STATS daily_count = COUNT(*)\n        BY day = DATE_TRUNC(1 day, @timestamp)\n| SORT day ASC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-05T00:00:00.000Z\" AND @timestamp < \"2026-07-05T11:08:28.000Z\"\n        AND host.name == \"db-1\"\n        AND event.outcome == \"failure\"\n        AND message LIKE \"*Failed password*\"\n| STATS daily_count = COUNT(*)\n        BY day = DATE_TRUNC(1 day, @timestamp)\n| SORT day ASC",
+        "columns": [
+          {
+            "name": "daily_count",
+            "type": "long"
+          },
+          {
+            "name": "day",
+            "type": "date"
+          }
+        ],
+        "row_count": 2,
+        "values": [
+          {
+            "daily_count": 64,
+            "day": "2026-06-08T00:00:00.000Z"
+          },
+          {
+            "daily_count": 24,
+            "day": "2026-07-03T00:00:00.000Z"
+          }
+        ]
+      }
+    }
+  ]
+}

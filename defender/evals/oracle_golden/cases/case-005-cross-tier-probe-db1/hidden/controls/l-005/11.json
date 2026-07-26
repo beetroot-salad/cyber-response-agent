@@ -1,0 +1,129 @@
+{
+  "lead_id": "l-005",
+  "seq": 11,
+  "controls": [
+    {
+      "name": "C-7d",
+      "window": [
+        "2026-07-19T10:34:24.500Z",
+        "2026-07-19T11:34:24.500Z"
+      ],
+      "query": "FROM logs-nginx.access-*\n| WHERE @timestamp >= \"2026-07-19T10:34:24.500Z\" AND @timestamp < \"2026-07-19T11:34:24.500Z\"\n| STATS BY host.name, source.ip\n| SORT host.name, source.ip",
+      "live": false,
+      "payload": null
+    },
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T10:34:24.500Z",
+        "2026-07-12T11:34:24.500Z"
+      ],
+      "query": "FROM logs-nginx.access-*\n| WHERE @timestamp >= \"2026-07-12T10:34:24.500Z\" AND @timestamp < \"2026-07-12T11:34:24.500Z\"\n| STATS BY host.name, source.ip\n| SORT host.name, source.ip",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-nginx.access-*\n| WHERE @timestamp >= \"2026-07-12T10:34:24.500Z\" AND @timestamp < \"2026-07-12T11:34:24.500Z\"\n| STATS BY host.name, source.ip\n| SORT host.name, source.ip",
+        "columns": [
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          }
+        ],
+        "row_count": 2,
+        "values": [
+          {
+            "host.name": "web-1",
+            "source.ip": "127.0.0.1"
+          },
+          {
+            "host.name": "web-2",
+            "source.ip": "127.0.0.1"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T10:34:24.500Z",
+        "2026-07-05T11:34:24.500Z"
+      ],
+      "query": "FROM logs-nginx.access-*\n| WHERE @timestamp >= \"2026-07-05T10:34:24.500Z\" AND @timestamp < \"2026-07-05T11:34:24.500Z\"\n| STATS BY host.name, source.ip\n| SORT host.name, source.ip",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-nginx.access-*\n| WHERE @timestamp >= \"2026-07-05T10:34:24.500Z\" AND @timestamp < \"2026-07-05T11:34:24.500Z\"\n| STATS BY host.name, source.ip\n| SORT host.name, source.ip",
+        "columns": [
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          }
+        ],
+        "row_count": 6,
+        "values": [
+          {
+            "host.name": "web-1",
+            "source.ip": "127.0.0.1"
+          },
+          {
+            "host.name": "web-1",
+            "source.ip": "172.18.0.12"
+          },
+          {
+            "host.name": "web-1",
+            "source.ip": "172.18.0.13"
+          },
+          {
+            "host.name": "web-2",
+            "source.ip": "127.0.0.1"
+          },
+          {
+            "host.name": "web-2",
+            "source.ip": "172.18.0.12"
+          },
+          {
+            "host.name": "web-2",
+            "source.ip": "172.18.0.13"
+          }
+        ]
+      }
+    }
+  ],
+  "attack_contribution": {
+    "window": [
+      "2026-07-26T11:04:03.000Z",
+      "2026-07-26T11:04:46.000Z"
+    ],
+    "query": "FROM logs-nginx.access-*\n| WHERE @timestamp >= \"2026-07-26T11:04:03.000Z\" AND @timestamp < \"2026-07-26T11:04:46.000Z\"\n| STATS BY host.name, source.ip\n| SORT host.name, source.ip",
+    "payload": {
+      "query": "FROM logs-nginx.access-*\n| WHERE @timestamp >= \"2026-07-26T11:04:03.000Z\" AND @timestamp < \"2026-07-26T11:04:46.000Z\"\n| STATS BY host.name, source.ip\n| SORT host.name, source.ip",
+      "columns": [
+        {
+          "name": "host.name",
+          "type": "keyword"
+        },
+        {
+          "name": "source.ip",
+          "type": "ip"
+        }
+      ],
+      "row_count": 2,
+      "values": [
+        {
+          "host.name": "web-1",
+          "source.ip": "127.0.0.1"
+        },
+        {
+          "host.name": "web-2",
+          "source.ip": "127.0.0.1"
+        }
+      ]
+    }
+  }
+}

@@ -26,7 +26,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from defender._io import read_text_utf8  # noqa: E402
-from defender.learning.core.config import oracle_effort, oracle_model  # noqa: E402
+from defender.learning.core.config import ORACLE_EFFORT, ORACLE_MODEL  # noqa: E402
 from defender.learning.core.validate import dump_oracle_doc  # noqa: E402
 from defender.learning.pipeline.oracle.run import invoke_oracle_lead  # noqa: E402
 from defender.learning.pipeline.oracle.sample import assemble_oracle_doc  # noqa: E402
@@ -62,7 +62,7 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("case_dir", type=Path, help="golden case directory")
-    p.add_argument("--tag", default=f"{oracle_model()}_effort-{oracle_effort()}",
+    p.add_argument("--tag", default=f"{ORACLE_MODEL}_effort-{ORACLE_EFFORT}",
                    help="projection tag (default: <model>_effort-<effort>)")
     ns = p.parse_args(argv)
 

@@ -1,0 +1,56 @@
+{
+  "projection": "glm-5.2_effort-none_prompt-711.yaml",
+  "n_leads": 2,
+  "class_agreement": "2/2",
+  "by_system": {
+    "cmdb": "1/1",
+    "elastic": "1/1"
+  },
+  "plus_event_recall": 1.0,
+  "zero_precision": 1.0,
+  "field_grades": {
+    "correct": 3
+  },
+  "contradiction_grades": {
+    "wrong(got bash)": 1,
+    "wrong(got write)": 1
+  },
+  "wrong_concrete_fields": 2,
+  "false_suppression": 0,
+  "malformed_projections": 0,
+  "forbidden_emitted": [],
+  "missing_leads": [],
+  "unscored_leads": [],
+  "duplicate_leads": [],
+  "rows": [
+    {
+      "lead": "l-001",
+      "system": "elastic",
+      "expected": "+event",
+      "predicted": "+event",
+      "class_match": true,
+      "heterogeneous": false,
+      "fields": {
+        "falco.rule": "correct",
+        "falco.output_fields.fd.name": "correct",
+        "falco.output_fields.user.name": "correct"
+      },
+      "contradictions": {
+        "falco.output_fields.evt.type": "wrong(got write)",
+        "falco.output_fields.proc.cmdline": "wrong(got bash)"
+      },
+      "intent_note": false
+    },
+    {
+      "lead": "l-002",
+      "system": "cmdb",
+      "expected": "0",
+      "predicted": "0",
+      "class_match": true,
+      "heterogeneous": false,
+      "fields": {},
+      "contradictions": {},
+      "intent_note": false
+    }
+  ]
+}

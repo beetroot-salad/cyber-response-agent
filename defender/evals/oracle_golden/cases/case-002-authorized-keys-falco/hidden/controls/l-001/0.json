@@ -1,0 +1,104 @@
+{
+  "lead_id": "l-001",
+  "seq": 0,
+  "controls": [
+    {
+      "name": "C-7d",
+      "window": [
+        "2026-07-18T08:59:30.000Z",
+        "2026-07-18T09:59:30.000Z"
+      ],
+      "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-18T08:59:30.000Z\" AND @timestamp < \"2026-07-18T09:59:30.000Z\"\n        AND falco.rule == \"Adding ssh keys to authorized_keys\"\n| KEEP @timestamp, falco.rule, `falco.output_fields.fd.name`, `falco.output_fields.user.name`, `falco.output_fields.proc.cmdline`, `falco.output_fields.container.id`, `falco.output_fields.evt.type`\n| SORT @timestamp ASC",
+      "live": false,
+      "payload": null
+    },
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-11T08:59:30.000Z",
+        "2026-07-11T09:59:30.000Z"
+      ],
+      "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-11T08:59:30.000Z\" AND @timestamp < \"2026-07-11T09:59:30.000Z\"\n        AND falco.rule == \"Adding ssh keys to authorized_keys\"\n| KEEP @timestamp, falco.rule, `falco.output_fields.fd.name`, `falco.output_fields.user.name`, `falco.output_fields.proc.cmdline`, `falco.output_fields.container.id`, `falco.output_fields.evt.type`\n| SORT @timestamp ASC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-11T08:59:30.000Z\" AND @timestamp < \"2026-07-11T09:59:30.000Z\"\n        AND falco.rule == \"Adding ssh keys to authorized_keys\"\n| KEEP @timestamp, falco.rule, `falco.output_fields.fd.name`, `falco.output_fields.user.name`, `falco.output_fields.proc.cmdline`, `falco.output_fields.container.id`, `falco.output_fields.evt.type`\n| SORT @timestamp ASC",
+        "columns": [
+          {
+            "name": "@timestamp",
+            "type": "date"
+          },
+          {
+            "name": "falco.rule",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.fd.name",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.user.name",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.proc.cmdline",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.container.id",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.evt.type",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-04T08:59:30.000Z",
+        "2026-07-04T09:59:30.000Z"
+      ],
+      "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-04T08:59:30.000Z\" AND @timestamp < \"2026-07-04T09:59:30.000Z\"\n        AND falco.rule == \"Adding ssh keys to authorized_keys\"\n| KEEP @timestamp, falco.rule, `falco.output_fields.fd.name`, `falco.output_fields.user.name`, `falco.output_fields.proc.cmdline`, `falco.output_fields.container.id`, `falco.output_fields.evt.type`\n| SORT @timestamp ASC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-04T08:59:30.000Z\" AND @timestamp < \"2026-07-04T09:59:30.000Z\"\n        AND falco.rule == \"Adding ssh keys to authorized_keys\"\n| KEEP @timestamp, falco.rule, `falco.output_fields.fd.name`, `falco.output_fields.user.name`, `falco.output_fields.proc.cmdline`, `falco.output_fields.container.id`, `falco.output_fields.evt.type`\n| SORT @timestamp ASC",
+        "columns": [
+          {
+            "name": "@timestamp",
+            "type": "date"
+          },
+          {
+            "name": "falco.rule",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.fd.name",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.user.name",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.proc.cmdline",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.container.id",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.evt.type",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    }
+  ]
+}

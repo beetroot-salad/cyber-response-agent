@@ -41,7 +41,14 @@ leads:
     system: elastic
     template: sshd-auth-history
     class: "+event"
-    heterogeneous: true          # 4 queries: 3 surface the burst, 1 is empty
+    # NOT heterogeneous, corrected 2026-07-26 by mechanical derivation (#711 M4).
+    # The seed comment read "4 queries: 3 surface the burst, 1 is empty"; the
+    # payloads say otherwise. All four sub-queries carry byte-identical WHERE
+    # clauses and the same window, differing only in their STATS aggregation, and
+    # all four surface the burst (95 failures / 48 by-user / 13-32-28 per minute /
+    # 95 total). Nothing in this lead is empty, and no two of its sub-queries
+    # disagree.
+    heterogeneous: false
     fields:
       source.ip: "172.18.0.15"
       user.name: "root"

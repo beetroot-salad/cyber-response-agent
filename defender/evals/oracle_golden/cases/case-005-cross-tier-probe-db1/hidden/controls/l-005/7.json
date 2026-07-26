@@ -1,0 +1,146 @@
+{
+  "lead_id": "l-005",
+  "seq": 7,
+  "controls": [
+    {
+      "name": "C-7d",
+      "window": [
+        "2026-07-19T10:34:24.500Z",
+        "2026-07-19T11:34:24.500Z"
+      ],
+      "query": "FROM logs-system.auth-* METADATA _id\n| WHERE @timestamp >= \"2026-07-19T10:34:24.500Z\" AND @timestamp < \"2026-07-19T11:34:24.500Z\"\n| WHERE host.name == \"db-1\" AND _id == \"7e260d27-a577-5826-b340-b13375d95cbf\"\n| KEEP @timestamp, host.name, source.ip, event.outcome, user.name, message, _id",
+      "live": false,
+      "payload": null
+    },
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T10:34:24.500Z",
+        "2026-07-12T11:34:24.500Z"
+      ],
+      "query": "FROM logs-system.auth-* METADATA _id\n| WHERE @timestamp >= \"2026-07-12T10:34:24.500Z\" AND @timestamp < \"2026-07-12T11:34:24.500Z\"\n| WHERE host.name == \"db-1\" AND _id == \"7e260d27-a577-5826-b340-b13375d95cbf\"\n| KEEP @timestamp, host.name, source.ip, event.outcome, user.name, message, _id",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-* METADATA _id\n| WHERE @timestamp >= \"2026-07-12T10:34:24.500Z\" AND @timestamp < \"2026-07-12T11:34:24.500Z\"\n| WHERE host.name == \"db-1\" AND _id == \"7e260d27-a577-5826-b340-b13375d95cbf\"\n| KEEP @timestamp, host.name, source.ip, event.outcome, user.name, message, _id",
+        "columns": [
+          {
+            "name": "@timestamp",
+            "type": "date"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "event.outcome",
+            "type": "keyword"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          },
+          {
+            "name": "message",
+            "type": "text"
+          },
+          {
+            "name": "_id",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T10:34:24.500Z",
+        "2026-07-05T11:34:24.500Z"
+      ],
+      "query": "FROM logs-system.auth-* METADATA _id\n| WHERE @timestamp >= \"2026-07-05T10:34:24.500Z\" AND @timestamp < \"2026-07-05T11:34:24.500Z\"\n| WHERE host.name == \"db-1\" AND _id == \"7e260d27-a577-5826-b340-b13375d95cbf\"\n| KEEP @timestamp, host.name, source.ip, event.outcome, user.name, message, _id",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-* METADATA _id\n| WHERE @timestamp >= \"2026-07-05T10:34:24.500Z\" AND @timestamp < \"2026-07-05T11:34:24.500Z\"\n| WHERE host.name == \"db-1\" AND _id == \"7e260d27-a577-5826-b340-b13375d95cbf\"\n| KEEP @timestamp, host.name, source.ip, event.outcome, user.name, message, _id",
+        "columns": [
+          {
+            "name": "@timestamp",
+            "type": "date"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "event.outcome",
+            "type": "keyword"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          },
+          {
+            "name": "message",
+            "type": "text"
+          },
+          {
+            "name": "_id",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    }
+  ],
+  "attack_contribution": {
+    "window": [
+      "2026-07-26T11:04:03.000Z",
+      "2026-07-26T11:04:46.000Z"
+    ],
+    "query": "FROM logs-system.auth-* METADATA _id\n| WHERE @timestamp >= \"2026-07-26T11:04:03.000Z\" AND @timestamp < \"2026-07-26T11:04:46.000Z\"\n| WHERE host.name == \"db-1\" AND _id == \"7e260d27-a577-5826-b340-b13375d95cbf\"\n| KEEP @timestamp, host.name, source.ip, event.outcome, user.name, message, _id",
+    "payload": {
+      "query": "FROM logs-system.auth-* METADATA _id\n| WHERE @timestamp >= \"2026-07-26T11:04:03.000Z\" AND @timestamp < \"2026-07-26T11:04:46.000Z\"\n| WHERE host.name == \"db-1\" AND _id == \"7e260d27-a577-5826-b340-b13375d95cbf\"\n| KEEP @timestamp, host.name, source.ip, event.outcome, user.name, message, _id",
+      "columns": [
+        {
+          "name": "@timestamp",
+          "type": "date"
+        },
+        {
+          "name": "host.name",
+          "type": "keyword"
+        },
+        {
+          "name": "source.ip",
+          "type": "ip"
+        },
+        {
+          "name": "event.outcome",
+          "type": "keyword"
+        },
+        {
+          "name": "user.name",
+          "type": "keyword"
+        },
+        {
+          "name": "message",
+          "type": "text"
+        },
+        {
+          "name": "_id",
+          "type": "keyword"
+        }
+      ],
+      "row_count": 0,
+      "values": []
+    }
+  }
+}

@@ -1,0 +1,166 @@
+{
+  "lead_id": "l-011",
+  "seq": 7,
+  "controls": [
+    {
+      "name": "C-7d",
+      "window": [
+        "2026-07-19T00:00:00.000Z",
+        "2026-07-20T00:00:00.000Z"
+      ],
+      "query": "FROM logs-zeek.ssh-*\n| WHERE @timestamp >= \"2026-07-19T00:00:00.000Z\" AND @timestamp < \"2026-07-20T00:00:00.000Z\"\n| STATS total_events = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY source.ip\n| SORT total_events DESC\n| LIMIT 20",
+      "live": false,
+      "payload": null
+    },
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T00:00:00.000Z",
+        "2026-07-13T00:00:00.000Z"
+      ],
+      "query": "FROM logs-zeek.ssh-*\n| WHERE @timestamp >= \"2026-07-12T00:00:00.000Z\" AND @timestamp < \"2026-07-13T00:00:00.000Z\"\n| STATS total_events = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY source.ip\n| SORT total_events DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-zeek.ssh-*\n| WHERE @timestamp >= \"2026-07-12T00:00:00.000Z\" AND @timestamp < \"2026-07-13T00:00:00.000Z\"\n| STATS total_events = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY source.ip\n| SORT total_events DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "total_events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          }
+        ],
+        "row_count": 7,
+        "values": [
+          {
+            "total_events": 672,
+            "first_seen": "2026-07-12T00:03:04.997Z",
+            "last_seen": "2026-07-12T23:57:01.724Z",
+            "source.ip": "172.18.0.22"
+          },
+          {
+            "total_events": 373,
+            "first_seen": "2026-07-12T00:09:07.870Z",
+            "last_seen": "2026-07-12T23:58:58.263Z",
+            "source.ip": "172.18.0.23"
+          },
+          {
+            "total_events": 348,
+            "first_seen": "2026-07-12T00:00:13.181Z",
+            "last_seen": "2026-07-12T23:57:18.844Z",
+            "source.ip": "172.18.0.14"
+          },
+          {
+            "total_events": 324,
+            "first_seen": "2026-07-12T00:03:31.691Z",
+            "last_seen": "2026-07-12T23:57:13.473Z",
+            "source.ip": "172.18.0.6"
+          },
+          {
+            "total_events": 324,
+            "first_seen": "2026-07-12T00:09:54.634Z",
+            "last_seen": "2026-07-12T23:58:31.647Z",
+            "source.ip": "172.18.0.8"
+          },
+          {
+            "total_events": 312,
+            "first_seen": "2026-07-12T00:06:24.411Z",
+            "last_seen": "2026-07-12T23:55:38.372Z",
+            "source.ip": "172.18.0.17"
+          },
+          {
+            "total_events": 271,
+            "first_seen": "2026-07-12T00:02:03.785Z",
+            "last_seen": "2026-07-12T23:59:21.416Z",
+            "source.ip": "172.18.0.20"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T00:00:00.000Z",
+        "2026-07-06T00:00:00.000Z"
+      ],
+      "query": "FROM logs-zeek.ssh-*\n| WHERE @timestamp >= \"2026-07-05T00:00:00.000Z\" AND @timestamp < \"2026-07-06T00:00:00.000Z\"\n| STATS total_events = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY source.ip\n| SORT total_events DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-zeek.ssh-*\n| WHERE @timestamp >= \"2026-07-05T00:00:00.000Z\" AND @timestamp < \"2026-07-06T00:00:00.000Z\"\n| STATS total_events = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY source.ip\n| SORT total_events DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "total_events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          }
+        ],
+        "row_count": 7,
+        "values": [
+          {
+            "total_events": 581,
+            "first_seen": "2026-07-05T00:03:57.253Z",
+            "last_seen": "2026-07-05T23:57:21.529Z",
+            "source.ip": "172.18.0.22"
+          },
+          {
+            "total_events": 352,
+            "first_seen": "2026-07-05T00:05:49.585Z",
+            "last_seen": "2026-07-05T23:55:59.944Z",
+            "source.ip": "172.18.0.14"
+          },
+          {
+            "total_events": 347,
+            "first_seen": "2026-07-05T00:00:46.523Z",
+            "last_seen": "2026-07-05T23:52:04.919Z",
+            "source.ip": "172.18.0.8"
+          },
+          {
+            "total_events": 339,
+            "first_seen": "2026-07-05T00:00:39.793Z",
+            "last_seen": "2026-07-05T23:55:17.573Z",
+            "source.ip": "172.18.0.6"
+          },
+          {
+            "total_events": 313,
+            "first_seen": "2026-07-05T00:03:06.987Z",
+            "last_seen": "2026-07-05T23:54:34.861Z",
+            "source.ip": "172.18.0.20"
+          },
+          {
+            "total_events": 309,
+            "first_seen": "2026-07-05T00:04:24.830Z",
+            "last_seen": "2026-07-05T23:55:33.744Z",
+            "source.ip": "172.18.0.23"
+          },
+          {
+            "total_events": 300,
+            "first_seen": "2026-07-05T00:03:43.594Z",
+            "last_seen": "2026-07-05T23:58:14.743Z",
+            "source.ip": "172.18.0.17"
+          }
+        ]
+      }
+    }
+  ]
+}

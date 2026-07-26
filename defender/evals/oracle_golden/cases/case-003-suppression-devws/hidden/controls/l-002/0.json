@@ -1,0 +1,106 @@
+{
+  "lead_id": "l-002",
+  "seq": 0,
+  "controls": [
+    {
+      "name": "C-7d",
+      "window": [
+        "2026-07-18T09:10:00.000Z",
+        "2026-07-18T10:10:00.000Z"
+      ],
+      "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-18T09:10:00.000Z\" AND @timestamp < \"2026-07-18T10:10:00.000Z\"\n        AND host.name == \"dev-ws-1\"\n| STATS events = COUNT(*) BY data_stream.dataset\n| SORT events DESC",
+      "live": false,
+      "payload": null
+    },
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-11T09:10:00.000Z",
+        "2026-07-11T10:10:00.000Z"
+      ],
+      "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-11T09:10:00.000Z\" AND @timestamp < \"2026-07-11T10:10:00.000Z\"\n        AND host.name == \"dev-ws-1\"\n| STATS events = COUNT(*) BY data_stream.dataset\n| SORT events DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-11T09:10:00.000Z\" AND @timestamp < \"2026-07-11T10:10:00.000Z\"\n        AND host.name == \"dev-ws-1\"\n| STATS events = COUNT(*) BY data_stream.dataset\n| SORT events DESC",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "data_stream.dataset",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 5,
+        "values": [
+          {
+            "events": 444,
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 360,
+            "data_stream.dataset": "elastic_agent.metricbeat"
+          },
+          {
+            "events": 12,
+            "data_stream.dataset": "elastic_agent"
+          },
+          {
+            "events": 6,
+            "data_stream.dataset": "elastic_agent.filebeat"
+          },
+          {
+            "events": 6,
+            "data_stream.dataset": "system.syslog"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-04T09:10:00.000Z",
+        "2026-07-04T10:10:00.000Z"
+      ],
+      "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-04T09:10:00.000Z\" AND @timestamp < \"2026-07-04T10:10:00.000Z\"\n        AND host.name == \"dev-ws-1\"\n| STATS events = COUNT(*) BY data_stream.dataset\n| SORT events DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-04T09:10:00.000Z\" AND @timestamp < \"2026-07-04T10:10:00.000Z\"\n        AND host.name == \"dev-ws-1\"\n| STATS events = COUNT(*) BY data_stream.dataset\n| SORT events DESC",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "data_stream.dataset",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 5,
+        "values": [
+          {
+            "events": 528,
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 360,
+            "data_stream.dataset": "elastic_agent.metricbeat"
+          },
+          {
+            "events": 14,
+            "data_stream.dataset": "elastic_agent"
+          },
+          {
+            "events": 6,
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 4,
+            "data_stream.dataset": "elastic_agent.filebeat"
+          }
+        ]
+      }
+    }
+  ]
+}

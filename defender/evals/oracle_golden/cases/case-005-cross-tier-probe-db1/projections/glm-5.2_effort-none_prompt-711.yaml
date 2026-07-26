@@ -1,0 +1,158 @@
+projections:
+- lead_id: l-004
+  events: []
+- lead_id: l-001
+  events:
+  - '@timestamp': '2026-07-26T11:04:03Z'
+    event.outcome: failure
+    source.ip: <office-ws-1-ip>
+    user.name: dev.dana
+    message: Failed password for dev.dana from <office-ws-1-ip> port <client-port>
+      ssh2
+  - '@timestamp': '2026-07-26T11:04:03Z'
+    event.outcome: failure
+    source.ip: <office-ws-1-ip>
+    user.name: dev.dana
+    message: Failed publickey for dev.dana from <office-ws-1-ip> port <client-port>
+      ssh2
+  - '@timestamp': '2026-07-26T11:04:17Z'
+    event.outcome: failure
+    source.ip: <office-ws-1-ip>
+    user.name: dev.dana
+    message: Failed password for dev.dana from <office-ws-1-ip> port <client-port>
+      ssh2
+  - '@timestamp': '2026-07-26T11:04:17Z'
+    event.outcome: failure
+    source.ip: <office-ws-1-ip>
+    user.name: dev.dana
+    message: Failed publickey for dev.dana from <office-ws-1-ip> port <client-port>
+      ssh2
+  - '@timestamp': '2026-07-26T11:04:28Z'
+    event.outcome: failure
+    source.ip: <office-ws-1-ip>
+    user.name: dev.dana
+    message: Failed password for dev.dana from <office-ws-1-ip> port <client-port>
+      ssh2
+  - '@timestamp': '2026-07-26T11:04:28Z'
+    event.outcome: failure
+    source.ip: <office-ws-1-ip>
+    user.name: dev.dana
+    message: Failed publickey for dev.dana from <office-ws-1-ip> port <client-port>
+      ssh2
+  - '@timestamp': '2026-07-26T11:04:39Z'
+    event.outcome: failure
+    source.ip: <office-ws-1-ip>
+    user.name: dev.dana
+    message: Failed password for dev.dana from <office-ws-1-ip> port <client-port>
+      ssh2
+  - '@timestamp': '2026-07-26T11:04:39Z'
+    event.outcome: failure
+    source.ip: <office-ws-1-ip>
+    user.name: dev.dana
+    message: Failed publickey for dev.dana from <office-ws-1-ip> port <client-port>
+      ssh2
+- lead_id: l-002
+  events:
+  - + 4 sshd "Failed password for dev.dana from <office-ws-1-ip>" events on db-1 at
+    2026-07-26 ~11:04 (at 11:04:0x, 11:04:1x, 11:04:2x, 11:04:3x) — adds to the daily_count
+    bucket for 2026-07-26, adds/increments source.ip=<office-ws-1-ip> in the per-source-IP
+    breakdown (first_seen ~2026-07-26T11:04:03Z, last_seen ~2026-07-26T11:04:39Z),
+    and contributes 4 counts to the 11:00 hour_of_day bucket
+- lead_id: l-003
+  events: []
+- lead_id: l-006
+  events: []
+- lead_id: l-005
+  events:
+  - <standard environment noise>
+- lead_id: l-008
+  events:
+  - '@timestamp': '2026-07-26T11:04:03+00:00'
+    source.ip: 172.18.0.11
+    destination.ip: <db-1-ip>
+    destination.port: 22
+    source.bytes: <source-bytes>
+    destination.bytes: <destination-bytes>
+    host.name: db-1
+    event.outcome: failure
+    auth_method: password
+  - '@timestamp': '2026-07-26T11:04:17+00:00'
+    source.ip: 172.18.0.11
+    destination.ip: <db-1-ip>
+    destination.port: 22
+    source.bytes: <source-bytes>
+    destination.bytes: <destination-bytes>
+    host.name: db-1
+    event.outcome: failure
+    auth_method: password
+  - '@timestamp': '2026-07-26T11:04:28+00:00'
+    source.ip: 172.18.0.11
+    destination.ip: <db-1-ip>
+    destination.port: 22
+    source.bytes: <source-bytes>
+    destination.bytes: <destination-bytes>
+    host.name: db-1
+    event.outcome: failure
+    auth_method: password
+  - '@timestamp': '2026-07-26T11:04:39+00:00'
+    source.ip: 172.18.0.11
+    destination.ip: <db-1-ip>
+    destination.port: 22
+    source.bytes: <source-bytes>
+    destination.bytes: <destination-bytes>
+    host.name: db-1
+    event.outcome: failure
+    auth_method: password
+- lead_id: l-007
+  events: []
+- lead_id: l-009
+  events: []
+- lead_id: l-011
+  events:
+  - '@timestamp': '2026-07-26T11:04:03+00:00'
+    source.ip: 172.18.0.11
+    destination.ip: <db-1-ip>
+    destination.port: 22
+    zeek.ssh.client: SSH-2.0-OpenSSH_<version>
+    zeek.ssh.auth_success: false
+    zeek.ssh.auth.success: false
+    zeek.ssh.cipher_alg: <cipher>
+    zeek.ssh.algorithm.cipher: <cipher>
+    zeek.ssh.mac_alg: <mac>
+    zeek.ssh.algorithm.mac: <mac>
+  - '@timestamp': '2026-07-26T11:04:17+00:00'
+    source.ip: 172.18.0.11
+    destination.ip: <db-1-ip>
+    destination.port: 22
+    zeek.ssh.client: SSH-2.0-OpenSSH_<version>
+    zeek.ssh.auth_success: false
+    zeek.ssh.auth.success: false
+    zeek.ssh.cipher_alg: <cipher>
+    zeek.ssh.algorithm.cipher: <cipher>
+    zeek.ssh.mac_alg: <mac>
+    zeek.ssh.algorithm.mac: <mac>
+  - '@timestamp': '2026-07-26T11:04:28+00:00'
+    source.ip: 172.18.0.11
+    destination.ip: <db-1-ip>
+    destination.port: 22
+    zeek.ssh.client: SSH-2.0-OpenSSH_<version>
+    zeek.ssh.auth_success: false
+    zeek.ssh.auth.success: false
+    zeek.ssh.cipher_alg: <cipher>
+    zeek.ssh.algorithm.cipher: <cipher>
+    zeek.ssh.mac_alg: <mac>
+    zeek.ssh.algorithm.mac: <mac>
+  - '@timestamp': '2026-07-26T11:04:39+00:00'
+    source.ip: 172.18.0.11
+    destination.ip: <db-1-ip>
+    destination.port: 22
+    zeek.ssh.client: SSH-2.0-OpenSSH_<version>
+    zeek.ssh.auth_success: false
+    zeek.ssh.auth.success: false
+    zeek.ssh.cipher_alg: <cipher>
+    zeek.ssh.algorithm.cipher: <cipher>
+    zeek.ssh.mac_alg: <mac>
+    zeek.ssh.algorithm.mac: <mac>
+- lead_id: l-010
+  events:
+  - <standard environment noise>

@@ -1,0 +1,82 @@
+{
+  "lead_id": "l-005",
+  "seq": 33,
+  "controls": [
+    {
+      "name": "C-7d",
+      "window": [
+        "2026-07-19T10:34:24.500Z",
+        "2026-07-19T11:34:24.500Z"
+      ],
+      "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-07-19T10:34:24.500Z\" AND @timestamp < \"2026-07-19T11:34:24.500Z\"\n| WHERE network.protocol LIKE \"*postgresql*\"\n| STATS BY destination.ip\n| SORT destination.ip",
+      "live": false,
+      "payload": null
+    },
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T10:34:24.500Z",
+        "2026-07-12T11:34:24.500Z"
+      ],
+      "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-07-12T10:34:24.500Z\" AND @timestamp < \"2026-07-12T11:34:24.500Z\"\n| WHERE network.protocol LIKE \"*postgresql*\"\n| STATS BY destination.ip\n| SORT destination.ip",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-07-12T10:34:24.500Z\" AND @timestamp < \"2026-07-12T11:34:24.500Z\"\n| WHERE network.protocol LIKE \"*postgresql*\"\n| STATS BY destination.ip\n| SORT destination.ip",
+        "columns": [
+          {
+            "name": "destination.ip",
+            "type": "ip"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "destination.ip": "172.18.0.15"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T10:34:24.500Z",
+        "2026-07-05T11:34:24.500Z"
+      ],
+      "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-07-05T10:34:24.500Z\" AND @timestamp < \"2026-07-05T11:34:24.500Z\"\n| WHERE network.protocol LIKE \"*postgresql*\"\n| STATS BY destination.ip\n| SORT destination.ip",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-07-05T10:34:24.500Z\" AND @timestamp < \"2026-07-05T11:34:24.500Z\"\n| WHERE network.protocol LIKE \"*postgresql*\"\n| STATS BY destination.ip\n| SORT destination.ip",
+        "columns": [
+          {
+            "name": "destination.ip",
+            "type": "ip"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "destination.ip": "172.18.0.15"
+          }
+        ]
+      }
+    }
+  ],
+  "attack_contribution": {
+    "window": [
+      "2026-07-26T11:04:03.000Z",
+      "2026-07-26T11:04:46.000Z"
+    ],
+    "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-07-26T11:04:03.000Z\" AND @timestamp < \"2026-07-26T11:04:46.000Z\"\n| WHERE network.protocol LIKE \"*postgresql*\"\n| STATS BY destination.ip\n| SORT destination.ip",
+    "payload": {
+      "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-07-26T11:04:03.000Z\" AND @timestamp < \"2026-07-26T11:04:46.000Z\"\n| WHERE network.protocol LIKE \"*postgresql*\"\n| STATS BY destination.ip\n| SORT destination.ip",
+      "columns": [
+        {
+          "name": "destination.ip",
+          "type": "ip"
+        }
+      ],
+      "row_count": 0,
+      "values": []
+    }
+  }
+}
