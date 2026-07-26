@@ -19,7 +19,8 @@ GOLDEN_DIR = Path(__file__).resolve().parent
 
 def _load(name: str, path: Path):
     spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
+    assert spec is not None
+    assert spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = mod
     spec.loader.exec_module(mod)
@@ -52,7 +53,8 @@ def test_a_single_perfect_observation_is_not_a_narrow_interval():
     """The failure Wald would produce here: 1/1 has zero Wald width, so a slice
     could be certified off one lead. Wilson keeps it honest at [0.21, 1.00]."""
     lo, hi = STATS.wilson_interval(1, 1)
-    assert lo < 0.25 and hi == 1.0
+    assert lo < 0.25
+    assert hi == 1.0
 
 
 @pytest.mark.parametrize(("rate", "expected_n"), [
@@ -87,5 +89,5 @@ def test_zero_successes_is_a_measurement_not_an_absence():
 
 
 def test_k_greater_than_n_is_a_bug_not_a_clamp():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="out of range"):
         STATS.wilson_interval(5, 4)

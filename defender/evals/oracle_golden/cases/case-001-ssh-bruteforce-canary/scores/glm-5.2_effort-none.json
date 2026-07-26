@@ -30,7 +30,7 @@
       "expected": "+event",
       "predicted": "+event",
       "class_match": true,
-      "heterogeneous": true,
+      "heterogeneous": false,
       "fields": {
         "source.ip": "correct",
         "user.name": "correct",

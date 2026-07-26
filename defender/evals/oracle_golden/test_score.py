@@ -1,14 +1,19 @@
-"""Tests for the oracle-calibration golden set and its scorer (#693).
+"""Unit tests for the golden-set scorer (#693, moved here by #711).
 
-`score.py` is the component the trust/abstention resolver is specified to read:
-a slice goes `no-update` on a `wrong` concrete field or a false suppression, so
-every grade it emits is load-bearing. It is also pure — a function of
-(`expected.yaml`, `projections/<tag>.yaml`) with no clock, no network, no model
-— which is what makes all of this testable at all, and what lets
-`test_every_checked_in_score_reproduces` pin the committed artifacts against
-scorer drift.
+`score.py` is the component the trust/abstention resolver reads: a slice goes
+`no-update` on a `wrong` concrete field or a false suppression, so every grade it
+emits is load-bearing. It is also pure — a function of (`expected.yaml`,
+`projections/<tag>.yaml`) with no clock, no network, no model — which is what
+makes all of this testable at all.
 
-The tests that carry the most weight are the ones pinning what must NOT happen
+These live beside the module they cover rather than under `defender/tests/`,
+because eval tooling is not application logic; that is the convention
+`defender/evals/test_judge_equivalence.py` and its siblings already set. The
+artifact SWEEPS that used to share this file moved to `validate_cases.py`: those
+check samples, not code, and a linter that exits non-zero is the better shape for
+them.
+
+The tests carrying the most weight are the ones pinning what must NOT happen
 silently:
 
   - `test_missing_lead_is_not_scored_as_an_empty_one` — the scorer used to read a
@@ -28,25 +33,17 @@ silently:
   - `test_a_volunteered_value_the_capture_refutes_is_wrong` — grading covered only
     the fields the labels required, so a projection could emit concrete values the
     hidden payloads refute and still score `0 wrong`.
-
-`test_no_story_states_the_expected_result` guards the other direction: a story is
-an oracle INPUT, and the seed negative control announced in its own story that a
-faithful oracle "must therefore return `0` for every lead". The hidden/visible
-split cannot catch an answer leaked inside oracle_visible/.
 """
 from __future__ import annotations
 
 import importlib.util
-import json
 import sys
 from pathlib import Path
 
 import pytest
 import yaml
 
-DEFENDER_DIR = Path(__file__).resolve().parents[1]
-GOLDEN_DIR = DEFENDER_DIR / "evals" / "oracle_golden"
-CASES_DIR = GOLDEN_DIR / "cases"
+GOLDEN_DIR = Path(__file__).resolve().parent
 
 
 def _load(name: str, path: Path):
@@ -61,7 +58,6 @@ def _load(name: str, path: Path):
 
 SCORE = _load("oracle_golden_score", GOLDEN_DIR / "score.py")
 
-CASE_DIRS = sorted(p for p in CASES_DIR.iterdir() if p.is_dir())
 
 
 def _spec(**leads) -> dict:
@@ -357,122 +353,3 @@ def test_a_forbidden_value_inside_a_suppression_marker_leaks():
     assert summary["forbidden_emitted"] == ["office-ws-1"]
 
 
-# --------------------------------------------------------------------------
-# the suite's own artifacts
-# --------------------------------------------------------------------------
-
-def test_there_are_cases_to_check():
-    """Every sweep below would pass vacuously against an empty cases/ tree."""
-    assert CASE_DIRS
-
-
-@pytest.mark.parametrize("case_dir", CASE_DIRS, ids=lambda p: p.name)
-def test_every_case_has_the_files_the_readme_promises(case_dir):
-    for rel in ("manifest.yaml", "expected.yaml",
-                "oracle_visible/story.md", "oracle_visible/leads.jsonl"):
-        assert (case_dir / rel).is_file(), f"{case_dir.name} is missing {rel}"
-
-
-@pytest.mark.parametrize("case_dir", CASE_DIRS, ids=lambda p: p.name)
-def test_manifest_and_expected_agree_on_the_case_identity(case_dir):
-    manifest = yaml.safe_load((case_dir / "manifest.yaml").read_text(encoding="utf-8"))
-    expected = yaml.safe_load((case_dir / "expected.yaml").read_text(encoding="utf-8"))
-    assert manifest["case_id"] == case_dir.name
-    assert expected["case_id"] == case_dir.name
-    assert manifest["kind"] == expected["kind"]
-
-
-@pytest.mark.parametrize("case_dir", CASE_DIRS, ids=lambda p: p.name)
-def test_an_observed_case_carries_the_hidden_ground_truth_it_was_labelled_from(case_dir):
-    manifest = yaml.safe_load((case_dir / "manifest.yaml").read_text(encoding="utf-8"))
-    if manifest["kind"] != "observed":
-        pytest.skip("derived cases re-run the oracle over a base case's captured leads")
-    assert (case_dir / "hidden" / "controls.yaml").is_file()
-    assert list((case_dir / "hidden" / "observed").iterdir())
-
-
-@pytest.mark.parametrize("case_dir", CASE_DIRS, ids=lambda p: p.name)
-def test_every_labelled_lead_has_an_oracle_visible_envelope(case_dir):
-    expected = yaml.safe_load((case_dir / "expected.yaml").read_text(encoding="utf-8"))
-    rows = [json.loads(x) for x
-            in (case_dir / "oracle_visible" / "leads.jsonl").read_text(encoding="utf-8").splitlines()
-            if x.strip()]
-    assert {r["lead_id"] for r in rows} == set(expected["leads"])
-
-
-# Vocabulary that only an eval author writes — the scoring frame, not the
-# operation. A story mentioning any of it is telling the oracle what it is being
-# tested on, or what to answer.
-_EVAL_TELLS = ("oracle", "negative control", "golden", "projection", "every lead",
-               "each lead", "expected result", "+event", "+noise", "-noise",
-               "result class", "standard environment noise", "suppressed:")
-
-
-@pytest.mark.parametrize("case_dir", CASE_DIRS, ids=lambda p: p.name)
-def test_no_story_states_the_expected_result(case_dir):
-    """A story is an ORACLE INPUT — the one file the hidden/visible split cannot
-    protect, because it is deliberately visible. The seed negative control's story
-    announced that it WAS a negative control and that the oracle "must therefore
-    return `0` for every lead", which is the scoring answer written into the
-    prompt. Rationale belongs in expected.yaml / manifest.yaml, which the oracle
-    never reads."""
-    story = (case_dir / "oracle_visible" / "story.md").read_text(encoding="utf-8").lower()
-    assert not [tell for tell in _EVAL_TELLS if tell in story], (
-        f"{case_dir.name}/oracle_visible/story.md leaks the evaluation frame to the "
-        f"oracle: {[t for t in _EVAL_TELLS if t in story]}")
-
-
-def _score_pairs():
-    for case_dir in CASE_DIRS:
-        for proj in sorted((case_dir / "projections").glob("*.yaml")):
-            yield case_dir, proj
-
-
-@pytest.mark.parametrize(("case_dir", "proj_path"), list(_score_pairs()),
-                         ids=lambda p: p.name)
-def test_every_checked_in_score_reproduces(case_dir, proj_path):
-    """The committed `scores/<tag>.json` must be the output of the committed
-    `score.py` over the committed `projections/<tag>.yaml`. Three of the seed
-    artifacts had been produced by an earlier scorer and no longer matched its
-    schema; nothing caught it, because scoring is cheap and nothing re-ran it."""
-    stored = case_dir / "scores" / f"{proj_path.stem}.json"
-    assert stored.is_file(), f"no scores/ artifact for {case_dir.name}/{proj_path.name}"
-    spec = yaml.safe_load((case_dir / "expected.yaml").read_text(encoding="utf-8"))
-    proj = yaml.safe_load(proj_path.read_text(encoding="utf-8"))
-    summary = SCORE.score_projection(spec, proj, proj_path.name)
-    assert json.dumps(summary, indent=2) + "\n" == stored.read_text(encoding="utf-8"), (
-        f"{stored.relative_to(DEFENDER_DIR)} is stale — "
-        f"re-run score.py --json over {proj_path.name}")
-
-
-@pytest.mark.parametrize(("case_dir", "proj_path"), list(_score_pairs()),
-                         ids=lambda p: p.name)
-def test_no_checked_in_projection_has_a_lead_set_mismatch(case_dir, proj_path):
-    assert SCORE.main([str(case_dir), str(proj_path)]) == 0
-
-
-def test_replay_never_names_the_hidden_tree_outside_its_docstring():
-    """The one hard rule is structural: `replay.py` sources every input from
-    `oracle_visible/`. A literal reaching into `hidden/` would make a projection
-    scoreable against data it was allowed to read, so pin it here rather than
-    trusting review to notice."""
-    import ast
-    tree = ast.parse((GOLDEN_DIR / "replay.py").read_text(encoding="utf-8"))
-    # Identify docstrings by NODE, not by value: ast.get_docstring() returns the
-    # cleaned text, which never equals the raw Constant a value-comparison would
-    # match — a sweep keyed on that silently exempts nothing and passes vacuously.
-    docstring_nodes = set()
-    for node in ast.walk(tree):
-        if not isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef)):
-            continue
-        first = next(iter(node.body), None)
-        if (isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant)
-                and isinstance(first.value.value, str)):
-            docstring_nodes.add(id(first.value))
-    code_literals = [n.value for n in ast.walk(tree)
-                     if isinstance(n, ast.Constant) and isinstance(n.value, str)
-                     and id(n) not in docstring_nodes]
-    assert any("oracle_visible" in s for s in code_literals), (
-        "the sweep found no path literals at all — the assertion below is vacuous")
-    assert not [s for s in code_literals if "hidden" in s], (
-        "replay.py must not reference the hidden/ tree in code")

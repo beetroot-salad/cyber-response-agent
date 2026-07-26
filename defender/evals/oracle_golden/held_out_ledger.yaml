@@ -1,0 +1,14 @@
+# Append-only record of held-out results (#711 AC 2).
+#
+# A held-out case is scored ONCE per oracle tag. The result is appended here with
+# the sha256 of its `scores/<tag>.json`, and `validate_cases.py` fails if that
+# file ever stops matching — so a rewritten result, a deleted one, or a second run
+# kept under the same tag are all detected. To record a new oracle version, add a
+# NEW tag; never re-run an existing one for a better number.
+#
+# What this does NOT do, stated plainly rather than implied: it cannot stop anyone
+# reading a held-out case while editing `oracle/prompt.md`. The case tree is
+# readable by anything with repo access, and unlike the defender's held-out nets
+# there is no process boundary here to attach a guard to. Enforcement of THAT is
+# review, and `defender/docs/oracle-calibration.md` says so.
+entries: []

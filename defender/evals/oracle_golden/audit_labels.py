@@ -37,7 +37,8 @@ GOLDEN_DIR = Path(__file__).resolve().parent
 
 def _load(name: str, path: Path):
     spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
+    assert spec is not None
+    assert spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = mod
     spec.loader.exec_module(mod)

@@ -33,7 +33,7 @@ import json
 import re
 import subprocess
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -76,7 +76,7 @@ def parse_iso(text: str) -> datetime:
 
 def format_iso(when: datetime) -> str:
     """Render back in the literal shape ES|QL accepts (millisecond Z form)."""
-    return when.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+    return when.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
 
 def esql_bounds(query: str) -> list[str]:

@@ -50,10 +50,13 @@ jobs:
 
       - name: Run unit tests
         working-directory: defender
-        # Collect both the learning-loop invariant suite (tests/) AND the
-        # orchestrator/loop tests co-located under learning/. The latter were
-        # previously dark to CI — only tests/ was collected — so a green run
-        # could hide failures in learning/test_loop.py et al.
+        # Collect the learning-loop invariant suite (tests/), the
+        # orchestrator/loop tests co-located under learning/, AND the measurement
+        # tooling under evals/. Each was added after being found dark to CI —
+        # only tests/ was collected originally, so a green run could hide
+        # failures in learning/test_loop.py et al., and evals/ carried three test
+        # files (judge_equivalence, run_judge_ab, secondary) that had never run in
+        # CI at all until #711 added the oracle-calibration engine beside them.
         #
         # DEFENDER_BUDGET_ENFORCE=1 runs the whole collected suite under the BLOCKING
         # budget posture (#631, M9/D11): flipping the flag in CI is what exercises the
@@ -61,7 +64,16 @@ jobs:
         # enforcement path is executed routinely rather than merely enabled.
         env:
           DEFENDER_BUDGET_ENFORCE: "1"
-        run: uv run pytest tests/ learning/ -v -m "not live"
+        run: uv run pytest tests/ learning/ evals/ -v -m "not live"
+
+      # The golden-set case tree is DATA, not code: split present and inherited,
+      # held-out results matching their append-only ledger hashes, `heterogeneous`
+      # agreeing with what the envelope derives, cause codes covering exactly the
+      # errors each score reports, and no story leaking the answer to the oracle.
+      # A linter that exits non-zero is the right shape for that; the engine's own
+      # behaviour is covered by the tests beside each module (#711).
+      - name: Validate the oracle-calibration case tree
+        run: defender/.venv/bin/python defender/evals/oracle_golden/validate_cases.py
 
       # The spec_graph gate checks (check_actors / check_binds) ship with the
       # spec-flow plugin and were dark to CI — only defender/ was collected, so a

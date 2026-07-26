@@ -45,6 +45,94 @@ diff over baseline** the lead's queries physically surface:
 return, not from what the lead was *for*. A lead's stated purpose is recorded
 (`intent_note`) to *explain* a divergence, never to excuse one.
 
+### The rule that keeps the suite a measurement
+
+> **A label may be corrected from the environment. Never from the projection.**
+
+Labels *can* legitimately be revised after a projection has been seen — the
+2026-07-25 re-evaluation revised three of six results, and every revision came
+from re-measuring the environment (control windows under each lead's own
+predicate, query filters against the mutated story) rather than from what the
+model emitted. That distinction is the whole difference between a suite that
+measures the oracle and one that quietly converges on agreeing with it.
+
+Operationally: a class change is accompanied by a control re-measurement or a
+generator re-run, never by an edit. `label.py` is the mechanical form of the same
+rule — the projection is not one of its inputs, so it *cannot* be fitted to one.
+
+## Dev and held-out
+
+The oracle is a prompt, and the prompt is the thing under test. There are two
+leakage paths and only the first is obvious:
+
+- **Prompt fitting.** Any change to `oracle/prompt.md` motivated by a case in the
+  suite is fitted to that case. With one pool, the suite stops being a
+  measurement the moment it becomes a target.
+- **Label fitting.** Covered by the rule above.
+
+`manifest.yaml` carries `split: dev | held-out`.
+
+- **Split at CASE level, never lead level.** Leads inside a case share a story and
+  an envelope and are not independent.
+- **A derived case inherits its base's assignment.** mut-001 and neg-001 reuse
+  case-001's envelopes byte-for-byte; putting one on the other side would put one
+  capture on both sides. Pinned by `validate_cases.py`.
+- **The six seed cases are all `dev`, and held-out is forward-only.** They were
+  visible while the prompt was being iterated, so calling them held-out now would
+  be a fiction. Retro-splitting four captures would also leave 1–2 environments
+  per side and burn the singleton classes.
+- **Held-out is assigned by the generator, before the first replay** — a
+  `generate_case.py --split` flag, not a human promise made after seeing a score.
+
+**What is enforced, and what is not.** A held-out result is written once per
+(case, tag) into the append-only `held_out_ledger.yaml` with the sha256 of its
+score artifact, so a rewritten result, a deleted one, or a second run kept under
+the same tag are all detected. To record a new oracle version, add a **new tag**;
+never re-run an existing one for a better number.
+
+What is **not** enforced, stated plainly rather than implied: nothing stops a
+prompt author reading a held-out case. The case tree is readable by anything with
+repo access, and unlike the defender's held-out nets (`run_common.is_held_out_alert_copy`)
+there is no process boundary here to attach a guard to. That is a review
+obligation, and this document is where it is written down rather than a
+construction the code provides.
+
+## Units — what `n` actually is
+
+An interval computed over leads overstates the suite, because leads inside a case
+are not independent: 27 of the suite's 36 leads are case-001's nine envelopes
+shown three times. The reporter therefore computes at **`n = n_units`**, where a
+unit is **(activity family × host pair)**.
+
+Seeds and re-runs **pool** within a unit — ten seeds of one scenario against one
+host pair are ten runs of one story shape, not ten trials. `runner.py
+--target/--user` is what moves the unit; `--seed` is not. This is a deliberately
+conservative full-within-unit-correlation assumption, held until there is enough
+data to estimate the real intra-unit correlation.
+
+The consequence worth internalizing: **automation raises the capture count
+cheaply and does not raise the unit count.** That is why the unit had to be fixed
+before recruitment started rather than after.
+
+`n_environments` is reported alongside: two cases captured from one restored
+snapshot are one environment however different their stories.
+
+### Sizing — where the resolver's `N` comes from
+
+`N` is *derived* from the interval width the policy needs, not chosen
+(`stats.py:required_n`). For a **≥ 0.90 lower bound at 95% confidence**:
+
+| observed rate | units needed |
+|---|---|
+| 1.00 (perfect) | 35 |
+| 0.97 | 69 |
+| 0.95 | 127 |
+| below 0.90 | unreachable — the bound converges to the rate |
+
+Below a floor of three units the reporter prints `insufficient` rather than a
+number: Wilson on one unit spans [0.21, 1.00], and printing that next to a point
+estimate invites the point estimate to be read.
+
 ## A. Capture an observed case (needs the environment)
 
 > **Only against `playground-v2`.** `build_case.py` performs no scrubbing —
@@ -188,6 +276,56 @@ Read the dimensions, never one number:
 A score with a non-empty `missing_leads` / `unscored_leads` / `duplicate_leads`
 is **not a measurement** and must not be read as one.
 
+### Cause codes — naming the failure, not just counting it
+
+Class agreement says *that* a projection was wrong; it never says *why*, and a
+prompt change aimed at "the disagreements" is aimed at nothing. Each error a score
+artifact reports carries a cause code in a sidecar,
+`scores/<tag>.causes.yaml`, keyed by `lead_id`.
+
+**A sidecar, not a field in the score artifact.** `score.py` is pure and its
+output is pinned to re-derive from (`expected.yaml`, `projections/<tag>.yaml`); a
+cause code is a judgment no pure function can emit. `validate_cases.py` requires
+the sidecar to cover **exactly** the leads the score reports an error on — both
+directions, so neither a missing cause nor a stale cause for a lead that has since
+scored clean survives.
+
+| code | meaning |
+|---|---|
+| `C-INTENT-SCOPE` | answers the lead's dominant framing rather than the union of its envelope |
+| `C-HETERO-UNDER` | the lead's sub-queries disagree; the projection emits one sub-query's class |
+| `C-SUPPRESS-UNBASELINED` | `-noise` emitted where the envelope's control baseline is zero |
+| `C-FABRICATED-VALUE` | a volunteered concrete value the capture refutes, where a placeholder was mandated |
+| `C-OVER-PROJECT` | `+event` emitted where the envelope is `0` or `+noise` |
+| `C-MALFORMED` | output outside the oracle's closed grammar |
+| `C-LABEL-SUSPECT` | suspected label defect — resolvable only by re-measuring the environment |
+
+**The evidence bar.** A cause is treated as real, and may motivate a prompt
+change, only at **≥ 5 instances across ≥ 3 distinct units**. Units, not cases:
+mut-001 and neg-001 are not independent evidence of anything case-001 already
+shows, and neither are two seeds of one scenario. The reporter tallies causes at
+unit granularity and marks each `established` or `insufficient`.
+
+**Two standing exemptions, and why they are not special pleading.** The bar
+governs taxonomy *claims* — "this is a real failure mode" — not errors the
+instrument already grades or defects readable in the specification:
+
+- a defect visible in `prompt.md` itself at n=0 (the suppression rule not
+  requiring the stream to plausibly be reporting);
+- an error an existing metric already counts (`wrong_concrete_fields`).
+
+Both are dev-motivated and stay dev-motivated: validated on dev, reported on
+held-out.
+
+**`C-INTENT-SCOPE` and `C-HETERO-UNDER` are currently inseparable.** After
+deriving `heterogeneous` mechanically, case-001's heterogeneous leads are
+`l-002, l-004, l-006` and its `intent_note` leads are `l-002, l-006` — which are
+exactly the two misses. The two hypotheses have the same witness set on the whole
+suite; they are one two-lead observation stated twice. Separating them needs
+crossed recruitment (a heterogeneous lead with no intent-scoping, and an
+intent-scoped homogeneous one). Entries carry `confounded_with` rather than
+picking a winner.
+
 ## D. Verify before you trust (the re-evaluation pass)
 
 A case is not calibrated because it was captured; it is calibrated because it
@@ -229,6 +367,17 @@ number.
   that kind, or an action that destroys data at source — clearing the log,
   disabling auditd.
 
+- **A control window can land in a lever-down gap.** The stack is levered up and
+  down between snapshots, so a shape-matched window a week back can fall in a
+  period when the server did not exist. Every query returns zero rows there, which
+  is indistinguishable from "this stream has no baseline" — and reading it that way
+  **suppresses real `-noise`**: case-003's 2026-07-18 control is empty only because
+  the environment was down between 07-17 and 07-25, while the same query a week
+  earlier returns 444 auth documents. `controls.py` liveness-probes each window
+  (total ingest across `logs-*`; no live playground-v2 hour is silent, because the
+  agents alone emit metricbeat continuously) and marks a dead one `live: false`;
+  the labeler ignores it rather than counting it as an empty baseline.
+
 Two more traps that are not the environment's fault:
 
 - A **zero-byte** `hidden/observed/**.json` is an **errored** query, not an empty
@@ -263,6 +412,91 @@ substitute for a trusted slice.
 the loop can apply a lesson update derived from an untrusted slice — today that
 includes every `+event` slice with a wrong volunteered value and the single
 `-noise` slice, which is both untrusted and effectively unexercised.
+
+## Enforcement — what is pinned, and what is review
+
+Split deliberately in two, because a rule list that mixes the two invites both to
+be believed equally.
+
+**Pinned mechanically.** `validate_cases.py` over the case tree (CI runs it), and
+the engine tests beside each module:
+
+- every case carries `split`, `unit`, and `capture_environment`;
+- a derived case's `split` and `unit` equal its base's;
+- `heterogeneous` matches what `label.py` recomputes from the envelope, wherever
+  that is measurable;
+- the cause sidecar covers exactly the errors the score artifact reports;
+- every held-out `scores/<tag>.json` matches its append-only ledger hash;
+- every `scores/<tag>.json` re-derives from its projection;
+- no `story.md` carries evaluation vocabulary, and `replay.py` names no `hidden/`
+  path in code;
+- the reporter refuses to publish an interval below the unit floor, and never
+  pools dev with held-out;
+- the labeler reproduces the hand-derived seed labels (`audit_labels.py`).
+
+**Review-only, and labelled as such** — no code can check these:
+
+- a `prompt.md` change cites the **dev** case ids that motivated it;
+- **a label may be corrected from the environment, never from the projection**;
+- a held-out case is not read while the prompt is being edited.
+
+## Generating cases
+
+`generate_case.py` orchestrates the tools that already exist: fire
+(`attacks/runner.py`) → capture (`extract_alert.py`) → envelope (`defender/run.py`)
+→ story (`story_from_run.py`) → assemble (`build_case.py`) → controls
+(`controls.py`) → label (`label.py`). Two properties the hand path could not
+guarantee come for free: the story cannot leak the evaluation, because the
+renderer's only input is the runner's record; and a control uses the lead's own
+predicate, because it *is* the lead's own query with its bounds moved.
+
+Three things worth knowing before running it:
+
+- **Baseline generators stay ON.** `attacks/catalog.yaml` used to advise
+  `V2_BASELINE_ENABLED=false`, which is right for capturing an alert fixture and
+  wrong for calibration: the oracle's class is a signed diff over baseline, so
+  with the generators off `+noise` cannot occur at all and `+event` is easier than
+  production.
+- **The generator does not predict which rule a cell trips.** It takes whichever
+  rule actually fired, preferring one whose alert names the operation's target
+  host — because with baseline running, unrelated alerts fire during the capture
+  window too, and investigating one of those binds a story to an envelope its
+  activity never touched.
+- **A cell that trips no rule has no captured envelope.** That is a real outcome,
+  not a failure: recruit it with authored leads, recorded as `lead_source: authored`.
+
+### The labeler is itself calibrated (`audit_labels.py`)
+
+When labels come from a program, that program is calibrated against hand-derived
+truth before its output is trusted. A labeler bug biases every case the same way,
+and no amount of `n` detects a systematic error — unlike human error, which is at
+least uncorrelated across cases. The seed six are the audit set, and a divergence
+is adjudicated by **re-measurement, never by adjusting the labeler to agree**: a
+labeler tuned until it reproduces the hand labels has been fitted to them and
+calibrates nothing.
+
+Running that audit is what found four instrument defects, every one an
+environment fact rather than a label error: duration-matched control windows too
+short to see a sparse baseline; `source.ip` unusable as a row key because
+addresses rotate across lever-ups; doc-returning queries keyed on the whole ECS
+document, so every one of them graded `+event`; and lever-down gaps read as empty
+baselines. The fourth had the labeler about to commit *the same error the suite
+exists to catch in the oracle* — inferring suppression from absence.
+
+### Levering up from a fresh workspace
+
+Beyond the missing Terraform state noted in §A.1: the project's `soc-playground-admin`
+and `soc-playground-devcontainer` SSH keys and the `soc-playground-edge` firewall
+already exist, so `terraform apply` from empty state collides with all three, and
+`/workspace/.ssh/devcontainer_ed25519.pub` (a required variable's default path) is
+absent in a fresh container. Use the `hcloud server create` path in §A.1, add your
+egress IP to the firewall's SSH allow-list, and remove it afterwards.
+
+`defender/run.py` boxes its bash lane in a container, and under
+docker-outside-of-Docker the run dir's in-container path is not the host path the
+bind mount resolves, so the box cannot start. `DEFENDER_ALLOW_UNSANDBOXED=1` is
+the documented local escape hatch (`runtime-sandbox-design.md`); the permission
+gate still applies, only the container boundary is dropped.
 
 ## Status
 

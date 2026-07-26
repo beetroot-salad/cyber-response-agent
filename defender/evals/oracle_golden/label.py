@@ -231,9 +231,11 @@ def query_class(payload_text: str, controls: list[dict] | None, *,
     """
     if system in STATE_SYSTEMS:
         return STATE
-    if attack_contribution is not None and _is_rowset(attack_contribution.get("payload")):
-        return _compare(attack_contribution["payload"], controls,
-                        attack_contribution.get("query", query), query_id)
+    contribution = (attack_contribution or {}).get("payload")
+    if _is_rowset(contribution):
+        assert isinstance(contribution, dict)
+        return _compare(contribution, controls,
+                        (attack_contribution or {}).get("query", query), query_id)
     if payload_text == "":
         return ERRORED                      # non-zero exit, not an empty result
     try:
@@ -265,7 +267,7 @@ def _compare(payload: dict, controls: list[dict] | None,
             # empty would suppress every real `-noise`.
             continue
         control_payload = control.get("payload")
-        if not _is_rowset(control_payload):
+        if not isinstance(control_payload, dict) or not _is_rowset(control_payload):
             continue
         rows = distinguishing_rows(control_payload, control.get("query", query), query_id)
         if rows is None:
