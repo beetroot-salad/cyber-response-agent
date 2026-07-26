@@ -67,7 +67,7 @@ def test_cases_sharing_one_envelope_count_as_one_unit(tmp_path):
                     host_pair="ws->canary", env="snap-1",
                     rows=[_row("l-1", "elastic", "+event", match=True)],
                     base_case=None if case_id == "case-a" else "case-a")
-    report = REPORT.build_report(REPORT.load_cases(tmp_path), TAG, 0.90)
+    report = REPORT.build_report(REPORT.load_golden_cases(tmp_path), TAG, 0.90)
     overall = report["splits"]["dev"]["overall"]
     assert overall["n_leads"] == 3
     assert overall["n_units"] == 1
@@ -79,7 +79,7 @@ def test_two_cases_from_one_snapshot_are_one_environment(tmp_path):
                 env="snap-1", rows=[_row("l-1", "elastic", "+event", match=True)])
     _write_case(tmp_path, "case-b", split="dev", family="f2", host_pair="c->d",
                 env="snap-1", rows=[_row("l-1", "elastic", "+event", match=True)])
-    report = REPORT.build_report(REPORT.load_cases(tmp_path), TAG, 0.90)
+    report = REPORT.build_report(REPORT.load_golden_cases(tmp_path), TAG, 0.90)
     assert report["splits"]["dev"]["overall"]["n_environments"] == 1
     assert report["splits"]["dev"]["overall"]["n_units"] == 2
 
@@ -89,7 +89,7 @@ def test_a_slice_below_the_unit_floor_reports_insufficient_not_a_number(tmp_path
     estimate invites the point estimate to be read."""
     _write_case(tmp_path, "case-a", split="dev", family="f1", host_pair="a->b",
                 env="e1", rows=[_row("l-1", "elastic", "+event", match=True)])
-    report = REPORT.build_report(REPORT.load_cases(tmp_path), TAG, 0.90)
+    report = REPORT.build_report(REPORT.load_golden_cases(tmp_path), TAG, 0.90)
     overall = report["splits"]["dev"]["overall"]
     assert overall["verdict"] == "insufficient"
     assert overall["interval"] is None
@@ -106,7 +106,7 @@ def test_dev_and_held_out_are_never_pooled(tmp_path):
         _write_case(tmp_path, f"ho-{i}", split="held-out", family=f"g{i}",
                     host_pair=f"b->{i}", env=f"f{i}",
                     rows=[_row("l-1", "elastic", "+event", match=False)])
-    report = REPORT.build_report(REPORT.load_cases(tmp_path), TAG, 0.90)
+    report = REPORT.build_report(REPORT.load_golden_cases(tmp_path), TAG, 0.90)
     assert report["splits"]["dev"]["overall"]["rate"] == 1.0
     assert report["splits"]["held-out"]["overall"]["rate"] == 0.0
     assert set(report["splits"]) == {"dev", "held-out"}
@@ -119,7 +119,7 @@ def test_a_perfect_rate_on_too_few_units_still_fails_to_certify(tmp_path):
         _write_case(tmp_path, f"case-{i}", split="dev", family=f"f{i}",
                     host_pair=f"a->{i}", env=f"e{i}",
                     rows=[_row("l-1", "elastic", "+event", match=True)])
-    report = REPORT.build_report(REPORT.load_cases(tmp_path), TAG, 0.90)
+    report = REPORT.build_report(REPORT.load_golden_cases(tmp_path), TAG, 0.90)
     overall = report["splits"]["dev"]["overall"]
     assert overall["rate"] == 1.0
     assert overall["verdict"] == "no-update"
@@ -133,7 +133,7 @@ def test_a_cause_needs_instances_across_distinct_units(tmp_path):
         _write_case(tmp_path, f"same-{i}", split="dev", family="f", host_pair="a->b",
                     env="e", rows=[_row("l-1", "elastic", "+event", match=False)],
                     causes={"l-1": {"cause": "C-INTENT-SCOPE"}})
-    report = REPORT.build_report(REPORT.load_cases(tmp_path), TAG, 0.90)
+    report = REPORT.build_report(REPORT.load_golden_cases(tmp_path), TAG, 0.90)
     tally = report["splits"]["dev"]["causes"]["C-INTENT-SCOPE"]
     assert tally["instances"] == 5
     assert tally["units"] == 1
@@ -146,7 +146,7 @@ def test_a_cause_across_enough_units_is_established(tmp_path):
                     host_pair=f"a->{i}", env=f"e{i}",
                     rows=[_row("l-1", "elastic", "+event", match=False)],
                     causes={"l-1": {"cause": "C-INTENT-SCOPE"}})
-    report = REPORT.build_report(REPORT.load_cases(tmp_path), TAG, 0.90)
+    report = REPORT.build_report(REPORT.load_golden_cases(tmp_path), TAG, 0.90)
     tally = report["splits"]["dev"]["causes"]["C-INTENT-SCOPE"]
     assert (tally["instances"], tally["units"]) == (5, 5)
     assert tally["status"] == "established"
@@ -159,7 +159,7 @@ def test_an_unreachable_bound_says_so_rather_than_naming_an_n(tmp_path):
         _write_case(tmp_path, f"case-{i}", split="dev", family=f"f{i}",
                     host_pair=f"a->{i}", env=f"e{i}",
                     rows=[_row("l-1", "elastic", "+event", match=(i % 2 == 0))])
-    report = REPORT.build_report(REPORT.load_cases(tmp_path), TAG, 0.90)
+    report = REPORT.build_report(REPORT.load_golden_cases(tmp_path), TAG, 0.90)
     overall = report["splits"]["dev"]["overall"]
     assert overall["verdict"] == "no-update"
     assert overall["units_needed"] is None

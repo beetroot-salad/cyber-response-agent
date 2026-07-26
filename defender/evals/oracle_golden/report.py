@@ -71,7 +71,7 @@ CAUSE_MIN_INSTANCES = 5
 CAUSE_MIN_UNITS = 3
 
 
-def load_cases(cases_dir: Path) -> list[dict]:
+def load_golden_cases(cases_dir: Path) -> list[dict]:
     """Every case with its manifest, expected labels, and recorded scores."""
     out = []
     for case_dir in sorted(d for d in cases_dir.iterdir() if d.is_dir()):
@@ -202,7 +202,7 @@ def build_report(cases: list[dict], tag: str, target_lower_bound: float) -> dict
     return report
 
 
-def print_report(report: dict) -> None:
+def print_rollup(report: dict) -> None:
     print(f"== oracle calibration — {report['tag']} "
           f"(target lower bound {report['target_lower_bound']:.2f}) ==")
     bound = report["target_lower_bound"]
@@ -255,7 +255,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--json", type=Path, default=None, dest="json_out")
     ns = p.parse_args(argv)
 
-    cases = load_cases(ns.cases_dir)
+    cases = load_golden_cases(ns.cases_dir)
     tags = [ns.tag] if ns.tag else sorted({t for c in cases for t in c["scores"]})
     if not tags:
         print("no scored projections found", file=sys.stderr)
@@ -265,7 +265,7 @@ def main(argv: list[str] | None = None) -> int:
     for tag in tags:
         report = build_report(cases, tag, ns.target_lower_bound)
         reports.append(report)
-        print_report(report)
+        print_rollup(report)
 
     if ns.json_out:
         ns.json_out.parent.mkdir(parents=True, exist_ok=True)

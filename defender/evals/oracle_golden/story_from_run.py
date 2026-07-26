@@ -98,7 +98,7 @@ def render_story(meta: dict) -> str:
     return "\n".join(out).rstrip() + "\n"
 
 
-def leaks(story: str) -> list[str]:
+def eval_tells_in(story: str) -> list[str]:
     """Evaluation vocabulary present in a story — must always be empty."""
     lowered = story.lower()
     return [tell for tell in EVAL_TELLS if tell in lowered]
@@ -114,7 +114,7 @@ def main(argv: list[str] | None = None) -> int:
     meta = json.loads(ns.meta.read_text(encoding="utf-8"))
     story = render_story(meta)
 
-    found = leaks(story)
+    found = eval_tells_in(story)
     if found:
         # Refuse rather than warn: a leaked answer in an oracle input invalidates
         # every projection the case will ever record, and it is invisible after

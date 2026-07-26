@@ -59,7 +59,7 @@ def test_the_story_states_the_identity_hosts_and_commands():
 
 
 def test_the_rendered_story_carries_no_evaluation_vocabulary():
-    assert STORY.leaks(STORY.render_story(META)) == []
+    assert STORY.eval_tells_in(STORY.render_story(META)) == []
 
 
 def test_an_aborted_run_says_so():
@@ -91,7 +91,7 @@ def test_every_checked_in_run_record_renders_cleanly(meta_path):
     """The four committed runner records are the renderer's real corpus."""
     meta = json.loads(meta_path.read_text(encoding="utf-8"))
     story = STORY.render_story(meta)
-    assert STORY.leaks(story) == []
+    assert STORY.eval_tells_in(story) == []
     assert (meta.get("resolved") or {}).get("target_host", "") in story
     assert len(story.splitlines()) > 5
 
