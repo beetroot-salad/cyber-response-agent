@@ -6,7 +6,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from uuid import uuid4
 
@@ -182,13 +182,16 @@ class CuratorDeps(AgentDeps):
     def for_run(  # noqa: PLR0913 — the spawn's roots + its bound check + the transport seam
         cls, run_dir: Path, repo_root: Path, corpus_dir: Path,
         *, check: ForwardCheck, runs_dir: Path, pending: Path,
-        queued_ids: frozenset[str], run_verify: Callable[..., str] = _run_verify_pydantic,
+        queued_ids: frozenset[str], box: Any,
+        run_verify: Callable[..., str] = _run_verify_pydantic,
         salt: str | None = None,
     ) -> CuratorDeps:
         """A thin wrapper over `bind` (M9): resolves the corpus NAME off `corpus_dir`'s own
         basename and binds through the one seam, then attaches the forward-check config into
         the base `tool_config` slot. `corpus_dir` stays the caller's contract (unchanged from
-        before #691) — only its *derivation* moved onto `bind`."""
+        before #691) — only its *derivation* moved onto `bind`. `box` is REQUIRED (R1): a
+        loud TypeError at construction beats a silent inert default that re-deads the curator's
+        bash lane (#665 F1)."""
         defender_dir = repo_root / "defender"
         cfg = ForwardCheckConfig(
             check=check, runs_dir=runs_dir, pending=pending,
@@ -200,7 +203,10 @@ class CuratorDeps(AgentDeps):
                 (defender_dir / name).resolve() for name in SHIPPED_LESSON_CORPORA
             ),
         )
-        deps = bind(CORPUS_AUTHOR_DEF, run_dir, scope=scope, defender_dir=defender_dir, salt=salt)
+        deps = bind(
+            CORPUS_AUTHOR_DEF, run_dir, scope=scope, defender_dir=defender_dir, salt=salt,
+            box=box,
+        )
         assert isinstance(deps, CuratorDeps)
         return replace(deps, tool_config=cfg)
 
@@ -240,6 +246,7 @@ def _run_curator_pydantic(  # noqa: PLR0913 — the transport signature plus the
     runs_dir: Path,
     pending: Path,
     queued_ids: frozenset[str],
+    box: Any = None,
     run_verify: Callable[..., str] = _run_verify_pydantic,
     salt: str | None = None,
     request_limit: int = config.AUTHOR_REQUEST_LIMIT,
@@ -249,7 +256,7 @@ def _run_curator_pydantic(  # noqa: PLR0913 — the transport signature plus the
     deps = CuratorDeps.for_run(
         learning_run_dir, repo_root, corpus_dir,
         check=check, runs_dir=runs_dir, pending=pending,
-        queued_ids=queued_ids, run_verify=run_verify, salt=salt,
+        queued_ids=queued_ids, run_verify=run_verify, salt=salt, box=box,
     )
     return run_stage(
         stage="curator",
@@ -275,6 +282,7 @@ def run_curator_stage(  # noqa: PLR0913 — the spawn contract (per-spawn inputs
     repo_root: Path,
     learning_run_dir: Path,
     log: Callable[[str], None],
+    box: Any = None,
     model: str = config.AUTHOR_MODEL,
     effort: str | None = config.AUTHOR_EFFORT,
     request_limit: int = config.AUTHOR_REQUEST_LIMIT,
@@ -305,7 +313,7 @@ def run_curator_stage(  # noqa: PLR0913 — the spawn contract (per-spawn inputs
             corpus_dir=corpus_dir, check=check, runs_dir=runs_dir, pending=pending,
             queued_ids=queued_ids, run_verify=run_verify,
             request_limit=request_limit, wall_clock_timeout=timeout,
-            salt=stage_salt,
+            salt=stage_salt, box=box,
         )
     except RunUnprocessable as e:
         raise AuthorError(f"curator ({batch_id}) did not complete: {e}") from e

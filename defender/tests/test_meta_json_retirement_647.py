@@ -208,11 +208,11 @@ def test_learning_curator_leg_mints_a_fresh_uuid4_salt_distinct_from_the_run_tok
 
     deps = CuratorDeps.for_run(
         curdir, repo, corpus,
-        check=FINDINGS_CHECK, runs_dir=runs, pending=pending, queued_ids=frozenset(),
+        check=FINDINGS_CHECK, runs_dir=runs, pending=pending, queued_ids=frozenset(), box=None,
     )
     other = CuratorDeps.for_run(
         curdir, repo, corpus,
-        check=FINDINGS_CHECK, runs_dir=runs, pending=pending, queued_ids=frozenset(),
+        check=FINDINGS_CHECK, runs_dir=runs, pending=pending, queued_ids=frozenset(), box=None,
     )
 
     assert re.fullmatch(r"[0-9a-f]{32}", deps.salt), (

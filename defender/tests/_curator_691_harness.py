@@ -119,14 +119,16 @@ def bind_curator(
     )
 
 
-def curator_deps(wt: Path, run_dir: Path, corpus_name: str = "lessons") -> CuratorDeps:
+def curator_deps(
+    wt: Path, run_dir: Path, corpus_name: str = "lessons", *, box=None,
+) -> CuratorDeps:
     """A ``CuratorDeps`` through the STABLE ``for_run`` entry point (M9 keeps it as a thin wrapper
     over ``bind``). Drive ``.policy`` through the real gates; the confine / membership / rm
     corrections surface as the policy's OWN decisions changing under the refactor."""
     return CuratorDeps.for_run(
         run_dir, wt, corpus(wt, corpus_name),
         check=FINDINGS_CHECK, runs_dir=wt / "runs",
-        pending=wt / "_pending" / "findings.jsonl", queued_ids=frozenset(),
+        pending=wt / "_pending" / "findings.jsonl", queued_ids=frozenset(), box=box,
     )
 
 

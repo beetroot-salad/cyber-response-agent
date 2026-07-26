@@ -107,7 +107,7 @@ def main(argv: list[str]) -> int:
     original_seed = sub._actor_seed
     sub._actor_seed = lambda _run_id, _stable=case_id: original_seed(_stable)
     try:
-        story = sub.invoke_actor(alert, actor_input, staging)
+        story = sub.invoke_actor(alert, actor_input, staging, box=None)
     except sub.RunUnprocessable as e:
         print(f"actor invocation failed: {e}", file=sys.stderr)
         return 2

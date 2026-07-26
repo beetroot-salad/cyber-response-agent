@@ -22,6 +22,7 @@ def invoke_actor_benign(
     alert_rule_key: str,
     learning_run_dir: Path,
     *,
+    box,
     actor_fn=None,
     salt: str | None = None,
 ) -> str:
@@ -48,5 +49,5 @@ def invoke_actor_benign(
             (LESSONS_ENV_RETRIEVE_SCRIPT,),
             read_confine=(LESSONS_ENVIRONMENT_DIR,),
         ),
-        salt=stage_salt,
+        salt=stage_salt, box=box,
     )

@@ -271,7 +271,7 @@ def test_subagents_judge_runs_pydantic_engine(monkeypatch, tmp_path):
     captured = {}
 
     def _spy(wiring, run_dir, actor_story_path, projected_telemetry_path, learning_run_dir,
-             *, judge_fn=_SENTINEL):
+             *, judge_fn=_SENTINEL, box=None):
         captured["judge_fn"] = judge_fn
         return _YAML
 

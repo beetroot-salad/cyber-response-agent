@@ -64,7 +64,7 @@ class Direction:
 
 ADVERSARIAL = Direction(
     name="adversarial",
-    invoke_actor=lambda agents, run_dir, lrd, key: agents.actor(run_dir, lrd),
+    invoke_actor=lambda agents, run_dir, lrd, key, *, box: agents.actor(run_dir, lrd, box=box),
     judge_wiring=ADVERSARIAL_WIRING,
     actor_model=ACTOR_MODEL,
     validate=validate_judge_doc,
@@ -92,7 +92,9 @@ ADVERSARIAL = Direction(
 
 BENIGN = Direction(
     name="benign",
-    invoke_actor=lambda agents, run_dir, lrd, key: agents.actor_benign(run_dir, lrd, key),
+    invoke_actor=lambda agents, run_dir, lrd, key, *, box: (
+        agents.actor_benign(run_dir, lrd, key, box=box)
+    ),
     judge_wiring=BENIGN_WIRING,
     actor_model=BENIGN_ACTOR_MODEL,
     validate=validate_judge_benign_doc,

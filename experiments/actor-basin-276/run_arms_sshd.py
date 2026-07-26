@@ -79,7 +79,7 @@ def run_arm(arm, actor_prompt, whitebox, retire):
         actor_input.write_text(LR.render_actor_view_yaml(str(FX)))
 
         print(f"[{arm}] actor... (retire={retire} lesson_present={RETIRE_LESSON.is_file()})", flush=True)
-        story = S.invoke_actor(alert_path, actor_input, ldir)
+        story = S.invoke_actor(alert_path, actor_input, ldir, box=None)
         (ldir / "actor_story.md").write_text(story)
 
         if _is_skip(story):
@@ -94,7 +94,7 @@ def run_arm(arm, actor_prompt, whitebox, retire):
         proj.write_text(_strip(oracle_yaml))
 
         print(f"[{arm}] judge...", flush=True)
-        judge_yaml = S.invoke_judge(FX, ldir / "actor_story.md", proj, ldir)
+        judge_yaml = S.invoke_judge(FX, ldir / "actor_story.md", proj, ldir, box=None)
         jstr = _strip(judge_yaml)
         (ldir / "judge_findings.yaml").write_text(jstr)
         doc = yaml.safe_load(jstr) if jstr.strip().startswith(("outcome", "defender")) else None

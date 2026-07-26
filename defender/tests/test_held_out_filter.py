@@ -23,6 +23,17 @@ REAL_REPO = Path(__file__).resolve().parents[2]
 from defender import run_common  # type: ignore[import-not-found]
 from defender.learning import loop  # type: ignore[import-not-found]
 
+def _noop_start_box(request, **_kw):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(name=request.name)
+
+
+def _noop_stop_box(_box, **_kw):
+    pass
+
+
+
 
 class FakeSubagents:
     """In-memory Subagents double — canned per-step outputs, records call counts.
@@ -43,11 +54,11 @@ class FakeSubagents:
     def _bump(self, name: str) -> None:
         self.calls[name] = self.calls.get(name, 0) + 1
 
-    def actor(self, run_dir, learning_run_dir):
+    def actor(self, run_dir, learning_run_dir, *, box=None):
         self._bump("actor")
         return self._story
 
-    def actor_benign(self, run_dir, learning_run_dir, alert_rule_key):
+    def actor_benign(self, run_dir, learning_run_dir, alert_rule_key, *, box=None):
         self._bump("actor_benign")
         return self._story_benign
 
@@ -56,7 +67,7 @@ class FakeSubagents:
         return self._oracle
 
     def judge(self, wiring, run_dir, actor_story_path, projected_telemetry_path,
-              learning_run_dir):
+              learning_run_dir, *, box=None):
         benign = wiring is loop.BENIGN_WIRING
         self._bump("judge_benign" if benign else "judge")
         return self._judge_benign if benign else self._judge
@@ -152,7 +163,10 @@ def test_malicious_dispatches_benign_not_adversarial(tmp_path: Path, monkeypatch
     agents = FakeSubagents(story_benign="SKIP: not ours\n")
     paths = loop.LoopPaths(repo_root=tmp_path)
 
-    rc = loop.run_one(run_dir, paths=paths, agents=agents)
+    rc = loop.run_one(
+        run_dir, paths=paths, agents=agents,
+        start_box=_noop_start_box, stop_box=_noop_stop_box,
+    )
     assert rc == 0
     marker = paths.author_queue_dir / f"{run_dir.name}.json"
     assert marker.exists(), "run must be enqueued for authoring regardless of disposition"
@@ -171,7 +185,10 @@ def test_run_one_enqueues_for_authoring_even_when_a_leg_fails(tmp_path: Path, mo
     paths = loop.LoopPaths(repo_root=tmp_path)
 
     with pytest.raises(loop.RunUnprocessable):
-        loop.run_one(run_dir, paths=paths, agents=agents)
+        loop.run_one(
+            run_dir, paths=paths, agents=agents,
+            start_box=_noop_start_box, stop_box=_noop_stop_box,
+        )
     marker = paths.author_queue_dir / f"{run_dir.name}.json"
     assert marker.exists(), "a failed leg must still enqueue the run for authoring"
 
@@ -213,7 +230,10 @@ def test_direct_learn_still_learns_an_ordinary_run(tmp_path: Path, monkeypatch) 
     agents = FakeSubagents(story_benign="SKIP: not ours\n")
     paths = loop.LoopPaths(repo_root=tmp_path)
 
-    assert loop.run_one(run_dir, paths=paths, agents=agents) == 0
+    assert loop.run_one(
+        run_dir, paths=paths, agents=agents,
+        start_box=_noop_start_box, stop_box=_noop_stop_box,
+    ) == 0
     marker = paths.author_queue_dir / f"{run_dir.name}.json"
     assert marker.exists(), "an ordinary run must still reach the author queue"
 

@@ -74,7 +74,15 @@ def run_env(defender_dir: Path, run_dir: Path) -> dict[str, str]:
     env["DEFENDER_RUN_DIR"] = str(run_dir)
     env["DEFENDER_RUNS_BASE"] = str(run_dir.parent)
     env["PATH"] = f"{defender_dir / 'bin'}{os.pathsep}{env.get('PATH', '')}"
+    # PREPENDED, not assigned: this env also drives the adapter/query/orient host
+    # subprocesses, which inherit whatever PYTHONPATH the operator's shell set. Clobbering it
+    # would silently drop those entries — mirror the additive shape PATH uses one line up.
+    env["PYTHONPATH"] = _prepend(str(defender_dir.parent), env.get("PYTHONPATH"))
     return env
+
+
+def _prepend(head: str, tail: str | None) -> str:
+    return f"{head}{os.pathsep}{tail}" if tail else head
 
 
 def visualize(run_dir: Path) -> None:

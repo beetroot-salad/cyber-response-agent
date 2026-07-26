@@ -155,7 +155,7 @@ def _curator(env):
     deps = CuratorDeps.for_run(
         env.run, env.dfn.parent, corpus,
         check=lambda *a, **k: "GOOD", runs_dir=env.tmp / "runs", pending=env.tmp / "pending",
-        queued_ids=frozenset(), run_verify=lambda *a, **k: "GOOD",
+        queued_ids=frozenset(), run_verify=lambda *a, **k: "GOOD", box=None,
     )
     return deps.policy
 

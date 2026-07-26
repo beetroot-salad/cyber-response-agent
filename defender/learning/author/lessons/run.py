@@ -60,10 +60,11 @@ class AuthorConfig:
     author_timeout: int = AUTHOR_TIMEOUT
     author_effort: str | None = AUTHOR_EFFORT
     manifest_seed: str | None = None
+    box: Any = None
 
 
 def build_author_config(
-    paths: LoopPaths = DEFAULT_PATHS, *, manifest_seed: str | None = None
+    paths: LoopPaths = DEFAULT_PATHS, *, manifest_seed: str | None = None, box: Any = None,
 ) -> AuthorConfig:
     return AuthorConfig(
         repo_root=paths.repo_root,
@@ -82,6 +83,7 @@ def build_author_config(
         author_prompt=paths.learning_dir / "author" / "lessons" / "prompt.md",
         invoke_agent=invoke_agent,
         manifest_seed=manifest_seed,
+        box=box,
     )
 
 
@@ -154,7 +156,7 @@ def invoke_agent(findings: list[dict], batch_id: str, cfg: AuthorConfig) -> dict
         effort=cfg.author_effort,
         request_limit=AUTHOR_REQUEST_LIMIT,
         timeout=cfg.author_timeout,
-        salt=stage_salt,
+        salt=stage_salt, box=cfg.box,
     )
 
 
@@ -228,9 +230,10 @@ def run_batch(
     hold_committed: bool = False,
     paths: LoopPaths = DEFAULT_PATHS,
     cfg: AuthorConfig | None = None,
+    box: Any = None,
 ) -> int:
     if cfg is None:
-        cfg = build_author_config(paths)
+        cfg = build_author_config(paths, box=box)
     return _shared.run_batch_envelope(
         queue_lock_file=cfg.lock_file,
         repo_lock_file=cfg.repo_lock_file,

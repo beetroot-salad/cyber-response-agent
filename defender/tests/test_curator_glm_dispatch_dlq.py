@@ -243,7 +243,16 @@ def test_dispatch_at_threshold_drain_completes(tmp_path: Path, monkeypatch) -> N
         def cleanup(self, wt: Path) -> None:
             pass
 
-    rc = orch.author_drain(paths, branch=_RepoBranch(paths.repo_root))
+    def _noop_start_box(request, **_kw):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(name=request.name)
+
+    rc = orch.author_drain(
+        paths, branch=_RepoBranch(paths.repo_root),
+        start_box=_noop_start_box, stop_box=lambda _b, **_kw: None,
+        scrub=lambda _p, **_kw: None,
+    )
     assert rc == 0
 
     expected = {

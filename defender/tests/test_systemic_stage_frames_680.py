@@ -206,6 +206,7 @@ def _capture_actor(
             run,
             actor_fn=actor_fn,
             salt=salt,
+            box=None,
         )
         tags = ("reader_contract", "alert", "alert_rule_id", "case_entities")
         required = (alert_text, hostile)
@@ -213,7 +214,7 @@ def _capture_actor(
     else:
         actor_input = tmp_path / "actor-input.md"
         actor_input.write_text(hostile)
-        _with_salt(invoke_actor, alert, actor_input, run, actor_fn=actor_fn, salt=salt)
+        _with_salt(invoke_actor, alert, actor_input, run, actor_fn=actor_fn, salt=salt, box=None)
         archetype = (run / "actor_archetype.txt").read_text().strip()
         menu = (run / "actor_menu.txt").read_text().strip()
         tags = (
@@ -652,6 +653,7 @@ def _corpus_author_deps_scene(tmp_path: Path, result: BoxResult):
         pending=tmp_path / "pending.jsonl",
         queued_ids=frozenset(),
         run_verify=lambda **_kwargs: "VERDICT: GOOD",
+        box=None,
     )
     deps = replace(deps, box=Box(result))
     assert deps.role is CORPUS_AUTHOR_DEF.role
@@ -678,7 +680,8 @@ def test_author_cannot_obtain_receiving_token_before_authorship(tmp_path):
         return authored
 
     _with_salt(
-        invoke_actor, alert, actor_input, actor_run, actor_fn=actor_fn, salt=uuid4().hex
+        invoke_actor, alert, actor_input, actor_run, actor_fn=actor_fn, salt=uuid4().hex,
+        box=None,
     )
     story = actor_root / "story.md"
     story.write_text(authored)
@@ -1840,6 +1843,7 @@ def test_d7_one_stage_salt_reaches_frames_and_tool_wraps(tmp_path):
         learning,
         judge_fn=judge_fn,
         salt=expected,
+        box=None,
     )
     frames = list(FRAME_RE.finditer(seen["prompt"] + seen["read"] + seen["bash"]))
     assert result == "done"

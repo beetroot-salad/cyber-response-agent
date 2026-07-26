@@ -30,7 +30,7 @@ Pins the port's load-bearing decisions:
   builds, and a NEW generous per-curator request cap (default 250) is threaded.
 
 NOTE (seams assumed beyond the tight contract): ``_run_curator_pydantic`` — the module
-default of ``run_author``, the mirror of ``lead_author_engine._run_author_pydantic`` — is
+default of ``run_author``, the mirror of ``lead_author_engine._run_lead_author_pydantic`` — is
 imported LOCALLY inside only the two tests that need the genuine in-process transport, so a
 naming divergence in the impl fails only those two rather than the whole binding suite.
 """

@@ -223,6 +223,7 @@ def invoke_agent(
     repo_root: Path = REPO_ROOT,
     spawn: Callable[..., int] = _spawn_author_agent,
     salt: str | None = None,
+    box: Any = None,
 ) -> int:
     pending_drafts = pending_drafts or []
     stage_salt = salt if salt is not None else uuid4().hex
@@ -248,7 +249,7 @@ def invoke_agent(
         repo_root=repo_root,
         learning_run_dir=run_dir,
         log_label="lead author",
-        salt=stage_salt,
+        salt=stage_salt, box=box,
     )
 
 
@@ -355,6 +356,7 @@ def run(
     *,
     paths: _loop_config.LoopPaths = _loop_config.DEFAULT_PATHS,
     deps: LeadAuthorDeps | None = None,
+    box: Any = None,
 ) -> int:
     if not run_dir.is_dir():
         _log(f"FATAL: run_dir not found: {run_dir}")
@@ -366,12 +368,12 @@ def run(
     if queue_lock is None:
         return 0
     try:
-        return _run_locked(run_dir, deps)
+        return _run_locked(run_dir, deps, box=box)
     finally:
         deps.release_queue_lock(queue_lock)
 
 
-def _run_locked(run_dir: Path, deps: LeadAuthorDeps) -> int:
+def _run_locked(run_dir: Path, deps: LeadAuthorDeps, *, box: Any = None) -> int:
     if _done_sentinel(run_dir).is_file():
         _log("already processed (done sentinel exists) — nothing to do")
         return 0
@@ -418,7 +420,7 @@ def _run_locked(run_dir: Path, deps: LeadAuthorDeps) -> int:
         f"{len(pending_drafts)} pending system-skill draft(s)"
     )
 
-    rc = deps.invoke_agent(run_dir, handoffs, pending_drafts)
+    rc = deps.invoke_agent(run_dir, handoffs, pending_drafts, box=box)
     if rc != 0:
         _log(f"FATAL: lead-author spawn exited rc={rc}; see the trace under {run_dir} (drain will quarantine)")
         return 2

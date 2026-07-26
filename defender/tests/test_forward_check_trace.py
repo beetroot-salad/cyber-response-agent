@@ -95,7 +95,7 @@ def _deps(scene, *, run_verify, check=None, queued=(), corpus=None, runs=None, p
         check=check if check is not None else FINDINGS_CHECK,
         runs_dir=runs if runs is not None else scene.runs,
         pending=pending if pending is not None else scene.pending,
-        queued_ids=frozenset(queued), run_verify=run_verify,
+        queued_ids=frozenset(queued), run_verify=run_verify, box=None,
     )
 
 

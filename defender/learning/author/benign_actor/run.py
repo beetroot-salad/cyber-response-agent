@@ -51,6 +51,7 @@ def _env_config(  # noqa: PLR0913 — every parameter is the per-direction field
     generation_fn,
     actor_model: str,
     log_prefix: str,
+    box=None,
 ) -> _curator.CuratorConfig:
     return _curator.CuratorConfig(
         repo_root=paths.repo_root,
@@ -72,10 +73,11 @@ def _env_config(  # noqa: PLR0913 — every parameter is the per-direction field
         author_timeout=AUTHOR_ENV_TIMEOUT,
         author_effort=AUTHOR_ENV_EFFORT,
         invoke_agent=invoke_agent,
+        box=box,
     )
 
 
-def build_benign_config(paths: LoopPaths = DEFAULT_PATHS) -> _curator.CuratorConfig:
+def build_benign_config(paths: LoopPaths = DEFAULT_PATHS, *, box=None) -> _curator.CuratorConfig:
     return _env_config(
         paths,
         channel=paths.environment_observations,
@@ -85,10 +87,13 @@ def build_benign_config(paths: LoopPaths = DEFAULT_PATHS) -> _curator.CuratorCon
         generation_fn=functools.partial(_shared.benign_generation_count, paths.repo_root),
         actor_model=BENIGN_ACTOR_MODEL,
         log_prefix="author_actor_benign",
+        box=box,
     )
 
 
-def build_adversarial_config(paths: LoopPaths = DEFAULT_PATHS) -> _curator.CuratorConfig:
+def build_adversarial_config(
+    paths: LoopPaths = DEFAULT_PATHS, *, box=None,
+) -> _curator.CuratorConfig:
     return _env_config(
         paths,
         channel=paths.actor_environment_observations,
@@ -98,6 +103,7 @@ def build_adversarial_config(paths: LoopPaths = DEFAULT_PATHS) -> _curator.Curat
         generation_fn=functools.partial(_shared.actor_env_generation_count, paths.repo_root),
         actor_model=ACTOR_MODEL,
         log_prefix="author_actor_env",
+        box=box,
     )
 
 
@@ -110,9 +116,10 @@ def run_batch(
     hold_committed: bool = False,
     paths: LoopPaths = DEFAULT_PATHS,
     cfg: _curator.CuratorConfig | None = None,
+    box=None,
 ) -> int:
     if cfg is None:
-        cfg = build_benign_config(paths)
+        cfg = build_benign_config(paths, box=box)
     return _curator.run_batch(hold_committed=hold_committed, cfg=cfg)
 
 

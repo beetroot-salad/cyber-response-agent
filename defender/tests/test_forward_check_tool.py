@@ -194,13 +194,13 @@ def _bundle(scene, run_id: str, *, transcript: str | None = None,
     return d
 
 
-def _deps(scene, *, run_verify, check=None, queued=(), corpus=None, runs=None, pending=None):
+def _deps(scene, *, run_verify, check=None, queued=(), corpus=None, runs=None, pending=None, box=None):
     return CuratorDeps.for_run(
         scene.curdir, scene.repo, corpus if corpus is not None else scene.corpus,
         check=check if check is not None else FINDINGS_CHECK,
         runs_dir=runs if runs is not None else scene.runs,
         pending=pending if pending is not None else scene.pending,
-        queued_ids=frozenset(queued), run_verify=run_verify,
+        queued_ids=frozenset(queued), run_verify=run_verify, box=box,
     )
 
 
@@ -1192,7 +1192,7 @@ def test_m10_curator_deps_cannot_be_built_without_a_corpus_confine(tmp_path):
     defaulting to a wider tree."""
     scene = _scene(tmp_path)
     common = dict(runs_dir=scene.runs, pending=scene.pending,
-                  queued_ids=frozenset(), run_verify=FakeVerify())
+                  queued_ids=frozenset(), run_verify=FakeVerify(), box=None)
     with pytest.raises(TypeError):
         CuratorDeps.for_run(scene.curdir, scene.repo, check=FINDINGS_CHECK, **common)
     with pytest.raises(TypeError):

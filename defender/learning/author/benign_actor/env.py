@@ -11,8 +11,8 @@ from defender.learning.author.benign_actor import run as _benign
 from defender.learning.core.config import DEFAULT_PATHS, LoopPaths
 
 
-def run_batch(*, hold_committed: bool = False, paths: LoopPaths = DEFAULT_PATHS) -> int:
-    cfg = _benign.build_adversarial_config(paths)
+def run_batch(*, hold_committed: bool = False, paths: LoopPaths = DEFAULT_PATHS, box=None) -> int:
+    cfg = _benign.build_adversarial_config(paths, box=box)
     return _benign.run_batch(hold_committed=hold_committed, cfg=cfg)
 
 

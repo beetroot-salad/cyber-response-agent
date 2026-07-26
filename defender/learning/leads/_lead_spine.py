@@ -27,6 +27,7 @@ def _spawn_author_agent(
     learning_run_dir: Path,
     log_label: str,
     salt: str,
+    box=None,
 ) -> int:
     PENDING_DIR.mkdir(parents=True, exist_ok=True)
     from defender.learning.leads import lead_author_engine
@@ -38,7 +39,7 @@ def _spawn_author_agent(
         learning_run_dir=learning_run_dir,
         log_label=log_label,
         log=_log,
-        salt=salt,
+        salt=salt, box=box,
     )
 
 
