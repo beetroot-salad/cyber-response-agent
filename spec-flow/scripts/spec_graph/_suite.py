@@ -71,84 +71,106 @@ def _module_exists(root: Path, dotted: str) -> bool:
     return p.with_suffix(".py").is_file() or p.is_dir()
 
 
-def target_modules(suite_dir: Path, root: Path) -> tuple[dict[str, set[str]], list[str]]:
-    """(targets, floor): dotted target module → the symbols the suite imports from it,
-    plus floor notes for the shapes the import heuristic cannot classify."""
-    targets: dict[str, set[str]] = {}
-    floor: list[str] = []
-    noted_toplevel: set[str] = set()
+class _Imports:
+    """The accumulator `target_modules` fills as it walks the suite's import statements:
+    dotted target module → the symbols imported from it, plus the floor notes for shapes
+    the heuristic cannot classify. One method per import form."""
 
-    def _note_single_segment(py_name: str, dotted: str) -> None:
+    def __init__(self, root: Path) -> None:
+        self.root = root
+        self.targets: dict[str, set[str]] = {}
+        self.floor: list[str] = []
+        self._noted_toplevel: set[str] = set()
+
+    def note_single_segment(self, py_name: str, dotted: str) -> None:
         # The single-segment blind spot (see the module docstring): for one segment,
         # project-rooted and exists collapse into the same test, so a greenfield
         # top-level target cannot be told from a third-party dep. Floor-noted rather
         # than guessed at — deduplicated per module name, stdlib names excluded (they
         # are resolvable without the project and never a not-yet-written target).
-        if "." in dotted or dotted in noted_toplevel or dotted in sys.stdlib_module_names:
+        if "." in dotted or dotted in self._noted_toplevel or dotted in sys.stdlib_module_names:
             return
-        noted_toplevel.add(dotted)
-        floor.append(
+        self._noted_toplevel.add(dotted)
+        self.floor.append(
             f"{py_name}: unresolved top-level import `{dotted}` — could be a greenfield "
             f"top-level target or a third-party dep; name it with --target if it is the "
             f"target."
         )
 
+    def visit_import(self, py_name: str, node: ast.Import) -> None:
+        """`import a.b.c` — the dotted name itself is the candidate."""
+        for alias in node.names:
+            dotted = alias.name
+            if not _project_rooted(self.root, dotted):
+                self.note_single_segment(py_name, dotted)
+            elif not _module_exists(self.root, dotted):
+                self.targets.setdefault(dotted, set())
+
+    def visit_import_from(self, py_name: str, node: ast.ImportFrom) -> None:
+        """`from a.b import x, y` — the module, and then each name it does not resolve."""
+        if node.level:
+            # A relative import resolves against the suite's own package, which this
+            # root-anchored heuristic cannot walk. Reported as floor rather than
+            # skipped: a dropped import is indistinguishable from "every import
+            # resolves", and that is the sentence both consumers exit 2 on.
+            self.floor.append(
+                f"{py_name}: relative import `from "
+                f"{'.' * node.level}{node.module or ''} import "
+                f"{', '.join(a.name for a in node.names)}` — the heuristic resolves "
+                f"project-rooted absolute imports only; name it with --target if it "
+                f"is the target."
+            )
+            return
+        if not node.module:
+            return
+        dotted = node.module
+        if not _project_rooted(self.root, dotted):
+            self.note_single_segment(py_name, dotted)
+            return
+        if not _module_exists(self.root, dotted):
+            self.targets.setdefault(dotted, set()).update(a.name for a in node.names)
+            return
+        self._visit_names_of_existing(py_name, dotted, node)
+
+    def _visit_names_of_existing(self, py_name: str, dotted: str, node: ast.ImportFrom) -> None:
+        """The module exists: each imported name is either its attribute (existing code),
+        a submodule file, or a MISSING submodule — the last is a target."""
+        base = self.root / Path(*dotted.split("."))
+        if not base.is_dir():
+            return  # a real module file; its symbols are existing code
+        init = base / "__init__.py"
+        for a in node.names:
+            if a.name == "*" or _module_exists(self.root, f"{dotted}.{a.name}"):
+                continue
+            if init.is_file():
+                if not _binds_name(init, a.name):
+                    self.floor.append(
+                        f"{py_name}: `from {dotted} import {a.name}` binds nothing "
+                        f"visible — a symbol to be added to existing code? Name the "
+                        f"module with --target if it is the target."
+                    )
+                continue
+            self.targets.setdefault(f"{dotted}.{a.name}", set())
+
+
+def target_modules(suite_dir: Path, root: Path) -> tuple[dict[str, set[str]], list[str]]:
+    """(targets, floor): dotted target module → the symbols the suite imports from it,
+    plus floor notes for the shapes the import heuristic cannot classify."""
+    imports = _Imports(root)
     for py in suite_files(suite_dir):
         try:
             tree = ast.parse(py.read_text(encoding="utf-8"))
         except (OSError, SyntaxError, ValueError) as e:
-            floor.append(f"{py.name}: unparseable ({e.__class__.__name__}) — its imports are unseen")
+            imports.floor.append(
+                f"{py.name}: unparseable ({e.__class__.__name__}) — its imports are unseen"
+            )
             continue
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
-                for alias in node.names:
-                    dotted = alias.name
-                    if not _project_rooted(root, dotted):
-                        _note_single_segment(py.name, dotted)
-                    elif not _module_exists(root, dotted):
-                        targets.setdefault(dotted, set())
+                imports.visit_import(py.name, node)
             elif isinstance(node, ast.ImportFrom):
-                if node.level:
-                    # A relative import resolves against the suite's own package, which this
-                    # root-anchored heuristic cannot walk. Reported as floor rather than
-                    # skipped: a dropped import is indistinguishable from "every import
-                    # resolves", and that is the sentence both consumers exit 2 on.
-                    floor.append(
-                        f"{py.name}: relative import `from "
-                        f"{'.' * node.level}{node.module or ''} import "
-                        f"{', '.join(a.name for a in node.names)}` — the heuristic resolves "
-                        f"project-rooted absolute imports only; name it with --target if it "
-                        f"is the target."
-                    )
-                    continue
-                if not node.module:
-                    continue
-                dotted = node.module
-                if not _project_rooted(root, dotted):
-                    _note_single_segment(py.name, dotted)
-                    continue
-                if not _module_exists(root, dotted):
-                    targets.setdefault(dotted, set()).update(a.name for a in node.names)
-                    continue
-                # The module exists: each imported name is either its attribute (existing
-                # code), a submodule file, or a MISSING submodule — the last is a target.
-                base = root / Path(*dotted.split("."))
-                if not base.is_dir():
-                    continue  # a real module file; its symbols are existing code
-                init = base / "__init__.py"
-                for a in node.names:
-                    if a.name == "*" or _module_exists(root, f"{dotted}.{a.name}"):
-                        continue
-                    if init.is_file():
-                        if not _binds_name(init, a.name):
-                            floor.append(
-                                f"{py.name}: `from {dotted} import {a.name}` binds nothing "
-                                f"visible — a symbol to be added to existing code? Name the "
-                                f"module with --target if it is the target."
-                            )
-                        continue
-                    targets.setdefault(f"{dotted}.{a.name}", set())
-    return targets, floor
+                imports.visit_import_from(py.name, node)
+    return imports.targets, imports.floor
 
 
 def _project_rooted(root: Path, dotted: str) -> bool:

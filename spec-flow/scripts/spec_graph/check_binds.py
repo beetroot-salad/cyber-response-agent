@@ -211,94 +211,132 @@ def _unexercised(
     return findings
 
 
-def check(path: Path, cfg: dict) -> list[str]:
-    graph = _cli.load_graph(path)
-    demands = graph.get("demands", []) or []
-    waivers = graph.get("binds_waivers", {}) or {}
-    exercise_waivers = graph.get("exercise_waivers", {}) or {}
-    test_fns = _test_functions(path.parent)
-    # Code kwarg name → graph concept name, when the two disagree: the graph may model the
-    # anchor tree as `anchor_tree` while the code threads it as the `anchor_dir=` kwarg.
-    #
-    # The alias makes the check SEE such a demand, it does not silence one. A concept is only
-    # flaggable when it is `modelled` — i.e. some demand binds it — and the graph never binds
-    # the code's spelling (`anchor_dir`). So without the alias, prose threading `anchor_dir=`
-    # maps to an unmodelled concept and is skipped: a false NEGATIVE, exactly the escape this
-    # check exists to catch.
-    #
-    # Which is why this map should normally be EMPTY. The fix for a spelling mismatch is to
-    # rename the graph to the code's name (schema.md, "Coin ids from the code's name"), not to
-    # alias around it — an alias silently disables the check for any concept whose entry someone
-    # forgets. Legitimate entries: a concept the code genuinely spells differently per call site,
-    # or a third-party name you cannot rename.
-    alias: dict[str, str] = cfg["conceptAliases"]
+class _Scan:
+    """One graph's worth of context, resolved once and read by every rule below.
 
-    # The graph's own vocabulary: every concept some demand binds is "modelled". A threaded
-    # value we flag must be one the graph already treats as first-class somewhere.
-    modelled: set[str] = set()
-    for d in demands:
-        for b in d.get("binds", []) or []:
-            modelled.add(_concept_root(b))
+    The two checks are per-demand, but everything they compare a demand AGAINST is
+    graph-wide — the modelled vocabulary, the waivers, the suite's parsed tests. Held
+    here rather than threaded through each helper's signature.
+    """
 
-    # A form:test demand carries its prose in the docstring of the test it names
-    # (`discharged_by`); clause/waiver keep `outcome.nl`. Scan whichever holds the prose.
-    docstrings = _test_docstrings(path.parent)
+    def __init__(self, path: Path, cfg: dict) -> None:
+        self.path = path
+        graph = _cli.load_graph(path)
+        self.demands: list[dict] = graph.get("demands", []) or []
+        self.waivers: dict = graph.get("binds_waivers", {}) or {}
+        self.exercise_waivers: dict = graph.get("exercise_waivers", {}) or {}
+        self.test_fns = _test_functions(path.parent)
+        # Code kwarg name → graph concept name, when the two disagree: the graph may model
+        # the anchor tree as `anchor_tree` while the code threads it as the `anchor_dir=`
+        # kwarg.
+        #
+        # The alias makes the check SEE such a demand, it does not silence one. A concept is
+        # only flaggable when it is `modelled` — i.e. some demand binds it — and the graph
+        # never binds the code's spelling (`anchor_dir`). So without the alias, prose
+        # threading `anchor_dir=` maps to an unmodelled concept and is skipped: a false
+        # NEGATIVE, exactly the escape this check exists to catch.
+        #
+        # Which is why this map should normally be EMPTY. The fix for a spelling mismatch is
+        # to rename the graph to the code's name (schema.md, "Coin ids from the code's
+        # name"), not to alias around it — an alias silently disables the check for any
+        # concept whose entry someone forgets. Legitimate entries: a concept the code
+        # genuinely spells differently per call site, or a third-party name you cannot rename.
+        self.alias: dict[str, str] = cfg["conceptAliases"]
+        # The graph's own vocabulary: every concept some demand binds is "modelled". A
+        # threaded value we flag must be one the graph already treats as first-class somewhere.
+        self.modelled: set[str] = {
+            _concept_root(b) for d in self.demands for b in d.get("binds", []) or []
+        }
+        # A form:test demand carries its prose in the docstring of the test it names
+        # (`discharged_by`); clause/waiver keep `outcome.nl`. Scan whichever holds the prose.
+        self.docstrings = _test_docstrings(path.parent)
 
+
+def _pointer_prose(
+    scan: _Scan, did: str, d: dict, test_name: str, findings: list[str]
+) -> str | None:
+    """A form:test demand's prose: the docstring of the test `discharged_by` names.
+
+    Also runs the exercise check while the pointer is resolved — that check reads the
+    test's BODY, so it must run before the empty-docstring gate below returns: a test
+    with no docstring still has a body worth checking.
+    """
+    path = scan.path
+    suite_dir = path.resolve().parent.name
+    if test_name not in scan.docstrings:
+        findings.append(
+            f"ORPHAN {path.name}:{did}: `discharged_by: {test_name}` names no test function "
+            f"in {suite_dir}/ — the pointer dangles, so its prose is unscannable "
+            f"(write the test, or fix the name)."
+        )
+        return None
+    if test_name in scan.test_fns:
+        findings.extend(_unexercised(
+            path, did, d, scan.test_fns[test_name],
+            set(scan.exercise_waivers.get(did, []) or []),
+        ))
+    prose = scan.docstrings[test_name]
+    if not prose.strip():
+        findings.append(
+            f"ORPHAN {path.name}:{did}: `discharged_by: {test_name}` points at a test with "
+            f"no docstring — the demand's prose is missing, so there is nothing to check "
+            f"against `binds` (step 8 puts the outcome sentence in that docstring)."
+        )
+        return None
+    return prose
+
+
+def _demand_prose(scan: _Scan, did: str, d: dict, findings: list[str]) -> str | None:
+    """Where this demand's prose lives, or None when there is none to scan (the findings
+    record why). `outcome` is read up front, not inside the branch: a demand whose
+    `outcome` is a scalar must still raise here, whatever else it carries."""
+    outcome_nl = (d.get("outcome", {}) or {}).get("nl", "") or ""
+    test_name = d.get("discharged_by")
+    if test_name:
+        return _pointer_prose(scan, did, d, test_name, findings)
+    if outcome_nl:
+        return outcome_nl  # clause/waiver, or a legacy form:test demand inlining its outcome
+    if d.get("form", "test") == "test":
+        findings.append(
+            f"ORPHAN {scan.path.name}:{did}: form:test demand carries neither `discharged_by` "
+            f"nor `outcome` — no prose to check for prose⊄binds (add the `discharged_by` "
+            f"pointer)."
+        )
+    return None  # a clause/waiver with no prose has nothing to scan
+
+
+def _prose_orphans(scan: _Scan, did: str, d: dict, prose: str) -> list[str]:
+    """The check proper: a concept this demand's prose THREADS, the graph models, and its
+    own `binds` omits."""
+    bind_roots = {_concept_root(b) for b in (d.get("binds", []) or [])}
+    waived = set(scan.waivers.get(did, []) or [])
     findings: list[str] = []
-    for d in demands:
-        did = d.get("id", "<no-id>")
-        outcome_nl = (d.get("outcome", {}) or {}).get("nl", "") or ""
-        test_name = d.get("discharged_by")
-        if test_name:
-            suite_dir = path.resolve().parent.name
-            if test_name not in docstrings:
-                findings.append(
-                    f"ORPHAN {path.name}:{did}: `discharged_by: {test_name}` names no test function "
-                    f"in {suite_dir}/ — the pointer dangles, so its prose is unscannable "
-                    f"(write the test, or fix the name)."
-                )
-                continue
-            # The exercise check reads the BODY, so it runs before the docstring gate below —
-            # a test with no docstring still has a body worth checking.
-            if test_name in test_fns:
-                findings.extend(_unexercised(
-                    path, did, d, test_fns[test_name],
-                    set(exercise_waivers.get(did, []) or []),
-                ))
-            prose = docstrings[test_name]
-            if not prose.strip():
-                findings.append(
-                    f"ORPHAN {path.name}:{did}: `discharged_by: {test_name}` points at a test with "
-                    f"no docstring — the demand's prose is missing, so there is nothing to check "
-                    f"against `binds` (step 8 puts the outcome sentence in that docstring)."
-                )
-                continue
-        elif outcome_nl:
-            prose = outcome_nl  # clause/waiver, or a legacy form:test demand inlining its outcome
-        elif d.get("form", "test") == "test":
-            findings.append(
-                f"ORPHAN {path.name}:{did}: form:test demand carries neither `discharged_by` nor "
-                f"`outcome` — no prose to check for prose⊄binds (add the `discharged_by` pointer)."
-            )
+    seen: set[str] = set()
+    for kw, rhs in _KWARG.findall(prose):
+        if rhs in _NON_THREAD_RHS:
+            continue  # signature default, not a threaded value
+        concept = scan.alias.get(kw, kw)
+        if concept in seen:
             continue
-        else:
-            continue  # a clause/waiver with no prose has nothing to scan
-        bind_roots = {_concept_root(b) for b in (d.get("binds", []) or [])}
-        waived = set(waivers.get(did, []) or [])
-        seen: set[str] = set()
-        for kw, rhs in _KWARG.findall(prose):
-            if rhs in _NON_THREAD_RHS:
-                continue  # signature default, not a threaded value
-            concept = alias.get(kw, kw)
-            if concept in seen:
-                continue
-            seen.add(concept)
-            if concept in modelled and concept not in bind_roots and concept not in waived:
-                findings.append(
-                    f"ORPHAN {path.name}:{did}: threads `{kw}={rhs}` in prose but does not bind "
-                    f"`{concept}` — the gate rules cover {sorted(bind_roots)}, so the "
-                    f"`{concept}` assertion is untracked (bind it, or waive under binds_waivers)."
-                )
+        seen.add(concept)
+        if concept in scan.modelled and concept not in bind_roots and concept not in waived:
+            findings.append(
+                f"ORPHAN {scan.path.name}:{did}: threads `{kw}={rhs}` in prose but does not "
+                f"bind `{concept}` — the gate rules cover {sorted(bind_roots)}, so the "
+                f"`{concept}` assertion is untracked (bind it, or waive under binds_waivers)."
+            )
+    return findings
+
+
+def check(path: Path, cfg: dict) -> list[str]:
+    scan = _Scan(path, cfg)
+    findings: list[str] = []
+    for d in scan.demands:
+        did = d.get("id", "<no-id>")
+        prose = _demand_prose(scan, did, d, findings)
+        if prose is None:
+            continue
+        findings.extend(_prose_orphans(scan, did, d, prose))
     return findings
 
 

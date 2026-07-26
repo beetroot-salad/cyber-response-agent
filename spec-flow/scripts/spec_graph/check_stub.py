@@ -251,29 +251,50 @@ def _recorded_passes(suite_dir: Path) -> set[str]:
     return recorded
 
 
-def run(suite_dir: Path, targets: dict[str, set[str]], python: str, keep: bool) -> int:
+def _drive_pytest(
+    suite_dir: Path, targets: dict[str, set[str]], stub_dir: Path, report_file: Path,
+    python: str, root: Path,
+) -> subprocess.CompletedProcess[str]:
+    """Generate the stub + report plugin, then run the suite against them.
+
+    The stub dir leads `PYTHONPATH` and the cwd is the project's own pytest rootdir —
+    the project's pytest config must apply to the run being measured.
+    """
+    _write_stub(stub_dir, targets, root)
+    (stub_dir / "nullstub_report.py").write_text(_PLUGIN, encoding="utf-8")
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join(
+        [str(stub_dir), env.get("PYTHONPATH", "")]).rstrip(os.pathsep)
+    env["NULLSTUB_REPORT_FILE"] = str(report_file)
+    env["NULLSTUB_TARGETS"] = ",".join(sorted(targets))
+    cmd = [python, "-m", "pytest", str(suite_dir), "-q", "--no-header",
+           "-p", "nullstub_report"]
+    return subprocess.run(
+        cmd, cwd=_pytest_cwd(suite_dir, root), env=env,
+        capture_output=True, text=True, encoding="utf-8", timeout=600,
+    )
+
+
+def _collect_results(
+    suite_dir: Path, targets: dict[str, set[str]], python: str, keep: bool
+) -> dict[str, dict] | None:
+    """The per-test report, or None when the run could not happen — this function owns
+    the whole exit-2 vocabulary (no report, no tests collected, a shadowed stub, a
+    timeout, an unwritable report, a broken interpreter) and prints its own reason.
+
+    None is "could not look", never "looked and found nothing": every branch below is a
+    run that proves nothing about discrimination, and must not certify clean.
+    """
     root = _config.repo_root(suite_dir)
     # resolve(): the shadow check compares module __file__ origins against this dir.
     stub_dir = Path(tempfile.mkdtemp(prefix="nullstub-")).resolve()
     report_file = stub_dir / "report.json"
     try:
-        _write_stub(stub_dir, targets, root)
-        (stub_dir / "nullstub_report.py").write_text(_PLUGIN, encoding="utf-8")
-        env = dict(os.environ)
-        env["PYTHONPATH"] = os.pathsep.join(
-            [str(stub_dir), env.get("PYTHONPATH", "")]).rstrip(os.pathsep)
-        env["NULLSTUB_REPORT_FILE"] = str(report_file)
-        env["NULLSTUB_TARGETS"] = ",".join(sorted(targets))
-        cmd = [python, "-m", "pytest", str(suite_dir), "-q", "--no-header",
-               "-p", "nullstub_report"]
-        proc = subprocess.run(
-            cmd, cwd=_pytest_cwd(suite_dir, root), env=env,
-            capture_output=True, text=True, encoding="utf-8", timeout=600,
-        )
+        proc = _drive_pytest(suite_dir, targets, stub_dir, report_file, python, root)
         if not report_file.is_file():
             print(f"check_stub: pytest produced no report — the run itself broke:\n"
                   f"{proc.stdout[-2000:]}\n{proc.stderr[-2000:]}", file=sys.stderr)
-            return 2
+            return None
         payload: dict = json.loads(report_file.read_text(encoding="utf-8"))
         results: dict[str, dict] = payload.get("results", {})
         if not results:
@@ -282,7 +303,7 @@ def run(suite_dir: Path, targets: dict[str, set[str]], python: str, keep: bool) 
             # nothing) would otherwise certify clean — the one outcome this check exists to deny.
             print(f"check_stub: pytest collected no tests under {suite_dir} — the run proves "
                   f"nothing about discrimination.\n{proc.stdout[-2000:]}", file=sys.stderr)
-            return 2
+            return None
         # `python -m pytest` puts the cwd ahead of PYTHONPATH, so a target that EXISTS on
         # disk (the modify-existing case; namespace packages merge path entries) resolves
         # to the REAL module — every verdict below would silently measure real code.
@@ -295,19 +316,20 @@ def run(suite_dir: Path, targets: dict[str, set[str]], python: str, keep: bool) 
             print("check_stub: stub was shadowed by real code — verdicts void; the run "
                   "measured the real implementation, not the null stub:\n  "
                   + "\n  ".join(shadowed), file=sys.stderr)
-            return 2
+            return None
+        return results
     except subprocess.TimeoutExpired:
         print("check_stub: pytest timed out after 600s against the stub", file=sys.stderr)
-        return 2
+        return None
     except json.JSONDecodeError as e:
         print(f"check_stub: could not run — the report is not valid JSON ({e}); the "
               f"pytest run under `{python}` broke mid-write.", file=sys.stderr)
-        return 2
+        return None
     except OSError as e:
         # A missing or broken interpreter is "could not look" (exit 2), never a
         # traceback — an uncaught traceback exits 1 and would read as findings.
         print(f"check_stub: could not run `{python} -m pytest` — {e}", file=sys.stderr)
-        return 2
+        return None
     finally:
         if keep:
             print(f"  [check_stub] stub kept at {stub_dir} — delete it; it is never committed.",
@@ -315,37 +337,55 @@ def run(suite_dir: Path, targets: dict[str, set[str]], python: str, keep: bool) 
         else:
             shutil.rmtree(stub_dir, ignore_errors=True)
 
-    recorded = _recorded_passes(suite_dir)
+
+def _verdict(nodeid: str, r: dict, recorded: set[str]) -> str | None:
+    """One test's classification against the null stub: the finding it earns, or None
+    when it discriminated (failed on its own assertion, or is a recorded pass)."""
+    outcome, msg = r.get("outcome"), r.get("message", "")
+    test = nodeid.split("::")[-1]
+    if outcome == "failed" and (msg.startswith("AssertionError") or msg.startswith("Failed")):
+        return None
+    if outcome == "passed":
+        # A parametrized nodeid ends in `[case]`; a recorded bare name covers every
+        # case, and a recorded full id covers just its own.
+        bare = test[: test.find("[")] if "[" in test and test.endswith("]") else test
+        if test in recorded or bare in recorded:
+            return None  # an examined pass — recorded with its class in the graph
+        return (
+            f"NULLSTUB-PASS {nodeid}: green against a do-nothing target — binds nothing. "
+            f"Strengthen it, or record it with its class in handoff.nullstub_passes."
+        )
+    if outcome == "failed":
+        return (
+            f"NON-ASSERT {nodeid}: fails on `{msg}`, not its own assertion — it rides "
+            f"machinery, so it may stay green when only the demand breaks."
+        )
+    if outcome in ("skipped", "collection-skipped"):
+        return f"SKIPPED {nodeid}: a skipped test discriminates nothing at spec time."
+    return (
+        f"BROKEN {nodeid}: {outcome} (`{msg}`) — proves the file is broken, not that "
+        f"the test discriminates."
+    )
+
+
+def _classify(results: dict[str, dict], recorded: set[str]) -> tuple[list[str], int]:
+    """(findings, discriminating count) over the whole report, in nodeid order."""
     findings: list[str] = []
     discriminated = 0
     for nodeid, r in sorted(results.items()):
-        outcome, msg = r.get("outcome"), r.get("message", "")
-        test = nodeid.split("::")[-1]
-        if outcome == "failed" and (msg.startswith("AssertionError") or msg.startswith("Failed")):
+        finding = _verdict(nodeid, r, recorded)
+        if finding is None:
             discriminated += 1
-        elif outcome == "passed":
-            # A parametrized nodeid ends in `[case]`; a recorded bare name covers every
-            # case, and a recorded full id covers just its own.
-            bare = test[: test.find("[")] if "[" in test and test.endswith("]") else test
-            if test in recorded or bare in recorded:
-                discriminated += 1  # an examined pass — recorded with its class in the graph
-            else:
-                findings.append(
-                    f"NULLSTUB-PASS {nodeid}: green against a do-nothing target — binds nothing. "
-                    f"Strengthen it, or record it with its class in handoff.nullstub_passes."
-                )
-        elif outcome == "failed":
-            findings.append(
-                f"NON-ASSERT {nodeid}: fails on `{msg}`, not its own assertion — it rides "
-                f"machinery, so it may stay green when only the demand breaks."
-            )
-        elif outcome in ("skipped", "collection-skipped"):
-            findings.append(f"SKIPPED {nodeid}: a skipped test discriminates nothing at spec time.")
         else:
-            findings.append(
-                f"BROKEN {nodeid}: {outcome} (`{msg}`) — proves the file is broken, not that "
-                f"the test discriminates."
-            )
+            findings.append(finding)
+    return findings, discriminated
+
+
+def run(suite_dir: Path, targets: dict[str, set[str]], python: str, keep: bool) -> int:
+    results = _collect_results(suite_dir, targets, python, keep)
+    if results is None:
+        return 2
+    findings, discriminated = _classify(results, _recorded_passes(suite_dir))
     for f in findings:
         print(f"  {f}")
     print(f"\n[check_stub] {discriminated} discriminating, {len(findings)} finding(s), "
