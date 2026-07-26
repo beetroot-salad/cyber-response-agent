@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Any
 
 from defender.learning.core.config import (
-    SUBAGENT_TIMEOUT,
     FatalConfigError,
     RunUnprocessable,
     StageAbort,
@@ -88,7 +87,9 @@ def run_stage(  # noqa: PLR0913 — every param is load-bearing per-call transpo
     request_limit: int,
     make_model: MakeModel = providers.build_for_effort,
     require_output: bool = True,
-    wall_clock_timeout: int = SUBAGENT_TIMEOUT,
+    # No signature default: the knob is env-backed, and a default evaluated at import
+    # would freeze it (#717). Each stage passes `subagent_timeout()` or its own knob.
+    wall_clock_timeout: int,
     tools: Any = None,
     verbs: Any = None,
 ) -> str:

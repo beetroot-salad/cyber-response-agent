@@ -55,9 +55,10 @@ def test_run_verify_pydantic_returns_text_verbatim_and_writes_trace(tmp_path):
     src = _src(tmp_path)
     with override_allow_model_requests(False):
         out = _run_verify_pydantic(
-            _prompt(tmp_path), config.VERIFIER_MODEL, config.VERIFIER_EFFORT,
+            _prompt(tmp_path), config.verifier_model(), config.verifier_effort(),
             "vf.run-X.trace.jsonl", "verify:X", "predict this case", src,
             defender_dir=tmp_path / "wt" / "defender",
+            wall_clock_timeout=config.verifier_timeout(),
             make_model=_fake_model(_replay(_VERDICT)),
         )
     assert out == _VERDICT
@@ -68,9 +69,10 @@ def test_run_verify_pydantic_returns_text_verbatim_and_writes_trace(tmp_path):
 def test_run_verify_pydantic_empty_output_is_unprocessable(tmp_path):
     with override_allow_model_requests(False), pytest.raises(RunUnprocessable):
         _run_verify_pydantic(
-            _prompt(tmp_path), config.VERIFIER_MODEL, config.VERIFIER_EFFORT,
+            _prompt(tmp_path), config.verifier_model(), config.verifier_effort(),
             "vf.trace.jsonl", "verify:X", "predict this case", _src(tmp_path),
             defender_dir=tmp_path / "wt" / "defender",
+            wall_clock_timeout=config.verifier_timeout(),
             make_model=_fake_model(_replay("")),
         )
 
@@ -109,10 +111,10 @@ def test_build_verify_agent_applies_glm_effort(monkeypatch):
     logger = observe.RequestLogger(Path("/tmp/does-not-need-to-exist-verify-effort.jsonl"))
     try:
         agent = _pydantic_stage.build_stage_agent(
-            VerifierDeps, Path(__file__), config.VERIFIER_MODEL, config.VERIFIER_EFFORT, logger, "verify",
+            VerifierDeps, Path(__file__), config.verifier_model(), config.verifier_effort(), logger, "verify",
         )
     finally:
         logger.close()
-    assert agent.model_settings["extra_body"]["reasoning_effort"] == config.VERIFIER_EFFORT
+    assert agent.model_settings["extra_body"]["reasoning_effort"] == config.verifier_effort()
 
 

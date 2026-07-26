@@ -17,7 +17,6 @@ from defender import _git
 from defender.learning.pipeline._prompt import stage_user_message, structured_json_body
 from defender._untrusted import wrap
 from defender._corpus import iter_lessons
-from defender.learning.core.config import REPO_LOCK_WAIT_SECONDS  # noqa: F401 — re-export
 
 
 

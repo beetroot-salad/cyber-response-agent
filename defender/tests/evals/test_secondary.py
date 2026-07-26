@@ -269,7 +269,9 @@ def test_replay_actor_uses_stable_case_id_for_seed(tmp_path: Path):
     captured: dict = {}
 
     class FakeLoop:
-        ACTOR_MODEL = "claude-sonnet-4-6"
+        @staticmethod
+        def actor_model():
+            return "claude-sonnet-4-6"
 
         class RunUnprocessable(Exception):
             pass

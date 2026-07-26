@@ -6,10 +6,10 @@ from uuid import uuid4
 
 from defender.learning import lead_repository
 from defender.learning.core.config import (
-    ORACLE_EFFORT,
-    ORACLE_MAX_CONCURRENCY,
-    ORACLE_MODEL,
     ORACLE_PROMPT,
+    oracle_effort,
+    oracle_max_concurrency,
+    oracle_model,
 )
 from defender.learning.core.validate import dump_oracle_doc
 from defender.learning.pipeline.oracle.sample import (
@@ -25,7 +25,7 @@ def invoke_oracle_lead(lead, story: str, sample_text: str, learning_run_dir: Pat
     stage_salt = salt if salt is not None else uuid4().hex
     user = build_lead_user_prompt(lead, story, sample_text, salt=stage_salt)
     raw = oracle_fn(
-        ORACLE_PROMPT, ORACLE_MODEL, ORACLE_EFFORT,
+        ORACLE_PROMPT, oracle_model(), oracle_effort(),
         f"oracle_{trace_prefix}_{lead.lead_id}.trace.jsonl", f"oracle:{lead.lead_id}",
         user, learning_run_dir,
         salt=stage_salt,
@@ -39,7 +39,7 @@ def invoke_oracle(run_dir: Path, actor_story_path: Path, learning_run_dir: Path,
     trace_prefix = actor_story_path.stem
     leads = lead_repository.joined(run_dir)
     samples = [lead_sample_text(jl) for jl in leads]
-    max_workers = max(1, min(ORACLE_MAX_CONCURRENCY, len(leads) or 1))
+    max_workers = max(1, min(oracle_max_concurrency(), len(leads) or 1))
     events_per_lead: list = [None] * len(leads)
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         fut_to_idx = {

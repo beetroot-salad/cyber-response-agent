@@ -213,8 +213,8 @@ class CuratorDeps(AgentDeps):
 
 CORPUS_AUTHOR_DEF = AgentDefinition(
     role=AgentRole.CORPUS_AUTHOR,
-    model=lambda: config.AUTHOR_MODEL,
-    effort=config.AUTHOR_EFFORT,
+    model=config.author_model,
+    effort=config.author_effort(),
     tools=ToolSet(bash=True, write=True, forward_check=True, lesson_read=True),
     bash_shapes=(_corpus_author_grants,),
     write_shapes=(_corpus_author_write_shapes,),
@@ -249,8 +249,8 @@ def _run_curator_pydantic(  # noqa: PLR0913 — the transport signature plus the
     box: Any = None,
     run_verify: Callable[..., str] = _run_verify_pydantic,
     salt: str | None = None,
-    request_limit: int = config.AUTHOR_REQUEST_LIMIT,
-    wall_clock_timeout: int = config.AUTHOR_TIMEOUT,
+    request_limit: int,
+    wall_clock_timeout: int,
     make_model: MakeModel = providers.build_for_effort,
 ) -> str:
     deps = CuratorDeps.for_run(
@@ -283,10 +283,13 @@ def run_curator_stage(  # noqa: PLR0913 — the spawn contract (per-spawn inputs
     learning_run_dir: Path,
     log: Callable[[str], None],
     box: Any = None,
-    model: str = config.AUTHOR_MODEL,
-    effort: str | None = config.AUTHOR_EFFORT,
-    request_limit: int = config.AUTHOR_REQUEST_LIMIT,
-    timeout: int = config.AUTHOR_TIMEOUT,
+    # No signature defaults for the four model/effort/limit/timeout knobs: each is
+    # env-backed, and a default evaluated at import would freeze it (#717). Every caller
+    # already threads its own curator's values (they differ per corpus).
+    model: str,
+    effort: str | None,
+    request_limit: int,
+    timeout: int,
     source_key: Callable[..., object] = config.source_first_party_key,
     run_author: Callable[..., str] = _run_curator_pydantic,
     run_verify: Callable[..., str] = _run_verify_pydantic,
@@ -300,10 +303,10 @@ def run_curator_stage(  # noqa: PLR0913 — the spawn contract (per-spawn inputs
         )
     source_key(model, label="curator")
     if check.prompt_path is not None and (
-        providers.provider_for(config.VERIFIER_MODEL).api_key_var
+        providers.provider_for(config.verifier_model()).api_key_var
         != providers.provider_for(model).api_key_var
     ):
-        source_key(config.VERIFIER_MODEL, label=f"verify:{check.error_prefix}")
+        source_key(config.verifier_model(), label=f"verify:{check.error_prefix}")
     trace_name = f"{batch_id}.{os.getpid()}.trace.jsonl"
     try:
         text = run_author(

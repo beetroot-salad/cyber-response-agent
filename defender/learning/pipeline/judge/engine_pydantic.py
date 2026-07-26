@@ -4,7 +4,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
-from defender.learning.core.config import JUDGE_EFFORT, JUDGE_MODEL
+from defender.learning.core.config import judge_effort, judge_model, subagent_timeout
 from defender.learning.pipeline._pydantic_stage import build_stage_agent, run_stage
 from defender.runtime import observe, providers
 from defender.runtime.agent_definition import (
@@ -62,8 +62,8 @@ def _judge_bash_shapes(roots: ResolvedRoots) -> tuple[Grant, ...]:
 
 JUDGE_DEF = AgentDefinition(
     role=AgentRole.JUDGE,
-    model=lambda: JUDGE_MODEL,
-    effort=JUDGE_EFFORT,
+    model=judge_model,
+    effort=judge_effort(),
     tools=ToolSet(read=True, bash=True),
     bash_shapes=(_judge_bash_shapes,),
     deps_cls=JudgeDeps,
@@ -110,5 +110,6 @@ def _run_judge_pydantic(  # noqa: PLR0913 — the judge_fn protocol signature pl
         trace_name=trace_name, label=label, user=user,
         learning_run_dir=learning_run_dir, deps=deps,
         request_limit=JUDGE_REQUEST_LIMIT, make_model=make_model,
+        wall_clock_timeout=subagent_timeout(),
         tools=tools, verbs=verbs,
     )

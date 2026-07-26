@@ -45,14 +45,14 @@ def _verify(ctx: CheckContext, user: str, source_run_dir: Path, *, salt: str) ->
     prefix = ctx.check.error_prefix
     raw = ctx.run_verify(
         prompt_path=ctx.check.prompt_path,
-        model=config.VERIFIER_MODEL,
-        effort=config.VERIFIER_EFFORT,
+        model=config.verifier_model(),
+        effort=config.verifier_effort(),
         trace_name=f"{prefix}.{stem}.{ctx.check_index}.trace.jsonl",
         label=f"{prefix}:{stem}",
         user=user,
         source_run_dir=source_run_dir,
         defender_dir=ctx.repo_root / "defender",
-        wall_clock_timeout=config.VERIFIER_TIMEOUT,
+        wall_clock_timeout=config.verifier_timeout(),
         salt=salt,
     )
     return parse_verdict(raw, error_prefix=prefix)

@@ -301,6 +301,7 @@ def test_box_reaches_both_actor_legs_and_both_drain_chains(tmp_path):
     lead_deps = lead_author_engine._run_lead_author_pydantic(
         prompt_path=tmp_path / "p.md", model="m", effort=None, trace_name="t",
         label="l", user="u", learning_run_dir=lrd, repo_root=tmp_path / "repo",
+        request_limit=4, wall_clock_timeout=60,
         box=delivered, run_stage=lambda **k: k["deps"],
     )
     assert got.get("actor") is delivered, "adversarial actor leg reached with no box"

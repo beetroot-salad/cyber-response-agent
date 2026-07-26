@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 from defender._run_paths import RunPaths, resolve_run_bundle
-from defender.learning.core.config import LESSONS_ENV_RETRIEVE_SCRIPT, VERIFIER_TIMEOUT
+from defender.learning.core.config import LESSONS_ENV_RETRIEVE_SCRIPT, verifier_timeout
 from defender.learning.core.prologue import extract_case_entities
 
 RETRIEVE = LESSONS_ENV_RETRIEVE_SCRIPT
@@ -30,13 +30,14 @@ def run_retrieval(rule_ids: str, entities: str, corpus: Path) -> list[str]:
         cmd += ["--alert-rule-ids", rule_ids]
     if entities:
         cmd += ["--entities", entities]
+    timeout = verifier_timeout()
     try:
         proc = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=VERIFIER_TIMEOUT, encoding="utf-8"
+            cmd, capture_output=True, text=True, timeout=timeout, encoding="utf-8"
         )
     except subprocess.TimeoutExpired as e:
         raise SystemExit(
-            f"verify_forward_env: retrieval timed out after {VERIFIER_TIMEOUT}s"
+            f"verify_forward_env: retrieval timed out after {timeout}s"
         ) from e
     if proc.returncode != 0:
         raise SystemExit(

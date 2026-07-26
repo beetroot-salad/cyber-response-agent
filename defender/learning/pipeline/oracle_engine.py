@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar
 
-from defender.learning.core.config import ORACLE_EFFORT, ORACLE_MODEL
+from defender.learning.core.config import oracle_effort, oracle_model, subagent_timeout
 from defender.learning.pipeline._pydantic_stage import run_stage
 from defender.runtime import providers
 from defender.runtime.agent_definition import AgentDefinition, ToolSet, bind
@@ -29,8 +29,8 @@ class OracleDeps(AgentDeps):
 
 ORACLE_DEF = AgentDefinition(
     role=AgentRole.ORACLE,
-    model=lambda: ORACLE_MODEL,
-    effort=ORACLE_EFFORT,
+    model=oracle_model,
+    effort=oracle_effort(),
     tools=ToolSet(),
     deps_cls=OracleDeps,
     deny_reason=_ORACLE_DENY_REASON,
@@ -56,4 +56,5 @@ def _run_oracle_pydantic(  # noqa: PLR0913 — the oracle_fn protocol signature 
         trace_name=trace_name, label=label, user=user,
         learning_run_dir=learning_run_dir, deps=deps,
         request_limit=ORACLE_REQUEST_LIMIT, make_model=make_model,
+        wall_clock_timeout=subagent_timeout(),
     )

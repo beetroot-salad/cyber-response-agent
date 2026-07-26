@@ -15,11 +15,11 @@ from defender.learning.core.config import (
     ADVERSARIAL_DISPOSITIONS,
     BENIGN_DISPOSITIONS,
     DEFAULT_PATHS,
-    ORACLE_MODEL,
     RunUnprocessable,
     LoopPaths,
     RunPaths,
     _log,
+    oracle_model,
     source_first_party_key,
 )
 from defender._paths import PATHS
@@ -152,7 +152,7 @@ def _directions_for(disposition: str) -> list[str]:
 
 
 def _prepare_engines_for(directions: list[str], *, include_actor: bool = True) -> None:
-    models: set[str] = {ORACLE_MODEL} if directions else set()
+    models: set[str] = {oracle_model()} if directions else set()
     for name in directions:
         d = BY_NAME[name]
         models.add(d.judge_wiring.model)

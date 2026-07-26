@@ -7,10 +7,10 @@ from uuid import uuid4
 from defender._untrusted import wrap
 from defender.learning.core.config import (
     ACTOR_BENIGN_PROMPT,
-    BENIGN_ACTOR_EFFORT,
-    BENIGN_ACTOR_MODEL,
     LESSONS_ENV_RETRIEVE_SCRIPT,
     LESSONS_ENVIRONMENT_DIR,
+    benign_actor_effort,
+    benign_actor_model,
 )
 from defender.learning.pipeline._prompt import stage_user_message
 from defender.learning.tickets import ticket_seeds
@@ -43,7 +43,7 @@ def invoke_actor_benign(
     from defender.learning.pipeline.actor_engine import _ActorScope, _run_actor_pydantic
     actor_fn = actor_fn if actor_fn is not None else _run_actor_pydantic  # lint-default: ok — DI seam owns its default; a signature default needs a module-top import that would defeat the lazy pydantic-ai import (subagents imports this module eagerly)
     return actor_fn(
-        ACTOR_BENIGN_PROMPT, BENIGN_ACTOR_MODEL, BENIGN_ACTOR_EFFORT,
+        ACTOR_BENIGN_PROMPT, benign_actor_model(), benign_actor_effort(),
         "actor_benign_trace.jsonl", "actor-benign", user, learning_run_dir,
         scope=_ActorScope(
             (LESSONS_ENV_RETRIEVE_SCRIPT,),

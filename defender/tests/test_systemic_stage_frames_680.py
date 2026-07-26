@@ -19,6 +19,7 @@ from types import SimpleNamespace
 from pydantic_ai.models import override_allow_model_requests
 
 from defender.agents import JUDGE_DEF, MAIN_DEF, ORACLE_DEF
+from defender.learning.core import config
 from defender.learning.pipeline import _pydantic_stage
 from defender.runtime.agent_definition import RunScope, bind
 from defender.runtime.box import BoxResult
@@ -843,6 +844,7 @@ def test_d18_run_stage_still_accepts_prejoined_user_string(tmp_path):
             label="oracle:test",
             user="prejoined user string",
             learning_run_dir=run,
+            wall_clock_timeout=config.subagent_timeout(),
             deps=deps,
             request_limit=2,
             make_model=fake_model(replay),

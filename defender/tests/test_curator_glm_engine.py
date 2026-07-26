@@ -285,7 +285,7 @@ def test_require_output_true_quarantines_empty_final(tmp_path):
         model="m", effort=None, label="curator", user="u",
         learning_run_dir=_run_dir(tmp_path), repo_root=_repo_root(tmp_path),
         corpus_dir=_corpus(tmp_path), **_check_args(tmp_path),
-        request_limit=4,
+        request_limit=4, wall_clock_timeout=config.author_timeout(),
     )
     with override_allow_model_requests(False), pytest.raises(RunUnprocessable):
         _run_curator_pydantic(
@@ -339,15 +339,15 @@ def test_request_limit_generous_default_and_threaded(tmp_path):
     mirroring LEAD_AUTHOR_REQUEST_LIMIT), not a read-only-sized cap — the subprocess path had NO
     request cap, so a small cap would kill a multi-file curator on its 2nd tool call. The cap is
     threaded to the transport (→ UsageLimits(request_limit))."""
-    assert config.AUTHOR_REQUEST_LIMIT == 250
-    assert config.AUTHOR_ACTOR_REQUEST_LIMIT == 250
-    assert config.AUTHOR_ENV_REQUEST_LIMIT == 250
+    assert config.author_request_limit() == 250
+    assert config.author_actor_request_limit() == 250
+    assert config.author_env_request_limit() == 250
     seen: list[int] = []
     _stage(
-        tmp_path, request_limit=config.AUTHOR_REQUEST_LIMIT,
+        tmp_path, request_limit=config.author_request_limit(),
         run_author=lambda **kw: seen.append(kw.get("request_limit")) or _AUTHOR_RESULT_OK,
     )
-    assert seen == [config.AUTHOR_REQUEST_LIMIT]
+    assert seen == [config.author_request_limit()]
     assert seen[0] >= 50
 
 
@@ -404,15 +404,15 @@ def test_model_flip_glm_low_defaults_flow_to_transport(tmp_path):
     efforts to low. Leaving claude-sonnet-4-6 while routing in-process would silently move
     curator billing from the subscription to the metered first-party key. The flipped default is
     what the in-process transport is asked to build."""
-    assert config.AUTHOR_MODEL == "glm-5.2"
-    assert config.AUTHOR_ACTOR_MODEL == "glm-5.2"
-    assert config.AUTHOR_ENV_MODEL == "glm-5.2"
-    assert config.AUTHOR_EFFORT == "low"
-    assert config.AUTHOR_ACTOR_EFFORT == "low"
-    assert config.AUTHOR_ENV_EFFORT == "low"
+    assert config.author_model() == "glm-5.2"
+    assert config.author_actor_model() == "glm-5.2"
+    assert config.author_env_model() == "glm-5.2"
+    assert config.author_effort() == "low"
+    assert config.author_actor_effort() == "low"
+    assert config.author_env_effort() == "low"
     seen: list[tuple[object, object]] = []
     _stage(
-        tmp_path, model=config.AUTHOR_MODEL, effort=config.AUTHOR_EFFORT,
+        tmp_path, model=config.author_model(), effort=config.author_effort(),
         run_author=lambda **kw: seen.append((kw.get("model"), kw.get("effort"))) or _AUTHOR_RESULT_OK,
     )
     assert seen == [("glm-5.2", "low")]

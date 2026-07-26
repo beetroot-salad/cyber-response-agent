@@ -121,6 +121,8 @@ def _spawn(**over):
         batch_id="run-A", user_prompt="u", repo_root=Path("/tmp/wt"),
         learning_run_dir=Path("/tmp/rd"), log_label="lead author", log=lambda *a, **k: None,
         source_key=lambda model, label: None, run_author=lambda **kw: "",
+        model=config.lead_author_model(), effort=config.lead_author_effort(),
+        timeout=config.lead_author_timeout(), request_limit=config.lead_author_request_limit(),
     )
     kw.update(over)
     return run_author_stage(**kw)
@@ -305,6 +307,7 @@ def test_run_stage_require_output_matrix(tmp_path):
             stage="lead_author", prompt_path=_prompt(tmp_path), model="m", effort=None,
             trace_name=f"ro-{tag}.jsonl", label="la", user="u",
             learning_run_dir=deps.run_dir, deps=deps, request_limit=4,
+            wall_clock_timeout=config.subagent_timeout(),
             make_model=_fake_model(_replay(text)), **kw,
         )
 
@@ -355,7 +358,7 @@ def test_relative_write_lands_in_worktree_not_process_cwd(tmp_path, monkeypatch)
         out = _run_lead_author_pydantic(
             prompt_path=_prompt(tmp_path), model="m", effort=None, trace_name="f2.jsonl",
             label="la", user="u", learning_run_dir=rd, repo_root=wt, request_limit=6,
-            make_model=_fake_model(fn))
+            wall_clock_timeout=config.lead_author_timeout(), make_model=_fake_model(fn))
     assert out == "done"
     landed = wt / "defender" / "skills" / "gather" / "queries" / "foo" / "new.md"
     assert landed.is_file()                                       # positive: real write, in the worktree
@@ -377,7 +380,7 @@ def test_write_into_new_subtree_creates_parents(tmp_path):
         out = _run_lead_author_pydantic(
             prompt_path=_prompt(tmp_path), model="m", effort=None, trace_name="newdir.jsonl",
             label="la", user="u", learning_run_dir=rd, repo_root=wt, request_limit=6,
-            make_model=_fake_model(fn))
+            wall_clock_timeout=config.lead_author_timeout(), make_model=_fake_model(fn))
     assert out == "done"
     landed = wt / "defender" / "skills" / "newsys" / "queries" / "auth.md"
     assert landed.read_text() == "PROMOTED"
@@ -397,6 +400,7 @@ def test_engine_run_does_not_leak_process_cwd(tmp_path, monkeypatch):
         _run_lead_author_pydantic(
             prompt_path=_prompt(tmp_path), model="m", effort=None, trace_name="cwd.jsonl",
             label="la", user="u", learning_run_dir=rd, repo_root=wt, request_limit=4,
+            wall_clock_timeout=config.lead_author_timeout(),
             make_model=_fake_model(_replay("done")))
     assert os.getcwd() == before
 
@@ -417,7 +421,7 @@ def test_writer_contentless_final_after_write_is_success(tmp_path):
         out = _run_lead_author_pydantic(
             prompt_path=_prompt(tmp_path), model="m", effort=None, trace_name="e.jsonl",
             label="la", user="u", learning_run_dir=rd, repo_root=wt, request_limit=6,
-            make_model=_fake_model(fn))
+            wall_clock_timeout=config.lead_author_timeout(), make_model=_fake_model(fn))
     assert out == "  "
     assert (wt / "defender" / "skills" / "gather" / "queries" / "foo" / "e.md").read_text() == "X"
 
@@ -473,10 +477,10 @@ def test_run_author_stage_sources_key_before_run():
     _spawn(
         source_key=lambda model, label: events.append(("key", model)),
         run_author=lambda **kw: events.append(("run", kw.get("model"))) or "",
-        model=config.LEAD_AUTHOR_MODEL,
+        model=config.lead_author_model(),
     )
     assert [e[0] for e in events] == ["key", "run"]
-    assert events[0][1] == config.LEAD_AUTHOR_MODEL
+    assert events[0][1] == config.lead_author_model()
 
 
 def test_run_author_stage_trace_name_carries_batch_id_and_pid(tmp_path):
@@ -510,6 +514,7 @@ def test_two_distinct_traces_into_one_dir_both_survive(tmp_path):
             _run_lead_author_pydantic(
                 prompt_path=_prompt(tmp_path), model="m", effort=None, trace_name=name,
                 label="la", user="u", learning_run_dir=rd, repo_root=wt, request_limit=4,
+                wall_clock_timeout=config.lead_author_timeout(),
                 make_model=_fake_model(_replay("done")))
     a, b = rd / "run-A.7.trace.jsonl", rd / "run-B.7.trace.jsonl"
     assert a.is_file()
@@ -525,9 +530,9 @@ def test_two_distinct_traces_into_one_dir_both_survive(tmp_path):
 def test_lead_author_config_defaults_glm_low():
     """The migration flips the shipped defaults: model glm-5.2, effort low (matching the defender
     MAIN + verifier), plus a generous request limit for a multi-file editor."""
-    assert config.LEAD_AUTHOR_MODEL == "glm-5.2"
-    assert config.LEAD_AUTHOR_EFFORT == "low"
-    assert config.LEAD_AUTHOR_REQUEST_LIMIT >= 50
+    assert config.lead_author_model() == "glm-5.2"
+    assert config.lead_author_effort() == "low"
+    assert config.lead_author_request_limit() >= 50
 
 
 def test_effort_cross_product_builds(monkeypatch):
@@ -540,8 +545,8 @@ def test_effort_cross_product_builds(monkeypatch):
     pytest.importorskip("pydantic_ai.models.openai")
     monkeypatch.setenv("FIREWORKS_API_KEY", "fw-test")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
-    providers.build_for_effort("glm-5.2", config.LEAD_AUTHOR_EFFORT)             # default builds
-    providers.build_for_effort("claude-sonnet-4-6", config.LEAD_AUTHOR_EFFORT)   # A/B override builds
+    providers.build_for_effort("glm-5.2", config.lead_author_effort())             # default builds
+    providers.build_for_effort("claude-sonnet-4-6", config.lead_author_effort())   # A/B override builds
     with pytest.raises(ValueError, match="none"):
         providers.build_for_effort("claude-sonnet-4-6", "none")                  # Fireworks-only effort
 
@@ -556,7 +561,8 @@ def test_claude_none_effort_becomes_fatal_config(tmp_path, monkeypatch):
         _run_lead_author_pydantic(
             prompt_path=_prompt(tmp_path), model="claude-sonnet-4-6", effort="none",
             trace_name="cfg.jsonl", label="la", user="u",
-            learning_run_dir=_run_dir(tmp_path), repo_root=_worktree(tmp_path), request_limit=4)
+            learning_run_dir=_run_dir(tmp_path), repo_root=_worktree(tmp_path), request_limit=4,
+            wall_clock_timeout=config.lead_author_timeout())
 
 
 def test_unroutable_model_source_key_fatal_config(tmp_path):
@@ -568,4 +574,7 @@ def test_unroutable_model_source_key_fatal_config(tmp_path):
             system_prompt_file=_prompt(tmp_path), batch_id="run-A", user_prompt="u",
             repo_root=_worktree(tmp_path), learning_run_dir=_run_dir(tmp_path),
             log_label="lead author", log=lambda *a, **k: None,
-            model="gpt-4-turbo", run_author=lambda **kw: "x")
+            model="gpt-4-turbo", effort=config.lead_author_effort(),
+            timeout=config.lead_author_timeout(),
+            request_limit=config.lead_author_request_limit(),
+            run_author=lambda **kw: "x")

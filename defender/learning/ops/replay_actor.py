@@ -94,7 +94,7 @@ def main(argv: list[str]) -> int:
     )
     lr = _load_sibling("_defender_learning_lead_repository_replay", learning / "lead_repository.py")
 
-    source_first_party_key(sub.ACTOR_MODEL, label="actor")
+    source_first_party_key(sub.actor_model(), label="actor")
 
     case_id = ns.case_id or staging.name
     view = lr.actor_view(staging)

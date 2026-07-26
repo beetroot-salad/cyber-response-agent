@@ -460,12 +460,12 @@ def satisfy_engine_keys(monkeypatch, disposition: str = "inconclusive") -> None:
     """Give `run_one`'s `_prepare_engines_for` an ambient provider key per direction model
     so key-sourcing does not FatalConfigError before the box seam is reached (setenv, not
     setattr — the sanctioned env seam)."""
-    from defender.learning.core.config import ORACLE_MODEL
+    from defender.learning.core.config import oracle_model
     from defender.learning.core.directions import BY_NAME
     from defender.learning.core.run_cycle import _directions_for
     from defender.runtime import providers
 
-    models = {ORACLE_MODEL}
+    models = {oracle_model()}
     for name in _directions_for(disposition):
         d = BY_NAME[name]
         models.add(d.judge_wiring.model)

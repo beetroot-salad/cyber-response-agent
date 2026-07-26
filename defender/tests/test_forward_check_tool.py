@@ -414,14 +414,14 @@ def test_d6_concurrency_bounded_by_workers(tmp_path):
     """The number of checks in flight at any instant never exceeds the configured worker
     bound."""
     scene = _scene(tmp_path)
-    n = config.VERIFY_BATCH_WORKERS + 4
+    n = config.verify_batch_workers() + 4
     rids = [f"run-{i}" for i in range(n)]
     fake = FakeVerify(specs={r: VerifySpec(raw=_VERDICT_GOOD, delay=0.04) for r in rids})
     pairs = [_fpair(scene, r) for r in rids]
     deps = _deps(scene, run_verify=fake, queued=set(rids))
     out = _run(deps, pairs)
     assert _counts(out) == (n, 0, 0)
-    assert fake.peak <= config.VERIFY_BATCH_WORKERS
+    assert fake.peak <= config.verify_batch_workers()
     assert fake.peak >= 2
 
 
@@ -557,7 +557,7 @@ def test_m12_a_raising_check_does_not_hang_the_batch(tmp_path):
     """A check that raises while holding the concurrency slot releases it, so the remaining
     pairs still run and the tool returns."""
     scene = _scene(tmp_path)
-    n = config.VERIFY_BATCH_WORKERS
+    n = config.verify_batch_workers()
     rids = [f"run-{i}" for i in range(n + 4)]
     specs = {r: VerifySpec(delay=0.02, raises=RunUnprocessable("boom")) for r in rids[:n]}
     specs.update({r: VerifySpec(raw=_VERDICT_GOOD) for r in rids[n:]})
@@ -964,18 +964,18 @@ def test_m5_verifier_timeout_zero_is_honored(tmp_path):
     fake = FakeVerify(default=VerifySpec(raw=_VERDICT_GOOD))
     deps = _deps(scene, run_verify=fake, queued={"run-1"})
     _run(deps, [_fpair(scene, "run-1")])
-    assert fake.calls[0].timeout == config.VERIFIER_TIMEOUT
+    assert fake.calls[0].timeout == config.verifier_timeout()
     src = scene.runs / "run-1"
     with override_allow_model_requests(False), pytest.raises(RunUnprocessable):
         _run_verify_pydantic(
-            _prompt(tmp_path), config.VERIFIER_MODEL, config.VERIFIER_EFFORT,
+            _prompt(tmp_path), config.verifier_model(), config.verifier_effort(),
             "vf.0.trace.jsonl", "l", "u", src,
             defender_dir=tmp_path / "wt" / "defender",
             wall_clock_timeout=0, make_model=_fake_model(_replay(_VERDICT_GOOD)),
         )
     with override_allow_model_requests(False):
         out = _run_verify_pydantic(
-            _prompt(tmp_path), config.VERIFIER_MODEL, config.VERIFIER_EFFORT,
+            _prompt(tmp_path), config.verifier_model(), config.verifier_effort(),
             "vf.big.trace.jsonl", "l", "u", src,
             defender_dir=tmp_path / "wt" / "defender",
             wall_clock_timeout=180, make_model=_fake_model(_replay(_VERDICT_GOOD)),
@@ -990,10 +990,10 @@ def test_m6_verifier_model_alternative_crosses(tmp_path, monkeypatch):
     fake = FakeVerify(default=VerifySpec(raw=_VERDICT_GOOD))
     deps = _deps(scene, run_verify=fake, queued={"run-1"})
     assert _counts(_run(deps, [_fpair(scene, "run-1")])) == (1, 0, 0)
-    assert fake.calls[0].model == config.VERIFIER_MODEL
+    assert fake.calls[0].model == config.verifier_model()
     pytest.importorskip("pydantic_ai.models.openai")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
-    providers.build_for_effort("claude-haiku-4-5", config.VERIFIER_EFFORT)
+    providers.build_for_effort("claude-haiku-4-5", config.verifier_effort())
 
 
 def test_m7_verifier_effort_none_is_provider_gated(tmp_path, monkeypatch):
@@ -1003,7 +1003,7 @@ def test_m7_verifier_effort_none_is_provider_gated(tmp_path, monkeypatch):
     fake = FakeVerify(default=VerifySpec(raw=_VERDICT_GOOD))
     deps = _deps(scene, run_verify=fake, queued={"run-1"})
     _run(deps, [_fpair(scene, "run-1")])
-    assert fake.calls[0].effort == config.VERIFIER_EFFORT
+    assert fake.calls[0].effort == config.verifier_effort()
     pytest.importorskip("pydantic_ai.models.openai")
     monkeypatch.setenv("FIREWORKS_API_KEY", "fw-test")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")

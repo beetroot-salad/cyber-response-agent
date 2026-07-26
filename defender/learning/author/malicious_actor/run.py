@@ -11,13 +11,14 @@ if (_root := str(Path(__file__).resolve().parents[4])) not in sys.path:
 from defender.learning.author import curator as _curator
 from defender.learning.author import shared as _shared
 from defender.learning.core.config import (
-    ACTOR_MODEL,
-    AUTHOR_ACTOR_EFFORT,
-    AUTHOR_ACTOR_MODEL,
-    AUTHOR_ACTOR_REQUEST_LIMIT,
-    AUTHOR_ACTOR_TIMEOUT,
     DEFAULT_PATHS,
     LoopPaths,
+    actor_model,
+    author_actor_effort,
+    author_actor_model,
+    author_actor_request_limit,
+    author_actor_timeout,
+    repo_lock_wait_seconds,
 )
 
 
@@ -35,7 +36,7 @@ def invoke_agent(
     return _curator.invoke_curator_agent(
         cfg, observations, batch_id,
         check=ACTOR_CHECK,
-        request_limit=AUTHOR_ACTOR_REQUEST_LIMIT,
+        request_limit=author_actor_request_limit(),
     )
 
 
@@ -50,17 +51,17 @@ def build_actor_config(
         corpus_dir_rel=paths.lessons_actor_dir_rel,
         channel=paths.actor_observations,
         repo_lock_file=paths.author_lock_file,
-        repo_lock_wait_seconds=_shared.REPO_LOCK_WAIT_SECONDS,
+        repo_lock_wait_seconds=repo_lock_wait_seconds(),
         outcome_author=frozenset({"caught", "incoherent"}),
         outcome_skip=frozenset({"survived", "undecidable"}),
         trailer_label="Actor-Model",
         generation_fn=functools.partial(_shared.actor_generation_count, paths.repo_root),
-        actor_model=ACTOR_MODEL,
+        actor_model=actor_model(),
         log_prefix="author_actor",
         author_prompt=paths.learning_dir / "author" / "malicious_actor" / "prompt.md",
-        author_model=AUTHOR_ACTOR_MODEL,
-        author_timeout=AUTHOR_ACTOR_TIMEOUT,
-        author_effort=AUTHOR_ACTOR_EFFORT,
+        author_model=author_actor_model(),
+        author_timeout=author_actor_timeout(),
+        author_effort=author_actor_effort(),
         invoke_agent=invoke_agent,
         box=box,
     )
