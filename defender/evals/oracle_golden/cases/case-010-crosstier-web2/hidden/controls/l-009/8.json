@@ -1,0 +1,198 @@
+{
+  "lead_id": "l-009",
+  "seq": 8,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T19:40:00.000Z",
+        "2026-07-12T20:40:00.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-12T19:40:00.000Z\" AND @timestamp < \"2026-07-12T20:40:00.000Z\"\n        AND host.name == \"web-2\"\n| STATS total_events = COUNT(*),\n        sshd_events = COUNT(*) WHERE process.name == \"sshd\",\n        failed_auth_events = COUNT(*) WHERE event.outcome == \"failure\",\n        success_auth_events = COUNT(*) WHERE event.outcome == \"success\",\n        pam_unix_events = COUNT(*) WHERE message LIKE \"*pam_unix*\",\n        session_events = COUNT(*) WHERE message LIKE \"*session*\",\n        first_event = MIN(@timestamp),\n        last_event = MAX(@timestamp)\n| EVAL window_duration_seconds = DATE_DIFF(\"second\", first_event, last_event)",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-12T19:40:00.000Z\" AND @timestamp < \"2026-07-12T20:40:00.000Z\"\n        AND host.name == \"web-2\"\n| STATS total_events = COUNT(*),\n        sshd_events = COUNT(*) WHERE process.name == \"sshd\",\n        failed_auth_events = COUNT(*) WHERE event.outcome == \"failure\",\n        success_auth_events = COUNT(*) WHERE event.outcome == \"success\",\n        pam_unix_events = COUNT(*) WHERE message LIKE \"*pam_unix*\",\n        session_events = COUNT(*) WHERE message LIKE \"*session*\",\n        first_event = MIN(@timestamp),\n        last_event = MAX(@timestamp)\n| EVAL window_duration_seconds = DATE_DIFF(\"second\", first_event, last_event)",
+        "columns": [
+          {
+            "name": "total_events",
+            "type": "long"
+          },
+          {
+            "name": "sshd_events",
+            "type": "long"
+          },
+          {
+            "name": "failed_auth_events",
+            "type": "long"
+          },
+          {
+            "name": "success_auth_events",
+            "type": "long"
+          },
+          {
+            "name": "pam_unix_events",
+            "type": "long"
+          },
+          {
+            "name": "session_events",
+            "type": "long"
+          },
+          {
+            "name": "first_event",
+            "type": "date"
+          },
+          {
+            "name": "last_event",
+            "type": "date"
+          },
+          {
+            "name": "window_duration_seconds",
+            "type": "integer"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "total_events": 763,
+            "sshd_events": 322,
+            "failed_auth_events": 0,
+            "success_auth_events": 7,
+            "pam_unix_events": 448,
+            "session_events": 462,
+            "first_event": "2026-07-12T19:40:56.000Z",
+            "last_event": "2026-07-12T20:39:01.000Z",
+            "window_duration_seconds": 3485
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T19:40:00.000Z",
+        "2026-07-05T20:40:00.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-05T19:40:00.000Z\" AND @timestamp < \"2026-07-05T20:40:00.000Z\"\n        AND host.name == \"web-2\"\n| STATS total_events = COUNT(*),\n        sshd_events = COUNT(*) WHERE process.name == \"sshd\",\n        failed_auth_events = COUNT(*) WHERE event.outcome == \"failure\",\n        success_auth_events = COUNT(*) WHERE event.outcome == \"success\",\n        pam_unix_events = COUNT(*) WHERE message LIKE \"*pam_unix*\",\n        session_events = COUNT(*) WHERE message LIKE \"*session*\",\n        first_event = MIN(@timestamp),\n        last_event = MAX(@timestamp)\n| EVAL window_duration_seconds = DATE_DIFF(\"second\", first_event, last_event)",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-05T19:40:00.000Z\" AND @timestamp < \"2026-07-05T20:40:00.000Z\"\n        AND host.name == \"web-2\"\n| STATS total_events = COUNT(*),\n        sshd_events = COUNT(*) WHERE process.name == \"sshd\",\n        failed_auth_events = COUNT(*) WHERE event.outcome == \"failure\",\n        success_auth_events = COUNT(*) WHERE event.outcome == \"success\",\n        pam_unix_events = COUNT(*) WHERE message LIKE \"*pam_unix*\",\n        session_events = COUNT(*) WHERE message LIKE \"*session*\",\n        first_event = MIN(@timestamp),\n        last_event = MAX(@timestamp)\n| EVAL window_duration_seconds = DATE_DIFF(\"second\", first_event, last_event)",
+        "columns": [
+          {
+            "name": "total_events",
+            "type": "long"
+          },
+          {
+            "name": "sshd_events",
+            "type": "long"
+          },
+          {
+            "name": "failed_auth_events",
+            "type": "long"
+          },
+          {
+            "name": "success_auth_events",
+            "type": "long"
+          },
+          {
+            "name": "pam_unix_events",
+            "type": "long"
+          },
+          {
+            "name": "session_events",
+            "type": "long"
+          },
+          {
+            "name": "first_event",
+            "type": "date"
+          },
+          {
+            "name": "last_event",
+            "type": "date"
+          },
+          {
+            "name": "window_duration_seconds",
+            "type": "integer"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "total_events": 714,
+            "sshd_events": 224,
+            "failed_auth_events": 0,
+            "success_auth_events": 49,
+            "pam_unix_events": 476,
+            "session_events": 448,
+            "first_event": "2026-07-05T19:40:58.000Z",
+            "last_event": "2026-07-05T20:39:24.000Z",
+            "window_duration_seconds": 3506
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-28T19:40:00.000Z",
+        "2026-06-28T20:40:00.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-28T19:40:00.000Z\" AND @timestamp < \"2026-06-28T20:40:00.000Z\"\n        AND host.name == \"web-2\"\n| STATS total_events = COUNT(*),\n        sshd_events = COUNT(*) WHERE process.name == \"sshd\",\n        failed_auth_events = COUNT(*) WHERE event.outcome == \"failure\",\n        success_auth_events = COUNT(*) WHERE event.outcome == \"success\",\n        pam_unix_events = COUNT(*) WHERE message LIKE \"*pam_unix*\",\n        session_events = COUNT(*) WHERE message LIKE \"*session*\",\n        first_event = MIN(@timestamp),\n        last_event = MAX(@timestamp)\n| EVAL window_duration_seconds = DATE_DIFF(\"second\", first_event, last_event)",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-28T19:40:00.000Z\" AND @timestamp < \"2026-06-28T20:40:00.000Z\"\n        AND host.name == \"web-2\"\n| STATS total_events = COUNT(*),\n        sshd_events = COUNT(*) WHERE process.name == \"sshd\",\n        failed_auth_events = COUNT(*) WHERE event.outcome == \"failure\",\n        success_auth_events = COUNT(*) WHERE event.outcome == \"success\",\n        pam_unix_events = COUNT(*) WHERE message LIKE \"*pam_unix*\",\n        session_events = COUNT(*) WHERE message LIKE \"*session*\",\n        first_event = MIN(@timestamp),\n        last_event = MAX(@timestamp)\n| EVAL window_duration_seconds = DATE_DIFF(\"second\", first_event, last_event)",
+        "columns": [
+          {
+            "name": "total_events",
+            "type": "long"
+          },
+          {
+            "name": "sshd_events",
+            "type": "long"
+          },
+          {
+            "name": "failed_auth_events",
+            "type": "long"
+          },
+          {
+            "name": "success_auth_events",
+            "type": "long"
+          },
+          {
+            "name": "pam_unix_events",
+            "type": "long"
+          },
+          {
+            "name": "session_events",
+            "type": "long"
+          },
+          {
+            "name": "first_event",
+            "type": "date"
+          },
+          {
+            "name": "last_event",
+            "type": "date"
+          },
+          {
+            "name": "window_duration_seconds",
+            "type": "integer"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "total_events": 584,
+            "sshd_events": 208,
+            "failed_auth_events": 0,
+            "success_auth_events": 8,
+            "pam_unix_events": 384,
+            "session_events": 400,
+            "first_event": "2026-06-28T19:42:43.000Z",
+            "last_event": "2026-06-28T20:38:14.000Z",
+            "window_duration_seconds": 3331
+          }
+        ]
+      }
+    }
+  ]
+}

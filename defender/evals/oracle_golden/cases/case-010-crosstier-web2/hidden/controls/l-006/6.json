@@ -1,0 +1,419 @@
+{
+  "lead_id": "l-006",
+  "seq": 6,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T19:36:22.000Z",
+        "2026-07-12T20:36:22.000Z"
+      ],
+      "query": "FROM logs-zeek.ssh-*\n| WHERE @timestamp >= \"2026-07-12T19:36:22.000Z\" AND @timestamp < \"2026-07-12T20:36:22.000Z\"\n| STATS count = COUNT(*) BY source.ip, destination.ip\n| SORT count DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-zeek.ssh-*\n| WHERE @timestamp >= \"2026-07-12T19:36:22.000Z\" AND @timestamp < \"2026-07-12T20:36:22.000Z\"\n| STATS count = COUNT(*) BY source.ip, destination.ip\n| SORT count DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "count",
+            "type": "long"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "destination.ip",
+            "type": "ip"
+          }
+        ],
+        "row_count": 20,
+        "values": [
+          {
+            "count": 18,
+            "source.ip": "172.18.0.23",
+            "destination.ip": "172.18.0.17"
+          },
+          {
+            "count": 16,
+            "source.ip": "172.18.0.8",
+            "destination.ip": "172.18.0.15"
+          },
+          {
+            "count": 13,
+            "source.ip": "172.18.0.6",
+            "destination.ip": "172.18.0.15"
+          },
+          {
+            "count": 10,
+            "source.ip": "172.18.0.20",
+            "destination.ip": "172.18.0.8"
+          },
+          {
+            "count": 6,
+            "source.ip": "172.18.0.20",
+            "destination.ip": "172.18.0.6"
+          },
+          {
+            "count": 6,
+            "source.ip": "172.18.0.17",
+            "destination.ip": "172.18.0.8"
+          },
+          {
+            "count": 5,
+            "source.ip": "172.18.0.17",
+            "destination.ip": "172.18.0.23"
+          },
+          {
+            "count": 4,
+            "source.ip": "172.18.0.22",
+            "destination.ip": "172.18.0.15"
+          },
+          {
+            "count": 3,
+            "source.ip": "172.18.0.14",
+            "destination.ip": "172.18.0.12"
+          },
+          {
+            "count": 3,
+            "source.ip": "172.18.0.22",
+            "destination.ip": "172.18.0.8"
+          },
+          {
+            "count": 3,
+            "source.ip": "172.18.0.14",
+            "destination.ip": "172.18.0.17"
+          },
+          {
+            "count": 3,
+            "source.ip": "172.18.0.14",
+            "destination.ip": "172.18.0.13"
+          },
+          {
+            "count": 3,
+            "source.ip": "172.18.0.14",
+            "destination.ip": "172.18.0.6"
+          },
+          {
+            "count": 2,
+            "source.ip": "172.18.0.22",
+            "destination.ip": "172.18.0.23"
+          },
+          {
+            "count": 2,
+            "source.ip": "172.18.0.14",
+            "destination.ip": "172.18.0.8"
+          },
+          {
+            "count": 2,
+            "source.ip": "172.18.0.22",
+            "destination.ip": "172.18.0.12"
+          },
+          {
+            "count": 2,
+            "source.ip": "172.18.0.22",
+            "destination.ip": "172.18.0.6"
+          },
+          {
+            "count": 2,
+            "source.ip": "172.18.0.22",
+            "destination.ip": "172.18.0.3"
+          },
+          {
+            "count": 2,
+            "source.ip": "172.18.0.17",
+            "destination.ip": "172.18.0.6"
+          },
+          {
+            "count": 2,
+            "source.ip": "172.18.0.14",
+            "destination.ip": "172.18.0.3"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T19:36:22.000Z",
+        "2026-07-05T20:36:22.000Z"
+      ],
+      "query": "FROM logs-zeek.ssh-*\n| WHERE @timestamp >= \"2026-07-05T19:36:22.000Z\" AND @timestamp < \"2026-07-05T20:36:22.000Z\"\n| STATS count = COUNT(*) BY source.ip, destination.ip\n| SORT count DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-zeek.ssh-*\n| WHERE @timestamp >= \"2026-07-05T19:36:22.000Z\" AND @timestamp < \"2026-07-05T20:36:22.000Z\"\n| STATS count = COUNT(*) BY source.ip, destination.ip\n| SORT count DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "count",
+            "type": "long"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "destination.ip",
+            "type": "ip"
+          }
+        ],
+        "row_count": 20,
+        "values": [
+          {
+            "count": 13,
+            "source.ip": "172.18.0.23",
+            "destination.ip": "172.18.0.17"
+          },
+          {
+            "count": 12,
+            "source.ip": "172.18.0.6",
+            "destination.ip": "172.18.0.15"
+          },
+          {
+            "count": 11,
+            "source.ip": "172.18.0.8",
+            "destination.ip": "172.18.0.15"
+          },
+          {
+            "count": 7,
+            "source.ip": "172.18.0.22",
+            "destination.ip": "172.18.0.15"
+          },
+          {
+            "count": 7,
+            "source.ip": "172.18.0.14",
+            "destination.ip": "172.18.0.23"
+          },
+          {
+            "count": 6,
+            "source.ip": "172.18.0.22",
+            "destination.ip": "172.18.0.23"
+          },
+          {
+            "count": 6,
+            "source.ip": "172.18.0.22",
+            "destination.ip": "172.18.0.3"
+          },
+          {
+            "count": 6,
+            "source.ip": "172.18.0.17",
+            "destination.ip": "172.18.0.6"
+          },
+          {
+            "count": 6,
+            "source.ip": "172.18.0.20",
+            "destination.ip": "172.18.0.8"
+          },
+          {
+            "count": 5,
+            "source.ip": "172.18.0.20",
+            "destination.ip": "172.18.0.6"
+          },
+          {
+            "count": 4,
+            "source.ip": "172.18.0.22",
+            "destination.ip": "172.18.0.17"
+          },
+          {
+            "count": 4,
+            "source.ip": "172.18.0.17",
+            "destination.ip": "172.18.0.23"
+          },
+          {
+            "count": 4,
+            "source.ip": "172.18.0.22",
+            "destination.ip": "172.18.0.6"
+          },
+          {
+            "count": 4,
+            "source.ip": "172.18.0.22",
+            "destination.ip": "172.18.0.8"
+          },
+          {
+            "count": 3,
+            "source.ip": "172.18.0.22",
+            "destination.ip": "172.18.0.13"
+          },
+          {
+            "count": 3,
+            "source.ip": "172.18.0.17",
+            "destination.ip": "172.18.0.15"
+          },
+          {
+            "count": 3,
+            "source.ip": "172.18.0.14",
+            "destination.ip": "172.18.0.17"
+          },
+          {
+            "count": 3,
+            "source.ip": "172.18.0.22",
+            "destination.ip": "172.18.0.12"
+          },
+          {
+            "count": 2,
+            "source.ip": "172.18.0.14",
+            "destination.ip": "172.18.0.8"
+          },
+          {
+            "count": 2,
+            "source.ip": "172.18.0.17",
+            "destination.ip": "172.18.0.8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-28T19:36:22.000Z",
+        "2026-06-28T20:36:22.000Z"
+      ],
+      "query": "FROM logs-zeek.ssh-*\n| WHERE @timestamp >= \"2026-06-28T19:36:22.000Z\" AND @timestamp < \"2026-06-28T20:36:22.000Z\"\n| STATS count = COUNT(*) BY source.ip, destination.ip\n| SORT count DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-zeek.ssh-*\n| WHERE @timestamp >= \"2026-06-28T19:36:22.000Z\" AND @timestamp < \"2026-06-28T20:36:22.000Z\"\n| STATS count = COUNT(*) BY source.ip, destination.ip\n| SORT count DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "count",
+            "type": "long"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "destination.ip",
+            "type": "ip"
+          }
+        ],
+        "row_count": 20,
+        "values": [
+          {
+            "count": 13,
+            "source.ip": "172.18.0.11",
+            "destination.ip": "172.18.0.18"
+          },
+          {
+            "count": 12,
+            "source.ip": "172.18.0.9",
+            "destination.ip": "172.18.0.11"
+          },
+          {
+            "count": 10,
+            "source.ip": "172.18.0.10",
+            "destination.ip": "172.18.0.18"
+          },
+          {
+            "count": 8,
+            "source.ip": "172.18.0.15",
+            "destination.ip": "172.18.0.21"
+          },
+          {
+            "count": 7,
+            "source.ip": "172.18.0.9",
+            "destination.ip": "172.18.0.10"
+          },
+          {
+            "count": 6,
+            "source.ip": "172.18.0.20",
+            "destination.ip": "172.18.0.21"
+          },
+          {
+            "count": 6,
+            "source.ip": "172.18.0.19",
+            "destination.ip": "172.18.0.24"
+          },
+          {
+            "count": 5,
+            "source.ip": "172.18.0.19",
+            "destination.ip": "172.18.0.17"
+          },
+          {
+            "count": 5,
+            "source.ip": "172.18.0.19",
+            "destination.ip": "172.18.0.15"
+          },
+          {
+            "count": 4,
+            "source.ip": "172.18.0.20",
+            "destination.ip": "172.18.0.18"
+          },
+          {
+            "count": 4,
+            "source.ip": "172.18.0.20",
+            "destination.ip": "172.18.0.24"
+          },
+          {
+            "count": 4,
+            "source.ip": "172.18.0.20",
+            "destination.ip": "172.18.0.11"
+          },
+          {
+            "count": 3,
+            "source.ip": "172.18.0.21",
+            "destination.ip": "172.18.0.15"
+          },
+          {
+            "count": 3,
+            "source.ip": "172.18.0.19",
+            "destination.ip": "172.18.0.18"
+          },
+          {
+            "count": 3,
+            "source.ip": "172.18.0.19",
+            "destination.ip": "172.18.0.11"
+          },
+          {
+            "count": 2,
+            "source.ip": "172.18.0.20",
+            "destination.ip": "172.18.0.17"
+          },
+          {
+            "count": 2,
+            "source.ip": "172.18.0.20",
+            "destination.ip": "172.18.0.25"
+          },
+          {
+            "count": 2,
+            "source.ip": "172.18.0.21",
+            "destination.ip": "172.18.0.10"
+          },
+          {
+            "count": 2,
+            "source.ip": "172.18.0.19",
+            "destination.ip": "172.18.0.21"
+          },
+          {
+            "count": 2,
+            "source.ip": "172.18.0.20",
+            "destination.ip": "172.18.0.10"
+          }
+        ]
+      }
+    }
+  ],
+  "attack_contribution": {
+    "window": [
+      "2026-07-26T20:06:02.000Z",
+      "2026-07-26T20:06:42.000Z"
+    ],
+    "query": "FROM logs-zeek.ssh-*\n| WHERE @timestamp >= \"2026-07-26T20:06:02.000Z\" AND @timestamp < \"2026-07-26T20:06:42.000Z\"\n| STATS count = COUNT(*) BY source.ip, destination.ip\n| SORT count DESC\n| LIMIT 20",
+    "payload": {
+      "query": "FROM logs-zeek.ssh-*\n| WHERE @timestamp >= \"2026-07-26T20:06:02.000Z\" AND @timestamp < \"2026-07-26T20:06:42.000Z\"\n| STATS count = COUNT(*) BY source.ip, destination.ip\n| SORT count DESC\n| LIMIT 20",
+      "columns": [
+        {
+          "name": "count",
+          "type": "long"
+        },
+        {
+          "name": "source.ip",
+          "type": "ip"
+        },
+        {
+          "name": "destination.ip",
+          "type": "ip"
+        }
+      ],
+      "row_count": 0,
+      "values": []
+    }
+  }
+}

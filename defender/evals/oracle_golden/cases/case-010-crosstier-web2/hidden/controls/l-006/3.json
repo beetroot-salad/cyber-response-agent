@@ -1,0 +1,174 @@
+{
+  "lead_id": "l-006",
+  "seq": 3,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T19:36:42.000Z",
+        "2026-07-12T20:36:42.000Z"
+      ],
+      "query": "FROM logs-zeek.ssh-*\n| WHERE @timestamp >= \"2026-07-12T19:36:42.000Z\" AND @timestamp <= \"2026-07-12T20:36:42.000Z\"\n  AND (\n    (source.ip == \"172.18.0.12\")\n    OR\n    (source.ip == \"172.18.0.6\" AND destination.ip == \"172.18.0.12\")\n  )\n| STATS count = COUNT(*), first_ts = MIN(@timestamp), last_ts = MAX(@timestamp),\n        auth_successes = COUNT(zeek.ssh.auth.success == true),\n        auth_failures = COUNT(zeek.ssh.auth.success == false),\n        auth_nulls = COUNT(zeek.ssh.auth.success IS NULL)\n    BY source.ip, destination.ip, zeek.ssh.client, zeek.ssh.server\n| SORT count DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-zeek.ssh-*\n| WHERE @timestamp >= \"2026-07-12T19:36:42.000Z\" AND @timestamp <= \"2026-07-12T20:36:42.000Z\"\n  AND (\n    (source.ip == \"172.18.0.12\")\n    OR\n    (source.ip == \"172.18.0.6\" AND destination.ip == \"172.18.0.12\")\n  )\n| STATS count = COUNT(*), first_ts = MIN(@timestamp), last_ts = MAX(@timestamp),\n        auth_successes = COUNT(zeek.ssh.auth.success == true),\n        auth_failures = COUNT(zeek.ssh.auth.success == false),\n        auth_nulls = COUNT(zeek.ssh.auth.success IS NULL)\n    BY source.ip, destination.ip, zeek.ssh.client, zeek.ssh.server\n| SORT count DESC",
+        "columns": [
+          {
+            "name": "count",
+            "type": "long"
+          },
+          {
+            "name": "first_ts",
+            "type": "date"
+          },
+          {
+            "name": "last_ts",
+            "type": "date"
+          },
+          {
+            "name": "auth_successes",
+            "type": "long"
+          },
+          {
+            "name": "auth_failures",
+            "type": "long"
+          },
+          {
+            "name": "auth_nulls",
+            "type": "long"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "destination.ip",
+            "type": "ip"
+          },
+          {
+            "name": "zeek.ssh.client",
+            "type": "keyword"
+          },
+          {
+            "name": "zeek.ssh.server",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T19:36:42.000Z",
+        "2026-07-05T20:36:42.000Z"
+      ],
+      "query": "FROM logs-zeek.ssh-*\n| WHERE @timestamp >= \"2026-07-05T19:36:42.000Z\" AND @timestamp <= \"2026-07-05T20:36:42.000Z\"\n  AND (\n    (source.ip == \"172.18.0.12\")\n    OR\n    (source.ip == \"172.18.0.6\" AND destination.ip == \"172.18.0.12\")\n  )\n| STATS count = COUNT(*), first_ts = MIN(@timestamp), last_ts = MAX(@timestamp),\n        auth_successes = COUNT(zeek.ssh.auth.success == true),\n        auth_failures = COUNT(zeek.ssh.auth.success == false),\n        auth_nulls = COUNT(zeek.ssh.auth.success IS NULL)\n    BY source.ip, destination.ip, zeek.ssh.client, zeek.ssh.server\n| SORT count DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-zeek.ssh-*\n| WHERE @timestamp >= \"2026-07-05T19:36:42.000Z\" AND @timestamp <= \"2026-07-05T20:36:42.000Z\"\n  AND (\n    (source.ip == \"172.18.0.12\")\n    OR\n    (source.ip == \"172.18.0.6\" AND destination.ip == \"172.18.0.12\")\n  )\n| STATS count = COUNT(*), first_ts = MIN(@timestamp), last_ts = MAX(@timestamp),\n        auth_successes = COUNT(zeek.ssh.auth.success == true),\n        auth_failures = COUNT(zeek.ssh.auth.success == false),\n        auth_nulls = COUNT(zeek.ssh.auth.success IS NULL)\n    BY source.ip, destination.ip, zeek.ssh.client, zeek.ssh.server\n| SORT count DESC",
+        "columns": [
+          {
+            "name": "count",
+            "type": "long"
+          },
+          {
+            "name": "first_ts",
+            "type": "date"
+          },
+          {
+            "name": "last_ts",
+            "type": "date"
+          },
+          {
+            "name": "auth_successes",
+            "type": "long"
+          },
+          {
+            "name": "auth_failures",
+            "type": "long"
+          },
+          {
+            "name": "auth_nulls",
+            "type": "long"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "destination.ip",
+            "type": "ip"
+          },
+          {
+            "name": "zeek.ssh.client",
+            "type": "keyword"
+          },
+          {
+            "name": "zeek.ssh.server",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-28T19:36:42.000Z",
+        "2026-06-28T20:36:42.000Z"
+      ],
+      "query": "FROM logs-zeek.ssh-*\n| WHERE @timestamp >= \"2026-06-28T19:36:42.000Z\" AND @timestamp <= \"2026-06-28T20:36:42.000Z\"\n  AND (\n    (source.ip == \"172.18.0.12\")\n    OR\n    (source.ip == \"172.18.0.6\" AND destination.ip == \"172.18.0.12\")\n  )\n| STATS count = COUNT(*), first_ts = MIN(@timestamp), last_ts = MAX(@timestamp),\n        auth_successes = COUNT(zeek.ssh.auth.success == true),\n        auth_failures = COUNT(zeek.ssh.auth.success == false),\n        auth_nulls = COUNT(zeek.ssh.auth.success IS NULL)\n    BY source.ip, destination.ip, zeek.ssh.client, zeek.ssh.server\n| SORT count DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-zeek.ssh-*\n| WHERE @timestamp >= \"2026-06-28T19:36:42.000Z\" AND @timestamp <= \"2026-06-28T20:36:42.000Z\"\n  AND (\n    (source.ip == \"172.18.0.12\")\n    OR\n    (source.ip == \"172.18.0.6\" AND destination.ip == \"172.18.0.12\")\n  )\n| STATS count = COUNT(*), first_ts = MIN(@timestamp), last_ts = MAX(@timestamp),\n        auth_successes = COUNT(zeek.ssh.auth.success == true),\n        auth_failures = COUNT(zeek.ssh.auth.success == false),\n        auth_nulls = COUNT(zeek.ssh.auth.success IS NULL)\n    BY source.ip, destination.ip, zeek.ssh.client, zeek.ssh.server\n| SORT count DESC",
+        "columns": [
+          {
+            "name": "count",
+            "type": "long"
+          },
+          {
+            "name": "first_ts",
+            "type": "date"
+          },
+          {
+            "name": "last_ts",
+            "type": "date"
+          },
+          {
+            "name": "auth_successes",
+            "type": "long"
+          },
+          {
+            "name": "auth_failures",
+            "type": "long"
+          },
+          {
+            "name": "auth_nulls",
+            "type": "long"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "destination.ip",
+            "type": "ip"
+          },
+          {
+            "name": "zeek.ssh.client",
+            "type": "keyword"
+          },
+          {
+            "name": "zeek.ssh.server",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    }
+  ]
+}

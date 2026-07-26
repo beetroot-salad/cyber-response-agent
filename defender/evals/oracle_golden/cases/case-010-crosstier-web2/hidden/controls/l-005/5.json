@@ -1,0 +1,214 @@
+{
+  "lead_id": "l-005",
+  "seq": 5,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T19:36:22.000Z",
+        "2026-07-12T20:36:22.000Z"
+      ],
+      "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-12T19:36:22.000Z\" AND @timestamp < \"2026-07-12T20:36:22.000Z\"\n| WHERE source.ip == \"172.18.0.6\"\n| STATS events = COUNT(*), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp) BY host.name, data_stream.dataset\n| SORT events DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-12T19:36:22.000Z\" AND @timestamp < \"2026-07-12T20:36:22.000Z\"\n| WHERE source.ip == \"172.18.0.6\"\n| STATS events = COUNT(*), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp) BY host.name, data_stream.dataset\n| SORT events DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "data_stream.dataset",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 3,
+        "values": [
+          {
+            "events": 883,
+            "first_seen": "2026-07-12T19:36:28.385Z",
+            "last_seen": "2026-07-12T20:36:20.243Z",
+            "host.name": null,
+            "data_stream.dataset": "zeek.connection"
+          },
+          {
+            "events": 870,
+            "first_seen": "2026-07-12T19:36:28.386Z",
+            "last_seen": "2026-07-12T20:36:20.243Z",
+            "host.name": null,
+            "data_stream.dataset": "zeek.ssl"
+          },
+          {
+            "events": 13,
+            "first_seen": "2026-07-12T19:38:01.389Z",
+            "last_seen": "2026-07-12T20:32:44.722Z",
+            "host.name": null,
+            "data_stream.dataset": "zeek.ssh"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T19:36:22.000Z",
+        "2026-07-05T20:36:22.000Z"
+      ],
+      "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-05T19:36:22.000Z\" AND @timestamp < \"2026-07-05T20:36:22.000Z\"\n| WHERE source.ip == \"172.18.0.6\"\n| STATS events = COUNT(*), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp) BY host.name, data_stream.dataset\n| SORT events DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-05T19:36:22.000Z\" AND @timestamp < \"2026-07-05T20:36:22.000Z\"\n| WHERE source.ip == \"172.18.0.6\"\n| STATS events = COUNT(*), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp) BY host.name, data_stream.dataset\n| SORT events DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "data_stream.dataset",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 5,
+        "values": [
+          {
+            "events": 949,
+            "first_seen": "2026-07-05T19:36:22.498Z",
+            "last_seen": "2026-07-05T20:36:19.414Z",
+            "host.name": null,
+            "data_stream.dataset": "zeek.connection"
+          },
+          {
+            "events": 932,
+            "first_seen": "2026-07-05T19:36:22.498Z",
+            "last_seen": "2026-07-05T20:36:19.414Z",
+            "host.name": null,
+            "data_stream.dataset": "zeek.ssl"
+          },
+          {
+            "events": 84,
+            "first_seen": "2026-07-05T19:39:47.000Z",
+            "last_seen": "2026-07-05T19:40:04.000Z",
+            "host.name": "web-1",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 12,
+            "first_seen": "2026-07-05T19:43:27.693Z",
+            "last_seen": "2026-07-05T20:35:30.481Z",
+            "host.name": null,
+            "data_stream.dataset": "zeek.ssh"
+          },
+          {
+            "events": 5,
+            "first_seen": "2026-07-05T19:47:57.852Z",
+            "last_seen": "2026-07-05T20:08:31.229Z",
+            "host.name": null,
+            "data_stream.dataset": "zeek.http"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-28T19:36:22.000Z",
+        "2026-06-28T20:36:22.000Z"
+      ],
+      "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-06-28T19:36:22.000Z\" AND @timestamp < \"2026-06-28T20:36:22.000Z\"\n| WHERE source.ip == \"172.18.0.6\"\n| STATS events = COUNT(*), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp) BY host.name, data_stream.dataset\n| SORT events DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-06-28T19:36:22.000Z\" AND @timestamp < \"2026-06-28T20:36:22.000Z\"\n| WHERE source.ip == \"172.18.0.6\"\n| STATS events = COUNT(*), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp) BY host.name, data_stream.dataset\n| SORT events DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "data_stream.dataset",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    }
+  ],
+  "attack_contribution": {
+    "window": [
+      "2026-07-26T20:06:02.000Z",
+      "2026-07-26T20:06:42.000Z"
+    ],
+    "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-26T20:06:02.000Z\" AND @timestamp < \"2026-07-26T20:06:42.000Z\"\n| WHERE source.ip == \"172.18.0.6\"\n| STATS events = COUNT(*), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp) BY host.name, data_stream.dataset\n| SORT events DESC\n| LIMIT 20",
+    "payload": {
+      "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-26T20:06:02.000Z\" AND @timestamp < \"2026-07-26T20:06:42.000Z\"\n| WHERE source.ip == \"172.18.0.6\"\n| STATS events = COUNT(*), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp) BY host.name, data_stream.dataset\n| SORT events DESC\n| LIMIT 20",
+      "columns": [
+        {
+          "name": "events",
+          "type": "long"
+        },
+        {
+          "name": "first_seen",
+          "type": "date"
+        },
+        {
+          "name": "last_seen",
+          "type": "date"
+        },
+        {
+          "name": "host.name",
+          "type": "keyword"
+        },
+        {
+          "name": "data_stream.dataset",
+          "type": "keyword"
+        }
+      ],
+      "row_count": 1,
+      "values": [
+        {
+          "events": 11,
+          "first_seen": "2026-07-26T20:06:04.000Z",
+          "last_seen": "2026-07-26T20:06:40.000Z",
+          "host.name": "web-2",
+          "data_stream.dataset": "system.auth"
+        }
+      ]
+    }
+  }
+}

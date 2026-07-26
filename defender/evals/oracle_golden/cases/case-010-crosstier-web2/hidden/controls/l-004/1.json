@@ -1,0 +1,168 @@
+{
+  "lead_id": "l-004",
+  "seq": 1,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-06-12T20:06:42.000Z",
+        "2026-07-12T20:06:42.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE host.name == \"web-2\"\n        AND @timestamp >= \"2026-06-12T20:06:42.000Z\" AND @timestamp < \"2026-07-12T20:06:42.000Z\"\n| STATS first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY host.ip\n| LIMIT 5",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE host.name == \"web-2\"\n        AND @timestamp >= \"2026-06-12T20:06:42.000Z\" AND @timestamp < \"2026-07-12T20:06:42.000Z\"\n| STATS first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY host.ip\n| LIMIT 5",
+        "columns": [
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "host.ip",
+            "type": "ip"
+          }
+        ],
+        "row_count": 5,
+        "values": [
+          {
+            "first_seen": "2026-06-13T09:16:43.000Z",
+            "last_seen": "2026-06-18T14:32:32.000Z",
+            "host.ip": "172.18.0.4"
+          },
+          {
+            "first_seen": "2026-06-13T09:16:43.000Z",
+            "last_seen": "2026-07-02T03:23:22.000Z",
+            "host.ip": "172.18.0.10"
+          },
+          {
+            "first_seen": "2026-06-13T09:16:43.000Z",
+            "last_seen": "2026-06-18T14:35:16.000Z",
+            "host.ip": "172.18.0.18"
+          },
+          {
+            "first_seen": "2026-06-13T09:16:43.000Z",
+            "last_seen": "2026-07-12T20:06:29.000Z",
+            "host.ip": "172.18.0.5"
+          },
+          {
+            "first_seen": "2026-06-13T09:16:43.000Z",
+            "last_seen": "2026-07-12T20:06:29.000Z",
+            "host.ip": "172.18.0.12"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-06-05T20:06:42.000Z",
+        "2026-07-05T20:06:42.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE host.name == \"web-2\"\n        AND @timestamp >= \"2026-06-05T20:06:42.000Z\" AND @timestamp < \"2026-07-05T20:06:42.000Z\"\n| STATS first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY host.ip\n| LIMIT 5",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE host.name == \"web-2\"\n        AND @timestamp >= \"2026-06-05T20:06:42.000Z\" AND @timestamp < \"2026-07-05T20:06:42.000Z\"\n| STATS first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY host.ip\n| LIMIT 5",
+        "columns": [
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "host.ip",
+            "type": "ip"
+          }
+        ],
+        "row_count": 5,
+        "values": [
+          {
+            "first_seen": "2026-06-05T20:07:00.000Z",
+            "last_seen": "2026-07-02T03:23:22.000Z",
+            "host.ip": "172.18.0.10"
+          },
+          {
+            "first_seen": "2026-06-05T20:07:00.000Z",
+            "last_seen": "2026-07-05T20:03:02.000Z",
+            "host.ip": "172.18.0.5"
+          },
+          {
+            "first_seen": "2026-06-05T20:07:00.000Z",
+            "last_seen": "2026-07-05T20:03:02.000Z",
+            "host.ip": "172.18.0.12"
+          },
+          {
+            "first_seen": "2026-06-05T20:07:00.000Z",
+            "last_seen": "2026-06-18T14:35:16.000Z",
+            "host.ip": "172.18.0.18"
+          },
+          {
+            "first_seen": "2026-06-05T20:07:00.000Z",
+            "last_seen": "2026-07-05T20:03:02.000Z",
+            "host.ip": "172.18.0.13"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-05-29T20:06:42.000Z",
+        "2026-06-28T20:06:42.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE host.name == \"web-2\"\n        AND @timestamp >= \"2026-05-29T20:06:42.000Z\" AND @timestamp < \"2026-06-28T20:06:42.000Z\"\n| STATS first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY host.ip\n| LIMIT 5",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE host.name == \"web-2\"\n        AND @timestamp >= \"2026-05-29T20:06:42.000Z\" AND @timestamp < \"2026-06-28T20:06:42.000Z\"\n| STATS first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY host.ip\n| LIMIT 5",
+        "columns": [
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "host.ip",
+            "type": "ip"
+          }
+        ],
+        "row_count": 5,
+        "values": [
+          {
+            "first_seen": "2026-05-29T20:11:20.000Z",
+            "last_seen": "2026-06-28T20:03:25.000Z",
+            "host.ip": "172.18.0.12"
+          },
+          {
+            "first_seen": "2026-05-29T20:11:20.000Z",
+            "last_seen": "2026-06-28T20:03:25.000Z",
+            "host.ip": "172.18.0.10"
+          },
+          {
+            "first_seen": "2026-05-29T20:11:20.000Z",
+            "last_seen": "2026-06-28T20:03:25.000Z",
+            "host.ip": "172.18.0.5"
+          },
+          {
+            "first_seen": "2026-05-29T20:11:20.000Z",
+            "last_seen": "2026-06-18T14:35:16.000Z",
+            "host.ip": "172.18.0.18"
+          },
+          {
+            "first_seen": "2026-05-29T20:11:20.000Z",
+            "last_seen": "2026-06-28T20:03:25.000Z",
+            "host.ip": "172.18.0.8"
+          }
+        ]
+      }
+    }
+  ]
+}

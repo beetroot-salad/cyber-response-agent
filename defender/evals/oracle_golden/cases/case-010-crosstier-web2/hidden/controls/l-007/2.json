@@ -1,0 +1,203 @@
+{
+  "lead_id": "l-007",
+  "seq": 2,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T19:36:42.000Z",
+        "2026-07-12T20:36:42.000Z"
+      ],
+      "query": "FROM .internal.alerts-security.alerts-default-*\n| WHERE @timestamp >= \"2026-07-12T19:36:42.000Z\" AND @timestamp < \"2026-07-12T20:36:42.000Z\"\n        AND (kibana.alert.rule.rule_id LIKE \"*cross-tier*\" OR kibana.alert.rule.name LIKE \"*cross-tier*\")\n| STATS alerts     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule     = kibana.alert.rule.name,\n           rule_id  = kibana.alert.rule.rule_id,\n           severity = kibana.alert.severity,\n           host.name\n| SORT alerts DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM .internal.alerts-security.alerts-default-*\n| WHERE @timestamp >= \"2026-07-12T19:36:42.000Z\" AND @timestamp < \"2026-07-12T20:36:42.000Z\"\n        AND (kibana.alert.rule.rule_id LIKE \"*cross-tier*\" OR kibana.alert.rule.name LIKE \"*cross-tier*\")\n| STATS alerts     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule     = kibana.alert.rule.name,\n           rule_id  = kibana.alert.rule.rule_id,\n           severity = kibana.alert.severity,\n           host.name\n| SORT alerts DESC",
+        "columns": [
+          {
+            "name": "alerts",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "rule",
+            "type": "keyword"
+          },
+          {
+            "name": "rule_id",
+            "type": "keyword"
+          },
+          {
+            "name": "severity",
+            "type": "keyword"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 4,
+        "values": [
+          {
+            "alerts": 2,
+            "first_seen": "2026-07-12T19:41:46.056Z",
+            "last_seen": "2026-07-12T19:56:45.992Z",
+            "rule": "v2 cross-tier SSH pivot",
+            "rule_id": "v2-cross-tier-ssh-pivot",
+            "severity": "high",
+            "host.name": null
+          },
+          {
+            "alerts": 2,
+            "first_seen": "2026-07-12T19:41:46.052Z",
+            "last_seen": "2026-07-12T19:56:45.991Z",
+            "rule": "v2 cross-tier SSH pivot",
+            "rule_id": "v2-cross-tier-ssh-pivot",
+            "severity": "high",
+            "host.name": "jump-box-1"
+          },
+          {
+            "alerts": 1,
+            "first_seen": "2026-07-12T19:56:45.990Z",
+            "last_seen": "2026-07-12T19:56:45.990Z",
+            "rule": "v2 cross-tier SSH pivot",
+            "rule_id": "v2-cross-tier-ssh-pivot",
+            "severity": "high",
+            "host.name": "office-ws-2"
+          },
+          {
+            "alerts": 1,
+            "first_seen": "2026-07-12T19:41:46.051Z",
+            "last_seen": "2026-07-12T19:41:46.051Z",
+            "rule": "v2 cross-tier SSH pivot",
+            "rule_id": "v2-cross-tier-ssh-pivot",
+            "severity": "high",
+            "host.name": "office-ws-1"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T19:36:42.000Z",
+        "2026-07-05T20:36:42.000Z"
+      ],
+      "query": "FROM .internal.alerts-security.alerts-default-*\n| WHERE @timestamp >= \"2026-07-05T19:36:42.000Z\" AND @timestamp < \"2026-07-05T20:36:42.000Z\"\n        AND (kibana.alert.rule.rule_id LIKE \"*cross-tier*\" OR kibana.alert.rule.name LIKE \"*cross-tier*\")\n| STATS alerts     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule     = kibana.alert.rule.name,\n           rule_id  = kibana.alert.rule.rule_id,\n           severity = kibana.alert.severity,\n           host.name\n| SORT alerts DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM .internal.alerts-security.alerts-default-*\n| WHERE @timestamp >= \"2026-07-05T19:36:42.000Z\" AND @timestamp < \"2026-07-05T20:36:42.000Z\"\n        AND (kibana.alert.rule.rule_id LIKE \"*cross-tier*\" OR kibana.alert.rule.name LIKE \"*cross-tier*\")\n| STATS alerts     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule     = kibana.alert.rule.name,\n           rule_id  = kibana.alert.rule.rule_id,\n           severity = kibana.alert.severity,\n           host.name\n| SORT alerts DESC",
+        "columns": [
+          {
+            "name": "alerts",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "rule",
+            "type": "keyword"
+          },
+          {
+            "name": "rule_id",
+            "type": "keyword"
+          },
+          {
+            "name": "severity",
+            "type": "keyword"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-28T19:36:42.000Z",
+        "2026-06-28T20:36:42.000Z"
+      ],
+      "query": "FROM .internal.alerts-security.alerts-default-*\n| WHERE @timestamp >= \"2026-06-28T19:36:42.000Z\" AND @timestamp < \"2026-06-28T20:36:42.000Z\"\n        AND (kibana.alert.rule.rule_id LIKE \"*cross-tier*\" OR kibana.alert.rule.name LIKE \"*cross-tier*\")\n| STATS alerts     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule     = kibana.alert.rule.name,\n           rule_id  = kibana.alert.rule.rule_id,\n           severity = kibana.alert.severity,\n           host.name\n| SORT alerts DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM .internal.alerts-security.alerts-default-*\n| WHERE @timestamp >= \"2026-06-28T19:36:42.000Z\" AND @timestamp < \"2026-06-28T20:36:42.000Z\"\n        AND (kibana.alert.rule.rule_id LIKE \"*cross-tier*\" OR kibana.alert.rule.name LIKE \"*cross-tier*\")\n| STATS alerts     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule     = kibana.alert.rule.name,\n           rule_id  = kibana.alert.rule.rule_id,\n           severity = kibana.alert.severity,\n           host.name\n| SORT alerts DESC",
+        "columns": [
+          {
+            "name": "alerts",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "rule",
+            "type": "keyword"
+          },
+          {
+            "name": "rule_id",
+            "type": "keyword"
+          },
+          {
+            "name": "severity",
+            "type": "keyword"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 3,
+        "values": [
+          {
+            "alerts": 1,
+            "first_seen": "2026-06-28T20:35:39.072Z",
+            "last_seen": "2026-06-28T20:35:39.072Z",
+            "rule": "v2 cross-tier SSH pivot",
+            "rule_id": "v2-cross-tier-ssh-pivot",
+            "severity": "high",
+            "host.name": "office-ws-2"
+          },
+          {
+            "alerts": 1,
+            "first_seen": "2026-06-28T20:35:39.073Z",
+            "last_seen": "2026-06-28T20:35:39.073Z",
+            "rule": "v2 cross-tier SSH pivot",
+            "rule_id": "v2-cross-tier-ssh-pivot",
+            "severity": "high",
+            "host.name": "jump-box-1"
+          },
+          {
+            "alerts": 1,
+            "first_seen": "2026-06-28T20:35:39.079Z",
+            "last_seen": "2026-06-28T20:35:39.079Z",
+            "rule": "v2 cross-tier SSH pivot",
+            "rule_id": "v2-cross-tier-ssh-pivot",
+            "severity": "high",
+            "host.name": null
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,177 @@
+{
+  "lead_id": "l-009",
+  "seq": 0,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T19:40:00.000Z",
+        "2026-07-12T20:40:00.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-12T19:40:00.000Z\" AND @timestamp < \"2026-07-12T20:40:00.000Z\"\n        AND host.name == \"web-2\"\n        AND (process.name == \"sshd\" OR message LIKE \"*sshd*\" OR message LIKE \"*Accepted*\" OR message LIKE \"*Failed password*\" OR message LIKE \"*pam_unix*\" OR message LIKE \"*session*\")\n| STATS event_count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY event_type = CASE(message LIKE \"*Accepted*\", \"Accepted\",\n                             message LIKE \"*Failed password*\", \"Failed\",\n                             message LIKE \"*pam_unix*\", \"pam_unix\",\n                             message LIKE \"*session*\", \"session\",\n                             \"other\")\n| SORT event_count DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-12T19:40:00.000Z\" AND @timestamp < \"2026-07-12T20:40:00.000Z\"\n        AND host.name == \"web-2\"\n        AND (process.name == \"sshd\" OR message LIKE \"*sshd*\" OR message LIKE \"*Accepted*\" OR message LIKE \"*Failed password*\" OR message LIKE \"*pam_unix*\" OR message LIKE \"*session*\")\n| STATS event_count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY event_type = CASE(message LIKE \"*Accepted*\", \"Accepted\",\n                             message LIKE \"*Failed password*\", \"Failed\",\n                             message LIKE \"*pam_unix*\", \"pam_unix\",\n                             message LIKE \"*session*\", \"session\",\n                             \"other\")\n| SORT event_count DESC",
+        "columns": [
+          {
+            "name": "event_count",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "event_type",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 4,
+        "values": [
+          {
+            "event_count": 448,
+            "first_seen": "2026-07-12T19:40:56.000Z",
+            "last_seen": "2026-07-12T20:38:35.000Z",
+            "event_type": "pam_unix"
+          },
+          {
+            "event_count": 294,
+            "first_seen": "2026-07-12T19:40:58.000Z",
+            "last_seen": "2026-07-12T20:39:01.000Z",
+            "event_type": "other"
+          },
+          {
+            "event_count": 14,
+            "first_seen": "2026-07-12T19:41:05.000Z",
+            "last_seen": "2026-07-12T20:17:01.000Z",
+            "event_type": "session"
+          },
+          {
+            "event_count": 7,
+            "first_seen": "2026-07-12T19:41:05.000Z",
+            "last_seen": "2026-07-12T19:41:05.000Z",
+            "event_type": "Accepted"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T19:40:00.000Z",
+        "2026-07-05T20:40:00.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-05T19:40:00.000Z\" AND @timestamp < \"2026-07-05T20:40:00.000Z\"\n        AND host.name == \"web-2\"\n        AND (process.name == \"sshd\" OR message LIKE \"*sshd*\" OR message LIKE \"*Accepted*\" OR message LIKE \"*Failed password*\" OR message LIKE \"*pam_unix*\" OR message LIKE \"*session*\")\n| STATS event_count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY event_type = CASE(message LIKE \"*Accepted*\", \"Accepted\",\n                             message LIKE \"*Failed password*\", \"Failed\",\n                             message LIKE \"*pam_unix*\", \"pam_unix\",\n                             message LIKE \"*session*\", \"session\",\n                             \"other\")\n| SORT event_count DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-05T19:40:00.000Z\" AND @timestamp < \"2026-07-05T20:40:00.000Z\"\n        AND host.name == \"web-2\"\n        AND (process.name == \"sshd\" OR message LIKE \"*sshd*\" OR message LIKE \"*Accepted*\" OR message LIKE \"*Failed password*\" OR message LIKE \"*pam_unix*\" OR message LIKE \"*session*\")\n| STATS event_count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY event_type = CASE(message LIKE \"*Accepted*\", \"Accepted\",\n                             message LIKE \"*Failed password*\", \"Failed\",\n                             message LIKE \"*pam_unix*\", \"pam_unix\",\n                             message LIKE \"*session*\", \"session\",\n                             \"other\")\n| SORT event_count DESC",
+        "columns": [
+          {
+            "name": "event_count",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "event_type",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 4,
+        "values": [
+          {
+            "event_count": 476,
+            "first_seen": "2026-07-05T19:40:58.000Z",
+            "last_seen": "2026-07-05T20:39:24.000Z",
+            "event_type": "pam_unix"
+          },
+          {
+            "event_count": 196,
+            "first_seen": "2026-07-05T19:42:10.000Z",
+            "last_seen": "2026-07-05T20:38:49.000Z",
+            "event_type": "other"
+          },
+          {
+            "event_count": 14,
+            "first_seen": "2026-07-05T19:42:09.000Z",
+            "last_seen": "2026-07-05T20:17:01.000Z",
+            "event_type": "session"
+          },
+          {
+            "event_count": 7,
+            "first_seen": "2026-07-05T19:42:09.000Z",
+            "last_seen": "2026-07-05T19:42:09.000Z",
+            "event_type": "Accepted"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-28T19:40:00.000Z",
+        "2026-06-28T20:40:00.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-28T19:40:00.000Z\" AND @timestamp < \"2026-06-28T20:40:00.000Z\"\n        AND host.name == \"web-2\"\n        AND (process.name == \"sshd\" OR message LIKE \"*sshd*\" OR message LIKE \"*Accepted*\" OR message LIKE \"*Failed password*\" OR message LIKE \"*pam_unix*\" OR message LIKE \"*session*\")\n| STATS event_count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY event_type = CASE(message LIKE \"*Accepted*\", \"Accepted\",\n                             message LIKE \"*Failed password*\", \"Failed\",\n                             message LIKE \"*pam_unix*\", \"pam_unix\",\n                             message LIKE \"*session*\", \"session\",\n                             \"other\")\n| SORT event_count DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-28T19:40:00.000Z\" AND @timestamp < \"2026-06-28T20:40:00.000Z\"\n        AND host.name == \"web-2\"\n        AND (process.name == \"sshd\" OR message LIKE \"*sshd*\" OR message LIKE \"*Accepted*\" OR message LIKE \"*Failed password*\" OR message LIKE \"*pam_unix*\" OR message LIKE \"*session*\")\n| STATS event_count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY event_type = CASE(message LIKE \"*Accepted*\", \"Accepted\",\n                             message LIKE \"*Failed password*\", \"Failed\",\n                             message LIKE \"*pam_unix*\", \"pam_unix\",\n                             message LIKE \"*session*\", \"session\",\n                             \"other\")\n| SORT event_count DESC",
+        "columns": [
+          {
+            "name": "event_count",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "event_type",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 4,
+        "values": [
+          {
+            "event_count": 384,
+            "first_seen": "2026-06-28T19:42:43.000Z",
+            "last_seen": "2026-06-28T20:38:14.000Z",
+            "event_type": "pam_unix"
+          },
+          {
+            "event_count": 176,
+            "first_seen": "2026-06-28T19:45:13.000Z",
+            "last_seen": "2026-06-28T20:36:40.000Z",
+            "event_type": "other"
+          },
+          {
+            "event_count": 16,
+            "first_seen": "2026-06-28T20:17:01.000Z",
+            "last_seen": "2026-06-28T20:22:09.000Z",
+            "event_type": "session"
+          },
+          {
+            "event_count": 8,
+            "first_seen": "2026-06-28T20:22:09.000Z",
+            "last_seen": "2026-06-28T20:22:09.000Z",
+            "event_type": "Accepted"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,132 @@
+{
+  "lead_id": "l-006",
+  "seq": 13,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T19:36:22.000Z",
+        "2026-07-12T20:36:22.000Z"
+      ],
+      "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-07-12T19:36:22.000Z\" AND @timestamp < \"2026-07-12T20:36:22.000Z\"\n| WHERE source.ip == \"172.18.0.12\" AND destination.ip == \"172.18.0.5\"\n| STATS count = COUNT(*), first_ts = MIN(@timestamp), last_ts = MAX(@timestamp)\n    BY destination.port\n| SORT count DESC\n| LIMIT 10",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-07-12T19:36:22.000Z\" AND @timestamp < \"2026-07-12T20:36:22.000Z\"\n| WHERE source.ip == \"172.18.0.12\" AND destination.ip == \"172.18.0.5\"\n| STATS count = COUNT(*), first_ts = MIN(@timestamp), last_ts = MAX(@timestamp)\n    BY destination.port\n| SORT count DESC\n| LIMIT 10",
+        "columns": [
+          {
+            "name": "count",
+            "type": "long"
+          },
+          {
+            "name": "first_ts",
+            "type": "date"
+          },
+          {
+            "name": "last_ts",
+            "type": "date"
+          },
+          {
+            "name": "destination.port",
+            "type": "long"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T19:36:22.000Z",
+        "2026-07-05T20:36:22.000Z"
+      ],
+      "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-07-05T19:36:22.000Z\" AND @timestamp < \"2026-07-05T20:36:22.000Z\"\n| WHERE source.ip == \"172.18.0.12\" AND destination.ip == \"172.18.0.5\"\n| STATS count = COUNT(*), first_ts = MIN(@timestamp), last_ts = MAX(@timestamp)\n    BY destination.port\n| SORT count DESC\n| LIMIT 10",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-07-05T19:36:22.000Z\" AND @timestamp < \"2026-07-05T20:36:22.000Z\"\n| WHERE source.ip == \"172.18.0.12\" AND destination.ip == \"172.18.0.5\"\n| STATS count = COUNT(*), first_ts = MIN(@timestamp), last_ts = MAX(@timestamp)\n    BY destination.port\n| SORT count DESC\n| LIMIT 10",
+        "columns": [
+          {
+            "name": "count",
+            "type": "long"
+          },
+          {
+            "name": "first_ts",
+            "type": "date"
+          },
+          {
+            "name": "last_ts",
+            "type": "date"
+          },
+          {
+            "name": "destination.port",
+            "type": "long"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-28T19:36:22.000Z",
+        "2026-06-28T20:36:22.000Z"
+      ],
+      "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-06-28T19:36:22.000Z\" AND @timestamp < \"2026-06-28T20:36:22.000Z\"\n| WHERE source.ip == \"172.18.0.12\" AND destination.ip == \"172.18.0.5\"\n| STATS count = COUNT(*), first_ts = MIN(@timestamp), last_ts = MAX(@timestamp)\n    BY destination.port\n| SORT count DESC\n| LIMIT 10",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-06-28T19:36:22.000Z\" AND @timestamp < \"2026-06-28T20:36:22.000Z\"\n| WHERE source.ip == \"172.18.0.12\" AND destination.ip == \"172.18.0.5\"\n| STATS count = COUNT(*), first_ts = MIN(@timestamp), last_ts = MAX(@timestamp)\n    BY destination.port\n| SORT count DESC\n| LIMIT 10",
+        "columns": [
+          {
+            "name": "count",
+            "type": "long"
+          },
+          {
+            "name": "first_ts",
+            "type": "date"
+          },
+          {
+            "name": "last_ts",
+            "type": "date"
+          },
+          {
+            "name": "destination.port",
+            "type": "long"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    }
+  ],
+  "attack_contribution": {
+    "window": [
+      "2026-07-26T20:06:02.000Z",
+      "2026-07-26T20:06:42.000Z"
+    ],
+    "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-07-26T20:06:02.000Z\" AND @timestamp < \"2026-07-26T20:06:42.000Z\"\n| WHERE source.ip == \"172.18.0.12\" AND destination.ip == \"172.18.0.5\"\n| STATS count = COUNT(*), first_ts = MIN(@timestamp), last_ts = MAX(@timestamp)\n    BY destination.port\n| SORT count DESC\n| LIMIT 10",
+    "payload": {
+      "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-07-26T20:06:02.000Z\" AND @timestamp < \"2026-07-26T20:06:42.000Z\"\n| WHERE source.ip == \"172.18.0.12\" AND destination.ip == \"172.18.0.5\"\n| STATS count = COUNT(*), first_ts = MIN(@timestamp), last_ts = MAX(@timestamp)\n    BY destination.port\n| SORT count DESC\n| LIMIT 10",
+      "columns": [
+        {
+          "name": "count",
+          "type": "long"
+        },
+        {
+          "name": "first_ts",
+          "type": "date"
+        },
+        {
+          "name": "last_ts",
+          "type": "date"
+        },
+        {
+          "name": "destination.port",
+          "type": "long"
+        }
+      ],
+      "row_count": 0,
+      "values": []
+    }
+  }
+}
