@@ -520,32 +520,43 @@ gate still applies, only the container boundary is dropped.
 ## What the 2026-07-26 pilot campaign measured
 
 Six stratified cells were fired against a live stack restored from snapshot
-`412461512`. The result is a constraint worth more than the cases would have been:
-
-> **The catalog's scenarios raise a detection rule reliably only on their DEFAULT
-> targets.** Retargeting them — the main lever for growing the unit count, since a
-> unit is (activity family × host pair) — fires activity that trips nothing.
+`412461512`. Read the per-cell outcomes carefully, because **two of the six
+failures were operator error, not environment** — the interesting constraint is
+narrower than a first pass suggested:
 
 | cell | outcome |
 |---|---|
 | `ssh-brute-force-canary --target db-1 --user sre.alice` | fired `v2-sshd-failed-auth-burst` on db-1 → **case-009**, held-out |
-| `cross-tier-ssh-probe --target db-1` (its default) | fired |
-| `persistence-authorized-keys --target db-1` | no rule fired in 10 min of polling |
-| `living-off-the-land --target web-1` | no rule fired in 10 min of polling |
-| `ssh-brute-force-canary --target web-1` | captured a **baseline** alert on another host — voided |
-| `cross-tier-ssh-probe --target web-2 --user sre.alice` | no usable alert |
+| `cross-tier-ssh-probe --target db-1` (its default) | fired within 2 min; run aborted on a since-fixed generator bug (a stale run dir) |
+| `cross-tier-ssh-probe --target web-2 --user sre.alice` | fired on **web-2**, the intended target; capture then failed for 12 straight polls because its working directory was deleted mid-run |
+| `ssh-brute-force-canary --target web-1` | took a **baseline** alert about a different host on its first poll — voided |
+| `persistence-authorized-keys --target db-1` | **no rule fired at all** — 20 polls, zero candidates |
+| `living-off-the-land --target web-1` | **no rule fired at all** — 20 polls, zero candidates |
 
-Two consequences for anyone recruiting next:
+So retargeting is **not** broadly undetectable: `ssh-brute-force-canary` fires on
+db-1 and `cross-tier-ssh-probe` fires on web-2. What does fail is narrower and
+sharper:
 
-- **Check that a cell's activity is detectable before spending an LLM run on it.**
-  The generator now prefers an alert naming the operation's target host, which
-  turns the third row above from a silently-wrong case into a voided cell — but it
-  cannot conjure a rule that does not fire.
+> **The two Falco-dependent scenarios — `persistence-authorized-keys` and
+> `living-off-the-land` — raise nothing once retargeted off `canary-1`.** Their
+> rules appear scoped to the default host, so those families cannot contribute a
+> second unit until that is fixed.
+
+Three things for whoever recruits next:
+
+- **A cell that fires no rule has no captured envelope, and that is a real
+  outcome.** The generator reports it and exits rather than inventing one; recruit
+  such a cell with authored leads and record `lead_source: authored`.
+- **The generator will still take an off-target alert if no target alert exists
+  yet.** It now *prefers* one naming the operation's target host, which is what
+  turned the `--target web-2` cell's alert into the right one — but preference is
+  not a requirement, and the `--target web-1` cell shows what happens when it
+  polls before its own alert lands. Requiring a target-host match (and waiting for
+  it) is the obvious next hardening.
 - **A `+noise` cell needs the identity AND the host pair to be baseline.**
-  case-009 was aimed at `+noise` by running an attack as a routine SRE account,
-  and it landed as `+event`: `office-ws-1` has `trust_edges_out: []`, so no route
-  from it is a baseline route. case-004's `jump-box-1 → db-1` is the shape that
-  works.
+  case-009 was aimed at `+noise` by running an attack as a routine SRE account and
+  landed as `+event`: `office-ws-1` has `trust_edges_out: []`, so no route from it
+  is routine for anyone. case-004's `jump-box-1 → db-1` is the shape that works.
 
 ## Status
 
