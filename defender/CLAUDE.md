@@ -40,7 +40,11 @@ defender/
   lessons/          # checked-in lesson corpus
   fixtures/         # alert.json (+ optional gather_raw payloads) used as runtime inputs
   run-transcripts/  # curated transcripts of past real-alert runs
-  tests/            # learning-loop invariants + hermetic e2e replay (test_replay_*, run with -m e2e)
+  tests/            # THE test tree — every collected suite lives here, none in the source dirs (#720).
+                    #   *.py       learning-loop invariants
+                    #   e2e/       hermetic replay (test_replay_*, run with -m e2e)
+                    #   learning/  the loop orchestrator (test_loop.py)
+                    #   evals/     the measurement tooling's unit tests
   docs/             # design docs (learning-loop.md, runtime-gates.md, system-skill-shape.md, ...)
 ```
 

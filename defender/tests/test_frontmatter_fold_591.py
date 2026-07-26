@@ -16,7 +16,8 @@ Import conventions mirror the collected neighbors:
   - orient / held_out / visualize resolve through the ``defender.*`` namespace
     (as tests/test_orient.py and tests/test_visualize_runtime.py do);
   - evals/_pipeline + evals/secondary have no package __init__ and rely on a
-    sys.path insert of evals/ -> importlib (as evals/test_secondary.py loads them).
+    sys.path insert of evals/ -> importlib (as tests/evals/test_secondary.py loads
+    them).
 """
 from __future__ import annotations
 

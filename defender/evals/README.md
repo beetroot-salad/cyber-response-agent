@@ -3,9 +3,15 @@
 The **measurement layer** for the defender. This is the eval home — separate
 from `defender/tests/` on purpose: tests are deterministic CI gates that assert
 invariants; evals run on a researcher's cadence, make LLM calls, and emit
-*scores/trends* rather than pass/fail. They are not collected as part of the
-CI gate (except `test_secondary.py`, which unit-tests the harness logic and is
-deterministic).
+*scores/trends* rather than pass/fail. Nothing here is collected by CI.
+
+The split is by *what a file is*, not by what it covers: the unit tests of this
+tooling (`secondary.py`, `run_judge_ab.py`, `judge_equivalence.py`) ARE
+deterministic CI gates, so #720 moved them to `defender/tests/evals/` with the
+rest of the suite. They had been sitting here uncollected — this README used to
+claim `test_secondary.py` ran in CI, and it never did, because `evals/` was
+missing from the workflow's collection roots. A test in the source tree is a
+test nobody is running.
 
 Everything here measures the defender or its learning loop. The dependency
 direction is one-way: `evals/` imports/invokes `learning/` and `runtime/`,

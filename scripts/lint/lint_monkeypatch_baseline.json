@@ -1,8 +1,8 @@
 {
   "//": "lint_monkeypatch baseline — monkeypatch.setattr sites in defender/ tests (the DI-avoidance smell; inject a config/deps seam instead). Fingerprint is file:target (no line number). CI fails on a file:target absent here. Regenerate: python scripts/lint/lint_monkeypatch.py --update-baseline. Annotate intentional entries; \"\" means un-triaged debt to convert to injection.",
   "entries": {
-    "defender/learning/test_loop.py:orch.os.replace": "boundary-ok: stdlib os.replace, fault-injection (lost claim-race)",
-    "defender/learning/test_loop.py:orch.run_one": "intentional: test exercises the un-injected default (run_one_fn defaults to module run_one); seam exists",
+    "defender/tests/learning/test_loop.py:orch.os.replace": "boundary-ok: stdlib os.replace, fault-injection (lost claim-race)",
+    "defender/tests/learning/test_loop.py:orch.run_one": "intentional: test exercises the un-injected default (run_one_fn defaults to module run_one); seam exists",
     "defender/tests/test_author_shared.py:Path.open": "boundary-ok: stdlib Path.open, fault-injection (fd-leak on ENOLCK path)",
     "defender/tests/test_author_shared.py:shared.fcntl.flock": "boundary-ok: fcntl.flock syscall, fault-injection (OSError ENOLCK)",
     "defender/tests/test_record_lead.py:os.fdopen": "boundary-ok: os.fdopen syscall, fault-injection (disk full)",
