@@ -195,7 +195,8 @@ def run_esql(query: str, *, timeout: int = 180) -> dict:
         [str(ES_SH), "/_query?format=json",
          "-H", "Content-Type: application/json",
          "-d", json.dumps({"query": query})],
-        capture_output=True, text=True, timeout=timeout, check=False,
+        capture_output=True, text=True, encoding="utf-8",
+        timeout=timeout, check=False,
     )
     if proc.returncode != 0:
         raise RuntimeError(f"es.sh failed ({proc.returncode}): {proc.stderr.strip()[:400]}")
@@ -233,6 +234,13 @@ def measure_controls(query: str, offsets_days: tuple[int, ...] = DEFAULT_OFFSETS
     if window is not None:
         windows = shape_matched_windows(*window, offsets_days)
         rewrite = shift_esql_window
+    elif esql_bounds(query):
+        # An ODD number of `@timestamp` bounds — one, or three. Neither route is
+        # safe: there is no window to shift, and adding one would leave the
+        # original bound in place, so the "control" would filter on a mix of the
+        # attack window and the baseline window. Real defender queries do carry
+        # these shapes; refuse rather than measure the wrong thing.
+        return [], None
     elif operation_window is not None:
         windows = shape_matched_windows(*operation_window, offsets_days)
         rewrite = add_esql_window

@@ -57,7 +57,8 @@ DEFENDER_RUN = REPO_ROOT / "defender" / "run.py"
 def _run(cmd: list[str | Path], *, timeout: int, label: str) -> str:
     print(f"  [{label}] {' '.join(str(c) for c in cmd)[:160]}")
     proc = subprocess.run([str(c) for c in cmd], capture_output=True, text=True,
-                          timeout=timeout, check=False, cwd=REPO_ROOT)
+                          encoding="utf-8", timeout=timeout, check=False,
+                          cwd=REPO_ROOT)
     if proc.returncode != 0:
         raise RuntimeError(f"{label} failed ({proc.returncode}):\n"
                            f"{proc.stdout[-2000:]}\n{proc.stderr[-2000:]}")
@@ -108,7 +109,8 @@ def rules_fired_since(since: datetime, target_host: str | None = None) -> list[s
         [str(REPO_ROOT / "infra" / "bin" / "es.sh"),
          "/.internal.alerts-security.alerts-default-*/_search",
          "-H", "Content-Type: application/json", "-d", body],
-        capture_output=True, text=True, timeout=180, check=False)
+        capture_output=True, text=True, encoding="utf-8",
+        timeout=180, check=False)
     if proc.returncode != 0:
         return []
     on_target: list[str] = []

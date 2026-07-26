@@ -137,3 +137,16 @@ def test_a_query_with_one_bound_has_no_window():
     """One bound is not a window, and guessing the other would invent a control."""
     one = 'FROM logs-* | WHERE @timestamp >= "2026-07-25T07:00:00Z"'
     assert CONTROLS.esql_window(one) is None
+
+
+def test_a_query_with_an_odd_bound_count_is_refused_not_patched():
+    """Neither route is safe on one bound: there is nothing to shift, and ADDING a
+    window would leave the original bound in place, so the "control" would filter
+    on a mix of the attack window and the baseline window. Real defender queries
+    carry this shape — it crashed the first campaign run."""
+    one = 'FROM logs-* | WHERE @timestamp >= "2026-07-25T07:00:00Z" AND host.name == "x"'
+    start = datetime(2026, 7, 25, 7, 0, tzinfo=UTC)
+    controls, contribution = CONTROLS.measure_controls(
+        one, (7,), operation_window=(start, start + timedelta(hours=1)), dry_run=True)
+    assert controls == []
+    assert contribution is None
