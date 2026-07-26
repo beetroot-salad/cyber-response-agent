@@ -69,7 +69,12 @@ class RequestLogger:
         }
         self.messages.append(rec)
         disk = {**rec, "message": _trim(message, cap)} if cap > 0 else rec
-        self._fh.write(json.dumps(disk, default=str) + "\n")
+        # ensure_ascii=True is load-bearing, not the default we happen to get: a lone
+        # UTF-16 surrogate (reachable from a provider response body via a `\udXXX`
+        # escape) survives dump_python and this encode, but raises UnicodeEncodeError
+        # at the point a raw str would be utf-8-encoded (issue #724). Pinned explicitly
+        # so a future edit can't flip it and reopen a content-triggered availability halt.
+        self._fh.write(json.dumps(disk, default=str, ensure_ascii=True) + "\n")
         self._fh.flush()
 
     def log(
@@ -100,7 +105,7 @@ class RequestLogger:
         rec = {"event_type": "budget_refusal", "kind": "budget_refusal",
                "tool_name": tool_name, "agent_id": agent_id}
         with contextlib.suppress(Exception):
-            self._fh.write(json.dumps(rec) + "\n")
+            self._fh.write(json.dumps(rec, ensure_ascii=True) + "\n")
             self._fh.flush()
 
     def close(self) -> None:
