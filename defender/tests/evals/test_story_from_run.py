@@ -19,6 +19,12 @@ import pytest
 
 GOLDEN_DIR = Path(__file__).resolve().parents[2] / "evals" / "oracle_golden"
 REPO_ROOT = GOLDEN_DIR.parents[2]
+# `playground-v2/attacks/runs/` is `*`-ignored, so the runner records this suite
+# sweeps existed only on the machine that produced them — the sweep collected
+# nothing anywhere else and its guard failed. The corpus is checked in here
+# instead; the live tree is still swept when a machine has one, so a run whose
+# shape the renderer cannot handle is caught before it is snapshotted.
+FIXTURE_RUNS_DIR = Path(__file__).resolve().parent / "_run_records"
 RUNS_DIR = REPO_ROOT / "playground-v2" / "attacks" / "runs"
 
 
@@ -47,7 +53,18 @@ META = {
                "ended_at": "2026-07-25T07:45:52+00:00"}],
 }
 
-RUN_RECORDS = sorted(RUNS_DIR.glob("*/meta.json")) if RUNS_DIR.is_dir() else []
+
+def _run_records() -> list[Path]:
+    """The checked-in corpus, plus any live run the local tree has that it lacks."""
+    records = sorted(FIXTURE_RUNS_DIR.glob("*/meta.json"))
+    seen = {p.parent.name for p in records}
+    if RUNS_DIR.is_dir():
+        records += [p for p in sorted(RUNS_DIR.glob("*/meta.json"))
+                    if p.parent.name not in seen]
+    return records
+
+
+RUN_RECORDS = _run_records()
 
 
 def test_the_story_states_the_identity_hosts_and_commands():
@@ -82,13 +99,13 @@ def test_a_leaking_command_is_refused_rather_than_written(tmp_path):
 
 
 def test_there_are_run_records_to_check():
-    """Every sweep below would pass vacuously against an empty runs/ tree."""
-    assert RUN_RECORDS
+    """Every sweep below would pass vacuously against an empty corpus."""
+    assert sorted(FIXTURE_RUNS_DIR.glob("*/meta.json"))
 
 
 @pytest.mark.parametrize("meta_path", RUN_RECORDS, ids=lambda p: p.parent.name)
 def test_every_checked_in_run_record_renders_cleanly(meta_path):
-    """The four committed runner records are the renderer's real corpus."""
+    """The checked-in runner records are the renderer's real corpus."""
     meta = json.loads(meta_path.read_text(encoding="utf-8"))
     story = STORY.render_story(meta)
     assert STORY.eval_tells_in(story) == []
