@@ -1,0 +1,47 @@
+projections:
+- lead_id: l-003
+  events: []
+- lead_id: l-002
+  events:
+  - '@timestamp': <alert-time>
+    host.name: canary-1
+    rule_id: v2-sshd-success-after-failures
+    alerts: 1
+    first_seen: <alert-time>
+    last_seen: <alert-time+~3m>
+    rule: <sshd-success-after-failures rule name>
+    severity: <severity>
+  - host.name: canary-1
+    auth_method: password
+    source.ip: 172.18.0.30
+    user.name: admin
+    accepted: 0
+    failed: <count>
+    first_seen: <alert-time>
+    last_seen: <alert-time+~3m>
+- lead_id: l-001
+  events:
+  - '@timestamp': <alert-time>
+    host.name: canary-1
+    event.outcome: failure
+    source.ip: 172.18.0.30
+    user.name: admin
+    message: Failed password for admin from 172.18.0.30 port <port> ssh2
+  - '@timestamp': <alert-time+~3m>
+    host.name: canary-1
+    event.outcome: failure
+    source.ip: 172.18.0.30
+    user.name: admin
+    message: Failed password for admin from 172.18.0.30 port <port> ssh2
+- lead_id: l-005
+  events: []
+- lead_id: l-006
+  events: []
+- lead_id: l-004
+  events: []
+- lead_id: l-007
+  events: []
+- lead_id: l-008
+  events: []
+- lead_id: l-009
+  events: []

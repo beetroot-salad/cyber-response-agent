@@ -1,0 +1,36 @@
+# Cause codes for `scores/glm-5.2_effort-none_prompt-711.json` (#711 M5).
+#
+# This tag re-records every projection against the prompt.md change that added
+# the missing baseline-existence condition to the suppression rule (#711 H3).
+# **It changed nothing.** Every lead in every case projected identically to
+# `glm-5.2_effort-none` -- including case-003 `l-001`, the false suppression the change was
+# written for. The errors below are therefore the same errors, unmoved.
+#
+# That is the finding, not a disappointment: the case-003 error is NOT explained
+# by the prompt's silence on baseline existence, so C-SUPPRESS-UNBASELINED needs a
+# different remedy and now needs ordinary evidence (>=5 instances across >=3
+# units) like any other cause, rather than the specification-defect exemption it
+# was carrying.
+projection: glm-5.2_effort-none
+causes:
+  l-001:
+    error: contradiction         # class was correct; two volunteered values are refuted
+    cause: C-FABRICATED-VALUE
+    fields: ["falco.output_fields.evt.type", "falco.output_fields.proc.cmdline"]
+    note: >
+      The class call is right (+event) and the required fields are right. What is
+      wrong is what the projection volunteered on top: `evt.type: write` where the
+      capture says `openat`, and `proc.cmdline: bash` where the capture holds the
+      attacker's full echo of the key. prompt.md mandates an `<angle-placeholder>`
+      for a value the story does not state, and a placeholder is never graded
+      wrong — so abstaining was available and free.
+
+      Class-level agreement cannot see this error at all: the lead scores a clean
+      2/2. It is visible only because `observed_fields` grades volunteered values,
+      which is why that check exists.
+
+# Exempt from the >=5-instances-across->=3-units bar (#711 M6), and recorded as
+# such: this is not a hypothesis awaiting evidence but an error an existing metric
+# already grades — `score.py` counts it into `wrong_concrete_fields`, the grade
+# that gates a slice to `no-update`. The bar governs taxonomy CLAIMS, not errors
+# the instrument already scores.

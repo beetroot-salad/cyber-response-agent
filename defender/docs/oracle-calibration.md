@@ -317,6 +317,24 @@ instrument already grades or defects readable in the specification:
 Both are dev-motivated and stay dev-motivated: validated on dev, reported on
 held-out.
 
+**What the first exercise of that exemption actually showed.** The suppression
+defect was fixed in `prompt.md` (the marker now requires the stream to have
+plausibly been reporting, not just an explicit blinding action) and every
+projection was re-recorded under the tag `glm-5.2_effort-none_prompt-711`. **It
+changed nothing** — all 36 leads across all six cases projected identically,
+including case-003 `l-001`, the false suppression the change was written for.
+
+Two things follow, and both are worth more than the fix would have been:
+
+- the prompt's silence was **not** the mechanism of that error, so
+  `C-SUPPRESS-UNBASELINED` loses its specification-defect exemption and now needs
+  ordinary evidence — ≥5 instances across ≥3 units — like any other cause;
+- a spec fix that provably regresses nothing across 36 leads is still worth
+  keeping, but "we fixed the prompt" is not the same claim as "the oracle
+  improved", and only the second would have needed a held-out number.
+
+The change is kept. Its dev evidence is a null result, recorded as one.
+
 **`C-INTENT-SCOPE` and `C-HETERO-UNDER` are currently inseparable.** After
 deriving `heterogeneous` mechanically, case-001's heterogeneous leads are
 `l-002, l-004, l-006` and its `intent_note` leads are `l-002, l-006` — which are
