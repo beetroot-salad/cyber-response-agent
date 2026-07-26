@@ -4,7 +4,7 @@ from __future__ import annotations
 import sys
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -19,12 +19,13 @@ from defender._yaml import safe_load
 from defender._corpus import iter_lessons
 from defender._io import read_jsonl_rows
 from defender.learning.core.config import (
-    AUTHOR_EFFORT,
-    AUTHOR_MODEL,
-    AUTHOR_REQUEST_LIMIT,
-    AUTHOR_TIMEOUT,
     DEFAULT_PATHS,
     LoopPaths,
+    author_effort as _author_effort,
+    author_model as _author_model,
+    author_request_limit,
+    repo_lock_wait_seconds,
+    author_timeout as _author_timeout,
     make_logger,
     now_iso,
 )
@@ -55,9 +56,11 @@ class AuthorConfig:
     held_report: Path
     author_prompt: Path
     invoke_agent: Callable[[list[dict], str, AuthorConfig], dict]
-    author_model: str = AUTHOR_MODEL
-    author_timeout: int = AUTHOR_TIMEOUT
-    author_effort: str | None = AUTHOR_EFFORT
+    # default_factory, not a plain default: these are env-backed knobs and a plain
+    # default would freeze at import (#717). A caller that overrides them still wins.
+    author_model: str = field(default_factory=_author_model)
+    author_timeout: int = field(default_factory=_author_timeout)
+    author_effort: str | None = field(default_factory=_author_effort)
     manifest_seed: str | None = None
     box: Any = None
 
@@ -76,7 +79,7 @@ def build_author_config(
         lock_file=paths.pending_dir / ".lock",
         findings_lock_file=paths.findings_lock_file,
         repo_lock_file=paths.author_lock_file,
-        repo_lock_wait_seconds=_shared.REPO_LOCK_WAIT_SECONDS,
+        repo_lock_wait_seconds=repo_lock_wait_seconds(),
         held_report=paths.pending_dir / "held_report.log",
         author_prompt=paths.learning_dir / "author" / "lessons" / "prompt.md",
         invoke_agent=invoke_agent,
@@ -152,7 +155,7 @@ def invoke_agent(findings: list[dict], batch_id: str, cfg: AuthorConfig) -> dict
         log=_log,
         model=cfg.author_model,
         effort=cfg.author_effort,
-        request_limit=AUTHOR_REQUEST_LIMIT,
+        request_limit=author_request_limit(),
         timeout=cfg.author_timeout,
         salt=stage_salt, box=cfg.box,
     )

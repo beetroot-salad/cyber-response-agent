@@ -190,7 +190,7 @@ def _dead_letter_or_bump(
     batch: list[dict], *, queue_file: Path, pending_dir: Path, id_key: str, reason: str,
 ) -> None:
     batch_ids = {o[id_key] for o in batch}
-    max_attempts = config.LEARNING_AUTHOR_MAX_ATTEMPTS
+    max_attempts = config.author_max_attempts()
     survivors: list[dict] = []
     quarantined: list[dict] = []
     for row in read_jsonl_rows(queue_file):

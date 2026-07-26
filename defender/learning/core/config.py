@@ -4,14 +4,13 @@ import os
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
-from functools import cached_property
 from pathlib import Path
 
 from defender._clock import now_iso  # noqa: F401 — re-export: core.config stays the loop's import surface
 from defender._env import env_int, env_str
-from defender._env import FatalConfigError  # noqa: F401 — re-export; enrolled as stage-fatal in orchestrate
+from defender._env import FatalConfigError  # noqa: F401 — re-export; enrolled as stage-fatal in core/faults.py
 from defender._run_paths import RunPaths  # noqa: F401 — re-export
-from defender._paths import DefenderPaths  # noqa: F401 — used by LoopPaths + re-export
+from defender._paths import DefenderPaths  # noqa: F401 — LoopPaths' base class + re-export
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -26,58 +25,17 @@ class QueueChannel:
 
 
 @dataclass(frozen=True)
-class LoopPaths:
+class LoopPaths(DefenderPaths):
+    """The loop's paths: every checked-in tree `DefenderPaths` locates, PLUS the mutable
+    learning state (queues, locks, run artifacts) rooted at `state_root`.
 
-    repo_root: Path
+    It INHERITS the repo-tree paths rather than forwarding them — eleven one-line
+    pass-throughs used to shadow `DefenderPaths`, so every path added to `_paths.py` had
+    to be declared twice or it was invisible here. Inheriting keeps `getattr(paths, name)`
+    (drains.py resolves each curator's corpus dir that way) answering for the whole set,
+    and keeps the directory NAMES owned by `_paths.py` alone."""
+
     state_dir: Path | None = None
-
-    @cached_property
-    def defender(self) -> DefenderPaths:
-        return DefenderPaths(self.repo_root)
-
-    @property
-    def learning_dir(self) -> Path:
-        return self.defender.learning_dir
-
-    @property
-    def lessons_dir(self) -> Path:
-        return self.defender.lessons_dir
-
-    @property
-    def lessons_actor_dir(self) -> Path:
-        return self.defender.lessons_actor_dir
-
-    @property
-    def lessons_environment_dir(self) -> Path:
-        return self.defender.lessons_environment_dir
-
-    @property
-    def held_out_fixtures(self) -> Path:
-        return self.defender.held_out_fixtures
-
-    @property
-    def lessons_dir_rel(self) -> str:
-        return DefenderPaths.lessons_dir_rel
-
-    @property
-    def lessons_actor_dir_rel(self) -> str:
-        return DefenderPaths.lessons_actor_dir_rel
-
-    @property
-    def lessons_environment_dir_rel(self) -> str:
-        return DefenderPaths.lessons_environment_dir_rel
-
-    @property
-    def catalog_dir(self) -> Path:
-        return self.defender.catalog_dir
-
-    @property
-    def skills_dir(self) -> Path:
-        return self.defender.skills_dir
-
-    @property
-    def worktree_base(self) -> Path:
-        return self.defender.worktree_base
 
     @property
     def state_root(self) -> Path:
@@ -223,17 +181,58 @@ BENIGN_AUDIT_ONLY_FINDING_TYPES = {"disposition-confirmed"}
 BENIGN_ALL_FINDING_TYPES = QUEUEABLE_FINDING_TYPES | BENIGN_AUDIT_ONLY_FINDING_TYPES
 ACTOR_OBSERVATION_TYPES = {"misprediction", "framing-choice", "discarded-class"}
 
-ACTOR_MODEL = os.environ.get("ACTOR_MODEL", "glm-5.2")
-BENIGN_ACTOR_MODEL = os.environ.get("BENIGN_ACTOR_MODEL", "glm-5.2")
-ACTOR_EFFORT = os.environ.get("ACTOR_EFFORT", "low")
-BENIGN_ACTOR_EFFORT = os.environ.get("BENIGN_ACTOR_EFFORT", "low")
-ORACLE_MODEL = os.environ.get("ORACLE_MODEL", "glm-5.2")
-ORACLE_EFFORT = os.environ.get("ORACLE_EFFORT", "none")
-ORACLE_MAX_CONCURRENCY = env_int("ORACLE_MAX_CONCURRENCY", 8)
-JUDGE_MODEL = os.environ.get("JUDGE_MODEL", "glm-5.2")
-BENIGN_JUDGE_MODEL = os.environ.get("BENIGN_JUDGE_MODEL", "glm-5.2")
-JUDGE_EFFORT = os.environ.get("JUDGE_EFFORT", "medium")
-BENIGN_JUDGE_EFFORT = os.environ.get("BENIGN_JUDGE_EFFORT", "medium")
+# Every env-backed knob is read HERE, at call time — one idiom for the whole file (#717).
+# The import-time `X = os.environ.get(...)` half froze its value at first import, so a test
+# could only move it by reloading the module; these read the live environment, so
+# `monkeypatch.setenv` reaches the code under test.
+#
+# A module-level constant BUILT from one of these still freezes at ITS import (the six
+# `AgentDefinition`s' `effort=`, directions.py's `JudgeWiring`s, a signature default) — the
+# freeze is now visible at that construction site instead of hidden here.
+
+
+def actor_model() -> str:
+    return env_str("ACTOR_MODEL", "glm-5.2")
+
+
+def benign_actor_model() -> str:
+    return env_str("BENIGN_ACTOR_MODEL", "glm-5.2")
+
+
+def actor_effort() -> str:
+    return env_str("ACTOR_EFFORT", "low")
+
+
+def benign_actor_effort() -> str:
+    return env_str("BENIGN_ACTOR_EFFORT", "low")
+
+
+def oracle_model() -> str:
+    return env_str("ORACLE_MODEL", "glm-5.2")
+
+
+def oracle_effort() -> str:
+    return env_str("ORACLE_EFFORT", "none")
+
+
+def oracle_max_concurrency() -> int:
+    return env_int("ORACLE_MAX_CONCURRENCY", 8)
+
+
+def judge_model() -> str:
+    return env_str("JUDGE_MODEL", "glm-5.2")
+
+
+def benign_judge_model() -> str:
+    return env_str("BENIGN_JUDGE_MODEL", "glm-5.2")
+
+
+def judge_effort() -> str:
+    return env_str("JUDGE_EFFORT", "medium")
+
+
+def benign_judge_effort() -> str:
+    return env_str("BENIGN_JUDGE_EFFORT", "medium")
 
 
 @dataclass(frozen=True)
@@ -248,40 +247,100 @@ class JudgeWiring:
     closed_ticket_read: bool = False
 
 
-SUBAGENT_TIMEOUT = env_int("LEARNING_SUBAGENT_TIMEOUT_SECONDS", 450)
+def subagent_timeout() -> int:
+    return env_int("LEARNING_SUBAGENT_TIMEOUT_SECONDS", 450)
 
 
-VERIFIER_MODEL = os.environ.get("LEARNING_VERIFIER_MODEL", "glm-5.2")
-VERIFIER_EFFORT = os.environ.get("LEARNING_VERIFIER_EFFORT", "low")
-VERIFIER_TIMEOUT = env_int("LEARNING_VERIFIER_TIMEOUT_SECONDS", 180)
-VERIFY_BATCH_WORKERS = env_int("LEARNING_VERIFY_BATCH_WORKERS", 8)
+def verifier_model() -> str:
+    return env_str("LEARNING_VERIFIER_MODEL", "glm-5.2")
+
+
+def verifier_effort() -> str:
+    return env_str("LEARNING_VERIFIER_EFFORT", "low")
+
+
+def verifier_timeout() -> int:
+    return env_int("LEARNING_VERIFIER_TIMEOUT_SECONDS", 180)
 
 
 def verify_batch_workers() -> int:
-    n = env_int("LEARNING_VERIFY_BATCH_WORKERS", VERIFY_BATCH_WORKERS)
+    n = env_int("LEARNING_VERIFY_BATCH_WORKERS", 8)
     if n < 1:
         raise FatalConfigError(f"LEARNING_VERIFY_BATCH_WORKERS must be >= 1; got {n}")
     return n
 
-AUTHOR_MODEL = os.environ.get("LEARNING_AUTHOR_MODEL", "glm-5.2")
-AUTHOR_TIMEOUT = env_int("LEARNING_AUTHOR_TIMEOUT_SECONDS", 1800)
-AUTHOR_EFFORT = os.environ.get("LEARNING_AUTHOR_EFFORT", "low")
-AUTHOR_ACTOR_MODEL = os.environ.get("LEARNING_AUTHOR_ACTOR_MODEL", "glm-5.2")
-AUTHOR_ACTOR_TIMEOUT = env_int("LEARNING_AUTHOR_ACTOR_TIMEOUT_SECONDS", 1800)
-AUTHOR_ACTOR_EFFORT = os.environ.get("LEARNING_AUTHOR_ACTOR_EFFORT", "low")
-AUTHOR_ENV_MODEL = os.environ.get("LEARNING_AUTHOR_ENV_MODEL", "glm-5.2")
-AUTHOR_ENV_TIMEOUT = env_int("LEARNING_AUTHOR_ENV_TIMEOUT_SECONDS", 1800)
-AUTHOR_ENV_EFFORT = os.environ.get("LEARNING_AUTHOR_ENV_EFFORT", "low")
-AUTHOR_REQUEST_LIMIT = env_int("LEARNING_AUTHOR_REQUEST_LIMIT", 250)
-AUTHOR_ACTOR_REQUEST_LIMIT = env_int("LEARNING_AUTHOR_ACTOR_REQUEST_LIMIT", 250)
-AUTHOR_ENV_REQUEST_LIMIT = env_int("LEARNING_AUTHOR_ENV_REQUEST_LIMIT", 250)
-LEARNING_AUTHOR_MAX_ATTEMPTS = env_int("LEARNING_AUTHOR_MAX_ATTEMPTS", 3)
-LEAD_AUTHOR_MODEL = os.environ.get("LEAD_AUTHOR_MODEL", "glm-5.2")
-LEAD_AUTHOR_EFFORT = os.environ.get("LEAD_AUTHOR_EFFORT", "low")
-LEAD_AUTHOR_TIMEOUT = env_int("LEAD_AUTHOR_TIMEOUT_SECONDS", 1800)
-LEAD_AUTHOR_REQUEST_LIMIT = env_int("LEAD_AUTHOR_REQUEST_LIMIT", 250)
 
-REPO_LOCK_WAIT_SECONDS = env_int("LEARNING_REPO_LOCK_WAIT_SECONDS", 1800)
+def author_model() -> str:
+    return env_str("LEARNING_AUTHOR_MODEL", "glm-5.2")
+
+
+def author_timeout() -> int:
+    return env_int("LEARNING_AUTHOR_TIMEOUT_SECONDS", 1800)
+
+
+def author_effort() -> str:
+    return env_str("LEARNING_AUTHOR_EFFORT", "low")
+
+
+def author_actor_model() -> str:
+    return env_str("LEARNING_AUTHOR_ACTOR_MODEL", "glm-5.2")
+
+
+def author_actor_timeout() -> int:
+    return env_int("LEARNING_AUTHOR_ACTOR_TIMEOUT_SECONDS", 1800)
+
+
+def author_actor_effort() -> str:
+    return env_str("LEARNING_AUTHOR_ACTOR_EFFORT", "low")
+
+
+def author_env_model() -> str:
+    return env_str("LEARNING_AUTHOR_ENV_MODEL", "glm-5.2")
+
+
+def author_env_timeout() -> int:
+    return env_int("LEARNING_AUTHOR_ENV_TIMEOUT_SECONDS", 1800)
+
+
+def author_env_effort() -> str:
+    return env_str("LEARNING_AUTHOR_ENV_EFFORT", "low")
+
+
+def author_request_limit() -> int:
+    return env_int("LEARNING_AUTHOR_REQUEST_LIMIT", 250)
+
+
+def author_actor_request_limit() -> int:
+    return env_int("LEARNING_AUTHOR_ACTOR_REQUEST_LIMIT", 250)
+
+
+def author_env_request_limit() -> int:
+    return env_int("LEARNING_AUTHOR_ENV_REQUEST_LIMIT", 250)
+
+
+def author_max_attempts() -> int:
+    return env_int("LEARNING_AUTHOR_MAX_ATTEMPTS", 3)
+
+
+def lead_author_model() -> str:
+    return env_str("LEAD_AUTHOR_MODEL", "glm-5.2")
+
+
+def lead_author_effort() -> str:
+    return env_str("LEAD_AUTHOR_EFFORT", "low")
+
+
+def lead_author_timeout() -> int:
+    return env_int("LEAD_AUTHOR_TIMEOUT_SECONDS", 1800)
+
+
+def lead_author_request_limit() -> int:
+    return env_int("LEAD_AUTHOR_REQUEST_LIMIT", 250)
+
+
+def repo_lock_wait_seconds() -> int:
+    return env_int("LEARNING_REPO_LOCK_WAIT_SECONDS", 1800)
+
 
 VALID_MERGE_MODES = ("auto_on_green", "human_review")
 

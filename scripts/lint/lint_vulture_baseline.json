@@ -3,7 +3,6 @@
   "entries": {
     "defender/hooks/_cmd_segments.py: unused attribute 'commenters' (60% confidence)": "false-positive: `shlex.shlex` instance attribute — assigned by us, read by shlex internals during tokenize()",
     "defender/hooks/_cmd_segments.py: unused attribute 'whitespace_split' (60% confidence)": "false-positive: `shlex.shlex` instance attribute — assigned by us, read by shlex internals during tokenize()",
-    "defender/learning/author/benign_actor/run.py: unused variable 'ADVERSARIAL_CONFIG' (60% confidence)": "test-only: consumed by tests/test_author_actor_env.py (tests/ is excluded from the scan). The live adversarial path calls build_adversarial_config() via benign_actor/env.py, so this module constant is a test fixture in production clothing",
     "defender/learning/core/validate.py: unused method 'ignore_aliases' (60% confidence)": "false-positive: yaml.SafeDumper override on _NoAliasOracleDumper — invoked by PyYAML's serializer, never by name",
     "defender/learning/frontend/serialize.py: unused variable 'blurb' (60% confidence)": "false-positive: GroupSpec TypedDict field, read by subscript",
     "defender/learning/frontend/serialize.py: unused variable 'dir' (60% confidence)": "false-positive: GroupSpec TypedDict field, read by subscript",

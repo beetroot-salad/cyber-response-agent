@@ -21,6 +21,7 @@ from pydantic_ai.models import override_allow_model_requests
 
 from defender.agents import JUDGE_DEF, ORACLE_DEF
 from defender.learning.author import shared as author_shared
+from defender.learning.core import config
 from defender.learning.core.config import RunUnprocessable, StageAbort
 from defender.learning.pipeline._pydantic_stage import run_stage
 from defender.learning.pipeline.judge.compare import (
@@ -717,6 +718,8 @@ def test_curator_runs_successive_batches_via_its_non_bindable_lifetime(tmp_path)
         log=lambda _m: None,
         source_key=lambda *_a, **_k: object(),
         run_author=run_author,
+        model=config.author_model(), effort=config.author_effort(),
+        request_limit=config.author_request_limit(), timeout=config.author_timeout(),
     )
     run_curator_stage(batch_id="one", **common)
     run_curator_stage(batch_id="two", **common)

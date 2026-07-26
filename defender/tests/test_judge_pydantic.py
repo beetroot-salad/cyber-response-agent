@@ -80,28 +80,28 @@ def _fake_by_name(**specs):
 
 
 def test_prepare_engines_sources_judge_and_actor_models(monkeypatch):
-    from defender.learning.core import orchestrate
+    from defender.learning.core import run_cycle
 
     registry = _fake_by_name(
         adversarial=("glm-5.2", "kimi-k2.6"), benign=("deepseek-v4", "gpt-oss-120b")
     )
-    monkeypatch.setattr(orchestrate, "BY_NAME", registry)  # lint-monkeypatch: ok — inject a per-direction model registry
+    monkeypatch.setattr(run_cycle, "BY_NAME", registry)  # lint-monkeypatch: ok — inject a per-direction model registry
     called: list[str] = []
     monkeypatch.setattr(  # lint-monkeypatch: ok — spy the gate decision
-        orchestrate, "source_first_party_key", lambda model, **kw: called.append(model)
+        run_cycle, "source_first_party_key", lambda model, **kw: called.append(model)
     )
-    orchestrate._prepare_engines_for(["adversarial", "benign"])
+    run_cycle._prepare_engines_for(["adversarial", "benign"])
     assert sorted(called) == ["deepseek-v4", "glm-5.2", "gpt-oss-120b", "kimi-k2.6"]
 
 
 def test_prepare_engines_dedups_identical_models(monkeypatch):
-    from defender.learning.core import orchestrate
+    from defender.learning.core import run_cycle
 
     registry = _fake_by_name(adversarial=("glm-5.2", "glm-5.2"), benign=("glm-5.2", "glm-5.2"))
-    monkeypatch.setattr(orchestrate, "BY_NAME", registry)  # lint-monkeypatch: ok — inject a per-direction model registry
+    monkeypatch.setattr(run_cycle, "BY_NAME", registry)  # lint-monkeypatch: ok — inject a per-direction model registry
     called: list[str] = []
     monkeypatch.setattr(  # lint-monkeypatch: ok — spy the gate decision
-        orchestrate, "source_first_party_key", lambda model, **kw: called.append(model)
+        run_cycle, "source_first_party_key", lambda model, **kw: called.append(model)
     )
-    orchestrate._prepare_engines_for(["adversarial", "benign"])
+    run_cycle._prepare_engines_for(["adversarial", "benign"])
     assert called == ["glm-5.2"]

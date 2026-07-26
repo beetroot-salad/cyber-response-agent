@@ -126,9 +126,9 @@ def test_oracle_ships_glm_reasoning_disabled_by_default():
     import os
 
     if "ORACLE_MODEL" not in os.environ:
-        assert config.ORACLE_MODEL == "glm-5.2"
+        assert config.oracle_model() == "glm-5.2"
     if "ORACLE_EFFORT" not in os.environ:
-        assert config.ORACLE_EFFORT == "none"
+        assert config.oracle_effort() == "none"
 
 
 

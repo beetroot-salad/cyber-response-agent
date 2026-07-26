@@ -10,7 +10,7 @@ and the eval harness — call:
         remainder parses to a YAML MAPPING; fail-closed (return input unchanged) when
         none do. NOT anchored on the literal `outcome:` keyword — general to any schema.
         Composed as `strip_yaml_preamble(strip_yaml_fence(x))`.
-  * E2  `orchestrate._validate_judge_yaml`   — the live loop (both engines feed it).
+  * E2  `run_cycle._validate_judge_yaml`   — the live loop (both engines feed it).
   * E3  `judge_equivalence.parse_judge_verdict` — the engine-equivalence A/B harness.
 
 These tests drive the REAL entry points and assert only observable outcomes (return
@@ -30,7 +30,7 @@ import yaml
 import pytest
 
 from defender.learning.core.config import RunUnprocessable
-from defender.learning.core.orchestrate import _validate_judge_yaml
+from defender.learning.core.run_cycle import _validate_judge_yaml
 from defender.learning.core.validate import (
     strip_yaml_fence,
     strip_yaml_preamble,

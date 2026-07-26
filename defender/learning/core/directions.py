@@ -5,16 +5,16 @@ from collections.abc import Callable
 from pathlib import Path
 
 from defender.learning.core.config import (
-    ACTOR_MODEL,
-    BENIGN_ACTOR_MODEL,
-    BENIGN_JUDGE_EFFORT,
-    BENIGN_JUDGE_MODEL,
     JUDGE_BENIGN_PROMPT,
-    JUDGE_EFFORT,
-    JUDGE_MODEL,
     JUDGE_PROMPT,
     JudgeWiring,
     LoopPaths,
+    actor_model,
+    benign_actor_model,
+    benign_judge_effort,
+    benign_judge_model,
+    judge_effort,
+    judge_model,
 )
 from defender.learning.core.persist import (
     append_actor_environment_observations,
@@ -24,12 +24,16 @@ from defender.learning.core.persist import (
 from defender.learning.core.validate import validate_judge_benign_doc, validate_judge_doc
 
 
+# These four env-backed knobs are read once, HERE, when the module is imported — the
+# wirings and Directions below are module constants, and an A/B run pins the model for
+# the whole process anyway (evals set the env before spawning). Everything else reads
+# its knob at call time; this is the one place the loop still snapshots (#717).
 ADVERSARIAL_WIRING = JudgeWiring(
-    JUDGE_PROMPT, JUDGE_MODEL, JUDGE_EFFORT, "judge_trace.jsonl", "judge",
+    JUDGE_PROMPT, judge_model(), judge_effort(), "judge_trace.jsonl", "judge",
     "comparison",
 )
 BENIGN_WIRING = JudgeWiring(
-    JUDGE_BENIGN_PROMPT, BENIGN_JUDGE_MODEL, BENIGN_JUDGE_EFFORT,
+    JUDGE_BENIGN_PROMPT, benign_judge_model(), benign_judge_effort(),
     "judge_benign_trace.jsonl", "judge-benign",
     "comparison_benign",
     closed_ticket_read=True,
@@ -66,7 +70,7 @@ ADVERSARIAL = Direction(
     name="adversarial",
     invoke_actor=lambda agents, run_dir, lrd, key, *, box: agents.actor(run_dir, lrd, box=box),
     judge_wiring=ADVERSARIAL_WIRING,
-    actor_model=ACTOR_MODEL,
+    actor_model=actor_model(),
     validate=validate_judge_doc,
     append_observations=append_actor_observations,
     story_name="actor_story.md",
@@ -96,7 +100,7 @@ BENIGN = Direction(
         agents.actor_benign(run_dir, lrd, key, box=box)
     ),
     judge_wiring=BENIGN_WIRING,
-    actor_model=BENIGN_ACTOR_MODEL,
+    actor_model=benign_actor_model(),
     validate=validate_judge_benign_doc,
     append_observations=append_environment_observations,
     story_name="actor_benign_story.md",

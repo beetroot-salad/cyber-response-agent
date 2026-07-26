@@ -4,11 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar
 
-from defender.learning.core.config import (
-    VERIFIER_EFFORT,
-    VERIFIER_MODEL,
-    VERIFIER_TIMEOUT,
-)
+from defender.learning.core.config import verifier_effort, verifier_model
 from defender.learning.pipeline._pydantic_stage import run_stage
 from defender.runtime import providers
 from defender.runtime.agent_definition import AgentDefinition, ToolSet, bind
@@ -37,8 +33,8 @@ VERIFY_DEF = AgentDefinition(
     anchors_on_tree=True,
     requires_explicit_tree=True,
     role=AgentRole.VERIFIER,
-    model=lambda: VERIFIER_MODEL,
-    effort=VERIFIER_EFFORT,
+    model=verifier_model,
+    effort=verifier_effort(),
     tools=ToolSet(),
     deps_cls=VerifierDeps,
     deny_reason=_VERIFY_DENY_REASON,
@@ -56,7 +52,7 @@ def _run_verify_pydantic(  # noqa: PLR0913 — the transport signature plus the 
     *,
     defender_dir: Path,
     salt: str | None = None,
-    wall_clock_timeout: int = VERIFIER_TIMEOUT,
+    wall_clock_timeout: int,
     make_model: MakeModel = providers.build_for_effort,
 ) -> str:
     deps = bind(VERIFY_DEF, source_run_dir, defender_dir=defender_dir, salt=salt)

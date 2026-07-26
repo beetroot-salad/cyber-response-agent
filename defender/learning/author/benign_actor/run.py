@@ -11,15 +11,16 @@ if (_root := str(Path(__file__).resolve().parents[4])) not in sys.path:
 from defender.learning.author import curator as _curator
 from defender.learning.author import shared as _shared
 from defender.learning.core.config import (
-    ACTOR_MODEL,
-    AUTHOR_ENV_EFFORT,
-    AUTHOR_ENV_MODEL,
-    AUTHOR_ENV_REQUEST_LIMIT,
-    AUTHOR_ENV_TIMEOUT,
-    BENIGN_ACTOR_MODEL,
     DEFAULT_PATHS,
     LoopPaths,
     QueueChannel,
+    actor_model,
+    author_env_effort,
+    author_env_model,
+    author_env_request_limit,
+    author_env_timeout,
+    benign_actor_model,
+    repo_lock_wait_seconds,
 )
 
 
@@ -37,7 +38,7 @@ def invoke_agent(
     return _curator.invoke_curator_agent(
         cfg, observations, batch_id,
         check=ENV_CHECK,
-        request_limit=AUTHOR_ENV_REQUEST_LIMIT,
+        request_limit=author_env_request_limit(),
     )
 
 
@@ -61,7 +62,7 @@ def _env_config(  # noqa: PLR0913 — every parameter is the per-direction field
         corpus_dir_rel=paths.lessons_environment_dir_rel,
         channel=channel,
         repo_lock_file=paths.author_lock_file,
-        repo_lock_wait_seconds=_shared.REPO_LOCK_WAIT_SECONDS,
+        repo_lock_wait_seconds=repo_lock_wait_seconds(),
         outcome_author=outcome_author,
         outcome_skip=outcome_skip,
         trailer_label=trailer_label,
@@ -69,9 +70,9 @@ def _env_config(  # noqa: PLR0913 — every parameter is the per-direction field
         actor_model=actor_model,
         log_prefix=log_prefix,
         author_prompt=paths.learning_dir / "author" / "benign_actor" / "prompt.md",
-        author_model=AUTHOR_ENV_MODEL,
-        author_timeout=AUTHOR_ENV_TIMEOUT,
-        author_effort=AUTHOR_ENV_EFFORT,
+        author_model=author_env_model(),
+        author_timeout=author_env_timeout(),
+        author_effort=author_env_effort(),
         invoke_agent=invoke_agent,
         box=box,
     )
@@ -85,7 +86,7 @@ def build_benign_config(paths: LoopPaths = DEFAULT_PATHS, *, box=None) -> _curat
         outcome_skip=frozenset({"refuted", "undecidable", "incoherent"}),
         trailer_label="Benign-Actor-Model",
         generation_fn=functools.partial(_shared.benign_generation_count, paths.repo_root),
-        actor_model=BENIGN_ACTOR_MODEL,
+        actor_model=benign_actor_model(),
         log_prefix="author_actor_benign",
         box=box,
     )
@@ -101,14 +102,10 @@ def build_adversarial_config(
         outcome_skip=frozenset({"survived", "undecidable"}),
         trailer_label="Actor-Env-Model",
         generation_fn=functools.partial(_shared.actor_env_generation_count, paths.repo_root),
-        actor_model=ACTOR_MODEL,
+        actor_model=actor_model(),
         log_prefix="author_actor_env",
         box=box,
     )
-
-
-BENIGN_CONFIG = build_benign_config(DEFAULT_PATHS)
-ADVERSARIAL_CONFIG = build_adversarial_config(DEFAULT_PATHS)
 
 
 def run_batch(
@@ -127,7 +124,7 @@ def main(argv: list[str]) -> int:
     if len(argv) != 1:
         print("usage: author_actor_benign.py", file=sys.stderr)
         return 64
-    return run_batch(cfg=BENIGN_CONFIG)
+    return run_batch()
 
 
 if __name__ == "__main__":

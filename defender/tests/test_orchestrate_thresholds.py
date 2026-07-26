@@ -17,7 +17,10 @@ import json
 import pytest
 
 from defender.learning.core import config  # type: ignore[import-not-found]
-from defender.learning.core import orchestrate  # type: ignore[import-not-found]
+from defender.learning.core import cli  # type: ignore[import-not-found]
+from defender.learning.core import drains  # type: ignore[import-not-found]
+from defender.learning.core import faults  # type: ignore[import-not-found]
+from defender.learning.core import markers  # type: ignore[import-not-found]
 from defender.learning.core.config import (  # type: ignore[import-not-found]
     FatalConfigError,
     RunUnprocessable,
@@ -49,13 +52,13 @@ def test_env_int_raises_fatal_config_on_non_numeric(monkeypatch, bad):
 def test_has_curator_work_raises_on_bad_threshold(tmp_path, monkeypatch):
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "high")
     with pytest.raises(FatalConfigError):
-        orchestrate._has_curator_work(LoopPaths(repo_root=tmp_path))
+        drains._has_curator_work(LoopPaths(repo_root=tmp_path))
 
 
 def test_has_lead_author_work_raises_on_bad_pitfalls_threshold(tmp_path, monkeypatch):
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "high")
     with pytest.raises(FatalConfigError):
-        orchestrate._has_lead_author_work(LoopPaths(repo_root=tmp_path))
+        drains._has_lead_author_work(LoopPaths(repo_root=tmp_path))
 
 
 def test_has_lead_author_work_raises_on_bad_pitfalls_threshold_with_marker_queued(
@@ -70,9 +73,9 @@ def test_has_lead_author_work_raises_on_bad_pitfalls_threshold_with_marker_queue
     paths = LoopPaths(repo_root=tmp_path)
     run_dir = tmp_path / "run-x"
     run_dir.mkdir()
-    orchestrate._enqueue_for_authoring(run_dir, paths)
+    markers.enqueue_for_authoring(run_dir, paths)
     with pytest.raises(FatalConfigError, match="LEARNING_PITFALLS_THRESHOLD"):
-        orchestrate._has_lead_author_work(paths)
+        drains._has_lead_author_work(paths)
 
 
 def test_lead_author_max_retries_bad_value_raises_fatal_config(tmp_path, monkeypatch):
@@ -84,22 +87,22 @@ def test_lead_author_max_retries_bad_value_raises_fatal_config(tmp_path, monkeyp
     paths = LoopPaths(repo_root=tmp_path)
     run_dir = tmp_path / "run-x"
     run_dir.mkdir()
-    orchestrate._enqueue_for_authoring(run_dir, paths)
+    markers.enqueue_for_authoring(run_dir, paths)
     with pytest.raises(FatalConfigError, match="LEAD_AUTHOR_MAX_RETRIES"):
-        orchestrate._drain_lead_author_markers(paths, lambda _p, _rd, *, box=None: None)
+        drains._drain_lead_author_markers(paths, lambda _p, _rd, *, box=None: None)
 
 
 
 def test_author_drain_bad_threshold_is_fatal_two(tmp_path, monkeypatch):
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "high")
     paths = LoopPaths(repo_root=tmp_path)
-    assert orchestrate._run_stage(lambda: orchestrate.author_drain(paths=paths)) == 2
+    assert cli._run_stage(lambda: drains.author_drain(paths=paths)) == 2
 
 
 def test_lead_author_drain_bad_threshold_is_fatal_two(tmp_path, monkeypatch):
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "high")
     paths = LoopPaths(repo_root=tmp_path)
-    assert orchestrate._run_stage(lambda: orchestrate.lead_author_drain(paths=paths)) == 2
+    assert cli._run_stage(lambda: drains.lead_author_drain(paths=paths)) == 2
 
 
 
@@ -113,11 +116,11 @@ def test_drains_skip_cleanly_with_valid_threshold_and_empty_queues(tmp_path, mon
     ):
         monkeypatch.delenv(sibling, raising=False)
     paths = LoopPaths(repo_root=tmp_path)
-    assert orchestrate._run_stage(lambda: orchestrate.author_drain(paths=paths)) == 0
-    assert orchestrate._run_stage(lambda: orchestrate.lead_author_drain(paths=paths)) == 0
+    assert cli._run_stage(lambda: drains.author_drain(paths=paths)) == 0
+    assert cli._run_stage(lambda: drains.lead_author_drain(paths=paths)) == 0
 
     empty = LoopPaths(repo_root=tmp_path, state_dir=tmp_path / "empty-state")
-    assert orchestrate._invoke_pitfalls(empty) == 0
+    assert drains._invoke_pitfalls(empty) == 0
 
 
 
@@ -139,30 +142,34 @@ def test_fatal_config_error_is_enrolled_not_subclassed_and_disjoint_from_run_unp
     assert not issubclass(RunUnprocessable, StageAbort)
 
 
-def test_every_stage_abort_except_clause_in_orchestrate_also_names_fatal_config():
+def test_every_stage_abort_except_clause_in_learning_also_names_fatal_config():
     """The structural guard for #468's cause/response split. FatalConfigError is no
     longer a StageAbort *subclass*, so the exit-2 contract rests on it being NAMED
     alongside StageAbort at every systemic catch site rather than inherited — the type
     system no longer enforces it, so this test does.
 
-    It parses orchestrate.py's AST and asserts every literal ``except`` clause that
-    catches ``StageAbort`` also catches ``FatalConfigError``. The risk this defends: the
-    drain-design contract is "route the swallow site through _run_or_dead_letter and be
-    systemic-fault-safe for free; a hand-rolled ``except`` is the odd-one-out" — and a
-    hand-rolled ``except StageAbort: raise`` in a future drain would silently DROP a
-    FatalConfigError to per-marker quarantine (exit 0) instead of the contracted exit 2
-    (the #438 class of bug). Such a clause fails here.
+    It parses every module under ``defender/learning/`` and asserts every literal
+    ``except`` clause that catches ``StageAbort`` also catches ``FatalConfigError``. The
+    sweep is by TREE, not by module: #717 split the orchestrator into core/{run_cycle,
+    drains,markers,faults,cli}.py, and a guard pinned to one file would have silently
+    stopped covering three of the four subsystems it was written for. The risk it
+    defends: the drain-design contract is "route the swallow site through
+    run_or_dead_letter and be systemic-fault-safe for free; a hand-rolled ``except`` is
+    the odd-one-out" — and a hand-rolled ``except StageAbort: raise`` in a future drain
+    would silently DROP a FatalConfigError to per-marker quarantine (exit 0) instead of
+    the contracted exit 2 (the #438 class of bug). Such a clause fails here.
 
-    Note the two existing sites are covered without overlap: _run_stage's literal
-    ``except (StageAbort, FatalConfigError)`` is checked here; _run_or_dead_letter's
-    ``except reraise:`` indirection (reraise = (StageAbort, FatalConfigError, *propagate))
-    is opaque to the AST and is pinned behaviorally by
-    test_run_or_dead_letter_reraises_systemic_faults. A future maintainer who genuinely
-    wants a StageAbort-only catch (not a known need) must update this test deliberately."""
+    The existing sites are covered without overlap: the literal ``except (StageAbort,
+    FatalConfigError)`` clauses (cli._run_stage, _pydantic_stage.run_stage,
+    verify_forward/tool.py) are checked here; faults.run_or_dead_letter's ``except
+    reraise:`` indirection (reraise = (*SYSTEMIC_FAULTS, *propagate)) is opaque to the
+    AST and is pinned behaviorally by test_run_or_dead_letter_reraises_systemic_faults.
+    A future maintainer who genuinely wants a StageAbort-only catch (not a known need)
+    must update this test deliberately."""
     import ast
     from pathlib import Path
 
-    tree = ast.parse(Path(orchestrate.__file__).read_text())
+    learning_dir = Path(cli.__file__).resolve().parents[1]
 
     def _caught_names(node: ast.expr | None) -> set[str]:
         """The exception types a handler names: a bare Name, or a tuple of Names.
@@ -173,14 +180,15 @@ def test_every_stage_abort_except_clause_in_orchestrate_also_names_fatal_config(
         return {e.id for e in elts if isinstance(e, ast.Name)}
 
     orphans = [
-        handler.lineno
-        for handler in ast.walk(tree)
+        f"{src.relative_to(learning_dir)}:{handler.lineno}"
+        for src in sorted(learning_dir.rglob("*.py"))
+        for handler in ast.walk(ast.parse(src.read_text(encoding="utf-8")))
         if isinstance(handler, ast.ExceptHandler)
         and "StageAbort" in _caught_names(handler.type)
         and "FatalConfigError" not in _caught_names(handler.type)
     ]
     assert not orphans, (
-        f"orchestrate.py has `except StageAbort` clause(s) at line(s) {orphans} that "
+        f"defender/learning/ has `except StageAbort` clause(s) at {orphans} that "
         "do not also name FatalConfigError. Since #468 FatalConfigError is enrolled "
         "(not subclassed), so it must ride along at every systemic catch site or a "
         "config misconfig is silently dead-lettered instead of mapped to exit 2."
@@ -201,13 +209,13 @@ def test_lead_author_marker_drain_reraises_fatal_lift_threshold(tmp_path, monkey
     paths = LoopPaths(repo_root=tmp_path)
     run_dir = tmp_path / "run-x"
     run_dir.mkdir()
-    orchestrate._enqueue_for_authoring(run_dir, paths)
+    markers.enqueue_for_authoring(run_dir, paths)
 
     def _run_lead_author(_paths, _run_dir, *, box=None):
         lead_author._lift_threshold()
 
     with pytest.raises(FatalConfigError):
-        orchestrate._drain_lead_author_markers(paths, _run_lead_author)
+        drains._drain_lead_author_markers(paths, _run_lead_author)
 
     failed_dir = paths.author_queue_dir / "failed"
     assert not (failed_dir / f"{run_dir.name}.json").exists()
@@ -223,7 +231,7 @@ def test_drain_pitfalls_reraises_fatal_config_error(tmp_path):
         raise FatalConfigError("systemic")
 
     with pytest.raises(FatalConfigError):
-        orchestrate._drain_pitfalls(paths, _run_pitfalls)
+        drains._drain_pitfalls(paths, _run_pitfalls)
 
 
 
@@ -235,9 +243,9 @@ def test_lead_author_drain_unlinks_marker_on_success(tmp_path, monkeypatch):
     paths = LoopPaths(repo_root=tmp_path)
     run_dir = tmp_path / "run-ok"
     run_dir.mkdir()
-    orchestrate._enqueue_for_authoring(run_dir, paths)
+    markers.enqueue_for_authoring(run_dir, paths)
 
-    orchestrate._drain_lead_author_markers(paths, lambda _p, _rd, *, box=None: None)
+    drains._drain_lead_author_markers(paths, lambda _p, _rd, *, box=None: None)
 
     assert not (paths.author_queue_dir / f"{run_dir.name}.json").exists()
     assert not (paths.author_queue_dir / "failed" / f"{run_dir.name}.json").exists()
@@ -250,12 +258,12 @@ def test_lead_author_drain_quarantines_a_plain_failure(tmp_path, monkeypatch):
     paths = LoopPaths(repo_root=tmp_path)
     run_dir = tmp_path / "run-boom"
     run_dir.mkdir()
-    orchestrate._enqueue_for_authoring(run_dir, paths)
+    markers.enqueue_for_authoring(run_dir, paths)
 
     def _run_lead_author(_paths, _run_dir, *, box=None):
         raise RuntimeError("poison run dir")
 
-    orchestrate._drain_lead_author_markers(paths, _run_lead_author)
+    drains._drain_lead_author_markers(paths, _run_lead_author)
 
     assert not (paths.author_queue_dir / f"{run_dir.name}.json").exists()
     failed = paths.author_queue_dir / "failed" / f"{run_dir.name}.json"
@@ -272,12 +280,12 @@ def test_lead_author_drain_requeues_a_transient_with_bumped_attempts(tmp_path, m
     paths = LoopPaths(repo_root=tmp_path)
     run_dir = tmp_path / "run-transient"
     run_dir.mkdir()
-    orchestrate._enqueue_for_authoring(run_dir, paths)
+    markers.enqueue_for_authoring(run_dir, paths)
 
     def _run_lead_author(_paths, _run_dir, *, box=None):
-        raise orchestrate._LeadAuthorRetry("rc=None transient")
+        raise drains._LeadAuthorRetry("rc=None transient")
 
-    orchestrate._drain_lead_author_markers(paths, _run_lead_author)
+    drains._drain_lead_author_markers(paths, _run_lead_author)
 
     marker = paths.author_queue_dir / f"{run_dir.name}.json"
     assert marker.exists()
@@ -294,7 +302,7 @@ def test_drain_pitfalls_swallows_a_plain_curation_error(tmp_path):
     def _run_pitfalls(_paths, *, box=None):
         raise RuntimeError("curation hiccup")
 
-    orchestrate._drain_pitfalls(paths, _run_pitfalls)
+    drains._drain_pitfalls(paths, _run_pitfalls)
 
 
 
@@ -303,7 +311,7 @@ def test_run_or_dead_letter_returns_true_on_success():
     """A clean run reports success (so the caller can unlink the marker) and never
     invokes the dead-letter callback."""
     calls: list[Exception] = []
-    ok = orchestrate._run_or_dead_letter(lambda: None, calls.append)
+    ok = faults.run_or_dead_letter(lambda: None, calls.append)
     assert ok is True
     assert calls == []
 
@@ -316,7 +324,7 @@ def test_run_or_dead_letter_dead_letters_a_plain_exception():
     def _boom():
         raise RuntimeError("poison item")
 
-    ok = orchestrate._run_or_dead_letter(_boom, calls.append)
+    ok = faults.run_or_dead_letter(_boom, calls.append)
     assert ok is False
     assert len(calls) == 1
     assert isinstance(calls[0], RuntimeError)
@@ -330,7 +338,7 @@ def test_run_or_dead_letter_dead_letters_a_run_unprocessable():
     def _boom():
         raise RunUnprocessable("malformed report.md")
 
-    ok = orchestrate._run_or_dead_letter(_boom, calls.append)
+    ok = faults.run_or_dead_letter(_boom, calls.append)
     assert ok is False
     assert len(calls) == 1
     assert isinstance(calls[0], RunUnprocessable)
@@ -350,7 +358,7 @@ def test_run_or_dead_letter_reraises_systemic_faults():
             raise exc
 
         with pytest.raises((StageAbort, FatalConfigError)):
-            orchestrate._run_or_dead_letter(_boom, calls.append)
+            faults.run_or_dead_letter(_boom, calls.append)
         assert calls == []
 
 
@@ -361,11 +369,11 @@ def test_run_or_dead_letter_propagates_declared_control_flow():
     calls: list[Exception] = []
 
     def _boom():
-        raise orchestrate._LeadAuthorRetry("transient")
+        raise drains._LeadAuthorRetry("transient")
 
-    with pytest.raises(orchestrate._LeadAuthorRetry):
-        orchestrate._run_or_dead_letter(
-            _boom, calls.append, propagate=(orchestrate._LeadAuthorRetry,)
+    with pytest.raises(drains._LeadAuthorRetry):
+        faults.run_or_dead_letter(
+            _boom, calls.append, propagate=(drains._LeadAuthorRetry,)
         )
     assert calls == []
 
@@ -398,7 +406,7 @@ def test_lead_author_drain_bad_lift_threshold_is_fatal_two(tmp_path, monkeypatch
     paths = LoopPaths(repo_root=tmp_path)
     run_dir = tmp_path / "run-x"
     run_dir.mkdir()
-    orchestrate._enqueue_for_authoring(run_dir, paths)
+    markers.enqueue_for_authoring(run_dir, paths)
 
     wt = tmp_path / "wt"
     wt.mkdir()
@@ -406,8 +414,8 @@ def test_lead_author_drain_bad_lift_threshold_is_fatal_two(tmp_path, monkeypatch
     def _run_lead_author(_paths, _run_dir, *, box=None):
         lead_author._lift_threshold()
 
-    rc = orchestrate._run_stage(
-        lambda: orchestrate.lead_author_drain(
+    rc = cli._run_stage(
+        lambda: drains.lead_author_drain(
             paths=paths, run_lead_author=_run_lead_author, branch=_StubBranch(wt)
         )
     )
@@ -424,9 +432,9 @@ def _raise(exc):
 
 
 def test_run_stage_maps_stage_abort_to_exit_two():
-    assert orchestrate._run_stage(_raise(StageAbort("systemic"))) == 2
-    assert orchestrate._run_stage(_raise(FatalConfigError("bad cfg"))) == 2
-    assert orchestrate._run_stage(
+    assert cli._run_stage(_raise(StageAbort("systemic"))) == 2
+    assert cli._run_stage(_raise(FatalConfigError("bad cfg"))) == 2
+    assert cli._run_stage(
         _raise(StageAbort("systemic")), allow_run_error=True
     ) == 2
 
@@ -435,13 +443,13 @@ def test_run_stage_propagates_run_unprocessable_on_a_drain():
     """The guard: on a drain path (allow_run_error=False, the default) a leaked
     RunUnprocessable propagates uncaught rather than being mapped to a clean exit 2."""
     with pytest.raises(RunUnprocessable, match="bad run"):
-        orchestrate._run_stage(_raise(RunUnprocessable("bad run")))
+        cli._run_stage(_raise(RunUnprocessable("bad run")))
 
 
 def test_run_stage_maps_run_unprocessable_to_exit_two_on_direct_run():
     """The direct single-run path (loop.py <run_dir>) has no queue to quarantine into,
     so a bad run maps to the contracted exit 2 — the behavior main() preserves."""
-    assert orchestrate._run_stage(
+    assert cli._run_stage(
         _raise(RunUnprocessable("bad run")), allow_run_error=True
     ) == 2
 
@@ -454,9 +462,9 @@ def test_main_direct_run_maps_run_unprocessable_to_exit_two(tmp_path, monkeypatc
     def boom(_run_dir):
         raise RunUnprocessable("bad run data")
     monkeypatch.setattr(  # lint-monkeypatch: ok — main() CLI dispatch resolves stage by argv
-        orchestrate, "run_one", boom
+        cli, "run_one", boom
     )
-    assert orchestrate.main(["loop.py", str(tmp_path)]) == 2
+    assert cli.main(["loop.py", str(tmp_path)]) == 2
 
 
 def test_main_drain_propagates_run_unprocessable(monkeypatch):
@@ -464,10 +472,10 @@ def test_main_drain_propagates_run_unprocessable(monkeypatch):
     to a drain's boundary (a bug that escaped the per-item quarantine guard) propagates
     uncaught rather than masquerading as a clean exit 2."""
     monkeypatch.setattr(  # lint-monkeypatch: ok — main() CLI dispatch resolves drain by argv
-        orchestrate, "learn_drain", _raise(RunUnprocessable("leaked"))
+        cli, "learn_drain", _raise(RunUnprocessable("leaked"))
     )
     with pytest.raises(RunUnprocessable, match="leaked"):
-        orchestrate.main(["loop.py", "--learn-drain"])
+        cli.main(["loop.py", "--learn-drain"])
 
 
 
@@ -482,7 +490,7 @@ def test_run_or_dead_letter_reraises_giterror_not_quarantine():
         raise _git.GitError(["status"], 128, "not a git repository")
 
     with pytest.raises(_git.GitError):
-        orchestrate._run_or_dead_letter(boom, dead_lettered.append)
+        faults.run_or_dead_letter(boom, dead_lettered.append)
     assert dead_lettered == []
 
 
@@ -493,4 +501,4 @@ def test_run_stage_maps_giterror_to_exit_2():
     def stage() -> int:
         raise _git.GitError(["commit"], 1, "pre-commit hook rejected")
 
-    assert orchestrate._run_stage(stage) == 2
+    assert cli._run_stage(stage) == 2

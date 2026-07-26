@@ -28,7 +28,7 @@ def _ids(rows: list[dict]) -> set[str]:
 
 def test_adversarial_outcome_policy_authors_caught_incoherent() -> None:
     held, consumed_pre, to_author = curator._partition_pre_author(
-        _rows(), aenv.ADVERSARIAL_CONFIG
+        _rows(), aenv.build_adversarial_config()
     )
     assert _ids(to_author) == {"t/0", "t/1"}
     assert {"t/2", "t/3"} <= _ids(consumed_pre)
@@ -36,14 +36,14 @@ def test_adversarial_outcome_policy_authors_caught_incoherent() -> None:
 
 def test_benign_outcome_policy_authors_only_survived() -> None:
     held, consumed_pre, to_author = curator._partition_pre_author(
-        _rows(), aenv.BENIGN_CONFIG
+        _rows(), aenv.build_benign_config()
     )
     assert _ids(to_author) == {"t/2"}
     assert {"t/4", "t/3", "t/1"} <= _ids(consumed_pre)
 
 
 def test_configs_are_distinct() -> None:
-    b, a = aenv.BENIGN_CONFIG, aenv.ADVERSARIAL_CONFIG
+    b, a = aenv.build_benign_config(), aenv.build_adversarial_config()
     assert b.trailer_label == "Benign-Actor-Model"
     assert a.trailer_label == "Actor-Env-Model"
     assert b.channel.file != a.channel.file

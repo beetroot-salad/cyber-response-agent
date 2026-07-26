@@ -39,6 +39,10 @@ def _spawn_author_agent(
         learning_run_dir=learning_run_dir,
         log_label=log_label,
         log=_log,
+        model=_loop_config.lead_author_model(),
+        effort=_loop_config.lead_author_effort(),
+        timeout=_loop_config.lead_author_timeout(),
+        request_limit=_loop_config.lead_author_request_limit(),
         salt=salt, box=box,
     )
 

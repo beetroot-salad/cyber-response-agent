@@ -16,7 +16,9 @@ append_actor_observations = loop.append_actor_observations
 from defender.learning.pipeline.judge import compare as comparison  # type: ignore[import-not-found]  # noqa: E402
 from defender.learning.core import directions as directions  # type: ignore[import-not-found]  # noqa: E402
 from defender.learning.pipeline.oracle import sample as oracle_mod  # type: ignore[import-not-found]  # noqa: E402
-from defender.learning.core import orchestrate as orch  # type: ignore[import-not-found]  # noqa: E402
+from defender.learning.core import drains as drains  # type: ignore[import-not-found]  # noqa: E402
+from defender.learning.core import markers as markers  # type: ignore[import-not-found]  # noqa: E402
+from defender.learning.core import run_cycle as run_cycle  # type: ignore[import-not-found]  # noqa: E402
 from defender.learning.core import persist as persist  # type: ignore[import-not-found]  # noqa: E402
 from defender import _io as _io  # type: ignore[import-not-found]  # noqa: E402
 from defender.learning.pipeline.judge import run as subagents  # type: ignore[import-not-found]  # noqa: E402
@@ -583,7 +585,7 @@ def test_enqueue_for_authoring_writes_marker(tmp_path: Path):
     paths, _ = _isolate(tmp_path)
     run_dir = tmp_path / "tmprun" / "case-a"
     run_dir.mkdir(parents=True)
-    orch._enqueue_for_authoring(run_dir, paths)
+    markers.enqueue_for_authoring(run_dir, paths)
     spec = json.loads((paths.author_queue_dir / "case-a.json").read_text())
     assert spec == {"run_id": "case-a", "run_dir": str(run_dir.resolve())}
 
@@ -625,7 +627,7 @@ def test_author_drain_triggers_all_curators(tmp_path: Path):
     paths, _ = _isolate(tmp_path)
     _seed_curator_findings(paths)
     triggered: list[str] = []
-    orch.author_drain(
+    drains.author_drain(
         paths,
         trigger_author=lambda paths, pending_file, env, module, label, **_kw: triggered.append(module),
         branch=_FakeBranch(),
@@ -641,7 +643,7 @@ def test_author_drain_skips_when_lease_held(tmp_path: Path):
     _seed_curator_findings(paths)
     triggered: list = []
     branch = _FakeBranch(pr_exists=True)
-    rc = orch.author_drain(
+    rc = drains.author_drain(
         paths,
         trigger_author=lambda *a, **_kw: triggered.append(a),
         branch=branch,
@@ -656,7 +658,7 @@ def test_author_drain_skips_when_no_work(tmp_path: Path):
     paths, _ = _isolate(tmp_path)
     triggered: list = []
     branch = _FakeBranch()
-    rc = orch.author_drain(
+    rc = drains.author_drain(
         paths,
         trigger_author=lambda *a, **_kw: triggered.append(a),
         branch=branch,
@@ -671,7 +673,7 @@ def test_author_drain_no_commits_opens_no_pr_but_cleans_up(tmp_path: Path):
     paths, _ = _isolate(tmp_path)
     _seed_curator_findings(paths)
     branch = _FakeBranch(commits=0)
-    rc = orch.author_drain(paths, trigger_author=lambda *a, **_kw: None, branch=branch, start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub)
+    rc = drains.author_drain(paths, trigger_author=lambda *a, **_kw: None, branch=branch, start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub)
     assert rc == 0
     assert "finish" in branch.events
     assert branch.events[-1] == "cleanup"
@@ -687,7 +689,7 @@ def test_author_drain_singleton_lock_exits_without_work(tmp_path: Path):
     fcntl.flock(holder.fileno(), fcntl.LOCK_EX)
     try:
         worked: list[str] = []
-        rc = orch.author_drain(
+        rc = drains.author_drain(
             paths,
             trigger_author=lambda *a, **_kw: worked.append("trigger"),
             branch=_FakeBranch(),
@@ -706,10 +708,10 @@ def test_lead_author_drain_runs_lead_author_then_clears_marker(tmp_path: Path):
     paths, _ = _isolate(tmp_path)
     run_dir = tmp_path / "tmprun" / "case-b"
     run_dir.mkdir(parents=True)
-    orch._enqueue_for_authoring(run_dir, paths)
+    markers.enqueue_for_authoring(run_dir, paths)
     seen: list[tuple[Path, Path]] = []
     branch = _FakeBranch(prefix="lead-author/")
-    orch.lead_author_drain(
+    drains.lead_author_drain(
         paths,
         run_lead_author=lambda wt_paths, rd, **_kw: seen.append((wt_paths.repo_root, rd)),
         branch=branch,
@@ -725,9 +727,9 @@ def test_lead_author_drain_runs_pitfalls_after_markers(tmp_path: Path):
     paths, _ = _isolate(tmp_path)
     run_dir = tmp_path / "tmprun" / "case-p"
     run_dir.mkdir(parents=True)
-    orch._enqueue_for_authoring(run_dir, paths)
+    markers.enqueue_for_authoring(run_dir, paths)
     order: list[str] = []
-    orch.lead_author_drain(
+    drains.lead_author_drain(
         paths,
         run_lead_author=lambda wt_paths, rd, **_kw: order.append("marker"),
         run_pitfalls=lambda wt_paths, **_kw: (order.append("pitfalls"), 0)[1],
@@ -740,23 +742,23 @@ def test_lead_author_drain_runs_pitfalls_after_markers(tmp_path: Path):
 def test_has_lead_author_work_fires_on_pitfalls_threshold(tmp_path: Path, monkeypatch):
     from defender.learning.core import persist
     paths, _ = _isolate(tmp_path)
-    assert orch._has_lead_author_work(paths) is False
+    assert drains._has_lead_author_work(paths) is False
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
     persist.append_pitfalls(
         [{"pitfall_id": f"r:{i}", "system": "elastic"} for i in range(2)], paths=paths
     )
-    assert orch._has_lead_author_work(paths) is True
+    assert drains._has_lead_author_work(paths) is True
 
 
 def test_lead_author_drain_marks_artifact_missing(tmp_path: Path):
     paths, _ = _isolate(tmp_path)
     run_dir = tmp_path / "tmprun" / "case-real"
     run_dir.mkdir(parents=True)
-    orch._enqueue_for_authoring(run_dir, paths)
+    markers.enqueue_for_authoring(run_dir, paths)
     gone = tmp_path / "tmprun" / "case-gone"
-    orch._enqueue_for_authoring(gone, paths)
+    markers.enqueue_for_authoring(gone, paths)
     seen: list[Path] = []
-    orch.lead_author_drain(
+    drains.lead_author_drain(
         paths,
         run_lead_author=lambda wt_paths, rd, **_kw: seen.append(rd),
         branch=_FakeBranch(prefix="lead-author/"),
@@ -772,10 +774,10 @@ def test_lead_author_drain_skips_when_lease_held(tmp_path: Path):
     paths, _ = _isolate(tmp_path)
     run_dir = tmp_path / "tmprun" / "case-lease"
     run_dir.mkdir(parents=True)
-    orch._enqueue_for_authoring(run_dir, paths)
+    markers.enqueue_for_authoring(run_dir, paths)
     seen: list = []
     branch = _FakeBranch(prefix="lead-author/", pr_exists=True)
-    rc = orch.lead_author_drain(
+    rc = drains.lead_author_drain(
         paths, run_lead_author=lambda wt_paths, rd, **_kw: seen.append(rd),
         branch=branch, start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub,
     )
@@ -791,13 +793,13 @@ def test_lead_author_drain_singleton_lock_distinct_from_lessons(tmp_path: Path):
     paths, _ = _isolate(tmp_path)
     run_dir = tmp_path / "tmprun" / "case-d"
     run_dir.mkdir(parents=True)
-    orch._enqueue_for_authoring(run_dir, paths)
+    markers.enqueue_for_authoring(run_dir, paths)
     paths.author_drain_lock_file.parent.mkdir(parents=True, exist_ok=True)
     holder = paths.author_drain_lock_file.open("a+")
     fcntl.flock(holder.fileno(), fcntl.LOCK_EX)
     try:
         seen: list = []
-        rc = orch.lead_author_drain(
+        rc = drains.lead_author_drain(
             paths,
             run_lead_author=lambda wt_paths, rd, **_kw: seen.append(rd),
             branch=_FakeBranch(prefix="lead-author/"),
@@ -816,8 +818,8 @@ def test_lead_author_drain_quarantines_poison_run_dir(tmp_path: Path):
     poison.mkdir(parents=True)
     good = tmp_path / "tmprun" / "case-good"
     good.mkdir(parents=True)
-    orch._enqueue_for_authoring(poison, paths)
-    orch._enqueue_for_authoring(good, paths)
+    markers.enqueue_for_authoring(poison, paths)
+    markers.enqueue_for_authoring(good, paths)
     seen: list[Path] = []
 
     def maybe_boom(wt_paths, rd: Path, *, box=None) -> None:
@@ -825,7 +827,7 @@ def test_lead_author_drain_quarantines_poison_run_dir(tmp_path: Path):
             raise RuntimeError("lead-author blew up")
         seen.append(rd)
 
-    orch.lead_author_drain(
+    drains.lead_author_drain(
         paths, run_lead_author=maybe_boom, branch=_FakeBranch(prefix="lead-author/"),
         start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub,
     )
@@ -841,10 +843,10 @@ def test_lead_author_drain_quarantines_on_nonzero_rc(tmp_path: Path, monkeypatch
     paths, _ = _isolate(tmp_path)
     run_dir = tmp_path / "tmprun" / "case-rc"
     run_dir.mkdir(parents=True)
-    orch._enqueue_for_authoring(run_dir, paths)
+    markers.enqueue_for_authoring(run_dir, paths)
     # lint-monkeypatch: ok — drives the real _invoke_lead_author; _run_curator_module
     monkeypatch.setattr(la, "run", lambda rd, paths=None, box=None: 2)  # lint-monkeypatch: ok
-    orch.lead_author_drain(paths, branch=_FakeBranch(prefix="lead-author/"), start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub)
+    drains.lead_author_drain(paths, branch=_FakeBranch(prefix="lead-author/"), start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub)
     assert not (paths.author_queue_dir / "case-rc.json").exists()
     failed = paths.author_queue_dir / "failed" / "case-rc.json"
     assert json.loads(failed.read_text())["failed"].startswith("lead-author-error")
@@ -856,7 +858,7 @@ def test_lead_author_drain_bounded_retry_then_quarantine(tmp_path: Path, monkeyp
     paths, _ = _isolate(tmp_path)
     run_dir = tmp_path / "tmprun" / "case-transient"
     run_dir.mkdir(parents=True)
-    orch._enqueue_for_authoring(run_dir, paths)
+    markers.enqueue_for_authoring(run_dir, paths)
     monkeypatch.setenv("LEAD_AUTHOR_MAX_RETRIES", "3")
 
     def boom(rd, paths=None, box=None):
@@ -868,12 +870,12 @@ def test_lead_author_drain_bounded_retry_then_quarantine(tmp_path: Path, monkeyp
     failed = paths.author_queue_dir / "failed" / "case-transient.json"
 
     for expected in (1, 2):
-        orch.lead_author_drain(paths, branch=_FakeBranch(prefix="lead-author/"), start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub)
+        drains.lead_author_drain(paths, branch=_FakeBranch(prefix="lead-author/"), start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub)
         assert marker.exists()
         assert json.loads(marker.read_text())["attempts"] == expected
         assert not failed.exists()
 
-    orch.lead_author_drain(paths, branch=_FakeBranch(prefix="lead-author/"), start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub)
+    drains.lead_author_drain(paths, branch=_FakeBranch(prefix="lead-author/"), start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub)
     assert not marker.exists()
     assert json.loads(failed.read_text())["failed"].startswith("transient-exhausted")
 
@@ -882,12 +884,12 @@ def test_lead_author_drain_opens_distinct_lead_author_pr(tmp_path: Path):
     paths, _ = _isolate(tmp_path)
     run_dir = tmp_path / "tmprun" / "case-pr"
     run_dir.mkdir(parents=True)
-    orch._enqueue_for_authoring(run_dir, paths)
+    markers.enqueue_for_authoring(run_dir, paths)
     _, work = _origin_work(tmp_path)
     forge = _FakeForge(create_ref="https://github.com/o/r/pull/77")
     branch = ab.AuthorBranch(
         forge=forge, repo_root=work, branch_prefix="lead-author/",
-        pr_title=orch._lead_author_pr_title, pr_body=orch._lead_author_pr_body,
+        pr_title=drains._lead_author_pr_title, pr_body=drains._lead_author_pr_body,
         worktree_base=tmp_path / "wt",
     )
 
@@ -898,7 +900,7 @@ def test_lead_author_drain_opens_distinct_lead_author_pr(tmp_path: Path):
         _real(wt_paths.repo_root, "add", "-A")
         _real(wt_paths.repo_root, "commit", "-q", "-m", "lead edit")
 
-    rc = orch.lead_author_drain(paths, run_lead_author=_author, branch=branch, start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub)
+    rc = drains.lead_author_drain(paths, run_lead_author=_author, branch=branch, start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub)
     assert rc == 0
     assert forge.open_calls[0]["head"].startswith("lead-author/")
     assert not forge.open_calls[0]["head"].startswith("lessons/")
@@ -921,8 +923,8 @@ def test_lead_author_drain_resets_worktree_between_markers(tmp_path: Path):
     good = tmp_path / "runs" / "case-b-good"
     poison.mkdir(parents=True)
     good.mkdir(parents=True)
-    orch._enqueue_for_authoring(poison, paths)
-    orch._enqueue_for_authoring(good, paths)
+    markers.enqueue_for_authoring(poison, paths)
+    markers.enqueue_for_authoring(good, paths)
 
     clean_at_entry: dict[str, bool] = {}
 
@@ -937,7 +939,7 @@ def test_lead_author_drain_resets_worktree_between_markers(tmp_path: Path):
              / "wazuh" / "auth-events.md").unlink()
             raise RuntimeError("scope-gate boom")
 
-    orch._drain_lead_author_markers(paths, run_lead_author)
+    drains._drain_lead_author_markers(paths, run_lead_author)
 
     assert clean_at_entry["case-a-poison"] is True
     assert clean_at_entry["case-b-good"] is True
@@ -954,7 +956,7 @@ def test_enqueue_for_learning_writes_marker(tmp_path: Path):
     paths, _ = _isolate(tmp_path)
     run_dir = tmp_path / "tmprun" / "case-a"
     run_dir.mkdir(parents=True)
-    orch.enqueue_for_learning(run_dir, paths)
+    markers.enqueue_for_learning(run_dir, paths)
     spec = json.loads((paths.learn_queue_dir / "case-a.json").read_text())
     assert spec == {"run_id": "case-a", "run_dir": str(run_dir.resolve())}
 
@@ -963,9 +965,9 @@ def test_learn_drain_runs_run_one_renders_and_clears_marker(tmp_path: Path):
     paths, _ = _isolate(tmp_path)
     run_dir = tmp_path / "tmprun" / "case-b"
     run_dir.mkdir(parents=True)
-    orch.enqueue_for_learning(run_dir, paths)
+    markers.enqueue_for_learning(run_dir, paths)
     events: list[tuple[str, Path]] = []
-    rc = orch.learn_drain(
+    rc = run_cycle.learn_drain(
         paths,
         run_one_fn=lambda rd: events.append(("run_one", rd)) or 0,
         render=lambda rd: events.append(("render", rd)),
@@ -979,9 +981,9 @@ def test_learn_drain_runs_run_one_renders_and_clears_marker(tmp_path: Path):
 def test_learn_drain_marks_artifact_missing(tmp_path: Path):
     paths, _ = _isolate(tmp_path)
     gone = tmp_path / "tmprun" / "case-gone"
-    orch.enqueue_for_learning(gone, paths)
+    markers.enqueue_for_learning(gone, paths)
     learned: list[Path] = []
-    orch.learn_drain(
+    run_cycle.learn_drain(
         paths,
         run_one_fn=lambda rd: learned.append(rd) or 0,
         render=lambda rd: None,
@@ -997,13 +999,13 @@ def test_learn_drain_quarantines_run_one_error(tmp_path: Path):
     paths, _ = _isolate(tmp_path)
     run_dir = tmp_path / "tmprun" / "case-poison"
     run_dir.mkdir(parents=True)
-    orch.enqueue_for_learning(run_dir, paths)
+    markers.enqueue_for_learning(run_dir, paths)
 
     def boom(_rd: Path) -> int:
         raise RuntimeError("run_one blew up")
 
     rendered: list[Path] = []
-    orch.learn_drain(paths, run_one_fn=boom, render=lambda rd: rendered.append(rd))
+    run_cycle.learn_drain(paths, run_one_fn=boom, render=lambda rd: rendered.append(rd))
     assert rendered == []
     assert not (paths.learn_queue_dir / "inflight" / "case-poison.json").exists()
     failed = paths.learn_queue_dir / "failed" / "case-poison.json"
@@ -1014,12 +1016,12 @@ def test_learn_drain_skips_already_claimed_marker(tmp_path: Path):
     paths, _ = _isolate(tmp_path)
     run_dir = tmp_path / "tmprun" / "case-claimed"
     run_dir.mkdir(parents=True)
-    orch.enqueue_for_learning(run_dir, paths)
+    markers.enqueue_for_learning(run_dir, paths)
     inflight = paths.learn_queue_dir / "inflight"
     inflight.mkdir(parents=True)
     (paths.learn_queue_dir / "case-claimed.json").rename(inflight / "case-claimed.json")
     learned: list[Path] = []
-    orch.learn_drain(
+    run_cycle.learn_drain(
         paths,
         run_one_fn=lambda rd: learned.append(rd) or 0,
         render=lambda rd: None,
@@ -1031,15 +1033,15 @@ def test_learn_drain_skips_marker_lost_to_claim_race(tmp_path: Path, monkeypatch
     paths, _ = _isolate(tmp_path)
     run_dir = tmp_path / "tmprun" / "case-race"
     run_dir.mkdir(parents=True)
-    orch.enqueue_for_learning(run_dir, paths)
+    markers.enqueue_for_learning(run_dir, paths)
 
     def racing_replace(src, dst):
         Path(src).unlink()
         raise FileNotFoundError(src)
 
-    monkeypatch.setattr(orch.os, "replace", racing_replace)
+    monkeypatch.setattr(run_cycle.os, "replace", racing_replace)
     learned: list[Path] = []
-    orch.learn_drain(
+    run_cycle.learn_drain(
         paths,
         run_one_fn=lambda rd: learned.append(rd) or 0,
         render=lambda rd: None,
@@ -1051,7 +1053,7 @@ def test_learn_drain_threads_paths_into_default_run_one(tmp_path: Path, monkeypa
     paths, _ = _isolate(tmp_path)
     run_dir = tmp_path / "tmprun" / "case-paths"
     run_dir.mkdir(parents=True)
-    orch.enqueue_for_learning(run_dir, paths)
+    markers.enqueue_for_learning(run_dir, paths)
     seen: dict = {}
 
     def fake_run_one(rd, *, paths=None, agents=None):
@@ -1059,8 +1061,8 @@ def test_learn_drain_threads_paths_into_default_run_one(tmp_path: Path, monkeypa
         seen["paths"] = paths
         return 0
 
-    monkeypatch.setattr(orch, "run_one", fake_run_one)
-    orch.learn_drain(paths, render=lambda rd: None)
+    monkeypatch.setattr(run_cycle, "run_one", fake_run_one)
+    run_cycle.learn_drain(paths, render=lambda rd: None)
     assert seen["rd"] == run_dir.resolve()
     assert seen["paths"] is paths
 
@@ -1071,17 +1073,17 @@ def test_learn_drain_each_queued_marker_processed_once(tmp_path: Path):
     for name in ("case-1", "case-2", "case-3"):
         rd = tmp_path / "tmprun" / name
         rd.mkdir(parents=True)
-        orch.enqueue_for_learning(rd, paths)
+        markers.enqueue_for_learning(rd, paths)
         runs.append(rd.resolve())
     learned: list[Path] = []
-    orch.learn_drain(
+    run_cycle.learn_drain(
         paths,
         run_one_fn=lambda rd: learned.append(rd) or 0,
         render=lambda rd: None,
     )
     assert sorted(learned) == sorted(runs)
     learned2: list[Path] = []
-    orch.learn_drain(
+    run_cycle.learn_drain(
         paths,
         run_one_fn=lambda rd: learned2.append(rd) or 0,
         render=lambda rd: None,

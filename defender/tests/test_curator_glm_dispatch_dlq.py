@@ -5,7 +5,7 @@ the spec:
 
   * the dispatch tests FAIL with ``KeyError`` against current code — ``_CURATOR_MODULES``
     has no ``"author_actor_env"`` entry, and the ``_CURATOR_MODULES[module_name]``
-    subscript at ``orchestrate._run_curator_module`` sits OUTSIDE the SubprocessError/
+    subscript at ``drains._run_curator_module`` sits OUTSIDE the SubprocessError/
     OSError ``try``, so the miss wedges the whole drain (the correct red — it pins the
     fix);
   * the DLQ tests are RED until the attempts-bump / ``deadletter.jsonl`` mechanism
@@ -24,7 +24,7 @@ contains ``deadletter`` and lives under ``_pending`` (discovered by glob, so the
 is robust to ``deadletter.jsonl`` vs a per-channel ``*.deadletter.jsonl``); the new
 knob is ``LEARNING_AUTHOR_MAX_ATTEMPTS`` (default 3), and quarantine fires when a
 batch's rows REACH that count (the ``attempts >= max`` shape of the lead-author
-``_quarantine_marker`` precedent).
+``markers.quarantine_marker`` precedent).
 """
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ from pathlib import Path
 
 import pytest
 
-from defender.learning.core import orchestrate as orch  # type: ignore[import-not-found]
+from defender.learning.core import drains as orch  # type: ignore[import-not-found]
 from defender.learning.author import curator as curator  # type: ignore[import-not-found]
 from defender.learning.author.benign_actor import run as aenv  # type: ignore[import-not-found]
 from defender.learning.core.config import FatalConfigError, LoopPaths  # type: ignore[import-not-found]
@@ -298,7 +298,7 @@ def test_dlq_quarantines_batch_at_max_attempts(tmp_path: Path, monkeypatch) -> N
     """dlq-quarantine-at-threshold: when a batch's rows REACH
     ``LEARNING_AUTHOR_MAX_ATTEMPTS`` (default 3) the rows move to the ``deadletter``
     sidecar and are removed from the active queue — the move-aside shape of
-    ``_quarantine_marker`` at the queue-row level, so the poison batch stops blocking."""
+    ``markers.quarantine_marker`` at the queue-row level, so the poison batch stops blocking."""
     monkeypatch.setenv("LEARNING_AUTHOR_MAX_ATTEMPTS", "3")
     paths = _env_repo(tmp_path)
     cfg = aenv.build_adversarial_config(paths)

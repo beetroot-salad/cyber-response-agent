@@ -103,7 +103,8 @@ def run_frozen_actor(
     python = venv_python if venv_python.is_file() else Path(sys.executable)
 
     env = os.environ.copy()
-    env["ACTOR_MODEL"] = pin.actor_model
+    env["ACTOR_MODEL"] = pin.actor_model  # lint-stale-ref: ok — the ENV VAR outlives the
+    # retired module constant of the same name; config.actor_model() reads exactly this key.
 
     proc = runner(
         [

@@ -54,8 +54,8 @@ class LeadAuthorDeps(AgentDeps):
 
 LEAD_AUTHOR_DEF = AgentDefinition(
     role=AgentRole.LEAD_AUTHOR,
-    model=lambda: config.LEAD_AUTHOR_MODEL,
-    effort=config.LEAD_AUTHOR_EFFORT,
+    model=config.lead_author_model,
+    effort=config.lead_author_effort(),
     tools=ToolSet(read=True, bash=True, write=True),
     bash_shapes=(_lead_author_bash_shapes,),
     write_shapes=(_lead_author_write_shape,),
@@ -76,10 +76,10 @@ def _run_lead_author_pydantic(  # noqa: PLR0913 — the transport signature plus
     user: str,
     learning_run_dir: Path,
     repo_root: Path,
-    request_limit: int = config.LEAD_AUTHOR_REQUEST_LIMIT,
+    request_limit: int,
     salt: str | None = None,
     box: Any = None,
-    wall_clock_timeout: int = config.LEAD_AUTHOR_TIMEOUT,
+    wall_clock_timeout: int,
     make_model: MakeModel = providers.build_for_effort,
     run_stage: Callable[..., Any] = _run_stage_fn,
 ) -> str:
@@ -107,10 +107,12 @@ def run_author_stage(  # noqa: PLR0913 — the spawn contract (5 per-mode inputs
     learning_run_dir: Path,
     log_label: str,
     log: Callable[[str], None],
-    model: str = config.LEAD_AUTHOR_MODEL,
-    effort: str | None = config.LEAD_AUTHOR_EFFORT,
-    timeout: int = config.LEAD_AUTHOR_TIMEOUT,
-    request_limit: int = config.LEAD_AUTHOR_REQUEST_LIMIT,
+    # No signature defaults for the four model/effort/limit/timeout knobs: each is
+    # env-backed, and a default evaluated at import would freeze it (#717).
+    model: str,
+    effort: str | None,
+    timeout: int,
+    request_limit: int,
     source_key: Callable[..., object] = config.source_first_party_key,
     run_author: Callable[..., str] = _run_lead_author_pydantic,
     salt: str | None = None,

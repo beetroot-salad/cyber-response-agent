@@ -1,7 +1,7 @@
 """Contamination boundary — a held-out eval run must never feed the learning corpora.
 
 The gate used to live in the persist stage: `run.py` copied `ground_truth.yaml` into the
-run dir and `orchestrate` suppressed queue appends when it declared `held_out`. That put
+run dir and the orchestrator suppressed queue appends when it declared `held_out`. That put
 an answer key inside the agent's readable workspace to carry a fact the learning loop
 needed one bit of.
 

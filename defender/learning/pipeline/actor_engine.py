@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, ClassVar
 
-from defender.learning.core.config import ACTOR_EFFORT, ACTOR_MODEL, REPO_ROOT
+from defender.learning.core.config import REPO_ROOT, actor_effort, actor_model, subagent_timeout
 from defender.learning.pipeline._pydantic_stage import run_stage
 from defender.runtime import providers
 from defender.runtime.agent_definition import (
@@ -60,8 +60,8 @@ def _actor_bash_shapes(roots: ResolvedRoots) -> tuple[Grant, ...]:
 
 ACTOR_DEF = AgentDefinition(
     role=AgentRole.ACTOR,
-    model=lambda: ACTOR_MODEL,
-    effort=ACTOR_EFFORT,
+    model=actor_model,
+    effort=actor_effort(),
     tools=ToolSet(read=True, bash=True),
     bash_shapes=(_actor_bash_shapes,),
     deps_cls=ActorDeps,
@@ -100,4 +100,5 @@ def _run_actor_pydantic(  # noqa: PLR0913 — the actor_fn protocol signature pl
         trace_name=trace_name, label=label, user=user,
         learning_run_dir=learning_run_dir, deps=deps,
         request_limit=ACTOR_REQUEST_LIMIT, make_model=make_model,
+        wall_clock_timeout=subagent_timeout(),
     )
