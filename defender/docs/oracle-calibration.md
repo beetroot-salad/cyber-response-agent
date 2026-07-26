@@ -154,6 +154,22 @@ estimate invites the point estimate to be read.
    The firewall pins SSH to a `/32` allow-list; add yours and remove it after.
    Then install detection rules: `python3 playground-v2/scripts/install_detection_rules.py`.
 
+   **That installer needs the CONTAINER's password, not `/workspace/.env`'s.** The two
+   differ on a restored snapshot, and the installer talks to Kibana from outside, so it
+   fails every rule with HTTP 401 while `infra/bin/es.sh` keeps working — es.sh execs
+   *inside* the container and reads `$ELASTIC_PASSWORD` there. Take the same value:
+
+   ```bash
+   V2_ELASTIC_PASSWORD=$(ssh soc-playground 'docker exec elasticsearch printenv ELASTIC_PASSWORD') \
+       python3 playground-v2/scripts/install_detection_rules.py
+   ```
+
+   **Then wait for recovery before measuring anything.** A restore replays ~430 shards,
+   and a partially recovered index returns fewer rows — which reads as a quiet baseline,
+   the exact error the suite exists to catch. Green never arrives on a single node
+   (replicas cannot be assigned), so the condition is `unassigned_primary_shards: 0` with
+   nothing initializing, not `status: green`.
+
 2. **Fire a real operation.**
 
    ```bash
@@ -185,6 +201,24 @@ estimate invites the point estimate to be read.
    one file the hidden/visible split cannot protect.
 
 5. **Measure controls** (below) and write `hidden/controls.yaml`.
+
+   **Pick the offsets by probing the ingest timeline first.** The default 7/14/21 assumes
+   the stack was running a week ago, and it often was not: the playground is levered up
+   and down, so 2026-07-26's 7-day control lands on 07-19, inside a gap that ran
+   07-18..07-24. Measured blind, case-006 came back with 47 dead controls — a third of
+   its baseline evidence, gone. A dead window is not an empty baseline, and the judge
+   correctly refuses to conclude anything from one, but the evidence is still lost.
+
+   ```bash
+   infra/bin/es.sh '/logs-*/_search' -H 'Content-Type: application/json' -d '{
+     "size":0, "query":{"range":{"@timestamp":{"gte":"now-32d"}}},
+     "aggs":{"per_day":{"date_histogram":{"field":"@timestamp","calendar_interval":"day"}}}}'
+   ```
+
+   Then choose whole-week offsets that land on live days — 14,21,28 for a 07-26 capture —
+   and pass them through: `generate_case.py --offsets-days 14,21,28`. Whole weeks are not
+   optional: the benign generators are schedule-shaped, so an offset that changes the
+   weekday is not a control at all.
 
 6. **Assemble and label.**
 
