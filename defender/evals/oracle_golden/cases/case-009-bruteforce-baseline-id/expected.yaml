@@ -1,0 +1,119 @@
+# Ground-truth labels for case-009-bruteforce-baseline-id, DERIVED MECHANICALLY by write_expected.py
+# from hidden/observed/ and hidden/controls/ (#711 M9). The projection is not one
+# of the inputs, which is the mechanical form of the rule "a label may be
+# corrected from the environment, never from the projection".
+#
+# Review before trusting, in this order:
+#   1. any lead labelled `needs-label` — the labeler declined to decide, and
+#      score.py will not match it against any real class. Declare the system in
+#      manifest.yaml `state_classes`, or measure a control it can use.
+#   2. `fields` — the values a correct projection must commit to. Derived as the
+#      row-key values present in the attack window and absent from every live
+#      control. Drop any that are an artifact of the query rather than the
+#      activity.
+#   3. `observed_fields` — everything else concrete the capture carries, graded
+#      only where the projection volunteers a value for the key.
+#
+# `intent_note` is never derived: it is a human's reading of what the lead was
+# FOR, and it explains a divergence without excusing it.
+case_id: case-009-bruteforce-baseline-id
+kind: observed
+result_classes_covered:
+- +event
+- '0'
+leads:
+  l-002:
+    system: elastic
+    class: '0'
+    template: sshd-auth-history
+  l-003:
+    system: elastic
+    class: +event
+    template: sshd-auth-history
+    observed_fields:
+      daily_count: 132
+      day: '2026-07-26T00:00:00.000Z'
+      failed: 96
+      source.ip: 172.18.0.11
+      hourly_count: 36
+      hour: '2026-07-26T08:00:00.000Z'
+      five_min_count: 12
+      bucket: '2026-07-26T08:25:00.000Z'
+      accepted: 8
+    fields:
+      user.name: root
+  l-001:
+    system: elastic
+    class: +event
+    template:
+    - sshd-all-failures-30sec-window
+    - sshd-all-failures-40sec
+    - sshd-all-failures-45sec
+    - sshd-all-failures-count
+    - sshd-all-failures-up-to-alert
+    - sshd-auth-failures-per-event
+    - sshd-auth-method-distribution
+    - sshd-failed-password-1min-window
+    - sshd-failed-password-40sec
+    - sshd-failed-password-45sec
+    - sshd-failed-password-5min-window
+    - sshd-failed-password-all-events
+    - sshd-failed-password-counts
+    - sshd-failed-password-per-event
+    - sshd-failed-password-to-092323
+    - sshd-failed-password-up-to-alert
+    - sshd-success-events-in-window
+    heterogeneous: true
+    observed_fields:
+      source.ip: 172.18.0.11
+      total: 30
+      distinct_ips: 1
+      distinct_users: 1
+    fields:
+      user.name: root
+      auth_method: password
+  l-004:
+    system: elastic
+    class: +event
+    template:
+    - host-trust-edges
+    - hostname-by-ip
+    - ip-to-host-search
+    observed_fields:
+      events: 65
+      data_stream.dataset: system.auth
+    fields:
+      host.name: db-1
+  l-006:
+    system: elastic
+    class: +event
+    template:
+    - sshd-accepted-events-detail
+    - sshd-accepted-events-detail-v2
+    - sshd-accepted-events-detail-v3
+    - sshd-accepted-events-detail-v4
+    - sshd-accepted-full-window
+    - sshd-accepted-post-alert
+    - sshd-accepted-post-alert-v2
+    - sshd-auth-summary-by-user
+    - sshd-events-timeline-detail
+    - sshd-failed-events-timeline
+    heterogeneous: true
+    observed_fields:
+      count: 4
+      accepted: 0
+      failed: 96
+      cnt: 8
+      earliest: '2026-07-25T07:49:30.000Z'
+      latest: '2026-07-25T08:02:33.000Z'
+      user.name: sre.ben
+      event.outcome: success
+    fields:
+      auth_method: password
+  l-005:
+    system: identity
+    class: '0'
+    template:
+    - list-all-users
+    - list-roles
+    - user-profile

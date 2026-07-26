@@ -294,6 +294,7 @@ scored clean survives.
 |---|---|
 | `C-INTENT-SCOPE` | answers the lead's dominant framing rather than the union of its envelope |
 | `C-HETERO-UNDER` | the lead's sub-queries disagree; the projection emits one sub-query's class |
+| `C-UNDER-PROJECT` | a weaker class than the envelope carries (`+noise` or `0` where it is `+event`), with no heterogeneity or intent-scope explanation |
 | `C-SUPPRESS-UNBASELINED` | `-noise` emitted where the envelope's control baseline is zero |
 | `C-FABRICATED-VALUE` | a volunteered concrete value the capture refutes, where a placeholder was mandated |
 | `C-OVER-PROJECT` | `+event` emitted where the envelope is `0` or `+noise` |

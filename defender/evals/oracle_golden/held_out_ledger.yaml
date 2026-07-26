@@ -11,4 +11,8 @@
 # readable by anything with repo access, and unlike the defender's held-out nets
 # there is no process boundary here to attach a guard to. Enforcement of THAT is
 # review, and `defender/docs/oracle-calibration.md` says so.
-entries: []
+entries:
+- case: case-009-bruteforce-baseline-id
+  tag: glm-5.2_effort-none_prompt-711
+  sha256: 6fcf8a9e50bb4a0132e5a855d835facf365eed58bd816ff8c74938edc3fb685d
+  recorded: '2026-07-26'

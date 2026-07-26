@@ -1,0 +1,153 @@
+{
+  "lead_id": "l-003",
+  "seq": 5,
+  "controls": [
+    {
+      "name": "C-7d",
+      "window": [
+        "2026-07-12T00:00:00.000Z",
+        "2026-07-19T09:30:00.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-12T00:00:00.000Z\" AND @timestamp < \"2026-07-19T09:30:00.000Z\"\n        AND host.name == \"db-1\"\n        AND event.outcome IS NOT NULL\n        AND process.name == \"sshd\"\n| STATS accepted = COUNT(*) WHERE event.outcome == \"success\",\n        failed = COUNT(*) WHERE event.outcome == \"failure\"\n        BY source.ip\n| SORT failed DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-12T00:00:00.000Z\" AND @timestamp < \"2026-07-19T09:30:00.000Z\"\n        AND host.name == \"db-1\"\n        AND event.outcome IS NOT NULL\n        AND process.name == \"sshd\"\n| STATS accepted = COUNT(*) WHERE event.outcome == \"success\",\n        failed = COUNT(*) WHERE event.outcome == \"failure\"\n        BY source.ip\n| SORT failed DESC",
+        "columns": [
+          {
+            "name": "accepted",
+            "type": "long"
+          },
+          {
+            "name": "failed",
+            "type": "long"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          }
+        ],
+        "row_count": 4,
+        "values": [
+          {
+            "accepted": 130,
+            "failed": 0,
+            "source.ip": "172.18.0.10"
+          },
+          {
+            "accepted": 90,
+            "failed": 0,
+            "source.ip": "172.18.0.14"
+          },
+          {
+            "accepted": 72,
+            "failed": 0,
+            "source.ip": "172.18.0.17"
+          },
+          {
+            "accepted": 45,
+            "failed": 0,
+            "source.ip": "172.18.0.3"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-05T00:00:00.000Z",
+        "2026-07-12T09:30:00.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-05T00:00:00.000Z\" AND @timestamp < \"2026-07-12T09:30:00.000Z\"\n        AND host.name == \"db-1\"\n        AND event.outcome IS NOT NULL\n        AND process.name == \"sshd\"\n| STATS accepted = COUNT(*) WHERE event.outcome == \"success\",\n        failed = COUNT(*) WHERE event.outcome == \"failure\"\n        BY source.ip\n| SORT failed DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-05T00:00:00.000Z\" AND @timestamp < \"2026-07-12T09:30:00.000Z\"\n        AND host.name == \"db-1\"\n        AND event.outcome IS NOT NULL\n        AND process.name == \"sshd\"\n| STATS accepted = COUNT(*) WHERE event.outcome == \"success\",\n        failed = COUNT(*) WHERE event.outcome == \"failure\"\n        BY source.ip\n| SORT failed DESC",
+        "columns": [
+          {
+            "name": "accepted",
+            "type": "long"
+          },
+          {
+            "name": "failed",
+            "type": "long"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          }
+        ],
+        "row_count": 2,
+        "values": [
+          {
+            "accepted": 882,
+            "failed": 0,
+            "source.ip": "172.18.0.17"
+          },
+          {
+            "accepted": 1836,
+            "failed": 0,
+            "source.ip": "172.18.0.14"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-06-28T00:00:00.000Z",
+        "2026-07-05T09:30:00.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-28T00:00:00.000Z\" AND @timestamp < \"2026-07-05T09:30:00.000Z\"\n        AND host.name == \"db-1\"\n        AND event.outcome IS NOT NULL\n        AND process.name == \"sshd\"\n| STATS accepted = COUNT(*) WHERE event.outcome == \"success\",\n        failed = COUNT(*) WHERE event.outcome == \"failure\"\n        BY source.ip\n| SORT failed DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-28T00:00:00.000Z\" AND @timestamp < \"2026-07-05T09:30:00.000Z\"\n        AND host.name == \"db-1\"\n        AND event.outcome IS NOT NULL\n        AND process.name == \"sshd\"\n| STATS accepted = COUNT(*) WHERE event.outcome == \"success\",\n        failed = COUNT(*) WHERE event.outcome == \"failure\"\n        BY source.ip\n| SORT failed DESC",
+        "columns": [
+          {
+            "name": "accepted",
+            "type": "long"
+          },
+          {
+            "name": "failed",
+            "type": "long"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          }
+        ],
+        "row_count": 6,
+        "values": [
+          {
+            "accepted": 0,
+            "failed": 72,
+            "source.ip": "172.18.0.13"
+          },
+          {
+            "accepted": 426,
+            "failed": 0,
+            "source.ip": "172.18.0.17"
+          },
+          {
+            "accepted": 1309,
+            "failed": 0,
+            "source.ip": "172.18.0.20"
+          },
+          {
+            "accepted": 728,
+            "failed": 0,
+            "source.ip": "172.18.0.21"
+          },
+          {
+            "accepted": 834,
+            "failed": 0,
+            "source.ip": "172.18.0.14"
+          },
+          {
+            "accepted": 24,
+            "failed": 0,
+            "source.ip": null
+          }
+        ]
+      }
+    }
+  ]
+}

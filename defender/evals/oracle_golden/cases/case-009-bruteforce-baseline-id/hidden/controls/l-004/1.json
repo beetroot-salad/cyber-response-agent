@@ -1,0 +1,202 @@
+{
+  "lead_id": "l-004",
+  "seq": 1,
+  "controls": [
+    {
+      "name": "C-7d",
+      "window": [
+        "2026-07-19T08:52:30.000Z",
+        "2026-07-19T09:52:30.000Z"
+      ],
+      "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-19T08:52:30.000Z\" AND @timestamp < \"2026-07-19T09:52:30.000Z\"\n        AND (source.ip == \"172.18.0.11\" OR client.ip == \"172.18.0.11\" OR host.ip == \"172.18.0.11\")\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY host.name, data_stream.dataset\n| SORT events DESC",
+      "live": false,
+      "payload": null
+    },
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T08:52:30.000Z",
+        "2026-07-12T09:52:30.000Z"
+      ],
+      "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-12T08:52:30.000Z\" AND @timestamp < \"2026-07-12T09:52:30.000Z\"\n        AND (source.ip == \"172.18.0.11\" OR client.ip == \"172.18.0.11\" OR host.ip == \"172.18.0.11\")\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY host.name, data_stream.dataset\n| SORT events DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-12T08:52:30.000Z\" AND @timestamp < \"2026-07-12T09:52:30.000Z\"\n        AND (source.ip == \"172.18.0.11\" OR client.ip == \"172.18.0.11\" OR host.ip == \"172.18.0.11\")\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY host.name, data_stream.dataset\n| SORT events DESC",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "data_stream.dataset",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 8,
+        "values": [
+          {
+            "events": 108,
+            "first_seen": "2026-07-12T08:52:53.310Z",
+            "last_seen": "2026-07-12T09:51:38.281Z",
+            "host.name": "jump-box-1",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 88,
+            "first_seen": "2026-07-12T08:54:28.093Z",
+            "last_seen": "2026-07-12T09:51:58.868Z",
+            "host.name": "dev-ws-1",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 57,
+            "first_seen": "2026-07-12T08:55:40.000Z",
+            "last_seen": "2026-07-12T09:50:37.000Z",
+            "host.name": "office-ws-1",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 42,
+            "first_seen": "2026-07-12T08:56:11.448Z",
+            "last_seen": "2026-07-12T09:50:13.546Z",
+            "host.name": "scanner-1",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-12T09:17:01.000Z",
+            "last_seen": "2026-07-12T09:17:01.000Z",
+            "host.name": "office-ws-1",
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-12T09:17:01.407Z",
+            "last_seen": "2026-07-12T09:17:01.407Z",
+            "host.name": "dev-ws-1",
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-12T09:17:01.152Z",
+            "last_seen": "2026-07-12T09:17:01.152Z",
+            "host.name": "scanner-1",
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-12T09:17:01.984Z",
+            "last_seen": "2026-07-12T09:17:01.984Z",
+            "host.name": "jump-box-1",
+            "data_stream.dataset": "system.syslog"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T08:52:30.000Z",
+        "2026-07-05T09:52:30.000Z"
+      ],
+      "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-05T08:52:30.000Z\" AND @timestamp < \"2026-07-05T09:52:30.000Z\"\n        AND (source.ip == \"172.18.0.11\" OR client.ip == \"172.18.0.11\" OR host.ip == \"172.18.0.11\")\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY host.name, data_stream.dataset\n| SORT events DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-05T08:52:30.000Z\" AND @timestamp < \"2026-07-05T09:52:30.000Z\"\n        AND (source.ip == \"172.18.0.11\" OR client.ip == \"172.18.0.11\" OR host.ip == \"172.18.0.11\")\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY host.name, data_stream.dataset\n| SORT events DESC",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "data_stream.dataset",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 8,
+        "values": [
+          {
+            "events": 86,
+            "first_seen": "2026-07-05T08:58:13.159Z",
+            "last_seen": "2026-07-05T09:51:39.538Z",
+            "host.name": "dev-ws-1",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 82,
+            "first_seen": "2026-07-05T08:53:26.272Z",
+            "last_seen": "2026-07-05T09:52:06.487Z",
+            "host.name": "jump-box-1",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 73,
+            "first_seen": "2026-07-05T08:53:54.000Z",
+            "last_seen": "2026-07-05T09:51:52.000Z",
+            "host.name": "office-ws-1",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 32,
+            "first_seen": "2026-07-05T08:52:44.036Z",
+            "last_seen": "2026-07-05T09:50:37.524Z",
+            "host.name": "scanner-1",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-05T09:17:01.000Z",
+            "last_seen": "2026-07-05T09:17:01.000Z",
+            "host.name": "office-ws-1",
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-05T09:17:01.850Z",
+            "last_seen": "2026-07-05T09:17:01.850Z",
+            "host.name": "dev-ws-1",
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-05T09:17:01.635Z",
+            "last_seen": "2026-07-05T09:17:01.635Z",
+            "host.name": "scanner-1",
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-05T09:17:01.424Z",
+            "last_seen": "2026-07-05T09:17:01.424Z",
+            "host.name": "jump-box-1",
+            "data_stream.dataset": "system.syslog"
+          }
+        ]
+      }
+    }
+  ]
+}

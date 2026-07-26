@@ -1,0 +1,136 @@
+{
+  "lead_id": "l-003",
+  "seq": 1,
+  "controls": [
+    {
+      "name": "C-7d",
+      "window": [
+        "2026-07-12T00:00:00.000Z",
+        "2026-07-19T09:30:00.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-12T00:00:00.000Z\" AND @timestamp < \"2026-07-19T09:30:00.000Z\"\n        AND host.name == \"db-1\"\n        AND event.outcome == \"failure\"\n        AND process.name == \"sshd\"\n| STATS failed = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY source.ip, user.name\n| SORT failed DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-12T00:00:00.000Z\" AND @timestamp < \"2026-07-19T09:30:00.000Z\"\n        AND host.name == \"db-1\"\n        AND event.outcome == \"failure\"\n        AND process.name == \"sshd\"\n| STATS failed = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY source.ip, user.name\n| SORT failed DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "failed",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    },
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-05T00:00:00.000Z",
+        "2026-07-12T09:30:00.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-05T00:00:00.000Z\" AND @timestamp < \"2026-07-12T09:30:00.000Z\"\n        AND host.name == \"db-1\"\n        AND event.outcome == \"failure\"\n        AND process.name == \"sshd\"\n| STATS failed = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY source.ip, user.name\n| SORT failed DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-05T00:00:00.000Z\" AND @timestamp < \"2026-07-12T09:30:00.000Z\"\n        AND host.name == \"db-1\"\n        AND event.outcome == \"failure\"\n        AND process.name == \"sshd\"\n| STATS failed = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY source.ip, user.name\n| SORT failed DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "failed",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-06-28T00:00:00.000Z",
+        "2026-07-05T09:30:00.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-28T00:00:00.000Z\" AND @timestamp < \"2026-07-05T09:30:00.000Z\"\n        AND host.name == \"db-1\"\n        AND event.outcome == \"failure\"\n        AND process.name == \"sshd\"\n| STATS failed = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY source.ip, user.name\n| SORT failed DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-28T00:00:00.000Z\" AND @timestamp < \"2026-07-05T09:30:00.000Z\"\n        AND host.name == \"db-1\"\n        AND event.outcome == \"failure\"\n        AND process.name == \"sshd\"\n| STATS failed = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY source.ip, user.name\n| SORT failed DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "failed",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 3,
+        "values": [
+          {
+            "failed": 24,
+            "first_seen": "2026-07-03T12:05:20.000Z",
+            "last_seen": "2026-07-03T12:05:55.000Z",
+            "source.ip": "172.18.0.13",
+            "user.name": "dev.dana"
+          },
+          {
+            "failed": 24,
+            "first_seen": "2026-07-03T12:05:20.000Z",
+            "last_seen": "2026-07-03T12:05:55.000Z",
+            "source.ip": "172.18.0.13",
+            "user.name": null
+          },
+          {
+            "failed": 24,
+            "first_seen": "2026-07-03T12:05:23.000Z",
+            "last_seen": "2026-07-03T12:05:57.000Z",
+            "source.ip": "172.18.0.13",
+            "user.name": " dev.dana"
+          }
+        ]
+      }
+    }
+  ]
+}

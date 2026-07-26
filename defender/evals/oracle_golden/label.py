@@ -353,9 +353,21 @@ def declared_state_class(manifest: dict, system: str) -> str:
     return declared if declared in {ZERO, PLUS_EVENT, PLUS_NOISE, MINUS_NOISE} else NEEDS_LABEL
 
 
+def query_system(query_id: str, fallback: str = "") -> str:
+    """The system a single query belongs to, from its `{system}.{template}` id."""
+    return query_id.split(".", 1)[0] if "." in query_id else fallback
+
+
 def label_lead(case_dir: Path, lead_id: str, queries: list[dict], system: str,
                manifest: dict | None = None) -> dict:
-    """Everything derivable for one lead: per-query classes, class, heterogeneous."""
+    """Everything derivable for one lead: per-query classes, class, heterogeneous.
+
+    `system` is the lead's HEADLINE system — what `score.py` stratifies by — but
+    each query is classified under **its own** system. A real captured lead mixes
+    them: case-009's `l-004` runs three cmdb lookups and one elastic search, and
+    deciding the whole lead by the state rule would discard the only sub-query
+    that can carry a delta.
+    """
     manifest = manifest or {}
     per_query = []
     for seq, q in enumerate(queries):
@@ -363,18 +375,20 @@ def label_lead(case_dir: Path, lead_id: str, queries: list[dict], system: str,
         payload_text = payload_path.read_text(encoding="utf-8") if payload_path.is_file() else ""
         params = q.get("params") or {}
         record = load_control_record(case_dir, lead_id, seq)
+        query_id = q.get("query_id", "")
         per_query.append({
             "seq": seq,
-            "query_id": q.get("query_id", ""),
+            "query_id": query_id,
             "class": query_class(
                 payload_text, record.get("controls") or None,
                 query=params.get("query", "") or "",
-                query_id=q.get("query_id", ""), system=system,
+                query_id=query_id, system=query_system(query_id, system),
                 attack_contribution=record.get("attack_contribution")),
         })
     classes = [row["class"] for row in per_query]
-    if system in STATE_SYSTEMS:
-        # No window comparison decides a state lookup; the case declares it.
+    if not [c for c in classes if c in _STRENGTH]:
+        # Nothing here was a window comparison — every query was a state lookup
+        # (or errored). The case declares the class; it is never defaulted.
         return {"lead_id": lead_id, "system": system,
                 "class": declared_state_class(manifest, system),
                 "heterogeneous": None, "per_query": per_query}

@@ -91,6 +91,12 @@ def main(argv: list[str] | None = None) -> int:
     for case_dir in sorted(d for d in ns.cases_dir.iterdir() if d.is_dir()):
         if not (case_dir / "hidden" / "observed").is_dir():
             continue          # derived case: labels are definitional, nothing measured
+        if not (case_dir / "expected.yaml").is_file():
+            # Generated but not yet labelled. There is no hand-derived label to
+            # audit against, which is the normal state between generate_case.py
+            # and write_expected.py.
+            print(f"(skipping {case_dir.name}: captured but not yet labelled)")
+            continue
         rows.extend(audit_case(case_dir))
 
     decided = [r for r in rows if not r["undecided"]]

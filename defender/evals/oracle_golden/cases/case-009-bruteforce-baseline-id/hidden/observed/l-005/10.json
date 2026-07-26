@@ -1,0 +1,1 @@
+{"username": "svc.backups", "email": "svc-backups@soc-playground.local", "first_name": "Backups", "last_name": "Service", "enabled": true, "realm_role": "service-account", "authorized_hosts": ["db-1"], "sudo_hosts": []}

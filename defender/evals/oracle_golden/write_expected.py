@@ -53,9 +53,20 @@ LABEL = _load("oracle_golden_label", GOLDEN_DIR / "label.py")
 #: Columns that describe the measurement rather than the activity. Committing a
 #: projection to these would be asking it to reproduce our aggregation, not the
 #: telemetry — and they are never stable across a control window anyway.
+#:
+#: `message` and the ephemeral port/id fields are here for a sharper reason: they
+#: are **not gradeable ground truth at all**. `score.py` treats a value as
+#: concrete unless it *starts* with `<`, so a correctly-placeholdered free-text
+#: value like `"Failed password for root from <office-ws-1-ip> port <source-port>
+#: ssh2"` grades `wrong` — and `wrong` gates a slice to `no-update`. A projection
+#: doing exactly what prompt.md mandates would be penalised for it. Case-009's
+#: first score showed one such false `wrong`; no field belongs in either set
+#: unless a projection could in principle match it.
 _NOT_GROUND_TRUTH = frozenset({
     "@timestamp", "first_seen", "last_seen", "first_in_minute", "last_in_minute",
     "minute", "event.ingested", "event.created",
+    "message", "source.port", "destination.port", "process.pid",
+    "zeek.session_id", "event.id", "agent.ephemeral_id",
 })
 
 
@@ -140,7 +151,13 @@ def build_expected(case_dir: Path) -> dict:
     classes: set[str] = set()
     for lead_id, lead in leads.items():
         queries = lead.get("queries", [])
-        system = (queries[0].get("query_id", "").split(".")[0] if queries else "unknown")
+        systems = [LABEL.query_system(q.get("query_id", "")) for q in queries]
+        # The headline system is the first that can carry a DELTA. A lead running
+        # three cmdb lookups and one elastic search belongs in the elastic slice,
+        # because elastic is where its class comes from; filing it under cmdb
+        # would put a `+event` into a slice that structurally cannot produce one.
+        telemetry = [s for s in systems if s and s not in LABEL.STATE_SYSTEMS]
+        system = (telemetry or systems or ["unknown"])[0] or "unknown"
         derived = LABEL.label_lead(case_dir, lead_id, queries, system, manifest)
         entry: dict = {"system": system, "class": derived["class"]}
         templates = sorted({q.get("query_id", "").split(".", 1)[-1] for q in queries})

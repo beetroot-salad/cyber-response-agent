@@ -1,0 +1,105 @@
+{
+  "lead_id": "l-001",
+  "seq": 11,
+  "controls": [
+    {
+      "name": "C-7d",
+      "window": [
+        "2026-07-19T08:52:52.000Z",
+        "2026-07-19T09:52:52.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-19T08:52:52.000Z\" AND @timestamp < \"2026-07-19T09:52:52.000Z\"\n  AND host.name == \"db-1\"\n  AND process.name == \"sshd\"\n  AND event.outcome == \"success\"\n| STATS total = COUNT(*),\n        distinct_ips = COUNT_DISTINCT(source.ip),\n        distinct_users = COUNT_DISTINCT(user.name),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY auth_method = CASE(message LIKE \"*publickey*\", \"publickey\",\n                              message LIKE \"*password*\",  \"password\", \"other\")",
+      "live": false,
+      "payload": null
+    },
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T08:52:52.000Z",
+        "2026-07-12T09:52:52.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-12T08:52:52.000Z\" AND @timestamp < \"2026-07-12T09:52:52.000Z\"\n  AND host.name == \"db-1\"\n  AND process.name == \"sshd\"\n  AND event.outcome == \"success\"\n| STATS total = COUNT(*),\n        distinct_ips = COUNT_DISTINCT(source.ip),\n        distinct_users = COUNT_DISTINCT(user.name),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY auth_method = CASE(message LIKE \"*publickey*\", \"publickey\",\n                              message LIKE \"*password*\",  \"password\", \"other\")",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-12T08:52:52.000Z\" AND @timestamp < \"2026-07-12T09:52:52.000Z\"\n  AND host.name == \"db-1\"\n  AND process.name == \"sshd\"\n  AND event.outcome == \"success\"\n| STATS total = COUNT(*),\n        distinct_ips = COUNT_DISTINCT(source.ip),\n        distinct_users = COUNT_DISTINCT(user.name),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY auth_method = CASE(message LIKE \"*publickey*\", \"publickey\",\n                              message LIKE \"*password*\",  \"password\", \"other\")",
+        "columns": [
+          {
+            "name": "total",
+            "type": "long"
+          },
+          {
+            "name": "distinct_ips",
+            "type": "long"
+          },
+          {
+            "name": "distinct_users",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "auth_method",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "total": 6,
+            "distinct_ips": 1,
+            "distinct_users": 1,
+            "first_seen": "2026-07-12T09:08:37.000Z",
+            "last_seen": "2026-07-12T09:08:37.000Z",
+            "auth_method": "password"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T08:52:52.000Z",
+        "2026-07-05T09:52:52.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-05T08:52:52.000Z\" AND @timestamp < \"2026-07-05T09:52:52.000Z\"\n  AND host.name == \"db-1\"\n  AND process.name == \"sshd\"\n  AND event.outcome == \"success\"\n| STATS total = COUNT(*),\n        distinct_ips = COUNT_DISTINCT(source.ip),\n        distinct_users = COUNT_DISTINCT(user.name),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY auth_method = CASE(message LIKE \"*publickey*\", \"publickey\",\n                              message LIKE \"*password*\",  \"password\", \"other\")",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-05T08:52:52.000Z\" AND @timestamp < \"2026-07-05T09:52:52.000Z\"\n  AND host.name == \"db-1\"\n  AND process.name == \"sshd\"\n  AND event.outcome == \"success\"\n| STATS total = COUNT(*),\n        distinct_ips = COUNT_DISTINCT(source.ip),\n        distinct_users = COUNT_DISTINCT(user.name),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY auth_method = CASE(message LIKE \"*publickey*\", \"publickey\",\n                              message LIKE \"*password*\",  \"password\", \"other\")",
+        "columns": [
+          {
+            "name": "total",
+            "type": "long"
+          },
+          {
+            "name": "distinct_ips",
+            "type": "long"
+          },
+          {
+            "name": "distinct_users",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "auth_method",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    }
+  ]
+}

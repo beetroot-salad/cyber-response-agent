@@ -1,0 +1,80 @@
+{
+  "lead_id": "l-006",
+  "seq": 5,
+  "controls": [
+    {
+      "name": "C-7d",
+      "window": [
+        "2026-07-18T07:00:00.000Z",
+        "2026-07-19T09:30:00.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-18T07:00:00.000Z\" AND @timestamp < \"2026-07-19T09:30:00.000Z\"\n        AND source.ip == \"172.18.0.11\"\n        AND host.name == \"db-1\"\n        AND event.outcome == \"failure\"\n| STATS count = COUNT(*) BY @timestamp, user.name, message\n| SORT @timestamp ASC\n| LIMIT 50",
+      "live": false,
+      "payload": null
+    },
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-11T07:00:00.000Z",
+        "2026-07-12T09:30:00.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-11T07:00:00.000Z\" AND @timestamp < \"2026-07-12T09:30:00.000Z\"\n        AND source.ip == \"172.18.0.11\"\n        AND host.name == \"db-1\"\n        AND event.outcome == \"failure\"\n| STATS count = COUNT(*) BY @timestamp, user.name, message\n| SORT @timestamp ASC\n| LIMIT 50",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-11T07:00:00.000Z\" AND @timestamp < \"2026-07-12T09:30:00.000Z\"\n        AND source.ip == \"172.18.0.11\"\n        AND host.name == \"db-1\"\n        AND event.outcome == \"failure\"\n| STATS count = COUNT(*) BY @timestamp, user.name, message\n| SORT @timestamp ASC\n| LIMIT 50",
+        "columns": [
+          {
+            "name": "count",
+            "type": "long"
+          },
+          {
+            "name": "@timestamp",
+            "type": "date"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          },
+          {
+            "name": "message",
+            "type": "text"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-04T07:00:00.000Z",
+        "2026-07-05T09:30:00.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-04T07:00:00.000Z\" AND @timestamp < \"2026-07-05T09:30:00.000Z\"\n        AND source.ip == \"172.18.0.11\"\n        AND host.name == \"db-1\"\n        AND event.outcome == \"failure\"\n| STATS count = COUNT(*) BY @timestamp, user.name, message\n| SORT @timestamp ASC\n| LIMIT 50",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-04T07:00:00.000Z\" AND @timestamp < \"2026-07-05T09:30:00.000Z\"\n        AND source.ip == \"172.18.0.11\"\n        AND host.name == \"db-1\"\n        AND event.outcome == \"failure\"\n| STATS count = COUNT(*) BY @timestamp, user.name, message\n| SORT @timestamp ASC\n| LIMIT 50",
+        "columns": [
+          {
+            "name": "count",
+            "type": "long"
+          },
+          {
+            "name": "@timestamp",
+            "type": "date"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          },
+          {
+            "name": "message",
+            "type": "text"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    }
+  ]
+}
