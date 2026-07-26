@@ -33,9 +33,11 @@ def test_dlq_quarantines_poison_findings_batch(tmp_repo, helpers, monkeypatch):
     """The findings curator (A → defender/lessons/) gets the SAME batch-granular dead-letter as
     the observation curators (spec: the ``curator_A -> dlq`` edge, findings.jsonl's NEW ``attempts``
     field): a poison findings batch that faults every tick quarantines to the ``deadletter.jsonl``
-    sidecar after ``LEARNING_AUTHOR_MAX_ATTEMPTS`` instead of retrying forever and wedging the
+    sidecar after ``config.author_max_attempts()`` tries instead of retrying forever and wedging the
     ``defender/lessons/`` queue."""
-    monkeypatch.setenv("LEARNING_AUTHOR_MAX_ATTEMPTS", "3")
+    # config.author_max_attempts() reads this key at call time, so the setenv now bites.
+    monkeypatch.setenv("LEARNING_AUTHOR_MAX_ATTEMPTS", "3")  # lint-stale-ref: ok — the ENV
+    # VAR outlives the retired module constant of the same name (#717).
     a = tmp_repo.author
     helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-P", "benign")
     helpers.write_finding(tmp_repo.paths.pending_file, finding_id="run-P/0", run_id="run-P")
