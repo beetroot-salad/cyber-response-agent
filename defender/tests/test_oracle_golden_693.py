@@ -366,19 +366,38 @@ def test_there_are_cases_to_check():
     assert CASE_DIRS
 
 
+#: `expected.yaml` stopped being a per-case requirement when the judge redesign landed
+#: (#711 §9). It held HAND labels, which were the scoring contract; the contract is now
+#: the judge's own measurement of the telemetry, and the surviving hand labels are the
+#: label pass's calibration set — carried by the four seed cases and nothing else. A
+#: recruited case has no hand labels by design, so requiring them of every case would
+#: force someone to invent the answers the suite exists to measure.
+CALIBRATION_FILE = "expected.yaml"
+
+
 @pytest.mark.parametrize("case_dir", CASE_DIRS, ids=lambda p: p.name)
 def test_every_case_has_the_files_the_readme_promises(case_dir):
-    for rel in ("manifest.yaml", "expected.yaml",
+    for rel in ("manifest.yaml", "environment.yaml",
                 "oracle_visible/story.md", "oracle_visible/leads.jsonl"):
         assert (case_dir / rel).is_file(), f"{case_dir.name} is missing {rel}"
+
+
+def test_the_calibration_set_still_exists_somewhere():
+    """`expected.yaml` is optional per case but must not vanish from the tree: it is
+    what `audit_judge.py` calibrates the label pass against, and a calibration set of
+    zero leads is not a calibration."""
+    labelled = [d for d in CASE_DIRS if (d / CALIBRATION_FILE).is_file()]
+    assert len(labelled) >= 4, f"only {len(labelled)} cases carry hand labels"
 
 
 @pytest.mark.parametrize("case_dir", CASE_DIRS, ids=lambda p: p.name)
 def test_manifest_and_expected_agree_on_the_case_identity(case_dir):
     manifest = yaml.safe_load((case_dir / "manifest.yaml").read_text(encoding="utf-8"))
-    expected = yaml.safe_load((case_dir / "expected.yaml").read_text(encoding="utf-8"))
     assert manifest["case_id"] == case_dir.name
-    assert expected["case_id"] == case_dir.name
+    if not (case_dir / CALIBRATION_FILE).is_file():
+        pytest.skip("no hand labels — a recruited case is measured, not labelled")
+    expected = yaml.safe_load((case_dir / CALIBRATION_FILE).read_text(encoding="utf-8"))
+    assert expected["case_id"] == case_dir.name, "a copied labels file would score the wrong case"
     assert manifest["kind"] == expected["kind"]
 
 
@@ -393,7 +412,9 @@ def test_an_observed_case_carries_the_hidden_ground_truth_it_was_labelled_from(c
 
 @pytest.mark.parametrize("case_dir", CASE_DIRS, ids=lambda p: p.name)
 def test_every_labelled_lead_has_an_oracle_visible_envelope(case_dir):
-    expected = yaml.safe_load((case_dir / "expected.yaml").read_text(encoding="utf-8"))
+    if not (case_dir / CALIBRATION_FILE).is_file():
+        pytest.skip("no hand labels — a recruited case is measured, not labelled")
+    expected = yaml.safe_load((case_dir / CALIBRATION_FILE).read_text(encoding="utf-8"))
     rows = [json.loads(x) for x
             in (case_dir / "oracle_visible" / "leads.jsonl").read_text(encoding="utf-8").splitlines()
             if x.strip()]

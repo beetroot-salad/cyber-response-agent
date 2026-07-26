@@ -60,7 +60,9 @@ UNRELATED_TREES = (
     # the runner's own tree; these are the same vocabulary read from inside
     # defender/, including the corpus of runner records the renderer is swept over.
     "defender/evals/oracle_golden/story_from_run.py",
+    "defender/evals/oracle_golden/generate_case.py",
     "defender/tests/evals/test_story_from_run.py",
+    "defender/tests/evals/test_generate_case.py",
     "defender/tests/evals/_run_records/",
     "defender/docs/oracle-calibration.md",
 )

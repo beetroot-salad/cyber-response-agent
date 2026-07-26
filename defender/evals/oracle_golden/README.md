@@ -25,11 +25,22 @@ cases/<case-id>/
     samples/<lead>.txt     #   the redacted sample skeleton the production oracle sees
   hidden/                  # ← the scoring target; never an oracle input. OBSERVED CASES ONLY
     observed/<lead>/<seq>.json   #   full observed query payloads (ground truth)
-    controls.yaml          #   shape-matched control-window baseline (see below)
-  expected.yaml            # authoritative labels: per-lead 4-way class + key fields
+    controls/<lead>/<seq>.json   #   per-query baseline: the SAME query, bounds moved
+    controls.yaml          #   provenance of that measurement (see below)
+  environment.yaml         # facts that change how a cross-window difference reads —
+                           #   an input to BOTH judge passes, not documentation
+  expected.yaml            # OPTIONAL. Hand labels, kept only by the four seed cases;
+                           #   the label pass's calibration set, not a scoring contract
   projections/<tag>.yaml   # oracle output for a given model/prompt (tag = <model>_effort-<e>)
   scores/<tag>.json        # scored dimensions for that projection
 ```
+
+`expected.yaml` is optional per case and that is the redesign, not an omission. It used
+to hold the authoritative per-lead class, which made it the scoring contract — and every
+defect the pilot campaign found was that contract being wrong. Ground truth is now the
+telemetry itself: the judge's label pass measures what an envelope did, and the surviving
+hand labels are what that pass is *calibrated against* (`audit_judge.py`). A recruited
+case carries none, because inventing the answers is the thing the suite exists to avoid.
 
 Two details the layout does not show:
 
