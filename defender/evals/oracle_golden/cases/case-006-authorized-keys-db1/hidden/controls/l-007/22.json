@@ -1,0 +1,213 @@
+{
+  "lead_id": "l-007",
+  "seq": 22,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T18:35:57.000Z",
+        "2026-07-12T19:35:57.000Z"
+      ],
+      "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-12T18:35:57.000Z\" AND @timestamp < \"2026-07-12T19:35:57.000Z\"\n        AND host.name == \"db-1\"\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY dataset = data_stream.dataset\n| SORT events DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-12T18:35:57.000Z\" AND @timestamp < \"2026-07-12T19:35:57.000Z\"\n        AND host.name == \"db-1\"\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY dataset = data_stream.dataset\n| SORT events DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "dataset",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 6,
+        "values": [
+          {
+            "events": 20160,
+            "first_seen": "2026-07-12T18:35:57.160Z",
+            "last_seen": "2026-07-12T19:35:47.159Z",
+            "dataset": "postgresql.log"
+          },
+          {
+            "events": 1800,
+            "first_seen": "2026-07-12T18:35:57.160Z",
+            "last_seen": "2026-07-12T19:35:54.070Z",
+            "dataset": "elastic_agent.metricbeat"
+          },
+          {
+            "events": 672,
+            "first_seen": "2026-07-12T18:39:40.000Z",
+            "last_seen": "2026-07-12T19:34:52.000Z",
+            "dataset": "system.auth"
+          },
+          {
+            "events": 14,
+            "first_seen": "2026-07-12T18:38:14.472Z",
+            "last_seen": "2026-07-12T19:32:32.003Z",
+            "dataset": "elastic_agent"
+          },
+          {
+            "events": 7,
+            "first_seen": "2026-07-12T19:17:01.000Z",
+            "last_seen": "2026-07-12T19:17:01.000Z",
+            "dataset": "system.syslog"
+          },
+          {
+            "events": 6,
+            "first_seen": "2026-07-12T18:57:25.932Z",
+            "last_seen": "2026-07-12T19:25:36.098Z",
+            "dataset": "elastic_agent.filebeat"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T18:35:57.000Z",
+        "2026-07-05T19:35:57.000Z"
+      ],
+      "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-05T18:35:57.000Z\" AND @timestamp < \"2026-07-05T19:35:57.000Z\"\n        AND host.name == \"db-1\"\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY dataset = data_stream.dataset\n| SORT events DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-05T18:35:57.000Z\" AND @timestamp < \"2026-07-05T19:35:57.000Z\"\n        AND host.name == \"db-1\"\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY dataset = data_stream.dataset\n| SORT events DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "dataset",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 6,
+        "values": [
+          {
+            "events": 20160,
+            "first_seen": "2026-07-05T18:35:57.159Z",
+            "last_seen": "2026-07-05T19:35:47.160Z",
+            "dataset": "postgresql.log"
+          },
+          {
+            "events": 1800,
+            "first_seen": "2026-07-05T18:35:57.159Z",
+            "last_seen": "2026-07-05T19:35:54.069Z",
+            "dataset": "elastic_agent.metricbeat"
+          },
+          {
+            "events": 840,
+            "first_seen": "2026-07-05T18:36:17.000Z",
+            "last_seen": "2026-07-05T19:32:03.000Z",
+            "dataset": "system.auth"
+          },
+          {
+            "events": 14,
+            "first_seen": "2026-07-05T18:39:13.007Z",
+            "last_seen": "2026-07-05T19:30:46.586Z",
+            "dataset": "elastic_agent"
+          },
+          {
+            "events": 7,
+            "first_seen": "2026-07-05T19:17:01.000Z",
+            "last_seen": "2026-07-05T19:17:01.000Z",
+            "dataset": "system.syslog"
+          },
+          {
+            "events": 2,
+            "first_seen": "2026-07-05T19:17:03.740Z",
+            "last_seen": "2026-07-05T19:22:08.759Z",
+            "dataset": "elastic_agent.filebeat"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-28T18:35:57.000Z",
+        "2026-06-28T19:35:57.000Z"
+      ],
+      "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-06-28T18:35:57.000Z\" AND @timestamp < \"2026-06-28T19:35:57.000Z\"\n        AND host.name == \"db-1\"\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY dataset = data_stream.dataset\n| SORT events DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-06-28T18:35:57.000Z\" AND @timestamp < \"2026-06-28T19:35:57.000Z\"\n        AND host.name == \"db-1\"\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY dataset = data_stream.dataset\n| SORT events DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "dataset",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 6,
+        "values": [
+          {
+            "events": 23040,
+            "first_seen": "2026-06-28T18:36:03.765Z",
+            "last_seen": "2026-06-28T19:35:53.771Z",
+            "dataset": "postgresql.log"
+          },
+          {
+            "events": 1800,
+            "first_seen": "2026-06-28T18:36:01.161Z",
+            "last_seen": "2026-06-28T19:35:53.771Z",
+            "dataset": "elastic_agent.metricbeat"
+          },
+          {
+            "events": 864,
+            "first_seen": "2026-06-28T18:37:41.000Z",
+            "last_seen": "2026-06-28T19:35:22.000Z",
+            "dataset": "system.auth"
+          },
+          {
+            "events": 10,
+            "first_seen": "2026-06-28T18:44:45.299Z",
+            "last_seen": "2026-06-28T19:25:33.084Z",
+            "dataset": "elastic_agent"
+          },
+          {
+            "events": 8,
+            "first_seen": "2026-06-28T19:17:01.000Z",
+            "last_seen": "2026-06-28T19:17:01.000Z",
+            "dataset": "system.syslog"
+          },
+          {
+            "events": 2,
+            "first_seen": "2026-06-28T19:17:07.373Z",
+            "last_seen": "2026-06-28T19:22:12.394Z",
+            "dataset": "elastic_agent.filebeat"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,100 @@
+{
+  "lead_id": "l-001",
+  "seq": 18,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T18:35:55.500Z",
+        "2026-07-12T19:35:55.500Z"
+      ],
+      "query": "FROM .internal.alerts-security.alerts-default-*\n| WHERE @timestamp >= \"2026-07-12T18:35:55.500Z\" AND @timestamp < \"2026-07-12T19:35:55.500Z\"\n| WHERE host.name == \"db-1\"\n| STATS events = COUNT(*)\n        BY kibana.alert.rule.name\n| SORT events DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM .internal.alerts-security.alerts-default-*\n| WHERE @timestamp >= \"2026-07-12T18:35:55.500Z\" AND @timestamp < \"2026-07-12T19:35:55.500Z\"\n| WHERE host.name == \"db-1\"\n| STATS events = COUNT(*)\n        BY kibana.alert.rule.name\n| SORT events DESC",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "kibana.alert.rule.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T18:35:55.500Z",
+        "2026-07-05T19:35:55.500Z"
+      ],
+      "query": "FROM .internal.alerts-security.alerts-default-*\n| WHERE @timestamp >= \"2026-07-05T18:35:55.500Z\" AND @timestamp < \"2026-07-05T19:35:55.500Z\"\n| WHERE host.name == \"db-1\"\n| STATS events = COUNT(*)\n        BY kibana.alert.rule.name\n| SORT events DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM .internal.alerts-security.alerts-default-*\n| WHERE @timestamp >= \"2026-07-05T18:35:55.500Z\" AND @timestamp < \"2026-07-05T19:35:55.500Z\"\n| WHERE host.name == \"db-1\"\n| STATS events = COUNT(*)\n        BY kibana.alert.rule.name\n| SORT events DESC",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "kibana.alert.rule.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-28T18:35:55.500Z",
+        "2026-06-28T19:35:55.500Z"
+      ],
+      "query": "FROM .internal.alerts-security.alerts-default-*\n| WHERE @timestamp >= \"2026-06-28T18:35:55.500Z\" AND @timestamp < \"2026-06-28T19:35:55.500Z\"\n| WHERE host.name == \"db-1\"\n| STATS events = COUNT(*)\n        BY kibana.alert.rule.name\n| SORT events DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM .internal.alerts-security.alerts-default-*\n| WHERE @timestamp >= \"2026-06-28T18:35:55.500Z\" AND @timestamp < \"2026-06-28T19:35:55.500Z\"\n| WHERE host.name == \"db-1\"\n| STATS events = COUNT(*)\n        BY kibana.alert.rule.name\n| SORT events DESC",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "kibana.alert.rule.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    }
+  ],
+  "attack_contribution": {
+    "window": [
+      "2026-07-26T19:05:54.000Z",
+      "2026-07-26T19:05:57.000Z"
+    ],
+    "query": "FROM .internal.alerts-security.alerts-default-*\n| WHERE @timestamp >= \"2026-07-26T19:05:54.000Z\" AND @timestamp < \"2026-07-26T19:05:57.000Z\"\n| WHERE host.name == \"db-1\"\n| STATS events = COUNT(*)\n        BY kibana.alert.rule.name\n| SORT events DESC",
+    "payload": {
+      "query": "FROM .internal.alerts-security.alerts-default-*\n| WHERE @timestamp >= \"2026-07-26T19:05:54.000Z\" AND @timestamp < \"2026-07-26T19:05:57.000Z\"\n| WHERE host.name == \"db-1\"\n| STATS events = COUNT(*)\n        BY kibana.alert.rule.name\n| SORT events DESC",
+      "columns": [
+        {
+          "name": "events",
+          "type": "long"
+        },
+        {
+          "name": "kibana.alert.rule.name",
+          "type": "keyword"
+        }
+      ],
+      "row_count": 0,
+      "values": []
+    }
+  }
+}

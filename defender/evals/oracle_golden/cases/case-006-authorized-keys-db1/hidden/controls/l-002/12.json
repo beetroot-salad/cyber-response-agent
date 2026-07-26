@@ -1,0 +1,645 @@
+{
+  "lead_id": "l-002",
+  "seq": 12,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T18:35:57.000Z",
+        "2026-07-12T19:35:57.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-12T18:35:57.000Z\" AND @timestamp < \"2026-07-12T19:35:57.000Z\"\n        AND host.name == \"db-1\"\n        AND process.name == \"sshd\"\n| STATS total = COUNT(*),\n        earliest = MIN(@timestamp),\n        latest = MAX(@timestamp)\n        BY message\n| SORT total DESC\n| LIMIT 30",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-12T18:35:57.000Z\" AND @timestamp < \"2026-07-12T19:35:57.000Z\"\n        AND host.name == \"db-1\"\n        AND process.name == \"sshd\"\n| STATS total = COUNT(*),\n        earliest = MIN(@timestamp),\n        latest = MAX(@timestamp)\n        BY message\n| SORT total DESC\n| LIMIT 30",
+        "columns": [
+          {
+            "name": "total",
+            "type": "long"
+          },
+          {
+            "name": "earliest",
+            "type": "date"
+          },
+          {
+            "name": "latest",
+            "type": "date"
+          },
+          {
+            "name": "message",
+            "type": "text"
+          }
+        ],
+        "row_count": 30,
+        "values": [
+          {
+            "total": 252,
+            "earliest": "2026-07-12T18:39:40.000Z",
+            "latest": "2026-07-12T19:34:52.000Z",
+            "message": "error: kex_exchange_identification: Connection closed by remote host"
+          },
+          {
+            "total": 7,
+            "earliest": "2026-07-12T19:34:14.000Z",
+            "latest": "2026-07-12T19:34:14.000Z",
+            "message": "Connection closed by 172.18.0.6 port 49662"
+          },
+          {
+            "total": 7,
+            "earliest": "2026-07-12T19:11:02.000Z",
+            "latest": "2026-07-12T19:11:02.000Z",
+            "message": "Connection closed by 172.18.0.8 port 43878"
+          },
+          {
+            "total": 7,
+            "earliest": "2026-07-12T19:31:35.000Z",
+            "latest": "2026-07-12T19:31:35.000Z",
+            "message": "Connection closed by 172.18.0.14 port 45270"
+          },
+          {
+            "total": 7,
+            "earliest": "2026-07-12T19:29:56.000Z",
+            "latest": "2026-07-12T19:29:56.000Z",
+            "message": "Connection closed by 127.0.0.1 port 35786"
+          },
+          {
+            "total": 7,
+            "earliest": "2026-07-12T19:27:48.000Z",
+            "latest": "2026-07-12T19:27:48.000Z",
+            "message": "Connection closed by 172.18.0.8 port 37192"
+          },
+          {
+            "total": 7,
+            "earliest": "2026-07-12T19:26:28.000Z",
+            "latest": "2026-07-12T19:26:28.000Z",
+            "message": "Connection closed by 172.18.0.8 port 55864"
+          },
+          {
+            "total": 7,
+            "earliest": "2026-07-12T19:26:16.000Z",
+            "latest": "2026-07-12T19:26:16.000Z",
+            "message": "Connection closed by 172.18.0.6 port 40228"
+          },
+          {
+            "total": 7,
+            "earliest": "2026-07-12T19:25:33.000Z",
+            "latest": "2026-07-12T19:25:33.000Z",
+            "message": "Connection closed by 172.18.0.6 port 50124"
+          },
+          {
+            "total": 7,
+            "earliest": "2026-07-12T19:19:48.000Z",
+            "latest": "2026-07-12T19:19:48.000Z",
+            "message": "Connection closed by 172.18.0.6 port 38974"
+          },
+          {
+            "total": 7,
+            "earliest": "2026-07-12T19:13:08.000Z",
+            "latest": "2026-07-12T19:13:08.000Z",
+            "message": "Connection closed by 127.0.0.1 port 44182"
+          },
+          {
+            "total": 7,
+            "earliest": "2026-07-12T19:11:56.000Z",
+            "latest": "2026-07-12T19:11:56.000Z",
+            "message": "Connection closed by 172.18.0.8 port 50590"
+          },
+          {
+            "total": 7,
+            "earliest": "2026-07-12T19:11:46.000Z",
+            "latest": "2026-07-12T19:11:46.000Z",
+            "message": "Connection closed by 172.18.0.6 port 44942"
+          },
+          {
+            "total": 7,
+            "earliest": "2026-07-12T19:11:12.000Z",
+            "latest": "2026-07-12T19:11:12.000Z",
+            "message": "Connection closed by 172.18.0.8 port 46982"
+          },
+          {
+            "total": 7,
+            "earliest": "2026-07-12T19:33:21.000Z",
+            "latest": "2026-07-12T19:33:21.000Z",
+            "message": "Connection closed by 127.0.0.1 port 36806"
+          },
+          {
+            "total": 7,
+            "earliest": "2026-07-12T19:10:03.000Z",
+            "latest": "2026-07-12T19:10:03.000Z",
+            "message": "Connection closed by 172.18.0.22 port 45236"
+          },
+          {
+            "total": 7,
+            "earliest": "2026-07-12T19:10:02.000Z",
+            "latest": "2026-07-12T19:10:02.000Z",
+            "message": "Connection closed by 172.18.0.17 port 45764"
+          },
+          {
+            "total": 7,
+            "earliest": "2026-07-12T19:09:49.000Z",
+            "latest": "2026-07-12T19:09:49.000Z",
+            "message": "Connection closed by 172.18.0.6 port 57372"
+          },
+          {
+            "total": 7,
+            "earliest": "2026-07-12T19:07:23.000Z",
+            "latest": "2026-07-12T19:07:23.000Z",
+            "message": "Connection closed by 172.18.0.6 port 36378"
+          },
+          {
+            "total": 7,
+            "earliest": "2026-07-12T19:06:53.000Z",
+            "latest": "2026-07-12T19:06:53.000Z",
+            "message": "Connection closed by 172.18.0.8 port 58364"
+          },
+          {
+            "total": 7,
+            "earliest": "2026-07-12T19:06:35.000Z",
+            "latest": "2026-07-12T19:06:35.000Z",
+            "message": "Connection closed by 127.0.0.1 port 58720"
+          },
+          {
+            "total": 7,
+            "earliest": "2026-07-12T19:04:57.000Z",
+            "latest": "2026-07-12T19:04:57.000Z",
+            "message": "Connection closed by 127.0.0.1 port 60660"
+          },
+          {
+            "total": 7,
+            "earliest": "2026-07-12T19:04:25.000Z",
+            "latest": "2026-07-12T19:04:25.000Z",
+            "message": "Connection closed by 172.18.0.6 port 45758"
+          },
+          {
+            "total": 7,
+            "earliest": "2026-07-12T19:02:13.000Z",
+            "latest": "2026-07-12T19:02:13.000Z",
+            "message": "Connection closed by 127.0.0.1 port 51236"
+          },
+          {
+            "total": 7,
+            "earliest": "2026-07-12T19:00:43.000Z",
+            "latest": "2026-07-12T19:00:43.000Z",
+            "message": "Connection closed by 172.18.0.8 port 55822"
+          },
+          {
+            "total": 7,
+            "earliest": "2026-07-12T18:59:46.000Z",
+            "latest": "2026-07-12T18:59:46.000Z",
+            "message": "Connection closed by 127.0.0.1 port 50466"
+          },
+          {
+            "total": 7,
+            "earliest": "2026-07-12T18:59:24.000Z",
+            "latest": "2026-07-12T18:59:24.000Z",
+            "message": "Connection closed by 172.18.0.14 port 32898"
+          },
+          {
+            "total": 7,
+            "earliest": "2026-07-12T18:58:22.000Z",
+            "latest": "2026-07-12T18:58:22.000Z",
+            "message": "Connection closed by 172.18.0.8 port 57754"
+          },
+          {
+            "total": 7,
+            "earliest": "2026-07-12T18:52:19.000Z",
+            "latest": "2026-07-12T18:52:19.000Z",
+            "message": "Connection closed by 172.18.0.22 port 43418"
+          },
+          {
+            "total": 7,
+            "earliest": "2026-07-12T19:34:52.000Z",
+            "latest": "2026-07-12T19:34:52.000Z",
+            "message": "Connection closed by 127.0.0.1 port 52496"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T18:35:57.000Z",
+        "2026-07-05T19:35:57.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-05T18:35:57.000Z\" AND @timestamp < \"2026-07-05T19:35:57.000Z\"\n        AND host.name == \"db-1\"\n        AND process.name == \"sshd\"\n| STATS total = COUNT(*),\n        earliest = MIN(@timestamp),\n        latest = MAX(@timestamp)\n        BY message\n| SORT total DESC\n| LIMIT 30",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-05T18:35:57.000Z\" AND @timestamp < \"2026-07-05T19:35:57.000Z\"\n        AND host.name == \"db-1\"\n        AND process.name == \"sshd\"\n| STATS total = COUNT(*),\n        earliest = MIN(@timestamp),\n        latest = MAX(@timestamp)\n        BY message\n| SORT total DESC\n| LIMIT 30",
+        "columns": [
+          {
+            "name": "total",
+            "type": "long"
+          },
+          {
+            "name": "earliest",
+            "type": "date"
+          },
+          {
+            "name": "latest",
+            "type": "date"
+          },
+          {
+            "name": "message",
+            "type": "text"
+          }
+        ],
+        "row_count": 30,
+        "values": [
+          {
+            "total": 329,
+            "earliest": "2026-07-05T18:36:17.000Z",
+            "latest": "2026-07-05T19:32:03.000Z",
+            "message": "error: kex_exchange_identification: Connection closed by remote host"
+          },
+          {
+            "total": 7,
+            "earliest": "2026-07-05T19:31:54.000Z",
+            "latest": "2026-07-05T19:31:54.000Z",
+            "message": "Connection closed by 127.0.0.1 port 50968"
+          },
+          {
+            "total": 7,
+            "earliest": "2026-07-05T19:20:27.000Z",
+            "latest": "2026-07-05T19:20:27.000Z",
+            "message": "Connection closed by 172.18.0.8 port 35256"
+          },
+          {
+            "total": 7,
+            "earliest": "2026-07-05T19:28:52.000Z",
+            "latest": "2026-07-05T19:28:52.000Z",
+            "message": "Connection closed by 172.18.0.22 port 36912"
+          },
+          {
+            "total": 7,
+            "earliest": "2026-07-05T19:28:14.000Z",
+            "latest": "2026-07-05T19:28:14.000Z",
+            "message": "Connection closed by 172.18.0.6 port 37450"
+          },
+          {
+            "total": 7,
+            "earliest": "2026-07-05T19:26:52.000Z",
+            "latest": "2026-07-05T19:26:52.000Z",
+            "message": "Connection closed by 172.18.0.6 port 38120"
+          },
+          {
+            "total": 7,
+            "earliest": "2026-07-05T19:26:38.000Z",
+            "latest": "2026-07-05T19:26:38.000Z",
+            "message": "Connection closed by 172.18.0.8 port 36708"
+          },
+          {
+            "total": 7,
+            "earliest": "2026-07-05T19:25:36.000Z",
+            "latest": "2026-07-05T19:25:36.000Z",
+            "message": "Connection closed by 127.0.0.1 port 48400"
+          },
+          {
+            "total": 7,
+            "earliest": "2026-07-05T19:24:16.000Z",
+            "latest": "2026-07-05T19:24:16.000Z",
+            "message": "Connection closed by 172.18.0.8 port 41158"
+          },
+          {
+            "total": 7,
+            "earliest": "2026-07-05T19:23:59.000Z",
+            "latest": "2026-07-05T19:23:59.000Z",
+            "message": "Connection closed by 127.0.0.1 port 60210"
+          },
+          {
+            "total": 7,
+            "earliest": "2026-07-05T19:23:56.000Z",
+            "latest": "2026-07-05T19:23:56.000Z",
+            "message": "Connection closed by 172.18.0.14 port 50586"
+          },
+          {
+            "total": 7,
+            "earliest": "2026-07-05T19:22:36.000Z",
+            "latest": "2026-07-05T19:22:36.000Z",
+            "message": "Connection closed by 172.18.0.8 port 50204"
+          },
+          {
+            "total": 7,
+            "earliest": "2026-07-05T19:21:33.000Z",
+            "latest": "2026-07-05T19:21:33.000Z",
+            "message": "Connection closed by 172.18.0.8 port 50856"
+          },
+          {
+            "total": 7,
+            "earliest": "2026-07-05T19:21:16.000Z",
+            "latest": "2026-07-05T19:21:16.000Z",
+            "message": "Connection closed by 172.18.0.14 port 57382"
+          },
+          {
+            "total": 7,
+            "earliest": "2026-07-05T19:29:07.000Z",
+            "latest": "2026-07-05T19:29:07.000Z",
+            "message": "Connection closed by 172.18.0.14 port 46154"
+          },
+          {
+            "total": 7,
+            "earliest": "2026-07-05T19:18:18.000Z",
+            "latest": "2026-07-05T19:18:18.000Z",
+            "message": "Connection closed by 172.18.0.8 port 55462"
+          },
+          {
+            "total": 7,
+            "earliest": "2026-07-05T19:16:10.000Z",
+            "latest": "2026-07-05T19:16:10.000Z",
+            "message": "Connection closed by 172.18.0.6 port 34644"
+          },
+          {
+            "total": 7,
+            "earliest": "2026-07-05T19:15:25.000Z",
+            "latest": "2026-07-05T19:15:25.000Z",
+            "message": "Connection closed by 172.18.0.8 port 55208"
+          },
+          {
+            "total": 7,
+            "earliest": "2026-07-05T19:12:02.000Z",
+            "latest": "2026-07-05T19:12:02.000Z",
+            "message": "Connection closed by 127.0.0.1 port 43500"
+          },
+          {
+            "total": 7,
+            "earliest": "2026-07-05T19:08:56.000Z",
+            "latest": "2026-07-05T19:08:56.000Z",
+            "message": "Connection closed by 127.0.0.1 port 45954"
+          },
+          {
+            "total": 7,
+            "earliest": "2026-07-05T19:08:40.000Z",
+            "latest": "2026-07-05T19:08:40.000Z",
+            "message": "Connection closed by 172.18.0.6 port 34446"
+          },
+          {
+            "total": 7,
+            "earliest": "2026-07-05T19:08:38.000Z",
+            "latest": "2026-07-05T19:08:38.000Z",
+            "message": "Connection closed by 127.0.0.1 port 53992"
+          },
+          {
+            "total": 7,
+            "earliest": "2026-07-05T19:07:40.000Z",
+            "latest": "2026-07-05T19:07:40.000Z",
+            "message": "Connection closed by 172.18.0.8 port 40736"
+          },
+          {
+            "total": 7,
+            "earliest": "2026-07-05T19:05:27.000Z",
+            "latest": "2026-07-05T19:05:27.000Z",
+            "message": "Connection closed by 172.18.0.8 port 49400"
+          },
+          {
+            "total": 7,
+            "earliest": "2026-07-05T19:04:46.000Z",
+            "latest": "2026-07-05T19:04:46.000Z",
+            "message": "Connection closed by 172.18.0.22 port 53306"
+          },
+          {
+            "total": 7,
+            "earliest": "2026-07-05T19:03:21.000Z",
+            "latest": "2026-07-05T19:03:21.000Z",
+            "message": "Connection closed by 172.18.0.8 port 47580"
+          },
+          {
+            "total": 7,
+            "earliest": "2026-07-05T19:03:01.000Z",
+            "latest": "2026-07-05T19:03:01.000Z",
+            "message": "Connection closed by 172.18.0.6 port 58804"
+          },
+          {
+            "total": 7,
+            "earliest": "2026-07-05T19:01:21.000Z",
+            "latest": "2026-07-05T19:01:21.000Z",
+            "message": "Connection closed by 172.18.0.17 port 45774"
+          },
+          {
+            "total": 7,
+            "earliest": "2026-07-05T19:00:05.000Z",
+            "latest": "2026-07-05T19:00:05.000Z",
+            "message": "Connection closed by 172.18.0.8 port 53008"
+          },
+          {
+            "total": 7,
+            "earliest": "2026-07-05T19:32:03.000Z",
+            "latest": "2026-07-05T19:32:03.000Z",
+            "message": "Connection closed by 172.18.0.6 port 32932"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-28T18:35:57.000Z",
+        "2026-06-28T19:35:57.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-28T18:35:57.000Z\" AND @timestamp < \"2026-06-28T19:35:57.000Z\"\n        AND host.name == \"db-1\"\n        AND process.name == \"sshd\"\n| STATS total = COUNT(*),\n        earliest = MIN(@timestamp),\n        latest = MAX(@timestamp)\n        BY message\n| SORT total DESC\n| LIMIT 30",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-28T18:35:57.000Z\" AND @timestamp < \"2026-06-28T19:35:57.000Z\"\n        AND host.name == \"db-1\"\n        AND process.name == \"sshd\"\n| STATS total = COUNT(*),\n        earliest = MIN(@timestamp),\n        latest = MAX(@timestamp)\n        BY message\n| SORT total DESC\n| LIMIT 30",
+        "columns": [
+          {
+            "name": "total",
+            "type": "long"
+          },
+          {
+            "name": "earliest",
+            "type": "date"
+          },
+          {
+            "name": "latest",
+            "type": "date"
+          },
+          {
+            "name": "message",
+            "type": "text"
+          }
+        ],
+        "row_count": 30,
+        "values": [
+          {
+            "total": 296,
+            "earliest": "2026-06-28T18:37:41.000Z",
+            "latest": "2026-06-28T19:35:22.000Z",
+            "message": "error: kex_exchange_identification: Connection closed by remote host"
+          },
+          {
+            "total": 8,
+            "earliest": "2026-06-28T19:32:46.000Z",
+            "latest": "2026-06-28T19:32:46.000Z",
+            "message": "Connection closed by 172.18.0.10 port 38094"
+          },
+          {
+            "total": 8,
+            "earliest": "2026-06-28T19:12:57.000Z",
+            "latest": "2026-06-28T19:12:57.000Z",
+            "message": "Connection closed by 172.18.0.19 port 59298"
+          },
+          {
+            "total": 8,
+            "earliest": "2026-06-28T19:28:52.000Z",
+            "latest": "2026-06-28T19:28:52.000Z",
+            "message": "Connection closed by 127.0.0.1 port 33954"
+          },
+          {
+            "total": 8,
+            "earliest": "2026-06-28T19:28:22.000Z",
+            "latest": "2026-06-28T19:28:22.000Z",
+            "message": "Connection closed by 172.18.0.21 port 52316"
+          },
+          {
+            "total": 8,
+            "earliest": "2026-06-28T19:27:55.000Z",
+            "latest": "2026-06-28T19:27:55.000Z",
+            "message": "Connection closed by 172.18.0.10 port 52444"
+          },
+          {
+            "total": 8,
+            "earliest": "2026-06-28T19:27:03.000Z",
+            "latest": "2026-06-28T19:27:03.000Z",
+            "message": "Connection closed by 172.18.0.10 port 43004"
+          },
+          {
+            "total": 8,
+            "earliest": "2026-06-28T19:24:18.000Z",
+            "latest": "2026-06-28T19:24:18.000Z",
+            "message": "Connection closed by 127.0.0.1 port 56268"
+          },
+          {
+            "total": 8,
+            "earliest": "2026-06-28T19:24:05.000Z",
+            "latest": "2026-06-28T19:24:05.000Z",
+            "message": "Connection closed by 127.0.0.1 port 38518"
+          },
+          {
+            "total": 8,
+            "earliest": "2026-06-28T19:20:59.000Z",
+            "latest": "2026-06-28T19:20:59.000Z",
+            "message": "Connection closed by 172.18.0.10 port 60482"
+          },
+          {
+            "total": 8,
+            "earliest": "2026-06-28T19:20:19.000Z",
+            "latest": "2026-06-28T19:20:19.000Z",
+            "message": "Connection closed by 172.18.0.21 port 59324"
+          },
+          {
+            "total": 8,
+            "earliest": "2026-06-28T19:18:58.000Z",
+            "latest": "2026-06-28T19:18:58.000Z",
+            "message": "Connection closed by 172.18.0.21 port 53710"
+          },
+          {
+            "total": 8,
+            "earliest": "2026-06-28T19:16:37.000Z",
+            "latest": "2026-06-28T19:16:37.000Z",
+            "message": "Connection closed by 172.18.0.10 port 54354"
+          },
+          {
+            "total": 8,
+            "earliest": "2026-06-28T19:15:28.000Z",
+            "latest": "2026-06-28T19:15:28.000Z",
+            "message": "Connection closed by 172.18.0.10 port 49008"
+          },
+          {
+            "total": 8,
+            "earliest": "2026-06-28T19:29:58.000Z",
+            "latest": "2026-06-28T19:29:58.000Z",
+            "message": "Connection closed by 127.0.0.1 port 33220"
+          },
+          {
+            "total": 8,
+            "earliest": "2026-06-28T19:12:55.000Z",
+            "latest": "2026-06-28T19:12:55.000Z",
+            "message": "Connection closed by 172.18.0.11 port 53944"
+          },
+          {
+            "total": 8,
+            "earliest": "2026-06-28T19:08:01.000Z",
+            "latest": "2026-06-28T19:08:01.000Z",
+            "message": "Connection closed by 127.0.0.1 port 49364"
+          },
+          {
+            "total": 8,
+            "earliest": "2026-06-28T19:07:13.000Z",
+            "latest": "2026-06-28T19:07:13.000Z",
+            "message": "Connection closed by 127.0.0.1 port 48826"
+          },
+          {
+            "total": 8,
+            "earliest": "2026-06-28T19:06:11.000Z",
+            "latest": "2026-06-28T19:06:11.000Z",
+            "message": "Connection closed by 172.18.0.11 port 58732"
+          },
+          {
+            "total": 8,
+            "earliest": "2026-06-28T19:03:46.000Z",
+            "latest": "2026-06-28T19:03:46.000Z",
+            "message": "Connection closed by 127.0.0.1 port 54774"
+          },
+          {
+            "total": 8,
+            "earliest": "2026-06-28T19:02:42.000Z",
+            "latest": "2026-06-28T19:02:42.000Z",
+            "message": "Connection closed by 127.0.0.1 port 47068"
+          },
+          {
+            "total": 8,
+            "earliest": "2026-06-28T18:58:56.000Z",
+            "latest": "2026-06-28T18:58:56.000Z",
+            "message": "Connection closed by 172.18.0.11 port 41186"
+          },
+          {
+            "total": 8,
+            "earliest": "2026-06-28T18:57:28.000Z",
+            "latest": "2026-06-28T18:57:28.000Z",
+            "message": "Connection closed by 127.0.0.1 port 42446"
+          },
+          {
+            "total": 8,
+            "earliest": "2026-06-28T18:54:18.000Z",
+            "latest": "2026-06-28T18:54:18.000Z",
+            "message": "Connection closed by 127.0.0.1 port 59808"
+          },
+          {
+            "total": 8,
+            "earliest": "2026-06-28T18:53:36.000Z",
+            "latest": "2026-06-28T18:53:36.000Z",
+            "message": "Connection closed by 127.0.0.1 port 57386"
+          },
+          {
+            "total": 8,
+            "earliest": "2026-06-28T18:51:39.000Z",
+            "latest": "2026-06-28T18:51:39.000Z",
+            "message": "Connection closed by 172.18.0.11 port 34472"
+          },
+          {
+            "total": 8,
+            "earliest": "2026-06-28T18:50:09.000Z",
+            "latest": "2026-06-28T18:50:09.000Z",
+            "message": "Connection closed by 172.18.0.11 port 50264"
+          },
+          {
+            "total": 8,
+            "earliest": "2026-06-28T18:48:54.000Z",
+            "latest": "2026-06-28T18:48:54.000Z",
+            "message": "Connection closed by 127.0.0.1 port 56938"
+          },
+          {
+            "total": 8,
+            "earliest": "2026-06-28T18:48:32.000Z",
+            "latest": "2026-06-28T18:48:32.000Z",
+            "message": "Connection closed by 127.0.0.1 port 35486"
+          },
+          {
+            "total": 8,
+            "earliest": "2026-06-28T19:35:22.000Z",
+            "latest": "2026-06-28T19:35:22.000Z",
+            "message": "Connection closed by 172.18.0.10 port 35710"
+          }
+        ]
+      }
+    }
+  ]
+}

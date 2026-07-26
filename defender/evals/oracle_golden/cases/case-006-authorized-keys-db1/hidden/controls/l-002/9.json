@@ -1,0 +1,189 @@
+{
+  "lead_id": "l-002",
+  "seq": 9,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T18:35:55.500Z",
+        "2026-07-12T19:35:55.500Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-12T18:35:55.500Z\" AND @timestamp < \"2026-07-12T19:35:55.500Z\"\n| WHERE host.name == \"db-1\"\n| STATS earliest = MIN(@timestamp),\n        latest = MAX(@timestamp),\n        total = COUNT(*)\n        BY process.name\n| SORT total DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-12T18:35:55.500Z\" AND @timestamp < \"2026-07-12T19:35:55.500Z\"\n| WHERE host.name == \"db-1\"\n| STATS earliest = MIN(@timestamp),\n        latest = MAX(@timestamp),\n        total = COUNT(*)\n        BY process.name\n| SORT total DESC",
+        "columns": [
+          {
+            "name": "earliest",
+            "type": "date"
+          },
+          {
+            "name": "latest",
+            "type": "date"
+          },
+          {
+            "name": "total",
+            "type": "long"
+          },
+          {
+            "name": "process.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 3,
+        "values": [
+          {
+            "earliest": "2026-07-12T18:39:40.000Z",
+            "latest": "2026-07-12T19:34:52.000Z",
+            "total": 504,
+            "process.name": "sshd"
+          },
+          {
+            "earliest": "2026-07-12T18:42:08.000Z",
+            "latest": "2026-07-12T19:34:52.000Z",
+            "total": 154,
+            "process.name": "runuser"
+          },
+          {
+            "earliest": "2026-07-12T19:17:01.000Z",
+            "latest": "2026-07-12T19:17:01.000Z",
+            "total": 14,
+            "process.name": "CRON"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T18:35:55.500Z",
+        "2026-07-05T19:35:55.500Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-05T18:35:55.500Z\" AND @timestamp < \"2026-07-05T19:35:55.500Z\"\n| WHERE host.name == \"db-1\"\n| STATS earliest = MIN(@timestamp),\n        latest = MAX(@timestamp),\n        total = COUNT(*)\n        BY process.name\n| SORT total DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-05T18:35:55.500Z\" AND @timestamp < \"2026-07-05T19:35:55.500Z\"\n| WHERE host.name == \"db-1\"\n| STATS earliest = MIN(@timestamp),\n        latest = MAX(@timestamp),\n        total = COUNT(*)\n        BY process.name\n| SORT total DESC",
+        "columns": [
+          {
+            "name": "earliest",
+            "type": "date"
+          },
+          {
+            "name": "latest",
+            "type": "date"
+          },
+          {
+            "name": "total",
+            "type": "long"
+          },
+          {
+            "name": "process.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 3,
+        "values": [
+          {
+            "earliest": "2026-07-05T18:36:17.000Z",
+            "latest": "2026-07-05T19:32:03.000Z",
+            "total": 658,
+            "process.name": "sshd"
+          },
+          {
+            "earliest": "2026-07-05T18:36:17.000Z",
+            "latest": "2026-07-05T19:31:54.000Z",
+            "total": 168,
+            "process.name": "runuser"
+          },
+          {
+            "earliest": "2026-07-05T19:17:01.000Z",
+            "latest": "2026-07-05T19:17:01.000Z",
+            "total": 14,
+            "process.name": "CRON"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-28T18:35:55.500Z",
+        "2026-06-28T19:35:55.500Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-28T18:35:55.500Z\" AND @timestamp < \"2026-06-28T19:35:55.500Z\"\n| WHERE host.name == \"db-1\"\n| STATS earliest = MIN(@timestamp),\n        latest = MAX(@timestamp),\n        total = COUNT(*)\n        BY process.name\n| SORT total DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-28T18:35:55.500Z\" AND @timestamp < \"2026-06-28T19:35:55.500Z\"\n| WHERE host.name == \"db-1\"\n| STATS earliest = MIN(@timestamp),\n        latest = MAX(@timestamp),\n        total = COUNT(*)\n        BY process.name\n| SORT total DESC",
+        "columns": [
+          {
+            "name": "earliest",
+            "type": "date"
+          },
+          {
+            "name": "latest",
+            "type": "date"
+          },
+          {
+            "name": "total",
+            "type": "long"
+          },
+          {
+            "name": "process.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 3,
+        "values": [
+          {
+            "earliest": "2026-06-28T18:37:41.000Z",
+            "latest": "2026-06-28T19:35:22.000Z",
+            "total": 592,
+            "process.name": "sshd"
+          },
+          {
+            "earliest": "2026-06-28T18:37:41.000Z",
+            "latest": "2026-06-28T19:29:58.000Z",
+            "total": 256,
+            "process.name": "runuser"
+          },
+          {
+            "earliest": "2026-06-28T19:17:01.000Z",
+            "latest": "2026-06-28T19:17:01.000Z",
+            "total": 16,
+            "process.name": "CRON"
+          }
+        ]
+      }
+    }
+  ],
+  "attack_contribution": {
+    "window": [
+      "2026-07-26T19:05:54.000Z",
+      "2026-07-26T19:05:57.000Z"
+    ],
+    "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-26T19:05:54.000Z\" AND @timestamp < \"2026-07-26T19:05:57.000Z\"\n| WHERE host.name == \"db-1\"\n| STATS earliest = MIN(@timestamp),\n        latest = MAX(@timestamp),\n        total = COUNT(*)\n        BY process.name\n| SORT total DESC",
+    "payload": {
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-26T19:05:54.000Z\" AND @timestamp < \"2026-07-26T19:05:57.000Z\"\n| WHERE host.name == \"db-1\"\n| STATS earliest = MIN(@timestamp),\n        latest = MAX(@timestamp),\n        total = COUNT(*)\n        BY process.name\n| SORT total DESC",
+      "columns": [
+        {
+          "name": "earliest",
+          "type": "date"
+        },
+        {
+          "name": "latest",
+          "type": "date"
+        },
+        {
+          "name": "total",
+          "type": "long"
+        },
+        {
+          "name": "process.name",
+          "type": "keyword"
+        }
+      ],
+      "row_count": 0,
+      "values": []
+    }
+  }
+}

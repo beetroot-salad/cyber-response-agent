@@ -1,0 +1,1 @@
+{"username": "dba.ivy", "email": "ivy@soc-playground.local", "first_name": "Ivy", "last_name": "Carter", "enabled": true, "realm_role": "dba", "authorized_hosts": ["db-1", "jump-box-1"], "sudo_hosts": ["db-1"]}

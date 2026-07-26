@@ -1,0 +1,537 @@
+{
+  "lead_id": "l-002",
+  "seq": 28,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T18:35:57.000Z",
+        "2026-07-12T19:35:57.000Z"
+      ],
+      "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-07-12T18:35:57.000Z\" AND @timestamp < \"2026-07-12T19:35:57.000Z\"\n        AND destination.port == 22\n| STATS total = COUNT(*),\n        earliest = MIN(@timestamp),\n        latest = MAX(@timestamp)\n        BY source.ip, destination.ip\n| SORT total DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-07-12T18:35:57.000Z\" AND @timestamp < \"2026-07-12T19:35:57.000Z\"\n        AND destination.port == 22\n| STATS total = COUNT(*),\n        earliest = MIN(@timestamp),\n        latest = MAX(@timestamp)\n        BY source.ip, destination.ip\n| SORT total DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "total",
+            "type": "long"
+          },
+          {
+            "name": "earliest",
+            "type": "date"
+          },
+          {
+            "name": "latest",
+            "type": "date"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "destination.ip",
+            "type": "ip"
+          }
+        ],
+        "row_count": 20,
+        "values": [
+          {
+            "total": 21,
+            "earliest": "2026-07-12T18:38:28.851Z",
+            "latest": "2026-07-12T19:35:42.182Z",
+            "source.ip": "172.18.0.23",
+            "destination.ip": "172.18.0.17"
+          },
+          {
+            "total": 10,
+            "earliest": "2026-07-12T18:39:40.354Z",
+            "latest": "2026-07-12T19:27:48.490Z",
+            "source.ip": "172.18.0.8",
+            "destination.ip": "172.18.0.15"
+          },
+          {
+            "total": 9,
+            "earliest": "2026-07-12T18:52:17.628Z",
+            "latest": "2026-07-12T19:34:14.337Z",
+            "source.ip": "172.18.0.6",
+            "destination.ip": "172.18.0.15"
+          },
+          {
+            "total": 7,
+            "earliest": "2026-07-12T18:41:53.128Z",
+            "latest": "2026-07-12T19:29:37.999Z",
+            "source.ip": "172.18.0.14",
+            "destination.ip": "172.18.0.3"
+          },
+          {
+            "total": 4,
+            "earliest": "2026-07-12T18:46:04.159Z",
+            "latest": "2026-07-12T19:30:33.559Z",
+            "source.ip": "172.18.0.20",
+            "destination.ip": "172.18.0.8"
+          },
+          {
+            "total": 4,
+            "earliest": "2026-07-12T18:58:15.482Z",
+            "latest": "2026-07-12T19:14:18.614Z",
+            "source.ip": "172.18.0.22",
+            "destination.ip": "172.18.0.17"
+          },
+          {
+            "total": 4,
+            "earliest": "2026-07-12T19:06:55.085Z",
+            "latest": "2026-07-12T19:35:23.897Z",
+            "source.ip": "172.18.0.22",
+            "destination.ip": "172.18.0.13"
+          },
+          {
+            "total": 4,
+            "earliest": "2026-07-12T18:38:55.348Z",
+            "latest": "2026-07-12T19:21:03.851Z",
+            "source.ip": "172.18.0.14",
+            "destination.ip": "172.18.0.8"
+          },
+          {
+            "total": 3,
+            "earliest": "2026-07-12T18:40:32.100Z",
+            "latest": "2026-07-12T19:10:03.198Z",
+            "source.ip": "172.18.0.22",
+            "destination.ip": "172.18.0.15"
+          },
+          {
+            "total": 2,
+            "earliest": "2026-07-12T19:10:03.242Z",
+            "latest": "2026-07-12T19:28:52.930Z",
+            "source.ip": "172.18.0.22",
+            "destination.ip": "172.18.0.3"
+          },
+          {
+            "total": 2,
+            "earliest": "2026-07-12T18:49:10.592Z",
+            "latest": "2026-07-12T19:20:45.581Z",
+            "source.ip": "172.18.0.17",
+            "destination.ip": "172.18.0.6"
+          },
+          {
+            "total": 2,
+            "earliest": "2026-07-12T19:10:03.233Z",
+            "latest": "2026-07-12T19:25:20.779Z",
+            "source.ip": "172.18.0.22",
+            "destination.ip": "172.18.0.12"
+          },
+          {
+            "total": 2,
+            "earliest": "2026-07-12T18:59:24.219Z",
+            "latest": "2026-07-12T19:31:35.094Z",
+            "source.ip": "172.18.0.14",
+            "destination.ip": "172.18.0.15"
+          },
+          {
+            "total": 2,
+            "earliest": "2026-07-12T18:40:11.210Z",
+            "latest": "2026-07-12T18:47:27.891Z",
+            "source.ip": "172.18.0.14",
+            "destination.ip": "172.18.0.17"
+          },
+          {
+            "total": 2,
+            "earliest": "2026-07-12T18:52:20.872Z",
+            "latest": "2026-07-12T19:10:03.180Z",
+            "source.ip": "172.18.0.22",
+            "destination.ip": "172.18.0.6"
+          },
+          {
+            "total": 2,
+            "earliest": "2026-07-12T18:47:02.880Z",
+            "latest": "2026-07-12T19:10:03.189Z",
+            "source.ip": "172.18.0.22",
+            "destination.ip": "172.18.0.8"
+          },
+          {
+            "total": 2,
+            "earliest": "2026-07-12T18:55:38.856Z",
+            "latest": "2026-07-12T19:09:38.076Z",
+            "source.ip": "172.18.0.20",
+            "destination.ip": "172.18.0.6"
+          },
+          {
+            "total": 1,
+            "earliest": "2026-07-12T19:10:56.556Z",
+            "latest": "2026-07-12T19:10:56.556Z",
+            "source.ip": "172.18.0.14",
+            "destination.ip": "172.18.0.23"
+          },
+          {
+            "total": 1,
+            "earliest": "2026-07-12T19:10:02.056Z",
+            "latest": "2026-07-12T19:10:02.056Z",
+            "source.ip": "172.18.0.17",
+            "destination.ip": "172.18.0.15"
+          },
+          {
+            "total": 1,
+            "earliest": "2026-07-12T19:10:03.216Z",
+            "latest": "2026-07-12T19:10:03.216Z",
+            "source.ip": "172.18.0.22",
+            "destination.ip": "172.18.0.23"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T18:35:57.000Z",
+        "2026-07-05T19:35:57.000Z"
+      ],
+      "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-07-05T18:35:57.000Z\" AND @timestamp < \"2026-07-05T19:35:57.000Z\"\n        AND destination.port == 22\n| STATS total = COUNT(*),\n        earliest = MIN(@timestamp),\n        latest = MAX(@timestamp)\n        BY source.ip, destination.ip\n| SORT total DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-07-05T18:35:57.000Z\" AND @timestamp < \"2026-07-05T19:35:57.000Z\"\n        AND destination.port == 22\n| STATS total = COUNT(*),\n        earliest = MIN(@timestamp),\n        latest = MAX(@timestamp)\n        BY source.ip, destination.ip\n| SORT total DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "total",
+            "type": "long"
+          },
+          {
+            "name": "earliest",
+            "type": "date"
+          },
+          {
+            "name": "latest",
+            "type": "date"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "destination.ip",
+            "type": "ip"
+          }
+        ],
+        "row_count": 20,
+        "values": [
+          {
+            "total": 18,
+            "earliest": "2026-07-05T18:44:57.183Z",
+            "latest": "2026-07-05T19:26:38.610Z",
+            "source.ip": "172.18.0.8",
+            "destination.ip": "172.18.0.15"
+          },
+          {
+            "total": 16,
+            "earliest": "2026-07-05T18:41:55.180Z",
+            "latest": "2026-07-05T19:35:46.474Z",
+            "source.ip": "172.18.0.23",
+            "destination.ip": "172.18.0.17"
+          },
+          {
+            "total": 8,
+            "earliest": "2026-07-05T19:06:40.638Z",
+            "latest": "2026-07-05T19:35:21.914Z",
+            "source.ip": "172.18.0.20",
+            "destination.ip": "172.18.0.6"
+          },
+          {
+            "total": 8,
+            "earliest": "2026-07-05T18:38:13.584Z",
+            "latest": "2026-07-05T19:32:03.481Z",
+            "source.ip": "172.18.0.6",
+            "destination.ip": "172.18.0.15"
+          },
+          {
+            "total": 8,
+            "earliest": "2026-07-05T18:54:50.817Z",
+            "latest": "2026-07-05T19:21:28.056Z",
+            "source.ip": "172.18.0.20",
+            "destination.ip": "172.18.0.8"
+          },
+          {
+            "total": 6,
+            "earliest": "2026-07-05T19:31:42.109Z",
+            "latest": "2026-07-05T19:31:58.596Z",
+            "source.ip": "172.18.0.6",
+            "destination.ip": "172.18.0.8"
+          },
+          {
+            "total": 4,
+            "earliest": "2026-07-05T18:43:29.209Z",
+            "latest": "2026-07-05T19:28:52.653Z",
+            "source.ip": "172.18.0.22",
+            "destination.ip": "172.18.0.6"
+          },
+          {
+            "total": 4,
+            "earliest": "2026-07-05T18:53:21.924Z",
+            "latest": "2026-07-05T19:28:52.672Z",
+            "source.ip": "172.18.0.22",
+            "destination.ip": "172.18.0.15"
+          },
+          {
+            "total": 3,
+            "earliest": "2026-07-05T18:48:25.087Z",
+            "latest": "2026-07-05T19:28:52.662Z",
+            "source.ip": "172.18.0.22",
+            "destination.ip": "172.18.0.8"
+          },
+          {
+            "total": 3,
+            "earliest": "2026-07-05T19:21:16.503Z",
+            "latest": "2026-07-05T19:29:07.673Z",
+            "source.ip": "172.18.0.14",
+            "destination.ip": "172.18.0.15"
+          },
+          {
+            "total": 3,
+            "earliest": "2026-07-05T18:52:06.164Z",
+            "latest": "2026-07-05T19:28:52.691Z",
+            "source.ip": "172.18.0.22",
+            "destination.ip": "172.18.0.23"
+          },
+          {
+            "total": 3,
+            "earliest": "2026-07-05T18:36:42.473Z",
+            "latest": "2026-07-05T19:15:09.765Z",
+            "source.ip": "172.18.0.14",
+            "destination.ip": "172.18.0.12"
+          },
+          {
+            "total": 3,
+            "earliest": "2026-07-05T19:28:52.701Z",
+            "latest": "2026-07-05T19:34:47.033Z",
+            "source.ip": "172.18.0.22",
+            "destination.ip": "172.18.0.13"
+          },
+          {
+            "total": 3,
+            "earliest": "2026-07-05T18:43:38.334Z",
+            "latest": "2026-07-05T19:19:53.598Z",
+            "source.ip": "172.18.0.14",
+            "destination.ip": "172.18.0.13"
+          },
+          {
+            "total": 2,
+            "earliest": "2026-07-05T18:49:14.588Z",
+            "latest": "2026-07-05T19:28:52.682Z",
+            "source.ip": "172.18.0.22",
+            "destination.ip": "172.18.0.17"
+          },
+          {
+            "total": 2,
+            "earliest": "2026-07-05T18:50:19.910Z",
+            "latest": "2026-07-05T19:13:39.241Z",
+            "source.ip": "172.18.0.14",
+            "destination.ip": "172.18.0.17"
+          },
+          {
+            "total": 2,
+            "earliest": "2026-07-05T18:38:36.083Z",
+            "latest": "2026-07-05T19:35:49.408Z",
+            "source.ip": "172.18.0.14",
+            "destination.ip": "172.18.0.6"
+          },
+          {
+            "total": 2,
+            "earliest": "2026-07-05T18:51:54.452Z",
+            "latest": "2026-07-05T19:10:41.151Z",
+            "source.ip": "172.18.0.17",
+            "destination.ip": "172.18.0.6"
+          },
+          {
+            "total": 2,
+            "earliest": "2026-07-05T18:42:39.214Z",
+            "latest": "2026-07-05T19:01:21.870Z",
+            "source.ip": "172.18.0.17",
+            "destination.ip": "172.18.0.15"
+          },
+          {
+            "total": 2,
+            "earliest": "2026-07-05T18:46:22.115Z",
+            "latest": "2026-07-05T19:00:52.601Z",
+            "source.ip": "172.18.0.14",
+            "destination.ip": "172.18.0.3"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-28T18:35:57.000Z",
+        "2026-06-28T19:35:57.000Z"
+      ],
+      "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-06-28T18:35:57.000Z\" AND @timestamp < \"2026-06-28T19:35:57.000Z\"\n        AND destination.port == 22\n| STATS total = COUNT(*),\n        earliest = MIN(@timestamp),\n        latest = MAX(@timestamp)\n        BY source.ip, destination.ip\n| SORT total DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-06-28T18:35:57.000Z\" AND @timestamp < \"2026-06-28T19:35:57.000Z\"\n        AND destination.port == 22\n| STATS total = COUNT(*),\n        earliest = MIN(@timestamp),\n        latest = MAX(@timestamp)\n        BY source.ip, destination.ip\n| SORT total DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "total",
+            "type": "long"
+          },
+          {
+            "name": "earliest",
+            "type": "date"
+          },
+          {
+            "name": "latest",
+            "type": "date"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "destination.ip",
+            "type": "ip"
+          }
+        ],
+        "row_count": 20,
+        "values": [
+          {
+            "total": 15,
+            "earliest": "2026-06-28T18:44:35.895Z",
+            "latest": "2026-06-28T19:34:33.916Z",
+            "source.ip": "172.18.0.15",
+            "destination.ip": "172.18.0.21"
+          },
+          {
+            "total": 10,
+            "earliest": "2026-06-28T18:44:08.193Z",
+            "latest": "2026-06-28T19:17:35.969Z",
+            "source.ip": "172.18.0.9",
+            "destination.ip": "172.18.0.11"
+          },
+          {
+            "total": 9,
+            "earliest": "2026-06-28T18:43:10.356Z",
+            "latest": "2026-06-28T19:35:22.898Z",
+            "source.ip": "172.18.0.10",
+            "destination.ip": "172.18.0.18"
+          },
+          {
+            "total": 7,
+            "earliest": "2026-06-28T18:39:24.197Z",
+            "latest": "2026-06-28T19:33:47.428Z",
+            "source.ip": "172.18.0.21",
+            "destination.ip": "172.18.0.11"
+          },
+          {
+            "total": 6,
+            "earliest": "2026-06-28T18:49:13.215Z",
+            "latest": "2026-06-28T19:35:01.210Z",
+            "source.ip": "172.18.0.9",
+            "destination.ip": "172.18.0.10"
+          },
+          {
+            "total": 6,
+            "earliest": "2026-06-28T18:44:22.805Z",
+            "latest": "2026-06-28T19:12:55.439Z",
+            "source.ip": "172.18.0.11",
+            "destination.ip": "172.18.0.18"
+          },
+          {
+            "total": 4,
+            "earliest": "2026-06-28T18:45:33.192Z",
+            "latest": "2026-06-28T19:28:22.306Z",
+            "source.ip": "172.18.0.21",
+            "destination.ip": "172.18.0.18"
+          },
+          {
+            "total": 4,
+            "earliest": "2026-06-28T18:45:47.303Z",
+            "latest": "2026-06-28T19:15:54.950Z",
+            "source.ip": "172.18.0.19",
+            "destination.ip": "172.18.0.21"
+          },
+          {
+            "total": 3,
+            "earliest": "2026-06-28T19:12:57.495Z",
+            "latest": "2026-06-28T19:34:24.804Z",
+            "source.ip": "172.18.0.19",
+            "destination.ip": "172.18.0.17"
+          },
+          {
+            "total": 3,
+            "earliest": "2026-06-28T18:40:34.055Z",
+            "latest": "2026-06-28T19:12:57.481Z",
+            "source.ip": "172.18.0.19",
+            "destination.ip": "172.18.0.25"
+          },
+          {
+            "total": 3,
+            "earliest": "2026-06-28T18:43:59.758Z",
+            "latest": "2026-06-28T18:56:11.868Z",
+            "source.ip": "172.18.0.21",
+            "destination.ip": "172.18.0.10"
+          },
+          {
+            "total": 2,
+            "earliest": "2026-06-28T19:05:33.360Z",
+            "latest": "2026-06-28T19:12:57.459Z",
+            "source.ip": "172.18.0.19",
+            "destination.ip": "172.18.0.24"
+          },
+          {
+            "total": 2,
+            "earliest": "2026-06-28T19:21:32.118Z",
+            "latest": "2026-06-28T19:23:58.772Z",
+            "source.ip": "172.18.0.20",
+            "destination.ip": "172.18.0.24"
+          },
+          {
+            "total": 2,
+            "earliest": "2026-06-28T19:07:52.062Z",
+            "latest": "2026-06-28T19:12:57.377Z",
+            "source.ip": "172.18.0.19",
+            "destination.ip": "172.18.0.10"
+          },
+          {
+            "total": 2,
+            "earliest": "2026-06-28T19:12:57.355Z",
+            "latest": "2026-06-28T19:19:02.267Z",
+            "source.ip": "172.18.0.19",
+            "destination.ip": "172.18.0.11"
+          },
+          {
+            "total": 2,
+            "earliest": "2026-06-28T18:37:21.814Z",
+            "latest": "2026-06-28T18:38:31.885Z",
+            "source.ip": "172.18.0.21",
+            "destination.ip": "172.18.0.15"
+          },
+          {
+            "total": 1,
+            "earliest": "2026-06-28T19:12:57.439Z",
+            "latest": "2026-06-28T19:12:57.439Z",
+            "source.ip": "172.18.0.19",
+            "destination.ip": "172.18.0.15"
+          },
+          {
+            "total": 1,
+            "earliest": "2026-06-28T19:15:00.895Z",
+            "latest": "2026-06-28T19:15:00.895Z",
+            "source.ip": "172.18.0.20",
+            "destination.ip": "172.18.0.25"
+          },
+          {
+            "total": 1,
+            "earliest": "2026-06-28T19:12:38.155Z",
+            "latest": "2026-06-28T19:12:38.155Z",
+            "source.ip": "172.18.0.20",
+            "destination.ip": "172.18.0.15"
+          },
+          {
+            "total": 1,
+            "earliest": "2026-06-28T19:12:57.399Z",
+            "latest": "2026-06-28T19:12:57.399Z",
+            "source.ip": "172.18.0.19",
+            "destination.ip": "172.18.0.18"
+          }
+        ]
+      }
+    }
+  ]
+}

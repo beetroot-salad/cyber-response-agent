@@ -150,3 +150,37 @@ def test_a_malformed_search_response_yields_no_candidates(payload):
 def test_the_wait_is_short_because_its_outcome_no_longer_decides_the_case():
     """Ten minutes of polling was the price of treating a quiet cell as a failure."""
     assert generate_case.ALERT_ATTEMPTS * generate_case.ALERT_INTERVAL <= 300
+
+
+def test_control_offsets_are_settable_because_a_default_window_can_be_dead():
+    """The playground is levered up and down, so the default 7,14,21 can put a control
+    in a window where the stack did not exist. case-006 was recruited on 2026-07-26,
+    whose 7-day control lands on 07-19 — dead, along with 07-14..07-16 and 07-18..07-24.
+    A dead window is not an empty baseline; it is a third of the evidence discarded."""
+    parser = generate_case.build_parser()
+    required = ["--scenario", "x", "--case-id", "c", "--split", "dev",
+                "--activity-family", "f"]
+    assert parser.parse_args(required).offsets_days is None, (
+        "absent means controls.py keeps its own default")
+    assert parser.parse_args([*required, "--offsets-days", "14,21,28"]
+                             ).offsets_days == "14,21,28"
+
+
+def test_the_offsets_reach_controls_py(tmp_path, monkeypatch):
+    """The flag is worthless if main does not forward it."""
+    seen = []
+    monkeypatch.setattr(generate_case, "_run",
+                        lambda cmd, **kw: seen.append([str(c) for c in cmd]) or "")
+    monkeypatch.setattr(generate_case, "fire", lambda *a, **k: tmp_path / "run")
+    (tmp_path / "run").mkdir()
+    (tmp_path / "run" / "meta.json").write_text(json.dumps(META), encoding="utf-8")
+    monkeypatch.setattr(generate_case, "wait_for_alert", lambda *a, **k: None)
+    monkeypatch.setattr(generate_case, "investigate", lambda *a, **k: tmp_path / "rundir")
+    generate_case.main([
+        "--scenario", "persistence-authorized-keys", "--case-id", "case-x",
+        "--split", "dev", "--activity-family", "persistence/T1098.004",
+        "--cases-dir", str(tmp_path / "cases"), "--offsets-days", "14,21,28"])
+    controls = [c for c in seen if c and c[1].endswith("controls.py")]
+    assert controls, "controls.py was never invoked"
+    assert "--offsets-days" in controls[0]
+    assert controls[0][controls[0].index("--offsets-days") + 1] == "14,21,28"

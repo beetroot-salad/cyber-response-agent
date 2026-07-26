@@ -270,7 +270,7 @@ def write_manifest(  # noqa: PLR0913 — the manifest's fields, each an independ
         encoding="utf-8")
 
 
-def main(argv: list[str] | None = None) -> int:
+def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--scenario", required=True)
@@ -286,8 +286,20 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--target", default=None)
     p.add_argument("--intensity", type=int, default=None)
     p.add_argument("--capture-environment", default="playground-v2@live")
+    p.add_argument("--offsets-days", default=None,
+                   help="whole-week control offsets, e.g. 14,21,28. The playground is "
+                        "levered up and down, so the DEFAULT 7,14,21 can put a control "
+                        "in a gap where the stack did not exist — a dead window is not "
+                        "an empty baseline, and a third of the evidence is lost to it. "
+                        "Probe the ingest timeline first and pick offsets that land on "
+                        "live days; whole weeks keep the weekday, which the "
+                        "schedule-shaped generators require.")
     p.add_argument("--cases-dir", type=Path, default=HERE / "cases")
-    ns = p.parse_args(argv)
+    return p
+
+
+def main(argv: list[str] | None = None) -> int:
+    ns = build_parser().parse_args(argv)
 
     case_dir = ns.cases_dir / ns.case_id
     work = case_dir / ".generate"
@@ -338,7 +350,10 @@ def main(argv: list[str] | None = None) -> int:
                    capture_environment=ns.capture_environment, scenario=ns.scenario,
                    seed=ns.seed, meta=meta, rule=rule, alert_source=alert_source)
 
-    _run([sys.executable, HERE / "controls.py", case_dir], timeout=3600, label="controls")
+    controls_cmd: list[str | Path] = [sys.executable, HERE / "controls.py", case_dir]
+    if ns.offsets_days:
+        controls_cmd += ["--offsets-days", ns.offsets_days]
+    _run(controls_cmd, timeout=3600, label="controls")
 
     print(f"\ngenerated {case_dir}")
     print("  next: declare state_classes in manifest.yaml, then replay.py to project "

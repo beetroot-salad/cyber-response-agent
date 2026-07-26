@@ -1,0 +1,108 @@
+{
+  "lead_id": "l-001",
+  "seq": 13,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T18:00:00.000Z",
+        "2026-07-12T20:00:00.000Z"
+      ],
+      "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-12T18:00:00.000Z\" AND @timestamp < \"2026-07-12T20:00:00.000Z\"\n        AND falco.rule IS NOT NULL\n| STATS events = COUNT(*)\n        BY host.name, data_stream.dataset\n| SORT events DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-12T18:00:00.000Z\" AND @timestamp < \"2026-07-12T20:00:00.000Z\"\n        AND falco.rule IS NOT NULL\n| STATS events = COUNT(*)\n        BY host.name, data_stream.dataset\n| SORT events DESC",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "data_stream.dataset",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "events": 3001,
+            "host.name": "soc-playground",
+            "data_stream.dataset": "falco.alerts"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T18:00:00.000Z",
+        "2026-07-05T20:00:00.000Z"
+      ],
+      "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-05T18:00:00.000Z\" AND @timestamp < \"2026-07-05T20:00:00.000Z\"\n        AND falco.rule IS NOT NULL\n| STATS events = COUNT(*)\n        BY host.name, data_stream.dataset\n| SORT events DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-05T18:00:00.000Z\" AND @timestamp < \"2026-07-05T20:00:00.000Z\"\n        AND falco.rule IS NOT NULL\n| STATS events = COUNT(*)\n        BY host.name, data_stream.dataset\n| SORT events DESC",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "data_stream.dataset",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "events": 3069,
+            "host.name": "soc-playground",
+            "data_stream.dataset": "falco.alerts"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-28T18:00:00.000Z",
+        "2026-06-28T20:00:00.000Z"
+      ],
+      "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-06-28T18:00:00.000Z\" AND @timestamp < \"2026-06-28T20:00:00.000Z\"\n        AND falco.rule IS NOT NULL\n| STATS events = COUNT(*)\n        BY host.name, data_stream.dataset\n| SORT events DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-06-28T18:00:00.000Z\" AND @timestamp < \"2026-06-28T20:00:00.000Z\"\n        AND falco.rule IS NOT NULL\n| STATS events = COUNT(*)\n        BY host.name, data_stream.dataset\n| SORT events DESC",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "data_stream.dataset",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "events": 2744,
+            "host.name": "soc-playground",
+            "data_stream.dataset": "falco.alerts"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,393 @@
+{
+  "lead_id": "l-001",
+  "seq": 7,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T18:35:57.000Z",
+        "2026-07-12T19:35:57.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-12T18:35:57.000Z\" AND @timestamp < \"2026-07-12T19:35:57.000Z\"\n        AND host.name == \"db-1\"\n| STATS events = COUNT(*)\n        BY process.name, message\n| SORT events DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-12T18:35:57.000Z\" AND @timestamp < \"2026-07-12T19:35:57.000Z\"\n        AND host.name == \"db-1\"\n| STATS events = COUNT(*)\n        BY process.name, message\n| SORT events DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "process.name",
+            "type": "keyword"
+          },
+          {
+            "name": "message",
+            "type": "text"
+          }
+        ],
+        "row_count": 20,
+        "values": [
+          {
+            "events": 252,
+            "process.name": "sshd",
+            "message": "error: kex_exchange_identification: Connection closed by remote host"
+          },
+          {
+            "events": 77,
+            "process.name": "runuser",
+            "message": "pam_unix(runuser:session): session closed for user svc.monitoring"
+          },
+          {
+            "events": 77,
+            "process.name": "runuser",
+            "message": "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1004) by (uid=0)"
+          },
+          {
+            "events": 7,
+            "process.name": "sshd",
+            "message": "Connection closed by 127.0.0.1 port 36806"
+          },
+          {
+            "events": 7,
+            "process.name": "sshd",
+            "message": "Connection closed by 172.18.0.6 port 50124"
+          },
+          {
+            "events": 7,
+            "process.name": "sshd",
+            "message": "Connection closed by 172.18.0.14 port 45270"
+          },
+          {
+            "events": 7,
+            "process.name": "sshd",
+            "message": "Connection closed by 172.18.0.8 port 55864"
+          },
+          {
+            "events": 7,
+            "process.name": "sshd",
+            "message": "Connection closed by 172.18.0.8 port 37192"
+          },
+          {
+            "events": 7,
+            "process.name": "sshd",
+            "message": "Connection closed by 172.18.0.8 port 43878"
+          },
+          {
+            "events": 7,
+            "process.name": "sshd",
+            "message": "Connection closed by 172.18.0.6 port 40228"
+          },
+          {
+            "events": 7,
+            "process.name": "sshd",
+            "message": "Connection closed by 172.18.0.8 port 50590"
+          },
+          {
+            "events": 7,
+            "process.name": "sshd",
+            "message": "Connection closed by 172.18.0.6 port 38974"
+          },
+          {
+            "events": 7,
+            "process.name": "CRON",
+            "message": "pam_unix(cron:session): session opened for user root(uid=0) by (uid=0)"
+          },
+          {
+            "events": 7,
+            "process.name": "CRON",
+            "message": "pam_unix(cron:session): session closed for user root"
+          },
+          {
+            "events": 7,
+            "process.name": "sshd",
+            "message": "Connection closed by 127.0.0.1 port 44182"
+          },
+          {
+            "events": 7,
+            "process.name": "sshd",
+            "message": "Connection closed by 127.0.0.1 port 35786"
+          },
+          {
+            "events": 7,
+            "process.name": "sshd",
+            "message": "Connection closed by 172.18.0.6 port 44942"
+          },
+          {
+            "events": 7,
+            "process.name": "sshd",
+            "message": "Connection closed by 172.18.0.8 port 46982"
+          },
+          {
+            "events": 7,
+            "process.name": "sshd",
+            "message": "Connection closed by 172.18.0.6 port 49662"
+          },
+          {
+            "events": 7,
+            "process.name": "sshd",
+            "message": "Connection closed by 127.0.0.1 port 52496"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T18:35:57.000Z",
+        "2026-07-05T19:35:57.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-05T18:35:57.000Z\" AND @timestamp < \"2026-07-05T19:35:57.000Z\"\n        AND host.name == \"db-1\"\n| STATS events = COUNT(*)\n        BY process.name, message\n| SORT events DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-05T18:35:57.000Z\" AND @timestamp < \"2026-07-05T19:35:57.000Z\"\n        AND host.name == \"db-1\"\n| STATS events = COUNT(*)\n        BY process.name, message\n| SORT events DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "process.name",
+            "type": "keyword"
+          },
+          {
+            "name": "message",
+            "type": "text"
+          }
+        ],
+        "row_count": 20,
+        "values": [
+          {
+            "events": 329,
+            "process.name": "sshd",
+            "message": "error: kex_exchange_identification: Connection closed by remote host"
+          },
+          {
+            "events": 84,
+            "process.name": "runuser",
+            "message": "pam_unix(runuser:session): session closed for user svc.monitoring"
+          },
+          {
+            "events": 84,
+            "process.name": "runuser",
+            "message": "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1004) by (uid=0)"
+          },
+          {
+            "events": 7,
+            "process.name": "sshd",
+            "message": "Connection closed by 172.18.0.14 port 46154"
+          },
+          {
+            "events": 7,
+            "process.name": "sshd",
+            "message": "Connection closed by 172.18.0.8 port 41158"
+          },
+          {
+            "events": 7,
+            "process.name": "sshd",
+            "message": "Connection closed by 172.18.0.22 port 36912"
+          },
+          {
+            "events": 7,
+            "process.name": "sshd",
+            "message": "Connection closed by 172.18.0.8 port 36708"
+          },
+          {
+            "events": 7,
+            "process.name": "sshd",
+            "message": "Connection closed by 172.18.0.6 port 38120"
+          },
+          {
+            "events": 7,
+            "process.name": "CRON",
+            "message": "pam_unix(cron:session): session opened for user root(uid=0) by (uid=0)"
+          },
+          {
+            "events": 7,
+            "process.name": "sshd",
+            "message": "Connection closed by 127.0.0.1 port 48400"
+          },
+          {
+            "events": 7,
+            "process.name": "sshd",
+            "message": "Connection closed by 172.18.0.14 port 57382"
+          },
+          {
+            "events": 7,
+            "process.name": "sshd",
+            "message": "Connection closed by 127.0.0.1 port 60210"
+          },
+          {
+            "events": 7,
+            "process.name": "sshd",
+            "message": "Connection closed by 172.18.0.14 port 50586"
+          },
+          {
+            "events": 7,
+            "process.name": "sshd",
+            "message": "Connection closed by 172.18.0.8 port 50204"
+          },
+          {
+            "events": 7,
+            "process.name": "sshd",
+            "message": "Connection closed by 172.18.0.8 port 50856"
+          },
+          {
+            "events": 7,
+            "process.name": "sshd",
+            "message": "Connection closed by 172.18.0.6 port 37450"
+          },
+          {
+            "events": 7,
+            "process.name": "sshd",
+            "message": "Connection closed by 172.18.0.8 port 35256"
+          },
+          {
+            "events": 7,
+            "process.name": "sshd",
+            "message": "Connection closed by 172.18.0.8 port 55462"
+          },
+          {
+            "events": 7,
+            "process.name": "sshd",
+            "message": "Connection closed by 127.0.0.1 port 50968"
+          },
+          {
+            "events": 7,
+            "process.name": "sshd",
+            "message": "Connection closed by 172.18.0.6 port 32932"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-28T18:35:57.000Z",
+        "2026-06-28T19:35:57.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-28T18:35:57.000Z\" AND @timestamp < \"2026-06-28T19:35:57.000Z\"\n        AND host.name == \"db-1\"\n| STATS events = COUNT(*)\n        BY process.name, message\n| SORT events DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-28T18:35:57.000Z\" AND @timestamp < \"2026-06-28T19:35:57.000Z\"\n        AND host.name == \"db-1\"\n| STATS events = COUNT(*)\n        BY process.name, message\n| SORT events DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "process.name",
+            "type": "keyword"
+          },
+          {
+            "name": "message",
+            "type": "text"
+          }
+        ],
+        "row_count": 20,
+        "values": [
+          {
+            "events": 296,
+            "process.name": "sshd",
+            "message": "error: kex_exchange_identification: Connection closed by remote host"
+          },
+          {
+            "events": 128,
+            "process.name": "runuser",
+            "message": "pam_unix(runuser:session): session closed for user svc.monitoring"
+          },
+          {
+            "events": 128,
+            "process.name": "runuser",
+            "message": "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1004) by (uid=0)"
+          },
+          {
+            "events": 8,
+            "process.name": "sshd",
+            "message": "Connection closed by 172.18.0.10 port 38094"
+          },
+          {
+            "events": 8,
+            "process.name": "sshd",
+            "message": "Connection closed by 127.0.0.1 port 33220"
+          },
+          {
+            "events": 8,
+            "process.name": "sshd",
+            "message": "Connection closed by 127.0.0.1 port 33954"
+          },
+          {
+            "events": 8,
+            "process.name": "sshd",
+            "message": "Connection closed by 172.18.0.10 port 43004"
+          },
+          {
+            "events": 8,
+            "process.name": "sshd",
+            "message": "Connection closed by 172.18.0.10 port 54354"
+          },
+          {
+            "events": 8,
+            "process.name": "sshd",
+            "message": "Connection closed by 172.18.0.19 port 59298"
+          },
+          {
+            "events": 8,
+            "process.name": "sshd",
+            "message": "Connection closed by 127.0.0.1 port 56268"
+          },
+          {
+            "events": 8,
+            "process.name": "sshd",
+            "message": "Connection closed by 127.0.0.1 port 38518"
+          },
+          {
+            "events": 8,
+            "process.name": "sshd",
+            "message": "Connection closed by 172.18.0.10 port 60482"
+          },
+          {
+            "events": 8,
+            "process.name": "sshd",
+            "message": "Connection closed by 172.18.0.21 port 59324"
+          },
+          {
+            "events": 8,
+            "process.name": "sshd",
+            "message": "Connection closed by 172.18.0.21 port 53710"
+          },
+          {
+            "events": 8,
+            "process.name": "CRON",
+            "message": "pam_unix(cron:session): session closed for user root"
+          },
+          {
+            "events": 8,
+            "process.name": "CRON",
+            "message": "pam_unix(cron:session): session opened for user root(uid=0) by (uid=0)"
+          },
+          {
+            "events": 8,
+            "process.name": "sshd",
+            "message": "Connection closed by 172.18.0.10 port 52444"
+          },
+          {
+            "events": 8,
+            "process.name": "sshd",
+            "message": "Connection closed by 172.18.0.10 port 49008"
+          },
+          {
+            "events": 8,
+            "process.name": "sshd",
+            "message": "Connection closed by 172.18.0.21 port 52316"
+          },
+          {
+            "events": 8,
+            "process.name": "sshd",
+            "message": "Connection closed by 172.18.0.10 port 35710"
+          }
+        ]
+      }
+    }
+  ]
+}
