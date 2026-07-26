@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import re
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 import yaml
@@ -194,18 +195,21 @@ def _covered(axis: str, interpolates: list, identity: dict) -> bool:
     )
 
 
-def _r0(g: Graph) -> list[str]:
-    """The formal half of R0. Findings, not triggers: each names the artifact defect
-    directly — there is no obligation to mint, the graph itself is ill-formed."""
+def _r0_dangling_binds(g: Graph) -> list[str]:
+    """A `binds:` address naming nothing in the structure."""
+    return [
+        f"R0 {g.path.name}:{d.get('id', '<no-id>')}: binds `{b}` resolves to nothing in "
+        f"structure — a dangling address (extraction gap or phantom design)."
+        for d in g.demands
+        for b in _binds(d)
+        if not _resolves(g, str(b))
+    ]
+
+
+def _r0_edge_endpoints(g: Graph) -> list[str]:
+    """An edge endpoint no element defines. `interacts` lands on a boundary, `drives` on
+    an actor; both leave from an actor."""
     findings: list[str] = []
-    for d in g.demands:
-        did = d.get("id", "<no-id>")
-        for b in _binds(d):
-            if not _resolves(g, str(b)):
-                findings.append(
-                    f"R0 {g.path.name}:{did}: binds `{b}` resolves to nothing in structure — "
-                    f"a dangling address (extraction gap or phantom design)."
-                )
     for kind, edges, targets in (
         ("interacts", g.interacts, g.boundaries),
         ("drives", g.drives, g.actors),
@@ -221,7 +225,14 @@ def _r0(g: Graph) -> list[str]:
                     f"R0 {g.path.name}: {kind}({src}->{dst}) — `to: {dst}` names no "
                     f"{'boundary' if kind == 'interacts' else 'actor'}."
                 )
+    return findings
+
+
+def _r0_identity_keys(g: Graph) -> list[str]:
+    """An identity facet's `key_axes`/`derivations` against the `axes:` registry, plus the
+    evidence a claimed key owes."""
     axes = set(g.axes)
+    findings: list[str] = []
     for bid in g.boundaries:
         identity = g.facet(bid, "identity") or {}
         for ax in identity.get("key_axes") or []:
@@ -244,6 +255,14 @@ def _r0(g: Graph) -> list[str]:
                 f"R0 {g.path.name}: {bid}.identity claims key_axes with no `evidence` — "
                 f"a claimed key without evidence is treated as unknown (schema.md)."
             )
+    return findings
+
+
+def _r0_interpolates(g: Graph) -> list[str]:
+    """An edge's `interpolates` member that is neither a registered axis nor a derivation
+    the destination's identity facet declares."""
+    axes = set(g.axes)
+    findings: list[str] = []
     for e in g.interacts:
         identity = g.facet(str(e.get("to")), "identity") or {}
         derived = {(d or {}).get("value") for d in identity.get("derivations") or []}
@@ -253,33 +272,69 @@ def _r0(g: Graph) -> list[str]:
                     f"R0 {g.path.name}: interacts({e.get('from')}->{e.get('to')}) interpolates "
                     f"`{ax}` — neither a registered axis nor a declared derivation."
                 )
-    # `unknown` invariants are holes to route, not lint errors — but an unknown with no
-    # recorded hole is a finding: the confession was made and then nobody heard it.
-    for bid in g.boundaries:
-        access = g.facet(bid, "access")
-        for via, cell in ((access or {}).get("constraints_by_via") or {}).items():
-            if (cell or {}).get("constraints") == "unknown":
-                el = f"{bid}.access[{via}]"
-                if not g.answered("R0", el):
-                    findings.append(
-                        f"R0 {g.path.name}: {el} constraints are `unknown` and no hole "
-                        f"records the undecided policy — decide it, then pin it."
-                    )
-        domain = g.facet(bid, "domain")
-        for alt in (domain or {}).get("documented_alternatives") or []:
-            if (alt or {}).get("crosses_validation") == "unknown":
-                el = f"{bid}.domain.alternatives[{(alt or {}).get('value')}]"
-                if not g.answered("R0", el):
-                    findings.append(
-                        f"R0 {g.path.name}: {el} `crosses_validation` is `unknown` with "
-                        f"no recorded hole — grounding establishes the crossing."
-                    )
     return findings
 
 
-def _triggers(g: Graph) -> tuple[list[Trigger], list[str]]:
-    """R1–R5 over the formal slots. Returns (triggers, key-coverage findings) — a key gap is
-    a direct finding (the slots already contain the answer), not a question to route."""
+def _r0_unheard_unknowns(g: Graph) -> list[str]:
+    """`unknown` invariants are holes to route, not lint errors — but an unknown with no
+    recorded hole is a finding: the confession was made and then nobody heard it."""
+    findings: list[str] = []
+    for bid in g.boundaries:
+        findings += _unheard_access(g, bid)
+        findings += _unheard_alternatives(g, bid)
+    return findings
+
+
+def _unheard_access(g: Graph, bid: str) -> list[str]:
+    """An access cell whose constraints are `unknown` with no hole recording it."""
+    findings: list[str] = []
+    access = g.facet(bid, "access")
+    for via, cell in ((access or {}).get("constraints_by_via") or {}).items():
+        if (cell or {}).get("constraints") == "unknown":
+            el = f"{bid}.access[{via}]"
+            if not g.answered("R0", el):
+                findings.append(
+                    f"R0 {g.path.name}: {el} constraints are `unknown` and no hole "
+                    f"records the undecided policy — decide it, then pin it."
+                )
+    return findings
+
+
+def _unheard_alternatives(g: Graph, bid: str) -> list[str]:
+    """A documented alternative whose `crosses_validation` is `unknown` with no hole."""
+    findings: list[str] = []
+    domain = g.facet(bid, "domain")
+    for alt in (domain or {}).get("documented_alternatives") or []:
+        if (alt or {}).get("crosses_validation") == "unknown":
+            el = f"{bid}.domain.alternatives[{(alt or {}).get('value')}]"
+            if not g.answered("R0", el):
+                findings.append(
+                    f"R0 {g.path.name}: {el} `crosses_validation` is `unknown` with "
+                    f"no recorded hole — grounding establishes the crossing."
+                )
+    return findings
+
+
+#: R0's formal half, in report order.
+_R0_CHECKS = (
+    _r0_dangling_binds,
+    _r0_edge_endpoints,
+    _r0_identity_keys,
+    _r0_interpolates,
+    _r0_unheard_unknowns,
+)
+
+
+def _r0(g: Graph) -> list[str]:
+    """The formal half of R0. Findings, not triggers: each names the artifact defect
+    directly — there is no obligation to mint, the graph itself is ill-formed."""
+    return [f for check_ in _R0_CHECKS for f in check_(g)]
+
+
+def _delta_scope(g: Graph) -> Callable[..., bool]:
+    """The delta predicate the R1–R4 rules gate on (rules.md's Procedure): an element is
+    in the delta when its `provenance` is `design`. A graph with no design-provenance
+    element at all cannot scope, so everything is delta and a WARN says so."""
     delta_scoped = any(
         e.get("provenance") == "design"
         for e in [*g.actors.values(), *g.boundaries.values(), *g.interacts, *g.drives]
@@ -294,10 +349,12 @@ def _triggers(g: Graph) -> tuple[list[Trigger], list[str]]:
     def in_delta(*elements: dict | None) -> bool:
         return (not delta_scoped) or g.in_delta(*elements)
 
-    triggers: list[Trigger] = []
-    coverage: list[str] = []
+    return in_delta
 
-    # R1 — unread channel: an edge sends into a payload-facet boundary.
+
+def _r1(g: Graph, in_delta: Callable[..., bool]) -> list[Trigger]:
+    """R1 — unread channel: an edge sends into a payload-facet boundary."""
+    triggers: list[Trigger] = []
     for e in g.interacts:
         if not e.get("sends"):
             continue
@@ -311,8 +368,17 @@ def _triggers(g: Graph) -> tuple[list[Trigger], list[str]]:
                 f"`{e.get('from')}` sends into `{dst}` — the outbound payload needs an "
                 f"executable shape demand or the channel ships unread.",
             ))
+    return triggers
 
-    # R2 — shared sink: an identity-facet boundary with ≥2 writers, or a driven writer.
+
+def _r2(g: Graph, in_delta: Callable[..., bool]) -> tuple[list[Trigger], list[str]]:
+    """R2 — shared sink: an identity-facet boundary with ≥2 writers, or a driven writer.
+
+    The only rule with two outputs. A missed key axis is a direct FINDING, not a trigger:
+    the slots already contain the answer, so there is no question to route.
+    """
+    triggers: list[Trigger] = []
+    coverage: list[str] = []
     for bid in g.boundaries:
         identity = g.facet(bid, "identity")
         if identity is None:
@@ -337,21 +403,32 @@ def _triggers(g: Graph) -> tuple[list[Trigger], list[str]]:
             + (" and at least one is driven over multiple invocations" if driven else "")
             + " — a uniqueness demand must drive them into one root at the composition frame.",
         ))
-        for e in writers:
-            for ax in identity.get("key_axes") or []:
-                if _covered(ax, e.get("interpolates") or [], identity):
-                    continue
-                # A recorded R2 answer on this boundary means the coverage question reached
-                # the gate — the demand it minted owns the cross-key assertion from here.
-                if g.answered("R2", f"{bid}.identity"):
-                    continue
-                coverage.append(
-                        f"R2 {g.path.name}: writer interacts({e.get('from')}->{bid}) does not "
-                        f"cover key axis `{ax}` — its `interpolates` names neither the axis nor "
-                        f"an injective derivation of it (a lost-write/cross-read shape)."
-                    )
+        coverage.extend(_r2_key_coverage(g, bid, identity, writers))
+    return triggers, coverage
 
-    # R3 — cross-via parity: an access-facet boundary reachable over ≥2 vias.
+
+def _r2_key_coverage(g: Graph, bid: str, identity: dict, writers: list[dict]) -> list[str]:
+    """Each writer's `interpolates` against the sink's key axes (rules.md R2a)."""
+    coverage: list[str] = []
+    for e in writers:
+        for ax in identity.get("key_axes") or []:
+            if _covered(ax, e.get("interpolates") or [], identity):
+                continue
+            # A recorded R2 answer on this boundary means the coverage question reached
+            # the gate — the demand it minted owns the cross-key assertion from here.
+            if g.answered("R2", f"{bid}.identity"):
+                continue
+            coverage.append(
+                f"R2 {g.path.name}: writer interacts({e.get('from')}->{bid}) does not "
+                f"cover key axis `{ax}` — its `interpolates` names neither the axis nor "
+                f"an injective derivation of it (a lost-write/cross-read shape)."
+            )
+    return coverage
+
+
+def _r3(g: Graph, in_delta: Callable[..., bool]) -> list[Trigger]:
+    """R3 — cross-via parity: an access-facet boundary reachable over ≥2 vias."""
+    triggers: list[Trigger] = []
     for bid in g.boundaries:
         access = g.facet(bid, "access")
         if access is None:
@@ -368,11 +445,15 @@ def _triggers(g: Graph) -> tuple[list[Trigger], list[str]]:
                 f"`{bid}` is reachable over {sorted(vias)} — every constraint the established "
                 f"via enforces must hold on the `{via}` cell too (per-cell discharge).",
             ))
+    return triggers
 
-    # R4 — domain coverage: consumers of a domain-facet boundary. Read edges are the
-    # canonical consumers, but rules.md's trigger is also "a domain facet gaining members" —
-    # a design-provenance domain reached only via invoke/write (or not yet wired at all)
-    # still fires; keying on `mode: read` alone let the edge label silence the rule.
+
+def _r4(g: Graph, in_delta: Callable[..., bool]) -> list[Trigger]:
+    """R4 — domain coverage: consumers of a domain-facet boundary. Read edges are the
+    canonical consumers, but rules.md's trigger is also "a domain facet gaining members" —
+    a design-provenance domain reached only via invoke/write (or not yet wired at all)
+    still fires; keying on `mode: read` alone let the edge label silence the rule."""
+    triggers: list[Trigger] = []
     for bid in g.boundaries:
         domain = g.facet(bid, "domain")
         if domain is None:
@@ -382,29 +463,49 @@ def _triggers(g: Graph) -> tuple[list[Trigger], list[str]]:
         consumers = readers or edges_in
         if not in_delta(g.boundaries.get(bid), *consumers):
             continue
-        for v in domain.get("distinguished") or []:
-            triggers.append(Trigger(
-                "R4", f"{bid}.domain.distinguished[{v}]",
-                f"distinguished member `{v!r}` must be individually exercised"
-                + (
-                    " — above all: it is falsy and `falsy_valid` is true, the "
-                    "`x or DEFAULT` swallow shape"
-                    if not v and domain.get("falsy_valid") is True else ""
-                ) + ".",
-            ))
-        for alt in domain.get("documented_alternatives") or []:
-            v = (alt or {}).get("value")
-            triggers.append(Trigger(
-                "R4", f"{bid}.domain.alternatives[{v}]",
-                f"documented alternative `{v}` must be pinned"
-                + (
-                    " — it crosses validation, so the advertised combination works or "
-                    "fails loud"
-                    if (alt or {}).get("crosses_validation") is True else ""
-                ) + ".",
-            ))
+        triggers += _r4_distinguished(bid, domain)
+        triggers += _r4_alternatives(bid, domain)
+    return triggers
 
-    # R5 — subtraction: a `mode: remove` edge whose target has live dependents.
+
+def _r4_distinguished(bid: str, domain: dict) -> list[Trigger]:
+    """Every distinguished member owes an individual exercise."""
+    return [
+        Trigger(
+            "R4", f"{bid}.domain.distinguished[{v}]",
+            f"distinguished member `{v!r}` must be individually exercised"
+            + (
+                " — above all: it is falsy and `falsy_valid` is true, the "
+                "`x or DEFAULT` swallow shape"
+                if not v and domain.get("falsy_valid") is True else ""
+            ) + ".",
+        )
+        for v in domain.get("distinguished") or []
+    ]
+
+
+def _r4_alternatives(bid: str, domain: dict) -> list[Trigger]:
+    """Every documented alternative owes a pin."""
+    return [
+        Trigger(
+            "R4", f"{bid}.domain.alternatives[{(alt or {}).get('value')}]",
+            f"documented alternative `{(alt or {}).get('value')}` must be pinned"
+            + (
+                " — it crosses validation, so the advertised combination works or "
+                "fails loud"
+                if (alt or {}).get("crosses_validation") is True else ""
+            ) + ".",
+        )
+        for alt in domain.get("documented_alternatives") or []
+    ]
+
+
+def _r5(g: Graph) -> list[Trigger]:
+    """R5 — subtraction: a `mode: remove` edge whose target has live dependents.
+
+    No delta predicate: a `remove` edge IS the delta, so the rule fires on its own shape.
+    """
+    triggers: list[Trigger] = []
     for e in g.interacts:
         if e.get("mode") != "remove":
             continue
@@ -420,6 +521,23 @@ def _triggers(g: Graph) -> tuple[list[Trigger], list[str]]:
                 f"depend on it — each dependent's workflow needs a survival demand (or the "
                 f"substitute's structural inability is a design hole).",
             ))
+    return triggers
+
+
+def _triggers(g: Graph) -> tuple[list[Trigger], list[str]]:
+    """R1–R5 over the formal slots. Returns (triggers, key-coverage findings) — a key gap is
+    a direct finding (the slots already contain the answer), not a question to route.
+
+    Written out rather than looped: the rules do not share a signature (only R2 produces
+    findings, only R5 ignores the delta), and their order is the order `check` reports in.
+    """
+    in_delta = _delta_scope(g)
+    triggers = _r1(g, in_delta)
+    r2_triggers, coverage = _r2(g, in_delta)
+    triggers += r2_triggers
+    triggers += _r3(g, in_delta)
+    triggers += _r4(g, in_delta)
+    triggers += _r5(g)
     return triggers, coverage
 
 

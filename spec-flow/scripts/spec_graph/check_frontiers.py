@@ -97,111 +97,165 @@ def _load(directory: Path) -> dict[str, Frontier]:
     return {p.name: Frontier(p) for p in sorted(directory.glob("*.md"))}
 
 
+def _lint_frontmatter(name: str, f: Frontier, findings: list[str]) -> None:
+    """The declared slots: a closed-vocabulary `status`, a `phase`, integer counts."""
+    if f.status not in _STATUS:
+        findings.append(
+            f"{name}: status `{f.status}` is not one of {sorted(_STATUS)}."
+        )
+    if not f.meta.get("phase"):
+        findings.append(f"{name}: frontmatter carries no `phase`.")
+    for cat, n in f.inventory.items():
+        if not isinstance(n, int):
+            findings.append(
+                f"{name}: inventory `{cat}: {n!r}` is not an integer count — counts are "
+                f"computed, never recalled."
+            )
+
+
+def _lint_digest(name: str, f: Frontier, findings: list[str]) -> None:
+    """The `## Digest` section — the leaf's inline return, verbatim and capped."""
+    if f.digest_lines is None:
+        findings.append(f"{name}: no `## Digest` section — the leaf's inline return has no home.")
+    elif f.digest_lines > _DIGEST_CAP:
+        findings.append(
+            f"{name}: digest runs {f.digest_lines} lines (cap {_DIGEST_CAP}) — measured "
+            f"drift runs long, not short."
+        )
+
+
+def _lint_input_shapes(name: str, f: Frontier, findings: list[str]) -> None:
+    """Every `inputs` entry must be a mapping.
+
+    Split from the reconciliation below because the `inputs` property keeps only
+    mappings — a bare string (`inputs: [10-brief.md]`, the natural shorthand) would
+    otherwise vanish from reconciliation entirely: no echo check, no finding, no
+    staleness. This is the pass that sees the raw list.
+    """
+    raw_inputs = f.meta.get("inputs")
+    for entry in (raw_inputs if isinstance(raw_inputs, list) else []):
+        if not isinstance(entry, dict):
+            findings.append(
+                f"{name}: input entry {entry!r} is not a mapping — each input must be a "
+                f"mapping with `path` + `inventory_echo`, or its echo is never reconciled."
+            )
+
+
+def _lint_input_echoes(
+    name: str, f: Frontier, frontiers: dict[str, Frontier], directory: Path,
+    findings: list[str],
+) -> int | None:
+    """Each input's `inventory_echo` against its producer's actual `inventory`.
+
+    Returns the premise count this frontier consumed — SUMMED across inputs, never
+    last-wins: a frontier that fans in two producers consumed both their premise counts,
+    and comparing the dispositions against only the last echo both false-flags a
+    conserved chain and hides a real drop. `None` means no input declared one, which is
+    what switches the dispositions rule off.
+    """
+    echoed_premises: int | None = None
+    for inp in f.inputs:
+        ref = str(inp.get("path") or "")
+        if not ref:
+            # A pathless entry has no producer to reconcile against — and in the resume
+            # scan it would resolve to the directory itself (false STALE on every write).
+            findings.append(
+                f"{name}: input entry carries no `path` — the echo has no producer to "
+                f"reconcile against."
+            )
+            continue
+        # `./10-brief.md` and `frontiers/10-brief.md` name the same sibling: reconcile by
+        # the bare filename, but keep the raw ref in messages so the author sees their own
+        # spelling. A decorated ref that skipped normalization skipped the echo check too.
+        norm = Path(ref).name
+        producer = frontiers.get(norm)
+        if producer is None:
+            _lint_absent_producer(name, ref, norm, directory, findings)
+            continue
+        if producer.error:
+            continue  # already reported on the producer
+        echo = inp.get("inventory_echo")
+        if not isinstance(echo, dict):
+            findings.append(f"{name}: input `{ref}` carries no `inventory_echo` mapping.")
+            continue
+        if isinstance(echo.get("premises"), int):
+            echoed_premises = (echoed_premises or 0) + echo["premises"]
+        if echo != producer.inventory:
+            findings.append(_echo_mismatch(name, ref, echo, producer.inventory))
+    return echoed_premises
+
+
+def _lint_absent_producer(
+    name: str, ref: str, norm: str, directory: Path, findings: list[str]
+) -> None:
+    """An input naming no frontier in the chain. Only a numeric-prefixed name CLAIMS to be
+    a sibling here — anything else (the design doc, an issue thread, a sidecar payload) is
+    an external or non-frontier input with no frontmatter to reconcile against."""
+    if not re.match(r"^\d+-", norm):
+        return
+    if norm.endswith(".md"):
+        findings.append(f"{name}: input `{ref}` names no frontier in {directory.name}/.")
+    elif not (directory / ref).exists():
+        findings.append(f"{name}: input `{ref}` does not exist.")
+
+
+def _echo_mismatch(name: str, ref: str, echo: dict, actual: dict) -> str:
+    diff = {
+        k: (echo.get(k), actual.get(k))
+        for k in set(echo) | set(actual)
+        if echo.get(k) != actual.get(k)
+    }
+    return (
+        f"{name}: inventory_echo for `{ref}` disagrees with its actual inventory "
+        f"— (echoed, actual) per category: {diff}. The two declarations disagree: "
+        f"recompute the count from the payload content — never resolve the "
+        f"mismatch by copying either side."
+    )
+
+
+def _lint_dispositions(
+    name: str, f: Frontier, echoed_premises: int | None, findings: list[str]
+) -> None:
+    """The sum rule: consensus + forks + silent_branches + drops == premises in.
+
+    ANY present disposition key engages the rule (phases/answer.md mandates all four):
+    requiring the full set let a partial inventory (`drops` omitted) skip the sum
+    entirely — exactly the shape a silent drop hides in.
+    """
+    present = _DISPOSITIONS & set(f.inventory)
+    if not (present and echoed_premises is not None):
+        return
+    for missing in sorted(_DISPOSITIONS - present):
+        findings.append(
+            f"{name}: inventory carries dispositions but omits `{missing}` — all four "
+            f"disposition categories are mandated, and a missing one is an unrecorded "
+            f"exit for a premise."
+        )
+    # Non-int counts were already flagged above (counts are computed, never recalled) —
+    # skip them here rather than lose the whole report behind a TypeError mid-sum.
+    total = sum(v for k in sorted(present) if isinstance(v := f.inventory[k], int))
+    if total != echoed_premises:
+        findings.append(
+            f"{name}: dispositions sum to {total} but {echoed_premises} premises were "
+            f"consumed — a premise left without a recorded disposition is the one loss "
+            f"no downstream check can see."
+        )
+
+
 def check(directory: Path) -> list[str]:
     frontiers = _load(directory)
     findings: list[str] = []
     for name, f in frontiers.items():
         if f.error:
+            # An unreadable file is one finding and no further questions: every rule
+            # below reads frontmatter this file does not have.
             findings.append(f"{name}: {f.error}.")
             continue
-        if f.status not in _STATUS:
-            findings.append(
-                f"{name}: status `{f.status}` is not one of {sorted(_STATUS)}."
-            )
-        if not f.meta.get("phase"):
-            findings.append(f"{name}: frontmatter carries no `phase`.")
-        for cat, n in f.inventory.items():
-            if not isinstance(n, int):
-                findings.append(
-                    f"{name}: inventory `{cat}: {n!r}` is not an integer count — counts are "
-                    f"computed, never recalled."
-                )
-        if f.digest_lines is None:
-            findings.append(f"{name}: no `## Digest` section — the leaf's inline return has no home.")
-        elif f.digest_lines > _DIGEST_CAP:
-            findings.append(
-                f"{name}: digest runs {f.digest_lines} lines (cap {_DIGEST_CAP}) — measured "
-                f"drift runs long, not short."
-            )
-        echoed_premises: int | None = None
-        raw_inputs = f.meta.get("inputs")
-        for entry in (raw_inputs if isinstance(raw_inputs, list) else []):
-            # The `inputs` property keeps only mappings — a bare string (`inputs:
-            # [10-brief.md]`, the natural shorthand) would otherwise vanish from
-            # reconciliation entirely: no echo check, no finding, no staleness.
-            if not isinstance(entry, dict):
-                findings.append(
-                    f"{name}: input entry {entry!r} is not a mapping — each input must be a "
-                    f"mapping with `path` + `inventory_echo`, or its echo is never reconciled."
-                )
-        for inp in f.inputs:
-            ref = str(inp.get("path") or "")
-            if not ref:
-                # A pathless entry has no producer to reconcile against — and in the resume
-                # scan it would resolve to the directory itself (false STALE on every write).
-                findings.append(
-                    f"{name}: input entry carries no `path` — the echo has no producer to "
-                    f"reconcile against."
-                )
-                continue
-            # `./10-brief.md` and `frontiers/10-brief.md` name the same sibling: reconcile by
-            # the bare filename, but keep the raw ref in messages so the author sees their own
-            # spelling. A decorated ref that skipped normalization skipped the echo check too.
-            norm = Path(ref).name
-            echo = inp.get("inventory_echo")
-            producer = frontiers.get(norm)
-            if producer is None:
-                # Only a numeric-prefixed name claims to be a sibling in this chain. Anything
-                # else — the design doc, an issue thread, a sidecar payload — is an external
-                # or non-frontier input with no frontmatter to reconcile against.
-                if re.match(r"^\d+-", norm) and norm.endswith(".md"):
-                    findings.append(f"{name}: input `{ref}` names no frontier in {directory.name}/.")
-                elif re.match(r"^\d+-", norm) and not (directory / ref).exists():
-                    findings.append(f"{name}: input `{ref}` does not exist.")
-                continue
-            if producer.error:
-                continue  # already reported on the producer
-            if isinstance(echo, dict):
-                if isinstance(echo.get("premises"), int):
-                    # SUM across inputs, never last-wins: a frontier that fans in two producers
-                    # consumed both their premise counts, and comparing the dispositions against
-                    # only the last echo both false-flags a conserved chain and hides a real drop.
-                    echoed_premises = (echoed_premises or 0) + echo["premises"]
-                if echo != producer.inventory:
-                    diff = {
-                        k: (echo.get(k), producer.inventory.get(k))
-                        for k in set(echo) | set(producer.inventory)
-                        if echo.get(k) != producer.inventory.get(k)
-                    }
-                    findings.append(
-                        f"{name}: inventory_echo for `{ref}` disagrees with its actual inventory "
-                        f"— (echoed, actual) per category: {diff}. The two declarations disagree: "
-                        f"recompute the count from the payload content — never resolve the "
-                        f"mismatch by copying either side."
-                    )
-            else:
-                findings.append(f"{name}: input `{ref}` carries no `inventory_echo` mapping.")
-        # Dispositions sum rule: consensus + forks + silent_branches + drops == premises in.
-        # ANY present disposition key engages the rule (phases/answer.md mandates all four):
-        # requiring the full set let a partial inventory (`drops` omitted) skip the sum
-        # entirely — exactly the shape a silent drop hides in.
-        present = _DISPOSITIONS & set(f.inventory)
-        if present and echoed_premises is not None:
-            for missing in sorted(_DISPOSITIONS - present):
-                findings.append(
-                    f"{name}: inventory carries dispositions but omits `{missing}` — all four "
-                    f"disposition categories are mandated, and a missing one is an unrecorded "
-                    f"exit for a premise."
-                )
-            # Non-int counts were already flagged above (counts are computed, never recalled) —
-            # skip them here rather than lose the whole report behind a TypeError mid-sum.
-            total = sum(v for k in sorted(present) if isinstance(v := f.inventory[k], int))
-            if total != echoed_premises:
-                findings.append(
-                    f"{name}: dispositions sum to {total} but {echoed_premises} premises were "
-                    f"consumed — a premise left without a recorded disposition is the one loss "
-                    f"no downstream check can see."
-                )
+        _lint_frontmatter(name, f, findings)
+        _lint_digest(name, f, findings)
+        _lint_input_shapes(name, f, findings)
+        echoed = _lint_input_echoes(name, f, frontiers, directory, findings)
+        _lint_dispositions(name, f, echoed, findings)
     return findings
 
 
