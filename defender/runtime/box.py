@@ -24,6 +24,7 @@ from defender.runtime.box_codec import (
     encode_response,
 )
 from defender.runtime.scrub import (  # noqa: F401 — re-exported: run.py/drains.py/tests import `box.scrub`, `box.RunTainted`
+    Finding,
     RunTainted,
     scrub,
 )
