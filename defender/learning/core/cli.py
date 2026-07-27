@@ -52,7 +52,7 @@ Environment:
                                        DISABLED; the mechanical per-lead projection needs none)
   ORACLE_MAX_CONCURRENCY               max concurrent per-lead oracle calls (default: 8)
   JUDGE_EFFORT / BENIGN_JUDGE_EFFORT   judge reasoning effort (default: medium)
-  JUDGE_MODEL / BENIGN_JUDGE_MODEL     adversarial / benign judge model (default: glm-5.2;
+  JUDGE_MODEL / BENIGN_JUDGE_MODEL     adversarial / benign judge model (default: kimi-k3;
                                        needs FIREWORKS_API_KEY — the judge runs in-process)
   LEARNING_SUBAGENT_TIMEOUT_SECONDS    per-subagent timeout (default: 450)
   LEARNING_AUTHOR_THRESHOLD            pending findings before author runs (default: 5)

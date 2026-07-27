@@ -234,12 +234,19 @@ def oracle_max_concurrency() -> int:
     return env_int("ORACLE_MAX_CONCURRENCY", 8)
 
 
+# The judge moved off glm-5.2 on STABILITY, not on per-verdict quality. Over the frozen
+# pair in experiments/judge-glm52-vs-kimik3, GLM at this effort returned a different outcome
+# on both cases across two identical reps — both times on the caught<->survived /
+# refuted<->survived axis, which is the axis that decides FN/FP accounting and therefore
+# which findings become lessons. K3 returned the same outcome on 4 of 4 reps. A judge that
+# relabels the same frozen input is injecting noise into every lesson the author trains on,
+# and the forward-check gate cannot catch it because that gate re-runs the same judge.
 def judge_model() -> str:
-    return env_str("JUDGE_MODEL", "glm-5.2")
+    return env_str("JUDGE_MODEL", "kimi-k3")
 
 
 def benign_judge_model() -> str:
-    return env_str("BENIGN_JUDGE_MODEL", "glm-5.2")
+    return env_str("BENIGN_JUDGE_MODEL", "kimi-k3")
 
 
 def judge_effort() -> str:
