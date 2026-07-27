@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from defender._artifact_schema import DISPOSITION_ENUM  # noqa: F401 — re-export; the enum's home is the report.md schema (#714)
 from defender._clock import now_iso  # noqa: F401 — re-export: core.config stays the loop's import surface
 from defender._env import env_int, env_str
 from defender._env import FatalConfigError  # noqa: F401 — re-export; enrolled as stage-fatal in core/faults.py
@@ -169,9 +170,10 @@ LESSONS_ENV_RETRIEVE_SCRIPT = _LESSONS_SCRIPTS_DIR / "lessons_env_retrieve.py"
 LESSONS_ACTOR_INDEX_SCRIPT = _LESSONS_SCRIPTS_DIR / "lessons_actor_index.py"
 
 
-DISPOSITION_ENUM = {"benign", "inconclusive", "malicious"}
 # Which dispositions select which direction is NOT declared here — it is a field on
-# `Direction` (`core/directions.py`), so the mapping has one home (#716).
+# `Direction` (`core/directions.py`), so the mapping has one home (#716). The enum ITSELF
+# moved to `defender/_artifact_schema.py` (#714), where the report.md schema that mints it
+# lives; core.config stays the loop's import surface for it.
 
 OUTCOME_ENUM = {"caught", "survived", "undecidable", "incoherent", "skip-passthrough"}
 BENIGN_OUTCOME_ENUM = {

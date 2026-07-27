@@ -1,0 +1,227 @@
+"""The content schema for the run's two model-authored artifacts.
+
+`report.md` and `investigation.md` are the only files a model authors that leave the
+system: the report and investigation ride verbatim into the judge LLM prompt, and the
+report body into the ticket bridge's HTTP egress. This module owns what a well-formed one
+IS — the report's frontmatter grammar, its `disposition` enum, the UTF-8 byte bounds on
+both, and the investigation's invlang structure.
+
+It owns NO authorization. Who may write where is `runtime/permission/files.py`'s job (the
+`write_allow` allowlist, the `write ⊆ read roots` containment check, and the resolve-then-key
+decision that picks which artifact a path IS); this module is called only after those gates
+have already said yes, and it never sees a policy, a run dir, or a path.
+
+Every entry point returns `str | None` — the deny reason, or `None` for "well-formed" —
+deliberately NOT a `permission.Decision`. `Decision` is authorization vocabulary, and
+keeping it out is what lets this module sit as a neutral leaf: the permission gate imports
+it, and so can the learning loop's read-side validators, without either importing the other
+(#714). The gate wraps a returned reason back into `Decision(False, reason)`, so the deny
+text the model sees as ModelRetry is unchanged.
+"""
+
+from __future__ import annotations
+
+import yaml
+
+from defender._frontmatter import FrontmatterError, split_frontmatter
+from defender.skills.invlang.validate import validate_companion
+
+# The canonical `report.md` disposition vocabulary — the SINGLE definition (#714). The
+# learning loop re-exports it (`learning/core/config.py`) so `core.config` stays the loop's
+# import surface, and the case-history ticket builder imports it rather than restating it.
+# It lives HERE, not in the loop's config, because the write gate is its earliest consumer
+# and a `runtime/` → `learning/` import inside a security boundary was the coupling #714
+# set out to remove.
+DISPOSITION_ENUM = {"benign", "inconclusive", "malicious"}
+
+# #629 — output-structure bounds for the run's two model-authored artifacts, all in
+# UTF-8 BYTES. These are a VOLUME + STRUCTURE control on bytes that leave the system
+# (the report/investigation ride verbatim into the judge LLM prompt, and the report
+# body into the ticket bridge's HTTP egress) — not a content oracle: an in-bound,
+# well-formed payload still passes. Values are policy inputs decided in the #629
+# intent+design doc (report frontmatter 512 B / whole file 8 KiB; investigation 64 KiB).
+REPORT_FRONTMATTER_MAX = 512
+REPORT_FILE_MAX = 8192
+INVESTIGATION_FILE_MAX = 65536
+
+# Preserve #629's fail-closed output-structure policy for the legacy report delimiter.
+# The judge now places report bytes inside an invocation-salted frame via
+# defender._untrusted.wrap, but accepting the formerly forbidden sequence would loosen
+# the report contract independently of that prompt-layer hardening.
+REPORT_CLOSE_DELIMITER = "</report>"
+
+REPORT_NAME = "report.md"
+INVESTIGATION_NAME = "investigation.md"
+
+# The artifacts this module has a schema for. The gate iterates this to decide whether a
+# resolved write target is a gated artifact at all, so adding a third one is a change HERE
+# rather than a new branch in `decide_write`.
+ARTIFACT_NAMES = (REPORT_NAME, INVESTIGATION_NAME)
+
+# Which artifacts need the CURRENT on-disk text as a baseline. Only invlang does (it is
+# append-only, so validation is against the document's history, not the text alone). The
+# gate reads the baseline and passes it in — this module does no filesystem access — and
+# it must read for THESE names only: an unconditional read would put a `read_text` that can
+# raise on the report.md path, where none ran before.
+NEEDS_BASELINE = frozenset({INVESTIGATION_NAME})
+
+
+def _utf8_len(text: str) -> int:
+    """Byte length under UTF-8 — the basis for every #629 bound. A multibyte codepoint costs
+    its real transport bytes, so a `len(str)` (codepoint-count) impl would under-count and let
+    a body over the byte bound through; the multibyte fixtures pin exactly that."""
+    return len(text.encode("utf-8"))
+
+
+def _has_duplicate_top_level_key(raw: str) -> bool:
+    """True iff the frontmatter YAML declares the same top-level key twice. PyYAML's `safe_load`
+    silently resolves duplicates last-wins, so a `disposition:` declared twice (a valid member
+    shadowing an invalid one) would pass a plain membership check on the parsed mapping — this
+    catches it at the node level instead. Returns False on any parse trouble: `raw` already
+    parsed once via `split_frontmatter`, so trouble here means no reliable duplicate signal and
+    the other checks stand.
+
+    Duplicates are judged on the CONSTRUCTED key — what `safe_load` would put in the mapping —
+    not on the raw scalar node text (#681). The node text is the wrong equality: it both
+    FALSE-POSITIVES (`1:` and `"1":` are distinct keys to `safe_load`, one int and one str, but
+    carry the same `key_node.value` `"1"`) and FALSE-NEGATIVES (`1:` / `0x1:`, `yes:` / `true:`
+    construct to the same key from different text, a real last-wins shadowing the raw compare
+    would miss). ONE `SafeLoader` — the same class `split_frontmatter` parses under — both
+    composes and constructs, so the two readings of "the same key" cannot diverge. That includes
+    `flatten_mapping`: `safe_load` expands a `<<:` merge INTO the mapping before building it, so
+    a merge-injected key is a real last-wins entry; skipping the flatten would hide exactly the
+    shadowing this check exists to catch (`<<: [*a, *b]` where both anchors carry `disposition`
+    — the parsed mapping keeps one, the raw text shows two). A key that cannot be constructed or
+    compared — an untabled tag, an unhashable list/mapping key, an out-of-range implicit
+    timestamp, all of which `safe_load` would have rejected upstream anyway — is skipped rather
+    than raised out of this blocking gate."""
+    loader = yaml.SafeLoader(raw)
+    try:
+        try:
+            node = loader.get_single_node()
+            if not isinstance(node, yaml.MappingNode):
+                return False
+            loader.flatten_mapping(node)  # `<<:` merges become real top-level pairs
+        except (yaml.YAMLError, RecursionError):
+            return False
+        seen: set[object] = set()
+        for key_node, _value_node in node.value:
+            try:
+                key = loader.construct_object(key_node, deep=True)
+                duplicate = key in seen
+            except (yaml.YAMLError, RecursionError, TypeError, ValueError):
+                continue  # unconstructible / unhashable — no reliable signal for THIS key
+            if duplicate:
+                return True
+            seen.add(key)
+        return False
+    finally:
+        loader.dispose()
+
+
+def encodable_or_reason(proposed_text: str, artifact: str) -> str | None:
+    """Deny text that is not UTF-8-encodable, BEFORE either artifact's own schema runs.
+
+    Both artifact schemas measure UTF-8 BYTES (`_utf8_len`) and their text splices into live
+    egresses. Content that is not UTF-8-encodable — a lone surrogate, reachable from a model
+    tool-call JSON arg (`json.loads('"\\ud800"')` yields one) — can be neither byte-measured
+    nor written (`write_text(encoding="utf-8")` raises the SAME error), so it is denied
+    FAIL-CLOSED here rather than letting `_utf8_len`'s `.encode()` raise out of the gate: the
+    gate's contract is to return a Decision, never propagate (its RESOLVE_ERRORS rule)."""
+    try:
+        proposed_text.encode("utf-8")
+    except UnicodeEncodeError:
+        return (
+            f"{artifact} contains bytes that are not valid UTF-8 (e.g. a lone surrogate) — "
+            "rewrite it as UTF-8 text and retry."
+        )
+    return None
+
+
+def validate_report(proposed_text: str) -> str | None:
+    """The report.md output-structure schema (#629). Fail-closed on any of: unparseable
+    frontmatter (the one canonical grammar — leading+closing fence, valid YAML, a mapping);
+    a missing / duplicated / non-string / out-of-enum top-level `disposition`; a frontmatter
+    over 512 B or a whole file over 8,192 B (UTF-8); or a literal `</report>` that would break
+    out of the judge's report block. Only `disposition` is required — `case_id`/`confidence`
+    are deliberately unvalidated (the ticket path derives case_id from the run dir; confidence
+    is untyped everywhere). Each reason is actionable text the tool lane raises as ModelRetry."""
+    try:
+        fm, raw, _body = split_frontmatter(proposed_text)
+    except FrontmatterError as e:
+        return f"report.md frontmatter is malformed — fix and rewrite: {e}"
+    if _has_duplicate_top_level_key(raw):
+        return (
+            "report.md frontmatter declares a top-level key more than once — remove the "
+            "duplicate and rewrite."
+        )
+    disposition = fm.get("disposition")
+    # `isinstance(str)` FIRST: a non-string value (a list / mapping) is unhashable, so a bare
+    # `value in DISPOSITION_ENUM` (a set) would raise TypeError out of the gate instead of denying.
+    if not (isinstance(disposition, str) and disposition in DISPOSITION_ENUM):
+        return (
+            "report.md frontmatter must carry a top-level `disposition` in "
+            f"{sorted(DISPOSITION_ENUM)} (got {disposition!r}) — fix and rewrite."
+        )
+    if _utf8_len(raw) > REPORT_FRONTMATTER_MAX:
+        return (
+            f"report.md frontmatter is {_utf8_len(raw)} bytes, over the "
+            f"{REPORT_FRONTMATTER_MAX}-byte limit — trim it and rewrite."
+        )
+    if _utf8_len(proposed_text) > REPORT_FILE_MAX:
+        return (
+            f"report.md is {_utf8_len(proposed_text)} bytes, over the "
+            f"{REPORT_FILE_MAX}-byte limit — trim it and rewrite."
+        )
+    if REPORT_CLOSE_DELIMITER in proposed_text:
+        return (
+            f"report.md contains the literal {REPORT_CLOSE_DELIMITER!r} delimiter, which would "
+            "break out of the judge's report block — remove it and rewrite."
+        )
+    return None
+
+
+def validate_investigation(proposed_text: str, current: str | None) -> str | None:
+    """The investigation.md schema: the #629 byte bound FIRST (size-first short-circuit, so an
+    over-bound document yields a deterministic SIZE-failure reason without the invlang validator
+    ever running on the oversize text), then the pre-existing structural invlang validation
+    against the full proposed text (`current`, the caller-supplied on-disk text, supplies the
+    append-only baseline). Empty / whitespace-only text is 0-ish bytes under bound and
+    invlang-empty, so it accepts."""
+    if _utf8_len(proposed_text) > INVESTIGATION_FILE_MAX:
+        return (
+            f"investigation.md is {_utf8_len(proposed_text)} bytes, over the "
+            f"{INVESTIGATION_FILE_MAX}-byte limit — trim it and rewrite."
+        )
+    # Fail closed on an internal validator error — same as invlang_validate's
+    # hook, which exits 2 (block) rather than letting the write through.
+    try:
+        errors = validate_companion(proposed_text, current)
+    except Exception as e:  # noqa: BLE001 — a blocking gate must fail closed
+        return (
+            f"investigation.md validation errored — failing closed: {e!r}. "
+            "Simplify the invlang and rewrite."
+        )
+    if errors:
+        return "investigation.md failed invlang validation — fix and rewrite:\n" + "\n".join(
+            f"  - {e}" for e in errors
+        )
+    return None
+
+
+def validate_artifact(name: str, proposed_text: str, current: str | None) -> str | None:
+    """Validate `proposed_text` as the artifact `name` (one of `ARTIFACT_NAMES`), returning the
+    deny reason or `None`. The UTF-8-encodability check runs for BOTH artifacts before either
+    schema, because both measure bytes. `current` is the on-disk baseline, required for the
+    artifacts in `NEEDS_BASELINE` and ignored for the rest. An unknown `name` is a caller bug —
+    the gate only calls with a name it took from `ARTIFACT_NAMES` — and raises rather than
+    silently accepting, so a third artifact added to the tuple without a schema cannot ship as
+    a permanently-allowed write."""
+    reason = encodable_or_reason(proposed_text, name)
+    if reason is not None:
+        return reason
+    if name == REPORT_NAME:
+        return validate_report(proposed_text)
+    if name == INVESTIGATION_NAME:
+        return validate_investigation(proposed_text, current)
+    raise ValueError(f"no content schema for artifact {name!r}")
