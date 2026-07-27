@@ -1,0 +1,11 @@
+{
+  "goal": "Look up IP address 172.18.0.16 in CMDB to determine if it is a registered host, its role, zone, owner, and any associated services.",
+  "what_to_summarize": [
+    "whether 172.18.0.16 is a registered/documented host in CMDB",
+    "host role if registered (scanner, monitoring, bastion, etc.)",
+    "network zone and provenance",
+    "owner or team responsible",
+    "any associated services or applications",
+    "whether the host has any declared trust relationship with canary-1"
+  ]
+}

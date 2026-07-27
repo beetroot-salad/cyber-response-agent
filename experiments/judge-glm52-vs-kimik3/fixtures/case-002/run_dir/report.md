@@ -1,0 +1,7 @@
+---
+case_id: fresh-01
+disposition: inconclusive
+confidence: high
+---
+
+Office workstation `office-ws-1` (172.18.0.16, owner dev.dana) conducted 96 SSH brute-force authentication attempts against `root` on canary-1 (a sandbox canary host owned by team.sre) over a 3-minute window starting 16:44:43Z on 2026-07-27, split evenly between password and other auth methods. CMDB lookup (l-004) confirmed the source is a developer workstation in the preprod zone — not a scanner or monitoring system — with no declared trust relationship to canary-1. The same IP concurrently appeared in nginx access logs on production web servers web-1 and web-2 (l-004), indicating broader probing of production infrastructure. Change-management query (l-005) returned zero change tickets for canary-1 — no authorized pen test or security testing covers this activity. Both authz contracts (approved-source-list, change-mgmt) return `unauthorized`, forcing escalation. The misconfigured-monitoring hypothesis (h-002) is strongly refuted; the brute-force hypothesis (h-001) is strongly supported. Disposition is `inconclusive` because the mechanism behind the workstation's behavior cannot be confirmed from available telemetry — the workstation may be compromised by an external attacker conducting lateral movement, or an insider may be running unauthorized security tools. Either way, the unauthorized brute-force from a workstation against a canary and production web servers requires immediate escalation to investigate `office-ws-1`.

@@ -1,0 +1,10 @@
+{
+  "goal": "Check the root account status on canary-1 \u2014 is root locked, disabled, or does it have a password set? Also check sshd configuration for PermitRootLogin setting.",
+  "what_to_summarize": [
+    "root account status (locked, disabled, has password)",
+    "sshd PermitRootLogin configuration value",
+    "whether root login via SSH is permitted",
+    "any PAM configuration relevant to root auth",
+    "whether failed auth attempts trigger account lockout (fail2ban or similar)"
+  ]
+}

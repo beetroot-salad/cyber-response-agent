@@ -1,0 +1,11 @@
+{
+  "goal": "Look up canary-1 in CMDB to establish its role, network zone, exposure (internet-facing vs internal), OS, and any associated services or ownership information.",
+  "what_to_summarize": [
+    "host role (bastion, web-server, monitoring, etc.)",
+    "network zone (internal, dmz, internet-facing)",
+    "OS and platform details",
+    "owner or team responsible",
+    "any associated services or applications",
+    "whether the host is documented as internet-exposed"
+  ]
+}

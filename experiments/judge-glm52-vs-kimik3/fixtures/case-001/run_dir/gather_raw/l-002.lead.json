@@ -1,0 +1,9 @@
+{
+  "goal": "Check for any sshd successful (Accepted) authentication events on canary-1 in a \u00b130 minute window around the alert timestamp 2026-07-27T16:44:58Z.",
+  "what_to_summarize": [
+    "any sshd Accepted events on canary-1",
+    "source IP, username, auth method, and timestamp of any successful auth",
+    "whether any successful auth follows the failure burst",
+    "time delta between last failure and any subsequent success"
+  ]
+}
