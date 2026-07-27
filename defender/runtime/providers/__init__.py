@@ -22,6 +22,24 @@ FIREWORKS = OpenAICompatProvider(
 PROVIDERS: tuple[Provider, ...] = (ANTHROPIC, FIREWORKS)
 
 
+def selectable_aliases() -> tuple[str, ...]:
+    """One spelling per distinct model behind the Fireworks alias map, in declaration order.
+
+    DERIVED rather than written out. The literal this replaced named the two models that
+    happened to exist when it was typed, and nothing makes adding an alias update it — an
+    operator who typos a model added later is then handed a list that omits it, and goes off
+    to check whether it is supported at all. A list that cannot drift from the map it
+    describes cannot do that.
+    """
+    seen: set[str] = set()
+    names: list[str] = []
+    for alias, target in FIREWORKS.aliases.items():
+        if target not in seen:
+            seen.add(target)
+            names.append(alias)
+    return tuple(names)
+
+
 def provider_for(name: str) -> Provider:
     low = name.lower()
     for p in PROVIDERS:
@@ -32,7 +50,7 @@ def provider_for(name: str) -> Provider:
             return p
     raise ValueError(
         f"unknown model {name!r}; expected a claude-* id or a Fireworks alias "
-        "(glm-5.2 / kimi-k2.6) / fireworks:<id>"
+        f"({' / '.join(selectable_aliases())}) / fireworks:<id>"
     )
 
 
@@ -64,4 +82,5 @@ __all__ = [
     "effort_for_role",
     "provider_for",
     "provider_id_for",
+    "selectable_aliases",
 ]

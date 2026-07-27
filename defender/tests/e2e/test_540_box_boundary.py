@@ -37,14 +37,34 @@ expected red; do not add a skeleton module to make it resolve.
 * `BOX_ENV_ALLOWLIST` — the positive env allowlist (F7), owned by the target so
   this file asserts against the shipped value rather than a copy of it.
 
-**Environment honesty.** Every test here drives a real Docker daemon, and every
-one of them starts a real box, which under docker-outside-of-Docker cannot pass
-F8's startup sentinel (bind SOURCES resolve on the real daemon host and are
-invisible from this process — ledger E2 / claim `C_dood`, corroborated by C46:
-an absent bind source is silently created EMPTY, no error at any stage). Rather
-than let a test pass green while unable to observe the thing it asserts, the
-whole file skips under DooD with that reason. On a native daemon (CI's
-`ubuntu-latest` included) it runs for real.
+**Environment honesty.** Every test here drives a real Docker daemon and starts
+a real box. This file used to skip WHOLESALE under docker-outside-of-Docker:
+bind SOURCES resolve in the daemon's namespace, so `source=<a path this process
+can see>` named nothing there, F8's startup sentinel could not pass, and a bind
+assertion would have been asserting against a filesystem it could not see
+(ledger E2 / claim `C_dood`, corroborated by C46: an absent bind source is
+silently created EMPTY, with no error at any stage).
+
+`box.py` now translates the bind source through this container's own mount
+table, so the topology is testable and the blanket skip is retired — which
+matters, because DooD is the topology the C46 fix exists for and the one no test
+covered. Two conditions replace it:
+
+* the run dirs move off pytest's `tmp_path` (a private `/tmp` the daemon cannot
+  resolve) onto the repo's gitignored `.defender-runs/`. That tree is *provably*
+  shared with the daemon: `defender_dir` is bound out of it, so if it were not,
+  no box could start at all;
+* if even that is uncovered, the topology genuinely cannot be observed from here
+  and the file skips with that reason.
+
+Separately, the file skips when the daemon does not register the runtime the F1
+lever resolves to — every box below would fail at create on a missing runtime,
+which says nothing about the boundary. That is not a hole CI can fall into: the
+gVisor install step there hard-fails unless `runsc` is registered.
+
+On a native daemon (CI's `ubuntu-latest` included) nothing changes: the mount
+table is empty, the translation is the identity, and `tmp_path` is used as
+before.
 
 Not asserted here, deliberately:
 
@@ -61,12 +81,15 @@ Not asserted here, deliberately:
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import errno as errno_mod
 import json
 import os
+import shutil
 import socket
 import subprocess
 import threading
+import uuid
 from pathlib import Path
 
 import pytest
@@ -81,6 +104,7 @@ from defender.runtime.driver import MAIN_DEF  # noqa: E402
 from defender.runtime.permission.bash import decide_bash  # noqa: E402
 from defender.tests.e2e._replay_harness import DEFENDER  # noqa: E402
 
+from defender.runtime import box as box_mod  # noqa: E402
 from defender.runtime.box import (  # noqa: E402
     BOX_ENV_ALLOWLIST,
     BoxResult,
@@ -118,21 +142,6 @@ def _is_dood() -> bool:
     return probe.returncode == 0 and bool(root) and not Path(root).exists()
 
 
-_NO_DAEMON = not _daemon_reachable()
-_DOOD = (not _NO_DAEMON) and _is_dood()
-
-requires_box = pytest.mark.skipif(
-    _NO_DAEMON or _DOOD,
-    reason=(
-        "no reachable Docker daemon" if _NO_DAEMON else
-        "docker-outside-of-Docker: bind sources resolve on the real daemon host and are "
-        "invisible from this process (ledger E2 / C_dood), so F8's startup sentinel cannot "
-        "pass and a bind assertion here would be asserting against a filesystem it cannot "
-        "see. Run on a native daemon."
-    ),
-)
-
-
 def _docker_runtimes() -> frozenset[str]:
     probe = subprocess.run(
         ["docker", "info", "--format", "{{range $k, $v := .Runtimes}}{{$k}} {{end}}"],
@@ -141,14 +150,78 @@ def _docker_runtimes() -> frozenset[str]:
     return frozenset(probe.stdout.split()) if probe.returncode == 0 else frozenset()
 
 
+_NO_DAEMON = not _daemon_reachable()
+_DOOD = (not _NO_DAEMON) and _is_dood()
+# What `_box` will actually ask for: `start_box` resolves the F1 lever when no spec is passed.
+_LEVERED_RUNTIME = BoxSpec.from_env(os.environ).runtime
+
+
+def _dood_anchor() -> Path | None:
+    """Where run dirs must live under DooD, or None if the topology is unobservable here.
+
+    A bind SOURCE has to lie on a path this container shares with the daemon, and pytest's
+    `tmp_path` is a private `/tmp` that does not. The repo tree does — `defender_dir` is bound
+    out of it — so the runs base goes under the gitignored `.defender-runs/` beside it. If
+    even the repo is uncovered, `start_box` would refuse (C46) and there is nothing here to
+    observe, so the caller skips instead of asserting into the dark."""
+    mounts = box_mod._shared_mounts(box_mod._docker)
+    if not mounts or not box_mod._covered(DEFENDER, mounts):
+        return None
+    return DEFENDER.parent / ".defender-runs"
+
+
+_DOOD_ANCHOR = _dood_anchor() if _DOOD else None
+_RUNTIME_ABSENT = (not _NO_DAEMON) and _LEVERED_RUNTIME not in _docker_runtimes()
+
+requires_box = pytest.mark.skipif(
+    _NO_DAEMON or (_DOOD and _DOOD_ANCHOR is None) or _RUNTIME_ABSENT,
+    reason=(
+        "no reachable Docker daemon" if _NO_DAEMON else
+        # Not a silent hole: `.github/workflows/ci.yml` hard-fails its gVisor step unless the
+        # daemon registers runsc, so CI cannot reach this branch by accident. It exists for a
+        # dev host whose daemon has only runc — where every box below would otherwise fail at
+        # create on a missing runtime, which says nothing about the boundary. Set
+        # DEFENDER_BOX_RUNTIME=runc to run the suite at the floor instead (F1).
+        f"the {_LEVERED_RUNTIME!r} runtime is not registered with this daemon (`docker info` "
+        "Runtimes), so no box here can start at all" if _RUNTIME_ABSENT else
+        "docker-outside-of-Docker AND no path this container shares with the daemon covers "
+        "the repo tree, so no bind source can be resolved (C46) and a bind assertion here "
+        "would be asserting against a filesystem it cannot see. Run on a native daemon."
+    ),
+)
+
+
 
 @pytest.fixture
-def run_dir(tmp_path: Path) -> Path:
+def runs_base(tmp_path: Path):
+    """The runs base every run dir in this file hangs off.
+
+    `tmp_path` on a native daemon — a private per-test tree, as before. Under DooD that tree
+    is invisible to the daemon, so the base moves under the repo's gitignored
+    `.defender-runs/` (see `_dood_anchor`), still one fresh directory per test and still
+    removed afterwards. It is deliberately NOT the run dir's parent-as-mount: the runs base
+    stays unmounted either way, which is what `test_another_runs_run_dir_is_absent` and
+    `test_box_env_contains_exactly_the_allowlist` assert against."""
+    if _DOOD_ANCHOR is None:
+        yield tmp_path / "defender-runs"
+        return
+    base = _DOOD_ANCHOR / uuid.uuid4().hex / "defender-runs"
+    base.mkdir(parents=True)
+    try:
+        yield base
+    finally:
+        # ignore_errors: the box writes through the rw bind as root (C41), so on a non-root
+        # host some artifacts are not ours to unlink. Residue is gitignored, and failing a
+        # passing boundary test on a cleanup permission bit would be the wrong signal.
+        shutil.rmtree(base.parent, ignore_errors=True)
+
+
+@pytest.fixture
+def run_dir(runs_base: Path) -> Path:
     """A real run dir under a real runs base, with a real sibling run beside it
     (the sibling is what `test_another_runs_run_dir_is_absent` and the `..`
     escape test try to reach — a live neighbour, not an imagined one)."""
-    base = tmp_path / "defender-runs"
-    d = base / "20260718T101500Z-boxspec"
+    d = runs_base / "20260718T101500Z-boxspec"
     (d / "gather_raw").mkdir(parents=True)
     (d / "alert.json").write_text('{"id": "boxspec"}', encoding="utf-8")
     return d
@@ -411,6 +484,41 @@ def test_host_path_outside_the_binds_is_absent(box, run_dir, tmp_path):
     )
     assert "HOST-ONLY-SECRET-99" not in _run(
         box, f"cat {outside}", cwd=run_dir).out.decode("utf-8", "replace")
+
+
+@pytest.mark.skipif(not _DOOD, reason="not docker-outside-of-Docker — there is no "
+                                      "namespace split here, so the translation is the "
+                                      "identity and this asserts nothing")
+@requires_box
+def test_the_bind_source_is_translated_for_the_daemons_namespace(box, run_dir):
+    """C46, on the topology it exists for. Under DooD `source=` and `target=` must DIVERGE:
+    the daemon resolves the source in its own namespace while every downstream reader
+    (artifacts, orient's workspace map, `raw_command`) keeps the target this process uses.
+
+    The `box` fixture already started, which means F8's startup sentinel round-tripped a
+    token through the real bind — the divergence below is therefore a working mapping, not
+    merely a different string. Both halves matter: the source alone could be right by
+    accident on a pass-through mount, and the target alone was never broken."""
+    mounts = box_mod._shared_mounts(box_mod._docker)
+    argv = box_mod._create_argv(box.name, run_dir, DEFENDER, box.spec, mounts)
+    binds = [
+        dict(part.split("=", 1) for part in spec.split(",") if "=" in part)
+        for spec in argv if spec.startswith("type=bind,")
+    ]
+    by_target = {b["target"]: b["source"] for b in binds}
+    for target in (run_dir, DEFENDER):
+        assert str(target) in by_target, f"{target} is not bound at all: {by_target}"
+        assert by_target[str(target)] != str(target), (
+            f"the bind source for {target} was not translated: {by_target} — under DooD an "
+            "untranslated source names nothing on the daemon and is silently created as an "
+            "EMPTY dir (C46)"
+        )
+
+    host_bytes = b"C46-ROUND-TRIP-\xe2\x9c\x93\n"
+    (run_dir / "c46.txt").write_bytes(host_bytes)
+    got = _probe(box, run_dir, "c46", _READ_PATH, str(run_dir / "c46.txt"))
+    assert got["read"] == host_bytes.decode("utf-8"), (
+        f"the translated bind did not map the host tree: {got}")
 
 
 @requires_box
@@ -782,8 +890,6 @@ def test_boxspec_carries_runtime_rootfs_and_lifecycle():
     sole external lever: it moves the runtime axis and nothing else, and no other
     variable moves anything. The lifecycle sits behind the interface rather than
     being hardcoded to a runtime's cost model."""
-    import dataclasses
-
     fields = {f.name for f in dataclasses.fields(BoxSpec)}
     assert {"runtime", "rootfs", "lifecycle"} <= fields, fields
 
@@ -885,7 +991,10 @@ def test_tmpfs_exhaustion_fails_the_run_loudly(run_dir):
     writing past the cap gets ENOSPC as a bare `OSError` (C56b) and a non-zero
     result, never a silent short write. This is accounting, not a security
     boundary (TM class 7) — the obligation is that it is loud."""
-    small = BoxSpec(tmpfs_size="4m")
+    # Overridden off the LEVERED spec, not a bare `BoxSpec()`: the bare constructor pins
+    # runtime=runsc, so on a host whose daemon registers only runc this test failed at create
+    # while every neighbour that goes through `_box`'s env-resolved default passed.
+    small = dataclasses.replace(BoxSpec.from_env(os.environ), tmpfs_size="4m")
 
     unguarded = (
         "chunk = b'x' * (1024 * 1024)\n"
