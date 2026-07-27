@@ -80,9 +80,8 @@ already caught the attack. There is a parallel **benign** direction
 that hunts false positives (could legitimate activity have produced this
 picture?).
 
-The **disposition selects which direction(s) run** (`core/run_cycle.py`
-`_directions_for`, gating on the `ADVERSARIAL_DISPOSITIONS` /
-`BENIGN_DISPOSITIONS` sets in `_loop_config.py`):
+The **disposition selects which direction(s) run** (`core/directions.py`
+`directions_for`, gating on the `dispositions` set each `Direction` declares):
 
 | Disposition | Directions run |
 |---|---|

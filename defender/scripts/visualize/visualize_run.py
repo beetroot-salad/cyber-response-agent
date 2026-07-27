@@ -32,6 +32,7 @@ from defender.scripts.visualize.visualize_data import (
 from defender.scripts.visualize.visualize_judge import (
     DirectionView,
     active_views,
+    judge_finding_count,
     render_judge_actor_section,
     render_judge_defender_summary,
     render_judge_judge_section,
@@ -109,9 +110,8 @@ def _byline(parts: list[str]) -> str:
 
 
 def render_judge_headline(
-    run_dir: Path, docs: list[tuple[DirectionView, dict | None]],
+    report: dict, docs: list[tuple[DirectionView, dict | None]],
 ) -> str:
-    report = parse_report(run_dir)
     disposition = str(report.get("disposition", "?"))
     confidence = str(report.get("confidence", "?"))
     # First rendered direction that produced a doc supplies the outcome tile — the page
@@ -121,7 +121,7 @@ def render_judge_headline(
     if graded is not None:
         view, doc = graded
         outcome = str(doc.get("outcome", "—"))
-        n_findings = len(doc.get("defender_findings") or [])
+        n_findings = judge_finding_count(doc)
         direction_sub = f"{n_findings} finding(s) · {view.direction.name} direction"
     else:
         outcome = "—"
@@ -308,13 +308,14 @@ def render_judge_page(run_dir: Path) -> str:
     events = read_jsonl_rows(run_dir / "tool_trace.jsonl")
     n_events, n_tool_calls, cost = _stats(events)
 
-    # One pass over the directions this run's disposition actually selected — the page no
+    # One pass over the directions this run selected or left artifacts for — the page no
     # longer enumerates them, so a third `Direction` lands here for free (#716).
-    disposition = str(parse_report(run_dir).get("disposition", "?"))
-    docs = [(v, load_judge_doc(case_id, v.direction)) for v in active_views(disposition)]
-    toc_sections = [
-        (v, len(d.get("defender_findings") or []) if d else None) for v, d in docs
+    report = parse_report(run_dir)
+    docs = [
+        (v, load_judge_doc(case_id, v.direction))
+        for v in active_views(case_id, str(report.get("disposition", "?")))
     ]
+    toc_sections = [(v, judge_finding_count(d) if d else None) for v, d in docs]
 
     byline = _byline([
         f"events={n_events}",
@@ -327,7 +328,7 @@ def render_judge_page(run_dir: Path) -> str:
 <html><head><meta charset="utf-8"><title>judge eval — {esc(case_id)}</title>
 <style>{CSS}</style></head><body id="top">
 {render_header(case_id, active="judge", byline=byline)}
-{render_judge_headline(run_dir, docs)}
+{render_judge_headline(report, docs)}
 <div class="layout">
   {render_judge_toc(toc_sections)}
   <article class="content">

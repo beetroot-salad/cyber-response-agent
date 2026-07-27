@@ -3,19 +3,19 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from defender.learning.core.config import DISPOSITION_ENUM
 from defender.learning.core.directions import (
     ADVERSARIAL,
     BENIGN,
     Direction,
-    telemetry_raw_name,
+    directions_for,
+    normalized_disposition,
+    raw_fallback_name,
 )
-from defender.scripts.visualize.visualize_primitives import (  # noqa: F401 — load_yaml kept for API parity
+from defender.scripts.visualize.visualize_primitives import (
     _learning_run_dir,
     block,
     esc,
     lead_repository,
-    load_yaml,
     pre_text,
     render_lead_sequence_compact,
     render_report_card,
@@ -23,43 +23,53 @@ from defender.scripts.visualize.visualize_primitives import (  # noqa: F401 — 
 )
 
 
+# The direction that owns the page's unsuffixed ids — `#sec-judge`, `#finding-0`. It is the
+# one that predates the second direction, so it kept the anchors the page already emitted;
+# every other direction namespaces its ids by name.
+UNSUFFIXED_DIRECTION = ADVERSARIAL.name
+
+
 @dataclass(frozen=True)
 class DirectionView:
-    """How one `Direction` presents on the judge page. The artifact NAMES are never
-    repeated here — they come off `direction` — so the loop's declaration and the view
-    cannot drift (#716). What lives here is genuinely view-layer: anchors, titles,
-    subtitles, and the adversarial-only actor artifacts."""
+    """How one `Direction` presents on the judge page. Neither the artifact NAMES nor the
+    anchor ids are written out here — the names come off `direction`, the ids off `anchor()`
+    — so the loop's declaration and the view cannot drift (#716) and a third direction
+    cannot typo its way into an id collision. What lives here is prose: titles and
+    subtitles."""
 
     direction: Direction
-    suffix: str            # "" | "-benign"   → sec-actor{suffix}, sec-judge{suffix}-outcome
-    label: str             # "" | " (benign)" → "Actor{label}"
-    anchor_prefix: str     # "finding" | "benign-finding"
     actor_subtitle: str
     judge_subtitle: str
     oracle_subtitle: str
     actor_toc_label: str
-    archetype_name: str | None = None
-    menu_name: str | None = None
+
+    @property
+    def suffix(self) -> str:
+        return "" if self.direction.name == UNSUFFIXED_DIRECTION else f"-{self.direction.name}"
+
+    @property
+    def label(self) -> str:
+        """`""` | `" (benign)"` → `Actor{label}` in headings."""
+        return f" ({self.direction.name})" if self.suffix else ""
+
+    def anchor(self, base: str) -> str:
+        """ONE mechanism for every per-direction id on the page — section ids, finding cards
+        and env-obs cards alike are `{base}{suffix}`. Findings used to prefix the direction
+        name while env observations suffixed it, which put `benign-finding-0` next to
+        `env-obs-benign-0` on the same page (#716)."""
+        return f"{base}{self.suffix}"
 
 
 ADVERSARIAL_VIEW = DirectionView(
     direction=ADVERSARIAL,
-    suffix="",
-    label="",
-    anchor_prefix="finding",
     actor_subtitle="— adversarial counterfactual",
     judge_subtitle="— outcome + findings",
     oracle_subtitle="— projected telemetry (collapsed by default)",
     actor_toc_label="archetype + story",
-    archetype_name="actor_archetype.txt",
-    menu_name="actor_menu.txt",
 )
 
 BENIGN_VIEW = DirectionView(
     direction=BENIGN,
-    suffix="-benign",
-    label=" (benign)",
-    anchor_prefix="benign-finding",
     actor_subtitle="— routine-operation counterfactual",
     judge_subtitle="— FP-direction outcome + findings",
     oracle_subtitle="— projected telemetry, FP direction (collapsed by default)",
@@ -69,25 +79,50 @@ BENIGN_VIEW = DirectionView(
 VIEWS: tuple[DirectionView, ...] = (ADVERSARIAL_VIEW, BENIGN_VIEW)
 
 
-def active_views(disposition: str) -> tuple[DirectionView, ...]:
-    """The directions this run's disposition actually selected — the same mapping
-    `run_cycle._directions_for` dispatches on, read off `Direction.dispositions`.
+def _left_artifacts(run_id: str, direction: Direction) -> bool:
+    learn_dir = _learning_run_dir(run_id)
+    return any((learn_dir / name).is_file() for name in direction.artifact_names())
 
-    A direction the disposition never selected is OMITTED from the page rather than
-    rendered as "the loop did not run or aborted", which is what the page used to claim of
-    the adversarial direction on every `malicious` run (#716).
+
+def active_views(run_id: str, disposition: str) -> tuple[DirectionView, ...]:
+    """The direction sections this page renders: the ones this run's disposition selected,
+    PLUS any that left artifacts on disk.
+
+    Selection runs through the same `directions_for` the loop dispatches on, so the two
+    cannot disagree (including on a disposition carrying a zero-width character, #722). A
+    direction the disposition never selected is OMITTED rather than rendered as "the loop did
+    not run or aborted", which is what the page used to claim of the adversarial direction on
+    every `malicious` run (#716).
+
+    Presence is the other half of the rule, because `report.md` is mutable while the learning
+    run dir accumulates: a run learned under `inconclusive` (both legs ran) whose disposition
+    is later corrected to `malicious` still holds the adversarial story, judge doc and
+    findings. Selection alone would drop them from the page while the Raw bundle's `*.raw.txt`
+    glob went on showing that leg — the page contradicting itself. Present beats selected.
 
     An unreadable or unrecognized disposition (no `report.md`, bad frontmatter) selects
     ALL directions: with nothing to gate on, showing every section with its
     missing-artifact placeholder is the honest fallback."""
-    if disposition not in DISPOSITION_ENUM:
+    if not normalized_disposition(disposition):
         return VIEWS
-    return tuple(v for v in VIEWS if disposition in v.direction.dispositions)
+    selected = {d.name for d in directions_for(disposition)}
+    return tuple(
+        v for v in VIEWS
+        if v.direction.name in selected or _left_artifacts(run_id, v.direction)
+    )
+
+
+def judge_finding_count(judge: dict) -> int:
+    """How many finding cards `render_judge_judge_section` will emit for this doc — the ONE
+    place the `defender_findings`-is-a-list guard lives, so the TOC and the headline can
+    never count anchors the section does not emit (or blow up on a scalar)."""
+    findings = judge.get("defender_findings") or []
+    return len(findings) if isinstance(findings, list) else 0
 
 
 
 
-def render_judge_finding(idx: int, f: dict, anchor_prefix: str = "finding") -> str:
+def render_judge_finding(idx: int, f: dict, anchor_prefix: str) -> str:
     ftype = str(f.get("type", "?"))
     topic = str(f.get("subject_topic", ""))
     anchor = str(f.get("subject_anchor", ""))
@@ -142,7 +177,7 @@ def render_judge_actor_section(run_id: str, view: DirectionView) -> str:
     learn_dir = _learning_run_dir(run_id)
     story_name = view.direction.story_name
     story = learn_dir / story_name
-    anchor, title = f"sec-actor{view.suffix}", f"Actor{view.label}"
+    anchor, title = view.anchor("sec-actor"), f"Actor{view.label}"
 
     if not story.is_file():
         return section(
@@ -151,8 +186,8 @@ def render_judge_actor_section(run_id: str, view: DirectionView) -> str:
         )
 
     meta_html = ""
-    if view.archetype_name is not None:
-        archetype = learn_dir / view.archetype_name
+    if view.direction.archetype_name is not None:
+        archetype = learn_dir / view.direction.archetype_name
         arch = archetype.read_text(encoding="utf-8").strip() if archetype.is_file() else "?"
         meta_html = (
             f'<div class="actor-meta"><span class="key">archetype:</span> '
@@ -160,8 +195,8 @@ def render_judge_actor_section(run_id: str, view: DirectionView) -> str:
         )
 
     menu_block = ""
-    if view.menu_name is not None:
-        menu = learn_dir / view.menu_name
+    if view.direction.menu_name is not None:
+        menu = learn_dir / view.direction.menu_name
         menu_txt = menu.read_text(encoding="utf-8").strip() if menu.is_file() else ""
         if menu_txt:
             menu_block = block("actor-menu", "MITRE technique menu (sampled)", pre_text(menu_txt))
@@ -176,7 +211,7 @@ def render_judge_actor_section(run_id: str, view: DirectionView) -> str:
 
 
 def render_judge_judge_section(judge: dict | None, view: DirectionView) -> str:
-    anchor, title = f"sec-judge{view.suffix}", f"Judge{view.label}"
+    anchor, title = view.anchor("sec-judge"), f"Judge{view.label}"
     if not judge:
         return section(
             anchor, "judge", title, view.judge_subtitle,
@@ -194,7 +229,7 @@ def render_judge_judge_section(judge: dict | None, view: DirectionView) -> str:
 
     if isinstance(findings, list) and findings:
         cards = "\n".join(
-            render_judge_finding(i, f, anchor_prefix=view.anchor_prefix)
+            render_judge_finding(i, f, anchor_prefix=view.anchor("finding"))
             for i, f in enumerate(findings) if isinstance(f, dict)
         )
     else:
@@ -202,7 +237,7 @@ def render_judge_judge_section(judge: dict | None, view: DirectionView) -> str:
 
     if isinstance(env_obs, list) and env_obs:
         env_cards = "\n".join(
-            render_env_observation(i, o, anchor_prefix=f"env-obs{view.suffix}")
+            render_env_observation(i, o, anchor_prefix=view.anchor("env-obs"))
             for i, o in enumerate(env_obs) if isinstance(o, dict)
         )
     else:
@@ -220,7 +255,7 @@ def render_judge_judge_section(judge: dict | None, view: DirectionView) -> str:
     <div class="outcome-rationale">{esc(rationale)}</div>
   </div>
 
-  <h3 id="{anchor}-findings">Findings ({len(findings) if isinstance(findings, list) else 0})</h3>
+  <h3 id="{anchor}-findings">Findings ({judge_finding_count(judge)})</h3>
   <div class="findings-grid">{cards}</div>
 
   <h3 id="{anchor}-env">Environment observations ({len(env_obs) if isinstance(env_obs, list) else 0})</h3>
@@ -234,7 +269,7 @@ def render_judge_judge_section(judge: dict | None, view: DirectionView) -> str:
 def render_judge_oracle_section(run_id: str, view: DirectionView) -> str:
     learn_dir = _learning_run_dir(run_id)
     proj_name = view.direction.telemetry_name
-    raw_name = telemetry_raw_name(proj_name)
+    raw_name = raw_fallback_name(proj_name)
     proj = learn_dir / proj_name
     proj_raw = learn_dir / raw_name
     inner = ""
@@ -245,13 +280,13 @@ def render_judge_oracle_section(run_id: str, view: DirectionView) -> str:
     if not inner:
         inner = '<div class="empty">no oracle artifacts</div>'
     return section(
-        f"sec-oracle{view.suffix}", "oracle", f"Oracle{view.label}", view.oracle_subtitle, inner,
+        view.anchor("sec-oracle"), "oracle", f"Oracle{view.label}", view.oracle_subtitle, inner,
     )
 
 
 
 
-def render_env_observation(idx: int, o: dict, anchor_prefix: str = "env-obs") -> str:
+def render_env_observation(idx: int, o: dict, anchor_prefix: str) -> str:
     fact = str(o.get("fact", "")).strip()
     criteria = str(o.get("relevance_criteria", "")).strip()
     rule_ids = o.get("alert_rule_ids") or []
@@ -298,13 +333,13 @@ def render_judge_raw_bundle(run_id: str) -> str:
 
 
 def _toc_judge_links(view: DirectionView, n_findings: int | None) -> str:
-    judge_anchor = f"sec-judge{view.suffix}"
+    judge_anchor = view.anchor("sec-judge")
     if n_findings is None:
         # The direction was selected but its judge doc is missing: the section renders as a
         # placeholder and carries no sub-anchors, so linking them would be four dead links.
         return f'<li class="item muted"><a href="#{judge_anchor}">(no findings)</a></li>'
     finding_links = "".join(
-        f'<li class="item"><a href="#{view.anchor_prefix}-{i}">finding #{i}</a></li>'
+        f'<li class="item"><a href="#{view.anchor("finding")}-{i}">finding #{i}</a></li>'
         for i in range(n_findings)
     )
     if n_findings == 0:
@@ -319,13 +354,13 @@ def _toc_judge_links(view: DirectionView, n_findings: int | None) -> str:
 def _toc_direction_block(view: DirectionView, n_findings: int | None) -> str:
     return f"""
     <li class="section">Actor{view.label}</li>
-    <li class="item"><a href="#sec-actor{view.suffix}">{view.actor_toc_label}</a></li>
+    <li class="item"><a href="#{view.anchor("sec-actor")}">{view.actor_toc_label}</a></li>
 
     <li class="section">Judge{view.label}</li>
     {_toc_judge_links(view, n_findings)}
 
     <li class="section">Oracle{view.label}</li>
-    <li class="item"><a href="#sec-oracle{view.suffix}">projected telemetry</a></li>
+    <li class="item"><a href="#{view.anchor("sec-oracle")}">projected telemetry</a></li>
 """
 
 
