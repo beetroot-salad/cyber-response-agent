@@ -1,0 +1,105 @@
+{
+  "tag": "glm-5.2_effort-none_prompt-711__judge-claude-opus-5-high_47d6044a",
+  "projection": "glm-5.2_effort-none_prompt-711.yaml",
+  "case": "case-012-bruteforce-db1",
+  "kind": "observed",
+  "judge": {
+    "model": "claude-opus-5",
+    "effort": "high",
+    "prompts_sha8": "47d6044a"
+  },
+  "n_leads": 6,
+  "mechanical": {
+    "missing_leads": [],
+    "unscored_leads": [],
+    "duplicate_leads": [],
+    "malformed_leads": {},
+    "forbidden_emitted": [],
+    "concrete_value_leads": [
+      "l-002"
+    ]
+  },
+  "judged": true,
+  "faithful": "2/5",
+  "abstentions": 1,
+  "by_system": {
+    "cmdb+elastic": "0/2",
+    "elastic": "2/2",
+    "elastic+host-state+identity": "0/1"
+  },
+  "cost_usd": 5.4413,
+  "rows": [
+    {
+      "lead": "l-001",
+      "system": "elastic",
+      "delta_kind": "undecidable",
+      "faithful": null,
+      "cause": null,
+      "heterogeneous": null,
+      "undecidable_reason": "insufficient-baseline",
+      "form_notes": null,
+      "rationale": "the label pass could not measure this envelope; not graded",
+      "evidence": "The lead has two queries: seq 0 is `unreadable: true` (never captured, no evidence either way), and seq 1 returned `total: 2, returned: 2, truncated: false` \u2014 an `authentication failure` for `user.name: root` on `host.name: db-1` at 2026-07-27T09:56:07.000Z from source.ip 172.18.0.16, and an `Accepted password for svc.config-mgmt from 172.18.0.24 port 57018 ssh2` with `event.outcome: success` on `host.name: office-ws-2` at 2026-07-27T09:48:58.698Z. The `baseline` block is the empty list `[]` \u2014 no control payload at all, live or dead \u2014 so there is nothing against which to judge whether these two rows are distinguishable from routine sshd traffic on db-1/office-ws-2, and both are `_id`-scoped fetches whose document IDs cannot recur in a shifted window. Only a populated control payload for the seq-1 query string over a `window_live: true` comparable window (or, failing that, the recorded seq-0 payload) would settle whether `Accepted password for svc.config-mgmt` and the root pam_unix failure are novel; note also that source.ip/source.address/host.ip/related.ip/agent.ephemeral_id are listed as unstable in this environment and could not have carried the distinction regardless."
+    },
+    {
+      "lead": "l-002",
+      "system": "elastic",
+      "delta_kind": "present",
+      "faithful": true,
+      "cause": null,
+      "heterogeneous": false,
+      "undecidable_reason": null,
+      "form_notes": "projection labels all rows auth_method=password and emits ~48 events, collapsing the observed 48 \"other\" (pam_unix) + 48 \"password\" failure rows into one password stream",
+      "rationale": "The measured delta is a failure burst on `host.name: db-1` by `user.name: root` \u2014 the distinguishing field per `measurement`, since `root` never appears in any live control (C-14d/C-21d/C-28d) and db-1 carries zero failures in every baseline, while the observed seq 6 shows `db-1/root accepted:0 failed:96` and seq 4 shows interleaved `Failed password for root` / `pam_unix(sshd:auth) ... user=root` pairs. The projection represents exactly this: repeated `host.name: db-1, user.name: root, event.outcome: failure` events across the operation window with no accepted login. `source.ip` is `<office-ws-1-ip>` and `message` is `<sshd-failed-password>` \u2014 placeholders, which are compliance, not fabrication, and `source.ip` is an unstable identifier disregarded anyway. Collapsing the observed 96 failures (48 `other` + 48 `password`) into 48 password-labeled rows is a granularity/field-shape divergence that does not alter the claim, so it is recorded in form_notes only.",
+      "evidence": "In `observed` seq 6 the top STATS row is `host.name: db-1, user.name: root, accepted: 0, failed: 96, first_seen 2026-07-27T09:56:07.000Z, last_seen 09:59:12.000Z`, split in seq 3 into two 48-count rows (`auth_method: other` and `auth_method: password`), and seq 4's 126-row event listing shows the interleaved `pam_unix(sshd:auth): authentication failure ... user=root` / `Failed password for root from ... ssh2` pairs at ~2s spacing with no Accepted for root. All three live controls (C-14d, C-21d, C-28d, `window_live: true`) also contain large failure bursts \u2014 svc.reports 192/96 failures on web-1, svc.reports 108 on web-2, dev.ethan 108 on jump-box-1 \u2014 so burst volume alone is not the distinction; the distinguishing field is `user.name` (and the matching `message` text), which is `root` in the observed window and never `root` in any baseline row, alongside a failure burst on `host.name: db-1`, a host that carries zero failures in every control. `source.ip: 172.18.0.16` is disregarded per environment_notes as an unstable identifier. Seqs 0, 1 and 5 are unreadable and seq 2 is an id-scoped doc fetch with no controls, but they are not needed: seqs 3, 4 and 6 agree, so the lead is `present` and non-heterogeneous."
+    },
+    {
+      "lead": "l-005",
+      "system": "cmdb+elastic",
+      "delta_kind": "present",
+      "faithful": false,
+      "cause": "C-MISSED-DELTA",
+      "heterogeneous": true,
+      "undecidable_reason": null,
+      "form_notes": null,
+      "rationale": "The observed seq 13 (`source.ip == \"172.18.0.16\"`, 09:50\u201310:00) returned 20 rows,\nall host.name db-1, event.outcome failure, \"Failed password for root from\n172.18.0.16 port \u2026\" and \"pam_unix(sshd:auth): authentication failure \u2026 user=root\",\nclustered 09:58:35\u201309:59:12, while all three live controls (C-14d/21d/28d) returned\nrow_count 0. The distinction is carried by message/event.outcome/host.name \u2014 not the\nunstable address columns \u2014 so it is a genuine, distinguishable delta, corroborated by\nseq 10's two high-severity \"v2 cross-tier SSH pivot\" alerts on db-1/office-ws-2. The\nprojection is empty (`[]`), representing no change at all, so it fails to surface the\nfailed-root brute-force burst the telemetry plainly shows.",
+      "evidence": "Query seq 13 (`FROM logs-system.auth-* | WHERE source.ip == \"172.18.0.16\"`, 09:50\u201310:00) returned row_count 20 in the observed window \u2014 every row host.name db-1, host.ip 172.18.0.25, event.outcome failure, messages \"Failed password for root from 172.18.0.16 port \u2026\" and \"pam_unix(sshd:auth): authentication failure \u2026 user=root\", clustered 09:58:35\u201309:59:12 \u2014 while all three of its controls (C-14d, C-21d, C-28d, each window_live: true) returned row_count 0. The distinction is carried by message/event.outcome/host.name (a repeated root-password failure burst on db-1), not only by the unstable address columns: no baseline payload in this lead contains any failed-root sshd row, and the closest baseline failure (seq 14 C-21d, one \"Failed password for svc.reports\") is a different user, host and volume; seq 10's alert docs corroborate with two high-severity \"v2 cross-tier SSH pivot\" signals at 2026-07-27T09:59:11 on db-1 and office-ws-2. Sibling queries disagree, hence heterogeneous: the host.ip-scoped views (seq 12/14, 6 rows of routine dev.dana runuser sessions on office-ws-1) look like the baselines' routine session traffic, and the cmdb lookups (seq 1, 2, 5, 15) are state-only records; seq 0 and 6 are unreadable but are not the queries that decide this."
+    },
+    {
+      "lead": "l-006",
+      "system": "elastic+host-state+identity",
+      "delta_kind": "present",
+      "faithful": false,
+      "cause": "C-MISSED-DELTA",
+      "heterogeneous": false,
+      "undecidable_reason": null,
+      "form_notes": null,
+      "rationale": "The only event-stream query is seq 6, whose operation-window payload returns row_count 2 while all three live controls (C-14d, C-21d, C-28d, each window_live: true) return row_count 0 with values: []. The two observed rows differ from baseline in fields the query surfaces and the environment notes do not mark unstable: host.name db-1 / user.name root / event.outcome failure (pam_unix sshd auth failure, rhost 172.18.0.16) at 09:56:07, and host.name office-ws-2 / user.name svc.config-mgmt / event.outcome success at 09:48:58. The measurement of record reads delta_kind present, heterogeneous false, so a distinguishable change exists over a live baseline. The projection is empty `[]`, representing no delta at all, so it fails to carry the change the telemetry shows.",
+      "evidence": "The only event-stream query in this lead is seq 6, the ES|QL `_id`-scoped fetch against\n.ds-logs-system.auth-default-2026.07.25-000004; over the operation window it returns\nrow_count 2, while all three live controls (C-14d, C-21d, C-28d, each window_live: true)\nreturn row_count 0 with values: []. The two observed rows are distinguishable in fields the\nquery surfaces and that the environment notes do not mark unstable: host.name office-ws-2 /\nuser.name svc.config-mgmt / event.outcome success (\"Accepted password for svc.config-mgmt\")\nat 2026-07-27T09:48:58.698Z, and host.name db-1 / user.name root / event.outcome failure\n(pam_unix sshd auth failure) at 2026-07-27T09:56:07.000Z \u2014 the source addresses 172.18.0.24\nand 172.18.0.16 are unstable and carry no weight, but host.name, user.name and event.outcome\ndo. The remaining readable payloads (seq 7 identity.user-profile, seq 8 identity.access-check,\nseq 9 authorized_keys, seq 12 passwd) are current configuration/entity records with no\ntimestamp bounds and thus state-only, so they neither support nor contradict seq 6; seqs\n0\u20135, 10 and 11 are unreadable and were not used."
+    },
+    {
+      "lead": "l-007",
+      "system": "cmdb+elastic",
+      "delta_kind": "present",
+      "faithful": false,
+      "cause": "C-MISSED-DELTA",
+      "heterogeneous": true,
+      "undecidable_reason": null,
+      "form_notes": null,
+      "rationale": "The story is 48 password-brute-force SSH attempts against `db-1` as root from\n172.18.0.16, and `observed` seq 0 surfaces exactly that \u2014 host.name db-1,\nuser.name root, accepted 0 / failed 48 (\"other\") and 0/47 (\"password\"),\nfirst_seen 09:56:07Z \u2014 while all three live controls (window_live: true) for the\nidentical ES|QL return row_count 0. Seq 4 shows the per-minute failure burst\n(28/32/27/8 against db-1) against empty live baselines, and seq 13 carries the\ndistinguishing `message` text (48 `pam_unix(sshd:auth)` failures, rhost=172.18.0.16\nuser=root) versus row_count 0 in every control. The distinction rides on\nhost.name, user.name, event.outcome and message \u2014 not solely the unstable address\ncolumn \u2014 so the reassignment caveat does not neutralize it, matching the\nmeasurement's `delta_kind: present`. The oracle emitted `[]`, representing none of\nthis distinguishable change.",
+      "evidence": "Query seq 0 returns two rows for source.ip 172.18.0.16 \u2014 host.name db-1, user.name root, accepted 0 / failed 48 (auth_method \"other\") and 0/47 (auth_method \"password\"), first_seen 2026-07-27T09:56:07Z, last_seen 09:59:10Z \u2014 while all three live controls (C-14d/21d/28d) for the identical ES|QL return row_count 0. Seq 4 resolves the same rows into a per-minute burst against db-1 (28, 32, 27, 8 failures in the 09:56\u201309:59 buckets, all event.outcome failure) against empty live baselines, and seq 13 surfaces the distinguishing message field: 48 events of 'pam_unix(sshd:auth): authentication failure; ... rhost=172.18.0.16 user=root' versus row_count 0 in every control. The distinction is carried by host.name, user.name, event.outcome, per-minute attempt counts and message text \u2014 not solely by the unstable address column \u2014 so the address-reassignment caveat does not neutralise it. Siblings disagree: seq 9 (web-2 scoped) is empty in both observed and all controls, seq 12 (window ending 09:56) is empty like its controls, and seq 8/10 show only lower-volume versions of the same baseline row shapes (431/24/10 vs ~28756/996/1010; 123/2 vs ~21082/484), while seq 11 is a cmdb record with no baseline; seqs 1, 2, 5 and 7 are unreadable but are not needed since seq 0/4/13 settle the lead."
+    },
+    {
+      "lead": "l-008",
+      "system": "elastic",
+      "delta_kind": "indistinguishable",
+      "faithful": true,
+      "cause": null,
+      "heterogeneous": null,
+      "undecidable_reason": null,
+      "form_notes": null,
+      "rationale": "This lead queries sshd auth history for svc.config-mgmt on office-ws-2, but the story's activity ran as dev.dana from office-ws-1 against db-1 \u2014 a different user and host entirely, so nothing the activity did lands in this lead's window. The observed payload shows only routine password logins (accepted=6/failed=0 from 172.18.0.19 and accepted=3/failed=0 from 172.18.0.24), matching the live baselines where every row is password/failed=0; the only separating column is source.ip, which environment_notes lists as an unstable identifier that cannot evidence a delta. The measurement confirms delta_kind indistinguishable with no surfaced field distinguishing observed from baseline. An empty projection faithfully represents the absence of a distinguishable delta here.",
+      "evidence": "The single query returns two observed rows \u2014 accepted=6/failed=0 password auth from 172.18.0.19 (first_seen 2026-07-26T09:47:08.979Z, last_seen 2026-07-26T11:16:41.756Z) and accepted=3/failed=0 password auth from 172.18.0.24 (2026-07-27T09:33:35.791Z to 09:48:58.698Z) \u2014 against live controls C-14d (accepted=2376, failed=0, password, 172.18.0.14), C-21d (1584 from 172.18.0.20 and 1280 from 172.18.0.14, both password, failed=0) and C-28d (2601, password, 172.18.0.20). Every surfaced categorical field is baseline-identical: auth_method is \"password\" in all five baseline rows and both observed rows, and failed=0 everywhere, so there is no failure burst, no publickey/other bucket, and no new outcome class. The only column that separates the observed 172.18.0.24 row from the baseline rows is source.ip, which environment_notes lists as an unstable identifier in this playground (addresses are reassigned in container start order after each lever-up), so it cannot evidence a delta; the lower accepted counts (9 total vs 1280\u20132601) reflect the shortened data span in the restored capture (first_seen only reaches back to 07-26 in a 7-day window), not added activity. No surfaced field distinguishes the observed rows from baseline."
+    }
+  ]
+}

@@ -1,0 +1,63 @@
+{
+  "judge": {
+    "model": "claude-opus-5",
+    "effort": "high",
+    "prompts_sha8": "47d6044a"
+  },
+  "leads": {
+    "l-001": {
+      "delta_kind": "present",
+      "undecidable_reason": null,
+      "heterogeneous": true,
+      "evidence": "In `observed` seq 2 (37 rows) and seq 0 (139 rows, truncated) the operation window\ncarries eight \"Failed password for invalid user dev.dana from 172.18.0.16 port ... ssh2\"\nrows (10:28:45, 10:28:58, 10:29:09, 10:29:21, 10:39:57, 10:40:08, 10:40:18, 10:40:30)\neach preceded by \"Invalid user dev.dana from 172.18.0.16 port ...\" and\n\"pam_unix(sshd:auth): check pass; user unknown\" \u2014 the surfaced `user.name` value\n\"dev.dana\"/\" dev.dana\" and the \"Invalid user\"/\"user unknown\" message text appear in no\ncontrol payload, where all live-window failures are for existing accounts (svc.reports\nin C-28d \"Failed password for svc.reports\", C-14d pam auth failures user=svc.reports)\nand accepted logins are sre.ben/svc.config-mgmt. The distinction is carried by `message`\nand `user.name`, not by `source.ip` (unstable per environment_notes), so it stands.\nSiblings disagree: seq 1 is 0 rows in observed and 0 rows in all three live controls\n(absent), and seq 4's eight tty=ssh rows differ from the C-14d (96 rows) and C-28d\n(54 rows) tty rows only in the rhost address embedded in an otherwise identical\npam_unix line, hence not itself distinguishing.",
+      "judge_model": "claude-opus-5",
+      "judge_effort": "high",
+      "cost_usd": 0.814195
+    },
+    "l-002": {
+      "delta_kind": "state-only",
+      "undecidable_reason": null,
+      "heterogeneous": null,
+      "evidence": "The lead contains a single query, `cmdb.host-trust-edges` with `host: web-1`, which returns a CMDB inventory record (name: web-1, role: web, criticality: prod, owner: team.web, trust_edges_out: [db-1], and a four-entry `users` list including svc.config-mgmt and svc.deploy with /bin/bash and sudo: true) rather than any timestamped event stream. Per `environment_notes.state_and_lookup_systems`, cmdb queries carry no `@timestamp` bounds to move, so the empty `baseline: []` is the expected absence of a control, not a missing or suppressed measurement. There is therefore no baseline-diff semantics to evaluate for this envelope, and the single query is tagged state-only regardless of its content. With only one decidable query, heterogeneity is null.",
+      "judge_model": "claude-opus-5",
+      "judge_effort": "high",
+      "cost_usd": 0.033361999999999996
+    },
+    "l-003": {
+      "delta_kind": "state-only",
+      "undecidable_reason": null,
+      "heterogeneous": false,
+      "evidence": "All five queries in this lead are identity and cmdb lookups (identity.user-authorization, identity.access-check for dev.dana/web-1, and three cmdb.host-trust-edges for office-ws-1, jump-box-1, dev-ws-1), which return an entity record and current configuration rather than an event stream. The payloads carry only static attributes \u2014 `enabled: true`, `realm_role: developer`, `authorized_hosts: [dev-ws-1, jump-box-1, office-ws-1]`, `authorized: false` for web-1, and per-host `role`/`criticality`/`trust_edges_out`/`users` lists \u2014 with no @timestamp bounds to shift, so `baseline` is correctly empty ([]) and no diff semantics apply. Per environment_notes, cmdb and identity queries are state-only, not a missing measurement, and all five queries agree in kind, so heterogeneous is false.",
+      "judge_model": "claude-opus-5",
+      "judge_effort": "high",
+      "cost_usd": 0.040888
+    },
+    "l-004": {
+      "delta_kind": "state-only",
+      "undecidable_reason": null,
+      "heterogeneous": false,
+      "evidence": "All four queries in this lead are `identity` templates (`identity.access-check` for svc.deploy/web-1 and svc.config-mgmt/web-1, `identity.user-authorization` for both accounts), which return entity records \u2014 user attributes and an authorization decision \u2014 not an event stream. The payloads carry only record fields (`enabled: true`, `realm_role: service-account`, `authorized_hosts`, `sudo_hosts`, and `authorized: true` / `via: override` / `sudo: true`), with no `@timestamp` bounds, and `baseline` is `[]` because no control window exists for such queries. Per `state_and_lookup_systems`, identity lookups have no baseline-diff semantics regardless of content, so the lead is tagged `state-only`; the queries are uniform in kind, hence not heterogeneous.",
+      "judge_model": "claude-opus-5",
+      "judge_effort": "high",
+      "cost_usd": 0.037307
+    },
+    "l-005": {
+      "delta_kind": "undecidable",
+      "undecidable_reason": "truncated-payload",
+      "heterogeneous": null,
+      "evidence": "Five of the six queries are `cmdb.list-all-hosts` / `cmdb.host-trust-edges` (seq 0, 2\u20135), which return entity records (11 hosts, trust_edges_out lists such as config-mgmt-1 \u2192 web-1/web-2/db-1/jump-box-1/dev-ws-1/office-ws-1/office-ws-2/canary-1) with no @timestamp bounds and therefore no control \u2014 state-only, carrying no baseline-diff signal. The only event-stream query is seq 1, and it is scoped entirely by the unstable columns source.ip/host.ip (172.18.0.16/.9/.24), which `environment_notes` says re-map to different machines after each lever-up, so the observed rows attributing 172.18.0.16\u2192office-ws-1, .9\u2192ci-1, .24\u2192config-mgmt-1 cannot be carried into the C-14d/C-21d/C-28d payloads at all; differences confined to those columns (e.g. db-1 system.auth from source.ip 172.18.0.16 at 96 events vs baseline db-1 system.auth from source.ip 172.18.0.14/.17 at 63/28 events) are by rule not a delta. The candidate host.name-level novelties \u2014 web-1, jump-box-1 and dev-ws-1 rows in system.auth (36, 8, 8 events) \u2014 would decide it, but all three controls are `truncated: true` with row_count 47, 44 and 85 against roughly 40 rows shown, sorted events DESC, so low-count rows are exactly what was cut and absence cannot be inferred. An untruncated C-14d/C-21d/C-28d payload (or a host.name-scoped rather than IP-scoped query) would have settled whether those web-1/jump-box-1/dev-ws-1 auth rows are new.",
+      "judge_model": "claude-opus-5",
+      "judge_effort": "high",
+      "cost_usd": 0.382887
+    },
+    "l-006": {
+      "delta_kind": "state-only",
+      "undecidable_reason": null,
+      "heterogeneous": false,
+      "evidence": "Both queries are `host-state.authorized-keys` against web-1, returning a point-in-time file record (`path`, `captured_at`, `keys[]`) rather than a timestamped event stream; the empty `baseline: []` is consistent with such host-state/lookup queries carrying no @timestamp bounds to move and therefore no control. Query seq 0 returns `keys: []` for svc.deploy (file present at /home/svc.deploy/.ssh/authorized_keys, zero keys); seq 1 returns 30 `ssh-rsa` entries for svc.config-mgmt, all with the uniform comment `svc.config-mgmt@rotation` and `AAAAB3rotated<10-digit>` bodies consistent with an automated rotation series. Per the environment notes on state and lookup systems, these have no baseline-diff semantics regardless of content, so the lead is tagged `state-only` rather than `present` or `absent`.",
+      "judge_model": "claude-opus-5",
+      "judge_effort": "high",
+      "cost_usd": 0.046113
+    }
+  }
+}

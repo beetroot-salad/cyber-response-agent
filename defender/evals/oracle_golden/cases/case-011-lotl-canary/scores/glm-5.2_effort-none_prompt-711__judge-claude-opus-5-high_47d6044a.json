@@ -1,0 +1,106 @@
+{
+  "tag": "glm-5.2_effort-none_prompt-711__judge-claude-opus-5-high_47d6044a",
+  "projection": "glm-5.2_effort-none_prompt-711.yaml",
+  "case": "case-011-lotl-canary",
+  "kind": "observed",
+  "judge": {
+    "model": "claude-opus-5",
+    "effort": "high",
+    "prompts_sha8": "47d6044a"
+  },
+  "n_leads": 6,
+  "mechanical": {
+    "missing_leads": [],
+    "unscored_leads": [],
+    "duplicate_leads": [],
+    "malformed_leads": {},
+    "forbidden_emitted": [],
+    "concrete_value_leads": [
+      "l-001"
+    ]
+  },
+  "judged": true,
+  "faithful": "5/5",
+  "abstentions": 1,
+  "by_system": {
+    "change-mgmt": "1/1",
+    "cmdb": "1/1",
+    "host-state": "2/2",
+    "identity": "1/1"
+  },
+  "cost_usd": 1.1209,
+  "rows": [
+    {
+      "lead": "l-001",
+      "system": "elastic",
+      "delta_kind": "undecidable",
+      "faithful": null,
+      "cause": null,
+      "heterogeneous": null,
+      "undecidable_reason": "payload-shape-unreadable",
+      "form_notes": null,
+      "rationale": "the label pass could not measure this envelope; not graded",
+      "evidence": "The lead contains exactly one query, `elastic.falco-alerts`, and its observed payload is marked `unreadable: true` \u2014 the capture never recorded the result, so it is not an empty result set and carries no evidence in either direction. The `baseline` array is likewise empty (`[]`), so there is no control window, no `window_live` flag, and no row counts to compare against. With zero readable rows on both sides, no surfaced field (falco.rule, priority, proc.name, proc.pname, proc.cmdline, user.name, loginuid, tty) can be examined for a distinction. The recorded STATS output of the falco-alerts ES|QL over 2026-07-27T09:34:35Z\u201309:54:35Z on canary-1, plus at least one live-window control of the same query string, would have settled it."
+    },
+    {
+      "lead": "l-002",
+      "system": "cmdb",
+      "delta_kind": "state-only",
+      "faithful": true,
+      "cause": null,
+      "heterogeneous": null,
+      "undecidable_reason": null,
+      "form_notes": "projection is empty rather than restating the unchanged CMDB record",
+      "rationale": "The lead's single query `cmdb.host-trust-edges` returns a static CMDB entity record for `canary-1` (role `canary`, criticality `sandbox`, owner `team.sre`, `trust_edges_out: []`, users `svc.monitoring` and `svc.config-mgmt`), and the measurement of record classifies it as `state-only`. The story's activity \u2014 a `curl` fetch to `/tmp/fetched_0.sh` and a base64-decoded `/tmp/payload_0.sh` executed on `canary-1` \u2014 creates no CMDB entity, no trust edge, and no per-host user override, so none of the observed fields would differ had the activity not occurred. The empty `baseline` here is the documented absence of baseline-diff semantics for lookup systems (`state_and_lookup_systems`), not an unmeasured live window, so it does not force `insufficient-baseline`. The oracle's empty projection therefore correctly asserts no delta over an envelope whose every surfaced field is pre-existing configuration.",
+      "evidence": "The lead's single query is `cmdb.host-trust-edges` with params `host: canary-1`, and the observed payload is one CMDB entity record (name `canary-1`, role `canary`, criticality `sandbox`, owner `team.sre`, `trust_edges_out: []`, and a two-entry `users` block for `svc.monitoring` and `svc.config-mgmt`), not an event stream. The `environment_notes` state_and_lookup_systems clause states explicitly that cmdb queries return current configuration or an entity record, carry no `@timestamp` bounds to move, and therefore have no control and no baseline-diff semantics. The empty `baseline` array is consistent with that \u2014 it is not a measured-but-empty control window, so no suppression or delta reading can be taken from it. With only one query in the lead and it being state-only, there is nothing to disagree with, so `heterogeneous` is null."
+    },
+    {
+      "lead": "l-003",
+      "system": "change-mgmt",
+      "delta_kind": "state-only",
+      "faithful": true,
+      "cause": null,
+      "heterogeneous": null,
+      "undecidable_reason": null,
+      "form_notes": "projection is a bare empty list rather than an explicit \"no active CRs returned\" statement requested by what_to_summarize; granularity/presentation only",
+      "rationale": "The lead holds a single `change-mgmt.active-changes` lookup (host `canary-1`, at `2026-07-27T09:44:35Z`), which `environment_notes.state_and_lookup_systems` classifies as a state/lookup system with no timestamp bounds, no control window and no baseline-diff semantics \u2014 matching `measurement.delta_kind: state-only`. `observed` seq 0 is `[]` (zero CR rows, i.e. no approved change covers canary-1 at that instant) and `baseline` is likewise `[]` with no window_live-bearing control. The projection is `[]`, asserting no rows and no change; it invents no CR id, requester or window, and fabricates no concrete values. Since there is no delta to represent for a state-only empty result, the empty projection matches the measurement exactly.",
+      "evidence": "The lead contains a single query, `change-mgmt.active-changes`, with params `host: canary-1` and `at: 2026-07-27T09:44:35Z` \u2014 a change-management lookup, not an event stream with @timestamp bounds. `environment_notes.state_and_lookup_systems` explicitly lists change-mgmt alongside cmdb, identity and threat-intel as systems that return current configuration or an entity record and therefore carry no control window and no baseline-diff semantics. Consistent with that, `observed` seq 0 is an empty payload (`[]`, zero CR rows, i.e. no active change request covering canary-1 at that instant) and `baseline` is likewise empty with no window_live-bearing control. The empty result is a state answer, not a suppressed or absent stream, so the query and the lead are tagged `state-only`."
+    },
+    {
+      "lead": "l-004",
+      "system": "identity",
+      "delta_kind": "state-only",
+      "faithful": true,
+      "cause": null,
+      "heterogeneous": false,
+      "undecidable_reason": null,
+      "form_notes": "projection is wholly empty rather than an explicit state-only/no-change marker",
+      "rationale": "All five queries in this lead hit the identity lookup system, which `environment_notes.state_and_lookup_systems` explicitly designates as returning current configuration or an entity record with no `@timestamp` bounds and therefore no control \u2014 consistent with `baseline: []` and the measurement's `state-only` classification. The only recorded payload, seq 4, is a static roster of `total: 16` users (sre.alice \u2026 ctr.kai, all `enabled: true`) with no `root` entry, and nothing in the story (a `curl` to web-1 into `/tmp/fetched_0.sh` and a base64-decoded `/tmp/payload_0.sh` run as an already-root shell) creates, enables, or authorizes an identity principal, so that roster is unchanged by the activity. Seqs 0\u20133 are `unreadable: true` and can carry no fault either way. The empty projection therefore asserts no change where the telemetry shows none and invents nothing \u2014 faithful for a state-only envelope.",
+      "evidence": "All five queries in this lead target the identity system (`identity.access-check`, `identity.user-authorization`, two `identity.positive-control` variants, and `identity.list-users`), which `environment_notes.state_and_lookup_systems` names explicitly as a lookup system returning an entity record or current configuration rather than an event stream, with no `@timestamp` bounds to move and therefore no control \u2014 hence the empty `baseline: []` is expected, not a missing measurement. The only recorded payload, seq 4, is a user-directory listing of `total: 16` records (sre.alice \u2026 ctr.kai), each carrying `username`, `email`, `first_name`, `last_name`, `enabled: true`, `realm_role` \u2014 a roster snapshot, not timestamped events; notably no `root` row appears among the 16. Seqs 0\u20133 are `unreadable: true` and carry no evidence either way, but that does not change the classification: state and lookup systems are tagged `state-only` regardless of whether their rows changed. No query here surfaces a baseline-diffable field, so no delta can be asserted or denied."
+    },
+    {
+      "lead": "l-005",
+      "system": "host-state",
+      "delta_kind": "state-only",
+      "faithful": true,
+      "cause": null,
+      "heterogeneous": false,
+      "undecidable_reason": null,
+      "form_notes": "projection is a single bare noise marker; it does not restate the state-only ps/passwd snapshot content the lead's what_to_summarize asked for",
+      "rationale": "Both queries are `host-state` snapshots with no @timestamp bounds \u2014 the measurement\nrecords `delta_kind: state-only` and the empty `baseline: []` is by construction, not a\ndead control window. The observed ps forest captured at 2026-07-27T09:52:04Z (seven\nminutes after the activity ended at 09:44:35) contains only tini/sshd, rsyslogd, cron,\nelastic-agent with its two collector children, scheduler.py, and the capturing `ps`\nitself \u2014 no curl, no `bash /tmp/payload_0.sh`, no base64 process survives to be seen.\nThe passwd list is likewise the stock system accounts plus sre.alice/ben/chen and\nsvc.monitoring/config-mgmt, none of which the story touches. Emitting the\nindistinguishable-noise marker rather than inventing a lingering curl or bash process is\nexactly what these payloads support.",
+      "evidence": "Both queries in this lead are `host-state` snapshots keyed only by `host: canary-1` \u2014 seq 0 returns a point-in-time `ps_output` forest with `captured_at: 2026-07-27T09:52:04Z`, and seq 1 returns the 26-line `/etc/passwd` entry list with `captured_at: 2026-07-27T09:52:36Z`. Neither carries @timestamp bounds that could be moved to a control window, and the `baseline` array is empty ([]) precisely because no time-shifted control exists for them. Per the environment notes on state and lookup systems, current-configuration and entity-record queries have no baseline-diff semantics, so both are tagged state-only regardless of content (the ps forest shows only tini/sshd/rsyslogd/cron/elastic-agent/scheduler.py plus the capturing `ps` itself, and passwd lists the standard system accounts plus sre.alice/ben/chen and svc.monitoring/config-mgmt). Both queries agree in kind, so heterogeneous is false."
+    },
+    {
+      "lead": "l-006",
+      "system": "host-state",
+      "delta_kind": "state-only",
+      "faithful": true,
+      "cause": null,
+      "heterogeneous": null,
+      "undecidable_reason": null,
+      "form_notes": "projection emits nothing at all rather than a state record with placeholdered key entries; granularity/shape divergence only",
+      "rationale": "The lead's single query `host-state.authorized-keys` returns a configuration record\n(`path: /root/.ssh/authorized_keys`, `captured_at: 2026-07-27T09:50:42Z`, three\n`ssh-rsa AAAAB3NzaC1yc2EAAAAD_fake_key_0_*_attacker attacker@elsewhere` entries), and\n`measurement` classifies it `state-only` \u2014 per `environment_notes.state_and_lookup_systems`\nit carries no @timestamp bounds, which is why `baseline` is `[]` rather than a control\npayload, so those keys cannot be scored as a delta. The story performs only a curl to\n`http://web-1/` into `/tmp/fetched_0.sh` and a base64-decoded `/tmp/payload_0.sh` run;\nit never writes to `authorized_keys`, so the activity contributes no change to this\nenvelope. The empty projection therefore asserts no change where there is none to\nassert, and the three fixture keys are pre-existing state the story does not ground \u2014\nemitting them concretely would have been fabrication, not credit.",
+      "evidence": "The lead's single query `host-state.authorized-keys` (params host=canary-1, user=root) returns a host-state record \u2014 path `/root/.ssh/authorized_keys`, `captured_at: 2026-07-27T09:50:42Z`, and a 3-element `keys` array \u2014 not a timestamped event stream, and it carries no @timestamp bounds that could be moved, which is why `baseline` is an empty list rather than a control payload. Per `environment_notes.state_and_lookup_systems`, queries returning current configuration or an entity record have no baseline-diff semantics and are tagged `state-only` regardless of row content. The observed keys (three `ssh-rsa AAAAB3NzaC1yc2EAAAAD_fake_key_0_*_attacker attacker@elsewhere` entries) therefore cannot be scored as a delta here \u2014 there is no comparable window against which \"recently added\" could be measured from this payload alone. Only one query exists in the lead, so heterogeneity is null."
+    }
+  ]
+}

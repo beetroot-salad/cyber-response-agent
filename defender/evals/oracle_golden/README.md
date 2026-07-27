@@ -315,18 +315,24 @@ under this design, not a certification. `report.py` prints the full breakdown.
 | split | oracle tag | active | quiet | abstained | units |
 |---|---|---|---|---|---|
 | dev | `glm-5.2_effort-none` | **4/7** | 9/10 | 1 | 4 |
-| dev | `glm-5.2_effort-none_prompt-711` | **5/7** | 9/10 | 1 | 4 |
+| dev | `glm-5.2_effort-none_prompt-711` | **8/13** | 18/19 | 4 | 6 |
 | held-out | `glm-5.2_effort-none_prompt-711` | **2/8** | 3/3 | 0 | 1 |
 
 The active band is the headline and the quiet band is reported beside it, never pooled
-into one number. The four cases recruited in #711 (006, 007, 008, 010) carry **no
-projection yet**, so they do not appear above; recruiting them was capture work, and
-running the oracle over them is the next measurement, not this one.
+into one number. Only the `_prompt-711` tag carries the three units recruited on
+2026-07-27 (case-011/012/013); the older tag is still the 4-unit seed set, which is why
+its denominators are smaller.
 
-Cause codes observed so far, none yet at the ≥5-instances-across-≥3-units threshold that
-makes one *established*: `C-MISSED-DELTA`, `C-EVENT-AS-NOISE`, `C-FABRICATED-VALUE`,
-`C-SUPPRESS-UNBASELINED`, `C-INVENTED-DELTA`, plus one mechanical `C-MALFORMED`
-(case-005 `l-002`'s prose paragraph).
+`elastic x present` is the first slice to clear the unit floor and publish an interval:
+**0.71 [0.30, 0.95] over 4 units**. `C-MISSED-DELTA` is the leading cause at 4 instances
+across 2 units — still short of the ≥5-across-≥3-units bar that makes a cause
+*established*, but it is the one to watch.
+
+**The judge's own noise floor is one lead** (`audits/verdict-selfagreement_*`, 0.988
+self-agreement over 5 repeats). Against a 13-lead active band that is ~8 points, so a
+prompt change has to move 2 leads before it is distinguishable from the judge re-running
+on an unchanged projection. That measurement was taken on the 17 seed-case leads; the
+rate is assumed to carry to the new units rather than re-measured.
 
 Two findings survive the architecture change and are worth naming, because the new
 measurement re-derived them from telemetry rather than inheriting them from the labels:
