@@ -542,14 +542,24 @@ def test_scrub_runs_before_the_first_run_dir_consumer(tmp_path):
     `sorted(...iterdir())`. Every later consumer — the table cross-check, the learning enqueue,
     the third-process visualizer — follows it too.
 
-    Bound to EXECUTED order, not to statement position (#741). The recorded event log is what
-    actually ran, so a scrub the control flow skips cannot satisfy it — where `_call_order`
-    over `main`'s AST would happily read a skipped call as correctly placed.
+    Two legs, one per half of the claim. (1) The REAP'S OWN order, bound to what EXECUTED
+    rather than to statement position (#741): the recorded event log is what actually ran, so
+    a scrub the control flow skips cannot satisfy it — where `_call_order` over an AST would
+    happily read a skipped call as correctly placed. (2) The CONSUMERS' siting in `main`,
+    which the extraction left behind in that function and which leg 1 cannot see.
 
-    The consumers are no longer in the same function, and do not need to be asserted against
-    here: they read `summary`, which exists only if the lifecycle RETURNED. A taint raised by
-    the scrub therefore makes every one of them unreachable by construction rather than by
-    ordering — the leg `test_no_consumer_runs_when_the_scrub_raises` carries."""
+    Leg 2 has to be syntactic, and that is not a weakness here: it is a claim about `main`'s
+    own composition, and there is no executed form of "this call is written below that one".
+    Driving `main` end-to-end to look for one would need the credentials the lifecycle seam
+    exists to avoid.
+
+    Nor is it redundant with the sibling demand. `test_no_consumer_runs_when_the_scrub_raises`
+    establishes that a taint escapes the lifecycle uncaught, from which every consumer is
+    unreachable BY CONSTRUCTION — but only because each one is sited below the lifecycle call.
+    `for entry in sorted(run_dir.iterdir())` reads the tree directly, not `summary`, so
+    nothing but its POSITION keeps it behind the reap. Hoist it and it reads a tree the scrub
+    never certified, with every leg of the sibling still green. This demand owns that premise;
+    the sibling owns 'nobody catches it'."""
     log: list[str] = []
     rec = BoxLifecycleRecorder(events=log)
     summary = _drive_lifecycle(tmp_path, rec)
@@ -564,18 +574,27 @@ def test_scrub_runs_before_the_first_run_dir_consumer(tmp_path):
     assert rec.scrubbed == [rec.requests[0]], \
         "the tree walked is not the run dir the box was given"
 
+    order = _call_order(_fn_node(RUN_PY, "main"))
+    assert "_run_investigation_lifecycle" in order, \
+        "main no longer drives the lifecycle; re-site this demand"
+    reap = order.index("_run_investigation_lifecycle")
+    for consumer in ("iterdir", "cross_check_tables", "enqueue_learning", "visualize"):
+        assert consumer in order, f"{consumer} left the entrypoint; re-site this demand"
+        assert reap < order.index(consumer), \
+            f"{consumer} reads the run dir BEFORE the lifecycle scrubbed it — an escaping " \
+            "taint no longer makes it unreachable"
+
 
 def test_no_consumer_runs_when_the_scrub_raises(tmp_path):
     """d_no_consumer_runs_on_a_tainted_tree — a tainted tree stops the run: the taint signal
     propagates out of the entrypoint uncaught, so the artifact listing, the table cross-check,
     the durable learning-state copy and the third-process visualizer never read the tree.
 
-    Four legs. (1) The signal really is raised by the real scrub on a real planted link, and
+    Three legs. (1) The signal really is raised by the real scrub on a real planted link, and
     it is not a subclass of any exception the entrypoint catches — a taint that lands in an
     existing `except` would be swallowed and every consumer would run anyway. (2) The taint
     ESCAPES the lifecycle rather than being absorbed inside it. (3) `main` catches nothing that
-    would stop it there either. (4) Every consumer is still SITED BELOW the lifecycle call in
-    `main`, which is what "unreachable by construction" actually rests on.
+    would stop it there either.
 
     Legs 2+3 are what replace the old ordering walk (#741). Since the extraction, every
     consumer runs only if the lifecycle RETURNED, so an escaping taint makes them unreachable
@@ -583,12 +602,11 @@ def test_no_consumer_runs_when_the_scrub_raises(tmp_path):
     syntactic claim about exception handlers, so it stays an AST assertion; the reachability
     half beside it is now executed.
 
-    Leg 4 is the premise those two rest on, and it is not self-evident: `for entry in
-    sorted(run_dir.iterdir())` reads the tree directly, not `summary`, so nothing but its
-    POSITION keeps it behind the reap. Hoist any consumer above the lifecycle call and it
-    reads a tree the scrub has not certified — with legs 1-3 still green. It stays an AST
-    assertion for the same reason leg 3 does: it is a claim about `main`'s own composition,
-    and driving `main` end-to-end needs the credentials the seam exists to avoid."""
+    "By construction" is not self-evident, and this demand does not assert it: it rests on
+    every consumer being SITED BELOW the lifecycle call, which is `d_scrub_precedes_first_
+    consumer`'s second leg. Hoist a consumer above that call and it reads an uncertified tree
+    with all three legs here still green — the sibling is what reddens. Kept apart so each
+    demand's binds name only what its own test checks; move one and the other goes vacuous."""
     run = _clean_run_dir(tmp_path)
     os.symlink("/etc/passwd", run / "sneaky.json")
     with pytest.raises(RunTainted):
@@ -617,16 +635,6 @@ def test_no_consumer_runs_when_the_scrub_raises(tmp_path):
         for blanket in ("Exception", "BaseException"):
             assert blanket not in caught, \
                 f"a blanket handler in {fn_name} would swallow the taint signal"
-
-    order = _call_order(_fn_node(RUN_PY, "main"))
-    assert "_run_investigation_lifecycle" in order, \
-        "main no longer drives the lifecycle; re-site this demand"
-    reap = order.index("_run_investigation_lifecycle")
-    for consumer in ("iterdir", "cross_check_tables", "enqueue_learning", "visualize"):
-        assert consumer in order, f"{consumer} left the entrypoint; re-site this demand"
-        assert reap < order.index(consumer), \
-            f"{consumer} reads the run dir BEFORE the lifecycle scrubbed it — an escaping " \
-            "taint no longer makes it unreachable"
 
 
 def test_the_scrub_survives_a_crashed_investigation(tmp_path):
