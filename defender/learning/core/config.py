@@ -170,8 +170,8 @@ LESSONS_ACTOR_INDEX_SCRIPT = _LESSONS_SCRIPTS_DIR / "lessons_actor_index.py"
 
 
 DISPOSITION_ENUM = {"benign", "inconclusive", "malicious"}
-ADVERSARIAL_DISPOSITIONS = {"benign", "inconclusive"}
-BENIGN_DISPOSITIONS = {"malicious", "inconclusive"}
+# Which dispositions select which direction is NOT declared here — it is a field on
+# `Direction` (`core/directions.py`), so the mapping has one home (#716).
 
 OUTCOME_ENUM = {"caught", "survived", "undecidable", "incoherent", "skip-passthrough"}
 BENIGN_OUTCOME_ENUM = {

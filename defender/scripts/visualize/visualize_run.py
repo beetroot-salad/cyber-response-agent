@@ -30,12 +30,12 @@ from defender.scripts.visualize.visualize_data import (
     tool_usage,
 )
 from defender.scripts.visualize.visualize_judge import (
-    render_judge_actor_benign_section,
+    DirectionView,
+    active_views,
+    judge_finding_count,
     render_judge_actor_section,
-    render_judge_benign_section,
     render_judge_defender_summary,
     render_judge_judge_section,
-    render_judge_oracle_benign_section,
     render_judge_oracle_section,
     render_judge_raw_bundle,
     render_judge_toc,
@@ -43,8 +43,7 @@ from defender.scripts.visualize.visualize_judge import (
 from defender.scripts.visualize.visualize_primitives import (
     esc,
     fmt_duration,
-    load_judge_benign_findings,
-    load_judge_findings,
+    load_judge_doc,
     parse_report,
     render_alert_block,
     section,
@@ -110,18 +109,20 @@ def _byline(parts: list[str]) -> str:
 
 
 
-def render_judge_headline(run_dir: Path, judge: dict | None, judge_benign: dict | None = None) -> str:
-    report = parse_report(run_dir)
+def render_judge_headline(
+    report: dict, docs: list[tuple[DirectionView, dict | None]],
+) -> str:
     disposition = str(report.get("disposition", "?"))
     confidence = str(report.get("confidence", "?"))
-    if judge:
-        outcome = str(judge.get("outcome", "—"))
-        n_findings = len(judge.get("defender_findings") or [])
-        direction_sub = f"{n_findings} finding(s)"
-    elif judge_benign:
-        outcome = str(judge_benign.get("outcome", "—"))
-        n_findings = len(judge_benign.get("defender_findings") or [])
-        direction_sub = f"{n_findings} finding(s) · benign direction"
+    # First rendered direction that produced a doc supplies the outcome tile — the page
+    # order, so adversarial still wins when both ran. The tile names its direction either
+    # way; it used to say so for the benign direction only.
+    graded = next(((v, d) for v, d in docs if d), None)
+    if graded is not None:
+        view, doc = graded
+        outcome = str(doc.get("outcome", "—"))
+        n_findings = judge_finding_count(doc)
+        direction_sub = f"{n_findings} finding(s) · {view.direction.name} direction"
     else:
         outcome = "—"
         direction_sub = "0 finding(s)"
@@ -306,12 +307,15 @@ def render_judge_page(run_dir: Path) -> str:
     case_id = run_dir.name
     events = read_jsonl_rows(run_dir / "tool_trace.jsonl")
     n_events, n_tool_calls, cost = _stats(events)
-    judge = load_judge_findings(case_id)
-    n_findings = len((judge or {}).get("defender_findings") or []) if judge else 0
-    judge_benign = load_judge_benign_findings(case_id)
-    n_benign_findings = (
-        len(judge_benign.get("defender_findings") or []) if judge_benign else None
-    )
+
+    # One pass over the directions this run selected or left artifacts for — the page no
+    # longer enumerates them, so a third `Direction` lands here for free (#716).
+    report = parse_report(run_dir)
+    docs = [
+        (v, load_judge_doc(case_id, v.direction))
+        for v in active_views(case_id, str(report.get("disposition", "?")))
+    ]
+    toc_sections = [(v, judge_finding_count(d) if d else None) for v, d in docs]
 
     byline = _byline([
         f"events={n_events}",
@@ -324,18 +328,18 @@ def render_judge_page(run_dir: Path) -> str:
 <html><head><meta charset="utf-8"><title>judge eval — {esc(case_id)}</title>
 <style>{CSS}</style></head><body id="top">
 {render_header(case_id, active="judge", byline=byline)}
-{render_judge_headline(run_dir, judge, judge_benign)}
+{render_judge_headline(report, docs)}
 <div class="layout">
-  {render_judge_toc(n_findings, n_benign_findings)}
+  {render_judge_toc(toc_sections)}
   <article class="content">
     {render_alert_block(run_dir, open_=True)}
     {render_judge_defender_summary(run_dir)}
-    {render_judge_actor_section(case_id)}
-    {render_judge_judge_section(judge)}
-    {render_judge_oracle_section(case_id)}
-    {render_judge_actor_benign_section(case_id)}
-    {render_judge_benign_section(judge_benign)}
-    {render_judge_oracle_benign_section(case_id)}
+    {"".join(
+        render_judge_actor_section(case_id, v)
+        + render_judge_judge_section(d, v)
+        + render_judge_oracle_section(case_id, v)
+        for v, d in docs
+    )}
     {render_judge_raw_bundle(case_id)}
   </article>
 </div>

@@ -12,8 +12,6 @@ import yaml
 
 from defender._yaml import safe_load
 from defender.learning.core.config import (
-    ADVERSARIAL_DISPOSITIONS,
-    BENIGN_DISPOSITIONS,
     DEFAULT_PATHS,
     RunUnprocessable,
     LoopPaths,
@@ -25,7 +23,12 @@ from defender.learning.core.config import (
 from defender._paths import PATHS
 from defender.runtime import box as box_mod
 from defender.run_common import is_held_out_alert_copy
-from defender.learning.core.directions import BY_NAME, Direction
+from defender.learning.core.directions import (
+    BY_NAME,
+    Direction,
+    directions_for,
+    raw_fallback_name,
+)
 from defender.learning.core.markers import enqueue_for_authoring, quarantine_marker
 from defender.learning.core.persist import (
     DirectionArtifacts,
@@ -49,7 +52,7 @@ def _write_oracle_telemetry(
     out_path = learning_run_dir / out_name
     out_path.write_text(stripped, encoding="utf-8")
     if stripped != oracle_raw:
-        (learning_run_dir / (Path(out_name).stem + ".raw.txt")).write_text(oracle_raw, encoding="utf-8")
+        (learning_run_dir / raw_fallback_name(out_name)).write_text(oracle_raw, encoding="utf-8")
     return out_path
 
 
@@ -109,7 +112,7 @@ def run_direction(
         box=box,
     )
     judge_doc, judge_stripped = _validate_judge_yaml(
-        judge_raw, spec.validate, learning_run_dir / spec.judge_raw_name
+        judge_raw, spec.validate, learning_run_dir / raw_fallback_name(spec.judge_name)
     )
 
     _log(f"step=persist ({spec.name})")
@@ -143,12 +146,7 @@ def run_direction(
 
 
 def _directions_for(disposition: str) -> list[str]:
-    directions: list[str] = []
-    if disposition in ADVERSARIAL_DISPOSITIONS:
-        directions.append("adversarial")
-    if disposition in BENIGN_DISPOSITIONS:
-        directions.append("benign")
-    return directions
+    return [d.name for d in directions_for(disposition)]
 
 
 def _prepare_engines_for(directions: list[str], *, include_actor: bool = True) -> None:

@@ -4,7 +4,9 @@ from dataclasses import dataclass
 from collections.abc import Callable
 from pathlib import Path
 
+from defender._text import strip_zero_width
 from defender.learning.core.config import (
+    DISPOSITION_ENUM,
     JUDGE_BENIGN_PROMPT,
     JUDGE_PROMPT,
     JudgeWiring,
@@ -60,10 +62,46 @@ class Direction:
     story_name: str
     telemetry_name: str
     judge_name: str
-    judge_raw_name: str
+    # The dispositions that select this direction — the ONE home for the mapping
+    # `directions_for` dispatches on and the judge view reads to tell "this direction was
+    # never selected" from "it was selected and its artifacts are missing" (#716).
+    dispositions: frozenset[str]
     obs_trigger: ObsTrigger
+    # Actor artifacts only some directions produce — declared HERE with the rest of the
+    # names, so the transcript view reads them off the Direction instead of restating the
+    # literals the actor pipeline writes (#716).
+    archetype_name: str | None = None
+    menu_name: str | None = None
     append_env_observations: Callable | None = None
     extra_obs_triggers: tuple[ObsTrigger, ...] = ()
+
+    def artifact_names(self) -> tuple[str, ...]:
+        """Every file this direction's legs leave in the learning run dir. Derived from the
+        names declared above so presence and rendering read the same list: the transcript asks
+        this to tell "this leg ran" from "it was never selected" (#716)."""
+        declared = (
+            self.story_name, self.telemetry_name, self.judge_name,
+            self.archetype_name, self.menu_name,
+        )
+        return tuple(n for n in declared if n is not None) + (
+            raw_fallback_name(self.telemetry_name), raw_fallback_name(self.judge_name),
+        )
+
+
+def raw_fallback_name(artifact_name: str) -> str:
+    """The pre-strip fallback written beside an artifact whose fence had to be stripped.
+    Derived HERE so a writer and the transcript view cannot disagree about the name (#716)."""
+    return Path(artifact_name).stem + ".raw.txt"
+
+
+def normalized_disposition(disposition: str) -> str:
+    """The disposition as it RENDERS, or `""` when it is not one of the three.
+
+    `validate.normalize_disposition` applies the same strip before deciding whether a run is
+    processable at all (#722) — a zero-width character clinging to the keyword must not make
+    the loop and the transcript disagree about which directions the run selected."""
+    disp = strip_zero_width(disposition).strip()
+    return disp if disp in DISPOSITION_ENUM else ""
 
 
 ADVERSARIAL = Direction(
@@ -76,7 +114,9 @@ ADVERSARIAL = Direction(
     story_name="actor_story.md",
     telemetry_name="projected_telemetry.yaml",
     judge_name="judge_findings.yaml",
-    judge_raw_name="judge_findings.raw.txt",
+    dispositions=frozenset({"benign", "inconclusive"}),
+    archetype_name="actor_archetype.txt",
+    menu_name="actor_menu.txt",
     obs_trigger=ObsTrigger(
         pending_file=lambda p: p.actor_observations.file,
         threshold_env="LEARNING_AUTHOR_ACTOR_THRESHOLD",
@@ -106,7 +146,7 @@ BENIGN = Direction(
     story_name="actor_benign_story.md",
     telemetry_name="projected_telemetry_benign.yaml",
     judge_name="judge_benign_findings.yaml",
-    judge_raw_name="judge_benign_findings.raw.txt",
+    dispositions=frozenset({"malicious", "inconclusive"}),
     obs_trigger=ObsTrigger(
         pending_file=lambda p: p.environment_observations.file,
         threshold_env="LEARNING_AUTHOR_ENV_THRESHOLD",
@@ -116,3 +156,15 @@ BENIGN = Direction(
 )
 
 BY_NAME = {ADVERSARIAL.name: ADVERSARIAL, BENIGN.name: BENIGN}
+
+# INVARIANT: the union of every `dispositions` is exactly `DISPOSITION_ENUM` — a typo or an
+# omission there silently drops a leg from BOTH the loop's dispatch and the transcript, with
+# nothing failing. Guarded by `test_every_disposition_selects_at_least_one_direction` (#716).
+
+
+def directions_for(disposition: str) -> list[Direction]:
+    """The directions a disposition selects — the ONE reader of `Direction.dispositions`,
+    shared by the loop's dispatch and the transcript view so they cannot disagree (#716).
+    An unrecognized disposition selects nothing; callers decide what that means."""
+    disp = normalized_disposition(disposition)
+    return [d for d in BY_NAME.values() if disp in d.dispositions] if disp else []
