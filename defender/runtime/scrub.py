@@ -21,14 +21,18 @@ class Finding:
     """
 
     path: Path
-    kind: str            # "type" (allowlist violation) | "hardlink" (second name for one inode)
-    filemode: str        # the mode character — 'l', 'p', 's', 'c', ...
+    kind: str            # "type" (allowlist violation) | "hardlink" (second name for one
+                         # inode) | "unreadable" (the walk could not judge it at all)
+    filemode: str        # the mode character — 'l', 'p', 's', 'c', ... ('?' when unreadable)
     nlink: int
     target: str | None
+    detail: str | None = None   # the OS error, for the "unreadable" kind only
 
     def describe(self) -> str:
         if self.kind == "hardlink":
             return f"{self.path}: hard link with {self.nlink} names"
+        if self.kind == "unreadable":
+            return f"{self.path}: could not be read ({self.detail})"
         link = f", symlink -> {self.target!r}" if self.target is not None else ""
         return f"{self.path}: {self.filemode!r}-type entry{link}"
 
@@ -80,6 +84,23 @@ def _check_entry(entry: Path) -> Finding | None:
     return None
 
 
+def _unreadable(path: Path, err: OSError) -> Finding:
+    """An entry the walk could not judge is REFUSED, never skipped.
+
+    The scrub's claim is that everything under the tree is a regular file or a directory; an
+    entry it failed to `lstat`, or a directory it failed to list, is precisely the entry it
+    cannot make that claim about. Failing closed here also keeps the walk's own errors from
+    becoming the two silences this module exists to retire: `os.walk`'s default `onerror`
+    DROPS an unlistable directory (the scrub would then certify a subtree it never read), and
+    letting an `OSError` propagate out of `scrub` would discard every finding already
+    collected and deny the caller the `RunTainted` its quarantine handler keys on (#747).
+    """
+    return Finding(
+        path=path, kind="unreadable", filemode="?", nlink=0, target=None,
+        detail=f"{type(err).__name__}: {err.strerror or err}",
+    )
+
+
 def _render_findings(run_dir: Path, findings: Sequence[Finding]) -> str:
     shown = findings[:_MESSAGE_CAP]
     lines = [
@@ -98,14 +119,24 @@ def _render_findings(run_dir: Path, findings: Sequence[Finding]) -> str:
 
 def scrub(run_dir: Path) -> None:
     findings: list[Finding] = []
-    for parent, dirs, files in os.walk(run_dir):
+
+    def refuse_unwalkable(err: OSError) -> None:
+        findings.append(_unreadable(Path(err.filename or run_dir), err))
+
+    for parent, dirs, files in os.walk(run_dir, onerror=refuse_unwalkable):
         for name in (*dirs, *files):
-            finding = _check_entry(Path(parent) / name)
+            entry = Path(parent) / name
+            try:
+                finding = _check_entry(entry)
+            except OSError as e:
+                finding = _unreadable(entry, e)
             if finding is not None:
                 findings.append(finding)
     if not findings:
         return
     # os.walk yields in the filesystem's order, so sort: the same tainted tree has to produce
     # the same message twice, or the report is not something an operator can diff or cite.
-    findings.sort(key=lambda f: str(f.path))
+    # Sorted by PATH, not by `str(path)` — the two disagree wherever a separator meets a
+    # character below '/' (`a/b` vs `a-c/x`), and path order is what a reader compares against.
+    findings.sort(key=lambda f: f.path)
     raise RunTainted(_render_findings(run_dir, findings), findings)

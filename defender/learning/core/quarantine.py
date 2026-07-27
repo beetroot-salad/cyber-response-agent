@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import json
 import tarfile
-from datetime import UTC, datetime
 from pathlib import Path
 
+from defender._clock import now_iso
 from defender._env import env_int
 from defender.learning.core.config import _log
 from defender.runtime.scrub import RunTainted
@@ -47,13 +47,13 @@ def _manifest(
         "label": label,
         "worktree": str(wt),
         "archive": archive.name,
-        "quarantined_at": datetime.now(UTC).isoformat(),
+        "quarantined_at": now_iso(),
         "taint": str(taint),
         "cause": repr(cause) if cause is not None else None,
         "findings": [
             {
                 "path": str(f.path), "kind": f.kind, "filemode": f.filemode,
-                "nlink": f.nlink, "target": f.target,
+                "nlink": f.nlink, "target": f.target, "detail": f.detail,
             }
             for f in taint.findings
         ],
@@ -77,19 +77,28 @@ def preserve_tainted_tree(
     one lost report for another. Every outcome is logged, because a silent failure here is
     indistinguishable from a tree that was never tainted.
     """
+    archived: Path | None = None
     try:
         quarantine_dir.mkdir(parents=True, exist_ok=True)
-        existing = sorted(quarantine_dir.glob("*.tar.gz"))
+        held = sum(1 for _ in quarantine_dir.glob("*.tar.gz"))
         cap = env_int(_MAX_ENV, _MAX_DEFAULT)
-        if len(existing) >= cap:
+        if held >= cap:
             _log(
-                f"{label}: {len(existing)} quarantined tree(s) already held at "
+                f"{label}: {held} quarantined tree(s) already held at "
                 f"{quarantine_dir} (cap {cap}, {_MAX_ENV}) — NOT preserving {wt}. The "
                 f"existing artifacts are untouched; clear them by hand once triaged."
             )
             return None
         archive = quarantine_dir / f"{batch_id}.tar.gz"
-        _archive_tree(wt, archive)
+        try:
+            _archive_tree(wt, archive)
+        except BaseException:
+            # A half-written tarball is not evidence, and leaving one behind spends the cap on
+            # failures: the count bound would eventually refuse every real archive because ten
+            # truncated ones sit in the way.
+            archive.unlink(missing_ok=True)
+            raise
+        archived = archive
         manifest = quarantine_dir / f"{batch_id}.json"
         manifest.write_text(
             json.dumps(
@@ -105,8 +114,14 @@ def preserve_tainted_tree(
         )
         return archive
     except Exception as e:  # noqa: BLE001 — the taint outranks any failure to preserve it
-        _log(
-            f"{label}: FAILED to quarantine the tainted worktree {wt}: {e!r} — the tree is "
-            "about to be destroyed and this taint's evidence is being lost"
+        # What survived decides what the operator is told: an archive with no manifest beside
+        # it is a very different residue from nothing at all, and saying "the evidence is
+        # being lost" over a tarball that is sitting right there would send triage the wrong
+        # way.
+        residue = (
+            f"the archive at {archived} survives, but WITHOUT its manifest"
+            if archived is not None
+            else "the tree is about to be destroyed and this taint's evidence is being lost"
         )
+        _log(f"{label}: FAILED to quarantine the tainted worktree {wt}: {e!r} — {residue}")
         return None
