@@ -1,0 +1,4 @@
+# 46MB of judge traces — regenerable by re-running run_judge_ab.py over fixtures/,
+# and results/cost.json already carries the token counts derived from them.
+runs/
+__pycache__/

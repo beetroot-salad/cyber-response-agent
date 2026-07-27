@@ -1,0 +1,10 @@
+{
+  "goal": "Check for any approved change ticket or authorized security testing (pen test, vulnerability scan) covering host canary-1 around 2026-07-27, especially SSH brute-force or auth testing activity.",
+  "what_to_summarize": [
+    "any change ticket referencing canary-1 in the window 2026-07-26 to 2026-07-28",
+    "any authorized pen test or security scan covering canary-1",
+    "ticket description and approval status",
+    "whether the activity includes SSH auth testing",
+    "the scope and time window of any authorized testing"
+  ]
+}

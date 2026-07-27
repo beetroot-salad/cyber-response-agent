@@ -15,6 +15,7 @@ FIREWORKS = OpenAICompatProvider(
         "glm-5p2": "accounts/fireworks/models/glm-5p2",
         "kimi-k2.6": "accounts/fireworks/models/kimi-k2p6",
         "kimi-k2p6": "accounts/fireworks/models/kimi-k2p6",
+        "kimi-k3": "accounts/fireworks/models/kimi-k3",
     },
     main_effort="low",
     gather_effort="none",

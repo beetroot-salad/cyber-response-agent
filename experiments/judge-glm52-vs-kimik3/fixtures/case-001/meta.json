@@ -1,0 +1,12 @@
+{
+  "direction": "adversarial",
+  "source_run_dir": "/workspace/.defender-runs/fresh-01",
+  "source_learning_dir": "defender/learning/runs/fresh-01",
+  "source_story": "actor_story.md",
+  "source_telemetry": "projected_telemetry.yaml",
+  "run_dir_excludes": [
+    "llm_requests.jsonl",
+    "transcript.html",
+    "runtime.html"
+  ]
+}

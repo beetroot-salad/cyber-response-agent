@@ -1,0 +1,18 @@
+{
+  "case-001-vs-ref-a": {
+    "A": "ref-a",
+    "B": "kimi-k3"
+  },
+  "case-001-vs-ref-b": {
+    "A": "kimi-k3",
+    "B": "ref-b"
+  },
+  "case-002-vs-ref-a": {
+    "A": "ref-a",
+    "B": "kimi-k3"
+  },
+  "case-002-vs-ref-b": {
+    "A": "kimi-k3",
+    "B": "ref-b"
+  }
+}

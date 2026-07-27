@@ -1,0 +1,11 @@
+{
+  "goal": "Retrieve the actual sshd failed-auth events on canary-1 around the alert timestamp to determine source IP cardinality, targeted usernames, exact count, and timestamps.",
+  "what_to_summarize": [
+    "source.ip values and cardinality (single vs many)",
+    "user.name values and cardinality (single vs many)",
+    "exact count of failed auth events",
+    "timestamps of each failure event",
+    "auth method if available (password, publickey, etc.)",
+    "any source.port or geoip information"
+  ]
+}

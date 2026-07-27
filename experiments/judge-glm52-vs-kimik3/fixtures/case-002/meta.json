@@ -1,0 +1,12 @@
+{
+  "direction": "benign",
+  "source_run_dir": "/workspace/.defender-runs/fresh-01",
+  "source_learning_dir": "defender/learning/runs/fresh-01",
+  "source_story": "actor_benign_story.md",
+  "source_telemetry": "projected_telemetry_benign.yaml",
+  "run_dir_excludes": [
+    "llm_requests.jsonl",
+    "transcript.html",
+    "runtime.html"
+  ]
+}

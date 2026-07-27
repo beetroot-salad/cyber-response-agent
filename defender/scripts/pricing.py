@@ -6,6 +6,9 @@ PRICING = {
     "claude-haiku-4-5":  {"in": 1.0, "out":  5.0, "cache_w": 1.25, "cache_r": 0.10},
     "glm-5.2":           {"in": 1.4, "out":  4.4, "cache_w": 1.40, "cache_r": 0.14},
     "kimi-k2.6":         {"in": 0.6, "out":  3.0, "cache_w": 0.60, "cache_r": 0.60},
+    # Unconfirmed: Fireworks omits K3 from /v1/models and quotes it two ways on the web
+    # ($3/$15 at 1M ctx, $0.95/$4.00 at 262k). Carrying the conservative pair.
+    "kimi-k3":           {"in": 3.0, "out": 15.0, "cache_w": 3.00, "cache_r": 0.30},
 }
 
 
@@ -15,6 +18,9 @@ def model_key(model: str) -> str:
     m = model.lower()
     if "glm" in m:
         return "glm-5.2"
+    # Must precede the generic kimi branch, or K3 bills at K2.6's rate.
+    if "kimi-k3" in m:
+        return "kimi-k3"
     if "kimi" in m:
         return "kimi-k2.6"
     if "haiku" in m:
