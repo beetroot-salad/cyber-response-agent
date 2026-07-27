@@ -59,8 +59,20 @@ class AuthorBranch:
             return self.worktree_base
         return DefenderPaths(self.repo_root).worktree_base
 
+    @property
+    def quarantine_dir(self) -> Path:
+        """Where a tainted worktree is preserved before cleanup destroys it (#747).
 
-    def _branch(self, batch_id: str) -> str:
+        A sibling of the live worktrees so it follows `worktree_base` wherever a caller
+        redirects it, rather than being a second way to compute the same location. Inside
+        the repo checkout is fine BECAUSE the artifact is an inert archive: the reason to
+        push it out of tree would have been a preserved worktree's live symlinks, and a
+        `.tar.gz` has none. `.worktrees/` is already gitignored.
+        """
+        return self._worktree_base / "quarantine"
+
+
+    def branch_name(self, batch_id: str) -> str:
         return f"{self.branch_prefix}{batch_id}"
 
     def _worktree_path(self, batch_id: str) -> Path:
@@ -100,7 +112,7 @@ class AuthorBranch:
             _git.git_fetch(self.repo_root)
             self._worktree_base.mkdir(parents=True, exist_ok=True)
             _git.git_worktree_add(
-                self.repo_root, wt, _BRANCH_BASE, branch=self._branch(batch_id)
+                self.repo_root, wt, _BRANCH_BASE, branch=self.branch_name(batch_id)
             )
         except GitError as e:
             self.cleanup(wt)
@@ -110,7 +122,7 @@ class AuthorBranch:
     def finish_batch(self, batch_id: str, wt: Path) -> str | None:
         if self.commits_ahead(wt) == 0:
             return None
-        branch = self._branch(batch_id)
+        branch = self.branch_name(batch_id)
         try:
             _git.git_push(wt, branch)
             ref = self._forge.open_pr(

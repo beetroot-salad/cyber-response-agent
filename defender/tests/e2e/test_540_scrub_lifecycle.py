@@ -822,8 +822,14 @@ def test_the_drain_scrub_survives_a_crashed_do_work(tmp_path):
     Milder than #738 was, and the test says so rather than inheriting its severity: on that path
     `finish_batch` (the commit+push+PR supply-chain step the scrub guards) never runs either,
     and the outer `finally` calls `branch.cleanup(wt)`. It fails closed by DESTROYING the tree
-    rather than by CHECKING it — but that cleanup is wrapped in `contextlib.suppress(Exception)`,
-    so a cleanup that fails leaves a worktree both tainted and never walked, with no signal.
+    rather than by CHECKING it — and a cleanup that fails leaves a worktree both tainted and
+    never walked (#746 made that failure logged rather than swallowed, so it is no longer
+    silent, but the tree still leaks).
+
+    #747 closed the other half this paragraph used to name: when the tree is destroyed after a
+    TAINT specifically, it is now archived to quarantine first, so the evidence outlives the
+    `finally` that reports it. That path is demanded in `test_747_taint_quarantine.py`; this
+    test still owns the ordinary crash path, where there is no taint and nothing to preserve.
 
     The assertion is that the scrub RAN, and ran after the teardown. `has_work` and the box
     start both succeed, so the only thing standing between this test and green is where the
