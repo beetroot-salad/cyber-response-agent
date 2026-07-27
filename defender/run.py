@@ -30,7 +30,7 @@ if __name__ == "__main__" and _VENV_PY.is_file() and Path(sys.executable) != _VE
 import argparse  # noqa: E402
 import asyncio  # noqa: E402
 from collections.abc import Callable  # noqa: E402
-from typing import Any  # noqa: E402
+from typing import Any, Protocol  # noqa: E402
 
 if (_root := str(_DEFENDER_DIR.parent)) not in sys.path:
     sys.path.insert(0, _root)
@@ -108,7 +108,32 @@ def _source_provider_keys(main_model: str, gather_model: str) -> int:
     return 0
 
 
-def _drive_investigation(**kwargs: Any) -> dict[str, Any]:
+class _Investigate(Protocol):
+    """The investigation seam's exact shape.
+
+    Spelled out rather than left as a bare `Callable[..., dict]` so BOTH halves of the
+    injection stay type-checked: the lifecycle's call site against this signature, and
+    `_drive_investigation` against `driver.run_investigation`'s own parameters. A `**kwargs`
+    passthrough checks neither, so a renamed driver keyword would type-check clean, pass every
+    test (they all inject the seam) and fail only on a real credentialed run.
+    """
+
+    def __call__(
+        self, *, alert_path: Path, run_dir: Path, run_id: str, defender_dir: Path,
+        salt: str, model_name: str, box: Any,
+    ) -> dict[str, Any]: ...
+
+
+def _drive_investigation(
+    *,
+    alert_path: Path,
+    run_dir: Path,
+    run_id: str,
+    defender_dir: Path,
+    salt: str,
+    model_name: str,
+    box: Any,
+) -> dict[str, Any]:
     """The production investigation call, as a SYNCHRONOUS callable.
 
     `_run_investigation_lifecycle` injects this rather than reaching for the driver directly,
@@ -116,7 +141,15 @@ def _drive_investigation(**kwargs: Any) -> dict[str, Any]:
     and no model credentials, which is what kept the entrypoint's lifecycle unobservable
     before #741.
     """
-    return asyncio.run(driver.run_investigation(**kwargs))
+    return asyncio.run(driver.run_investigation(
+        alert_path=alert_path,
+        run_dir=run_dir,
+        run_id=run_id,
+        defender_dir=defender_dir,
+        salt=salt,
+        model_name=model_name,
+        box=box,
+    ))
 
 
 def _run_investigation_lifecycle(
@@ -125,7 +158,7 @@ def _run_investigation_lifecycle(
     salt: str,
     model: str,
     defender_dir: Path,
-    investigate: Callable[..., dict[str, Any]] = _drive_investigation,
+    investigate: _Investigate = _drive_investigation,
     start_box: Callable[..., Any] = box_mod.start_box,
     stop_box: Callable[..., None] = box_mod.stop_box,
     scrub: Callable[[Path], None] = box_mod.scrub,

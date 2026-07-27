@@ -10,6 +10,9 @@ from defender import _git
 from defender._git import REPO_ROOT, GitError
 from defender._paths import DefenderPaths
 from defender.learning.author.forge import Forge, ForgeError, GhForge
+from defender.learning.core.config import make_logger
+
+_log = make_logger("branch")
 
 LESSONS_BRANCH_PREFIX = "lessons/"
 _BRANCH_BASE = "origin/main"
@@ -119,8 +122,14 @@ class AuthorBranch:
         return ref or branch
 
     def cleanup(self, wt: Path) -> None:
-        with contextlib.suppress(GitError):
+        # Best-effort: a failed removal must not mask the fault that brought us here. But it
+        # is never silent — a worktree that survives cleanup is one the box could have written
+        # and, on the crash path, one the scrub never walked. The caller's own `except` cannot
+        # see this: the suppression lives HERE, so the log has to as well.
+        try:
             _git.git_worktree_remove(self.repo_root, wt, force=True)
+        except GitError as e:
+            _log(f"worktree cleanup failed: {e} — {wt} leaked")
 
 
     def revert_lesson_pr(self, lesson_rel_path: str, lesson_name: str) -> str | None:

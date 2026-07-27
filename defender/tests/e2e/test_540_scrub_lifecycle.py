@@ -77,7 +77,6 @@ from defender.runtime.box import (  # noqa: E402
 from defender.scripts import workspace_map as workspace_map_mod  # noqa: E402
 from defender.tests.e2e._box665 import (  # noqa: E402
     BoxLifecycleRecorder,
-    RecordingBranch,
     drive_worktree_batch,
 )
 from defender.tests.e2e._replay_harness import (  # noqa: E402
@@ -306,13 +305,17 @@ def _recording_investigate(log: list[str], *, fault: BaseException | None = None
     return investigate
 
 
-def _drive_lifecycle(tmp_path, rec, *, log, fault=None, run_dir=None, **kw):
+def _drive_lifecycle(tmp_path, rec, *, fault=None, run_dir=None, **kw):
     """Drive the REAL `run.py::_run_investigation_lifecycle` over the recorder's box seams.
 
     #741 extracted this out of `main` precisely so the reap-time demands could be EXECUTED.
     Before that they were read off `main`'s statement sequence, which cannot see whether a
     call is reachable on the exception path — the blind spot #738 fell through, and the
-    limitation `spec_graph_540.yaml` recorded as AM-1."""
+    limitation `spec_graph_540.yaml` recorded as AM-1.
+
+    The event log is the recorder's own (`rec.events`), never a second one threaded alongside:
+    one shared list is what makes the box events and the investigation event comparable at
+    all, and two handles on it invite a caller passing the wrong one."""
     from defender.run import _run_investigation_lifecycle
 
     run = _clean_run_dir(tmp_path / "lifecycle") if run_dir is None else run_dir
@@ -320,7 +323,7 @@ def _drive_lifecycle(tmp_path, rec, *, log, fault=None, run_dir=None, **kw):
     seams.update(kw)   # a test may swap one seam for a faulting or real one
     return _run_investigation_lifecycle(
         run_dir=run, salt="s741", model="m-741", defender_dir=DEFENDER,
-        investigate=_recording_investigate(log, fault=fault), **seams,
+        investigate=_recording_investigate(rec.events, fault=fault), **seams,
     )
 
 
@@ -549,7 +552,7 @@ def test_scrub_runs_before_the_first_run_dir_consumer(tmp_path):
     ordering — the leg `test_no_consumer_runs_when_the_scrub_raises` carries."""
     log: list[str] = []
     rec = BoxLifecycleRecorder(events=log)
-    summary = _drive_lifecycle(tmp_path, rec, log=log)
+    summary = _drive_lifecycle(tmp_path, rec)
 
     assert summary == {"output": "done", "requests": 1}
     assert rec.scrubbed, "the lifecycle never scrubbed the run dir"
@@ -567,17 +570,25 @@ def test_no_consumer_runs_when_the_scrub_raises(tmp_path):
     propagates out of the entrypoint uncaught, so the artifact listing, the table cross-check,
     the durable learning-state copy and the third-process visualizer never read the tree.
 
-    Three legs. (1) The signal really is raised by the real scrub on a real planted link, and
+    Four legs. (1) The signal really is raised by the real scrub on a real planted link, and
     it is not a subclass of any exception the entrypoint catches — a taint that lands in an
     existing `except` would be swallowed and every consumer would run anyway. (2) The taint
     ESCAPES the lifecycle rather than being absorbed inside it. (3) `main` catches nothing that
-    would stop it there either.
+    would stop it there either. (4) Every consumer is still SITED BELOW the lifecycle call in
+    `main`, which is what "unreachable by construction" actually rests on.
 
     Legs 2+3 are what replace the old ordering walk (#741). Since the extraction, every
-    consumer reads `summary` — the lifecycle's return value — so an escaping taint makes them
-    unreachable by construction, and the property reduces to 'nobody catches it'. That is a
-    genuinely syntactic claim about exception handlers, so it stays an AST assertion; the
-    reachability half beside it is now executed."""
+    consumer runs only if the lifecycle RETURNED, so an escaping taint makes them unreachable
+    by construction, and the property reduces to 'nobody catches it'. That is a genuinely
+    syntactic claim about exception handlers, so it stays an AST assertion; the reachability
+    half beside it is now executed.
+
+    Leg 4 is the premise those two rest on, and it is not self-evident: `for entry in
+    sorted(run_dir.iterdir())` reads the tree directly, not `summary`, so nothing but its
+    POSITION keeps it behind the reap. Hoist any consumer above the lifecycle call and it
+    reads a tree the scrub has not certified — with legs 1-3 still green. It stays an AST
+    assertion for the same reason leg 3 does: it is a claim about `main`'s own composition,
+    and driving `main` end-to-end needs the credentials the seam exists to avoid."""
     run = _clean_run_dir(tmp_path)
     os.symlink("/etc/passwd", run / "sneaky.json")
     with pytest.raises(RunTainted):
@@ -588,7 +599,7 @@ def test_no_consumer_runs_when_the_scrub_raises(tmp_path):
     tainted = _clean_run_dir(tmp_path / "second")
     os.symlink("/etc/passwd", tainted / "sneaky.json")
     with pytest.raises(RunTainted):
-        _drive_lifecycle(tmp_path, rec, log=log, run_dir=tainted, scrub=scrub)
+        _drive_lifecycle(tmp_path, rec, run_dir=tainted, scrub=scrub)
     assert [ev.split(":")[0] for ev in log] == ["start", "investigate", "stop"], \
         "the taint did not escape the lifecycle, or the box was left running behind it"
 
@@ -606,6 +617,16 @@ def test_no_consumer_runs_when_the_scrub_raises(tmp_path):
         for blanket in ("Exception", "BaseException"):
             assert blanket not in caught, \
                 f"a blanket handler in {fn_name} would swallow the taint signal"
+
+    order = _call_order(_fn_node(RUN_PY, "main"))
+    assert "_run_investigation_lifecycle" in order, \
+        "main no longer drives the lifecycle; re-site this demand"
+    reap = order.index("_run_investigation_lifecycle")
+    for consumer in ("iterdir", "cross_check_tables", "enqueue_learning", "visualize"):
+        assert consumer in order, f"{consumer} left the entrypoint; re-site this demand"
+        assert reap < order.index(consumer), \
+            f"{consumer} reads the run dir BEFORE the lifecycle scrubbed it — an escaping " \
+            "taint no longer makes it unreachable"
 
 
 def test_the_scrub_survives_a_crashed_investigation(tmp_path):
@@ -633,7 +654,7 @@ def test_the_scrub_survives_a_crashed_investigation(tmp_path):
     boom = RuntimeError("the driver exploded")
 
     with pytest.raises(RuntimeError) as e:
-        _drive_lifecycle(tmp_path, rec, log=log, fault=boom)
+        _drive_lifecycle(tmp_path, rec, fault=boom)
     assert e.value is boom, "the lifecycle swallowed or replaced the driver's own failure"
 
     assert rec.scrubbed, \
@@ -661,14 +682,16 @@ def test_the_drain_scrub_survives_a_crashed_do_work(tmp_path):
     scrub is sited relative to the raise."""
     log: list[str] = []
     rec = BoxLifecycleRecorder(events=log)
-    branch = RecordingBranch(tmp_path / "wt", events=log)
     boom = RuntimeError("do_work exploded")
 
     def crashing_do_work(wt_paths, *, box=None):
         raise boom
 
+    # No `branch=`: `drive_worktree_batch` already defaults to a RecordingBranch over the
+    # recorder's own event log, which is what makes the branch events and the box events
+    # comparable. Rebuilding an identical one here would just be a second way to get it wrong.
     with pytest.raises(RuntimeError) as e:
-        drive_worktree_batch(tmp_path, rec, do_work=crashing_do_work, branch=branch)
+        drive_worktree_batch(tmp_path, rec, do_work=crashing_do_work)
     assert e.value is boom, "the drain swallowed or replaced do_work's own failure"
 
     assert rec.stopped, "the box was not torn down on the crash path"
@@ -710,7 +733,7 @@ def test_the_reap_scrubs_once_the_box_is_down(tmp_path):
     assert log == ["stop", "scrub"]
 
 
-def test_a_failed_teardown_skips_the_scrub_rather_than_racing_it(tmp_path):
+def test_a_failed_teardown_skips_the_scrub_rather_than_racing_it(tmp_path, capsys):
     """d_reap_skips_the_scrub_on_a_failed_teardown — the scrub runs only once the box is
     PROVABLY dead. "No live writer" is the walk's entire justification, so a teardown that
     faulted leaves that unproven and the walk is SKIPPED, not attempted anyway.
@@ -719,7 +742,12 @@ def test_a_failed_teardown_skips_the_scrub_rather_than_racing_it(tmp_path):
     fault is the only signal and propagates. With the work's own exception already propagating
     the fault is suppressed so it cannot replace the more informative failure — but it still
     blocks the scrub, which is the half that matters here: the suppression is about which
-    exception reaches the caller, never about whether the tree got walked."""
+    exception reaches the caller, never about whether the tree got walked.
+
+    Outranked is not unrecorded. On the suppressed branch BOTH facts — a box that may have
+    outlived its run (one genuinely survives its parent's death, C42) and a tree that was
+    never certified — reach nobody through the exception, so they must reach stderr. A silent
+    leak is the residue this helper exists to retire, not one it may create."""
     fault = BoxFault("teardown refused")
 
     log, stop, scrub_tree = _reap_probe(stop_fault=fault)
@@ -729,10 +757,20 @@ def test_a_failed_teardown_skips_the_scrub_rather_than_racing_it(tmp_path):
     assert e.value is fault
     assert log == ["stop"], "the scrub walked a tree whose box was not provably dead"
 
+    capsys.readouterr()
     log2, stop2, scrub_tree2 = _reap_probe(stop_fault=fault)
     assert stop_and_scrub(object(), tmp_path, stop_box=stop2, scrub_tree=scrub_tree2,
                           in_flight=True) is None
     assert log2 == ["stop"], "the scrub walked a tree whose box was not provably dead"
+    err = capsys.readouterr().err
+    assert "teardown refused" in err, (
+        "the suppressed teardown fault left no trace — a box that may have outlived its run "
+        f"went unrecorded; stderr was {err!r}"
+    )
+    assert str(tmp_path) in err, (
+        "the skipped walk left no trace — nothing says which tree went uncertified; "
+        f"stderr was {err!r}"
+    )
 
 
 def test_a_taint_outranks_the_work_s_own_failure(tmp_path):
@@ -785,7 +823,7 @@ def test_box_construction_failure_refuses_the_run(tmp_path):
         raise fault
 
     with pytest.raises(BoxFault) as e:
-        _drive_lifecycle(tmp_path, rec, log=log, start_box=refusing_start)
+        _drive_lifecycle(tmp_path, rec, start_box=refusing_start)
     assert e.value is fault
     assert "investigate" not in log, \
         "the investigation ran despite the box refusing to build — untrusted input was " \
@@ -906,7 +944,7 @@ def test_box_does_not_outlive_a_crashed_driver(tmp_path):
     rec = BoxLifecycleRecorder(events=log)
 
     with pytest.raises(RuntimeError):
-        _drive_lifecycle(tmp_path, rec, log=log, fault=RuntimeError("the driver exploded"))
+        _drive_lifecycle(tmp_path, rec, fault=RuntimeError("the driver exploded"))
 
     assert rec.stopped == rec.boxes, \
         "a crashed driver leaked its box: every box started must be torn down"

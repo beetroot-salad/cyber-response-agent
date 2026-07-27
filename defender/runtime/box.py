@@ -466,7 +466,11 @@ def stop_and_scrub(
     - **An in-flight exception outranks a teardown fault.** The work's own failure is the
       more informative signal; a `BoxFault` raised on top of it would replace it. Python's
       implicit chaining keeps the teardown fault reachable on `__context__`. With nothing in
-      flight there is nothing to outrank, so the fault propagates normally.
+      flight there is nothing to outrank, so the fault propagates normally. Outranked is not
+      the same as unrecorded: a suppressed fault means BOTH a possibly-leaked container (one
+      genuinely survives its parent's death, C42) and a tree that was never walked, so it is
+      logged rather than dropped — a silent leak is exactly the residue this helper exists
+      to retire.
     - **A taint outranks everything.** `RunTainted` from the scrub deliberately wins over the
       work's own failure — a tainted tree is the worse signal, and the crash path's tree is
       the one most likely to hold what the box planted, and the one a human then opens by
@@ -481,9 +485,14 @@ def stop_and_scrub(
     try:
         stop_box(box)
         box_down = True
-    except BoxFault:
+    except BoxFault as e:
         if not in_flight:
             raise
+        print(
+            f"[box] WARNING: teardown failed under an in-flight failure: {e} — the box may "
+            f"be leaked, and {tree} was NOT scrubbed (the walk needs a provably dead box).",
+            file=sys.stderr,
+        )
     if box_down:
         scrub_tree(tree)
 

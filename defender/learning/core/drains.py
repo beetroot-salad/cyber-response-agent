@@ -345,6 +345,9 @@ def _run_worktree_batch(
         # A cleanup failure leaves a worktree that is both possibly-tainted and, if do_work
         # raised before the scan could clear it, never walked. Suppressed so it cannot mask
         # the real failure, but never silent — that silence was the whole residue #741 named.
+        # The git-level failure is logged where it is SWALLOWED (`AuthorBranch.cleanup` runs
+        # `git worktree remove` under its own suppression, so it never reaches this handler);
+        # this catch is the backstop for everything else a cleanup implementation can raise.
         try:
             branch.cleanup(wt)
         except Exception as e:  # noqa: BLE001 — best-effort cleanup; the real fault outranks it
