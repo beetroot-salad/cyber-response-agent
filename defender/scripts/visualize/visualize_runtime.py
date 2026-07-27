@@ -18,8 +18,9 @@ from defender.scripts.visualize.visualize_primitives import (
     REPO_ROOT,
     block,
     esc,
+    esc_untrusted,
     fmt_duration,
-    pre_text,
+    pre_text_untrusted,
     section,
 )
 
@@ -191,14 +192,16 @@ def _render_tx_entry(e: dict, anchor_attr: str = "") -> str:
         body: list[str] = []
         for t in e.get("texts") or []:
             if t and t.strip():
-                body.append(f'<div class="tx-text">{esc(t)}</div>')
+                body.append(f'<div class="tx-text">{esc_untrusted(t)}</div>')
         for th in e.get("thinks") or []:
             if th and th.strip():
-                body.append(block("tx-think", "thinking", pre_text(th)))
+                # Thinking content and tool-call args are model-authored, exactly like
+                # `texts` above — same attacker-influenced lane, same escape.
+                body.append(block("tx-think", "thinking", pre_text_untrusted(th)))
         for c in e.get("calls") or []:
             body.append(
                 f'<details class="block tx-call"><summary>→ {esc(c["tool"])}</summary>'
-                f'<div class="body">{pre_text(c["args"])}</div></details>'
+                f'<div class="body">{pre_text_untrusted(c["args"])}</div></details>'
             )
         inner = "".join(body) or '<div class="empty">(no content)</div>'
         return (
@@ -214,7 +217,8 @@ def _render_tx_entry(e: dict, anchor_attr: str = "") -> str:
         content = e.get("content") or ""
         head = f'<span class="tx-role">← {esc(e.get("tool", "?"))}</span> <span class="tx-meta">{len(content):,} chars</span>'
         inner = (
-            block("tx-resultbody", "result", pre_text(content), open_=len(content) <= 400)
+            block("tx-resultbody", "result", pre_text_untrusted(content),
+                  open_=len(content) <= 400)
             if content
             else '<div class="empty">(empty result)</div>'
         )
@@ -234,7 +238,8 @@ def _render_tx_entry(e: dict, anchor_attr: str = "") -> str:
         f'<div class="tx-entry tx-retry"{anchor_attr} data-kind="retry" '
         f'data-phase="{esc(phase)}" data-tool="{esc(tool)}" data-tools="{esc(data_tools)}">'
         f'<div class="tx-gutter">{tag}</div>'
-        f'<div class="tx-body"><div class="tx-head">{head}</div>{pre_text(content)}</div></div>'
+        f'<div class="tx-body"><div class="tx-head">{head}</div>'
+        f'{pre_text_untrusted(content)}</div></div>'
     )
 
 

@@ -25,6 +25,21 @@ def esc(s) -> str:
     return html.escape(s if isinstance(s, str) else json.dumps(s, indent=2))
 
 
+#: An `on<word>=`-shaped event-handler attribute pattern, e.g. `onerror=`. `esc()` already
+#: makes this inert HTML (the enclosing `<tag ...>` is neutralized into text), but the
+#: pattern still reads as a live handler to a downstream non-HTML-aware consumer (a plain
+#: text viewer, a naive markdown renderer someone pastes this into) — split it with a
+#: zero-width space, invisible in any HTML rendering.
+_EVENT_HANDLER_RE = re.compile(r"\bon(?=[a-zA-Z]\w*\s*=)")
+
+
+def esc_untrusted(s) -> str:
+    """`esc()`, plus the event-handler split above — for text whose source is
+    attacker-influenced by construction (a model-authored session store payload, per
+    `session_store`'s own access table), as opposed to internal/structural strings."""
+    return _EVENT_HANDLER_RE.sub("on\u200b", esc(s))
+
+
 def load_yaml(path: Path) -> dict | list | None:
     if not path.is_file():
         return None
@@ -56,6 +71,11 @@ def section(anchor: str, stage: str, title: str, subtitle: str, body: str) -> st
 
 def pre_text(text: str) -> str:
     return f'<pre class="text">{esc(text)}</pre>'
+
+
+def pre_text_untrusted(text: str) -> str:
+    """`pre_text` for model-authored content — see `esc_untrusted`."""
+    return f'<pre class="text">{esc_untrusted(text)}</pre>'
 
 
 _JSON_TOKEN_RE = re.compile(

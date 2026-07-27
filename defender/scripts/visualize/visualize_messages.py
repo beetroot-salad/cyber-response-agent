@@ -197,8 +197,8 @@ def tool_usage(events: list[dict], messages: list[dict] | None = None) -> list[d
                 name = blk.get("name", "?")
                 counts[name] = counts.get(name, 0) + 1
     retries: dict[str, int] = {}
-    for rec in messages or []:
-        if rec.get("kind") != "request" or rec.get("agent_id", "main") != "main":
+    for rec in deduped_main_records(messages or []):
+        if rec.get("kind") != "request":
             continue
         for part in (rec.get("message") or {}).get("parts", []):
             if part.get("part_kind") == "retry-prompt":
@@ -213,8 +213,8 @@ def tool_usage(events: list[dict], messages: list[dict] | None = None) -> list[d
 def _count_retries(messages: list[dict]) -> int:
     return sum(
         1
-        for rec in messages or []
-        if rec.get("kind") == "request" and rec.get("agent_id", "main") == "main"
+        for rec in deduped_main_records(messages or [])
+        if rec.get("kind") == "request"
         for part in (rec.get("message") or {}).get("parts", [])
         if part.get("part_kind") == "retry-prompt"
     )
@@ -337,6 +337,55 @@ def _request_entries(rec: dict, phase: str | None, turn: int) -> list[dict]:
     return out
 
 
+def _message_key(rec: dict) -> str:
+    return json.dumps(rec.get("message") or {}, sort_keys=True, default=str)
+
+
+def _new_suffix(prev: list[str], current: list[str]) -> int:
+    """Index past the longest common prefix of two turns' request digests."""
+    i = 0
+    while i < len(prev) and i < len(current) and prev[i] == current[i]:
+        i += 1
+    return i
+
+
+def deduped_main_records(messages: list[dict]) -> list[dict]:
+    """Main-agent wire records with the verbatim log's repeated history removed.
+
+    `RequestLogger.log` records the FULL request list on every call — #705 deleted the
+    write-time delta encoding deliberately, because the old cursor never logged a rewrite
+    that failed to shrink the list below it. The cost is that the log is no longer a
+    stream of distinct messages, so every consumer that treats it as one has to
+    de-duplicate at READ time or count each turn's history again on the next turn.
+
+    The key is wire POSITION, not content identity: each turn's request records are
+    matched against the previous turn's and only the suffix past their longest common
+    prefix is new. Two genuinely identical tool results therefore both survive (they sit
+    at different positions), while a fold — which rewrites the list from the front —
+    correctly re-emits the frontier and everything after it.
+    """
+    out: list[dict] = []
+    prev: list[str] = []
+    pending: list[dict] = []
+
+    def flush() -> None:
+        nonlocal prev, pending
+        digests = [_message_key(r) for r in pending]
+        out.extend(pending[_new_suffix(prev, digests):])
+        prev, pending = digests, []
+
+    for rec in messages:
+        if rec.get("agent_id", "main") != "main":
+            continue
+        if rec.get("kind") == "response":
+            flush()
+            out.append(rec)
+        else:
+            pending.append(rec)
+    flush()
+    return out
+
+
 def build_transcript(
     messages: list[dict],
     msg_phase: dict[str, str],
@@ -345,9 +394,7 @@ def build_transcript(
     entries: list[dict] = []
     cur_phase: str | None = phase_order[0] if phase_order else None
     turn = 0
-    for rec in messages:
-        if rec.get("agent_id", "main") != "main":
-            continue
+    for rec in deduped_main_records(messages):
         if rec.get("kind") == "response":
             turn += 1
             cur_phase = msg_phase.get(rec.get("id") or "", cur_phase)

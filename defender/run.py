@@ -241,7 +241,10 @@ def main(argv: list[str]) -> int:
     elif _run.enqueue_learning(run_dir, alert, truncated_by=summary.get("truncated_by")):
         print("[run.py] enqueued for off-process learning", file=sys.stderr)
 
-    _run.visualize(run_dir)
+    try:
+        _run.visualize(run_dir)
+    except _run.VisualizeFailed as e:
+        print(f"[run.py] {e}", file=sys.stderr)
     return 0
 
 

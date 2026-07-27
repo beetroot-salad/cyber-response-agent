@@ -32,6 +32,8 @@
     "defender/scripts/gather_tools/record_query.py: unused function 'derive_system' (60% confidence)": "test-only: tests/test_record_query.py pins the system-from-argv derivation; no production caller",
     "defender/skills/invlang/advisory.py: unused function 'clear_cache' (60% confidence)": "test-only: cache teardown used by tests/test_invlang_advisory.py to isolate cases",
     "defender/skills/invlang/corpus.py: unused variable 'parse_warnings' (60% confidence)": "false-positive: Companion dataclass field, read off instances",
-    "defender/skills/invlang/corpus.py: unused variable 'source_path' (60% confidence)": "false-positive: Companion dataclass field, read off instances"
+    "defender/skills/invlang/corpus.py: unused variable 'source_path' (60% confidence)": "false-positive: Companion dataclass field, read off instances",
+    "defender/runtime/session_store.py: unused variable 'at_message_id' (100% confidence)": "intentional: fork()'s signature documents the caller's fork point (test_a_fork_is_a_branch_with_no_prefix_copy_and_no_id_remap pins there is no forked_at_message column — the caller re-passes it as parent_id on their own append()); same shape as new_session's agent_id (ARG002 below it)",
+    "defender/runtime/session_store.py: unused variable 'requested_role_from_content' (100% confidence)": "intentional: hydrate()'s deliberate decoy parameter — a plausible-looking knob the reader never consults, per #705's spec"
   }
 }

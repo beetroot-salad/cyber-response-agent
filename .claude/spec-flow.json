@@ -50,6 +50,27 @@
           "defender/scripts/adapters/ticket_adapter.py::health_check"
         ],
         "grep": ["ticket_adapter.py"]
+      },
+      "wire_log": {
+        "writers": [
+          "defender/runtime/observe.py::RequestLogger"
+        ],
+        "readers": [
+          "defender/runtime/observe.py::write_trace",
+          "defender/scripts/visualize/visualize_messages.py::load_messages"
+        ],
+        "grep": ["llm_requests.jsonl", "logger.messages"]
+      },
+      "runs_base": {
+        "writers": [
+          "defender/run_common.py::materialize_run_dir"
+        ],
+        "readers": [
+          "defender/run_common.py::resolve_runs_base",
+          "defender/evals/held_out.py::index_runs",
+          "defender/learning/ops/trace_lesson.py::in_context_cases"
+        ],
+        "grep": ["DEFENDER_RUNS_BASE", "runs_dir.iterdir", "runs_base"]
       }
     }
   },

@@ -5,6 +5,7 @@ import re
 import shutil
 import sys
 from pathlib import Path
+from typing import Any
 
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
@@ -42,6 +43,7 @@ from defender.scripts.visualize.visualize_judge import (
 )
 from defender.scripts.visualize.visualize_primitives import (
     esc,
+    esc_untrusted,
     fmt_duration,
     load_judge_doc,
     parse_report,
@@ -303,6 +305,63 @@ def _stats(events: list[dict]) -> tuple[int, int, float]:
     return n_events, n_tool_calls, cost
 
 
+def _main_session_analysis(run_dir: Path) -> list[tuple[Any, str]]:
+    """The store's own `analysis`-role read of this run's MAIN session, paired with each
+    row's `actor`-role coordinate — resolved fresh from just `run_dir` (R4: the render
+    path opens the store itself, it does not trust a stale on-disk projection), so a run
+    dir whose store cannot be resolved fails this call rather than rendering
+    silently-stale or empty pages."""
+    from defender.runtime import session_store as ss
+
+    store_path = ss.resolve_store_path(run_dir)
+    store = ss.open_store_for_read(store_path)
+    try:
+        # The main session by its RECORDED agent_id, not by insertion order. `ORDER BY
+        # rowid` held only because run_investigation happens to open main's session before
+        # any gather dispatch opens one; anything that creates a session earlier (a
+        # warm-up, a mid-run fork, a replay tool seeding a gather session first) would
+        # silently render the wrong transcript. Falls back to rowid for a store written
+        # before `session.agent_id` existed.
+        row = store.connection.execute(
+            "SELECT session_id FROM session WHERE agent_id = 'main' ORDER BY rowid LIMIT 1"
+        ).fetchone() or store.connection.execute(
+            "SELECT session_id FROM session ORDER BY rowid LIMIT 1"
+        ).fetchone()
+        if row is None:
+            return []
+        session_id = row[0]
+        messages = ss.hydrate(store, session_id, role="analysis")
+        coords = ss.hydrate(store, session_id, role="actor")
+        return list(zip(messages, [c["coord"] for c in coords], strict=True))
+    finally:
+        store.connection.close()
+
+
+def render_store_transcript_section(run_dir: Path) -> str:
+    """Model-authored text is attacker-influenced by construction (`session_store`'s own
+    access table), so it is rendered through `esc_untrusted`, not `esc` — see that
+    function's docstring."""
+    from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
+
+    blocks: list[str] = []
+    for message, coord in _main_session_analysis(run_dir):
+        if not isinstance(message, ModelResponse):
+            continue
+        body: list[str] = []
+        for part in message.parts:
+            if isinstance(part, TextPart) and part.content.strip():
+                body.append(f'<pre class="text">{esc_untrusted(part.content)}</pre>')
+            elif isinstance(part, ToolCallPart):
+                body.append(f'<div class="tx-call">→ {esc(part.tool_name)}</div>')
+        if body:
+            blocks.append(f'<div class="tx-entry" data-coord="{esc(coord)}">'
+                          f'{"".join(body)}</div>')
+    section_body = "".join(blocks) if blocks else '<div class="empty">no model transcript</div>'
+    return section("sec-store-transcript", "defender", "Model transcript",
+                    "— a preview of each response the store recorded for this run",
+                    section_body)
+
+
 def render_judge_page(run_dir: Path) -> str:
     case_id = run_dir.name
     events = read_jsonl_rows(run_dir / "tool_trace.jsonl")
@@ -341,6 +400,7 @@ def render_judge_page(run_dir: Path) -> str:
         for v, d in docs
     )}
     {render_judge_raw_bundle(case_id)}
+    {render_store_transcript_section(run_dir)}
   </article>
 </div>
 </body></html>
@@ -432,6 +492,7 @@ def render_runtime_page(run_dir: Path) -> str:
     {investigation_html}
     {leads_html}
     {transcript_html}
+    {render_store_transcript_section(run_dir)}
   </article>
 </div>
 {render_footer(run_dir, case_id)}

@@ -27,31 +27,13 @@ from _baseline import Finding, gate
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BASELINE_PATH = Path(__file__).with_name("lint_vulture_baseline.json")
 
-# Confidence 60, NOT 80. Vulture scores unused *functions/classes/methods* at 60 and only
-# unused imports (90) / unreachable code (100) at 80 — so the former `--min-confidence 80`
-# made this gate structurally incapable of reporting the category it is named for. It ran
-# clean with an empty baseline while a 9-function dead subtree sat in
-# scripts/visualize/visualize_primitives.py (the retired Claude-Code stream-JSON renderer,
-# orphaned by the move to the in-process PydanticAI driver). 60 is vulture's own default.
-#
-# The cost is that 60 also reports names reached by a mechanism vulture cannot see —
-# @agent.tool decorator registration, Protocol methods, PyYAML representer hooks. Those are
-# real false positives, and they live in the baseline ANNOTATED with why, so a genuine new
-# corpse still trips the gate.
-# invlang/schema.py is excluded wholesale: it is a declarative TypedDict schema, and vulture
-# cannot see a TypedDict field being read through `rec["source_vertex"]`. It alone produced ~90
-# of the 96 findings at confidence 60 — baselining that is not triage, it is a second empty
-# baseline wearing a disguise. Excluding it keeps the gate's signal readable.
+# Mirror the invocation the soft code-smells step used.
 VULTURE_ARGS = [
     "defender",
-    "--min-confidence", "60",
-    "--exclude", "defender/.venv,defender/tests,defender/skills/invlang/schema.py",
+    "--min-confidence", "80",
+    "--exclude", "defender/.venv,defender/tests",
     "--ignore-names", "key_field,key_value",
 ]
-
-# vulture 2.x exit codes (vulture.core.ExitCode): 0 NoDeadCode, 1 InvalidInput,
-# 2 InvalidCmdlineArguments, 3 DeadCode. A findings run exits 3, NOT 0.
-_VULTURE_OK = (0, 3)
 
 # `path:lineno: message` — strip the lineno for a line-stable fingerprint.
 LINE_RE = re.compile(r"^(?P<path>[^:]+):(?P<lineno>\d+): (?P<msg>.*)$")
@@ -71,12 +53,11 @@ def _scan(vulture: str) -> list[Finding]:
         text=True,
         capture_output=True,
     )
-    # The former check was `not in (0, 1)`, which had the contract exactly backwards: it
-    # ACCEPTED 1 (InvalidInput — e.g. a file vulture could not parse, silently read as "no
-    # findings") and REJECTED 3 (DeadCode — the very case this gate exists to report). It never
-    # fired only because `--min-confidence 80` guaranteed an empty result and thus rc=0; the two
-    # defects masked each other. Ratcheting happens below, so 3 is a normal outcome here.
-    if proc.returncode not in _VULTURE_OK:
+    # vulture's own ExitCode enum (vulture.utils): 0=NoDeadCode, 1=InvalidInput,
+    # 2=InvalidCmdlineArguments, 3=DeadCode — findings are reported on 0 OR 3; 1/2 are
+    # real usage/parse errors. (The installed 2.16 differs from whatever version this
+    # wrapper was first written against, where 1 meant "dead code found".)
+    if proc.returncode not in (0, 3):
         sys.stderr.write(proc.stderr)
         raise RuntimeError(f"vulture exited {proc.returncode}")
     findings: list[Finding] = []

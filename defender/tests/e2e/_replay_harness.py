@@ -21,11 +21,16 @@ it). Drive a run with `drive(run_dir, run_id=…, salt=…, main=<callable>)`, w
 the callable is a `ReplayFn` / `DenyProbe` / `NeverEndsModel` — `drive` wraps it
 in `FunctionModel`, so scripts never touch the pydantic plumbing.
 
-Below the model there are exactly FOUR injected seams, and every one is a VALUE the run
+Below the model there are exactly FIVE injected seams, and every one is a VALUE the run
 is handed (never a monkeypatched module attribute): the model itself (`make_model`), the
 data-source verb registry (`verbs=` → `run_investigation(verbs=…)`, #611), the budget cap
-table (`limits=` → `run_investigation(limits=…)`, #631), and the box executor (`box=` →
-`run_investigation(box=…)`, #540). A scenario hands `drive` a `FakeVerbs` table of plain
+table (`limits=` → `run_investigation(limits=…)`, #631), the box executor (`box=` →
+`run_investigation(box=…)`, #540), and the per-case session store (`store_factory=` →
+`run_investigation(store_factory=…)`, #705). The fifth exists because environment steering
+cannot express contention or corruption — it can only express "the store is missing", one
+third of O19's stated domain, while reading as covered — and the project profile forbids
+the `monkeypatch.setattr` that would express the rest (R12). A scenario hands `drive` a
+`FakeVerbs` table of plain
 annotated functions; the real query tool validates against their real signatures, the real
 capture capability writes the real rows. A scenario hands `drive` a `limits` dict; the real
 accounting hook and the real enforcing seam read it, so a run crosses a real cap in a few
@@ -261,8 +266,9 @@ def normalize(text: str, *, run_dir: Path, salt: str, run_id: str) -> str:
                 .replace(run_id, "<RUN_ID>"))
 
 
-def drive(run_dir: Path, *, run_id: str, salt: str, main, gather=None, verbs=None,
-          limits=None, box=None):
+def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJECTION SEAM
+        run_dir: Path, *, run_id: str, salt: str, main, gather=None, verbs=None,
+        limits=None, box=None, store_factory=None):
     """Run the real driver with injected fake models — no monkeypatching of the
     model symbol. `main`/`gather` are plain replay callables (ReplayFn / DenyProbe
     / NeverEndsModel); this wraps each in `FunctionModel`, so scripts stay
@@ -314,6 +320,8 @@ def drive(run_dir: Path, *, run_id: str, salt: str, main, gather=None, verbs=Non
         seams["verbs"] = verbs
     if limits is not None:
         seams["limits"] = limits
+    if store_factory is not None:
+        seams["store_factory"] = store_factory
     seams["box"] = box if box is not None else box_mod.unboxed_executor(
         env=run_common.run_env(DEFENDER, run_dir),
     )
