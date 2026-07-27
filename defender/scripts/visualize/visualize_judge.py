@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -60,6 +61,25 @@ class DirectionView:
         return f"{base}{self.suffix}"
 
 
+@dataclass(frozen=True)
+class CardGroup:
+    """One `<h3>` + card grid inside the Judge section, driven off the judge-doc key it
+    renders. The section, the heading count and the TOC all read this table, so a group
+    cannot appear on the page without its TOC link or vice versa (#748)."""
+
+    key: str
+    # `#sec-judge{suffix}-{sub}` — the sub-anchor the TOC links; `anchor_base` is the per-card
+    # id, namespaced per direction by `DirectionView.anchor`.
+    sub: str
+    anchor_base: str
+    heading: str
+    empty: str
+    render: Callable[..., str]
+
+    def toc_label(self) -> str:
+        return self.heading.lower()
+
+
 ADVERSARIAL_VIEW = DirectionView(
     direction=ADVERSARIAL,
     actor_subtitle="— adversarial counterfactual",
@@ -112,22 +132,39 @@ def active_views(run_id: str, disposition: str) -> tuple[DirectionView, ...]:
     )
 
 
+def _card_items(judge: dict, key: str) -> list[dict]:
+    """The mappings a card group under `key` will render, and nothing else — the ONE place
+    the is-it-a-list-of-mappings guard lives for findings and both observation groups. A
+    heading count, a TOC link and a card all read this, so none of them can claim an anchor
+    the section does not emit (or blow up on a scalar)."""
+    value = judge.get(key) or []
+    if not isinstance(value, list):
+        return []
+    return [o for o in value if isinstance(o, dict)]
+
+
 def judge_finding_count(judge: dict) -> int:
-    """How many finding cards `render_judge_judge_section` will emit for this doc — the ONE
-    place the `defender_findings`-is-a-list guard lives, so the TOC and the headline can
-    never count anchors the section does not emit (or blow up on a scalar)."""
-    findings = judge.get("defender_findings") or []
-    return len(findings) if isinstance(findings, list) else 0
+    """How many finding cards `render_judge_judge_section` will emit for this doc — read by
+    the TOC and the headline tile."""
+    return len(_card_items(judge, "defender_findings"))
 
 
 
 
-def render_judge_finding(idx: int, f: dict, anchor_prefix: str) -> str:
-    ftype = str(f.get("type", "?"))
-    topic = str(f.get("subject_topic", ""))
-    anchor = str(f.get("subject_anchor", ""))
-    finding_text = str(f.get("finding", "")).strip()
-    citations = f.get("citations") or []
+def _render_subject_card(
+    idx: int, o: dict, anchor_prefix: str, *, body_key: str, type_prefix: str,
+) -> str:
+    """The card shape shared by judge findings and actor observations: the same
+    `type` / `subject_topic` / `subject_anchor` head over one prose body, plus the citation
+    rows when the mapping carries any — only findings do, so no flag is needed to tell the
+    two apart. Written ONCE because `actor_observations` would otherwise have arrived as a
+    third near-twin of this markup (#748); environment observations are the second and stay
+    separate, their head and body genuinely differ."""
+    otype = str(o.get("type", "?"))
+    topic = str(o.get("subject_topic", ""))
+    anchor = str(o.get("subject_anchor", ""))
+    body_text = str(o.get(body_key, "")).strip()
+    citations = o.get("citations") or []
 
     citation_html = ""
     if isinstance(citations, list) and citations:
@@ -146,15 +183,32 @@ def render_judge_finding(idx: int, f: dict, anchor_prefix: str) -> str:
         citation_html = f'<div class="citations">{"".join(rows)}</div>'
 
     return (
-        f'<div class="finding-card finding-{esc(ftype)}" id="{esc(anchor_prefix)}-{idx}">'
+        f'<div class="finding-card {esc(type_prefix)}-{esc(otype)}" id="{esc(anchor_prefix)}-{idx}">'
         f'<div class="finding-head">'
-        f'<span class="ftype">{esc(ftype)}</span>'
+        f'<span class="ftype">{esc(otype)}</span>'
         f'<span class="ftopic">{esc(topic)}</span>'
         f'<span class="fanchor">{esc(anchor)}</span>'
         f'</div>'
-        f'<div class="finding-body">{esc(finding_text)}</div>'
+        f'<div class="finding-body">{esc(body_text)}</div>'
         f'{citation_html}'
         f'</div>'
+    )
+
+
+def render_judge_finding(idx: int, f: dict, anchor_prefix: str) -> str:
+    return _render_subject_card(
+        idx, f, anchor_prefix, body_key="finding", type_prefix="finding",
+    )
+
+
+def render_actor_observation(idx: int, o: dict, anchor_prefix: str) -> str:
+    """One `actor_observations` entry — what the judge learned about the ACTOR's own story
+    (`misprediction` / `framing-choice` / `discarded-class`, `config.ACTOR_OBSERVATION_TYPES`)
+    rather than about the defender. `validate_judge_doc` has accepted these on the
+    adversarial doc all along and `judge/malicious.md` asks for them; the page dropped them
+    silently until #748."""
+    return _render_subject_card(
+        idx, o, anchor_prefix, body_key="observation", type_prefix="actor-obs",
     )
 
 
@@ -221,27 +275,6 @@ def render_judge_judge_section(judge: dict | None, view: DirectionView) -> str:
     outcome = str(judge.get("outcome", "?"))
     rationale = str(judge.get("outcome_rationale", "")).strip()
     encounter = str(judge.get("encounter_analysis", "")).strip()
-    findings = judge.get("defender_findings") or []
-    # Both judge docs may carry `environment_observations` — `validate_judge_doc` accepts it
-    # on the adversarial doc too, and judge/malicious.md asks for it. The view used to render
-    # it for the benign direction only, silently dropping the adversarial ones (#716).
-    env_obs = judge.get("environment_observations") or []
-
-    if isinstance(findings, list) and findings:
-        cards = "\n".join(
-            render_judge_finding(i, f, anchor_prefix=view.anchor("finding"))
-            for i, f in enumerate(findings) if isinstance(f, dict)
-        )
-    else:
-        cards = '<div class="empty">judge emitted no findings</div>'
-
-    if isinstance(env_obs, list) and env_obs:
-        env_cards = "\n".join(
-            render_env_observation(i, o, anchor_prefix=view.anchor("env-obs"))
-            for i, o in enumerate(env_obs) if isinstance(o, dict)
-        )
-    else:
-        env_cards = '<div class="empty">no environment observations queued</div>'
 
     encounter_html = (
         f'<pre class="text encounter">{esc(encounter)}</pre>'
@@ -255,15 +288,50 @@ def render_judge_judge_section(judge: dict | None, view: DirectionView) -> str:
     <div class="outcome-rationale">{esc(rationale)}</div>
   </div>
 
-  <h3 id="{anchor}-findings">Findings ({judge_finding_count(judge)})</h3>
-  <div class="findings-grid">{cards}</div>
-
-  <h3 id="{anchor}-env">Environment observations ({len(env_obs) if isinstance(env_obs, list) else 0})</h3>
-  <div class="findings-grid">{env_cards}</div>
-
+  {"".join(_render_card_group(judge, view, g) for g in active_card_groups(view))}
+  {_render_resolution_method(judge, view)}
   <h3 id="{anchor}-encounter">Encounter analysis</h3>
   {encounter_html}"""
     return section(anchor, "judge", title, view.judge_subtitle, body)
+
+
+def _render_card_group(judge: dict, view: DirectionView, group: CardGroup) -> str:
+    items = _card_items(judge, group.key)
+    cards = (
+        "\n".join(
+            group.render(i, o, anchor_prefix=view.anchor(group.anchor_base))
+            for i, o in enumerate(items)
+        )
+        if items
+        else f'<div class="empty">{group.empty}</div>'
+    )
+    return f"""<h3 id="{view.anchor("sec-judge")}-{group.sub}">{group.heading} ({len(items)})</h3>
+  <div class="findings-grid">{cards}</div>
+"""
+
+
+def _render_resolution_method(judge: dict, view: DirectionView) -> str:
+    """`resolution_method` renders as the one plain line the judge emitted, not a card: it is
+    the compact citable form a future benign judge reads back when this case is cited as a
+    covering policy (#338), and it reaches the case-history ticket through
+    `tickets/ticket_enrichment.py` whether or not the page shows it — here it is an auditing
+    convenience (#748).
+
+    Absence is the NORMAL case even for the direction that declares the key: the adversarial
+    judge emits it on `benign` dispositions only, so the placeholder says which case it is
+    rather than reading as a missing artifact."""
+    if not renders_resolution_method(view):
+        return ""
+    method = str(judge.get("resolution_method", "")).strip()
+    inner = (
+        f'<div class="resolution-method">{esc(method)}</div>'
+        if method
+        else '<div class="empty">no resolution_method — '
+             'emitted on benign dispositions only</div>'
+    )
+    return f"""<h3 id="{view.anchor("sec-judge")}-resolution">Resolution method</h3>
+  {inner}
+"""
 
 
 def render_judge_oracle_section(run_id: str, view: DirectionView) -> str:
@@ -312,6 +380,54 @@ def render_env_observation(idx: int, o: dict, anchor_prefix: str) -> str:
     )
 
 
+# The card-group table lives down here because it names the three card renderers above.
+FINDINGS_GROUP = CardGroup(
+    key="defender_findings",
+    sub="findings",
+    anchor_base="finding",
+    heading="Findings",
+    empty="judge emitted no findings",
+    render=render_judge_finding,
+)
+
+# The card groups only some directions carry, in page order. Membership is NOT decided here
+# — `Direction.judge_optional_keys` declares which keys a direction's judge doc may hold and
+# `validate.py` enforces the same sets, so a key cannot be accepted by the schema and stay
+# invisible on the page (#748).
+OPTIONAL_CARD_GROUPS: tuple[CardGroup, ...] = (
+    CardGroup(
+        key="actor_observations",
+        sub="actor-obs",
+        anchor_base="actor-obs",
+        heading="Actor observations",
+        empty="no actor observations queued",
+        render=render_actor_observation,
+    ),
+    CardGroup(
+        key="environment_observations",
+        sub="env",
+        anchor_base="env-obs",
+        heading="Environment observations",
+        empty="no environment observations queued",
+        render=render_env_observation,
+    ),
+)
+
+
+def active_card_groups(view: DirectionView) -> tuple[CardGroup, ...]:
+    """The card groups this direction's Judge section emits — findings plus whichever
+    optional groups its judge doc may carry. The section and the TOC both read this."""
+    return (FINDINGS_GROUP,) + tuple(
+        g for g in OPTIONAL_CARD_GROUPS if g.key in view.direction.judge_optional_keys
+    )
+
+
+def renders_resolution_method(view: DirectionView) -> bool:
+    """Whether this direction's Judge section carries the `resolution_method` line — the one
+    optional key that is not card-shaped, so it sits beside `active_card_groups` rather than
+    inside it. Read by the section AND the TOC, so neither can emit without the other."""
+    return "resolution_method" in view.direction.judge_optional_keys
+
 
 def render_judge_raw_bundle(run_id: str) -> str:
     learn_dir = _learning_run_dir(run_id)
@@ -344,11 +460,22 @@ def _toc_judge_links(view: DirectionView, n_findings: int | None) -> str:
     )
     if n_findings == 0:
         finding_links = '<li class="item muted">(none)</li>'
+    # Every group but findings links its heading only — the per-card links below findings are
+    # the one place the count is known here. The groups come off `active_card_groups`, so a
+    # direction that carries no `actor_observations` gets no link to a section it never emits.
+    group_links = "".join(
+        f'<li class="item"><a href="#{judge_anchor}-{g.sub}">{g.toc_label()}</a></li>\n    '
+        for g in active_card_groups(view) if g is not FINDINGS_GROUP
+    )
+    resolution_link = (
+        f'<li class="item"><a href="#{judge_anchor}-resolution">resolution method</a></li>\n    '
+        if renders_resolution_method(view)
+        else ""
+    )
     return f"""<li class="item"><a href="#{judge_anchor}-outcome">outcome</a></li>
-    <li class="item"><a href="#{judge_anchor}-findings">findings</a></li>
+    <li class="item"><a href="#{judge_anchor}-{FINDINGS_GROUP.sub}">{FINDINGS_GROUP.toc_label()}</a></li>
     {finding_links}
-    <li class="item"><a href="#{judge_anchor}-env">environment observations</a></li>
-    <li class="item"><a href="#{judge_anchor}-encounter">encounter analysis</a></li>"""
+    {group_links}{resolution_link}<li class="item"><a href="#{judge_anchor}-encounter">encounter analysis</a></li>"""
 
 
 def _toc_direction_block(view: DirectionView, n_findings: int | None) -> str:
@@ -364,11 +491,20 @@ def _toc_direction_block(view: DirectionView, n_findings: int | None) -> str:
 """
 
 
-def render_judge_toc(sections: list[tuple[DirectionView, int | None]]) -> str:
+def render_judge_toc(
+    sections: list[tuple[DirectionView, int | None]], *, raw_bundle: bool,
+) -> str:
     """`sections` is one (view, finding count) per direction the page actually rendered —
     so the TOC never links a section the disposition did not select. A `None` count means
-    the direction was selected but produced no judge doc (#716)."""
+    the direction was selected but produced no judge doc (#716).
+
+    `raw_bundle` is whether `render_judge_raw_bundle` produced a section for this run. It is
+    passed rather than recomputed so the caller's ONE render decides both the link and the
+    section: a run with no raw-bundle artifacts used to carry a dead `#sec-raw-bundle` entry
+    (noted in #716, fixed in #748)."""
     direction_blocks = "".join(_toc_direction_block(v, n) for v, n in sections)
+    raw_block = """<li class="section">Raw bundle</li>
+    <li class="item"><a href="#sec-raw-bundle">inputs &amp; fallbacks</a></li>""" if raw_bundle else ""
     return f"""
 <nav class="toc">
   <ul>
@@ -381,8 +517,7 @@ def render_judge_toc(sections: list[tuple[DirectionView, int | None]]) -> str:
     <li class="section">Defender summary</li>
     <li class="item"><a href="#sec-defender-summary">report + leads</a></li>
     {direction_blocks}
-    <li class="section">Raw bundle</li>
-    <li class="item"><a href="#sec-raw-bundle">inputs &amp; fallbacks</a></li>
+    {raw_block}
   </ul>
 </nav>
 """

@@ -19,8 +19,12 @@ if str(_SCRIPTS) not in sys.path:
 
 import pytest
 
-from defender.learning.core.config import DISPOSITION_ENUM
+from defender.learning.core.config import ACTOR_OBSERVATION_TYPES, DISPOSITION_ENUM
 from defender.learning.core.directions import BY_NAME, directions_for, raw_fallback_name
+from defender.learning.core.validate import (
+    ADVERSARIAL_JUDGE_OPTIONAL_KEYS,
+    BENIGN_JUDGE_OPTIONAL_KEYS,
+)
 
 
 def _load(name: str):
@@ -65,6 +69,19 @@ _JUDGE = {
         }
     ],
 }
+
+_ACTOR_OBS = [
+    {
+        "type": "misprediction",
+        "subject_anchor": "cover",
+        "subject_topic": "443 blend",
+        "observation": "the story assumed 443 egress blends into the web tier",
+    }
+]
+
+_RESOLUTION_METHOD = (
+    "identity-confirmed (l-002) + no-egress (l-005); policy: change-mgmt CR-1182"
+)
 
 _ENV_OBS = [
     {
@@ -114,13 +131,16 @@ def test_every_disposition_selects_at_least_one_direction():
 
 # --- ids come off the direction name, through one mechanism -----------------------
 
+_ANCHOR_BASES = ("sec-actor", "sec-judge", "sec-oracle", "finding", "env-obs", "actor-obs")
+
+
 def test_anchor_ids_are_derived_from_the_direction_name():
     """`suffix`, `label` and the finding prefix used to be hand-written per view, so a third
     direction had to restate three strings it could typo into a collision (#716)."""
     assert (_ADVERSARIAL.suffix, _ADVERSARIAL.label) == ("", "")
     assert (_BENIGN.suffix, _BENIGN.label) == ("-benign", " (benign)")
     for view in vj.VIEWS:
-        for base in ("sec-actor", "sec-judge", "sec-oracle", "finding", "env-obs"):
+        for base in _ANCHOR_BASES:
             assert view.anchor(base) == f"{base}{view.suffix}"
 
 
@@ -131,20 +151,20 @@ def test_exactly_one_direction_owns_the_unsuffixed_ids():
 
 
 def test_no_direction_id_collides_with_another():
-    ids = [
-        v.anchor(base)
-        for v in vj.VIEWS
-        for base in ("sec-actor", "sec-judge", "sec-oracle", "finding", "env-obs")
-    ]
+    ids = [v.anchor(base) for v in vj.VIEWS for base in _ANCHOR_BASES]
     assert len(set(ids)) == len(ids)
 
 
 def test_card_renderers_have_no_default_anchor_prefix():
     """The prefix has ONE home (`DirectionView.anchor`). A signature default would be a
-    second one, silently keeping the old value for any caller that omits the argument."""
-    for fn in (vj.render_judge_finding, vj.render_env_observation):
+    second one, silently keeping the old value for any caller that omits the argument.
+
+    Read off the card-group table so a fourth group's renderer is covered the day it lands."""
+    renderers = {vj.FINDINGS_GROUP.render, vj.render_actor_observation, vj.render_env_observation}
+    renderers |= {g.render for g in vj.OPTIONAL_CARD_GROUPS}
+    for fn in renderers:
         param = inspect.signature(fn).parameters["anchor_prefix"]
-        assert param.default is inspect.Parameter.empty
+        assert param.default is inspect.Parameter.empty, fn.__name__
 
 
 def test_sections_render_the_artifact_names_direction_declares(tmp_path):
@@ -278,7 +298,9 @@ def test_finding_count_survives_a_non_list_defender_findings():
         assert "Findings (0)" in vj.render_judge_judge_section(
             {"defender_findings": bad}, _ADVERSARIAL,
         )
-    assert 'href="#finding-' not in vj.render_judge_toc([(_ADVERSARIAL, 0)])
+    assert 'href="#finding-' not in vj.render_judge_toc(
+        [(_ADVERSARIAL, 0)], raw_bundle=True,
+    )
 
 
 # --- rendering, both directions ---------------------------------------------------
@@ -316,6 +338,129 @@ def test_env_observation_anchors_do_not_collide_across_directions():
     assert 'id="env-obs-benign-0"' in both
 
 
+# --- the optional judge-doc keys (#748) -------------------------------------------
+
+def test_every_optional_key_the_schema_accepts_has_somewhere_to_render():
+    """The #748 bug in one assertion: `validate_judge_doc` accepted three optional keys and
+    the page rendered one. Every key a direction declares must be claimed by a card group or
+    by the resolution-method line, or it is accepted-but-invisible again."""
+    rendered = {g.key for g in vj.OPTIONAL_CARD_GROUPS} | {"resolution_method"}
+    for direction in BY_NAME.values():
+        assert direction.judge_optional_keys <= rendered, direction.name
+
+
+def test_direction_declares_the_keys_its_validator_enforces():
+    """`Direction.judge_optional_keys` is the view's copy of a schema fact — it must be the
+    same set `validate.py` enforces, not a hand-kept list that can drift from it."""
+    assert BY_NAME["adversarial"].judge_optional_keys == ADVERSARIAL_JUDGE_OPTIONAL_KEYS
+    assert BY_NAME["benign"].judge_optional_keys == BENIGN_JUDGE_OPTIONAL_KEYS
+    assert "actor_observations" in ADVERSARIAL_JUDGE_OPTIONAL_KEYS
+    assert "resolution_method" in ADVERSARIAL_JUDGE_OPTIONAL_KEYS
+    assert "actor_observations" not in BENIGN_JUDGE_OPTIONAL_KEYS
+    assert "resolution_method" not in BENIGN_JUDGE_OPTIONAL_KEYS
+
+
+def test_card_groups_follow_what_the_direction_declares():
+    adversarial = [g.key for g in vj.active_card_groups(_ADVERSARIAL)]
+    benign = [g.key for g in vj.active_card_groups(_BENIGN)]
+    assert adversarial == ["defender_findings", "actor_observations", "environment_observations"]
+    assert benign == ["defender_findings", "environment_observations"]
+
+
+def test_adversarial_actor_observations_render():
+    """`validate_judge_doc` accepts `actor_observations` and judge/malicious.md asks for
+    them; no renderer existed, so they were dropped on the floor (#748)."""
+    html = vj.render_judge_judge_section({**_JUDGE, "actor_observations": _ACTOR_OBS}, _ADVERSARIAL)
+    assert 'id="sec-judge-actor-obs"' in html
+    assert "Actor observations (1)" in html
+    assert 'id="actor-obs-0"' in html
+    assert "the story assumed 443 egress blends into the web tier" in html
+    assert "443 blend" in html
+    assert "misprediction" in html
+
+
+def test_actor_observation_card_carries_the_observation_type_class():
+    """The three `ACTOR_OBSERVATION_TYPES` are the card's tint, so a type must reach the
+    markup as a class the stylesheet can hit."""
+    for otype in ACTOR_OBSERVATION_TYPES:
+        html = vj.render_actor_observation(
+            0, {**_ACTOR_OBS[0], "type": otype}, anchor_prefix=_ADVERSARIAL.anchor("actor-obs"),
+        )
+        assert f'class="finding-card actor-obs-{otype}"' in html
+
+
+def test_actor_observations_section_is_absent_for_a_direction_that_cannot_carry_them():
+    """The benign judge doc has no `actor_observations` in its schema, so the section must
+    not appear even if a doc smuggles the key in — the alternative is a section the direction
+    can never fill."""
+    html = vj.render_judge_judge_section({**_BENIGN_JUDGE, "actor_observations": _ACTOR_OBS}, _BENIGN)
+    assert "Actor observations" not in html
+    assert "actor-obs" not in html
+
+
+def test_actor_observations_placeholder_when_the_declared_key_is_absent():
+    html = vj.render_judge_judge_section(_JUDGE, _ADVERSARIAL)
+    assert "Actor observations (0)" in html
+    assert "no actor observations queued" in html
+
+
+def test_actor_observation_anchors_do_not_collide_with_findings():
+    """`finding-0` and `actor-obs-0` sit on the same page — the near-twin card shape must not
+    become a near-twin id."""
+    html = vj.render_judge_judge_section({**_JUDGE, "actor_observations": _ACTOR_OBS}, _ADVERSARIAL)
+    assert 'id="finding-0"' in html
+    assert 'id="actor-obs-0"' in html
+
+
+def test_actor_observations_are_counted_the_way_findings_are():
+    """A non-mapping entry emits no card, so it must not be counted either."""
+    html = vj.render_judge_judge_section(
+        {**_JUDGE, "actor_observations": [*_ACTOR_OBS, "not-a-mapping"]}, _ADVERSARIAL,
+    )
+    assert "Actor observations (1)" in html
+
+
+def test_non_list_actor_observations_do_not_crash_the_page():
+    for bad in (3, "none", {"a": 1}):
+        html = vj.render_judge_judge_section(
+            {**_JUDGE, "actor_observations": bad}, _ADVERSARIAL,
+        )
+        assert "Actor observations (0)" in html
+
+
+def test_resolution_method_renders_on_the_direction_that_emits_it():
+    html = vj.render_judge_judge_section(
+        {**_JUDGE, "resolution_method": _RESOLUTION_METHOD}, _ADVERSARIAL,
+    )
+    assert 'id="sec-judge-resolution"' in html
+    assert 'class="resolution-method"' in html
+    assert "identity-confirmed (l-002)" in html
+
+
+def test_resolution_method_placeholder_names_why_it_is_missing():
+    """Absence is the normal case: the adversarial judge emits it on benign dispositions
+    only, so the placeholder must not read as a missing artifact."""
+    html = vj.render_judge_judge_section(_JUDGE, _ADVERSARIAL)
+    assert 'id="sec-judge-resolution"' in html
+    assert "emitted on benign dispositions only" in html
+
+
+def test_resolution_method_is_absent_for_a_direction_that_cannot_carry_it():
+    html = vj.render_judge_judge_section(
+        {**_BENIGN_JUDGE, "resolution_method": _RESOLUTION_METHOD}, _BENIGN,
+    )
+    assert "resolution" not in html
+    assert _RESOLUTION_METHOD not in html
+
+
+def test_resolution_method_is_escaped_not_injected():
+    html = vj.render_judge_judge_section(
+        {**_JUDGE, "resolution_method": "policy: <script>x</script>"}, _ADVERSARIAL,
+    )
+    assert "<script>" not in html
+    assert "&lt;script&gt;" in html
+
+
 def test_env_observation_card_handles_missing_entities():
     html = vj.render_env_observation(0, {
         "alert_rule_ids": ["r1"],
@@ -351,8 +496,12 @@ def test_actor_section_placeholder_names_the_missing_story():
 
 # --- TOC --------------------------------------------------------------------------
 
+def _toc(sections, *, raw_bundle: bool = True) -> str:
+    return vj.render_judge_toc(sections, raw_bundle=raw_bundle)
+
+
 def test_toc_emits_one_block_per_rendered_direction():
-    toc = vj.render_judge_toc([(_ADVERSARIAL, 2), (_BENIGN, 1)])
+    toc = _toc([(_ADVERSARIAL, 2), (_BENIGN, 1)])
     assert 'href="#finding-1"' in toc
     assert 'href="#finding-benign-0"' in toc
     assert "sec-actor-benign" in toc
@@ -361,7 +510,7 @@ def test_toc_emits_one_block_per_rendered_direction():
 
 
 def test_toc_omits_a_direction_the_page_did_not_render():
-    toc = vj.render_judge_toc([(_BENIGN, 1)])
+    toc = _toc([(_BENIGN, 1)])
     assert 'href="#sec-actor"' not in toc
     assert 'href="#sec-judge-outcome"' not in toc
     assert "sec-actor-benign" in toc
@@ -369,16 +518,42 @@ def test_toc_omits_a_direction_the_page_did_not_render():
 
 def test_toc_links_only_the_section_when_a_selected_direction_has_no_judge_doc():
     """The placeholder section carries no sub-anchors, so the TOC must not link them."""
-    toc = vj.render_judge_toc([(_ADVERSARIAL, None)])
+    toc = _toc([(_ADVERSARIAL, None)])
     assert 'href="#sec-judge"' in toc
-    for sub in ("outcome", "findings", "env", "encounter"):
+    for sub in ("outcome", "findings", "env", "actor-obs", "resolution", "encounter"):
         assert f'href="#sec-judge-{sub}"' not in toc
 
 
 def test_toc_marks_a_direction_with_no_findings():
-    toc = vj.render_judge_toc([(_ADVERSARIAL, 0)])
+    toc = _toc([(_ADVERSARIAL, 0)])
     assert "(none)" in toc
     assert 'href="#finding-0"' not in toc
+
+
+def test_toc_links_every_section_the_direction_emits_and_no_other():
+    """The TOC and the section read the same card-group table (#748), so the benign block
+    cannot link an `actor_observations` section its judge doc can never carry."""
+    toc = _toc([(_ADVERSARIAL, 1), (_BENIGN, 1)])
+    assert 'href="#sec-judge-actor-obs"' in toc
+    assert 'href="#sec-judge-resolution"' in toc
+    assert 'href="#sec-judge-benign-actor-obs"' not in toc
+    assert 'href="#sec-judge-benign-resolution"' not in toc
+
+
+def test_toc_omits_the_raw_bundle_link_when_the_bundle_is_empty():
+    """`render_judge_raw_bundle` returns "" for a run with no raw artifacts; the entry used to
+    be emitted regardless, so the link went nowhere (noted in #716, fixed in #748)."""
+    assert 'href="#sec-raw-bundle"' in _toc([(_ADVERSARIAL, 1)], raw_bundle=True)
+    assert 'href="#sec-raw-bundle"' not in _toc([(_ADVERSARIAL, 1)], raw_bundle=False)
+    assert "Raw bundle" not in _toc([(_ADVERSARIAL, 1)], raw_bundle=False)
+
+
+def test_toc_requires_the_caller_to_state_whether_the_raw_bundle_rendered():
+    """No default: the flag mirrors what the caller actually rendered, and a default would be
+    a second home for that fact — the dead link is exactly what a wrong default reintroduces."""
+    param = inspect.signature(vj.render_judge_toc).parameters["raw_bundle"]
+    assert param.default is inspect.Parameter.empty
+    assert param.kind is inspect.Parameter.KEYWORD_ONLY
 
 
 # --- unchanged surfaces -----------------------------------------------------------

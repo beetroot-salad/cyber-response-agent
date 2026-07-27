@@ -129,6 +129,20 @@ def dump_oracle_doc(doc: dict) -> str:
 
 
 
+def _validate_judge_optional_keys(doc: dict[str, Any], keys: frozenset[str]) -> None:
+    """Validate the optional top-level keys THIS doc's direction may carry — a key outside
+    `keys` is left alone rather than rejected, which is what the per-direction validators
+    already did key by key.
+
+    The declared set is the one home for "which optional keys does this direction's judge
+    emit": the transcript view reads the same sets off `Direction.judge_optional_keys` to
+    decide which sections to render, so a fourth optional key cannot be accepted here and
+    stay invisible on the page the way `actor_observations` and `resolution_method` did
+    (#748)."""
+    for key in sorted(keys):
+        _JUDGE_OPTIONAL_VALIDATORS[key](doc)
+
+
 def _validate_judge_actor_observations(doc: dict[str, Any]) -> None:
     if "actor_observations" not in doc:
         return
@@ -157,6 +171,19 @@ def _validate_judge_resolution_method(doc: dict[str, Any]) -> None:
         raise RunUnprocessable("judge `resolution_method` must be a non-empty string")
 
 
+_JUDGE_OPTIONAL_VALIDATORS = {
+    "actor_observations": _validate_judge_actor_observations,
+    "environment_observations": _validate_judge_environment_observations,
+    "resolution_method": _validate_judge_resolution_method,
+}
+
+# The optional top-level keys each direction's judge doc may carry. Enforced by the
+# validators below and read by the transcript view through `Direction.judge_optional_keys`
+# — ONE declaration, so accepted-but-unrendered cannot happen again (#748).
+ADVERSARIAL_JUDGE_OPTIONAL_KEYS = frozenset(_JUDGE_OPTIONAL_VALIDATORS)
+BENIGN_JUDGE_OPTIONAL_KEYS = frozenset({"environment_observations"})
+
+
 def validate_judge_doc(doc: Any) -> dict[str, Any]:
     if not isinstance(doc, dict):
         raise RunUnprocessable("judge YAML did not parse to a mapping")
@@ -166,9 +193,7 @@ def validate_judge_doc(doc: Any) -> dict[str, Any]:
         raise RunUnprocessable("judge `defender_findings` is not a list")
     for i, f in enumerate(findings):
         _validate_finding(i, f, ALL_FINDING_TYPES)
-    _validate_judge_actor_observations(doc)
-    _validate_judge_environment_observations(doc)
-    _validate_judge_resolution_method(doc)
+    _validate_judge_optional_keys(doc, ADVERSARIAL_JUDGE_OPTIONAL_KEYS)
     return doc
 
 
@@ -224,12 +249,7 @@ def validate_judge_benign_doc(doc: Any) -> dict[str, Any]:
         raise RunUnprocessable("benign judge `defender_findings` is not a list")
     for i, f in enumerate(findings):
         _validate_finding(i, f, BENIGN_ALL_FINDING_TYPES)
-    if "environment_observations" in doc:
-        obs = doc["environment_observations"]
-        if not isinstance(obs, list):
-            raise RunUnprocessable("benign judge `environment_observations` is not a list")
-        for i, o in enumerate(obs):
-            _validate_environment_observation(i, o)
+    _validate_judge_optional_keys(doc, BENIGN_JUDGE_OPTIONAL_KEYS)
     return doc
 
 
