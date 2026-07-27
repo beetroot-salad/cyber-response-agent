@@ -212,30 +212,38 @@ def test_quarantine_refuses_past_the_cap_and_evicts_nothing(tmp_path, monkeypatc
         "the control never archived either — the refusal above was vacuous"
 
 
-def test_a_failure_to_quarantine_does_not_replace_the_taint(tmp_path, monkeypatch):
+def test_a_failure_to_quarantine_does_not_replace_the_taint(tmp_path, capsys):
     """d_preserve_failure_never_masks_the_taint (#747) — if archiving fails, the taint still
-    propagates unchanged.
+    propagates unchanged, and the failure is LOUD.
 
     The preserve step is a best-effort improvement to a failure path. Letting its own
     failure escape would replace the most important signal the system produces with a
     complaint about a tarball — the same substitution this issue is about, one layer up.
+    Silence would be just as bad in the other direction: a quarantine that failed quietly is
+    indistinguishable from a tree that was never tainted, so the log line is part of the
+    contract rather than decoration.
 
-    `called` is the POSITIVE CONTROL: without it this passes just as happily against a lane
-    that never tries to archive at all, which a mutation run confirmed."""
-    called: list[str] = []
+    The failure is induced by giving the lane a quarantine path that CANNOT be a directory —
+    a regular file already sits there, so `mkdir` raises — rather than by patching the
+    module's internals. That keeps the test pointed at behaviour reachable through the real
+    seam, and it exercises the genuine `except` rather than a synthetic raise.
 
-    def explode(*_a, **_kw):
-        called.append("attempted")
-        raise OSError("no space left on device")
+    Asserting on the emitted log is the POSITIVE CONTROL: without it this passes just as
+    happily against a lane that never tries to archive at all, which a mutation run
+    confirmed."""
+    branch = RecordingBranch(tmp_path / "wt", events=[], destroy_on_cleanup=True)
+    branch.quarantine_dir.parent.mkdir(parents=True, exist_ok=True)
+    branch.quarantine_dir.write_text("not a directory\n", encoding="utf-8")
 
-    monkeypatch.setattr("defender.learning.core.quarantine._archive_tree", explode)
+    _, taint = _drive_tainted(tmp_path, branch=branch)
 
-    branch, taint = _drive_tainted(tmp_path)
+    err = capsys.readouterr().err
+    assert "FAILED to quarantine" in err, \
+        "the preserve step failed silently — indistinguishable from never having run"
 
-    assert called == ["attempted"], "the lane never attempted to archive"
     assert isinstance(taint, RunTainted)
     assert taint.findings, "the taint's own findings were disturbed by the failed preserve"
-    assert sorted(branch.quarantine_dir.glob("*.tar.gz")) == []
+    assert branch.quarantine_dir.is_file(), "the blocking path was clobbered"
 
 
 def test_run_tainted_is_a_systemic_fault(tmp_path):

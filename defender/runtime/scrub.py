@@ -80,7 +80,7 @@ def _check_entry(entry: Path) -> Finding | None:
     return None
 
 
-def _render(run_dir: Path, findings: Sequence[Finding]) -> str:
+def _render_findings(run_dir: Path, findings: Sequence[Finding]) -> str:
     shown = findings[:_MESSAGE_CAP]
     lines = [
         f"{len(findings)} offending entr{'y' if len(findings) == 1 else 'ies'} under "
@@ -108,4 +108,4 @@ def scrub(run_dir: Path) -> None:
     # os.walk yields in the filesystem's order, so sort: the same tainted tree has to produce
     # the same message twice, or the report is not something an operator can diff or cite.
     findings.sort(key=lambda f: str(f.path))
-    raise RunTainted(_render(run_dir, findings), findings)
+    raise RunTainted(_render_findings(run_dir, findings), findings)
