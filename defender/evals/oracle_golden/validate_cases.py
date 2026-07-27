@@ -53,7 +53,8 @@ REQUIRED_FILES = ("manifest.yaml", "environment.yaml",
 
 #: Kinds that carry no capture of their own: they reuse a base case's envelopes and
 #: change only the story, so `hidden/` is absent BY DESIGN and its absence is not a gap.
-DERIVED_KINDS = ("mutation", "negative-control", "spec-probe", "contradiction")
+DERIVED_KINDS = ("mutation", "negative-control", "spec-probe", "contradiction",
+                 "corrupted")
 
 #: Vocabulary only an eval author writes — the scoring frame, not the operation.
 #: Mirrored in `story_from_run.py`, which lints its own rendered output.

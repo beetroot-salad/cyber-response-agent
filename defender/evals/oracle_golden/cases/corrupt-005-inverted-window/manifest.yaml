@@ -1,0 +1,46 @@
+case_id: corrupt-005-inverted-window
+kind: corrupted
+base_case: case-001-ssh-bruteforce-canary
+
+split: dev
+unit:
+  activity_family: brute-force/T1110.001
+  host_pair: office-ws-1->canary-1
+capture_environment: playground-v2@409583061
+
+# ------------------------------------------------------ what the `corrupted` kind is for
+# `contradiction` cases are well-formed stories with incoherent CONTENT. These are
+# malformed INPUT — the channel itself is damaged. Every one is realizable in production:
+# the actor is an LLM with a token budget and a SKIP path, the defender's gather agent
+# writes the queries, and the oracle must answer regardless because its grammar has no
+# way to say "this input is unusable".
+#
+# Unlike the contradiction cases, these have DEFENSIBLE correct answers. Nothing in a
+# damaged input grounds a concrete event, and prompt.md is explicit: "Project only what
+# the story states", "Never fabricate concrete-looking values the story did not state",
+# "An unsatisfiable item is a signal the activity didn't happen, not a prompt to invent
+# it." So the bar is not "guess well" — it is "do not invent".
+derivation:
+  changed: >
+    leads.jsonl only — every @timestamp window with the operation's bounds has its start
+    and end SWAPPED, so each filter reads `>= 07:48:37 AND < 07:45:35`. story.md is
+    case-001's, byte-identical.
+  unchanged: story.md, samples/
+
+# The one case here where the STORY is perfect and the LEAD is broken. The defender's
+# gather agent composes these windows, and an inverted range is an ordinary bug — the
+# suite already carries 69 zero-byte payloads from queries that errored at capture, so
+# malformed queries are demonstrably real here.
+#
+# An inverted range matches nothing, whatever happened. prompt.md: "Emit only events
+# matching these queries' index/system, time windows, and filter predicates." So the
+# answer is empty on every lead whose window was inverted, no matter how vividly the
+# story describes the burst — and the story describes it vividly, which is the point.
+probes_rule: "stay inside the envelope, including when the envelope is empty by construction"
+discriminates: reading the window as a filter vs. as decoration
+
+expectation:
+  # The six leads whose queries carry the inverted bounds. l-003/l-007/l-008/l-009 are
+  # state lookups with no window to invert and are left alone.
+  empty_leads: [l-001, l-002, l-004, l-005, l-006]
+  no_suppression: all

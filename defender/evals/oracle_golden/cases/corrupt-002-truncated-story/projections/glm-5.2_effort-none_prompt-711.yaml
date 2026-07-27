@@ -1,0 +1,125 @@
+projections:
+- lead_id: l-003
+  events: []
+- lead_id: l-002
+  events: []
+- lead_id: l-001
+  events:
+  - '@timestamp': <brute-force-start>
+    host.name: canary-1
+    event.outcome: failure
+    source.ip: 172.18.0.15
+    user.name: root
+    message: Failed password for root from 172.18.0.15 port <port> ssh2
+  - '@timestamp': <brute-force-start+3s>
+    host.name: canary-1
+    event.outcome: failure
+    source.ip: 172.18.0.15
+    user.name: root
+    message: Failed password for root from 172.18.0.15 port <port> ssh2
+  - '@timestamp': <brute-force-start+6s>
+    host.name: canary-1
+    event.outcome: failure
+    source.ip: 172.18.0.15
+    user.name: root
+    message: Failed password for root from 172.18.0.15 port <port> ssh2
+  - '@timestamp': <brute-force-start+9s>
+    host.name: canary-1
+    event.outcome: failure
+    source.ip: 172.18.0.15
+    user.name: root
+    message: Failed password for root from 172.18.0.15 port <port> ssh2
+  - '@timestamp': <brute-force-start+12s>
+    host.name: canary-1
+    event.outcome: failure
+    source.ip: 172.18.0.15
+    user.name: root
+    message: Failed password for root from 172.18.0.15 port <port> ssh2
+  - '@timestamp': <brute-force-start+15s>
+    host.name: canary-1
+    event.outcome: failure
+    source.ip: 172.18.0.15
+    user.name: root
+    message: Failed password for root from 172.18.0.15 port <port> ssh2
+  - '@timestamp': <brute-force-start+18s>
+    host.name: canary-1
+    event.outcome: failure
+    source.ip: 172.18.0.15
+    user.name: root
+    message: Failed password for root from 172.18.0.15 port <port> ssh2
+  - '@timestamp': <brute-force-start+21s>
+    host.name: canary-1
+    event.outcome: failure
+    source.ip: 172.18.0.15
+    user.name: root
+    message: Failed password for root from 172.18.0.15 port <port> ssh2
+  - '@timestamp': <brute-force-start+24s>
+    host.name: canary-1
+    event.outcome: failure
+    source.ip: 172.18.0.15
+    user.name: root
+    message: Failed password for root from 172.18.0.15 port <port> ssh2
+  - '@timestamp': <brute-force-start+27s>
+    host.name: canary-1
+    event.outcome: failure
+    source.ip: 172.18.0.15
+    user.name: root
+    message: Failed password for root from 172.18.0.15 port <port> ssh2
+- lead_id: l-005
+  events:
+  - verdict: benign
+    score: 0
+    tags: []
+    campaigns: []
+    threat_actors: []
+- lead_id: l-006
+  events:
+  - host.name: canary-1
+    source.ip: 172.18.0.15
+    auth_method: password
+    accepted: 0
+    failed: <count>
+    first_seen: <brute-force-start>
+    last_seen: <alert-time>
+    cadence: one-off — no prior 24h history from this source IP
+  - host.name: <other-host>
+    source.ip: 172.18.0.15
+    auth_method: password
+    accepted: 0
+    failed: <count>
+    first_seen: <alert-time>
+    last_seen: <alert-window-end>
+    spread: cross-host activity during alert window
+- lead_id: l-004
+  events:
+  - source.ip: 172.18.0.15
+    destination.ip: <canary-1-ip>
+    zeek.ssh.client: <ssh-client-string>
+    zeek.ssh.server: <canary-1-ssh-server-string>
+    events: <brute-force-attempt-count>
+    first_seen: <brute-force-start>
+    last_seen: <brute-force-end>
+  - destination.ip: <canary-1-ip>
+    destination.port: 22
+    conns: <brute-force-attempt-count>
+    bytes_out: <aggregate-outbound-bytes>
+    bytes_in: <aggregate-inbound-bytes>
+    dest_ips: 1
+    first_seen: <brute-force-start>
+    last_seen: <brute-force-end>
+  - host.name: <canary-1-hostname>
+    data_stream.dataset: zeek.ssh
+    events: <brute-force-attempt-count>
+    first_seen: <brute-force-start>
+    last_seen: <brute-force-end>
+  - host.name: <office-ws-1-hostname>
+    data_stream.dataset: zeek.connection
+    events: <brute-force-attempt-count>
+    first_seen: <brute-force-start>
+    last_seen: <brute-force-end>
+- lead_id: l-007
+  events: []
+- lead_id: l-008
+  events: []
+- lead_id: l-009
+  events: []

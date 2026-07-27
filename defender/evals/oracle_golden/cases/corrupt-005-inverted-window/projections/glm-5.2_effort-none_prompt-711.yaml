@@ -1,0 +1,170 @@
+projections:
+- lead_id: l-003
+  events: []
+- lead_id: l-002
+  events: []
+- lead_id: l-001
+  events:
+  - '@timestamp': <alert-time>
+    host.name: canary-1
+    event.outcome: failure
+    source.ip: 172.18.0.15
+    user.name: root
+    message: Failed password for root from 172.18.0.15 port <port> ssh2
+- lead_id: l-005
+  events: []
+- lead_id: l-006
+  events:
+  - host.name: canary-1
+    source.ip: 172.18.0.15
+    event.outcome: failure
+    auth_method: password
+    user.name: root
+    first_seen: <alert-time>
+    last_seen: <alert-time+3m>
+    failed: 48
+    accepted: 0
+    bursts: 8
+    targeted_account: root
+    source_host: office-ws-1
+    cross_host_spread: none — all auth events from 172.18.0.15 target canary-1 only;
+      no sshd auth events on other playground hosts during or before the alert window
+    prior_24h_from_172.18.0.15: none — office-ws-1 has no outbound trust edges and
+      did not originate SSH to canary-1 or any other host before the alert; the guessing
+      bursts are a one-off, not a recurring pattern
+- lead_id: l-004
+  events:
+  - '@timestamp': <alert-time>
+    source.ip: 172.18.0.15
+    destination.ip: 172.18.0.9
+    destination.port: 22
+    zeek.ssh.client: <ssh-client-version>
+    zeek.ssh.server: <ssh-server-version>
+    host.name: <host-name>
+    data_stream.dataset: zeek.ssh
+  - '@timestamp': <alert-time+10s>
+    source.ip: 172.18.0.15
+    destination.ip: 172.18.0.9
+    destination.port: 22
+    zeek.ssh.client: <ssh-client-version>
+    zeek.ssh.server: <ssh-server-version>
+    host.name: <host-name>
+    data_stream.dataset: zeek.ssh
+  - '@timestamp': <alert-time+20s>
+    source.ip: 172.18.0.15
+    destination.ip: 172.18.0.9
+    destination.port: 22
+    zeek.ssh.client: <ssh-client-version>
+    zeek.ssh.server: <ssh-server-version>
+    host.name: <host-name>
+    data_stream.dataset: zeek.ssh
+  - '@timestamp': <alert-time+30s>
+    source.ip: 172.18.0.15
+    destination.ip: 172.18.0.9
+    destination.port: 22
+    zeek.ssh.client: <ssh-client-version>
+    zeek.ssh.server: <ssh-server-version>
+    host.name: <host-name>
+    data_stream.dataset: zeek.ssh
+  - '@timestamp': <alert-time+40s>
+    source.ip: 172.18.0.15
+    destination.ip: 172.18.0.9
+    destination.port: 22
+    zeek.ssh.client: <ssh-client-version>
+    zeek.ssh.server: <ssh-server-version>
+    host.name: <host-name>
+    data_stream.dataset: zeek.ssh
+  - '@timestamp': <alert-time+50s>
+    source.ip: 172.18.0.15
+    destination.ip: 172.18.0.9
+    destination.port: 22
+    zeek.ssh.client: <ssh-client-version>
+    zeek.ssh.server: <ssh-server-version>
+    host.name: <host-name>
+    data_stream.dataset: zeek.ssh
+  - '@timestamp': <alert-time+60s>
+    source.ip: 172.18.0.15
+    destination.ip: 172.18.0.9
+    destination.port: 22
+    zeek.ssh.client: <ssh-client-version>
+    zeek.ssh.server: <ssh-server-version>
+    host.name: <host-name>
+    data_stream.dataset: zeek.ssh
+  - '@timestamp': <alert-time+75s>
+    source.ip: 172.18.0.15
+    destination.ip: 172.18.0.9
+    destination.port: 22
+    zeek.ssh.client: <ssh-client-version>
+    zeek.ssh.server: <ssh-server-version>
+    host.name: <host-name>
+    data_stream.dataset: zeek.ssh
+  - '@timestamp': <alert-time>
+    source.ip: 172.18.0.15
+    destination.ip: 172.18.0.9
+    destination.port: 22
+    source.bytes: <source-bytes>
+    destination.bytes: <destination-bytes>
+    host.name: <host-name>
+    data_stream.dataset: zeek.connection
+  - '@timestamp': <alert-time+10s>
+    source.ip: 172.18.0.15
+    destination.ip: 172.18.0.9
+    destination.port: 22
+    source.bytes: <source-bytes>
+    destination.bytes: <destination-bytes>
+    host.name: <host-name>
+    data_stream.dataset: zeek.connection
+  - '@timestamp': <alert-time+20s>
+    source.ip: 172.18.0.15
+    destination.ip: 172.18.0.9
+    destination.port: 22
+    source.bytes: <source-bytes>
+    destination.bytes: <destination-bytes>
+    host.name: <host-name>
+    data_stream.dataset: zeek.connection
+  - '@timestamp': <alert-time+30s>
+    source.ip: 172.18.0.15
+    destination.ip: 172.18.0.9
+    destination.port: 22
+    source.bytes: <source-bytes>
+    destination.bytes: <destination-bytes>
+    host.name: <host-name>
+    data_stream.dataset: zeek.connection
+  - '@timestamp': <alert-time+40s>
+    source.ip: 172.18.0.15
+    destination.ip: 172.18.0.9
+    destination.port: 22
+    source.bytes: <source-bytes>
+    destination.bytes: <destination-bytes>
+    host.name: <host-name>
+    data_stream.dataset: zeek.connection
+  - '@timestamp': <alert-time+50s>
+    source.ip: 172.18.0.15
+    destination.ip: 172.18.0.9
+    destination.port: 22
+    source.bytes: <source-bytes>
+    destination.bytes: <destination-bytes>
+    host.name: <host-name>
+    data_stream.dataset: zeek.connection
+  - '@timestamp': <alert-time+60s>
+    source.ip: 172.18.0.15
+    destination.ip: 172.18.0.9
+    destination.port: 22
+    source.bytes: <source-bytes>
+    destination.bytes: <destination-bytes>
+    host.name: <host-name>
+    data_stream.dataset: zeek.connection
+  - '@timestamp': <alert-time+75s>
+    source.ip: 172.18.0.15
+    destination.ip: 172.18.0.9
+    destination.port: 22
+    source.bytes: <source-bytes>
+    destination.bytes: <destination-bytes>
+    host.name: <host-name>
+    data_stream.dataset: zeek.connection
+- lead_id: l-007
+  events: []
+- lead_id: l-008
+  events: []
+- lead_id: l-009
+  events: []
