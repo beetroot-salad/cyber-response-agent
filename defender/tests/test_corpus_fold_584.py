@@ -1013,7 +1013,7 @@ def test_d28_curator_consumers_survive_the_dataclass(tmp_path, capsys):
     from defender.learning.core.config import LoopPaths
 
     cfg = build_author_config(LoopPaths(repo_root=tmp_path))
-    corpus = cfg.lessons_dir
+    corpus = cfg.corpus_dir
     corpus.mkdir(parents=True, exist_ok=True)
     _findings_lesson(corpus, "good", finding_ids=("fid/0", "fid/1"))
     (corpus / "obs.md").write_text(
@@ -1093,6 +1093,6 @@ def test_d30_relocated_tree_survival(tmp_path):
     assert not any(stem in out for stem in real_stems)
 
     cfg = build_author_config(LoopPaths(repo_root=tmp_path / "eval"))
-    cfg.lessons_dir.mkdir(parents=True)
-    _findings_lesson(cfg.lessons_dir, "temp-tree-lesson", finding_ids=("tmp/0",))
+    cfg.corpus_dir.mkdir(parents=True)
+    _findings_lesson(cfg.corpus_dir, "temp-tree-lesson", finding_ids=("tmp/0",))
     assert existing_finding_ids(cfg) == {"tmp/0"}

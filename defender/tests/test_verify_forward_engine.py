@@ -18,6 +18,7 @@ pytest.importorskip("pydantic_ai")
 
 from pydantic_ai.models import override_allow_model_requests  # noqa: E402
 
+from defender.learning.core.config import StageWiring  # noqa: E402
 from defender.learning.author.verify_forward.engine import (  # noqa: E402
     VERIFY_DEF,
     VerifierDeps,
@@ -55,8 +56,13 @@ def test_run_verify_pydantic_returns_text_verbatim_and_writes_trace(tmp_path):
     src = _src(tmp_path)
     with override_allow_model_requests(False):
         out = _run_verify_pydantic(
-            _prompt(tmp_path), config.verifier_model(), config.verifier_effort(),
-            "vf.run-X.trace.jsonl", "verify:X", "predict this case", src,
+            StageWiring(
+                prompt_path=_prompt(tmp_path), model=config.verifier_model(),
+                effort=config.verifier_effort(), trace_name="vf.run-X.trace.jsonl",
+                label="verify:X",
+            ),
+            user="predict this case",
+            source_run_dir=src,
             defender_dir=tmp_path / "wt" / "defender",
             wall_clock_timeout=config.verifier_timeout(),
             make_model=_fake_model(_replay(_VERDICT)),
@@ -69,8 +75,13 @@ def test_run_verify_pydantic_returns_text_verbatim_and_writes_trace(tmp_path):
 def test_run_verify_pydantic_empty_output_is_unprocessable(tmp_path):
     with override_allow_model_requests(False), pytest.raises(RunUnprocessable):
         _run_verify_pydantic(
-            _prompt(tmp_path), config.verifier_model(), config.verifier_effort(),
-            "vf.trace.jsonl", "verify:X", "predict this case", _src(tmp_path),
+            StageWiring(
+                prompt_path=_prompt(tmp_path), model=config.verifier_model(),
+                effort=config.verifier_effort(), trace_name="vf.trace.jsonl",
+                label="verify:X",
+            ),
+            user="predict this case",
+            source_run_dir=_src(tmp_path),
             defender_dir=tmp_path / "wt" / "defender",
             wall_clock_timeout=config.verifier_timeout(),
             make_model=_fake_model(_replay("")),
@@ -97,7 +108,12 @@ def test_verify_agent_is_read_only_no_writers():
     logger = observe.RequestLogger(Path("/tmp/does-not-need-to-exist-verify-tools.jsonl"))
     try:
         agent = _pydantic_stage.build_stage_agent(
-            VerifierDeps, Path(__file__), "any-model", "medium", logger, "verify",
+            VerifierDeps,
+            StageWiring(
+                prompt_path=Path(__file__), model="any-model", effort="medium",
+                trace_name="t.jsonl", label="verify",
+            ),
+            logger,
             make_model=_fake_model(_replay("")),
         )
     finally:
@@ -111,7 +127,12 @@ def test_build_verify_agent_applies_glm_effort(monkeypatch):
     logger = observe.RequestLogger(Path("/tmp/does-not-need-to-exist-verify-effort.jsonl"))
     try:
         agent = _pydantic_stage.build_stage_agent(
-            VerifierDeps, Path(__file__), config.verifier_model(), config.verifier_effort(), logger, "verify",
+            VerifierDeps,
+            StageWiring(
+                prompt_path=Path(__file__), model=config.verifier_model(), effort=config.verifier_effort(),
+                trace_name="t.jsonl", label="verify",
+            ),
+            logger,
         )
     finally:
         logger.close()

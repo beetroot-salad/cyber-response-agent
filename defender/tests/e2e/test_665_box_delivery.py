@@ -33,6 +33,7 @@ from _box665 import (  # noqa: E402  (bare import: tests/e2e is on sys.path via 
 pytest.importorskip("pydantic_ai")
 
 from defender import agents as agents_registry  # noqa: E402
+from defender.learning.core.config import StageContext, StageWiring  # noqa: E402
 from defender.runtime import box as box_mod  # noqa: E402
 from defender.runtime.agent_definition import RunScope, bind  # noqa: E402
 from defender.runtime.agent_role import AgentRole  # noqa: E402
@@ -85,7 +86,11 @@ def _curator_for_run(tmp_path, *, box):
     """Build a curator's deps through the REAL production wrapper CuratorDeps.for_run with
     the future required `box=`. TypeError at HEAD. Sets up a real worktree defender tree so
     the wrapped bind() actually resolves (the future green path)."""
-    from defender.learning.author.curator_engine import SHIPPED_LESSON_CORPORA, CuratorDeps
+    from defender.learning.author.curator_engine import (
+        SHIPPED_LESSON_CORPORA,
+        CuratorDeps,
+        ForwardCheckConfig,
+    )
     from defender.learning.author.verify_forward.checks import ForwardCheck
 
     repo = tmp_path / "repo"
@@ -96,9 +101,11 @@ def _curator_for_run(tmp_path, *, box):
     run_dir.mkdir(exist_ok=True)  # both curator helpers may run against one tmp_path
     check = ForwardCheck(error_prefix="spec", prompt_path=None, run=lambda ctx: "")
     return CuratorDeps.for_run(
-        run_dir, repo, dtree / "lessons",
-        check=check, runs_dir=tmp_path / "runs", pending=tmp_path / "pending.jsonl",
-        queued_ids=frozenset(), box=box,
+        run_dir,
+        repo,
+        dtree / "lessons",
+        cfg=ForwardCheckConfig(check=check, runs_dir=tmp_path / "runs", pending=tmp_path / "pending.jsonl", queued_ids=frozenset()),
+        box=box,
     )
 
 
@@ -135,7 +142,11 @@ def test_box_delivery_absence_does_not_silently_re_dead_the_lane(tmp_path):
 
 
 def _curator_for_run_no_box(tmp_path):
-    from defender.learning.author.curator_engine import SHIPPED_LESSON_CORPORA, CuratorDeps
+    from defender.learning.author.curator_engine import (
+        SHIPPED_LESSON_CORPORA,
+        CuratorDeps,
+        ForwardCheckConfig,
+    )
     from defender.learning.author.verify_forward.checks import ForwardCheck
 
     repo = tmp_path / "repo"
@@ -145,10 +156,11 @@ def _curator_for_run_no_box(tmp_path):
     run_dir = tmp_path / "lrd"
     run_dir.mkdir(exist_ok=True)  # both curator helpers may run against one tmp_path
     check = ForwardCheck(error_prefix="spec", prompt_path=None, run=lambda ctx: "")
-    return CuratorDeps.for_run(  # box= omitted → must raise (required), never inert-default
-        run_dir, repo, dtree / "lessons",
-        check=check, runs_dir=tmp_path / "runs", pending=tmp_path / "pending.jsonl",
-        queued_ids=frozenset(),
+    return CuratorDeps.for_run(
+        run_dir,
+        repo,
+        dtree / "lessons",
+        cfg=ForwardCheckConfig(check=check, runs_dir=tmp_path / "runs", pending=tmp_path / "pending.jsonl", queued_ids=frozenset()),
     )
 
 
@@ -299,10 +311,20 @@ def test_box_reaches_both_actor_legs_and_both_drain_chains(tmp_path):
     from defender.learning.leads import lead_author_engine
 
     lead_deps = lead_author_engine._run_lead_author_pydantic(
-        prompt_path=tmp_path / "p.md", model="m", effort=None, trace_name="t",
-        label="l", user="u", learning_run_dir=lrd, repo_root=tmp_path / "repo",
-        request_limit=4, wall_clock_timeout=60,
-        box=delivered, run_stage=lambda **k: k["deps"],
+        StageWiring(
+            prompt_path=tmp_path / "p.md", model="m",
+            effort=None, trace_name="t",
+            label="l",
+        ),
+        StageContext(
+            learning_run_dir=lrd,
+            user="u",
+            request_limit=4,
+            wall_clock_timeout=60,
+            repo_root=tmp_path / "repo",
+            box=delivered,
+        ),
+        run_stage=lambda **k: k["deps"],
     )
     assert got.get("actor") is delivered, "adversarial actor leg reached with no box"
     assert got.get("actor_benign") is delivered, "benign actor leg reached with no box"

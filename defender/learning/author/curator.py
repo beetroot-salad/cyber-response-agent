@@ -10,12 +10,13 @@ from collections.abc import Callable
 
 
 from defender.learning.author import shared as _shared
+from defender.learning.author._config import CorpusAuthorConfig
 from defender.learning.author.verify_forward.checks import ForwardCheck
 from defender._corpus import iter_lesson_paths, iter_lessons
 from defender._io import append_jsonl, read_jsonl_rows, write_atomic
 from defender._run_paths import resolve_run_bundle
 from defender.learning.core import config
-from defender.learning.core.config import QueueChannel, make_logger
+from defender.learning.core.config import StageContext, StageWiring, make_logger
 from defender.learning.core.persist import rotate_queue_locked
 
 
@@ -26,28 +27,16 @@ AuthorError = _shared.AuthorError
 
 
 
-@dataclass(frozen=True)
-class CuratorConfig:
-    repo_root: Path
-    pending_dir: Path
-    runs_dir: Path
-    corpus_dir: Path
-    corpus_dir_rel: str
-    channel: QueueChannel
-    repo_lock_file: Path
-    repo_lock_wait_seconds: int
+@dataclass(frozen=True, kw_only=True)
+class CuratorConfig(CorpusAuthorConfig):
+    """The actor/environment curators' drain config: the shared corpus-author core (#713)
+    plus the five fields only an observation-queue curator has."""
+
     outcome_author: frozenset[str]
     outcome_skip: frozenset[str]
     trailer_label: str
     generation_fn: Callable[[], int]
     actor_model: str
-    log_prefix: str
-    author_prompt: Path
-    author_model: str
-    author_timeout: int
-    author_effort: str
-    invoke_agent: Callable[[list[dict], str, CuratorConfig], dict]
-    box: Any = None
 
 
 
@@ -101,28 +90,34 @@ def invoke_curator_agent(
     cfg.pending_dir.mkdir(parents=True, exist_ok=True)
     stage_salt = uuid.uuid4().hex
     return curator_engine.run_curator_stage(
-        system_prompt_file=cfg.author_prompt,
-        batch_id=batch_id,
-        user_prompt=_shared.build_curator_user_prompt(
-            observations, batch_id, corpus_dir=cfg.corpus_dir,
-            corpus_dir_rel=cfg.corpus_dir_rel, label="observations",
+        wiring=StageWiring.for_batch(
+            cfg.author_prompt, cfg.author_model, cfg.author_effort,
+            batch_id=batch_id, label="curator",
+        ),
+        ctx=StageContext(
+            learning_run_dir=cfg.pending_dir,
+            user=_shared.build_curator_user_prompt(
+                observations, batch_id, corpus_dir=cfg.corpus_dir,
+                corpus_dir_rel=cfg.corpus_dir_rel, label="observations",
+                salt=stage_salt,
+            ),
+            request_limit=request_limit,
+            wall_clock_timeout=cfg.author_timeout,
+            repo_root=cfg.repo_root,
+            box=cfg.box,
             salt=stage_salt,
         ),
+        batch_id=batch_id,
         corpus_dir=cfg.corpus_dir,
-        check=check,
-        runs_dir=cfg.runs_dir,
-        pending=cfg.channel.file,
-        queued_ids=frozenset(
-            str(o["observation_id"]) for o in observations if o.get("observation_id")
+        cfg=curator_engine.ForwardCheckConfig(
+            check=check,
+            runs_dir=cfg.runs_dir,
+            pending=cfg.channel.file,
+            queued_ids=frozenset(
+                str(o["observation_id"]) for o in observations if o.get("observation_id")
+            ),
         ),
-        repo_root=cfg.repo_root,
-        learning_run_dir=cfg.pending_dir,
         log=make_logger(cfg.log_prefix),
-        model=cfg.author_model,
-        effort=cfg.author_effort,
-        request_limit=request_limit,
-        timeout=cfg.author_timeout,
-        salt=stage_salt, box=cfg.box,
     )
 
 

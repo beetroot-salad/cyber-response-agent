@@ -20,6 +20,7 @@ import yaml  # noqa: E402
 
 from pydantic_ai.models import override_allow_model_requests  # noqa: E402
 
+from defender.learning.core.config import StageWiring  # noqa: E402
 from defender.learning.core import config, subagents  # noqa: E402
 from defender.learning.pipeline import _pydantic_stage  # noqa: E402
 from defender.learning.pipeline.oracle import run as oracle_run  # noqa: E402
@@ -58,9 +59,14 @@ def test_run_oracle_pydantic_returns_yaml_and_writes_trace(tmp_path):
     fn = _replay([{"text": _ORACLE_YAML}])
     with override_allow_model_requests(False):
         out = _run_oracle_pydantic(
-            _prompt(tmp_path), "glm-5.2", "none",
-            "oracle_l-001.trace.jsonl", "oracle:l-001",
-            "project this lead", lrd, make_model=_fake_model(fn),
+            StageWiring(
+                prompt_path=_prompt(tmp_path), model="glm-5.2",
+                effort="none", trace_name="oracle_l-001.trace.jsonl",
+                label="oracle:l-001",
+            ),
+            user="project this lead",
+            learning_run_dir=lrd,
+            make_model=_fake_model(fn),
         )
     assert out == _ORACLE_YAML
     assert (lrd / "oracle_l-001.trace.jsonl").is_file()
@@ -101,7 +107,12 @@ def test_oracle_agent_is_read_only_no_writers():
     logger = observe.RequestLogger(Path("/tmp/does-not-need-to-exist-oracle-tools.jsonl"))
     try:
         agent = _pydantic_stage.build_stage_agent(
-            OracleDeps, Path(__file__), "any-model", "none", logger, "oracle",
+            OracleDeps,
+            StageWiring(
+                prompt_path=Path(__file__), model="any-model", effort="none",
+                trace_name="t.jsonl", label="oracle",
+            ),
+            logger,
             make_model=_fake_model(_replay([{"text": ""}])),
         )
     finally:
@@ -115,7 +126,12 @@ def test_build_oracle_agent_disables_glm_reasoning(monkeypatch):
     logger = observe.RequestLogger(Path("/tmp/does-not-need-to-exist-oracle-effort.jsonl"))
     try:
         agent = _pydantic_stage.build_stage_agent(
-            OracleDeps, Path(__file__), "glm-5.2", "none", logger, "oracle",
+            OracleDeps,
+            StageWiring(
+                prompt_path=Path(__file__), model="glm-5.2", effort="none",
+                trace_name="t.jsonl", label="oracle",
+            ),
+            logger,
         )
     finally:
         logger.close()
@@ -162,9 +178,9 @@ def test_invoke_oracle_fans_out_per_lead_in_order(monkeypatch, tmp_path):
 
     calls = []
 
-    def fake_oracle_fn(prompt_path, model, effort, trace_name, label, user, learning_run_dir, *, salt):
-        calls.append((label, trace_name, learning_run_dir))
-        lead_id = label.split(":", 1)[1]
+    def fake_oracle_fn(wiring, *, user, learning_run_dir, salt):
+        calls.append((wiring.label, wiring.trace_name, learning_run_dir))
+        lead_id = wiring.label.split(":", 1)[1]
         return f'events:\n  - lead: "{lead_id}"\n'
 
     story = tmp_path / "story.md"
@@ -201,8 +217,8 @@ def test_invoke_oracle_trace_name_is_per_direction(monkeypatch, tmp_path):
         story = tmp_path / story_name
         story.write_text("the story\n")
 
-        def fake_oracle_fn(prompt_path, model, effort, trace_name, label, user, learning_run_dir, *, salt):
-            seen.append(trace_name)
+        def fake_oracle_fn(wiring, *, user, learning_run_dir, salt):
+            seen.append(wiring.trace_name)
             return 'events:\n  - lead: "l-001"\n'
 
         oracle_run.invoke_oracle(tmp_path, story, lrd, oracle_fn=fake_oracle_fn)

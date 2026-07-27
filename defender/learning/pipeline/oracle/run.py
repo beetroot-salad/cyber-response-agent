@@ -7,6 +7,7 @@ from uuid import uuid4
 from defender.learning import lead_repository
 from defender.learning.core.config import (
     ORACLE_PROMPT,
+    StageWiring,
     oracle_effort,
     oracle_max_concurrency,
     oracle_model,
@@ -25,10 +26,12 @@ def invoke_oracle_lead(lead, story: str, sample_text: str, learning_run_dir: Pat
     stage_salt = salt if salt is not None else uuid4().hex
     user = build_lead_user_prompt(lead, story, sample_text, salt=stage_salt)
     raw = oracle_fn(
-        ORACLE_PROMPT, oracle_model(), oracle_effort(),
-        f"oracle_{trace_prefix}_{lead.lead_id}.trace.jsonl", f"oracle:{lead.lead_id}",
-        user, learning_run_dir,
-        salt=stage_salt,
+        StageWiring(
+            prompt_path=ORACLE_PROMPT, model=oracle_model(), effort=oracle_effort(),
+            trace_name=f"oracle_{trace_prefix}_{lead.lead_id}.trace.jsonl",
+            label=f"oracle:{lead.lead_id}",
+        ),
+        user=user, learning_run_dir=learning_run_dir, salt=stage_salt,
     )
     return parse_lead_events(raw, lead.lead_id)
 

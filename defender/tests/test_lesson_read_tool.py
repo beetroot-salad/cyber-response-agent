@@ -32,6 +32,7 @@ from pydantic_ai.messages import ModelResponse, TextPart  # noqa: E402
 from pydantic_ai.models.function import FunctionModel  # noqa: E402
 
 import defender.runtime.tools as _rt_tools  # noqa: E402  (the shared read core / char cap)
+from defender.learning.core.config import StageWiring  # noqa: E402
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender.runtime import observe, permission  # noqa: E402
 from defender.runtime.agent_role import AgentRole  # noqa: E402
@@ -43,6 +44,7 @@ from defender.runtime.tools import AgentDeps, register_tools  # noqa: E402
 from defender.learning.author.curator_engine import (  # noqa: E402
     CORPUS_AUTHOR_DEF,
     CuratorDeps,
+    ForwardCheckConfig,
 )
 from defender.learning.author.verify_forward.checks import FINDINGS_CHECK  # noqa: E402
 from defender.learning.pipeline._pydantic_stage import build_stage_agent  # noqa: E402
@@ -77,7 +79,12 @@ def _build_curator_agent(tmp_path):
     logger = observe.RequestLogger(tmp_path / "t.jsonl")
     try:
         agent = build_stage_agent(
-            CuratorDeps, _prompt(tmp_path), "m", "low", logger, "curator",
+            CuratorDeps,
+            StageWiring(
+                prompt_path=_prompt(tmp_path), model="m", effort="low",
+                trace_name="t.jsonl", label="curator",
+            ),
+            logger,
             make_model=_fake_model(_replay("")),
         )
         return agent, logger
@@ -88,9 +95,11 @@ def _build_curator_agent(tmp_path):
 
 def _deps(scene) -> CuratorDeps:
     return CuratorDeps.for_run(
-        scene.curdir, scene.repo, scene.corpus,
-        check=FINDINGS_CHECK, runs_dir=scene.runs, pending=scene.pending,
-        queued_ids=frozenset(), run_verify=lambda **kw: "", box=None,
+        scene.curdir,
+        scene.repo,
+        scene.corpus,
+        cfg=ForwardCheckConfig(check=FINDINGS_CHECK, runs_dir=scene.runs, pending=scene.pending, queued_ids=frozenset(), run_verify=lambda *a, **kw: ""),
+        box=None,
     )
 
 

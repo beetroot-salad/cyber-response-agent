@@ -38,6 +38,7 @@ from pydantic_ai.messages import (  # noqa: E402
 )
 from pydantic_ai.models import override_allow_model_requests  # noqa: E402
 
+from defender.learning.core.config import StageContext, StageWiring  # noqa: E402
 from defender.learning.core import config  # noqa: E402
 from defender.learning.core.config import RunUnprocessable  # noqa: E402
 from defender.learning.leads.lead_author_engine import LEAD_AUTHOR_DEF  # noqa: E402
@@ -97,8 +98,11 @@ def _oracle(tmp_path: Path, text: str, tag: str) -> str:
     lrd.mkdir(exist_ok=True)
     with override_allow_model_requests(False):
         return _run_oracle_pydantic(
-            _prompt(tmp_path), "glm-5.2", "none", f"oracle-{tag}.trace.jsonl",
-            f"oracle:{tag}", "project this lead", lrd,
+            StageWiring(
+                prompt_path=_prompt(tmp_path), model="glm-5.2", effort="none",
+                trace_name=f"oracle-{tag}.trace.jsonl", label=f"oracle:{tag}",
+            ),
+            user="project this lead", learning_run_dir=lrd,
             make_model=_fake_model(_replay(text)),
         )
 
@@ -114,10 +118,16 @@ def _lead_author(tmp_path: Path, text: str, tag: str, **over) -> str:
     kw.update(over)
     with override_allow_model_requests(False):
         return run_stage(
-            stage="lead_author", prompt_path=_prompt(tmp_path), model="m", effort=None,
-            trace_name=f"la-{tag}.trace.jsonl", label="la", user="u",
-            learning_run_dir=rd, deps=deps, request_limit=4,
-            wall_clock_timeout=config.lead_author_timeout(),
+            stage="lead_author",
+            wiring=StageWiring(
+                prompt_path=_prompt(tmp_path), model="m", effort=None,
+                trace_name=f"la-{tag}.trace.jsonl", label="la",
+            ),
+            ctx=StageContext(
+                learning_run_dir=rd, user="u", request_limit=4,
+                wall_clock_timeout=config.lead_author_timeout(),
+            ),
+            deps=deps,
             make_model=_fake_model(_replay(text)), **kw,
         )
 

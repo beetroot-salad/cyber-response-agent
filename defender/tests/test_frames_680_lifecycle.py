@@ -19,6 +19,8 @@ import pytest
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
 from pydantic_ai.models import override_allow_model_requests
 
+from defender.learning.author.curator_engine import ForwardCheckConfig  # noqa: E402
+from defender.learning.core.config import StageContext, StageWiring  # noqa: E402
 from defender.agents import JUDGE_DEF, ORACLE_DEF
 from defender.learning.author import shared as author_shared
 from defender.learning.core import config
@@ -188,17 +190,21 @@ def _stage_attempt(
     with override_allow_model_requests(False):
         out = run_stage(
             stage="judge",
-            prompt_path=instructions,
-            model="test",
-            effort=None,
-            trace_name=trace_name,
-            label="judge:lifecycle",
-            user=observation.prompt,
-            learning_run_dir=run,
+            wiring=StageWiring(
+                prompt_path=instructions,
+                model="test",
+                effort=None,
+                trace_name=trace_name,
+                label="judge:lifecycle",
+            ),
+            ctx=StageContext(
+                learning_run_dir=run,
+                user=observation.prompt,
+                request_limit=8,
+                wall_clock_timeout=wall_clock_timeout,
+            ),
             deps=deps,
-            request_limit=8,
             make_model=fake_model(model_fn),
-            wall_clock_timeout=wall_clock_timeout,
         )
     return out, deps, observation, run / trace_name
 
@@ -481,7 +487,7 @@ def test_concurrent_oracle_body_replays_another_oracles_frame(tmp_path):
         assert salt is not None, (
             "the oracle model seam must receive a per-invocation stage salt"
         )
-        seen.append((args[5], salt))
+        seen.append((kwargs["user"], salt))
         return "events: []"
 
     with ThreadPoolExecutor(max_workers=2) as pool:
@@ -522,7 +528,7 @@ def test_cached_anthropic_stage_calls_use_fresh_user_frame_contracts(tmp_path):
         assert salt is not None, (
             "the oracle model seam must receive a per-invocation stage salt"
         )
-        seen.append((args[5], salt))
+        seen.append((kwargs["user"], salt))
         return "events: []"
 
     invoke_oracle_lead(
@@ -559,7 +565,7 @@ def test_two_oracle_invocations_receive_distinct_stage_inputs_concurrently(tmp_p
         assert salt is not None, (
             "the oracle model seam must receive a per-invocation stage salt"
         )
-        seen.append((args[5], salt))
+        seen.append((kwargs["user"], salt))
         return "events: []"
 
     with ThreadPoolExecutor(max_workers=2) as pool:
@@ -602,7 +608,7 @@ def test_concurrent_oracle_leads_finish_in_reverse_creation_order(tmp_path):
     seen = {}
 
     def oracle_fn(*args, **kwargs):
-        prompt, salt = (args[5], kwargs.get("salt"))
+        prompt, salt = (kwargs["user"], kwargs.get("salt"))
         assert salt is not None, (
             "each concurrent oracle model call must receive its stage salt"
         )
@@ -667,7 +673,7 @@ def test_sequential_stage_invocations_share_a_learning_run_directory(tmp_path):
         assert salt is not None, (
             "the oracle model seam must receive a per-invocation stage salt"
         )
-        seen.append((args[5], salt))
+        seen.append((kwargs["user"], salt))
         return "events: []"
 
     invoke_oracle_lead(
@@ -699,30 +705,36 @@ def test_curator_runs_successive_batches_via_its_non_bindable_lifetime(tmp_path)
     prompt.write_text("instructions")
     seen = []
 
-    def run_author(**kwargs):
-        salt = kwargs.get("salt")
-        assert salt is not None, "each curator batch must receive its own stage salt"
-        seen.append((kwargs["user"], salt))
+    def run_author(wiring, ctx, **kwargs):
+        assert ctx.salt is not None, "each curator batch must receive its own stage salt"
+        seen.append((ctx.user, ctx.salt))
         return 'AUTHOR_RESULT: {"ok": true}'
 
-    common = dict(
-        system_prompt_file=prompt,
-        user_prompt="batch body",
-        corpus_dir=corpus,
-        check=FINDINGS_CHECK,
-        runs_dir=tmp_path / "runs",
-        pending=tmp_path / "pending",
-        queued_ids=frozenset(),
-        repo_root=repo,
-        learning_run_dir=run,
-        log=lambda _m: None,
-        source_key=lambda *_a, **_k: object(),
-        run_author=run_author,
-        model=config.author_model(), effort=config.author_effort(),
-        request_limit=config.author_request_limit(), timeout=config.author_timeout(),
-    )
-    run_curator_stage(batch_id="one", **common)
-    run_curator_stage(batch_id="two", **common)
+    def _spawn(batch_id: str) -> None:
+        run_curator_stage(
+            wiring=StageWiring.for_batch(
+                prompt, config.author_model(), config.author_effort(),
+                batch_id=batch_id, label="curator",
+            ),
+            ctx=StageContext(
+                learning_run_dir=run, user="batch body",
+                request_limit=config.author_request_limit(),
+                wall_clock_timeout=config.author_timeout(),
+                repo_root=repo,
+            ),
+            batch_id=batch_id,
+            corpus_dir=corpus,
+            cfg=ForwardCheckConfig(
+                check=FINDINGS_CHECK, runs_dir=tmp_path / "runs",
+                pending=tmp_path / "pending", queued_ids=frozenset(),
+            ),
+            log=lambda _m: None,
+            source_key=lambda *_a, **_k: object(),
+            run_author=run_author,
+        )
+
+    _spawn("one")
+    _spawn("two")
     assert seen[0][1] != seen[1][1]
     assert all(
         (

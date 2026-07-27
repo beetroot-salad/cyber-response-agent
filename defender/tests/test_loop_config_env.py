@@ -90,3 +90,105 @@ def test_accessor_returns_the_default_when_unset(monkeypatch):
     monkeypatch.delenv("ACTOR_MODEL", raising=False)
     assert config.author_max_attempts() == 3
     assert config.actor_model() == "glm-5.2"
+
+
+# ===========================================================================
+# #713 — the grouping objects must not re-freeze what #717 unfroze
+# ===========================================================================
+
+# The stage engines, plus the one module that legitimately holds wirings as constants.
+_STAGE_MODULES = (
+    "learning/pipeline/_pydantic_stage.py",
+    "learning/pipeline/actor_engine.py",
+    "learning/pipeline/oracle_engine.py",
+    "learning/pipeline/judge/engine_pydantic.py",
+    "learning/author/curator_engine.py",
+    "learning/author/verify_forward/engine.py",
+    "learning/leads/lead_author_engine.py",
+    "learning/core/directions.py",
+)
+
+# `directions.py` snapshots these two deliberately and says so at its line 28: an A/B run
+# pins the judge model for the whole process. They are the ONLY grandfathered pair; anything
+# else built at import time is the #717 regression coming back through the new objects.
+_GRANDFATHERED = {"ADVERSARIAL_WIRING", "BENIGN_WIRING"}
+
+_GROUPING_TYPES = {"StageWiring", "StageContext", "JudgeWiring"}
+
+
+def _defender_root() -> Path:
+    return Path(config.__file__).resolve().parents[2]
+
+
+def _constructs_a_grouping_object(node: ast.AST) -> bool:
+    for sub in ast.walk(node):
+        if isinstance(sub, ast.Call):
+            f = sub.func
+            name = f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", None)
+            if name in _GROUPING_TYPES:
+                return True
+            # `StageWiring.for_batch(...)` reads os.getpid() and the caller's live knobs;
+            # at module level it would freeze both just as surely.
+            if name == "for_batch":
+                return True
+    return False
+
+
+def _targets(node: ast.Assign | ast.AnnAssign) -> list[str]:
+    if isinstance(node, ast.AnnAssign):
+        return [node.target.id] if isinstance(node.target, ast.Name) else []
+    return [t.id for t in node.targets if isinstance(t, ast.Name)]
+
+
+@pytest.mark.parametrize("rel", _STAGE_MODULES)
+def test_no_module_level_stage_wiring_or_context(rel):
+    """A `StageWiring`/`StageContext` built at import time freezes whatever env-backed knob
+    it carries — `model`, `effort`, `wall_clock_timeout` (`subagent_timeout()`) — which is
+    exactly the freeze #717 removed and #713's grouping could quietly reintroduce.
+
+    Lint cannot see this: bundling the parameters into a module constant DELETES the
+    PLR0913 suppression and passes `ruff check defender` while the knob stops moving. So
+    the structural guard is the control, and it names its two grandfathered exceptions."""
+    path = _defender_root() / rel
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    frozen = [
+        f"{rel}:{node.lineno}: {', '.join(_targets(node))}"
+        for node in tree.body
+        if isinstance(node, ast.Assign | ast.AnnAssign)
+        and node.value is not None
+        and _constructs_a_grouping_object(node.value)
+        and not set(_targets(node)) <= _GRANDFATHERED
+    ]
+    assert not frozen, (
+        "a stage wiring/context is constructed at MODULE level:\n  "
+        + "\n  ".join(frozen)
+        + "\nBuild it per call, at the spawn boundary — an import-time construction "
+        "freezes its env-backed knobs past monkeypatch.setenv (#717/#713)."
+    )
+
+
+@pytest.mark.parametrize("rel", _STAGE_MODULES[:-1])
+def test_stage_entry_points_take_no_passthrough_blob(rel):
+    """The grouping must not be bought with a bag. `**kwargs` or a bare `dict` parameter
+    would get every engine under ruff's `max-args = 8` while keeping the call untyped —
+    the same defect in a costume, and one the DI-seam fakes could not discriminate."""
+    path = _defender_root() / rel
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    offenders = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            continue
+        if not (node.name.startswith("_run_") or node.name in {
+            "run_stage", "build_stage_agent", "run_curator_stage", "run_author_stage",
+        }):
+            continue
+        if node.args.kwarg is not None:
+            offenders.append(f"{rel}:{node.lineno} {node.name}(**{node.args.kwarg.arg})")
+        for arg in (*node.args.args, *node.args.kwonlyargs):
+            ann = arg.annotation
+            if isinstance(ann, ast.Name) and ann.id == "dict":
+                offenders.append(f"{rel}:{node.lineno} {node.name}({arg.arg}: dict)")
+    assert not offenders, (
+        "a stage entry point takes an untyped passthrough:\n  " + "\n  ".join(offenders)
+        + "\nGroup the parameters into StageWiring/StageContext instead (#713)."
+    )

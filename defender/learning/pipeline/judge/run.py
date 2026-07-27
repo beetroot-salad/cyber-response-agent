@@ -103,8 +103,8 @@ def invoke_judge(wiring: JudgeWiring, run_dir: Path, actor_story_path: Path,
         salt=stage_salt,
     )
     return judge_fn(
-        wiring.prompt_path, wiring.model, wiring.effort, wiring.trace_name, wiring.label,
-        inv.user_text, learning_run_dir,
+        wiring,
+        user=inv.user_text, learning_run_dir=learning_run_dir,
         scope=_ToolScope(
             add_dir=inv.add_dirs, closed_ticket_read=wiring.closed_ticket_read,
         ),

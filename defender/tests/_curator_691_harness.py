@@ -43,6 +43,7 @@ from defender.learning.author.lesson_read import _tool_lesson_read  # noqa: E402
 from defender.learning.author.curator_engine import (  # noqa: E402
     CORPUS_AUTHOR_DEF,
     CuratorDeps,
+    ForwardCheckConfig,
 )
 from defender.learning.author.verify_forward.checks import FINDINGS_CHECK  # noqa: E402
 
@@ -126,9 +127,11 @@ def curator_deps(
     over ``bind``). Drive ``.policy`` through the real gates; the confine / membership / rm
     corrections surface as the policy's OWN decisions changing under the refactor."""
     return CuratorDeps.for_run(
-        run_dir, wt, corpus(wt, corpus_name),
-        check=FINDINGS_CHECK, runs_dir=wt / "runs",
-        pending=wt / "_pending" / "findings.jsonl", queued_ids=frozenset(), box=box,
+        run_dir,
+        wt,
+        corpus(wt, corpus_name),
+        cfg=ForwardCheckConfig(check=FINDINGS_CHECK, runs_dir=wt / "runs", pending=wt / "_pending" / "findings.jsonl", queued_ids=frozenset()),
+        box=box,
     )
 
 

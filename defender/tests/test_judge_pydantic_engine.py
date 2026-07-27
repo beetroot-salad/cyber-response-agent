@@ -16,6 +16,7 @@ pytest.importorskip("pydantic_ai")
 
 from pydantic_ai.models import override_allow_model_requests  # noqa: E402
 
+from defender.learning.core.config import StageWiring  # noqa: E402
 from defender.learning.core import subagents  # noqa: E402
 from defender.learning.core.directions import ADVERSARIAL_WIRING  # noqa: E402
 from defender.learning.pipeline.judge import engine_pydantic  # noqa: E402
@@ -71,8 +72,15 @@ def test_run_judge_pydantic_returns_yaml_and_writes_trace(tmp_path):
     fn = _replay([{"text": _YAML}])
     with override_allow_model_requests(False):
         out = _run_judge_pydantic(
-            _prompt(tmp_path), "claude-sonnet-4-6", "low", "judge_trace.jsonl", "judge",
-            "score this", lrd, scope=_ToolScope(add_dir=[]), make_model=_fake_model(fn),
+            StageWiring(
+                prompt_path=_prompt(tmp_path), model="claude-sonnet-4-6",
+                effort="low", trace_name="judge_trace.jsonl",
+                label="judge",
+            ),
+            user="score this",
+            learning_run_dir=lrd,
+            scope=_ToolScope(add_dir=[]),
+            make_model=_fake_model(fn),
         )
     assert out == _YAML
     assert (lrd / "judge_trace.jsonl").is_file()
@@ -93,8 +101,13 @@ def test_run_judge_pydantic_reads_gather_raw_through_read_roots(tmp_path):
     )
     with override_allow_model_requests(False):
         out = _run_judge_pydantic(
-            _prompt(tmp_path), "claude-sonnet-4-6", "low", "judge_trace.jsonl", "judge",
-            "score this", lrd,
+            StageWiring(
+                prompt_path=_prompt(tmp_path), model="claude-sonnet-4-6",
+                effort="low", trace_name="judge_trace.jsonl",
+                label="judge",
+            ),
+            user="score this",
+            learning_run_dir=lrd,
             scope=_ToolScope(add_dir=[gather_raw]),
             make_model=_fake_model(fn),
         )
@@ -119,8 +132,14 @@ def test_run_judge_pydantic_returns_raw_preamble_untrimmed(tmp_path):
     fn = _replay([{"text": "Here is my analysis.\n\noutcome: refuted\ndefender_findings: []\n"}])
     with override_allow_model_requests(False):
         out = _run_judge_pydantic(
-            _prompt(tmp_path), "claude-sonnet-4-6", "low", "judge_benign_trace.jsonl",
-            "judge-benign", "score this", lrd, scope=_ToolScope(add_dir=[]),
+            StageWiring(
+                prompt_path=_prompt(tmp_path), model="claude-sonnet-4-6",
+                effort="low", trace_name="judge_benign_trace.jsonl",
+                label="judge-benign",
+            ),
+            user="score this",
+            learning_run_dir=lrd,
+            scope=_ToolScope(add_dir=[]),
             make_model=_fake_model(fn),
         )
     assert out.startswith("Here is my analysis.")
@@ -138,8 +157,14 @@ def test_pydantic_engine_preamble_survives_end_to_end_via_shared_path(tmp_path):
                            "outcome: refuted\ndefender_findings: []\n"}])
     with override_allow_model_requests(False):
         out = _run_judge_pydantic(
-            _prompt(tmp_path), "claude-sonnet-4-6", "low", "judge_benign_trace.jsonl",
-            "judge-benign", "score this", lrd, scope=_ToolScope(add_dir=[]),
+            StageWiring(
+                prompt_path=_prompt(tmp_path), model="claude-sonnet-4-6",
+                effort="low", trace_name="judge_benign_trace.jsonl",
+                label="judge-benign",
+            ),
+            user="score this",
+            learning_run_dir=lrd,
+            scope=_ToolScope(add_dir=[]),
             make_model=_fake_model(fn),
         )
     v = parse_judge_verdict(out, case_id="c", direction="benign")
@@ -153,8 +178,11 @@ def test_build_judge_agent_applies_effort_via_provider(monkeypatch):
     logger = observe.RequestLogger(Path("/tmp/does-not-need-to-exist-judge-effort.jsonl"))
     try:
         agent = engine_pydantic.build_judge_agent(
-            _prompt_path := Path(__file__),
-            "claude-sonnet-4-6", "low", logger, "judge",
+            StageWiring(
+                prompt_path=Path(__file__), model="claude-sonnet-4-6", effort="low",
+                trace_name="judge_trace.jsonl", label="judge",
+            ),
+            logger,
         )
     finally:
         logger.close()

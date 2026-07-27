@@ -5,6 +5,7 @@ import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from defender._clock import now_iso  # noqa: F401 — re-export: core.config stays the loop's import surface
 from defender._env import env_int, env_str
@@ -94,7 +95,19 @@ class LoopPaths(DefenderPaths):
 
     @property
     def findings_lock_file(self) -> Path:
+        """The lessons drain's READ-side lock, held while `read_batch` slurps the queue.
+
+        Distinct from `findings.lock` below, which is the drain-wide queue lock the batch
+        envelope takes. Two locks, two jobs — do not fold this into the channel."""
         return self.pending_dir / ".findings.lock"
+
+    @property
+    def findings(self) -> QueueChannel:
+        return QueueChannel(
+            file=self.pending_file,
+            consumed=self.pending_dir / "consumed.jsonl",
+            lock=self.pending_dir / ".lock",
+        )
 
     @property
     def actor_observations(self) -> QueueChannel:
@@ -236,15 +249,68 @@ def benign_judge_effort() -> str:
 
 
 @dataclass(frozen=True)
-class JudgeWiring:
+class StageWiring:
+    """How one in-process stage is wired: the five fields every stage engine used to
+    re-declare and hand down to `run_stage` unchanged (#713).
+
+    Deliberately carries NO limits. `request_limit` and `wall_clock_timeout` live on
+    `StageContext` instead, because a wiring is allowed to be a module constant (the two
+    `JudgeWiring`s in `directions.py` are) and `subagent_timeout()` is env-backed — freezing
+    it into an import-time constant is the exact regression #717 closed. Anything env-backed
+    belongs on the per-call context, not here."""
 
     prompt_path: Path
     model: str
-    effort: str
+    effort: str | None
     trace_name: str
     label: str
+
+    @classmethod
+    def for_batch(
+        cls, prompt_path: Path, model: str, effort: str | None,
+        *, batch_id: str, label: str,
+    ) -> StageWiring:
+        """The per-spawn wiring both drain entry points build (#713).
+
+        The trace name is unique on (batch_id, pid): `batch_id` separates concurrent spawns
+        for DIFFERENT runs, `pid` separates concurrent drain PROCESSES sharing one run dir.
+        Both curators derived this identically and separately before; it lives here now."""
+        return cls(
+            prompt_path=prompt_path, model=model, effort=effort,
+            trace_name=f"{batch_id}.{os.getpid()}.trace.jsonl",
+            label=f"{label}:{batch_id}",
+        )
+
+
+@dataclass(frozen=True)
+class JudgeWiring(StageWiring):
+    """The judge's wiring: the shared five plus its two per-leg knobs. Field order is
+    base-then-own, which is the order `directions.py` and the test builders already pass
+    positionally."""
+
     comparison_dirname: str
     closed_ticket_read: bool = False
+
+
+@dataclass(frozen=True)
+class StageContext:
+    """What one spawn of a stage is about: the per-call transport `run_stage` consumes.
+
+    Built per call, never a module constant — `wall_clock_timeout` reaches
+    `subagent_timeout()` and `request_limit` its own env knob, and an import-time
+    construction would freeze both (#717). `tests/test_loop_config_env.py` enforces this
+    structurally.
+
+    `repo_root` is optional because only the stages that bind a corpus or a skills tree
+    (curator, lead author) need one; the pure-prediction stages bind off the run dir alone."""
+
+    learning_run_dir: Path
+    user: str
+    request_limit: int
+    wall_clock_timeout: int
+    repo_root: Path | None = None
+    box: Any = None
+    salt: str | None = None
 
 
 def subagent_timeout() -> int:

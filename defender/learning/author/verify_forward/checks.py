@@ -44,11 +44,13 @@ def _verify(ctx: CheckContext, user: str, source_run_dir: Path, *, salt: str) ->
     stem = ctx.lesson_path.stem
     prefix = ctx.check.error_prefix
     raw = ctx.run_verify(
-        prompt_path=ctx.check.prompt_path,
-        model=config.verifier_model(),
-        effort=config.verifier_effort(),
-        trace_name=f"{prefix}.{stem}.{ctx.check_index}.trace.jsonl",
-        label=f"{prefix}:{stem}",
+        config.StageWiring(
+            prompt_path=ctx.check.prompt_path,
+            model=config.verifier_model(),
+            effort=config.verifier_effort(),
+            trace_name=f"{prefix}.{stem}.{ctx.check_index}.trace.jsonl",
+            label=f"{prefix}:{stem}",
+        ),
         user=user,
         source_run_dir=source_run_dir,
         defender_dir=ctx.repo_root / "defender",

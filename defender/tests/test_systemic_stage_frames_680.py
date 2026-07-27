@@ -18,6 +18,7 @@ from types import SimpleNamespace
 
 from pydantic_ai.models import override_allow_model_requests
 
+from defender.learning.core.config import StageContext, StageWiring  # noqa: E402
 from defender.agents import JUDGE_DEF, MAIN_DEF, ORACLE_DEF
 from defender.learning.core import config
 from defender.learning.pipeline import _pydantic_stage
@@ -620,7 +621,7 @@ def test_d7_one_stage_salt_reaches_frames_and_tool_wraps(tmp_path):
         assert salt is not None, (
             "the Judge model seam must receive the demand's stage salt"
         )
-        seen["prompt"] = args[5]
+        seen["prompt"] = kwargs["user"]
         comparison = learning / "comparison"
         artifact = comparison / "artifact.md"
         artifact.parent.mkdir(exist_ok=True)
@@ -680,7 +681,7 @@ def test_d8_stage_salt_is_never_the_run_salt(tmp_path):
         assert salt is not None, (
             "the oracle model seam must receive a per-invocation stage salt"
         )
-        seen.append((args[5], salt))
+        seen.append((kwargs["user"], salt))
         return "events: []"
 
     invoke_oracle_lead(
@@ -837,16 +838,20 @@ def test_d18_run_stage_still_accepts_prejoined_user_string(tmp_path):
     with override_allow_model_requests(False):
         out = _pydantic_stage.run_stage(
             stage="oracle",
-            prompt_path=prompt,
-            model="test",
-            effort=None,
-            trace_name="trace.jsonl",
-            label="oracle:test",
-            user="prejoined user string",
-            learning_run_dir=run,
-            wall_clock_timeout=config.subagent_timeout(),
+            wiring=StageWiring(
+                prompt_path=prompt,
+                model="test",
+                effort=None,
+                trace_name="trace.jsonl",
+                label="oracle:test",
+            ),
+            ctx=StageContext(
+                learning_run_dir=run,
+                user="prejoined user string",
+                request_limit=2,
+                wall_clock_timeout=config.subagent_timeout(),
+            ),
             deps=deps,
-            request_limit=2,
             make_model=fake_model(replay),
         )
     assert out == "done"

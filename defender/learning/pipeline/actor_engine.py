@@ -5,7 +5,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, ClassVar
 
-from defender.learning.core.config import REPO_ROOT, actor_effort, actor_model, subagent_timeout
+from defender.learning.core.config import (
+    REPO_ROOT,
+    StageContext,
+    StageWiring,
+    actor_effort,
+    actor_model,
+    subagent_timeout,
+)
 from defender.learning.pipeline._pydantic_stage import run_stage
 from defender.runtime import providers
 from defender.runtime.agent_definition import (
@@ -75,20 +82,18 @@ ACTOR_DEF = AgentDefinition(
 )
 
 
-def _run_actor_pydantic(  # noqa: PLR0913 — the actor_fn protocol signature plus the make_model test seam; every param is load-bearing per-call state
-    prompt_path: Path,
-    model: str,
-    effort: str,
-    trace_name: str,
-    label: str,
+def _run_actor_pydantic(
+    wiring: StageWiring,
+    *,
     user: str,
     learning_run_dir: Path,
-    *,
     scope: _ActorScope,
     salt: str | None = None,
     box: Any = None,
     make_model: MakeModel = providers.build_for_effort,
 ) -> str:
+    """The actor's limits are stage-fixed, so the context is built HERE rather than taken
+    from the caller — `subagent_timeout()` is read at spawn, never frozen at import (#717)."""
     deps = bind(
         ACTOR_DEF, learning_run_dir,
         scope=RunScope(scripts=scope.scripts, read_confine=scope.read_confine),
@@ -96,9 +101,12 @@ def _run_actor_pydantic(  # noqa: PLR0913 — the actor_fn protocol signature pl
     )
     return run_stage(
         stage="actor",
-        prompt_path=prompt_path, model=model, effort=effort,
-        trace_name=trace_name, label=label, user=user,
-        learning_run_dir=learning_run_dir, deps=deps,
-        request_limit=ACTOR_REQUEST_LIMIT, make_model=make_model,
-        wall_clock_timeout=subagent_timeout(),
+        wiring=wiring,
+        ctx=StageContext(
+            learning_run_dir=learning_run_dir, user=user,
+            request_limit=ACTOR_REQUEST_LIMIT,
+            wall_clock_timeout=subagent_timeout(),
+            box=box, salt=salt,
+        ),
+        deps=deps, make_model=make_model,
     )

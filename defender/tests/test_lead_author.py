@@ -807,6 +807,15 @@ def _capture_engine(monkeypatch, *, rc: int = 0, raise_exc=None):
 
     def _fake(**kwargs):
         cap.update(kwargs)
+        # #713: the spawn now forwards a StageWiring/StageContext pair. Flatten the fields
+        # the cases assert on back onto `cap`, so each case still names one knob.
+        if (w := kwargs.get("wiring")) is not None:
+            cap.update(system_prompt_file=w.prompt_path, model=w.model,
+                       effort=w.effort, trace_name=w.trace_name, label=w.label)
+        if (c := kwargs.get("ctx")) is not None:
+            cap.update(user_prompt=c.user, learning_run_dir=c.learning_run_dir,
+                       repo_root=c.repo_root, request_limit=c.request_limit,
+                       timeout=c.wall_clock_timeout, box=c.box, salt=c.salt)
         if raise_exc is not None:
             raise raise_exc
         return rc
@@ -1002,11 +1011,15 @@ def test_invoke_agent_wires_engine_kwargs(run_dir: Path, tmp_path: Path, monkeyp
     prompt, the run-dir-named batch id, the injected repo_root (distinguishing it from the
     pitfalls spawn), and the run_dir as the learning trace anchor. The model/effort/request_limit
     default INSIDE run_author_stage from config (pinned in test_lead_author_engine), so they are
-    not forwarded here — only the per-spawn wiring is."""
+    not forwarded here — only the per-spawn wiring is.
+
+    Since #713 the batch id is no longer its own engine kwarg: it is carried by the
+    StageWiring the spawn builds, so it stays observable on the trace name and label."""
     cap = _capture_engine(monkeypatch)
     lead_author.invoke_agent(run_dir, [], repo_root=tmp_path)
     assert cap["system_prompt_file"] == lead_author.LEAD_AUTHOR_PROMPT
-    assert cap["batch_id"] == run_dir.name
+    assert cap["trace_name"].startswith(f"{run_dir.name}.")
+    assert cap["label"].endswith(f":{run_dir.name}")
     assert cap["repo_root"] == tmp_path
     assert cap["learning_run_dir"] == run_dir
 
