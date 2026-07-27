@@ -18,6 +18,7 @@ from pydantic_ai.exceptions import UsageLimitExceeded
 from pydantic_ai.messages import ModelResponse
 from pydantic_ai.usage import UsageLimits
 
+from . import compaction
 from . import observe
 from . import orient
 from . import permission
@@ -38,6 +39,7 @@ from .tools import (
 from .verbs import ModuleVerbRegistry
 
 from defender._env import env_bool
+from defender._run_paths import RunPaths
 from defender.hooks.budget_enforcer import (
     DEFAULT_LIMITS,
     BudgetKill,
@@ -113,9 +115,26 @@ def _account_executed_call(deps: AgentDeps, tool_name: str, *, active: bool, lim
         print(f"[run.py] budget accounting skipped: {e!r}", file=sys.stderr)
 
 
-def _make_hooks(
+def _stamp_duration(store: Any, session_id: str | None, duration_ms: float) -> None:
+    """Write the MEASURED latency into the render's pending stamp.
+
+    `selection.render` opens the stamp for the request it is preparing, but that
+    request's duration only exists once the model has answered — here. The stamp is
+    consumed by the next round's `ingest`, which runs after this hook, so patching it
+    in place is what puts a real number in `message.duration_ms` instead of the
+    placeholder the renderer had to leave."""
+    if store is None or session_id is None:
+        return
+    pending = getattr(store, "pending_stamps", None)
+    if not pending or session_id not in pending:
+        return
+    run_step, _placeholder, wire_sha = pending[session_id]
+    pending[session_id] = (run_step, duration_ms, wire_sha)
+
+
+def _make_hooks(  # noqa: PLR0913 — the hook set's full wiring: logging, budget, and the store stamp
     logger: observe.RequestLogger, agent_id: str, *, enforce: bool, limits: dict = DEFAULT_LIMITS,
-    session_id: str | None = None,
+    session_id: str | None = None, store: Any = None,
 ) -> Hooks[Any]:
     hooks = Hooks()
 
@@ -135,12 +154,14 @@ def _make_hooks(
     async def _log_request(ctx, *, request_context, handler):  # noqa: ANN001
         t0 = time.time()
         resp = await handler(request_context)
+        duration_ms = (time.time() - t0) * 1000.0
         try:
+            _stamp_duration(store, session_id, duration_ms)
             logger.log(
                 request_messages=request_context.messages,
                 response=resp,
                 run_step=int(getattr(ctx, "run_step", 0) or 0),
-                duration_ms=(time.time() - t0) * 1000.0,
+                duration_ms=duration_ms,
                 agent_id=agent_id,
                 session_id=session_id,
             )
@@ -172,11 +193,12 @@ def build_agent_core(  # noqa: PLR0913 — the single build site's config + 3 DI
     verbs: Any = None,
     limits: dict = DEFAULT_LIMITS,
     session_id: str | None = None,
+    store: Any = None,
 ) -> Agent[Any, str]:
     built = make_model(defn.model(), defn.effort)
     capabilities: list[Any] = [
         _make_hooks(logger, agent_id, enforce=defn.budget_enforced, limits=limits,
-                    session_id=session_id),
+                    session_id=session_id, store=store),
         *extra_capabilities,
     ]
     if defn.tools.query:
@@ -288,6 +310,30 @@ def _summary_pointers(run_dir: Path) -> dict[str, str]:
     return {p.stem: str(p) for p in sorted(d.glob("*.md"))}
 
 
+def _fold_decision(run_dir: Path) -> tuple[int, str] | None:
+    """WHEN to fold, and what the frontier carries — `None` for "not yet".
+
+    `compaction.fold_boundary` is the same trigger the retired in-driver glue used: the
+    highest CONTIGUOUS closed investigation loop that produced a resolved lead, and `0`
+    until one closes. That gate is the whole policy — without it a fold fires on every
+    round, and since the boundary it keys on advances every round too, each one mints a
+    FRESH frontier and orphans the turns before it. The model would then re-enter every
+    round having lost its own tool results (#705's port dropped this trigger and nothing
+    replaced it; `fold_boundary` is FK10's open decision, settled here on the loop
+    number so one closed loop maps to exactly one frontier row).
+
+    The loop number, not a row count, is the boundary: it is stable across the rounds
+    WITHIN a loop, so `_fold_impl`'s reuse lookup hits and the same frontier is reused
+    until the next loop closes.
+    """
+    inv = RunPaths(run_dir).investigation
+    inv_text = inv.read_text(encoding="utf-8") if inv.is_file() else ""
+    fold_through = compaction.fold_boundary(inv_text)
+    if fold_through <= 0:
+        return None
+    return fold_through, compaction.frontier_text(inv_text, fold_through)
+
+
 def _make_store_render_processor(store: Any, session_id: str, *, fold: bool):
     async def process(ctx: RunContext[AgentDeps], messages: list) -> list:
         # The framework appends this round's own request to state history and only
@@ -302,9 +348,16 @@ def _make_store_render_processor(store: Any, session_id: str, *, fold: bool):
             selection.ingest(store, session_id, messages[:-1], agent_id="main")
             return messages
         selection.ingest(store, session_id, messages, agent_id="main")
+        decision = _fold_decision(ctx.deps.run_dir) if fold else None
         return selection.render(
-            store, session_id, messages, agent_id="main", fold=fold,
-            run_step=int(getattr(ctx, "run_step", 0) or 0), duration_ms=0.0,
+            store, session_id, messages, agent_id="main", fold=decision is not None,
+            boundary=decision[0] if decision else None,
+            text=decision[1] if decision else None,
+            run_step=int(getattr(ctx, "run_step", 0) or 0),
+            # The latency of the request this render is PREPARING cannot be known here;
+            # `_log_request` measures it and patches this same pending stamp before the
+            # next round's ingest consumes it (`_stamp_duration`).
+            duration_ms=None,
             run_id=getattr(ctx, "run_id", None), conversation_id=getattr(ctx, "conversation_id", None),
         )
 
@@ -313,6 +366,16 @@ def _make_store_render_processor(store: Any, session_id: str, *, fold: bool):
 
 def _make_gather_recorder(store: Any, session_id: str, agent_id: str):
     async def process(ctx: RunContext[GatherDeps], messages: list) -> list:
+        # Same withholding rule as the main processor: pydantic_ai appends the round's own
+        # continuation to history BEFORE it checks the request limit, so on the doomed
+        # round `messages` already ends with a request that will never be sent. Committing
+        # it would leave a phantom, never-executed round in this gather's session — and
+        # unlike main there is no run-end flush on this side to reconcile it afterwards.
+        usage = getattr(ctx, "usage", None)
+        requests = int(getattr(usage, "requests", 0) or 0)
+        if requests >= GATHER_REQUEST_LIMIT:
+            selection.ingest(store, session_id, messages[:-1], agent_id=agent_id)
+            return messages
         selection.ingest(store, session_id, messages, agent_id=agent_id)
         return messages
 
@@ -355,6 +418,7 @@ def build_agent(  # noqa: PLR0913 — composition root: config + DI seams + the 
         make_model=make_model,
         limits=limits,
         session_id=session_id,
+        store=store,
     )
 
     def _build_gather(agent_id: str) -> Agent[GatherDeps, str]:
@@ -453,7 +517,11 @@ async def _drive_agent(
         print(f"[run.py] {e}; writing partial trace", file=sys.stderr)
         truncated_by = "budget"
         exit_reason = "BudgetKill"
-    except (sqlite3.Error, session_store.StoreAppendError) as e:
+    except (sqlite3.Error, session_store.StoreError) as e:
+        # StoreError, not StoreAppendError: PayloadNotRepresentable / IngestTailUnderflow
+        # / CyclicParentChain / UnknownSchemaVersion all reach here from inside the
+        # ProcessHistory hook, and any one of them escaping takes the whole run.py
+        # process down instead of writing the partial trace this handler exists for.
         print(f"[run.py] store append failed ({e!r}); stopping the run", file=sys.stderr)
         truncated_by = "store"
         exit_reason = "StoreAppendError"

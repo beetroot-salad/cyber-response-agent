@@ -7,6 +7,7 @@ reader (`send` / `analysis` / `actor`) that walks the chain and projects it.
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import math
@@ -35,23 +36,33 @@ CASE_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
 _CONFIG_REQUIRED_FIELDS = ("models", "corpus", "prompts", "versions")
 
 
-class StoreAppendError(Exception):
+class StoreError(Exception):
+    """Base for every failure this store raises on its own behalf.
+
+    The driver catches THIS (alongside `sqlite3.Error`) to end a run through the handled
+    `truncated_by` exit. A new store exception that does not inherit from it propagates
+    out of the `ProcessHistory` hook and takes the whole `run.py` process down instead —
+    which is what a `PayloadNotRepresentable` from one NaN in a tool result used to do.
+    """
+
+
+class StoreAppendError(StoreError):
     """An append was refused at the store's own boundary."""
 
 
-class UnknownSchemaVersion(Exception):
+class UnknownSchemaVersion(StoreError):
     """The store's `PRAGMA user_version` is not one the reader recognizes."""
 
 
-class PayloadNotRepresentable(Exception):
+class PayloadNotRepresentable(StoreError):
     """A payload value `dump_python` would silently coerce; refused at append."""
 
 
-class PayloadSchemaSkew(Exception):
+class PayloadSchemaSkew(StoreError):
     """A stored payload carries a field the installed adapter does not recognize."""
 
 
-class CyclicParentChain(Exception):
+class CyclicParentChain(StoreError):
     """The `parent_id` chain loops; the walk refuses to follow it forever."""
 
 
@@ -59,11 +70,11 @@ class IncompleteConfig(Exception):
     """A config dict is missing one of the four required reproducibility fields."""
 
 
-class UnknownReadRole(Exception):
+class UnknownReadRole(StoreError):
     """`hydrate` was asked for a role outside the closed `{send, analysis, actor}` set."""
 
 
-class IngestTailUnderflow(Exception):
+class IngestTailUnderflow(StoreError):
     """A live message list is shorter than the session's last recorded render length."""
 
 
@@ -81,6 +92,8 @@ CREATE TABLE IF NOT EXISTS session (
     session_id TEXT PRIMARY KEY,
     case_id TEXT NOT NULL,
     parent_session_id TEXT REFERENCES session(session_id),
+    agent_id TEXT,
+    fork_at_message_id INTEGER REFERENCES message(id),
     truncated_by TEXT,
     last_render_len INTEGER
 ) STRICT;
@@ -182,29 +195,48 @@ def _connect(path: Path) -> sqlite3.Connection:
 
 @dataclass
 class StoreHandle:
+    """One handle, ONE `sqlite3.Connection`, shared by the main agent's session and every
+    concurrently-dispatched gather sub-agent's session.
+
+    That is safe only because `append()`'s `BEGIN IMMEDIATE … COMMIT` block contains no
+    `await`: pydantic_ai dispatches parallel `gather` calls as asyncio tasks on one
+    thread, so without a suspension point inside the transaction two tasks cannot
+    interleave halfway through one. **Adding any `await` inside that block reintroduces
+    interleaved-transaction corruption** — give each session its own connection first.
+    """
+
     path: Path
     connection: sqlite3.Connection
     case_id: str
     pending_stamps: dict = field(default_factory=dict, repr=False, compare=False)
 
-    def new_session(self, agent_id: str) -> str:  # noqa: ARG002 — part of the contract
+    def new_session(self, agent_id: str) -> str:
         session_id = uuid.uuid4().hex
         self.connection.execute(
-            "INSERT INTO session (session_id, case_id, parent_session_id, truncated_by, "
-            "last_render_len) VALUES (?, ?, NULL, NULL, NULL)",
-            (session_id, self.case_id),
+            "INSERT INTO session (session_id, case_id, parent_session_id, agent_id, "
+            "fork_at_message_id, truncated_by, last_render_len) "
+            "VALUES (?, ?, NULL, ?, NULL, NULL, NULL)",
+            (session_id, self.case_id, agent_id),
         )
         return session_id
 
-    def fork(self, session_id: str, at_message_id: int) -> str:  # noqa: ARG002
+    def fork(self, session_id: str, at_message_id: int) -> str:
+        """Open a session branching from `session_id` at `at_message_id`.
+
+        The branch point is RECORDED, so the fork's first `append` parents onto it
+        without the caller having to re-supply the same id (`_session_tip`). Passing an
+        explicit `parent_id` still wins."""
         new_id = uuid.uuid4().hex
         row = self.connection.execute(
-            "SELECT case_id FROM session WHERE session_id = ?", (session_id,)).fetchone()
+            "SELECT case_id, agent_id FROM session WHERE session_id = ?",
+            (session_id,)).fetchone()
         case_id = row[0] if row else self.case_id
+        agent_id = row[1] if row else None
         self.connection.execute(
-            "INSERT INTO session (session_id, case_id, parent_session_id, truncated_by, "
-            "last_render_len) VALUES (?, ?, ?, NULL, NULL)",
-            (new_id, case_id, session_id),
+            "INSERT INTO session (session_id, case_id, parent_session_id, agent_id, "
+            "fork_at_message_id, truncated_by, last_render_len) "
+            "VALUES (?, ?, ?, ?, ?, NULL, NULL)",
+            (new_id, case_id, session_id, agent_id, at_message_id),
         )
         return new_id
 
@@ -222,6 +254,7 @@ class StoreHandle:
             if len(messages) != 1:
                 raise StoreAppendError(
                     "an explicit seq may only be given for a single-message append")
+        _validate_duration_ms(duration_ms)
         for m in messages:
             bad = _find_nonrepresentable(m)
             if bad is _TOO_DEEP:
@@ -232,38 +265,31 @@ class StoreHandle:
 
         conn = self.connection
         conn.execute("BEGIN IMMEDIATE")
+        committed = False
         try:
             ids: list[int] = []
             pid = parent_id if parent_id is not None else _session_tip(conn, session_id)
             for m in messages:
-                kind = "request" if isinstance(m, ModelRequest) else "response"
-                tool_name = _tool_name(m)
                 row_seq = seq if seq is not None else _next_seq(
                     conn, session_id, agent_id, synthesized)
-                cur = conn.execute(
-                    "INSERT INTO message (session_id, agent_id, parent_id, seq, synthesized, "
-                    "kind, tool_name, run_step, duration_ms, wire_sha) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,?)",
-                    (session_id, agent_id, pid, row_seq, int(synthesized), kind, tool_name,
-                     run_step, duration_ms, wire_sha),
+                pid = _insert_message(
+                    conn, m, session_id=session_id, agent_id=agent_id, parent_id=pid,
+                    seq=row_seq, synthesized=synthesized, run_step=run_step,
+                    duration_ms=duration_ms, wire_sha=wire_sha,
                 )
-                mid = cur.lastrowid
-                if mid is None:
-                    raise StoreAppendError("INSERT produced no rowid")
-                dumped = ModelMessagesTypeAdapter.dump_python([m], mode="json")[0]
-                payload_text = json.dumps(dumped, ensure_ascii=PAYLOAD_ENSURE_ASCII)
-                payload_sha = hashlib.sha256(payload_text.encode("utf-8")).hexdigest()
-                conn.execute(
-                    "INSERT INTO message_payload (message_id, payload, payload_sha) "
-                    "VALUES (?,?,?)",
-                    (mid, payload_text, payload_sha),
-                )
-                ids.append(mid)
-                pid = mid
+                ids.append(pid)
             conn.execute("COMMIT")
+            committed = True
             conn.execute("SELECT 1")
         except BaseException:
-            conn.execute("ROLLBACK")
+            # Only roll back a transaction that is still open. Past COMMIT there is none,
+            # and `ROLLBACK` with no active transaction itself raises
+            # (sqlite3.OperationalError) — which would replace whatever actually brought
+            # us here with an unrelated error, and get the run classified as a routine
+            # "store" truncation even though the rows are already durable.
+            if not committed:
+                with contextlib.suppress(sqlite3.Error):
+                    conn.execute("ROLLBACK")
             raise
         return ids
 
@@ -296,17 +322,87 @@ class StoreHandle:
         self.connection.close()
 
 
+def _walk_parents(conn: sqlite3.Connection, tip: int) -> list[int]:
+    """Tip-to-root row ids, refusing a cyclic chain. The one walk both the reader
+    (`path_row_ids`) and the writer (`_session_tip`) go through, so a corrupted chain
+    cannot stay invisible at write time and surface only later, at read time."""
+    ids: list[int] = []
+    seen: set[int] = set()
+    current: int | None = tip
+    while current is not None:
+        if current in seen:
+            raise CyclicParentChain(f"cycle detected at message {current}")
+        seen.add(current)
+        ids.append(current)
+        row = conn.execute(
+            "SELECT parent_id FROM message WHERE id = ?", (current,)).fetchone()
+        current = row[0] if row else None
+    return ids
+
+
 def _session_tip(conn: sqlite3.Connection, session_id: str) -> int | None:
+    """The implicit append parent: this session's own last row, or — for a fork that has
+    none yet — the branch point `fork()` recorded."""
     row = conn.execute(
         "SELECT id FROM message WHERE session_id = ? ORDER BY id DESC LIMIT 1",
         (session_id,),
     ).fetchone()
-    return row[0] if row else None
+    if row is not None:
+        _walk_parents(conn, row[0])
+        return row[0]
+    forked = conn.execute(
+        "SELECT fork_at_message_id FROM session WHERE session_id = ?",
+        (session_id,),
+    ).fetchone()
+    return forked[0] if forked else None
+
+
+def _insert_message(  # noqa: PLR0913 — one row's full coordinate set, from append()
+    conn: sqlite3.Connection, message: Any, *, session_id: str, agent_id: str,
+    parent_id: int | None, seq: int, synthesized: bool, run_step: int | None,
+    duration_ms: float | None, wire_sha: str | None,
+) -> int:
+    """One `message` row plus its `message_payload` row; returns the new row id.
+    Caller owns the transaction."""
+    kind = "request" if isinstance(message, ModelRequest) else "response"
+    cur = conn.execute(
+        "INSERT INTO message (session_id, agent_id, parent_id, seq, synthesized, "
+        "kind, tool_name, run_step, duration_ms, wire_sha) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?)",
+        (session_id, agent_id, parent_id, seq, int(synthesized), kind,
+         _tool_name(message), run_step, duration_ms, wire_sha),
+    )
+    mid = cur.lastrowid
+    if mid is None:
+        raise StoreAppendError("INSERT produced no rowid")
+    dumped = ModelMessagesTypeAdapter.dump_python([message], mode="json")[0]
+    payload_text = json.dumps(dumped, ensure_ascii=PAYLOAD_ENSURE_ASCII)
+    payload_sha = hashlib.sha256(payload_text.encode("utf-8")).hexdigest()
+    conn.execute(
+        "INSERT INTO message_payload (message_id, payload, payload_sha) VALUES (?,?,?)",
+        (mid, payload_text, payload_sha),
+    )
+    return mid
 
 
 def _validate_seq(seq: Any) -> None:
     if isinstance(seq, bool) or not isinstance(seq, int):
         raise StoreAppendError(f"seq must be a real int, got {seq!r}")
+
+
+def _validate_duration_ms(duration_ms: Any) -> None:
+    """`duration_ms` is bound straight into the INSERT, so it never meets
+    `_find_nonrepresentable` — the isfinite discipline every other float in the row is
+    held to. Without this check SQLite silently stores a NaN as SQL NULL (defeating the
+    discipline two lines away) and an inf round-trips verbatim, later serializing to the
+    bare token `Infinity`, which is not valid JSON for any strict downstream consumer."""
+    if duration_ms is None:
+        return
+    if isinstance(duration_ms, bool) or not isinstance(duration_ms, (int, float)):
+        raise PayloadNotRepresentable(
+            f"duration_ms must be a real number, got {duration_ms!r}")
+    if not math.isfinite(duration_ms):
+        raise PayloadNotRepresentable(f"cannot store {duration_ms!r} as duration_ms")
 
 
 def _next_seq(conn: sqlite3.Connection, session_id: str, agent_id: str, synthesized: bool) -> int:
@@ -319,10 +415,18 @@ def _next_seq(conn: sqlite3.Connection, session_id: str, agent_id: str, synthesi
 
 
 def _tool_name(message: Any) -> str | None:
+    """Every distinct tool named by the message, comma-joined in first-seen order.
+
+    One response legitimately carries several tool calls — the `gather` tool's own
+    docstring tells the model to "issue multiple gather calls in one turn to dispatch
+    sibling leads in parallel". Returning only the first would make the `actor`
+    projection disagree with `observe.write_trace`, which re-derives the same fact from
+    `message.parts` and lists all of them. Single-tool messages are unaffected."""
+    names: list[str] = []
     for part in getattr(message, "parts", []):
-        if isinstance(part, (ToolCallPart, ToolReturnPart)):
-            return part.tool_name
-    return None
+        if isinstance(part, (ToolCallPart, ToolReturnPart)) and part.tool_name not in names:
+            names.append(part.tool_name)
+    return ",".join(names) if names else None
 
 
 def _is_nonrepresentable_leaf(obj: Any) -> bool:
@@ -380,12 +484,29 @@ def store_path_for(case_id: str, *, runs_base: Path) -> Path:
     return runs_base.parent / "sessions" / f"{case_id}.db"
 
 
+#: Columns added to `session` after the table's first shipped shape. `CREATE TABLE IF NOT
+#: EXISTS` is a no-op against a file that already has the old table, so an existing store
+#: would otherwise keep the old columns and every read of a new one would raise.
+_SESSION_ADDED_COLUMNS = (
+    ("agent_id", "TEXT"),
+    ("fork_at_message_id", "INTEGER REFERENCES message(id)"),
+)
+
+
+def _migrate_session_columns(conn: sqlite3.Connection) -> None:
+    have = {r[1] for r in conn.execute("PRAGMA table_info(session)").fetchall()}
+    for name, decl in _SESSION_ADDED_COLUMNS:
+        if name not in have:
+            conn.execute(f"ALTER TABLE session ADD COLUMN {name} {decl}")
+
+
 def open_store(*, case_id: str, runs_base: Path) -> StoreHandle:
     path = store_path_for(case_id, runs_base=runs_base)
     path.parent.mkdir(parents=True, exist_ok=True)
     fresh = not path.exists()
     conn = _connect(path)
     conn.executescript(DDL)
+    _migrate_session_columns(conn)
     if fresh:
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     return StoreHandle(path=path, connection=conn, case_id=case_id)
@@ -427,17 +548,7 @@ def path_row_ids(store: Any, session_id: str) -> list[int]:
     ).fetchone()
     if tip is None:
         return []
-    ids: list[int] = []
-    seen: set[int] = set()
-    current: int | None = tip[0]
-    while current is not None:
-        if current in seen:
-            raise CyclicParentChain(f"cycle detected at message {current}")
-        seen.add(current)
-        ids.append(current)
-        row = conn.execute(
-            "SELECT parent_id FROM message WHERE id = ?", (current,)).fetchone()
-        current = row[0] if row else None
+    ids = _walk_parents(conn, tip[0])
     ids.reverse()
     return ids
 
@@ -557,8 +668,12 @@ def _has_extra_keys(raw: Any, redumped: Any) -> bool:
                 return True
         return False
     if isinstance(raw, list):
+        # Same verdict as the dict branch above: a type change or a dropped element IS
+        # skew. Returning False here would report "no skew" for exactly the case
+        # PayloadSchemaSkew exists to catch — an adapter that reshapes a list-typed
+        # field (`parts`) on the round-trip instead of raising.
         if not isinstance(redumped, list) or len(raw) != len(redumped):
-            return False
+            return True
         return any(_has_extra_keys(a, b) for a, b in zip(raw, redumped, strict=True))
     return False
 

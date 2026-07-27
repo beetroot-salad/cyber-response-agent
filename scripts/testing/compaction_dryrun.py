@@ -103,38 +103,42 @@ def _cache_split(records: list[dict]) -> dict[str, int]:
 
 
 def dry_run(records: list[dict]) -> list[StepMetric]:
-    history: list[dict] = []
+    """One compaction step per model request, over the history that request actually sent.
+
+    `llm_requests.jsonl` records each request's message list VERBATIM (#705 removed
+    RequestLogger's write-time delta encoding), so the `kind == "request"` records
+    between two responses ARE that turn's complete history — they are not increments to
+    append to a running list. Accumulating them instead, as this did while the log was
+    delta-encoded, re-adds every earlier turn's prefix on every turn: `full_chars` grows
+    quadratically and the reported savings figure inflates by a multiple of run length.
+    """
     investigation_md = ""
     state: C.FrozenState | None = None
     metrics: list[StepMetric] = []
-    pending: tuple[C.CompactionStep, int, int] | None = None  # step, full_chars, comp_chars
+    history: list[dict] = []
 
     for rec in records:
         msg = rec.get("message", {})
         kind = rec.get("kind")
         if kind == "request":
             history.append(msg)
+        elif kind == "response":
             step = C.compact(history, investigation_md, state)
             state = step.state
-            pending = (step, C.history_chars(history), C.history_chars(step.history))
-        elif kind == "response":
-            if pending is not None:
-                step, full_c, comp_c = pending
-                usage = (rec.get("message") or {}).get("usage") or {}
-                metrics.append(
-                    StepMetric(
-                        seq=rec.get("seq", -1),
-                        action=step.action,
-                        loop=step.loop,
-                        full_chars=full_c,
-                        comp_chars=comp_c,
-                        input_tokens=int(usage.get("input_tokens", 0) or 0),
-                        reason=step.reason,
-                    )
+            usage = (rec.get("message") or {}).get("usage") or {}
+            metrics.append(
+                StepMetric(
+                    seq=rec.get("seq", -1),
+                    action=step.action,
+                    loop=step.loop,
+                    full_chars=C.history_chars(history),
+                    comp_chars=C.history_chars(step.history),
+                    input_tokens=int(usage.get("input_tokens", 0) or 0),
+                    reason=step.reason,
                 )
-                pending = None
+            )
             investigation_md = C.apply_writes(investigation_md, msg)
-            history.append(msg)
+            history = []
     return metrics
 
 

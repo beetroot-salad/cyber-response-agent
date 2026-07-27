@@ -315,7 +315,15 @@ def _main_session_analysis(run_dir: Path) -> list[tuple[Any, str]]:
     store_path = ss.resolve_store_path(run_dir)
     store = ss.open_store_for_read(store_path)
     try:
+        # The main session by its RECORDED agent_id, not by insertion order. `ORDER BY
+        # rowid` held only because run_investigation happens to open main's session before
+        # any gather dispatch opens one; anything that creates a session earlier (a
+        # warm-up, a mid-run fork, a replay tool seeding a gather session first) would
+        # silently render the wrong transcript. Falls back to rowid for a store written
+        # before `session.agent_id` existed.
         row = store.connection.execute(
+            "SELECT session_id FROM session WHERE agent_id = 'main' ORDER BY rowid LIMIT 1"
+        ).fetchone() or store.connection.execute(
             "SELECT session_id FROM session ORDER BY rowid LIMIT 1"
         ).fetchone()
         if row is None:

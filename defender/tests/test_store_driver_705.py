@@ -65,6 +65,29 @@ pytestmark = pytest.mark.e2e
 
 SALT = "0011223344556677"
 
+#: An investigation.md whose loop 1 is CLOSED (`:T close`) with a resolved lead, and whose
+#: loop 2 is still open — `compaction.fold_boundary` reads 1 from it, which is what makes
+#: `driver._fold_decision` authorize a fold. The active loop 2 is what keeps the fold from
+#: swallowing the turn in progress.
+_CLOSED_LOOP_INVLANG = """```invlang
+:L findings [id|loop|name|target|tests|system|window]
+l-001|1|raw-auth|v-001|h-001|elastic|w
+
+:E l-001.observations.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]
+e-001|attempted_auth|v-003|v-001|2026-05-01T10:11:00Z|siem-event:wazuh|outcome=success
+```
+
+```invlang
+:T close
+loop 1
+```
+
+```invlang
+:L findings [id|loop|name|target|tests|system|window]
+l-005|2|cmdb-ip|v-006|h-002|cmdb|w
+```
+"""
+
 #: A token the MAIN agent emits into its own history and that nothing else in the driven
 #: conversation contains. Probed, not assumed: the leak test below reads it back out of
 #: main's own next request as its positive control, and the string it replaced
@@ -661,9 +684,18 @@ def test_minted_row_round_trips_after_fill_run_metadata(tmp_path, monkeypatch):
     unreachable against O6's own last sentence (a minted row is never in the ingest tail),
     so mint-with-RunContext is the only executable branch. C8 (executed) measured the
     hazard: the framework fills those three fields IN PLACE after the processor returns,
-    and a row persisted at render time was `byte-identical: False`."""
+    and a row persisted at render time was `byte-identical: False`.
+
+    The flag alone does not fold. `driver._fold_decision` gates on
+    `compaction.fold_boundary(investigation.md)` — the same loop-closure trigger the
+    retired in-driver glue used — so the fixture must ALSO put a closed loop on disk, or
+    the run folds nothing and this demand's subject never exists (the assertion below
+    says exactly that). Folding on the flag alone is the bug the gate exists to prevent:
+    the boundary advances every round, so every round would mint a fresh frontier and
+    orphan the turns before it."""
     monkeypatch.setenv("DEFENDER_COMPACTION", "1")
     rd = materialize(tmp_path, GOLDEN)
+    (rd / "investigation.md").write_text(_CLOSED_LOOP_INVLANG, encoding="utf-8")
     opened: list = []
     drive(rd, run_id="minted", salt=SALT,
           main=ReplayFn(_read_alert_turns(rd, 6) + [Turn(text="done")]),

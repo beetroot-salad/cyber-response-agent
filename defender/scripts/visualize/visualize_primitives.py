@@ -72,6 +72,11 @@ def pre_text(text: str) -> str:
     return f'<pre class="text">{esc(text)}</pre>'
 
 
+def pre_text_untrusted(text: str) -> str:
+    """`pre_text` for model-authored content — see `esc_untrusted`."""
+    return f'<pre class="text">{esc_untrusted(text)}</pre>'
+
+
 _JSON_TOKEN_RE = re.compile(
     r'"(?:\\.|[^"\\])*"(?:\s*:)?'
     r'|\b(?:true|false|null)\b'

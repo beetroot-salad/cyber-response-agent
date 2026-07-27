@@ -41,18 +41,24 @@ def _default_boundary(store: Any, session_id: str) -> int:
 def _fold_impl(  # noqa: PLR0913 — mint-time stamping needs the run's identity, not a patch-after
     store: Any, session_id: str, *, agent_id: str, boundary: int | None = None,
     run_id: str | None = None, conversation_id: str | None = None,
+    text: str | None = None,
 ) -> int:
     if boundary is None:
         boundary = _default_boundary(store, session_id)
     existing = store.connection.execute(
-        "SELECT id FROM message WHERE session_id = ? AND synthesized = 1 AND seq = ?",
-        (session_id, boundary),
+        "SELECT id FROM message WHERE session_id = ? AND agent_id = ? "
+        "AND synthesized = 1 AND seq = ?",
+        (session_id, agent_id, boundary),
     ).fetchone()
     if existing is not None:
         return existing[0]
     ids = path_row_ids(store, session_id)
     root = ids[0] if ids else None
-    text = f"FRONTIER: fold boundary {boundary}"
+    # The caller owns the frontier's CONTENT (the driver passes the invlang record of the
+    # loops being folded); the placeholder is a shape-only default for callers that have
+    # no record to carry — a fold whose frontier says only "boundary N" discards the
+    # folded turns without replacing them, so no production path should take it.
+    text = text if text is not None else f"FRONTIER: fold boundary {boundary}"
     frontier = ModelRequest(
         parts=[UserPromptPart(content=text)], run_id=run_id, conversation_id=conversation_id,
         timestamp=datetime.now(UTC),
@@ -62,8 +68,9 @@ def _fold_impl(  # noqa: PLR0913 — mint-time stamping needs the run's identity
     return new_ids[0]
 
 
-def fold(store: Any, session_id: str, *, agent_id: str, boundary: int | None = None) -> int:
-    return _fold_impl(store, session_id, agent_id=agent_id, boundary=boundary)
+def fold(store: Any, session_id: str, *, agent_id: str, boundary: int | None = None,
+         text: str | None = None) -> int:
+    return _fold_impl(store, session_id, agent_id=agent_id, boundary=boundary, text=text)
 
 
 def fold_boundary(store: Any, session_id: str) -> Any:
@@ -113,10 +120,11 @@ def render(  # noqa: PLR0913 — the renderer's full parameter set
     store: Any, session_id: str, live: list, *, agent_id: str, fold: bool,  # noqa: A002
     run_step: int | None = None, duration_ms: float | None = None,
     run_id: str | None = None, conversation_id: str | None = None,
+    boundary: int | None = None, text: str | None = None,
 ) -> list:
     if fold:
         _fold_impl(store, session_id, agent_id=agent_id, run_id=run_id,
-                   conversation_id=conversation_id)
+                   conversation_id=conversation_id, boundary=boundary, text=text)
     rendered = hydrate(store, session_id, role="send")
     store.set_last_render_len(session_id, len(rendered))
     if run_step is not None:

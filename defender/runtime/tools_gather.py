@@ -12,6 +12,7 @@ from pydantic_ai.usage import UsageLimits
 
 from . import circuit_breaker
 from . import permission
+from . import session_store
 from . import tools
 from .tools import (
     GatherDeps,
@@ -300,6 +301,18 @@ async def _run_gather(
             f"gather for {lead_id} ended abnormally ({e}); any queries it ran are in "
             "the queries table. Treat this lead as incomplete and reason from what was "
             "captured."
+        )
+    except session_store.StoreError as e:
+        # The gather recorder is observational — `_make_gather_recorder` returns the live
+        # list unchanged, so gather never sends a store-sourced history and a recording
+        # failure here cannot put an unrecorded list on the wire. Degrade this lead like
+        # the two above rather than letting the exception unwind through the main agent's
+        # tool call and kill the whole process; if the store is genuinely broken, main's
+        # own next append stops the run through the handled exit.
+        output = (
+            f"gather for {lead_id} could not be recorded ({e}); any queries it ran are "
+            "in the queries table. Treat this lead as incomplete and reason from what "
+            "was captured."
         )
 
     wrapped = _wrap(output, "untrusted", deps.salt)
