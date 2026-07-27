@@ -17,12 +17,23 @@ ten trials. Automation raises the capture count cheaply and does **not** raise t
 unit count — which is why the unit had to be fixed before recruitment started.
 
 **An interval, computed at `n = n_units`.** The observed rate is the lead-level
-one, but the interval is taken at the unit count with `k = round(rate x n_units)`
+one, but the interval is taken at the unit count with `k = floor(rate x n_units)`
 — a deliberately conservative full-within-unit-correlation design effect, held
 until there is enough data to estimate the real intra-unit correlation. Below a
 floor of `MIN_UNITS` a slice reports `insufficient` rather than a number, because
 a Wilson interval on one unit spans [0.21, 1.00] and publishing that invites
 someone to read the point estimate.
+
+**`floor`, not `round`.** At the unit counts that actually occur here — three,
+four — the rounding rule decides the interval, and rounding decided it toward
+optimism. Dev overall is 33/36 leads over 4 units: `round(0.917 x 4)` is 4, so
+the published interval was the one for a PERFECT 4/4, `[0.51, 1.00]`. `floor`
+gives 3/4 and `[0.30, 0.95]` — 0.21 lower on the one bound the trust policy
+reads. It also removed a self-contradiction: `elastic x 0` printed the interval
+for 3/3, upper bound 1.00, directly beside "unreachable at the observed rate
+0.889 — this slice cannot qualify without improving". A reporter whose purpose is
+to stop a point estimate being over-read must not round its own `k` up to produce
+one.
 
 **`n_environments`.** Two cases captured from one restored snapshot are one
 environment however different their stories, so a shared-snapshot pair cannot
@@ -38,6 +49,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import math
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -116,7 +128,9 @@ def summarize(rows: list[dict], units: set[str], environments: set[str]) -> dict
         out["why"] = (f"{n_units} independent unit(s) — below the floor of {MIN_UNITS}; "
                       f"an interval here would be uninformative")
         return out
-    interval = STATS.wilson_interval(round(rate * n_units), n_units)
+    # floor, never round — see the module docstring. Rounding up at n_units=4
+    # publishes the interval for a perfect record on a slice that missed leads.
+    interval = STATS.wilson_interval(math.floor(rate * n_units), n_units)
     out["interval"] = [round(interval[0], 3), round(interval[1], 3)]
     return out
 

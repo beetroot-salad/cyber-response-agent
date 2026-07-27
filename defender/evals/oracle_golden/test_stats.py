@@ -73,6 +73,14 @@ def test_required_n_is_none_when_the_rate_cannot_reach_the_bound():
     assert STATS.required_n(0.90, 0.85) is None
 
 
+def test_a_rate_EQUAL_to_the_bound_is_also_unreachable():
+    """Convergence is from below, so the bound is approached but never attained.
+    Answered from the inequality rather than by walking all 100_000 candidates —
+    a reporter that prints a sizing line per slice should not pay for that."""
+    assert STATS.required_n(0.90, 0.90) is None
+    assert STATS.required_n(1.0, 1.0) is None
+
+
 def test_an_unexercised_slice_has_no_interval():
     """`None`, not (0.0, 1.0) — the same distinction score.py keeps with `null`,
     so aggregation cannot read "never measured" as a real but wide measurement."""

@@ -114,6 +114,15 @@ The consequence worth internalizing: **automation raises the capture count
 cheaply and does not raise the unit count.** That is why the unit had to be fixed
 before recruitment started rather than after.
 
+The successes at that `n` are `floor(rate × n_units)`, **never `round`**. At the
+unit counts this suite actually has — three, four — the rounding rule decides the
+interval. Rounding took dev's 33/36 over 4 units to `k = 4` and published the
+interval for a *perfect* record, `[0.51, 1.00]`; the floor gives `3/4` and
+`[0.30, 0.95]`. It also removed a contradiction: `elastic × 0` printed an upper
+bound of 1.00 beside the verdict "unreachable at the observed rate 0.889". A
+reporter that exists to stop a point estimate being over-read does not round its
+own numerator up to produce one.
+
 `n_environments` is reported alongside: two cases captured from one restored
 snapshot are one environment however different their stories.
 
@@ -451,13 +460,38 @@ the engine tests beside each module:
   path in code;
 - the reporter refuses to publish an interval below the unit floor, and never
   pools dev with held-out;
-- the labeler reproduces the hand-derived seed labels (`audit_labels.py`).
+- the labeler reproduces the hand-derived seed labels (`audit_labels.py`, a CI
+  step — a labeler bug biases every case the same way, so no amount of `n`
+  detects it and it cannot be a report someone remembers to run);
+- every case declares `ground_truth: hand | generated`, and a `generated` one
+  still follows from `write_expected.py` except where its `expected.yaml`
+  `overrides:` block records the reason.
 
 **Review-only, and labelled as such** — no code can check these:
 
 - a `prompt.md` change cites the **dev** case ids that motivated it;
-- **a label may be corrected from the environment, never from the projection**;
+- **a label may be corrected from the environment, never from the projection** —
+  the *direction* is unenforceable, but since the review of #728 the *fact* of a
+  correction is not: an undeclared divergence from the generator fails the linter,
+  so a hand correction has to be written down even though its justification
+  cannot be checked;
 - a held-out case is not read while the prompt is being edited.
+
+### Ground-truth provenance
+
+`ground_truth: hand` means a human derived the labels from the environment. The
+four seed cases are `hand` because they predate the generator, and because
+`audit_labels.py` calibrates the labeler *against* them — deriving them from the
+tool they exist to check would make that audit circular. Derived cases (`mut-`,
+`neg-`) are `hand` too: they reuse a base's envelope, so nothing of their own was
+measured.
+
+`ground_truth: generated` means the recruiter produced it, and the linter holds it
+to that: re-derive, and every difference must be named in `overrides:` with a
+reason. Correcting ground truth by hand stays legal — that is the rule above, not
+a loophole. What is no longer possible is a case whose committed labels quietly
+stop matching the tool that claims to produce them, which is what
+`case-005`'s `fields` had done on 8 of its 11 leads.
 
 ## Generating cases
 

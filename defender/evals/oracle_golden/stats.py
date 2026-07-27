@@ -58,16 +58,18 @@ def required_n(lower_bound: float, rate: float = 1.0, z: float = Z_95,
 
     This is the function that turns the resolver's "≥ N (currently a stub
     threshold)" into a derived number. At a *perfect* observed rate a ≥0.90
-    lower bound needs n≈35; at 0.97 it needs ≈69; at 0.95, ≈126. Those are the
+    lower bound needs n=35; at 0.97 it needs 69; at 0.95, 127. Those are the
     numbers that make the current suite one to two orders of magnitude short.
 
     `None` when the rate cannot reach the bound at any n — the lower bound
-    converges to `rate`, so asking for 0.90 at an observed 0.85 is unsatisfiable
-    and must say so rather than spinning to `max_n`.
+    converges to `rate` FROM BELOW, so it reaches the bound only when the rate is
+    strictly above it. Asking for 0.90 at an observed 0.85 is unsatisfiable, and
+    so is asking for 0.90 at an observed 0.90; both must say so rather than
+    walking all `max_n` candidates to discover it.
     """
     if not 0.0 <= rate <= 1.0:
         raise ValueError(f"rate={rate} is not a proportion")
-    if rate < lower_bound:
+    if rate <= lower_bound:
         return None
     n = 1
     while n <= max_n:
