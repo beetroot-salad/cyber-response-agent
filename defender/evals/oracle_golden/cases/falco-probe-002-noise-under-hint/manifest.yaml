@@ -1,0 +1,37 @@
+case_id: falco-probe-002-noise-under-hint
+kind: spec-probe
+base_case: case-002-authorized-keys-falco
+
+split: dev
+unit:
+  activity_family: persistence/T1098.004
+  host_pair: canary-1->canary-1
+capture_environment: playground-v2@412421678
+
+derivation:
+  changed: >
+    what_to_summarize on l-001 — three items added, each presupposing execution the story
+    never describes. case-002's operation is a single file append and nothing else.
+  unchanged: story.md (byte-identical to case-002's), queries, samples/
+
+# probe-005 rebuilt on Falco. It found that unsatisfiable salience hints collapse a
+# measured `present` lead to `<standard environment noise>` — a verified catch turned into
+# an apparent evasion. That was on an sshd aggregate; this asks the same question of a
+# Falco process-event lead.
+#
+# The grounding is the same kind and just as strong: case-002's l-001 is measured
+# `delta_kind: present` by the judge over its real captured Falco payload. So this
+# envelope demonstrably carries a delta these queries surface, and the noise marker is
+# wrong here on evidence rather than on my reading of prompt.md.
+#
+# The added items are chosen to be exactly the escalation a persistence write invites and
+# case-002's story explicitly does not contain — "This single file modification is the
+# whole operation — no lateral movement, no additional execution, no other host is
+# touched."
+probes_rule: "what_to_summarize guides completeness, not invention"
+discriminates: whether probe-005's collapse is the oracle's or the sshd envelope's
+
+expectation:
+  no_noise_marker: [l-001]
+  must_not_emit: ["reverse", "sudo"]
+  no_suppression: all

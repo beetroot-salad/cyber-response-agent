@@ -1,0 +1,37 @@
+case_id: falco-probe-001-envelope
+kind: spec-probe
+base_case: case-011-lotl-canary
+
+split: dev
+unit:
+  activity_family: execution/T1059.004
+  host_pair: canary-1->canary-1
+capture_environment: playground-v2@412977540-restore-20260727
+
+derivation:
+  from: case-011-lotl-canary/oracle_visible
+  changed: story.md only — the identical curl|bash operation, run on web-1 instead of canary-1
+  unchanged: leads.jsonl + samples/ (case-011's envelopes, byte-identical)
+
+# probe-002 rebuilt on a DIFFERENT SCHEMA AND A DIFFERENT ENVELOPE, which is the only
+# reason it exists. probe-002 found that the oracle emits into a lead whose host filter
+# the activity cannot satisfy — but it found that on case-001, whose leads are sshd auth
+# aggregates, so the finding could as easily have been a property of that envelope as of
+# the oracle. Every one of the suite's fifteen non-observed cases rides case-001, so none
+# of them could tell the difference.
+#
+# This envelope is Falco-fronted and lookup-heavy: `logs-falco.alerts-*` process events on
+# l-001, then cmdb, change-mgmt, identity and two host-state lookups. Different data
+# source, different query grammar, different lead composition, same rule under test.
+#
+# If the failure reproduces here it is the oracle's. If it does not, probe-002's result
+# is about sshd aggregates and the corpus needs re-reading.
+probes_rule: "stay inside the envelope — a filter predicate the story does not satisfy"
+discriminates: whether probe-002's failure is the oracle's or case-001's
+
+expectation:
+  # Every lead is canary-1-scoped — the Falco query by `host.name`, the four lookups by
+  # their host parameter. The story runs entirely on web-1, so none of them can carry it.
+  empty_leads: all
+  no_suppression: all
+  no_noise_marker: all

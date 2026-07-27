@@ -1,0 +1,12 @@
+projections:
+- lead_id: l-001
+  events:
+  - '@timestamp': <alert-time>
+    falco.rule: Adding ssh keys to authorized_keys
+    falco.output_fields.fd.name: /root/.ssh/authorized_keys
+    falco.output_fields.user.name: root
+    falco.output_fields.proc.cmdline: bash
+    falco.output_fields.container.id: <container-id>
+    falco.output_fields.evt.type: write
+- lead_id: l-002
+  events: []
