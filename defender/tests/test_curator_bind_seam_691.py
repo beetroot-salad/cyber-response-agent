@@ -38,7 +38,11 @@ from _curator_691_harness import (  # noqa: E402
     write_file,
 )
 from defender.agents import AGENTS  # noqa: E402
-from defender.learning.author.curator_engine import CORPUS_AUTHOR_DEF, CuratorDeps  # noqa: E402
+from defender.learning.author.curator_engine import (  # noqa: E402
+    CORPUS_AUTHOR_DEF,
+    CuratorDeps,
+    ForwardCheckConfig,
+)
 from defender.learning.author.verify_forward.checks import FINDINGS_CHECK, ForwardCheck  # noqa: E402
 from defender.runtime.agent_definition import compile_policy_for  # noqa: E402
 from defender.runtime.agent_role import AgentRole  # noqa: E402
@@ -256,9 +260,11 @@ def test_forward_check_repacks_the_config_slot_into_check_context(tmp_path):
     rec_check = ForwardCheck(error_prefix="rec", prompt_path=None, run=_rec)
     sid = "row-1"
     deps = CuratorDeps.for_run(
-        rd, wt, corpus(wt, "lessons"),
-        check=rec_check, runs_dir=wt / "runs",
-        pending=wt / "_pending" / "f.jsonl", queued_ids=frozenset({sid}), box=None,
+        rd,
+        wt,
+        corpus(wt, "lessons"),
+        cfg=ForwardCheckConfig(check=rec_check, runs_dir=wt / "runs", pending=wt / "_pending" / "f.jsonl", queued_ids=frozenset({sid})),
+        box=None,
     )
     (corpus(wt, "lessons") / "lesson.md").write_text("x\n", encoding="utf-8")
     asyncio.run(run_forward_check(deps, [Pair(lesson_path=rel("lessons", "lesson.md"), source_id=sid)]))

@@ -4,7 +4,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar
 
-from defender.learning.core.config import verifier_effort, verifier_model
+from defender.learning.core.config import (
+    StageContext,
+    StageWiring,
+    verifier_effort,
+    verifier_model,
+)
 from defender.learning.pipeline._pydantic_stage import run_stage
 from defender.runtime import providers
 from defender.runtime.agent_definition import AgentDefinition, ToolSet, bind
@@ -41,26 +46,30 @@ VERIFY_DEF = AgentDefinition(
 )
 
 
-def _run_verify_pydantic(  # noqa: PLR0913 — the transport signature plus the make_model test seam; every param is load-bearing per-call state
-    prompt_path: Path,
-    model: str,
-    effort: str,
-    trace_name: str,
-    label: str,
+def _run_verify_pydantic(
+    wiring: StageWiring,
+    *,
     user: str,
     source_run_dir: Path,
-    *,
     defender_dir: Path,
-    salt: str | None = None,
     wall_clock_timeout: int,
+    salt: str | None = None,
     make_model: MakeModel = providers.build_for_effort,
 ) -> str:
-    deps = bind(VERIFY_DEF, source_run_dir, defender_dir=defender_dir, salt=salt)
-    return run_stage(
-        stage="verify_forward",
-        prompt_path=prompt_path, model=model, effort=effort,
-        trace_name=trace_name, label=label, user=user,
-        learning_run_dir=source_run_dir, deps=deps,
-        request_limit=VERIFY_REQUEST_LIMIT, make_model=make_model,
+    """The forward-check's request limit is stage-fixed (one turn); its timeout is not — the
+    caller passes its own env-backed knob, so no default is evaluated at import (#717).
+
+    The context is built FIRST and `bind` reads the salt off it, so `ctx.salt` is what the
+    agent was actually bound with rather than a second copy nothing reads."""
+    ctx = StageContext(
+        learning_run_dir=source_run_dir, user=user,
+        request_limit=VERIFY_REQUEST_LIMIT,
         wall_clock_timeout=wall_clock_timeout,
+        salt=salt,
+    )
+    deps = bind(
+        VERIFY_DEF, ctx.learning_run_dir, defender_dir=defender_dir, salt=ctx.salt,
+    )
+    return run_stage(
+        stage="verify_forward", wiring=wiring, ctx=ctx, deps=deps, make_model=make_model,
     )

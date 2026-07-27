@@ -32,7 +32,7 @@ from defender.agents import (
     MAIN_DEF,
 )
 from defender.learning.author import shared as author_shared
-from defender.learning.author.curator_engine import CuratorDeps
+from defender.learning.author.curator_engine import CuratorDeps, ForwardCheckConfig
 from defender.learning.author.verify_forward.checks import (
     ACTOR_CHECK,
     FINDINGS_CHECK,
@@ -174,7 +174,7 @@ def _capture_actor(
     captured = {}
 
     def actor_fn(*args, **kwargs):
-        captured["user"] = args[5]
+        captured["user"] = kwargs["user"]
         captured["kwargs"] = kwargs
         return "story"
 
@@ -231,8 +231,9 @@ def _findings_prompt(tmp_path: Path, *, hostile="TRANSCRIPT-BODY", salt="5a" * 1
     (source / "source_refs.yaml").write_text("normalized_disposition: malicious\n")
     captured = {}
 
-    def run_verify(**kwargs):
+    def run_verify(wiring, **kwargs):
         captured.update(kwargs)
+        captured["wiring"] = wiring
         return "VERDICT: GOOD"
 
     lesson = tmp_path / "lesson.md"
@@ -284,8 +285,9 @@ def _actor_verify_prompt(tmp_path: Path, *, hostile="OBS-BODY", salt="5a" * 16):
     )
     captured = {}
 
-    def run_verify(**kwargs):
+    def run_verify(wiring, **kwargs):
         captured.update(kwargs)
+        captured["wiring"] = wiring
         return "VERDICT: GOOD"
 
     lesson = tmp_path / "lesson.md"
@@ -459,11 +461,15 @@ def _corpus_author_deps_scene(tmp_path: Path, result: BoxResult):
         run,
         repo,
         corpus,
-        check=FINDINGS_CHECK,
-        runs_dir=tmp_path / "runs",
-        pending=tmp_path / "pending.jsonl",
-        queued_ids=frozenset(),
-        run_verify=lambda **_kwargs: "VERDICT: GOOD",
+        cfg=ForwardCheckConfig(
+            check=FINDINGS_CHECK,
+            runs_dir=tmp_path / "runs",
+            pending=tmp_path / "pending.jsonl",
+            queued_ids=frozenset(),
+            # `*_a` because `_verify` passes the StageWiring POSITIONALLY (#713); a
+            # keyword-only fake would TypeError the moment this scene drove a check.
+            run_verify=lambda *_a, **_kwargs: "VERDICT: GOOD",
+        ),
         box=None,
     )
     deps = replace(deps, box=Box(result))

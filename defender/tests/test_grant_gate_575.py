@@ -64,7 +64,10 @@ from defender.agents import (  # noqa: E402
     VERIFY_DEF,
 )
 from defender.hooks._cmd_segments import NON_ADAPTER_SHIMS  # noqa: E402
-from defender.learning.author.curator_engine import CuratorDeps  # noqa: E402
+from defender.learning.author.curator_engine import (  # noqa: E402
+    CuratorDeps,
+    ForwardCheckConfig,
+)
 from defender.learning.core import config  # noqa: E402
 from defender.runtime import permission, tools  # noqa: E402
 from defender.runtime.agent_definition import (  # noqa: E402
@@ -153,9 +156,11 @@ def _curator(env):
     off its own real front door (`CuratorDeps.for_run`), never `bind`."""
     corpus = env.dfn / "lessons"
     deps = CuratorDeps.for_run(
-        env.run, env.dfn.parent, corpus,
-        check=lambda *a, **k: "GOOD", runs_dir=env.tmp / "runs", pending=env.tmp / "pending",
-        queued_ids=frozenset(), run_verify=lambda *a, **k: "GOOD", box=None,
+        env.run,
+        env.dfn.parent,
+        corpus,
+        cfg=ForwardCheckConfig(check=lambda *a, **k: "GOOD", runs_dir=env.tmp / "runs", pending=env.tmp / "pending", queued_ids=frozenset(), run_verify=lambda *a, **k: "GOOD"),
+        box=None,
     )
     return deps.policy
 

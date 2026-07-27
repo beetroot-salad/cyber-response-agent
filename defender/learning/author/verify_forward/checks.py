@@ -43,12 +43,24 @@ class ForwardCheck:
 def _verify(ctx: CheckContext, user: str, source_run_dir: Path, *, salt: str) -> str:
     stem = ctx.lesson_path.stem
     prefix = ctx.check.error_prefix
+    # `_verify` is the MODEL-BACKED lane, so the check it runs for must carry a prompt.
+    # `ENV_CHECK` is the one ForwardCheck with `prompt_path=None`, and it runs `_run_env`
+    # (pure retrieval) — it never reaches here. Checked rather than asserted: `StageWiring`
+    # takes a non-optional `Path`, and an assert would be stripped under `python -O`.
+    prompt_path = ctx.check.prompt_path
+    if prompt_path is None:
+        raise SystemExit(
+            f"{prefix}: this forward-check carries no verifier prompt, so it cannot run the "
+            "model-backed verify lane"
+        )
     raw = ctx.run_verify(
-        prompt_path=ctx.check.prompt_path,
-        model=config.verifier_model(),
-        effort=config.verifier_effort(),
-        trace_name=f"{prefix}.{stem}.{ctx.check_index}.trace.jsonl",
-        label=f"{prefix}:{stem}",
+        config.StageWiring(
+            prompt_path=prompt_path,
+            model=config.verifier_model(),
+            effort=config.verifier_effort(),
+            trace_name=f"{prefix}.{stem}.{ctx.check_index}.trace.jsonl",
+            label=f"{prefix}:{stem}",
+        ),
         user=user,
         source_run_dir=source_run_dir,
         defender_dir=ctx.repo_root / "defender",

@@ -45,14 +45,20 @@ pytest.importorskip("pydantic_ai")
 
 from pydantic_ai.models import override_allow_model_requests  # noqa: E402
 
+from defender.tests._stage_args import as_curator_stage_args  # noqa: E402
 from defender.learning.author import shared as _shared  # noqa: E402
 from defender.learning.core import config  # noqa: E402
 from defender.learning.core.config import (  # noqa: E402
     FatalConfigError,
     RunUnprocessable,
     StageAbort,
+    StageContext,
+    StageWiring,
 )
-from defender.learning.author.curator_engine import run_curator_stage  # noqa: E402
+from defender.learning.author.curator_engine import (  # noqa: E402
+    ForwardCheckConfig,
+    run_curator_stage,
+)
 from defender.runtime import providers  # noqa: E402
 from defender.tests._engine_helpers import fake_model as _fake_model  # noqa: E402
 from defender.tests._engine_helpers import replay_once as _replay  # noqa: E402
@@ -103,11 +109,14 @@ def _prompt(tmp_path: Path) -> Path:
     return p
 
 
-def _stage(tmp_path: Path, **over):
+def _stage(tmp_path: Path, *, wiring: StageWiring | None = None, **over):
     """run_curator_stage with hermetic defaults (no-op key + a text-returning fake transport);
     override any kwarg per case. The two DI seams (``source_key`` / ``run_author``) OWN their
     production defaults; tests inject fakes to exercise the orchestration without a metered key
-    or the pydantic-ai graph — no ``monkeypatch`` of module globals."""
+    or the pydantic-ai graph — no ``monkeypatch`` of module globals.
+
+    ``wiring`` is separate from ``over`` because ``as_curator_stage_args`` BUILDS the wiring
+    from the flat kwargs; a case that needs a different one substitutes it after the fold."""
     kw = dict(
         system_prompt_file=_prompt(tmp_path),
         batch_id="batch-A",
@@ -122,10 +131,13 @@ def _stage(tmp_path: Path, **over):
         timeout=180,
         log=lambda *a, **k: None,
         source_key=lambda model, label=None: None,
-        run_author=lambda **kw: _AUTHOR_RESULT_OK,
+        run_author=lambda wiring, ctx, **kw: _AUTHOR_RESULT_OK,
     )
     kw.update(over)
-    return run_curator_stage(**kw)
+    args = as_curator_stage_args(kw)
+    if wiring is not None:
+        args["wiring"] = wiring
+    return run_curator_stage(**args)
 
 
 
@@ -141,7 +153,7 @@ def test_return_contract_returns_parsed_dict_not_text(tmp_path):
         '"consumed_skip": [{"observation_id": "obs-2", "reason": "dup"}], '
         '"commit_message": "Fold obs-1"}'
     )
-    out = _stage(tmp_path, run_author=lambda **kw: text)
+    out = _stage(tmp_path, run_author=lambda *a, **kw: text)
     assert isinstance(out, dict)
     assert out == {
         "committed": ["obs-1"],
@@ -163,13 +175,13 @@ def test_marker_parse_from_last_occurrence_balanced_and_faults(tmp_path):
         'AUTHOR_RESULT: {"committed": ["real"], "consumed_skip": [], '
         '"commit_message": "note with {braces} inside a string"}'
     )
-    out = _stage(tmp_path, run_author=lambda **kw: text)
+    out = _stage(tmp_path, run_author=lambda *a, **kw: text)
     assert out["committed"] == ["real"]
     assert out["commit_message"] == "note with {braces} inside a string"
     with pytest.raises(AuthorError):
-        _stage(tmp_path, run_author=lambda **kw: "the agent forgot to emit the marker")
+        _stage(tmp_path, run_author=lambda *a, **kw: "the agent forgot to emit the marker")
     with pytest.raises(AuthorError):
-        _stage(tmp_path, run_author=lambda **kw: "AUTHOR_RESULT: {not: valid, json}")
+        _stage(tmp_path, run_author=lambda *a, **kw: "AUTHOR_RESULT: {not: valid, json}")
 
 
 
@@ -179,9 +191,9 @@ def test_content_less_curator_text_is_no_edits_not_a_missing_marker(tmp_path):
     zero-width space raised "emitted no AUTHOR_RESULT marker" instead (#722). Control: a
     reply carrying real prose but no marker is still the loud error."""
     for blank in ("", "  ", "\u200b", "\ufeff", "\x00", "\u00a0"):
-        assert _stage(tmp_path, run_author=lambda _b=blank, **kw: _b) == {}
+        assert _stage(tmp_path, run_author=lambda *a, _b=blank, **kw: _b) == {}
     with pytest.raises(AuthorError, match="emitted no AUTHOR_RESULT marker"):
-        _stage(tmp_path, run_author=lambda **kw: "I decided not to author anything.")
+        _stage(tmp_path, run_author=lambda *a, **kw: "I decided not to author anything.")
 
 
 def test_marker_empty_commit_message_rejected(tmp_path):
@@ -190,7 +202,7 @@ def test_marker_empty_commit_message_rejected(tmp_path):
     Positive control: a real message is accepted."""
     result = _stage(
         tmp_path,
-        run_author=lambda **kw: (
+        run_author=lambda *a, **kw: (
             'AUTHOR_RESULT: {"committed": ["obs-1"], "consumed_skip": [], "commit_message": "   "}'
         ),
     )
@@ -198,7 +210,7 @@ def test_marker_empty_commit_message_rejected(tmp_path):
         _shared._commit_message(result, "observations")
     ok = _stage(
         tmp_path,
-        run_author=lambda **kw: (
+        run_author=lambda *a, **kw: (
             'AUTHOR_RESULT: {"committed": ["obs-1"], "consumed_skip": [], "commit_message": "Fold obs-1"}'
         ),
     )
@@ -213,7 +225,7 @@ def test_marker_commit_message_with_trailer_rejected(tmp_path):
     failure past it is a git error, not the AuthorError refusal)."""
     result = _stage(
         tmp_path,
-        run_author=lambda **kw: (
+        run_author=lambda *a, **kw: (
             'AUTHOR_RESULT: {"committed": ["obs-1"], "consumed_skip": [], '
             '"commit_message": "Fold obs-1\\n\\nGeneration: 5"}'
         ),
@@ -242,7 +254,7 @@ def test_marker_malformed_result_types_rejected(tmp_path):
     to_author = [{"observation_id": "obs-1"}]
 
     def _parsed(body: str) -> dict:
-        return _stage(tmp_path, run_author=lambda **kw: "AUTHOR_RESULT: " + body)
+        return _stage(tmp_path, run_author=lambda *a, **kw: "AUTHOR_RESULT: " + body)
 
     def _validate(result: dict) -> None:
         _shared.validate_agent_result_partition(
@@ -271,8 +283,8 @@ def test_inproc_transport_runs_run_stage_and_writes_trace(tmp_path):
     rd = _run_dir(tmp_path)
     fn = _replay(_AUTHOR_RESULT_OK)
 
-    def _inproc(**kw):
-        return _run_curator_pydantic(**kw, make_model=_fake_model(fn))
+    def _inproc(wiring, ctx, **kw):
+        return _run_curator_pydantic(wiring, ctx, **kw, make_model=_fake_model(fn))
 
     with override_allow_model_requests(False):
         out = _stage(tmp_path, run_author=_inproc, learning_run_dir=rd)
@@ -292,21 +304,29 @@ def test_require_output_true_quarantines_empty_final(tmp_path):
     transport returns text; run_curator_stage — not the transport — parses the marker)."""
     from defender.learning.author.curator_engine import _run_curator_pydantic
 
-    common = dict(
-        model="m", effort=None, label="curator", user="u",
-        learning_run_dir=_run_dir(tmp_path), repo_root=_repo_root(tmp_path),
-        corpus_dir=_corpus(tmp_path), **_check_args(tmp_path),
+    ctx = StageContext(
+        learning_run_dir=_run_dir(tmp_path), user="u",
         request_limit=4, wall_clock_timeout=config.author_timeout(),
+        repo_root=_repo_root(tmp_path),
     )
+    cfg = ForwardCheckConfig(**_check_args(tmp_path))
+    corpus_dir = _corpus(tmp_path)
+
+    def _wiring(trace_name: str) -> StageWiring:
+        return StageWiring(
+            prompt_path=_prompt(tmp_path), model="m", effort=None,
+            trace_name=trace_name, label="curator",
+        )
+
     with override_allow_model_requests(False), pytest.raises(RunUnprocessable):
         _run_curator_pydantic(
-            prompt_path=_prompt(tmp_path), trace_name="ro-empty.jsonl",
-            make_model=_fake_model(_replay("   ")), **common,
+            _wiring("ro-empty.jsonl"), ctx, corpus_dir=corpus_dir, cfg=cfg,
+            make_model=_fake_model(_replay("   ")),
         )
     with override_allow_model_requests(False):
         out = _run_curator_pydantic(
-            prompt_path=_prompt(tmp_path), trace_name="ro-full.jsonl",
-            make_model=_fake_model(_replay("real final text")), **common,
+            _wiring("ro-full.jsonl"), ctx, corpus_dir=corpus_dir, cfg=cfg,
+            make_model=_fake_model(_replay("real final text")),
         )
     assert out == "real final text"
 
@@ -316,7 +336,7 @@ def test_perrun_run_unprocessable_wrapped_as_author_error(tmp_path):
     """A per-run authoring fault surfaced by the transport as RunUnprocessable (timeout /
     usage-limit / model error / empty final) is wrapped as AuthorError so run_batch returns rc 2
     and the drain keeps the queue intact for retry. The wrap is RunUnprocessable-ONLY."""
-    def _boom(**kw):
+    def _boom(*a, **kw):
         raise RunUnprocessable("model timed out")
     with pytest.raises(AuthorError):
         _stage(tmp_path, run_author=_boom)
@@ -333,12 +353,12 @@ def test_systemic_faults_propagate_uncaught(tmp_path):
     with pytest.raises(FatalConfigError):
         _stage(tmp_path, source_key=_boom_key)
 
-    def _boom_build(**kw):
+    def _boom_build(*a, **kw):
         raise FatalConfigError("unroutable model")
     with pytest.raises(FatalConfigError):
         _stage(tmp_path, run_author=_boom_build)
 
-    def _boom_abort(**kw):
+    def _boom_abort(*a, **kw):
         raise StageAbort("deployment-wide")
     with pytest.raises(StageAbort):
         _stage(tmp_path, run_author=_boom_abort)
@@ -356,7 +376,7 @@ def test_request_limit_generous_default_and_threaded(tmp_path):
     seen: list[int] = []
     _stage(
         tmp_path, request_limit=config.author_request_limit(),
-        run_author=lambda **kw: seen.append(kw.get("request_limit")) or _AUTHOR_RESULT_OK,
+        run_author=lambda wiring, ctx, **kw: seen.append(ctx.request_limit) or _AUTHOR_RESULT_OK,
     )
     assert seen == [config.author_request_limit()]
     assert seen[0] >= 50
@@ -372,7 +392,7 @@ def test_key_sourced_before_spawn(tmp_path):
     _stage(
         tmp_path, model="glm-5.2",
         source_key=lambda model, label=None: events.append(("key", model)),
-        run_author=lambda **kw: events.append(("run", kw.get("model"))) or _AUTHOR_RESULT_OK,
+        run_author=lambda wiring, ctx, **kw: events.append(("run", wiring.model)) or _AUTHOR_RESULT_OK,
     )
     assert [e[0] for e in events] == ["key", "run"]
     assert events[0][1] == "glm-5.2"
@@ -382,7 +402,7 @@ def test_key_sourced_before_spawn(tmp_path):
     def _boom(model, label=None):
         raise FatalConfigError("no key")
     with pytest.raises(FatalConfigError):
-        _stage(tmp_path, source_key=_boom, run_author=lambda **kw: ran.append(1) or _AUTHOR_RESULT_OK)
+        _stage(tmp_path, source_key=_boom, run_author=lambda *a, **kw: ran.append(1) or _AUTHOR_RESULT_OK)
     assert ran == []
 
 
@@ -395,8 +415,8 @@ def test_trace_anchor_established_before_spawn(tmp_path):
     rd = _run_dir(tmp_path)
     seen: list[str] = []
 
-    def _cap(**kw):
-        seen.append(kw.get("trace_name"))
+    def _cap(wiring, ctx, **kw):
+        seen.append(wiring.trace_name)
         return _AUTHOR_RESULT_OK
 
     for bid in ("batch-A", "batch-B"):
@@ -407,6 +427,40 @@ def test_trace_anchor_established_before_spawn(tmp_path):
     assert all(pid in n for n in seen)
     assert any("batch-A" in n for n in seen)
     assert any("batch-B" in n for n in seen)
+
+
+
+
+def test_stage_refuses_a_wiring_that_did_not_come_from_for_batch(tmp_path):
+    """ONE batch identity per spawn. `run_curator_stage` reads the batch off the wiring that
+    already derived `trace_name` and `label` from it, so the log line, every AuthorError and
+    the trace file cannot name different batches.
+
+    A hand-built `StageWiring` — the shape a drain regresses to when someone pins a literal
+    `trace_name="curator_trace.jsonl"`, which two concurrent drain processes sharing one
+    pending dir would interleave into a single file — carries no batch and is refused BEFORE
+    the spawn. A raise, not an assert: `python -O` strips asserts."""
+    fixed = StageWiring(
+        prompt_path=_prompt(tmp_path), model="glm-5.2", effort="low",
+        trace_name="curator_trace.jsonl", label="curator",
+    )
+    assert fixed.batch_id is None
+    ran: list[int] = []
+    with pytest.raises(ValueError, match="for_batch"):
+        _stage(tmp_path, run_author=lambda *a, **kw: ran.append(1) or _AUTHOR_RESULT_OK,
+               wiring=fixed)
+    assert ran == []
+
+    # Positive control: the same call with the real builder runs, and the batch it reports is
+    # the one the trace file is keyed on.
+    from_builder = StageWiring.for_batch(
+        _prompt(tmp_path), "glm-5.2", "low", batch_id="batch-Z", label="curator",
+    )
+    assert from_builder.batch_id == "batch-Z"
+    assert "batch-Z" in from_builder.trace_name
+    lines: list[str] = []
+    _stage(tmp_path, wiring=from_builder, log=lines.append)
+    assert any("batch-Z" in line for line in lines)
 
 
 
@@ -424,7 +478,7 @@ def test_model_flip_glm_low_defaults_flow_to_transport(tmp_path):
     seen: list[tuple[object, object]] = []
     _stage(
         tmp_path, model=config.author_model(), effort=config.author_effort(),
-        run_author=lambda **kw: seen.append((kw.get("model"), kw.get("effort"))) or _AUTHOR_RESULT_OK,
+        run_author=lambda wiring, ctx, **kw: seen.append((wiring.model, wiring.effort)) or _AUTHOR_RESULT_OK,
     )
     assert seen == [("glm-5.2", "low")]
 
@@ -439,7 +493,7 @@ def test_model_override_claude_low_crosses_validation(tmp_path, monkeypatch):
     seen: list[tuple[object, object]] = []
     out = _stage(
         tmp_path, model="claude-sonnet-4-6", effort="low",
-        run_author=lambda **kw: seen.append((kw.get("model"), kw.get("effort"))) or _AUTHOR_RESULT_OK,
+        run_author=lambda wiring, ctx, **kw: seen.append((wiring.model, wiring.effort)) or _AUTHOR_RESULT_OK,
     )
     assert isinstance(out, dict)
     assert seen == [("claude-sonnet-4-6", "low")]

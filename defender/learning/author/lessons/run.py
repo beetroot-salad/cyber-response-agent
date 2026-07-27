@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import sys
 import uuid
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -15,12 +14,15 @@ if (_root := str(Path(__file__).resolve().parents[4])) not in sys.path:
 
 from defender.learning.author import curator as _curator
 from defender.learning.author import shared as _shared
+from defender.learning.author._config import CorpusAuthorConfig
 from defender._yaml import safe_load
 from defender._corpus import iter_lessons
 from defender._io import read_jsonl_rows
 from defender.learning.core.config import (
     DEFAULT_PATHS,
     LoopPaths,
+    StageContext,
+    StageWiring,
     author_effort as _author_effort,
     author_model as _author_model,
     author_request_limit,
@@ -39,30 +41,30 @@ from defender.learning.core.persist import (
 
 AuthorError = _shared.AuthorError
 
+# The ONE spelling of this drain's log prefix. `build_author_config` puts it on
+# `cfg.log_prefix` (the field the shared corpus-author base requires) and `_log` below is
+# built from it, so the envelope, the curator stage and every message in this module cannot
+# drift onto two prefixes.
+_LOG_PREFIX = "author"
 
-@dataclass(frozen=True)
-class AuthorConfig:
-    repo_root: Path
-    lessons_dir: Path
-    lessons_dir_rel: str
-    runs_dir: Path
-    pending_dir: Path
-    pending_file: Path
-    consumed_file: Path
-    lock_file: Path
+
+@dataclass(frozen=True, kw_only=True)
+class AuthorConfig(CorpusAuthorConfig):
+    """The lessons curator's drain config: the shared corpus-author core (#713) plus the
+    three fields only this drain has.
+
+    `findings_lock_file` is NOT `channel.lock` — it is the read-side lock `read_batch` holds
+    while slurping the queue, where `channel.lock` is the drain-wide queue lock the batch
+    envelope takes. Two locks, two jobs."""
+
     findings_lock_file: Path
-    repo_lock_file: Path
-    repo_lock_wait_seconds: int
     held_report: Path
-    author_prompt: Path
-    invoke_agent: Callable[[list[dict], str, AuthorConfig], dict]
+    manifest_seed: str | None = None
     # default_factory, not a plain default: these are env-backed knobs and a plain
     # default would freeze at import (#717). A caller that overrides them still wins.
     author_model: str = field(default_factory=_author_model)
     author_timeout: int = field(default_factory=_author_timeout)
     author_effort: str | None = field(default_factory=_author_effort)
-    manifest_seed: str | None = None
-    box: Any = None
 
 
 def build_author_config(
@@ -70,17 +72,16 @@ def build_author_config(
 ) -> AuthorConfig:
     return AuthorConfig(
         repo_root=paths.repo_root,
-        lessons_dir=paths.lessons_dir,
-        lessons_dir_rel=paths.lessons_dir_rel,
+        corpus_dir=paths.lessons_dir,
+        corpus_dir_rel=paths.lessons_dir_rel,
         runs_dir=paths.runs_dir,
         pending_dir=paths.pending_dir,
-        pending_file=paths.pending_file,
-        consumed_file=paths.pending_dir / "consumed.jsonl",
-        lock_file=paths.pending_dir / ".lock",
+        channel=paths.findings,
         findings_lock_file=paths.findings_lock_file,
         repo_lock_file=paths.author_lock_file,
         repo_lock_wait_seconds=repo_lock_wait_seconds(),
         held_report=paths.pending_dir / "held_report.log",
+        log_prefix=_LOG_PREFIX,
         author_prompt=paths.learning_dir / "author" / "lessons" / "prompt.md",
         invoke_agent=invoke_agent,
         manifest_seed=manifest_seed,
@@ -91,10 +92,10 @@ def build_author_config(
 
 
 def read_batch(cfg: AuthorConfig) -> list[dict]:
-    if not cfg.pending_file.is_file():
+    if not cfg.channel.file.is_file():
         return []
     with _flock(cfg.findings_lock_file):
-        return read_jsonl_rows(cfg.pending_file)
+        return read_jsonl_rows(cfg.channel.file)
 
 
 def disposition_for(cfg: AuthorConfig, run_id: str) -> str | None:
@@ -114,7 +115,7 @@ def disposition_for(cfg: AuthorConfig, run_id: str) -> str | None:
 def existing_finding_ids(cfg: AuthorConfig) -> set[str]:
     ids: set[str] = set()
     for lesson in iter_lessons(
-        cfg.lessons_dir, warn_label=lambda p: f"finding-id pre-flight: {p.name}"
+        cfg.corpus_dir, warn_label=lambda p: f"finding-id pre-flight: {p.name}"
     ):
         sids = lesson.fm.get("source_finding_ids") or []
         if isinstance(sids, list):
@@ -128,8 +129,8 @@ def build_user_prompt(
     findings: list[dict], batch_id: str, cfg: AuthorConfig, *, salt: str | None = None
 ) -> str:
     return _shared.build_curator_user_prompt(
-        findings, batch_id, corpus_dir=cfg.lessons_dir,
-        corpus_dir_rel=cfg.lessons_dir_rel, label="findings",
+        findings, batch_id, corpus_dir=cfg.corpus_dir,
+        corpus_dir_rel=cfg.corpus_dir_rel, label="findings",
         manifest_seed=cfg.manifest_seed,
         salt=salt,
     )
@@ -142,32 +143,39 @@ def invoke_agent(findings: list[dict], batch_id: str, cfg: AuthorConfig) -> dict
     cfg.pending_dir.mkdir(parents=True, exist_ok=True)
     stage_salt = uuid.uuid4().hex
     return curator_engine.run_curator_stage(
-        system_prompt_file=cfg.author_prompt,
-        batch_id=batch_id,
-        user_prompt=build_user_prompt(findings, batch_id, cfg, salt=stage_salt),
-        corpus_dir=cfg.lessons_dir,
-        check=FINDINGS_CHECK,
-        runs_dir=cfg.runs_dir,
-        pending=cfg.pending_file,
-        queued_ids=frozenset(str(f["run_id"]) for f in findings if f.get("run_id")),
-        repo_root=cfg.repo_root,
-        learning_run_dir=cfg.pending_dir,
+        wiring=StageWiring.for_batch(
+            cfg.author_prompt, cfg.author_model, cfg.author_effort,
+            batch_id=batch_id, label="curator",
+        ),
+        ctx=StageContext(
+            learning_run_dir=cfg.pending_dir,
+            user=build_user_prompt(findings, batch_id, cfg, salt=stage_salt),
+            request_limit=author_request_limit(),
+            wall_clock_timeout=cfg.author_timeout,
+            repo_root=cfg.repo_root,
+            box=cfg.box,
+            salt=stage_salt,
+        ),
+        corpus_dir=cfg.corpus_dir,
+        cfg=curator_engine.ForwardCheckConfig(
+            check=FINDINGS_CHECK,
+            runs_dir=cfg.runs_dir,
+            pending=cfg.channel.file,
+            queued_ids=frozenset(
+                str(f["run_id"]) for f in findings if f.get("run_id")
+            ),
+        ),
         log=_log,
-        model=cfg.author_model,
-        effort=cfg.author_effort,
-        request_limit=author_request_limit(),
-        timeout=cfg.author_timeout,
-        salt=stage_salt, box=cfg.box,
     )
 
 
 
 def changes_outside_lessons(cfg: AuthorConfig) -> list[str]:
-    return _shared.changes_outside(cfg.repo_root, cfg.lessons_dir_rel)
+    return _shared.changes_outside(cfg.repo_root, cfg.corpus_dir_rel)
 
 
 def commit_lessons(cfg: AuthorConfig, message: str) -> str | None:
-    return _shared.commit_corpus(cfg.repo_root, cfg.lessons_dir, message)
+    return _shared.commit_corpus(cfg.repo_root, cfg.corpus_dir, message)
 
 
 def _result_list(result: dict, key: str) -> list[Any]:
@@ -186,8 +194,8 @@ def rotate_queue(
     commit_sha: str | None,
 ) -> None:
     rotate_queue_locked(
-        pending_file=cfg.pending_file,
-        consumed_file=cfg.consumed_file,
+        pending_file=cfg.channel.file,
+        consumed_file=cfg.channel.consumed,
         lock_file=cfg.findings_lock_file,
         id_key="finding_id",
         held=held,
@@ -215,7 +223,8 @@ def write_held_report(
 
 
 
-_log = make_logger("author")
+# This drain's one diagnostic logger, built from the single prefix anchor at the top.
+_log = make_logger(_LOG_PREFIX)
 
 
 def run_batch(
@@ -228,12 +237,12 @@ def run_batch(
     if cfg is None:
         cfg = build_author_config(paths, box=box)
     return _shared.run_batch_envelope(
-        queue_lock_file=cfg.lock_file,
+        queue_lock_file=cfg.channel.lock,
         repo_lock_file=cfg.repo_lock_file,
         repo_lock_wait_seconds=cfg.repo_lock_wait_seconds,
         repo_root=cfg.repo_root,
-        corpus_dir=cfg.lessons_dir,
-        corpus_dir_rel=cfg.lessons_dir_rel,
+        corpus_dir=cfg.corpus_dir,
+        corpus_dir_rel=cfg.corpus_dir_rel,
         log=_log,
         inner=lambda: _run_batch_inner(cfg, hold_committed=hold_committed),
     )
@@ -337,13 +346,13 @@ def _author_to_author(
     except AuthorError as e:
         _log(f"FATAL: {e}")
         _curator._dead_letter_or_bump(
-            to_author, queue_file=cfg.pending_file, pending_dir=cfg.pending_dir,
+            to_author, queue_file=cfg.channel.file, pending_dir=cfg.pending_dir,
             id_key="finding_id", reason=str(e),
         )
         return 2, None, [], [], []
     try:
         _shared.verify_agent_state(
-            cfg.repo_root, result, cfg.lessons_dir, cfg.lessons_dir_rel,
+            cfg.repo_root, result, cfg.corpus_dir, cfg.corpus_dir_rel,
             "findings", baseline_stray,
         )
         _shared.validate_agent_result_partition(

@@ -39,6 +39,8 @@ from pydantic_ai.exceptions import ModelRetry  # noqa: E402
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart  # noqa: E402
 from pydantic_ai.models import override_allow_model_requests  # noqa: E402
 
+from defender.tests._stage_args import as_curator_stage_args  # noqa: E402
+from defender.learning.core.config import StageWiring  # noqa: E402
 from defender.learning.core import config  # noqa: E402
 from defender.learning.core.config import (  # noqa: E402
     FatalConfigError,
@@ -47,6 +49,7 @@ from defender.learning.core.config import (  # noqa: E402
 )
 from defender.learning.author.curator_engine import (  # noqa: E402
     CuratorDeps,
+    ForwardCheckConfig,
     _run_curator_pydantic,
     run_curator_stage,
 )
@@ -126,13 +129,15 @@ class FakeVerify:
         self._inflight = 0
         self.peak = 0
 
-    def __call__(self, **kw) -> str:
+    def __call__(self, wiring, **kw) -> str:
+        # Reads the WIRING's fields, not a kwargs bag (#713): a fake that accepted `**kw`
+        # alone would go green against any regrouping of the transport signature.
         src = kw.get("source_run_dir")
         with self._lock:
             self.calls.append(_Call(
-                prompt_path=kw.get("prompt_path"), user=kw.get("user"),
-                trace_name=kw.get("trace_name"), source_run_dir=src,
-                model=kw.get("model"), effort=kw.get("effort"),
+                prompt_path=wiring.prompt_path, user=kw.get("user"),
+                trace_name=wiring.trace_name, source_run_dir=src,
+                model=wiring.model, effort=wiring.effort,
                 timeout=kw.get("wall_clock_timeout", kw.get("timeout")),
             ))
             self._inflight += 1
@@ -196,11 +201,11 @@ def _bundle(scene, run_id: str, *, transcript: str | None = None,
 
 def _deps(scene, *, run_verify, check=None, queued=(), corpus=None, runs=None, pending=None, box=None):
     return CuratorDeps.for_run(
-        scene.curdir, scene.repo, corpus if corpus is not None else scene.corpus,
-        check=check if check is not None else FINDINGS_CHECK,
-        runs_dir=runs if runs is not None else scene.runs,
-        pending=pending if pending is not None else scene.pending,
-        queued_ids=frozenset(queued), run_verify=run_verify, box=box,
+        scene.curdir,
+        scene.repo,
+        corpus if corpus is not None else scene.corpus,
+        cfg=ForwardCheckConfig(check=check if check is not None else FINDINGS_CHECK, runs_dir=runs if runs is not None else scene.runs, pending=pending if pending is not None else scene.pending, queued_ids=frozenset(queued), run_verify=run_verify),
+        box=box,
     )
 
 
@@ -282,7 +287,12 @@ def _build_curator_agent(tmp_path):
     logger = observe.RequestLogger(tmp_path / "t.jsonl")
     try:
         return build_stage_agent(
-            CuratorDeps, _prompt(tmp_path), "m", "low", logger, "curator",
+            CuratorDeps,
+            StageWiring(
+                prompt_path=_prompt(tmp_path), model="m", effort="low",
+                trace_name="t.jsonl", label="curator",
+            ),
+            logger,
             make_model=_fake_model(_replay("")),
         ), logger
     except Exception:
@@ -306,7 +316,12 @@ def test_d1_tool_registered_for_corpus_author(tmp_path):
     lg = observe.RequestLogger(tmp_path / "v.jsonl")
     try:
         ver = build_stage_agent(
-            VerifierDeps, _prompt(tmp_path), "m", "low", lg, "verify",
+            VerifierDeps,
+            StageWiring(
+                prompt_path=_prompt(tmp_path), model="m", effort="low",
+                trace_name="t.jsonl", label="verify",
+            ),
+            lg,
             make_model=_fake_model(_replay("")),
         )
         assert "forward_check" not in ver._function_toolset.tools
@@ -606,11 +621,11 @@ def _curator_stage(scene, **over):
         log=lambda *a, **k: None,
         model="glm-5.2", effort="low", request_limit=250, timeout=180,
         source_key=lambda model, label=None: None,
-        run_author=lambda **kw: _AUTHOR_RESULT_OK,
+        run_author=lambda *a, **kw: _AUTHOR_RESULT_OK,
         run_verify=FakeVerify(default=VerifySpec(raw=_VERDICT_GOOD)),
     )
     kw.update(over)
-    return run_curator_stage(**kw)
+    return run_curator_stage(**as_curator_stage_args(kw))
 
 
 def _forward_tool_call(pairs_args):
@@ -637,7 +652,7 @@ def test_d13_key_sourced_once_per_spawn(tmp_path):
         out = _curator_stage(
             scene,
             source_key=lambda model, label=None: sourced.append((model, label)),
-            run_author=lambda **kw: _run_curator_pydantic(**kw, make_model=_fake_model(curator_fn)),
+            run_author=lambda *a, **kw: _run_curator_pydantic(*a, **kw, make_model=_fake_model(curator_fn)),
             run_verify=verify,
         )
     assert isinstance(out, dict)
@@ -668,9 +683,9 @@ def test_d15_verify_requests_do_not_consume_curator_request_cap(tmp_path):
     verifier_fn = _replay("reasoning\n\nVERDICT: GOOD")
     vcalls: list = []
 
-    def _verify_transport(**kw):
+    def _verify_transport(wiring, **kw):
         vcalls.append(kw.get("source_run_dir"))
-        return _run_verify_pydantic(**kw, make_model=_fake_model(verifier_fn))
+        return _run_verify_pydantic(wiring, **kw, make_model=_fake_model(verifier_fn))
 
     pairs_args = [
         {"lesson_path": f"defender/lessons/l-{r}.md", "source_id": r, "direction": "adversarial"}
@@ -681,7 +696,7 @@ def test_d15_verify_requests_do_not_consume_curator_request_cap(tmp_path):
         out = _curator_stage(
             scene, request_limit=4,
             queued_ids=frozenset(rids),
-            run_author=lambda **kw: _run_curator_pydantic(**kw, make_model=_fake_model(curator_fn)),
+            run_author=lambda *a, **kw: _run_curator_pydantic(*a, **kw, make_model=_fake_model(curator_fn)),
             run_verify=_verify_transport,
         )
     assert isinstance(out, dict)
@@ -912,8 +927,8 @@ def test_d21_no_nested_event_loop_crash(tmp_path):
     _lesson(scene, "lx")
     verifier_fn = _replay("reasoning\n\nVERDICT: GOOD")
 
-    def _verify_transport(**kw):
-        return _run_verify_pydantic(**kw, make_model=_fake_model(verifier_fn))
+    def _verify_transport(wiring, **kw):
+        return _run_verify_pydantic(wiring, **kw, make_model=_fake_model(verifier_fn))
 
     deps = _deps(scene, run_verify=_verify_transport, queued={"run-X"})
 
@@ -968,17 +983,29 @@ def test_m5_verifier_timeout_zero_is_honored(tmp_path):
     src = scene.runs / "run-1"
     with override_allow_model_requests(False), pytest.raises(RunUnprocessable):
         _run_verify_pydantic(
-            _prompt(tmp_path), config.verifier_model(), config.verifier_effort(),
-            "vf.0.trace.jsonl", "l", "u", src,
+            StageWiring(
+                prompt_path=_prompt(tmp_path), model=config.verifier_model(),
+                effort=config.verifier_effort(), trace_name="vf.0.trace.jsonl",
+                label="l",
+            ),
+            user="u",
+            source_run_dir=src,
             defender_dir=tmp_path / "wt" / "defender",
-            wall_clock_timeout=0, make_model=_fake_model(_replay(_VERDICT_GOOD)),
+            wall_clock_timeout=0,
+            make_model=_fake_model(_replay(_VERDICT_GOOD)),
         )
     with override_allow_model_requests(False):
         out = _run_verify_pydantic(
-            _prompt(tmp_path), config.verifier_model(), config.verifier_effort(),
-            "vf.big.trace.jsonl", "l", "u", src,
+            StageWiring(
+                prompt_path=_prompt(tmp_path), model=config.verifier_model(),
+                effort=config.verifier_effort(), trace_name="vf.big.trace.jsonl",
+                label="l",
+            ),
+            user="u",
+            source_run_dir=src,
             defender_dir=tmp_path / "wt" / "defender",
-            wall_clock_timeout=180, make_model=_fake_model(_replay(_VERDICT_GOOD)),
+            wall_clock_timeout=180,
+            make_model=_fake_model(_replay(_VERDICT_GOOD)),
         )
     assert "GOOD" in out
 
@@ -1191,14 +1218,17 @@ def test_m10_curator_deps_cannot_be_built_without_a_corpus_confine(tmp_path):
     writes and its forward-check lesson operand; a construction that omits it raises rather than
     defaulting to a wider tree."""
     scene = _scene(tmp_path)
-    common = dict(runs_dir=scene.runs, pending=scene.pending,
-                  queued_ids=frozenset(), run_verify=FakeVerify(), box=None)
-    with pytest.raises(TypeError):
-        CuratorDeps.for_run(scene.curdir, scene.repo, check=FINDINGS_CHECK, **common)
-    with pytest.raises(TypeError):
-        CuratorDeps.for_run(scene.curdir, scene.repo, scene.corpus, **common)
-    deps = CuratorDeps.for_run(scene.curdir, scene.repo, scene.corpus,
-                               check=FINDINGS_CHECK, **common)
+    cfg = ForwardCheckConfig(
+        check=FINDINGS_CHECK, runs_dir=scene.runs, pending=scene.pending,
+        queued_ids=frozenset(), run_verify=FakeVerify(),
+    )
+    with pytest.raises(TypeError):                       # no corpus_dir
+        CuratorDeps.for_run(scene.curdir, scene.repo, cfg=cfg, box=None)
+    with pytest.raises(TypeError):                       # no forward-check config
+        CuratorDeps.for_run(scene.curdir, scene.repo, scene.corpus, box=None)
+    deps = CuratorDeps.for_run(
+        scene.curdir, scene.repo, scene.corpus, cfg=cfg, box=None,
+    )
     inside = permission.decide_write(
         (scene.corpus / "a.md").resolve(), "x",
         run_dir=deps.run_dir, defender_dir=deps.defender_dir, policy=deps.policy,

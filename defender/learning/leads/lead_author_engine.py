@@ -1,15 +1,13 @@
 from __future__ import annotations
 
-import os
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar
 
-from uuid import uuid4
 from defender.learning.core import config
-from defender.learning.core.config import RunUnprocessable
+from defender.learning.core.config import RunUnprocessable, StageContext, StageWiring
 from defender.learning.leads.path_validation import SKILLS_REL
 from defender.learning.pipeline._pydantic_stage import run_stage as _run_stage_fn
 from defender.runtime import providers
@@ -66,70 +64,54 @@ LEAD_AUTHOR_DEF = AgentDefinition(
 )
 
 
-def _run_lead_author_pydantic(  # noqa: PLR0913 — the transport signature plus the make_model test seam; every param is load-bearing per-call state
+def _run_lead_author_pydantic(
+    wiring: StageWiring,
+    ctx: StageContext,
     *,
-    prompt_path: Path,
-    model: str,
-    effort: str | None,
-    trace_name: str,
-    label: str,
-    user: str,
-    learning_run_dir: Path,
-    repo_root: Path,
-    request_limit: int,
-    salt: str | None = None,
-    box: Any = None,
-    wall_clock_timeout: int,
     make_model: MakeModel = providers.build_for_effort,
     run_stage: Callable[..., Any] = _run_stage_fn,
 ) -> str:
+    """Both limits vary per spawn here, so the caller owns the whole context — this is one
+    of the two stages where the transport really was threaded through three layers (#713)."""
+    # `repo_root` is optional on the SHARED context (the pure-prediction stages bind off the
+    # run dir alone) but required here: the skills tree is resolved off the repo. A raise,
+    # not an assert — `python -O` strips asserts, and the fallout would be a `NoneType / str`
+    # TypeError one frame down.
+    repo_root = ctx.repo_root
+    if repo_root is None:
+        raise ValueError(
+            "lead-author stage needs ctx.repo_root: it binds the skills tree off the repo"
+        )
     deps = bind(
-        LEAD_AUTHOR_DEF, learning_run_dir, defender_dir=repo_root / "defender", salt=salt,
-        box=box,
+        LEAD_AUTHOR_DEF, ctx.learning_run_dir,
+        defender_dir=repo_root / "defender", salt=ctx.salt, box=ctx.box,
     )
     return run_stage(
         stage="lead_author",
-        prompt_path=prompt_path, model=model, effort=effort,
-        trace_name=trace_name, label=label, user=user,
-        learning_run_dir=learning_run_dir, deps=deps,
-        request_limit=request_limit, make_model=make_model,
-        require_output=False,
-        wall_clock_timeout=wall_clock_timeout,
+        wiring=wiring, ctx=ctx, deps=deps,
+        make_model=make_model, require_output=False,
     )
 
 
-def run_author_stage(  # noqa: PLR0913 — the spawn contract (5 per-mode inputs + logger) + its 4 config knobs + 2 DI seams; every param is load-bearing per-call state
+def run_author_stage(
     *,
-    system_prompt_file: Path,
-    batch_id: str,
-    user_prompt: str,
-    repo_root: Path,
-    learning_run_dir: Path,
+    wiring: StageWiring,
+    ctx: StageContext,
     log_label: str,
     log: Callable[[str], None],
-    # No signature defaults for the four model/effort/limit/timeout knobs: each is
-    # env-backed, and a default evaluated at import would freeze it (#717).
-    model: str,
-    effort: str | None,
-    timeout: int,
-    request_limit: int,
     source_key: Callable[..., object] = config.source_first_party_key,
     run_author: Callable[..., str] = _run_lead_author_pydantic,
-    salt: str | None = None,
-    box: Any = None,
 ) -> int:
-    log(f"spawn {log_label} in-process (model={model}, effort={effort}, timeout={timeout}s)")
-    stage_salt = salt if salt is not None else uuid4().hex
-    source_key(model, label=log_label)
-    trace_name = f"{batch_id}.{os.getpid()}.trace.jsonl"
+    """`wiring` and `ctx` are both built per spawn by the caller — the four model/effort/
+    limit/timeout knobs are env-backed, so nothing here may be evaluated at import (#717)."""
+    log(
+        f"spawn {log_label} in-process "
+        f"(model={wiring.model}, effort={wiring.effort}, "
+        f"timeout={ctx.wall_clock_timeout}s)"
+    )
+    source_key(wiring.model, label=log_label)
     try:
-        run_author(
-            prompt_path=system_prompt_file, model=model, effort=effort,
-            trace_name=trace_name, label=f"{log_label}:{batch_id}", user=user_prompt,
-            learning_run_dir=learning_run_dir, repo_root=repo_root,
-            request_limit=request_limit, wall_clock_timeout=timeout,
-            salt=stage_salt, box=box,
-        )
+        run_author(wiring, ctx)
     except RunUnprocessable as e:
         log(f"{log_label} did not complete (per-run fault): {e}")
         return 124

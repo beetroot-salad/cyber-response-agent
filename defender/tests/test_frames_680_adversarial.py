@@ -57,7 +57,7 @@ def test_author_cannot_obtain_receiving_token_before_authorship(tmp_path):
     producer_seen = {}
 
     def actor_fn(*args, **kwargs):
-        producer_seen["prompt"] = args[5]
+        producer_seen["prompt"] = kwargs["user"]
         producer_seen["salt"] = kwargs.get("salt")
         return authored
 

@@ -320,12 +320,12 @@ def test_p3_manifest_from_abs_dir_rel_is_display_only(tmp_path):
 
 def test_p4_both_callers_forward_the_abs_corpus_path(tmp_repo, tmp_path):
     """demand: P4 — both thin callers forward the abs corpus Path they hold: findings
-    ``build_user_prompt`` → cfg.lessons_dir (behavioral); actor ``invoke_curator_agent`` →
+    ``build_user_prompt`` → cfg.corpus_dir (behavioral); actor ``invoke_curator_agent`` →
     cfg.corpus_dir (it passes ``corpus_dir=`` into build_curator_user_prompt)."""
-    _findings_lesson(tmp_repo.cfg.lessons_dir, "wrapper-lesson")
+    _findings_lesson(tmp_repo.cfg.corpus_dir, "wrapper-lesson")
     prompt = build_user_prompt(_ROWS, "batch-1", tmp_repo.cfg)
     assert "## wrapper-lesson" in prompt
-    assert tmp_repo.cfg.lessons_dir_rel in prompt
+    assert tmp_repo.cfg.corpus_dir_rel in prompt
     tree = ast.parse(Path(_curator_mod.__file__).read_text())
     fn = next(n for n in ast.walk(tree)
               if isinstance(n, ast.FunctionDef) and n.name == "invoke_curator_agent")

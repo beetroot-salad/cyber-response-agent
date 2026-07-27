@@ -14,7 +14,7 @@ def test_lock_refuses_concurrent_run(tmp_repo, helpers):
 
     The author drives this through ``shared.run_batch_envelope``; the lock primitive
     is ``shared.acquire_flock`` on the cfg's queue lock-file."""
-    lock_file = tmp_repo.cfg.lock_file
+    lock_file = tmp_repo.cfg.channel.lock
     fh = shared.acquire_flock(lock_file)
     assert fh is not None
     try:
@@ -72,12 +72,12 @@ def test_clean_scope_check_refuses_dirty_lessons(tmp_repo):
     cfg = tmp_repo.cfg
     (tmp_repo.paths.lessons_dir / "drift.md").write_text("uncommitted\n")
     with pytest.raises(shared.AuthorError, match="uncommitted changes"):
-        shared.assert_clean_corpus_dir(cfg.repo_root, cfg.lessons_dir, "defender/lessons/")
+        shared.assert_clean_corpus_dir(cfg.repo_root, cfg.corpus_dir, "defender/lessons/")
 
 
 def test_clean_scope_passes_when_clean(tmp_repo):
     cfg = tmp_repo.cfg
-    shared.assert_clean_corpus_dir(cfg.repo_root, cfg.lessons_dir, "defender/lessons/")
+    shared.assert_clean_corpus_dir(cfg.repo_root, cfg.corpus_dir, "defender/lessons/")
 
 
 def test_ground_truth_gate_holds_inconclusive(tmp_repo, helpers, monkeypatch):
@@ -174,7 +174,7 @@ def test_ground_truth_gate_benign_authors_off_malicious(tmp_repo, helpers, monke
 
     consumed = [
         json.loads(line)
-        for line in tmp_repo.cfg.consumed_file.read_text().splitlines()
+        for line in tmp_repo.cfg.channel.consumed.read_text().splitlines()
         if line.strip()
     ]
     assert [c["finding_id"] for c in consumed] == ["run-M/0"]
@@ -213,7 +213,7 @@ def test_idempotency_filter_skips_already_authored(tmp_repo, helpers, monkeypatc
     assert tmp_repo.paths.pending_file.read_text().strip() == ""
     consumed = [
         json.loads(line)
-        for line in tmp_repo.cfg.consumed_file.read_text().splitlines()
+        for line in tmp_repo.cfg.channel.consumed.read_text().splitlines()
         if line.strip()
     ]
     assert len(consumed) == 1

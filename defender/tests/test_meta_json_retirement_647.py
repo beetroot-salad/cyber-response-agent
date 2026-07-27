@@ -193,7 +193,7 @@ def test_learning_curator_leg_mints_a_fresh_uuid4_salt_distinct_from_the_run_tok
     positive control for the negatives that assert no SECOND token reaches the run lane: the
     fresh-mint channel demonstrably works, so a clean run-lane sweep is not vacuous."""
     pytest.importorskip("pydantic_ai")
-    from defender.learning.author.curator_engine import CuratorDeps
+    from defender.learning.author.curator_engine import CuratorDeps, ForwardCheckConfig
     from defender.learning.author.verify_forward.checks import FINDINGS_CHECK
 
     repo = tmp_path / "wt"
@@ -208,11 +208,17 @@ def test_learning_curator_leg_mints_a_fresh_uuid4_salt_distinct_from_the_run_tok
 
     deps = CuratorDeps.for_run(
         curdir, repo, corpus,
-        check=FINDINGS_CHECK, runs_dir=runs, pending=pending, queued_ids=frozenset(), box=None,
+        cfg=ForwardCheckConfig(
+            check=FINDINGS_CHECK, runs_dir=runs, pending=pending, queued_ids=frozenset(),
+        ),
+        box=None,
     )
     other = CuratorDeps.for_run(
         curdir, repo, corpus,
-        check=FINDINGS_CHECK, runs_dir=runs, pending=pending, queued_ids=frozenset(), box=None,
+        cfg=ForwardCheckConfig(
+            check=FINDINGS_CHECK, runs_dir=runs, pending=pending, queued_ids=frozenset(),
+        ),
+        box=None,
     )
 
     assert re.fullmatch(r"[0-9a-f]{32}", deps.salt), (

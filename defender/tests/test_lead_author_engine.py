@@ -37,6 +37,7 @@ from pydantic_ai.messages import (  # noqa: E402
 )
 from pydantic_ai.models import override_allow_model_requests  # noqa: E402
 
+from defender.learning.core.config import StageContext, StageWiring  # noqa: E402
 from defender.learning.core import config  # noqa: E402
 from defender.learning.core.config import (  # noqa: E402
     FatalConfigError,
@@ -115,17 +116,37 @@ def _run_dir(tmp_path):
 
 
 def _spawn(**over):
-    """run_author_stage with hermetic defaults (fake key + fake transport); override per case."""
+    """run_author_stage with hermetic defaults (fake key + fake transport); override per case.
+
+    Keeps the flat per-knob override ergonomics the cases rely on and folds them into the
+    #713 grouped call shape here, so a case still says `model=...` / `batch_id=...`."""
     kw = dict(
         system_prompt_file=Path("/tmp/does-not-matter-lae.md"),
         batch_id="run-A", user_prompt="u", repo_root=Path("/tmp/wt"),
         learning_run_dir=Path("/tmp/rd"), log_label="lead author", log=lambda *a, **k: None,
-        source_key=lambda model, label: None, run_author=lambda **kw: "",
+        source_key=lambda model, label: None, run_author=lambda *a, **kw: "",
         model=config.lead_author_model(), effort=config.lead_author_effort(),
         timeout=config.lead_author_timeout(), request_limit=config.lead_author_request_limit(),
     )
     kw.update(over)
-    return run_author_stage(**kw)
+    log_label = kw.pop("log_label")
+    return run_author_stage(
+        wiring=StageWiring.for_batch(
+            kw.pop("system_prompt_file"), kw.pop("model"), kw.pop("effort"),
+            batch_id=kw.pop("batch_id"), label=log_label,
+        ),
+        ctx=StageContext(
+            learning_run_dir=kw.pop("learning_run_dir"),
+            user=kw.pop("user_prompt"),
+            request_limit=kw.pop("request_limit"),
+            wall_clock_timeout=kw.pop("timeout"),
+            repo_root=kw.pop("repo_root"),
+            box=kw.pop("box", None),
+            salt=kw.pop("salt", None),
+        ),
+        log_label=log_label,
+        **kw,
+    )
 
 
 # ===========================================================================
@@ -304,11 +325,23 @@ def test_run_stage_require_output_matrix(tmp_path):
     def _go(require, text, tag):
         kw = {} if require is None else {"require_output": require}
         return run_stage(
-            stage="lead_author", prompt_path=_prompt(tmp_path), model="m", effort=None,
-            trace_name=f"ro-{tag}.jsonl", label="la", user="u",
-            learning_run_dir=deps.run_dir, deps=deps, request_limit=4,
-            wall_clock_timeout=config.subagent_timeout(),
-            make_model=_fake_model(_replay(text)), **kw,
+            stage="lead_author",
+            wiring=StageWiring(
+                prompt_path=_prompt(tmp_path),
+                model="m",
+                effort=None,
+                trace_name=f"ro-{tag}.jsonl",
+                label="la",
+            ),
+            ctx=StageContext(
+                learning_run_dir=deps.run_dir,
+                user="u",
+                request_limit=4,
+                wall_clock_timeout=config.subagent_timeout(),
+            ),
+            deps=deps,
+            make_model=_fake_model(_replay(text)),
+            **kw,
         )
 
     with override_allow_model_requests(False):
@@ -329,8 +362,14 @@ def test_lead_author_registers_file_writers(tmp_path):
     logger = observe.RequestLogger(tmp_path / "toolset.jsonl")
     try:
         w = _pydantic_stage.build_stage_agent(
-            LeadAuthorDeps, _prompt(tmp_path), "m", None, logger, "la",
-            make_model=_fake_model(_replay("")))
+            LeadAuthorDeps,
+            StageWiring(
+                prompt_path=_prompt(tmp_path), model="m", effort=None,
+                trace_name="t.jsonl", label="la",
+            ),
+            logger,
+            make_model=_fake_model(_replay("")),
+        )
     finally:
         logger.close()
     assert list(w._function_toolset.tools) == ["bash", "read_file", "write_file", "edit_file"]
@@ -356,9 +395,20 @@ def test_relative_write_lands_in_worktree_not_process_cwd(tmp_path, monkeypatch)
     fn = _tool_then_text([("write_file", {"path": rel, "content": "BODY-42"})], "done")
     with override_allow_model_requests(False):
         out = _run_lead_author_pydantic(
-            prompt_path=_prompt(tmp_path), model="m", effort=None, trace_name="f2.jsonl",
-            label="la", user="u", learning_run_dir=rd, repo_root=wt, request_limit=6,
-            wall_clock_timeout=config.lead_author_timeout(), make_model=_fake_model(fn))
+            StageWiring(
+                prompt_path=_prompt(tmp_path), model="m",
+                effort=None, trace_name="f2.jsonl",
+                label="la",
+            ),
+            StageContext(
+                learning_run_dir=rd,
+                user="u",
+                request_limit=6,
+                wall_clock_timeout=config.lead_author_timeout(),
+                repo_root=wt,
+            ),
+            make_model=_fake_model(fn),
+        )
     assert out == "done"
     landed = wt / "defender" / "skills" / "gather" / "queries" / "foo" / "new.md"
     assert landed.is_file()                                       # positive: real write, in the worktree
@@ -378,9 +428,20 @@ def test_write_into_new_subtree_creates_parents(tmp_path):
     fn = _tool_then_text([("write_file", {"path": rel, "content": "PROMOTED"})], "done")
     with override_allow_model_requests(False):
         out = _run_lead_author_pydantic(
-            prompt_path=_prompt(tmp_path), model="m", effort=None, trace_name="newdir.jsonl",
-            label="la", user="u", learning_run_dir=rd, repo_root=wt, request_limit=6,
-            wall_clock_timeout=config.lead_author_timeout(), make_model=_fake_model(fn))
+            StageWiring(
+                prompt_path=_prompt(tmp_path), model="m",
+                effort=None, trace_name="newdir.jsonl",
+                label="la",
+            ),
+            StageContext(
+                learning_run_dir=rd,
+                user="u",
+                request_limit=6,
+                wall_clock_timeout=config.lead_author_timeout(),
+                repo_root=wt,
+            ),
+            make_model=_fake_model(fn),
+        )
     assert out == "done"
     landed = wt / "defender" / "skills" / "newsys" / "queries" / "auth.md"
     assert landed.read_text() == "PROMOTED"
@@ -398,10 +459,20 @@ def test_engine_run_does_not_leak_process_cwd(tmp_path, monkeypatch):
     before = os.getcwd()
     with override_allow_model_requests(False):
         _run_lead_author_pydantic(
-            prompt_path=_prompt(tmp_path), model="m", effort=None, trace_name="cwd.jsonl",
-            label="la", user="u", learning_run_dir=rd, repo_root=wt, request_limit=4,
-            wall_clock_timeout=config.lead_author_timeout(),
-            make_model=_fake_model(_replay("done")))
+            StageWiring(
+                prompt_path=_prompt(tmp_path), model="m",
+                effort=None, trace_name="cwd.jsonl",
+                label="la",
+            ),
+            StageContext(
+                learning_run_dir=rd,
+                user="u",
+                request_limit=4,
+                wall_clock_timeout=config.lead_author_timeout(),
+                repo_root=wt,
+            ),
+            make_model=_fake_model(_replay("done")),
+        )
     assert os.getcwd() == before
 
 
@@ -419,9 +490,20 @@ def test_writer_contentless_final_after_write_is_success(tmp_path):
     fn = _tool_then_text([("write_file", {"path": rel, "content": "X"})], "  ")
     with override_allow_model_requests(False):
         out = _run_lead_author_pydantic(
-            prompt_path=_prompt(tmp_path), model="m", effort=None, trace_name="e.jsonl",
-            label="la", user="u", learning_run_dir=rd, repo_root=wt, request_limit=6,
-            wall_clock_timeout=config.lead_author_timeout(), make_model=_fake_model(fn))
+            StageWiring(
+                prompt_path=_prompt(tmp_path), model="m",
+                effort=None, trace_name="e.jsonl",
+                label="la",
+            ),
+            StageContext(
+                learning_run_dir=rd,
+                user="u",
+                request_limit=6,
+                wall_clock_timeout=config.lead_author_timeout(),
+                repo_root=wt,
+            ),
+            make_model=_fake_model(fn),
+        )
     assert out == "  "
     assert (wt / "defender" / "skills" / "gather" / "queries" / "foo" / "e.md").read_text() == "X"
 
@@ -432,13 +514,13 @@ def test_writer_contentless_final_after_write_is_success(tmp_path):
 
 def test_run_author_stage_success_returns_zero():
     """A run_author that completes (returns text — or "" for a writer) → rc 0."""
-    assert _spawn(run_author=lambda **kw: "") == 0
+    assert _spawn(run_author=lambda *a, **kw: "") == 0
 
 
 def test_run_author_stage_run_unprocessable_maps_to_124():
     """A per-run fault (timeout / usage-limit / model error / empty verdict → RunUnprocessable
     from run_author) → rc 124 (single-run quarantine). The positive contrast to config faults."""
-    def _boom(**kw):
+    def _boom(*a, **kw):
         raise RunUnprocessable("model timed out")
     assert _spawn(run_author=_boom) == 124
 
@@ -453,7 +535,7 @@ def test_run_author_stage_config_fault_propagates_not_124():
     with pytest.raises(FatalConfigError, match="FIREWORKS_API_KEY"):
         _spawn(source_key=_boom_key)
 
-    def _boom_build(**kw):
+    def _boom_build(*a, **kw):
         raise FatalConfigError("misconfigured effort")
     with pytest.raises(FatalConfigError):
         _spawn(run_author=_boom_build)
@@ -463,7 +545,7 @@ def test_run_author_stage_config_fault_propagates_not_124():
 
 def test_run_author_stage_stage_abort_propagates():
     """StageAbort (a systemic fault) also propagates — only RunUnprocessable is caught→124."""
-    def _boom(**kw):
+    def _boom(*a, **kw):
         raise StageAbort("systemic")
     with pytest.raises(StageAbort):
         _spawn(run_author=_boom)
@@ -476,7 +558,7 @@ def test_run_author_stage_sources_key_before_run():
     events = []
     _spawn(
         source_key=lambda model, label: events.append(("key", model)),
-        run_author=lambda **kw: events.append(("run", kw.get("model"))) or "",
+        run_author=lambda wiring, ctx, **kw: events.append(("run", wiring.model)) or "",
         model=config.lead_author_model(),
     )
     assert [e[0] for e in events] == ["key", "run"]
@@ -490,8 +572,8 @@ def test_run_author_stage_trace_name_carries_batch_id_and_pid(tmp_path):
     rd = _run_dir(tmp_path)
     seen = []
 
-    def _cap(**kw):
-        seen.append(kw["trace_name"])
+    def _cap(wiring, ctx, **kw):
+        seen.append(wiring.trace_name)
         return ""
 
     for bid in ("run-A", "run-B"):
@@ -512,10 +594,20 @@ def test_two_distinct_traces_into_one_dir_both_survive(tmp_path):
     with override_allow_model_requests(False):
         for name in ("run-A.7.trace.jsonl", "run-B.7.trace.jsonl"):
             _run_lead_author_pydantic(
-                prompt_path=_prompt(tmp_path), model="m", effort=None, trace_name=name,
-                label="la", user="u", learning_run_dir=rd, repo_root=wt, request_limit=4,
-                wall_clock_timeout=config.lead_author_timeout(),
-                make_model=_fake_model(_replay("done")))
+                StageWiring(
+                    prompt_path=_prompt(tmp_path), model="m",
+                    effort=None, trace_name=name,
+                    label="la",
+                ),
+                StageContext(
+                    learning_run_dir=rd,
+                    user="u",
+                    request_limit=4,
+                    wall_clock_timeout=config.lead_author_timeout(),
+                    repo_root=wt,
+                ),
+                make_model=_fake_model(_replay("done")),
+            )
     a, b = rd / "run-A.7.trace.jsonl", rd / "run-B.7.trace.jsonl"
     assert a.is_file()
     assert a.read_text().strip()
@@ -559,10 +651,19 @@ def test_claude_none_effort_becomes_fatal_config(tmp_path, monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
     with override_allow_model_requests(False), pytest.raises(FatalConfigError):
         _run_lead_author_pydantic(
-            prompt_path=_prompt(tmp_path), model="claude-sonnet-4-6", effort="none",
-            trace_name="cfg.jsonl", label="la", user="u",
-            learning_run_dir=_run_dir(tmp_path), repo_root=_worktree(tmp_path), request_limit=4,
-            wall_clock_timeout=config.lead_author_timeout())
+            StageWiring(
+                prompt_path=_prompt(tmp_path), model="claude-sonnet-4-6",
+                effort="none", trace_name="cfg.jsonl",
+                label="la",
+            ),
+            StageContext(
+                learning_run_dir=_run_dir(tmp_path),
+                user="u",
+                request_limit=4,
+                wall_clock_timeout=config.lead_author_timeout(),
+                repo_root=_worktree(tmp_path),
+            ),
+        )
 
 
 def test_unroutable_model_source_key_fatal_config(tmp_path):
@@ -570,11 +671,9 @@ def test_unroutable_model_source_key_fatal_config(tmp_path):
     that routes to no provider — and per F1 that propagates (not 124). run_author is a fake so
     nothing runs; the fault is at key-sourcing time."""
     with pytest.raises(FatalConfigError):
-        run_author_stage(
-            system_prompt_file=_prompt(tmp_path), batch_id="run-A", user_prompt="u",
+        _spawn(
+            system_prompt_file=_prompt(tmp_path),
             repo_root=_worktree(tmp_path), learning_run_dir=_run_dir(tmp_path),
-            log_label="lead author", log=lambda *a, **k: None,
-            model="gpt-4-turbo", effort=config.lead_author_effort(),
-            timeout=config.lead_author_timeout(),
-            request_limit=config.lead_author_request_limit(),
-            run_author=lambda **kw: "x")
+            model="gpt-4-turbo",
+            source_key=config.source_first_party_key,
+            run_author=lambda *a, **kw: "x")

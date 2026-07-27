@@ -237,6 +237,15 @@ def _capture_engine(monkeypatch, *, rc: int = 0, raise_exc=None):
 
     def _fake(**kwargs):
         cap.update(kwargs)
+        # #713: the spawn now forwards a StageWiring/StageContext pair. Flatten the fields
+        # the cases assert on back onto `cap`, so each case still names one knob.
+        if (w := kwargs.get("wiring")) is not None:
+            cap.update(system_prompt_file=w.prompt_path, model=w.model,
+                       effort=w.effort, trace_name=w.trace_name, label=w.label)
+        if (c := kwargs.get("ctx")) is not None:
+            cap.update(user_prompt=c.user, learning_run_dir=c.learning_run_dir,
+                       repo_root=c.repo_root, request_limit=c.request_limit,
+                       timeout=c.wall_clock_timeout, box=c.box, salt=c.salt)
         if raise_exc is not None:
             raise raise_exc
         return rc
@@ -269,11 +278,15 @@ def test_invoke_pitfalls_agent_wires_engine_kwargs_and_pending_anchor(tmp_path: 
     gets the pitfalls prompt, the 'pitfalls' batch id, and the injected repo_root. F4: the pitfalls
     curator has NO per-run dir, so its learning trace anchors at PENDING_DIR (the stable cross-run
     queue dir), not a synthesized run dir. Model/effort/request_limit default inside
-    run_author_stage (pinned in test_lead_author_engine)."""
+    run_author_stage (pinned in test_lead_author_engine).
+
+    Since #713 the batch id rides the StageWiring rather than being its own engine kwarg,
+    so it stays observable on the trace name and label."""
     cap = _capture_engine(monkeypatch)
     pitfalls_curator._invoke_pitfalls_agent([], repo_root=tmp_path)
     assert cap["system_prompt_file"] == pitfalls_curator.LEAD_PITFALLS_PROMPT
-    assert cap["batch_id"] == "pitfalls"
+    assert cap["trace_name"].startswith("pitfalls.")
+    assert cap["label"].endswith(":pitfalls")
     assert cap["repo_root"] == tmp_path
     assert cap["learning_run_dir"] == config.DEFAULT_PATHS.lead_pending_dir
 

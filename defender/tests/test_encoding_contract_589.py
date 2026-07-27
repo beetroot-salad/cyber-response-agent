@@ -186,7 +186,7 @@ def _curator_deps(tmp_path: Path):
     """A real `AgentDeps` for the corpus-author agent — enough to drive `runtime/tools.py`'s
     write/read tools directly, gate and all. Mirrors `test_lesson_read_tool.py`'s scene. Imported
     by the C-locale subprocess below too, so both processes build the same scene."""
-    from defender.learning.author.curator_engine import CuratorDeps
+    from defender.learning.author.curator_engine import CuratorDeps, ForwardCheckConfig
     from defender.learning.author.verify_forward.checks import FINDINGS_CHECK
 
     repo = tmp_path / "wt"
@@ -198,8 +198,11 @@ def _curator_deps(tmp_path: Path):
     pending.parent.mkdir(parents=True, exist_ok=True)
     pending.write_text("", encoding="utf-8")
     deps = CuratorDeps.for_run(
-        pending.parent, repo, corpus, check=FINDINGS_CHECK, runs_dir=runs,
-        pending=pending, queued_ids=frozenset(), run_verify=lambda **kw: "", box=None,
+        pending.parent,
+        repo,
+        corpus,
+        cfg=ForwardCheckConfig(check=FINDINGS_CHECK, runs_dir=runs, pending=pending, queued_ids=frozenset(), run_verify=lambda *a, **kw: ""),
+        box=None,
     )
     return deps, corpus
 

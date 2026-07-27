@@ -31,6 +31,7 @@ from pathlib import Path
 
 import pytest
 
+from defender.tests._stage_args import as_curator_stage_args  # noqa: E402
 from defender._io import read_jsonl_rows
 from defender.learning.author import curator, shared
 from defender.learning.author.benign_actor import run as benign_run
@@ -90,7 +91,7 @@ def test_survival_partial_write_rollback(tmp_repo, helpers):
     assert a.run_batch(cfg=replace(tmp_repo.cfg, invoke_agent=partial_then_raise)) == 2
     assert _commit_count(tmp_repo) == commits_before
     assert queued_ids() == {"run-P/0"}
-    assert not tmp_repo.cfg.consumed_file.exists()
+    assert not tmp_repo.cfg.channel.consumed.exists()
 
     assert tmp_repo.run_git("status", "--porcelain").stdout.strip() != ""
 
@@ -130,7 +131,7 @@ def test_survival_committed_dirty_crosscheck(tmp_repo, helpers):
 
     assert a.run_batch(cfg=replace(tmp_repo.cfg, invoke_agent=committed_but_clean)) == 2
     assert tmp_repo.paths.pending_file.read_text() == pre
-    assert not tmp_repo.cfg.consumed_file.exists()
+    assert not tmp_repo.cfg.channel.consumed.exists()
 
     def dirty_but_no_commit(findings, batch_id, cfg):
         (tmp_repo.paths.lessons_dir / "orphan.md").write_text("uncommitted\n")
@@ -140,7 +141,7 @@ def test_survival_committed_dirty_crosscheck(tmp_repo, helpers):
 
     assert a.run_batch(cfg=replace(tmp_repo.cfg, invoke_agent=dirty_but_no_commit)) == 2
     assert tmp_repo.paths.pending_file.read_text() == pre
-    assert not tmp_repo.cfg.consumed_file.exists()
+    assert not tmp_repo.cfg.channel.consumed.exists()
 
     tmp_repo.run_git("reset", "--hard", "--quiet")
     tmp_repo.run_git("clean", "-fdq")
@@ -221,7 +222,7 @@ def test_survival_idempotent_redrain(tmp_repo, helpers):
     assert a.run_batch(hold_committed=True, cfg=replace(tmp_repo.cfg, invoke_agent=must_not_author)) == 0
     assert tmp_repo.run_git("rev-parse", "HEAD").stdout.strip() == head_after_tick1
     assert tmp_repo.paths.pending_file.read_text().strip() == ""
-    consumed = tmp_repo.cfg.consumed_file.read_text()
+    consumed = tmp_repo.cfg.channel.consumed.read_text()
     assert "run-I/0" in consumed
     assert "consumed_idempotent" in consumed
 
@@ -386,10 +387,10 @@ def _spawn_curator(**over):
         timeout=60,
         log=lambda *a, **k: None,
         source_key=lambda model, label=None: None,
-        run_author=lambda **kw: "",
+        run_author=lambda *a, **kw: "",
     )
     kw.update(over)
-    return run_curator_stage(**kw)
+    return run_curator_stage(**as_curator_stage_args(kw))
 
 
 
@@ -405,8 +406,8 @@ def test_trace_per_spawn_distinct(tmp_path: Path):
 
     seen: list[str] = []
 
-    def _cap(**kw):
-        seen.append(kw["trace_name"])
+    def _cap(wiring, ctx, **kw):
+        seen.append(wiring.trace_name)
         return ""
 
     for bid in ("batch-C", "batch-D"):
@@ -453,9 +454,9 @@ def test_trace_persistent_not_worktree(tmp_path: Path):
     rd.mkdir(parents=True, exist_ok=True)
     captured: dict = {}
 
-    def _cap(**kw):
-        captured["anchor"] = kw["learning_run_dir"]
-        captured["name"] = kw["trace_name"]
+    def _cap(wiring, ctx, **kw):
+        captured["anchor"] = ctx.learning_run_dir
+        captured["name"] = wiring.trace_name
         return ""
 
     _spawn_curator(

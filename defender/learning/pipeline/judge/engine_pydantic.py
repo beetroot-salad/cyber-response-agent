@@ -4,7 +4,13 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
-from defender.learning.core.config import judge_effort, judge_model, subagent_timeout
+from defender.learning.core.config import (
+    StageContext,
+    StageWiring,
+    judge_effort,
+    judge_model,
+    subagent_timeout,
+)
 from defender.learning.pipeline._pydantic_stage import build_stage_agent, run_stage
 from defender.runtime import observe, providers
 from defender.runtime.agent_definition import (
@@ -72,44 +78,44 @@ JUDGE_DEF = AgentDefinition(
 
 
 def build_judge_agent(
-    prompt_path: Path, model: str, effort: str,
-    logger: observe.RequestLogger, agent_id: str,
+    wiring: StageWiring, logger: observe.RequestLogger,
     *, make_model: MakeModel = providers.build_for_effort,
 ) -> Agent[JudgeDeps, str]:
-    return build_stage_agent(
-        JudgeDeps, prompt_path, model, effort, logger, agent_id, make_model=make_model,
-    )
+    return build_stage_agent(JudgeDeps, wiring, logger, make_model=make_model)
 
 
-def _run_judge_pydantic(  # noqa: PLR0913 — the judge_fn protocol signature plus the make_model/verbs test seams; every param is load-bearing per-call state
-    prompt_path: Path,
-    model: str,
-    effort: str,
-    trace_name: str,
-    label: str,
+def _run_judge_pydantic(
+    wiring: StageWiring,
+    *,
     user: str,
     learning_run_dir: Path,
-    *,
     scope: _ToolScope,
     salt: str | None = None,
     box: Any = None,
     make_model: MakeModel = providers.build_for_effort,
     verbs: Any = None,
 ) -> str:
+    """The judge's limits are stage-fixed, so the context is built HERE rather than taken
+    from the caller — `subagent_timeout()` is read at spawn, never frozen at import (#717).
+
+    The context is built FIRST and `bind` reads the transport off it, so `ctx.box`/`ctx.salt`
+    are what the agent was actually bound with rather than a second copy nothing reads."""
     read_roots = tuple(scope.add_dir) if isinstance(scope.add_dir, list) else ()
+    ctx = StageContext(
+        learning_run_dir=learning_run_dir, user=user,
+        request_limit=JUDGE_REQUEST_LIMIT,
+        wall_clock_timeout=subagent_timeout(),
+        box=box, salt=salt,
+    )
     deps = bind(
-        JUDGE_DEF, learning_run_dir, scope=RunScope(add_dirs=read_roots), salt=salt, box=box,
+        JUDGE_DEF, ctx.learning_run_dir, scope=RunScope(add_dirs=read_roots),
+        salt=ctx.salt, box=ctx.box,
     )
     tools = replace(JUDGE_DEF.tools, closed_tickets=scope.closed_ticket_read)
     if verbs is None and scope.closed_ticket_read:
         from defender.runtime.verbs import ModuleVerbRegistry
         verbs = ModuleVerbRegistry(deps.defender_dir / "scripts" / "adapters")
     return run_stage(
-        stage="judge",
-        prompt_path=prompt_path, model=model, effort=effort,
-        trace_name=trace_name, label=label, user=user,
-        learning_run_dir=learning_run_dir, deps=deps,
-        request_limit=JUDGE_REQUEST_LIMIT, make_model=make_model,
-        wall_clock_timeout=subagent_timeout(),
-        tools=tools, verbs=verbs,
+        stage="judge", wiring=wiring, ctx=ctx,
+        deps=deps, make_model=make_model, tools=tools, verbs=verbs,
     )

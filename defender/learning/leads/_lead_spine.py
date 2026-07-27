@@ -31,19 +31,26 @@ def _spawn_author_agent(
 ) -> int:
     PENDING_DIR.mkdir(parents=True, exist_ok=True)
     from defender.learning.leads import lead_author_engine
+    # Every knob below is read HERE, at spawn — each is env-backed and a module-level or
+    # signature default would freeze it at import (#717).
     return lead_author_engine.run_author_stage(
-        system_prompt_file=system_prompt_file,
-        batch_id=batch_id,
-        user_prompt=user_prompt,
-        repo_root=repo_root,
-        learning_run_dir=learning_run_dir,
+        wiring=_loop_config.StageWiring.for_batch(
+            system_prompt_file,
+            _loop_config.lead_author_model(),
+            _loop_config.lead_author_effort(),
+            batch_id=batch_id, label=log_label,
+        ),
+        ctx=_loop_config.StageContext(
+            learning_run_dir=learning_run_dir,
+            user=user_prompt,
+            request_limit=_loop_config.lead_author_request_limit(),
+            wall_clock_timeout=_loop_config.lead_author_timeout(),
+            repo_root=repo_root,
+            box=box,
+            salt=salt,
+        ),
         log_label=log_label,
         log=_log,
-        model=_loop_config.lead_author_model(),
-        effort=_loop_config.lead_author_effort(),
-        timeout=_loop_config.lead_author_timeout(),
-        request_limit=_loop_config.lead_author_request_limit(),
-        salt=salt, box=box,
     )
 
 

@@ -49,6 +49,7 @@ from pydantic_ai.messages import ModelResponse, TextPart  # noqa: E402
 from pydantic_ai.models import override_allow_model_requests  # noqa: E402
 from pydantic_ai.models.function import FunctionModel  # noqa: E402
 
+from defender.learning.core.config import StageWiring  # noqa: E402
 from defender._env import FatalConfigError  # noqa: E402
 from defender.learning.pipeline.judge import engine_pydantic  # noqa: E402
 from defender.runtime import driver, observe, providers  # noqa: E402
@@ -319,8 +320,12 @@ def test_build_judge_agent_thin_wrapper_still_applies_per_leg_effort(monkeypatch
     Uses the real build_for_effort (a fake key keeps it hermetic; settings make no call)."""
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
     prompt = Path(__file__)
-    malicious = engine_pydantic.build_judge_agent(prompt, "claude-sonnet-4-6", "low", logger, "judge-malicious")
-    benign = engine_pydantic.build_judge_agent(prompt, "claude-sonnet-4-6", "high", logger, "judge-benign")
+    malicious = engine_pydantic.build_judge_agent(
+        StageWiring(prompt_path=prompt, model="claude-sonnet-4-6", effort="low",
+                    trace_name="judge_trace.jsonl", label="judge-malicious"), logger)
+    benign = engine_pydantic.build_judge_agent(
+        StageWiring(prompt_path=prompt, model="claude-sonnet-4-6", effort="high",
+                    trace_name="judge_benign_trace.jsonl", label="judge-benign"), logger)
     assert malicious.model_settings["anthropic_effort"] == "low"
     assert benign.model_settings["anthropic_effort"] == "high"
     assert list(malicious._function_toolset.tools) == ["bash", "read_file"]

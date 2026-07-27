@@ -90,3 +90,193 @@ def test_accessor_returns_the_default_when_unset(monkeypatch):
     monkeypatch.delenv("ACTOR_MODEL", raising=False)
     assert config.author_max_attempts() == 3
     assert config.actor_model() == "glm-5.2"
+
+
+# ===========================================================================
+# #713 — the grouping objects must not re-freeze what #717 unfroze
+# ===========================================================================
+
+# The stage ENGINES — the entry points whose signatures the passthrough guard polices.
+_STAGE_MODULES = (
+    "learning/pipeline/_pydantic_stage.py",
+    "learning/pipeline/actor_engine.py",
+    "learning/pipeline/oracle_engine.py",
+    "learning/pipeline/judge/engine_pydantic.py",
+    "learning/author/curator_engine.py",
+    "learning/author/verify_forward/engine.py",
+    "learning/leads/lead_author_engine.py",
+)
+
+# Every module that CONSTRUCTS a wiring or a context — the engines above plus the spawn
+# boundaries, which is where the env-backed knobs are actually read. The freeze guard has to
+# span all of them: `malicious_actor/run.py` builds `StageWiring(ACTOR_PROMPT, actor_model(),
+# ...)` a few lines under a block of module constants, and hoisting it there would freeze
+# ACTOR_MODEL at import exactly as surely as doing it inside an engine.
+_WIRING_SITES = _STAGE_MODULES + (
+    "learning/core/directions.py",
+    "learning/leads/_lead_spine.py",
+    "learning/author/curator.py",
+    "learning/author/lessons/run.py",
+    "learning/pipeline/malicious_actor/run.py",
+    "learning/pipeline/benign_actor/run.py",
+    "learning/pipeline/oracle/run.py",
+    "learning/pipeline/judge/run.py",
+)
+
+# `directions.py` snapshots these two deliberately and says so at its line 28: an A/B run
+# pins the judge model for the whole process. They are the ONLY grandfathered pair; anything
+# else built at import time is the #717 regression coming back through the new objects.
+_GRANDFATHERED = {"ADVERSARIAL_WIRING", "BENIGN_WIRING"}
+
+_GROUPING_TYPES = {"StageWiring", "StageContext", "JudgeWiring"}
+
+
+def _defender_root() -> Path:
+    return Path(config.__file__).resolve().parents[2]
+
+
+def _constructs_a_grouping_object(node: ast.AST) -> bool:
+    for sub in ast.walk(node):
+        if isinstance(sub, ast.Call):
+            f = sub.func
+            name = f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", None)
+            if name in _GROUPING_TYPES:
+                return True
+            # `StageWiring.for_batch(...)` reads os.getpid() and the caller's live knobs;
+            # at module level it would freeze both just as surely.
+            if name == "for_batch":
+                return True
+    return False
+
+
+def _targets(node: ast.Assign | ast.AnnAssign) -> list[str]:
+    """Every bare NAME bound by this assignment, including through tuple/list unpacking.
+
+    Walking the targets (rather than reading `.id` off the top level only) matters for the
+    exemption below: a target list that yields NO names must not be treated as 'all of its
+    names are grandfathered'. `A, B = StageWiring(...), StageWiring(...)` binds a Tuple, and
+    a top-level-only reader returns `[]` for it."""
+    targets = [node.target] if isinstance(node, ast.AnnAssign) else list(node.targets)
+    return [
+        sub.id
+        for t in targets
+        for sub in ast.walk(t)
+        if isinstance(sub, ast.Name)
+    ]
+
+
+@pytest.mark.parametrize("rel", _WIRING_SITES)
+def test_no_module_level_stage_wiring_or_context(rel):
+    """A `StageWiring`/`StageContext` built at import time freezes whatever env-backed knob
+    it carries — `model`, `effort`, `wall_clock_timeout` (`subagent_timeout()`) — which is
+    exactly the freeze #717 removed and #713's grouping could quietly reintroduce.
+
+    Lint cannot see this: bundling the parameters into a module constant DELETES the
+    PLR0913 suppression and passes `ruff check defender` while the knob stops moving. So
+    the structural guard is the control, and it names its two grandfathered exceptions."""
+    path = _defender_root() / rel
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    frozen = []
+    for node in tree.body:
+        if not isinstance(node, ast.Assign | ast.AnnAssign):
+            continue
+        if node.value is None or not _constructs_a_grouping_object(node.value):
+            continue
+        names = _targets(node)
+        # `names and ...` on purpose: an EMPTY name set is vacuously a subset of the
+        # grandfathered pair, so an assignment to something that is not a bare name
+        # (`obj.attr = ...`, `d["k"] = ...`) would otherwise exempt itself.
+        if names and set(names) <= _GRANDFATHERED:
+            continue
+        frozen.append(f"{rel}:{node.lineno}: {', '.join(names) or ast.unparse(node)}")
+    assert not frozen, (
+        "a stage wiring/context is constructed at MODULE level:\n  "
+        + "\n  ".join(frozen)
+        + "\nBuild it per call, at the spawn boundary — an import-time construction "
+        "freezes its env-backed knobs past monkeypatch.setenv (#717/#713)."
+    )
+
+
+# ===========================================================================
+# #713 — a per-batch spawn's trace name stays unique on (batch_id, pid)
+# ===========================================================================
+
+# The spawn boundaries that stand up ONE batch of an authoring drain. Each used to let
+# `run_curator_stage` / `run_author_stage` derive the trace name for it; since #713 each
+# builds the wiring itself, so the uniqueness now depends on each one reaching `for_batch`.
+_BATCH_SPAWN_SITES = (
+    "learning/author/curator.py",
+    "learning/author/lessons/run.py",
+    "learning/leads/_lead_spine.py",
+)
+
+
+@pytest.mark.parametrize("rel", _BATCH_SPAWN_SITES)
+def test_batch_spawn_boundaries_build_their_wiring_via_for_batch(rel):
+    """`StageWiring.for_batch` is the ONLY builder that keys `trace_name` on (batch_id, pid).
+    A drain that constructs the wiring directly — `StageWiring(..., trace_name=
+    "curator_trace.jsonl")` — still spawns and still traces, but two concurrent drain
+    PROCESSES sharing one pending dir then interleave into a single file, and the second
+    `RequestLogger` truncates the first one's trace.
+
+    Structural because there is no injection seam below these entry points: `invoke_agent`
+    imports `curator_engine` locally and calls `run_curator_stage` with its production
+    `run_author` default, so a behavioral test would have to `monkeypatch.setattr` a module
+    global — which this repo's ratcheted `lint_monkeypatch` gate refuses. The behavioral half
+    lives at `test_curator_glm_engine.py::test_stage_refuses_a_wiring_that_did_not_come_from_
+    for_batch` (the stage rejects a batch-less wiring) and at
+    `test_curator_glm_survival.py::test_trace_per_spawn_distinct` (`for_batch` really does
+    separate two spawns); this guard is what binds those to the production callers."""
+    path = _defender_root() / rel
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    direct = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        f = node.func
+        name = f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", None)
+        if name in _GROUPING_TYPES - {"StageContext"}:
+            direct.append(f"{rel}:{node.lineno}: {ast.unparse(node.func)}(...)")
+    assert not direct, (
+        "a per-batch spawn boundary builds its wiring directly:\n  " + "\n  ".join(direct)
+        + "\nUse StageWiring.for_batch(..., batch_id=...) — it is what keys trace_name on "
+        "(batch_id, pid), so concurrent drain processes never share one trace file (#713)."
+    )
+
+
+def _is_blob_annotation(ann: ast.expr | None) -> bool:
+    """A `dict` parameter, subscripted or not — `dict[str, Any]` is the same bag."""
+    if isinstance(ann, ast.Subscript):
+        ann = ann.value
+    return isinstance(ann, ast.Name) and ann.id == "dict"
+
+
+@pytest.mark.parametrize("rel", _STAGE_MODULES)
+def test_stage_entry_points_take_no_passthrough_blob(rel):
+    """The grouping must not be bought with a bag. `**kwargs`, `*args` or a `dict` parameter
+    would get every engine under ruff's `max-args = 8` while keeping the call untyped —
+    the same defect in a costume, and one the DI-seam fakes could not discriminate.
+
+    All three costumes, not just `**kwargs`: `*args` forwards positionally with no names at
+    all, and `dict[str, Any]` is exactly as opaque as a bare `dict`."""
+    path = _defender_root() / rel
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    offenders = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            continue
+        if not (node.name.startswith("_run_") or node.name in {
+            "run_stage", "build_stage_agent", "run_curator_stage", "run_author_stage",
+        }):
+            continue
+        if node.args.kwarg is not None:
+            offenders.append(f"{rel}:{node.lineno} {node.name}(**{node.args.kwarg.arg})")
+        if node.args.vararg is not None:
+            offenders.append(f"{rel}:{node.lineno} {node.name}(*{node.args.vararg.arg})")
+        for arg in (*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs):
+            if _is_blob_annotation(arg.annotation):
+                offenders.append(f"{rel}:{node.lineno} {node.name}({arg.arg}: dict)")
+    assert not offenders, (
+        "a stage entry point takes an untyped passthrough:\n  " + "\n  ".join(offenders)
+        + "\nGroup the parameters into StageWiring/StageContext instead (#713)."
+    )

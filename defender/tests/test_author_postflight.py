@@ -49,7 +49,7 @@ def test_committed_finding_consumed(tmp_repo, helpers, monkeypatch):
     assert tmp_repo.paths.pending_file.read_text().strip() == ""
     consumed = [
         json.loads(line)
-        for line in tmp_repo.cfg.consumed_file.read_text().splitlines() if line.strip()
+        for line in tmp_repo.cfg.channel.consumed.read_text().splitlines() if line.strip()
     ]
     assert len(consumed) == 1
     assert consumed[0]["consumed_category"] == "consumed_committed"
@@ -73,7 +73,7 @@ def test_committed_finding_without_commit_message_aborts(tmp_repo, helpers, monk
     cfg = replace(tmp_repo.cfg, invoke_agent=fake_invoke)
     assert a.run_batch(cfg=cfg) == 2
     assert tmp_repo.paths.pending_file.read_text() == pre_pending
-    assert not tmp_repo.cfg.consumed_file.exists()
+    assert not tmp_repo.cfg.channel.consumed.exists()
 
 
 def test_held_forward_bad_stays_in_queue(tmp_repo, helpers, monkeypatch):
@@ -119,7 +119,7 @@ def test_consumed_skip_rotates_out(tmp_repo, helpers, monkeypatch):
     assert tmp_repo.paths.pending_file.read_text().strip() == "", "skipped findings must rotate out — never re-trigger"
     consumed = [
         json.loads(line)
-        for line in tmp_repo.cfg.consumed_file.read_text().splitlines() if line.strip()
+        for line in tmp_repo.cfg.channel.consumed.read_text().splitlines() if line.strip()
     ]
     assert consumed[0]["consumed_category"] == "consumed_skip"
     assert "skip_reason" in consumed[0]
@@ -260,7 +260,7 @@ def test_agent_result_duplicate_classification_aborts(
     rc = a.run_batch(cfg=cfg)
     assert rc == 2
     assert tmp_repo.paths.pending_file.read_text() == pre_pending
-    assert not tmp_repo.cfg.consumed_file.exists()
+    assert not tmp_repo.cfg.channel.consumed.exists()
 
 
 def test_agent_writes_outside_lessons_aborts(tmp_repo, helpers, monkeypatch):

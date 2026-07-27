@@ -4,7 +4,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar
 
-from defender.learning.core.config import oracle_effort, oracle_model, subagent_timeout
+from defender.learning.core.config import (
+    StageContext,
+    StageWiring,
+    oracle_effort,
+    oracle_model,
+    subagent_timeout,
+)
 from defender.learning.pipeline._pydantic_stage import run_stage
 from defender.runtime import providers
 from defender.runtime.agent_definition import AgentDefinition, ToolSet, bind
@@ -37,24 +43,24 @@ ORACLE_DEF = AgentDefinition(
 )
 
 
-def _run_oracle_pydantic(  # noqa: PLR0913 — the oracle_fn protocol signature plus the make_model test seam; every param is load-bearing per-call state
-    prompt_path: Path,
-    model: str,
-    effort: str,
-    trace_name: str,
-    label: str,
+def _run_oracle_pydantic(
+    wiring: StageWiring,
+    *,
     user: str,
     learning_run_dir: Path,
-    *,
     salt: str | None = None,
     make_model: MakeModel = providers.build_for_effort,
 ) -> str:
-    deps = bind(ORACLE_DEF, learning_run_dir, salt=salt)
-    return run_stage(
-        stage="oracle",
-        prompt_path=prompt_path, model=model, effort=effort,
-        trace_name=trace_name, label=label, user=user,
-        learning_run_dir=learning_run_dir, deps=deps,
-        request_limit=ORACLE_REQUEST_LIMIT, make_model=make_model,
+    """The oracle's limits are stage-fixed, so the context is built HERE rather than taken
+    from the caller — `subagent_timeout()` is read at spawn, never frozen at import (#717).
+
+    The context is built FIRST and `bind` reads the salt off it, so `ctx.salt` is what the
+    agent was actually bound with rather than a second copy nothing reads."""
+    ctx = StageContext(
+        learning_run_dir=learning_run_dir, user=user,
+        request_limit=ORACLE_REQUEST_LIMIT,
         wall_clock_timeout=subagent_timeout(),
+        salt=salt,
     )
+    deps = bind(ORACLE_DEF, ctx.learning_run_dir, salt=ctx.salt)
+    return run_stage(stage="oracle", wiring=wiring, ctx=ctx, deps=deps, make_model=make_model)

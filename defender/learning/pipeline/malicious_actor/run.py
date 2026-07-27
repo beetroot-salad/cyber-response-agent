@@ -14,6 +14,7 @@ from defender.learning.core.config import (
     LESSONS_ENV_RETRIEVE_SCRIPT,
     LESSONS_ENVIRONMENT_DIR,
     RunUnprocessable,  # noqa: F401 — re-exported for ops/replay_actor.py's `sub.RunUnprocessable`
+    StageWiring,
     actor_effort,
     actor_model,  # noqa: F401 — re-exported for ops/replay_actor.py's `sub.actor_model`
 )
@@ -63,8 +64,11 @@ def invoke_actor(alert_path: Path, actor_input_path: Path, learning_run_dir: Pat
     from defender.learning.pipeline.actor_engine import _ActorScope, _run_actor_pydantic
     actor_fn = actor_fn if actor_fn is not None else _run_actor_pydantic  # lint-default: ok — DI seam owns its default; a signature default needs a module-top import that would defeat the lazy pydantic-ai import (subagents imports this module eagerly)
     return actor_fn(
-        ACTOR_PROMPT, actor_model(), actor_effort(), "actor_trace.jsonl", "actor",
-        user, learning_run_dir,
+        StageWiring(
+            prompt_path=ACTOR_PROMPT, model=actor_model(), effort=actor_effort(),
+            trace_name="actor_trace.jsonl", label="actor",
+        ),
+        user=user, learning_run_dir=learning_run_dir,
         scope=_ActorScope(
             (LESSONS_ENV_RETRIEVE_SCRIPT, LESSONS_ACTOR_INDEX_SCRIPT),
             read_confine=(LESSONS_ACTOR_DIR, LESSONS_ENVIRONMENT_DIR),

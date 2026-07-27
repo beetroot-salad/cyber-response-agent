@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -19,7 +18,7 @@ from defender.learning.author import shared as _shared
 from defender.learning.author.verify_forward.checks import ForwardCheck
 from defender.learning.author.verify_forward.engine import _run_verify_pydantic
 from defender.learning.core import config
-from defender.learning.core.config import RunUnprocessable
+from defender.learning.core.config import RunUnprocessable, StageContext, StageWiring
 from defender.learning.pipeline._pydantic_stage import run_stage
 from defender.learning.pipeline._prompt import stage_user_message
 from defender.runtime import providers
@@ -180,24 +179,20 @@ class CuratorDeps(AgentDeps):
         return self._forward_check_config().run_verify
 
     @classmethod
-    def for_run(  # noqa: PLR0913 — the spawn's roots + its bound check + the transport seam
+    def for_run(
         cls, run_dir: Path, repo_root: Path, corpus_dir: Path,
-        *, check: ForwardCheck, runs_dir: Path, pending: Path,
-        queued_ids: frozenset[str], box: Any,
-        run_verify: Callable[..., str] = _run_verify_pydantic,
-        salt: str | None = None,
+        *, cfg: ForwardCheckConfig, box: Any, salt: str | None = None,
     ) -> CuratorDeps:
         """A thin wrapper over `bind` (M9): resolves the corpus NAME off `corpus_dir`'s own
         basename and binds through the one seam, then attaches the forward-check config into
         the base `tool_config` slot. `corpus_dir` stays the caller's contract (unchanged from
         before #691) — only its *derivation* moved onto `bind`. `box` is REQUIRED (R1): a
         loud TypeError at construction beats a silent inert default that re-deads the curator's
-        bash lane (#665 F1)."""
+        bash lane (#665 F1).
+
+        Since #713 the `ForwardCheckConfig` arrives already built: `run_curator_stage` owns
+        its construction, so the five forward-check fields stop being re-declared here."""
         defender_dir = repo_root / "defender"
-        cfg = ForwardCheckConfig(
-            check=check, runs_dir=runs_dir, pending=pending,
-            queued_ids=queued_ids, run_verify=run_verify,
-        )
         scope = RunScope(
             corpus_name=corpus_dir.name,
             read_confine=tuple(
@@ -232,92 +227,86 @@ CORPUS_AUTHOR_DEF = AgentDefinition(
 )
 
 
-def _run_curator_pydantic(  # noqa: PLR0913 — the transport signature plus the make_model test seam; every param is load-bearing per-call state
+def _run_curator_pydantic(
+    wiring: StageWiring,
+    ctx: StageContext,
     *,
-    prompt_path: Path,
-    model: str,
-    effort: str | None,
-    trace_name: str,
-    label: str,
-    user: str,
-    learning_run_dir: Path,
-    repo_root: Path,
     corpus_dir: Path,
-    check: ForwardCheck,
-    runs_dir: Path,
-    pending: Path,
-    queued_ids: frozenset[str],
-    box: Any = None,
-    run_verify: Callable[..., str] = _run_verify_pydantic,
-    salt: str | None = None,
-    request_limit: int,
-    wall_clock_timeout: int,
+    cfg: ForwardCheckConfig,
     make_model: MakeModel = providers.build_for_effort,
 ) -> str:
+    """Both limits vary per spawn here, so the caller owns the whole context — this is one
+    of the two stages where the transport really was threaded through three layers (#713)."""
+    # `repo_root` is optional on the SHARED context (the pure-prediction stages bind off the
+    # run dir alone) but required here: the corpus confine is resolved off the repo tree.
+    # A raise, not an assert — `python -O` strips asserts, and the fallout would be a
+    # `NoneType / str` TypeError several frames down inside `bind`.
+    repo_root = ctx.repo_root
+    if repo_root is None:
+        raise ValueError(
+            "curator stage needs ctx.repo_root: it binds a corpus off the repo tree"
+        )
     deps = CuratorDeps.for_run(
-        learning_run_dir, repo_root, corpus_dir,
-        check=check, runs_dir=runs_dir, pending=pending,
-        queued_ids=queued_ids, run_verify=run_verify, salt=salt, box=box,
+        ctx.learning_run_dir, repo_root, corpus_dir,
+        cfg=cfg, salt=ctx.salt, box=ctx.box,
     )
     return run_stage(
         stage="curator",
-        prompt_path=prompt_path, model=model, effort=effort,
-        trace_name=trace_name, label=label, user=user,
-        learning_run_dir=learning_run_dir, deps=deps,
-        request_limit=request_limit, make_model=make_model,
-        require_output=True,
-        wall_clock_timeout=wall_clock_timeout,
+        wiring=wiring, ctx=ctx, deps=deps,
+        make_model=make_model, require_output=True,
     )
 
 
-def run_curator_stage(  # noqa: PLR0913 — the spawn contract (per-spawn inputs + logger) + its config knobs + 2 DI seams; every param is load-bearing per-call state
+def run_curator_stage(
     *,
-    system_prompt_file: Path,
-    batch_id: str,
-    user_prompt: str,
+    wiring: StageWiring,
+    ctx: StageContext,
     corpus_dir: Path,
-    check: ForwardCheck,
-    runs_dir: Path,
-    pending: Path,
-    queued_ids: frozenset[str],
-    repo_root: Path,
-    learning_run_dir: Path,
+    cfg: ForwardCheckConfig,
     log: Callable[[str], None],
-    box: Any = None,
-    # No signature defaults for the four model/effort/limit/timeout knobs: each is
-    # env-backed, and a default evaluated at import would freeze it (#717). Every caller
-    # already threads its own curator's values (they differ per corpus).
-    model: str,
-    effort: str | None,
-    request_limit: int,
-    timeout: int,
     source_key: Callable[..., object] = config.source_first_party_key,
     run_author: Callable[..., str] = _run_curator_pydantic,
-    run_verify: Callable[..., str] = _run_verify_pydantic,
-    salt: str | None = None,
 ) -> dict:
-    log(f"spawn curator {batch_id} in-process (model={model}, effort={effort}, timeout={timeout}s)")
-    stage_salt = salt if salt is not None else uuid4().hex
+    """`wiring` is the spawn's prompt/model/effort/trace/label/batch, `ctx` its roots, user
+    prompt and two env-backed limits; `cfg` is the forward-check group, built by the caller
+    since #713 rather than five parameters re-declared all the way down to
+    `CuratorDeps.for_run`.
+
+    Every model/effort/limit/timeout knob is caller-supplied with no default here: each is
+    env-backed and differs per corpus, so a default evaluated at import would freeze it
+    (#717)."""
+    # ONE batch identity, read off the wiring that already derived `trace_name` and `label`
+    # from it. Taking it a second time as a parameter let a caller log `spawn curator B`,
+    # raise `AuthorError("curator (B) ...")` and write `A.<pid>.trace.jsonl` — three artifacts
+    # naming two batches, with nothing asserting they agree. A raise, not an assert: `python
+    # -O` strips asserts, and `for_batch` is the only builder that sets the field.
+    batch_id = wiring.batch_id
+    if batch_id is None:
+        raise ValueError(
+            "curator stage needs a wiring built by StageWiring.for_batch: its log line and "
+            "its AuthorErrors name the same batch its trace file is keyed on"
+        )
+    log(
+        f"spawn curator {batch_id} in-process (model={wiring.model}, "
+        f"effort={wiring.effort}, timeout={ctx.wall_clock_timeout}s)"
+    )
+    stage_salt = ctx.salt if ctx.salt is not None else uuid4().hex
+    user_prompt = ctx.user
     if f"<run-{stage_salt}-" not in user_prompt:
         user_prompt = stage_user_message(
             stage_salt, wrap(user_prompt, "lesson_rows", stage_salt)
         )
-    source_key(model, label="curator")
-    if check.prompt_path is not None and (
+    source_key(wiring.model, label="curator")
+    if cfg.check.prompt_path is not None and (
         providers.provider_for(config.verifier_model()).api_key_var
-        != providers.provider_for(model).api_key_var
+        != providers.provider_for(wiring.model).api_key_var
     ):
-        source_key(config.verifier_model(), label=f"verify:{check.error_prefix}")
-    trace_name = f"{batch_id}.{os.getpid()}.trace.jsonl"
+        source_key(config.verifier_model(), label=f"verify:{cfg.check.error_prefix}")
     try:
         text = run_author(
-            prompt_path=system_prompt_file, model=model, effort=effort,
-            trace_name=trace_name, label=f"curator:{batch_id}", user=user_prompt,
-            learning_run_dir=learning_run_dir, repo_root=repo_root,
-            corpus_dir=corpus_dir, check=check, runs_dir=runs_dir, pending=pending,
-            queued_ids=queued_ids, run_verify=run_verify,
-            request_limit=request_limit, wall_clock_timeout=timeout,
-            salt=stage_salt, box=box,
+            wiring,
+            replace(ctx, user=user_prompt, salt=stage_salt),
+            corpus_dir=corpus_dir, cfg=cfg,
         )
     except RunUnprocessable as e:
         raise AuthorError(f"curator ({batch_id}) did not complete: {e}") from e

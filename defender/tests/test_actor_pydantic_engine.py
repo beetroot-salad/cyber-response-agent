@@ -17,6 +17,7 @@ pytest.importorskip("pydantic_ai")
 from pydantic_ai.exceptions import ModelRetry  # noqa: E402
 from pydantic_ai.models import override_allow_model_requests  # noqa: E402
 
+from defender.learning.core.config import StageWiring  # noqa: E402
 from defender.learning.core import config, subagents  # noqa: E402
 from defender.learning.pipeline import _pydantic_stage  # noqa: E402
 from defender.learning.pipeline import actor_engine  # noqa: E402
@@ -75,8 +76,13 @@ def test_run_actor_pydantic_returns_story_and_writes_trace(tmp_path):
     fn = _replay([{"text": _STORY}])
     with override_allow_model_requests(False):
         out = _run_actor_pydantic(
-            _prompt(tmp_path), "claude-sonnet-4-6", "low", "actor_trace.jsonl", "actor",
-            "write the story", lrd,
+            StageWiring(
+                prompt_path=_prompt(tmp_path), model="claude-sonnet-4-6",
+                effort="low", trace_name="actor_trace.jsonl",
+                label="actor",
+            ),
+            user="write the story",
+            learning_run_dir=lrd,
             scope=_ActorScope((_ENV_RETRIEVE, _ACTOR_INDEX), read_confine=_MALICIOUS_CONFINE),
             make_model=_fake_model(fn),
         )
@@ -90,8 +96,13 @@ def test_run_actor_pydantic_returns_skip_verbatim(tmp_path):
     fn = _replay([{"text": "Let me consider the menu.\n\nSKIP: no covering initial-access technique"}])
     with override_allow_model_requests(False):
         out = _run_actor_pydantic(
-            _prompt(tmp_path), "claude-sonnet-4-6", "low", "actor_trace.jsonl", "actor",
-            "write the story", lrd,
+            StageWiring(
+                prompt_path=_prompt(tmp_path), model="claude-sonnet-4-6",
+                effort="low", trace_name="actor_trace.jsonl",
+                label="actor",
+            ),
+            user="write the story",
+            learning_run_dir=lrd,
             scope=_ActorScope((_ENV_RETRIEVE, _ACTOR_INDEX), read_confine=_MALICIOUS_CONFINE),
             make_model=_fake_model(fn),
         )
@@ -249,7 +260,12 @@ def test_actor_agent_is_read_only_no_writers():
     logger = observe.RequestLogger(Path("/tmp/does-not-need-to-exist-actor-tools.jsonl"))
     try:
         agent = _pydantic_stage.build_stage_agent(
-            ActorDeps, Path(__file__), "any-model", "low", logger, "actor",
+            ActorDeps,
+            StageWiring(
+                prompt_path=Path(__file__), model="any-model", effort="low",
+                trace_name="t.jsonl", label="actor",
+            ),
+            logger,
             make_model=_fake_model(_replay([{"text": ""}])),
         )
     finally:
@@ -263,7 +279,12 @@ def test_build_actor_agent_applies_glm_low_effort(monkeypatch):
     logger = observe.RequestLogger(Path("/tmp/does-not-need-to-exist-actor-effort.jsonl"))
     try:
         agent = _pydantic_stage.build_stage_agent(
-            ActorDeps, Path(__file__), "glm-5.2", "low", logger, "actor",
+            ActorDeps,
+            StageWiring(
+                prompt_path=Path(__file__), model="glm-5.2", effort="low",
+                trace_name="t.jsonl", label="actor",
+            ),
+            logger,
         )
     finally:
         logger.close()

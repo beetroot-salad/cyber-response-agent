@@ -30,8 +30,10 @@ pytest.importorskip("pydantic_ai")
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart  # noqa: E402
 from pydantic_ai.models import override_allow_model_requests  # noqa: E402
 
+from defender.tests._stage_args import as_curator_stage_args  # noqa: E402
 from defender.learning.author.curator_engine import (  # noqa: E402
     CuratorDeps,
+    ForwardCheckConfig,
     _run_curator_pydantic,
     run_curator_stage,
 )
@@ -91,11 +93,11 @@ def _bundle(scene, run_id: str, *, disposition: str = "malicious") -> Path:
 
 def _deps(scene, *, run_verify, check=None, queued=(), corpus=None, runs=None, pending=None):
     return CuratorDeps.for_run(
-        scene.curdir, scene.repo, corpus if corpus is not None else scene.corpus,
-        check=check if check is not None else FINDINGS_CHECK,
-        runs_dir=runs if runs is not None else scene.runs,
-        pending=pending if pending is not None else scene.pending,
-        queued_ids=frozenset(queued), run_verify=run_verify, box=None,
+        scene.curdir,
+        scene.repo,
+        corpus if corpus is not None else scene.corpus,
+        cfg=ForwardCheckConfig(check=check if check is not None else FINDINGS_CHECK, runs_dir=runs if runs is not None else scene.runs, pending=pending if pending is not None else scene.pending, queued_ids=frozenset(queued), run_verify=run_verify),
+        box=None,
     )
 
 
@@ -120,12 +122,12 @@ def test_d11_trace_names_distinct_per_check(tmp_path):
     inflight = [0]
     peak = [0]
 
-    def _transport(**kw):
+    def _transport(wiring, **kw):
         with lock:
             inflight[0] += 1
             peak[0] = max(peak[0], inflight[0])
         try:
-            return _run_verify_pydantic(**kw, make_model=_fake_model(_verifier("VERDICT: GOOD", delay=0.05)))
+            return _run_verify_pydantic(wiring, **kw, make_model=_fake_model(_verifier("VERDICT: GOOD", delay=0.05)))
         finally:
             with lock:
                 inflight[0] -= 1
@@ -167,13 +169,13 @@ def test_d12_curator_trace_in_a_separate_root(tmp_path):
         {"lesson_path": "defender/lessons/l.md", "source_id": "run-X", "direction": "adversarial"},
     ])
 
-    def _transport(**kw):
-        return _run_verify_pydantic(**kw, make_model=_fake_model(_verifier("VERDICT: GOOD")))
+    def _transport(wiring, **kw):
+        return _run_verify_pydantic(wiring, **kw, make_model=_fake_model(_verifier("VERDICT: GOOD")))
 
     prompt = scene.tmp / "curator.md"
     prompt.write_text("Curate. Emit AUTHOR_RESULT when done.\n")
     with override_allow_model_requests(False):
-        run_curator_stage(
+        run_curator_stage(**as_curator_stage_args(dict(
             system_prompt_file=prompt, batch_id="batch-A", user_prompt="u",
             corpus_dir=scene.corpus, check=FINDINGS_CHECK,
             runs_dir=scene.runs, pending=scene.pending, queued_ids=frozenset({"run-X"}),
@@ -181,9 +183,10 @@ def test_d12_curator_trace_in_a_separate_root(tmp_path):
             log=lambda *a, **k: None, model="glm-5.2", effort="low",
             request_limit=8, timeout=180,
             source_key=lambda model, label=None: None,
-            run_author=lambda **kw: _run_curator_pydantic(**kw, make_model=_fake_model(curator_fn)),
+            run_author=lambda *a, **kw: _run_curator_pydantic(
+                *a, **kw, make_model=_fake_model(curator_fn)),
             run_verify=_transport,
-        )
+        )))
 
     curator_traces = list(scene.curdir.glob("*.trace.jsonl"))
     assert curator_traces, "the curator spawn wrote no trace in its learning_run_dir"
@@ -226,7 +229,7 @@ def test_m2_env_checks_write_no_trace(tmp_path):
 
     calls: list = []
 
-    def _transport(**kw):
+    def _transport(wiring, **kw):
         calls.append(kw)
         return "VERDICT: GOOD"
 
@@ -238,8 +241,8 @@ def test_m2_env_checks_write_no_trace(tmp_path):
     (scene.corpus / "m.md").write_text("---\nname: m\n---\nbody\n")
     src2 = _bundle(scene, "run-M")
 
-    def _real(**kw):
-        return _run_verify_pydantic(**kw, make_model=_fake_model(_verifier("VERDICT: GOOD")))
+    def _real(wiring, **kw):
+        return _run_verify_pydantic(wiring, **kw, make_model=_fake_model(_verifier("VERDICT: GOOD")))
 
     deps2 = _deps(scene, run_verify=_real, check=FINDINGS_CHECK, queued={"run-M"})
     with override_allow_model_requests(False):
@@ -262,8 +265,8 @@ def test_m13_trace_handle_closed_when_a_check_raises(tmp_path):
         (scene.corpus / f"l-{r}.md").write_text(f"---\nname: l-{r}\n---\nbody\n")
         _bundle(scene, r)
 
-    def _transport(**kw):
-        return _run_verify_pydantic(**kw, make_model=_fake_model(_verifier("")))
+    def _transport(wiring, **kw):
+        return _run_verify_pydantic(wiring, **kw, make_model=_fake_model(_verifier("")))
 
     pairs = [Pair(f"defender/lessons/l-{r}.md", r, "adversarial") for r in rids]
     deps = _deps(scene, run_verify=_transport, queued=set(rids))

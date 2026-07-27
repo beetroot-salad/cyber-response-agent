@@ -1627,11 +1627,9 @@ def test_invoke_judge_benign_is_grounded(tmp_path: Path):
 
     captured: dict = {}
 
-    def _fake_judge_fn(prompt_path, model, *args, **kwargs):
-        _effort, _trace, label, user, _lrd = args
-        scope = kwargs["scope"]
+    def _fake_judge_fn(wiring, *, user, scope, **kwargs):
         captured.update(
-            prompt_path=prompt_path, model=model, label=label, user=user,
+            prompt_path=wiring.prompt_path, model=wiring.model, label=wiring.label, user=user,
             add_dir=scope.add_dir, closed_ticket_read=scope.closed_ticket_read,
         )
         return "outcome: survived\ndefender_findings: []\n"

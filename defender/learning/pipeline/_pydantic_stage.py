@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import replace
-from pathlib import Path
 from typing import Any
 
 from defender._text import is_content_less
@@ -10,6 +9,8 @@ from defender.learning.core.config import (
     FatalConfigError,
     RunUnprocessable,
     StageAbort,
+    StageContext,
+    StageWiring,
     _log,
 )
 from defender.runtime import observe, providers
@@ -21,13 +22,10 @@ from pydantic_ai.exceptions import UsageLimitExceeded
 from pydantic_ai.usage import UsageLimits
 
 
-def build_stage_agent(  # noqa: PLR0913 — the stage-build seam plus the make_model/tools/verbs DI seams; every param is load-bearing
+def build_stage_agent(
     deps_type: type[AgentDeps],
-    prompt_path: Path,
-    model: str,
-    effort: str | None,
+    wiring: StageWiring,
     logger: observe.RequestLogger,
-    label: str,
     *,
     make_model: MakeModel = providers.build_for_effort,
     tools: Any = None,
@@ -35,16 +33,16 @@ def build_stage_agent(  # noqa: PLR0913 — the stage-build seam plus the make_m
 ) -> Agent[Any, str]:
     from defender.agents import AGENTS
 
-    overrides: dict[str, Any] = {"model": lambda: model, "effort": effort}
+    overrides: dict[str, Any] = {"model": lambda: wiring.model, "effort": wiring.effort}
     if tools is not None:
         overrides["tools"] = tools
     defn = replace(AGENTS[deps_type.role], **overrides)
     return build_agent_core(
         defn,
         deps_type=deps_type,
-        instructions=prompt_path.read_text(encoding="utf-8"),
+        instructions=wiring.prompt_path.read_text(encoding="utf-8"),
         logger=logger,
-        agent_id=label,
+        agent_id=wiring.label,
         make_model=make_model,
         verbs=verbs,
     )
@@ -75,38 +73,33 @@ def _last_response_is_empty_text(messages: list[dict]) -> bool:
 
 
 
-def run_stage(  # noqa: PLR0913 — every param is load-bearing per-call transport state
+def run_stage(
     *,
     stage: str,
-    prompt_path: Path,
-    model: str,
-    effort: str | None,
-    trace_name: str,
-    label: str,
-    user: str,
-    learning_run_dir: Path,
+    wiring: StageWiring,
+    ctx: StageContext,
     deps: AgentDeps,
-    request_limit: int,
     make_model: MakeModel = providers.build_for_effort,
     require_output: bool = True,
-    # No signature default: the knob is env-backed, and a default evaluated at import
-    # would freeze it (#717). Each stage passes `subagent_timeout()` or its own knob.
-    wall_clock_timeout: int,
     tools: Any = None,
     verbs: Any = None,
 ) -> str:
-    logger = observe.RequestLogger(learning_run_dir / trace_name)
-    _log(f"step={label} engine=pydantic_ai model={model} effort={effort}")
+    """Drive one in-process stage. `wiring` is how the stage is configured, `ctx` is what
+    this spawn is about — the two objects that replaced the ten parameters every engine
+    used to re-declare and forward unchanged (#713)."""
+    label = wiring.label
+    logger = observe.RequestLogger(ctx.learning_run_dir / wiring.trace_name)
+    _log(f"step={label} engine=pydantic_ai model={wiring.model} effort={wiring.effort}")
     try:
         try:
             agent = build_stage_agent(
-                type(deps), prompt_path, model, effort, logger, label,
+                type(deps), wiring, logger,
                 make_model=make_model, tools=tools, verbs=verbs,
             )
         except ValueError as e:
             raise FatalConfigError(f"{stage} ({label}) misconfigured: {e}") from e
         result = asyncio.run(
-            _drive(agent, user, deps, request_limit, wall_clock_timeout)
+            _drive(agent, ctx.user, deps, ctx.request_limit, ctx.wall_clock_timeout)
         )
     except (TimeoutError, UsageLimitExceeded) as e:
         if require_output and _last_response_is_empty_text(logger.messages):
