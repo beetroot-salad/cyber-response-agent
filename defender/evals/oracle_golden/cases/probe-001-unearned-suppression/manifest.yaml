@@ -1,0 +1,60 @@
+case_id: probe-001-unearned-suppression
+kind: spec-probe
+base_case: case-001-ssh-bruteforce-canary
+
+# --- calibration metadata (#711) — see defender/docs/oracle-calibration.md ---
+# INHERITED from the base, and required to be: this case reuses case-001's envelopes
+# byte-for-byte. It is not a new unit and contributes no judged rows, so it cannot move
+# any rate the reporter publishes.
+split: dev
+unit:
+  activity_family: brute-force/T1110.001
+  host_pair: office-ws-1->canary-1
+capture_environment: playground-v2@409583061
+
+# A SPEC PROBE. No capture, no telemetry, no judge — and that is the point, not a
+# limitation. `oracle/prompt.md` is a specification, and much of it is decidable from the
+# story ALONE. A probe states a story whose correct handling the prompt already settles,
+# and `expectation:` below is that rule made executable. This is the eval axis the suite
+# lacked: it needs no environment, costs one oracle replay, and can be written for any
+# rule in the prompt.
+derivation:
+  from: case-001-ssh-bruteforce-canary/oracle_visible
+  changed: story.md only
+  unchanged: leads.jsonl + samples/ (case-001's envelopes, byte-identical)
+
+# ---------------------------------------------------------------- the rule under test
+# oracle/prompt.md, "Choosing the result":
+#
+#   "Suppression is earned by an explicit story action. Emit the `− noise` suppression
+#    marker ONLY when the story performs a concrete action that disables/removes/blinds
+#    the specific stream these queries read... If the story merely doesn't touch this
+#    stream, that is `0` (empty), not suppression — getting this wrong turns ordinary
+#    silence into a false detection."
+#
+# The story here performs NO blinding action: the attacker reads local files on
+# office-ws-1 and opens no connection to anything. It does, deliberately, NARRATE
+# silence — an operator remarking that canary-1's auth panel showed nothing that
+# evening. That is an observation of quiet, not a cause of it, and the distinction is
+# exactly the one `C-SUPPRESS-UNBASELINED` names: suppression earned from the STORY is
+# not suppression visible in the ENVELOPE.
+#
+# This targets a live, measured failure. `C-SUPPRESS-UNBASELINED` fires on
+# case-003 l-001 today, and the sanctioned prompt fix for it produced a NULL result —
+# all 36 leads projected identically. That fix was tested only against captures that
+# happened to contain the condition. This probe isolates the mechanism directly.
+probes_rule: "suppression is earned by an explicit story action"
+
+# The attacker's own entities are unchanged from case-001 (office-ws-1 / 172.18.0.15), so
+# the source-scoped envelopes (l-004, l-005, l-006) still match on entity. A projection
+# keyed on "is the story's actor in this filter?" rather than on "does the story's
+# activity write here?" emits anyway, and fails.
+discriminates: entity-presence vs. action-caused projection; narrated silence vs. suppression
+
+expectation:
+  # Nothing in this story writes to, or removes from, any envelope case-001 gathered.
+  empty_leads: all
+  # The load-bearing clause. An `<suppressed: ...>` marker anywhere here is the exact
+  # error this probe exists to catch, and `empty_leads` alone would already flag it —
+  # this states it separately so the failure names the rule rather than the symptom.
+  no_suppression: all

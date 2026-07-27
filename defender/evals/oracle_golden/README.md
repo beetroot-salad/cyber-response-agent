@@ -169,6 +169,43 @@ contribute no judged rows, and the roll-up names them rather than dropping them 
   field). Also **no env** — a story edit + an oracle re-run. Scored by the mechanical
   checks only: the mutated story was never fired, so no telemetry exists to grade it
   against.
+- **spec-probe** — a story written so that `oracle/prompt.md` already settles the
+  correct handling, over another case's envelopes. **No env, no telemetry, no judge**,
+  and that is the point rather than a limitation.
+
+### Spec probes — the axis that needs no ground truth
+
+Every observed case measures **retrodiction**: given a story describing an operation that
+really ran, does the oracle reproduce the telemetry that was really captured? Production
+asks for something else — the actor synthesizes an attack that was **never executed** and
+the oracle projects what it *would* have written. That quantity has no ground truth, which
+is exactly why this suite grades the proxy instead.
+
+A spec probe attacks the gap from the other side. `oracle/prompt.md` is a specification,
+and much of it is decidable **from the story alone**: an unrelated story touches nothing,
+suppression is earned by an explicit blinding action, a value the story never states must
+stay a placeholder, an event outside a query's filter does not surface in it. Write a
+story that puts one of those rules under load and the correct answer is knowable without
+capturing anything. A probe costs one oracle replay and no judge call.
+
+`expectation:` in the manifest is that rule made executable. `score.py` **fails the score
+and exits non-zero** on a violation:
+
+| clause | asserts |
+|---|---|
+| `empty_leads` | `all`, or a list — the activity touches none of these envelopes |
+| `no_suppression` | no `<suppressed: …>` marker; the story blinds nothing |
+| `must_emit` | values the story states that the projection must carry |
+| `must_not_emit` | values it must not — a mutation's originals, or a withdrawn entity |
+
+**This existed only as prose until 2026-07-27, and the gap was real.** A forged `neg-001`
+projection copying the base case's brute-force burst into all nine of its leads — the
+precise window-copying that case exists to catch — scored **clean and exited 0**. Its
+`class: "0"` rows live in `expected.yaml`, and the judge redesign had moved the contract
+to *the judge's measurement of the telemetry*; a derived case has no telemetry, so the
+judge never runs and nothing was left checking. `validate_cases.py` now fails any derived
+case that declares no `expectation:`, because a derived case that asserts nothing passes
+no matter what the oracle emits.
 
 ### `lead_source` — where the envelope came from
 
@@ -373,6 +410,44 @@ case-006 and case-007, which are `defective:` and unscoreable. Still pending: a
 suppression capture on a stream with a measured non-zero baseline in its own envelope;
 routine **benign** observed cases; more mutation entities; and wiring the trust resolver
 into lesson scoring.
+
+### What the first spec-probe run found (2026-07-27, `glm-5.2_effort-none_prompt-711`)
+
+Three probes over case-001's envelopes, one oracle replay each, no judge:
+
+| probe | rule under test | result |
+|---|---|---|
+| `probe-001-unearned-suppression` | suppression is earned by an explicit story action | **pass** — all nine leads empty |
+| `probe-002-causal-step-removed` | stay inside the envelope | **fail** — `l-006` |
+| `probe-003-ungrounded-entities` | ground every value in the story | **pass** |
+
+**probe-002 is the finding, and it is a new failure mode.** The story is case-001's
+operation with one token moved: the target is `web-2`, not `canary-1`. Same actor, same
+source host, same account, same password list, same burst structure, same clock window —
+so every salience cue still points at "brute force, now, these leads". `l-006` filters
+`host.name == "canary-1"` **and** `source.ip == "172.18.0.15"`. The source matches; the
+destination cannot. The oracle emitted `<standard environment noise>`.
+
+That marker means *the activity lights this envelope and only looks routine*. The activity
+cannot light it at all. So this is a **partial entity match read as presence** — the mirror
+of `C-SUPPRESS-UNBASELINED`: that one asserts absence-as-signal, this asserts
+presence-as-noise, and both manufacture a delta the envelope cannot carry.
+
+`l-004` in the same projection is the control that makes it a finding rather than a
+mood: it is source-scoped (`source.ip == "172.18.0.15"`, no destination filter), the
+activity genuinely falls inside it, and the projection tracked the retarget correctly —
+`destination.ip: 172.18.0.22` (web-2), **zero** occurrences of canary-1's `172.18.0.9`,
+volatile fields placeholdered. The oracle read that envelope's predicate correctly and
+`l-006`'s incorrectly, in one document.
+
+**One probe was wrong and the oracle was right**, which is worth recording because the
+artifact is what settled it. `probe-003` originally asserted that no value anywhere be
+concrete. The oracle placeholdered both withdrawn entities (`<attacker-workstation-ip>`,
+`<target-account>`) and recovered neither from the query predicates that carry them —
+correct — while keeping `host.name: canary-1` and `event.outcome: failure` concrete, both
+of which its story states outright. `prompt.md` says to placeholder what the story does
+*not* state; the clause was reading a rule that is not there. `placeholder_only` was
+removed from the vocabulary rather than narrowed, and the contract is now value-specific.
 
 ### Notes surfaced by these cases
 

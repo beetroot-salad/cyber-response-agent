@@ -1,0 +1,33 @@
+projections:
+- lead_id: l-003
+  events: []
+- lead_id: l-002
+  events: []
+- lead_id: l-001
+  events:
+  - '@timestamp': <alert-time>
+    host.name: canary-1
+    event.outcome: failure
+    source.ip: <attacker-workstation-ip>
+    user.name: <target-account>
+    message: Failed password for <target-account> from <attacker-workstation-ip> port
+      <source-port> ssh2
+  - '@timestamp': <alert-time+3m>
+    host.name: canary-1
+    event.outcome: failure
+    source.ip: <attacker-workstation-ip>
+    user.name: <target-account>
+    message: Failed password for <target-account> from <attacker-workstation-ip> port
+      <source-port> ssh2
+- lead_id: l-005
+  events: []
+- lead_id: l-006
+  events: []
+- lead_id: l-004
+  events: []
+- lead_id: l-007
+  events: []
+- lead_id: l-008
+  events: []
+- lead_id: l-009
+  events: []

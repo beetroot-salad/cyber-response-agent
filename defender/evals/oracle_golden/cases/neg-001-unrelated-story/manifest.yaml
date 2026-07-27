@@ -48,6 +48,20 @@ discriminates: window-copying / salience-copying vs. story-caused projection
 result_classes_covered: ["0"]
 lead_source: inherited from case-001 (captured from defender run oracle-fidelity-1)
 
+# THE CONTRACT — not documentation. `score.py` fails the score and exits non-zero on a
+# violation. It has to live here because this case has no telemetry: the judge grades a
+# projection against a measurement of `hidden/`, there is nothing to measure, and so
+# between the judge redesign and this line NOTHING checked the all-zero claim. A forged
+# projection copying case-001's burst into all nine leads — the exact window-copying this
+# case exists to catch — scored CLEAN and exited 0. The `class: "0"` rows in
+# expected.yaml did not save it: that file is the label pass's calibration set, and the
+# label pass never runs on a case with no observed payloads.
+expectation:
+  empty_leads: all
+  # An unrelated story blinds nothing, so a suppression marker here is the same error as
+  # a fabricated event — absence asserted rather than reasoned.
+  no_suppression: all
+
 projections:
   - tag: glm-5.2_effort-none
     oracle_model: glm-5.2
