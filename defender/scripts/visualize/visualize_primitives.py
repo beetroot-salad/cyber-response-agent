@@ -16,6 +16,7 @@ from defender._io import TEXT_READ_ERRORS, read_text_utf8  # noqa: E402
 from defender._run_paths import RunPaths  # noqa: E402
 from defender.learning import lead_repository  # noqa: E402
 from defender.learning.core import config as _loop_config  # noqa: E402
+from defender.learning.core.directions import Direction  # noqa: E402
 
 
 
@@ -122,13 +123,8 @@ def _learning_run_dir(run_id: str) -> Path:
     return _loop_config.learning_run_paths(run_id).run_dir
 
 
-def load_judge_findings(run_id: str) -> dict | None:
-    data = load_yaml(_learning_run_dir(run_id) / "judge_findings.yaml")
-    return data if isinstance(data, dict) else None
-
-
-def load_judge_benign_findings(run_id: str) -> dict | None:
-    data = load_yaml(_learning_run_dir(run_id) / "judge_benign_findings.yaml")
+def load_judge_doc(run_id: str, direction: Direction) -> dict | None:
+    data = load_yaml(_learning_run_dir(run_id) / direction.judge_name)
     return data if isinstance(data, dict) else None
 
 

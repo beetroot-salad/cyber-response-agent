@@ -61,9 +61,19 @@ class Direction:
     telemetry_name: str
     judge_name: str
     judge_raw_name: str
+    # The dispositions that select this direction — the ONE home for the mapping
+    # `_directions_for` dispatches on and the judge view reads to tell "this direction was
+    # never selected" from "it was selected and its artifacts are missing" (#716).
+    dispositions: frozenset[str]
     obs_trigger: ObsTrigger
     append_env_observations: Callable | None = None
     extra_obs_triggers: tuple[ObsTrigger, ...] = ()
+
+
+def telemetry_raw_name(telemetry_name: str) -> str:
+    """The oracle's pre-strip fallback beside `telemetry_name`. Derived HERE so the writer
+    and the transcript view cannot disagree about the name (#716)."""
+    return Path(telemetry_name).stem + ".raw.txt"
 
 
 ADVERSARIAL = Direction(
@@ -77,6 +87,7 @@ ADVERSARIAL = Direction(
     telemetry_name="projected_telemetry.yaml",
     judge_name="judge_findings.yaml",
     judge_raw_name="judge_findings.raw.txt",
+    dispositions=frozenset({"benign", "inconclusive"}),
     obs_trigger=ObsTrigger(
         pending_file=lambda p: p.actor_observations.file,
         threshold_env="LEARNING_AUTHOR_ACTOR_THRESHOLD",
@@ -107,6 +118,7 @@ BENIGN = Direction(
     telemetry_name="projected_telemetry_benign.yaml",
     judge_name="judge_benign_findings.yaml",
     judge_raw_name="judge_benign_findings.raw.txt",
+    dispositions=frozenset({"malicious", "inconclusive"}),
     obs_trigger=ObsTrigger(
         pending_file=lambda p: p.environment_observations.file,
         threshold_env="LEARNING_AUTHOR_ENV_THRESHOLD",

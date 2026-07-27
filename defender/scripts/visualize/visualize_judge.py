@@ -1,7 +1,15 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
+from defender.learning.core.config import DISPOSITION_ENUM
+from defender.learning.core.directions import (
+    ADVERSARIAL,
+    BENIGN,
+    Direction,
+    telemetry_raw_name,
+)
 from defender.scripts.visualize.visualize_primitives import (  # noqa: F401 — load_yaml kept for API parity
     _learning_run_dir,
     block,
@@ -13,6 +21,68 @@ from defender.scripts.visualize.visualize_primitives import (  # noqa: F401 — 
     render_report_card,
     section,
 )
+
+
+@dataclass(frozen=True)
+class DirectionView:
+    """How one `Direction` presents on the judge page. The artifact NAMES are never
+    repeated here — they come off `direction` — so the loop's declaration and the view
+    cannot drift (#716). What lives here is genuinely view-layer: anchors, titles,
+    subtitles, and the adversarial-only actor artifacts."""
+
+    direction: Direction
+    suffix: str            # "" | "-benign"   → sec-actor{suffix}, sec-judge{suffix}-outcome
+    label: str             # "" | " (benign)" → "Actor{label}"
+    anchor_prefix: str     # "finding" | "benign-finding"
+    actor_subtitle: str
+    judge_subtitle: str
+    oracle_subtitle: str
+    actor_toc_label: str
+    archetype_name: str | None = None
+    menu_name: str | None = None
+
+
+ADVERSARIAL_VIEW = DirectionView(
+    direction=ADVERSARIAL,
+    suffix="",
+    label="",
+    anchor_prefix="finding",
+    actor_subtitle="— adversarial counterfactual",
+    judge_subtitle="— outcome + findings",
+    oracle_subtitle="— projected telemetry (collapsed by default)",
+    actor_toc_label="archetype + story",
+    archetype_name="actor_archetype.txt",
+    menu_name="actor_menu.txt",
+)
+
+BENIGN_VIEW = DirectionView(
+    direction=BENIGN,
+    suffix="-benign",
+    label=" (benign)",
+    anchor_prefix="benign-finding",
+    actor_subtitle="— routine-operation counterfactual",
+    judge_subtitle="— FP-direction outcome + findings",
+    oracle_subtitle="— projected telemetry, FP direction (collapsed by default)",
+    actor_toc_label="routine-op story",
+)
+
+VIEWS: tuple[DirectionView, ...] = (ADVERSARIAL_VIEW, BENIGN_VIEW)
+
+
+def active_views(disposition: str) -> tuple[DirectionView, ...]:
+    """The directions this run's disposition actually selected — the same mapping
+    `run_cycle._directions_for` dispatches on, read off `Direction.dispositions`.
+
+    A direction the disposition never selected is OMITTED from the page rather than
+    rendered as "the loop did not run or aborted", which is what the page used to claim of
+    the adversarial direction on every `malicious` run (#716).
+
+    An unreadable or unrecognized disposition (no `report.md`, bad frontmatter) selects
+    ALL directions: with nothing to gate on, showing every section with its
+    missing-artifact placeholder is the honest fallback."""
+    if disposition not in DISPOSITION_ENUM:
+        return VIEWS
+    return tuple(v for v in VIEWS if disposition in v.direction.dispositions)
 
 
 
@@ -68,50 +138,75 @@ def render_judge_defender_summary(run_dir: Path) -> str:
     return section("sec-defender-summary", "defender", "Defender summary", "— what the judge graded", body)
 
 
-def render_judge_actor_section(run_id: str) -> str:
+def render_judge_actor_section(run_id: str, view: DirectionView) -> str:
     learn_dir = _learning_run_dir(run_id)
-    archetype = learn_dir / "actor_archetype.txt"
-    menu = learn_dir / "actor_menu.txt"
-    story = learn_dir / "actor_story.md"
+    story_name = view.direction.story_name
+    story = learn_dir / story_name
+    anchor, title = f"sec-actor{view.suffix}", f"Actor{view.label}"
 
-    subtitle = "— adversarial counterfactual"
     if not story.is_file():
-        return section("sec-actor", "actor", "Actor", subtitle, '<div class="empty">no actor_story.md</div>')
-    arch = archetype.read_text(encoding="utf-8").strip() if archetype.is_file() else "?"
-    menu_txt = menu.read_text(encoding="utf-8").strip() if menu.is_file() else ""
-    meta_html = (
-        f'<div class="actor-meta"><span class="key">archetype:</span> '
-        f'<span class="val">{esc(arch)}</span></div>'
-    )
+        return section(
+            anchor, "actor", title, view.actor_subtitle,
+            f'<div class="empty">no {esc(story_name)}</div>',
+        )
+
+    meta_html = ""
+    if view.archetype_name is not None:
+        archetype = learn_dir / view.archetype_name
+        arch = archetype.read_text(encoding="utf-8").strip() if archetype.is_file() else "?"
+        meta_html = (
+            f'<div class="actor-meta"><span class="key">archetype:</span> '
+            f'<span class="val">{esc(arch)}</span></div>'
+        )
+
     menu_block = ""
-    if menu_txt:
-        menu_block = block("actor-menu", "MITRE technique menu (sampled)", pre_text(menu_txt))
+    if view.menu_name is not None:
+        menu = learn_dir / view.menu_name
+        menu_txt = menu.read_text(encoding="utf-8").strip() if menu.is_file() else ""
+        if menu_txt:
+            menu_block = block("actor-menu", "MITRE technique menu (sampled)", pre_text(menu_txt))
 
     story_html = f'<pre class="text story">{esc(story.read_text(encoding="utf-8"))}</pre>'
 
     body = f"""{meta_html}
   {menu_block}
-  <h3>actor_story.md</h3>
+  <h3>{esc(story_name)}</h3>
   {story_html}"""
-    return section("sec-actor", "actor", "Actor", subtitle, body)
+    return section(anchor, "actor", title, view.actor_subtitle, body)
 
 
-def render_judge_judge_section(judge: dict | None) -> str:
-    subtitle = "— outcome + findings"
+def render_judge_judge_section(judge: dict | None, view: DirectionView) -> str:
+    anchor, title = f"sec-judge{view.suffix}", f"Judge{view.label}"
     if not judge:
         return section(
-            "sec-judge", "judge", "Judge", subtitle,
-            '<div class="empty">no judge_findings.yaml — learning loop did not run or aborted</div>',
+            anchor, "judge", title, view.judge_subtitle,
+            f'<div class="empty">no {esc(view.direction.judge_name)} — '
+            f'learning loop did not run or aborted</div>',
         )
     outcome = str(judge.get("outcome", "?"))
     rationale = str(judge.get("outcome_rationale", "")).strip()
     encounter = str(judge.get("encounter_analysis", "")).strip()
     findings = judge.get("defender_findings") or []
+    # Both judge docs may carry `environment_observations` — `validate_judge_doc` accepts it
+    # on the adversarial doc too, and judge/malicious.md asks for it. The view used to render
+    # it for the benign direction only, silently dropping the adversarial ones (#716).
+    env_obs = judge.get("environment_observations") or []
 
     if isinstance(findings, list) and findings:
-        cards = "\n".join(render_judge_finding(i, f) for i, f in enumerate(findings) if isinstance(f, dict))
+        cards = "\n".join(
+            render_judge_finding(i, f, anchor_prefix=view.anchor_prefix)
+            for i, f in enumerate(findings) if isinstance(f, dict)
+        )
     else:
         cards = '<div class="empty">judge emitted no findings</div>'
+
+    if isinstance(env_obs, list) and env_obs:
+        env_cards = "\n".join(
+            render_env_observation(i, o, anchor_prefix=f"env-obs{view.suffix}")
+            for i, o in enumerate(env_obs) if isinstance(o, dict)
+        )
+    else:
+        env_cards = '<div class="empty">no environment observations queued</div>'
 
     encounter_html = (
         f'<pre class="text encounter">{esc(encounter)}</pre>'
@@ -119,37 +214,44 @@ def render_judge_judge_section(judge: dict | None) -> str:
         else '<div class="empty">no encounter_analysis</div>'
     )
 
-    body = f"""<h3 id="sec-judge-outcome">Outcome</h3>
+    body = f"""<h3 id="{anchor}-outcome">Outcome</h3>
   <div class="judge-outcome out-{esc(outcome)}">
     <div class="outcome-value">{esc(outcome)}</div>
     <div class="outcome-rationale">{esc(rationale)}</div>
   </div>
 
-  <h3 id="sec-judge-findings">Findings ({len(findings) if isinstance(findings, list) else 0})</h3>
+  <h3 id="{anchor}-findings">Findings ({len(findings) if isinstance(findings, list) else 0})</h3>
   <div class="findings-grid">{cards}</div>
 
-  <h3 id="sec-judge-encounter">Encounter analysis</h3>
+  <h3 id="{anchor}-env">Environment observations ({len(env_obs) if isinstance(env_obs, list) else 0})</h3>
+  <div class="findings-grid">{env_cards}</div>
+
+  <h3 id="{anchor}-encounter">Encounter analysis</h3>
   {encounter_html}"""
-    return section("sec-judge", "judge", "Judge", subtitle, body)
+    return section(anchor, "judge", title, view.judge_subtitle, body)
 
 
-def render_judge_oracle_section(run_id: str) -> str:
+def render_judge_oracle_section(run_id: str, view: DirectionView) -> str:
     learn_dir = _learning_run_dir(run_id)
-    proj = learn_dir / "projected_telemetry.yaml"
-    proj_raw = learn_dir / "projected_telemetry.raw.txt"
+    proj_name = view.direction.telemetry_name
+    raw_name = telemetry_raw_name(proj_name)
+    proj = learn_dir / proj_name
+    proj_raw = learn_dir / raw_name
     inner = ""
     if proj.is_file():
-        inner += block("oracle-yaml", "projected_telemetry.yaml", pre_text(proj.read_text(encoding="utf-8")))
+        inner += block("oracle-yaml", proj_name, pre_text(proj.read_text(encoding="utf-8")))
     if proj_raw.is_file():
-        inner += block("oracle-raw", "projected_telemetry.raw.txt (raw fallback)", pre_text(proj_raw.read_text(encoding="utf-8")))
+        inner += block("oracle-raw", f"{raw_name} (raw fallback)", pre_text(proj_raw.read_text(encoding="utf-8")))
     if not inner:
         inner = '<div class="empty">no oracle artifacts</div>'
-    return section("sec-oracle", "oracle", "Oracle", "— projected telemetry (collapsed by default)", inner)
+    return section(
+        f"sec-oracle{view.suffix}", "oracle", f"Oracle{view.label}", view.oracle_subtitle, inner,
+    )
 
 
 
 
-def render_env_observation(idx: int, o: dict) -> str:
+def render_env_observation(idx: int, o: dict, anchor_prefix: str = "env-obs") -> str:
     fact = str(o.get("fact", "")).strip()
     criteria = str(o.get("relevance_criteria", "")).strip()
     rule_ids = o.get("alert_rule_ids") or []
@@ -163,7 +265,7 @@ def render_env_observation(idx: int, o: dict) -> str:
         ]
         ent_rows = f'<div class="env-obs-ents">entities: {" · ".join(sels)}</div>'
     return (
-        f'<div class="finding-card env-obs" id="env-obs-{idx}">'
+        f'<div class="finding-card env-obs" id="{esc(anchor_prefix)}-{idx}">'
         f'<div class="finding-head">'
         f'<span class="ftype">environment fact</span>'
         f'<span class="fanchor">{esc(rule_str)}</span>'
@@ -174,80 +276,6 @@ def render_env_observation(idx: int, o: dict) -> str:
         f'</div>'
     )
 
-
-def render_judge_actor_benign_section(run_id: str) -> str:
-    learn_dir = _learning_run_dir(run_id)
-    story = learn_dir / "actor_benign_story.md"
-    if not story.is_file():
-        return ""
-    story_html = f'<pre class="text story">{esc(story.read_text(encoding="utf-8"))}</pre>'
-    body = f"""<h3>actor_benign_story.md</h3>
-  {story_html}"""
-    return section("sec-actor-benign", "actor", "Actor (benign)", "— routine-operation counterfactual", body)
-
-
-def render_judge_benign_section(judge: dict | None) -> str:
-    if not judge:
-        return ""
-    outcome = str(judge.get("outcome", "?"))
-    rationale = str(judge.get("outcome_rationale", "")).strip()
-    encounter = str(judge.get("encounter_analysis", "")).strip()
-    findings = judge.get("defender_findings") or []
-    env_obs = judge.get("environment_observations") or []
-
-    if isinstance(findings, list) and findings:
-        cards = "\n".join(
-            render_judge_finding(i, f, anchor_prefix="benign-finding")
-            for i, f in enumerate(findings) if isinstance(f, dict)
-        )
-    else:
-        cards = '<div class="empty">judge emitted no findings</div>'
-
-    if isinstance(env_obs, list) and env_obs:
-        env_cards = "\n".join(
-            render_env_observation(i, o) for i, o in enumerate(env_obs) if isinstance(o, dict)
-        )
-    else:
-        env_cards = '<div class="empty">no environment observations queued</div>'
-
-    encounter_html = (
-        f'<pre class="text encounter">{esc(encounter)}</pre>'
-        if encounter
-        else '<div class="empty">no encounter_analysis</div>'
-    )
-
-    body = f"""<h3 id="sec-judge-benign-outcome">Outcome</h3>
-  <div class="judge-outcome out-{esc(outcome)}">
-    <div class="outcome-value">{esc(outcome)}</div>
-    <div class="outcome-rationale">{esc(rationale)}</div>
-  </div>
-
-  <h3 id="sec-judge-benign-findings">Findings ({len(findings) if isinstance(findings, list) else 0})</h3>
-  <div class="findings-grid">{cards}</div>
-
-  <h3 id="sec-judge-benign-env">Environment observations ({len(env_obs) if isinstance(env_obs, list) else 0})</h3>
-  <div class="findings-grid">{env_cards}</div>
-
-  <h3 id="sec-judge-benign-encounter">Encounter analysis</h3>
-  {encounter_html}"""
-    return section("sec-judge-benign", "judge", "Judge (benign)", "— FP-direction outcome + findings", body)
-
-
-def render_judge_oracle_benign_section(run_id: str) -> str:
-    learn_dir = _learning_run_dir(run_id)
-    proj = learn_dir / "projected_telemetry_benign.yaml"
-    proj_raw = learn_dir / "projected_telemetry_benign.raw.txt"
-    inner = ""
-    if proj.is_file():
-        inner += block("oracle-yaml", "projected_telemetry_benign.yaml", pre_text(proj.read_text(encoding="utf-8")))
-    if proj_raw.is_file():
-        inner += block("oracle-raw", "projected_telemetry_benign.raw.txt (raw fallback)", pre_text(proj_raw.read_text(encoding="utf-8")))
-    if not inner:
-        return ""
-    return section(
-        "sec-oracle-benign", "oracle", "Oracle (benign)",
-        "— projected telemetry, FP direction (collapsed by default)", inner,
-    )
 
 
 def render_judge_raw_bundle(run_id: str) -> str:
@@ -269,37 +297,43 @@ def render_judge_raw_bundle(run_id: str) -> str:
     return section("sec-raw-bundle", "raw", "Raw bundle", "— learning-loop inputs &amp; fallbacks", "".join(panels))
 
 
-def render_judge_toc(n_findings: int, n_benign_findings: int | None = None) -> str:
+def _toc_judge_links(view: DirectionView, n_findings: int | None) -> str:
+    judge_anchor = f"sec-judge{view.suffix}"
+    if n_findings is None:
+        # The direction was selected but its judge doc is missing: the section renders as a
+        # placeholder and carries no sub-anchors, so linking them would be four dead links.
+        return f'<li class="item muted"><a href="#{judge_anchor}">(no findings)</a></li>'
     finding_links = "".join(
-        f'<li class="item"><a href="#finding-{i}">finding #{i}</a></li>'
+        f'<li class="item"><a href="#{view.anchor_prefix}-{i}">finding #{i}</a></li>'
         for i in range(n_findings)
     )
     if n_findings == 0:
         finding_links = '<li class="item muted">(none)</li>'
+    return f"""<li class="item"><a href="#{judge_anchor}-outcome">outcome</a></li>
+    <li class="item"><a href="#{judge_anchor}-findings">findings</a></li>
+    {finding_links}
+    <li class="item"><a href="#{judge_anchor}-env">environment observations</a></li>
+    <li class="item"><a href="#{judge_anchor}-encounter">encounter analysis</a></li>"""
 
-    benign_block = ""
-    if n_benign_findings is not None:
-        benign_finding_links = "".join(
-            f'<li class="item"><a href="#benign-finding-{i}">finding #{i}</a></li>'
-            for i in range(n_benign_findings)
-        )
-        if n_benign_findings == 0:
-            benign_finding_links = '<li class="item muted">(none)</li>'
-        benign_block = f"""
-    <li class="section">Actor (benign)</li>
-    <li class="item"><a href="#sec-actor-benign">routine-op story</a></li>
 
-    <li class="section">Judge (benign)</li>
-    <li class="item"><a href="#sec-judge-benign-outcome">outcome</a></li>
-    <li class="item"><a href="#sec-judge-benign-findings">findings</a></li>
-    {benign_finding_links}
-    <li class="item"><a href="#sec-judge-benign-env">environment observations</a></li>
-    <li class="item"><a href="#sec-judge-benign-encounter">encounter analysis</a></li>
+def _toc_direction_block(view: DirectionView, n_findings: int | None) -> str:
+    return f"""
+    <li class="section">Actor{view.label}</li>
+    <li class="item"><a href="#sec-actor{view.suffix}">{view.actor_toc_label}</a></li>
 
-    <li class="section">Oracle (benign)</li>
-    <li class="item"><a href="#sec-oracle-benign">projected telemetry</a></li>
+    <li class="section">Judge{view.label}</li>
+    {_toc_judge_links(view, n_findings)}
+
+    <li class="section">Oracle{view.label}</li>
+    <li class="item"><a href="#sec-oracle{view.suffix}">projected telemetry</a></li>
 """
 
+
+def render_judge_toc(sections: list[tuple[DirectionView, int | None]]) -> str:
+    """`sections` is one (view, finding count) per direction the page actually rendered —
+    so the TOC never links a section the disposition did not select. A `None` count means
+    the direction was selected but produced no judge doc (#716)."""
+    direction_blocks = "".join(_toc_direction_block(v, n) for v, n in sections)
     return f"""
 <nav class="toc">
   <ul>
@@ -311,19 +345,7 @@ def render_judge_toc(n_findings: int, n_benign_findings: int | None = None) -> s
 
     <li class="section">Defender summary</li>
     <li class="item"><a href="#sec-defender-summary">report + leads</a></li>
-
-    <li class="section">Actor</li>
-    <li class="item"><a href="#sec-actor">archetype + story</a></li>
-
-    <li class="section">Judge</li>
-    <li class="item"><a href="#sec-judge-outcome">outcome</a></li>
-    <li class="item"><a href="#sec-judge-findings">findings</a></li>
-    {finding_links}
-    <li class="item"><a href="#sec-judge-encounter">encounter analysis</a></li>
-
-    <li class="section">Oracle</li>
-    <li class="item"><a href="#sec-oracle">projected telemetry</a></li>
-    {benign_block}
+    {direction_blocks}
     <li class="section">Raw bundle</li>
     <li class="item"><a href="#sec-raw-bundle">inputs &amp; fallbacks</a></li>
   </ul>
