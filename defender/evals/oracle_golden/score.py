@@ -1,34 +1,47 @@
 #!/usr/bin/env python3
-"""Score an oracle projection against a golden case's ground-truth labels.
+"""Score an oracle projection against the telemetry it was projecting (#711 §4).
 
-Reports the #693 dimensions, not one accuracy number:
-  - four-way result-class agreement (0 | +noise | +event | -noise), stratified
-    by system;
-  - field/value grounding on +event leads: concrete-correct / wrong / unknown
-    (placeholder) / missing — `wrong` is the dangerous error, placeholders are
-    never `wrong`;
-  - the volunteered-value check (`observed_fields`): ground truth for fields the
-    labels do NOT require, graded only where the projection emitted a concrete
-    value for the key. Grading only the required fields lets a projection invent
-    refuted values for free — the fabrication that manufactures a catch;
-  - occurrence precision/recall: emitted +event where expected (recall), stayed
-    empty where expected 0 (precision) — `null` when the case has no lead of
-    that class, never 0.0, so aggregating slices cannot read "undefined" as
-    "worst possible";
-  - false suppression: any -noise predicted where the stream is alive;
-  - lead-set integrity: a projection that is missing leads, carries leads the
-    labels do not cover, or repeats a lead_id is reported and exits non-zero. A
-    missing lead is NOT scored as an empty one — silent under-coverage would let
-    a truncated projection pass an all-`0` case perfectly.
+`y'` vs `y`: the oracle emits telemetry, so this grades telemetry against telemetry
+rather than projecting both sides down to a four-way class. Two things run first, in
+code, and never reach the model:
 
-Compares the projection to `expected.yaml` (authoritative envelope truth). The
-lead's stated intent is reported to explain divergence, never to excuse it.
+1. **Lead-set integrity.** A projection missing leads, carrying leads the case does not
+   have, or repeating a `lead_id` is not a result. It is reported and nothing is scored
+   — the judge is not paid to grade a truncated document.
+2. **Grammar.** The oracle's output grammar is closed (`oracle/prompt.md` §"Output"):
+   event mappings, or exactly one of the two marker strings, never mixed. `case-005
+   l-002` emitted a prose paragraph whose *content* was correct; that scores as a
+   failure, deterministically, because a judge would be tempted to be generous about it.
+3. **Leak check.** For mutation cases, the pre-mutation entities must appear nowhere in
+   the projection. Deterministic, whole-value-or-token containment.
 
-Pure and deterministic given (expected.yaml, projection.yaml) — that is what lets
-`defender/tests/test_oracle_golden_693.py` assert every checked-in
-`scores/<tag>.json` still reproduces from its `projections/<tag>.yaml`.
+Everything downstream is the judge's, in two passes (`judge.py`):
 
-Usage: score.py <case_dir> <projection.yaml> [--json <out.json>]
+* the **label** pass reads the telemetry alone — never the story, never the projection —
+  and returns the `delta_kind` this envelope actually carried;
+* the **verdict** pass grades the projection against that measurement.
+
+A lead the label pass calls `undecidable` never reaches the verdict pass: there is
+nothing to grade against. It is recorded with `faithful: null`, excluded from every
+denominator, and counted in the abstention tally.
+
+**The label pass is a function of (case, lead) and nothing else** — it is the one part
+of this that does not depend on which projection is being scored. Its output is cached
+per case under `labels/<judge-suffix>.json`, so two oracle tags are graded against the
+same measurement instead of two independent readings of the same telemetry, and a
+re-score costs the verdict pass only. Editing either prompt changes the suffix and
+invalidates the cache by construction.
+
+**Derived cases (`mutation`, `negative-control`) never reach the judge.** They reuse
+their base's envelopes and change only the story, so no telemetry was ever captured for
+the story they tell — there is no `y`. They are scored by the mechanical checks alone
+and contribute no judged rows; `report.py` reports their mechanical results separately
+rather than folding a definitional truth into a measured rate.
+
+Because the judge runs here, THIS IS NOT DETERMINISTIC, and the judge is part of the
+tag: `<oracle-tag>__judge-<model>-<effort>_<prompts-sha8>`.
+
+Usage: score.py <case_dir> <projections/<tag>.yaml> [--json <out>] [--jobs N] [--relabel]
 """
 from __future__ import annotations
 
@@ -36,39 +49,38 @@ import argparse
 import json
 import re
 import sys
+from collections.abc import Iterable
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import yaml
 
-# The oracle's output grammar is closed (defender/learning/pipeline/oracle/prompt.md
-# §"Output"): a lead's events are either event MAPPINGS, or exactly one of two
-# marker STRINGS. Anything else is malformed model output and must not be folded
-# into a real class — a degraded model emitting prose would otherwise score as a
-# clean `+noise`.
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+
+from defender.evals.oracle_golden import judge  # noqa: E402
+
+# The closed marker vocabulary. Anything else is malformed model output and must not be
+# folded into a real answer — a degraded model emitting prose would otherwise be graded
+# on its prose.
 _SUPPRESSED_PREFIX = "<suppressed"
 _NOISE_MARKER = "<standard environment noise>"
-MALFORMED = "malformed"
 
-# The predicted-class value for a labelled lead the projection never produced.
-# Distinct from every real class — most importantly from `0`, which it would
-# otherwise impersonate on exactly the cases (all-`0` negative controls) where a
-# truncated projection is hardest to notice.
-NOT_PROJECTED = "missing"
+#: Kinds whose story was never fired, so nothing was ever measured for it.
+DERIVED_KINDS = ("mutation", "negative-control")
 
-# Punctuation trimmed off a token before a leak comparison — `<`/`>` included, so
-# the closing bracket of a marker ("…on office-ws-1>") does not hide a real leak.
-# A whole `<placeholder>` is exempt (see _tokens): trimming those would turn the
-# placeholder vocabulary into bare words and let `<port>` collide with `port`.
+#: Causes decided in code, never by the judge. They are disjoint from `judge.CAUSES` on
+#: purpose: a mechanical failure is a property of the document, needs no measurement to
+#: establish, and must not be confused with a graded one when the report tallies causes.
+C_MALFORMED = "C-MALFORMED"
+C_NOT_PROJECTED = "C-NOT-PROJECTED"
+MECHANICAL_CAUSES = frozenset({C_MALFORMED, C_NOT_PROJECTED})
+
+#: Punctuation trimmed off a token before a leak comparison — `<`/`>` included, so the
+#: closing bracket of a marker ("…on office-ws-1>") does not hide a real leak. A whole
+#: `<placeholder>` is exempt (see `_tokens`): trimming those would turn the placeholder
+#: vocabulary into bare words and let `<port>` collide with `port`.
 _TOKEN_TRIM = "\"'`,;:()[]{}<>"
 
-# An `<angle-placeholder>` ANYWHERE in a value, not only at the start. prompt.md
-# mandates a placeholder for a value the story does not state, and a projection
-# obeying it often states part of a value and abstains on the rest —
-# `"Failed password for root from <office-ws-1-ip> port <source-port> ssh2"`, or
-# `"SSH-2.0-OpenSSH_<openssh-version>"`. Grading those `wrong` because the
-# placeholder is not the literal captured text punishes exactly the abstention the
-# prompt asks for, and `wrong` is the grade that gates a slice to `no-update`.
-# Both shapes really occurred in the #711 held-out captures.
 _PLACEHOLDER = re.compile(r"<[^<>]+>")
 
 
@@ -79,105 +91,46 @@ def _norm(value: object) -> str:
     return str(value)
 
 
-def _marker_class(marker: str) -> str:
+# ------------------------------------------------------------------ mechanical checks
+
+def _marker_kind(marker: str) -> str | None:
     text = marker.strip()
     if text.startswith(_SUPPRESSED_PREFIX):
-        return "-noise"
+        return "suppressed-marker"
     if text == _NOISE_MARKER:
-        return "+noise"
-    return MALFORMED
+        return "noise-marker"
+    return None
 
 
-def project_class(events: list) -> str:
-    """Map a lead's emitted events onto the oracle's four result classes.
+def grammar_problem(events: object) -> str | None:
+    """`None` when a lead's events parse as the oracle's closed grammar, else why not.
 
-    Returns `malformed` — never a real class — when the events fall outside the
-    oracle's closed grammar: an unrecognized marker string, a marker mixed with
-    event mappings (prompt.md: "Never mix a marker with event mappings in the
-    same list"), or an item that is neither. `malformed` agrees with no expected
-    class, so it scores as a disagreement instead of passing silently.
-
-    Repeated markers of the SAME class still read as that class — unambiguous in
-    meaning, even though prompt.md asks for a single marker item.
+    Repeated markers of the SAME kind still read as that kind — unambiguous in meaning,
+    even though `prompt.md` asks for a single marker item.
     """
+    if not isinstance(events, list):
+        return f"events is {type(events).__name__}, not a list"
     if not events:
-        return "0"
+        return None                                    # an empty list is "nothing here"
     if all(isinstance(e, dict) for e in events):
-        return "+event"
-    if all(isinstance(e, str) for e in events):
-        classes = {_marker_class(m) for m in events}
-        return classes.pop() if len(classes) == 1 else MALFORMED
-    return MALFORMED
+        return None
+    if not all(isinstance(e, str) for e in events):
+        kinds = sorted({type(e).__name__ for e in events})
+        return f"a marker mixed with {'/'.join(kinds)} — prompt.md forbids mixing"
+    kinds = {_marker_kind(m) for m in events}
+    if None in kinds:
+        unknown = [m for m in events if _marker_kind(m) is None]
+        return f"not in the marker vocabulary: {unknown[0]!r}"
+    if len(kinds) > 1:
+        return f"two different markers in one list: {sorted(set(events))}"
+    return None
 
 
-def concrete_values(events: list) -> dict[str, set[str]]:
-    """Concrete (non-placeholder) values per key, across every event mapping.
-
-    A key collects the SET of values it takes, not the first one. A lead whose
-    events legitimately carry the same field twice (an alert row plus the auth
-    row it summarizes) must not grade `wrong` merely because ground truth
-    matches the second event. `wrong` is the grade that gates a slice to
-    `no-update`, so it has to mean "the projection contradicts ground truth",
-    never "the projection emitted it in the wrong position".
-    """
-    out: dict[str, set[str]] = {}
-    for e in events:
-        if not isinstance(e, dict):
-            continue
-        for k, v in e.items():
-            text = _norm(v)
-            if not _PLACEHOLDER.search(text):   # any placeholder = stated-unknown
-                out.setdefault(str(k), set()).add(text)
-    return out
-
-
-def grade_fields(expected: dict, got: dict[str, set[str]], events: list) -> dict:
-    """For each expected distinguishing field: correct / wrong / unknown / missing."""
-    # was the field emitted at all (even as a placeholder)?
-    emitted_keys = {str(k) for e in events if isinstance(e, dict) for k in e}
-    result = {}
-    for k, want in expected.items():
-        key = str(k)
-        values = got.get(key)
-        if values:
-            result[key] = ("correct" if _norm(want) in values
-                           else f"wrong(got {', '.join(sorted(values))})")
-        elif key in emitted_keys:
-            result[key] = "unknown"          # emitted only as a placeholder
-        else:
-            result[key] = "missing"
-    return result
-
-
-def grade_contradictions(observed: dict, got: dict[str, set[str]]) -> dict:
-    """Ground truth for fields the labels do NOT require the projection to commit to.
-
-    Graded only where the projection volunteered a concrete value for the key —
-    never `missing`, never `unknown`. `fields` asks "did you commit to the
-    distinguishing values?"; this asks the separate question "is anything else you
-    made up contradicted by the telemetry?". Without it a projection scores a clean
-    `0 wrong` while emitting concrete values the hidden payloads refute (case-002
-    emits `evt.type: write` where the capture says `openat`), and inventing a
-    concrete value is exactly what prompt.md forbids and what manufactures a catch
-    downstream.
-    """
-    result = {}
-    for k, want in observed.items():
-        key = str(k)
-        values = got.get(key)
-        if not values:      # absent, or emitted only as a `<placeholder>` — not a claim
-            continue
-        result[key] = ("correct" if _norm(want) in values
-                       else f"wrong(got {', '.join(sorted(values))})")
-    return result
-
-
-def emitted_values(events: list) -> list[str]:
+def emitted_values(events: Iterable) -> list[str]:
     """Every value a projection emits — mapping values and marker strings.
 
-    Keys are excluded on purpose: they are schema field names (`user.name`),
-    never the mutated entities a mutation case forbids, so scanning them only
-    invents false leaks.
+    Keys are excluded on purpose: they are schema field names (`user.name`), never the
+    mutated entities a mutation case forbids, so scanning them only invents false leaks.
     """
     out: list[str] = []
     for e in events:
@@ -191,8 +144,8 @@ def emitted_values(events: list) -> list[str]:
 def _tokens(value: str) -> set[str]:
     """Whitespace-delimited, punctuation-trimmed tokens of an emitted value.
 
-    A whole `<placeholder>` survives intact — it names a value the story did not
-    state, and reducing it to a bare word would let it collide with a real one.
+    A whole `<placeholder>` survives intact — it names a value the story did not state,
+    and reducing it to a bare word would let it collide with a real one.
     """
     out = set()
     for token in value.split():
@@ -202,15 +155,13 @@ def _tokens(value: str) -> set[str]:
 
 
 def leaks(forbidden: list, preds: dict[str, list]) -> list[str]:
-    """Forbidden original values a mutation case's projection actually emitted.
+    """Forbidden pre-mutation values a projection actually emitted.
 
     Matches a forbidden value against a whole emitted value or one of its
-    whitespace-delimited, punctuation-trimmed tokens — never as a bare
-    substring. Substring matching cannot tell `user.name: root` (a real leak)
-    from `file.path: /root/.ssh/authorized_keys` (an unrelated path that merely
-    contains the token), and case-002 in this very suite emits the latter.
-    Free-text fields still leak correctly: "Failed password for root from
-    172.18.0.15" tokenizes to both forbidden values.
+    whitespace-delimited, punctuation-trimmed tokens — never as a bare substring.
+    Substring matching cannot tell `user.name: root` (a real leak) from
+    `file.path: /root/.ssh/authorized_keys` (an unrelated path that merely contains the
+    token), and case-002 in this very suite emits the latter.
     """
     seen: set[str] = set()
     for events in preds.values():
@@ -221,13 +172,30 @@ def leaks(forbidden: list, preds: dict[str, list]) -> list[str]:
     return [f for f in forbidden if _norm(f) in seen]
 
 
-def _ratio(numerator: int, denominator: int) -> float | None:
-    """`None` — not 0.0 — when the class is unexercised, so slices aggregate honestly."""
-    return round(numerator / denominator, 3) if denominator else None
+def has_concrete_value(events: Iterable) -> bool:
+    """Did the projection commit to any fully concrete value?
+
+    `prompt.md` mandates `<angle-placeholder>` for anything the story does not state, so
+    a wholly-placeholdered event is an abstention, not a claim. Reported for the derived
+    cases, where it is the only thing distinguishing "declined to invent" from "invented".
+    """
+    return any(not _PLACEHOLDER.search(v) for v in emitted_values(events))
 
 
-def _fmt(ratio: float | None) -> str:
-    return "n/a" if ratio is None else f"{ratio:.2f}"
+# ------------------------------------------------------------------------ lead framing
+
+def system_of(lead: dict) -> str:
+    """The stratification axis, derived from the lead's own `query_id` prefixes.
+
+    `query_id` is `{system}.{kebab-name}` (defender/CLAUDE.md), so this is a property of
+    the envelope rather than an attribution someone made. A lead spanning systems keeps
+    both, `+`-joined: it really is a mixed lead, and flattening it to the majority system
+    would file a cross-system result under a single-system slice. Checked against the 47
+    hand-assigned systems in the seed `expected.yaml` files — 46 agree, and the one that
+    does not (case-005 l-005) is a cmdb+elastic lead the hand label had flattened.
+    """
+    systems = sorted(judge.lead_systems(lead) - {""})
+    return "+".join(systems) if systems else "?"
 
 
 def load_predictions(proj: dict) -> tuple[dict[str, list], list[str]]:
@@ -242,132 +210,328 @@ def load_predictions(proj: dict) -> tuple[dict[str, list], list[str]]:
     return preds, duplicates
 
 
-def score_projection(spec: dict, proj: dict, projection_name: str) -> dict:
-    """The whole measurement, as the dict written to `scores/<tag>.json`."""
-    expected = spec["leads"]
-    forbidden = spec.get("must_not_emit", [])  # mutation cases: originals that must not leak
-    preds, duplicate_leads = load_predictions(proj)
-
-    missing_leads = [lead_id for lead_id in expected if lead_id not in preds]
-    unscored_leads = [lead_id for lead_id in preds if lead_id not in expected]
-
-    rows = []
-    by_system: dict[str, dict[str, int]] = {}
-    for lead_id, exp in expected.items():
-        # A lead the projection never produced is scored `missing`, never as the
-        # empty `0` it would otherwise impersonate — see the module docstring.
-        events = preds.get(lead_id, [])
-        pred_c = project_class(events) if lead_id in preds else NOT_PROJECTED
-        exp_c = exp["class"]
-        system = exp["system"]
-        match = pred_c == exp_c
-        concrete = concrete_values(events)
-        fields = (grade_fields(exp.get("fields", {}), concrete, events)
-                  if exp_c == "+event" else {})
-        # Contradictions are graded on EVERY class: a fabricated concrete value on a
-        # lead labelled `0` is the same error as one on a `+event` lead, and the
-        # class disagreement alone does not say the value was refuted.
-        contradictions = grade_contradictions(exp.get("observed_fields", {}), concrete)
-        rows.append({
-            "lead": lead_id, "system": system, "expected": exp_c, "predicted": pred_c,
-            "class_match": match, "heterogeneous": exp.get("heterogeneous", False),
-            "fields": fields, "contradictions": contradictions,
-            "intent_note": bool(exp.get("intent_note")),
-        })
-        st = by_system.setdefault(system, {"n": 0, "match": 0})
-        st["n"] += 1
-        st["match"] += match
-
-    # aggregate metrics
-    n = len(rows)
-    class_agree = sum(r["class_match"] for r in rows)
-    ev_expected = [r for r in rows if r["expected"] == "+event"]
-    zero_expected = [r for r in rows if r["expected"] == "0"]
-    recall = _ratio(sum(r["predicted"] == "+event" for r in ev_expected), len(ev_expected))
-    precision_zero = _ratio(sum(r["predicted"] == "0" for r in zero_expected), len(zero_expected))
-    all_field_grades = [g for r in rows for g in r["fields"].values()]
-    all_contradiction_grades = [g for r in rows for g in r["contradictions"].values()]
-    # `wrong` gates a slice to `no-update`, so it spans both grading paths: a refuted
-    # value is no less wrong for being one the labels did not ask for.
-    wrong = [g for g in all_field_grades + all_contradiction_grades if g.startswith("wrong")]
-    false_suppress = [r for r in rows if r["predicted"] == "-noise" and r["expected"] != "-noise"]
-    malformed = [r for r in rows if r["predicted"] == MALFORMED]
-
+def integrity(lead_ids: list[str], preds: dict[str, list],
+              duplicates: list[str]) -> dict[str, list[str]]:
     return {
-        "projection": projection_name,
-        "n_leads": n,
-        "class_agreement": f"{class_agree}/{n}",
-        "by_system": {s: f"{v['match']}/{v['n']}" for s, v in sorted(by_system.items())},
-        "plus_event_recall": recall,
-        "zero_precision": precision_zero,
-        "field_grades": {g: all_field_grades.count(g) for g in sorted(set(all_field_grades))},
-        "contradiction_grades": {g: all_contradiction_grades.count(g)
-                                 for g in sorted(set(all_contradiction_grades))},
-        "wrong_concrete_fields": len(wrong),
-        "false_suppression": len(false_suppress),
-        "malformed_projections": len(malformed),
-        "forbidden_emitted": leaks(forbidden, preds),  # mutation: leaked originals (should be [])
-        "missing_leads": missing_leads,      # labelled but absent from the projection
-        "unscored_leads": unscored_leads,    # projected but not labelled
-        "duplicate_leads": duplicate_leads,  # lead_id repeated in the projection doc
-        "rows": rows,
+        "missing_leads": [x for x in lead_ids if x not in preds],
+        "unscored_leads": [x for x in preds if x not in lead_ids],
+        "duplicate_leads": duplicates,
     }
 
 
-def print_report(summary: dict, case_name: str, forbidden: list) -> None:
-    print(f"== score: {summary['projection']} vs {case_name} ==")
-    print(f"class agreement: {summary['class_agreement']}   "
-          f"+event recall: {_fmt(summary['plus_event_recall'])}   "
-          f"0 precision: {_fmt(summary['zero_precision'])}")
-    print(f"by system: {summary['by_system']}")
-    print(f"field grounding: {summary['field_grades']}   "
-          f"volunteered-value check: {summary['contradiction_grades']}   "
-          f"WRONG concrete: {summary['wrong_concrete_fields']}   "
-          f"false-suppression: {summary['false_suppression']}   "
-          f"malformed: {summary['malformed_projections']}")
-    if forbidden:
-        hits = summary["forbidden_emitted"]
-        print(f"mutation — forbidden original values: {'CLEAN' if not hits else f'LEAKED {hits}'}")
+# ----------------------------------------------------------------------- the label pass
+
+def labels_path(case_dir: Path, model: str, effort: str) -> Path:
+    return case_dir / "labels" / f"{judge.tag_suffix(model, effort)}.json"
+
+
+def measure_case(case_dir: Path, lead_ids: list[str], *, model: str, effort: str,
+                 jobs: int = 4, relabel: bool = False,
+                 call: judge.CallFn = judge.call_model) -> dict:
+    """The label pass over a case's leads, read from or written to the label cache.
+
+    Projection-independent by construction — see the module docstring. A cached entry is
+    reused verbatim; only leads absent from the cache are measured, so adding a lead to a
+    case does not re-measure the rest of it.
+    """
+    path = labels_path(case_dir, model, effort)
+    cached: dict = {}
+    if path.is_file() and not relabel:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+        cached = doc.get("leads") or {}
+
+    todo = [x for x in lead_ids if x not in cached]
+    if todo:
+        with ThreadPoolExecutor(max_workers=max(1, min(jobs, len(todo)))) as pool:
+            fresh = list(pool.map(
+                lambda lead_id: judge.label_lead(
+                    judge.load_lead_inputs(case_dir, lead_id),
+                    model=model, effort=effort, call=call),
+                todo))
+        cached.update(dict(zip(todo, fresh, strict=True)))
+        # Read the judge back from the calls rather than echoing the request: a run that
+        # silently fell back must not be filed under the tag we asked for.
+        resolved = {x["judge_model"] for x in fresh}
+        if len(resolved) != 1:
+            raise RuntimeError(f"the label pass ran on more than one judge: {sorted(resolved)}")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({
+            "judge": {"model": resolved.pop(), "effort": effort,
+                      "prompts_sha8": judge.prompts_sha8()},
+            "leads": {k: cached[k] for k in sorted(cached)},
+        }, indent=2) + "\n", encoding="utf-8")
+    return cached
+
+
+# --------------------------------------------------------------------------- the score
+
+def _mechanical_row(lead_id: str, system: str, label: dict, cause: str, note: str) -> dict:
+    """A row failed in code. It carries the measurement's `delta_kind` anyway, so the
+    lead still lands in its own slice — a malformed projection is not evidence about the
+    envelope, and hiding it from the slice would flatter the slices it belongs to.
+
+    A mechanical failure wins over an `undecidable` measurement: it is established by the
+    document alone and needs no telemetry to settle.
+    """
+    return {
+        "lead": lead_id, "system": system,
+        "delta_kind": label.get("delta_kind", "undecidable"),
+        "faithful": False, "cause": cause,
+        "heterogeneous": label.get("heterogeneous"),
+        "undecidable_reason": None, "form_notes": note,
+        "rationale": "mechanical pre-check; the judge was not called",
+        "evidence": label.get("evidence"),
+    }
+
+
+def score_case(case_dir: Path, proj_path: Path, *, model: str, effort: str, jobs: int = 4,
+               relabel: bool = False, call: judge.CallFn = judge.call_model) -> dict:
+    """The whole measurement, as the dict written to `scores/<tag>.json`."""
+    manifest = yaml.safe_load((case_dir / "manifest.yaml").read_text(encoding="utf-8")) or {}
+    proj = yaml.safe_load(proj_path.read_text(encoding="utf-8")) or {}
+    leads = {row["lead_id"]: row for row in judge.load_leads(case_dir)}
+    preds, duplicates = load_predictions(proj)
+
+    summary: dict = {
+        "tag": score_tag(proj_path.stem, model, effort),
+        "projection": proj_path.name,
+        "case": case_dir.name,
+        "kind": manifest.get("kind"),
+        "judge": {"model": model, "effort": effort, "prompts_sha8": judge.prompts_sha8()},
+        "n_leads": len(leads),
+    }
+    summary["mechanical"] = {
+        **integrity(list(leads), preds, duplicates),
+        "malformed_leads": {}, "forbidden_emitted": [], "concrete_value_leads": [],
+    }
+
+    forbidden = _forbidden_values(case_dir, manifest)
+    summary["mechanical"]["forbidden_emitted"] = leaks(forbidden, preds)
+    summary["mechanical"]["malformed_leads"] = {
+        lead_id: problem
+        for lead_id, events in preds.items()
+        if (problem := grammar_problem(events)) is not None
+    }
+    summary["mechanical"]["concrete_value_leads"] = sorted(
+        lead_id for lead_id, events in preds.items()
+        if isinstance(events, list) and has_concrete_value(events))
+
+    # A lead set that does not match is not a result. Report it and stop before paying
+    # for a single judge call — grading a truncated document produces a number that
+    # looks like a score and is not one.
+    if any(summary["mechanical"][k] for k in
+           ("missing_leads", "unscored_leads", "duplicate_leads")):
+        summary.update({"judged": False, "rows": [],
+                        "why_unjudged": "the projection's lead set does not match the case's"})
+        return summary
+
+    if manifest.get("kind") in DERIVED_KINDS:
+        summary.update({
+            "judged": False, "rows": [],
+            "why_unjudged": (
+                f"a {manifest.get('kind')} case reuses its base's envelopes and changes only "
+                f"the story, so the story it tells was never fired and no telemetry was ever "
+                f"captured for it. There is nothing to grade a projection against; it is "
+                f"scored by the mechanical checks alone."),
+        })
+        return summary
+
+    lead_ids = sorted(leads)
+    measured = measure_case(case_dir, lead_ids, model=model, effort=effort, jobs=jobs,
+                            relabel=relabel, call=call)
+
+    to_judge = [
+        lead_id for lead_id in lead_ids
+        if measured[lead_id]["delta_kind"] != "undecidable"
+        and lead_id not in summary["mechanical"]["malformed_leads"]
+    ]
+    with ThreadPoolExecutor(max_workers=max(1, min(jobs, len(to_judge) or 1))) as pool:
+        verdicts = dict(zip(to_judge, pool.map(
+            lambda lead_id: judge.verdict_lead(
+                judge.load_lead_inputs(case_dir, lead_id), preds[lead_id],
+                _measurement(measured[lead_id]),
+                model=model, effort=effort, call=call),
+            to_judge), strict=True))
+
+    rows = []
+    for lead_id in lead_ids:
+        system = system_of(leads[lead_id])
+        label = measured[lead_id]
+        problem = summary["mechanical"]["malformed_leads"].get(lead_id)
+        if problem is not None:
+            rows.append(_mechanical_row(lead_id, system, label, C_MALFORMED, problem))
+            continue
+        if lead_id not in verdicts:          # the measurement could not settle the lead
+            rows.append({
+                "lead": lead_id, "system": system, "delta_kind": "undecidable",
+                "faithful": None, "cause": None,
+                "heterogeneous": label.get("heterogeneous"),
+                "undecidable_reason": label.get("undecidable_reason"),
+                "form_notes": None,
+                "rationale": "the label pass could not measure this envelope; not graded",
+                "evidence": label.get("evidence"),
+            })
+            continue
+        verdict = verdicts[lead_id]
+        rows.append({
+            "lead": lead_id, "system": system,
+            "delta_kind": label["delta_kind"],
+            "faithful": verdict["faithful"], "cause": verdict["cause"],
+            "heterogeneous": label.get("heterogeneous"),
+            "undecidable_reason": verdict["undecidable_reason"],
+            "form_notes": verdict["form_notes"],
+            "rationale": verdict["rationale"],
+            "evidence": label.get("evidence"),
+        })
+
+    decided = [r for r in rows if r["faithful"] is not None]
+    faithful = sum(1 for r in decided if r["faithful"] is True)
+    costs = [x.get("cost_usd") for x in list(measured.values()) + list(verdicts.values())
+             if x.get("cost_usd") is not None]
+    summary.update({
+        "judged": True,
+        "faithful": f"{faithful}/{len(decided)}",
+        "abstentions": len(rows) - len(decided),
+        "by_system": _by_system(rows),
+        "cost_usd": round(sum(costs), 4) if costs else None,
+        "rows": rows,
+    })
+    return summary
+
+
+def _measurement(label: dict) -> dict:
+    """The label pass's reading, as the verdict pass is shown it. Provenance and cost are
+    ours, not the judge's business, and feeding them back would put the label pass's
+    price tag inside the grading prompt."""
+    return {k: label[k] for k in ("delta_kind", "heterogeneous", "evidence") if k in label}
+
+
+def _forbidden_values(case_dir: Path, manifest: dict) -> list:
+    """`must_not_emit` for a mutation case: the pre-mutation entities.
+
+    Read from `expected.yaml` where the seed cases keep it, falling back to the manifest —
+    `expected.yaml` is the label pass's calibration set now, and a case recruited without
+    hand labels declares its mutation in its manifest instead.
+    """
+    calibration = case_dir / "expected.yaml"
+    if calibration.is_file():
+        doc = yaml.safe_load(calibration.read_text(encoding="utf-8")) or {}
+        if doc.get("must_not_emit"):
+            return list(doc["must_not_emit"])
+    return list(manifest.get("must_not_emit") or [])
+
+
+def _by_system(rows: list[dict]) -> dict[str, str]:
+    out: dict[str, list[int]] = {}
+    for r in rows:
+        if r["faithful"] is None:
+            continue
+        bucket = out.setdefault(r["system"], [0, 0])
+        bucket[0] += r["faithful"] is True
+        bucket[1] += 1
+    return {s: f"{k}/{n}" for s, (k, n) in sorted(out.items())}
+
+
+def score_tag(projection_stem: str, model: str, effort: str) -> str:
+    """`<oracle-model>_<oracle-prompt>__judge-<model>-<effort>_<prompts-sha8>` (#711 §6).
+
+    The judge runs at score time, so it is part of the tag: editing either prompt is a
+    new tag requiring a full re-score, exactly like an oracle change.
+    """
+    return f"{projection_stem}__{judge.tag_suffix(model, effort)}"
+
+
+# ---------------------------------------------------------------------------- reporting
+
+def print_report(summary: dict) -> None:
+    mech = summary["mechanical"]
+    j = summary["judge"]
+    print(f"== score: {summary['projection']} vs {summary['case']} ==")
+    print(f"judge: {j['model']} effort={j['effort']} prompts={j['prompts_sha8']}")
     for label, key in (("MISSING from projection", "missing_leads"),
-                       ("projected but UNLABELLED", "unscored_leads"),
+                       ("projected but NOT IN THE CASE", "unscored_leads"),
                        ("DUPLICATED in projection", "duplicate_leads")):
-        if summary[key]:
-            print(f"!! lead-set integrity — {label}: {summary[key]}")
-    print()
+        if mech[key]:
+            print(f"!! lead-set integrity — {label}: {mech[key]}")
+    if mech["malformed_leads"]:
+        for lead_id, problem in sorted(mech["malformed_leads"].items()):
+            print(f"!! malformed grammar — {lead_id}: {problem}")
+    if mech["forbidden_emitted"]:
+        print(f"!! mutation — LEAKED pre-mutation values: {mech['forbidden_emitted']}")
+
+    if not summary["judged"]:
+        print(f"\nnot judged: {summary['why_unjudged']}")
+        return
+
+    print(f"\nfaithful: {summary['faithful']} of the DECIDED leads   "
+          f"abstentions: {summary['abstentions']}/{summary['n_leads']}   "
+          f"cost: ${summary['cost_usd']}")
+    print(f"by system: {summary['by_system']}\n")
     for r in summary["rows"]:
-        tag = "ok " if r["class_match"] else "DIS"
+        mark = "?? " if r["faithful"] is None else ("ok " if r["faithful"] else "!! ")
+        tail = f"  {r['cause']}" if r["cause"] else (
+            f"  ({r['undecidable_reason']})" if r["undecidable_reason"] else "")
         het = " het" if r["heterogeneous"] else ""
-        fld = ("  fields=" + json.dumps(r["fields"])) if r["fields"] else ""
-        con = ("  volunteered=" + json.dumps(r["contradictions"])) if r["contradictions"] else ""
-        note = "  [intent-scoped divergence]" if (not r["class_match"] and r["intent_note"]) else ""
-        print(f"  {tag} {r['lead']:<6} {r['system']:<12} exp={r['expected']:<7} "
-              f"pred={r['predicted']:<9}{het}{fld}{con}{note}")
+        print(f"  {mark}{r['lead']:<6} {r['system']:<16} {r['delta_kind']:<18}{het}{tail}")
 
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("case_dir", type=Path, help="golden case directory (holds expected.yaml)")
+    p.add_argument("case_dir", type=Path, help="golden case directory")
     p.add_argument("projection", type=Path, help="projections/<tag>.yaml to score")
     p.add_argument("--json", type=Path, default=None, dest="json_out",
-                   help="also write the full summary here")
+                   help="write the score here (default: <case_dir>/scores/<tag>.json)")
+    p.add_argument("--jobs", type=int, default=4, help="concurrent judge calls")
+    p.add_argument("--relabel", action="store_true",
+                   help="re-run the label pass instead of reading labels/<judge-suffix>.json")
+    p.add_argument("--dry-run", action="store_true",
+                   help="run the mechanical checks only; call no model and write nothing")
     ns = p.parse_args(argv)
 
-    spec = yaml.safe_load((ns.case_dir / "expected.yaml").read_text(encoding="utf-8"))
-    proj = yaml.safe_load(ns.projection.read_text(encoding="utf-8"))
-    summary = score_projection(spec, proj, ns.projection.name)
+    model, effort = judge.judge_model(), judge.judge_effort()
+    if ns.dry_run:
+        summary = _dry_run(ns.case_dir, ns.projection, model=model, effort=effort)
+    else:
+        summary = score_case(ns.case_dir, ns.projection, model=model, effort=effort,
+                             jobs=ns.jobs, relabel=ns.relabel)
+    print_report(summary)
 
-    print_report(summary, ns.case_dir.name, spec.get("must_not_emit", []))
+    broken = any(summary["mechanical"][k] for k in
+                 ("missing_leads", "unscored_leads", "duplicate_leads"))
+    if not ns.dry_run:
+        out = ns.json_out if ns.json_out is not None else (
+            ns.case_dir / "scores" / f"{summary['tag']}.json")
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+        print(f"\nwrote {out}")
+    # Non-zero on a lead-set mismatch: a partial projection is not a result, and a caller
+    # scripting the suite must not read it as one.
+    return 1 if broken else 0
 
-    if ns.json_out:
-        ns.json_out.parent.mkdir(parents=True, exist_ok=True)
-        ns.json_out.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
-        print(f"\nwrote {ns.json_out}")
 
-    # Non-zero on a lead-set mismatch: a partial or mislabelled projection is not
-    # a result, and a caller scripting the suite must not read it as one.
-    return 1 if (summary["missing_leads"] or summary["unscored_leads"]
-                 or summary["duplicate_leads"]) else 0
+def _dry_run(case_dir: Path, proj_path: Path, *, model: str, effort: str) -> dict:
+    """The mechanical half, with no model in the loop — what `--dry-run` reports."""
+    manifest = yaml.safe_load((case_dir / "manifest.yaml").read_text(encoding="utf-8")) or {}
+    proj = yaml.safe_load(proj_path.read_text(encoding="utf-8")) or {}
+    leads = {row["lead_id"]: row for row in judge.load_leads(case_dir)}
+    preds, duplicates = load_predictions(proj)
+    return {
+        "tag": score_tag(proj_path.stem, model, effort),
+        "projection": proj_path.name, "case": case_dir.name, "kind": manifest.get("kind"),
+        "judge": {"model": model, "effort": effort, "prompts_sha8": judge.prompts_sha8()},
+        "n_leads": len(leads),
+        "mechanical": {
+            **integrity(list(leads), preds, duplicates),
+            "malformed_leads": {lead_id: problem for lead_id, events in preds.items()
+                                if (problem := grammar_problem(events)) is not None},
+            "forbidden_emitted": leaks(_forbidden_values(case_dir, manifest), preds),
+            "concrete_value_leads": sorted(lead_id for lead_id, events in preds.items()
+                                           if isinstance(events, list)
+                                           and has_concrete_value(events)),
+        },
+        "judged": False, "rows": [], "why_unjudged": "--dry-run: no model was called",
+    }
 
 
 if __name__ == "__main__":

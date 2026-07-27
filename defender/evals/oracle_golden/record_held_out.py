@@ -13,10 +13,15 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import sys
 from pathlib import Path
 
 import yaml
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+
+from defender.evals.oracle_golden import judge  # noqa: E402
 
 GOLDEN_DIR = Path(__file__).resolve().parent
 LEDGER = GOLDEN_DIR / "held_out_ledger.yaml"
@@ -44,6 +49,20 @@ def main(argv: list[str] | None = None) -> int:
         print(f"!! no {score_path}", file=sys.stderr)
         return 1
 
+    # The judge runs at score time, so the tag names it (#711 §6). `judge_model()` reads
+    # an env var with a fallback, which means two machines can mint identically-named
+    # tags from different judges. Refuse the one thing that would make the ledger lie:
+    # a result filed under a tag that does not name the judge recorded inside it.
+    score = json.loads(score_path.read_bytes())
+    recorded = score.get("judge") or {}
+    if not ns.tag.endswith(judge.tag_suffix(recorded.get("model", ""),
+                                            recorded.get("effort", ""))):
+        print(f"!! {score_path.name} was produced by "
+              f"{recorded.get('model')!r}/{recorded.get('effort')!r} at prompts "
+              f"{recorded.get('prompts_sha8')!r}, which is not the judge its tag names. "
+              f"Re-score under the correct tag; do not rename the file.", file=sys.stderr)
+        return 1
+
     doc = yaml.safe_load(ledger_path.read_text(encoding="utf-8")) or {}
     entries = doc.get("entries") or []
     key = (ns.case_dir.name, ns.tag)
@@ -65,7 +84,8 @@ def main(argv: list[str] | None = None) -> int:
     # ledger exists, and a rewrite that dropped it would leave a bare hash list.
     head = ledger_path.read_text(encoding="utf-8").split("entries:")[0]
     ledger_path.write_text(
-        head + yaml.safe_dump({"entries": entries}, sort_keys=False, width=100),
+        head + yaml.safe_dump({"entries": entries}, sort_keys=False, width=100,
+                              allow_unicode=True),
         encoding="utf-8")
     print(f"recorded {key[0]}/{key[1]}")
     return 0
