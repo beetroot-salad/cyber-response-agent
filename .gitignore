@@ -94,3 +94,6 @@ experiments/actor-author-discipline/runs/
 experiments/actor-author-discipline/results/
 experiments/actor-author-discipline/__pycache__/
 experiments/actor-author-discipline/**/__pycache__/
+
+# Local runs base when DEFENDER_RUNS_BASE must sit on a host-shared mount (C46/DooD).
+.defender-runs/

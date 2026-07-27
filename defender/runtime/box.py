@@ -215,15 +215,83 @@ def _is_running(docker: DockerFn, name: str) -> bool:
     return proc.returncode == 0 and "running" in (proc.stdout or "")
 
 
-def _create_argv(name: str, run_dir: Path, defender_dir: Path, spec: BoxSpec) -> list[str]:
+def _own_container_mounts(docker: DockerFn) -> tuple[tuple[Path, Path], ...]:
+    """This process's own bind mounts as `(destination, source)`, longest destination first.
+
+    Empty when we are not in a container, or when the daemon cannot be asked — both of which
+    make `_daemon_source` the identity, i.e. exactly today's behavior.
+    """
+    try:
+        cid = Path("/etc/hostname").read_text(encoding="utf-8").strip()
+    except OSError:
+        return ()
+    if not cid:
+        return ()
+    proc = _call(docker, [
+        "docker", "inspect", cid,
+        "--format", "{{range .Mounts}}{{.Destination}}\t{{.Source}}\n{{end}}",
+    ])
+    if proc.returncode != 0:
+        return ()
+    pairs = []
+    for line in (proc.stdout or "").splitlines():
+        dest, _, source = line.partition("\t")
+        if dest.strip() and source.strip():
+            pairs.append((Path(dest.strip()), Path(source.strip())))
+    return tuple(sorted(pairs, key=lambda p: len(str(p[0])), reverse=True))
+
+
+def _daemon_source(path: Path, mounts: Sequence[tuple[Path, Path]]) -> Path:
+    """Translate a path THIS process can see into the one the DAEMON must be given as a bind
+    source.
+
+    C46 — under docker-outside-of-Docker the caller's namespace and the daemon's differ, so
+    `source=<our path>` names a directory the daemon cannot resolve and `docker run` fails at
+    create. Only the bind SOURCE is translated: `target=`, `--workdir`, and `infra_env` keep
+    the path this process uses, because that is the path the agent records into
+    investigation.md, orient's workspace map, and `raw_command`, and the learning loop and
+    visualizer read those back through this same namespace. The equality the RSD's
+    mount-ordering note actually depends on — in-isolate path == the path the downstream
+    reader uses — is therefore preserved, not broken.
+
+    Identity when no mapping covers `path`, keeping the native-daemon case byte-identical.
+    A WRONG mapping cannot pass silently: the bind would land the wrong tree and M11's
+    per-mount sentinel read-back fails the run closed.
+    """
+    for dest, source in mounts:
+        if path == dest or dest in path.parents:
+            return source / path.relative_to(dest)
+    return path
+
+
+def _covered(path: Path, mounts: Sequence[tuple[Path, Path]]) -> bool:
+    return any(path == dest or dest in path.parents for dest, _ in mounts)
+
+
+def _create_argv(
+    name: str, run_dir: Path, defender_dir: Path, spec: BoxSpec,
+    mounts: Sequence[tuple[Path, Path]] = (),
+) -> list[str]:
     env_pairs = {**infra_env(defender_dir, run_dir), **_LOCALE_ENV}
+    for label, path in (("run dir", run_dir), ("defender dir", defender_dir)):
+        if mounts and not _covered(path, mounts):
+            raise BoxFault(
+                f"the {label} {path} is not on any path this container shares with the docker "
+                "daemon, so the box's bind source cannot be resolved (C46: docker-outside-of-"
+                "Docker). Point it at a directory under one of "
+                f"{', '.join(str(d) for d, _ in mounts)} — e.g. set DEFENDER_RUNS_BASE to a "
+                "path inside the workspace mount — or run the driver where it shares a path "
+                "namespace with the daemon."
+            )
+    run_src = _daemon_source(run_dir, mounts)
+    defender_src = _daemon_source(defender_dir, mounts)
     argv = [
         "docker", "run", "--detach", "--name", name,
         "--runtime", spec.runtime,
         "--network", "none",
         "--read-only",
-        "--mount", f"type=bind,source={run_dir},target={run_dir}",
-        "--mount", f"type=bind,source={defender_dir},target={defender_dir},readonly",
+        "--mount", f"type=bind,source={run_src},target={run_dir}",
+        "--mount", f"type=bind,source={defender_src},target={defender_dir},readonly",
         "--tmpfs", f"/tmp:rw,noexec,nosuid,mode=1777,size={spec.tmpfs_size}",
         "--workdir", str(run_dir),
     ]
@@ -295,7 +363,9 @@ def _start_boxed(
             "it, because that box belongs to another run still writing its artifacts"
         )
     _call(docker, ["docker", "rm", "-f", name])
-    created = _call(docker, _create_argv(name, run_dir, defender_dir, spec))
+    created = _call(
+        docker, _create_argv(name, run_dir, defender_dir, spec, _own_container_mounts(docker))
+    )
     if created.returncode != 0:
         raise BoxFault(
             f"could not create the box {name}: {(created.stderr or '').strip()}"
@@ -308,7 +378,9 @@ def _start_boxed(
     return BoxExecutor(spec=spec, transport=_DockerTransport(name, spec), name=name)
 
 
-def _render_argv(request: BoxRequest) -> list[str]:
+def _render_argv(
+    request: BoxRequest, mounts: Sequence[tuple[Path, Path]] = (),
+) -> list[str]:
     argv = [
         "docker", "run", "--detach", "--name", request.name,
         "--runtime", request.spec.runtime,
@@ -316,7 +388,15 @@ def _render_argv(request: BoxRequest) -> list[str]:
         "--read-only",
     ]
     for m in request.mounts:
-        spec_str = f"type=bind,source={m.source},target={m.target}"
+        if mounts and not _covered(Path(m.source), mounts):
+            raise BoxFault(
+                f"the mount source {m.source} is not on any path this container shares with "
+                "the docker daemon, so the box's bind source cannot be resolved (C46: "
+                "docker-outside-of-Docker). Compose the mount under one of "
+                f"{', '.join(str(d) for d, _ in mounts)}, or run the driver where it shares "
+                "a path namespace with the daemon."
+            )
+        spec_str = f"type=bind,source={_daemon_source(Path(m.source), mounts)},target={m.target}"
         if not m.writable:
             spec_str += ",readonly"
         argv += ["--mount", spec_str]
@@ -343,7 +423,7 @@ def _start_boxed_request(request: BoxRequest, docker: DockerFn) -> BoxExecutor:
             "reaping it, because that box belongs to another batch still writing its artifacts"
         )
     _call(docker, ["docker", "rm", "-f", request.name])
-    created = _call(docker, _render_argv(request))
+    created = _call(docker, _render_argv(request, _own_container_mounts(docker)))
     if created.returncode != 0:
         raise BoxFault(
             f"could not create the box {request.name}: {(created.stderr or '').strip()}"
@@ -397,14 +477,25 @@ def _host_fallback_env(request: BoxRequest) -> dict[str, str]:
 
 def start_box(
     run_dir_or_request: Path | BoxRequest, defender_dir: Path | None = None, *,
-    spec: BoxSpec = DEFAULT_SPEC, docker: DockerFn = _docker,
+    spec: BoxSpec | None = None, docker: DockerFn = _docker,
 ) -> BoxExecutor:
+    # F1 (intent_540 §542) settled the runtime knob as "the dataclass anchors the default,
+    # ONE env var is its external lever". `BoxSpec.from_env` implemented the lever, but no
+    # call path read it — `DEFAULT_SPEC` hard-pinned every run to runsc, which made the RSD's
+    # "ships on whatever the host supports rather than waiting on a privileged runsc host"
+    # unreachable. Resolving the default here is what connects the two.
+    #
+    # The DEFAULT IS UNCHANGED (runsc). runc is the weaker isolation tier, so it is reached
+    # only by an operator explicitly setting DEFENDER_BOX_RUNTIME=runc — never by fallback.
+    caller_set_spec = spec is not None
+    if spec is None:
+        spec = BoxSpec.from_env(os.environ)
     if isinstance(run_dir_or_request, BoxRequest):
         request = run_dir_or_request
-        # Compared by VALUE, not identity: BoxSpec is a frozen value object and
-        # `BoxSpec.from_env({})` legitimately returns a fresh-but-equal default, which an
-        # `is not` check would reject as "ambiguous" even though it names nothing.
-        if spec != DEFAULT_SPEC:
+        # An explicit `spec=` beside a BoxRequest names two geographies. Tracked as a flag
+        # rather than compared against DEFAULT_SPEC: now that the default is env-resolved, a
+        # value comparison would fire spuriously whenever DEFENDER_BOX_RUNTIME is set.
+        if caller_set_spec:
             raise TypeError(
                 "start_box(request, spec=…) is ambiguous — a BoxRequest carries its own spec; "
                 "set it on the request (BoxRequest(..., spec=…)) instead of the call"
