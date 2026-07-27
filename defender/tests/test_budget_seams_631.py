@@ -585,7 +585,7 @@ def test_enforcement_flag_diverges_across_a_process_boundary(monkeypatch, tmp_pa
     assert child.stdout.strip() == "False"
 
 
-def test_ci_runs_the_suite_with_enforcement_on():
+def test_ci_runs_the_suite_with_enforcement_on(monkeypatch):
     """CI runs the collected suite with DEFENDER_BUDGET_ENFORCE on: the unit-test job
     carries the env block, so every test in tests/ and learning/ executes under the
     enforcing posture rather than the default-off one.
@@ -605,11 +605,14 @@ def test_ci_runs_the_suite_with_enforcement_on():
     for step in unit:
         value = (step.get("env") or {}).get(FLAG)
         assert value is not None, f"{step.get('name')!r} carries no {FLAG} env block"
-        os.environ[FLAG] = str(value)
-        try:
-            assert driver.enforcement_enabled() is True
-        finally:
-            os.environ.pop(FLAG, None)
+        # monkeypatch, not a bare os.environ[FLAG] = ...  /  os.environ.pop(FLAG, None):
+        # the bare form's `finally` unconditionally DELETES the var rather than restoring
+        # whatever it was before this test ran — under the real posture this suite itself
+        # runs under (DEFENDER_BUDGET_ENFORCE=1, set at the job level), that permanently
+        # erases it for every test that happens to collect after this one in the same
+        # process, silently disabling enforcement suite-wide from this point on.
+        monkeypatch.setenv(FLAG, str(value))
+        assert driver.enforcement_enabled() is True
 
 
 

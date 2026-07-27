@@ -89,9 +89,6 @@ def _budget_short_circuit(
     logger: observe.RequestLogger, agent_id: str,
 ) -> str | None:
     state = _budget_state_for_enforcement(read_budget(deps.run_dir), deps)
-    print(f"[DEBUG-budget] short_circuit tool={tool_name} tier={tier(tool_name, deps.role)} "
-          f"role={deps.role} tool_calls={state.get('tool_calls')} limits={limits}",
-          file=sys.stderr)
     if tail_exhausted(state, limits):
         raise BudgetKill(f"budget tail exhausted at {tool_name}")
     if should_refuse(state, tool_name, tier(tool_name, deps.role), limits):
@@ -103,14 +100,10 @@ def _budget_short_circuit(
 def _account_executed_call(deps: AgentDeps, tool_name: str, *, active: bool, limits: dict) -> None:
     try:
         call_tier = tier(tool_name, deps.role)
-        print(f"[DEBUG-budget] account tool={tool_name} tier={call_tier} active={active}",
-              file=sys.stderr)
         if active:
             state = account_call(deps.run_dir, deps.run_id, tool_name, limits=limits, tier=call_tier)
         else:
             state = update_budget_locked(deps.run_dir, deps.run_id, tool_name, limits=limits)
-        print(f"[DEBUG-budget] account result tool_calls={state.get('tool_calls')}",
-              file=sys.stderr)
         state = _budget_state_for_enforcement(state, deps)
         for w in check_budgets(state, limits):
             print(f"[run.py] {w}", file=sys.stderr)
@@ -124,8 +117,6 @@ def _make_hooks(
     logger: observe.RequestLogger, agent_id: str, *, enforce: bool, limits: dict = DEFAULT_LIMITS,
     session_id: str | None = None,
 ) -> Hooks[Any]:
-    print(f"[DEBUG-budget] _make_hooks agent_id={agent_id} enforce={enforce} limits={limits}",
-          file=sys.stderr)
     hooks = Hooks()
 
     @hooks.on.tool_execute
