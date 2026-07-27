@@ -54,14 +54,20 @@ LABEL = _load("oracle_golden_label", GOLDEN_DIR / "label.py")
 #: projection to these would be asking it to reproduce our aggregation, not the
 #: telemetry — and they are never stable across a control window anyway.
 #:
-#: `message` and the ephemeral port/id fields are here for a sharper reason: they
-#: are **not gradeable ground truth at all**. `score.py` treats a value as
-#: concrete unless it *starts* with `<`, so a correctly-placeholdered free-text
-#: value like `"Failed password for root from <office-ws-1-ip> port <source-port>
-#: ssh2"` grades `wrong` — and `wrong` gates a slice to `no-update`. A projection
-#: doing exactly what prompt.md mandates would be penalised for it. Case-009's
-#: first score showed one such false `wrong`; no field belongs in either set
-#: unless a projection could in principle match it.
+#: `message` and the ephemeral port/id fields are here because a projection could
+#: never match them from the story: they carry a value per connection (a source
+#: port, a pid, a session id) that nothing an oracle reads could predict, and
+#: free-text `message` embeds several of those at once. Ground truth a faithful
+#: projection cannot satisfy is not ground truth.
+#:
+#: This list is NOT a workaround for the scorer's placeholder handling. It once
+#: was — `score.py` treated a value as concrete unless it *started* with `<`, so
+#: `"Failed password for root from <office-ws-1-ip> port <source-port> ssh2"`
+#: graded `wrong` for doing what prompt.md mandates. That defect is fixed at
+#: source (`score.py.partial_placeholder_matches`), so a partially-placeholdered
+#: value now grades on its literal spans alone. The entries stay because the
+#: unpredictability reason above still holds; if one ever stops holding, the field
+#: can come back without touching the scorer.
 _NOT_GROUND_TRUTH = frozenset({
     "@timestamp", "first_seen", "last_seen", "first_in_minute", "last_in_minute",
     "minute", "event.ingested", "event.created",
@@ -105,10 +111,81 @@ def _baseline_keys(record: dict, query: str, query_id: str) -> set[tuple]:
     return baseline
 
 
-def _field_sets(case_dir: Path, lead_id: str, queries: list[dict]) -> tuple[dict, dict]:
-    """(fields, observed_fields) for a lead, from its attack rows vs its controls."""
-    fields: dict[str, object] = {}
-    observed: dict[str, object] = {}
+def _live_controls_returned_rows(record: dict) -> bool:
+    """Did any live control window return a row at all, keyable or not?
+
+    Distinct from `_baseline_keys` being empty: that set is empty both when the
+    baseline is genuinely empty and when the rows could not be keyed. Only the
+    raw count separates the two.
+    """
+    for control in record.get("controls") or []:
+        if control.get("live") is False:
+            continue
+        payload = control.get("payload")
+        if isinstance(payload, dict) and (payload.get("row_count") or 0) > 0:
+            return True
+    return False
+
+
+def _collect(bucket: dict[str, set], column: str, value: object) -> None:
+    bucket.setdefault(column, set()).add(value)
+
+
+def _settle(bucket: dict[str, set]) -> tuple[dict[str, object], list[str]]:
+    """Ground truth for the columns that have ONE value; the rest are dropped.
+
+    Never "whichever row came first". ES|QL without an explicit `SORT` guarantees
+    no row order, so a first-wins rule pins whichever value the cluster happened
+    to return first — regenerating could silently pin a different one and move a
+    grade. That is ground truth deciding itself by luck.
+
+    A column that takes several values across the attack rows is not
+    single-valued ground truth at all. `l-010`'s `source.ip` takes twelve across
+    a 30-day history lead, and `event.outcome` takes both `failure` and `success`.
+    Pinning one is arbitrary; accepting any of twelve is a check that cannot fail.
+    So neither: the column is dropped and reported, and a human can add it back
+    by hand with a reason if the capture really does make one of them the truth.
+    """
+    out: dict[str, object] = {}
+    dropped: list[str] = []
+    for column, values in sorted(bucket.items()):
+        if len(values) == 1:
+            out[column] = next(iter(values))
+        else:
+            dropped.append(column)
+    return out, dropped
+
+
+def _harvest(payload: dict, keys: tuple[str, ...] | None, baseline: set,
+             fields: dict[str, set], observed: dict[str, set]) -> None:
+    """Fold one query's attributable rows into the two field buckets."""
+    for row in payload.get("values") or []:
+        if LABEL._is_empty_summary_row(row):
+            continue
+        key = (tuple(json.dumps(row.get(k), sort_keys=True, default=str) for k in keys)
+               if keys else None)
+        if key is not None and key in baseline:
+            # A BASELINE row. Its values are true of the envelope but are not
+            # attributable to the activity, and grading a projection against them
+            # measures the baseline instead. case-005's `l-011` asserted
+            # `zeek.ssh.auth.success: True` from a routine connection to
+            # jump-box-1, marking the projection `wrong` for correctly saying the
+            # db-1 attempt failed. Neither field set may come from here.
+            continue
+        for column, value in row.items():
+            if column in _NOT_GROUND_TRUTH or not _scalar(value):
+                continue
+            if keys and column in keys:
+                _collect(fields, column, value)
+            else:
+                _collect(observed, column, value)
+
+
+def _field_sets(case_dir: Path, lead_id: str,
+                queries: list[dict]) -> tuple[dict, dict, list[str]]:
+    """(fields, observed_fields, dropped) for a lead, from its attack rows vs controls."""
+    fields: dict[str, set] = {}
+    observed: dict[str, set] = {}
     for seq, q in enumerate(queries):
         query = (q.get("params") or {}).get("query") or ""
         query_id = q.get("query_id", "")
@@ -119,30 +196,25 @@ def _field_sets(case_dir: Path, lead_id: str, queries: list[dict]) -> tuple[dict
         keys = LABEL.row_key_columns(payload, query, query_id)
         baseline = _baseline_keys(record, query, query_id)
 
-        for row in payload.get("values") or []:
-            if LABEL._is_empty_summary_row(row):
-                continue
-            key = (tuple(json.dumps(row.get(k), sort_keys=True, default=str) for k in keys)
-                   if keys else None)
-            if key is not None and key in baseline:
-                # A BASELINE row. Its values are true of the envelope but are not
-                # attributable to the activity, and grading a projection against
-                # them measures the baseline instead. case-005's `l-011` asserted
-                # `zeek.ssh.auth.success: True` from a routine connection to
-                # jump-box-1, marking the projection `wrong` for correctly saying
-                # the db-1 attempt failed. Neither field set may come from here.
-                continue
-            for column, value in row.items():
-                if column in _NOT_GROUND_TRUTH or not _scalar(value):
-                    continue
-                if keys and column in keys:
-                    fields.setdefault(column, value)
-                else:
-                    observed.setdefault(column, value)
+        if keys is None and _live_controls_returned_rows(record):
+            # No defensible notion of "the same row" here (a doc-returning query
+            # with no `KEEP` and no `ROW_KEY_OVERRIDES` entry), so the baseline
+            # exclusion inside `_harvest` cannot run — `key` would be `None` and
+            # every baseline row would pass straight into `observed_fields`. That
+            # is the very contamination the exclusion exists to stop, arriving
+            # through the door beside it: case-005's `l-011` and `l-005` are
+            # exactly this shape, and l-011 is the lead whose baseline-sourced
+            # `zeek.ssh.auth.success` had to be removed by hand. A query whose
+            # rows cannot be attributed yields no ground truth at all.
+            continue
+
+        _harvest(payload, keys, baseline, fields, observed)
     # A value cannot be both required and merely observed.
     for column in fields:
         observed.pop(column, None)
-    return fields, observed
+    settled_fields, dropped_fields = _settle(fields)
+    settled_observed, dropped_observed = _settle(observed)
+    return settled_fields, settled_observed, sorted(set(dropped_fields + dropped_observed))
 
 
 def build_expected(case_dir: Path) -> dict:
@@ -156,6 +228,7 @@ def build_expected(case_dir: Path) -> dict:
 
     out_leads: dict[str, dict] = {}
     classes: set[str] = set()
+    dropped: dict[str, list[str]] = {}
     for lead_id, lead in leads.items():
         queries = lead.get("queries", [])
         systems = [LABEL.query_system(q.get("query_id", "")) for q in queries]
@@ -173,11 +246,13 @@ def build_expected(case_dir: Path) -> dict:
         if derived["heterogeneous"] is not None:
             entry["heterogeneous"] = derived["heterogeneous"]
         if derived["class"] == LABEL.PLUS_EVENT:
-            fields, observed = _field_sets(case_dir, lead_id, queries)
+            fields, observed, not_single_valued = _field_sets(case_dir, lead_id, queries)
             if fields:
                 entry["fields"] = fields
             if observed:
                 entry["observed_fields"] = observed
+            if not_single_valued:
+                dropped[lead_id] = not_single_valued
         out_leads[lead_id] = entry
         classes.add(derived["class"])
 
@@ -186,6 +261,10 @@ def build_expected(case_dir: Path) -> dict:
         "kind": manifest.get("kind", "observed"),
         "result_classes_covered": sorted(classes),
         "leads": out_leads,
+        # Not written to the file — reported to the operator by main(). Columns
+        # that took more than one value across the attack rows, so no single value
+        # is their ground truth. Silence here would read as "nothing was dropped".
+        "_not_single_valued": dropped,
     }
 
 
@@ -226,6 +305,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     expected = build_expected(ns.case_dir)
+    dropped = expected.pop("_not_single_valued", {})
     body = yaml.safe_dump(expected, sort_keys=False, allow_unicode=True, width=100)
     out.write_text(HEADER.format(case_id=ns.case_dir.name) + body, encoding="utf-8")
 
@@ -237,6 +317,13 @@ def main(argv: list[str] | None = None) -> int:
     if counts.get(LABEL.NEEDS_LABEL):
         print(f"  !! {counts[LABEL.NEEDS_LABEL]} lead(s) need a human decision "
               f"before this case can be scored")
+    if dropped:
+        # Said out loud, never silently: a dropped column is a check this case
+        # does NOT make, and a reader who is not told assumes it was covered.
+        print(f"  {sum(len(v) for v in dropped.values())} column(s) took more than "
+              f"one value across the attack rows and are NOT ground truth:")
+        for lead_id, columns in sorted(dropped.items()):
+            print(f"    {lead_id}: {', '.join(columns)}")
     return 0
 
 

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import re
 import sys
 from pathlib import Path
 
@@ -60,10 +61,16 @@ def main(argv: list[str] | None = None) -> int:
         "sha256": hashlib.sha256(score_path.read_bytes()).hexdigest(),
         "recorded": ns.recorded,
     })
-    # Keep the file's explanatory header (everything before `entries:`) and
-    # re-serialize the list — the header is the only place that says why this
+    # Keep the file's explanatory header (everything before the `entries:` key)
+    # and re-serialize the list — the header is the only place that says why this
     # ledger exists, and a rewrite that dropped it would leave a bare hash list.
-    head = ledger_path.read_text(encoding="utf-8").split("entries:")[0]
+    #
+    # Anchored to the start of a line: a bare `split("entries:")` also matches the
+    # string inside a `retired:` reason, and retirement reasons are free prose
+    # written about this very file. The first such reason to use the word would
+    # have silently truncated the header it is trying to preserve.
+    head = re.split(r"^entries:", ledger_path.read_text(encoding="utf-8"),
+                    maxsplit=1, flags=re.MULTILINE)[0]
     ledger_path.write_text(
         head + yaml.safe_dump({"entries": entries}, sort_keys=False, width=100),
         encoding="utf-8")
