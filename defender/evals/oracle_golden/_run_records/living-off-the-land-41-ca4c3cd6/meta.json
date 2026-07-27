@@ -1,0 +1,49 @@
+{
+  "run_id": "living-off-the-land-41-ca4c3cd6",
+  "scenario_id": "living-off-the-land",
+  "category": "execution",
+  "description": "Foothold on canary-1 runs a `curl | bash` chain plus a base64-decoded shell payload \u2014 exercises Falco's execution-lineage rules (shell spawned from non-shell parent, curl-to-bash piping, decoded script execution).",
+  "seed": 41,
+  "overrides": {
+    "target": "web-1"
+  },
+  "resolved": {
+    "intensity": 1,
+    "source_user": "root",
+    "target_host": "web-1"
+  },
+  "pre_run": {
+    "cr_mode": "none"
+  },
+  "started_at": "2026-07-26T09:11:47+00:00",
+  "finished_at": "2026-07-26T09:11:52+00:00",
+  "aborted": false,
+  "steps": [
+    {
+      "step_index": 0,
+      "iteration": 0,
+      "source_host": "canary-1",
+      "source_user": "root",
+      "cmd": "curl -fsS http://web-1/ -o /tmp/fetched_0.sh 2>&1 || true\n# Not actually executing web-1's HTML as a script \u2014 just producing\n# the download+read-from-/tmp signal the telemetry cares about.\nbash -c \"cat /tmp/fetched_0.sh | head -3\" 2>&1 || true\n",
+      "rc": 0,
+      "stdout_tail": "<!doctype html>\n<html lang=\"en\">\n<head>\n",
+      "stderr_tail": "",
+      "started_at": "2026-07-26T09:11:47+00:00",
+      "ended_at": "2026-07-26T09:11:49+00:00",
+      "duration_s": 2.768
+    },
+    {
+      "step_index": 1,
+      "iteration": 0,
+      "source_host": "canary-1",
+      "source_user": "root",
+      "cmd": "echo \"IyEvYmluL2Jhc2gKZWNobyAicGxheWdyb3VuZCBhdHRhY2stc2ltIHJlYWNoZWQ6ICQobG9jYWx0aW1lKSIK\" \\\n  | base64 -d > /tmp/payload_0.sh\nbash /tmp/payload_0.sh\n",
+      "rc": 0,
+      "stdout_tail": "playground attack-sim reached: \n",
+      "stderr_tail": "/tmp/payload_0.sh: line 2: localtime: command not found\n",
+      "started_at": "2026-07-26T09:11:49+00:00",
+      "ended_at": "2026-07-26T09:11:52+00:00",
+      "duration_s": 2.498
+    }
+  ]
+}
