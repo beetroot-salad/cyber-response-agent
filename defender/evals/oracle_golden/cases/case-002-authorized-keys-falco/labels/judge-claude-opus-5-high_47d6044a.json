@@ -1,0 +1,27 @@
+{
+  "judge": {
+    "model": "claude-opus-5",
+    "effort": "high",
+    "prompts_sha8": "47d6044a"
+  },
+  "leads": {
+    "l-001": {
+      "delta_kind": "present",
+      "undecidable_reason": null,
+      "heterogeneous": null,
+      "evidence": "The single query (elastic.falco-alerts) returned row_count 1 in the operation window: a 2026-07-25T09:29:02.246Z alert with falco.rule \"Adding ssh keys to authorized_keys\", falco.output_fields.fd.name \"/root/.ssh/authorized_keys\", user.name \"root\", evt.type \"openat\", and a proc.cmdline appending \"ssh-rsa AAAAB3NzaC1yc2EAAAAD_fake_key_0_${ts}_attacker attacker@elsewhere\" to /root/.ssh/authorized_keys. Two of the three controls are live (C-14d 2026-07-11 and C-21d 2026-07-04, both window_live: true) and each returned row_count 0 with values: []; only C-7d is dead and is disregarded. The distinction is carried by non-volatile surfaced fields \u2014 falco.output_fields.fd.name, user.name and proc.cmdline \u2014 not by the unstable falco.output_fields.container.id (1df4bcd65ee4), so the delta survives the environment's unstable-identifier caveat. No truncation flags are set on any payload.",
+      "judge_model": "claude-opus-5",
+      "judge_effort": "high",
+      "cost_usd": 0.17758200000000002
+    },
+    "l-002": {
+      "delta_kind": "state-only",
+      "undecidable_reason": null,
+      "heterogeneous": null,
+      "evidence": "The lead contains a single query, `cmdb.host-trust-edges` with params `{host: canary-1}`, and the observed payload is a state lookup marked `_note: state lookup` that echoes only the query params. The `baseline` array is empty because this query carries no `@timestamp` bounds to shift, exactly as `environment_notes.state_and_lookup_systems` describes for cmdb queries. Per that note, cmdb records return current configuration/an entity record rather than an event stream, so no baseline-diff semantics apply and the absent baseline is not a missing measurement. With only one decidable query in the lead, `heterogeneous` is null.",
+      "judge_model": "claude-opus-5",
+      "judge_effort": "high",
+      "cost_usd": 0.14833299999999996
+    }
+  }
+}

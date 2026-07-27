@@ -1,0 +1,78 @@
+{
+  "tag": "glm-5.2_effort-none__judge-claude-opus-5-high_47d6044a",
+  "projection": "glm-5.2_effort-none.yaml",
+  "case": "case-003-suppression-devws",
+  "kind": "observed",
+  "judge": {
+    "model": "claude-opus-5",
+    "effort": "high",
+    "prompts_sha8": "47d6044a"
+  },
+  "n_leads": 4,
+  "mechanical": {
+    "missing_leads": [],
+    "unscored_leads": [],
+    "duplicate_leads": [],
+    "malformed_leads": {},
+    "forbidden_emitted": [],
+    "concrete_value_leads": []
+  },
+  "judged": true,
+  "faithful": "2/3",
+  "abstentions": 1,
+  "by_system": {
+    "cmdb": "1/1",
+    "elastic": "1/2"
+  },
+  "cost_usd": 0.402,
+  "rows": [
+    {
+      "lead": "l-001",
+      "system": "elastic",
+      "delta_kind": "absent",
+      "faithful": false,
+      "cause": "C-SUPPRESS-UNBASELINED",
+      "heterogeneous": null,
+      "undecidable_reason": null,
+      "form_notes": "projection is a single suppression marker rather than rows; granularity not at issue",
+      "rationale": "The observed payload for elastic.sshd-auth-history returned row_count 0 with an empty\nvalues list, and the baseline does not establish that this envelope routinely carries\nauth events in this window: C-7d (2026-07-18) is window_live false with payload null and\ncarries no information, C-21d (2026-07-04) is live and also returns row_count 0 over a\nfull hour, and the only populated control, C-14d, has a single scheduled burst row\n(accepted 6, failed 0, svc.config-mgmt from 172.18.0.14) whose first_seen == last_seen ==\n09:47:08.297Z \u2014 an instant that falls outside the observed 09:35\u201309:45 slice. A live\none-hour control already returning zero rows means an empty ten-minute window is ordinary\nsilence, which is exactly the measurement of record's reading (delta_kind absent, \"not a\nstream going dark\"). The projection nonetheless emits a concrete `<suppressed: ...>`\nmarker asserting the agent-stop blinded this stream, converting unbaselined quiet into a\ndetection.",
+      "evidence": "The single query (elastic.sshd-auth-history, 10-minute window 09:35\u201309:45Z on 2026-07-25) returned row_count 0 with an empty values list, so no source.ip/user.name group was surfaced at all. Of the three controls, C-7d (2026-07-18) has window_live false and payload null, so it carries no information; the two live controls disagree \u2014 C-21d (2026-07-04, one hour) also returned row_count 0, while C-14d (2026-07-11, one hour) returned exactly one row (accepted 6, failed 0, user.name svc.config-mgmt, source.ip 172.18.0.14) whose first_seen and last_seen are the same instant 09:47:08.297Z, i.e. a single scheduled burst. Since a live one-hour control already returns zero rows, an empty ten-minute observed window is within routine behaviour rather than a stream going dark, so this is not `suppressed`; and with zero observed rows there is nothing that could be distinguishable in accepted, failed, source.ip or user.name."
+    },
+    {
+      "lead": "l-002",
+      "system": "elastic",
+      "delta_kind": "suppressed",
+      "faithful": true,
+      "cause": null,
+      "heterogeneous": null,
+      "undecidable_reason": null,
+      "form_notes": "projection is a single suppression marker rather than a per-dataset accounting of the removed volume",
+      "rationale": "The observed payload for elastic.syslog-ip-search over 2026-07-25T09:35\u201309:45Z returns row_count 0 with empty `values`, while two live controls carry a substantial baseline for host.name == \"dev-ws-1\" (C-14d: system.auth 444, elastic_agent.metricbeat 360, elastic_agent 12, filebeat 6, system.syslog 6; C-21d: system.auth 528, metricbeat 360, elastic_agent 14, syslog 6, filebeat 4). Suppression is earned twice here: the story concretely stops the Elastic Agent that ships these streams, and the live baselines show the envelope routinely carried hundreds of events per hour to remove, so the dead C-7d window is not needed and is correctly irrelevant. The projection emits exactly one `<suppressed: ...>` marker attributing the darkness to the stopped agent with `<alert-time>` left as a placeholder, which matches the measurement's `delta_kind: suppressed` for the lead's sole query. No concrete ungrounded value is asserted and no change beyond the total silence is claimed.",
+      "evidence": "The single query (elastic.syslog-ip-search) over the operation window 2026-07-25T09:35\u201309:45Z returns row_count 0 with no values, despite the columns (events, data_stream.dataset) being present. Two live controls return a populated baseline for the same host.name == \"dev-ws-1\": C-14d (window_live: true) has 5 rows \u2014 system.auth 444, elastic_agent.metricbeat 360, elastic_agent 12, elastic_agent.filebeat 6, system.syslog 6 \u2014 and C-21d (window_live: true) has 5 rows \u2014 system.auth 528, metricbeat 360, elastic_agent 14, system.syslog 6, filebeat 4. Even prorating the 60-minute controls to the 10-minute observed window (~74 auth and ~60 metricbeat events expected), the observed count of zero across every dataset means the host stopped emitting entirely; the distinction is carried by the events count per data_stream.dataset. The empty C-7d control is disregarded because window_live is false, but the two live controls are sufficient to establish a non-empty baseline."
+    },
+    {
+      "lead": "l-003",
+      "system": "elastic",
+      "delta_kind": "undecidable",
+      "faithful": null,
+      "cause": null,
+      "heterogeneous": null,
+      "undecidable_reason": "insufficient-baseline",
+      "form_notes": null,
+      "rationale": "the label pass could not measure this envelope; not graded",
+      "evidence": "The single query (elastic.sshd-auth-history, web-1, 09:35\u201309:45Z) returned row_count: 0 with the\naggregation columns accepted/failed/source.ip/user.name and an empty values list. Its three controls\ndo not agree: C-7d (2026-07-18) has window_live: false and a null payload, so it measures nothing;\nC-14d (2026-07-11, live) returns 2 rows (svc.config-mgmt 6 accepted/0 failed; svc.reports 0\naccepted/72 failed); C-21d (2026-07-04, live) returns row_count: 0 with empty values. With one live\ncontrol non-empty and the other live control empty \u2014 and both controls widened to 60 minutes against\na 10-minute observation window \u2014 the payloads do not establish whether zero sshd auth rows on web-1\nis routine (absent) or a dark stream (suppressed). A live, duration-comparable control on web-1 that\nconsistently returned non-zero accepted/failed rows would have settled it."
+    },
+    {
+      "lead": "l-004",
+      "system": "cmdb",
+      "delta_kind": "state-only",
+      "faithful": true,
+      "cause": null,
+      "heterogeneous": null,
+      "undecidable_reason": null,
+      "form_notes": "projection is an empty list rather than an explicit state-only marker",
+      "rationale": "The lead has one query, `cmdb.host-trust-edges` with params `{host: dev-ws-1}`, and its\nobserved payload contains only `_note: \"state lookup; not an event stream\"` and the echoed\nparams \u2014 no role, criticality, owner, or trust-edge rows to reproduce. The baseline is an\nempty list by construction, since a CMDB lookup carries no `@timestamp` bounds to shift,\nwhich `state_and_lookup_systems` classifies as `state-only` rather than a missing or dead\ncontrol. The measurement agrees: there is no event delta for this envelope. An empty\nprojection therefore asserts no change where none is measurable, and had the oracle instead\nfilled in `what_to_summarize` with concrete role/criticality/owner values, that would have\nbeen ungrounded fabrication.",
+      "evidence": "The lead has a single query, `cmdb.host-trust-edges` with params `{host: dev-ws-1}`, and its observed payload carries only `_note: \"state lookup; not an event stream\"` plus the echoed params \u2014 no event rows, no timestamped columns. The baseline is an empty list because a CMDB lookup carries no `@timestamp` bounds to shift, so no control window exists by construction. Per `state_and_lookup_systems`, cmdb queries return an entity record rather than an event stream and have no baseline-diff semantics. This is `state-only`, not a missing or dead-window measurement, and with only one decidable query there is no cross-query disagreement to record."
+    }
+  ]
+}

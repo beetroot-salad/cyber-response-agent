@@ -1,0 +1,45 @@
+{
+  "judge": {
+    "model": "claude-opus-5",
+    "effort": "high",
+    "prompts_sha8": "47d6044a"
+  },
+  "leads": {
+    "l-001": {
+      "delta_kind": "absent",
+      "undecidable_reason": null,
+      "heterogeneous": null,
+      "evidence": "The single query (elastic.sshd-auth-history, 10-minute window 09:35\u201309:45Z on 2026-07-25) returned row_count 0 with an empty values list, so no source.ip/user.name group was surfaced at all. Of the three controls, C-7d (2026-07-18) has window_live false and payload null, so it carries no information; the two live controls disagree \u2014 C-21d (2026-07-04, one hour) also returned row_count 0, while C-14d (2026-07-11, one hour) returned exactly one row (accepted 6, failed 0, user.name svc.config-mgmt, source.ip 172.18.0.14) whose first_seen and last_seen are the same instant 09:47:08.297Z, i.e. a single scheduled burst. Since a live one-hour control already returns zero rows, an empty ten-minute observed window is within routine behaviour rather than a stream going dark, so this is not `suppressed`; and with zero observed rows there is nothing that could be distinguishable in accepted, failed, source.ip or user.name.",
+      "judge_model": "claude-opus-5",
+      "judge_effort": "high",
+      "cost_usd": 0.067252
+    },
+    "l-002": {
+      "delta_kind": "suppressed",
+      "undecidable_reason": null,
+      "heterogeneous": null,
+      "evidence": "The single query (elastic.syslog-ip-search) over the operation window 2026-07-25T09:35\u201309:45Z returns row_count 0 with no values, despite the columns (events, data_stream.dataset) being present. Two live controls return a populated baseline for the same host.name == \"dev-ws-1\": C-14d (window_live: true) has 5 rows \u2014 system.auth 444, elastic_agent.metricbeat 360, elastic_agent 12, elastic_agent.filebeat 6, system.syslog 6 \u2014 and C-21d (window_live: true) has 5 rows \u2014 system.auth 528, metricbeat 360, elastic_agent 14, system.syslog 6, filebeat 4. Even prorating the 60-minute controls to the 10-minute observed window (~74 auth and ~60 metricbeat events expected), the observed count of zero across every dataset means the host stopped emitting entirely; the distinction is carried by the events count per data_stream.dataset. The empty C-7d control is disregarded because window_live is false, but the two live controls are sufficient to establish a non-empty baseline.",
+      "judge_model": "claude-opus-5",
+      "judge_effort": "high",
+      "cost_usd": 0.048934
+    },
+    "l-003": {
+      "delta_kind": "undecidable",
+      "undecidable_reason": "insufficient-baseline",
+      "heterogeneous": null,
+      "evidence": "The single query (elastic.sshd-auth-history, web-1, 09:35\u201309:45Z) returned row_count: 0 with the\naggregation columns accepted/failed/source.ip/user.name and an empty values list. Its three controls\ndo not agree: C-7d (2026-07-18) has window_live: false and a null payload, so it measures nothing;\nC-14d (2026-07-11, live) returns 2 rows (svc.config-mgmt 6 accepted/0 failed; svc.reports 0\naccepted/72 failed); C-21d (2026-07-04, live) returns row_count: 0 with empty values. With one live\ncontrol non-empty and the other live control empty \u2014 and both controls widened to 60 minutes against\na 10-minute observation window \u2014 the payloads do not establish whether zero sshd auth rows on web-1\nis routine (absent) or a dark stream (suppressed). A live, duration-comparable control on web-1 that\nconsistently returned non-zero accepted/failed rows would have settled it.",
+      "judge_model": "claude-opus-5",
+      "judge_effort": "high",
+      "cost_usd": 0.07427200000000002
+    },
+    "l-004": {
+      "delta_kind": "state-only",
+      "undecidable_reason": null,
+      "heterogeneous": null,
+      "evidence": "The lead has a single query, `cmdb.host-trust-edges` with params `{host: dev-ws-1}`, and its observed payload carries only `_note: \"state lookup; not an event stream\"` plus the echoed params \u2014 no event rows, no timestamped columns. The baseline is an empty list because a CMDB lookup carries no `@timestamp` bounds to shift, so no control window exists by construction. Per `state_and_lookup_systems`, cmdb queries return an entity record rather than an event stream and have no baseline-diff semantics. This is `state-only`, not a missing or dead-window measurement, and with only one decidable query there is no cross-query disagreement to record.",
+      "judge_model": "claude-opus-5",
+      "judge_effort": "high",
+      "cost_usd": 0.029648
+    }
+  }
+}

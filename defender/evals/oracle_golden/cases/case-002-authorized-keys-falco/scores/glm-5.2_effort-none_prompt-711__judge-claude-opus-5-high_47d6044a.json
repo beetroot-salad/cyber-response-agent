@@ -1,0 +1,56 @@
+{
+  "tag": "glm-5.2_effort-none_prompt-711__judge-claude-opus-5-high_47d6044a",
+  "projection": "glm-5.2_effort-none_prompt-711.yaml",
+  "case": "case-002-authorized-keys-falco",
+  "kind": "observed",
+  "judge": {
+    "model": "claude-opus-5",
+    "effort": "high",
+    "prompts_sha8": "47d6044a"
+  },
+  "n_leads": 2,
+  "mechanical": {
+    "missing_leads": [],
+    "unscored_leads": [],
+    "duplicate_leads": [],
+    "malformed_leads": {},
+    "forbidden_emitted": [],
+    "concrete_value_leads": [
+      "l-001"
+    ]
+  },
+  "judged": true,
+  "faithful": "2/2",
+  "abstentions": 0,
+  "by_system": {
+    "cmdb": "1/1",
+    "elastic": "1/1"
+  },
+  "cost_usd": 0.3956,
+  "rows": [
+    {
+      "lead": "l-001",
+      "system": "elastic",
+      "delta_kind": "present",
+      "faithful": true,
+      "cause": null,
+      "heterogeneous": null,
+      "undecidable_reason": null,
+      "form_notes": "evt.type rendered as \"write\" where the observed row carries the syscall-level \"openat\"; proc.cmdline collapsed to \"bash\" rather than the full `bash -lc mkdir -p /root/.ssh ...` string",
+      "rationale": "The measurement records delta_kind present on the single query: one row at 2026-07-25T09:29:02.246Z with falco.rule \"Adding ssh keys to authorized_keys\", fd.name \"/root/.ssh/authorized_keys\", user.name \"root\", against two live controls (C-14d, C-21d) that both returned row_count 0. The projection emits exactly one alert mapping carrying those same distinguishing, non-volatile fields \u2014 rule name, /root/.ssh/authorized_keys, root \u2014 so it represents the delta rather than missing or inventing one. It correctly placeholders the two values the story does not state and the environment marks volatile: `<alert-time>` and `<container-id>` (falco.output_fields.container.id is on the unstable-identifier list, and the observed 1df4bcd65ee4 could not be grounded). The divergences are field-granularity only: the story grounds \"the write is performed by a `bash` process\", so \"bash\" for proc.cmdline and \"write\" for evt.type are under-specified renderings of a story-grounded action, not concrete claims contradicting the surfaced delta; they are noted in form_notes and do not change the verdict.",
+      "evidence": "The single query (elastic.falco-alerts) returned row_count 1 in the operation window: a 2026-07-25T09:29:02.246Z alert with falco.rule \"Adding ssh keys to authorized_keys\", falco.output_fields.fd.name \"/root/.ssh/authorized_keys\", user.name \"root\", evt.type \"openat\", and a proc.cmdline appending \"ssh-rsa AAAAB3NzaC1yc2EAAAAD_fake_key_0_${ts}_attacker attacker@elsewhere\" to /root/.ssh/authorized_keys. Two of the three controls are live (C-14d 2026-07-11 and C-21d 2026-07-04, both window_live: true) and each returned row_count 0 with values: []; only C-7d is dead and is disregarded. The distinction is carried by non-volatile surfaced fields \u2014 falco.output_fields.fd.name, user.name and proc.cmdline \u2014 not by the unstable falco.output_fields.container.id (1df4bcd65ee4), so the delta survives the environment's unstable-identifier caveat. No truncation flags are set on any payload."
+    },
+    {
+      "lead": "l-002",
+      "system": "cmdb",
+      "delta_kind": "state-only",
+      "faithful": true,
+      "cause": null,
+      "heterogeneous": null,
+      "undecidable_reason": null,
+      "form_notes": "projection is an empty list rather than an explicit state-only/no-delta marker",
+      "rationale": "The lead holds a single query, `cmdb.host-trust-edges` with params `{host: canary-1}`, and the observed payload at seq 0 is `{_note: state lookup, params: {host: canary-1}}` \u2014 it echoes the query parameters and carries no `role`, `criticality`, `owner`, or `trust_edges_out` fields at all. The `baseline` array is empty because, per `environment_notes.state_and_lookup_systems`, cmdb queries have no `@timestamp` bounds to shift and therefore no baseline-diff semantics, matching the measurement's `state-only` reading. The story's activity is a single `authorized_keys` append on canary-1, which changes no CMDB attribute this query would surface, so there is no delta for the projection to represent. The oracle's empty projection asserts no change and invents no concrete role/owner/trust-edge values the story does not ground and the payload does not carry, which is the correct response to a state-only envelope.",
+      "evidence": "The lead contains a single query, `cmdb.host-trust-edges` with params `{host: canary-1}`, and the observed payload is a state lookup marked `_note: state lookup` that echoes only the query params. The `baseline` array is empty because this query carries no `@timestamp` bounds to shift, exactly as `environment_notes.state_and_lookup_systems` describes for cmdb queries. Per that note, cmdb records return current configuration/an entity record rather than an event stream, so no baseline-diff semantics apply and the absent baseline is not a missing measurement. With only one decidable query in the lead, `heterogeneous` is null."
+    }
+  ]
+}

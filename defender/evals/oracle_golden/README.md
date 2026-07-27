@@ -18,7 +18,7 @@ it is scored against:
 
 ```
 cases/<case-id>/
-  manifest.yaml            # provenance, classes covered, lead_source, recorded projections
+  manifest.yaml            # provenance, split, unit, lead_source, recorded projections
   oracle_visible/          # ← the ONLY thing a projection may read
     story.md               #   ground-truth story (the oracle's story input)
     leads.jsonl            #   per lead: {lead_id, goal, what_to_summarize, queries[{query_id, params}]}
@@ -32,7 +32,8 @@ cases/<case-id>/
   expected.yaml            # OPTIONAL. Hand labels, kept only by the four seed cases;
                            #   the label pass's calibration set, not a scoring contract
   projections/<tag>.yaml   # oracle output for a given model/prompt (tag = <model>_effort-<e>)
-  scores/<tag>.json        # scored dimensions for that projection
+  labels/<judge-tag>.json  # the label pass's measurement of hidden/ — projection-independent
+  scores/<oracle>__<judge-tag>.json   # one projection graded against that measurement
 ```
 
 `expected.yaml` is optional per case and that is the redesign, not an omission. It used
@@ -57,13 +58,14 @@ Two details the layout does not show:
 **A story is an oracle input, so it may never state or justify the expected
 result.** That is the one leak the file-level split cannot catch, because
 `story.md` is deliberately visible. `test_no_story_states_the_expected_result`
-pins it. Rationale goes in `expected.yaml` / `manifest.yaml`, which the oracle
-never reads.
+pins it. Rationale goes in `manifest.yaml`, which the oracle never reads.
 
-`replay.py` reads only `oracle_visible/`; `score.py` reads `expected.yaml` (which
-was authored from `hidden/`) and never `hidden/` itself. The boundary is
-structural, not a matter of discipline — `test_oracle_golden_693.py` pins that
-no code literal in `replay.py` names the hidden tree.
+`replay.py` reads only `oracle_visible/`. `score.py` reads `hidden/` — it must, since
+that is the `y` it grades against — and it is not the thing the boundary protects. The
+boundary is structural, not a matter of discipline: `test_oracle_golden_693.py` pins that
+no code literal in `replay.py` names the hidden tree, and the judge is invoked with an
+empty tool allowlist from a neutral temp directory so it cannot reach the case tree by a
+second route.
 
 The derived kinds (negative-control, mutation) carry **no `hidden/`**: nothing
 new was captured, so their ground truth is definitional rather than measured.
@@ -73,70 +75,87 @@ and exactly what the derivation changed.
 ### Why a control-window baseline is stored
 
 The oracle emits a **signed diff over baseline**, so "distinguishable event
-(`+event`)" vs "additive baseline noise (`+noise`)" is undecidable from the
+(`present`)" vs "additive baseline noise (`indistinguishable`)" is undecidable from the
 attack window alone. `hidden/controls.yaml` records the same query over
 shape-matched control windows (e.g. the same clock window on prior weekends,
 where the Poisson baseline generators produce a fair routine sample). A row is a
-genuine `+event` only if the attack window has it and every control does not.
+genuine `present` only if the attack window has it and every live control does not.
 
 **Measure a control with the lead's own predicate.** A control taken on a broader
 filter than the lead runs does not describe the lead's envelope, and the mismatch
 is silent. Case-003 recorded "44 auth docs in the control window" measured over
 *all* dev-ws-1 auth docs, while its lead filters `event.outcome IS NOT NULL`;
 under that filter the control is **0**, there was no baseline for the suppression
-to remove, and the `-noise` label it justified was wrong. Likewise, control a
-`+event` on the **fields that distinguish it**, not on the rule that fired:
+to remove, and the `suppressed` reading it justified was wrong. Likewise, control a
+`present` candidate on the **fields that distinguish it**, not on the rule that fired:
 case-002's Falco rule has a routine ~hourly baseline (`config-mgmt-key-rotate`
 rotates `svc.config-mgmt` keys and fires the same rule), so its three zero-count
 windows only say the baseline action missed those windows.
 
-## The four result classes (the oracle's own vocabulary)
+## `delta_kind` — the stratification axis
 
-| class | meaning |
-|---|---|
-| `+event` | a distinguishable event the activity writes (attacker src, off-baseline dest, …) |
-| `+noise` | activity lights the stream but only with baseline-shape events — net observable delta 0 |
-| `-noise` | activity **removes** the baseline stream (kills the sensor, clears the log) — goes dark |
-| `0` | the activity never touches this lead (wrong system/window/filter, or a state/lookup query) |
+The oracle emits telemetry, so the suite grades telemetry against telemetry (`y'` vs
+`y`). The old four-way class is gone as a *contract*; it comes back as `delta_kind`, a
+label the judge tags each lead with so the report can stratify. The difference is
+load-bearing: a wrong class used to be a wrong score, and now it only moves a lead
+between report slices.
 
-## Scoring dimensions (`score.py`) — not one accuracy number
+| `delta_kind` | meaning | band |
+|---|---|---|
+| `present` | the activity writes rows these queries distinguish from baseline | active |
+| `indistinguishable` | it lights the stream, but only with baseline-shaped rows in the fields these queries surface | active |
+| `suppressed` | it **removes** a baseline this envelope was carrying — the stream goes dark | active |
+| `absent` | an event stream the activity never touches (wrong system, window, or filter) | quiet |
+| `state-only` | a lookup/state system: current configuration, no stream, no window to diff | quiet |
+| `undecidable` | the telemetry does not settle it — an abstention, never a score | — |
 
-- **four-way class agreement**, stratified **by system** (and extensible to
-  template / activity-family as cases accumulate);
-- **field/value grounding** on `+event` leads (`expected.yaml: fields`): `correct`
-  / `wrong` / `unknown` (emitted only as a `<placeholder>`) / `missing`. `wrong`
-  is the dangerous error; placeholders are *never* `wrong` — the prompt mandates
-  them for values the story does not state;
-- **the volunteered-value check** (`expected.yaml: observed_fields`): ground truth
-  for fields the labels do *not* require, graded **only** where the projection
-  emitted a concrete value for that key — never `missing`, never `unknown`.
-  `fields` asks "did you commit to the distinguishing values?"; this asks the
-  separate question "is anything else you made up refuted by the capture?".
-  Without it, grading is confined to the fields the author chose and a projection
-  invents refuted values for free: case-002 emits `evt.type: write` where the
-  capture says `openat`, and mut-001 emits an alert row (`alerts: 1`) for a rule
-  its story never fires. Both used to score a clean `0 wrong`. Contradictions
-  count into `wrong_concrete_fields` — the grade that gates a slice;
-- **occurrence precision/recall**: `+event` recall (emitted where expected) and
-  `0` precision (stayed empty where expected). A case with no lead of that class
-  reports `null`, **never `0.0`** — the resolver below aggregates these slices,
-  and "unexercised" must not read as "worst possible";
-- **false suppression**: any `-noise` predicted where the stream is actually
-  alive — the error that turns ordinary silence into a false detection;
-- **malformed**: events outside the oracle's closed grammar (an unrecognized
-  marker string, or a marker mixed with event mappings). Counted as a
-  disagreement, never folded into a real class — otherwise a degraded model
-  emitting prose scores as a clean `+noise`;
-- **lead-set integrity**: leads the labels cover but the projection omits
-  (`missing_leads`), leads it projects that the labels do not cover
-  (`unscored_leads`), and repeated `lead_id`s. A missing lead is scored
-  `missing`, **not** the empty `0` it would otherwise impersonate, and any
-  mismatch exits non-zero — without this, a projection truncated to one lead
-  scores a perfect 9/9 against the all-`0` negative control.
+**The report headlines the active band.** On the seed data 27 of 36 dev leads were
+`quiet`, so a single pooled number was three-quarters correctly-said-nothing. Both bands
+are printed and neither is pooled into a headline.
 
-Score is per-query/per-lead against the **envelope truth** in `expected.yaml`
-(what the queries physically surface). A lead's stated *intent* is recorded to
-*explain* divergence (an intent-scoped `[]`), never to excuse it.
+## Scoring (`score.py`) — mechanical checks first, then two judge passes
+
+Three things run **in code**, before any model call:
+
+1. **Lead-set integrity** — leads the case has but the projection omits, leads it
+   projects that the case does not have, repeated `lead_id`s. Any mismatch reports,
+   scores nothing, and exits non-zero: a truncated projection is not a result, and
+   without this it scores perfectly against an all-quiet case.
+2. **Grammar** — the oracle's output grammar is closed (event mappings, or exactly one
+   of the two marker strings, never mixed). Out-of-grammar output is `C-MALFORMED`,
+   decided deterministically. case-005 `l-002` emitted a prose paragraph whose *content*
+   was correct; a judge asked to grade that would be tempted to be generous.
+3. **Leak check** — for a mutation case, the pre-mutation entities must appear nowhere
+   in the projection. Matched against whole emitted values and their
+   whitespace-delimited tokens, never as bare substrings: `/root/.ssh/authorized_keys`
+   is case-002's real output and must not read as a leak of the user `root`.
+
+Then the judge (`judge.py`, `prompts/`), in two separate calls:
+
+- the **label pass** reads the telemetry alone — never the story, never the projection —
+  and returns the `delta_kind` this envelope actually carried, plus its evidence;
+- the **verdict pass** grades the projection against that measurement and returns
+  `faithful: true | false | null`, a `cause` when false, and a rationale.
+
+The split is what keeps the measurement honest: merging the passes would let a confident
+projection colour the reading of the telemetry, and the label pass's calibration set
+(hand labels, none derived with a projection in view) would stop being like-for-like.
+
+A lead the label pass calls `undecidable` **never reaches the verdict pass** — there is
+nothing to grade against. It is recorded with `faithful: null`, excluded from every
+denominator, and counted in the per-slice abstention tally. A slice that abstains at
+least as often as it decides is reported as *not a measurement*, not as a rate.
+
+The label pass is a function of (case, lead) and nothing else, so it is cached per case
+in `labels/<judge-tag>.json`. Two oracle tags are then graded against **one** measurement
+rather than two independent readings of the same telemetry, and a re-score costs only the
+verdict pass. Editing either prompt changes the judge tag and invalidates the cache by
+construction.
+
+**Derived cases never reach the judge.** A mutation or negative-control case reuses its
+base's envelopes and changes only the story, so the story it tells was never fired and no
+telemetry exists for it — there is no `y`. They are scored by the mechanical checks alone,
+contribute no judged rows, and the roll-up names them rather than dropping them silently.
 
 ## Case kinds
 
@@ -146,8 +165,10 @@ Score is per-query/per-lead against the **envelope truth** in `expected.yaml`
   window/salience rather than caused by the story. Needs **no env** — it reuses
   captured leads and only re-runs the oracle.
 - **mutation** — a captured case with one causal action/entity removed or
-  altered; the projection must change accordingly (drop the `+event`, or move a
-  field). Also **no env** — a story edit + an oracle re-run.
+  altered; the projection must change accordingly (drop the events, or move a
+  field). Also **no env** — a story edit + an oracle re-run. Scored by the mechanical
+  checks only: the mutated story was never fired, so no telemetry exists to grade it
+  against.
 
 ### `lead_source` — where the envelope came from
 
@@ -175,28 +196,59 @@ one.
 # The out dir's NAME is the case id — there is no separate id argument to drift
 # from it. Re-capturing clears oracle_visible/samples/ and hidden/observed/ so a
 # lead dropped since the last capture leaves no stale file behind; hand-authored
-# siblings (expected.yaml, manifest.yaml, projections/, scores/) are untouched.
+# siblings (manifest.yaml, environment.yaml, projections/, scores/) are untouched.
 python3 defender/evals/oracle_golden/build_case.py \
     <run_dir> <story.md> <controls.yaml> cases/<case_id>
 
 # Re-run the production oracle over a case (reads ONLY oracle_visible/):
 python3 defender/evals/oracle_golden/replay.py cases/<case_id> [--tag <model>_effort-<e>]
 
-# Score a projection against the case's labels, emit the dimensions.
+# Score a projection. Writes cases/<case_id>/scores/<oracle-tag>__<judge-tag>.json.
 # Exits non-zero on a lead-set mismatch — a partial projection is not a result.
+# --dry-run runs the mechanical checks only and calls no model.
 python3 defender/evals/oracle_golden/score.py cases/<case_id> \
-    cases/<case_id>/projections/<tag>.yaml --json cases/<case_id>/scores/<tag>.json
+    cases/<case_id>/projections/<tag>.yaml [--jobs 4] [--relabel] [--dry-run]
+
+# Roll every case's scores up per tag, split dev / held-out, never pooled.
+python3 defender/evals/oracle_golden/report.py [--tag <tag>] [--target-lower-bound 0.90]
+
+# Calibrate the label pass against the hand labels + measure its own noise floor.
+python3 defender/evals/oracle_golden/audit_judge.py --repeats 5 --out audits/<name>.json
+
+# Append a held-out result. Refuses a second entry per (case, tag), and refuses any
+# score whose tag does not name the judge recorded inside it.
+python3 defender/evals/oracle_golden/record_held_out.py cases/<case_id> <tag>
 ```
 
 `replay.py` drives the exact production seam (`invoke_oracle_lead` →
 `_run_oracle_pydantic`), so a projection is production-identical; only its input
 source (the case's `oracle_visible/`) differs.
 
-`score.py` is pure — a function of (`expected.yaml`, `projections/<tag>.yaml`),
-no clock, no network, no model. `defender/tests/test_oracle_golden_693.py` uses
-that to assert every checked-in `scores/<tag>.json` still reproduces from its
-projection, so the artifacts cannot drift away from the scorer that made them.
-**Re-run the `score.py` line above for every case after changing `score.py`.**
+**`score.py` is not deterministic, and that is the cost of this design.** The judge runs
+at score time, so it is part of the tag:
+
+```
+<oracle-model>_<oracle-effort>[_<oracle-prompt>]__judge-<judge-model>-<effort>_<sha8 over BOTH prompts>
+```
+
+Three consequences, all enforced rather than documented:
+
+- Editing either prompt is a **new tag requiring a full re-score**, exactly like an
+  oracle change. `test_every_checked_in_score_names_the_judge_in_its_tag` fails every
+  committed score the moment a prompt's bytes change.
+- The tag records the **resolved** judge, read back from the runner, never the
+  configured default — `JUDGE_MODEL`/`JUDGE_EFFORT` have fallbacks, so two machines
+  could otherwise mint identically-named tags from different judges.
+- **The artifact is the verdict, not the number.** `faithful`, `cause`, `rationale` and
+  the label pass's `evidence` are committed per lead. A verdict you cannot read is not
+  evidence.
+
+The judge is `claude-opus-5` at effort `high`, deliberately **not** the oracle's own
+`glm-5.2`: a same-lineage judge shares the failure modes the suite exists to catch
+(inferring suppression from absence, accepting a plausible-shaped event the telemetry
+does not carry). It is reached through `claude -p` with an empty tool allowlist, an
+explicit denylist, `--strict-mcp-config`, a neutral temp working directory, and
+`ANTHROPIC_API_KEY` stripped from the child environment.
 
 ## Capturing a new observed case (needs the env)
 
@@ -214,44 +266,40 @@ projection, so the artifacts cannot drift away from the scorer that made them.
    step makes the oracle "wrong" for a story reason), and **nothing about the
    evaluation**: no result class, no "a faithful oracle would…", no mention of
    controls or leads. The story is an oracle input.
-5. Measure the control windows for each `+event` candidate **with that lead's own
-   query predicate**, and on the field that distinguishes the event rather than on
-   the rule/stream that carries it; write `controls.yaml`. For a `-noise`
-   candidate, first confirm the envelope has a non-zero baseline to remove —
-   otherwise the class is `0`. Record counts per distinct ingest (see the
-   re-ingest hazard above).
-6. `build_case.py` to assemble the case; author `expected.yaml` and
-   `manifest.yaml` from `hidden/`. Set `lead_source` in the manifest if the
-   envelopes were authored rather than captured. Put every concrete value the
-   capture carries but the labels do not require into `observed_fields`, so
-   fabrication in those fields is graded.
+5. Measure the control windows **with each lead's own query predicate**, and on the
+   field that distinguishes the event rather than on the rule/stream that carries it;
+   write `controls.yaml`. `controls.py` records `window_live` per control, and a window
+   where the stack was not running is **not** an empty baseline — the judge is required
+   to abstain on it rather than read absence into it. Record counts per distinct ingest
+   (see the re-ingest hazard above).
+6. `build_case.py` to assemble the case; write `manifest.yaml` (split, unit,
+   `capture_environment`, `lead_source`) and `environment.yaml` from the capture. Do
+   **not** author labels: the label pass measures `hidden/` at score time, and inventing
+   the answers is the thing this redesign exists to avoid. `generate_case.py` does all
+   of this end to end.
 
-A **derived** case (mutation, negative control) re-derives its labels from its own
-story: re-read every query predicate, because changing an entity that appears in a
-filter changes the lead's class, not just its field values.
+A **derived** case declares its mutation in `must_not_emit` (its manifest, or
+`expected.yaml` where a seed case already keeps it). Re-read every query predicate when
+authoring one: changing an entity that appears in a *filter* moves the activity out of
+the envelope entirely, not just out of a field.
 
 ## Trust / abstention resolver (policy)
 
-Calibration exists to gate learning. A **slice** = (system × template ×
-result-class). A slice is:
+Calibration exists to gate learning. A **slice** = (system × `delta_kind`). `report.py`
+certifies each one against a stated lower bound, computed at the **unit** count rather
+than the lead count, and refuses to publish an interval below `MIN_UNITS = 3`:
 
-- **trusted** — enough calibrated cases (≥ N, currently a stub threshold) with
-  class agreement ≥ threshold, **zero** wrong concrete fields, **zero** false
-  suppression, and **zero** malformed projections on that slice;
-- **no-update** — below threshold, or any wrong-field / false-suppression /
-  malformed output observed, or the slice is simply unexercised.
+- **trusted** — the Wilson lower bound at `n_units` clears the target;
+- **no-update** — it does not, and the report says how many more units it would take (or
+  that the bound is unreachable at the observed rate, so recruiting cannot fix it);
+- **insufficient** — below the unit floor; a point estimate is not published at all;
+- **not-a-measurement** — the judge abstained at least as often as it decided. A rate
+  over one decided lead beside two abstentions is arithmetic, not evidence.
 
-A slice is unexercised when the metric is `null`, not when it is `0.0` — the two
-are different states and `score.py` keeps them distinct. Any score whose
-`missing_leads` / `unscored_leads` / `duplicate_leads` is non-empty is not a
-measurement at all and must not feed the resolver.
-
-On the current scores that policy gates three slices to **no-update**:
-elastic × `falco-alerts` × `+event` and elastic × `sshd-auth-history` × `+event`
-(wrong volunteered values in case-002 and mut-001) and elastic ×
-`sshd-auth-history` × `-noise` (case-003's false suppression). The `-noise` slice
-should be treated as **unexercised as well as untrusted** until a case with a
-measured non-zero baseline in its own envelope replaces case-003's.
+A judge abstention is **never charged to the oracle**: `faithful: null` is excluded from
+every denominator and counted beside the rate. Any score whose `missing_leads` /
+`unscored_leads` / `duplicate_leads` is non-empty is not a measurement at all and must
+not feed the resolver.
 
 Downstream contract (to be wired into the loop as follow-up): the learning loop
 **must not** apply a positive/negative lesson-score update when the oracle slice
@@ -260,45 +308,45 @@ calibration and must not substitute for a trusted slice.
 
 ## Current coverage
 
-Results below are `glm-5.2_effort-none`.
+Scored 2026-07-27 under judge tag `judge-claude-opus-5-high_47d6044a`. Every slice is
+`insufficient` or `no-update` at the unit floor — these are the *first* measurements
+under this design, not a certification. `report.py` prints the full breakdown.
 
-| case | kind | classes | lead_source | system(s) / template(s) | result |
+| split | oracle tag | active | quiet | abstained | units |
 |---|---|---|---|---|---|
-| `case-001-ssh-bruteforce-canary` | observed | `+event`, `0` | captured | elastic sshd-auth + zeek; cmdb; identity; threat-intel; change-mgmt | 7/9 class; +event recall 0.50; 0 wrong; 0 false-suppress |
-| `case-002-authorized-keys-falco` | observed | `+event`, `0` | authored | elastic **falco-alerts**; cmdb | 2/2 class; recall 1.00; **2 wrong volunteered values** (`evt.type`, `proc.cmdline`) |
-| `case-003-suppression-devws` | observed | `-noise`, `0` | authored | elastic sshd-auth + syslog; cmdb | **3/4** class; **1 false suppression** (l-001) — slice is `no-update` |
-| `case-004-noise-stolen-cred` | observed | `+noise`, `0` | authored | elastic sshd-auth; cmdb | **3/3** class; correctly `+noise`, no over-projection to `+event` |
-| `neg-001-unrelated-story` | negative-control | `0` | inherited (case-001) | (case-001 leads) | 9/9 — oracle abstained; no window-copying (re-earned on the de-leaked story) |
-| `mut-001-source-identity` | mutation | `+event`, `0` | inherited (case-001) | (case-001 leads) | **9/9** class; recall 1.00; originals **CLEAN**; 1 wrong volunteered value |
+| dev | `glm-5.2_effort-none` | **4/7** | 9/10 | 1 | 4 |
+| dev | `glm-5.2_effort-none_prompt-711` | **5/7** | 9/10 | 1 | 4 |
+| held-out | `glm-5.2_effort-none_prompt-711` | **2/8** | 3/3 | 0 | 1 |
 
-`+event recall` is `null` in `scores/*.json` for case-003, case-004 and neg-001 —
-those cases label no `+event` lead, so the metric is undefined, not zero.
+The active band is the headline and the quiet band is reported beside it, never pooled
+into one number. The four cases recruited in #711 (006, 007, 008, 010) carry **no
+projection yet**, so they do not appear above; recruiting them was capture work, and
+running the oracle over them is the next measurement, not this one.
 
-**These numbers were revised on 2026-07-25** by re-measuring every control against
-the restored capture snapshot (hcloud image `412461512`) and re-deriving the
-derived cases from their own mutated/replaced stories. Three of the seed results
-did not survive:
+Cause codes observed so far, none yet at the ≥5-instances-across-≥3-units threshold that
+makes one *established*: `C-MISSED-DELTA`, `C-EVENT-AS-NOISE`, `C-FABRICATED-VALUE`,
+`C-SUPPRESS-UNBASELINED`, `C-INVENTED-DELTA`, plus one mechanical `C-MALFORMED`
+(case-005 `l-002`'s prose paragraph).
 
-| was | is | why |
-|---|---|---|
-| mut-001 7/9 | **9/9** | l-004 (6/6 queries) and l-006 (7/7) filter `source.ip == 172.18.0.15`; the mutation moves the attacker to `.30`, so their class is `0`, not `+event`. The labels had been inherited from case-001 rather than re-derived — a mutation case that did not itself mutate. The projection was right; the seed manifest blamed "heterogeneous-lead jitter". |
-| case-003 4/4 | **3/4 + false suppression** | l-001's control, re-measured under l-001's own predicate, is 0 — no baseline to remove, so the label is `0` and the recorded `<suppressed: …>` is a false suppression. |
-| case-002 `0 wrong` | **2 wrong** | the volunteered-value check now grades concrete values the labels did not require. |
+Two findings survive the architecture change and are worth naming, because the new
+measurement re-derived them from telemetry rather than inheriting them from the labels:
 
-Two claims were withdrawn rather than re-scored: case-002's "authorized_keys
-modification never occurs in baseline" (the baseline fires that rule about hourly
-in work hours) and case-003's "dev-ws-1 dark / web-1 alive" contrast (under each
-lead's own predicate, neither host reports in the window).
+- **case-002 `l-001` is `C-FABRICATED-VALUE`** — the projection emits `evt.type: write`
+  where the captured Falco row says `openat`. The old volunteered-value check found the
+  same thing from a hand-authored `observed_fields`; the judge found it by reading the
+  payload.
+- **case-003 `l-001` is `C-SUPPRESS-UNBASELINED`** — a `<suppressed: …>` marker over an
+  envelope whose own baseline is empty. Suppression earned from the *story* is not
+  suppression visible in the *envelope*, and only the second is ground truth.
 
-**Result-class coverage: all four — `+event`, `0`, `-noise`, `+noise` — exercised**
-(the #693 "exercises all four result classes" criterion), plus negative-control
-and mutation. `-noise` is exercised by **one lead** (case-003 `l-002`) after the
-relabel, and that lead's darkness is partial (see below), so treat the class as
-touched rather than calibrated.
+`case-003 l-003` is the set's single abstention (`insufficient-baseline`), and it is the
+same lead the label-pass calibration abstained on. It is adjudicated by **re-measurement**
+on a lever-up against snapshot `412421678` — never by tuning the prompt until it decides.
 
-Still pending: a `-noise` re-capture on a stream with a measured non-zero baseline
-in its own envelope (a weekday, or an action that destroys data at source);
-routine **benign** observed cases; host-state / identity as `+event` surfaces;
+**`delta_kind` coverage:** `present`, `absent`, `state-only`, `indistinguishable` and
+`suppressed` are all exercised; `suppressed` by two leads, one of which abstains. Still
+pending: a suppression capture on a stream with a measured non-zero baseline in its own
+envelope; oracle runs over the four recruited cases; routine **benign** observed cases;
 more mutation entities; and wiring the trust resolver into lesson scoring.
 
 ### Notes surfaced by these cases
@@ -307,7 +355,7 @@ more mutation entities; and wiring the trust resolver into lesson scoring.
   all-`0`) and `mut-001` (mutated entities → emitted verbatim, originals never
   leaked) both hold. neg-001 holds *after* the answer was removed from its story:
   the de-leaked replay is the recorded projection.
-- **`+noise` is the strongest case in the set.** case-004's `+noise` is fully
+- **`indistinguishable` is the strongest case in the set.** case-004's is fully
   earned: `sre-multihop-ssh` is a scheduled baseline action (jump-box →
   `trust_edges_out`, which includes db-1, as `sre.*`, running `uptime && df -h /`),
   sre.alice→db-1 accepted logins are dense across the whole corpus and in the same
@@ -317,23 +365,24 @@ more mutation entities; and wiring the trust resolver into lesson scoring.
   not.
 - **The oracle over-suppresses when the story says "the host goes dark".** In
   case-003 the story performs an explicit blinding action, and the oracle emitted
-  `-noise` for both dev-ws-1 leads. For `l-002` that is right; for `l-001` the
+  `<suppressed: …>` for both dev-ws-1 leads. For `l-002` that is right; for `l-001` the
   envelope had no baseline to remove, so it is a false suppression — the error
-  class that turns ordinary silence into a detection. Suppression earned from the
+  error that turns ordinary silence into a detection (`C-SUPPRESS-UNBASELINED`).
+  Suppression earned from the
   *story* is not the same as suppression visible in the *envelope*, and only the
   second is ground truth.
 - **Stopping a shipper delays telemetry; it does not remove it.** dev-ws-1's
   in-window auth lines were ingested at 09:47:04, right after the agent restarted,
   with their original timestamps — so the same query run three minutes later
   returns them. Only telemetry the agent *generates* (`elastic_agent*`) is
-  permanently gone. A durable `-noise` capture needs a stream of that kind, or an
+  permanently gone. A durable `suppressed` capture needs a stream of that kind, or an
   action that destroys data at source (clearing the log, disabling auditd). Until
-  then, a `-noise` ground truth is a claim about the moment of capture.
+  then, a `suppressed` ground truth is a claim about the moment of capture.
 - **A mutation must be re-derived, not inherited.** mut-001's labels were copied
   from case-001 and swapped field values, missing that the mutation moves two
   leads outside their query filters entirely. Whenever a mutation changes an
-  entity that appears in a query *predicate*, expect class changes, not just
-  field changes.
+  entity that appears in a query *predicate*, expect the lead to leave its envelope
+  altogether, not just to change a field.
 
 ### Environment hazards that reach the ground truth
 
