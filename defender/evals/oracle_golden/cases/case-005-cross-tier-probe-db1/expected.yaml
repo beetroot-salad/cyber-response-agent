@@ -182,3 +182,76 @@ leads:
       last_failed: '2026-06-09T23:28:15.614Z'
       auth_method: other
       host.name: web-2
+
+
+# --- where this file departs from write_expected.py, and why (#711) ---
+#
+# `validate_cases.py check_derivation` re-derives every aspect below from the
+# telemetry and fails on any difference this block does not name. That is the
+# gate: ground truth may be corrected from the environment by hand, but never
+# silently, and regenerating this case can no longer move a number unnoticed.
+#
+# Two provenances are mixed here, and the difference matters to a reader:
+#
+#   HAND — a human overruled the tool from the environment. Each is argued in the
+#   lead's own `label_note` above.
+#
+#   PREDATES — the tool changed after this file was written. Two ground-truth
+#   defects were fixed in the review of #728: a query whose rows cannot be keyed
+#   now yields no ground truth at all (its baseline rows were flowing straight
+#   into `observed_fields`), and a column taking several values across the attack
+#   rows is dropped rather than pinned to whichever row the cluster returned
+#   first. Re-deriving under the fixed tool is strictly HARSHER on this
+#   projection (one more `wrong`, one more `missing`; class agreement unchanged
+#   at 6/11), so this is not a result kept for being flattering. It is kept
+#   because the score is in the append-only ledger, and because re-deriving
+#   `l-011` would reinstate the `zeek.ssh.auth.success` value the hand correction
+#   removed for good reason. The next held-out case is generated clean.
+overrides:
+  l-001:
+    fields: >-
+      PREDATES. The single-valued-column rule now drops `user.name` and
+      `event.outcome`, which take more than one value across this lead's rows.
+    observed_fields: >-
+      PREDATES. The same rule drops `accepted`, `failed` and `auth_method`.
+  l-002:
+    class: >-
+      HAND. label.py abstains (needs-label) because every sub-query groups only by
+      a time bucket or by source.ip, both dropped from a row key. The class was
+      read off the payloads before any projection existed; see label_note.
+  l-003:
+    observed_fields: >-
+      PREDATES. `rule`, `rule_id`, `severity` and `alerts` each take two values
+      across this lead's alert rows and are no longer pinned to one.
+  l-005:
+    fields: >-
+      PREDATES. `host.name` and `user.name` are multi-valued here.
+    observed_fields: >-
+      PREDATES. `_index`, `host.ip` and `count` likewise, and the unkeyable
+      ip-to-host-search sub-queries no longer contribute at all.
+  l-007:
+    fields: >-
+      HAND and PREDATES. The `auth_method` value `password` was removed by hand
+      (the capture encodes a failed attempt as `other`; see label_note), and the
+      alert columns the tool now derives are multi-valued.
+    observed_fields: >-
+      HAND and PREDATES. The same removal, plus the multi-valued drop.
+  l-008:
+    fields: >-
+      PREDATES. `host.name` takes three values across this lead's rows.
+    observed_fields: >-
+      PREDATES. `failed` takes eight.
+  l-010:
+    fields: >-
+      PREDATES. The tool now derives `auth_method`, which this file does not carry.
+    observed_fields: >-
+      PREDATES. The history columns (`failed_count`, `first_failed`,
+      `last_failed`, `host.name`, `source.ip`) are multi-valued across a 30-day lead.
+  l-011:
+    fields: >-
+      HAND. `zeek.ssh.auth.success` came from a baseline connection to jump-box-1,
+      not from this operation's target; see label_note. The tool still derives it,
+      so this override is load-bearing rather than cosmetic.
+    observed_fields: >-
+      HAND. The same correction, plus the unkeyable zeek sub-queries that no
+      longer contribute.

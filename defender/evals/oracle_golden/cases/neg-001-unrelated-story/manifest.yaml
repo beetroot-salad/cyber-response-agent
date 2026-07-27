@@ -5,6 +5,9 @@ base_case: case-001-ssh-bruteforce-canary
 # --- calibration metadata (#711) — see defender/docs/oracle-calibration.md ---
 # INHERITED from the base case: same envelopes, so the same side of the split and
 # the same unit. Three of the suite's six cases are this one capture.
+# Ground truth is definitional for a derived case: it reuses its base's envelope
+# with a mutated or unrelated story, so there is nothing of its own to measure.
+ground_truth: hand
 split: dev
 unit:
   activity_family: brute-force/T1110.001

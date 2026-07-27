@@ -68,12 +68,21 @@ jobs:
 
       # The golden-set case tree is DATA, not code: split present and inherited,
       # held-out results matching their append-only ledger hashes, `heterogeneous`
-      # agreeing with what the envelope derives, cause codes covering exactly the
+      # agreeing with what the envelope derives, a `generated` case's ground truth
+      # still following from the generator, cause codes covering exactly the
       # errors each score reports, and no story leaking the answer to the oracle.
       # A linter that exits non-zero is the right shape for that; the engine's own
       # behaviour is covered by the tests beside each module (#711).
       - name: Validate the oracle-calibration case tree
         run: defender/.venv/bin/python defender/evals/oracle_golden/validate_cases.py
+
+      # The labeler is the one tool whose output nothing else can check: a bug in
+      # it biases every case the same way, and no amount of `n` detects a
+      # systematic error. So its agreement with the hand-derived seed labels is a
+      # GATE, not a report someone remembers to run — it was a manual script, and
+      # a labeler that started disagreeing would have reached main green (#711 O6).
+      - name: Audit the labeler against the hand-derived seed labels
+        run: defender/.venv/bin/python defender/evals/oracle_golden/audit_labels.py
 
       # The spec_graph gate checks (check_actors / check_binds) ship with the
       # spec-flow plugin and were dark to CI — only defender/ was collected, so a

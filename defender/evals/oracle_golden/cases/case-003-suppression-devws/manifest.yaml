@@ -4,6 +4,13 @@ disposition_class: malicious
 activity_family: "defense-evasion / T1562.001 (impair defenses: stop monitoring agent)"
 
 # --- calibration metadata (#711) — see defender/docs/oracle-calibration.md ---
+# How this case's ground truth was produced (#711). `hand` exempts it from
+# check_derivation; `generated` requires expected.yaml to follow from
+# write_expected.py except where expected.yaml's `overrides:` block says why.
+# These four seeds were hand-derived from the environment before any generator
+# existed, and audit_labels.py calibrates the labeler against them — deriving
+# them from the tool they are meant to check would make that audit circular.
+ground_truth: hand
 split: dev
 unit:
   activity_family: defense-evasion/T1562.001

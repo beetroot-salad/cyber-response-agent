@@ -45,7 +45,7 @@ def _make_case(root: Path, case_id: str, **overrides) -> Path:
     manifest = {
         "case_id": case_id, "kind": "negative-control", "split": "dev",
         "unit": {"activity_family": "f", "host_pair": "a->b"},
-        "capture_environment": "env-1",
+        "capture_environment": "env-1", "ground_truth": "hand",
     }
     manifest.update(overrides.pop("manifest", {}))
     expected = {"case_id": case_id, "kind": manifest["kind"],
@@ -221,3 +221,80 @@ def test_a_retired_entry_may_have_no_file(tmp_path):
     ledger = _ledger(tmp_path, [{"case": "gone", "tag": "t", "sha256": "abc",
                                  "retired": "story named two different targets"}])
     assert VALIDATE.check_held_out_ledger([], ledger) == []
+
+
+# --------------------------------------------------------------------------
+# ground-truth provenance (#728 review): a case says how its labels were made,
+# and a `generated` one must still follow from the generator
+# --------------------------------------------------------------------------
+
+def test_a_case_that_does_not_say_how_its_ground_truth_was_made_fails(tmp_path):
+    """Not defaulted. An unmarked case reads as generated-and-verified whichever
+    it is, and `check_derivation` would silently skip it."""
+    case = _make_case(tmp_path, "case-1", manifest={"ground_truth": None})
+    problems = VALIDATE.check_case(case, {"case-1": {}})
+    assert any("ground_truth must be hand|generated" in p for p in problems)
+
+
+def _generated_case(root: Path) -> Path:
+    """A `generated` case whose committed expected.yaml matches the generator."""
+    case = _make_case(root, "case-g", manifest={
+        "kind": "observed", "ground_truth": "generated", "state_classes": {"cmdb": "0"}})
+    (case / "hidden" / "observed").mkdir(parents=True, exist_ok=True)
+    (case / "hidden" / "controls.yaml").write_text("{}\n", encoding="utf-8")
+    (case / "oracle_visible" / "leads.jsonl").write_text(
+        json.dumps({"lead_id": "l-1", "queries": [
+            {"query_id": "cmdb.host-trust-edges", "params": {"host": "web-1"}}]}) + "\n",
+        encoding="utf-8")
+    (case / "expected.yaml").write_text(yaml.safe_dump(
+        {"case_id": "case-g", "kind": "observed",
+         "leads": {"l-1": {"system": "cmdb", "class": "0", "template": "host-trust-edges"}}}),
+        encoding="utf-8")
+    return case
+
+
+def test_a_generated_case_matching_its_generator_passes(tmp_path):
+    """The gate must not fire on the case it is meant to allow, or every future
+    capture arrives with a wall of overrides and they stop being read."""
+    case = _generated_case(tmp_path)
+    assert VALIDATE.check_derivation(
+        case, yaml.safe_load((case / "manifest.yaml").read_text(encoding="utf-8")),
+        yaml.safe_load((case / "expected.yaml").read_text(encoding="utf-8"))) == []
+
+
+def test_ground_truth_drifting_from_the_telemetry_fails_unless_declared(tmp_path):
+    """The finding this gate exists for: case-005's `fields` diverged from the
+    committed generator on 8 of 11 leads, only two of them recorded as
+    deliberate, and nothing said so. A hand correction stays legal — it just has
+    to be written down."""
+    case = _generated_case(tmp_path)
+    expected = yaml.safe_load((case / "expected.yaml").read_text(encoding="utf-8"))
+    expected["leads"]["l-1"]["class"] = "+event"          # the tool derives "0"
+    manifest = yaml.safe_load((case / "manifest.yaml").read_text(encoding="utf-8"))
+
+    problems = VALIDATE.check_derivation(case, manifest, expected)
+    assert any("no `overrides:` entry says why" in p for p in problems)
+
+    expected["overrides"] = {"l-1": {"class": "hand-set from the environment"}}
+    assert VALIDATE.check_derivation(case, manifest, expected) == []
+
+
+def test_an_override_the_generator_has_caught_up_with_is_stale(tmp_path):
+    """The direction that rots. A leftover override keeps asserting a
+    disagreement that no longer exists, and silently licenses the next real one."""
+    case = _generated_case(tmp_path)
+    expected = yaml.safe_load((case / "expected.yaml").read_text(encoding="utf-8"))
+    expected["overrides"] = {"l-1": {"class": "was hand-set once"}}
+    problems = VALIDATE.check_derivation(
+        case, yaml.safe_load((case / "manifest.yaml").read_text(encoding="utf-8")), expected)
+    assert any("the generator now agrees" in p for p in problems)
+
+
+def test_an_override_with_no_reason_is_not_a_declaration(tmp_path):
+    case = _generated_case(tmp_path)
+    expected = yaml.safe_load((case / "expected.yaml").read_text(encoding="utf-8"))
+    expected["leads"]["l-1"]["class"] = "+event"
+    expected["overrides"] = {"l-1": {"class": "  "}}
+    problems = VALIDATE.check_derivation(
+        case, yaml.safe_load((case / "manifest.yaml").read_text(encoding="utf-8")), expected)
+    assert any("carries no reason" in p for p in problems)

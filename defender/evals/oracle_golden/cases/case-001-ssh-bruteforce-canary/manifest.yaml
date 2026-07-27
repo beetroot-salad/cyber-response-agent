@@ -7,6 +7,13 @@ activity_family: brute-force / T1110.001 (password guessing)
 # Assigned at CASE level; a derived case inherits its base's, so one envelope
 # never straddles the split. The six seed cases are all `dev` because they were
 # visible while the oracle prompt was being iterated. Held-out is forward-only.
+# How this case's ground truth was produced (#711). `hand` exempts it from
+# check_derivation; `generated` requires expected.yaml to follow from
+# write_expected.py except where expected.yaml's `overrides:` block says why.
+# These four seeds were hand-derived from the environment before any generator
+# existed, and audit_labels.py calibrates the labeler against them — deriving
+# them from the tool they are meant to check would make that audit circular.
+ground_truth: hand
 split: dev
 # The independent unit the reporter computes its interval over. Seeds and re-runs
 # POOL within a unit — only a different activity family or host pair makes a new

@@ -7,6 +7,9 @@ base_case: case-001-ssh-bruteforce-canary
 # envelopes byte-for-byte, so putting it on the other side of the split would put
 # one capture on both sides. For the same reason it is not a second unit — it is
 # case-001's unit shown again, and the reporter must not count it twice.
+# Ground truth is definitional for a derived case: it reuses its base's envelope
+# with a mutated or unrelated story, so there is nothing of its own to measure.
+ground_truth: hand
 split: dev
 unit:
   activity_family: brute-force/T1110.001

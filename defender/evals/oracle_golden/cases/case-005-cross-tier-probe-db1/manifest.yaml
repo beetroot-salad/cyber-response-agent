@@ -3,6 +3,10 @@ kind: observed
 # --- calibration metadata (#711) ---
 # Assigned by the generator BEFORE the first replay: nothing has been scored
 # at this point, so no result could have influenced which side this lands on.
+# Generated end to end by the recruiter. `expected.yaml` must follow from
+# write_expected.py except where its `overrides:` block records a hand correction
+# or a tool change that postdates the file — see check_derivation.
+ground_truth: generated
 split: held-out
 unit:
   activity_family: data-access/T1021.004

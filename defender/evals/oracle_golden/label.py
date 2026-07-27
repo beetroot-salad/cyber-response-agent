@@ -295,6 +295,16 @@ def _compare(payload: dict, controls: list[dict] | None,
     # the control windowS first", and it stops the labeler committing exactly the
     # error the suite exists to catch in the oracle: inferring suppression from
     # absence.
+    #
+    # KNOWN BIAS, stated where it bites: this is the one branch that
+    # `controls.MIN_CONTROL_SECONDS` pushes the WRONG way. The controls compared
+    # here may be an hour long while the attack envelope is seconds, and a longer
+    # window is likelier to be non-empty for reasons that have nothing to do with
+    # the activity — so `always_present` is easier to satisfy than a like-for-like
+    # comparison would make it, and the error it produces is a FALSE SUPPRESSION.
+    # Every control now records `duration_matched` for this reason; until a case
+    # carries a matched control beside the widened one, a `-noise` on a short
+    # operation is the weakest label this module emits.
     return MINUS_NOISE if always_present else ZERO
 
 

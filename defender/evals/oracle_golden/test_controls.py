@@ -93,7 +93,7 @@ def test_control_windows_keep_the_weekday():
     for a weekend capture is not a control. Whole-week offsets preserve it."""
     start = datetime(2026, 7, 25, 10, 0, tzinfo=UTC)   # a Saturday
     end = start + timedelta(hours=2)
-    for _, lo, _hi in CONTROLS.shape_matched_windows(start, end):
+    for _, lo, _hi, _m in CONTROLS.shape_matched_windows(start, end):
         assert lo.weekday() == start.weekday()
 
 
@@ -104,7 +104,7 @@ def test_a_short_operation_still_gets_a_long_enough_control():
     start = datetime(2026, 7, 25, 10, 33, 5, tzinfo=UTC)
     end = datetime(2026, 7, 25, 10, 33, 26, tzinfo=UTC)
     windows = CONTROLS.shape_matched_windows(start, end)
-    for _, lo, hi in windows:
+    for _, lo, hi, _m in windows:
         assert (hi - lo).total_seconds() >= CONTROLS.MIN_CONTROL_SECONDS
 
 
@@ -113,14 +113,14 @@ def test_a_long_operation_keeps_its_own_duration():
     controlled against one hour."""
     start = datetime(2026, 7, 25, 8, 0, tzinfo=UTC)
     end = start + timedelta(hours=2)
-    for _, lo, hi in CONTROLS.shape_matched_windows(start, end):
+    for _, lo, hi, _m in CONTROLS.shape_matched_windows(start, end):
         assert (hi - lo) == timedelta(hours=2)
 
 
 def test_the_control_window_is_centred_on_the_operation():
     start = datetime(2026, 7, 25, 10, 30, tzinfo=UTC)
     end = datetime(2026, 7, 25, 10, 40, tzinfo=UTC)
-    _, lo, hi = CONTROLS.shape_matched_windows(start, end, (7,))[0]
+    _, lo, hi, _m = CONTROLS.shape_matched_windows(start, end, (7,))[0]
     midpoint_operation = (start + (end - start) / 2) - timedelta(days=7)
     assert lo + (hi - lo) / 2 == midpoint_operation
 
@@ -150,3 +150,20 @@ def test_a_query_with_an_odd_bound_count_is_refused_not_patched():
         one, (7,), operation_window=(start, start + timedelta(hours=1)), dry_run=True)
     assert controls == []
     assert contribution is None
+
+
+def test_a_widened_control_is_recorded_as_not_duration_matched():
+    """Widening buys a visible baseline for `+noise`/`+event` and biases `-noise`
+    the other way: an hour-long control is likelier to be non-empty for reasons
+    unrelated to the activity, and `label.py` grades `-noise` when every control
+    is non-empty. The flag is what lets a label say which windows it rests on."""
+    start = datetime(2026, 7, 25, 10, 33, 5, tzinfo=UTC)
+    end = datetime(2026, 7, 25, 10, 33, 26, tzinfo=UTC)      # 21 seconds
+    assert all(not matched
+               for *_, matched in CONTROLS.shape_matched_windows(start, end))
+
+
+def test_a_control_that_did_not_need_widening_is_duration_matched():
+    start = datetime(2026, 7, 25, 8, 0, tzinfo=UTC)
+    end = start + timedelta(hours=2)
+    assert all(matched for *_, matched in CONTROLS.shape_matched_windows(start, end))

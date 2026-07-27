@@ -59,15 +59,18 @@ def _load(name: str, path: Path):
 
 SCORE = _load("oracle_golden_score", GOLDEN_DIR / "score.py")
 LABEL = _load("oracle_golden_label", GOLDEN_DIR / "label.py")
+STORY = _load("oracle_golden_story", GOLDEN_DIR / "story_from_run.py")
+WRITE = _load("oracle_golden_write_expected", GOLDEN_DIR / "write_expected.py")
 
 REQUIRED_FILES = ("manifest.yaml", "expected.yaml",
                   "oracle_visible/story.md", "oracle_visible/leads.jsonl")
 
 #: Vocabulary only an eval author writes — the scoring frame, not the operation.
-#: Mirrored in `story_from_run.py`, which lints its own rendered output.
-EVAL_TELLS = ("oracle", "negative control", "golden", "projection", "every lead",
-              "each lead", "expected result", "+event", "+noise", "-noise",
-              "result class", "standard environment noise", "suppressed:")
+#: Taken FROM the renderer rather than copied beside it: the renderer refuses to
+#: write a story that trips this list and the linter fails a story that carries
+#: it, so two copies under a "keep in sync" comment is one edit away from a
+#: renderer that emits a tell the linter no longer looks for.
+EVAL_TELLS = STORY.EVAL_TELLS
 
 
 def _leads_of(case_dir: Path) -> dict[str, dict]:
@@ -108,6 +111,7 @@ def check_case(case_dir: Path, by_id: dict[str, dict]) -> list[str]:
 
     problems += check_split_and_unit(name, manifest, by_id)
     problems += check_heterogeneous(case_dir, manifest, expected, leads)
+    problems += check_derivation(case_dir, manifest, expected)
     problems += check_scores(case_dir, manifest, expected)
     return problems
 
@@ -145,6 +149,12 @@ def check_split_and_unit(name: str, manifest: dict, by_id: dict[str, dict]) -> l
         problems.append(f"{name}: unit needs activity_family and host_pair, got {unit!r}")
     if not manifest.get("capture_environment"):
         problems.append(f"{name}: no capture_environment")
+    if manifest.get("ground_truth") not in ("hand", "generated"):
+        # Required, not defaulted. A case that does not say how its ground truth
+        # was produced reads as generated-and-verified whichever it is, and
+        # `check_derivation` would silently skip it.
+        problems.append(f"{name}: ground_truth must be hand|generated, got "
+                        f"{manifest.get('ground_truth')!r}")
 
     base_id = manifest.get("base_case")
     if not base_id:
@@ -182,6 +192,82 @@ def check_heterogeneous(case_dir: Path, manifest: dict, expected: dict,
                 f"{case_dir.name}/{lead_id}: heterogeneous is "
                 f"{spec.get('heterogeneous', False)!r} but the envelope derives {got!r} "
                 f"(per-query: {[q['class'] for q in derived['per_query']]})")
+    return problems
+
+
+#: The aspects of a lead's ground truth that `write_expected.py` derives, and so
+#: the aspects a `ground_truth: generated` case must either reproduce or declare.
+_DERIVED_ASPECTS = ("class", "system", "heterogeneous", "fields", "observed_fields")
+
+
+def check_derivation(case_dir: Path, manifest: dict, expected: dict) -> list[str]:
+    """Does `expected.yaml` still follow from the telemetry, or has it drifted?
+
+    `audit_labels.py` checks the CLASS against `label.py`. Nothing checked the
+    rest, and the rest is what `wrong` and `missing` are graded against — so
+    `fields` could diverge from anything the committed generator produces and no
+    gate would say. It had: case-005's `fields` diverged on 8 of 11 leads, only
+    two of them recorded as deliberate.
+
+    A divergence is not automatically an error. Ground truth may be corrected from
+    the environment by hand — that is the procedure doc's rule, not a loophole —
+    and the seed cases were hand-written before a generator existed. What must not
+    happen is a divergence nobody declared. So:
+
+      ground_truth: hand        — authored by a human; nothing to reproduce.
+      ground_truth: generated   — must match `write_expected.py`, except for the
+                                  aspects named in `expected.yaml`'s `overrides:`
+                                  block, each of which carries its reason.
+
+    The point is not to forbid the hand correction. It is that regenerating a case
+    can never silently move a number, and a reader can see which values a tool
+    derived and which a person decided.
+    """
+    if manifest.get("ground_truth") != "generated":
+        return []
+    problems = []
+    derived = WRITE.build_expected(case_dir)["leads"]
+    overrides = expected.get("overrides") or {}
+    for lead_id, spec in sorted((expected.get("leads") or {}).items()):
+        declared = overrides.get(lead_id) or {}
+        got = derived.get(lead_id)
+        if got is None:
+            problems.append(f"{case_dir.name}/{lead_id}: in expected.yaml but the "
+                            f"generator derives no such lead")
+            continue
+        for aspect in _DERIVED_ASPECTS:
+            if spec.get(aspect) == got.get(aspect):
+                continue
+            if aspect in declared:
+                if not str(declared[aspect]).strip():
+                    problems.append(f"{case_dir.name}/{lead_id}: overrides.{aspect} "
+                                    f"carries no reason")
+                continue
+            problems.append(
+                f"{case_dir.name}/{lead_id}: {aspect} is {spec.get(aspect)!r} but the "
+                f"telemetry derives {got.get(aspect)!r}, and no `overrides:` entry "
+                f"says why. Either re-derive it or record the reason.")
+    problems += _stale_overrides(case_dir.name, expected, derived, overrides)
+    return problems
+
+
+def _stale_overrides(name: str, expected: dict, derived: dict,
+                     overrides: dict) -> list[str]:
+    """Overrides the generator has since caught up with.
+
+    The direction that rots: one left behind keeps asserting a disagreement that
+    no longer exists, and a block full of those stops being read — which is how
+    the next real divergence slips in beside them.
+    """
+    problems = []
+    for lead_id, aspects in sorted(overrides.items()):
+        spec, got = (expected.get("leads") or {}).get(lead_id), derived.get(lead_id)
+        if spec is None or got is None:
+            continue
+        stale = [a for a in aspects if spec.get(a) == got.get(a)]
+        if stale:
+            problems.append(f"{name}/{lead_id}: overrides name {stale}, "
+                            f"but the generator now agrees — remove them")
     return problems
 
 

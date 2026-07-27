@@ -34,8 +34,10 @@ import json
 import sys
 from pathlib import Path
 
-#: Kept in sync with `_EVAL_TELLS` in the golden-set case linter. Vocabulary only
-#: an eval author writes — the scoring frame, never the operation.
+#: Vocabulary only an eval author writes — the scoring frame, never the
+#: operation. THE definition: `validate_cases.py` imports this tuple rather than
+#: keeping a copy beside a "keep in sync" comment, so the renderer's own refusal
+#: and the linter that reads committed stories cannot drift apart.
 EVAL_TELLS = (
     "oracle", "negative control", "golden", "projection", "every lead",
     "each lead", "expected result", "+event", "+noise", "-noise",

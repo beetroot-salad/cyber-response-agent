@@ -56,8 +56,24 @@ DEFAULT_OFFSETS_DAYS = (7, 14, 21)
 #: `sre.alice -> db-1` login graded `+event` — a manufactured catch. The
 #: hand-written seed controls already used an hour for a three-minute attack
 #: (case-001: 07:30-08:30 controlling 07:45-07:48); this makes that practice the
-#: default. Widening can only move a class toward `+noise`, which is the safe
-#: direction: it costs recall, never a false detection.
+#: default.
+#:
+#: Widening is NOT one-directional, and an earlier version of this note claimed it
+#: was ("can only move a class toward `+noise` … it costs recall, never a false
+#: detection"). That holds only for a NON-EMPTY attack envelope, where a wider
+#: baseline can absorb an attack row and cost a catch. For an EMPTY one it runs
+#: the other way: `label.py` grades `-noise` when EVERY live control is non-empty,
+#: so stretching a 21-second control to an hour makes "non-empty" far likelier and
+#: turns an ordinary `0` into a suppression finding. That is a false detection, of
+#: exactly the kind this suite exists to catch in the oracle — inferring
+#: suppression from absence.
+#:
+#: What would settle it is a duration-matched control measured ALONGSIDE the
+#: widened one, so `-noise` is decided on like-for-like while `+noise`/`+event`
+#: keep the wider baseline. That needs the stack up, so it is not done here.
+#: What is done: every control records whether it was widened, so a label can
+#: say which windows it rests on, and a `-noise` derived only from widened
+#: controls is the weakest label in the set until the matched measurement exists.
 MIN_CONTROL_SECONDS = 3600
 
 ISO_FORMATS = ("%Y-%m-%dT%H:%M:%S.%f%z", "%Y-%m-%dT%H:%M:%S%z")
@@ -143,19 +159,30 @@ def add_esql_window(query: str, start: datetime, end: datetime) -> str:
 def shape_matched_windows(start: datetime, end: datetime,
                           offsets_days: tuple[int, ...] = DEFAULT_OFFSETS_DAYS,
                           min_seconds: int = MIN_CONTROL_SECONDS,
-                          ) -> list[tuple[str, datetime, datetime]]:
-    """Named control windows: the same clock time, whole weeks earlier.
+                          ) -> list[tuple[str, datetime, datetime, bool]]:
+    """Named control windows: `(name, start, end, duration_matched)`.
 
-    Widened symmetrically about the operation's midpoint to at least
-    `min_seconds`, because a control shorter than the baseline's own period
-    cannot observe the baseline at all — see `MIN_CONTROL_SECONDS`. Whole-week
-    offsets keep the weekday, which matters: the Poisson baseline generators are
-    schedule-shaped, so a weekday control for a weekend capture is not a control.
+    The same clock time, whole weeks earlier. Widened symmetrically about the
+    operation's midpoint to at least `min_seconds`, because a control shorter than
+    the baseline's own period cannot observe the baseline at all — see
+    `MIN_CONTROL_SECONDS`, which also records what that widening costs in the
+    other direction. Whole-week offsets keep the weekday, which matters: the
+    Poisson baseline generators are schedule-shaped, so a weekday control for a
+    weekend capture is not a control.
+
+    `duration_matched` says whether the floor bit, so a reader of the recorded
+    controls can tell a like-for-like window from a widened one instead of having
+    to re-derive it from two timestamps.
     """
     midpoint = start + (end - start) / 2
     half = max((end - start) / 2, timedelta(seconds=min_seconds) / 2)
     lo, hi = midpoint - half, midpoint + half
-    return [(f"C-{days}d", lo - timedelta(days=days), hi - timedelta(days=days))
+    # Whether the floor actually bit. A control the same length as the operation
+    # supports both label directions; a widened one supports `+noise`/`+event`
+    # and biases `-noise` — see MIN_CONTROL_SECONDS.
+    duration_matched = (hi - lo) <= (end - start)
+    return [(f"C-{days}d", lo - timedelta(days=days), hi - timedelta(days=days),
+             duration_matched)
             for days in offsets_days]
 
 
@@ -254,7 +281,7 @@ def measure_controls(query: str, offsets_days: tuple[int, ...] = DEFAULT_OFFSETS
         return [], None
 
     out = []
-    for name, start, end in windows:
+    for name, start, end, duration_matched in windows:
         shifted = rewrite(query, start, end)
         live = True if dry_run else window_is_live(start, end)
         out.append({"name": name, "window": [format_iso(start), format_iso(end)],
@@ -262,6 +289,11 @@ def measure_controls(query: str, offsets_days: tuple[int, ...] = DEFAULT_OFFSETS
                     # A window the environment was not running in is not a control.
                     # Recorded rather than dropped, so the case shows what was tried.
                     "live": live,
+                    # False when MIN_CONTROL_SECONDS widened this window past the
+                    # operation's own length. Such a control supports `+noise` and
+                    # `+event` but biases `-noise` toward a false suppression — see
+                    # MIN_CONTROL_SECONDS.
+                    "duration_matched": duration_matched,
                     "payload": None if (dry_run or not live) else run_esql(shifted)})
     return out, contribution
 
