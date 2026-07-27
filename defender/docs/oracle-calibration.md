@@ -560,7 +560,7 @@ narrower than a first pass suggested:
 
 | cell | outcome |
 |---|---|
-| `ssh-brute-force-canary --target db-1 --user sre.alice` | fired `v2-sshd-failed-auth-burst` on db-1 → **case-009**, held-out |
+| `ssh-brute-force-canary --target db-1 --user sre.alice` | fired `v2-sshd-failed-auth-burst` on db-1 → **case-009**, held-out — since **retired** (its story was rendered by a pre-fix `story_from_run.py` that carried the catalog's static description, naming the scenario's *default* target; the ledger entry stays, annotated) |
 | `cross-tier-ssh-probe --target db-1` (its default) | fired within 2 min; run aborted on a since-fixed generator bug (a stale run dir) |
 | `cross-tier-ssh-probe --target web-2 --user sre.alice` | fired on **web-2**, the intended target; capture then failed for 12 straight polls because its working directory was deleted mid-run |
 | `ssh-brute-force-canary --target web-1` | took a **baseline** alert about a different host on its first poll — voided |
@@ -597,16 +597,52 @@ Three things for whoever recruits next:
 `defender/evals/oracle_golden/README.md` carries the current coverage table and
 per-case results. Open work, in the order it matters:
 
-1. **make retargeted scenarios detectable** — until then the unit count cannot
-   grow, and every number here stays `insufficient` (see the pilot above);
+1. **make the two Falco-dependent scenarios detectable when retargeted** — the
+   unit count does grow without it (2026-07-27 added three dev units and took
+   held-out to three), but `persistence-authorized-keys` and `living-off-the-land`
+   still cannot contribute a second unit each (see the pilot above);
 2. wire the trust resolver into lesson scoring (the safety criterion);
-3. **find out whether the held-out/dev gap is real.** The first held-out case
-   scores 3/6 against 0.92 on dev. One case at one unit proves nothing, and the
-   reporter says so — but if it holds up, the dev number was never a measurement;
+3. ~~**find out whether the held-out/dev gap is real.**~~ **Provisionally answered
+   2026-07-27, and the answer is no.** On one unit held-out read 2/8 active against
+   dev's 8/13, which is the number this item was written about. case-008 and
+   case-010 — captured 2026-07-26, assigned held-out by the generator before any
+   replay, and held unscored until then — took it to three units, where it reads
+   **9/17 = 0.53 [0.21, 0.94]** against dev's **0.61**. That gap is about one lead,
+   which is the judge's own measured noise floor. case-005 was an outlier, and the
+   two cases that show it are the two with **zero** dead control windows against
+   its 31%. What is *not* settled is why case-005 is so much worse; and note the
+   confound this suite cannot currently separate — see item 9;
 4. re-capture `-noise` against a stream with a measured non-zero baseline in its
    own envelope — the class currently rests on one lead whose darkness is partial;
 5. routine **benign** observed cases (the suite is malicious-heavy);
 6. host-state / identity as `+event` surfaces, and more mutation entities;
 7. stratify reports by activity family once enough cases exist to support it;
 8. a remedy for `C-SUPPRESS-UNBASELINED` that actually moves a projection — the
-   prompt fix did not (see above), so the mechanism is still unknown.
+   prompt fix did not (see above), so the mechanism is still unknown;
+9. **separate story *shape* from split.** Production feeds the oracle the malicious
+   actor's three-section prose (`0. Selected techniques` / `1. Attack story` /
+   `2. Bypass`, pinned in `malicious_actor/prompt.md`). Only the four seed cases
+   are that shape. Every recruited case is a `story_from_run.py` transcript —
+   commands and verbatim stdout — which is a deliberate and well-argued trade (a
+   renderer structurally cannot leak the evaluation into an oracle input, and
+   cannot invent a step) whose **cost was never written down**: the recruited shape
+   is off the distribution production actually projects from, and it is the shape
+   of every held-out case and every unit added since the seed set. The active band
+   splits by shape more than it splits by side:
+
+   | shape | split | active |
+   |---|---|---|
+   | actor prose | dev | 5/7 = 0.71 |
+   | transcript | dev | 3/6 = 0.50 |
+   | transcript | held-out | 9/17 = 0.53 |
+
+   Within the transcript shape dev and held-out agree (0.50 / 0.53), which is what
+   retired item 3. What remains is a shape effect the suite cannot currently
+   measure, because shape is confounded with capture date and nearly with split —
+   and every future recruit deepens it. `n` is 7 against 23, so this is a
+   hypothesis. Settle it cheaply and without the stack: hand-render one captured
+   operation's story in actor-prose shape and score it against the **same**
+   `hidden/` tree. That is not a mutation — the story describes what actually
+   fired, so the telemetry is still its ground truth and the pair is judgeable.
+   Run the renderer's `EVAL_TELLS` lint over the hand-written story to keep the
+   leak protection the renderer was built for.

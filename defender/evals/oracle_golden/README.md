@@ -316,17 +316,27 @@ under this design, not a certification. `report.py` prints the full breakdown.
 |---|---|---|---|---|---|
 | dev | `glm-5.2_effort-none` | **4/7** | 9/10 | 1 | 4 |
 | dev | `glm-5.2_effort-none_prompt-711` | **8/13** | 18/19 | 4 | 6 |
-| held-out | `glm-5.2_effort-none_prompt-711` | **2/8** | 3/3 | 0 | 1 |
+| held-out | `glm-5.2_effort-none_prompt-711` | **9/17** | 8/8 | 1 | 3 |
 
 The active band is the headline and the quiet band is reported beside it, never pooled
 into one number. Only the `_prompt-711` tag carries the three units recruited on
 2026-07-27 (case-011/012/013); the older tag is still the 4-unit seed set, which is why
 its denominators are smaller.
 
-`elastic x present` is the first slice to clear the unit floor and publish an interval:
-**0.71 [0.30, 0.95] over 4 units**. `C-MISSED-DELTA` is the leading cause at 4 instances
-across 2 units — still short of the ≥5-across-≥3-units bar that makes a cause
-*established*, but it is the one to watch.
+**Held-out cleared the unit floor on 2026-07-27** when case-008 and case-010 — captured
+2026-07-26 and held unscored since — were replayed and scored, taking it from 1 unit to
+3. Its active band publishes an interval for the first time: **0.53 [0.21, 0.94]**, and
+`elastic x present` is **0.54 [0.21, 0.94] over 3 units** beside dev's 0.71 [0.30, 0.95]
+over 4. Read the change to the *story* before the change to the number: on one unit
+held-out read 2/8, which is the evidence §Status called "the first evidence for what #711
+suspected". Across three it reads 0.53 against dev's 0.61, and the gap is inside one
+lead of the judge's own noise floor. **case-005 was an outlier, not a trend** — and the
+two cases that show it were assigned held-out by the generator before any replay, so
+neither the split nor the order of scoring was chosen after seeing a result.
+
+`C-MISSED-DELTA` is the leading cause on both sides and is now **4 instances across 3
+units** on held-out — meeting the unit half of the ≥5-across-≥3-units bar that makes a
+cause *established*, and one instance short of the other half. It is the cause to watch.
 
 **The judge's own noise floor is one lead** (`audits/verdict-selfagreement_*`, 0.988
 self-agreement over 5 repeats). Against a 13-lead active band that is ~8 points, so a
@@ -349,11 +359,20 @@ measurement re-derived them from telemetry rather than inheriting them from the 
 same lead the label-pass calibration abstained on. It is adjudicated by **re-measurement**
 on a lever-up against snapshot `412421678` — never by tuning the prompt until it decides.
 
-**`delta_kind` coverage:** `present`, `absent`, `state-only`, `indistinguishable` and
-`suppressed` are all exercised; `suppressed` by two leads, one of which abstains. Still
-pending: a suppression capture on a stream with a measured non-zero baseline in its own
-envelope; oracle runs over the four recruited cases; routine **benign** observed cases;
-more mutation entities; and wiring the trust resolver into lesson scoring.
+**`delta_kind` coverage** over the 62 labelled leads — `state-only` 25, `present` 24,
+`undecidable` 5, `indistinguishable` 4, `suppressed` 2, `absent` 2. All five deciding
+kinds are exercised, but the distribution is the thing to read: the active band is 77%
+`present`, and the two kinds that actually gate learning — `indistinguishable` (do not
+manufacture a catch out of routine traffic) and `suppressed` (do not read absence as a
+detection) — carry 4 and 2 leads. One of the two `suppressed` leads is the set's chronic
+abstention. **Those are the least-sampled cells and the most consequential ones**, so
+recruitment should target them rather than another brute-force unit.
+
+Every case that can be replayed now has been: the only two without a projection are
+case-006 and case-007, which are `defective:` and unscoreable. Still pending: a
+suppression capture on a stream with a measured non-zero baseline in its own envelope;
+routine **benign** observed cases; more mutation entities; and wiring the trust resolver
+into lesson scoring.
 
 ### Notes surfaced by these cases
 

@@ -1,0 +1,72 @@
+{
+  "judge": {
+    "model": "claude-opus-5",
+    "effort": "high",
+    "prompts_sha8": "47d6044a"
+  },
+  "leads": {
+    "l-001": {
+      "delta_kind": "present",
+      "undecidable_reason": null,
+      "heterogeneous": false,
+      "evidence": "Query seq 1 returns two rows in the observed window \u2014 source.ip 172.18.0.6, user.name \"root\", auth_method \"other\" (48 failures, 19:52:23\u219219:55:21) and auth_method \"password\" (48 failures, 19:52:25\u219219:55:23), totalling 96 \u2014 while all live controls return user.name \"svc.reports\" (C-14d and C-21d: 42 + 42 failures each; C-28d empty). The distinguishing field is user.name (root vs svc.reports), which is not in the unstable-identifier list; source.ip 172.18.0.6 matches C-21d anyway and would not on its own count. Seq 2 corroborates in a surfaced field: observed failures spread across four minute-buckets (23/28/33/12, 19:52\u201319:55) with sample_msg \"Failed password for root from 172.18.0.6 \u2026\", versus baseline bursts compressed into one or two buckets (84 in a single minute at C-14d; 77+7 at C-21d) with sample_msg naming svc.reports. Seq 3/4 (the 24h pre-window counts, 48 and 16) are lower than their live controls (672/1008/864 and 336/504/432) but non-zero, so nothing reads as suppressed, and no query contradicts the present verdict; the truncated seq 0 payload (5 of 96 hits) is consistent and was not needed to decide.",
+      "judge_model": "claude-opus-5",
+      "judge_effort": "high",
+      "cost_usd": 0.30034500000000003
+    },
+    "l-002": {
+      "delta_kind": "present",
+      "undecidable_reason": null,
+      "heterogeneous": true,
+      "evidence": "Query seq 1 (`failed_count`) returns 96 over the 30-minute observed window 19:45\u201320:15, versus 84, 84 and 0 over the three one-hour live controls (C-14d, C-21d, C-28d) \u2014 a count that exceeds every control despite covering half the duration, and the surfaced field carrying the distinction is `failed_count` itself. Queries seq 0 and seq 2 disagree: observed returns 0 success rows and `accepted_count: 0`, while live controls return 7 / 49 (truncated) / 8 rows and accepted counts 7 / 7 / 8 \u2014 but every baseline Accepted row is stamped 2026-07-12T19:41:05, 2026-07-05T19:42:09 or 2026-06-28T20:22:09, all outside the 19:45\u201320:15 clock range the observed query covers, so those zeros do not establish that a routine login was suppressed. The baseline `source.ip` values (172.18.0.14, 172.18.0.20) are in the unstable-identifier list and carry no weight either way. The lead is therefore `present` on the strength of the failure-count query alone, with its sibling accepted-event queries not evidencing a delta.",
+      "judge_model": "claude-opus-5",
+      "judge_effort": "high",
+      "cost_usd": 0.290885
+    },
+    "l-003": {
+      "delta_kind": "state-only",
+      "undecidable_reason": null,
+      "heterogeneous": null,
+      "evidence": "The lead's single query is `cmdb.host-trust-edges` with param `host: web-2`, which returns a CMDB inventory record \u2014 name/role/criticality/owner/change_window/os/service/trust_edges_out/users \u2014 not an event stream, and it carries no `@timestamp` bounds that could be shifted to a control window. Accordingly `baseline` is an empty list `[]`, which here reflects the absence of baseline-diff semantics rather than a measured empty control. `environment_notes.state_and_lookup_systems` explicitly designates cmdb queries as `state-only`. The observed row (role `web`, criticality `prod`, owner `team.web`, `trust_edges_out: [db-1]`, four `users` entries including sudo-capable `svc.config-mgmt` and `svc.deploy`) is configuration state, so no delta verdict applies regardless of its contents; with only one decidable query, `heterogeneous` is null.",
+      "judge_model": "claude-opus-5",
+      "judge_effort": "high",
+      "cost_usd": 0.154251
+    },
+    "l-004": {
+      "delta_kind": "state-only",
+      "undecidable_reason": null,
+      "heterogeneous": false,
+      "evidence": "Both queries in this lead are CMDB lookups: `cmdb.list-all-hosts` returned an inventory record of `total: 11` hosts (canary-1, ci-1, config-mgmt-1, db-1, dev-ws-1, jump-box-1, office-ws-1, office-ws-2, scanner-1, web-1, web-2) with role/criticality/owner/os/service/trust_edges_out/users fields, and `cmdb.host-trust-edges` for host web-2 returned that single entity record (role web, trust_edges_out: [db-1], four svc.* users). Neither payload carries an `@timestamp` field or any event rows, and the baseline is empty precisely because these queries have no time bounds to move, which `environment_notes.state_and_lookup_systems` designates as `state-only` rather than a missing measurement. Note also that neither payload surfaces any IP address column at all, so the lead's question about 172.18.0.6 could not be resolved from these fields regardless. Both queries are the same kind of lookup, so they do not disagree.",
+      "judge_model": "claude-opus-5",
+      "judge_effort": "high",
+      "cost_usd": 0.17958200000000002
+    },
+    "l-005": {
+      "delta_kind": "state-only",
+      "undecidable_reason": null,
+      "heterogeneous": false,
+      "evidence": "Both queries in this lead are threat-intel lookups: `threat-intel.ip-lookup` for 172.18.0.6 returned a single entity record (verdict `unknown`, score 0, empty `sources`/`tags`, null first_seen/last_seen), and `threat-intel.list-all-indicators` returned the full seed catalog of `total: 15` indicators (e.g. 185.220.101.45 malicious/92, evil-c2.example malicious/95, 8.8.8.8 clean/0). Neither carries `@timestamp` bounds, so the baseline is empty (`[]`) by construction rather than by measurement. Per `environment_notes.state_and_lookup_systems`, threat-intel queries return current configuration/entity records, not an event stream, and have no baseline-diff semantics. 172.18.0.6 does not appear among the 15 catalog entries, but that is a property of the static seed catalog, not a windowed delta.",
+      "judge_model": "claude-opus-5",
+      "judge_effort": "high",
+      "cost_usd": 0.050899
+    },
+    "l-006": {
+      "delta_kind": "indistinguishable",
+      "undecidable_reason": null,
+      "heterogeneous": false,
+      "evidence": "The only non-trivial observed rows are the sshd failures: seq 3 returns one row \u2014 host.name=web-2, event.outcome=failure, process.name=sshd, events=96, 19:52:23\u219219:55:23 \u2014 and seq 0 carries the same 96-event web-2/system.auth aggregate. The live C-21d control for seq 3 returns exactly that surfaced tuple (web-2 / failure / sshd, events=84, 19:31:42\u219219:32:00, plus an 84-event web-1 twin), so every categorical field these queries surface (host.name, event.outcome, process.name, data_stream.dataset) is baseline-identical and only the count (96 vs 84) and burst spread differ; C-14d and C-28d simply returned 0 rows for that query. The remaining queries carry no delta: seq 6 nginx is 0 rows in observed and in all three live controls; seqs 4 and 7 differ from baseline only in which host.name the address 172.18.0.6 resolves to (office-ws-1 now vs web-1 in the controls), which environment_notes marks as an unstable-identifier artifact, not a delta; seq 1's empty Zeek result is scoped entirely on source.ip/destination.ip (unstable columns, and the C-28d live control was also 0 rows), so it cannot evidence suppression. Seqs 2 and 5 are unreadable but are supersets of the decidable seqs 3 and 6, so they do not change the reading.",
+      "judge_model": "claude-opus-5",
+      "judge_effort": "high",
+      "cost_usd": 0.413767
+    },
+    "l-007": {
+      "delta_kind": "state-only",
+      "undecidable_reason": null,
+      "heterogeneous": false,
+      "evidence": "All three queries in this lead are change-mgmt templates (`change-mgmt.list-changes` \u00d72, `change-mgmt.active-changes` \u00d71), which `environment_notes.state_and_lookup_systems` explicitly classifies as returning current configuration/entity records rather than an event stream, with no `@timestamp` bounds to move and therefore no control \u2014 hence `state-only` regardless of row content. Consistent with that, `baseline` is an empty list: no control payloads exist at all. The observed rows are static ticket records (seq 0: total 2 \u2014 CHG-1042 and CHG-WEB-PATCH-20260721T0200Z, both hosts web-1/web-2, windows in April and 2026-07-21; seq 2: total 11, adding nine CHG-DB-BACKUP-* records for db-1), and seq 1 (`active-changes` at 2026-07-26T19:52:00Z for web-2) returned `[]` \u2014 no approved change covers that instant. No query surfaces an event-stream field that could carry a baseline delta.",
+      "judge_model": "claude-opus-5",
+      "judge_effort": "high",
+      "cost_usd": 0.06786400000000001
+    }
+  }
+}

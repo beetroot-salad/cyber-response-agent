@@ -1,0 +1,81 @@
+{
+  "judge": {
+    "model": "claude-opus-5",
+    "effort": "high",
+    "prompts_sha8": "47d6044a"
+  },
+  "leads": {
+    "l-002": {
+      "delta_kind": "present",
+      "undecidable_reason": null,
+      "heterogeneous": false,
+      "evidence": "Query seq 0 returns 6 rows in the observed window including `failed: 48` for `user.name: root` (auth_method `password` and `other`, 19:52:23\u201319:55:23Z) and three `failed: 4` groups for `user.name: dev.dana` / `' dev.dana'` (20:06:04\u201320:06:42Z), whereas all three live controls (C-14d, C-21d, C-28d) contain only success rows \u2014 `accepted: 7/21/8, failed: 0` for `svc.config-mgmt`, `svc.deploy`, or null user \u2014 and zero failure rows and no `dev.dana` or `root` user at all. Query seq 1 carries the same distinction in the `message` and `event.outcome` columns: `Failed password for invalid user dev.dana from 172.18.0.6 port 35532/46948/41960/49970 ssh2`, `Invalid user dev.dana ...`, and `pam_unix(sshd:auth): authentication failure ... user=root` (count 48), none of which appear in any control, whose only sshd auth row is `Accepted password for svc.config-mgmt` (C-28d, count 8). The distinction is carried by `user.name`, `message`, and `event.outcome` \u2014 stable fields \u2014 not by `source.ip` (172.18.0.6), which environment_notes marks unstable and which is therefore not relied on. Both decidable queries agree, so heterogeneous is false.",
+      "judge_model": "claude-opus-5",
+      "judge_effort": "high",
+      "cost_usd": 0.18948600000000002
+    },
+    "l-003": {
+      "delta_kind": "state-only",
+      "undecidable_reason": null,
+      "heterogeneous": false,
+      "evidence": "All three queries are `identity.*` templates (identity.access-check \u00d72, identity.user-authorization), which the environment notes classify explicitly as a state-and-lookup system returning current configuration or an entity record with no @timestamp bounds and therefore no control window. The payloads confirm this shape: seq 0 and seq 2 return point-in-time authorization records (`authorized: false`, `via: null`, `role: developer`, `sudo: false`, `shell: null`) for web-2 and db-1, and seq 1 returns dev.dana's user record (`enabled: true`, `realm_role: developer`, `authorized_hosts: [dev-ws-1, jump-box-1, office-ws-1]`, `sudo_hosts: [office-ws-1]`). The empty `baseline` is expected here rather than a missing measurement, since these queries have no baseline-diff semantics. All queries agree in kind, so the lead is not heterogeneous.",
+      "judge_model": "claude-opus-5",
+      "judge_effort": "high",
+      "cost_usd": 0.034405000000000005
+    },
+    "l-004": {
+      "delta_kind": "present",
+      "undecidable_reason": null,
+      "heterogeneous": true,
+      "evidence": "The web-2 user breakdown (seq 12) returns 10 groups in the observed window including\n`dev.dana` (0 accepted / 20 failed), `' dev.dana'` (0/19) and `root` (0/96), whereas\nall three live controls (C-14d, C-21d, C-28d) return exactly 7 groups \u2014 null,\nsvc.config-mgmt, svc.deploy, sre.ben/chen/alice, svc.reports \u2014 with no dev.dana and\nno root; the dedicated dev.dana query (seq 11) returns 4 rows totalling 39 failures\nin the observed window against row_count 0 in every live control. user.name is a\nsurfaced, stable field (not in the unstable-identifier list), so this is a real delta,\nreinforced by seq 18 (20 sshd authentication-failure messages with null user vs 0 rows\nin all controls) and seq 22 (failed=20 vs 0/0/0). Other queries disagree: the\nweb-2\u2192db-1 auth queries (seq 3, 7) and the web-2-as-source query (seq 19) are empty in\nthe observed window, and the Zeek outbound-SSH queries (seq 2, 8, 9) are empty\nobserved while two controls show 172.18.0.12\u2192172.18.0.2/.4 \u2014 but 172.18.0.12 is an\nunstable address, so those historical rows are unattributed and cannot evidence\nsuppression.",
+      "judge_model": "claude-opus-5",
+      "judge_effort": "high",
+      "cost_usd": 0.9384409999999999
+    },
+    "l-005": {
+      "delta_kind": "indistinguishable",
+      "undecidable_reason": null,
+      "heterogeneous": false,
+      "evidence": "The three cmdb queries (seq 0-2: web-2 role=web/prod/team.web trust_edges_out=[db-1]; db-1 role=db/prod trust_edges_out=[]; 11-host list) are entity records with no @timestamp bounds and carry no baseline-diff semantics, so they contribute nothing. The event-stream queries are all scoped to the address 172.18.0.6, which environment_notes marks as an unstable identifier: seq 3 (row_count 50, truncated) and seq 10 (10 rows) add host.name values web-2, dev-ws-1, canary-1, db-1 and ci-1 on top of the controls' web-1/jump-box-1/office-ws-1/office-ws-2/config-mgmt-1, but every one of those extra rows has first_seen/last_seen wholly outside the control cadence (e.g. web-2 nginx.access 2026-05-26\u21922026-06-12, db-1 system.auth 2026-04-30, ci-1 2026-06-14), i.e. historical rows in an address-scoped payload, which the notes say must be treated as unattributed rather than as a delta. In the stable surfaced fields nothing new appears: seq 4's destination.port set {9200,5432,22,80,443} and the 172.18.0.22\u2192172.18.0.6 port fan are all present in C-14d/C-21d, seq 5's datasets (zeek.connection/ssl/ssh/http) match C-14d/C-21d, seq 6 and seq 8 return row_count 0 against controls that are also 0 in all three live windows (not suppression), and seq 9's host.name set (soc-playground, db-1, web-1, web-2) is identical to the controls' with only host.ip differing; seq 7 is unreadable but is a narrower nginx variant of the already-empty seq 6/8.",
+      "judge_model": "claude-opus-5",
+      "judge_effort": "high",
+      "cost_usd": 0.604904
+    },
+    "l-006": {
+      "delta_kind": "undecidable",
+      "undecidable_reason": "insufficient-baseline",
+      "heterogeneous": false,
+      "evidence": "No query returns any row inside the operation window: seq 3 (172.18.0.12 as client OR 172.18.0.6\u2192172.18.0.12, 2026-07-26T19:51:42\u201320:21:42Z) is row_count 0, and seq 4 (2026-07-26\u201307-27, source .12 or .6) is row_count 0 \u2014 but the coverage checks show why: seq 5 reports count 130 for 2026-07-25\u219207-28 with max_ts 2026-07-25T10:35:43.717Z, and seq 12 reports 4,079,247 conn rows for 2026-06-26\u219207-26 with max_ts 2026-07-25T10:37:23.249Z, i.e. both zeek datasets stop ~30 hours before the 2026-07-26T20:06Z window, so that window was never measured rather than observed-empty. The live controls for seq 4 do carry rows (C-14d: 445 for 172.18.0.6\u2192172.18.0.15 plus 36 to .8; C-21d: 580 and 90; C-28d: 0), so the observed-vs-baseline zero looks like a dark stream, yet the ingest gap predates the window and the seq 6/7/8/9 payloads that do have rows (e.g. 172.18.0.12\u2192172.18.0.2 count 4427, first_ts 2026-05-26T07:29:35.813Z; single 172.18.0.6\u2192172.18.0.12 row at 2026-06-12T17:21:20.484Z) are unbounded all-time aggregates whose controls were bounded to the one-hour control windows, and their only distinguishing columns are unstable addresses. A zeek ssh/conn payload actually spanning 2026-07-26T19:51\u201320:21Z (or a date-range check showing max_ts past 2026-07-26T20:21Z) would have settled it; seq 0 and seq 2 are additionally unreadable.",
+      "judge_model": "claude-opus-5",
+      "judge_effort": "high",
+      "cost_usd": 0.461907
+    },
+    "l-007": {
+      "delta_kind": "present",
+      "undecidable_reason": null,
+      "heterogeneous": true,
+      "evidence": "Query seq 0 (host.name==\"web-2\") returns two rows in the observed window \u2014 v2-sshd-success-after-failures, severity high, alerts=15 (20:10:44.957Z\u201320:10:45.023Z) and v2-sshd-failed-auth-burst, severity medium, alerts=2 (19:55:35.939Z\u201320:10:35.945Z) \u2014 while its three live controls return only one web-2 row at C-14d (v2-sshd-success-after-failures, alerts=5) and zero rows at C-21d and C-28d; the rule/rule_id column carries the distinction (a failed-auth-burst rule on web-2 that no live control surfaces) and the alerts count carries a 15-vs-5 magnitude difference, so this query alone makes the lead present. Seq 5 (unfiltered window) shows the same two web-2 rows and nothing else (row_count 2, 17 alerts total) against live controls of 11/6/9 rows dominated by v2-falco-suspicious-network-tool at 201\u2013270 alerts and v2-internal-port-scan, so the background streams that query normally surfaces are dark there. Seq 1 and 2 (v2-cross-tier-ssh-pivot / *cross-tier*) are empty in the observed window while C-14d returns 4 rows and C-28d 3 rows on live windows, and seq 3/7 (synthetic-cross-tier-ssh-probe) are zero in both observed and every control \u2014 so the lead's queries disagree in direction (new/elevated web-2 sshd rows, dark cross-tier and background rules, flat synthetic-probe), hence heterogeneous.",
+      "judge_model": "claude-opus-5",
+      "judge_effort": "high",
+      "cost_usd": 0.327994
+    },
+    "l-008": {
+      "delta_kind": "present",
+      "undecidable_reason": null,
+      "heterogeneous": true,
+      "evidence": "The seq-3 payload (success+failure breakdown) returns 6 rows in the observed window including `user.name: root` / failed=48 (two rows, auth_method \"other\" and \"password\", 19:52\u201319:55) and `user.name: dev.dana` plus the whitespace-padded `' dev.dana'` / failed=4 each (20:06:04\u201320:06:42); all three live controls (C-14d, C-21d, C-28d) return only rows with failed=0, so the `failed` count and the `user.name` values root/dev.dana carry a distinction in fields these queries surface, and user.name is not an unstable identifier (only the shared 172.18.0.6 is). Seq 2 also differs in the surfaced `message` column: observed success rows are four identical `pam_unix(sshd:auth): check pass; user unknown` entries with null user.name/source.ip, whereas every control returns `Accepted password for svc.config-mgmt|svc.deploy from ...` rows. Seq 0 and seq 1 disagree with those two: their single observed row is (user.name null, source.ip null, auth_method other, accepted=4), which matches the null-keyed row already present in the C-21d control (accepted=21) and differs only in count, so on their own they are not distinguishable \u2014 hence heterogeneous. The union of the lead's queries surfaces a distinguishable delta, so the lead is present.",
+      "judge_model": "claude-opus-5",
+      "judge_effort": "high",
+      "cost_usd": 0.194653
+    },
+    "l-009": {
+      "delta_kind": "present",
+      "undecidable_reason": null,
+      "heterogeneous": true,
+      "evidence": "The observed 10-minute window carries a failed-authentication cluster absent from all three live controls: seq 8 reports failed_auth_events=12 for 2026-07-26T20:06:04\u201320:14:03 while C-14d/C-21d/C-28d all report failed_auth_events=0 (with totals 763/714/584). The distinguishing fields are message and user.name, not an unstable address: seq 4 shows 4\u00d7 \"Failed password for invalid user dev.dana from 172.18.0.6 port \u2026 ssh2\", 4\u00d7 \"Invalid user dev.dana\", and 4\u00d7 pam_unix authentication-failure rows, with user.name values \"dev.dana\" and \" dev.dana\" (seq 3, event_count 4 each) \u2014 a principal that appears nowhere in the baselines, whose only auth users are svc.config-mgmt/svc.deploy/svc.monitoring/svc.reports. Alerts corroborate: seq 5 observed has 15 v2-sshd-success-after-failures plus a v2-sshd-failed-auth-burst (rule_id absent from every control), and seq 7's alert reasons/messages name dev.dana. Queries disagree: seq 1/2/9 surface zero \"Accepted\" rows in the observed window versus 7\u20138 Accepted rows for service accounts in each live control, so those queries read quiet/darker while seq 0/3/4/5/7/8 carry the new distinguishable rows.",
+      "judge_model": "claude-opus-5",
+      "judge_effort": "high",
+      "cost_usd": 0.6226719999999999
+    }
+  }
+}

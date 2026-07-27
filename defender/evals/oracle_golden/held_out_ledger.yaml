@@ -27,11 +27,19 @@ entries:
   recorded: '2026-07-26'
   retired: The scorer that produced it was replaced by the two-pass judge (#711). That artifact graded
     the projection against `expected.yaml`'s hand-derived four-way class; the contract is now the judge's
-    own measurement of the telemetry. `class_match` over a class the labels asserted is not a weaker
-    version of `faithful` over a delta that was measured -- it is a different question, so the number
-    is not restated or carried forward. case-005 is re-scored under the next entry's tag, which names
-    the judge that produced it. This entry stays because a held-out result is never silently unmade.
+    own measurement of the telemetry. `class_match` over a class the labels asserted is not a weaker version
+    of `faithful` over a delta that was measured -- it is a different question, so the number is not restated
+    or carried forward. case-005 is re-scored under the next entry's tag, which names the judge that produced
+    it. This entry stays because a held-out result is never silently unmade.
 - case: case-005-cross-tier-probe-db1
   tag: glm-5.2_effort-none_prompt-711__judge-claude-opus-5-high_47d6044a
   sha256: 5650ba7deab451d792bc6d968de53d5f4f8e70ad53c8f8fd6b1b1e959f659390
+  recorded: '2026-07-27'
+- case: case-008-bruteforce-web2
+  tag: glm-5.2_effort-none_prompt-711__judge-claude-opus-5-high_47d6044a
+  sha256: 9a942287bbb9eea5ab9bdb300534f509078af6837aab019bb35f4c55a0d8d946
+  recorded: '2026-07-27'
+- case: case-010-crosstier-web2
+  tag: glm-5.2_effort-none_prompt-711__judge-claude-opus-5-high_47d6044a
+  sha256: ed494843fea12f020dfd9a7e38522b321fb0b559917bd44a552773c5b18c6b66
   recorded: '2026-07-27'
