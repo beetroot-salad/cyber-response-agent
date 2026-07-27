@@ -209,3 +209,32 @@ def test_runtime_lever_rejects_an_unknown_runtime(monkeypatch):
     monkeypatch.setenv(BoxSpec.ENV_VAR, "gvisor")
     with pytest.raises(ValueError, match="not a known box runtime"):
         BoxSpec.from_env({BoxSpec.ENV_VAR: "gvisor"})
+
+
+def _request_runtime_of(monkeypatch, value: str | None) -> str:
+    """The lever as reached through a BoxRequest — the learning run-cycle's and the curator
+    drains' only entry point. `start_box` resolves the env only for its run_dir overload; a
+    request carries its own spec, so the default_factory is what has to read the lever."""
+    from defender.runtime.box import BoxRequest
+
+    monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
+    if value is None:
+        monkeypatch.delenv(BoxSpec.ENV_VAR, raising=False)
+    else:
+        monkeypatch.setenv(BoxSpec.ENV_VAR, value)
+    rec = _CapturingDocker()
+    request = BoxRequest(name="defender-runcycle-r1", workdir=Path("/workspace"))
+    with pytest.raises(BoxFault):
+        start_box(request, docker=rec)
+    assert rec.create_argv is not None
+    return rec.create_argv[rec.create_argv.index("--runtime") + 1]
+
+
+def test_request_runtime_lever_defaults_to_runsc_when_unset(monkeypatch):
+    assert _request_runtime_of(monkeypatch, None) == "runsc"
+
+
+def test_request_runtime_lever_honours_an_explicit_runc(monkeypatch):
+    """Pre-fix this returned runsc: `BoxRequest.spec` defaulted to a bare `BoxSpec()`, so
+    every boxed LEARN cycle demanded gVisor no matter what the operator set."""
+    assert _request_runtime_of(monkeypatch, "runc") == "runc"

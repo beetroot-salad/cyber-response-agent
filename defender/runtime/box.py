@@ -70,7 +70,11 @@ class BoxRequest:
     mounts: tuple[Mount, ...] = ()
     workdir: Path = Path(".")
     env: dict[str, str] = field(default_factory=dict)
-    spec: BoxSpec = field(default_factory=BoxSpec)
+    # Same lever as start_box's run_dir path (F1): unset anchors to the dataclass default,
+    # runsc. A request carries its own spec, so resolving it anywhere but here would leave
+    # the BoxRequest callers — the learning run-cycle and the curator drains — pinned to
+    # runsc with the env var silently ignored.
+    spec: BoxSpec = field(default_factory=lambda: BoxSpec.from_env(os.environ))
 
 
 class Transport(Protocol):
