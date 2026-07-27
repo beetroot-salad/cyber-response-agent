@@ -395,11 +395,26 @@ def _flush_run_end(run: Any, store: Any, session_id: str, truncated_by: str | No
     if run is not None:
         try:
             live = run.ctx.state.message_history
-            for i in range(len(live) - 1, -1, -1):
-                if isinstance(live[i], ModelResponse):
-                    live = live[: i + 1]
-                    break
-            selection.ingest(store, session_id, live, agent_id="main")
+            confirmed_len = store.last_render_len(session_id) or 0
+            if len(live) <= confirmed_len:
+                # A prior round's processor already committed everything `live` holds
+                # (or more — `_make_store_render_processor`'s request-limit check
+                # withholds a doomed round's own continuation, so `live` can be one
+                # message SHORTER than what is already confirmed). Either way there is
+                # nothing new to add, and truncating `live` here would try to re-add
+                # content the store has already, correctly, chosen not to hold.
+                pass
+            else:
+                # New content past the last confirmed round: drop a trailing incomplete
+                # continuation (one built but never itself confirmed by a processor
+                # call — the request-limit / uncaught-mid-round shapes) so the tail
+                # ends on the response that IS confirmed, never on an unconfirmed one.
+                for i in range(len(live) - 1, -1, -1):
+                    if isinstance(live[i], ModelResponse):
+                        live = live[: i + 1]
+                        break
+                if len(live) > confirmed_len:
+                    selection.ingest(store, session_id, live, agent_id="main")
         except Exception as e:  # noqa: BLE001 — the run-end flush is best-effort
             print(f"[run.py] run-end flush skipped: {e!r}", file=sys.stderr)
     if truncated_by is not None:

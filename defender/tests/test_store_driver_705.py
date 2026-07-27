@@ -33,7 +33,12 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-from pydantic_ai.messages import ModelMessagesTypeAdapter, ModelResponse, TextPart  # noqa: E402
+from pydantic_ai.messages import (  # noqa: E402
+    ModelMessagesTypeAdapter,
+    ModelResponse,
+    TextPart,
+    ToolCallPart,
+)
 
 from defender.hooks.budget_enforcer import DEFAULT_LIMITS  # noqa: E402
 from defender.runtime import circuit_breaker, driver  # noqa: E402
@@ -482,7 +487,13 @@ def test_the_request_logging_guard_stays_around_the_log_path_only(tmp_path):
     The log-side fault is real content, not an authored exception: a lone surrogate
     (reachable via `json.loads('"\\ud800"')` on a provider body) is what the STRICT encoder
     O25 introduces must refuse, while the store's stated `ensure_ascii` lets the same
-    content through (adv:PO4). The asymmetry is the demand."""
+    content through (adv:PO4). The asymmetry is the demand.
+
+    The surrogate-bearing turn ALSO makes a tool call: `_replay_harness.Turn`'s own
+    docstring states the rule this fake model must obey too — "a turn with no tool_calls
+    is text-only and ENDS the agent loop" — so a text-only first response would end the
+    run after one call regardless of whether the log-side fault stopped anything,
+    collapsing the very distinction this test exists to make."""
     run_dir = materialize(tmp_path, GOLDEN)
     opened: list = []
 
@@ -495,7 +506,11 @@ def test_the_request_logging_guard_stays_around_the_log_path_only(tmp_path):
         def __call__(self, messages, info) -> ModelResponse:
             self.calls += 1
             if self.calls == 1:
-                return ModelResponse(parts=[TextPart(content=json.loads('"\\ud800"'))])
+                return ModelResponse(parts=[
+                    TextPart(content=json.loads('"\\ud800"')),
+                    ToolCallPart(tool_name="read_file",
+                                args={"path": str(run_dir / "alert.json")}),
+                ])
             return ModelResponse(parts=[TextPart(content="Investigation complete.")])
 
     model = SurrogateModel()
@@ -567,20 +582,22 @@ def test_run_end_flush_captures_the_terminal_response_on_every_exit(tmp_path):
     rd = materialize(tmp_path / "uncaught", GOLDEN)
     opened = []
 
-    class Exploding:
-        __name__ = "Exploding"
+    def _exploding_gather(messages, info) -> ModelResponse:
+        raise RuntimeError("an exit type nobody enumerated")
 
-        def __init__(self):
-            self.calls = 0
-
-        def __call__(self, messages, info) -> ModelResponse:
-            self.calls += 1
-            if self.calls == 1:
-                return ModelResponse(parts=[TextPart(content="first")])
-            raise RuntimeError("an exit type nobody enumerated")
-
+    # Same shape as (3)'s RunAborted case: the exception arises DEEP INSIDE a nested
+    # gather dispatch, so MAIN's own response (the `gather` tool call) stays orphaned —
+    # unanswered, no continuation ever built — rather than needing a second call to
+    # MAIN's own model (which `Turn`'s own documented rule rules out for a text-only
+    # first response, and which — even with a tool call — would leave the FIRST round
+    # complete in the store, not orphaned, once round two's own model raises instead of
+    # the store ever seeing an unanswered call).
     with pytest.raises(RuntimeError):
-        drive(rd, run_id="flush-uncaught", salt=SALT, main=Exploding(),
+        drive(rd, run_id="flush-uncaught", salt=SALT,
+              main=ReplayFn([Turn(tool_calls=[("gather", {
+                  "lead_id": "l-001", "system": "elastic", "goal": "probe",
+                  "what_to_summarize": ["x"]})])]),
+              gather=_exploding_gather,
               store_factory=store_factory(tmp_path / "uncaught", sink=opened))
     exits["uncaught"] = (opened[0], None)
 
