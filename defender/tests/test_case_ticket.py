@@ -37,9 +37,14 @@ def _write_run(tmp_path: Path, *, disposition: str = "benign", reason: str = "Ro
 
 
 def test_disposition_enum_matches_loop_config():
-    from defender.learning.core.config import DISPOSITION_ENUM as canonical
+    """One definition, not two copies that agree (#714). The enum lives in the report.md
+    content schema; both the loop's config surface and this module re-export it, so `is`
+    holds — an equality assert would pass again the moment someone restates the literal."""
+    from defender._artifact_schema import DISPOSITION_ENUM as canonical
+    from defender.learning.core.config import DISPOSITION_ENUM as via_loop_config
 
-    assert canonical == case_ticket.DISPOSITION_ENUM
+    assert case_ticket.DISPOSITION_ENUM is canonical
+    assert via_loop_config is canonical
 
 
 def test_seed_eligible_outcomes_subset_of_outcome_enum():

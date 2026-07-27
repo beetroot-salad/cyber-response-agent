@@ -8,10 +8,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from defender._artifact_schema import DISPOSITION_ENUM
 from defender._frontmatter import FrontmatterError, parse_frontmatter
 from defender._run_paths import RunPaths
-
-DISPOSITION_ENUM = {"benign", "inconclusive", "malicious"}
 
 _SEED_ELIGIBLE_OUTCOMES = {"caught", "skip-passthrough"}
 
@@ -119,7 +118,13 @@ def read_case_record(run_dir: Path) -> CaseRecord:
         raise CaseTicketError(f"report.md not found: {report}")
     fm, body = _parse_frontmatter(report.read_text(encoding="utf-8"))
 
-    disposition = fm.get("disposition")
+    # Annotated `Any` deliberately: mypy narrows an `Any` differently across an `in` test
+    # against an IMPORTED set than against a module-local literal (it keeps the `None` arm),
+    # and the enum is imported since #714. The membership test is the real check; the
+    # annotation only keeps the inference where it was. Note this lane, unlike the write gate
+    # (`permission/files.py`), has no `isinstance(str)` guard ahead of the membership test —
+    # tracked as part of the report.md schema-ownership follow-up, not widened here.
+    disposition: Any = fm.get("disposition")
     if disposition not in DISPOSITION_ENUM:
         raise CaseTicketError(
             f"report.md disposition={disposition!r} not in {sorted(DISPOSITION_ENUM)}"
