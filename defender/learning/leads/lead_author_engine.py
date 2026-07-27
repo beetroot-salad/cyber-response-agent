@@ -73,10 +73,18 @@ def _run_lead_author_pydantic(
 ) -> str:
     """Both limits vary per spawn here, so the caller owns the whole context — this is one
     of the two stages where the transport really was threaded through three layers (#713)."""
-    assert ctx.repo_root is not None
+    # `repo_root` is optional on the SHARED context (the pure-prediction stages bind off the
+    # run dir alone) but required here: the skills tree is resolved off the repo. A raise,
+    # not an assert — `python -O` strips asserts, and the fallout would be a `NoneType / str`
+    # TypeError one frame down.
+    repo_root = ctx.repo_root
+    if repo_root is None:
+        raise ValueError(
+            "lead-author stage needs ctx.repo_root: it binds the skills tree off the repo"
+        )
     deps = bind(
         LEAD_AUTHOR_DEF, ctx.learning_run_dir,
-        defender_dir=ctx.repo_root / "defender", salt=ctx.salt, box=ctx.box,
+        defender_dir=repo_root / "defender", salt=ctx.salt, box=ctx.box,
     )
     return run_stage(
         stage="lead_author",

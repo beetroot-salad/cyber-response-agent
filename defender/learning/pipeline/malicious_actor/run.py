@@ -13,8 +13,8 @@ from defender.learning.core.config import (
     LESSONS_ACTOR_INDEX_SCRIPT,
     LESSONS_ENV_RETRIEVE_SCRIPT,
     LESSONS_ENVIRONMENT_DIR,
-    StageWiring,
     RunUnprocessable,  # noqa: F401 — re-exported for ops/replay_actor.py's `sub.RunUnprocessable`
+    StageWiring,
     actor_effort,
     actor_model,  # noqa: F401 — re-exported for ops/replay_actor.py's `sub.actor_model`
 )

@@ -52,16 +52,15 @@ def _run_oracle_pydantic(
     make_model: MakeModel = providers.build_for_effort,
 ) -> str:
     """The oracle's limits are stage-fixed, so the context is built HERE rather than taken
-    from the caller — `subagent_timeout()` is read at spawn, never frozen at import (#717)."""
-    deps = bind(ORACLE_DEF, learning_run_dir, salt=salt)
-    return run_stage(
-        stage="oracle",
-        wiring=wiring,
-        ctx=StageContext(
-            learning_run_dir=learning_run_dir, user=user,
-            request_limit=ORACLE_REQUEST_LIMIT,
-            wall_clock_timeout=subagent_timeout(),
-            salt=salt,
-        ),
-        deps=deps, make_model=make_model,
+    from the caller — `subagent_timeout()` is read at spawn, never frozen at import (#717).
+
+    The context is built FIRST and `bind` reads the salt off it, so `ctx.salt` is what the
+    agent was actually bound with rather than a second copy nothing reads."""
+    ctx = StageContext(
+        learning_run_dir=learning_run_dir, user=user,
+        request_limit=ORACLE_REQUEST_LIMIT,
+        wall_clock_timeout=subagent_timeout(),
+        salt=salt,
     )
+    deps = bind(ORACLE_DEF, ctx.learning_run_dir, salt=ctx.salt)
+    return run_stage(stage="oracle", wiring=wiring, ctx=ctx, deps=deps, make_model=make_model)

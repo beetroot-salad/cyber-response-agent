@@ -96,23 +96,26 @@ def _run_judge_pydantic(
     verbs: Any = None,
 ) -> str:
     """The judge's limits are stage-fixed, so the context is built HERE rather than taken
-    from the caller — `subagent_timeout()` is read at spawn, never frozen at import (#717)."""
+    from the caller — `subagent_timeout()` is read at spawn, never frozen at import (#717).
+
+    The context is built FIRST and `bind` reads the transport off it, so `ctx.box`/`ctx.salt`
+    are what the agent was actually bound with rather than a second copy nothing reads."""
     read_roots = tuple(scope.add_dir) if isinstance(scope.add_dir, list) else ()
+    ctx = StageContext(
+        learning_run_dir=learning_run_dir, user=user,
+        request_limit=JUDGE_REQUEST_LIMIT,
+        wall_clock_timeout=subagent_timeout(),
+        box=box, salt=salt,
+    )
     deps = bind(
-        JUDGE_DEF, learning_run_dir, scope=RunScope(add_dirs=read_roots), salt=salt, box=box,
+        JUDGE_DEF, ctx.learning_run_dir, scope=RunScope(add_dirs=read_roots),
+        salt=ctx.salt, box=ctx.box,
     )
     tools = replace(JUDGE_DEF.tools, closed_tickets=scope.closed_ticket_read)
     if verbs is None and scope.closed_ticket_read:
         from defender.runtime.verbs import ModuleVerbRegistry
         verbs = ModuleVerbRegistry(deps.defender_dir / "scripts" / "adapters")
     return run_stage(
-        stage="judge",
-        wiring=wiring,
-        ctx=StageContext(
-            learning_run_dir=learning_run_dir, user=user,
-            request_limit=JUDGE_REQUEST_LIMIT,
-            wall_clock_timeout=subagent_timeout(),
-            box=box, salt=salt,
-        ),
+        stage="judge", wiring=wiring, ctx=ctx,
         deps=deps, make_model=make_model, tools=tools, verbs=verbs,
     )

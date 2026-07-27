@@ -93,20 +93,21 @@ def _run_actor_pydantic(
     make_model: MakeModel = providers.build_for_effort,
 ) -> str:
     """The actor's limits are stage-fixed, so the context is built HERE rather than taken
-    from the caller — `subagent_timeout()` is read at spawn, never frozen at import (#717)."""
+    from the caller — `subagent_timeout()` is read at spawn, never frozen at import (#717).
+
+    The context is built FIRST and `bind` reads the transport off it. Binding off the flat
+    parameters instead would leave `ctx.box`/`ctx.salt` a second copy that nothing reads
+    (`run_stage` consumes only the run dir, user, limit and timeout) and that can silently
+    diverge from what the agent was actually bound with."""
+    ctx = StageContext(
+        learning_run_dir=learning_run_dir, user=user,
+        request_limit=ACTOR_REQUEST_LIMIT,
+        wall_clock_timeout=subagent_timeout(),
+        box=box, salt=salt,
+    )
     deps = bind(
-        ACTOR_DEF, learning_run_dir,
+        ACTOR_DEF, ctx.learning_run_dir,
         scope=RunScope(scripts=scope.scripts, read_confine=scope.read_confine),
-        salt=salt, box=box,
+        salt=ctx.salt, box=ctx.box,
     )
-    return run_stage(
-        stage="actor",
-        wiring=wiring,
-        ctx=StageContext(
-            learning_run_dir=learning_run_dir, user=user,
-            request_limit=ACTOR_REQUEST_LIMIT,
-            wall_clock_timeout=subagent_timeout(),
-            box=box, salt=salt,
-        ),
-        deps=deps, make_model=make_model,
-    )
+    return run_stage(stage="actor", wiring=wiring, ctx=ctx, deps=deps, make_model=make_model)

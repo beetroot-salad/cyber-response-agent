@@ -98,7 +98,7 @@ demands:
   - id: P4
     kind: seam
     form: test
-    outcome: {nl: "both callers forward the abs Path they hold — lessons/run.build_user_prompt passes cfg.lessons_dir (behavioral); curator.invoke_curator_agent passes cfg.corpus_dir into build_curator_user_prompt (AST-bound, no observable seam)"}
+    outcome: {nl: "both callers forward the abs Path they hold — lessons/run.build_user_prompt passes cfg.corpus_dir (behavioral); curator.invoke_curator_agent passes cfg.corpus_dir into build_curator_user_prompt (AST-bound, no observable seam)"}
     binds: ["drives(build_user_prompt->build_curator_user_prompt)", "drives(invoke_curator_agent->build_curator_user_prompt)"]
 
   # --- lesson_read tool ---

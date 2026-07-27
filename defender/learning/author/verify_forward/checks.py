@@ -43,15 +43,16 @@ class ForwardCheck:
 def _verify(ctx: CheckContext, user: str, source_run_dir: Path, *, salt: str) -> str:
     stem = ctx.lesson_path.stem
     prefix = ctx.check.error_prefix
-    # Only the two MODEL-backed checks reach here — `_run_findings` (FINDINGS_CHECK) and
-    # `_run_actor` (ACTOR_CHECK), both of which carry a prompt. `ENV_CHECK` is the
-    # model-free one (`prompt_path=None`): its `_run_env` answers GOOD/BAD from retrieval
-    # and never calls `_verify`. Resolve the Optional once, at this boundary, rather than
-    # threading `Path | None` inward. The old call could not be checked at all — the seam
-    # is a `Callable[..., str]`, so the same latent mismatch was invisible until #713 built
-    # a real `StageWiring` here.
+    # `_verify` is the MODEL-BACKED lane, so the check it runs for must carry a prompt.
+    # `ENV_CHECK` is the one ForwardCheck with `prompt_path=None`, and it runs `_run_env`
+    # (pure retrieval) — it never reaches here. Checked rather than asserted: `StageWiring`
+    # takes a non-optional `Path`, and an assert would be stripped under `python -O`.
     prompt_path = ctx.check.prompt_path
-    assert prompt_path is not None, f"{prefix}: a model-free check reached the verify transport"
+    if prompt_path is None:
+        raise SystemExit(
+            f"{prefix}: this forward-check carries no verifier prompt, so it cannot run the "
+            "model-backed verify lane"
+        )
     raw = ctx.run_verify(
         config.StageWiring(
             prompt_path=prompt_path,

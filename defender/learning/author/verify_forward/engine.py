@@ -57,16 +57,19 @@ def _run_verify_pydantic(
     make_model: MakeModel = providers.build_for_effort,
 ) -> str:
     """The forward-check's request limit is stage-fixed (one turn); its timeout is not — the
-    caller passes its own env-backed knob, so no default is evaluated at import (#717)."""
-    deps = bind(VERIFY_DEF, source_run_dir, defender_dir=defender_dir, salt=salt)
+    caller passes its own env-backed knob, so no default is evaluated at import (#717).
+
+    The context is built FIRST and `bind` reads the salt off it, so `ctx.salt` is what the
+    agent was actually bound with rather than a second copy nothing reads."""
+    ctx = StageContext(
+        learning_run_dir=source_run_dir, user=user,
+        request_limit=VERIFY_REQUEST_LIMIT,
+        wall_clock_timeout=wall_clock_timeout,
+        salt=salt,
+    )
+    deps = bind(
+        VERIFY_DEF, ctx.learning_run_dir, defender_dir=defender_dir, salt=ctx.salt,
+    )
     return run_stage(
-        stage="verify_forward",
-        wiring=wiring,
-        ctx=StageContext(
-            learning_run_dir=source_run_dir, user=user,
-            request_limit=VERIFY_REQUEST_LIMIT,
-            wall_clock_timeout=wall_clock_timeout,
-            salt=salt,
-        ),
-        deps=deps, make_model=make_model,
+        stage="verify_forward", wiring=wiring, ctx=ctx, deps=deps, make_model=make_model,
     )

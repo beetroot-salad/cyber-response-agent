@@ -109,11 +109,14 @@ def _prompt(tmp_path: Path) -> Path:
     return p
 
 
-def _stage(tmp_path: Path, **over):
+def _stage(tmp_path: Path, *, wiring: StageWiring | None = None, **over):
     """run_curator_stage with hermetic defaults (no-op key + a text-returning fake transport);
     override any kwarg per case. The two DI seams (``source_key`` / ``run_author``) OWN their
     production defaults; tests inject fakes to exercise the orchestration without a metered key
-    or the pydantic-ai graph — no ``monkeypatch`` of module globals."""
+    or the pydantic-ai graph — no ``monkeypatch`` of module globals.
+
+    ``wiring`` is separate from ``over`` because ``as_curator_stage_args`` BUILDS the wiring
+    from the flat kwargs; a case that needs a different one substitutes it after the fold."""
     kw = dict(
         system_prompt_file=_prompt(tmp_path),
         batch_id="batch-A",
@@ -131,7 +134,10 @@ def _stage(tmp_path: Path, **over):
         run_author=lambda wiring, ctx, **kw: _AUTHOR_RESULT_OK,
     )
     kw.update(over)
-    return run_curator_stage(**as_curator_stage_args(kw))
+    args = as_curator_stage_args(kw)
+    if wiring is not None:
+        args["wiring"] = wiring
+    return run_curator_stage(**args)
 
 
 
@@ -421,6 +427,40 @@ def test_trace_anchor_established_before_spawn(tmp_path):
     assert all(pid in n for n in seen)
     assert any("batch-A" in n for n in seen)
     assert any("batch-B" in n for n in seen)
+
+
+
+
+def test_stage_refuses_a_wiring_that_did_not_come_from_for_batch(tmp_path):
+    """ONE batch identity per spawn. `run_curator_stage` reads the batch off the wiring that
+    already derived `trace_name` and `label` from it, so the log line, every AuthorError and
+    the trace file cannot name different batches.
+
+    A hand-built `StageWiring` — the shape a drain regresses to when someone pins a literal
+    `trace_name="curator_trace.jsonl"`, which two concurrent drain processes sharing one
+    pending dir would interleave into a single file — carries no batch and is refused BEFORE
+    the spawn. A raise, not an assert: `python -O` strips asserts."""
+    fixed = StageWiring(
+        prompt_path=_prompt(tmp_path), model="glm-5.2", effort="low",
+        trace_name="curator_trace.jsonl", label="curator",
+    )
+    assert fixed.batch_id is None
+    ran: list[int] = []
+    with pytest.raises(ValueError, match="for_batch"):
+        _stage(tmp_path, run_author=lambda *a, **kw: ran.append(1) or _AUTHOR_RESULT_OK,
+               wiring=fixed)
+    assert ran == []
+
+    # Positive control: the same call with the real builder runs, and the batch it reports is
+    # the one the trace file is keyed on.
+    from_builder = StageWiring.for_batch(
+        _prompt(tmp_path), "glm-5.2", "low", batch_id="batch-Z", label="curator",
+    )
+    assert from_builder.batch_id == "batch-Z"
+    assert "batch-Z" in from_builder.trace_name
+    lines: list[str] = []
+    _stage(tmp_path, wiring=from_builder, log=lines.append)
+    assert any("batch-Z" in line for line in lines)
 
 
 

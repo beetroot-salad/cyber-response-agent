@@ -41,6 +41,12 @@ from defender.learning.core.persist import (
 
 AuthorError = _shared.AuthorError
 
+# The ONE spelling of this drain's log prefix. `build_author_config` puts it on
+# `cfg.log_prefix` (the field the shared corpus-author base requires) and `_log` below is
+# built from it, so the envelope, the curator stage and every message in this module cannot
+# drift onto two prefixes.
+_LOG_PREFIX = "author"
+
 
 @dataclass(frozen=True, kw_only=True)
 class AuthorConfig(CorpusAuthorConfig):
@@ -75,7 +81,7 @@ def build_author_config(
         repo_lock_file=paths.author_lock_file,
         repo_lock_wait_seconds=repo_lock_wait_seconds(),
         held_report=paths.pending_dir / "held_report.log",
-        log_prefix="author",
+        log_prefix=_LOG_PREFIX,
         author_prompt=paths.learning_dir / "author" / "lessons" / "prompt.md",
         invoke_agent=invoke_agent,
         manifest_seed=manifest_seed,
@@ -150,7 +156,6 @@ def invoke_agent(findings: list[dict], batch_id: str, cfg: AuthorConfig) -> dict
             box=cfg.box,
             salt=stage_salt,
         ),
-        batch_id=batch_id,
         corpus_dir=cfg.corpus_dir,
         cfg=curator_engine.ForwardCheckConfig(
             check=FINDINGS_CHECK,
@@ -160,7 +165,7 @@ def invoke_agent(findings: list[dict], batch_id: str, cfg: AuthorConfig) -> dict
                 str(f["run_id"]) for f in findings if f.get("run_id")
             ),
         ),
-        log=make_logger(cfg.log_prefix),
+        log=_log,
     )
 
 
@@ -218,10 +223,8 @@ def write_held_report(
 
 
 
-# This drain's own diagnostic logger. The prefix is the same one `build_author_config`
-# puts on `cfg.log_prefix` — that field is what gets handed to the shared envelope and to
-# the curator stage, so both spellings resolve to one prefix.
-_log = make_logger("author")
+# This drain's one diagnostic logger, built from the single prefix anchor at the top.
+_log = make_logger(_LOG_PREFIX)
 
 
 def run_batch(
@@ -240,7 +243,7 @@ def run_batch(
         repo_root=cfg.repo_root,
         corpus_dir=cfg.corpus_dir,
         corpus_dir_rel=cfg.corpus_dir_rel,
-        log=make_logger(cfg.log_prefix),
+        log=_log,
         inner=lambda: _run_batch_inner(cfg, hold_committed=hold_committed),
     )
 

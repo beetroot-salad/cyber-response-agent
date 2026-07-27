@@ -722,7 +722,6 @@ def test_curator_runs_successive_batches_via_its_non_bindable_lifetime(tmp_path)
                 wall_clock_timeout=config.author_timeout(),
                 repo_root=repo,
             ),
-            batch_id=batch_id,
             corpus_dir=corpus,
             cfg=ForwardCheckConfig(
                 check=FINDINGS_CHECK, runs_dir=tmp_path / "runs",

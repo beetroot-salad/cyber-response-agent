@@ -107,7 +107,6 @@ def invoke_curator_agent(
             box=cfg.box,
             salt=stage_salt,
         ),
-        batch_id=batch_id,
         corpus_dir=cfg.corpus_dir,
         cfg=curator_engine.ForwardCheckConfig(
             check=check,

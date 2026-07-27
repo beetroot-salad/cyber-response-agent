@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import sys
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -264,6 +264,16 @@ class StageWiring:
     effort: str | None
     trace_name: str
     label: str
+    # The batch this spawn is for, RETAINED by `for_batch` rather than derived twice. Both
+    # `trace_name` and `label` already encode it, so a stage that also wants to name the batch
+    # (`run_curator_stage` logs it and puts it in every AuthorError) would otherwise take it a
+    # second time as its own parameter — two sources of truth for one identity, with nothing
+    # reconciling them. `None` on the wirings that are not per-batch (the two `JudgeWiring`s,
+    # the actor/oracle/forward-check spawns, which name a direction or a lead instead).
+    #
+    # `kw_only` so it stays off the positional tail: `JudgeWiring` extends this class with two
+    # more fields and `directions.py` passes the base five positionally.
+    batch_id: str | None = field(default=None, kw_only=True)
 
     @classmethod
     def for_batch(
@@ -279,6 +289,7 @@ class StageWiring:
             prompt_path=prompt_path, model=model, effort=effort,
             trace_name=f"{batch_id}.{os.getpid()}.trace.jsonl",
             label=f"{label}:{batch_id}",
+            batch_id=batch_id,
         )
 
 
@@ -302,7 +313,13 @@ class StageContext:
     structurally.
 
     `repo_root` is optional because only the stages that bind a corpus or a skills tree
-    (curator, lead author) need one; the pure-prediction stages bind off the run dir alone."""
+    (curator, lead author) need one; the pure-prediction stages bind off the run dir alone.
+
+    `run_stage` itself reads only the first four fields — `repo_root`/`box`/`salt` are the
+    BIND inputs, and every engine resolves its deps off THIS object (`bind(..., salt=ctx.salt,
+    box=ctx.box)`) rather than off a parallel local. Set one here and pass another to `bind`
+    and the two silently diverge, with the context reading as the authority it would no longer
+    be."""
 
     learning_run_dir: Path
     user: str

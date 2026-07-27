@@ -8,8 +8,8 @@ from defender._untrusted import wrap
 from defender.learning.core.config import (
     ACTOR_BENIGN_PROMPT,
     LESSONS_ENV_RETRIEVE_SCRIPT,
-    StageWiring,
     LESSONS_ENVIRONMENT_DIR,
+    StageWiring,
     benign_actor_effort,
     benign_actor_model,
 )

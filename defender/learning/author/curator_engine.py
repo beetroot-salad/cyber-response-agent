@@ -237,9 +237,17 @@ def _run_curator_pydantic(
 ) -> str:
     """Both limits vary per spawn here, so the caller owns the whole context — this is one
     of the two stages where the transport really was threaded through three layers (#713)."""
-    assert ctx.repo_root is not None
+    # `repo_root` is optional on the SHARED context (the pure-prediction stages bind off the
+    # run dir alone) but required here: the corpus confine is resolved off the repo tree.
+    # A raise, not an assert — `python -O` strips asserts, and the fallout would be a
+    # `NoneType / str` TypeError several frames down inside `bind`.
+    repo_root = ctx.repo_root
+    if repo_root is None:
+        raise ValueError(
+            "curator stage needs ctx.repo_root: it binds a corpus off the repo tree"
+        )
     deps = CuratorDeps.for_run(
-        ctx.learning_run_dir, ctx.repo_root, corpus_dir,
+        ctx.learning_run_dir, repo_root, corpus_dir,
         cfg=cfg, salt=ctx.salt, box=ctx.box,
     )
     return run_stage(
@@ -253,20 +261,31 @@ def run_curator_stage(
     *,
     wiring: StageWiring,
     ctx: StageContext,
-    batch_id: str,
     corpus_dir: Path,
     cfg: ForwardCheckConfig,
     log: Callable[[str], None],
     source_key: Callable[..., object] = config.source_first_party_key,
     run_author: Callable[..., str] = _run_curator_pydantic,
 ) -> dict:
-    """`wiring` is the spawn's prompt/model/effort/trace/label, `ctx` its roots, user prompt
-    and two env-backed limits; `cfg` is the forward-check group, built by the caller since
-    #713 rather than five parameters re-declared all the way down to `CuratorDeps.for_run`.
+    """`wiring` is the spawn's prompt/model/effort/trace/label/batch, `ctx` its roots, user
+    prompt and two env-backed limits; `cfg` is the forward-check group, built by the caller
+    since #713 rather than five parameters re-declared all the way down to
+    `CuratorDeps.for_run`.
 
     Every model/effort/limit/timeout knob is caller-supplied with no default here: each is
     env-backed and differs per corpus, so a default evaluated at import would freeze it
     (#717)."""
+    # ONE batch identity, read off the wiring that already derived `trace_name` and `label`
+    # from it. Taking it a second time as a parameter let a caller log `spawn curator B`,
+    # raise `AuthorError("curator (B) ...")` and write `A.<pid>.trace.jsonl` — three artifacts
+    # naming two batches, with nothing asserting they agree. A raise, not an assert: `python
+    # -O` strips asserts, and `for_batch` is the only builder that sets the field.
+    batch_id = wiring.batch_id
+    if batch_id is None:
+        raise ValueError(
+            "curator stage needs a wiring built by StageWiring.for_batch: its log line and "
+            "its AuthorErrors name the same batch its trace file is keyed on"
+        )
     log(
         f"spawn curator {batch_id} in-process (model={wiring.model}, "
         f"effort={wiring.effort}, timeout={ctx.wall_clock_timeout}s)"
