@@ -78,6 +78,30 @@ def test_provider_for_unknown_name_fails_loud():
         providers.provider_for("gpt-4o")
 
 
+def test_every_alias_in_the_map_actually_routes():
+    """The map is the registry of what is selectable; nothing in it may be dead. Parametrized
+    routing above pins the spellings someone remembered to add a case for — this covers the
+    map as it ships, so a new alias cannot land unrouted."""
+    for alias in providers.FIREWORKS.aliases:
+        assert providers.provider_id_for(alias) == "fireworks", alias
+
+
+def test_the_refusal_names_every_model_the_map_makes_selectable():
+    """The refusal used to hardcode the models that existed when it was typed, so adding an
+    alias silently left it stale and an operator who typo'd the new model was told it did not
+    exist. The list is derived now; this is what keeps it from drifting from the map again —
+    it fails on the NEXT alias added, not only on the one that prompted it."""
+    with pytest.raises(ValueError, match="unknown model") as e:
+        providers.provider_for("kimi-k-9")
+    message = str(e.value)
+
+    targets = set(providers.FIREWORKS.aliases.values())
+    named = {providers.FIREWORKS.aliases[a] for a in providers.selectable_aliases()}
+    assert named == targets, "a selectable model has no spelling in the refusal"
+    for alias in providers.selectable_aliases():
+        assert alias in message, f"{alias} is selectable but absent from {message!r}"
+
+
 def test_api_key_vars_covers_both_providers():
     assert providers.api_key_vars() == {"ANTHROPIC_API_KEY", "FIREWORKS_API_KEY"}
 
