@@ -382,7 +382,10 @@ def write_manifest(  # noqa: PLR0913 — the manifest's fields, each an independ
         encoding="utf-8")
 
 
-def build_parser() -> argparse.ArgumentParser:
+# lint-dup: ok — argparse scaffolding, not logic. Shares only its name with
+# scripts/adapters/ticket_adapter.py's; the two build disjoint flag sets for unrelated
+# CLIs and there is nothing to consolidate.
+def build_parser() -> argparse.ArgumentParser:  # lint-dup: ok — argparse only
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--scenario", required=True)

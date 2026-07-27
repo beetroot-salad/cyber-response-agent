@@ -64,7 +64,7 @@ import yaml
 GOLDEN_DIR = Path(__file__).resolve().parent
 
 
-def _load(name: str, path: Path):
+def _load_module(name: str, path: Path):
     spec = importlib.util.spec_from_file_location(name, path)
     assert spec is not None
     assert spec.loader is not None
@@ -74,7 +74,7 @@ def _load(name: str, path: Path):
     return mod
 
 
-STATS = _load("oracle_golden_stats", GOLDEN_DIR / "stats.py")
+STATS = _load_module("oracle_golden_stats", GOLDEN_DIR / "stats.py")
 
 #: Fewest independent units a slice needs before an interval is published at all.
 #: At n=1 Wilson spans [0.21, 1.00] and at n=2 [0.34, 1.00]; printing either

@@ -289,7 +289,7 @@ def score_case(case_dir: Path, proj_path: Path, *, model: str, effort: str, jobs
     """The whole measurement, as the dict written to `scores/<tag>.json`."""
     manifest = yaml.safe_load((case_dir / "manifest.yaml").read_text(encoding="utf-8")) or {}
     proj = yaml.safe_load(proj_path.read_text(encoding="utf-8")) or {}
-    leads = {row["lead_id"]: row for row in judge.load_leads(case_dir)}
+    leads = {row["lead_id"]: row for row in judge.load_case_leads(case_dir)}
     preds, duplicates = load_predictions(proj)
 
     summary: dict = {
@@ -524,7 +524,7 @@ def _dry_run(case_dir: Path, proj_path: Path, *, model: str, effort: str) -> dic
     """The mechanical half, with no model in the loop — what `--dry-run` reports."""
     manifest = yaml.safe_load((case_dir / "manifest.yaml").read_text(encoding="utf-8")) or {}
     proj = yaml.safe_load(proj_path.read_text(encoding="utf-8")) or {}
-    leads = {row["lead_id"]: row for row in judge.load_leads(case_dir)}
+    leads = {row["lead_id"]: row for row in judge.load_case_leads(case_dir)}
     preds, duplicates = load_predictions(proj)
     return {
         "tag": score_tag(proj_path.stem, model, effort),

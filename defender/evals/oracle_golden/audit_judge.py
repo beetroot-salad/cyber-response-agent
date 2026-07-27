@@ -99,7 +99,7 @@ def audit_set(case_names: tuple[str, ...]) -> list[tuple[Path, str, str, dict]]:
     for name in case_names:
         case_dir = CASES_DIR / name
         expected = yaml.safe_load((case_dir / "expected.yaml").read_text(encoding="utf-8"))
-        leads = {row["lead_id"]: row for row in judge.load_leads(case_dir)}
+        leads = {row["lead_id"]: row for row in judge.load_case_leads(case_dir)}
         for lead_id, spec in (expected.get("leads") or {}).items():
             if lead_id not in leads:
                 continue

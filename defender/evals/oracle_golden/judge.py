@@ -67,11 +67,17 @@ class GrammarError(ValueError):
     """The model's output did not parse as the closed grammar its prompt mandates."""
 
 
-def judge_model() -> str:
+# lint-dup: ok — same names as learning/core/config.py, deliberately NOT shared. That
+# judge is the learning loop's outcome classifier; this one is the calibration judge, and
+# the suite picks it to be off the oracle's own lineage. Worse, this pair feeds
+# `prompts_sha8` into the score tag: importing the learning config would let a change
+# there silently re-tag every committed score, which is the one thing the tag exists to
+# prevent. Two readers of two different env vars that happen to rhyme.
+def judge_model() -> str:  # lint-dup: ok — see the note above
     return os.environ.get("JUDGE_MODEL") or DEFAULT_JUDGE_MODEL
 
 
-def judge_effort() -> str:
+def judge_effort() -> str:  # lint-dup: ok — see the note above
     return os.environ.get("JUDGE_EFFORT") or DEFAULT_JUDGE_EFFORT
 
 
@@ -187,13 +193,13 @@ def lead_systems(lead: dict) -> set[str]:
     return {(q.get("query_id") or "").split(".")[0] for q in lead.get("queries") or []}
 
 
-def load_leads(case_dir: Path) -> list[dict]:
+def load_case_leads(case_dir: Path) -> list[dict]:
     text = (case_dir / "oracle_visible" / "leads.jsonl").read_text(encoding="utf-8")
     return [json.loads(line) for line in text.splitlines() if line.strip()]
 
 
 def load_lead_inputs(case_dir: Path, lead_id: str) -> LeadInputs:
-    leads = {row["lead_id"]: row for row in load_leads(case_dir)}
+    leads = {row["lead_id"]: row for row in load_case_leads(case_dir)}
     if lead_id not in leads:
         raise KeyError(f"{case_dir.name} has no lead {lead_id}")
 
@@ -304,7 +310,7 @@ def parse_label(raw: str) -> dict:
     }
 
 
-def parse_verdict(raw: str) -> dict:
+def parse_verdict_reply(raw: str) -> dict:
     doc = _document(raw)
     if "faithful" not in doc:
         raise GrammarError("no `faithful` key")
@@ -484,5 +490,5 @@ def verdict_lead(inputs: LeadInputs, projection: Any, measurement: dict, *,
                  model: str | None = None, effort: str | None = None,
                  call: CallFn = call_model) -> dict:
     return _pass(VERDICT_PROMPT, verdict_user_prompt(inputs, projection, measurement),
-                 parse_verdict,
+                 parse_verdict_reply,
                  model=model or judge_model(), effort=effort or judge_effort(), call=call)

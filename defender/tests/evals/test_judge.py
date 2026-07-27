@@ -194,14 +194,14 @@ def test_a_malformed_label_is_a_grammar_error(raw, why):
 
 
 def test_a_well_formed_verdict_parses():
-    got = judge.parse_verdict(VERDICT_OK)
+    got = judge.parse_verdict_reply(VERDICT_OK)
     assert got["faithful"] is True
     assert got["cause"] is None
     assert got["form_notes"] is None
 
 
 def test_an_undecidable_verdict_carries_its_reason():
-    got = judge.parse_verdict(
+    got = judge.parse_verdict_reply(
         "faithful: null\nundecidable_reason: contradicts-measurement\nrationale: x\n")
     assert got["faithful"] is None
     assert got["undecidable_reason"] == "contradicts-measurement"
@@ -219,7 +219,7 @@ def test_an_undecidable_verdict_carries_its_reason():
 ])
 def test_a_malformed_verdict_is_a_grammar_error(raw, why):
     with pytest.raises(judge.GrammarError):
-        judge.parse_verdict(raw)
+        judge.parse_verdict_reply(raw)
 
 
 # ----------------------------------------------------------------------- the call

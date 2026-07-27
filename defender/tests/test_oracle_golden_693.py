@@ -181,7 +181,7 @@ def test_no_checked_in_projection_has_a_lead_set_mismatch(case_dir, proj_path):
     """The mechanical half of scoring, swept over the tree. A missing lead is not an
     empty one, and an all-quiet case is exactly where a truncated projection would pass
     unnoticed."""
-    leads = [row["lead_id"] for row in judge.load_leads(case_dir)]
+    leads = [row["lead_id"] for row in judge.load_case_leads(case_dir)]
     proj = yaml.safe_load(proj_path.read_text(encoding="utf-8")) or {}
     preds, duplicates = score.load_predictions(proj)
     assert score.integrity(leads, preds, duplicates) == {
