@@ -72,6 +72,29 @@ _TOKEN_TRIM = "\"'`,;:()[]{}<>"
 _PLACEHOLDER = re.compile(r"<[^<>]+>")
 
 
+def partial_placeholder_matches(text: str, want: str) -> bool:
+    """Could a partially-placeholdered value be the ground-truth one?
+
+    Exempting a value from grading because it contains a placeholder ANYWHERE is
+    too generous on its own: it also exempts the value's CONCRETE half, so
+    `"user.name": "svc-backup <unknown>"` would grade `unknown` against a ground
+    truth of `root`, and a projection could blunt any `wrong` by appending a
+    placeholder. The abstention is only honest if what the projection did commit
+    to still fits.
+
+    So each `<...>` span becomes "one or more characters" and the literal spans
+    around it must match exactly. `"SSH-2.0-OpenSSH_<version>"` fits
+    `"SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.15"`; `"root<x>"` does not fit
+    `"admin"`. A fit stays UNGRADED — the projection abstained and gets neither
+    credit nor blame. A value that cannot fit is a concrete claim the telemetry
+    refutes, and grades `wrong` like any other.
+    """
+    pattern = "".join(".+" if part.startswith("<") and part.endswith(">")
+                      else re.escape(part)
+                      for part in re.split(r"(<[^<>]+>)", text) if part)
+    return re.fullmatch(pattern, want, re.DOTALL) is not None
+
+
 def _norm(value: object) -> str:
     """One coercion for both sides of a value comparison (YAML ints/bools vs strings)."""
     if isinstance(value, bool):
@@ -131,10 +154,42 @@ def concrete_values(events: list) -> dict[str, set[str]]:
     return out
 
 
-def grade_fields(expected: dict, got: dict[str, set[str]], events: list) -> dict:
+def partial_values(events: list) -> dict[str, set[str]]:
+    """Per key, the values that mix concrete text with a `<placeholder>`.
+
+    The complement of `concrete_values`. These are not claims about the whole
+    value, but their literal spans ARE claims, and `partial_placeholder_matches`
+    is what decides whether the telemetry refutes them.
+    """
+    out: dict[str, set[str]] = {}
+    for e in events:
+        if not isinstance(e, dict):
+            continue
+        for k, v in e.items():
+            text = _norm(v)
+            if _PLACEHOLDER.search(text):
+                out.setdefault(str(k), set()).add(text)
+    return out
+
+
+def _refuted_partial(partials: set[str] | None, want: str) -> bool:
+    """Did the projection abstain in a shape the ground truth cannot fit?
+
+    True only when the key was emitted with a placeholder AND no such value could
+    be the ground-truth one. One fitting value is enough to keep the abstention
+    honest — the same set-not-first rule `concrete_values` uses.
+    """
+    if not partials:
+        return False
+    return not any(partial_placeholder_matches(p, want) for p in partials)
+
+
+def grade_fields(expected: dict, got: dict[str, set[str]], events: list,
+                 partials: dict[str, set[str]] | None = None) -> dict:
     """For each expected distinguishing field: correct / wrong / unknown / missing."""
     # was the field emitted at all (even as a placeholder)?
     emitted_keys = {str(k) for e in events if isinstance(e, dict) for k in e}
+    partials = partials if partials is not None else partial_values(events)
     result = {}
     for k, want in expected.items():
         key = str(k)
@@ -142,6 +197,10 @@ def grade_fields(expected: dict, got: dict[str, set[str]], events: list) -> dict
         if values:
             result[key] = ("correct" if _norm(want) in values
                            else f"wrong(got {', '.join(sorted(values))})")
+        elif _refuted_partial(partials.get(key), _norm(want)):
+            # Abstained, but around literal text the capture contradicts. That is
+            # a concrete claim wearing a placeholder, not an abstention.
+            result[key] = f"wrong(got {', '.join(sorted(partials[key]))})"
         elif key in emitted_keys:
             result[key] = "unknown"          # emitted only as a placeholder
         else:
@@ -149,7 +208,8 @@ def grade_fields(expected: dict, got: dict[str, set[str]], events: list) -> dict
     return result
 
 
-def grade_contradictions(observed: dict, got: dict[str, set[str]]) -> dict:
+def grade_contradictions(observed: dict, got: dict[str, set[str]],
+                         partials: dict[str, set[str]] | None = None) -> dict:
     """Ground truth for fields the labels do NOT require the projection to commit to.
 
     Graded only where the projection volunteered a concrete value for the key —
@@ -161,11 +221,18 @@ def grade_contradictions(observed: dict, got: dict[str, set[str]]) -> dict:
     concrete value is exactly what prompt.md forbids and what manufactures a catch
     downstream.
     """
+    partials = partials or {}
     result = {}
     for k, want in observed.items():
         key = str(k)
         values = got.get(key)
-        if not values:      # absent, or emitted only as a `<placeholder>` — not a claim
+        if not values:
+            # Absent, or emitted only as a placeholder — not a claim, UNLESS the
+            # literal text wrapped around that placeholder is one the capture
+            # refutes. Otherwise `"<user>@evil.example"` volunteers a domain the
+            # telemetry contradicts and is never graded for it.
+            if _refuted_partial(partials.get(key), _norm(want)):
+                result[key] = f"wrong(got {', '.join(sorted(partials[key]))})"
             continue
         result[key] = ("correct" if _norm(want) in values
                        else f"wrong(got {', '.join(sorted(values))})")
@@ -262,12 +329,14 @@ def score_projection(spec: dict, proj: dict, projection_name: str) -> dict:
         system = exp["system"]
         match = pred_c == exp_c
         concrete = concrete_values(events)
-        fields = (grade_fields(exp.get("fields", {}), concrete, events)
+        partials = partial_values(events)
+        fields = (grade_fields(exp.get("fields", {}), concrete, events, partials)
                   if exp_c == "+event" else {})
         # Contradictions are graded on EVERY class: a fabricated concrete value on a
         # lead labelled `0` is the same error as one on a `+event` lead, and the
         # class disagreement alone does not say the value was refuted.
-        contradictions = grade_contradictions(exp.get("observed_fields", {}), concrete)
+        contradictions = grade_contradictions(exp.get("observed_fields", {}),
+                                              concrete, partials)
         rows.append({
             "lead": lead_id, "system": system, "expected": exp_c, "predicted": pred_c,
             "class_match": match, "heterogeneous": exp.get("heterogeneous", False),

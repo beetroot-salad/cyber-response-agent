@@ -394,3 +394,49 @@ def test_a_fully_concrete_fabrication_is_still_wrong():
         _proj(**{"l-1": [{"evt.type": "write"}]}),
         "p.yaml")
     assert summary["wrong_concrete_fields"] == 1
+
+
+def test_a_placeholder_cannot_launder_a_refuted_concrete_claim():
+    """The exemption is for the ABSTENTION, not for the literal text wrapped
+    around it. Exempting the whole value would let any `wrong` be blunted by
+    appending a placeholder, and would leave the concrete half — the half that IS
+    a claim — permanently ungraded."""
+    summary = SCORE.score_projection(
+        _spec(**{"l-1": {"system": "elastic", "class": "+event",
+                         "fields": {"user.name": "root"}}}),
+        _proj(**{"l-1": [{"user.name": "svc-backup <unknown>"}]}),
+        "p.yaml")
+    assert summary["rows"][0]["fields"]["user.name"].startswith("wrong")
+    assert summary["wrong_concrete_fields"] == 1
+
+
+def test_a_volunteered_partial_value_the_capture_refutes_is_a_contradiction():
+    """`grade_contradictions` skipped every partially-placeholdered value, so
+    `"<user>@evil.example"` volunteered a domain the telemetry contradicts and was
+    never graded for it."""
+    summary = SCORE.score_projection(
+        _spec(**{"l-1": {"system": "elastic", "class": "+event",
+                         "observed_fields": {"user.email": "alice@corp.example"}}}),
+        _proj(**{"l-1": [{"user.email": "<user>@evil.example"}]}),
+        "p.yaml")
+    assert summary["rows"][0]["contradictions"]["user.email"].startswith("wrong")
+
+
+@pytest.mark.parametrize(("emitted", "want", "fits"), [
+    ("SSH-2.0-OpenSSH_<v>", "SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.15", True),
+    ("<hostname>", "db-1", True),                    # a bare placeholder fits anything
+    ("Failed password for root from <ip> port <p> ssh2",
+     "Failed password for root from 172.18.0.15 port 5122 ssh2", True),
+    ("root<x>", "admin", False),
+    ("SSH-2.0-OpenSSH_<v>", "SSH-2.0-Dropbear_2022.82", False),
+    ("a.<b>.c", "a.x.d", False),                     # the trailing literal must match too
+])
+def test_partial_placeholder_fit(emitted, want, fits):
+    assert SCORE.partial_placeholder_matches(emitted, want) is fits
+
+
+def test_a_regex_metacharacter_in_a_value_is_literal_text():
+    """The fit test builds a pattern from projection output. A value carrying
+    `.` or `(` must be matched as text, not compiled as syntax."""
+    assert SCORE.partial_placeholder_matches("a.c<x>", "abcZ") is False
+    assert SCORE.partial_placeholder_matches("f(<n>)", "f(3)") is True
