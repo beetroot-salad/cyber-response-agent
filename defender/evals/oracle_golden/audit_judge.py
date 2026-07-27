@@ -95,7 +95,7 @@ def expected_delta_kinds(case_class: str, lead: dict) -> tuple[str, ...]:
 
 def audit_set(case_names: tuple[str, ...]) -> list[tuple[Path, str, str, dict]]:
     """(case_dir, lead_id, hand_class, lead_row) for every hand-labelled, measurable lead."""
-    out = []
+    out: list[tuple[Path, str, str, dict]] = []
     for name in case_names:
         case_dir = CASES_DIR / name
         expected = yaml.safe_load((case_dir / "expected.yaml").read_text(encoding="utf-8"))
@@ -105,7 +105,10 @@ def audit_set(case_names: tuple[str, ...]) -> list[tuple[Path, str, str, dict]]:
                 continue
             if not (case_dir / "hidden" / "observed" / lead_id).is_dir():
                 continue  # a derived case: nothing to measure against
-            out.append((case_dir, lead_id, (spec or {}).get("class"), leads[lead_id]))
+            hand_class = (spec or {}).get("class")
+            if not hand_class:
+                continue  # listed but never hand-labelled: not calibration evidence
+            out.append((case_dir, lead_id, hand_class, leads[lead_id]))
     return out
 
 
@@ -186,7 +189,8 @@ def run_audit(case_names: tuple[str, ...], repeats: int, jobs: int, *,
 DEFAULT_ORACLE_TAG = "glm-5.2_effort-none_prompt-711"
 
 
-def verdict_set(case_names: tuple[str, ...], oracle_tag: str) -> list[tuple]:
+def verdict_set(case_names: tuple[str, ...],
+                oracle_tag: str) -> list[tuple[Path, str, object, dict]]:
     """(case_dir, lead_id, events, measurement) for every lead a real score judged.
 
     Deliberately reuses the committed `labels/<judge-tag>.json` rather than re-measuring:
@@ -194,7 +198,7 @@ def verdict_set(case_names: tuple[str, ...], oracle_tag: str) -> list[tuple]:
     the label pass vary underneath it would fold the two variances into one number that
     names neither.
     """
-    out = []
+    out: list[tuple[Path, str, object, dict]] = []
     model, effort = judge.judge_model(), judge.judge_effort()
     for name in case_names:
         case_dir = CASES_DIR / name
@@ -233,9 +237,13 @@ def run_verdict_audit(case_names: tuple[str, ...], oracle_tag: str, repeats: int
                       call: judge.CallFn = judge.call_model) -> dict:
     entries = verdict_set(case_names, oracle_tag)
     work = [(entry, rep) for entry in entries for rep in range(repeats)]
+
+    def _one(item: tuple[tuple[Path, str, object, dict], int]) -> dict:
+        (case_dir, lead_id, events, measurement), _rep = item
+        return _verdict_once(case_dir, lead_id, events, measurement, model, effort, call)
+
     with ThreadPoolExecutor(max_workers=max(1, min(jobs, len(work) or 1))) as pool:
-        results = list(pool.map(
-            lambda item: _verdict_once(*item[0], model, effort, call), work))
+        results = list(pool.map(_one, work))
 
     by_lead: dict[tuple[str, str], list[dict]] = {}
     for ((case_dir, lead_id, _e, _m), _rep), verdict in zip(work, results, strict=True):

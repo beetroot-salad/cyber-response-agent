@@ -220,7 +220,8 @@ def rules_fired_since(since: datetime, target_host: str | None = None, *,
         hits = json.loads(proc.stdout)["hits"]["hits"]
     except (json.JSONDecodeError, KeyError, TypeError):
         return []
-    on_target, others = [], []
+    on_target: list[str] = []
+    others: list[str] = []
     for hit in hits:
         source = hit.get("_source") or {}
         rule = source.get("kibana.alert.rule.rule_id")

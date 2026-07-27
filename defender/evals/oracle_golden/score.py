@@ -115,8 +115,8 @@ def grammar_problem(events: object) -> str | None:
     if all(isinstance(e, dict) for e in events):
         return None
     if not all(isinstance(e, str) for e in events):
-        kinds = sorted({type(e).__name__ for e in events})
-        return f"a marker mixed with {'/'.join(kinds)} — prompt.md forbids mixing"
+        type_names = sorted({type(e).__name__ for e in events})
+        return f"a marker mixed with {'/'.join(type_names)} — prompt.md forbids mixing"
     kinds = {_marker_kind(m) for m in events}
     if None in kinds:
         unknown = [m for m in events if _marker_kind(m) is None]

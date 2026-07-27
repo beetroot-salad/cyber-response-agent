@@ -208,7 +208,7 @@ def build_report(cases: list[dict], tag: str, target_lower_bound: float) -> dict
         by_slice: dict[tuple, dict] = defaultdict(
             lambda: {"rows": [], "units": set(), "envs": set()})
         cause_tally: dict[str, dict] = defaultdict(lambda: {"instances": 0, "units": set()})
-        mechanical = {"malformed_leads": 0, "leaked_values": [], "unjudged_cases": []}
+        mechanical: dict = {"malformed_leads": 0, "leaked_values": [], "unjudged_cases": []}
 
         for case in members:
             unit = unit_of(case["manifest"])
