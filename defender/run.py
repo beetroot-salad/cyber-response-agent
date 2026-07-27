@@ -29,7 +29,8 @@ if __name__ == "__main__" and _VENV_PY.is_file() and Path(sys.executable) != _VE
 
 import argparse  # noqa: E402
 import asyncio  # noqa: E402
-import contextlib  # noqa: E402
+from collections.abc import Callable  # noqa: E402
+from typing import Any, Protocol  # noqa: E402
 
 if (_root := str(_DEFENDER_DIR.parent)) not in sys.path:
     sys.path.insert(0, _root)
@@ -107,6 +108,92 @@ def _source_provider_keys(main_model: str, gather_model: str) -> int:
     return 0
 
 
+class _Investigate(Protocol):
+    """The investigation seam's exact shape.
+
+    Spelled out rather than left as a bare `Callable[..., dict]` so BOTH halves of the
+    injection stay type-checked: the lifecycle's call site against this signature, and
+    `_drive_investigation` against `driver.run_investigation`'s own parameters. A `**kwargs`
+    passthrough checks neither, so a renamed driver keyword would type-check clean, pass every
+    test (they all inject the seam) and fail only on a real credentialed run.
+    """
+
+    def __call__(
+        self, *, alert_path: Path, run_dir: Path, run_id: str, defender_dir: Path,
+        salt: str, model_name: str, box: Any,
+    ) -> dict[str, Any]: ...
+
+
+def _drive_investigation(
+    *,
+    alert_path: Path,
+    run_dir: Path,
+    run_id: str,
+    defender_dir: Path,
+    salt: str,
+    model_name: str,
+    box: Any,
+) -> dict[str, Any]:
+    """The production investigation call, as a SYNCHRONOUS callable.
+
+    `_run_investigation_lifecycle` injects this rather than reaching for the driver directly,
+    so a test can hand in a plain function — no coroutine to build, no event loop to drive,
+    and no model credentials, which is what kept the entrypoint's lifecycle unobservable
+    before #741.
+    """
+    return asyncio.run(driver.run_investigation(
+        alert_path=alert_path,
+        run_dir=run_dir,
+        run_id=run_id,
+        defender_dir=defender_dir,
+        salt=salt,
+        model_name=model_name,
+        box=box,
+    ))
+
+
+def _run_investigation_lifecycle(
+    *,
+    run_dir: Path,
+    salt: str,
+    model: str,
+    defender_dir: Path,
+    investigate: _Investigate = _drive_investigation,
+    start_box: Callable[..., Any] = box_mod.start_box,
+    stop_box: Callable[..., None] = box_mod.stop_box,
+    scrub: Callable[[Path], None] = box_mod.scrub,
+) -> dict[str, Any]:
+    """Start the box, run the investigation inside it, and reap both on every exit.
+
+    #741: extracted out of `main` so the lifecycle carries the injection seam its siblings
+    already have (`drains._run_worktree_batch`, `run_cycle.run_one`), and the demands over it
+    can be executed rather than read off `main`'s statement sequence. `main` stays an argv
+    entrypoint; the seam lives one layer in, where a test can reach it.
+
+    The exit half belongs to `box_mod.stop_and_scrub`, which owns the ordering, the
+    only-scrub-a-provably-dead-box rule, and the exception preference for both writable lanes.
+    """
+    box = start_box(run_dir, defender_dir)
+    investigation_ok = False
+    try:
+        summary = investigate(
+            alert_path=RunPaths(run_dir).alert,
+            run_dir=run_dir,
+            run_id=run_dir.name,
+            defender_dir=defender_dir,
+            salt=salt,
+            model_name=model,
+            box=box,
+        )
+        investigation_ok = True
+    finally:
+        box_mod.stop_and_scrub(
+            box, run_dir, stop_box=stop_box, scrub_tree=scrub,
+            in_flight=not investigation_ok,
+        )
+    return summary
+
+
 def main(argv: list[str]) -> int:
     ns = parse_args(argv)
 
@@ -126,40 +213,16 @@ def main(argv: list[str]) -> int:
 
     print(f"[run.py] run_dir={run_dir} model={model}", file=sys.stderr)
 
-    box = box_mod.start_box(run_dir, DEFENDER_DIR)
-    investigation_ok = False
-    box_down = False
-    try:
-        summary = asyncio.run(driver.run_investigation(
-            alert_path=RunPaths(run_dir).alert,
-            run_dir=run_dir,
-            run_id=run_dir.name,
-            defender_dir=DEFENDER_DIR,
-            salt=salt,
-            model_name=model,
-            box=box,
-        ))
-        investigation_ok = True
-    finally:
-        if investigation_ok:
-            box_mod.stop_box(box)
-            box_down = True
-        else:
-            with contextlib.suppress(box_mod.BoxFault):
-                box_mod.stop_box(box)
-                box_down = True
-        # #738: the scrub reaps EVERY exit from the investigation, not just the one that
-        # falls through — sited after the `try` it was jumped clean over by a raising
-        # driver, leaving the crash's tree (the one most likely to hold what the box
-        # planted) unwalked. It stays BEHIND the teardown, and runs only once the box is
-        # known dead: "no live writer" is the scrub's whole justification, so a teardown
-        # whose fault was suppressed above leaves that unproven and the walk is skipped
-        # rather than raced. A taint raised here on the crash path deliberately WINS over
-        # the investigation's own failure — a tainted tree is the worse signal — and
-        # Python's implicit chaining keeps the original on `__context__`.
-        if box_down:
-            box_mod.scrub(run_dir)
+    summary = _run_investigation_lifecycle(
+        run_dir=run_dir,
+        salt=salt,
+        model=model,
+        defender_dir=DEFENDER_DIR,
+    )
 
+    # Every consumer below reads the tree the lifecycle just scrubbed. None of them is
+    # reachable on a tainted tree: `summary` only exists if the lifecycle returned, and
+    # nothing here catches what it raises.
     out = str(summary.get("output") or "")
     print(f"[run.py] done ({summary.get('requests')} model requests); "
           f"output: {out[:200]}", file=sys.stderr)

@@ -131,12 +131,20 @@ def module_level_names_at_base(repo_path: str) -> set[str]:
 
 
 
-def test_run_py_unpacks_the_pair_and_threads_both_elements_onward():
+def test_run_py_unpacks_the_pair_and_threads_both_elements_onward(tmp_path):
     """`run.py`'s call to `materialize_run_dir` binds BOTH elements of the returned pair in
     order — the run dir first, the salt second — and hands each onward to `run_investigation`
     (`run_dir=` and `salt=`). No disk re-read of the salt survives between the two: the value
     the builder returned is the value threaded, not a round-trip through a file the same
-    function just wrote."""
+    function just wrote.
+
+    #741 moved the `run_investigation` call out of `main` and behind an `investigate=` seam on
+    `_run_investigation_lifecycle`, so the threading leg is now EXECUTED rather than read off
+    the source: the values are asserted where they ARRIVE. That is strictly stronger than the
+    AST walk it replaces, which could only see that a keyword named `run_dir` was spelled at
+    one call site — not that the run dir reached the driver. The unpack leg and the
+    no-disk-re-read leg stay source-level: both are genuinely claims about what `run.py`
+    contains."""
     tree = ast.parse((DEFENDER / "run.py").read_text(encoding="utf-8"))
 
     unpacks = [
@@ -157,18 +165,25 @@ def test_run_py_unpacks_the_pair_and_threads_both_elements_onward():
         f"unpack order must match the return order (run_dir, salt); got {bound}"
     )
 
-    calls = [
-        n for n in ast.walk(tree)
-        if isinstance(n, ast.Call)
-        and isinstance(n.func, ast.Attribute)
-        and n.func.attr == "run_investigation"
-    ]
-    assert len(calls) == 1, "expected exactly one run_investigation call site in run.py"
-    threaded = {
-        kw.arg: kw.value.id for kw in calls[0].keywords if isinstance(kw.value, ast.Name)
-    }
-    assert threaded.get("run_dir") == "run_dir", "run.py must thread the unpacked run dir onward"
-    assert threaded.get("salt") == "salt", (
+    from defender.run import _run_investigation_lifecycle
+
+    arrived: dict = {}
+
+    def recording_investigate(**kwargs):
+        arrived.update(kwargs)
+        return {"output": "", "requests": 0}
+
+    run_dir = tmp_path / "r-647"
+    run_dir.mkdir()
+    _run_investigation_lifecycle(
+        run_dir=run_dir, salt="THE-MINTED-SALT", model="m-647", defender_dir=DEFENDER,
+        investigate=recording_investigate,
+        start_box=lambda *_a, **_kw: object(),
+        stop_box=lambda *_a, **_kw: None,
+        scrub=lambda *_a, **_kw: None,
+    )
+    assert arrived.get("run_dir") == run_dir, "run.py must thread the unpacked run dir onward"
+    assert arrived.get("salt") == "THE-MINTED-SALT", (
         "run.py must thread the UNPACKED salt onward — not a value re-read from disk"
     )
 

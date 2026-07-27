@@ -441,6 +441,62 @@ def stop_box(box: BoxExecutor, *, docker: DockerFn = _docker) -> None:
         )
 
 
+def stop_and_scrub(
+    box: BoxExecutor,
+    tree: Path,
+    *,
+    stop_box: Callable[..., None],
+    scrub_tree: Callable[[Path], None],
+    in_flight: bool,
+) -> None:
+    """Reap a boxed run: tear the box down, then walk the tree it could write.
+
+    #741: this is the exit half of a boxed lifecycle, owned in ONE place rather than
+    hand-assembled at each call site. Both writable lanes call it — `run.py`'s investigation
+    and `drains.py`'s worktree batch. `run_cycle` does not, and correctly: all of its mounts
+    are read-only, so it has no tree to walk.
+
+    Call it from a `finally`, with `in_flight` saying whether an exception is already
+    propagating. Three rules, and the ordering between them is the whole point:
+
+    - **The scrub runs only once the box is provably dead.** "No live writer" is the scrub's
+      entire justification, so a teardown whose fault was swallowed leaves that unproven and
+      the walk is SKIPPED rather than raced. A check that races a live writer is a check in
+      name only.
+    - **An in-flight exception outranks a teardown fault.** The work's own failure is the
+      more informative signal; a `BoxFault` raised on top of it would replace it. Python's
+      implicit chaining keeps the teardown fault reachable on `__context__`. With nothing in
+      flight there is nothing to outrank, so the fault propagates normally. Outranked is not
+      the same as unrecorded: a suppressed fault means BOTH a possibly-leaked container (one
+      genuinely survives its parent's death, C42) and a tree that was never walked, so it is
+      logged rather than dropped — a silent leak is exactly the residue this helper exists
+      to retire.
+    - **A taint outranks everything.** `RunTainted` from the scrub deliberately wins over the
+      work's own failure — a tainted tree is the worse signal, and the crash path's tree is
+      the one most likely to hold what the box planted, and the one a human then opens by
+      hand. That falls out of not catching it.
+
+    `stop_box` and `scrub_tree` are required, not defaulted: each lane already anchors its own
+    defaults in its own signature, and re-defaulting them here would be a second source.
+    `scrub_tree` rather than `scrub` because this module re-exports the real `scrub` for its
+    callers, and a parameter of that name would shadow it.
+    """
+    box_down = False
+    try:
+        stop_box(box)
+        box_down = True
+    except BoxFault as e:
+        if not in_flight:
+            raise
+        print(
+            f"[box] WARNING: teardown failed under an in-flight failure: {e} — the box may "
+            f"be leaked, and {tree} was NOT scrubbed (the walk needs a provably dead box).",
+            file=sys.stderr,
+        )
+    if box_down:
+        scrub_tree(tree)
+
+
 @dataclass(frozen=True)
 class _DockerTransport:
 
