@@ -26,7 +26,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from defender._io import read_text_utf8  # noqa: E402
-from defender.learning.core.config import ORACLE_EFFORT, ORACLE_MODEL  # noqa: E402
+from defender.learning.core.config import oracle_effort, oracle_model  # noqa: E402
 from defender.learning.core.validate import dump_oracle_doc  # noqa: E402
 from defender.learning.pipeline.oracle.run import invoke_oracle_lead  # noqa: E402
 from defender.learning.pipeline.oracle.sample import assemble_oracle_doc  # noqa: E402
@@ -62,9 +62,14 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("case_dir", type=Path, help="golden case directory")
-    p.add_argument("--tag", default=f"{ORACLE_MODEL}_effort-{ORACLE_EFFORT}",
+    # Resolved once, at the boundary — `oracle_model`/`oracle_effort` read env vars with
+    # their own fallbacks, and a tag naming a model the run did not use is worse than no
+    # default at all.
+    p.add_argument("--tag", default=None,
                    help="projection tag (default: <model>_effort-<effort>)")
     ns = p.parse_args(argv)
+    if ns.tag is None:
+        ns.tag = f"{oracle_model()}_effort-{oracle_effort()}"
 
     case_dir = ns.case_dir.resolve()   # bind() requires an absolute trace root
     tag = ns.tag

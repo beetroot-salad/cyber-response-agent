@@ -265,6 +265,11 @@ def coverage(case_dir: Path, manifest: dict) -> dict:
                     dead += 1
     return {
         "case": case_dir.name, "kind": manifest.get("kind"), "split": manifest.get("split"),
+        # A case whose capture cannot answer the question its leads ask. It stays in the
+        # tree -- the telemetry is real and the defect is instructive -- but it is not
+        # part of any split's totals, because counting it inflates the unit count with a
+        # unit nothing was ever measured for.
+        "defective": manifest.get("defective"),
         "unit": f"{(manifest.get('unit') or {}).get('activity_family', '?')} "
                 f"{(manifest.get('unit') or {}).get('host_pair', '')}".strip(),
         "leads": len(leads), "observed": len(observed), "baselined": len(controlled),
@@ -277,11 +282,12 @@ def render_coverage(rows: list[dict]) -> str:
              f"{'case':<34}{'split':<10}{'leads':>6}{'obs':>5}{'base':>6}"
              f"{'err':>5}{'ctl-live':>10}{'ctl-dead':>10}"]
     for r in rows:
+        mark = "  !! DEFECTIVE" if r.get("defective") else ""
         lines.append(f"{r['case']:<34}{r['split'] or '?':<10}{r['leads']:>6}{r['observed']:>5}"
                      f"{r['baselined']:>6}{r['errored_payloads'] or '':>5}"
-                     f"{r['controls_live']:>10}{r['controls_dead'] or '':>10}")
+                     f"{r['controls_live']:>10}{r['controls_dead'] or '':>10}{mark}")
     for split in ("dev", "held-out"):
-        sel = [r for r in rows if r["split"] == split]
+        sel = [r for r in rows if r["split"] == split and not r.get("defective")]
         if not sel:
             continue
         lines.append(
@@ -289,6 +295,10 @@ def render_coverage(rows: list[dict]) -> str:
             f"{sum(r['leads'] for r in sel)} leads, "
             f"{sum(r['observed'] for r in sel)} with telemetry, "
             f"{sum(r['baselined'] for r in sel)} with a baseline")
+    for r in rows:
+        if r.get("defective"):
+            lines.append(f"  !! {r['case']} is EXCLUDED from the totals above: "
+                         f"{' '.join(str(r['defective']).split())}")
     dead = sum(r["controls_dead"] for r in rows)
     if dead:
         lines.append(f"  !! {dead} controls landed on a window where the stack was not "

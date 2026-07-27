@@ -24,3 +24,26 @@ attack:
   # alert either way (oracle/prompt.md:1) — it only shapes the lead set.
   alert_source: synthesised
 generated_by: generate_case.py
+
+# ---------------------------------------------------------------- DEFECTIVE
+# This case is NOT part of the dataset. It is kept because the capture is real and
+# the defect is instructive, not because it can be scored.
+#
+# The unit above claims `->web-1`. The activity never touched web-1: scenario
+# `living-off-the-land` is LOCAL -- none of its steps interpolate ${target}, so it acted on
+# canary-1 exactly as it always does. `--target web-1` reached only the runner's
+# record, the story's "directed at" header and the synthesised alert, so
+# `defender/run.py` investigated web-1 and every lead here queries an envelope
+# that cannot contain the activity.
+#
+# The evidence is in this case's own hidden/ tree: the scenario's steps curl web-1 over HTTP and execute the result on canary-1; the leads ask what PROCESSES ran on web-1, which is a question the activity never answers.
+#
+# Not recoverable by editing this file. The leads are a gather against the wrong
+# host; fixing it means a lever-up on snapshot 412854206-restore-20260726, a fresh
+# `defender/run.py` against an alert on canary-1, and a new capture.
+#
+# `generate_case.retarget_problem` now refuses this before the stack is touched.
+defective: >-
+  the leads investigate web-1; the activity ran on canary-1. Scenario
+  `living-off-the-land` does not read ${target}, so the recruiter's --target moved only the
+  metadata. Re-capture required; no manifest edit recovers it.

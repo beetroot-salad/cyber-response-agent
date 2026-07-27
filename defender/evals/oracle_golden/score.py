@@ -325,6 +325,16 @@ def score_case(case_dir: Path, proj_path: Path, *, model: str, effort: str, jobs
                         "why_unjudged": "the projection's lead set does not match the case's"})
         return summary
 
+    if manifest.get("defective"):
+        # A case whose leads cannot contain the activity they were gathered for. Scoring
+        # it would report a projection as correctly-quiet and file that under a unit
+        # nothing was ever measured for — which reads as coverage.
+        summary.update({
+            "judged": False, "rows": [],
+            "why_unjudged": f"the case is marked defective: {manifest['defective']}",
+        })
+        return summary
+
     if manifest.get("kind") in DERIVED_KINDS:
         summary.update({
             "judged": False, "rows": [],

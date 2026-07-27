@@ -4,12 +4,18 @@
 Rebuilt thin. The previous recruiter polled 20 x 30s for a detection rule and then
 `return 2` — discarding telemetry the activity had ALREADY produced. That threw away
 two of the pilot campaign's six cells (`persistence-authorized-keys`,
-`living-off-the-land`), which raise nothing once retargeted off canary-1.
+`living-off-the-land`), which raise no rule.
 
 The rule was never load-bearing. **The oracle does not see the alert** — `oracle/prompt.md`
 opens by saying so — and the alert exists only to make `defender/run.py` emit a realistic
 lead set. So a cell whose activity trips no rule is not an unrecruitable cell; it is a
 cell whose alert has to come from somewhere else.
+
+**A `--target` the scenario cannot honour is refused before the stack is touched**
+(`retarget_problem`). Those same two cells are LOCAL — they act on canary-1 itself and
+never read `${target}` — but `runner.py` records the override regardless, so recruiting
+them "at db-1" produced two cases whose every lead investigated a host the activity had
+not run on. See `retarget_problem` for the full account; it cost case-006 and case-007.
 
   fire       playground-v2/attacks/runner.py run <scenario> --seed --user --target
   alert      the rule's own alert if one fired, else synthesised from the runner record
@@ -35,8 +41,8 @@ answer is a signed diff over baseline, so with the generators off `+noise` canno
 at all and `+event` is easier than production.
 
 Usage:
-  generate_case.py --scenario persistence-authorized-keys --target db-1 \\
-      --case-id case-006-... --split dev --activity-family persistence/T1098.004
+  generate_case.py --scenario cross-tier-ssh-probe --target web-2 \\
+      --case-id case-010-... --split held-out --activity-family data-access/T1021.004
 """
 from __future__ import annotations
 
@@ -51,9 +57,12 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import yaml
+
 HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parents[2]
 RUNNER = REPO_ROOT / "playground-v2" / "attacks" / "runner.py"
+CATALOG = REPO_ROOT / "playground-v2" / "attacks" / "catalog.yaml"
 RUNS_DIR = REPO_ROOT / "playground-v2" / "attacks" / "runs"
 EXTRACT_ALERT = REPO_ROOT / "experiments" / "oracle-telemetry-fidelity" / "extract_alert.py"
 DEFENDER_RUN = REPO_ROOT / "defender" / "run.py"
@@ -80,6 +89,60 @@ def _run(cmd: list[str | Path], *, timeout: int, label: str) -> str:
         raise RuntimeError(f"{label} failed ({proc.returncode}):\n"
                            f"{proc.stdout[-2000:]}\n{proc.stderr[-2000:]}")
     return proc.stdout
+
+
+def scenario_entry(scenario: str, catalog_path: Path) -> dict:
+    catalog = yaml.safe_load(catalog_path.read_text(encoding="utf-8")) or {}
+    entries = catalog.get("scenarios") or catalog.get("attacks") or []
+    for entry in entries:
+        if entry.get("id") == scenario:
+            return entry
+    raise KeyError(f"{catalog_path.name} has no scenario {scenario!r}")
+
+
+def honours_target(entry: dict) -> bool:
+    """Do this scenario's own commands interpolate `${target}`?
+
+    `runner.py` records `resolved.target_host = overrides.target or scenario.target_host`
+    whether or not any command reads it, so the record, the story header and the
+    manifest's `host_pair` all repeat an override the activity never obeyed.
+    """
+    return any("${target}" in (step.get("cmd") or "")
+               for step in entry.get("steps") or [])
+
+
+def retarget_problem(scenario: str, target: str | None, *,
+                     catalog_path: Path) -> str | None:
+    """Why this scenario cannot be pointed at `target`, or `None` if it can.
+
+    This check exists because its absence cost two cases. `persistence-authorized-keys`
+    and `living-off-the-land` are LOCAL scenarios — the first appends to canary-1's own
+    `/root/.ssh/authorized_keys`, the second curls a URL and runs the result on canary-1.
+    Neither reads `${target}`. Recruited with `--target db-1` / `--target web-1`, the
+    override reached only the runner's record, the story's "directed at" header and the
+    synthesised alert — so `defender/run.py` investigated a host the activity never ran
+    on, and every lead in the resulting case queries an envelope that cannot contain it.
+    case-006's capture proves it: db-1's `/root/.ssh/authorized_keys` is empty and Falco
+    has zero rows for db-1.
+
+    A case like that is not merely mislabelled. Its leads are unusable, and no manifest
+    edit recovers them — the envelope has to be re-gathered against an alert on the host
+    the activity actually touched.
+    """
+    if target is None:
+        return None
+    entry = scenario_entry(scenario, catalog_path)
+    default = entry.get("target_host")
+    if target == default or honours_target(entry):
+        return None
+    return (
+        f"scenario {scenario!r} runs entirely on {entry.get('source_host', 'its source host')} "
+        f"— none of its steps interpolate ${{target}} — so --target {target!r} would change "
+        f"the runner record, the story header and the synthesised alert while the commands "
+        f"still ran against {default!r}. The resulting case's leads would investigate a host "
+        f"the activity never touched. Recruit it at its own target ({default!r}), or add a "
+        f"retargetable scenario to the catalog."
+    )
 
 
 def fire(scenario: str, *, seed: int, user: str | None, target: str | None,
@@ -314,6 +377,15 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     ns = build_parser().parse_args(argv)
+
+    # First, before the stack is touched OR a directory is created: a target the
+    # scenario cannot honour produces a case whose leads point at the wrong host, and
+    # nothing downstream notices. A refusal that has already made `cases/<id>/` leaves a
+    # half-case behind for the next reader to wonder about.
+    problem = retarget_problem(ns.scenario, ns.target, catalog_path=CATALOG)
+    if problem is not None:
+        print(f"!! {problem}", file=sys.stderr)
+        return 2
 
     case_dir = ns.cases_dir / ns.case_id
     work = case_dir / ".generate"

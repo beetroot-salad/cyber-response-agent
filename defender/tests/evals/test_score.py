@@ -21,6 +21,7 @@ Every judge call goes through an injected `call` seam; nothing here reaches a mo
 """
 from __future__ import annotations
 
+import importlib
 import json
 
 import pytest
@@ -388,3 +389,31 @@ def test_the_dry_run_reports_the_mechanical_half_and_calls_nothing(tmp_path, cap
     assert score.main([str(d), str(proj), "--dry-run"]) == 0
     assert "malformed grammar" in capsys.readouterr().out
     assert not (d / "scores").exists(), "--dry-run must not write a score"
+
+
+# ------------------------------------------------------------- the sibling entrypoints
+
+@pytest.mark.parametrize("module", ["replay", "build_case", "controls", "report",
+                                    "record_held_out", "validate_cases", "audit_judge",
+                                    "generate_case", "story_from_run"])
+def test_every_suite_entrypoint_still_imports(module):
+    """`replay.py` sat broken on main for two commits: `learning/core/config.py` moved
+    `ORACLE_MODEL`/`ORACLE_EFFORT` from module constants to functions, and nothing here
+    imported the module, so the ImportError only surfaced when someone tried to produce
+    a projection. These are scripts, not libraries — a smoke import is the cheapest thing
+    that would have caught it."""
+    importlib.import_module(f"defender.evals.oracle_golden.{module}")
+
+
+def test_a_defective_case_is_never_sent_to_the_judge(tmp_path):
+    """case-006 and case-007 were recruited with a `--target` their scenario could not
+    honour, so the activity ran on canary-1 while every lead queries db-1 / web-1. The
+    oracle's empty projection is CORRECT there, and scoring it would file a perfect
+    quiet result under a unit nothing was ever measured for."""
+    d = _case(tmp_path, extra_manifest={"defective": "the leads investigate the wrong host"})
+    proj = _projection(d, {"l-001": []})
+    call = _scripted()
+    summary = _score(d, proj, call)
+    assert summary["judged"] is False
+    assert call.calls == []
+    assert "defective" in summary["why_unjudged"]

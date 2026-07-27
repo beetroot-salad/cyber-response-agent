@@ -240,3 +240,18 @@ def test_coverage_survives_a_half_built_case(tmp_path):
     d = tmp_path / "case-partial"
     d.mkdir()
     assert validate_cases.coverage(d, {})["leads"] == 0
+
+
+def test_a_defective_case_is_excluded_from_the_totals_and_named(tmp_path):
+    """A capture whose leads cannot contain the activity is not coverage. Leaving it in
+    the split totals inflates the unit count with a unit nothing was measured for —
+    which is exactly how case-006 and case-007 briefly made dev look like six units."""
+    _case(tmp_path, "case-good")
+    _case(tmp_path, "case-bad", manifest_extra={"defective": "leads point at the wrong host"})
+    rows = [validate_cases.coverage(
+        d, yaml.safe_load((d / "manifest.yaml").read_text(encoding="utf-8")))
+        for d in sorted(tmp_path.iterdir())]
+    rendered = validate_cases.render_coverage(rows)
+    assert "dev: 1 cases" in rendered, "the defective case must not be counted"
+    assert "case-bad is EXCLUDED" in rendered
+    assert "wrong host" in rendered, "the reason travels with the exclusion"

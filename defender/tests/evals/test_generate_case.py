@@ -211,3 +211,77 @@ def test_the_hand_written_and_generated_environment_notes_are_one_template(tmp_p
         (judge.GOLDEN_DIR / "cases" / "case-001-ssh-bruteforce-canary" / "environment.yaml")
         .read_text(encoding="utf-8"))
     assert generated == hand
+
+
+# ------------------------------------------------------- the retarget guard (#711)
+
+CATALOG = {"scenarios": [
+    {"id": "local-only", "source_host": "canary-1", "target_host": "canary-1",
+     "steps": [{"cmd": "echo key >> /root/.ssh/authorized_keys"}]},
+    {"id": "retargetable", "source_host": "office-ws-1", "target_host": "db-1",
+     "steps": [{"cmd": "ssh dev.dana@${target} id"}]},
+]}
+
+
+@pytest.fixture
+def catalog(tmp_path):
+    p = tmp_path / "catalog.yaml"
+    p.write_text(yaml.safe_dump(CATALOG), encoding="utf-8")
+    return p
+
+
+def test_a_scenario_that_reads_the_target_can_be_retargeted(catalog):
+    assert generate_case.retarget_problem("retargetable", "web-2",
+                                          catalog_path=catalog) is None
+
+
+def test_a_scenario_at_its_own_target_is_always_fine(catalog):
+    assert generate_case.retarget_problem("local-only", "canary-1",
+                                          catalog_path=catalog) is None
+    assert generate_case.retarget_problem("local-only", None, catalog_path=catalog) is None
+
+
+def test_retargeting_a_local_scenario_is_refused(catalog):
+    """The check that cost two cases by being absent. `persistence-authorized-keys`
+    appends to canary-1's OWN authorized_keys and `living-off-the-land` curls a URL and
+    runs the result there; neither reads `${target}`. `runner.py` still records
+    `resolved.target_host` from the override, so the record, the story's "directed at"
+    header and the synthesised alert all name a host the commands never touched — and
+    `defender/run.py` then gathers leads against that host. case-006's own capture is
+    the proof: db-1's `/root/.ssh/authorized_keys` is empty and Falco has zero rows for
+    db-1, because the key was written on canary-1."""
+    problem = generate_case.retarget_problem("local-only", "db-1", catalog_path=catalog)
+    assert problem is not None
+    assert "never touched" in problem
+    assert "canary-1" in problem, "it must name where the commands actually ran"
+
+
+def test_the_guard_runs_before_the_stack_is_touched(catalog, tmp_path, monkeypatch,
+                                                   capsys):
+    """A refusal after `fire()` would still have levered the attack and burned the
+    window. The exit is worth nothing if it happens second."""
+    def explode(*a, **kw):
+        raise AssertionError("fired the scenario despite an impossible target")
+
+    monkeypatch.setattr(generate_case, "CATALOG", catalog)
+    monkeypatch.setattr(generate_case, "fire", explode)
+    # `main` reads the module-level CATALOG at call time, which is what the patch above
+    # replaces — the guard takes its catalog as a required argument precisely so a
+    # default bound at import time cannot outlive it.
+    rc = generate_case.main(["--scenario", "local-only", "--target", "db-1",
+                             "--case-id", "case-x", "--split", "dev",
+                             "--activity-family", "persistence/T1098.004",
+                             "--cases-dir", str(tmp_path / "cases")])
+    assert rc == 2
+    assert "never touched" in capsys.readouterr().err
+    assert not (tmp_path / "cases").exists(), (
+        "the refusal created a half-case directory — it must precede every side effect")
+
+
+def test_the_guard_reads_the_real_catalog():
+    """A guard keyed on a fixture only would not notice the catalog changing shape."""
+    real = generate_case.CATALOG
+    assert generate_case.retarget_problem(
+        "persistence-authorized-keys", "db-1", catalog_path=real) is not None
+    assert generate_case.retarget_problem(
+        "cross-tier-ssh-probe", "web-2", catalog_path=real) is None
