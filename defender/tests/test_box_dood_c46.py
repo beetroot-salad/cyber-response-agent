@@ -65,7 +65,8 @@ def test_a_pass_through_mount_translates_to_itself():
     """Identity is a legitimate MAPPING here, not a missing one — the socket is bind-mounted
     at the same path on both sides, so `_covered` must still report it as covered."""
     p = Path("/var/run/docker.sock")
-    assert _covered(p, MOUNTS) and _daemon_source(p, MOUNTS) == p
+    assert _covered(p, MOUNTS)
+    assert _daemon_source(p, MOUNTS) == p
 
 
 def test_no_mounts_is_the_identity_so_a_native_daemon_is_unchanged():
