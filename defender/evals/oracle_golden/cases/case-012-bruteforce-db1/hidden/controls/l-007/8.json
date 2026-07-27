@@ -1,0 +1,138 @@
+{
+  "lead_id": "l-007",
+  "seq": 8,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-06T09:59:11.000Z",
+        "2026-07-13T09:59:11.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-06T09:59:11.000Z\" AND @timestamp < \"2026-07-13T09:59:11.000Z\"\n        AND host.name == \"web-2\"\n        AND (source.ip == \"172.18.0.16\" OR host.ip == \"172.18.0.16\")\n| STATS events = COUNT(*) BY event.outcome, data_stream.dataset\n| SORT events DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-06T09:59:11.000Z\" AND @timestamp < \"2026-07-13T09:59:11.000Z\"\n        AND host.name == \"web-2\"\n        AND (source.ip == \"172.18.0.16\" OR host.ip == \"172.18.0.16\")\n| STATS events = COUNT(*) BY event.outcome, data_stream.dataset\n| SORT events DESC",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "event.outcome",
+            "type": "keyword"
+          },
+          {
+            "name": "data_stream.dataset",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 3,
+        "values": [
+          {
+            "events": 28756,
+            "event.outcome": null,
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 1010,
+            "event.outcome": "success",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 996,
+            "event.outcome": "failure",
+            "data_stream.dataset": "system.auth"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-06-29T09:59:11.000Z",
+        "2026-07-06T09:59:11.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-29T09:59:11.000Z\" AND @timestamp < \"2026-07-06T09:59:11.000Z\"\n        AND host.name == \"web-2\"\n        AND (source.ip == \"172.18.0.16\" OR host.ip == \"172.18.0.16\")\n| STATS events = COUNT(*) BY event.outcome, data_stream.dataset\n| SORT events DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-29T09:59:11.000Z\" AND @timestamp < \"2026-07-06T09:59:11.000Z\"\n        AND host.name == \"web-2\"\n        AND (source.ip == \"172.18.0.16\" OR host.ip == \"172.18.0.16\")\n| STATS events = COUNT(*) BY event.outcome, data_stream.dataset\n| SORT events DESC",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "event.outcome",
+            "type": "keyword"
+          },
+          {
+            "name": "data_stream.dataset",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 3,
+        "values": [
+          {
+            "events": 29475,
+            "event.outcome": null,
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 1853,
+            "event.outcome": "success",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 852,
+            "event.outcome": "failure",
+            "data_stream.dataset": "system.auth"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-22T09:59:11.000Z",
+        "2026-06-29T09:59:11.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-22T09:59:11.000Z\" AND @timestamp < \"2026-06-29T09:59:11.000Z\"\n        AND host.name == \"web-2\"\n        AND (source.ip == \"172.18.0.16\" OR host.ip == \"172.18.0.16\")\n| STATS events = COUNT(*) BY event.outcome, data_stream.dataset\n| SORT events DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-22T09:59:11.000Z\" AND @timestamp < \"2026-06-29T09:59:11.000Z\"\n        AND host.name == \"web-2\"\n        AND (source.ip == \"172.18.0.16\" OR host.ip == \"172.18.0.16\")\n| STATS events = COUNT(*) BY event.outcome, data_stream.dataset\n| SORT events DESC",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "event.outcome",
+            "type": "keyword"
+          },
+          {
+            "name": "data_stream.dataset",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 3,
+        "values": [
+          {
+            "events": 29255,
+            "event.outcome": null,
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 1337,
+            "event.outcome": "success",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 984,
+            "event.outcome": "failure",
+            "data_stream.dataset": "system.auth"
+          }
+        ]
+      }
+    }
+  ]
+}

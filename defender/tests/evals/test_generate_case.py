@@ -285,3 +285,50 @@ def test_the_guard_reads_the_real_catalog():
         "persistence-authorized-keys", "db-1", catalog_path=real) is not None
     assert generate_case.retarget_problem(
         "cross-tier-ssh-probe", "web-2", catalog_path=real) is None
+
+
+# --------------------------------------------------- the occupied-case-id guard (#711)
+
+def test_a_free_case_id_is_not_refused(tmp_path):
+    assert generate_case.occupancy_problem(tmp_path / "case-new") is None
+
+
+@pytest.mark.parametrize("artifact", generate_case.CASE_ARTIFACTS)
+def test_an_id_that_already_holds_a_capture_is_refused(tmp_path, artifact):
+    """Two recruitments of one case id interleave rather than collide: the second
+    overwrites `.generate/alert.json` while the first is still investigating. case-013's
+    first attempt landed a story describing the 10:28 run against web-1, leads from an
+    investigation of a web-2 alert, and a manifest window from a 10:16 run that had
+    already been killed — every file well-formed, the case incoherent. That is the
+    defect that retired case-009, and nothing downstream detects it."""
+    d = tmp_path / "case-x"
+    (d / artifact).mkdir(parents=True) if artifact in ("oracle_visible", "hidden") else (
+        d.mkdir(parents=True), (d / artifact).write_text("x", encoding="utf-8"))
+    problem = generate_case.occupancy_problem(d)
+    assert problem is not None
+    assert artifact in problem
+    assert "two captures" in problem
+
+
+def test_a_recruitment_already_in_flight_is_refused(tmp_path):
+    d = tmp_path / "case-x" / ".generate"
+    d.mkdir(parents=True)
+    problem = generate_case.occupancy_problem(tmp_path / "case-x")
+    assert problem is not None
+    assert "in flight" in problem
+
+
+def test_the_occupancy_guard_precedes_every_side_effect(tmp_path, catalog, monkeypatch,
+                                                        capsys):
+    def explode(*a, **kw):
+        raise AssertionError("fired the scenario into an occupied case id")
+
+    monkeypatch.setattr(generate_case, "CATALOG", catalog)
+    monkeypatch.setattr(generate_case, "fire", explode)
+    cases = tmp_path / "cases"
+    (cases / "case-x" / "hidden").mkdir(parents=True)
+    rc = generate_case.main(["--scenario", "retargetable", "--case-id", "case-x",
+                             "--split", "dev", "--activity-family", "f",
+                             "--cases-dir", str(cases)])
+    assert rc == 2
+    assert "two captures" in capsys.readouterr().err

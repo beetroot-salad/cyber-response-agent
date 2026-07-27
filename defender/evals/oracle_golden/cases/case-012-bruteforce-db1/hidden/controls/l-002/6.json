@@ -1,0 +1,393 @@
+{
+  "lead_id": "l-002",
+  "seq": 6,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-13T09:15:00.000Z",
+        "2026-07-13T10:15:00.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-13T09:15:00.000Z\" AND @timestamp < \"2026-07-13T10:15:00.000Z\"\n        AND (host.name LIKE \"db-*\" OR host.name LIKE \"web-*\" OR host.name LIKE \"jump-box-*\")\n        AND event.outcome IS NOT NULL\n| STATS accepted = COUNT(*) WHERE event.outcome == \"success\",\n        failed   = COUNT(*) WHERE event.outcome == \"failure\",\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY host.name, source.ip, user.name\n| SORT failed DESC, accepted DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-13T09:15:00.000Z\" AND @timestamp < \"2026-07-13T10:15:00.000Z\"\n        AND (host.name LIKE \"db-*\" OR host.name LIKE \"web-*\" OR host.name LIKE \"jump-box-*\")\n        AND event.outcome IS NOT NULL\n| STATS accepted = COUNT(*) WHERE event.outcome == \"success\",\n        failed   = COUNT(*) WHERE event.outcome == \"failure\",\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY host.name, source.ip, user.name\n| SORT failed DESC, accepted DESC",
+        "columns": [
+          {
+            "name": "accepted",
+            "type": "long"
+          },
+          {
+            "name": "failed",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 7,
+        "values": [
+          {
+            "accepted": 0,
+            "failed": 192,
+            "first_seen": "2026-07-13T09:18:26.000Z",
+            "last_seen": "2026-07-13T09:47:48.000Z",
+            "host.name": "web-1",
+            "source.ip": "172.18.0.6",
+            "user.name": "svc.reports"
+          },
+          {
+            "accepted": 0,
+            "failed": 96,
+            "first_seen": "2026-07-13T09:23:35.000Z",
+            "last_seen": "2026-07-13T09:23:51.000Z",
+            "host.name": "web-1",
+            "source.ip": "172.18.0.8",
+            "user.name": "svc.reports"
+          },
+          {
+            "accepted": 40,
+            "failed": 0,
+            "first_seen": "2026-07-13T09:17:34.000Z",
+            "last_seen": "2026-07-13T10:12:36.000Z",
+            "host.name": "web-1",
+            "source.ip": "172.18.0.17",
+            "user.name": "sre.ben"
+          },
+          {
+            "accepted": 24,
+            "failed": 0,
+            "first_seen": "2026-07-13T09:37:49.000Z",
+            "last_seen": "2026-07-13T09:57:50.000Z",
+            "host.name": "web-2",
+            "source.ip": "172.18.0.17",
+            "user.name": "sre.ben"
+          },
+          {
+            "accepted": 16,
+            "failed": 0,
+            "first_seen": "2026-07-13T09:52:38.000Z",
+            "last_seen": "2026-07-13T10:04:22.000Z",
+            "host.name": "web-2",
+            "source.ip": "172.18.0.17",
+            "user.name": "sre.chen"
+          },
+          {
+            "accepted": 8,
+            "failed": 0,
+            "first_seen": "2026-07-13T09:36:54.000Z",
+            "last_seen": "2026-07-13T09:36:54.000Z",
+            "host.name": "db-1",
+            "source.ip": "172.18.0.17",
+            "user.name": "sre.ben"
+          },
+          {
+            "accepted": 8,
+            "failed": 0,
+            "first_seen": "2026-07-13T09:37:41.000Z",
+            "last_seen": "2026-07-13T09:37:41.000Z",
+            "host.name": "db-1",
+            "source.ip": "172.18.0.17",
+            "user.name": "sre.chen"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-06T09:15:00.000Z",
+        "2026-07-06T10:15:00.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-06T09:15:00.000Z\" AND @timestamp < \"2026-07-06T10:15:00.000Z\"\n        AND (host.name LIKE \"db-*\" OR host.name LIKE \"web-*\" OR host.name LIKE \"jump-box-*\")\n        AND event.outcome IS NOT NULL\n| STATS accepted = COUNT(*) WHERE event.outcome == \"success\",\n        failed   = COUNT(*) WHERE event.outcome == \"failure\",\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY host.name, source.ip, user.name\n| SORT failed DESC, accepted DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-06T09:15:00.000Z\" AND @timestamp < \"2026-07-06T10:15:00.000Z\"\n        AND (host.name LIKE \"db-*\" OR host.name LIKE \"web-*\" OR host.name LIKE \"jump-box-*\")\n        AND event.outcome IS NOT NULL\n| STATS accepted = COUNT(*) WHERE event.outcome == \"success\",\n        failed   = COUNT(*) WHERE event.outcome == \"failure\",\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY host.name, source.ip, user.name\n| SORT failed DESC, accepted DESC",
+        "columns": [
+          {
+            "name": "accepted",
+            "type": "long"
+          },
+          {
+            "name": "failed",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 6,
+        "values": [
+          {
+            "accepted": 56,
+            "failed": 0,
+            "first_seen": "2026-07-06T09:23:10.584Z",
+            "last_seen": "2026-07-06T10:13:13.687Z",
+            "host.name": "jump-box-1",
+            "source.ip": "172.18.0.14",
+            "user.name": "svc.config-mgmt"
+          },
+          {
+            "accepted": 56,
+            "failed": 0,
+            "first_seen": "2026-07-06T09:23:10.000Z",
+            "last_seen": "2026-07-06T10:13:13.000Z",
+            "host.name": "web-2",
+            "source.ip": "172.18.0.14",
+            "user.name": "svc.config-mgmt"
+          },
+          {
+            "accepted": 56,
+            "failed": 0,
+            "first_seen": "2026-07-06T09:23:10.000Z",
+            "last_seen": "2026-07-06T10:13:13.000Z",
+            "host.name": "db-1",
+            "source.ip": "172.18.0.14",
+            "user.name": "svc.config-mgmt"
+          },
+          {
+            "accepted": 56,
+            "failed": 0,
+            "first_seen": "2026-07-06T09:23:09.000Z",
+            "last_seen": "2026-07-06T10:13:12.000Z",
+            "host.name": "web-1",
+            "source.ip": "172.18.0.14",
+            "user.name": "svc.config-mgmt"
+          },
+          {
+            "accepted": 8,
+            "failed": 0,
+            "first_seen": "2026-07-06T09:57:37.476Z",
+            "last_seen": "2026-07-06T09:57:37.476Z",
+            "host.name": "jump-box-1",
+            "source.ip": "172.18.0.23",
+            "user.name": "dev.ethan"
+          },
+          {
+            "accepted": 8,
+            "failed": 0,
+            "first_seen": "2026-07-06T10:02:04.691Z",
+            "last_seen": "2026-07-06T10:02:04.691Z",
+            "host.name": "jump-box-1",
+            "source.ip": "172.18.0.23",
+            "user.name": "dev.fatima"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-29T09:15:00.000Z",
+        "2026-06-29T10:15:00.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-29T09:15:00.000Z\" AND @timestamp < \"2026-06-29T10:15:00.000Z\"\n        AND (host.name LIKE \"db-*\" OR host.name LIKE \"web-*\" OR host.name LIKE \"jump-box-*\")\n        AND event.outcome IS NOT NULL\n| STATS accepted = COUNT(*) WHERE event.outcome == \"success\",\n        failed   = COUNT(*) WHERE event.outcome == \"failure\",\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY host.name, source.ip, user.name\n| SORT failed DESC, accepted DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-29T09:15:00.000Z\" AND @timestamp < \"2026-06-29T10:15:00.000Z\"\n        AND (host.name LIKE \"db-*\" OR host.name LIKE \"web-*\" OR host.name LIKE \"jump-box-*\")\n        AND event.outcome IS NOT NULL\n| STATS accepted = COUNT(*) WHERE event.outcome == \"success\",\n        failed   = COUNT(*) WHERE event.outcome == \"failure\",\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY host.name, source.ip, user.name\n| SORT failed DESC, accepted DESC",
+        "columns": [
+          {
+            "name": "accepted",
+            "type": "long"
+          },
+          {
+            "name": "failed",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 15,
+        "values": [
+          {
+            "accepted": 18,
+            "failed": 108,
+            "first_seen": "2026-06-29T09:38:57.412Z",
+            "last_seen": "2026-06-29T10:00:15.794Z",
+            "host.name": "jump-box-1",
+            "source.ip": "172.18.0.15",
+            "user.name": "dev.ethan"
+          },
+          {
+            "accepted": 0,
+            "failed": 108,
+            "first_seen": "2026-06-29T10:13:36.000Z",
+            "last_seen": "2026-06-29T10:13:53.000Z",
+            "host.name": "web-1",
+            "source.ip": "172.18.0.10",
+            "user.name": "svc.reports"
+          },
+          {
+            "accepted": 0,
+            "failed": 108,
+            "first_seen": "2026-06-29T09:45:33.000Z",
+            "last_seen": "2026-06-29T09:45:54.000Z",
+            "host.name": "web-2",
+            "source.ip": "172.18.0.11",
+            "user.name": "svc.reports"
+          },
+          {
+            "accepted": 27,
+            "failed": 0,
+            "first_seen": "2026-06-29T09:51:41.542Z",
+            "last_seen": "2026-06-29T10:02:34.771Z",
+            "host.name": "jump-box-1",
+            "source.ip": "172.18.0.20",
+            "user.name": "svc.config-mgmt"
+          },
+          {
+            "accepted": 27,
+            "failed": 0,
+            "first_seen": "2026-06-29T09:21:24.818Z",
+            "last_seen": "2026-06-29T09:53:01.937Z",
+            "host.name": "jump-box-1",
+            "source.ip": "172.18.0.15",
+            "user.name": "dev.fatima"
+          },
+          {
+            "accepted": 27,
+            "failed": 0,
+            "first_seen": "2026-06-29T09:40:57.000Z",
+            "last_seen": "2026-06-29T10:00:58.000Z",
+            "host.name": "web-2",
+            "source.ip": "172.18.0.21",
+            "user.name": "sre.ben"
+          },
+          {
+            "accepted": 27,
+            "failed": 0,
+            "first_seen": "2026-06-29T09:51:40.000Z",
+            "last_seen": "2026-06-29T10:02:34.000Z",
+            "host.name": "web-2",
+            "source.ip": "172.18.0.20",
+            "user.name": "svc.config-mgmt"
+          },
+          {
+            "accepted": 27,
+            "failed": 0,
+            "first_seen": "2026-06-29T09:20:42.000Z",
+            "last_seen": "2026-06-29T09:58:16.000Z",
+            "host.name": "web-1",
+            "source.ip": "172.18.0.21",
+            "user.name": "sre.ben"
+          },
+          {
+            "accepted": 27,
+            "failed": 0,
+            "first_seen": "2026-06-29T09:51:41.000Z",
+            "last_seen": "2026-06-29T10:02:34.000Z",
+            "host.name": "db-1",
+            "source.ip": "172.18.0.20",
+            "user.name": "svc.config-mgmt"
+          },
+          {
+            "accepted": 27,
+            "failed": 0,
+            "first_seen": "2026-06-29T09:51:40.000Z",
+            "last_seen": "2026-06-29T10:02:33.000Z",
+            "host.name": "web-1",
+            "source.ip": "172.18.0.20",
+            "user.name": "svc.config-mgmt"
+          },
+          {
+            "accepted": 18,
+            "failed": 0,
+            "first_seen": "2026-06-29T09:52:42.000Z",
+            "last_seen": "2026-06-29T09:52:42.000Z",
+            "host.name": "web-1",
+            "source.ip": null,
+            "user.name": null
+          },
+          {
+            "accepted": 18,
+            "failed": 0,
+            "first_seen": "2026-06-29T09:15:43.000Z",
+            "last_seen": "2026-06-29T09:40:01.000Z",
+            "host.name": "db-1",
+            "source.ip": "172.18.0.21",
+            "user.name": "sre.ben"
+          },
+          {
+            "accepted": 9,
+            "failed": 0,
+            "first_seen": "2026-06-29T10:07:18.000Z",
+            "last_seen": "2026-06-29T10:07:18.000Z",
+            "host.name": "web-2",
+            "source.ip": "172.18.0.21",
+            "user.name": "sre.chen"
+          },
+          {
+            "accepted": 9,
+            "failed": 0,
+            "first_seen": "2026-06-29T09:52:42.000Z",
+            "last_seen": "2026-06-29T09:52:42.000Z",
+            "host.name": "web-1",
+            "source.ip": "172.18.0.21",
+            "user.name": "sre.chen"
+          },
+          {
+            "accepted": 9,
+            "failed": 0,
+            "first_seen": "2026-06-29T09:55:03.238Z",
+            "last_seen": "2026-06-29T09:55:03.238Z",
+            "host.name": "jump-box-1",
+            "source.ip": "172.18.0.15",
+            "user.name": "dev.hira"
+          }
+        ]
+      }
+    }
+  ]
+}

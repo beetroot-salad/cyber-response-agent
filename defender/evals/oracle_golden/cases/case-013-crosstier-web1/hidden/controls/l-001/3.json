@@ -1,0 +1,2791 @@
+{
+  "lead_id": "l-001",
+  "seq": 3,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-13T10:10:06.000Z",
+        "2026-07-13T11:10:06.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-13T10:10:06.000Z\" AND @timestamp < \"2026-07-13T11:10:06.000Z\"\n        AND host.name == \"web-1\"\n        AND message LIKE \"*pam_unix(sshd:session)*\"\n        AND (message LIKE \"*session opened*\" OR message LIKE \"*session closed*\")\n| EVAL session_action = CASE(message LIKE \"*session opened*\", \"opened\", message LIKE \"*session closed*\", \"closed\", \"other\")\n| EVAL session_user = CASE(message LIKE \"*for user svc.deploy*\", \"svc.deploy\", message LIKE \"*for user svc.config-mgmt*\", \"svc.config-mgmt\", message LIKE \"*for user dev.dana*\", \"dev.dana\", \"other\")\n| KEEP @timestamp, message, session_action, session_user, host.name\n| SORT @timestamp ASC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-13T10:10:06.000Z\" AND @timestamp < \"2026-07-13T11:10:06.000Z\"\n        AND host.name == \"web-1\"\n        AND message LIKE \"*pam_unix(sshd:session)*\"\n        AND (message LIKE \"*session opened*\" OR message LIKE \"*session closed*\")\n| EVAL session_action = CASE(message LIKE \"*session opened*\", \"opened\", message LIKE \"*session closed*\", \"closed\", \"other\")\n| EVAL session_user = CASE(message LIKE \"*for user svc.deploy*\", \"svc.deploy\", message LIKE \"*for user svc.config-mgmt*\", \"svc.config-mgmt\", message LIKE \"*for user dev.dana*\", \"dev.dana\", \"other\")\n| KEEP @timestamp, message, session_action, session_user, host.name\n| SORT @timestamp ASC",
+        "columns": [
+          {
+            "name": "@timestamp",
+            "type": "date"
+          },
+          {
+            "name": "message",
+            "type": "text"
+          },
+          {
+            "name": "session_action",
+            "type": "keyword"
+          },
+          {
+            "name": "session_user",
+            "type": "keyword"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 80,
+        "values": [
+          {
+            "@timestamp": "2026-07-13T10:12:24.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:12:24.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:12:24.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:12:24.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:12:24.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:12:24.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:12:24.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:12:24.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:12:24.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:12:24.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:12:24.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:12:24.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:12:24.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:12:24.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:12:24.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:12:24.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:12:36.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:12:36.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:12:36.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:12:36.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:12:36.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:12:36.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:12:36.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:12:36.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:12:36.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:12:36.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:12:36.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:12:36.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:12:36.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:12:36.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:12:36.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:12:36.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:16:30.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:16:30.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:16:30.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:16:30.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:16:30.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:16:30.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:16:30.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:16:30.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:16:30.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:16:30.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:16:30.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:16:30.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:16:30.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:16:30.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:16:30.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:16:30.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:28:12.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:28:12.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:28:12.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:28:12.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:28:12.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:28:12.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:28:12.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:28:12.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:28:12.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:28:12.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:28:12.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:28:12.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:28:12.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:28:12.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:28:12.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:28:12.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:03:56.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.chen(uid=1002) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:03:56.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.chen(uid=1002) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:03:56.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.chen",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:03:56.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.chen",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:03:56.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.chen",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:03:56.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.chen(uid=1002) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:03:56.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.chen(uid=1002) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:03:56.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.chen(uid=1002) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:03:56.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.chen",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:03:56.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.chen(uid=1002) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:03:56.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.chen(uid=1002) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:03:56.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.chen",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:03:56.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.chen",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:03:56.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.chen",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:03:56.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.chen(uid=1002) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:03:56.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.chen",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-06T10:10:06.000Z",
+        "2026-07-06T11:10:06.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-06T10:10:06.000Z\" AND @timestamp < \"2026-07-06T11:10:06.000Z\"\n        AND host.name == \"web-1\"\n        AND message LIKE \"*pam_unix(sshd:session)*\"\n        AND (message LIKE \"*session opened*\" OR message LIKE \"*session closed*\")\n| EVAL session_action = CASE(message LIKE \"*session opened*\", \"opened\", message LIKE \"*session closed*\", \"closed\", \"other\")\n| EVAL session_user = CASE(message LIKE \"*for user svc.deploy*\", \"svc.deploy\", message LIKE \"*for user svc.config-mgmt*\", \"svc.config-mgmt\", message LIKE \"*for user dev.dana*\", \"dev.dana\", \"other\")\n| KEEP @timestamp, message, session_action, session_user, host.name\n| SORT @timestamp ASC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-06T10:10:06.000Z\" AND @timestamp < \"2026-07-06T11:10:06.000Z\"\n        AND host.name == \"web-1\"\n        AND message LIKE \"*pam_unix(sshd:session)*\"\n        AND (message LIKE \"*session opened*\" OR message LIKE \"*session closed*\")\n| EVAL session_action = CASE(message LIKE \"*session opened*\", \"opened\", message LIKE \"*session closed*\", \"closed\", \"other\")\n| EVAL session_user = CASE(message LIKE \"*for user svc.deploy*\", \"svc.deploy\", message LIKE \"*for user svc.config-mgmt*\", \"svc.config-mgmt\", message LIKE \"*for user dev.dana*\", \"dev.dana\", \"other\")\n| KEEP @timestamp, message, session_action, session_user, host.name\n| SORT @timestamp ASC",
+        "columns": [
+          {
+            "name": "@timestamp",
+            "type": "date"
+          },
+          {
+            "name": "message",
+            "type": "text"
+          },
+          {
+            "name": "session_action",
+            "type": "keyword"
+          },
+          {
+            "name": "session_user",
+            "type": "keyword"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 32,
+        "values": [
+          {
+            "@timestamp": "2026-07-06T10:13:12.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-06T10:13:12.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-06T10:13:12.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-06T10:13:12.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-06T10:13:12.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-06T10:13:12.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-06T10:13:12.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-06T10:13:12.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-06T10:13:12.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-06T10:13:12.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-06T10:13:12.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-06T10:13:12.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-06T10:13:12.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-06T10:13:12.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-06T10:13:12.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-06T10:13:12.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-06T10:33:54.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-06T10:33:54.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-06T10:33:54.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-06T10:33:54.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-06T10:33:54.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-06T10:33:54.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-06T10:33:54.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-06T10:33:54.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-06T10:33:54.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-06T10:33:54.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-06T10:33:54.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-06T10:33:54.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-06T10:33:54.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-06T10:33:54.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-06T10:33:54.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-06T10:33:54.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-29T10:10:06.000Z",
+        "2026-06-29T11:10:06.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-29T10:10:06.000Z\" AND @timestamp < \"2026-06-29T11:10:06.000Z\"\n        AND host.name == \"web-1\"\n        AND message LIKE \"*pam_unix(sshd:session)*\"\n        AND (message LIKE \"*session opened*\" OR message LIKE \"*session closed*\")\n| EVAL session_action = CASE(message LIKE \"*session opened*\", \"opened\", message LIKE \"*session closed*\", \"closed\", \"other\")\n| EVAL session_user = CASE(message LIKE \"*for user svc.deploy*\", \"svc.deploy\", message LIKE \"*for user svc.config-mgmt*\", \"svc.config-mgmt\", message LIKE \"*for user dev.dana*\", \"dev.dana\", \"other\")\n| KEEP @timestamp, message, session_action, session_user, host.name\n| SORT @timestamp ASC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-29T10:10:06.000Z\" AND @timestamp < \"2026-06-29T11:10:06.000Z\"\n        AND host.name == \"web-1\"\n        AND message LIKE \"*pam_unix(sshd:session)*\"\n        AND (message LIKE \"*session opened*\" OR message LIKE \"*session closed*\")\n| EVAL session_action = CASE(message LIKE \"*session opened*\", \"opened\", message LIKE \"*session closed*\", \"closed\", \"other\")\n| EVAL session_user = CASE(message LIKE \"*for user svc.deploy*\", \"svc.deploy\", message LIKE \"*for user svc.config-mgmt*\", \"svc.config-mgmt\", message LIKE \"*for user dev.dana*\", \"dev.dana\", \"other\")\n| KEEP @timestamp, message, session_action, session_user, host.name\n| SORT @timestamp ASC",
+        "columns": [
+          {
+            "name": "@timestamp",
+            "type": "date"
+          },
+          {
+            "name": "message",
+            "type": "text"
+          },
+          {
+            "name": "session_action",
+            "type": "keyword"
+          },
+          {
+            "name": "session_user",
+            "type": "keyword"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 270,
+        "values": [
+          {
+            "@timestamp": "2026-06-29T10:15:32.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:15:32.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:15:32.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:15:32.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:15:32.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:15:32.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:15:32.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:15:32.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:15:32.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:15:32.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:15:32.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:15:32.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:15:32.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:15:32.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:15:32.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:15:32.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:15:32.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:15:32.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:15:44.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:15:44.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:15:44.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:15:44.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:15:44.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:15:44.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:15:44.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:15:44.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:15:44.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:15:44.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:15:44.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:15:44.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:15:44.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:15:44.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:15:44.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:15:44.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:15:44.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:15:44.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:19:38.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:19:38.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:19:38.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:19:38.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:19:38.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:19:38.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:19:38.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:19:38.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:19:38.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:19:38.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:19:38.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:19:38.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:19:38.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:19:38.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:19:38.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:19:38.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:19:38.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:19:38.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:24:57.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:24:57.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:24:57.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:24:57.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:24:57.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:24:57.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:24:57.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:24:57.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:24:57.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:24:57.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:24:57.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:24:57.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:24:57.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:24:57.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:24:57.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:24:57.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:24:57.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:24:57.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:25:10.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:25:10.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:25:10.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:25:10.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:25:10.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:25:10.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:25:10.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:25:10.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:25:10.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:25:10.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:25:10.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:25:10.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:25:10.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:25:10.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:25:10.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:25:10.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:25:10.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:25:10.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:27:41.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:27:41.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:27:41.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:27:41.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:27:41.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:27:41.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:27:41.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:27:41.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:27:41.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:27:41.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:27:41.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:27:41.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:27:41.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:27:41.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:27:41.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:27:41.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:27:41.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:27:41.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:31:21.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:31:21.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:31:21.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:31:21.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:31:21.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:31:21.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:31:21.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:31:21.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:31:21.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:31:21.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:31:21.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:31:21.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:31:21.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:31:21.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:31:21.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:31:21.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:31:21.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.ben(uid=1001) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:31:21.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.ben",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:32:33.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:32:33.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:32:33.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:32:33.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:32:33.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:32:33.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:32:33.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:32:33.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:32:33.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:32:33.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:32:33.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:32:33.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:32:33.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:32:33.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:32:33.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:32:33.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:32:33.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:32:33.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:33:35.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.deploy(uid=1006) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:33:35.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.deploy(uid=1006) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:33:35.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.deploy",
+            "session_action": "closed",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:33:35.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.deploy(uid=1006) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:33:35.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.deploy",
+            "session_action": "closed",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:33:35.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.deploy(uid=1006) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:33:35.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.deploy",
+            "session_action": "closed",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:33:35.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.deploy(uid=1006) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:33:35.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.deploy",
+            "session_action": "closed",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:33:35.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.deploy(uid=1006) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:33:35.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.deploy",
+            "session_action": "closed",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:33:35.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.deploy",
+            "session_action": "closed",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:33:35.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.deploy(uid=1006) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:33:35.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.deploy",
+            "session_action": "closed",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:33:35.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.deploy",
+            "session_action": "closed",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:33:35.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.deploy(uid=1006) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:33:35.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.deploy(uid=1006) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:33:35.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.deploy",
+            "session_action": "closed",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:42:19.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.chen",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:42:19.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.chen(uid=1002) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:42:19.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.chen",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:42:19.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.chen(uid=1002) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:42:19.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.chen",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:42:19.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.chen(uid=1002) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:42:19.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.chen(uid=1002) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:42:19.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.chen",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:42:19.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.chen(uid=1002) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:42:19.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.chen(uid=1002) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:42:19.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.chen",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:42:19.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.chen(uid=1002) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:42:19.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.chen",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:42:19.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.chen",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:42:19.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.chen",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:42:19.000Z",
+            "message": "pam_unix(sshd:session): session closed for user sre.chen",
+            "session_action": "closed",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:42:19.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.chen(uid=1002) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:42:19.000Z",
+            "message": "pam_unix(sshd:session): session opened for user sre.chen(uid=1002) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "other",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:50:23.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:50:23.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:50:23.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:50:23.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:50:23.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:50:23.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:50:23.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:50:23.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:50:23.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:50:23.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:50:23.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:50:23.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:50:23.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:50:23.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:50:23.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:50:23.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:50:23.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:50:23.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:00:04.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.deploy(uid=1006) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:00:04.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.deploy(uid=1006) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:00:04.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.deploy",
+            "session_action": "closed",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:00:04.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.deploy(uid=1006) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:00:04.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.deploy",
+            "session_action": "closed",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:00:04.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.deploy",
+            "session_action": "closed",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:00:04.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.deploy(uid=1006) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:00:04.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.deploy",
+            "session_action": "closed",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:00:04.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.deploy",
+            "session_action": "closed",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:00:04.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.deploy(uid=1006) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:00:04.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.deploy(uid=1006) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:00:04.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.deploy",
+            "session_action": "closed",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:00:04.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.deploy(uid=1006) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:00:04.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.deploy(uid=1006) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:00:04.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.deploy",
+            "session_action": "closed",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:00:04.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.deploy",
+            "session_action": "closed",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:00:04.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.deploy",
+            "session_action": "closed",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:00:04.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.deploy(uid=1006) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:02:03.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.deploy(uid=1006) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:02:03.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.deploy",
+            "session_action": "closed",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:02:03.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.deploy(uid=1006) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:02:03.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.deploy(uid=1006) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:02:03.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.deploy",
+            "session_action": "closed",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:02:03.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.deploy",
+            "session_action": "closed",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:02:03.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.deploy(uid=1006) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:02:03.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.deploy(uid=1006) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:02:03.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.deploy",
+            "session_action": "closed",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:02:03.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.deploy",
+            "session_action": "closed",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:02:03.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.deploy(uid=1006) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:02:03.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.deploy(uid=1006) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:02:03.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.deploy",
+            "session_action": "closed",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:02:03.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.deploy(uid=1006) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:02:03.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.deploy",
+            "session_action": "closed",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:02:03.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.deploy",
+            "session_action": "closed",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:02:03.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.deploy",
+            "session_action": "closed",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:02:03.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.deploy(uid=1006) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:02:23.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:02:23.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:02:23.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:02:23.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:02:23.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:02:23.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:02:23.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:02:23.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:02:23.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:02:23.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:02:23.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:02:23.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:02:23.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:02:23.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:02:23.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:02:23.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:02:23.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:02:23.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "session_action": "closed",
+            "session_user": "svc.config-mgmt",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:08:20.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.deploy(uid=1006) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:08:20.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.deploy",
+            "session_action": "closed",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:08:20.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.deploy(uid=1006) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:08:20.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.deploy(uid=1006) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:08:20.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.deploy",
+            "session_action": "closed",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:08:20.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.deploy(uid=1006) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:08:20.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.deploy",
+            "session_action": "closed",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:08:20.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.deploy",
+            "session_action": "closed",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:08:20.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.deploy(uid=1006) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:08:20.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.deploy(uid=1006) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:08:20.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.deploy",
+            "session_action": "closed",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:08:20.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.deploy",
+            "session_action": "closed",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:08:20.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.deploy(uid=1006) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:08:20.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.deploy(uid=1006) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:08:20.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.deploy",
+            "session_action": "closed",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:08:20.000Z",
+            "message": "pam_unix(sshd:session): session opened for user svc.deploy(uid=1006) by (uid=0)",
+            "session_action": "opened",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:08:20.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.deploy",
+            "session_action": "closed",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T11:08:20.000Z",
+            "message": "pam_unix(sshd:session): session closed for user svc.deploy",
+            "session_action": "closed",
+            "session_user": "svc.deploy",
+            "host.name": "web-1"
+          }
+        ]
+      }
+    }
+  ]
+}

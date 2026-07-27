@@ -1,0 +1,842 @@
+{
+  "lead_id": "l-001",
+  "seq": 4,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-13T10:10:06.000Z",
+        "2026-07-13T11:10:06.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-13T10:10:06.000Z\" AND @timestamp < \"2026-07-13T11:10:06.000Z\"\n        AND host.name == \"web-1\"\n        AND (message LIKE \"*pty*\" OR message LIKE \"*PTY*\" OR message LIKE \"*tty*\")\n| KEEP @timestamp, message, host.name\n| SORT @timestamp ASC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-13T10:10:06.000Z\" AND @timestamp < \"2026-07-13T11:10:06.000Z\"\n        AND host.name == \"web-1\"\n        AND (message LIKE \"*pty*\" OR message LIKE \"*PTY*\" OR message LIKE \"*tty*\")\n| KEEP @timestamp, message, host.name\n| SORT @timestamp ASC",
+        "columns": [
+          {
+            "name": "@timestamp",
+            "type": "date"
+          },
+          {
+            "name": "message",
+            "type": "text"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 96,
+        "values": [
+          {
+            "@timestamp": "2026-07-13T10:55:06.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:55:06.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:55:06.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:55:06.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:55:06.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:55:06.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:55:06.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:55:06.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:55:11.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:55:11.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:55:11.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:55:11.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:55:11.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:55:11.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:55:11.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:55:11.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:55:15.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:55:15.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:55:15.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:55:15.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:55:15.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:55:15.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:55:15.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:55:15.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:55:19.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:55:19.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:55:19.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:55:19.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:55:19.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:55:19.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:55:19.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:55:19.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:55:21.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:55:21.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:55:21.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:55:21.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:55:21.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:55:21.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:55:21.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:55:21.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:55:25.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:55:25.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:55:25.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:55:25.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:55:25.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:55:25.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:55:25.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T10:55:25.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:00:50.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:00:50.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:00:50.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:00:50.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:00:50.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:00:50.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:00:50.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:00:50.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:00:52.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:00:52.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:00:52.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:00:52.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:00:52.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:00:52.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:00:52.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:00:52.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:00:56.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:00:56.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:00:56.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:00:56.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:00:56.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:00:56.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:00:56.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:00:56.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:00:58.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:00:58.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:00:58.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:00:58.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:00:58.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:00:58.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:00:58.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:00:58.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:01:00.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:01:00.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:01:00.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:01:00.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:01:00.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:01:00.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:01:00.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:01:00.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:01:04.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:01:04.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:01:04.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:01:04.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:01:04.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:01:04.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:01:04.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-07-13T11:01:04.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "host.name": "web-1"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-06T10:10:06.000Z",
+        "2026-07-06T11:10:06.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-06T10:10:06.000Z\" AND @timestamp < \"2026-07-06T11:10:06.000Z\"\n        AND host.name == \"web-1\"\n        AND (message LIKE \"*pty*\" OR message LIKE \"*PTY*\" OR message LIKE \"*tty*\")\n| KEEP @timestamp, message, host.name\n| SORT @timestamp ASC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-06T10:10:06.000Z\" AND @timestamp < \"2026-07-06T11:10:06.000Z\"\n        AND host.name == \"web-1\"\n        AND (message LIKE \"*pty*\" OR message LIKE \"*PTY*\" OR message LIKE \"*tty*\")\n| KEEP @timestamp, message, host.name\n| SORT @timestamp ASC",
+        "columns": [
+          {
+            "name": "@timestamp",
+            "type": "date"
+          },
+          {
+            "name": "message",
+            "type": "text"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-29T10:10:06.000Z",
+        "2026-06-29T11:10:06.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-29T10:10:06.000Z\" AND @timestamp < \"2026-06-29T11:10:06.000Z\"\n        AND host.name == \"web-1\"\n        AND (message LIKE \"*pty*\" OR message LIKE \"*PTY*\" OR message LIKE \"*tty*\")\n| KEEP @timestamp, message, host.name\n| SORT @timestamp ASC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-29T10:10:06.000Z\" AND @timestamp < \"2026-06-29T11:10:06.000Z\"\n        AND host.name == \"web-1\"\n        AND (message LIKE \"*pty*\" OR message LIKE \"*PTY*\" OR message LIKE \"*tty*\")\n| KEEP @timestamp, message, host.name\n| SORT @timestamp ASC",
+        "columns": [
+          {
+            "name": "@timestamp",
+            "type": "date"
+          },
+          {
+            "name": "message",
+            "type": "text"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 54,
+        "values": [
+          {
+            "@timestamp": "2026-06-29T10:13:36.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.10  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:13:36.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.10  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:13:36.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.10  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:13:36.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.10  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:13:36.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.10  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:13:36.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.10  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:13:36.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.10  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:13:36.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.10  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:13:36.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.10  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:13:41.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.10  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:13:41.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.10  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:13:41.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.10  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:13:41.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.10  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:13:41.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.10  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:13:41.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.10  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:13:41.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.10  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:13:41.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.10  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:13:41.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.10  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:13:45.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.10  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:13:45.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.10  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:13:45.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.10  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:13:45.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.10  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:13:45.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.10  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:13:45.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.10  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:13:45.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.10  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:13:45.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.10  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:13:45.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.10  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:13:47.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.10  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:13:47.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.10  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:13:47.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.10  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:13:47.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.10  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:13:47.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.10  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:13:47.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.10  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:13:47.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.10  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:13:47.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.10  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:13:47.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.10  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:13:49.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.10  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:13:49.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.10  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:13:49.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.10  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:13:49.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.10  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:13:49.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.10  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:13:49.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.10  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:13:49.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.10  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:13:49.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.10  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:13:49.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.10  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:13:51.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.10  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:13:51.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.10  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:13:51.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.10  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:13:51.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.10  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:13:51.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.10  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:13:51.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.10  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:13:51.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.10  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:13:51.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.10  user=svc.reports",
+            "host.name": "web-1"
+          },
+          {
+            "@timestamp": "2026-06-29T10:13:51.000Z",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.10  user=svc.reports",
+            "host.name": "web-1"
+          }
+        ]
+      }
+    }
+  ]
+}

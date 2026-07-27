@@ -1,0 +1,361 @@
+{
+  "lead_id": "l-005",
+  "seq": 11,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-13T09:27:39.000Z",
+        "2026-07-13T10:27:39.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-13T09:27:39.000Z\" AND @timestamp < \"2026-07-13T10:27:39.000Z\"\n| WHERE host.ip == \"172.18.0.16\"\n| KEEP @timestamp, host.name, host.ip, source.ip, message\n| SORT @timestamp DESC\n| LIMIT 10",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-13T09:27:39.000Z\" AND @timestamp < \"2026-07-13T10:27:39.000Z\"\n| WHERE host.ip == \"172.18.0.16\"\n| KEEP @timestamp, host.name, host.ip, source.ip, message\n| SORT @timestamp DESC\n| LIMIT 10",
+        "columns": [
+          {
+            "name": "@timestamp",
+            "type": "date"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "host.ip",
+            "type": "ip"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "message",
+            "type": "text"
+          }
+        ],
+        "row_count": 10,
+        "values": [
+          {
+            "@timestamp": "2026-07-13T10:27:21.000Z",
+            "host.name": "web-2",
+            "host.ip": "172.18.0.16",
+            "source.ip": null,
+            "message": "pam_unix(runuser:session): session opened for user svc.reports(uid=1004) by (uid=0)"
+          },
+          {
+            "@timestamp": "2026-07-13T10:27:21.000Z",
+            "host.name": "web-2",
+            "host.ip": "172.18.0.16",
+            "source.ip": null,
+            "message": "pam_unix(runuser:session): session closed for user svc.reports"
+          },
+          {
+            "@timestamp": "2026-07-13T10:26:50.000Z",
+            "host.name": "web-2",
+            "host.ip": "172.18.0.16",
+            "source.ip": null,
+            "message": "pam_unix(runuser:session): session opened for user svc.reports(uid=1004) by (uid=0)"
+          },
+          {
+            "@timestamp": "2026-07-13T10:26:50.000Z",
+            "host.name": "web-2",
+            "host.ip": "172.18.0.16",
+            "source.ip": null,
+            "message": "pam_unix(runuser:session): session closed for user svc.reports"
+          },
+          {
+            "@timestamp": "2026-07-13T10:26:39.000Z",
+            "host.name": "web-2",
+            "host.ip": "172.18.0.16",
+            "source.ip": null,
+            "message": "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)"
+          },
+          {
+            "@timestamp": "2026-07-13T10:26:39.000Z",
+            "host.name": "web-2",
+            "host.ip": "172.18.0.16",
+            "source.ip": null,
+            "message": "pam_unix(runuser:session): session closed for user svc.monitoring"
+          },
+          {
+            "@timestamp": "2026-07-13T10:26:37.000Z",
+            "host.name": "web-2",
+            "host.ip": "172.18.0.16",
+            "source.ip": null,
+            "message": "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)"
+          },
+          {
+            "@timestamp": "2026-07-13T10:26:37.000Z",
+            "host.name": "db-1",
+            "host.ip": "172.18.0.16",
+            "source.ip": null,
+            "message": "error: kex_exchange_identification: Connection closed by remote host"
+          },
+          {
+            "@timestamp": "2026-07-13T10:26:37.000Z",
+            "host.name": "db-1",
+            "host.ip": "172.18.0.16",
+            "source.ip": null,
+            "message": "Connection closed by 172.18.0.8 port 48722"
+          },
+          {
+            "@timestamp": "2026-07-13T10:26:37.000Z",
+            "host.name": "web-2",
+            "host.ip": "172.18.0.16",
+            "source.ip": null,
+            "message": "pam_unix(runuser:session): session closed for user svc.monitoring"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-06T09:27:39.000Z",
+        "2026-07-06T10:27:39.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-06T09:27:39.000Z\" AND @timestamp < \"2026-07-06T10:27:39.000Z\"\n| WHERE host.ip == \"172.18.0.16\"\n| KEEP @timestamp, host.name, host.ip, source.ip, message\n| SORT @timestamp DESC\n| LIMIT 10",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-06T09:27:39.000Z\" AND @timestamp < \"2026-07-06T10:27:39.000Z\"\n| WHERE host.ip == \"172.18.0.16\"\n| KEEP @timestamp, host.name, host.ip, source.ip, message\n| SORT @timestamp DESC\n| LIMIT 10",
+        "columns": [
+          {
+            "name": "@timestamp",
+            "type": "date"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "host.ip",
+            "type": "ip"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "message",
+            "type": "text"
+          }
+        ],
+        "row_count": 10,
+        "values": [
+          {
+            "@timestamp": "2026-07-06T10:27:00.000Z",
+            "host.name": "web-2",
+            "host.ip": "172.18.0.16",
+            "source.ip": null,
+            "message": "pam_unix(runuser:session): session opened for user svc.reports(uid=1004) by (uid=0)"
+          },
+          {
+            "@timestamp": "2026-07-06T10:27:00.000Z",
+            "host.name": "web-2",
+            "host.ip": "172.18.0.16",
+            "source.ip": null,
+            "message": "pam_unix(runuser:session): session closed for user svc.reports"
+          },
+          {
+            "@timestamp": "2026-07-06T10:26:44.000Z",
+            "host.name": "web-2",
+            "host.ip": "172.18.0.16",
+            "source.ip": null,
+            "message": "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)"
+          },
+          {
+            "@timestamp": "2026-07-06T10:26:44.000Z",
+            "host.name": "web-2",
+            "host.ip": "172.18.0.16",
+            "source.ip": null,
+            "message": "pam_unix(runuser:session): session closed for user svc.monitoring"
+          },
+          {
+            "@timestamp": "2026-07-06T10:26:44.000Z",
+            "host.name": "db-1",
+            "host.ip": "172.18.0.16",
+            "source.ip": null,
+            "message": "error: kex_exchange_identification: Connection closed by remote host"
+          },
+          {
+            "@timestamp": "2026-07-06T10:26:44.000Z",
+            "host.name": "db-1",
+            "host.ip": "172.18.0.16",
+            "source.ip": null,
+            "message": "Connection closed by 172.18.0.8 port 43560"
+          },
+          {
+            "@timestamp": "2026-07-06T10:26:29.000Z",
+            "host.name": "db-1",
+            "host.ip": "172.18.0.16",
+            "source.ip": null,
+            "message": "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1004) by (uid=0)"
+          },
+          {
+            "@timestamp": "2026-07-06T10:26:29.000Z",
+            "host.name": "db-1",
+            "host.ip": "172.18.0.16",
+            "source.ip": null,
+            "message": "error: kex_exchange_identification: Connection closed by remote host"
+          },
+          {
+            "@timestamp": "2026-07-06T10:26:29.000Z",
+            "host.name": "db-1",
+            "host.ip": "172.18.0.16",
+            "source.ip": null,
+            "message": "Connection closed by 127.0.0.1 port 47368"
+          },
+          {
+            "@timestamp": "2026-07-06T10:26:29.000Z",
+            "host.name": "db-1",
+            "host.ip": "172.18.0.16",
+            "source.ip": null,
+            "message": "pam_unix(runuser:session): session closed for user svc.monitoring"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-29T09:27:39.000Z",
+        "2026-06-29T10:27:39.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-29T09:27:39.000Z\" AND @timestamp < \"2026-06-29T10:27:39.000Z\"\n| WHERE host.ip == \"172.18.0.16\"\n| KEEP @timestamp, host.name, host.ip, source.ip, message\n| SORT @timestamp DESC\n| LIMIT 10",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-29T09:27:39.000Z\" AND @timestamp < \"2026-06-29T10:27:39.000Z\"\n| WHERE host.ip == \"172.18.0.16\"\n| KEEP @timestamp, host.name, host.ip, source.ip, message\n| SORT @timestamp DESC\n| LIMIT 10",
+        "columns": [
+          {
+            "name": "@timestamp",
+            "type": "date"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "host.ip",
+            "type": "ip"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "message",
+            "type": "text"
+          }
+        ],
+        "row_count": 10,
+        "values": [
+          {
+            "@timestamp": "2026-06-29T10:27:26.000Z",
+            "host.name": "office-ws-1",
+            "host.ip": "172.18.0.16",
+            "source.ip": null,
+            "message": "pam_unix(runuser:session): session closed for user dev.dana"
+          },
+          {
+            "@timestamp": "2026-06-29T10:27:26.000Z",
+            "host.name": "office-ws-1",
+            "host.ip": "172.18.0.16",
+            "source.ip": null,
+            "message": "pam_unix(runuser:session): session opened for user dev.dana(uid=1003) by (uid=0)"
+          },
+          {
+            "@timestamp": "2026-06-29T10:27:22.000Z",
+            "host.name": "web-2",
+            "host.ip": "172.18.0.16",
+            "source.ip": null,
+            "message": "pam_unix(runuser:session): session closed for user svc.reports"
+          },
+          {
+            "@timestamp": "2026-06-29T10:27:22.000Z",
+            "host.name": "web-2",
+            "host.ip": "172.18.0.16",
+            "source.ip": null,
+            "message": "pam_unix(runuser:session): session opened for user svc.reports(uid=1004) by (uid=0)"
+          },
+          {
+            "@timestamp": "2026-06-29T10:26:48.000Z",
+            "host.name": "web-2",
+            "host.ip": "172.18.0.16",
+            "source.ip": null,
+            "message": "pam_unix(runuser:session): session opened for user svc.reports(uid=1004) by (uid=0)"
+          },
+          {
+            "@timestamp": "2026-06-29T10:26:48.000Z",
+            "host.name": "web-2",
+            "host.ip": "172.18.0.16",
+            "source.ip": null,
+            "message": "pam_unix(runuser:session): session closed for user svc.reports"
+          },
+          {
+            "@timestamp": "2026-06-29T10:26:42.000Z",
+            "host.name": "web-2",
+            "host.ip": "172.18.0.16",
+            "source.ip": null,
+            "message": "pam_unix(runuser:session): session opened for user svc.reports(uid=1004) by (uid=0)"
+          },
+          {
+            "@timestamp": "2026-06-29T10:26:42.000Z",
+            "host.name": "web-2",
+            "host.ip": "172.18.0.16",
+            "source.ip": null,
+            "message": "pam_unix(runuser:session): session closed for user svc.reports"
+          },
+          {
+            "@timestamp": "2026-06-29T10:26:30.000Z",
+            "host.name": "ci-1",
+            "host.ip": "172.18.0.16",
+            "source.ip": null,
+            "message": "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1000) by (uid=0)"
+          },
+          {
+            "@timestamp": "2026-06-29T10:26:30.000Z",
+            "host.name": "ci-1",
+            "host.ip": "172.18.0.16",
+            "source.ip": null,
+            "message": "pam_unix(runuser:session): session closed for user svc.monitoring"
+          }
+        ]
+      }
+    }
+  ],
+  "attack_contribution": {
+    "window": [
+      "2026-07-27T09:56:05.000Z",
+      "2026-07-27T09:59:13.000Z"
+    ],
+    "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-27T09:56:05.000Z\" AND @timestamp < \"2026-07-27T09:59:13.000Z\"\n| WHERE host.ip == \"172.18.0.16\"\n| KEEP @timestamp, host.name, host.ip, source.ip, message\n| SORT @timestamp DESC\n| LIMIT 10",
+    "payload": {
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-27T09:56:05.000Z\" AND @timestamp < \"2026-07-27T09:59:13.000Z\"\n| WHERE host.ip == \"172.18.0.16\"\n| KEEP @timestamp, host.name, host.ip, source.ip, message\n| SORT @timestamp DESC\n| LIMIT 10",
+      "columns": [
+        {
+          "name": "@timestamp",
+          "type": "date"
+        },
+        {
+          "name": "host.name",
+          "type": "keyword"
+        },
+        {
+          "name": "host.ip",
+          "type": "ip"
+        },
+        {
+          "name": "source.ip",
+          "type": "ip"
+        },
+        {
+          "name": "message",
+          "type": "text"
+        }
+      ],
+      "row_count": 0,
+      "values": []
+    }
+  }
+}

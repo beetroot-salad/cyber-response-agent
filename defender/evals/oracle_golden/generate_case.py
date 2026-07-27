@@ -145,6 +145,40 @@ def retarget_problem(scenario: str, target: str | None, *,
     )
 
 
+#: Everything a completed recruitment leaves behind. Their presence means this case id
+#: is taken; `.generate/` alone means a run is in flight or died partway.
+CASE_ARTIFACTS = ("manifest.yaml", "environment.yaml", "oracle_visible", "hidden")
+
+
+def occupancy_problem(case_dir: Path) -> str | None:
+    """Why this case id cannot be recruited into, or `None` if it is free.
+
+    Two recruitments of one case id do not collide loudly — they interleave. The second
+    overwrites `.generate/alert.json` while the first is still investigating, and what
+    lands is a case assembled from both: `case-013`'s first attempt produced a story
+    describing the 10:28 run against web-1, leads from an investigation of a web-2 alert,
+    and a manifest window from a 10:16 run that had already been killed. Story and
+    envelope disagreed, which is exactly the defect that retired case-009 — and nothing
+    downstream detects it, because every individual file is well-formed.
+
+    Refusing an occupied id is not about protecting committed work; it is about making
+    the collision loud at the only moment it is cheap.
+    """
+    if not case_dir.exists():
+        return None
+    present = [name for name in CASE_ARTIFACTS if (case_dir / name).exists()]
+    if present:
+        return (f"{case_dir.name} already exists and holds {', '.join(present)}. "
+                f"Recruiting into it would mix two captures into one case. Pick a new "
+                f"case id, or delete the directory if the capture is being replaced.")
+    if (case_dir / ".generate").exists():
+        return (f"{case_dir.name}/.generate already exists — a recruitment is either in "
+                f"flight or died partway. Two concurrent runs share this directory and "
+                f"produce a case assembled from both. Wait for it, or delete the "
+                f"directory if it is dead.")
+    return None
+
+
 def fire(scenario: str, *, seed: int, user: str | None, target: str | None,
          intensity: int | None) -> Path:
     """Run the scenario and return its runner record directory."""
@@ -328,10 +362,10 @@ def write_manifest(  # noqa: PLR0913 — the manifest's fields, each an independ
         f"  activity_family: {activity_family}\n"
         f"  host_pair: {source_host}->{resolved.get('target_host', '?')}\n"
         f"capture_environment: {capture_environment}\n"
-        f"# Declare a class for every state/lookup system this case's leads touch.\n"
-        f"# A lookup has no @timestamp bounds to move, so it has no baseline and no\n"
-        f"# diff semantics — the judge reads that as `state-only`, not as a gap.\n"
-        f"state_classes: {{}}\n"
+        f"# No `state_classes:` here. It was the class-labelling architecture's way of\n"
+        f"# declaring which lookups had nothing to diff; the label pass now derives\n"
+        f"# `state-only` from the lead's own query systems and `environment.yaml`, so a\n"
+        f"# hand-declared class could only disagree with the measurement (#711 §5).\n"
         f"attack:\n"
         f"  scenario: {scenario}\n"
         f"  seed: {seed}\n"
@@ -388,6 +422,11 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     case_dir = ns.cases_dir / ns.case_id
+    occupied = occupancy_problem(case_dir)
+    if occupied is not None:
+        print(f"!! {occupied}", file=sys.stderr)
+        return 2
+
     work = case_dir / ".generate"
     work.mkdir(parents=True, exist_ok=True)
     started = datetime.now(UTC) - timedelta(minutes=2)
@@ -443,8 +482,7 @@ def main(argv: list[str] | None = None) -> int:
     _run(controls_cmd, timeout=3600, label="controls")
 
     print(f"\ngenerated {case_dir}")
-    print("  next: declare state_classes in manifest.yaml, then replay.py to project "
-          "and score.py to grade")
+    print("  next: replay.py to project, then score.py to grade")
     return 0
 
 

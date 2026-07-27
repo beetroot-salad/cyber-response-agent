@@ -1,0 +1,173 @@
+{
+  "lead_id": "l-006",
+  "seq": 6,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-13T09:27:39.000Z",
+        "2026-07-13T10:27:39.000Z"
+      ],
+      "query": "FROM .ds-logs-system.auth-default-2026.07.25-000004 METADATA _id | WHERE _id == \"AZ-i-v43CigTi6WRhP2K\" OR _id == \"AZ-jAP43CigTi6XiiWh3\" | KEEP _id, @timestamp, host.name, user.name, event.outcome, message | LIMIT 10\n| WHERE @timestamp >= \"2026-07-13T09:27:39.000Z\" AND @timestamp < \"2026-07-13T10:27:39.000Z\"",
+      "live": true,
+      "payload": {
+        "query": "FROM .ds-logs-system.auth-default-2026.07.25-000004 METADATA _id | WHERE _id == \"AZ-i-v43CigTi6WRhP2K\" OR _id == \"AZ-jAP43CigTi6XiiWh3\" | KEEP _id, @timestamp, host.name, user.name, event.outcome, message | LIMIT 10\n| WHERE @timestamp >= \"2026-07-13T09:27:39.000Z\" AND @timestamp < \"2026-07-13T10:27:39.000Z\"",
+        "columns": [
+          {
+            "name": "_id",
+            "type": "keyword"
+          },
+          {
+            "name": "@timestamp",
+            "type": "date"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          },
+          {
+            "name": "event.outcome",
+            "type": "keyword"
+          },
+          {
+            "name": "message",
+            "type": "text"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-06T09:27:39.000Z",
+        "2026-07-06T10:27:39.000Z"
+      ],
+      "query": "FROM .ds-logs-system.auth-default-2026.07.25-000004 METADATA _id | WHERE _id == \"AZ-i-v43CigTi6WRhP2K\" OR _id == \"AZ-jAP43CigTi6XiiWh3\" | KEEP _id, @timestamp, host.name, user.name, event.outcome, message | LIMIT 10\n| WHERE @timestamp >= \"2026-07-06T09:27:39.000Z\" AND @timestamp < \"2026-07-06T10:27:39.000Z\"",
+      "live": true,
+      "payload": {
+        "query": "FROM .ds-logs-system.auth-default-2026.07.25-000004 METADATA _id | WHERE _id == \"AZ-i-v43CigTi6WRhP2K\" OR _id == \"AZ-jAP43CigTi6XiiWh3\" | KEEP _id, @timestamp, host.name, user.name, event.outcome, message | LIMIT 10\n| WHERE @timestamp >= \"2026-07-06T09:27:39.000Z\" AND @timestamp < \"2026-07-06T10:27:39.000Z\"",
+        "columns": [
+          {
+            "name": "_id",
+            "type": "keyword"
+          },
+          {
+            "name": "@timestamp",
+            "type": "date"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          },
+          {
+            "name": "event.outcome",
+            "type": "keyword"
+          },
+          {
+            "name": "message",
+            "type": "text"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-29T09:27:39.000Z",
+        "2026-06-29T10:27:39.000Z"
+      ],
+      "query": "FROM .ds-logs-system.auth-default-2026.07.25-000004 METADATA _id | WHERE _id == \"AZ-i-v43CigTi6WRhP2K\" OR _id == \"AZ-jAP43CigTi6XiiWh3\" | KEEP _id, @timestamp, host.name, user.name, event.outcome, message | LIMIT 10\n| WHERE @timestamp >= \"2026-06-29T09:27:39.000Z\" AND @timestamp < \"2026-06-29T10:27:39.000Z\"",
+      "live": true,
+      "payload": {
+        "query": "FROM .ds-logs-system.auth-default-2026.07.25-000004 METADATA _id | WHERE _id == \"AZ-i-v43CigTi6WRhP2K\" OR _id == \"AZ-jAP43CigTi6XiiWh3\" | KEEP _id, @timestamp, host.name, user.name, event.outcome, message | LIMIT 10\n| WHERE @timestamp >= \"2026-06-29T09:27:39.000Z\" AND @timestamp < \"2026-06-29T10:27:39.000Z\"",
+        "columns": [
+          {
+            "name": "_id",
+            "type": "keyword"
+          },
+          {
+            "name": "@timestamp",
+            "type": "date"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          },
+          {
+            "name": "event.outcome",
+            "type": "keyword"
+          },
+          {
+            "name": "message",
+            "type": "text"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    }
+  ],
+  "attack_contribution": {
+    "window": [
+      "2026-07-27T09:56:05.000Z",
+      "2026-07-27T09:59:13.000Z"
+    ],
+    "query": "FROM .ds-logs-system.auth-default-2026.07.25-000004 METADATA _id | WHERE _id == \"AZ-i-v43CigTi6WRhP2K\" OR _id == \"AZ-jAP43CigTi6XiiWh3\" | KEEP _id, @timestamp, host.name, user.name, event.outcome, message | LIMIT 10\n| WHERE @timestamp >= \"2026-07-27T09:56:05.000Z\" AND @timestamp < \"2026-07-27T09:59:13.000Z\"",
+    "payload": {
+      "query": "FROM .ds-logs-system.auth-default-2026.07.25-000004 METADATA _id | WHERE _id == \"AZ-i-v43CigTi6WRhP2K\" OR _id == \"AZ-jAP43CigTi6XiiWh3\" | KEEP _id, @timestamp, host.name, user.name, event.outcome, message | LIMIT 10\n| WHERE @timestamp >= \"2026-07-27T09:56:05.000Z\" AND @timestamp < \"2026-07-27T09:59:13.000Z\"",
+      "columns": [
+        {
+          "name": "_id",
+          "type": "keyword"
+        },
+        {
+          "name": "@timestamp",
+          "type": "date"
+        },
+        {
+          "name": "host.name",
+          "type": "keyword"
+        },
+        {
+          "name": "user.name",
+          "type": "keyword"
+        },
+        {
+          "name": "event.outcome",
+          "type": "keyword"
+        },
+        {
+          "name": "message",
+          "type": "text"
+        }
+      ],
+      "row_count": 1,
+      "values": [
+        {
+          "_id": "AZ-jAP43CigTi6XiiWh3",
+          "@timestamp": "2026-07-27T09:56:07.000Z",
+          "host.name": "db-1",
+          "user.name": "root",
+          "event.outcome": "failure",
+          "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.16  user=root"
+        }
+      ]
+    }
+  }
+}
