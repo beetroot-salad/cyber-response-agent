@@ -417,3 +417,25 @@ def test_a_defective_case_is_never_sent_to_the_judge(tmp_path):
     assert summary["judged"] is False
     assert call.calls == []
     assert "defective" in summary["why_unjudged"]
+
+
+def test_the_cli_resolves_the_call_seam_at_the_boundary(tmp_path, monkeypatch):
+    """`call: CallFn = judge.call_model` binds at import, so patching `judge.call_model`
+    does NOT reach a default bound when the module loaded. A test that thought it had
+    stubbed the judge instead spent two minutes and real money on live Opus 5 calls
+    before this was resolved in `main` instead."""
+    seen: list[str] = []
+
+    def stub(instructions, user, model, effort):
+        seen.append("called")
+        return judge.CallResult(
+            "delta_kind: absent\nheterogeneous: false\nevidence: |\n  quiet\n"
+            if "<measurement>" not in user else
+            "faithful: true\nrationale: |\n  nothing to represent\n",
+            model, effort, 0.0)
+
+    monkeypatch.setattr(judge, "call_model", stub)
+    d = _case(tmp_path)
+    proj = _projection(d, {"l-001": []})
+    assert score.main([str(d), str(proj), "--jobs", "1"]) == 0
+    assert seen, "the patched seam was never reached — main bound its default at import"

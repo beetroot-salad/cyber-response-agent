@@ -56,3 +56,47 @@ which is what `absent` means. But the case is a suppression case — the attacke
 about, and a thin baseline is exactly the condition under which it is hard to see. The
 abstention is the judge declining to call it from two live control hours, one of them
 empty. Re-measure before deciding who was right.
+
+## `verdict-selfagreement_judge-claude-opus-5-high_47d6044a` — 2026-07-27
+
+The verdict pass, `audit_judge.py --pass verdict --repeats 5`. It has no hand-labelled
+ground truth, so **this is not a calibration**. It measures the two things that can be
+measured: how often the judge gives the same lead the same verdict, and how often it
+disagrees with the pass that measured the telemetry.
+
+Run over the 17 dev leads a real score graded (`glm-5.2_effort-none_prompt-711`), reusing
+the committed `labels/<judge-tag>.json` as the measurement of record — the same input
+`score.py` feeds it. Letting the label pass vary underneath would fold two variances into
+one number that names neither.
+
+| | |
+|---|---|
+| mean self-agreement over 5 repeats | **0.988** |
+| leads that did not answer identically every time | **1/17** |
+| `contradicts-measurement` | **0/17** |
+| cost | $5.28 |
+
+**The noise floor is one lead.** The dev active band is 7 leads, so a prompt edit has to
+move at least 2 of them before the change is distinguishable from the judge re-running
+on an unchanged projection. That is the number to hold a tuning result against, and it is
+the reason this sweep is not optional: without it, a one-lead "improvement" is
+indistinguishable from noise.
+
+Zero `contradicts-measurement` is the more reassuring half. The verdict pass never once
+read the telemetry differently from the pass that measured it, across 85 calls — the two
+passes are looking at the same evidence and agreeing about what it says, which is what
+makes the split worth its cost rather than just its complexity.
+
+### The one unstable lead: `case-002-authorized-keys-falco/l-001`
+
+`C-FABRICATED-VALUE` on four of five repeats, `faithful: true` on the fifth. This is the
+`evt.type: write` / `openat` divergence — the projection reproduces the Falco rule, the
+file path and the user correctly, placeholders the volatile container id correctly, and
+gets one field wrong. Whether a single wrong non-distinguishing field makes the whole
+projection unfaithful is a genuinely marginal call, and the judge makes it the same way
+four times in five.
+
+It is not a defect to tune away. A judge that answered identically on a lead this close
+would be a judge with an artificially narrow notion of fabrication, and the design's rule
+holds here too: adjudicate by re-reading the payload, not by editing the prompt until the
+wobble stops.

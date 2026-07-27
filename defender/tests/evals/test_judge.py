@@ -15,7 +15,7 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
-from defender.evals.oracle_golden import audit_judge, judge
+from defender.evals.oracle_golden import audit_judge, judge, score
 
 CASES = judge.GOLDEN_DIR / "cases"
 CASE = CASES / "case-003-suppression-devws"
@@ -501,15 +501,27 @@ def test_the_audit_reports_the_resolved_judge_and_what_it_cost():
 AUDITS = judge.GOLDEN_DIR / "audits"
 
 
+def _committed_audits(which: str | None = None) -> list[dict]:
+    """Every committed audit, optionally just one pass's.
+
+    `pass` defaults to `label` for the step-2 gate artifact, which predates the verdict
+    audit and so does not carry the key. Filtering matters because the two passes answer
+    different questions and report different keys — a sweep over both would assert a
+    label-only key on a verdict artifact."""
+    audits = [json.loads(p.read_text(encoding="utf-8"))
+              for p in sorted(AUDITS.glob("*.json"))]
+    return [a for a in audits if which is None or a.get("pass", "label") == which]
+
+
 def _committed_calibrations() -> list[dict]:
-    return [json.loads(p.read_text(encoding="utf-8")) for p in sorted(AUDITS.glob("*.json"))]
+    return _committed_audits("label")
 
 
 def test_the_committed_calibration_was_produced_by_the_prompts_in_the_tree():
     """A calibration describes the judge that produced it. Edit either prompt and it
     stops describing the judge that would run now — so the sweep is re-run, exactly as a
     held-out result is re-scored under a new tag rather than quietly inherited."""
-    calibrations = _committed_calibrations()
+    calibrations = _committed_audits()
     assert calibrations, "no calibration is committed — the judge is unmeasured"
     assert any(c["prompts_sha8"] == judge.prompts_sha8() for c in calibrations), (
         f"the prompts hash to {judge.prompts_sha8()} but the committed calibrations were "
@@ -545,3 +557,117 @@ def test_the_report_serialises_for_the_committed_artifact():
                                    model="m", effort="high", call=_call(LABEL_OK))
     assert json.loads(json.dumps(report))["prompts_sha8"] == judge.prompts_sha8()
     assert "calibration:" in audit_judge.render(report)
+
+
+# ------------------------------------------------- the verdict pass's own noise floor
+
+def _verdict_call(*answers):
+    """A seam that cycles fixed verdicts, so instability can be scripted exactly."""
+    seq = iter(answers * 40)
+
+    def call(instructions, user, model, effort):
+        return judge.CallResult(next(seq), model, effort, 0.02)
+    return call
+
+
+VERDICT_T = "faithful: true\nrationale: |\n  it carries the delta\n"
+VERDICT_F = "faithful: false\ncause: C-MISSED-DELTA\nrationale: |\n  it does not\n"
+VERDICT_CONTRA = ("faithful: null\nundecidable_reason: contradicts-measurement\n"
+                  "rationale: |\n  my reading of the payload differs\n")
+
+
+def test_the_verdict_audit_grades_the_leads_a_real_score_graded():
+    """It reuses the committed labels rather than re-measuring: the question is how
+    stable the VERDICT pass is given a FIXED measurement, and letting the label pass
+    vary underneath would fold two variances into a number that names neither."""
+    entries = audit_judge.verdict_set(audit_judge.AUDIT_CASES,
+                                      audit_judge.DEFAULT_ORACLE_TAG)
+    assert entries, "no committed labels/projections — the sweep would pass vacuously"
+    for case_dir, lead_id, events, measurement in entries:
+        assert measurement["delta_kind"] != "undecidable", (
+            f"{case_dir.name}/{lead_id}: an unmeasured envelope never reaches the "
+            f"verdict pass, so auditing it would measure a call that never happens")
+        assert score.grammar_problem(events) is None, (
+            f"{case_dir.name}/{lead_id}: a malformed projection is failed in code")
+        assert "cost_usd" not in measurement
+
+
+def test_a_defective_case_is_not_in_the_verdict_audit_set():
+    names = {c.name for c, _, _, _ in
+             audit_judge.verdict_set(("case-006-authorized-keys-db1",), "any-tag")}
+    assert names == set()
+
+
+def test_a_stable_verdict_reports_full_self_agreement():
+    report = audit_judge.run_verdict_audit(
+        ("case-002-authorized-keys-falco",), audit_judge.DEFAULT_ORACLE_TAG,
+        repeats=3, jobs=1, model="m", effort="high", call=_verdict_call(VERDICT_T))
+    assert report["mean_self_agreement"] == 1.0
+    assert report["unstable_leads"] == 0
+    assert all(r["stable"] for r in report["rows"])
+
+
+def test_a_lead_that_flips_is_counted_into_the_noise_floor():
+    """The number a prompt change has to beat. A dev band of 7 leads where 2 flip
+    between runs of the SAME projection cannot resolve a one-lead improvement."""
+    report = audit_judge.run_verdict_audit(
+        ("case-002-authorized-keys-falco",), audit_judge.DEFAULT_ORACLE_TAG,
+        repeats=4, jobs=1, model="m", effort="high",
+        call=_verdict_call(VERDICT_T, VERDICT_F))
+    assert report["unstable_leads"] == report["leads"]
+    assert report["noise_floor_leads"] == report["unstable_leads"]
+    assert report["mean_self_agreement"] == 0.5
+    assert "did not answer the same way" in audit_judge.render_verdict(report)
+
+
+def test_contradicts_measurement_is_tallied_separately():
+    """It is a disagreement BETWEEN THE TWO PASSES, not an oracle failure — folding it
+    into the instability count would charge the oracle for a judge argument."""
+    report = audit_judge.run_verdict_audit(
+        ("case-002-authorized-keys-falco",), audit_judge.DEFAULT_ORACLE_TAG,
+        repeats=2, jobs=1, model="m", effort="high", call=_verdict_call(VERDICT_CONTRA))
+    assert report["contradicts_measurement"] == report["leads"]
+    assert report["unstable_leads"] == 0, "consistently undecided is stable"
+    assert "adjudicate it by re-reading" in audit_judge.render_verdict(report)
+
+
+def test_the_verdict_audit_refuses_a_sweep_that_changed_judge():
+    models = iter(["judge-a", "judge-b"] * 20)
+
+    def call(instructions, user, model, effort):
+        return judge.CallResult(VERDICT_T, next(models), effort, 0.01)
+
+    with pytest.raises(RuntimeError, match="more than one judge"):
+        audit_judge.run_verdict_audit(
+            ("case-002-authorized-keys-falco",), audit_judge.DEFAULT_ORACLE_TAG,
+            repeats=2, jobs=1, model="m", effort="high", call=call)
+
+
+def test_instability_is_reported_not_failed(monkeypatch, capsys):
+    """An unstable judge is a measurement about the instrument. Exiting non-zero would
+    make the honest number look like a broken build and invite someone to suppress it."""
+    monkeypatch.setattr(judge, "call_model", _verdict_call(VERDICT_T, VERDICT_F))
+    rc = audit_judge.main(["--pass", "verdict", "--repeats", "2", "--jobs", "1",
+                           "--case", "case-002-authorized-keys-falco"])
+    assert rc == 0
+    assert "self-agreement:" in capsys.readouterr().out
+
+
+def test_the_verdict_pass_has_a_measured_noise_floor_for_the_current_prompts():
+    """The judge runs at score time, so its variance sits inside every interval
+    `report.py` prints. Without this number a prompt change smaller than the judge's own
+    wobble reads as an improvement — and the dev active band is 7 leads, so that is a
+    very small change indeed."""
+    current = [a for a in _committed_audits("verdict")
+               if a["prompts_sha8"] == judge.prompts_sha8()]
+    assert current, (
+        f"no verdict self-agreement sweep for prompts {judge.prompts_sha8()} — "
+        f"run audit_judge.py --pass verdict --repeats 5")
+    for audit in current:
+        assert audit["repeats"] >= 3, "self-agreement over two runs is a coin flip"
+        assert audit["leads"] > 0
+        assert audit["noise_floor_leads"] == audit["unstable_leads"]
+        for row in audit["rows"]:
+            # The verdicts themselves, not just the tally: a noise floor you cannot
+            # attribute to a lead cannot be argued with.
+            assert len(row["faithful"]) == audit["repeats"], row["lead"]

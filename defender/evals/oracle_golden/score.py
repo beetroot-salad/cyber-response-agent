@@ -504,7 +504,7 @@ def main(argv: list[str] | None = None) -> int:
         summary = _dry_run(ns.case_dir, ns.projection, model=model, effort=effort)
     else:
         summary = score_case(ns.case_dir, ns.projection, model=model, effort=effort,
-                             jobs=ns.jobs, relabel=ns.relabel)
+                             jobs=ns.jobs, relabel=ns.relabel, call=judge.call_model)
     print_report(summary)
 
     broken = any(summary["mechanical"][k] for k in

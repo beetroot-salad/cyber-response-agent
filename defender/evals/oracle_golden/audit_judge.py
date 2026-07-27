@@ -16,9 +16,18 @@ Two numbers come out:
   report prints. Unmeasured, every one of them is understated.
 
 The VERDICT pass cannot be calibrated this way: nothing hand-labelled exists for it.
-Watch its self-agreement and its `contradicts-measurement` rate instead.
+`--pass verdict` measures the two things that can be measured — self-agreement, and how
+often it returns `contradicts-measurement` — over the leads a real projection was scored
+on, reusing the same cached measurement `score.py` feeds it.
 
-Usage: audit_judge.py [--repeats N] [--case CASE]... [--out PATH] [--jobs N]
+**Why the verdict audit is not optional.** The judge runs at score time, so its variance
+sits inside every interval `report.py` prints. The dev active band is 7 leads: one lead
+that flips between runs moves the headline 14 points. Without this number, a prompt
+change smaller than the judge's own noise reads as an improvement.
+
+Usage:
+  audit_judge.py [--pass label|verdict] [--repeats N] [--case CASE]... [--tag TAG]
+                 [--out PATH] [--jobs N]
 """
 from __future__ import annotations
 
@@ -33,7 +42,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
-from defender.evals.oracle_golden import judge  # noqa: E402
+from defender.evals.oracle_golden import judge, score  # noqa: E402
 
 GOLDEN_DIR = Path(__file__).resolve().parent
 CASES_DIR = GOLDEN_DIR / "cases"
@@ -156,6 +165,7 @@ def run_audit(case_names: tuple[str, ...], repeats: int, jobs: int, *,
 
     decided = [r for r in rows if not r["abstained"]]
     return {
+        "pass": "label",
         "judge_model": resolved.pop(), "judge_effort": effort,
         "tag_suffix": judge.tag_suffix(model, effort),
         "cost_usd": round(sum(costs), 4) if costs else None,
@@ -168,6 +178,149 @@ def run_audit(case_names: tuple[str, ...], repeats: int, jobs: int, *,
         "mean_self_agreement": round(sum(agreements) / len(agreements), 3) if agreements else None,
         "rows": rows,
     }
+
+
+#: The oracle tag the verdict audit grades, unless `--tag` says otherwise. The verdict
+#: pass is a function of a PROJECTION, so unlike the label pass it cannot be audited
+#: without naming one.
+DEFAULT_ORACLE_TAG = "glm-5.2_effort-none_prompt-711"
+
+
+def verdict_set(case_names: tuple[str, ...], oracle_tag: str) -> list[tuple]:
+    """(case_dir, lead_id, events, measurement) for every lead a real score judged.
+
+    Deliberately reuses the committed `labels/<judge-tag>.json` rather than re-measuring:
+    the question is how stable the VERDICT pass is given a fixed measurement, and letting
+    the label pass vary underneath it would fold the two variances into one number that
+    names neither.
+    """
+    out = []
+    model, effort = judge.judge_model(), judge.judge_effort()
+    for name in case_names:
+        case_dir = CASES_DIR / name
+        proj_path = case_dir / "projections" / f"{oracle_tag}.yaml"
+        labels_path = score.labels_path(case_dir, model, effort)
+        if not (proj_path.is_file() and labels_path.is_file()):
+            continue
+        manifest = yaml.safe_load((case_dir / "manifest.yaml").read_text(encoding="utf-8")) or {}
+        if manifest.get("defective") or manifest.get("kind") in score.DERIVED_KINDS:
+            continue
+        proj = yaml.safe_load(proj_path.read_text(encoding="utf-8")) or {}
+        preds, _ = score.load_predictions(proj)
+        labels = (json.loads(labels_path.read_text(encoding="utf-8")).get("leads") or {})
+        for lead_id, label in sorted(labels.items()):
+            # The same two exclusions score.py applies: an unmeasured envelope has
+            # nothing to grade against, and a malformed projection never reaches the
+            # judge at all. Auditing either would measure a call that never happens.
+            if label.get("delta_kind") == "undecidable" or lead_id not in preds:
+                continue
+            if score.grammar_problem(preds[lead_id]) is not None:
+                continue
+            out.append((case_dir, lead_id, preds[lead_id],
+                        {k: label[k] for k in ("delta_kind", "heterogeneous", "evidence")
+                         if k in label}))
+    return out
+
+
+def _verdict_once(case_dir: Path, lead_id: str, events, measurement: dict,
+                  model: str, effort: str, call: judge.CallFn) -> dict:
+    return judge.verdict_lead(judge.load_lead_inputs(case_dir, lead_id), events,
+                              measurement, model=model, effort=effort, call=call)
+
+
+def run_verdict_audit(case_names: tuple[str, ...], oracle_tag: str, repeats: int,  # noqa: PLR0913 — every argument is an axis of the sweep; a config object would hide which one a caller varied
+                      jobs: int, *, model: str, effort: str,
+                      call: judge.CallFn = judge.call_model) -> dict:
+    entries = verdict_set(case_names, oracle_tag)
+    work = [(entry, rep) for entry in entries for rep in range(repeats)]
+    with ThreadPoolExecutor(max_workers=max(1, min(jobs, len(work) or 1))) as pool:
+        results = list(pool.map(
+            lambda item: _verdict_once(*item[0], model, effort, call), work))
+
+    by_lead: dict[tuple[str, str], list[dict]] = {}
+    for ((case_dir, lead_id, _e, _m), _rep), verdict in zip(work, results, strict=True):
+        by_lead.setdefault((case_dir.name, lead_id), []).append(verdict)
+
+    rows, agreements = [], []
+    for case_dir, lead_id, _events, measurement in entries:
+        verdicts = by_lead[(case_dir.name, lead_id)]
+        answers = [v["faithful"] for v in verdicts]
+        modal, modal_n = Counter(answers).most_common(1)[0]
+        agreements.append(modal_n / len(answers))
+        rows.append({
+            "case": case_dir.name, "lead": lead_id,
+            "delta_kind": measurement.get("delta_kind"),
+            "modal_faithful": modal,
+            "self_agreement": round(modal_n / len(answers), 3),
+            "stable": modal_n == len(answers),
+            "faithful": answers,
+            "causes": sorted({v["cause"] for v in verdicts if v["cause"]}),
+            "undecidable_reasons": sorted({v["undecidable_reason"] for v in verdicts
+                                           if v["undecidable_reason"]}),
+            "rationale": verdicts[0]["rationale"],
+        })
+
+    resolved = {v["judge_model"] for vs in by_lead.values() for v in vs}
+    if len(resolved) != 1:
+        raise RuntimeError(f"the sweep ran on more than one judge: {sorted(resolved)}")
+    costs = [v["cost_usd"] for vs in by_lead.values() for v in vs
+             if v.get("cost_usd") is not None]
+    unstable = [r for r in rows if not r["stable"]]
+    contradicts = [r for r in rows if "contradicts-measurement" in r["undecidable_reasons"]]
+    return {
+        "pass": "verdict",
+        "oracle_tag": oracle_tag,
+        "judge_model": resolved.pop(), "judge_effort": effort,
+        "tag_suffix": judge.tag_suffix(model, effort),
+        "cost_usd": round(sum(costs), 4) if costs else None,
+        "prompts_sha8": judge.prompts_sha8(), "repeats": repeats,
+        "leads": len(rows),
+        "unstable_leads": len(unstable),
+        # The number a prompt change has to beat. A dev band of 7 leads where 2 flip
+        # between runs cannot resolve a one-lead improvement.
+        "noise_floor_leads": len(unstable),
+        "contradicts_measurement": len(contradicts),
+        "mean_self_agreement": round(sum(agreements) / len(agreements), 3) if agreements else None,
+        "rows": rows,
+    }
+
+
+def render_verdict(report: dict) -> str:
+    lines = [
+        f"judge: {report['judge_model']} effort={report['judge_effort']} "
+        f"prompts={report['prompts_sha8']} repeats={report['repeats']} "
+        f"oracle={report['oracle_tag']}"
+        + (f" cost=${report['cost_usd']}" if report.get("cost_usd") else ""),
+        f"self-agreement: {report['mean_self_agreement']} mean; "
+        f"{report['unstable_leads']}/{report['leads']} lead(s) did not answer the same "
+        f"way every time",
+        f"contradicts-measurement: {report['contradicts_measurement']}/{report['leads']}",
+        "",
+    ]
+    for r in report["rows"]:
+        mark = "ok " if r["stable"] else "!! "
+        answers = ",".join("T" if a is True else "F" if a is False else "?"
+                           for a in r["faithful"])
+        lines.append(f"{mark}{r['case']}/{r['lead']:6} {r['delta_kind']:18} "
+                     f"[{answers}] agreement={r['self_agreement']}"
+                     + (f" causes={','.join(r['causes'])}" if r["causes"] else ""))
+    lines += [
+        "",
+        "There is no hand-labelled ground truth for this pass, so none of this is a",
+        "calibration. It bounds how much of a score change is the judge rather than the",
+        f"oracle: {report['unstable_leads']} lead(s) can move between two runs of the same",
+        "unchanged projection, so a prompt edit that moves fewer than that has not been",
+        "shown to do anything.",
+    ]
+    if report["contradicts_measurement"]:
+        lines += [
+            "",
+            "`contradicts-measurement` means the verdict pass read the telemetry",
+            "differently from the pass that measured it. That is a disagreement between",
+            "the two passes, not an oracle failure — adjudicate it by re-reading the",
+            "payload, and if the label pass is wrong the fix is a re-measurement.",
+        ]
+    return "\n".join(lines)
 
 
 def render(report: dict) -> str:
@@ -207,22 +360,35 @@ def render(report: dict) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--pass", dest="which", choices=["label", "verdict"], default="label",
+                    help="label: calibrate against the hand labels. "
+                         "verdict: self-agreement only — nothing hand-labelled exists")
     ap.add_argument("--repeats", type=int, default=1,
-                    help="label each lead N times and report self-agreement")
+                    help="judge each lead N times and report self-agreement")
     ap.add_argument("--case", action="append", dest="cases",
                     help="restrict to this case (repeatable); default is the audit set")
+    ap.add_argument("--tag", default=DEFAULT_ORACLE_TAG,
+                    help="--pass verdict only: the oracle projection to grade")
     ap.add_argument("--jobs", type=int, default=4, help="concurrent judge calls")
     ap.add_argument("--out", type=Path, help="write the JSON report here")
     args = ap.parse_args(argv)
 
     model, effort = judge.judge_model(), judge.judge_effort()
-    report = run_audit(tuple(args.cases or AUDIT_CASES), args.repeats, args.jobs,
-                       model=model, effort=effort)
-    print(render(report))
+    cases = tuple(args.cases or AUDIT_CASES)
+    if args.which == "verdict":
+        report = run_verdict_audit(cases, args.tag, args.repeats, args.jobs,
+                                   model=model, effort=effort, call=judge.call_model)
+        print(render_verdict(report))
+        rc = 0          # instability is a measurement, not a failure
+    else:
+        report = run_audit(cases, args.repeats, args.jobs, model=model, effort=effort,
+                           call=judge.call_model)
+        print(render(report))
+        rc = 1 if report["divergences"] else 0
     if args.out:
         args.out.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
         print(f"\nwrote {args.out}")
-    return 1 if report["divergences"] else 0
+    return rc
 
 
 if __name__ == "__main__":
