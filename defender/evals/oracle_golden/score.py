@@ -235,6 +235,11 @@ def expectation_failures(expectation: dict, preds: dict[str, list],
                for e in preds.get(lead_id) or []):
             out.append(f"{lead_id}: must not claim suppression — the story performs no "
                        f"action that blinds this stream")
+    for lead_id in _requested(expectation.get("no_noise_marker"), lead_ids):
+        if any(isinstance(e, str) and _marker_kind(e) == "noise-marker"
+               for e in preds.get(lead_id) or []):
+            out.append(f"{lead_id}: must not claim indistinguishability — this envelope "
+                       f"carries a delta the queries surface")
     emitted_index = _emitted_index(preds)
     for value in expectation.get("must_emit") or []:
         if _norm(value) not in emitted_index:

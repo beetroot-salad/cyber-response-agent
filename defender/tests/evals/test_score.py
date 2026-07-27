@@ -515,3 +515,28 @@ def test_a_concrete_value_the_story_does_state_is_not_a_violation(tmp_path):
     copied = _projection(d, {"l-001": [
         {"host.name": "canary-1", "source.ip": "172.18.0.15"}]}, name="b.yaml")
     assert score.main([str(d), str(copied)]) == 1, "recovered from the query, not the story"
+
+
+def test_the_noise_marker_can_be_refused_where_a_delta_is_measured(tmp_path):
+    """`no_noise_marker` is the mirror of `no_suppression`. probe-005 needs it: adding two
+    unsatisfiable `what_to_summarize` items to case-001 — same story byte-for-byte, same
+    queries — collapsed a judge-measured `present` lead to `<standard environment noise>`,
+    turning a verified catch into an apparent evasion."""
+    d = _case(tmp_path, kind="spec-probe",
+              extra_manifest={"kind": "spec-probe",
+                              "expectation": {"no_noise_marker": ["l-001"]}})
+    denied = _projection(d, {"l-001": ["<standard environment noise>"]})
+    assert score.main([str(d), str(denied)]) == 1
+    projected = _projection(d, {"l-001": [{"event.outcome": "failure"}]}, name="b.yaml")
+    assert score.main([str(d), str(projected)]) == 0
+
+
+def test_a_clause_naming_a_lead_the_case_lacks_asserts_nothing_loudly(tmp_path):
+    """`_requested` resolves against the case's own ids, so a typo'd lead id cannot make a
+    contract look enforced while checking nothing. The case still has to assert something
+    real elsewhere — `validate_cases.check_expectation` is what catches a case whose whole
+    contract evaporates this way."""
+    assert score.expectation_failures(
+        {"empty_leads": ["l-999"]}, {"l-001": [{"a": 1}]}, ["l-001"]) == []
+    assert score.expectation_failures(
+        {"empty_leads": "all"}, {"l-001": [{"a": 1}]}, ["l-001"]) != []

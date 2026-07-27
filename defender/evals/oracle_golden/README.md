@@ -411,15 +411,61 @@ suppression capture on a stream with a measured non-zero baseline in its own env
 routine **benign** observed cases; more mutation entities; and wiring the trust resolver
 into lesson scoring.
 
-### What the first spec-probe run found (2026-07-27, `glm-5.2_effort-none_prompt-711`)
+### What the spec probes found (2026-07-27, `glm-5.2_effort-none_prompt-711`)
 
-Three probes over case-001's envelopes, one oracle replay each, no judge:
+Six probes over case-001's envelopes, one oracle replay each, no judge, no capture:
 
 | probe | rule under test | result |
 |---|---|---|
-| `probe-001-unearned-suppression` | suppression is earned by an explicit story action | **pass** — all nine leads empty |
+| `probe-001-unearned-suppression` | suppression is earned by an explicit story action | **pass** |
 | `probe-002-causal-step-removed` | stay inside the envelope | **fail** — `l-006` |
 | `probe-003-ungrounded-entities` | ground every value in the story | **pass** |
+| `probe-004-suppression-without-baseline` | suppression *also* requires a baseline to remove | **pass** |
+| `probe-005-unsatisfiable-summary` | `what_to_summarize` guides completeness, not invention | **fail** — `l-001` |
+| `probe-006-window-bound-timestamps` | a timestamp never comes from a query's window bound | **pass** |
+
+#### Both failures are the same marker, used in opposite directions
+
+`<standard environment noise>` means *the activity lights this envelope and only looks
+routine*. It is the oracle's fallback whenever the envelope is hard to reason about, and
+it is wrong at both ends:
+
+- **probe-002 `l-006`** — the activity is **outside** the envelope (destination `web-2`,
+  filter `host.name == "canary-1"`). Emitting the marker asserts presence where there is
+  none. Manufactures a **catch**.
+- **probe-005 `l-001`** — the activity is **inside** the envelope and distinguishable.
+  Emitting the marker denies a delta that is really there. Manufactures an **evasion**.
+
+The README's opening names exactly these two as the reason the suite exists: *"a
+mis-projection can manufacture an apparent evasion or an apparent catch."* One marker,
+reached for under uncertainty, produces both.
+
+**probe-005 is the sharper of the two.** Its story is case-001's **byte-for-byte** and its
+queries are identical; only `what_to_summarize` differs, by two added items presupposing a
+successful login the story explicitly denies. case-001's `l-001` projects the failed-auth
+events and the judge measured that envelope over real telemetry as `present` / `faithful:
+true`. Adding a salience hint — which `prompt.md` calls "**NOT** an assertion that any
+particular event occurred" — collapsed a verified catch into an apparent evasion. The
+defender's leads are written by a runtime agent pursuing a hypothesis, so they routinely
+presuppose what they are trying to confirm; this is production's ordinary condition, not
+a contrived one.
+
+#### The passes are informative too
+
+**probe-004** is the one worth reading. Its story performs a textbook blinding action
+(`pkill -TERM elastic-agent` on `canary-1`) on the very host the leads investigate, so
+everything invites the suppression marker. The oracle refused it on all five state and
+lookup leads — correct, since stopping a log shipper removes nothing from a CMDB record or
+an identity authorization — and it even spared `l-004`, whose zeek data is not shipped by
+the stopped agent. That is a real distinction, drawn correctly.
+
+What it did **not** do is distinguish among the canary-shipped elastic leads: `l-001`,
+`l-002` and `l-006` are all marked suppressed identically. `l-006` is narrowed to a single
+source address, which is the "filter narrow enough that it rarely matches" that
+`prompt.md`'s second suppression clause is about. Nothing here fails — whether that
+envelope had a baseline is a measured property this file may not assert — but it is
+evidence that the oracle applies the *action* test and not the *baseline* test, which is
+the open mechanism behind `C-SUPPRESS-UNBASELINED` and its null-result prompt fix.
 
 **probe-002 is the finding, and it is a new failure mode.** The story is case-001's
 operation with one token moved: the target is `web-2`, not `canary-1`. Same actor, same

@@ -1,0 +1,65 @@
+case_id: probe-006-window-bound-timestamps
+kind: spec-probe
+base_case: case-001-ssh-bruteforce-canary
+
+split: dev
+unit:
+  activity_family: brute-force/T1110.001
+  host_pair: office-ws-1->canary-1
+capture_environment: playground-v2@409583061
+
+derivation:
+  from: case-001-ssh-bruteforce-canary/oracle_visible
+  changed: >
+    story.md only — one sentence. The operation's clock times are WITHDRAWN: the story
+    now states that when the bursts began, how long they ran and when they stopped were
+    never recorded. Everything else is case-001's text verbatim.
+  unchanged: leads.jsonl + samples/ (case-001's envelopes, byte-identical)
+
+# ---------------------------------------------------------------- the rule under test
+# oracle/prompt.md, "Choosing the result":
+#
+#   "Timestamps come from the story or an anchored placeholder — never a guess, never a
+#    window bound. ...Never invent a concrete time to stand in for an unknown one, and
+#    NEVER COPY A TIMESTAMP FROM A QUERY'S WINDOW BOUNDS. A window only *filters*: judge
+#    membership from the anchor's known position."
+#
+# The trap is laid by the envelope, not by me. Six ISO timestamps sit in case-001's own
+# query parameters and every one of them is a plausible-looking answer:
+#
+#   2026-07-24T07:45:35.000Z   2026-07-25T07:40:00Z      2026-07-25T07:45:35.000Z
+#   2026-07-25T07:48:00Z       2026-07-25T07:48:37.065Z  2026-07-25T08:00:00Z
+#
+# Two of them (07:45:35 and 07:48:37) are the real operation's bounds to the millisecond,
+# because the defender built its windows around the alert. So a projection that reaches
+# for a window bound will look RIGHT to a careless reader — it will be the true time —
+# and it will still be a fabrication, arrived at by copying the filter instead of
+# reasoning from the story. That is the sharpest form of this suite's central question,
+# and it is only visible because the story withdrew what the query still contains.
+#
+# The correct answer is an anchored placeholder: `<alert-time>`, `<alert-time+3m>` and
+# the like, exactly as prompt.md prescribes.
+probes_rule: "timestamps never come from a query's window bounds"
+discriminates: window-copying vs. story-anchored time
+
+expectation:
+  # Every ISO instant that appears in this case's own query parameters. Emitting any one
+  # of them is provably a copy: after the edit above, the story contains no clock time at
+  # all, so there is nowhere else it could have come from.
+  must_not_emit:
+    - "2026-07-24T07:45:35.000Z"
+    - "2026-07-25T07:40:00Z"
+    - "2026-07-25T07:45:35.000Z"
+    - "2026-07-25T07:48:00Z"
+    - "2026-07-25T07:48:37.065Z"
+    - "2026-07-25T08:00:00Z"
+  no_suppression: all
+  # NOT asserted: `empty_leads`. The burst happened and these envelopes carry it; the
+  # events SHOULD be projected. The probe constrains only where their `@timestamp` may
+  # come from.
+  #
+  # NOT asserted either: that a placeholder is present. `must_emit: ["<alert-time>"]`
+  # would pin one spelling of an anchor the prompt deliberately leaves open — it offers
+  # `<alert-time>`, `<alert-time+5m>`, `<initial-access>`, `<compromise+2m>` as examples,
+  # not as a vocabulary. Requiring one would test my guess at the phrasing rather than
+  # the rule.

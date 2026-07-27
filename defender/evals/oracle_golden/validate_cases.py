@@ -113,7 +113,8 @@ def check_expectation(name: str, manifest: dict) -> list[str]:
         return []
     expectation = manifest.get("expectation") or {}
     if not any(expectation.get(k) for k in
-               ("empty_leads", "no_suppression", "must_emit", "must_not_emit")):
+               ("empty_leads", "no_suppression", "no_noise_marker", "must_emit",
+                "must_not_emit")):
         return [f"{name}: a {manifest.get('kind')} case declares no `expectation:` — the "
                 f"judge never runs on it, so it would pass no matter what the oracle "
                 f"emitted. Declare what its story settles."]

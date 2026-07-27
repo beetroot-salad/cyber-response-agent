@@ -1,0 +1,40 @@
+projections:
+- lead_id: l-003
+  events: []
+- lead_id: l-002
+  events:
+  - '<suppressed: the attacker ran pkill -TERM elastic-agent on canary-1 before the
+    guessing began, halting the shipper that forwards that host''s sshd auth logs
+    and detection alerts for the remainder of the operation>'
+- lead_id: l-001
+  events:
+  - '<suppressed: the attacker ran pkill -TERM elastic-agent on canary-1 before the
+    password-guessing loop began, halting the log shipper so no sshd auth-failure
+    events from canary-1 are forwarded during the window>'
+- lead_id: l-005
+  events: []
+- lead_id: l-006
+  events:
+  - '<suppressed: the attacker stopped the monitoring agent on canary-1 with pkill
+    -TERM elastic-agent before the password-guessing loop began, so no sshd auth events
+    from 172.18.0.15 against canary-1 are forwarded during the alert window>'
+- lead_id: l-004
+  events:
+  - '@timestamp': <alert-time>
+    source.ip: 172.18.0.15
+    destination.ip: 172.18.0.9
+    zeek.ssh.client: <ssh-client>
+    zeek.ssh.server: <ssh-server>
+    destination.port: 22
+  - '@timestamp': <alert-time+~3m>
+    source.ip: 172.18.0.15
+    destination.ip: 172.18.0.9
+    zeek.ssh.client: <ssh-client>
+    zeek.ssh.server: <ssh-server>
+    destination.port: 22
+- lead_id: l-007
+  events: []
+- lead_id: l-008
+  events: []
+- lead_id: l-009
+  events: []
