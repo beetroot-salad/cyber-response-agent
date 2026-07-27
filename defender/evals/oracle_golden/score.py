@@ -67,7 +67,7 @@ _NOISE_MARKER = "<standard environment noise>"
 
 #: Kinds whose story was never fired, so nothing was ever measured for it. They are
 #: graded against `expectation:` in the manifest instead — see `expectation_failures`.
-DERIVED_KINDS = ("mutation", "negative-control", "spec-probe")
+DERIVED_KINDS = ("mutation", "negative-control", "spec-probe", "contradiction")
 
 #: Causes decided in code, never by the judge. They are disjoint from `judge.CAUSES` on
 #: purpose: a mechanical failure is a property of the document, needs no measurement to

@@ -1,0 +1,43 @@
+case_id: contra-003-target
+kind: contradiction
+base_case: case-001-ssh-bruteforce-canary
+
+split: dev
+unit:
+  activity_family: brute-force/T1110.001
+  host_pair: office-ws-1->canary-1
+capture_environment: playground-v2@409583061
+
+derivation:
+  from: case-001-ssh-bruteforce-canary/oracle_visible
+  changed: >
+    story.md only — one sentence ADDED to section 2, contradicting section 1. Nothing is
+    removed, so both claims stand in the same document.
+  unchanged: leads.jsonl + samples/ (case-001's envelopes, byte-identical)
+
+# See contra-001-outcome/manifest.yaml for what this kind is for and, more importantly,
+# for what a failure here does and does not prove. In short: the oracle cannot know which
+# branch is true, so this is not a competence grade — it demonstrates that a
+# self-contradicting story drives a confident, concrete, factually false projection into
+# a loop whose only stage able to name incoherence sits downstream of it.
+probes_rule: "no rule — prompt.md does not address contradictory input"
+discriminates: silent branch-selection vs. refusing to commit to a contested claim
+
+# THE CONTRADICTION. Section 1: the password-guessing loop runs against the SSH service
+# on `canary-1` (172.18.0.9). Section 2: "The host under attack throughout is `web-2`
+# (172.18.0.22), not the canary."
+#
+# THE CAPTURE REFUTES web-2. case-001's payloads are canary-1's sshd log; the burst is
+# there, and 172.18.0.22 appears nowhere.
+#
+# The target contradiction is the one with teeth for the learning loop. Source identity
+# mostly moves a field; the TARGET decides which envelopes the activity reaches at all, so
+# taking the wrong branch does not produce a slightly-wrong event — it produces a wholly
+# different verdict about whether the operation was visible. That is the same failure
+# class as case-006/case-007, where a retarget the scenario never honoured sent a whole
+# investigation at a host the activity never touched.
+expectation:
+  must_not_emit: ["172.18.0.22", "web-2"]
+  no_suppression: all
+
+replays: 3

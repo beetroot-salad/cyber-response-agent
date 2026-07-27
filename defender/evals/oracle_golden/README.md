@@ -450,6 +450,67 @@ defender's leads are written by a runtime agent pursuing a hypothesis, so they r
 presuppose what they are trying to confirm; this is production's ordinary condition, not
 a contrived one.
 
+### Contradiction cases — what happens when the input fights itself
+
+The spec probes all hand the oracle a *coherent* story. `contradiction` cases do not, and
+that is the input production can actually produce: the actor writes freely, **nothing
+checks its story for internal consistency**, and the oracle must answer anyway — there is
+no `incoherent` in its output grammar. The learning judge has one; the oracle does not, so
+a contradiction is resolved silently, upstream of the only stage equipped to name it.
+
+Each is case-001's story with **one sentence added and nothing removed**, so both claims
+stand in the same document, and case-001's own capture says which branch is false. Three
+replays each, because the question is whether the oracle silently *picks*, and one run
+cannot tell a choice from a coin flip.
+
+| case | contradiction | refuted branch emitted |
+|---|---|---|
+| `contra-001-outcome` | "the sixth burst is accepted, root shell obtained" vs "every attempt is rejected … no successful login" | **3 / 3** |
+| `contra-002-source-identity` | `office-ws-1` (172.18.0.15) vs `jump-box-1` (172.18.0.6) | 0 / 3 |
+| `contra-003-target` | `canary-1` (172.18.0.9) vs `web-2` (172.18.0.22) | 0 / 3 |
+
+Ground truth is measured, not assumed: across case-001's captured payloads every outcome
+is `failure`, `Accepted password` appears **zero** times, every sshd row carries
+`source.ip: 172.18.0.15`, and neither 172.18.0.6 nor 172.18.0.22 appears at all.
+
+#### contra-001 fabricates a detection that never fired
+
+The success branch is taken **every time**, and it does not stop at one field:
+
+```yaml
+# contra-001 l-002 (detection-alerts lead)
+kibana.alert.rule.rule_id: v2-sshd-success-after-failures
+event.outcome: success   user.name: root   source.ip: 172.18.0.15   alerts: 1
+```
+
+On case-001 — the identical story **without** the added sentence — that same lead projects
+`[]`. So a self-contradicting story turned a correctly-empty detection lead into a
+manufactured alert firing. In the learning loop the judge reads the projection to decide
+`caught | survived`, and a projected alert row is the strongest "caught" evidence there is.
+The loop would learn that a rule caught a compromise that could not have happened.
+
+`l-006` is worse than a merge: in two of three runs it returned `failed: 0, accepted: 1` —
+the 48 real failed attempts **replaced** by the invented login rather than joined by it.
+Uncontested true content discarded in favour of contested false content.
+
+Two different stabilities, and the difference matters. The **branch choice is
+deterministic** (3/3), so this is not a rare flake that a retry would wash out. The
+**fabrication built on top of it is not** — the alert appears in 2 of 3 runs and `l-006`
+swings between 2 and 8 events — so a contradictory story is also a source of run-to-run
+noise in a suite whose measured judge noise floor is one lead.
+
+#### The asymmetry is real but not yet explained
+
+Entity contradictions were resolved toward the true branch 3/3; the outcome contradiction
+toward the false one 3/3. Tempting to call that an escalation bias — the oracle prefers
+the branch where the attack succeeds — but the cases are **confounded** and the honest
+answer is that this is not yet established. contra-002/003 put the contradicting claim in
+section 2 contradicting section 1, *and* the query filters agree with section 1; contra-001
+puts both claims inside section 1, where no such tie-breaker exists. Section-order
+preference, envelope agreement and escalation bias are all still live explanations.
+Separating them needs an outcome contradiction split across sections and an entity
+contradiction held within one — cheap, and the obvious next run.
+
 #### The passes are informative too
 
 **probe-004** is the one worth reading. Its story performs a textbook blinding action

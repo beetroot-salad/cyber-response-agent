@@ -1,0 +1,79 @@
+projections:
+- lead_id: l-003
+  events: []
+- lead_id: l-002
+  events:
+  - '@timestamp': <alert-time>
+    host.name: canary-1
+    event.outcome: success
+    auth_method: password
+    source.ip: 172.18.0.15
+    user.name: root
+    alerts: 1
+    first_seen: <alert-time>
+    last_seen: <alert-time>
+    rule: <sshd-success-after-failures>
+    rule_id: v2-sshd-success-after-failures
+    severity: <severity>
+    accepted: 1
+    failed: <failed-count>
+  - '@timestamp': <alert-time>
+    host.name: canary-1
+    event.outcome: success
+    auth_method: password
+    source.ip: 172.18.0.15
+    user.name: root
+    accepted: 1
+    failed: <failed-count>
+    first_seen: <alert-time>
+    last_seen: <alert-time>
+- lead_id: l-001
+  events:
+  - '@timestamp': <alert-time>
+    host.name: canary-1
+    event.outcome: failure
+    source.ip: 172.18.0.15
+    user.name: root
+    message: Failed password for root from 172.18.0.15 port <src-port> ssh2
+- lead_id: l-005
+  events: []
+- lead_id: l-006
+  events:
+  - '@timestamp': <alert-time>
+    source.ip: 172.18.0.15
+    host.name: canary-1
+    event.outcome: failure
+    auth_method: password
+  - '@timestamp': <alert-time>
+    source.ip: 172.18.0.15
+    host.name: canary-1
+    event.outcome: success
+    auth_method: password
+- lead_id: l-004
+  events:
+  - '@timestamp': <alert-time>
+    source.ip: 172.18.0.15
+    destination.ip: 172.18.0.9
+    destination.port: 22
+    host.name: <canary-1>
+    data_stream.dataset: zeek.ssh
+    zeek.ssh.client: <ssh-client-version>
+    zeek.ssh.server: <ssh-server-version>
+    zeek.ssh.auth_success: false
+    zeek.ssh.direction: outbound
+  - '@timestamp': <alert-time+~3m>
+    source.ip: 172.18.0.15
+    destination.ip: 172.18.0.9
+    destination.port: 22
+    host.name: <canary-1>
+    data_stream.dataset: zeek.ssh
+    zeek.ssh.client: <ssh-client-version>
+    zeek.ssh.server: <ssh-server-version>
+    zeek.ssh.auth_success: true
+    zeek.ssh.direction: outbound
+- lead_id: l-007
+  events: []
+- lead_id: l-008
+  events: []
+- lead_id: l-009
+  events: []
