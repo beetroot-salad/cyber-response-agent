@@ -1,0 +1,1 @@
+{"query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-26T19:00:00Z\" AND @timestamp < \"2026-07-26T20:00:00Z\"\n        AND host.name == \"web-1\"\n| STATS count = COUNT(*)\n        BY data_stream.dataset\n| SORT count DESC", "columns": [{"name": "count", "type": "long"}, {"name": "data_stream.dataset", "type": "keyword"}], "row_count": 0, "values": []}

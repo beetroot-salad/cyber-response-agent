@@ -1,0 +1,16 @@
+projections:
+- lead_id: l-001
+  events:
+  - '<suppressed: the attacker stopped the Elastic Agent on dev-ws-1 at <alert-time>,
+    halting the host''s auth/syslog stream to the central store before the query window
+    opens>'
+- lead_id: l-002
+  events:
+  - '<suppressed: the attacker stopped the Elastic Agent on dev-ws-1 at <alert-time>,
+    halting all syslog/auth/metric streams from that host — the query window (09:35–09:45Z)
+    falls within the dark period, so the per-dataset counts the query would normally
+    return are absent>'
+- lead_id: l-003
+  events: []
+- lead_id: l-004
+  events: []

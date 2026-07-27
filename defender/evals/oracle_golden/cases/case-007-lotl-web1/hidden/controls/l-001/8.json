@@ -1,0 +1,93 @@
+{
+  "lead_id": "l-001",
+  "seq": 8,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-11T00:00:00.000Z",
+        "2026-07-13T00:00:00.000Z"
+      ],
+      "query": "FROM logs-falco.*\n| WHERE @timestamp >= \"2026-07-11T00:00:00.000Z\" AND @timestamp < \"2026-07-13T00:00:00.000Z\"\n| STATS events = COUNT(*)\n        BY data_stream.dataset\n| SORT events DESC\n| LIMIT 10",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-falco.*\n| WHERE @timestamp >= \"2026-07-11T00:00:00.000Z\" AND @timestamp < \"2026-07-13T00:00:00.000Z\"\n| STATS events = COUNT(*)\n        BY data_stream.dataset\n| SORT events DESC\n| LIMIT 10",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "data_stream.dataset",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "events": 72087,
+            "data_stream.dataset": "falco.alerts"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-04T00:00:00.000Z",
+        "2026-07-06T00:00:00.000Z"
+      ],
+      "query": "FROM logs-falco.*\n| WHERE @timestamp >= \"2026-07-04T00:00:00.000Z\" AND @timestamp < \"2026-07-06T00:00:00.000Z\"\n| STATS events = COUNT(*)\n        BY data_stream.dataset\n| SORT events DESC\n| LIMIT 10",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-falco.*\n| WHERE @timestamp >= \"2026-07-04T00:00:00.000Z\" AND @timestamp < \"2026-07-06T00:00:00.000Z\"\n| STATS events = COUNT(*)\n        BY data_stream.dataset\n| SORT events DESC\n| LIMIT 10",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "data_stream.dataset",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "events": 73229,
+            "data_stream.dataset": "falco.alerts"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-27T00:00:00.000Z",
+        "2026-06-29T00:00:00.000Z"
+      ],
+      "query": "FROM logs-falco.*\n| WHERE @timestamp >= \"2026-06-27T00:00:00.000Z\" AND @timestamp < \"2026-06-29T00:00:00.000Z\"\n| STATS events = COUNT(*)\n        BY data_stream.dataset\n| SORT events DESC\n| LIMIT 10",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-falco.*\n| WHERE @timestamp >= \"2026-06-27T00:00:00.000Z\" AND @timestamp < \"2026-06-29T00:00:00.000Z\"\n| STATS events = COUNT(*)\n        BY data_stream.dataset\n| SORT events DESC\n| LIMIT 10",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "data_stream.dataset",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "events": 68926,
+            "data_stream.dataset": "falco.alerts"
+          }
+        ]
+      }
+    }
+  ]
+}

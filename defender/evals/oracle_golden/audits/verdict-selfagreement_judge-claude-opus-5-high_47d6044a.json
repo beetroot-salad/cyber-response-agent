@@ -1,0 +1,331 @@
+{
+  "pass": "verdict",
+  "oracle_tag": "glm-5.2_effort-none_prompt-711",
+  "judge_model": "claude-opus-5",
+  "judge_effort": "high",
+  "tag_suffix": "judge-claude-opus-5-high_47d6044a",
+  "cost_usd": 5.2815,
+  "prompts_sha8": "47d6044a",
+  "repeats": 5,
+  "leads": 17,
+  "unstable_leads": 1,
+  "noise_floor_leads": 1,
+  "contradicts_measurement": 0,
+  "mean_self_agreement": 0.988,
+  "rows": [
+    {
+      "case": "case-001-ssh-bruteforce-canary",
+      "lead": "l-001",
+      "delta_kind": "present",
+      "modal_faithful": true,
+      "self_agreement": 1.0,
+      "stable": true,
+      "faithful": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "causes": [],
+      "undecidable_reasons": [],
+      "rationale": "The measurement records delta_kind=present and homogeneous: observed seq 3 gives total_failed=95, distinct_src_ips=1, distinct_users=1 over 07:45:35Z\u201307:48:37Z, seq 0 a single group source.ip=172.18.0.15 / user.name=root, while both live controls (C-14d, C-21d) return row_count=0 and total_failed=0. The projection emits failure rows on canary-1 with user.name=root, source.ip=172.18.0.15, and the exact surfaced message form \"Failed password for root from 172.18.0.15 port <port> ssh2\", spanning <alert-time> to <alert-time+3m> \u2014 which matches the observed 07:45:35Z\u201307:48:37Z span and the observed literal message lines (e.g. port 55044, port 59722). Every concrete value is grounded by the story (172.18.0.15, root, canary-1) and corroborated by observed rows; the port is correctly placeholdered. Representing 95 events as two bracketing rows rather than a count or minute buckets (13/32/28/22) is a granularity divergence, not a content mismatch, and the pam_unix variant (failed_count=48) expresses the same root-password-failure claim."
+    },
+    {
+      "case": "case-001-ssh-bruteforce-canary",
+      "lead": "l-002",
+      "delta_kind": "present",
+      "modal_faithful": false,
+      "self_agreement": 1.0,
+      "stable": true,
+      "faithful": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "causes": [
+        "C-MISSED-DELTA"
+      ],
+      "undecidable_reasons": [],
+      "rationale": "The lead's second query (`logs-system.auth-*`, seq 1) returns two rows over the operation window \u2014 `user.name: root`, `accepted: 0`, `failed: 48` for `auth_method: other` (07:45:35Z\u201307:48:37Z) and another `failed: 48` for `auth_method: password` (07:45:37Z\u201307:48:39Z) \u2014 96 failed root authentications on canary-1. Both live controls (C-14d and C-21d, `window_live: true`) return `row_count: 0` for the identical aggregation over one-hour windows, so the delta is carried by `user.name`, `auth_method` and the failure counts, not by the unstable `source.ip` 172.18.0.15. The projection is an empty list, representing nothing at all, so it omits this distinguishable change entirely. It is correct only about seq 0 (the `v2-sshd-success-after-failures` alert query, `row_count: 0` observed and in both live controls, and indeed no `accepted > 0` row anywhere), but silence on the auth-history query is a missed delta rather than a faithful no-change reading."
+    },
+    {
+      "case": "case-001-ssh-bruteforce-canary",
+      "lead": "l-003",
+      "delta_kind": "state-only",
+      "modal_faithful": true,
+      "self_agreement": 1.0,
+      "stable": true,
+      "faithful": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "causes": [],
+      "undecidable_reasons": [],
+      "rationale": "The lead's single query `cmdb.host-trust-edges` (host: canary-1) is a state lookup, and the\nmeasurement of record classifies it `state-only`: the returned record (`role: canary`,\n`criticality: sandbox`, `owner: team.sre`, `trust_edges_out: []`, users `svc.monitoring`\nnologin/no-sudo and `svc.config-mgmt` /bin/bash+sudo) is current configuration, not an event\nstream, and `environment_notes.state_and_lookup_systems` says such queries have no control\nand no baseline-diff semantics \u2014 so the empty `baseline: []` is absence-by-construction, not\na measured zero. The story's activity is an sshd password-guessing run against canary-1 with\nno configuration change, no new trust edge, and no account modification, so nothing in this\ninventory record differs on account of the operation. An empty projection therefore asserts\nno delta where there is none: it neither omits a distinguishable change (no `C-MISSED-DELTA`)\nnor invents one, and it does not claim suppression over the unbaselined envelope."
+    },
+    {
+      "case": "case-001-ssh-bruteforce-canary",
+      "lead": "l-004",
+      "delta_kind": "present",
+      "modal_faithful": true,
+      "self_agreement": 1.0,
+      "stable": true,
+      "faithful": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "causes": [],
+      "undecidable_reasons": [],
+      "rationale": "The measured delta is the appearance of 172.18.0.15 as an SSH *client* toward 172.18.0.9:22 \u2014 seq 4 returns 0 rows in both live controls (C-14d 2026-07-11, C-21d 2026-07-04) while the observed payload carries 48 events to 172.18.0.9 with zeek.ssh.client \"SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.15\", first_seen 2026-07-25T07:45:35.517Z / last_seen 07:48:37.065Z, and seq 5 adds the matching source.ip 172.18.0.15 \u2192 destination.ip 172.18.0.9 client/server row absent from every control. The projection emits exactly that envelope: zeek.ssh rows, source 172.18.0.15 \u2192 destination 172.18.0.9 port 22, spanning <alert-time> to <alert-time+3m>, which brackets the observed ~3-minute burst. The version strings the story does not state are left as <ssh-client>/<ssh-server> placeholders, which is required compliance, not fabrication, and no concrete unfounded value appears. It compresses 48 events into two boundary rows and does not spell out event.outcome \"failure\" / auth.success false from seq 3, but the claim it makes \u2014 new SSH client activity from .15 to .9 during the window \u2014 matches the measured delta rather than asserting anything the telemetry lacks."
+    },
+    {
+      "case": "case-001-ssh-bruteforce-canary",
+      "lead": "l-005",
+      "delta_kind": "state-only",
+      "modal_faithful": true,
+      "self_agreement": 1.0,
+      "stable": true,
+      "faithful": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "causes": [],
+      "undecidable_reasons": [],
+      "rationale": "The lead's single query is a threat-intel entity lookup for 172.18.0.15, which\n`environment_notes.state_and_lookup_systems` classifies as state-only \u2014 no @timestamp\nbounds, no control, hence the empty `baseline` array, and `measurement` reads it the\nsame way. The observed record is a bare miss: `verdict: unknown`, `score: 0`,\n`sources: []`, `tags: []`, `first_seen`/`last_seen` null \u2014 nothing the password-guessing\nbursts from 172.18.0.15 could have written, since the story grounds no reputation,\ncampaign, or actor association for this internal RFC1918 address. The empty projection\ntherefore asserts no change, which is exactly what this envelope shows; critically it\ndoes not invent a malicious verdict, a nonzero score, or actor tags that the payload\ndoes not carry."
+    },
+    {
+      "case": "case-001-ssh-bruteforce-canary",
+      "lead": "l-006",
+      "delta_kind": "present",
+      "modal_faithful": false,
+      "self_agreement": 1.0,
+      "stable": true,
+      "faithful": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "causes": [
+        "C-EVENT-AS-NOISE"
+      ],
+      "undecidable_reasons": [],
+      "rationale": "The projection is the bare indistinguishable-noise marker, but three of the lead's queries surface concretely distinguishing rows in the operation window: seq 1 returns two host.name=canary-1 rows with accepted=0 / failed=48 (auth_method \"other\") and failed=47 (\"password\") spanning 2026-07-25T07:45:35Z\u201307:48:37Z, seq 5 collapses the same 95 failures into the 07:00 hourly bucket, and seq 6 resolves them into eight per-minute rows (7+6, 16+16, 14+14, 11+11) \u2014 a sustained ~30 failures/minute burst with zero successes.\nThe corresponding baseline query strings over live control windows (C-7d/C-14d/C-21d for seq 1 and 5, C-14d/C-21d for seq 6) all return row_count 0, so the delta is carried by fields these queries actually return \u2014 host.name, the failed/accepted counts, and the bucket cadence \u2014 not solely by the unstable source.ip filter flagged in environment_notes.\nThe measurement of record likewise reads delta_kind: present with heterogeneous: true (seq 0/2/3 legitimately empty and baseline-matching), so the honest projection had to represent the canary-1 failure burst rather than declaring the whole envelope routine.\nEmitting the noise marker over an envelope whose queries do carry a distinguishing field is exactly C-EVENT-AS-NOISE."
+    },
+    {
+      "case": "case-001-ssh-bruteforce-canary",
+      "lead": "l-007",
+      "delta_kind": "state-only",
+      "modal_faithful": true,
+      "self_agreement": 1.0,
+      "stable": true,
+      "faithful": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "causes": [],
+      "undecidable_reasons": [],
+      "rationale": "The lead's only query is cmdb.host-trust-edges for host=db-1, which `measurement`\nclassifies as `state-only`: it returns the current entity record (role: db,\ncriticality: prod, owner: team.data, trust_edges_out: [], users svc.monitoring /\nsvc.backups / svc.config-mgmt) and carries no @timestamp bounds, so the empty\n`baseline` array is a definitional property of lookup systems, not a measurement of\nabsence. The story's activity is confined to sshd password guessing from\noffice-ws-1 (172.18.0.15) against canary-1 and explicitly makes no file, config, or\npersistence changes, so nothing in it would alter db-1's inventory record \u2014 every\nfield in `observed` is pre-existing configuration identical with and without the\nattack. The empty projection therefore asserts no change and omits only rows that\nare routine in both states, which the delta-grading rule treats as correct. It also\ninvents nothing \u2014 notably it does not claim a trust edge from db-1 to canary-1,\nwhich `observed` shows as `trust_edges_out: []`."
+    },
+    {
+      "case": "case-001-ssh-bruteforce-canary",
+      "lead": "l-008",
+      "delta_kind": "state-only",
+      "modal_faithful": true,
+      "self_agreement": 1.0,
+      "stable": true,
+      "faithful": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "causes": [],
+      "undecidable_reasons": [],
+      "rationale": "Every query in this lead hits the `identity` system (access-check, list-all-users,\nuser-authorization), which `environment_notes.state_and_lookup_systems` classifies as\ncurrent-configuration lookups with no `@timestamp` bounds and therefore no baseline-diff\nsemantics \u2014 consistent with `baseline: []` and the measurement's `state-only` tag.\nThe story's activity is a failed sshd password-guessing run against `root@canary-1`\nfrom 172.18.0.15 that gains no session and makes no changes, so it cannot alter any\nfield these queries surface: seq 1 still returns the standing 16-user realm, seq 4\u201319\nreturn static `authorized_hosts`/`sudo_hosts` lists (canary-1 present for sre.alice,\nsre.ben, sre.chen, svc.config-mgmt, svc.monitoring), and seq 2/3 report the pre-existing\n`authorized: true, via: override` grants. The oracle projecting nothing correctly asserts\nno delta on this envelope; seq 0 (root on canary-1) is `unreadable: true` and could not\nbe used to fault it either way."
+    },
+    {
+      "case": "case-001-ssh-bruteforce-canary",
+      "lead": "l-009",
+      "delta_kind": "state-only",
+      "modal_faithful": true,
+      "self_agreement": 1.0,
+      "stable": true,
+      "faithful": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "causes": [],
+      "undecidable_reasons": [],
+      "rationale": "All four queries are `change-mgmt` templates, which `environment_notes` classifies as state/lookup systems with no @timestamp bounds and therefore no baseline-diff semantics; `measurement` records this as `state-only` with `heterogeneous: false`, and `baseline` is an empty list. The observed payloads carry seq 1 `total: 0, changes: []` for canary-1, seq 2 `total: 10` db-1 records (CHG-1043 postgres bump with window 2026-05-02T04:00\u201306:00Z plus nine approved OPS-STANDING-DB-BACKUP nightly 02:00\u201303:00Z windows for 07-18..07-26), and seq 0 / seq 3 empty active-change lists at 07:48:00Z \u2014 every one of these is pre-existing configuration state that the story's password-guessing bursts from office-ws-1 could not create or alter. The story states no change-ticket filing, no service disruption, and no follow-on action, so the activity's delta against this envelope is genuinely nothing. The empty projection asserts exactly that: it neither invents an authorizing ticket nor claims suppression of the standing db-1 backup records, so it faithfully represents a null delta."
+    },
+    {
+      "case": "case-002-authorized-keys-falco",
+      "lead": "l-001",
+      "delta_kind": "present",
+      "modal_faithful": false,
+      "self_agreement": 0.8,
+      "stable": false,
+      "faithful": [
+        false,
+        false,
+        true,
+        false,
+        false
+      ],
+      "causes": [
+        "C-FABRICATED-VALUE"
+      ],
+      "undecidable_reasons": [],
+      "rationale": "The measurement records delta_kind present on the strength of one observed row at\n2026-07-25T09:29:02.246Z carrying falco.rule \"Adding ssh keys to authorized_keys\",\nfd.name \"/root/.ssh/authorized_keys\", user.name \"root\" and evt.type \"openat\", against\ntwo live controls (C-14d, C-21d) that both returned row_count 0. The projection does\nrepresent that delta \u2014 one alert row, correct rule, correct fd.name, correct user,\nwith `<alert-time>` and `<container-id>` properly placeholdered (container.id is an\nunstable column anyway). But it fills `falco.output_fields.evt.type` with the fully\nconcrete value \"write\", which the story never states (it says only that a bash process\nperformed the write) and which the observed payload contradicts \u2014 the surfaced field\ncarries \"openat\". That is a concrete, unplaceholdered value with no grounding in either\nthe story or the telemetry, so it grades as C-FABRICATED-VALUE despite the rest of the\nrow matching."
+    },
+    {
+      "case": "case-002-authorized-keys-falco",
+      "lead": "l-002",
+      "delta_kind": "state-only",
+      "modal_faithful": true,
+      "self_agreement": 1.0,
+      "stable": true,
+      "faithful": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "causes": [],
+      "undecidable_reasons": [],
+      "rationale": "The lead has a single query, `cmdb.host-trust-edges` with `{host: canary-1}`, and the observed payload is `{_note: state lookup, params: {host: canary-1}}` \u2014 it echoes the query parameters and carries no `role`, `criticality`, `owner`, or `trust_edges_out` values at all. The empty `baseline` is expected here: per `environment_notes.state_and_lookup_systems`, cmdb queries have no `@timestamp` bounds to shift and therefore no baseline-diff semantics, which matches the measurement's `state-only` reading. The story's only action is appending a key to `/root/.ssh/authorized_keys` on canary-1, which changes no CMDB entity record, so there is no delta for this envelope to carry. The oracle's empty projection asserts no change and invents no concrete role/owner/trust-edge values, which is exactly right for a state-only lookup that surfaced nothing."
+    },
+    {
+      "case": "case-003-suppression-devws",
+      "lead": "l-001",
+      "delta_kind": "absent",
+      "modal_faithful": false,
+      "self_agreement": 1.0,
+      "stable": true,
+      "faithful": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "causes": [
+        "C-SUPPRESS-UNBASELINED"
+      ],
+      "undecidable_reasons": [],
+      "rationale": "The observed payload for elastic.sshd-auth-history is `row_count: 0, values: []` over 09:35\u201309:45Z, and the projection converts that silence into a `<suppressed: ...>` marker. Suppression has to be earned on the baseline side too, and it is not: C-7d is `window_live: false` with a null payload (no information), C-21d is live for a full hour and also returns `row_count: 0`, and the only non-empty control, C-14d, carries a single group (accepted 6, failed 0, svc.config-mgmt, 172.18.0.14) whose first_seen == last_seen == 09:47:08.297Z \u2014 one scheduled burst that falls outside the observed window's 09:35\u201309:45 slot. So a live one-hour control already shows this envelope routinely quiet, meaning there were no events for a stopped shipper to remove and the empty ten-minute window is within routine behaviour. This matches the measurement's `delta_kind: absent`; the projection asserts a blind that this lead's telemetry does not evidence."
+    },
+    {
+      "case": "case-003-suppression-devws",
+      "lead": "l-002",
+      "delta_kind": "suppressed",
+      "modal_faithful": true,
+      "self_agreement": 1.0,
+      "stable": true,
+      "faithful": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "causes": [],
+      "undecidable_reasons": [],
+      "rationale": "The observed payload for elastic.syslog-ip-search over 09:35\u201309:45Z returns row_count 0 with\nempty values, while two live controls (C-14d and C-21d, both window_live: true) return five\npopulated datasets each \u2014 system.auth 444/528, elastic_agent.metricbeat 360/360, elastic_agent\n12/14, system.syslog 6/6, elastic_agent.filebeat 6/4 \u2014 so the baseline is non-empty and the\nsuppression marker is earned on both counts required: the story stops the Elastic Agent shipping\nthis host's streams, and the baseline shows routine events to remove. The projection emits a\nsingle `<suppressed: ...>` marker naming exactly that cause and scope (dev-ws-1, syslog/auth/metric\nstreams, the 09:35\u201309:45Z window), matching the measurement's `delta_kind: suppressed`. The dead\nC-7d window (2026-07-18, window_live: false) is correctly irrelevant here since two live controls\nalready establish the baseline. `<alert-time>` is a required placeholder for a value the story\ndoes not state, not a fabrication."
+    },
+    {
+      "case": "case-003-suppression-devws",
+      "lead": "l-004",
+      "delta_kind": "state-only",
+      "modal_faithful": true,
+      "self_agreement": 1.0,
+      "stable": true,
+      "faithful": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "causes": [],
+      "undecidable_reasons": [],
+      "rationale": "The lead's single query `cmdb.host-trust-edges` returned only `_note: \"state lookup; not an event stream\"` and the echoed `params: {host: dev-ws-1}` \u2014 no role, criticality, owner, or trust-edge rows \u2014 and the baseline is an empty list because a CMDB lookup carries no `@timestamp` bounds to shift, which `state_and_lookup_systems` defines as `state-only` rather than a dead or missing window. The measurement of record agrees: `delta_kind: state-only`, `heterogeneous: null`. Since the story's activity (stopping the Elastic Agent on dev-ws-1) changes no CMDB entity record, there is no delta for this envelope to carry, and the observed payload surfaces no concrete field the projection could have grounded. The empty projection therefore neither omits a distinguishable change nor invents one; had it asserted a concrete role/owner/trust edge, that would have been `C-FABRICATED-VALUE`."
+    },
+    {
+      "case": "case-004-noise-stolen-cred",
+      "lead": "l-001",
+      "delta_kind": "indistinguishable",
+      "modal_faithful": true,
+      "self_agreement": 1.0,
+      "stable": true,
+      "faithful": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "causes": [],
+      "undecidable_reasons": [],
+      "rationale": "The operation window returns exactly one row \u2014 `sre.alice`, `password`, accepted 5,\nfailed 0, source.ip 172.18.0.6 \u2014 and the live C-14d control returns a structurally\nidentical row \u2014 `sre.alice`, `password`, accepted 6, failed 0, source.ip 172.18.0.17.\nThe only categorical difference is `source.ip`, which `environment_notes` lists as an\nunstable identifier in playground-v2, so it cannot evidence a delta; accepted 5 vs 6\nis not a distinguishing field value. C-7d is `window_live: false` (not measured) and\nC-21d is live-but-empty, so neither overturns C-14d. The projection emitted the\nindistinguishable-noise marker, which is exactly what these queries' surfaced fields\nsupport, and it correctly declined to invent a distinction (e.g. the post-login recon)\nthat this sshd-auth aggregate cannot carry."
+    },
+    {
+      "case": "case-004-noise-stolen-cred",
+      "lead": "l-002",
+      "delta_kind": "absent",
+      "modal_faithful": true,
+      "self_agreement": 1.0,
+      "stable": true,
+      "faithful": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "causes": [],
+      "undecidable_reasons": [],
+      "rationale": "The lead's only query returned row_count 0 with empty `values` over 2026-07-25T10:32:00Z\u201310:35:00Z, not truncated and not unreadable, and the two live controls (C-14d 2026-07-11 and C-21d 2026-07-04, both `window_live: true`) returned the same row_count 0 / empty `values` with identical columns (failed, source.ip, user.name). The story is explicit that the attacker issued no failed authentications, so the failure-scoped envelope carries nothing distinguishable. The empty projection asserts no change, which matches the measurement's `delta_kind: absent`; it also correctly avoids a suppression marker, which would have been unearned since the live baseline is itself empty."
+    },
+    {
+      "case": "case-004-noise-stolen-cred",
+      "lead": "l-003",
+      "delta_kind": "state-only",
+      "modal_faithful": true,
+      "self_agreement": 1.0,
+      "stable": true,
+      "faithful": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "causes": [],
+      "undecidable_reasons": [],
+      "rationale": "The lead holds a single query, `cmdb.host-trust-edges` with `{host: db-1}`, and the observed payload contains only `_note: state lookup` plus the echoed params \u2014 no role, criticality, owner, or authorized-user rows, and no `@timestamp` field. Per `environment_notes.state_and_lookup_systems` the empty `baseline` is expected for cmdb lookups rather than a missing control, and `measurement` reads the envelope as `state-only`, so there is no event stream for the story's single accepted SSH login to alter. An empty projection therefore asserts no change where the telemetry shows none; had the oracle emitted concrete CMDB fields such as an owner or authorized-user list, those would have been ungrounded by both the story and the observed payload. The only divergence is presentational \u2014 a bare `[]` instead of an explicit no-delta marker \u2014 which does not affect faithfulness."
+    }
+  ]
+}

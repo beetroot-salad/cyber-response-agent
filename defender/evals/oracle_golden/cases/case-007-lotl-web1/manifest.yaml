@@ -1,0 +1,49 @@
+case_id: case-007-lotl-web1
+kind: observed
+# --- calibration metadata (#711) ---
+# Assigned by the generator BEFORE the first replay: nothing has been scored
+# at this point, so no result could have influenced which side this lands on.
+split: dev
+unit:
+  activity_family: execution/T1059.004
+  host_pair: canary-1->web-1
+capture_environment: playground-v2@412854206-restore-20260726
+# Declare a class for every state/lookup system this case's leads touch.
+# A lookup has no @timestamp bounds to move, so it has no baseline and no
+# diff semantics — the judge reads that as `state-only`, not as a gap.
+state_classes: {}
+attack:
+  scenario: living-off-the-land
+  seed: 41
+  runner_run_id: living-off-the-land-41-837f831e
+  window: ["2026-07-26T19:32:17+00:00", "2026-07-26T19:32:22+00:00"]
+  alert_rule: synthetic-living-off-the-land
+  # `captured` = a real rule fired and its alert was extracted.
+  # `synthesised` = nothing fired; the alert was built from the runner record
+  # so the activity's telemetry is not discarded. The oracle never sees the
+  # alert either way (oracle/prompt.md:1) — it only shapes the lead set.
+  alert_source: synthesised
+generated_by: generate_case.py
+
+# ---------------------------------------------------------------- DEFECTIVE
+# This case is NOT part of the dataset. It is kept because the capture is real and
+# the defect is instructive, not because it can be scored.
+#
+# The unit above claims `->web-1`. The activity never touched web-1: scenario
+# `living-off-the-land` is LOCAL -- none of its steps interpolate ${target}, so it acted on
+# canary-1 exactly as it always does. `--target web-1` reached only the runner's
+# record, the story's "directed at" header and the synthesised alert, so
+# `defender/run.py` investigated web-1 and every lead here queries an envelope
+# that cannot contain the activity.
+#
+# The evidence is in this case's own hidden/ tree: the scenario's steps curl web-1 over HTTP and execute the result on canary-1; the leads ask what PROCESSES ran on web-1, which is a question the activity never answers.
+#
+# Not recoverable by editing this file. The leads are a gather against the wrong
+# host; fixing it means a lever-up on snapshot 412854206-restore-20260726, a fresh
+# `defender/run.py` against an alert on canary-1, and a new capture.
+#
+# `generate_case.retarget_problem` now refuses this before the stack is touched.
+defective: >-
+  the leads investigate web-1; the activity ran on canary-1. Scenario
+  `living-off-the-land` does not read ${target}, so the recruiter's --target moved only the
+  metadata. Re-capture required; no manifest edit recovers it.

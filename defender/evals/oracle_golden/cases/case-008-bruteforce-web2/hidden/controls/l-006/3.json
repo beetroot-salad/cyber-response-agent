@@ -1,0 +1,143 @@
+{
+  "lead_id": "l-006",
+  "seq": 3,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T19:25:00.000Z",
+        "2026-07-12T20:25:00.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-12T19:25:00.000Z\" AND @timestamp < \"2026-07-12T20:25:00.000Z\"\n        AND source.ip == \"172.18.0.6\"\n| STATS events = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY host.name, event.outcome, process.name\n| SORT events DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-12T19:25:00.000Z\" AND @timestamp < \"2026-07-12T20:25:00.000Z\"\n        AND source.ip == \"172.18.0.6\"\n| STATS events = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY host.name, event.outcome, process.name\n| SORT events DESC",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "event.outcome",
+            "type": "keyword"
+          },
+          {
+            "name": "process.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T19:25:00.000Z",
+        "2026-07-05T20:25:00.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-05T19:25:00.000Z\" AND @timestamp < \"2026-07-05T20:25:00.000Z\"\n        AND source.ip == \"172.18.0.6\"\n| STATS events = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY host.name, event.outcome, process.name\n| SORT events DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-05T19:25:00.000Z\" AND @timestamp < \"2026-07-05T20:25:00.000Z\"\n        AND source.ip == \"172.18.0.6\"\n| STATS events = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY host.name, event.outcome, process.name\n| SORT events DESC",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "event.outcome",
+            "type": "keyword"
+          },
+          {
+            "name": "process.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 2,
+        "values": [
+          {
+            "events": 84,
+            "first_seen": "2026-07-05T19:31:42.000Z",
+            "last_seen": "2026-07-05T19:32:00.000Z",
+            "host.name": "web-2",
+            "event.outcome": "failure",
+            "process.name": "sshd"
+          },
+          {
+            "events": 84,
+            "first_seen": "2026-07-05T19:39:47.000Z",
+            "last_seen": "2026-07-05T19:40:04.000Z",
+            "host.name": "web-1",
+            "event.outcome": "failure",
+            "process.name": "sshd"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-28T19:25:00.000Z",
+        "2026-06-28T20:25:00.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-28T19:25:00.000Z\" AND @timestamp < \"2026-06-28T20:25:00.000Z\"\n        AND source.ip == \"172.18.0.6\"\n| STATS events = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY host.name, event.outcome, process.name\n| SORT events DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-28T19:25:00.000Z\" AND @timestamp < \"2026-06-28T20:25:00.000Z\"\n        AND source.ip == \"172.18.0.6\"\n| STATS events = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY host.name, event.outcome, process.name\n| SORT events DESC",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "event.outcome",
+            "type": "keyword"
+          },
+          {
+            "name": "process.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    }
+  ]
+}

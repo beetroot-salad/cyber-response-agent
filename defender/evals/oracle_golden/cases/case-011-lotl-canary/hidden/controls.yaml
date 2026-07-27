@@ -1,0 +1,7 @@
+# Per-query controls are measured mechanically into hidden/controls/ by
+# controls.py: each is the lead's own query with only its @timestamp bounds
+# moved to a shape-matched window. This file records that provenance; it is
+# not a hand-measured baseline.
+measured_by: controls.py
+generated_for: case-011-lotl-canary
+operation_window: ["2026-07-27T09:44:30+00:00", "2026-07-27T09:44:35+00:00"]

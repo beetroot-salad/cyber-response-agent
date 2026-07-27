@@ -1,0 +1,565 @@
+{
+  "lead_id": "l-002",
+  "seq": 0,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T19:30:00.000Z",
+        "2026-07-12T20:30:00.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-12T19:30:00.000Z\" AND @timestamp < \"2026-07-12T20:30:00.000Z\"\n        AND host.name == \"web-2\"\n        AND event.outcome IS NOT NULL\n        AND event.outcome == \"success\"\n| EVAL auth_method = CASE(message LIKE \"*publickey*\", \"publickey\",\n                          message LIKE \"*password*\", \"password\", \"other\")\n| KEEP @timestamp, user.name, source.ip, auth_method, message\n| SORT @timestamp ASC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-12T19:30:00.000Z\" AND @timestamp < \"2026-07-12T20:30:00.000Z\"\n        AND host.name == \"web-2\"\n        AND event.outcome IS NOT NULL\n        AND event.outcome == \"success\"\n| EVAL auth_method = CASE(message LIKE \"*publickey*\", \"publickey\",\n                          message LIKE \"*password*\", \"password\", \"other\")\n| KEEP @timestamp, user.name, source.ip, auth_method, message\n| SORT @timestamp ASC",
+        "columns": [
+          {
+            "name": "@timestamp",
+            "type": "date"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "auth_method",
+            "type": "keyword"
+          },
+          {
+            "name": "message",
+            "type": "text"
+          }
+        ],
+        "row_count": 7,
+        "values": [
+          {
+            "@timestamp": "2026-07-12T19:41:05.000Z",
+            "user.name": "svc.config-mgmt",
+            "source.ip": "172.18.0.14",
+            "auth_method": "password",
+            "message": "Accepted password for svc.config-mgmt from 172.18.0.14 port 42584 ssh2"
+          },
+          {
+            "@timestamp": "2026-07-12T19:41:05.000Z",
+            "user.name": "svc.config-mgmt",
+            "source.ip": "172.18.0.14",
+            "auth_method": "password",
+            "message": "Accepted password for svc.config-mgmt from 172.18.0.14 port 42584 ssh2"
+          },
+          {
+            "@timestamp": "2026-07-12T19:41:05.000Z",
+            "user.name": "svc.config-mgmt",
+            "source.ip": "172.18.0.14",
+            "auth_method": "password",
+            "message": "Accepted password for svc.config-mgmt from 172.18.0.14 port 42584 ssh2"
+          },
+          {
+            "@timestamp": "2026-07-12T19:41:05.000Z",
+            "user.name": "svc.config-mgmt",
+            "source.ip": "172.18.0.14",
+            "auth_method": "password",
+            "message": "Accepted password for svc.config-mgmt from 172.18.0.14 port 42584 ssh2"
+          },
+          {
+            "@timestamp": "2026-07-12T19:41:05.000Z",
+            "user.name": "svc.config-mgmt",
+            "source.ip": "172.18.0.14",
+            "auth_method": "password",
+            "message": "Accepted password for svc.config-mgmt from 172.18.0.14 port 42584 ssh2"
+          },
+          {
+            "@timestamp": "2026-07-12T19:41:05.000Z",
+            "user.name": "svc.config-mgmt",
+            "source.ip": "172.18.0.14",
+            "auth_method": "password",
+            "message": "Accepted password for svc.config-mgmt from 172.18.0.14 port 42584 ssh2"
+          },
+          {
+            "@timestamp": "2026-07-12T19:41:05.000Z",
+            "user.name": "svc.config-mgmt",
+            "source.ip": "172.18.0.14",
+            "auth_method": "password",
+            "message": "Accepted password for svc.config-mgmt from 172.18.0.14 port 42584 ssh2"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T19:30:00.000Z",
+        "2026-07-05T20:30:00.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-05T19:30:00.000Z\" AND @timestamp < \"2026-07-05T20:30:00.000Z\"\n        AND host.name == \"web-2\"\n        AND event.outcome IS NOT NULL\n        AND event.outcome == \"success\"\n| EVAL auth_method = CASE(message LIKE \"*publickey*\", \"publickey\",\n                          message LIKE \"*password*\", \"password\", \"other\")\n| KEEP @timestamp, user.name, source.ip, auth_method, message\n| SORT @timestamp ASC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-05T19:30:00.000Z\" AND @timestamp < \"2026-07-05T20:30:00.000Z\"\n        AND host.name == \"web-2\"\n        AND event.outcome IS NOT NULL\n        AND event.outcome == \"success\"\n| EVAL auth_method = CASE(message LIKE \"*publickey*\", \"publickey\",\n                          message LIKE \"*password*\", \"password\", \"other\")\n| KEEP @timestamp, user.name, source.ip, auth_method, message\n| SORT @timestamp ASC",
+        "columns": [
+          {
+            "name": "@timestamp",
+            "type": "date"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "auth_method",
+            "type": "keyword"
+          },
+          {
+            "name": "message",
+            "type": "text"
+          }
+        ],
+        "row_count": 49,
+        "values": [
+          {
+            "@timestamp": "2026-07-05T19:42:09.000Z",
+            "user.name": "svc.deploy",
+            "source.ip": "172.18.0.20",
+            "auth_method": "password",
+            "message": "Accepted password for svc.deploy from 172.18.0.20 port 55346 ssh2"
+          },
+          {
+            "@timestamp": "2026-07-05T19:42:09.000Z",
+            "user.name": "svc.deploy",
+            "source.ip": "172.18.0.20",
+            "auth_method": "password",
+            "message": "Accepted password for svc.deploy from 172.18.0.20 port 55346 ssh2"
+          },
+          {
+            "@timestamp": "2026-07-05T19:42:09.000Z",
+            "user.name": "svc.deploy",
+            "source.ip": "172.18.0.20",
+            "auth_method": "password",
+            "message": "Accepted password for svc.deploy from 172.18.0.20 port 55346 ssh2"
+          },
+          {
+            "@timestamp": "2026-07-05T19:42:09.000Z",
+            "user.name": "svc.deploy",
+            "source.ip": "172.18.0.20",
+            "auth_method": "password",
+            "message": "Accepted password for svc.deploy from 172.18.0.20 port 55346 ssh2"
+          },
+          {
+            "@timestamp": "2026-07-05T19:42:09.000Z",
+            "user.name": "svc.deploy",
+            "source.ip": "172.18.0.20",
+            "auth_method": "password",
+            "message": "Accepted password for svc.deploy from 172.18.0.20 port 55346 ssh2"
+          },
+          {
+            "@timestamp": "2026-07-05T19:42:09.000Z",
+            "user.name": "svc.deploy",
+            "source.ip": "172.18.0.20",
+            "auth_method": "password",
+            "message": "Accepted password for svc.deploy from 172.18.0.20 port 55346 ssh2"
+          },
+          {
+            "@timestamp": "2026-07-05T19:42:09.000Z",
+            "user.name": "svc.deploy",
+            "source.ip": "172.18.0.20",
+            "auth_method": "password",
+            "message": "Accepted password for svc.deploy from 172.18.0.20 port 55346 ssh2"
+          },
+          {
+            "@timestamp": "2026-07-05T19:42:10.000Z",
+            "user.name": null,
+            "source.ip": null,
+            "auth_method": "password",
+            "message": "pam_unix(sudo:auth): auth could not identify password for [svc.deploy]"
+          },
+          {
+            "@timestamp": "2026-07-05T19:42:10.000Z",
+            "user.name": null,
+            "source.ip": null,
+            "auth_method": "other",
+            "message": "pam_unix(sudo:auth): conversation failed"
+          },
+          {
+            "@timestamp": "2026-07-05T19:42:10.000Z",
+            "user.name": null,
+            "source.ip": null,
+            "auth_method": "other",
+            "message": "pam_unix(sudo:auth): conversation failed"
+          },
+          {
+            "@timestamp": "2026-07-05T19:42:10.000Z",
+            "user.name": null,
+            "source.ip": null,
+            "auth_method": "other",
+            "message": "pam_unix(sudo:auth): conversation failed"
+          },
+          {
+            "@timestamp": "2026-07-05T19:42:10.000Z",
+            "user.name": null,
+            "source.ip": null,
+            "auth_method": "password",
+            "message": "pam_unix(sudo:auth): auth could not identify password for [svc.deploy]"
+          },
+          {
+            "@timestamp": "2026-07-05T19:42:10.000Z",
+            "user.name": null,
+            "source.ip": null,
+            "auth_method": "other",
+            "message": "pam_unix(sudo:auth): conversation failed"
+          },
+          {
+            "@timestamp": "2026-07-05T19:42:10.000Z",
+            "user.name": null,
+            "source.ip": null,
+            "auth_method": "password",
+            "message": "pam_unix(sudo:auth): auth could not identify password for [svc.deploy]"
+          },
+          {
+            "@timestamp": "2026-07-05T19:42:10.000Z",
+            "user.name": null,
+            "source.ip": null,
+            "auth_method": "password",
+            "message": "pam_unix(sudo:auth): auth could not identify password for [svc.deploy]"
+          },
+          {
+            "@timestamp": "2026-07-05T19:42:10.000Z",
+            "user.name": null,
+            "source.ip": null,
+            "auth_method": "other",
+            "message": "pam_unix(sudo:auth): conversation failed"
+          },
+          {
+            "@timestamp": "2026-07-05T19:42:10.000Z",
+            "user.name": null,
+            "source.ip": null,
+            "auth_method": "other",
+            "message": "pam_unix(sudo:auth): conversation failed"
+          },
+          {
+            "@timestamp": "2026-07-05T19:42:10.000Z",
+            "user.name": null,
+            "source.ip": null,
+            "auth_method": "password",
+            "message": "pam_unix(sudo:auth): auth could not identify password for [svc.deploy]"
+          },
+          {
+            "@timestamp": "2026-07-05T19:42:10.000Z",
+            "user.name": null,
+            "source.ip": null,
+            "auth_method": "other",
+            "message": "pam_unix(sudo:auth): conversation failed"
+          },
+          {
+            "@timestamp": "2026-07-05T19:42:10.000Z",
+            "user.name": null,
+            "source.ip": null,
+            "auth_method": "password",
+            "message": "pam_unix(sudo:auth): auth could not identify password for [svc.deploy]"
+          },
+          {
+            "@timestamp": "2026-07-05T19:42:10.000Z",
+            "user.name": null,
+            "source.ip": null,
+            "auth_method": "other",
+            "message": "pam_unix(sudo:auth): conversation failed"
+          },
+          {
+            "@timestamp": "2026-07-05T19:42:10.000Z",
+            "user.name": null,
+            "source.ip": null,
+            "auth_method": "other",
+            "message": "pam_unix(sudo:auth): conversation failed"
+          },
+          {
+            "@timestamp": "2026-07-05T19:42:10.000Z",
+            "user.name": null,
+            "source.ip": null,
+            "auth_method": "password",
+            "message": "pam_unix(sudo:auth): auth could not identify password for [svc.deploy]"
+          },
+          {
+            "@timestamp": "2026-07-05T19:42:10.000Z",
+            "user.name": null,
+            "source.ip": null,
+            "auth_method": "other",
+            "message": "pam_unix(sudo:auth): conversation failed"
+          },
+          {
+            "@timestamp": "2026-07-05T19:42:10.000Z",
+            "user.name": null,
+            "source.ip": null,
+            "auth_method": "other",
+            "message": "pam_unix(sudo:auth): conversation failed"
+          },
+          {
+            "@timestamp": "2026-07-05T19:42:10.000Z",
+            "user.name": null,
+            "source.ip": null,
+            "auth_method": "password",
+            "message": "pam_unix(sudo:auth): auth could not identify password for [svc.deploy]"
+          },
+          {
+            "@timestamp": "2026-07-05T19:42:10.000Z",
+            "user.name": null,
+            "source.ip": null,
+            "auth_method": "other",
+            "message": "pam_unix(sudo:auth): conversation failed"
+          },
+          {
+            "@timestamp": "2026-07-05T19:42:10.000Z",
+            "user.name": null,
+            "source.ip": null,
+            "auth_method": "other",
+            "message": "pam_unix(sudo:auth): conversation failed"
+          },
+          {
+            "@timestamp": "2026-07-05T19:42:10.000Z",
+            "user.name": null,
+            "source.ip": null,
+            "auth_method": "password",
+            "message": "pam_unix(sudo:auth): auth could not identify password for [svc.deploy]"
+          },
+          {
+            "@timestamp": "2026-07-05T19:42:10.000Z",
+            "user.name": null,
+            "source.ip": null,
+            "auth_method": "password",
+            "message": "pam_unix(sudo:auth): auth could not identify password for [svc.deploy]"
+          },
+          {
+            "@timestamp": "2026-07-05T19:42:10.000Z",
+            "user.name": null,
+            "source.ip": null,
+            "auth_method": "password",
+            "message": "pam_unix(sudo:auth): auth could not identify password for [svc.deploy]"
+          },
+          {
+            "@timestamp": "2026-07-05T19:42:10.000Z",
+            "user.name": null,
+            "source.ip": null,
+            "auth_method": "password",
+            "message": "pam_unix(sudo:auth): auth could not identify password for [svc.deploy]"
+          },
+          {
+            "@timestamp": "2026-07-05T19:42:10.000Z",
+            "user.name": null,
+            "source.ip": null,
+            "auth_method": "other",
+            "message": "pam_unix(sudo:auth): conversation failed"
+          },
+          {
+            "@timestamp": "2026-07-05T19:42:10.000Z",
+            "user.name": null,
+            "source.ip": null,
+            "auth_method": "password",
+            "message": "pam_unix(sudo:auth): auth could not identify password for [svc.deploy]"
+          },
+          {
+            "@timestamp": "2026-07-05T19:42:10.000Z",
+            "user.name": null,
+            "source.ip": null,
+            "auth_method": "other",
+            "message": "pam_unix(sudo:auth): conversation failed"
+          },
+          {
+            "@timestamp": "2026-07-05T19:42:10.000Z",
+            "user.name": null,
+            "source.ip": null,
+            "auth_method": "password",
+            "message": "pam_unix(sudo:auth): auth could not identify password for [svc.deploy]"
+          },
+          {
+            "@timestamp": "2026-07-05T19:42:10.000Z",
+            "user.name": null,
+            "source.ip": null,
+            "auth_method": "other",
+            "message": "pam_unix(sudo:auth): conversation failed"
+          },
+          {
+            "@timestamp": "2026-07-05T19:42:10.000Z",
+            "user.name": null,
+            "source.ip": null,
+            "auth_method": "password",
+            "message": "pam_unix(sudo:auth): auth could not identify password for [svc.deploy]"
+          },
+          {
+            "@timestamp": "2026-07-05T19:42:10.000Z",
+            "user.name": null,
+            "source.ip": null,
+            "auth_method": "password",
+            "message": "pam_unix(sudo:auth): auth could not identify password for [svc.deploy]"
+          },
+          {
+            "@timestamp": "2026-07-05T19:42:10.000Z",
+            "user.name": null,
+            "source.ip": null,
+            "auth_method": "password",
+            "message": "pam_unix(sudo:auth): auth could not identify password for [svc.deploy]"
+          },
+          {
+            "@timestamp": "2026-07-05T19:42:10.000Z",
+            "user.name": null,
+            "source.ip": null,
+            "auth_method": "other",
+            "message": "pam_unix(sudo:auth): conversation failed"
+          },
+          {
+            "@timestamp": "2026-07-05T19:42:10.000Z",
+            "user.name": null,
+            "source.ip": null,
+            "auth_method": "password",
+            "message": "pam_unix(sudo:auth): auth could not identify password for [svc.deploy]"
+          },
+          {
+            "@timestamp": "2026-07-05T19:42:10.000Z",
+            "user.name": null,
+            "source.ip": null,
+            "auth_method": "other",
+            "message": "pam_unix(sudo:auth): conversation failed"
+          },
+          {
+            "@timestamp": "2026-07-05T19:42:10.000Z",
+            "user.name": null,
+            "source.ip": null,
+            "auth_method": "password",
+            "message": "pam_unix(sudo:auth): auth could not identify password for [svc.deploy]"
+          },
+          {
+            "@timestamp": "2026-07-05T19:42:10.000Z",
+            "user.name": null,
+            "source.ip": null,
+            "auth_method": "other",
+            "message": "pam_unix(sudo:auth): conversation failed"
+          },
+          {
+            "@timestamp": "2026-07-05T19:42:10.000Z",
+            "user.name": null,
+            "source.ip": null,
+            "auth_method": "password",
+            "message": "pam_unix(sudo:auth): auth could not identify password for [svc.deploy]"
+          },
+          {
+            "@timestamp": "2026-07-05T19:42:10.000Z",
+            "user.name": null,
+            "source.ip": null,
+            "auth_method": "other",
+            "message": "pam_unix(sudo:auth): conversation failed"
+          },
+          {
+            "@timestamp": "2026-07-05T19:42:10.000Z",
+            "user.name": null,
+            "source.ip": null,
+            "auth_method": "password",
+            "message": "pam_unix(sudo:auth): auth could not identify password for [svc.deploy]"
+          },
+          {
+            "@timestamp": "2026-07-05T19:42:10.000Z",
+            "user.name": null,
+            "source.ip": null,
+            "auth_method": "other",
+            "message": "pam_unix(sudo:auth): conversation failed"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-28T19:30:00.000Z",
+        "2026-06-28T20:30:00.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-28T19:30:00.000Z\" AND @timestamp < \"2026-06-28T20:30:00.000Z\"\n        AND host.name == \"web-2\"\n        AND event.outcome IS NOT NULL\n        AND event.outcome == \"success\"\n| EVAL auth_method = CASE(message LIKE \"*publickey*\", \"publickey\",\n                          message LIKE \"*password*\", \"password\", \"other\")\n| KEEP @timestamp, user.name, source.ip, auth_method, message\n| SORT @timestamp ASC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-28T19:30:00.000Z\" AND @timestamp < \"2026-06-28T20:30:00.000Z\"\n        AND host.name == \"web-2\"\n        AND event.outcome IS NOT NULL\n        AND event.outcome == \"success\"\n| EVAL auth_method = CASE(message LIKE \"*publickey*\", \"publickey\",\n                          message LIKE \"*password*\", \"password\", \"other\")\n| KEEP @timestamp, user.name, source.ip, auth_method, message\n| SORT @timestamp ASC",
+        "columns": [
+          {
+            "name": "@timestamp",
+            "type": "date"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "auth_method",
+            "type": "keyword"
+          },
+          {
+            "name": "message",
+            "type": "text"
+          }
+        ],
+        "row_count": 8,
+        "values": [
+          {
+            "@timestamp": "2026-06-28T20:22:09.000Z",
+            "user.name": "svc.config-mgmt",
+            "source.ip": "172.18.0.20",
+            "auth_method": "password",
+            "message": "Accepted password for svc.config-mgmt from 172.18.0.20 port 53520 ssh2"
+          },
+          {
+            "@timestamp": "2026-06-28T20:22:09.000Z",
+            "user.name": "svc.config-mgmt",
+            "source.ip": "172.18.0.20",
+            "auth_method": "password",
+            "message": "Accepted password for svc.config-mgmt from 172.18.0.20 port 53520 ssh2"
+          },
+          {
+            "@timestamp": "2026-06-28T20:22:09.000Z",
+            "user.name": "svc.config-mgmt",
+            "source.ip": "172.18.0.20",
+            "auth_method": "password",
+            "message": "Accepted password for svc.config-mgmt from 172.18.0.20 port 53520 ssh2"
+          },
+          {
+            "@timestamp": "2026-06-28T20:22:09.000Z",
+            "user.name": "svc.config-mgmt",
+            "source.ip": "172.18.0.20",
+            "auth_method": "password",
+            "message": "Accepted password for svc.config-mgmt from 172.18.0.20 port 53520 ssh2"
+          },
+          {
+            "@timestamp": "2026-06-28T20:22:09.000Z",
+            "user.name": "svc.config-mgmt",
+            "source.ip": "172.18.0.20",
+            "auth_method": "password",
+            "message": "Accepted password for svc.config-mgmt from 172.18.0.20 port 53520 ssh2"
+          },
+          {
+            "@timestamp": "2026-06-28T20:22:09.000Z",
+            "user.name": "svc.config-mgmt",
+            "source.ip": "172.18.0.20",
+            "auth_method": "password",
+            "message": "Accepted password for svc.config-mgmt from 172.18.0.20 port 53520 ssh2"
+          },
+          {
+            "@timestamp": "2026-06-28T20:22:09.000Z",
+            "user.name": "svc.config-mgmt",
+            "source.ip": "172.18.0.20",
+            "auth_method": "password",
+            "message": "Accepted password for svc.config-mgmt from 172.18.0.20 port 53520 ssh2"
+          },
+          {
+            "@timestamp": "2026-06-28T20:22:09.000Z",
+            "user.name": "svc.config-mgmt",
+            "source.ip": "172.18.0.20",
+            "auth_method": "password",
+            "message": "Accepted password for svc.config-mgmt from 172.18.0.20 port 53520 ssh2"
+          }
+        ]
+      }
+    }
+  ]
+}

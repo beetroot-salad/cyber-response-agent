@@ -1,0 +1,239 @@
+{
+  "lead_id": "l-004",
+  "seq": 5,
+  "controls": [
+    {
+      "name": "C-7d",
+      "window": [
+        "2026-07-18T07:17:07.500Z",
+        "2026-07-18T08:17:07.500Z"
+      ],
+      "query": "FROM logs-zeek.ssh-*\n| WHERE @timestamp >= \"2026-07-18T07:17:07.500Z\" AND @timestamp < \"2026-07-18T08:17:07.500Z\"\n| WHERE source.ip == \"172.18.0.15\" OR destination.ip == \"172.18.0.15\"\n| STATS events = COUNT(*), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp) BY source.ip, destination.ip, zeek.ssh.client, zeek.ssh.server\n| SORT events DESC\n| LIMIT 1000",
+      "live": false,
+      "payload": null
+    },
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-11T07:17:07.500Z",
+        "2026-07-11T08:17:07.500Z"
+      ],
+      "query": "FROM logs-zeek.ssh-*\n| WHERE @timestamp >= \"2026-07-11T07:17:07.500Z\" AND @timestamp < \"2026-07-11T08:17:07.500Z\"\n| WHERE source.ip == \"172.18.0.15\" OR destination.ip == \"172.18.0.15\"\n| STATS events = COUNT(*), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp) BY source.ip, destination.ip, zeek.ssh.client, zeek.ssh.server\n| SORT events DESC\n| LIMIT 1000",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-zeek.ssh-*\n| WHERE @timestamp >= \"2026-07-11T07:17:07.500Z\" AND @timestamp < \"2026-07-11T08:17:07.500Z\"\n| WHERE source.ip == \"172.18.0.15\" OR destination.ip == \"172.18.0.15\"\n| STATS events = COUNT(*), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp) BY source.ip, destination.ip, zeek.ssh.client, zeek.ssh.server\n| SORT events DESC\n| LIMIT 1000",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "destination.ip",
+            "type": "ip"
+          },
+          {
+            "name": "zeek.ssh.client",
+            "type": "keyword"
+          },
+          {
+            "name": "zeek.ssh.server",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 4,
+        "values": [
+          {
+            "events": 13,
+            "first_seen": "2026-07-11T07:17:24.946Z",
+            "last_seen": "2026-07-11T08:11:24.472Z",
+            "source.ip": "172.18.0.8",
+            "destination.ip": "172.18.0.15",
+            "zeek.ssh.client": null,
+            "zeek.ssh.server": "SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.15"
+          },
+          {
+            "events": 12,
+            "first_seen": "2026-07-11T07:18:49.680Z",
+            "last_seen": "2026-07-11T08:15:45.294Z",
+            "source.ip": "172.18.0.6",
+            "destination.ip": "172.18.0.15",
+            "zeek.ssh.client": null,
+            "zeek.ssh.server": "SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.15"
+          },
+          {
+            "events": 3,
+            "first_seen": "2026-07-11T07:42:35.984Z",
+            "last_seen": "2026-07-11T07:51:07.503Z",
+            "source.ip": "172.18.0.17",
+            "destination.ip": "172.18.0.15",
+            "zeek.ssh.client": null,
+            "zeek.ssh.server": "SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.15"
+          },
+          {
+            "events": 3,
+            "first_seen": "2026-07-11T07:49:55.552Z",
+            "last_seen": "2026-07-11T07:51:52.479Z",
+            "source.ip": "172.18.0.22",
+            "destination.ip": "172.18.0.15",
+            "zeek.ssh.client": null,
+            "zeek.ssh.server": "SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.15"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-04T07:17:07.500Z",
+        "2026-07-04T08:17:07.500Z"
+      ],
+      "query": "FROM logs-zeek.ssh-*\n| WHERE @timestamp >= \"2026-07-04T07:17:07.500Z\" AND @timestamp < \"2026-07-04T08:17:07.500Z\"\n| WHERE source.ip == \"172.18.0.15\" OR destination.ip == \"172.18.0.15\"\n| STATS events = COUNT(*), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp) BY source.ip, destination.ip, zeek.ssh.client, zeek.ssh.server\n| SORT events DESC\n| LIMIT 1000",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-zeek.ssh-*\n| WHERE @timestamp >= \"2026-07-04T07:17:07.500Z\" AND @timestamp < \"2026-07-04T08:17:07.500Z\"\n| WHERE source.ip == \"172.18.0.15\" OR destination.ip == \"172.18.0.15\"\n| STATS events = COUNT(*), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp) BY source.ip, destination.ip, zeek.ssh.client, zeek.ssh.server\n| SORT events DESC\n| LIMIT 1000",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "destination.ip",
+            "type": "ip"
+          },
+          {
+            "name": "zeek.ssh.client",
+            "type": "keyword"
+          },
+          {
+            "name": "zeek.ssh.server",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 5,
+        "values": [
+          {
+            "events": 12,
+            "first_seen": "2026-07-04T07:19:20.133Z",
+            "last_seen": "2026-07-04T08:16:53.458Z",
+            "source.ip": "172.18.0.8",
+            "destination.ip": "172.18.0.15",
+            "zeek.ssh.client": null,
+            "zeek.ssh.server": "SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.15"
+          },
+          {
+            "events": 11,
+            "first_seen": "2026-07-04T07:17:56.921Z",
+            "last_seen": "2026-07-04T08:12:09.671Z",
+            "source.ip": "172.18.0.6",
+            "destination.ip": "172.18.0.15",
+            "zeek.ssh.client": null,
+            "zeek.ssh.server": "SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.15"
+          },
+          {
+            "events": 5,
+            "first_seen": "2026-07-04T07:20:59.951Z",
+            "last_seen": "2026-07-04T07:51:44.342Z",
+            "source.ip": "172.18.0.17",
+            "destination.ip": "172.18.0.15",
+            "zeek.ssh.client": null,
+            "zeek.ssh.server": "SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.15"
+          },
+          {
+            "events": 4,
+            "first_seen": "2026-07-04T07:29:55.816Z",
+            "last_seen": "2026-07-04T08:10:18.829Z",
+            "source.ip": "172.18.0.22",
+            "destination.ip": "172.18.0.15",
+            "zeek.ssh.client": null,
+            "zeek.ssh.server": "SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.15"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-04T08:15:22.941Z",
+            "last_seen": "2026-07-04T08:15:22.941Z",
+            "source.ip": "172.18.0.14",
+            "destination.ip": "172.18.0.15",
+            "zeek.ssh.client": null,
+            "zeek.ssh.server": "SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.15"
+          }
+        ]
+      }
+    }
+  ],
+  "attack_contribution": {
+    "window": [
+      "2026-07-25T07:45:35.000Z",
+      "2026-07-25T07:48:40.000Z"
+    ],
+    "query": "FROM logs-zeek.ssh-*\n| WHERE @timestamp >= \"2026-07-25T07:45:35.000Z\" AND @timestamp < \"2026-07-25T07:48:40.000Z\"\n| WHERE source.ip == \"172.18.0.15\" OR destination.ip == \"172.18.0.15\"\n| STATS events = COUNT(*), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp) BY source.ip, destination.ip, zeek.ssh.client, zeek.ssh.server\n| SORT events DESC\n| LIMIT 1000",
+    "payload": {
+      "query": "FROM logs-zeek.ssh-*\n| WHERE @timestamp >= \"2026-07-25T07:45:35.000Z\" AND @timestamp < \"2026-07-25T07:48:40.000Z\"\n| WHERE source.ip == \"172.18.0.15\" OR destination.ip == \"172.18.0.15\"\n| STATS events = COUNT(*), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp) BY source.ip, destination.ip, zeek.ssh.client, zeek.ssh.server\n| SORT events DESC\n| LIMIT 1000",
+      "columns": [
+        {
+          "name": "events",
+          "type": "long"
+        },
+        {
+          "name": "first_seen",
+          "type": "date"
+        },
+        {
+          "name": "last_seen",
+          "type": "date"
+        },
+        {
+          "name": "source.ip",
+          "type": "ip"
+        },
+        {
+          "name": "destination.ip",
+          "type": "ip"
+        },
+        {
+          "name": "zeek.ssh.client",
+          "type": "keyword"
+        },
+        {
+          "name": "zeek.ssh.server",
+          "type": "keyword"
+        }
+      ],
+      "row_count": 1,
+      "values": [
+        {
+          "events": 48,
+          "first_seen": "2026-07-25T07:45:35.517Z",
+          "last_seen": "2026-07-25T07:48:37.065Z",
+          "source.ip": "172.18.0.15",
+          "destination.ip": "172.18.0.9",
+          "zeek.ssh.client": "SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.15",
+          "zeek.ssh.server": "SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.15"
+        }
+      ]
+    }
+  }
+}

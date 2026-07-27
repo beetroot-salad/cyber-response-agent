@@ -1,0 +1,108 @@
+{
+  "lead_id": "l-006",
+  "seq": 12,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-06-12T00:00:00.000Z",
+        "2026-07-12T23:59:59.000Z"
+      ],
+      "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-06-12T00:00:00.000Z\" AND @timestamp <= \"2026-07-12T23:59:59.000Z\"\n| STATS count = COUNT(*), min_ts = MIN(@timestamp), max_ts = MAX(@timestamp)\n| LIMIT 1",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-06-12T00:00:00.000Z\" AND @timestamp <= \"2026-07-12T23:59:59.000Z\"\n| STATS count = COUNT(*), min_ts = MIN(@timestamp), max_ts = MAX(@timestamp)\n| LIMIT 1",
+        "columns": [
+          {
+            "name": "count",
+            "type": "long"
+          },
+          {
+            "name": "min_ts",
+            "type": "date"
+          },
+          {
+            "name": "max_ts",
+            "type": "date"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "count": 6958120,
+            "min_ts": "2026-06-12T15:01:39.093Z",
+            "max_ts": "2026-07-12T23:59:58.381Z"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-06-05T00:00:00.000Z",
+        "2026-07-05T23:59:59.000Z"
+      ],
+      "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-06-05T00:00:00.000Z\" AND @timestamp <= \"2026-07-05T23:59:59.000Z\"\n| STATS count = COUNT(*), min_ts = MIN(@timestamp), max_ts = MAX(@timestamp)\n| LIMIT 1",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-06-05T00:00:00.000Z\" AND @timestamp <= \"2026-07-05T23:59:59.000Z\"\n| STATS count = COUNT(*), min_ts = MIN(@timestamp), max_ts = MAX(@timestamp)\n| LIMIT 1",
+        "columns": [
+          {
+            "name": "count",
+            "type": "long"
+          },
+          {
+            "name": "min_ts",
+            "type": "date"
+          },
+          {
+            "name": "max_ts",
+            "type": "date"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "count": 6656382,
+            "min_ts": "2026-06-05T00:00:00.176Z",
+            "max_ts": "2026-07-05T23:59:58.678Z"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-05-29T00:00:00.000Z",
+        "2026-06-28T23:59:59.000Z"
+      ],
+      "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-05-29T00:00:00.000Z\" AND @timestamp <= \"2026-06-28T23:59:59.000Z\"\n| STATS count = COUNT(*), min_ts = MIN(@timestamp), max_ts = MAX(@timestamp)\n| LIMIT 1",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-05-29T00:00:00.000Z\" AND @timestamp <= \"2026-06-28T23:59:59.000Z\"\n| STATS count = COUNT(*), min_ts = MIN(@timestamp), max_ts = MAX(@timestamp)\n| LIMIT 1",
+        "columns": [
+          {
+            "name": "count",
+            "type": "long"
+          },
+          {
+            "name": "min_ts",
+            "type": "date"
+          },
+          {
+            "name": "max_ts",
+            "type": "date"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "count": 6821613,
+            "min_ts": "2026-05-29T00:00:00.378Z",
+            "max_ts": "2026-06-28T23:59:58.428Z"
+          }
+        ]
+      }
+    }
+  ]
+}

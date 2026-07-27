@@ -1,0 +1,1122 @@
+{
+  "lead_id": "l-004",
+  "seq": 0,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-06-12T20:06:42.000Z",
+        "2026-07-12T20:06:42.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-12T20:06:42.000Z\" AND @timestamp < \"2026-07-12T20:06:42.000Z\"\n        AND host.name == \"web-2\"\n        AND event.outcome IS NOT NULL\n| STATS accepted   = COUNT(*) WHERE event.outcome == \"success\",\n        failed     = COUNT(*) WHERE event.outcome == \"failure\",\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY auth_method = CASE(message LIKE \"*publickey*\", \"publickey\",\n                              message LIKE \"*password*\",  \"password\", \"other\"),\n           source.ip, user.name\n| SORT accepted DESC, failed DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-12T20:06:42.000Z\" AND @timestamp < \"2026-07-12T20:06:42.000Z\"\n        AND host.name == \"web-2\"\n        AND event.outcome IS NOT NULL\n| STATS accepted   = COUNT(*) WHERE event.outcome == \"success\",\n        failed     = COUNT(*) WHERE event.outcome == \"failure\",\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY auth_method = CASE(message LIKE \"*publickey*\", \"publickey\",\n                              message LIKE \"*password*\",  \"password\", \"other\"),\n           source.ip, user.name\n| SORT accepted DESC, failed DESC",
+        "columns": [
+          {
+            "name": "accepted",
+            "type": "long"
+          },
+          {
+            "name": "failed",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "auth_method",
+            "type": "keyword"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 33,
+        "values": [
+          {
+            "accepted": 14187,
+            "failed": 0,
+            "first_seen": "2026-06-13T14:48:27.000Z",
+            "last_seen": "2026-07-12T08:22:28.000Z",
+            "auth_method": "password",
+            "source.ip": null,
+            "user.name": null
+          },
+          {
+            "accepted": 14187,
+            "failed": 0,
+            "first_seen": "2026-06-13T14:48:27.000Z",
+            "last_seen": "2026-07-12T08:22:28.000Z",
+            "auth_method": "other",
+            "source.ip": null,
+            "user.name": null
+          },
+          {
+            "accepted": 4656,
+            "failed": 0,
+            "first_seen": "2026-06-18T14:42:49.000Z",
+            "last_seen": "2026-07-02T01:23:07.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.20",
+            "user.name": "svc.config-mgmt"
+          },
+          {
+            "accepted": 3164,
+            "failed": 0,
+            "first_seen": "2026-07-02T08:05:42.000Z",
+            "last_seen": "2026-07-12T19:41:05.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.14",
+            "user.name": "svc.config-mgmt"
+          },
+          {
+            "accepted": 2420,
+            "failed": 0,
+            "first_seen": "2026-06-14T11:36:00.000Z",
+            "last_seen": "2026-06-18T14:19:06.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.24",
+            "user.name": "svc.config-mgmt"
+          },
+          {
+            "accepted": 2296,
+            "failed": 0,
+            "first_seen": "2026-06-18T14:54:01.000Z",
+            "last_seen": "2026-07-02T02:41:03.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.9",
+            "user.name": "svc.deploy"
+          },
+          {
+            "accepted": 1050,
+            "failed": 0,
+            "first_seen": "2026-07-02T09:16:55.000Z",
+            "last_seen": "2026-07-12T08:22:28.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.20",
+            "user.name": "svc.deploy"
+          },
+          {
+            "accepted": 1030,
+            "failed": 0,
+            "first_seen": "2026-06-14T15:08:10.000Z",
+            "last_seen": "2026-06-18T13:19:30.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.23",
+            "user.name": "svc.deploy"
+          },
+          {
+            "accepted": 836,
+            "failed": 0,
+            "first_seen": "2026-06-14T07:19:12.000Z",
+            "last_seen": "2026-07-01T17:58:42.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.21",
+            "user.name": "sre.chen"
+          },
+          {
+            "accepted": 792,
+            "failed": 0,
+            "first_seen": "2026-06-19T01:16:20.000Z",
+            "last_seen": "2026-07-01T22:28:29.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.21",
+            "user.name": "sre.ben"
+          },
+          {
+            "accepted": 736,
+            "failed": 0,
+            "first_seen": "2026-06-14T00:40:25.000Z",
+            "last_seen": "2026-07-01T17:55:29.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.21",
+            "user.name": "sre.alice"
+          },
+          {
+            "accepted": 483,
+            "failed": 0,
+            "first_seen": "2026-07-02T09:54:17.000Z",
+            "last_seen": "2026-07-12T12:07:14.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.17",
+            "user.name": "sre.chen"
+          },
+          {
+            "accepted": 469,
+            "failed": 0,
+            "first_seen": "2026-07-02T13:59:04.000Z",
+            "last_seen": "2026-07-12T02:45:46.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.17",
+            "user.name": "sre.ben"
+          },
+          {
+            "accepted": 413,
+            "failed": 0,
+            "first_seen": "2026-07-02T12:34:51.000Z",
+            "last_seen": "2026-07-11T23:51:56.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.17",
+            "user.name": "sre.alice"
+          },
+          {
+            "accepted": 300,
+            "failed": 0,
+            "first_seen": "2026-06-15T15:58:58.000Z",
+            "last_seen": "2026-06-18T14:26:15.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.18",
+            "user.name": "sre.ben"
+          },
+          {
+            "accepted": 250,
+            "failed": 0,
+            "first_seen": "2026-06-15T01:00:07.000Z",
+            "last_seen": "2026-06-18T07:31:45.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.18",
+            "user.name": "sre.alice"
+          },
+          {
+            "accepted": 230,
+            "failed": 0,
+            "first_seen": "2026-06-15T03:52:50.000Z",
+            "last_seen": "2026-06-18T12:59:27.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.18",
+            "user.name": "sre.chen"
+          },
+          {
+            "accepted": 72,
+            "failed": 0,
+            "first_seen": "2026-06-13T11:16:21.000Z",
+            "last_seen": "2026-06-14T09:24:46.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.15",
+            "user.name": "svc.config-mgmt"
+          },
+          {
+            "accepted": 24,
+            "failed": 0,
+            "first_seen": "2026-06-13T14:48:27.000Z",
+            "last_seen": "2026-06-14T07:50:10.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.11",
+            "user.name": "svc.deploy"
+          },
+          {
+            "accepted": 0,
+            "failed": 3888,
+            "first_seen": "2026-06-20T04:27:10.000Z",
+            "last_seen": "2026-07-02T01:43:09.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.11",
+            "user.name": "svc.reports"
+          },
+          {
+            "accepted": 0,
+            "failed": 3888,
+            "first_seen": "2026-06-20T04:27:08.000Z",
+            "last_seen": "2026-07-02T01:43:07.000Z",
+            "auth_method": "other",
+            "source.ip": "172.18.0.11",
+            "user.name": "svc.reports"
+          },
+          {
+            "accepted": 0,
+            "failed": 3408,
+            "first_seen": "2026-06-18T22:16:48.000Z",
+            "last_seen": "2026-07-02T01:54:55.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.10",
+            "user.name": "svc.reports"
+          },
+          {
+            "accepted": 0,
+            "failed": 3408,
+            "first_seen": "2026-06-18T22:16:47.000Z",
+            "last_seen": "2026-07-02T01:54:53.000Z",
+            "auth_method": "other",
+            "source.ip": "172.18.0.10",
+            "user.name": "svc.reports"
+          },
+          {
+            "accepted": 0,
+            "failed": 2604,
+            "first_seen": "2026-07-03T21:16:32.000Z",
+            "last_seen": "2026-07-12T13:38:24.000Z",
+            "auth_method": "other",
+            "source.ip": "172.18.0.6",
+            "user.name": "svc.reports"
+          },
+          {
+            "accepted": 0,
+            "failed": 2604,
+            "first_seen": "2026-07-03T21:16:33.000Z",
+            "last_seen": "2026-07-12T13:38:26.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.6",
+            "user.name": "svc.reports"
+          },
+          {
+            "accepted": 0,
+            "failed": 2268,
+            "first_seen": "2026-07-02T15:06:07.000Z",
+            "last_seen": "2026-07-12T19:32:32.000Z",
+            "auth_method": "other",
+            "source.ip": "172.18.0.8",
+            "user.name": "svc.reports"
+          },
+          {
+            "accepted": 0,
+            "failed": 2268,
+            "first_seen": "2026-07-02T15:06:09.000Z",
+            "last_seen": "2026-07-12T19:32:33.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.8",
+            "user.name": "svc.reports"
+          },
+          {
+            "accepted": 0,
+            "failed": 1140,
+            "first_seen": "2026-06-14T17:16:54.000Z",
+            "last_seen": "2026-06-18T05:04:05.000Z",
+            "auth_method": "other",
+            "source.ip": "172.18.0.4",
+            "user.name": "svc.reports"
+          },
+          {
+            "accepted": 0,
+            "failed": 1140,
+            "first_seen": "2026-06-14T17:16:56.000Z",
+            "last_seen": "2026-06-18T05:04:07.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.4",
+            "user.name": "svc.reports"
+          },
+          {
+            "accepted": 0,
+            "failed": 1140,
+            "first_seen": "2026-06-15T23:27:25.000Z",
+            "last_seen": "2026-06-18T12:36:15.000Z",
+            "auth_method": "other",
+            "source.ip": "172.18.0.7",
+            "user.name": "svc.reports"
+          },
+          {
+            "accepted": 0,
+            "failed": 1140,
+            "first_seen": "2026-06-15T23:27:27.000Z",
+            "last_seen": "2026-06-18T12:36:17.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.7",
+            "user.name": "svc.reports"
+          },
+          {
+            "accepted": 0,
+            "failed": 72,
+            "first_seen": "2026-06-13T16:57:15.000Z",
+            "last_seen": "2026-06-13T16:57:33.000Z",
+            "auth_method": "other",
+            "source.ip": "172.18.0.18",
+            "user.name": "svc.reports"
+          },
+          {
+            "accepted": 0,
+            "failed": 72,
+            "first_seen": "2026-06-13T16:57:17.000Z",
+            "last_seen": "2026-06-13T16:57:36.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.18",
+            "user.name": "svc.reports"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-06-05T20:06:42.000Z",
+        "2026-07-05T20:06:42.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-05T20:06:42.000Z\" AND @timestamp < \"2026-07-05T20:06:42.000Z\"\n        AND host.name == \"web-2\"\n        AND event.outcome IS NOT NULL\n| STATS accepted   = COUNT(*) WHERE event.outcome == \"success\",\n        failed     = COUNT(*) WHERE event.outcome == \"failure\",\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY auth_method = CASE(message LIKE \"*publickey*\", \"publickey\",\n                              message LIKE \"*password*\",  \"password\", \"other\"),\n           source.ip, user.name\n| SORT accepted DESC, failed DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-05T20:06:42.000Z\" AND @timestamp < \"2026-07-05T20:06:42.000Z\"\n        AND host.name == \"web-2\"\n        AND event.outcome IS NOT NULL\n| STATS accepted   = COUNT(*) WHERE event.outcome == \"success\",\n        failed     = COUNT(*) WHERE event.outcome == \"failure\",\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY auth_method = CASE(message LIKE \"*publickey*\", \"publickey\",\n                              message LIKE \"*password*\",  \"password\", \"other\"),\n           source.ip, user.name\n| SORT accepted DESC, failed DESC",
+        "columns": [
+          {
+            "name": "accepted",
+            "type": "long"
+          },
+          {
+            "name": "failed",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "auth_method",
+            "type": "keyword"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 42,
+        "values": [
+          {
+            "accepted": 16856,
+            "failed": 0,
+            "first_seen": "2026-06-05T20:12:37.000Z",
+            "last_seen": "2026-07-05T19:42:10.000Z",
+            "auth_method": "password",
+            "source.ip": null,
+            "user.name": null
+          },
+          {
+            "accepted": 16856,
+            "failed": 0,
+            "first_seen": "2026-06-05T20:12:37.000Z",
+            "last_seen": "2026-07-05T19:42:10.000Z",
+            "auth_method": "other",
+            "source.ip": null,
+            "user.name": null
+          },
+          {
+            "accepted": 4656,
+            "failed": 0,
+            "first_seen": "2026-06-18T14:42:49.000Z",
+            "last_seen": "2026-07-02T01:23:07.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.20",
+            "user.name": "svc.config-mgmt"
+          },
+          {
+            "accepted": 2420,
+            "failed": 0,
+            "first_seen": "2026-06-14T11:36:00.000Z",
+            "last_seen": "2026-06-18T14:19:06.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.24",
+            "user.name": "svc.config-mgmt"
+          },
+          {
+            "accepted": 2296,
+            "failed": 0,
+            "first_seen": "2026-06-18T14:54:01.000Z",
+            "last_seen": "2026-07-02T02:41:03.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.9",
+            "user.name": "svc.deploy"
+          },
+          {
+            "accepted": 1907,
+            "failed": 0,
+            "first_seen": "2026-06-05T20:12:37.000Z",
+            "last_seen": "2026-07-05T19:42:09.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.20",
+            "user.name": "svc.deploy"
+          },
+          {
+            "accepted": 1800,
+            "failed": 0,
+            "first_seen": "2026-06-05T20:42:42.000Z",
+            "last_seen": "2026-06-10T04:24:37.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.25",
+            "user.name": "svc.config-mgmt"
+          },
+          {
+            "accepted": 1030,
+            "failed": 0,
+            "first_seen": "2026-06-14T15:08:10.000Z",
+            "last_seen": "2026-06-18T13:19:30.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.23",
+            "user.name": "svc.deploy"
+          },
+          {
+            "accepted": 1022,
+            "failed": 0,
+            "first_seen": "2026-07-02T08:05:42.000Z",
+            "last_seen": "2026-07-05T17:24:01.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.14",
+            "user.name": "svc.config-mgmt"
+          },
+          {
+            "accepted": 836,
+            "failed": 0,
+            "first_seen": "2026-06-14T07:19:12.000Z",
+            "last_seen": "2026-07-01T17:58:42.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.21",
+            "user.name": "sre.chen"
+          },
+          {
+            "accepted": 792,
+            "failed": 0,
+            "first_seen": "2026-06-19T01:16:20.000Z",
+            "last_seen": "2026-07-01T22:28:29.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.21",
+            "user.name": "sre.ben"
+          },
+          {
+            "accepted": 736,
+            "failed": 0,
+            "first_seen": "2026-06-14T00:40:25.000Z",
+            "last_seen": "2026-07-01T17:55:29.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.21",
+            "user.name": "sre.alice"
+          },
+          {
+            "accepted": 522,
+            "failed": 0,
+            "first_seen": "2026-06-05T23:49:43.000Z",
+            "last_seen": "2026-06-10T03:44:31.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.11",
+            "user.name": "sre.chen"
+          },
+          {
+            "accepted": 522,
+            "failed": 0,
+            "first_seen": "2026-06-06T01:16:23.000Z",
+            "last_seen": "2026-06-09T21:31:31.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.11",
+            "user.name": "sre.alice"
+          },
+          {
+            "accepted": 300,
+            "failed": 0,
+            "first_seen": "2026-06-15T15:58:58.000Z",
+            "last_seen": "2026-06-18T14:26:15.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.18",
+            "user.name": "sre.ben"
+          },
+          {
+            "accepted": 288,
+            "failed": 0,
+            "first_seen": "2026-06-06T15:07:56.000Z",
+            "last_seen": "2026-06-10T03:45:01.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.11",
+            "user.name": "sre.ben"
+          },
+          {
+            "accepted": 250,
+            "failed": 0,
+            "first_seen": "2026-06-15T01:00:07.000Z",
+            "last_seen": "2026-06-18T07:31:45.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.18",
+            "user.name": "sre.alice"
+          },
+          {
+            "accepted": 230,
+            "failed": 0,
+            "first_seen": "2026-06-15T03:52:50.000Z",
+            "last_seen": "2026-06-18T12:59:27.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.18",
+            "user.name": "sre.chen"
+          },
+          {
+            "accepted": 119,
+            "failed": 0,
+            "first_seen": "2026-07-02T13:59:04.000Z",
+            "last_seen": "2026-07-05T05:57:16.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.17",
+            "user.name": "sre.ben"
+          },
+          {
+            "accepted": 112,
+            "failed": 0,
+            "first_seen": "2026-07-02T09:54:17.000Z",
+            "last_seen": "2026-07-05T14:47:14.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.17",
+            "user.name": "sre.chen"
+          },
+          {
+            "accepted": 105,
+            "failed": 0,
+            "first_seen": "2026-07-02T12:34:51.000Z",
+            "last_seen": "2026-07-05T14:26:02.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.17",
+            "user.name": "sre.alice"
+          },
+          {
+            "accepted": 75,
+            "failed": 0,
+            "first_seen": "2026-06-12T15:08:05.000Z",
+            "last_seen": "2026-06-12T15:48:09.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.17",
+            "user.name": "svc.config-mgmt"
+          },
+          {
+            "accepted": 72,
+            "failed": 0,
+            "first_seen": "2026-06-13T11:16:21.000Z",
+            "last_seen": "2026-06-14T09:24:46.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.15",
+            "user.name": "svc.config-mgmt"
+          },
+          {
+            "accepted": 30,
+            "failed": 0,
+            "first_seen": "2026-06-12T15:49:41.000Z",
+            "last_seen": "2026-06-12T15:50:37.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.6",
+            "user.name": "sre.alice"
+          },
+          {
+            "accepted": 24,
+            "failed": 0,
+            "first_seen": "2026-06-13T14:48:27.000Z",
+            "last_seen": "2026-06-14T07:50:10.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.11",
+            "user.name": "svc.deploy"
+          },
+          {
+            "accepted": 17,
+            "failed": 0,
+            "first_seen": "2026-06-10T18:12:41.000Z",
+            "last_seen": "2026-06-10T18:12:41.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.4",
+            "user.name": "svc.config-mgmt"
+          },
+          {
+            "accepted": 0,
+            "failed": 4596,
+            "first_seen": "2026-06-05T22:41:09.000Z",
+            "last_seen": "2026-06-18T05:04:05.000Z",
+            "auth_method": "other",
+            "source.ip": "172.18.0.4",
+            "user.name": "svc.reports"
+          },
+          {
+            "accepted": 0,
+            "failed": 4596,
+            "first_seen": "2026-06-05T22:41:11.000Z",
+            "last_seen": "2026-06-18T05:04:07.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.4",
+            "user.name": "svc.reports"
+          },
+          {
+            "accepted": 0,
+            "failed": 3888,
+            "first_seen": "2026-06-20T04:27:08.000Z",
+            "last_seen": "2026-07-02T01:43:07.000Z",
+            "auth_method": "other",
+            "source.ip": "172.18.0.11",
+            "user.name": "svc.reports"
+          },
+          {
+            "accepted": 0,
+            "failed": 3888,
+            "first_seen": "2026-06-20T04:27:10.000Z",
+            "last_seen": "2026-07-02T01:43:09.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.11",
+            "user.name": "svc.reports"
+          },
+          {
+            "accepted": 0,
+            "failed": 3408,
+            "first_seen": "2026-06-18T22:16:48.000Z",
+            "last_seen": "2026-07-02T01:54:55.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.10",
+            "user.name": "svc.reports"
+          },
+          {
+            "accepted": 0,
+            "failed": 3408,
+            "first_seen": "2026-06-18T22:16:47.000Z",
+            "last_seen": "2026-07-02T01:54:53.000Z",
+            "auth_method": "other",
+            "source.ip": "172.18.0.10",
+            "user.name": "svc.reports"
+          },
+          {
+            "accepted": 0,
+            "failed": 2484,
+            "first_seen": "2026-06-06T08:38:44.000Z",
+            "last_seen": "2026-06-10T00:36:25.000Z",
+            "auth_method": "other",
+            "source.ip": "172.18.0.12",
+            "user.name": "svc.reports"
+          },
+          {
+            "accepted": 0,
+            "failed": 2484,
+            "first_seen": "2026-06-06T08:38:46.000Z",
+            "last_seen": "2026-06-10T00:36:27.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.12",
+            "user.name": "svc.reports"
+          },
+          {
+            "accepted": 0,
+            "failed": 1140,
+            "first_seen": "2026-06-15T23:27:27.000Z",
+            "last_seen": "2026-06-18T12:36:17.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.7",
+            "user.name": "svc.reports"
+          },
+          {
+            "accepted": 0,
+            "failed": 1140,
+            "first_seen": "2026-06-15T23:27:25.000Z",
+            "last_seen": "2026-06-18T12:36:15.000Z",
+            "auth_method": "other",
+            "source.ip": "172.18.0.7",
+            "user.name": "svc.reports"
+          },
+          {
+            "accepted": 0,
+            "failed": 672,
+            "first_seen": "2026-07-03T21:16:32.000Z",
+            "last_seen": "2026-07-05T19:31:58.000Z",
+            "auth_method": "other",
+            "source.ip": "172.18.0.6",
+            "user.name": "svc.reports"
+          },
+          {
+            "accepted": 0,
+            "failed": 672,
+            "first_seen": "2026-07-03T21:16:33.000Z",
+            "last_seen": "2026-07-05T19:32:00.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.6",
+            "user.name": "svc.reports"
+          },
+          {
+            "accepted": 0,
+            "failed": 588,
+            "first_seen": "2026-07-02T15:06:07.000Z",
+            "last_seen": "2026-07-05T09:38:20.000Z",
+            "auth_method": "other",
+            "source.ip": "172.18.0.8",
+            "user.name": "svc.reports"
+          },
+          {
+            "accepted": 0,
+            "failed": 588,
+            "first_seen": "2026-07-02T15:06:09.000Z",
+            "last_seen": "2026-07-05T09:38:22.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.8",
+            "user.name": "svc.reports"
+          },
+          {
+            "accepted": 0,
+            "failed": 72,
+            "first_seen": "2026-06-13T16:57:15.000Z",
+            "last_seen": "2026-06-13T16:57:33.000Z",
+            "auth_method": "other",
+            "source.ip": "172.18.0.18",
+            "user.name": "svc.reports"
+          },
+          {
+            "accepted": 0,
+            "failed": 72,
+            "first_seen": "2026-06-13T16:57:17.000Z",
+            "last_seen": "2026-06-13T16:57:36.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.18",
+            "user.name": "svc.reports"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-05-29T20:06:42.000Z",
+        "2026-06-28T20:06:42.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-05-29T20:06:42.000Z\" AND @timestamp < \"2026-06-28T20:06:42.000Z\"\n        AND host.name == \"web-2\"\n        AND event.outcome IS NOT NULL\n| STATS accepted   = COUNT(*) WHERE event.outcome == \"success\",\n        failed     = COUNT(*) WHERE event.outcome == \"failure\",\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY auth_method = CASE(message LIKE \"*publickey*\", \"publickey\",\n                              message LIKE \"*password*\",  \"password\", \"other\"),\n           source.ip, user.name\n| SORT accepted DESC, failed DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-05-29T20:06:42.000Z\" AND @timestamp < \"2026-06-28T20:06:42.000Z\"\n        AND host.name == \"web-2\"\n        AND event.outcome IS NOT NULL\n| STATS accepted   = COUNT(*) WHERE event.outcome == \"success\",\n        failed     = COUNT(*) WHERE event.outcome == \"failure\",\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY auth_method = CASE(message LIKE \"*publickey*\", \"publickey\",\n                              message LIKE \"*password*\",  \"password\", \"other\"),\n           source.ip, user.name\n| SORT accepted DESC, failed DESC",
+        "columns": [
+          {
+            "name": "accepted",
+            "type": "long"
+          },
+          {
+            "name": "failed",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "auth_method",
+            "type": "keyword"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 34,
+        "values": [
+          {
+            "accepted": 20296,
+            "failed": 0,
+            "first_seen": "2026-05-29T20:41:13.000Z",
+            "last_seen": "2026-06-28T18:49:13.000Z",
+            "auth_method": "other",
+            "source.ip": null,
+            "user.name": null
+          },
+          {
+            "accepted": 20296,
+            "failed": 0,
+            "first_seen": "2026-05-29T20:41:13.000Z",
+            "last_seen": "2026-06-28T18:49:13.000Z",
+            "auth_method": "password",
+            "source.ip": null,
+            "user.name": null
+          },
+          {
+            "accepted": 7476,
+            "failed": 0,
+            "first_seen": "2026-05-29T20:19:00.000Z",
+            "last_seen": "2026-06-10T04:24:37.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.25",
+            "user.name": "svc.config-mgmt"
+          },
+          {
+            "accepted": 3846,
+            "failed": 0,
+            "first_seen": "2026-05-29T20:41:13.000Z",
+            "last_seen": "2026-06-12T15:19:24.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.20",
+            "user.name": "svc.deploy"
+          },
+          {
+            "accepted": 3200,
+            "failed": 0,
+            "first_seen": "2026-06-18T14:42:49.000Z",
+            "last_seen": "2026-06-28T13:28:22.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.20",
+            "user.name": "svc.config-mgmt"
+          },
+          {
+            "accepted": 2420,
+            "failed": 0,
+            "first_seen": "2026-06-14T11:36:00.000Z",
+            "last_seen": "2026-06-18T14:19:06.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.24",
+            "user.name": "svc.config-mgmt"
+          },
+          {
+            "accepted": 1690,
+            "failed": 0,
+            "first_seen": "2026-05-30T01:13:15.000Z",
+            "last_seen": "2026-06-10T03:44:31.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.11",
+            "user.name": "sre.chen"
+          },
+          {
+            "accepted": 1475,
+            "failed": 0,
+            "first_seen": "2026-05-30T01:48:55.000Z",
+            "last_seen": "2026-06-09T21:31:31.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.11",
+            "user.name": "sre.alice"
+          },
+          {
+            "accepted": 1448,
+            "failed": 0,
+            "first_seen": "2026-06-18T14:54:01.000Z",
+            "last_seen": "2026-06-28T18:49:13.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.9",
+            "user.name": "svc.deploy"
+          },
+          {
+            "accepted": 1420,
+            "failed": 0,
+            "first_seen": "2026-05-30T18:42:28.000Z",
+            "last_seen": "2026-06-10T03:45:01.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.11",
+            "user.name": "sre.ben"
+          },
+          {
+            "accepted": 1030,
+            "failed": 0,
+            "first_seen": "2026-06-14T15:08:10.000Z",
+            "last_seen": "2026-06-18T13:19:30.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.23",
+            "user.name": "svc.deploy"
+          },
+          {
+            "accepted": 520,
+            "failed": 0,
+            "first_seen": "2026-06-19T01:16:20.000Z",
+            "last_seen": "2026-06-28T02:48:52.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.21",
+            "user.name": "sre.ben"
+          },
+          {
+            "accepted": 496,
+            "failed": 0,
+            "first_seen": "2026-06-14T00:40:25.000Z",
+            "last_seen": "2026-06-28T15:53:17.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.21",
+            "user.name": "sre.alice"
+          },
+          {
+            "accepted": 468,
+            "failed": 0,
+            "first_seen": "2026-06-14T07:19:12.000Z",
+            "last_seen": "2026-06-27T15:42:59.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.21",
+            "user.name": "sre.chen"
+          },
+          {
+            "accepted": 300,
+            "failed": 0,
+            "first_seen": "2026-06-15T15:58:58.000Z",
+            "last_seen": "2026-06-18T14:26:15.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.18",
+            "user.name": "sre.ben"
+          },
+          {
+            "accepted": 250,
+            "failed": 0,
+            "first_seen": "2026-06-15T01:00:07.000Z",
+            "last_seen": "2026-06-18T07:31:45.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.18",
+            "user.name": "sre.alice"
+          },
+          {
+            "accepted": 230,
+            "failed": 0,
+            "first_seen": "2026-06-15T03:52:50.000Z",
+            "last_seen": "2026-06-18T12:59:27.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.18",
+            "user.name": "sre.chen"
+          },
+          {
+            "accepted": 75,
+            "failed": 0,
+            "first_seen": "2026-06-12T15:08:05.000Z",
+            "last_seen": "2026-06-12T15:48:09.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.17",
+            "user.name": "svc.config-mgmt"
+          },
+          {
+            "accepted": 72,
+            "failed": 0,
+            "first_seen": "2026-06-13T11:16:21.000Z",
+            "last_seen": "2026-06-14T09:24:46.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.15",
+            "user.name": "svc.config-mgmt"
+          },
+          {
+            "accepted": 30,
+            "failed": 0,
+            "first_seen": "2026-06-12T15:49:41.000Z",
+            "last_seen": "2026-06-12T15:50:37.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.6",
+            "user.name": "sre.alice"
+          },
+          {
+            "accepted": 24,
+            "failed": 0,
+            "first_seen": "2026-06-13T14:48:27.000Z",
+            "last_seen": "2026-06-14T07:50:10.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.11",
+            "user.name": "svc.deploy"
+          },
+          {
+            "accepted": 17,
+            "failed": 0,
+            "first_seen": "2026-06-10T18:12:41.000Z",
+            "last_seen": "2026-06-10T18:12:41.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.4",
+            "user.name": "svc.config-mgmt"
+          },
+          {
+            "accepted": 0,
+            "failed": 9564,
+            "first_seen": "2026-05-29T22:20:26.000Z",
+            "last_seen": "2026-06-18T05:04:05.000Z",
+            "auth_method": "other",
+            "source.ip": "172.18.0.4",
+            "user.name": "svc.reports"
+          },
+          {
+            "accepted": 0,
+            "failed": 9564,
+            "first_seen": "2026-05-29T22:20:28.000Z",
+            "last_seen": "2026-06-18T05:04:07.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.4",
+            "user.name": "svc.reports"
+          },
+          {
+            "accepted": 0,
+            "failed": 6804,
+            "first_seen": "2026-05-29T22:08:32.000Z",
+            "last_seen": "2026-06-10T00:36:27.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.12",
+            "user.name": "svc.reports"
+          },
+          {
+            "accepted": 0,
+            "failed": 6804,
+            "first_seen": "2026-05-29T22:08:29.000Z",
+            "last_seen": "2026-06-10T00:36:25.000Z",
+            "auth_method": "other",
+            "source.ip": "172.18.0.12",
+            "user.name": "svc.reports"
+          },
+          {
+            "accepted": 0,
+            "failed": 2928,
+            "first_seen": "2026-06-20T04:27:08.000Z",
+            "last_seen": "2026-06-28T15:09:25.000Z",
+            "auth_method": "other",
+            "source.ip": "172.18.0.11",
+            "user.name": "svc.reports"
+          },
+          {
+            "accepted": 0,
+            "failed": 2928,
+            "first_seen": "2026-06-20T04:27:10.000Z",
+            "last_seen": "2026-06-28T15:09:27.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.11",
+            "user.name": "svc.reports"
+          },
+          {
+            "accepted": 0,
+            "failed": 2496,
+            "first_seen": "2026-06-18T22:16:48.000Z",
+            "last_seen": "2026-06-28T14:10:28.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.10",
+            "user.name": "svc.reports"
+          },
+          {
+            "accepted": 0,
+            "failed": 2496,
+            "first_seen": "2026-06-18T22:16:47.000Z",
+            "last_seen": "2026-06-28T14:10:27.000Z",
+            "auth_method": "other",
+            "source.ip": "172.18.0.10",
+            "user.name": "svc.reports"
+          },
+          {
+            "accepted": 0,
+            "failed": 1140,
+            "first_seen": "2026-06-15T23:27:25.000Z",
+            "last_seen": "2026-06-18T12:36:15.000Z",
+            "auth_method": "other",
+            "source.ip": "172.18.0.7",
+            "user.name": "svc.reports"
+          },
+          {
+            "accepted": 0,
+            "failed": 1140,
+            "first_seen": "2026-06-15T23:27:27.000Z",
+            "last_seen": "2026-06-18T12:36:17.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.7",
+            "user.name": "svc.reports"
+          },
+          {
+            "accepted": 0,
+            "failed": 72,
+            "first_seen": "2026-06-13T16:57:15.000Z",
+            "last_seen": "2026-06-13T16:57:33.000Z",
+            "auth_method": "other",
+            "source.ip": "172.18.0.18",
+            "user.name": "svc.reports"
+          },
+          {
+            "accepted": 0,
+            "failed": 72,
+            "first_seen": "2026-06-13T16:57:17.000Z",
+            "last_seen": "2026-06-13T16:57:36.000Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.18",
+            "user.name": "svc.reports"
+          }
+        ]
+      }
+    }
+  ]
+}

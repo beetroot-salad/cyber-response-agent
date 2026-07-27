@@ -1,0 +1,1921 @@
+{
+  "lead_id": "l-007",
+  "seq": 11,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T00:00:00.000Z",
+        "2026-07-13T00:00:00.000Z"
+      ],
+      "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-12T00:00:00.000Z\" AND @timestamp < \"2026-07-13T00:00:00.000Z\"\n| LIMIT 1",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-12T00:00:00.000Z\" AND @timestamp < \"2026-07-13T00:00:00.000Z\"\n| LIMIT 1",
+        "columns": [
+          {
+            "name": "@timestamp",
+            "type": "date"
+          },
+          {
+            "name": "agent.ephemeral_id",
+            "type": "keyword"
+          },
+          {
+            "name": "agent.id",
+            "type": "keyword"
+          },
+          {
+            "name": "agent.name",
+            "type": "keyword"
+          },
+          {
+            "name": "agent.type",
+            "type": "keyword"
+          },
+          {
+            "name": "agent.version",
+            "type": "keyword"
+          },
+          {
+            "name": "cloud.account.id",
+            "type": "keyword"
+          },
+          {
+            "name": "cloud.availability_zone",
+            "type": "keyword"
+          },
+          {
+            "name": "cloud.image.id",
+            "type": "keyword"
+          },
+          {
+            "name": "cloud.instance.id",
+            "type": "keyword"
+          },
+          {
+            "name": "cloud.instance.name",
+            "type": "keyword"
+          },
+          {
+            "name": "cloud.machine.type",
+            "type": "keyword"
+          },
+          {
+            "name": "cloud.project.id",
+            "type": "keyword"
+          },
+          {
+            "name": "cloud.provider",
+            "type": "keyword"
+          },
+          {
+            "name": "cloud.region",
+            "type": "keyword"
+          },
+          {
+            "name": "cloud.service.name",
+            "type": "keyword"
+          },
+          {
+            "name": "container.id",
+            "type": "keyword"
+          },
+          {
+            "name": "container.image.name",
+            "type": "keyword"
+          },
+          {
+            "name": "container.name",
+            "type": "keyword"
+          },
+          {
+            "name": "data_stream.dataset",
+            "type": "keyword"
+          },
+          {
+            "name": "data_stream.namespace",
+            "type": "keyword"
+          },
+          {
+            "name": "data_stream.type",
+            "type": "keyword"
+          },
+          {
+            "name": "ecs.version",
+            "type": "keyword"
+          },
+          {
+            "name": "elastic_agent.id",
+            "type": "keyword"
+          },
+          {
+            "name": "elastic_agent.snapshot",
+            "type": "boolean"
+          },
+          {
+            "name": "elastic_agent.version",
+            "type": "keyword"
+          },
+          {
+            "name": "error.data",
+            "type": "keyword"
+          },
+          {
+            "name": "error.field",
+            "type": "keyword"
+          },
+          {
+            "name": "error.message",
+            "type": "text"
+          },
+          {
+            "name": "error.type",
+            "type": "keyword"
+          },
+          {
+            "name": "event.agent_id_status",
+            "type": "keyword"
+          },
+          {
+            "name": "event.dataset",
+            "type": "keyword"
+          },
+          {
+            "name": "event.ingested",
+            "type": "date"
+          },
+          {
+            "name": "falco.hostname",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.container.id",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.container.image.repository",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.container.name",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.container.name.text",
+            "type": "text"
+          },
+          {
+            "name": "falco.output_fields.container.start_ts",
+            "type": "long"
+          },
+          {
+            "name": "falco.output_fields.evt.arg.cmd",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.evt.arg.fd",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.evt.arg.filename",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.evt.arg.flags",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.evt.arg.mode",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.evt.arg.name",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.evt.arg.name.text",
+            "type": "text"
+          },
+          {
+            "name": "falco.output_fields.evt.arg.newpath",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.evt.arg.oldpath",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.evt.arg.uid",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.evt.args",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.evt.res",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.evt.time",
+            "type": "long"
+          },
+          {
+            "name": "falco.output_fields.evt.type",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.fd.l4proto",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.fd.lport",
+            "type": "long"
+          },
+          {
+            "name": "falco.output_fields.fd.name",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.fd.name.text",
+            "type": "text"
+          },
+          {
+            "name": "falco.output_fields.fd.rport",
+            "type": "long"
+          },
+          {
+            "name": "falco.output_fields.fd.sip",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.fd.type",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.proc.aname[2]",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.proc.aname[3]",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.proc.aname[4]",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.proc.cmdline",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.proc.cwd",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.proc.exe",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.proc.exe_ino.ctime",
+            "type": "date"
+          },
+          {
+            "name": "falco.output_fields.proc.exe_ino.ctime_duration_proc_start",
+            "type": "unsupported",
+            "original_types": [
+              "float",
+              "long"
+            ],
+            "suggested_cast": "keyword"
+          },
+          {
+            "name": "falco.output_fields.proc.exe_ino.mtime",
+            "type": "date"
+          },
+          {
+            "name": "falco.output_fields.proc.exepath",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.proc.name",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.proc.name.text",
+            "type": "text"
+          },
+          {
+            "name": "falco.output_fields.proc.pcmdline",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.proc.pname",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.proc.sname",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.proc.tty",
+            "type": "long"
+          },
+          {
+            "name": "falco.output_fields.thread.cap_permitted",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.user.loginuid",
+            "type": "long"
+          },
+          {
+            "name": "falco.output_fields.user.name",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.user.name.text",
+            "type": "text"
+          },
+          {
+            "name": "falco.output_fields.user.uid",
+            "type": "long"
+          },
+          {
+            "name": "falco.priority",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.rule",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.source",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.tags",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.time",
+            "type": "keyword"
+          },
+          {
+            "name": "host.architecture",
+            "type": "keyword"
+          },
+          {
+            "name": "host.containerized",
+            "type": "boolean"
+          },
+          {
+            "name": "host.domain",
+            "type": "keyword"
+          },
+          {
+            "name": "host.hostname",
+            "type": "keyword"
+          },
+          {
+            "name": "host.id",
+            "type": "keyword"
+          },
+          {
+            "name": "host.ip",
+            "type": "ip"
+          },
+          {
+            "name": "host.mac",
+            "type": "keyword"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "host.os.build",
+            "type": "keyword"
+          },
+          {
+            "name": "host.os.codename",
+            "type": "keyword"
+          },
+          {
+            "name": "host.os.family",
+            "type": "keyword"
+          },
+          {
+            "name": "host.os.kernel",
+            "type": "keyword"
+          },
+          {
+            "name": "host.os.name",
+            "type": "keyword"
+          },
+          {
+            "name": "host.os.name.text",
+            "type": "text"
+          },
+          {
+            "name": "host.os.platform",
+            "type": "keyword"
+          },
+          {
+            "name": "host.os.type",
+            "type": "keyword"
+          },
+          {
+            "name": "host.os.version",
+            "type": "keyword"
+          },
+          {
+            "name": "host.type",
+            "type": "keyword"
+          },
+          {
+            "name": "input.type",
+            "type": "keyword"
+          },
+          {
+            "name": "log.file.path",
+            "type": "keyword"
+          },
+          {
+            "name": "log.file.path.text",
+            "type": "text"
+          },
+          {
+            "name": "log.offset",
+            "type": "long"
+          },
+          {
+            "name": "message",
+            "type": "text"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "@timestamp": "2026-07-12T23:59:50.680Z",
+            "agent.ephemeral_id": "d33fe44d-c451-4c09-b4e6-2a4bbe24fb78",
+            "agent.id": "bfaae2d3-4889-4c77-b214-8d6f00a0b730",
+            "agent.name": "soc-playground",
+            "agent.type": "filebeat",
+            "agent.version": "9.3.3",
+            "cloud.account.id": null,
+            "cloud.availability_zone": "nbg1-dc3",
+            "cloud.image.id": null,
+            "cloud.instance.id": "147100598",
+            "cloud.instance.name": "soc-playground",
+            "cloud.machine.type": null,
+            "cloud.project.id": null,
+            "cloud.provider": "hetzner",
+            "cloud.region": "eu-central",
+            "cloud.service.name": "Cloud",
+            "container.id": null,
+            "container.image.name": null,
+            "container.name": null,
+            "data_stream.dataset": "falco.alerts",
+            "data_stream.namespace": "default",
+            "data_stream.type": "logs",
+            "ecs.version": "8.0.0",
+            "elastic_agent.id": "bfaae2d3-4889-4c77-b214-8d6f00a0b730",
+            "elastic_agent.snapshot": false,
+            "elastic_agent.version": "9.3.3",
+            "error.data": null,
+            "error.field": null,
+            "error.message": null,
+            "error.type": null,
+            "event.agent_id_status": "verified",
+            "event.dataset": "falco.alerts",
+            "event.ingested": "2026-07-12T23:59:55.000Z",
+            "falco.hostname": "8f2f24631570",
+            "falco.output": "23:59:48.358503002: Notice Ingress remote file copy tool launched in container | evt_type=execve user=<NA> user_uid=1004 user_loginuid=-1 process=curl proc_exepath=/usr/bin/curl parent=bash command=curl -sf -o /dev/null http://127.0.0.1/ terminal=0 exe_flags=EXE_LOWER_LAYER container=<NA> (id=2c1e2ec93d17 image=<NA>)",
+            "falco.output_fields.container.id": "2c1e2ec93d17",
+            "falco.output_fields.container.image.repository": null,
+            "falco.output_fields.container.name": "<NA>",
+            "falco.output_fields.container.name.text": "<NA>",
+            "falco.output_fields.container.start_ts": null,
+            "falco.output_fields.evt.arg.cmd": null,
+            "falco.output_fields.evt.arg.fd": null,
+            "falco.output_fields.evt.arg.filename": null,
+            "falco.output_fields.evt.arg.flags": "EXE_LOWER_LAYER",
+            "falco.output_fields.evt.arg.mode": null,
+            "falco.output_fields.evt.arg.name": null,
+            "falco.output_fields.evt.arg.name.text": null,
+            "falco.output_fields.evt.arg.newpath": null,
+            "falco.output_fields.evt.arg.oldpath": null,
+            "falco.output_fields.evt.arg.uid": null,
+            "falco.output_fields.evt.args": null,
+            "falco.output_fields.evt.res": null,
+            "falco.output_fields.evt.time": 1783900788358503002,
+            "falco.output_fields.evt.type": "execve",
+            "falco.output_fields.fd.l4proto": null,
+            "falco.output_fields.fd.lport": null,
+            "falco.output_fields.fd.name": null,
+            "falco.output_fields.fd.name.text": null,
+            "falco.output_fields.fd.rport": null,
+            "falco.output_fields.fd.sip": null,
+            "falco.output_fields.fd.type": null,
+            "falco.output_fields.proc.aname[2]": null,
+            "falco.output_fields.proc.aname[3]": null,
+            "falco.output_fields.proc.aname[4]": null,
+            "falco.output_fields.proc.cmdline": "curl -sf -o /dev/null http://127.0.0.1/",
+            "falco.output_fields.proc.cwd": null,
+            "falco.output_fields.proc.exe": null,
+            "falco.output_fields.proc.exe_ino.ctime": null,
+            "falco.output_fields.proc.exe_ino.ctime_duration_proc_start": null,
+            "falco.output_fields.proc.exe_ino.mtime": null,
+            "falco.output_fields.proc.exepath": "/usr/bin/curl",
+            "falco.output_fields.proc.name": "curl",
+            "falco.output_fields.proc.name.text": "curl",
+            "falco.output_fields.proc.pcmdline": null,
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.sname": null,
+            "falco.output_fields.proc.tty": 0,
+            "falco.output_fields.thread.cap_permitted": null,
+            "falco.output_fields.user.loginuid": -1,
+            "falco.output_fields.user.name": "<NA>",
+            "falco.output_fields.user.name.text": "<NA>",
+            "falco.output_fields.user.uid": 1004,
+            "falco.priority": "Notice",
+            "falco.rule": "Launch Ingress Remote File Copy Tools in Container",
+            "falco.source": "syscall",
+            "falco.tags": [
+              "TA0011",
+              "container",
+              "maturity_incubating",
+              "mitre_command_and_control",
+              "network",
+              "process"
+            ],
+            "falco.time": "2026-07-12T23:59:48.358503002Z",
+            "host.architecture": "x86_64",
+            "host.containerized": false,
+            "host.domain": null,
+            "host.hostname": "soc-playground",
+            "host.id": "53433647c31443da999f4f4d5326d980",
+            "host.ip": [
+              "172.17.0.1",
+              "172.18.0.1",
+              "178.105.170.226",
+              "2a01:4f8:1c1b:8c96::1",
+              "fe80::c07:4eff:fe76:b57b",
+              "fe80::ccc:9eff:fe70:ea7b",
+              "fe80::cd5:56ff:fe8c:ae2e",
+              "fe80::181b:46ff:fe8e:9732",
+              "fe80::1822:b6ff:fead:d33a",
+              "fe80::18e7:adff:fe07:826",
+              "fe80::20ad:e6ff:febd:eb0a",
+              "fe80::242d:93ff:feb6:fcb8",
+              "fe80::2c3d:c5ff:fe1b:37c6",
+              "fe80::3063:b1ff:fe7a:a51a",
+              "fe80::30a5:baff:fe8a:8dc5",
+              "fe80::34d6:47ff:fe77:8f4e",
+              "fe80::6030:64ff:fe18:438f",
+              "fe80::68ea:e3ff:fe36:193a",
+              "fe80::7053:83ff:fe7c:b5f2",
+              "fe80::7c01:7eff:fe0f:9a51",
+              "fe80::9000:8ff:fec4:93b6",
+              "fe80::9c68:e8ff:fe13:bb8b",
+              "fe80::a464:feff:fe44:3143",
+              "fe80::ac39:a2ff:fe1a:96ca",
+              "fe80::c463:93ff:fe60:991d",
+              "fe80::d847:c9ff:fe0b:efd7",
+              "fe80::d8a2:1eff:febd:a370",
+              "fe80::e8d8:72ff:fe0b:23d3",
+              "fe80::f465:1cff:fe61:98e4",
+              "fe80::fc3f:d3ff:fe2c:2205"
+            ],
+            "host.mac": [
+              "0E-07-4E-76-B5-7B",
+              "0E-CC-9E-70-EA-7B",
+              "0E-D5-56-8C-AE-2E",
+              "1A-1B-46-8E-97-32",
+              "1A-22-B6-AD-D3-3A",
+              "1A-E7-AD-07-08-26",
+              "22-AD-E6-BD-EB-0A",
+              "26-2D-93-B6-FC-B8",
+              "2E-3D-C5-1B-37-C6",
+              "32-63-B1-7A-A5-1A",
+              "32-A5-BA-8A-8D-C5",
+              "36-D6-47-77-8F-4E",
+              "62-30-64-18-43-8F",
+              "6A-EA-E3-36-19-3A",
+              "72-53-83-7C-B5-F2",
+              "7E-01-7E-0F-9A-51",
+              "92-00-08-C4-93-B6",
+              "9E-68-E8-13-BB-8B",
+              "A6-64-FE-44-31-43",
+              "AE-39-A2-1A-96-CA",
+              "C6-63-93-60-99-1D",
+              "DA-47-C9-0B-EF-D7",
+              "DA-A2-1E-BD-A3-70",
+              "EA-D8-72-0B-23-D3",
+              "F6-65-1C-61-98-E4",
+              "FE-3F-D3-2C-22-05"
+            ],
+            "host.name": "soc-playground",
+            "host.os.build": null,
+            "host.os.codename": "noble",
+            "host.os.family": "debian",
+            "host.os.kernel": "6.8.0-71-generic",
+            "host.os.name": "Ubuntu",
+            "host.os.name.text": "Ubuntu",
+            "host.os.platform": "ubuntu",
+            "host.os.type": "linux",
+            "host.os.version": "24.04.3 LTS (Noble Numbat)",
+            "host.type": null,
+            "input.type": "log",
+            "log.file.path": "/var/log/falco/falco.json",
+            "log.file.path.text": "/var/log/falco/falco.json",
+            "log.offset": 1865493100,
+            "message": "{\"hostname\":\"8f2f24631570\",\"output\":\"23:59:48.358503002: Notice Ingress remote file copy tool launched in container | evt_type=execve user=<NA> user_uid=1004 user_loginuid=-1 process=curl proc_exepath=/usr/bin/curl parent=bash command=curl -sf -o /dev/null http://127.0.0.1/ terminal=0 exe_flags=EXE_LOWER_LAYER container=<NA> (id=2c1e2ec93d17 image=<NA>)\",\"output_fields\":{\"container.id\":\"2c1e2ec93d17\",\"container.image.repository\":null,\"container.name\":\"<NA>\",\"evt.arg.flags\":\"EXE_LOWER_LAYER\",\"evt.time\":1783900788358503002,\"evt.type\":\"execve\",\"proc.cmdline\":\"curl -sf -o /dev/null http://127.0.0.1/\",\"proc.exepath\":\"/usr/bin/curl\",\"proc.name\":\"curl\",\"proc.pname\":\"bash\",\"proc.tty\":0,\"user.loginuid\":-1,\"user.name\":\"<NA>\",\"user.uid\":1004},\"priority\":\"Notice\",\"rule\":\"Launch Ingress Remote File Copy Tools in Container\",\"source\":\"syscall\",\"tags\":[\"TA0011\",\"container\",\"maturity_incubating\",\"mitre_command_and_control\",\"network\",\"process\"],\"time\":\"2026-07-12T23:59:48.358503002Z\"}"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T00:00:00.000Z",
+        "2026-07-06T00:00:00.000Z"
+      ],
+      "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-05T00:00:00.000Z\" AND @timestamp < \"2026-07-06T00:00:00.000Z\"\n| LIMIT 1",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-05T00:00:00.000Z\" AND @timestamp < \"2026-07-06T00:00:00.000Z\"\n| LIMIT 1",
+        "columns": [
+          {
+            "name": "@timestamp",
+            "type": "date"
+          },
+          {
+            "name": "agent.ephemeral_id",
+            "type": "keyword"
+          },
+          {
+            "name": "agent.id",
+            "type": "keyword"
+          },
+          {
+            "name": "agent.name",
+            "type": "keyword"
+          },
+          {
+            "name": "agent.type",
+            "type": "keyword"
+          },
+          {
+            "name": "agent.version",
+            "type": "keyword"
+          },
+          {
+            "name": "cloud.account.id",
+            "type": "keyword"
+          },
+          {
+            "name": "cloud.availability_zone",
+            "type": "keyword"
+          },
+          {
+            "name": "cloud.image.id",
+            "type": "keyword"
+          },
+          {
+            "name": "cloud.instance.id",
+            "type": "keyword"
+          },
+          {
+            "name": "cloud.instance.name",
+            "type": "keyword"
+          },
+          {
+            "name": "cloud.machine.type",
+            "type": "keyword"
+          },
+          {
+            "name": "cloud.project.id",
+            "type": "keyword"
+          },
+          {
+            "name": "cloud.provider",
+            "type": "keyword"
+          },
+          {
+            "name": "cloud.region",
+            "type": "keyword"
+          },
+          {
+            "name": "cloud.service.name",
+            "type": "keyword"
+          },
+          {
+            "name": "container.id",
+            "type": "keyword"
+          },
+          {
+            "name": "container.image.name",
+            "type": "keyword"
+          },
+          {
+            "name": "container.name",
+            "type": "keyword"
+          },
+          {
+            "name": "data_stream.dataset",
+            "type": "keyword"
+          },
+          {
+            "name": "data_stream.namespace",
+            "type": "keyword"
+          },
+          {
+            "name": "data_stream.type",
+            "type": "keyword"
+          },
+          {
+            "name": "ecs.version",
+            "type": "keyword"
+          },
+          {
+            "name": "elastic_agent.id",
+            "type": "keyword"
+          },
+          {
+            "name": "elastic_agent.snapshot",
+            "type": "boolean"
+          },
+          {
+            "name": "elastic_agent.version",
+            "type": "keyword"
+          },
+          {
+            "name": "error.data",
+            "type": "keyword"
+          },
+          {
+            "name": "error.field",
+            "type": "keyword"
+          },
+          {
+            "name": "error.message",
+            "type": "text"
+          },
+          {
+            "name": "error.type",
+            "type": "keyword"
+          },
+          {
+            "name": "event.agent_id_status",
+            "type": "keyword"
+          },
+          {
+            "name": "event.dataset",
+            "type": "keyword"
+          },
+          {
+            "name": "event.ingested",
+            "type": "date"
+          },
+          {
+            "name": "falco.hostname",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.container.id",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.container.image.repository",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.container.name",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.container.name.text",
+            "type": "text"
+          },
+          {
+            "name": "falco.output_fields.container.start_ts",
+            "type": "long"
+          },
+          {
+            "name": "falco.output_fields.evt.arg.cmd",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.evt.arg.fd",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.evt.arg.filename",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.evt.arg.flags",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.evt.arg.mode",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.evt.arg.name",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.evt.arg.name.text",
+            "type": "text"
+          },
+          {
+            "name": "falco.output_fields.evt.arg.newpath",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.evt.arg.oldpath",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.evt.arg.uid",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.evt.args",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.evt.res",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.evt.time",
+            "type": "long"
+          },
+          {
+            "name": "falco.output_fields.evt.type",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.fd.l4proto",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.fd.lport",
+            "type": "long"
+          },
+          {
+            "name": "falco.output_fields.fd.name",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.fd.name.text",
+            "type": "text"
+          },
+          {
+            "name": "falco.output_fields.fd.rport",
+            "type": "long"
+          },
+          {
+            "name": "falco.output_fields.fd.sip",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.fd.type",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.proc.aname[2]",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.proc.aname[3]",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.proc.aname[4]",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.proc.cmdline",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.proc.cwd",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.proc.exe",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.proc.exe_ino.ctime",
+            "type": "date"
+          },
+          {
+            "name": "falco.output_fields.proc.exe_ino.ctime_duration_proc_start",
+            "type": "unsupported",
+            "original_types": [
+              "float",
+              "long"
+            ],
+            "suggested_cast": "keyword"
+          },
+          {
+            "name": "falco.output_fields.proc.exe_ino.mtime",
+            "type": "date"
+          },
+          {
+            "name": "falco.output_fields.proc.exepath",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.proc.name",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.proc.name.text",
+            "type": "text"
+          },
+          {
+            "name": "falco.output_fields.proc.pcmdline",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.proc.pname",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.proc.sname",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.proc.tty",
+            "type": "long"
+          },
+          {
+            "name": "falco.output_fields.thread.cap_permitted",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.user.loginuid",
+            "type": "long"
+          },
+          {
+            "name": "falco.output_fields.user.name",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.user.name.text",
+            "type": "text"
+          },
+          {
+            "name": "falco.output_fields.user.uid",
+            "type": "long"
+          },
+          {
+            "name": "falco.priority",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.rule",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.source",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.tags",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.time",
+            "type": "keyword"
+          },
+          {
+            "name": "host.architecture",
+            "type": "keyword"
+          },
+          {
+            "name": "host.containerized",
+            "type": "boolean"
+          },
+          {
+            "name": "host.domain",
+            "type": "keyword"
+          },
+          {
+            "name": "host.hostname",
+            "type": "keyword"
+          },
+          {
+            "name": "host.id",
+            "type": "keyword"
+          },
+          {
+            "name": "host.ip",
+            "type": "ip"
+          },
+          {
+            "name": "host.mac",
+            "type": "keyword"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "host.os.build",
+            "type": "keyword"
+          },
+          {
+            "name": "host.os.codename",
+            "type": "keyword"
+          },
+          {
+            "name": "host.os.family",
+            "type": "keyword"
+          },
+          {
+            "name": "host.os.kernel",
+            "type": "keyword"
+          },
+          {
+            "name": "host.os.name",
+            "type": "keyword"
+          },
+          {
+            "name": "host.os.name.text",
+            "type": "text"
+          },
+          {
+            "name": "host.os.platform",
+            "type": "keyword"
+          },
+          {
+            "name": "host.os.type",
+            "type": "keyword"
+          },
+          {
+            "name": "host.os.version",
+            "type": "keyword"
+          },
+          {
+            "name": "host.type",
+            "type": "keyword"
+          },
+          {
+            "name": "input.type",
+            "type": "keyword"
+          },
+          {
+            "name": "log.file.path",
+            "type": "keyword"
+          },
+          {
+            "name": "log.file.path.text",
+            "type": "text"
+          },
+          {
+            "name": "log.offset",
+            "type": "long"
+          },
+          {
+            "name": "message",
+            "type": "text"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "@timestamp": "2026-07-05T23:59:31.733Z",
+            "agent.ephemeral_id": "d33fe44d-c451-4c09-b4e6-2a4bbe24fb78",
+            "agent.id": "bfaae2d3-4889-4c77-b214-8d6f00a0b730",
+            "agent.name": "soc-playground",
+            "agent.type": "filebeat",
+            "agent.version": "9.3.3",
+            "cloud.account.id": null,
+            "cloud.availability_zone": "nbg1-dc3",
+            "cloud.image.id": null,
+            "cloud.instance.id": "147100598",
+            "cloud.instance.name": "soc-playground",
+            "cloud.machine.type": null,
+            "cloud.project.id": null,
+            "cloud.provider": "hetzner",
+            "cloud.region": "eu-central",
+            "cloud.service.name": "Cloud",
+            "container.id": null,
+            "container.image.name": null,
+            "container.name": null,
+            "data_stream.dataset": "falco.alerts",
+            "data_stream.namespace": "default",
+            "data_stream.type": "logs",
+            "ecs.version": "8.0.0",
+            "elastic_agent.id": "bfaae2d3-4889-4c77-b214-8d6f00a0b730",
+            "elastic_agent.snapshot": false,
+            "elastic_agent.version": "9.3.3",
+            "error.data": null,
+            "error.field": null,
+            "error.message": null,
+            "error.type": null,
+            "event.agent_id_status": "verified",
+            "event.dataset": "falco.alerts",
+            "event.ingested": "2026-07-05T23:59:34.000Z",
+            "falco.hostname": "8f2f24631570",
+            "falco.output": "23:59:29.171317071: Critical Executing binary not part of base image | proc_exe=openssl proc_sname= gparent=<NA> proc_exe_ino_ctime=1779020802162534025 proc_exe_ino_mtime=1775773197000000000 proc_exe_ino_ctime_duration_proc_start=4275167008507397 proc_cwd= container_start_ts=1782977129528410242 evt_type=execve user=root user_uid=0 user_loginuid=-1 process=openssl proc_exepath=/usr/bin/openssl parent=sh command=openssl x509 -in /certs/ca/ca.crt -fingerprint -sha256 -noout terminal=0 exe_flags=EXE_WRITABLE|EXE_UPPER_LAYER container=<NA> (id=58ffe39dd54f image=<NA>)",
+            "falco.output_fields.container.id": "58ffe39dd54f",
+            "falco.output_fields.container.image.repository": null,
+            "falco.output_fields.container.name": "<NA>",
+            "falco.output_fields.container.name.text": "<NA>",
+            "falco.output_fields.container.start_ts": 1782977129528410242,
+            "falco.output_fields.evt.arg.cmd": null,
+            "falco.output_fields.evt.arg.fd": null,
+            "falco.output_fields.evt.arg.filename": null,
+            "falco.output_fields.evt.arg.flags": "EXE_WRITABLE|EXE_UPPER_LAYER",
+            "falco.output_fields.evt.arg.mode": null,
+            "falco.output_fields.evt.arg.name": null,
+            "falco.output_fields.evt.arg.name.text": null,
+            "falco.output_fields.evt.arg.newpath": null,
+            "falco.output_fields.evt.arg.oldpath": null,
+            "falco.output_fields.evt.arg.uid": null,
+            "falco.output_fields.evt.args": null,
+            "falco.output_fields.evt.res": null,
+            "falco.output_fields.evt.time": 1783295969171317071,
+            "falco.output_fields.evt.type": "execve",
+            "falco.output_fields.fd.l4proto": null,
+            "falco.output_fields.fd.lport": null,
+            "falco.output_fields.fd.name": null,
+            "falco.output_fields.fd.name.text": null,
+            "falco.output_fields.fd.rport": null,
+            "falco.output_fields.fd.sip": null,
+            "falco.output_fields.fd.type": null,
+            "falco.output_fields.proc.aname[2]": "<NA>",
+            "falco.output_fields.proc.aname[3]": null,
+            "falco.output_fields.proc.aname[4]": null,
+            "falco.output_fields.proc.cmdline": "openssl x509 -in /certs/ca/ca.crt -fingerprint -sha256 -noout",
+            "falco.output_fields.proc.cwd": "",
+            "falco.output_fields.proc.exe": "openssl",
+            "falco.output_fields.proc.exe_ino.ctime": "+56376894-12-30T13:08:54.025Z",
+            "falco.output_fields.proc.exe_ino.ctime_duration_proc_start": null,
+            "falco.output_fields.proc.exe_ino.mtime": "+56273982-06-27T20:00:00.000Z",
+            "falco.output_fields.proc.exepath": "/usr/bin/openssl",
+            "falco.output_fields.proc.name": "openssl",
+            "falco.output_fields.proc.name.text": "openssl",
+            "falco.output_fields.proc.pcmdline": null,
+            "falco.output_fields.proc.pname": "sh",
+            "falco.output_fields.proc.sname": "",
+            "falco.output_fields.proc.tty": 0,
+            "falco.output_fields.thread.cap_permitted": null,
+            "falco.output_fields.user.loginuid": -1,
+            "falco.output_fields.user.name": "root",
+            "falco.output_fields.user.name.text": "root",
+            "falco.output_fields.user.uid": 0,
+            "falco.priority": "Critical",
+            "falco.rule": "Drop and execute new binary in container",
+            "falco.source": "syscall",
+            "falco.tags": [
+              "PCI_DSS_11.5.1",
+              "TA0003",
+              "container",
+              "maturity_stable",
+              "mitre_persistence",
+              "process"
+            ],
+            "falco.time": "2026-07-05T23:59:29.171317071Z",
+            "host.architecture": "x86_64",
+            "host.containerized": false,
+            "host.domain": null,
+            "host.hostname": "soc-playground",
+            "host.id": "53433647c31443da999f4f4d5326d980",
+            "host.ip": [
+              "172.17.0.1",
+              "172.18.0.1",
+              "178.105.170.226",
+              "2a01:4f8:1c1b:8c96::1",
+              "fe80::c07:4eff:fe76:b57b",
+              "fe80::ccc:9eff:fe70:ea7b",
+              "fe80::cd5:56ff:fe8c:ae2e",
+              "fe80::181b:46ff:fe8e:9732",
+              "fe80::1822:b6ff:fead:d33a",
+              "fe80::18e7:adff:fe07:826",
+              "fe80::20ad:e6ff:febd:eb0a",
+              "fe80::242d:93ff:feb6:fcb8",
+              "fe80::3063:b1ff:fe7a:a51a",
+              "fe80::30a5:baff:fe8a:8dc5",
+              "fe80::34d6:47ff:fe77:8f4e",
+              "fe80::68ea:e3ff:fe36:193a",
+              "fe80::7053:83ff:fe7c:b5f2",
+              "fe80::74fe:98ff:fe8f:9120",
+              "fe80::7c01:7eff:fe0f:9a51",
+              "fe80::9000:8ff:fec4:93b6",
+              "fe80::9c68:e8ff:fe13:bb8b",
+              "fe80::a464:feff:fe44:3143",
+              "fe80::ac39:a2ff:fe1a:96ca",
+              "fe80::c463:93ff:fe60:991d",
+              "fe80::d847:c9ff:fe0b:efd7",
+              "fe80::d8a2:1eff:febd:a370",
+              "fe80::e8d8:72ff:fe0b:23d3",
+              "fe80::f465:1cff:fe61:98e4",
+              "fe80::fc3f:d3ff:fe2c:2205"
+            ],
+            "host.mac": [
+              "0E-07-4E-76-B5-7B",
+              "0E-CC-9E-70-EA-7B",
+              "0E-D5-56-8C-AE-2E",
+              "1A-1B-46-8E-97-32",
+              "1A-22-B6-AD-D3-3A",
+              "1A-E7-AD-07-08-26",
+              "22-AD-E6-BD-EB-0A",
+              "26-2D-93-B6-FC-B8",
+              "2E-3D-C5-1B-37-C6",
+              "32-63-B1-7A-A5-1A",
+              "32-A5-BA-8A-8D-C5",
+              "36-D6-47-77-8F-4E",
+              "6A-EA-E3-36-19-3A",
+              "72-53-83-7C-B5-F2",
+              "76-FE-98-8F-91-20",
+              "7E-01-7E-0F-9A-51",
+              "92-00-08-C4-93-B6",
+              "9E-68-E8-13-BB-8B",
+              "A6-64-FE-44-31-43",
+              "AE-39-A2-1A-96-CA",
+              "C6-63-93-60-99-1D",
+              "DA-47-C9-0B-EF-D7",
+              "DA-A2-1E-BD-A3-70",
+              "EA-D8-72-0B-23-D3",
+              "F6-65-1C-61-98-E4",
+              "FE-3F-D3-2C-22-05"
+            ],
+            "host.name": "soc-playground",
+            "host.os.build": null,
+            "host.os.codename": "noble",
+            "host.os.family": "debian",
+            "host.os.kernel": "6.8.0-71-generic",
+            "host.os.name": "Ubuntu",
+            "host.os.name.text": "Ubuntu",
+            "host.os.platform": "ubuntu",
+            "host.os.type": "linux",
+            "host.os.version": "24.04.3 LTS (Noble Numbat)",
+            "host.type": null,
+            "input.type": "log",
+            "log.file.path": "/var/log/falco/falco.json",
+            "log.file.path.text": "/var/log/falco/falco.json",
+            "log.offset": 1535989241,
+            "message": "{\"hostname\":\"8f2f24631570\",\"output\":\"23:59:29.171317071: Critical Executing binary not part of base image | proc_exe=openssl proc_sname= gparent=<NA> proc_exe_ino_ctime=1779020802162534025 proc_exe_ino_mtime=1775773197000000000 proc_exe_ino_ctime_duration_proc_start=4275167008507397 proc_cwd= container_start_ts=1782977129528410242 evt_type=execve user=root user_uid=0 user_loginuid=-1 process=openssl proc_exepath=/usr/bin/openssl parent=sh command=openssl x509 -in /certs/ca/ca.crt -fingerprint -sha256 -noout terminal=0 exe_flags=EXE_WRITABLE|EXE_UPPER_LAYER container=<NA> (id=58ffe39dd54f image=<NA>)\",\"output_fields\":{\"container.id\":\"58ffe39dd54f\",\"container.image.repository\":null,\"container.name\":\"<NA>\",\"container.start_ts\":1782977129528410242,\"evt.arg.flags\":\"EXE_WRITABLE|EXE_UPPER_LAYER\",\"evt.time\":1783295969171317071,\"evt.type\":\"execve\",\"proc.aname[2]\":\"<NA>\",\"proc.cmdline\":\"openssl x509 -in /certs/ca/ca.crt -fingerprint -sha256 -noout\",\"proc.cwd\":\"\",\"proc.exe\":\"openssl\",\"proc.exe_ino.ctime\":1779020802162534025,\"proc.exe_ino.ctime_duration_proc_start\":4275167008507397,\"proc.exe_ino.mtime\":1775773197000000000,\"proc.exepath\":\"/usr/bin/openssl\",\"proc.name\":\"openssl\",\"proc.pname\":\"sh\",\"proc.sname\":\"\",\"proc.tty\":0,\"user.loginuid\":-1,\"user.name\":\"root\",\"user.uid\":0},\"priority\":\"Critical\",\"rule\":\"Drop and execute new binary in container\",\"source\":\"syscall\",\"tags\":[\"PCI_DSS_11.5.1\",\"TA0003\",\"container\",\"maturity_stable\",\"mitre_persistence\",\"process\"],\"time\":\"2026-07-05T23:59:29.171317071Z\"}"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-28T00:00:00.000Z",
+        "2026-06-29T00:00:00.000Z"
+      ],
+      "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-06-28T00:00:00.000Z\" AND @timestamp < \"2026-06-29T00:00:00.000Z\"\n| LIMIT 1",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-06-28T00:00:00.000Z\" AND @timestamp < \"2026-06-29T00:00:00.000Z\"\n| LIMIT 1",
+        "columns": [
+          {
+            "name": "@timestamp",
+            "type": "date"
+          },
+          {
+            "name": "agent.ephemeral_id",
+            "type": "keyword"
+          },
+          {
+            "name": "agent.id",
+            "type": "keyword"
+          },
+          {
+            "name": "agent.name",
+            "type": "keyword"
+          },
+          {
+            "name": "agent.type",
+            "type": "keyword"
+          },
+          {
+            "name": "agent.version",
+            "type": "keyword"
+          },
+          {
+            "name": "cloud.account.id",
+            "type": "keyword"
+          },
+          {
+            "name": "cloud.availability_zone",
+            "type": "keyword"
+          },
+          {
+            "name": "cloud.image.id",
+            "type": "keyword"
+          },
+          {
+            "name": "cloud.instance.id",
+            "type": "keyword"
+          },
+          {
+            "name": "cloud.instance.name",
+            "type": "keyword"
+          },
+          {
+            "name": "cloud.machine.type",
+            "type": "keyword"
+          },
+          {
+            "name": "cloud.project.id",
+            "type": "keyword"
+          },
+          {
+            "name": "cloud.provider",
+            "type": "keyword"
+          },
+          {
+            "name": "cloud.region",
+            "type": "keyword"
+          },
+          {
+            "name": "cloud.service.name",
+            "type": "keyword"
+          },
+          {
+            "name": "container.id",
+            "type": "keyword"
+          },
+          {
+            "name": "container.image.name",
+            "type": "keyword"
+          },
+          {
+            "name": "container.name",
+            "type": "keyword"
+          },
+          {
+            "name": "data_stream.dataset",
+            "type": "keyword"
+          },
+          {
+            "name": "data_stream.namespace",
+            "type": "keyword"
+          },
+          {
+            "name": "data_stream.type",
+            "type": "keyword"
+          },
+          {
+            "name": "ecs.version",
+            "type": "keyword"
+          },
+          {
+            "name": "elastic_agent.id",
+            "type": "keyword"
+          },
+          {
+            "name": "elastic_agent.snapshot",
+            "type": "boolean"
+          },
+          {
+            "name": "elastic_agent.version",
+            "type": "keyword"
+          },
+          {
+            "name": "error.data",
+            "type": "keyword"
+          },
+          {
+            "name": "error.field",
+            "type": "keyword"
+          },
+          {
+            "name": "error.message",
+            "type": "text"
+          },
+          {
+            "name": "error.type",
+            "type": "keyword"
+          },
+          {
+            "name": "event.agent_id_status",
+            "type": "keyword"
+          },
+          {
+            "name": "event.dataset",
+            "type": "keyword"
+          },
+          {
+            "name": "event.ingested",
+            "type": "date"
+          },
+          {
+            "name": "falco.hostname",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.container.id",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.container.image.repository",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.container.name",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.container.name.text",
+            "type": "text"
+          },
+          {
+            "name": "falco.output_fields.container.start_ts",
+            "type": "long"
+          },
+          {
+            "name": "falco.output_fields.evt.arg.cmd",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.evt.arg.fd",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.evt.arg.filename",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.evt.arg.flags",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.evt.arg.mode",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.evt.arg.name",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.evt.arg.name.text",
+            "type": "text"
+          },
+          {
+            "name": "falco.output_fields.evt.arg.newpath",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.evt.arg.oldpath",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.evt.arg.uid",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.evt.args",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.evt.res",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.evt.time",
+            "type": "long"
+          },
+          {
+            "name": "falco.output_fields.evt.type",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.fd.l4proto",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.fd.lport",
+            "type": "long"
+          },
+          {
+            "name": "falco.output_fields.fd.name",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.fd.name.text",
+            "type": "text"
+          },
+          {
+            "name": "falco.output_fields.fd.rport",
+            "type": "long"
+          },
+          {
+            "name": "falco.output_fields.fd.sip",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.fd.type",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.proc.aname[2]",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.proc.aname[3]",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.proc.aname[4]",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.proc.cmdline",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.proc.cwd",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.proc.exe",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.proc.exe_ino.ctime",
+            "type": "date"
+          },
+          {
+            "name": "falco.output_fields.proc.exe_ino.ctime_duration_proc_start",
+            "type": "unsupported",
+            "original_types": [
+              "float",
+              "long"
+            ],
+            "suggested_cast": "keyword"
+          },
+          {
+            "name": "falco.output_fields.proc.exe_ino.mtime",
+            "type": "date"
+          },
+          {
+            "name": "falco.output_fields.proc.exepath",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.proc.name",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.proc.name.text",
+            "type": "text"
+          },
+          {
+            "name": "falco.output_fields.proc.pcmdline",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.proc.pname",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.proc.sname",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.proc.tty",
+            "type": "long"
+          },
+          {
+            "name": "falco.output_fields.thread.cap_permitted",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.user.loginuid",
+            "type": "long"
+          },
+          {
+            "name": "falco.output_fields.user.name",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.user.name.text",
+            "type": "text"
+          },
+          {
+            "name": "falco.output_fields.user.uid",
+            "type": "long"
+          },
+          {
+            "name": "falco.priority",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.rule",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.source",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.tags",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.time",
+            "type": "keyword"
+          },
+          {
+            "name": "host.architecture",
+            "type": "keyword"
+          },
+          {
+            "name": "host.containerized",
+            "type": "boolean"
+          },
+          {
+            "name": "host.domain",
+            "type": "keyword"
+          },
+          {
+            "name": "host.hostname",
+            "type": "keyword"
+          },
+          {
+            "name": "host.id",
+            "type": "keyword"
+          },
+          {
+            "name": "host.ip",
+            "type": "ip"
+          },
+          {
+            "name": "host.mac",
+            "type": "keyword"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "host.os.build",
+            "type": "keyword"
+          },
+          {
+            "name": "host.os.codename",
+            "type": "keyword"
+          },
+          {
+            "name": "host.os.family",
+            "type": "keyword"
+          },
+          {
+            "name": "host.os.kernel",
+            "type": "keyword"
+          },
+          {
+            "name": "host.os.name",
+            "type": "keyword"
+          },
+          {
+            "name": "host.os.name.text",
+            "type": "text"
+          },
+          {
+            "name": "host.os.platform",
+            "type": "keyword"
+          },
+          {
+            "name": "host.os.type",
+            "type": "keyword"
+          },
+          {
+            "name": "host.os.version",
+            "type": "keyword"
+          },
+          {
+            "name": "host.type",
+            "type": "keyword"
+          },
+          {
+            "name": "input.type",
+            "type": "keyword"
+          },
+          {
+            "name": "log.file.path",
+            "type": "keyword"
+          },
+          {
+            "name": "log.file.path.text",
+            "type": "text"
+          },
+          {
+            "name": "log.offset",
+            "type": "long"
+          },
+          {
+            "name": "message",
+            "type": "text"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "@timestamp": "2026-06-28T23:59:56.080Z",
+            "agent.ephemeral_id": "fe6d7104-030d-4632-b8a4-2ee9387c5bf2",
+            "agent.id": "bfaae2d3-4889-4c77-b214-8d6f00a0b730",
+            "agent.name": "soc-playground",
+            "agent.type": "filebeat",
+            "agent.version": "9.3.3",
+            "cloud.account.id": null,
+            "cloud.availability_zone": "nbg1-dc3",
+            "cloud.image.id": null,
+            "cloud.instance.id": "140534535",
+            "cloud.instance.name": "soc-playground",
+            "cloud.machine.type": null,
+            "cloud.project.id": null,
+            "cloud.provider": "hetzner",
+            "cloud.region": "eu-central",
+            "cloud.service.name": "Cloud",
+            "container.id": null,
+            "container.image.name": null,
+            "container.name": null,
+            "data_stream.dataset": "falco.alerts",
+            "data_stream.namespace": "default",
+            "data_stream.type": "logs",
+            "ecs.version": "8.0.0",
+            "elastic_agent.id": "bfaae2d3-4889-4c77-b214-8d6f00a0b730",
+            "elastic_agent.snapshot": false,
+            "elastic_agent.version": "9.3.3",
+            "error.data": null,
+            "error.field": null,
+            "error.message": null,
+            "error.type": null,
+            "event.agent_id_status": "verified",
+            "event.dataset": "falco.alerts",
+            "event.ingested": "2026-06-29T00:00:03.000Z",
+            "falco.hostname": "8f2f24631570",
+            "falco.output": "23:59:55.568035776: Critical Executing binary not part of base image | proc_exe=curl proc_sname= gparent=<NA> proc_exe_ino_ctime=1779020802151534339 proc_exe_ino_mtime=1759425275000000000 proc_exe_ino_ctime_duration_proc_start=3670393416036409 proc_cwd= container_start_ts=1781793372498666599 evt_type=execve user=root user_uid=0 user_loginuid=-1 process=curl proc_exepath=/usr/bin/curl parent=sh command=curl -fsS -u elastic:ThtCKpHHSQSoXwERX4Go7PAvRcFDJuwX -H kbn-xsrf: x http://kibana:5601/api/fleet/outputs/fleet-default-output terminal=0 exe_flags=EXE_WRITABLE|EXE_UPPER_LAYER container=<NA> (id=58ffe39dd54f image=<NA>)",
+            "falco.output_fields.container.id": "58ffe39dd54f",
+            "falco.output_fields.container.image.repository": null,
+            "falco.output_fields.container.name": "<NA>",
+            "falco.output_fields.container.name.text": "<NA>",
+            "falco.output_fields.container.start_ts": 1781793372498666599,
+            "falco.output_fields.evt.arg.cmd": null,
+            "falco.output_fields.evt.arg.fd": null,
+            "falco.output_fields.evt.arg.filename": null,
+            "falco.output_fields.evt.arg.flags": "EXE_WRITABLE|EXE_UPPER_LAYER",
+            "falco.output_fields.evt.arg.mode": null,
+            "falco.output_fields.evt.arg.name": null,
+            "falco.output_fields.evt.arg.name.text": null,
+            "falco.output_fields.evt.arg.newpath": null,
+            "falco.output_fields.evt.arg.oldpath": null,
+            "falco.output_fields.evt.arg.uid": null,
+            "falco.output_fields.evt.args": null,
+            "falco.output_fields.evt.res": null,
+            "falco.output_fields.evt.time": 1782691195568035776,
+            "falco.output_fields.evt.type": "execve",
+            "falco.output_fields.fd.l4proto": null,
+            "falco.output_fields.fd.lport": null,
+            "falco.output_fields.fd.name": null,
+            "falco.output_fields.fd.name.text": null,
+            "falco.output_fields.fd.rport": null,
+            "falco.output_fields.fd.sip": null,
+            "falco.output_fields.fd.type": null,
+            "falco.output_fields.proc.aname[2]": "<NA>",
+            "falco.output_fields.proc.aname[3]": null,
+            "falco.output_fields.proc.aname[4]": null,
+            "falco.output_fields.proc.cmdline": "curl -fsS -u elastic:ThtCKpHHSQSoXwERX4Go7PAvRcFDJuwX -H kbn-xsrf: x http://kibana:5601/api/fleet/outputs/fleet-default-output",
+            "falco.output_fields.proc.cwd": "",
+            "falco.output_fields.proc.exe": "curl",
+            "falco.output_fields.proc.exe_ino.ctime": "+56376894-12-30T10:05:34.339Z",
+            "falco.output_fields.proc.exe_ino.ctime_duration_proc_start": null,
+            "falco.output_fields.proc.exe_ino.mtime": "+55755937-06-18T15:33:20.000Z",
+            "falco.output_fields.proc.exepath": "/usr/bin/curl",
+            "falco.output_fields.proc.name": "curl",
+            "falco.output_fields.proc.name.text": "curl",
+            "falco.output_fields.proc.pcmdline": null,
+            "falco.output_fields.proc.pname": "sh",
+            "falco.output_fields.proc.sname": "",
+            "falco.output_fields.proc.tty": 0,
+            "falco.output_fields.thread.cap_permitted": null,
+            "falco.output_fields.user.loginuid": -1,
+            "falco.output_fields.user.name": "root",
+            "falco.output_fields.user.name.text": "root",
+            "falco.output_fields.user.uid": 0,
+            "falco.priority": "Critical",
+            "falco.rule": "Drop and execute new binary in container",
+            "falco.source": "syscall",
+            "falco.tags": [
+              "PCI_DSS_11.5.1",
+              "TA0003",
+              "container",
+              "maturity_stable",
+              "mitre_persistence",
+              "process"
+            ],
+            "falco.time": "2026-06-28T23:59:55.568035776Z",
+            "host.architecture": "x86_64",
+            "host.containerized": false,
+            "host.domain": null,
+            "host.hostname": "soc-playground",
+            "host.id": "53433647c31443da999f4f4d5326d980",
+            "host.ip": [
+              "172.17.0.1",
+              "172.18.0.1",
+              "178.105.170.226",
+              "2a01:4f8:1c1b:8c96::1",
+              "fe80::43:6cff:fe14:f0c0",
+              "fe80::c79:ddff:fe21:ab25",
+              "fe80::18fa:a6ff:feb5:b801",
+              "fe80::446c:62ff:feaa:f0cb",
+              "fe80::44e4:9dff:fe6f:48b5",
+              "fe80::4822:5aff:fe4b:d571",
+              "fe80::485a:34ff:fed9:9f7f",
+              "fe80::5450:6bff:fe99:847f",
+              "fe80::5476:17ff:fee7:149",
+              "fe80::5cfd:bff:fe4d:4a96",
+              "fe80::6068:74ff:fe12:29c9",
+              "fe80::60d5:2aff:fe97:15c6",
+              "fe80::6811:97ff:fe76:6e4b",
+              "fe80::74ab:6cff:febb:43f2",
+              "fe80::8c17:84ff:fe55:628c",
+              "fe80::9000:8ff:fe60:6307",
+              "fe80::a0d3:c5ff:fe75:d18c",
+              "fe80::c860:c7ff:feef:9438",
+              "fe80::cce3:cfff:fe25:fb38",
+              "fe80::ccff:16ff:fe05:c01c",
+              "fe80::d460:6dff:fe1a:4bd0",
+              "fe80::e0f0:18ff:fe54:f903",
+              "fe80::f045:42ff:feda:8157",
+              "fe80::f0f3:26ff:fe23:12d6",
+              "fe80::f4e0:1ff:feb4:9f76"
+            ],
+            "host.mac": [
+              "02-43-6C-14-F0-C0",
+              "0E-79-DD-21-AB-25",
+              "1A-FA-A6-B5-B8-01",
+              "46-6C-62-AA-F0-CB",
+              "46-E4-9D-6F-48-B5",
+              "4A-22-5A-4B-D5-71",
+              "4A-5A-34-D9-9F-7F",
+              "56-50-6B-99-84-7F",
+              "56-76-17-E7-01-49",
+              "5E-FD-0B-4D-4A-96",
+              "62-68-74-12-29-C9",
+              "62-D5-2A-97-15-C6",
+              "6A-11-97-76-6E-4B",
+              "76-AB-6C-BB-43-F2",
+              "8E-17-84-55-62-8C",
+              "92-00-08-60-63-07",
+              "A2-D3-C5-75-D1-8C",
+              "CA-60-C7-EF-94-38",
+              "CE-E3-CF-25-FB-38",
+              "CE-FF-16-05-C0-1C",
+              "D6-60-6D-1A-4B-D0",
+              "DE-01-C9-E8-06-99",
+              "E2-F0-18-54-F9-03",
+              "F2-45-42-DA-81-57",
+              "F2-F3-26-23-12-D6",
+              "F6-E0-01-B4-9F-76"
+            ],
+            "host.name": "soc-playground",
+            "host.os.build": null,
+            "host.os.codename": "noble",
+            "host.os.family": "debian",
+            "host.os.kernel": "6.8.0-71-generic",
+            "host.os.name": "Ubuntu",
+            "host.os.name.text": "Ubuntu",
+            "host.os.platform": "ubuntu",
+            "host.os.type": "linux",
+            "host.os.version": "24.04.3 LTS (Noble Numbat)",
+            "host.type": null,
+            "input.type": "log",
+            "log.file.path": "/var/log/falco/falco.json",
+            "log.file.path.text": "/var/log/falco/falco.json",
+            "log.offset": 1212159452,
+            "message": "{\"hostname\":\"8f2f24631570\",\"output\":\"23:59:55.568035776: Critical Executing binary not part of base image | proc_exe=curl proc_sname= gparent=<NA> proc_exe_ino_ctime=1779020802151534339 proc_exe_ino_mtime=1759425275000000000 proc_exe_ino_ctime_duration_proc_start=3670393416036409 proc_cwd= container_start_ts=1781793372498666599 evt_type=execve user=root user_uid=0 user_loginuid=-1 process=curl proc_exepath=/usr/bin/curl parent=sh command=curl -fsS -u elastic:ThtCKpHHSQSoXwERX4Go7PAvRcFDJuwX -H kbn-xsrf: x http://kibana:5601/api/fleet/outputs/fleet-default-output terminal=0 exe_flags=EXE_WRITABLE|EXE_UPPER_LAYER container=<NA> (id=58ffe39dd54f image=<NA>)\",\"output_fields\":{\"container.id\":\"58ffe39dd54f\",\"container.image.repository\":null,\"container.name\":\"<NA>\",\"container.start_ts\":1781793372498666599,\"evt.arg.flags\":\"EXE_WRITABLE|EXE_UPPER_LAYER\",\"evt.time\":1782691195568035776,\"evt.type\":\"execve\",\"proc.aname[2]\":\"<NA>\",\"proc.cmdline\":\"curl -fsS -u elastic:ThtCKpHHSQSoXwERX4Go7PAvRcFDJuwX -H kbn-xsrf: x http://kibana:5601/api/fleet/outputs/fleet-default-output\",\"proc.cwd\":\"\",\"proc.exe\":\"curl\",\"proc.exe_ino.ctime\":1779020802151534339,\"proc.exe_ino.ctime_duration_proc_start\":3670393416036409,\"proc.exe_ino.mtime\":1759425275000000000,\"proc.exepath\":\"/usr/bin/curl\",\"proc.name\":\"curl\",\"proc.pname\":\"sh\",\"proc.sname\":\"\",\"proc.tty\":0,\"user.loginuid\":-1,\"user.name\":\"root\",\"user.uid\":0},\"priority\":\"Critical\",\"rule\":\"Drop and execute new binary in container\",\"source\":\"syscall\",\"tags\":[\"PCI_DSS_11.5.1\",\"TA0003\",\"container\",\"maturity_stable\",\"mitre_persistence\",\"process\"],\"time\":\"2026-06-28T23:59:55.568035776Z\"}"
+          }
+        ]
+      }
+    }
+  ]
+}

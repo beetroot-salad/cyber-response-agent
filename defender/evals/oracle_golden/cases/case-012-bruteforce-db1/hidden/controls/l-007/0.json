@@ -1,0 +1,138 @@
+{
+  "lead_id": "l-007",
+  "seq": 0,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-06T09:59:11.000Z",
+        "2026-07-13T09:59:11.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-06T09:59:11.000Z\" AND @timestamp < \"2026-07-13T09:59:11.000Z\"\n        AND source.ip == \"172.18.0.16\"\n        AND event.outcome IS NOT NULL\n| STATS accepted   = COUNT(*) WHERE event.outcome == \"success\",\n        failed     = COUNT(*) WHERE event.outcome == \"failure\",\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY auth_method = CASE(message LIKE \"*publickey*\", \"publickey\",\n                              message LIKE \"*password*\",  \"password\", \"other\"),\n           host.name, user.name\n| SORT accepted DESC, failed DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-06T09:59:11.000Z\" AND @timestamp < \"2026-07-13T09:59:11.000Z\"\n        AND source.ip == \"172.18.0.16\"\n        AND event.outcome IS NOT NULL\n| STATS accepted   = COUNT(*) WHERE event.outcome == \"success\",\n        failed     = COUNT(*) WHERE event.outcome == \"failure\",\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY auth_method = CASE(message LIKE \"*publickey*\", \"publickey\",\n                              message LIKE \"*password*\",  \"password\", \"other\"),\n           host.name, user.name\n| SORT accepted DESC, failed DESC",
+        "columns": [
+          {
+            "name": "accepted",
+            "type": "long"
+          },
+          {
+            "name": "failed",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "auth_method",
+            "type": "keyword"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-06-29T09:59:11.000Z",
+        "2026-07-06T09:59:11.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-29T09:59:11.000Z\" AND @timestamp < \"2026-07-06T09:59:11.000Z\"\n        AND source.ip == \"172.18.0.16\"\n        AND event.outcome IS NOT NULL\n| STATS accepted   = COUNT(*) WHERE event.outcome == \"success\",\n        failed     = COUNT(*) WHERE event.outcome == \"failure\",\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY auth_method = CASE(message LIKE \"*publickey*\", \"publickey\",\n                              message LIKE \"*password*\",  \"password\", \"other\"),\n           host.name, user.name\n| SORT accepted DESC, failed DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-29T09:59:11.000Z\" AND @timestamp < \"2026-07-06T09:59:11.000Z\"\n        AND source.ip == \"172.18.0.16\"\n        AND event.outcome IS NOT NULL\n| STATS accepted   = COUNT(*) WHERE event.outcome == \"success\",\n        failed     = COUNT(*) WHERE event.outcome == \"failure\",\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY auth_method = CASE(message LIKE \"*publickey*\", \"publickey\",\n                              message LIKE \"*password*\",  \"password\", \"other\"),\n           host.name, user.name\n| SORT accepted DESC, failed DESC",
+        "columns": [
+          {
+            "name": "accepted",
+            "type": "long"
+          },
+          {
+            "name": "failed",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "auth_method",
+            "type": "keyword"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-22T09:59:11.000Z",
+        "2026-06-29T09:59:11.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-22T09:59:11.000Z\" AND @timestamp < \"2026-06-29T09:59:11.000Z\"\n        AND source.ip == \"172.18.0.16\"\n        AND event.outcome IS NOT NULL\n| STATS accepted   = COUNT(*) WHERE event.outcome == \"success\",\n        failed     = COUNT(*) WHERE event.outcome == \"failure\",\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY auth_method = CASE(message LIKE \"*publickey*\", \"publickey\",\n                              message LIKE \"*password*\",  \"password\", \"other\"),\n           host.name, user.name\n| SORT accepted DESC, failed DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-22T09:59:11.000Z\" AND @timestamp < \"2026-06-29T09:59:11.000Z\"\n        AND source.ip == \"172.18.0.16\"\n        AND event.outcome IS NOT NULL\n| STATS accepted   = COUNT(*) WHERE event.outcome == \"success\",\n        failed     = COUNT(*) WHERE event.outcome == \"failure\",\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY auth_method = CASE(message LIKE \"*publickey*\", \"publickey\",\n                              message LIKE \"*password*\",  \"password\", \"other\"),\n           host.name, user.name\n| SORT accepted DESC, failed DESC",
+        "columns": [
+          {
+            "name": "accepted",
+            "type": "long"
+          },
+          {
+            "name": "failed",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "auth_method",
+            "type": "keyword"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    }
+  ]
+}

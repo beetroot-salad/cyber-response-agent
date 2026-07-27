@@ -1,0 +1,78 @@
+{
+  "lead_id": "l-007",
+  "seq": 12,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-06T09:59:11.000Z",
+        "2026-07-13T09:56:00.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-06T09:59:11.000Z\" AND @timestamp < \"2026-07-13T09:56:00.000Z\"\n        AND source.ip == \"172.18.0.16\"\n        AND event.outcome IS NOT NULL\n| STATS events = COUNT(*) BY host.name\n| SORT events DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-06T09:59:11.000Z\" AND @timestamp < \"2026-07-13T09:56:00.000Z\"\n        AND source.ip == \"172.18.0.16\"\n        AND event.outcome IS NOT NULL\n| STATS events = COUNT(*) BY host.name\n| SORT events DESC",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-06-29T09:59:11.000Z",
+        "2026-07-06T09:56:00.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-29T09:59:11.000Z\" AND @timestamp < \"2026-07-06T09:56:00.000Z\"\n        AND source.ip == \"172.18.0.16\"\n        AND event.outcome IS NOT NULL\n| STATS events = COUNT(*) BY host.name\n| SORT events DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-29T09:59:11.000Z\" AND @timestamp < \"2026-07-06T09:56:00.000Z\"\n        AND source.ip == \"172.18.0.16\"\n        AND event.outcome IS NOT NULL\n| STATS events = COUNT(*) BY host.name\n| SORT events DESC",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-22T09:59:11.000Z",
+        "2026-06-29T09:56:00.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-22T09:59:11.000Z\" AND @timestamp < \"2026-06-29T09:56:00.000Z\"\n        AND source.ip == \"172.18.0.16\"\n        AND event.outcome IS NOT NULL\n| STATS events = COUNT(*) BY host.name\n| SORT events DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-22T09:59:11.000Z\" AND @timestamp < \"2026-06-29T09:56:00.000Z\"\n        AND source.ip == \"172.18.0.16\"\n        AND event.outcome IS NOT NULL\n| STATS events = COUNT(*) BY host.name\n| SORT events DESC",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    }
+  ]
+}

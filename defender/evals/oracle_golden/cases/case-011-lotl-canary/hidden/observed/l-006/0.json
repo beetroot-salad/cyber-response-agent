@@ -1,0 +1,1 @@
+{"host": "canary-1", "user": "root", "path": "/root/.ssh/authorized_keys", "captured_at": "2026-07-27T09:50:42Z", "keys": ["ssh-rsa AAAAB3NzaC1yc2EAAAAD_fake_key_0_1784971741_attacker attacker@elsewhere", "ssh-rsa AAAAB3NzaC1yc2EAAAAD_fake_key_0_1785056453_attacker attacker@elsewhere", "ssh-rsa AAAAB3NzaC1yc2EAAAAD_fake_key_0_1785092757_attacker attacker@elsewhere"]}

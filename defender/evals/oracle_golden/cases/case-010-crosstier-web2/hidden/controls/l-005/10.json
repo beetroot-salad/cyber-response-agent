@@ -1,0 +1,264 @@
+{
+  "lead_id": "l-005",
+  "seq": 10,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T19:36:22.000Z",
+        "2026-07-12T20:36:22.000Z"
+      ],
+      "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-12T19:36:22.000Z\" AND @timestamp < \"2026-07-12T20:36:22.000Z\"\n| WHERE host.ip == \"172.18.0.6\"\n| STATS events = COUNT(*), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp) BY host.name, host.ip\n| SORT events DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-12T19:36:22.000Z\" AND @timestamp < \"2026-07-12T20:36:22.000Z\"\n| WHERE host.ip == \"172.18.0.6\"\n| STATS events = COUNT(*), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp) BY host.name, host.ip\n| SORT events DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "host.ip",
+            "type": "ip"
+          }
+        ],
+        "row_count": 5,
+        "values": [
+          {
+            "events": 1638,
+            "first_seen": "2026-07-12T19:36:28.000Z",
+            "last_seen": "2026-07-12T20:36:20.436Z",
+            "host.name": "web-1",
+            "host.ip": "172.18.0.6"
+          },
+          {
+            "events": 108,
+            "first_seen": "2026-07-12T19:36:32.320Z",
+            "last_seen": "2026-07-12T20:35:48.181Z",
+            "host.name": "jump-box-1",
+            "host.ip": "172.18.0.6"
+          },
+          {
+            "events": 72,
+            "first_seen": "2026-07-12T19:36:56.000Z",
+            "last_seen": "2026-07-12T20:34:39.000Z",
+            "host.name": "office-ws-1",
+            "host.ip": "172.18.0.6"
+          },
+          {
+            "events": 45,
+            "first_seen": "2026-07-12T19:41:07.138Z",
+            "last_seen": "2026-07-12T20:34:22.751Z",
+            "host.name": "office-ws-2",
+            "host.ip": "172.18.0.6"
+          },
+          {
+            "events": 25,
+            "first_seen": "2026-07-12T19:39:25.270Z",
+            "last_seen": "2026-07-12T20:25:32.685Z",
+            "host.name": "config-mgmt-1",
+            "host.ip": "172.18.0.6"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T19:36:22.000Z",
+        "2026-07-05T20:36:22.000Z"
+      ],
+      "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-05T19:36:22.000Z\" AND @timestamp < \"2026-07-05T20:36:22.000Z\"\n| WHERE host.ip == \"172.18.0.6\"\n| STATS events = COUNT(*), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp) BY host.name, host.ip\n| SORT events DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-05T19:36:22.000Z\" AND @timestamp < \"2026-07-05T20:36:22.000Z\"\n| WHERE host.ip == \"172.18.0.6\"\n| STATS events = COUNT(*), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp) BY host.name, host.ip\n| SORT events DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "host.ip",
+            "type": "ip"
+          }
+        ],
+        "row_count": 5,
+        "values": [
+          {
+            "events": 1736,
+            "first_seen": "2026-07-05T19:36:28.000Z",
+            "last_seen": "2026-07-05T20:36:20.437Z",
+            "host.name": "web-1",
+            "host.ip": "172.18.0.6"
+          },
+          {
+            "events": 89,
+            "first_seen": "2026-07-05T19:37:34.444Z",
+            "last_seen": "2026-07-05T20:36:12.886Z",
+            "host.name": "jump-box-1",
+            "host.ip": "172.18.0.6"
+          },
+          {
+            "events": 56,
+            "first_seen": "2026-07-05T19:38:27.661Z",
+            "last_seen": "2026-07-05T20:30:19.056Z",
+            "host.name": "office-ws-2",
+            "host.ip": "172.18.0.6"
+          },
+          {
+            "events": 50,
+            "first_seen": "2026-07-05T19:39:28.000Z",
+            "last_seen": "2026-07-05T20:34:48.000Z",
+            "host.name": "office-ws-1",
+            "host.ip": "172.18.0.6"
+          },
+          {
+            "events": 35,
+            "first_seen": "2026-07-05T19:37:26.177Z",
+            "last_seen": "2026-07-05T20:34:48.443Z",
+            "host.name": "config-mgmt-1",
+            "host.ip": "172.18.0.6"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-28T19:36:22.000Z",
+        "2026-06-28T20:36:22.000Z"
+      ],
+      "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-06-28T19:36:22.000Z\" AND @timestamp < \"2026-06-28T20:36:22.000Z\"\n| WHERE host.ip == \"172.18.0.6\"\n| STATS events = COUNT(*), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp) BY host.name, host.ip\n| SORT events DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-06-28T19:36:22.000Z\" AND @timestamp < \"2026-06-28T20:36:22.000Z\"\n| WHERE host.ip == \"172.18.0.6\"\n| STATS events = COUNT(*), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp) BY host.name, host.ip\n| SORT events DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "host.ip",
+            "type": "ip"
+          }
+        ],
+        "row_count": 5,
+        "values": [
+          {
+            "events": 990,
+            "first_seen": "2026-06-28T19:36:30.000Z",
+            "last_seen": "2026-06-28T20:36:20.000Z",
+            "host.name": "web-1",
+            "host.ip": "172.18.0.6"
+          },
+          {
+            "events": 80,
+            "first_seen": "2026-06-28T19:36:28.914Z",
+            "last_seen": "2026-06-28T20:36:11.289Z",
+            "host.name": "jump-box-1",
+            "host.ip": "172.18.0.6"
+          },
+          {
+            "events": 64,
+            "first_seen": "2026-06-28T19:36:43.000Z",
+            "last_seen": "2026-06-28T20:32:19.000Z",
+            "host.name": "office-ws-1",
+            "host.ip": "172.18.0.6"
+          },
+          {
+            "events": 55,
+            "first_seen": "2026-06-28T19:37:16.493Z",
+            "last_seen": "2026-06-28T20:33:54.335Z",
+            "host.name": "office-ws-2",
+            "host.ip": "172.18.0.6"
+          },
+          {
+            "events": 39,
+            "first_seen": "2026-06-28T19:38:00.067Z",
+            "last_seen": "2026-06-28T20:26:17.944Z",
+            "host.name": "config-mgmt-1",
+            "host.ip": "172.18.0.6"
+          }
+        ]
+      }
+    }
+  ],
+  "attack_contribution": {
+    "window": [
+      "2026-07-26T20:06:02.000Z",
+      "2026-07-26T20:06:42.000Z"
+    ],
+    "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-26T20:06:02.000Z\" AND @timestamp < \"2026-07-26T20:06:42.000Z\"\n| WHERE host.ip == \"172.18.0.6\"\n| STATS events = COUNT(*), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp) BY host.name, host.ip\n| SORT events DESC\n| LIMIT 20",
+    "payload": {
+      "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-26T20:06:02.000Z\" AND @timestamp < \"2026-07-26T20:06:42.000Z\"\n| WHERE host.ip == \"172.18.0.6\"\n| STATS events = COUNT(*), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp) BY host.name, host.ip\n| SORT events DESC\n| LIMIT 20",
+      "columns": [
+        {
+          "name": "events",
+          "type": "long"
+        },
+        {
+          "name": "first_seen",
+          "type": "date"
+        },
+        {
+          "name": "last_seen",
+          "type": "date"
+        },
+        {
+          "name": "host.name",
+          "type": "keyword"
+        },
+        {
+          "name": "host.ip",
+          "type": "ip"
+        }
+      ],
+      "row_count": 1,
+      "values": [
+        {
+          "events": 4,
+          "first_seen": "2026-07-26T20:06:09.105Z",
+          "last_seen": "2026-07-26T20:06:39.102Z",
+          "host.name": "office-ws-1",
+          "host.ip": "172.18.0.6"
+        }
+      ]
+    }
+  }
+}

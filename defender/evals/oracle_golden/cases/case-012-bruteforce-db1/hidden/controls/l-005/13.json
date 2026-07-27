@@ -1,0 +1,126 @@
+{
+  "lead_id": "l-005",
+  "seq": 13,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-13T09:25:00.000Z",
+        "2026-07-13T10:25:00.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE source.ip == \"172.18.0.16\" AND @timestamp >= \"2026-07-13T09:25:00.000Z\" AND @timestamp < \"2026-07-13T10:25:00.000Z\"\n| KEEP @timestamp, host.name, host.ip, source.ip, message, event.outcome\n| SORT @timestamp DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE source.ip == \"172.18.0.16\" AND @timestamp >= \"2026-07-13T09:25:00.000Z\" AND @timestamp < \"2026-07-13T10:25:00.000Z\"\n| KEEP @timestamp, host.name, host.ip, source.ip, message, event.outcome\n| SORT @timestamp DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "@timestamp",
+            "type": "date"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "host.ip",
+            "type": "ip"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "message",
+            "type": "text"
+          },
+          {
+            "name": "event.outcome",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-06T09:25:00.000Z",
+        "2026-07-06T10:25:00.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE source.ip == \"172.18.0.16\" AND @timestamp >= \"2026-07-06T09:25:00.000Z\" AND @timestamp < \"2026-07-06T10:25:00.000Z\"\n| KEEP @timestamp, host.name, host.ip, source.ip, message, event.outcome\n| SORT @timestamp DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE source.ip == \"172.18.0.16\" AND @timestamp >= \"2026-07-06T09:25:00.000Z\" AND @timestamp < \"2026-07-06T10:25:00.000Z\"\n| KEEP @timestamp, host.name, host.ip, source.ip, message, event.outcome\n| SORT @timestamp DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "@timestamp",
+            "type": "date"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "host.ip",
+            "type": "ip"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "message",
+            "type": "text"
+          },
+          {
+            "name": "event.outcome",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-29T09:25:00.000Z",
+        "2026-06-29T10:25:00.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE source.ip == \"172.18.0.16\" AND @timestamp >= \"2026-06-29T09:25:00.000Z\" AND @timestamp < \"2026-06-29T10:25:00.000Z\"\n| KEEP @timestamp, host.name, host.ip, source.ip, message, event.outcome\n| SORT @timestamp DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE source.ip == \"172.18.0.16\" AND @timestamp >= \"2026-06-29T09:25:00.000Z\" AND @timestamp < \"2026-06-29T10:25:00.000Z\"\n| KEEP @timestamp, host.name, host.ip, source.ip, message, event.outcome\n| SORT @timestamp DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "@timestamp",
+            "type": "date"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "host.ip",
+            "type": "ip"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "message",
+            "type": "text"
+          },
+          {
+            "name": "event.outcome",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    }
+  ]
+}

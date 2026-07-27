@@ -1,0 +1,193 @@
+{
+  "lead_id": "l-007",
+  "seq": 6,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T19:36:42.000Z",
+        "2026-07-12T20:36:42.000Z"
+      ],
+      "query": "FROM .internal.alerts-security.alerts-default-*\n| WHERE @timestamp >= \"2026-07-12T19:36:42.000Z\" AND @timestamp < \"2026-07-12T20:36:42.000Z\"\n        AND host.name IS NULL\n| STATS alerts     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule     = kibana.alert.rule.name,\n           rule_id  = kibana.alert.rule.rule_id,\n           severity = kibana.alert.severity\n| SORT alerts DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM .internal.alerts-security.alerts-default-*\n| WHERE @timestamp >= \"2026-07-12T19:36:42.000Z\" AND @timestamp < \"2026-07-12T20:36:42.000Z\"\n        AND host.name IS NULL\n| STATS alerts     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule     = kibana.alert.rule.name,\n           rule_id  = kibana.alert.rule.rule_id,\n           severity = kibana.alert.severity\n| SORT alerts DESC",
+        "columns": [
+          {
+            "name": "alerts",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "rule",
+            "type": "keyword"
+          },
+          {
+            "name": "rule_id",
+            "type": "keyword"
+          },
+          {
+            "name": "severity",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 3,
+        "values": [
+          {
+            "alerts": 7,
+            "first_seen": "2026-07-12T19:36:46.083Z",
+            "last_seen": "2026-07-12T20:31:45.999Z",
+            "rule": "v2 internal port-scan burst",
+            "rule_id": "v2-internal-port-scan",
+            "severity": "medium"
+          },
+          {
+            "alerts": 2,
+            "first_seen": "2026-07-12T19:41:46.056Z",
+            "last_seen": "2026-07-12T19:56:45.992Z",
+            "rule": "v2 cross-tier SSH pivot",
+            "rule_id": "v2-cross-tier-ssh-pivot",
+            "severity": "high"
+          },
+          {
+            "alerts": 1,
+            "first_seen": "2026-07-12T19:41:46.152Z",
+            "last_seen": "2026-07-12T19:41:46.152Z",
+            "rule": "v2 bulk SSH success from single source",
+            "rule_id": "v2-bulk-ssh-success",
+            "severity": "medium"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T19:36:42.000Z",
+        "2026-07-05T20:36:42.000Z"
+      ],
+      "query": "FROM .internal.alerts-security.alerts-default-*\n| WHERE @timestamp >= \"2026-07-05T19:36:42.000Z\" AND @timestamp < \"2026-07-05T20:36:42.000Z\"\n        AND host.name IS NULL\n| STATS alerts     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule     = kibana.alert.rule.name,\n           rule_id  = kibana.alert.rule.rule_id,\n           severity = kibana.alert.severity\n| SORT alerts DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM .internal.alerts-security.alerts-default-*\n| WHERE @timestamp >= \"2026-07-05T19:36:42.000Z\" AND @timestamp < \"2026-07-05T20:36:42.000Z\"\n        AND host.name IS NULL\n| STATS alerts     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule     = kibana.alert.rule.name,\n           rule_id  = kibana.alert.rule.rule_id,\n           severity = kibana.alert.severity\n| SORT alerts DESC",
+        "columns": [
+          {
+            "name": "alerts",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "rule",
+            "type": "keyword"
+          },
+          {
+            "name": "rule_id",
+            "type": "keyword"
+          },
+          {
+            "name": "severity",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 2,
+        "values": [
+          {
+            "alerts": 6,
+            "first_seen": "2026-07-05T19:41:41.078Z",
+            "last_seen": "2026-07-05T20:31:40.806Z",
+            "rule": "v2 internal port-scan burst",
+            "rule_id": "v2-internal-port-scan",
+            "severity": "medium"
+          },
+          {
+            "alerts": 1,
+            "first_seen": "2026-07-05T19:56:40.979Z",
+            "last_seen": "2026-07-05T19:56:40.979Z",
+            "rule": "v2 bulk SSH success from single source",
+            "rule_id": "v2-bulk-ssh-success",
+            "severity": "medium"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-28T19:36:42.000Z",
+        "2026-06-28T20:36:42.000Z"
+      ],
+      "query": "FROM .internal.alerts-security.alerts-default-*\n| WHERE @timestamp >= \"2026-06-28T19:36:42.000Z\" AND @timestamp < \"2026-06-28T20:36:42.000Z\"\n        AND host.name IS NULL\n| STATS alerts     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule     = kibana.alert.rule.name,\n           rule_id  = kibana.alert.rule.rule_id,\n           severity = kibana.alert.severity\n| SORT alerts DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM .internal.alerts-security.alerts-default-*\n| WHERE @timestamp >= \"2026-06-28T19:36:42.000Z\" AND @timestamp < \"2026-06-28T20:36:42.000Z\"\n        AND host.name IS NULL\n| STATS alerts     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule     = kibana.alert.rule.name,\n           rule_id  = kibana.alert.rule.rule_id,\n           severity = kibana.alert.severity\n| SORT alerts DESC",
+        "columns": [
+          {
+            "name": "alerts",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "rule",
+            "type": "keyword"
+          },
+          {
+            "name": "rule_id",
+            "type": "keyword"
+          },
+          {
+            "name": "severity",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 3,
+        "values": [
+          {
+            "alerts": 6,
+            "first_seen": "2026-06-28T19:37:57.113Z",
+            "last_seen": "2026-06-28T20:27:57.062Z",
+            "rule": "v2 internal port-scan burst",
+            "rule_id": "v2-internal-port-scan",
+            "severity": "medium"
+          },
+          {
+            "alerts": 1,
+            "first_seen": "2026-06-28T20:35:39.079Z",
+            "last_seen": "2026-06-28T20:35:39.079Z",
+            "rule": "v2 cross-tier SSH pivot",
+            "rule_id": "v2-cross-tier-ssh-pivot",
+            "severity": "high"
+          },
+          {
+            "alerts": 1,
+            "first_seen": "2026-06-28T20:25:39.083Z",
+            "last_seen": "2026-06-28T20:25:39.083Z",
+            "rule": "v2 bulk SSH success from single source",
+            "rule_id": "v2-bulk-ssh-success",
+            "severity": "medium"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,141 @@
+{
+  "lead_id": "l-005",
+  "seq": 18,
+  "controls": [
+    {
+      "name": "C-7d",
+      "window": [
+        "2026-07-19T10:34:24.500Z",
+        "2026-07-19T11:34:24.500Z"
+      ],
+      "query": "FROM logs-postgresql.log-*\n| WHERE @timestamp >= \"2026-07-19T10:34:24.500Z\" AND @timestamp < \"2026-07-19T11:34:24.500Z\"\n| STATS BY host.name, host.ip\n| SORT host.name, host.ip",
+      "live": false,
+      "payload": null
+    },
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T10:34:24.500Z",
+        "2026-07-12T11:34:24.500Z"
+      ],
+      "query": "FROM logs-postgresql.log-*\n| WHERE @timestamp >= \"2026-07-12T10:34:24.500Z\" AND @timestamp < \"2026-07-12T11:34:24.500Z\"\n| STATS BY host.name, host.ip\n| SORT host.name, host.ip",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-postgresql.log-*\n| WHERE @timestamp >= \"2026-07-12T10:34:24.500Z\" AND @timestamp < \"2026-07-12T11:34:24.500Z\"\n| STATS BY host.name, host.ip\n| SORT host.name, host.ip",
+        "columns": [
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "host.ip",
+            "type": "ip"
+          }
+        ],
+        "row_count": 6,
+        "values": [
+          {
+            "host.name": "db-1",
+            "host.ip": "172.18.0.12"
+          },
+          {
+            "host.name": "db-1",
+            "host.ip": "172.18.0.15"
+          },
+          {
+            "host.name": "db-1",
+            "host.ip": "172.18.0.16"
+          },
+          {
+            "host.name": "db-1",
+            "host.ip": "172.18.0.21"
+          },
+          {
+            "host.name": "db-1",
+            "host.ip": "172.18.0.23"
+          },
+          {
+            "host.name": "db-1",
+            "host.ip": "172.18.0.24"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T10:34:24.500Z",
+        "2026-07-05T11:34:24.500Z"
+      ],
+      "query": "FROM logs-postgresql.log-*\n| WHERE @timestamp >= \"2026-07-05T10:34:24.500Z\" AND @timestamp < \"2026-07-05T11:34:24.500Z\"\n| STATS BY host.name, host.ip\n| SORT host.name, host.ip",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-postgresql.log-*\n| WHERE @timestamp >= \"2026-07-05T10:34:24.500Z\" AND @timestamp < \"2026-07-05T11:34:24.500Z\"\n| STATS BY host.name, host.ip\n| SORT host.name, host.ip",
+        "columns": [
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "host.ip",
+            "type": "ip"
+          }
+        ],
+        "row_count": 6,
+        "values": [
+          {
+            "host.name": "db-1",
+            "host.ip": "172.18.0.12"
+          },
+          {
+            "host.name": "db-1",
+            "host.ip": "172.18.0.15"
+          },
+          {
+            "host.name": "db-1",
+            "host.ip": "172.18.0.16"
+          },
+          {
+            "host.name": "db-1",
+            "host.ip": "172.18.0.21"
+          },
+          {
+            "host.name": "db-1",
+            "host.ip": "172.18.0.23"
+          },
+          {
+            "host.name": "db-1",
+            "host.ip": "172.18.0.24"
+          }
+        ]
+      }
+    }
+  ],
+  "attack_contribution": {
+    "window": [
+      "2026-07-26T11:04:03.000Z",
+      "2026-07-26T11:04:46.000Z"
+    ],
+    "query": "FROM logs-postgresql.log-*\n| WHERE @timestamp >= \"2026-07-26T11:04:03.000Z\" AND @timestamp < \"2026-07-26T11:04:46.000Z\"\n| STATS BY host.name, host.ip\n| SORT host.name, host.ip",
+    "payload": {
+      "query": "FROM logs-postgresql.log-*\n| WHERE @timestamp >= \"2026-07-26T11:04:03.000Z\" AND @timestamp < \"2026-07-26T11:04:46.000Z\"\n| STATS BY host.name, host.ip\n| SORT host.name, host.ip",
+      "columns": [
+        {
+          "name": "host.name",
+          "type": "keyword"
+        },
+        {
+          "name": "host.ip",
+          "type": "ip"
+        }
+      ],
+      "row_count": 1,
+      "values": [
+        {
+          "host.name": "db-1",
+          "host.ip": "172.18.0.12"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,26 @@
+case_id: case-012-bruteforce-db1
+kind: observed
+# --- calibration metadata (#711) ---
+# Assigned by the generator BEFORE the first replay: nothing has been scored
+# at this point, so no result could have influenced which side this lands on.
+split: dev
+unit:
+  activity_family: brute-force/T1110.001
+  host_pair: office-ws-1->db-1
+capture_environment: playground-v2@412977540-restore-20260727
+# Declare a class for every state/lookup system this case's leads touch.
+# A lookup has no @timestamp bounds to move, so it has no baseline and no
+# diff semantics — the judge reads that as `state-only`, not as a gap.
+state_classes: {}
+attack:
+  scenario: ssh-brute-force-canary
+  seed: 42
+  runner_run_id: ssh-brute-force-canary-42-abd6adac
+  window: ["2026-07-27T09:56:05+00:00", "2026-07-27T09:59:13+00:00"]
+  alert_rule: v2-cross-tier-ssh-pivot
+  # `captured` = a real rule fired and its alert was extracted.
+  # `synthesised` = nothing fired; the alert was built from the runner record
+  # so the activity's telemetry is not discarded. The oracle never sees the
+  # alert either way (oracle/prompt.md:1) — it only shapes the lead set.
+  alert_source: captured
+generated_by: generate_case.py

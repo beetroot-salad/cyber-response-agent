@@ -1,0 +1,114 @@
+{
+  "lead_id": "l-006",
+  "seq": 23,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T19:02:22.000Z",
+        "2026-07-12T20:02:22.000Z"
+      ],
+      "query": "FROM logs-nginx.access-*\n| WHERE @timestamp >= \"2026-07-12T19:02:22.000Z\" AND @timestamp < \"2026-07-12T20:02:22.000Z\"\n        AND host.name == \"web-1\"\n        AND (url.original LIKE \"*.sh\" OR url.original LIKE \"*script*\" OR url.original LIKE \"*bin*\" OR url.original LIKE \"*pipe*\" OR url.original LIKE \"*download*\")\n| KEEP @timestamp, url.original, source.ip, user_agent.original, http.request.method\n| SORT @timestamp ASC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-nginx.access-*\n| WHERE @timestamp >= \"2026-07-12T19:02:22.000Z\" AND @timestamp < \"2026-07-12T20:02:22.000Z\"\n        AND host.name == \"web-1\"\n        AND (url.original LIKE \"*.sh\" OR url.original LIKE \"*script*\" OR url.original LIKE \"*bin*\" OR url.original LIKE \"*pipe*\" OR url.original LIKE \"*download*\")\n| KEEP @timestamp, url.original, source.ip, user_agent.original, http.request.method\n| SORT @timestamp ASC",
+        "columns": [
+          {
+            "name": "@timestamp",
+            "type": "date"
+          },
+          {
+            "name": "url.original",
+            "type": "keyword"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "user_agent.original",
+            "type": "keyword"
+          },
+          {
+            "name": "http.request.method",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T19:02:22.000Z",
+        "2026-07-05T20:02:22.000Z"
+      ],
+      "query": "FROM logs-nginx.access-*\n| WHERE @timestamp >= \"2026-07-05T19:02:22.000Z\" AND @timestamp < \"2026-07-05T20:02:22.000Z\"\n        AND host.name == \"web-1\"\n        AND (url.original LIKE \"*.sh\" OR url.original LIKE \"*script*\" OR url.original LIKE \"*bin*\" OR url.original LIKE \"*pipe*\" OR url.original LIKE \"*download*\")\n| KEEP @timestamp, url.original, source.ip, user_agent.original, http.request.method\n| SORT @timestamp ASC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-nginx.access-*\n| WHERE @timestamp >= \"2026-07-05T19:02:22.000Z\" AND @timestamp < \"2026-07-05T20:02:22.000Z\"\n        AND host.name == \"web-1\"\n        AND (url.original LIKE \"*.sh\" OR url.original LIKE \"*script*\" OR url.original LIKE \"*bin*\" OR url.original LIKE \"*pipe*\" OR url.original LIKE \"*download*\")\n| KEEP @timestamp, url.original, source.ip, user_agent.original, http.request.method\n| SORT @timestamp ASC",
+        "columns": [
+          {
+            "name": "@timestamp",
+            "type": "date"
+          },
+          {
+            "name": "url.original",
+            "type": "keyword"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "user_agent.original",
+            "type": "keyword"
+          },
+          {
+            "name": "http.request.method",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-28T19:02:22.000Z",
+        "2026-06-28T20:02:22.000Z"
+      ],
+      "query": "FROM logs-nginx.access-*\n| WHERE @timestamp >= \"2026-06-28T19:02:22.000Z\" AND @timestamp < \"2026-06-28T20:02:22.000Z\"\n        AND host.name == \"web-1\"\n        AND (url.original LIKE \"*.sh\" OR url.original LIKE \"*script*\" OR url.original LIKE \"*bin*\" OR url.original LIKE \"*pipe*\" OR url.original LIKE \"*download*\")\n| KEEP @timestamp, url.original, source.ip, user_agent.original, http.request.method\n| SORT @timestamp ASC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-nginx.access-*\n| WHERE @timestamp >= \"2026-06-28T19:02:22.000Z\" AND @timestamp < \"2026-06-28T20:02:22.000Z\"\n        AND host.name == \"web-1\"\n        AND (url.original LIKE \"*.sh\" OR url.original LIKE \"*script*\" OR url.original LIKE \"*bin*\" OR url.original LIKE \"*pipe*\" OR url.original LIKE \"*download*\")\n| KEEP @timestamp, url.original, source.ip, user_agent.original, http.request.method\n| SORT @timestamp ASC",
+        "columns": [
+          {
+            "name": "@timestamp",
+            "type": "date"
+          },
+          {
+            "name": "url.original",
+            "type": "keyword"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "user_agent.original",
+            "type": "keyword"
+          },
+          {
+            "name": "http.request.method",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    }
+  ]
+}

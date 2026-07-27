@@ -1,0 +1,217 @@
+{
+  "lead_id": "l-002",
+  "seq": 26,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T18:35:57.000Z",
+        "2026-07-12T19:35:57.000Z"
+      ],
+      "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-07-12T18:35:57.000Z\" AND @timestamp < \"2026-07-12T19:35:57.000Z\"\n        AND (destination.ip == \"172.18.0.12\" OR destination.ip == \"172.18.0.17\" OR destination.ip == \"127.0.0.1\")\n        AND destination.port == 22\n| STATS total = COUNT(*),\n        earliest = MIN(@timestamp),\n        latest = MAX(@timestamp)\n        BY source.ip, destination.ip, destination.port\n| SORT total DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-07-12T18:35:57.000Z\" AND @timestamp < \"2026-07-12T19:35:57.000Z\"\n        AND (destination.ip == \"172.18.0.12\" OR destination.ip == \"172.18.0.17\" OR destination.ip == \"127.0.0.1\")\n        AND destination.port == 22\n| STATS total = COUNT(*),\n        earliest = MIN(@timestamp),\n        latest = MAX(@timestamp)\n        BY source.ip, destination.ip, destination.port\n| SORT total DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "total",
+            "type": "long"
+          },
+          {
+            "name": "earliest",
+            "type": "date"
+          },
+          {
+            "name": "latest",
+            "type": "date"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "destination.ip",
+            "type": "ip"
+          },
+          {
+            "name": "destination.port",
+            "type": "long"
+          }
+        ],
+        "row_count": 4,
+        "values": [
+          {
+            "total": 21,
+            "earliest": "2026-07-12T18:38:28.851Z",
+            "latest": "2026-07-12T19:35:42.182Z",
+            "source.ip": "172.18.0.23",
+            "destination.ip": "172.18.0.17",
+            "destination.port": 22
+          },
+          {
+            "total": 4,
+            "earliest": "2026-07-12T18:58:15.482Z",
+            "latest": "2026-07-12T19:14:18.614Z",
+            "source.ip": "172.18.0.22",
+            "destination.ip": "172.18.0.17",
+            "destination.port": 22
+          },
+          {
+            "total": 2,
+            "earliest": "2026-07-12T18:40:11.210Z",
+            "latest": "2026-07-12T18:47:27.891Z",
+            "source.ip": "172.18.0.14",
+            "destination.ip": "172.18.0.17",
+            "destination.port": 22
+          },
+          {
+            "total": 2,
+            "earliest": "2026-07-12T19:10:03.233Z",
+            "latest": "2026-07-12T19:25:20.779Z",
+            "source.ip": "172.18.0.22",
+            "destination.ip": "172.18.0.12",
+            "destination.port": 22
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T18:35:57.000Z",
+        "2026-07-05T19:35:57.000Z"
+      ],
+      "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-07-05T18:35:57.000Z\" AND @timestamp < \"2026-07-05T19:35:57.000Z\"\n        AND (destination.ip == \"172.18.0.12\" OR destination.ip == \"172.18.0.17\" OR destination.ip == \"127.0.0.1\")\n        AND destination.port == 22\n| STATS total = COUNT(*),\n        earliest = MIN(@timestamp),\n        latest = MAX(@timestamp)\n        BY source.ip, destination.ip, destination.port\n| SORT total DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-07-05T18:35:57.000Z\" AND @timestamp < \"2026-07-05T19:35:57.000Z\"\n        AND (destination.ip == \"172.18.0.12\" OR destination.ip == \"172.18.0.17\" OR destination.ip == \"127.0.0.1\")\n        AND destination.port == 22\n| STATS total = COUNT(*),\n        earliest = MIN(@timestamp),\n        latest = MAX(@timestamp)\n        BY source.ip, destination.ip, destination.port\n| SORT total DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "total",
+            "type": "long"
+          },
+          {
+            "name": "earliest",
+            "type": "date"
+          },
+          {
+            "name": "latest",
+            "type": "date"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "destination.ip",
+            "type": "ip"
+          },
+          {
+            "name": "destination.port",
+            "type": "long"
+          }
+        ],
+        "row_count": 5,
+        "values": [
+          {
+            "total": 16,
+            "earliest": "2026-07-05T18:41:55.180Z",
+            "latest": "2026-07-05T19:35:46.474Z",
+            "source.ip": "172.18.0.23",
+            "destination.ip": "172.18.0.17",
+            "destination.port": 22
+          },
+          {
+            "total": 3,
+            "earliest": "2026-07-05T18:36:42.473Z",
+            "latest": "2026-07-05T19:15:09.765Z",
+            "source.ip": "172.18.0.14",
+            "destination.ip": "172.18.0.12",
+            "destination.port": 22
+          },
+          {
+            "total": 2,
+            "earliest": "2026-07-05T18:49:14.588Z",
+            "latest": "2026-07-05T19:28:52.682Z",
+            "source.ip": "172.18.0.22",
+            "destination.ip": "172.18.0.17",
+            "destination.port": 22
+          },
+          {
+            "total": 2,
+            "earliest": "2026-07-05T18:50:19.910Z",
+            "latest": "2026-07-05T19:13:39.241Z",
+            "source.ip": "172.18.0.14",
+            "destination.ip": "172.18.0.17",
+            "destination.port": 22
+          },
+          {
+            "total": 1,
+            "earliest": "2026-07-05T19:28:52.710Z",
+            "latest": "2026-07-05T19:28:52.710Z",
+            "source.ip": "172.18.0.22",
+            "destination.ip": "172.18.0.12",
+            "destination.port": 22
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-28T18:35:57.000Z",
+        "2026-06-28T19:35:57.000Z"
+      ],
+      "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-06-28T18:35:57.000Z\" AND @timestamp < \"2026-06-28T19:35:57.000Z\"\n        AND (destination.ip == \"172.18.0.12\" OR destination.ip == \"172.18.0.17\" OR destination.ip == \"127.0.0.1\")\n        AND destination.port == 22\n| STATS total = COUNT(*),\n        earliest = MIN(@timestamp),\n        latest = MAX(@timestamp)\n        BY source.ip, destination.ip, destination.port\n| SORT total DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-06-28T18:35:57.000Z\" AND @timestamp < \"2026-06-28T19:35:57.000Z\"\n        AND (destination.ip == \"172.18.0.12\" OR destination.ip == \"172.18.0.17\" OR destination.ip == \"127.0.0.1\")\n        AND destination.port == 22\n| STATS total = COUNT(*),\n        earliest = MIN(@timestamp),\n        latest = MAX(@timestamp)\n        BY source.ip, destination.ip, destination.port\n| SORT total DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "total",
+            "type": "long"
+          },
+          {
+            "name": "earliest",
+            "type": "date"
+          },
+          {
+            "name": "latest",
+            "type": "date"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "destination.ip",
+            "type": "ip"
+          },
+          {
+            "name": "destination.port",
+            "type": "long"
+          }
+        ],
+        "row_count": 2,
+        "values": [
+          {
+            "total": 3,
+            "earliest": "2026-06-28T19:12:57.495Z",
+            "latest": "2026-06-28T19:34:24.804Z",
+            "source.ip": "172.18.0.19",
+            "destination.ip": "172.18.0.17",
+            "destination.port": 22
+          },
+          {
+            "total": 1,
+            "earliest": "2026-06-28T18:42:11.391Z",
+            "latest": "2026-06-28T18:42:11.391Z",
+            "source.ip": "172.18.0.20",
+            "destination.ip": "172.18.0.17",
+            "destination.port": 22
+          }
+        ]
+      }
+    }
+  ]
+}

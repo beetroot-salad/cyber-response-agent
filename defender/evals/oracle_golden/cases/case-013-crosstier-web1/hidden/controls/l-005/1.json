@@ -1,0 +1,1913 @@
+{
+  "lead_id": "l-005",
+  "seq": 1,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-13T00:00:00.000Z",
+        "2026-07-13T23:59:59.000Z"
+      ],
+      "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-13T00:00:00.000Z\" AND @timestamp < \"2026-07-13T23:59:59.000Z\"\n        AND (source.ip == \"172.18.0.16\" OR client.ip == \"172.18.0.16\" OR host.ip == \"172.18.0.16\"\n             OR source.ip == \"172.18.0.9\" OR client.ip == \"172.18.0.9\" OR host.ip == \"172.18.0.9\"\n             OR source.ip == \"172.18.0.24\" OR client.ip == \"172.18.0.24\" OR host.ip == \"172.18.0.24\")\n| STATS events = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY host.name, source.ip, client.ip, host.ip, data_stream.dataset\n| SORT events DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-13T00:00:00.000Z\" AND @timestamp < \"2026-07-13T23:59:59.000Z\"\n        AND (source.ip == \"172.18.0.16\" OR client.ip == \"172.18.0.16\" OR host.ip == \"172.18.0.16\"\n             OR source.ip == \"172.18.0.9\" OR client.ip == \"172.18.0.9\" OR host.ip == \"172.18.0.9\"\n             OR source.ip == \"172.18.0.24\" OR client.ip == \"172.18.0.24\" OR host.ip == \"172.18.0.24\")\n| STATS events = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY host.name, source.ip, client.ip, host.ip, data_stream.dataset\n| SORT events DESC",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "client.ip",
+            "type": "ip"
+          },
+          {
+            "name": "host.ip",
+            "type": "ip"
+          },
+          {
+            "name": "data_stream.dataset",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 47,
+        "values": [
+          {
+            "events": 32568,
+            "first_seen": "2026-07-13T00:00:07.158Z",
+            "last_seen": "2026-07-13T11:18:27.160Z",
+            "host.name": "db-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.24",
+            "data_stream.dataset": "postgresql.log"
+          },
+          {
+            "events": 32568,
+            "first_seen": "2026-07-13T00:00:07.158Z",
+            "last_seen": "2026-07-13T11:18:27.160Z",
+            "host.name": "db-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "postgresql.log"
+          },
+          {
+            "events": 4189,
+            "first_seen": "2026-07-13T00:00:08.000Z",
+            "last_seen": "2026-07-13T11:18:38.000Z",
+            "host.name": "web-2",
+            "source.ip": "127.0.0.1",
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "nginx.access"
+          },
+          {
+            "events": 1784,
+            "first_seen": "2026-07-13T00:00:31.000Z",
+            "last_seen": "2026-07-13T11:18:35.000Z",
+            "host.name": "web-2",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 1444,
+            "first_seen": "2026-07-13T00:01:30.000Z",
+            "last_seen": "2026-07-13T11:17:01.000Z",
+            "host.name": "db-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 1444,
+            "first_seen": "2026-07-13T00:01:30.000Z",
+            "last_seen": "2026-07-13T11:17:01.000Z",
+            "host.name": "db-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.24",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 870,
+            "first_seen": "2026-07-13T00:17:01.000Z",
+            "last_seen": "2026-07-13T11:17:17.000Z",
+            "host.name": "office-ws-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 675,
+            "first_seen": "2026-07-13T00:00:59.437Z",
+            "last_seen": "2026-07-13T11:17:58.598Z",
+            "host.name": null,
+            "source.ip": "172.18.0.16",
+            "client.ip": null,
+            "host.ip": null,
+            "data_stream.dataset": "zeek.http"
+          },
+          {
+            "events": 675,
+            "first_seen": "2026-07-13T00:00:59.437Z",
+            "last_seen": "2026-07-13T11:17:58.598Z",
+            "host.name": null,
+            "source.ip": "172.18.0.16",
+            "client.ip": null,
+            "host.ip": null,
+            "data_stream.dataset": "zeek.connection"
+          },
+          {
+            "events": 674,
+            "first_seen": "2026-07-13T00:00:59.000Z",
+            "last_seen": "2026-07-13T11:17:01.000Z",
+            "host.name": "canary-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.9",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 654,
+            "first_seen": "2026-07-13T00:07:45.920Z",
+            "last_seen": "2026-07-13T11:17:39.527Z",
+            "host.name": "office-ws-2",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.24",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 654,
+            "first_seen": "2026-07-13T00:07:45.920Z",
+            "last_seen": "2026-07-13T11:17:39.527Z",
+            "host.name": "office-ws-2",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.9",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 596,
+            "first_seen": "2026-07-13T00:01:15.867Z",
+            "last_seen": "2026-07-13T11:17:01.535Z",
+            "host.name": "config-mgmt-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.24",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 354,
+            "first_seen": "2026-07-13T00:06:52.347Z",
+            "last_seen": "2026-07-13T11:17:01.535Z",
+            "host.name": "scanner-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.9",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 354,
+            "first_seen": "2026-07-13T00:06:52.347Z",
+            "last_seen": "2026-07-13T11:17:01.535Z",
+            "host.name": "scanner-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 339,
+            "first_seen": "2026-07-13T10:22:07.911Z",
+            "last_seen": "2026-07-13T11:18:27.910Z",
+            "host.name": "ci-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "elastic_agent.metricbeat"
+          },
+          {
+            "events": 310,
+            "first_seen": "2026-07-13T00:17:01.000Z",
+            "last_seen": "2026-07-13T11:17:01.000Z",
+            "host.name": "ci-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 310,
+            "first_seen": "2026-07-13T00:17:01.000Z",
+            "last_seen": "2026-07-13T11:17:01.000Z",
+            "host.name": "ci-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.9",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 49,
+            "first_seen": "2026-07-13T00:18:41.000Z",
+            "last_seen": "2026-07-13T11:15:22.000Z",
+            "host.name": "web-2",
+            "source.ip": "172.18.0.13",
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "nginx.access"
+          },
+          {
+            "events": 47,
+            "first_seen": "2026-07-13T00:23:41.000Z",
+            "last_seen": "2026-07-13T11:17:39.000Z",
+            "host.name": "web-2",
+            "source.ip": "172.18.0.12",
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "nginx.access"
+          },
+          {
+            "events": 28,
+            "first_seen": "2026-07-13T00:17:01.346Z",
+            "last_seen": "2026-07-13T11:17:01.533Z",
+            "host.name": "config-mgmt-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.24",
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 24,
+            "first_seen": "2026-07-13T02:34:14.000Z",
+            "last_seen": "2026-07-13T05:36:13.000Z",
+            "host.name": "web-2",
+            "source.ip": "172.18.0.6",
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 14,
+            "first_seen": "2026-07-13T00:17:01.000Z",
+            "last_seen": "2026-07-13T11:17:01.000Z",
+            "host.name": "db-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.24",
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 14,
+            "first_seen": "2026-07-13T00:17:01.000Z",
+            "last_seen": "2026-07-13T11:17:01.000Z",
+            "host.name": "ci-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 14,
+            "first_seen": "2026-07-13T00:17:01.346Z",
+            "last_seen": "2026-07-13T11:17:01.533Z",
+            "host.name": "scanner-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.9",
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 14,
+            "first_seen": "2026-07-13T00:17:01.000Z",
+            "last_seen": "2026-07-13T11:17:01.000Z",
+            "host.name": "db-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 14,
+            "first_seen": "2026-07-13T00:17:01.346Z",
+            "last_seen": "2026-07-13T11:17:01.533Z",
+            "host.name": "scanner-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 14,
+            "first_seen": "2026-07-13T00:17:01.601Z",
+            "last_seen": "2026-07-13T11:17:01.792Z",
+            "host.name": "office-ws-2",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.24",
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 14,
+            "first_seen": "2026-07-13T00:17:01.000Z",
+            "last_seen": "2026-07-13T11:17:01.000Z",
+            "host.name": "office-ws-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 14,
+            "first_seen": "2026-07-13T00:17:01.000Z",
+            "last_seen": "2026-07-13T11:17:01.000Z",
+            "host.name": "canary-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.9",
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 14,
+            "first_seen": "2026-07-13T00:17:01.000Z",
+            "last_seen": "2026-07-13T11:17:01.000Z",
+            "host.name": "ci-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.9",
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 14,
+            "first_seen": "2026-07-13T00:17:01.000Z",
+            "last_seen": "2026-07-13T11:17:01.000Z",
+            "host.name": "web-2",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 14,
+            "first_seen": "2026-07-13T00:17:01.601Z",
+            "last_seen": "2026-07-13T11:17:01.792Z",
+            "host.name": "office-ws-2",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.9",
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 12,
+            "first_seen": "2026-07-13T08:37:21.000Z",
+            "last_seen": "2026-07-13T08:37:39.000Z",
+            "host.name": "web-2",
+            "source.ip": "172.18.0.8",
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 10,
+            "first_seen": "2026-07-13T10:30:49.511Z",
+            "last_seen": "2026-07-13T11:15:23.264Z",
+            "host.name": "ci-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "elastic_agent"
+          },
+          {
+            "events": 10,
+            "first_seen": "2026-07-13T10:22:10.988Z",
+            "last_seen": "2026-07-13T11:17:06.258Z",
+            "host.name": "ci-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "elastic_agent.filebeat"
+          },
+          {
+            "events": 8,
+            "first_seen": "2026-07-13T04:07:27.000Z",
+            "last_seen": "2026-07-13T11:00:30.000Z",
+            "host.name": "web-2",
+            "source.ip": "172.18.0.17",
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 7,
+            "first_seen": "2026-07-13T03:41:52.555Z",
+            "last_seen": "2026-07-13T07:56:09.442Z",
+            "host.name": "office-ws-2",
+            "source.ip": "172.18.0.14",
+            "client.ip": null,
+            "host.ip": "172.18.0.9",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 7,
+            "first_seen": "2026-07-13T03:41:52.555Z",
+            "last_seen": "2026-07-13T07:56:09.442Z",
+            "host.name": "office-ws-2",
+            "source.ip": "172.18.0.14",
+            "client.ip": null,
+            "host.ip": "172.18.0.24",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 6,
+            "first_seen": "2026-07-13T03:41:51.000Z",
+            "last_seen": "2026-07-13T07:56:08.000Z",
+            "host.name": "web-2",
+            "source.ip": "172.18.0.14",
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 6,
+            "first_seen": "2026-07-13T03:41:51.000Z",
+            "last_seen": "2026-07-13T07:56:08.000Z",
+            "host.name": "db-1",
+            "source.ip": "172.18.0.14",
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 6,
+            "first_seen": "2026-07-13T03:41:51.000Z",
+            "last_seen": "2026-07-13T07:56:08.000Z",
+            "host.name": "db-1",
+            "source.ip": "172.18.0.14",
+            "client.ip": null,
+            "host.ip": "172.18.0.24",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 6,
+            "first_seen": "2026-07-13T03:41:52.000Z",
+            "last_seen": "2026-07-13T07:56:09.000Z",
+            "host.name": "canary-1",
+            "source.ip": "172.18.0.14",
+            "client.ip": null,
+            "host.ip": "172.18.0.9",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 6,
+            "first_seen": "2026-07-13T03:41:52.000Z",
+            "last_seen": "2026-07-13T07:56:09.000Z",
+            "host.name": "office-ws-1",
+            "source.ip": "172.18.0.14",
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 5,
+            "first_seen": "2026-07-13T07:16:57.000Z",
+            "last_seen": "2026-07-13T10:19:58.000Z",
+            "host.name": "db-1",
+            "source.ip": "172.18.0.17",
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 5,
+            "first_seen": "2026-07-13T07:16:57.000Z",
+            "last_seen": "2026-07-13T10:19:58.000Z",
+            "host.name": "db-1",
+            "source.ip": "172.18.0.17",
+            "client.ip": null,
+            "host.ip": "172.18.0.24",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 4,
+            "first_seen": "2026-07-13T06:09:10.000Z",
+            "last_seen": "2026-07-13T08:39:03.000Z",
+            "host.name": "web-2",
+            "source.ip": "172.18.0.20",
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "system.auth"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-06T00:00:00.000Z",
+        "2026-07-06T23:59:59.000Z"
+      ],
+      "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-06T00:00:00.000Z\" AND @timestamp < \"2026-07-06T23:59:59.000Z\"\n        AND (source.ip == \"172.18.0.16\" OR client.ip == \"172.18.0.16\" OR host.ip == \"172.18.0.16\"\n             OR source.ip == \"172.18.0.9\" OR client.ip == \"172.18.0.9\" OR host.ip == \"172.18.0.9\"\n             OR source.ip == \"172.18.0.24\" OR client.ip == \"172.18.0.24\" OR host.ip == \"172.18.0.24\")\n| STATS events = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY host.name, source.ip, client.ip, host.ip, data_stream.dataset\n| SORT events DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-06T00:00:00.000Z\" AND @timestamp < \"2026-07-06T23:59:59.000Z\"\n        AND (source.ip == \"172.18.0.16\" OR client.ip == \"172.18.0.16\" OR host.ip == \"172.18.0.16\"\n             OR source.ip == \"172.18.0.9\" OR client.ip == \"172.18.0.9\" OR host.ip == \"172.18.0.9\"\n             OR source.ip == \"172.18.0.24\" OR client.ip == \"172.18.0.24\" OR host.ip == \"172.18.0.24\")\n| STATS events = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY host.name, source.ip, client.ip, host.ip, data_stream.dataset\n| SORT events DESC",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "client.ip",
+            "type": "ip"
+          },
+          {
+            "name": "host.ip",
+            "type": "ip"
+          },
+          {
+            "name": "data_stream.dataset",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 44,
+        "values": [
+          {
+            "events": 69120,
+            "first_seen": "2026-07-06T00:00:07.158Z",
+            "last_seen": "2026-07-06T23:59:57.160Z",
+            "host.name": "db-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "postgresql.log"
+          },
+          {
+            "events": 69120,
+            "first_seen": "2026-07-06T00:00:07.158Z",
+            "last_seen": "2026-07-06T23:59:57.160Z",
+            "host.name": "db-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.24",
+            "data_stream.dataset": "postgresql.log"
+          },
+          {
+            "events": 8911,
+            "first_seen": "2026-07-06T00:00:08.000Z",
+            "last_seen": "2026-07-06T23:59:58.000Z",
+            "host.name": "web-2",
+            "source.ip": "127.0.0.1",
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "nginx.access"
+          },
+          {
+            "events": 4712,
+            "first_seen": "2026-07-06T00:00:30.000Z",
+            "last_seen": "2026-07-06T23:59:27.000Z",
+            "host.name": "web-2",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 3133,
+            "first_seen": "2026-07-06T00:00:19.000Z",
+            "last_seen": "2026-07-06T23:59:27.000Z",
+            "host.name": "db-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 3133,
+            "first_seen": "2026-07-06T00:00:19.000Z",
+            "last_seen": "2026-07-06T23:59:27.000Z",
+            "host.name": "db-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.24",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 1981,
+            "first_seen": "2026-07-06T00:02:25.000Z",
+            "last_seen": "2026-07-06T23:55:37.000Z",
+            "host.name": "office-ws-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 1693,
+            "first_seen": "2026-07-06T00:04:53.000Z",
+            "last_seen": "2026-07-06T23:57:16.000Z",
+            "host.name": "canary-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.9",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 1467,
+            "first_seen": "2026-07-06T00:01:07.552Z",
+            "last_seen": "2026-07-06T23:53:01.725Z",
+            "host.name": "office-ws-2",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.24",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 1467,
+            "first_seen": "2026-07-06T00:01:07.552Z",
+            "last_seen": "2026-07-06T23:53:01.725Z",
+            "host.name": "office-ws-2",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.9",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 1434,
+            "first_seen": "2026-07-06T00:00:02.433Z",
+            "last_seen": "2026-07-06T23:59:41.873Z",
+            "host.name": null,
+            "source.ip": "172.18.0.16",
+            "client.ip": null,
+            "host.ip": null,
+            "data_stream.dataset": "zeek.connection"
+          },
+          {
+            "events": 1434,
+            "first_seen": "2026-07-06T00:00:02.433Z",
+            "last_seen": "2026-07-06T23:59:41.873Z",
+            "host.name": null,
+            "source.ip": "172.18.0.16",
+            "client.ip": null,
+            "host.ip": null,
+            "data_stream.dataset": "zeek.http"
+          },
+          {
+            "events": 1376,
+            "first_seen": "2026-07-06T00:03:51.735Z",
+            "last_seen": "2026-07-06T23:59:19.269Z",
+            "host.name": "config-mgmt-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.24",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 744,
+            "first_seen": "2026-07-06T00:12:22.091Z",
+            "last_seen": "2026-07-06T23:59:12.391Z",
+            "host.name": "scanner-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 744,
+            "first_seen": "2026-07-06T00:12:22.091Z",
+            "last_seen": "2026-07-06T23:59:12.391Z",
+            "host.name": "scanner-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.9",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 602,
+            "first_seen": "2026-07-06T00:00:12.000Z",
+            "last_seen": "2026-07-06T23:53:56.000Z",
+            "host.name": "ci-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 602,
+            "first_seen": "2026-07-06T00:00:12.000Z",
+            "last_seen": "2026-07-06T23:53:56.000Z",
+            "host.name": "ci-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.9",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 126,
+            "first_seen": "2026-07-06T00:01:07.000Z",
+            "last_seen": "2026-07-06T23:21:52.000Z",
+            "host.name": "web-2",
+            "source.ip": "172.18.0.12",
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "nginx.access"
+          },
+          {
+            "events": 112,
+            "first_seen": "2026-07-06T00:52:04.000Z",
+            "last_seen": "2026-07-06T23:32:41.000Z",
+            "host.name": "web-2",
+            "source.ip": "172.18.0.13",
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "nginx.access"
+          },
+          {
+            "events": 84,
+            "first_seen": "2026-07-06T00:08:37.000Z",
+            "last_seen": "2026-07-06T22:39:53.000Z",
+            "host.name": "web-2",
+            "source.ip": "172.18.0.8",
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 72,
+            "first_seen": "2026-07-06T10:24:58.000Z",
+            "last_seen": "2026-07-06T23:20:07.000Z",
+            "host.name": "web-2",
+            "source.ip": "172.18.0.6",
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 63,
+            "first_seen": "2026-07-06T00:33:41.841Z",
+            "last_seen": "2026-07-06T22:20:40.963Z",
+            "host.name": "office-ws-2",
+            "source.ip": "172.18.0.14",
+            "client.ip": null,
+            "host.ip": "172.18.0.9",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 63,
+            "first_seen": "2026-07-06T00:33:42.000Z",
+            "last_seen": "2026-07-06T22:20:41.000Z",
+            "host.name": "canary-1",
+            "source.ip": "172.18.0.14",
+            "client.ip": null,
+            "host.ip": "172.18.0.9",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 63,
+            "first_seen": "2026-07-06T00:33:40.000Z",
+            "last_seen": "2026-07-06T22:20:39.000Z",
+            "host.name": "db-1",
+            "source.ip": "172.18.0.14",
+            "client.ip": null,
+            "host.ip": "172.18.0.24",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 63,
+            "first_seen": "2026-07-06T00:33:40.000Z",
+            "last_seen": "2026-07-06T22:20:39.000Z",
+            "host.name": "db-1",
+            "source.ip": "172.18.0.14",
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 63,
+            "first_seen": "2026-07-06T00:33:40.000Z",
+            "last_seen": "2026-07-06T22:20:39.000Z",
+            "host.name": "web-2",
+            "source.ip": "172.18.0.14",
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 63,
+            "first_seen": "2026-07-06T00:33:41.841Z",
+            "last_seen": "2026-07-06T22:20:40.963Z",
+            "host.name": "office-ws-2",
+            "source.ip": "172.18.0.14",
+            "client.ip": null,
+            "host.ip": "172.18.0.24",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 63,
+            "first_seen": "2026-07-06T00:33:41.000Z",
+            "last_seen": "2026-07-06T22:20:40.000Z",
+            "host.name": "office-ws-1",
+            "source.ip": "172.18.0.14",
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 52,
+            "first_seen": "2026-07-06T00:17:01.833Z",
+            "last_seen": "2026-07-06T23:17:01.188Z",
+            "host.name": "config-mgmt-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.24",
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 28,
+            "first_seen": "2026-07-06T00:19:54.000Z",
+            "last_seen": "2026-07-06T22:52:33.000Z",
+            "host.name": "db-1",
+            "source.ip": "172.18.0.17",
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 28,
+            "first_seen": "2026-07-06T00:19:54.000Z",
+            "last_seen": "2026-07-06T22:52:33.000Z",
+            "host.name": "db-1",
+            "source.ip": "172.18.0.17",
+            "client.ip": null,
+            "host.ip": "172.18.0.24",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 26,
+            "first_seen": "2026-07-06T00:17:01.000Z",
+            "last_seen": "2026-07-06T23:17:01.000Z",
+            "host.name": "ci-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 26,
+            "first_seen": "2026-07-06T00:17:01.000Z",
+            "last_seen": "2026-07-06T23:17:01.000Z",
+            "host.name": "canary-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.9",
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 26,
+            "first_seen": "2026-07-06T00:17:01.834Z",
+            "last_seen": "2026-07-06T23:17:01.188Z",
+            "host.name": "scanner-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.9",
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 26,
+            "first_seen": "2026-07-06T00:17:01.110Z",
+            "last_seen": "2026-07-06T23:17:01.453Z",
+            "host.name": "office-ws-2",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.9",
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 26,
+            "first_seen": "2026-07-06T00:17:01.000Z",
+            "last_seen": "2026-07-06T23:17:01.000Z",
+            "host.name": "db-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 26,
+            "first_seen": "2026-07-06T00:17:01.000Z",
+            "last_seen": "2026-07-06T23:17:01.000Z",
+            "host.name": "db-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.24",
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 26,
+            "first_seen": "2026-07-06T00:17:01.834Z",
+            "last_seen": "2026-07-06T23:17:01.188Z",
+            "host.name": "scanner-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 26,
+            "first_seen": "2026-07-06T00:17:01.110Z",
+            "last_seen": "2026-07-06T23:17:01.453Z",
+            "host.name": "office-ws-2",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.24",
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 26,
+            "first_seen": "2026-07-06T00:17:01.000Z",
+            "last_seen": "2026-07-06T23:17:01.000Z",
+            "host.name": "office-ws-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 26,
+            "first_seen": "2026-07-06T00:17:01.000Z",
+            "last_seen": "2026-07-06T23:17:01.000Z",
+            "host.name": "ci-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.9",
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 26,
+            "first_seen": "2026-07-06T00:17:01.000Z",
+            "last_seen": "2026-07-06T23:17:01.000Z",
+            "host.name": "web-2",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 16,
+            "first_seen": "2026-07-06T00:36:59.000Z",
+            "last_seen": "2026-07-06T22:29:09.000Z",
+            "host.name": "web-2",
+            "source.ip": "172.18.0.17",
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-06T22:43:34.000Z",
+            "last_seen": "2026-07-06T22:43:34.000Z",
+            "host.name": "web-2",
+            "source.ip": "172.18.0.20",
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "system.auth"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-29T00:00:00.000Z",
+        "2026-06-29T23:59:59.000Z"
+      ],
+      "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-06-29T00:00:00.000Z\" AND @timestamp < \"2026-06-29T23:59:59.000Z\"\n        AND (source.ip == \"172.18.0.16\" OR client.ip == \"172.18.0.16\" OR host.ip == \"172.18.0.16\"\n             OR source.ip == \"172.18.0.9\" OR client.ip == \"172.18.0.9\" OR host.ip == \"172.18.0.9\"\n             OR source.ip == \"172.18.0.24\" OR client.ip == \"172.18.0.24\" OR host.ip == \"172.18.0.24\")\n| STATS events = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY host.name, source.ip, client.ip, host.ip, data_stream.dataset\n| SORT events DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-06-29T00:00:00.000Z\" AND @timestamp < \"2026-06-29T23:59:59.000Z\"\n        AND (source.ip == \"172.18.0.16\" OR client.ip == \"172.18.0.16\" OR host.ip == \"172.18.0.16\"\n             OR source.ip == \"172.18.0.9\" OR client.ip == \"172.18.0.9\" OR host.ip == \"172.18.0.9\"\n             OR source.ip == \"172.18.0.24\" OR client.ip == \"172.18.0.24\" OR host.ip == \"172.18.0.24\")\n| STATS events = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY host.name, source.ip, client.ip, host.ip, data_stream.dataset\n| SORT events DESC",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "client.ip",
+            "type": "ip"
+          },
+          {
+            "name": "host.ip",
+            "type": "ip"
+          },
+          {
+            "name": "data_stream.dataset",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 85,
+        "values": [
+          {
+            "events": 69120,
+            "first_seen": "2026-06-29T00:00:03.766Z",
+            "last_seen": "2026-06-29T23:59:53.774Z",
+            "host.name": "db-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.24",
+            "data_stream.dataset": "postgresql.log"
+          },
+          {
+            "events": 69120,
+            "first_seen": "2026-06-29T00:00:03.766Z",
+            "last_seen": "2026-06-29T23:59:53.774Z",
+            "host.name": "db-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "postgresql.log"
+          },
+          {
+            "events": 16444,
+            "first_seen": "2026-06-29T00:00:05.727Z",
+            "last_seen": "2026-06-29T23:59:56.659Z",
+            "host.name": null,
+            "source.ip": "172.18.0.9",
+            "client.ip": null,
+            "host.ip": null,
+            "data_stream.dataset": "zeek.connection"
+          },
+          {
+            "events": 15996,
+            "first_seen": "2026-06-29T00:00:05.727Z",
+            "last_seen": "2026-06-29T23:59:56.659Z",
+            "host.name": null,
+            "source.ip": "172.18.0.9",
+            "client.ip": null,
+            "host.ip": null,
+            "data_stream.dataset": "zeek.ssl"
+          },
+          {
+            "events": 15467,
+            "first_seen": "2026-06-29T00:00:00.193Z",
+            "last_seen": "2026-06-29T23:59:50.193Z",
+            "host.name": null,
+            "source.ip": "172.18.0.24",
+            "client.ip": null,
+            "host.ip": null,
+            "data_stream.dataset": "zeek.connection"
+          },
+          {
+            "events": 15212,
+            "first_seen": "2026-06-29T00:00:00.194Z",
+            "last_seen": "2026-06-29T23:59:50.194Z",
+            "host.name": null,
+            "source.ip": "172.18.0.24",
+            "client.ip": null,
+            "host.ip": null,
+            "data_stream.dataset": "zeek.ssl"
+          },
+          {
+            "events": 8918,
+            "first_seen": "2026-06-29T00:00:07.000Z",
+            "last_seen": "2026-06-29T23:59:57.000Z",
+            "host.name": "web-2",
+            "source.ip": "127.0.0.1",
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "nginx.access"
+          },
+          {
+            "events": 8640,
+            "first_seen": "2026-06-29T00:00:05.724Z",
+            "last_seen": "2026-06-29T23:59:55.724Z",
+            "host.name": "ci-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.9",
+            "data_stream.dataset": "elastic_agent.metricbeat"
+          },
+          {
+            "events": 8640,
+            "first_seen": "2026-06-29T00:00:01.396Z",
+            "last_seen": "2026-06-29T23:59:51.396Z",
+            "host.name": "office-ws-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.24",
+            "data_stream.dataset": "elastic_agent.metricbeat"
+          },
+          {
+            "events": 5253,
+            "first_seen": "2026-06-29T00:02:54.000Z",
+            "last_seen": "2026-06-29T23:59:17.000Z",
+            "host.name": "web-2",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 3753,
+            "first_seen": "2026-06-29T00:00:29.977Z",
+            "last_seen": "2026-06-29T23:57:56.981Z",
+            "host.name": null,
+            "source.ip": "172.18.0.16",
+            "client.ip": null,
+            "host.ip": null,
+            "data_stream.dataset": "zeek.ssl"
+          },
+          {
+            "events": 3753,
+            "first_seen": "2026-06-29T00:00:29.977Z",
+            "last_seen": "2026-06-29T23:57:56.979Z",
+            "host.name": null,
+            "source.ip": "172.18.0.16",
+            "client.ip": null,
+            "host.ip": null,
+            "data_stream.dataset": "zeek.connection"
+          },
+          {
+            "events": 3112,
+            "first_seen": "2026-06-29T00:00:15.000Z",
+            "last_seen": "2026-06-29T23:59:35.000Z",
+            "host.name": "db-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 3112,
+            "first_seen": "2026-06-29T00:00:15.000Z",
+            "last_seen": "2026-06-29T23:59:35.000Z",
+            "host.name": "db-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.24",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 2124,
+            "first_seen": "2026-06-29T00:04:55.000Z",
+            "last_seen": "2026-06-29T23:54:49.000Z",
+            "host.name": "office-ws-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 2124,
+            "first_seen": "2026-06-29T00:04:55.000Z",
+            "last_seen": "2026-06-29T23:54:49.000Z",
+            "host.name": "office-ws-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.24",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 1758,
+            "first_seen": "2026-06-29T00:00:23.000Z",
+            "last_seen": "2026-06-29T23:59:47.000Z",
+            "host.name": "canary-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.9",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 1508,
+            "first_seen": "2026-06-29T00:00:00.618Z",
+            "last_seen": "2026-06-29T23:57:56.407Z",
+            "host.name": "office-ws-2",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.9",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 1508,
+            "first_seen": "2026-06-29T00:00:00.618Z",
+            "last_seen": "2026-06-29T23:57:56.407Z",
+            "host.name": "office-ws-2",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.24",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 1460,
+            "first_seen": "2026-06-29T00:00:39.000Z",
+            "last_seen": "2026-06-29T23:58:58.000Z",
+            "host.name": "ci-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.9",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 1448,
+            "first_seen": "2026-06-29T00:01:07.394Z",
+            "last_seen": "2026-06-29T23:58:38.015Z",
+            "host.name": "config-mgmt-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.24",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 756,
+            "first_seen": "2026-06-29T00:07:41.888Z",
+            "last_seen": "2026-06-29T23:57:27.548Z",
+            "host.name": "scanner-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 756,
+            "first_seen": "2026-06-29T00:07:41.888Z",
+            "last_seen": "2026-06-29T23:57:27.548Z",
+            "host.name": "scanner-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.9",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 730,
+            "first_seen": "2026-06-29T00:00:39.000Z",
+            "last_seen": "2026-06-29T23:58:58.000Z",
+            "host.name": "ci-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 404,
+            "first_seen": "2026-06-29T00:00:02.979Z",
+            "last_seen": "2026-06-29T23:57:57.092Z",
+            "host.name": null,
+            "source.ip": "172.18.0.16",
+            "client.ip": null,
+            "host.ip": null,
+            "data_stream.dataset": "zeek.weird"
+          },
+          {
+            "events": 366,
+            "first_seen": "2026-06-29T00:00:39.965Z",
+            "last_seen": "2026-06-29T23:58:58.504Z",
+            "host.name": null,
+            "source.ip": "172.18.0.9",
+            "client.ip": null,
+            "host.ip": null,
+            "data_stream.dataset": "zeek.ssh"
+          },
+          {
+            "events": 314,
+            "first_seen": "2026-06-29T00:01:02.139Z",
+            "last_seen": "2026-06-29T23:53:14.070Z",
+            "host.name": "office-ws-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.24",
+            "data_stream.dataset": "elastic_agent"
+          },
+          {
+            "events": 298,
+            "first_seen": "2026-06-29T00:04:41.950Z",
+            "last_seen": "2026-06-29T23:55:55.090Z",
+            "host.name": "ci-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.9",
+            "data_stream.dataset": "elastic_agent"
+          },
+          {
+            "events": 252,
+            "first_seen": "2026-06-29T03:16:02.000Z",
+            "last_seen": "2026-06-29T23:17:54.000Z",
+            "host.name": "web-1",
+            "source.ip": "172.18.0.24",
+            "client.ip": null,
+            "host.ip": "172.18.0.18",
+            "data_stream.dataset": "nginx.access"
+          },
+          {
+            "events": 252,
+            "first_seen": "2026-06-29T03:16:02.000Z",
+            "last_seen": "2026-06-29T23:17:54.000Z",
+            "host.name": "web-2",
+            "source.ip": "172.18.0.24",
+            "client.ip": null,
+            "host.ip": "172.18.0.12",
+            "data_stream.dataset": "nginx.access"
+          },
+          {
+            "events": 252,
+            "first_seen": "2026-06-29T03:16:02.000Z",
+            "last_seen": "2026-06-29T23:17:54.000Z",
+            "host.name": "web-1",
+            "source.ip": "172.18.0.24",
+            "client.ip": null,
+            "host.ip": "172.18.0.6",
+            "data_stream.dataset": "nginx.access"
+          },
+          {
+            "events": 252,
+            "first_seen": "2026-06-29T03:16:02.862Z",
+            "last_seen": "2026-06-29T23:17:54.706Z",
+            "host.name": null,
+            "source.ip": "172.18.0.24",
+            "client.ip": null,
+            "host.ip": null,
+            "data_stream.dataset": "zeek.http"
+          },
+          {
+            "events": 251,
+            "first_seen": "2026-06-29T00:00:48.225Z",
+            "last_seen": "2026-06-29T23:57:09.279Z",
+            "host.name": "ci-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.9",
+            "data_stream.dataset": "elastic_agent.filebeat"
+          },
+          {
+            "events": 190,
+            "first_seen": "2026-06-29T00:05:02.192Z",
+            "last_seen": "2026-06-29T23:59:56.202Z",
+            "host.name": "office-ws-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.24",
+            "data_stream.dataset": "elastic_agent.filebeat"
+          },
+          {
+            "events": 135,
+            "first_seen": "2026-06-29T01:59:04.000Z",
+            "last_seen": "2026-06-29T23:23:46.000Z",
+            "host.name": "web-2",
+            "source.ip": "172.18.0.25",
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "nginx.access"
+          },
+          {
+            "events": 126,
+            "first_seen": "2026-06-29T03:16:02.000Z",
+            "last_seen": "2026-06-29T23:17:54.000Z",
+            "host.name": "web-2",
+            "source.ip": "172.18.0.24",
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "nginx.access"
+          },
+          {
+            "events": 126,
+            "first_seen": "2026-06-29T03:16:02.000Z",
+            "last_seen": "2026-06-29T23:17:54.000Z",
+            "host.name": "web-2",
+            "source.ip": "172.18.0.24",
+            "client.ip": null,
+            "host.ip": "172.18.0.8",
+            "data_stream.dataset": "nginx.access"
+          },
+          {
+            "events": 126,
+            "first_seen": "2026-06-29T03:16:02.000Z",
+            "last_seen": "2026-06-29T23:17:54.000Z",
+            "host.name": "web-2",
+            "source.ip": "172.18.0.24",
+            "client.ip": null,
+            "host.ip": "172.18.0.10",
+            "data_stream.dataset": "nginx.access"
+          },
+          {
+            "events": 126,
+            "first_seen": "2026-06-29T03:16:02.000Z",
+            "last_seen": "2026-06-29T23:17:54.000Z",
+            "host.name": "web-1",
+            "source.ip": "172.18.0.24",
+            "client.ip": null,
+            "host.ip": "172.18.0.11",
+            "data_stream.dataset": "nginx.access"
+          },
+          {
+            "events": 126,
+            "first_seen": "2026-06-29T03:16:02.000Z",
+            "last_seen": "2026-06-29T23:17:54.000Z",
+            "host.name": "web-1",
+            "source.ip": "172.18.0.24",
+            "client.ip": null,
+            "host.ip": "172.18.0.10",
+            "data_stream.dataset": "nginx.access"
+          },
+          {
+            "events": 126,
+            "first_seen": "2026-06-29T03:16:02.000Z",
+            "last_seen": "2026-06-29T23:17:54.000Z",
+            "host.name": "web-2",
+            "source.ip": "172.18.0.24",
+            "client.ip": null,
+            "host.ip": "172.18.0.13",
+            "data_stream.dataset": "nginx.access"
+          },
+          {
+            "events": 126,
+            "first_seen": "2026-06-29T03:16:02.000Z",
+            "last_seen": "2026-06-29T23:17:54.000Z",
+            "host.name": "web-1",
+            "source.ip": "172.18.0.24",
+            "client.ip": null,
+            "host.ip": "172.18.0.2",
+            "data_stream.dataset": "nginx.access"
+          },
+          {
+            "events": 126,
+            "first_seen": "2026-06-29T03:16:02.000Z",
+            "last_seen": "2026-06-29T23:17:54.000Z",
+            "host.name": "web-2",
+            "source.ip": "172.18.0.24",
+            "client.ip": null,
+            "host.ip": "172.18.0.14",
+            "data_stream.dataset": "nginx.access"
+          },
+          {
+            "events": 126,
+            "first_seen": "2026-06-29T03:16:02.000Z",
+            "last_seen": "2026-06-29T23:17:54.000Z",
+            "host.name": "web-2",
+            "source.ip": "172.18.0.24",
+            "client.ip": null,
+            "host.ip": "172.18.0.19",
+            "data_stream.dataset": "nginx.access"
+          },
+          {
+            "events": 80,
+            "first_seen": "2026-06-29T03:37:38.000Z",
+            "last_seen": "2026-06-29T23:15:18.000Z",
+            "host.name": "web-2",
+            "source.ip": "172.18.0.9",
+            "client.ip": null,
+            "host.ip": "172.18.0.12",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 80,
+            "first_seen": "2026-06-29T03:37:37.000Z",
+            "last_seen": "2026-06-29T23:15:18.000Z",
+            "host.name": "web-1",
+            "source.ip": "172.18.0.9",
+            "client.ip": null,
+            "host.ip": "172.18.0.6",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 74,
+            "first_seen": "2026-06-29T03:37:37.000Z",
+            "last_seen": "2026-06-29T23:15:18.000Z",
+            "host.name": "web-1",
+            "source.ip": "172.18.0.9",
+            "client.ip": null,
+            "host.ip": "172.18.0.18",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 72,
+            "first_seen": "2026-06-29T05:51:29.000Z",
+            "last_seen": "2026-06-29T23:59:15.000Z",
+            "host.name": "web-2",
+            "source.ip": "172.18.0.11",
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 56,
+            "first_seen": "2026-06-29T04:45:57.000Z",
+            "last_seen": "2026-06-29T23:38:32.000Z",
+            "host.name": "office-ws-1",
+            "source.ip": "172.18.0.20",
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 56,
+            "first_seen": "2026-06-29T04:45:58.359Z",
+            "last_seen": "2026-06-29T23:38:32.846Z",
+            "host.name": "office-ws-2",
+            "source.ip": "172.18.0.20",
+            "client.ip": null,
+            "host.ip": "172.18.0.24",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 56,
+            "first_seen": "2026-06-29T04:45:56.000Z",
+            "last_seen": "2026-06-29T23:38:31.000Z",
+            "host.name": "db-1",
+            "source.ip": "172.18.0.20",
+            "client.ip": null,
+            "host.ip": "172.18.0.24",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 56,
+            "first_seen": "2026-06-29T04:45:56.000Z",
+            "last_seen": "2026-06-29T23:38:30.000Z",
+            "host.name": "web-2",
+            "source.ip": "172.18.0.20",
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 56,
+            "first_seen": "2026-06-29T04:45:57.000Z",
+            "last_seen": "2026-06-29T23:38:32.000Z",
+            "host.name": "office-ws-1",
+            "source.ip": "172.18.0.20",
+            "client.ip": null,
+            "host.ip": "172.18.0.24",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 56,
+            "first_seen": "2026-06-29T04:45:58.000Z",
+            "last_seen": "2026-06-29T23:38:33.000Z",
+            "host.name": "canary-1",
+            "source.ip": "172.18.0.20",
+            "client.ip": null,
+            "host.ip": "172.18.0.9",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 56,
+            "first_seen": "2026-06-29T04:45:58.359Z",
+            "last_seen": "2026-06-29T23:38:32.846Z",
+            "host.name": "office-ws-2",
+            "source.ip": "172.18.0.20",
+            "client.ip": null,
+            "host.ip": "172.18.0.9",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 56,
+            "first_seen": "2026-06-29T04:45:56.000Z",
+            "last_seen": "2026-06-29T23:38:31.000Z",
+            "host.name": "db-1",
+            "source.ip": "172.18.0.20",
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 52,
+            "first_seen": "2026-06-29T00:17:01.687Z",
+            "last_seen": "2026-06-29T23:17:01.300Z",
+            "host.name": "config-mgmt-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.24",
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 52,
+            "first_seen": "2026-06-29T00:17:01.000Z",
+            "last_seen": "2026-06-29T23:17:01.000Z",
+            "host.name": "ci-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.9",
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 48,
+            "first_seen": "2026-06-29T02:43:45.000Z",
+            "last_seen": "2026-06-29T23:12:12.000Z",
+            "host.name": "web-2",
+            "source.ip": "172.18.0.10",
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 40,
+            "first_seen": "2026-06-29T03:37:37.000Z",
+            "last_seen": "2026-06-29T23:15:18.000Z",
+            "host.name": "web-1",
+            "source.ip": "172.18.0.9",
+            "client.ip": null,
+            "host.ip": "172.18.0.10",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 40,
+            "first_seen": "2026-06-29T03:37:38.000Z",
+            "last_seen": "2026-06-29T23:15:18.000Z",
+            "host.name": "web-2",
+            "source.ip": "172.18.0.9",
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 40,
+            "first_seen": "2026-06-29T03:37:38.000Z",
+            "last_seen": "2026-06-29T23:15:18.000Z",
+            "host.name": "web-2",
+            "source.ip": "172.18.0.9",
+            "client.ip": null,
+            "host.ip": "172.18.0.19",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 40,
+            "first_seen": "2026-06-29T03:37:38.000Z",
+            "last_seen": "2026-06-29T23:15:18.000Z",
+            "host.name": "web-2",
+            "source.ip": "172.18.0.9",
+            "client.ip": null,
+            "host.ip": "172.18.0.5",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 40,
+            "first_seen": "2026-06-29T03:37:37.000Z",
+            "last_seen": "2026-06-29T23:15:18.000Z",
+            "host.name": "web-1",
+            "source.ip": "172.18.0.9",
+            "client.ip": null,
+            "host.ip": "172.18.0.3",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 40,
+            "first_seen": "2026-06-29T03:37:38.000Z",
+            "last_seen": "2026-06-29T23:15:18.000Z",
+            "host.name": "web-2",
+            "source.ip": "172.18.0.9",
+            "client.ip": null,
+            "host.ip": "172.18.0.8",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 40,
+            "first_seen": "2026-06-29T03:37:38.000Z",
+            "last_seen": "2026-06-29T23:15:18.000Z",
+            "host.name": "web-2",
+            "source.ip": "172.18.0.9",
+            "client.ip": null,
+            "host.ip": "172.18.0.14",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 40,
+            "first_seen": "2026-06-29T03:37:38.000Z",
+            "last_seen": "2026-06-29T23:15:18.000Z",
+            "host.name": "web-2",
+            "source.ip": "172.18.0.9",
+            "client.ip": null,
+            "host.ip": "172.18.0.13",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 40,
+            "first_seen": "2026-06-29T03:37:38.000Z",
+            "last_seen": "2026-06-29T23:15:18.000Z",
+            "host.name": "web-2",
+            "source.ip": "172.18.0.9",
+            "client.ip": null,
+            "host.ip": "172.18.0.10",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 40,
+            "first_seen": "2026-06-29T03:37:37.000Z",
+            "last_seen": "2026-06-29T23:15:18.000Z",
+            "host.name": "web-1",
+            "source.ip": "172.18.0.9",
+            "client.ip": null,
+            "host.ip": "172.18.0.22",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 40,
+            "first_seen": "2026-06-29T03:37:37.000Z",
+            "last_seen": "2026-06-29T23:15:18.000Z",
+            "host.name": "web-1",
+            "source.ip": "172.18.0.9",
+            "client.ip": null,
+            "host.ip": "172.18.0.11",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 40,
+            "first_seen": "2026-06-29T03:37:37.000Z",
+            "last_seen": "2026-06-29T23:15:18.000Z",
+            "host.name": "web-1",
+            "source.ip": "172.18.0.9",
+            "client.ip": null,
+            "host.ip": "172.18.0.2",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 37,
+            "first_seen": "2026-06-29T01:14:57.000Z",
+            "last_seen": "2026-06-29T23:30:47.000Z",
+            "host.name": "db-1",
+            "source.ip": "172.18.0.21",
+            "client.ip": null,
+            "host.ip": "172.18.0.24",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 37,
+            "first_seen": "2026-06-29T01:14:57.000Z",
+            "last_seen": "2026-06-29T23:30:47.000Z",
+            "host.name": "db-1",
+            "source.ip": "172.18.0.21",
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 37,
+            "first_seen": "2026-06-29T01:37:30.000Z",
+            "last_seen": "2026-06-29T22:12:11.000Z",
+            "host.name": "web-2",
+            "source.ip": "172.18.0.21",
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 26,
+            "first_seen": "2026-06-29T00:17:01.000Z",
+            "last_seen": "2026-06-29T23:17:01.000Z",
+            "host.name": "canary-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.9",
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 26,
+            "first_seen": "2026-06-29T00:17:01.000Z",
+            "last_seen": "2026-06-29T23:17:01.000Z",
+            "host.name": "db-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.24",
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 26,
+            "first_seen": "2026-06-29T00:17:01.000Z",
+            "last_seen": "2026-06-29T23:17:01.000Z",
+            "host.name": "web-2",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 26,
+            "first_seen": "2026-06-29T00:17:01.045Z",
+            "last_seen": "2026-06-29T23:17:01.657Z",
+            "host.name": "scanner-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.9",
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 26,
+            "first_seen": "2026-06-29T00:17:01.048Z",
+            "last_seen": "2026-06-29T23:17:01.659Z",
+            "host.name": "office-ws-2",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.9",
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 26,
+            "first_seen": "2026-06-29T00:17:01.000Z",
+            "last_seen": "2026-06-29T23:17:01.000Z",
+            "host.name": "db-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 26,
+            "first_seen": "2026-06-29T00:17:01.045Z",
+            "last_seen": "2026-06-29T23:17:01.657Z",
+            "host.name": "scanner-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 26,
+            "first_seen": "2026-06-29T00:17:01.048Z",
+            "last_seen": "2026-06-29T23:17:01.659Z",
+            "host.name": "office-ws-2",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.24",
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 26,
+            "first_seen": "2026-06-29T00:17:01.000Z",
+            "last_seen": "2026-06-29T23:17:01.000Z",
+            "host.name": "office-ws-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 26,
+            "first_seen": "2026-06-29T00:17:01.000Z",
+            "last_seen": "2026-06-29T23:17:01.000Z",
+            "host.name": "office-ws-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.24",
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 26,
+            "first_seen": "2026-06-29T00:17:01.000Z",
+            "last_seen": "2026-06-29T23:17:01.000Z",
+            "host.name": "ci-1",
+            "source.ip": null,
+            "client.ip": null,
+            "host.ip": "172.18.0.16",
+            "data_stream.dataset": "system.syslog"
+          }
+        ]
+      }
+    }
+  ]
+}

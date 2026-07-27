@@ -1,0 +1,609 @@
+{
+  "lead_id": "l-002",
+  "seq": 1,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T19:36:42.000Z",
+        "2026-07-12T20:36:42.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-12T19:36:42.000Z\" AND @timestamp < \"2026-07-12T20:36:42.000Z\"\n        AND host.name == \"web-2\"\n| STATS count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY event.action, event.outcome, message\n| SORT count DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-12T19:36:42.000Z\" AND @timestamp < \"2026-07-12T20:36:42.000Z\"\n        AND host.name == \"web-2\"\n| STATS count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY event.action, event.outcome, message\n| SORT count DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "count",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "event.action",
+            "type": "keyword"
+          },
+          {
+            "name": "event.outcome",
+            "type": "keyword"
+          },
+          {
+            "name": "message",
+            "type": "text"
+          }
+        ],
+        "row_count": 20,
+        "values": [
+          {
+            "count": 175,
+            "first_seen": "2026-07-12T19:37:54.000Z",
+            "last_seen": "2026-07-12T20:34:55.000Z",
+            "event.action": "logged-off",
+            "event.outcome": null,
+            "message": "pam_unix(runuser:session): session closed for user svc.monitoring"
+          },
+          {
+            "count": 175,
+            "first_seen": "2026-07-12T19:37:54.000Z",
+            "last_seen": "2026-07-12T20:34:55.000Z",
+            "event.action": "logged-on",
+            "event.outcome": null,
+            "message": "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)"
+          },
+          {
+            "count": 140,
+            "first_seen": "2026-07-12T19:38:44.000Z",
+            "last_seen": "2026-07-12T20:36:11.000Z",
+            "event.action": null,
+            "event.outcome": null,
+            "message": "error: kex_exchange_identification: Connection closed by remote host"
+          },
+          {
+            "count": 21,
+            "first_seen": "2026-07-12T19:47:00.000Z",
+            "last_seen": "2026-07-12T20:16:26.000Z",
+            "event.action": "logged-on",
+            "event.outcome": null,
+            "message": "pam_unix(runuser:session): session opened for user svc.reports(uid=1004) by (uid=0)"
+          },
+          {
+            "count": 21,
+            "first_seen": "2026-07-12T19:47:00.000Z",
+            "last_seen": "2026-07-12T20:16:26.000Z",
+            "event.action": "logged-off",
+            "event.outcome": null,
+            "message": "pam_unix(runuser:session): session closed for user svc.reports"
+          },
+          {
+            "count": 7,
+            "first_seen": "2026-07-12T20:23:06.000Z",
+            "last_seen": "2026-07-12T20:23:06.000Z",
+            "event.action": null,
+            "event.outcome": null,
+            "message": "Connection closed by 172.18.0.20 port 38986"
+          },
+          {
+            "count": 7,
+            "first_seen": "2026-07-12T20:30:46.000Z",
+            "last_seen": "2026-07-12T20:30:46.000Z",
+            "event.action": null,
+            "event.outcome": null,
+            "message": "Connection closed by 172.18.0.22 port 41948"
+          },
+          {
+            "count": 7,
+            "first_seen": "2026-07-12T20:35:48.000Z",
+            "last_seen": "2026-07-12T20:35:48.000Z",
+            "event.action": null,
+            "event.outcome": null,
+            "message": "Connection closed by 172.18.0.17 port 34128"
+          },
+          {
+            "count": 7,
+            "first_seen": "2026-07-12T20:17:01.000Z",
+            "last_seen": "2026-07-12T20:17:01.000Z",
+            "event.action": null,
+            "event.outcome": null,
+            "message": "pam_env(cron:session): Unable to open env file: /etc/default/locale: No such file or directory"
+          },
+          {
+            "count": 7,
+            "first_seen": "2026-07-12T20:02:22.000Z",
+            "last_seen": "2026-07-12T20:02:22.000Z",
+            "event.action": null,
+            "event.outcome": null,
+            "message": "Connection closed by 172.18.0.22 port 39460"
+          },
+          {
+            "count": 7,
+            "first_seen": "2026-07-12T20:17:01.000Z",
+            "last_seen": "2026-07-12T20:17:01.000Z",
+            "event.action": "logged-on",
+            "event.outcome": null,
+            "message": "pam_unix(cron:session): session opened for user root(uid=0) by (uid=0)"
+          },
+          {
+            "count": 7,
+            "first_seen": "2026-07-12T20:17:01.000Z",
+            "last_seen": "2026-07-12T20:17:01.000Z",
+            "event.action": "logged-off",
+            "event.outcome": null,
+            "message": "pam_unix(cron:session): session closed for user root"
+          },
+          {
+            "count": 7,
+            "first_seen": "2026-07-12T20:17:54.000Z",
+            "last_seen": "2026-07-12T20:17:54.000Z",
+            "event.action": null,
+            "event.outcome": null,
+            "message": "Connection closed by 172.18.0.14 port 41002"
+          },
+          {
+            "count": 7,
+            "first_seen": "2026-07-12T20:06:09.000Z",
+            "last_seen": "2026-07-12T20:06:09.000Z",
+            "event.action": null,
+            "event.outcome": null,
+            "message": "Connection closed by 172.18.0.17 port 44152"
+          },
+          {
+            "count": 7,
+            "first_seen": "2026-07-12T20:07:15.000Z",
+            "last_seen": "2026-07-12T20:07:15.000Z",
+            "event.action": null,
+            "event.outcome": null,
+            "message": "Connection closed by 172.18.0.20 port 60704"
+          },
+          {
+            "count": 7,
+            "first_seen": "2026-07-12T20:11:54.000Z",
+            "last_seen": "2026-07-12T20:11:54.000Z",
+            "event.action": null,
+            "event.outcome": null,
+            "message": "Connection closed by 172.18.0.20 port 51096"
+          },
+          {
+            "count": 7,
+            "first_seen": "2026-07-12T20:20:21.000Z",
+            "last_seen": "2026-07-12T20:20:21.000Z",
+            "event.action": null,
+            "event.outcome": null,
+            "message": "Connection closed by 172.18.0.17 port 37196"
+          },
+          {
+            "count": 7,
+            "first_seen": "2026-07-12T20:04:43.000Z",
+            "last_seen": "2026-07-12T20:04:43.000Z",
+            "event.action": null,
+            "event.outcome": null,
+            "message": "Connection closed by 172.18.0.20 port 56052"
+          },
+          {
+            "count": 7,
+            "first_seen": "2026-07-12T20:22:47.000Z",
+            "last_seen": "2026-07-12T20:22:47.000Z",
+            "event.action": null,
+            "event.outcome": null,
+            "message": "Connection closed by 172.18.0.20 port 50622"
+          },
+          {
+            "count": 7,
+            "first_seen": "2026-07-12T20:36:11.000Z",
+            "last_seen": "2026-07-12T20:36:11.000Z",
+            "event.action": null,
+            "event.outcome": null,
+            "message": "Connection closed by 172.18.0.20 port 37894"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T19:36:42.000Z",
+        "2026-07-05T20:36:42.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-05T19:36:42.000Z\" AND @timestamp < \"2026-07-05T20:36:42.000Z\"\n        AND host.name == \"web-2\"\n| STATS count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY event.action, event.outcome, message\n| SORT count DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-05T19:36:42.000Z\" AND @timestamp < \"2026-07-05T20:36:42.000Z\"\n        AND host.name == \"web-2\"\n| STATS count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY event.action, event.outcome, message\n| SORT count DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "count",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "event.action",
+            "type": "keyword"
+          },
+          {
+            "name": "event.outcome",
+            "type": "keyword"
+          },
+          {
+            "name": "message",
+            "type": "text"
+          }
+        ],
+        "row_count": 20,
+        "values": [
+          {
+            "count": 147,
+            "first_seen": "2026-07-05T19:36:45.000Z",
+            "last_seen": "2026-07-05T20:36:38.000Z",
+            "event.action": "logged-on",
+            "event.outcome": null,
+            "message": "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)"
+          },
+          {
+            "count": 147,
+            "first_seen": "2026-07-05T19:36:45.000Z",
+            "last_seen": "2026-07-05T20:36:38.000Z",
+            "event.action": "logged-off",
+            "event.outcome": null,
+            "message": "pam_unix(runuser:session): session closed for user svc.monitoring"
+          },
+          {
+            "count": 91,
+            "first_seen": "2026-07-05T19:39:11.000Z",
+            "last_seen": "2026-07-05T20:35:36.000Z",
+            "event.action": null,
+            "event.outcome": null,
+            "message": "error: kex_exchange_identification: Connection closed by remote host"
+          },
+          {
+            "count": 70,
+            "first_seen": "2026-07-05T19:43:05.000Z",
+            "last_seen": "2026-07-05T20:34:32.000Z",
+            "event.action": "logged-off",
+            "event.outcome": null,
+            "message": "pam_unix(runuser:session): session closed for user svc.reports"
+          },
+          {
+            "count": 70,
+            "first_seen": "2026-07-05T19:43:05.000Z",
+            "last_seen": "2026-07-05T20:34:32.000Z",
+            "event.action": "logged-on",
+            "event.outcome": null,
+            "message": "pam_unix(runuser:session): session opened for user svc.reports(uid=1004) by (uid=0)"
+          },
+          {
+            "count": 21,
+            "first_seen": "2026-07-05T19:42:10.000Z",
+            "last_seen": "2026-07-05T19:42:10.000Z",
+            "event.action": null,
+            "event.outcome": "success",
+            "message": "pam_unix(sudo:auth): conversation failed"
+          },
+          {
+            "count": 21,
+            "first_seen": "2026-07-05T19:42:10.000Z",
+            "last_seen": "2026-07-05T19:42:10.000Z",
+            "event.action": null,
+            "event.outcome": "success",
+            "message": "pam_unix(sudo:auth): auth could not identify password for [svc.deploy]"
+          },
+          {
+            "count": 7,
+            "first_seen": "2026-07-05T20:16:20.000Z",
+            "last_seen": "2026-07-05T20:16:20.000Z",
+            "event.action": null,
+            "event.outcome": null,
+            "message": "Connection closed by 172.18.0.17 port 55326"
+          },
+          {
+            "count": 7,
+            "first_seen": "2026-07-05T20:17:01.000Z",
+            "last_seen": "2026-07-05T20:17:01.000Z",
+            "event.action": "logged-on",
+            "event.outcome": null,
+            "message": "pam_unix(cron:session): session opened for user root(uid=0) by (uid=0)"
+          },
+          {
+            "count": 7,
+            "first_seen": "2026-07-05T20:30:03.000Z",
+            "last_seen": "2026-07-05T20:30:03.000Z",
+            "event.action": null,
+            "event.outcome": null,
+            "message": "Connection closed by 172.18.0.22 port 43152"
+          },
+          {
+            "count": 7,
+            "first_seen": "2026-07-05T20:17:01.000Z",
+            "last_seen": "2026-07-05T20:17:01.000Z",
+            "event.action": null,
+            "event.outcome": null,
+            "message": "pam_env(cron:session): Unable to open env file: /etc/default/locale: No such file or directory"
+          },
+          {
+            "count": 7,
+            "first_seen": "2026-07-05T20:17:01.000Z",
+            "last_seen": "2026-07-05T20:17:01.000Z",
+            "event.action": "logged-off",
+            "event.outcome": null,
+            "message": "pam_unix(cron:session): session closed for user root"
+          },
+          {
+            "count": 7,
+            "first_seen": "2026-07-05T20:19:04.000Z",
+            "last_seen": "2026-07-05T20:19:04.000Z",
+            "event.action": null,
+            "event.outcome": null,
+            "message": "Connection closed by 172.18.0.20 port 34776"
+          },
+          {
+            "count": 7,
+            "first_seen": "2026-07-05T20:03:02.000Z",
+            "last_seen": "2026-07-05T20:03:02.000Z",
+            "event.action": null,
+            "event.outcome": null,
+            "message": "Connection closed by 172.18.0.14 port 46934"
+          },
+          {
+            "count": 7,
+            "first_seen": "2026-07-05T19:46:52.000Z",
+            "last_seen": "2026-07-05T19:46:52.000Z",
+            "event.action": null,
+            "event.outcome": null,
+            "message": "Connection closed by 172.18.0.22 port 41218"
+          },
+          {
+            "count": 7,
+            "first_seen": "2026-07-05T19:54:08.000Z",
+            "last_seen": "2026-07-05T19:54:08.000Z",
+            "event.action": null,
+            "event.outcome": null,
+            "message": "Connection closed by 172.18.0.20 port 32898"
+          },
+          {
+            "count": 7,
+            "first_seen": "2026-07-05T19:57:43.000Z",
+            "last_seen": "2026-07-05T19:57:43.000Z",
+            "event.action": null,
+            "event.outcome": null,
+            "message": "Connection closed by 172.18.0.14 port 32952"
+          },
+          {
+            "count": 7,
+            "first_seen": "2026-07-05T19:43:19.000Z",
+            "last_seen": "2026-07-05T19:43:19.000Z",
+            "event.action": null,
+            "event.outcome": null,
+            "message": "Connection closed by 172.18.0.22 port 37846"
+          },
+          {
+            "count": 7,
+            "first_seen": "2026-07-05T20:22:36.000Z",
+            "last_seen": "2026-07-05T20:22:36.000Z",
+            "event.action": null,
+            "event.outcome": null,
+            "message": "Connection closed by 172.18.0.20 port 60976"
+          },
+          {
+            "count": 7,
+            "first_seen": "2026-07-05T20:29:29.000Z",
+            "last_seen": "2026-07-05T20:29:29.000Z",
+            "event.action": null,
+            "event.outcome": null,
+            "message": "Connection closed by 172.18.0.17 port 50354"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-28T19:36:42.000Z",
+        "2026-06-28T20:36:42.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-28T19:36:42.000Z\" AND @timestamp < \"2026-06-28T20:36:42.000Z\"\n        AND host.name == \"web-2\"\n| STATS count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY event.action, event.outcome, message\n| SORT count DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-28T19:36:42.000Z\" AND @timestamp < \"2026-06-28T20:36:42.000Z\"\n        AND host.name == \"web-2\"\n| STATS count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY event.action, event.outcome, message\n| SORT count DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "count",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "event.action",
+            "type": "keyword"
+          },
+          {
+            "name": "event.outcome",
+            "type": "keyword"
+          },
+          {
+            "name": "message",
+            "type": "text"
+          }
+        ],
+        "row_count": 20,
+        "values": [
+          {
+            "count": 136,
+            "first_seen": "2026-06-28T19:42:43.000Z",
+            "last_seen": "2026-06-28T20:36:28.000Z",
+            "event.action": "logged-off",
+            "event.outcome": null,
+            "message": "pam_unix(runuser:session): session closed for user svc.monitoring"
+          },
+          {
+            "count": 136,
+            "first_seen": "2026-06-28T19:42:43.000Z",
+            "last_seen": "2026-06-28T20:36:28.000Z",
+            "event.action": "logged-on",
+            "event.outcome": null,
+            "message": "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)"
+          },
+          {
+            "count": 96,
+            "first_seen": "2026-06-28T19:38:00.000Z",
+            "last_seen": "2026-06-28T20:36:40.000Z",
+            "event.action": null,
+            "event.outcome": null,
+            "message": "error: kex_exchange_identification: Connection closed by remote host"
+          },
+          {
+            "count": 48,
+            "first_seen": "2026-06-28T19:39:07.000Z",
+            "last_seen": "2026-06-28T20:29:25.000Z",
+            "event.action": "logged-off",
+            "event.outcome": null,
+            "message": "pam_unix(runuser:session): session closed for user svc.reports"
+          },
+          {
+            "count": 48,
+            "first_seen": "2026-06-28T19:39:07.000Z",
+            "last_seen": "2026-06-28T20:29:24.000Z",
+            "event.action": "logged-on",
+            "event.outcome": null,
+            "message": "pam_unix(runuser:session): session opened for user svc.reports(uid=1004) by (uid=0)"
+          },
+          {
+            "count": 8,
+            "first_seen": "2026-06-28T20:22:09.000Z",
+            "last_seen": "2026-06-28T20:22:09.000Z",
+            "event.action": null,
+            "event.outcome": null,
+            "message": "Disconnected from user svc.config-mgmt 172.18.0.20 port 53520"
+          },
+          {
+            "count": 8,
+            "first_seen": "2026-06-28T20:22:09.000Z",
+            "last_seen": "2026-06-28T20:22:09.000Z",
+            "event.action": null,
+            "event.outcome": null,
+            "message": "Received disconnect from 172.18.0.20 port 53520:11: disconnected by user"
+          },
+          {
+            "count": 8,
+            "first_seen": "2026-06-28T20:22:09.000Z",
+            "last_seen": "2026-06-28T20:22:09.000Z",
+            "event.action": null,
+            "event.outcome": null,
+            "message": "pam_env(sshd:session): Unable to open env file: /etc/default/locale: No such file or directory"
+          },
+          {
+            "count": 8,
+            "first_seen": "2026-06-28T20:22:09.000Z",
+            "last_seen": "2026-06-28T20:22:09.000Z",
+            "event.action": "logged-on",
+            "event.outcome": null,
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)"
+          },
+          {
+            "count": 8,
+            "first_seen": "2026-06-28T20:06:55.000Z",
+            "last_seen": "2026-06-28T20:06:55.000Z",
+            "event.action": null,
+            "event.outcome": null,
+            "message": "Connection closed by 172.18.0.9 port 51058"
+          },
+          {
+            "count": 8,
+            "first_seen": "2026-06-28T20:22:09.000Z",
+            "last_seen": "2026-06-28T20:22:09.000Z",
+            "event.action": "ssh_login",
+            "event.outcome": "success",
+            "message": "Accepted password for svc.config-mgmt from 172.18.0.20 port 53520 ssh2"
+          },
+          {
+            "count": 8,
+            "first_seen": "2026-06-28T20:24:07.000Z",
+            "last_seen": "2026-06-28T20:24:07.000Z",
+            "event.action": null,
+            "event.outcome": null,
+            "message": "Connection closed by 172.18.0.9 port 41160"
+          },
+          {
+            "count": 8,
+            "first_seen": "2026-06-28T20:17:01.000Z",
+            "last_seen": "2026-06-28T20:17:01.000Z",
+            "event.action": "logged-on",
+            "event.outcome": null,
+            "message": "pam_unix(cron:session): session opened for user root(uid=0) by (uid=0)"
+          },
+          {
+            "count": 8,
+            "first_seen": "2026-06-28T20:22:09.000Z",
+            "last_seen": "2026-06-28T20:22:09.000Z",
+            "event.action": "logged-off",
+            "event.outcome": null,
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt"
+          },
+          {
+            "count": 8,
+            "first_seen": "2026-06-28T20:17:01.000Z",
+            "last_seen": "2026-06-28T20:17:01.000Z",
+            "event.action": null,
+            "event.outcome": null,
+            "message": "pam_env(cron:session): Unable to open env file: /etc/default/locale: No such file or directory"
+          },
+          {
+            "count": 8,
+            "first_seen": "2026-06-28T20:28:32.000Z",
+            "last_seen": "2026-06-28T20:28:32.000Z",
+            "event.action": null,
+            "event.outcome": null,
+            "message": "Connection closed by 172.18.0.9 port 33706"
+          },
+          {
+            "count": 8,
+            "first_seen": "2026-06-28T20:17:01.000Z",
+            "last_seen": "2026-06-28T20:17:01.000Z",
+            "event.action": "logged-off",
+            "event.outcome": null,
+            "message": "pam_unix(cron:session): session closed for user root"
+          },
+          {
+            "count": 8,
+            "first_seen": "2026-06-28T20:09:36.000Z",
+            "last_seen": "2026-06-28T20:09:36.000Z",
+            "event.action": null,
+            "event.outcome": null,
+            "message": "Connection closed by 172.18.0.21 port 51564"
+          },
+          {
+            "count": 8,
+            "first_seen": "2026-06-28T20:35:56.000Z",
+            "last_seen": "2026-06-28T20:35:56.000Z",
+            "event.action": null,
+            "event.outcome": null,
+            "message": "Connection closed by 172.18.0.21 port 47450"
+          },
+          {
+            "count": 8,
+            "first_seen": "2026-06-28T20:36:40.000Z",
+            "last_seen": "2026-06-28T20:36:40.000Z",
+            "event.action": null,
+            "event.outcome": null,
+            "message": "Connection closed by 172.18.0.9 port 43898"
+          }
+        ]
+      }
+    }
+  ]
+}

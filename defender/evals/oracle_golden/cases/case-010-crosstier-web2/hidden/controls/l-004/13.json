@@ -1,0 +1,153 @@
+{
+  "lead_id": "l-004",
+  "seq": 13,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-06-12T20:06:42.000Z",
+        "2026-07-12T20:06:42.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-12T20:06:42.000Z\" AND @timestamp < \"2026-07-12T20:06:42.000Z\"\n        AND host.name == \"web-2\"\n        AND event.outcome IS NOT NULL\n| STATS accepted = COUNT(*) WHERE event.outcome == \"success\",\n        failed   = COUNT(*) WHERE event.outcome == \"failure\",\n        distinct_users = COUNT_DISTINCT(user.name),\n        distinct_sources = COUNT_DISTINCT(source.ip),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-12T20:06:42.000Z\" AND @timestamp < \"2026-07-12T20:06:42.000Z\"\n        AND host.name == \"web-2\"\n        AND event.outcome IS NOT NULL\n| STATS accepted = COUNT(*) WHERE event.outcome == \"success\",\n        failed   = COUNT(*) WHERE event.outcome == \"failure\",\n        distinct_users = COUNT_DISTINCT(user.name),\n        distinct_sources = COUNT_DISTINCT(source.ip),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)",
+        "columns": [
+          {
+            "name": "accepted",
+            "type": "long"
+          },
+          {
+            "name": "failed",
+            "type": "long"
+          },
+          {
+            "name": "distinct_users",
+            "type": "long"
+          },
+          {
+            "name": "distinct_sources",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "accepted": 47595,
+            "failed": 29040,
+            "distinct_users": 6,
+            "distinct_sources": 15,
+            "first_seen": "2026-06-13T11:16:21.000Z",
+            "last_seen": "2026-07-12T19:41:05.000Z"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-06-05T20:06:42.000Z",
+        "2026-07-05T20:06:42.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-05T20:06:42.000Z\" AND @timestamp < \"2026-07-05T20:06:42.000Z\"\n        AND host.name == \"web-2\"\n        AND event.outcome IS NOT NULL\n| STATS accepted = COUNT(*) WHERE event.outcome == \"success\",\n        failed   = COUNT(*) WHERE event.outcome == \"failure\",\n        distinct_users = COUNT_DISTINCT(user.name),\n        distinct_sources = COUNT_DISTINCT(source.ip),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-05T20:06:42.000Z\" AND @timestamp < \"2026-07-05T20:06:42.000Z\"\n        AND host.name == \"web-2\"\n        AND event.outcome IS NOT NULL\n| STATS accepted = COUNT(*) WHERE event.outcome == \"success\",\n        failed   = COUNT(*) WHERE event.outcome == \"failure\",\n        distinct_users = COUNT_DISTINCT(user.name),\n        distinct_sources = COUNT_DISTINCT(source.ip),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)",
+        "columns": [
+          {
+            "name": "accepted",
+            "type": "long"
+          },
+          {
+            "name": "failed",
+            "type": "long"
+          },
+          {
+            "name": "distinct_users",
+            "type": "long"
+          },
+          {
+            "name": "distinct_sources",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "accepted": 53873,
+            "failed": 33696,
+            "distinct_users": 6,
+            "distinct_sources": 17,
+            "first_seen": "2026-06-05T20:12:37.000Z",
+            "last_seen": "2026-07-05T19:42:10.000Z"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-05-29T20:06:42.000Z",
+        "2026-06-28T20:06:42.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-05-29T20:06:42.000Z\" AND @timestamp < \"2026-06-28T20:06:42.000Z\"\n        AND host.name == \"web-2\"\n        AND event.outcome IS NOT NULL\n| STATS accepted = COUNT(*) WHERE event.outcome == \"success\",\n        failed   = COUNT(*) WHERE event.outcome == \"failure\",\n        distinct_users = COUNT_DISTINCT(user.name),\n        distinct_sources = COUNT_DISTINCT(source.ip),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-05-29T20:06:42.000Z\" AND @timestamp < \"2026-06-28T20:06:42.000Z\"\n        AND host.name == \"web-2\"\n        AND event.outcome IS NOT NULL\n| STATS accepted = COUNT(*) WHERE event.outcome == \"success\",\n        failed   = COUNT(*) WHERE event.outcome == \"failure\",\n        distinct_users = COUNT_DISTINCT(user.name),\n        distinct_sources = COUNT_DISTINCT(source.ip),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)",
+        "columns": [
+          {
+            "name": "accepted",
+            "type": "long"
+          },
+          {
+            "name": "failed",
+            "type": "long"
+          },
+          {
+            "name": "distinct_users",
+            "type": "long"
+          },
+          {
+            "name": "distinct_sources",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "accepted": 67079,
+            "failed": 46008,
+            "distinct_users": 6,
+            "distinct_sources": 15,
+            "first_seen": "2026-05-29T20:19:00.000Z",
+            "last_seen": "2026-06-28T18:49:13.000Z"
+          }
+        ]
+      }
+    }
+  ]
+}

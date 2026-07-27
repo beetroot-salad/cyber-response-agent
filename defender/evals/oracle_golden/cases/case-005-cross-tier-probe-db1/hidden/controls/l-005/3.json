@@ -1,0 +1,104 @@
+{
+  "lead_id": "l-005",
+  "seq": 3,
+  "controls": [
+    {
+      "name": "C-7d",
+      "window": [
+        "2026-07-19T10:34:24.500Z",
+        "2026-07-19T11:34:24.500Z"
+      ],
+      "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-19T10:34:24.500Z\" AND @timestamp < \"2026-07-19T11:34:24.500Z\"\n| WHERE host.ip == \"172.18.0.11\"\n| STATS BY host.name\n| SORT host.name",
+      "live": false,
+      "payload": null
+    },
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T10:34:24.500Z",
+        "2026-07-12T11:34:24.500Z"
+      ],
+      "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-12T10:34:24.500Z\" AND @timestamp < \"2026-07-12T11:34:24.500Z\"\n| WHERE host.ip == \"172.18.0.11\"\n| STATS BY host.name\n| SORT host.name",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-12T10:34:24.500Z\" AND @timestamp < \"2026-07-12T11:34:24.500Z\"\n| WHERE host.ip == \"172.18.0.11\"\n| STATS BY host.name\n| SORT host.name",
+        "columns": [
+          {
+            "name": "host.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 4,
+        "values": [
+          {
+            "host.name": "dev-ws-1"
+          },
+          {
+            "host.name": "jump-box-1"
+          },
+          {
+            "host.name": "office-ws-1"
+          },
+          {
+            "host.name": "scanner-1"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T10:34:24.500Z",
+        "2026-07-05T11:34:24.500Z"
+      ],
+      "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-05T10:34:24.500Z\" AND @timestamp < \"2026-07-05T11:34:24.500Z\"\n| WHERE host.ip == \"172.18.0.11\"\n| STATS BY host.name\n| SORT host.name",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-05T10:34:24.500Z\" AND @timestamp < \"2026-07-05T11:34:24.500Z\"\n| WHERE host.ip == \"172.18.0.11\"\n| STATS BY host.name\n| SORT host.name",
+        "columns": [
+          {
+            "name": "host.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 4,
+        "values": [
+          {
+            "host.name": "dev-ws-1"
+          },
+          {
+            "host.name": "jump-box-1"
+          },
+          {
+            "host.name": "office-ws-1"
+          },
+          {
+            "host.name": "scanner-1"
+          }
+        ]
+      }
+    }
+  ],
+  "attack_contribution": {
+    "window": [
+      "2026-07-26T11:04:03.000Z",
+      "2026-07-26T11:04:46.000Z"
+    ],
+    "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-26T11:04:03.000Z\" AND @timestamp < \"2026-07-26T11:04:46.000Z\"\n| WHERE host.ip == \"172.18.0.11\"\n| STATS BY host.name\n| SORT host.name",
+    "payload": {
+      "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-26T11:04:03.000Z\" AND @timestamp < \"2026-07-26T11:04:46.000Z\"\n| WHERE host.ip == \"172.18.0.11\"\n| STATS BY host.name\n| SORT host.name",
+      "columns": [
+        {
+          "name": "host.name",
+          "type": "keyword"
+        }
+      ],
+      "row_count": 1,
+      "values": [
+        {
+          "host.name": "office-ws-1"
+        }
+      ]
+    }
+  }
+}

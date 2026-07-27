@@ -1,0 +1,303 @@
+{
+  "lead_id": "l-007",
+  "seq": 25,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T18:35:57.000Z",
+        "2026-07-12T19:35:57.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-12T18:35:57.000Z\" AND @timestamp < \"2026-07-12T19:35:57.000Z\"\n        AND host.name == \"db-1\"\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY event_action = event.action,\n           process = process.name,\n           user = user.name,\n           ssh_method = system.auth.ssh.method,\n           ssh_event = system.auth.ssh.event\n| SORT events DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-12T18:35:57.000Z\" AND @timestamp < \"2026-07-12T19:35:57.000Z\"\n        AND host.name == \"db-1\"\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY event_action = event.action,\n           process = process.name,\n           user = user.name,\n           ssh_method = system.auth.ssh.method,\n           ssh_event = system.auth.ssh.event\n| SORT events DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "event_action",
+            "type": "keyword"
+          },
+          {
+            "name": "process",
+            "type": "keyword"
+          },
+          {
+            "name": "user",
+            "type": "keyword"
+          },
+          {
+            "name": "ssh_method",
+            "type": "keyword"
+          },
+          {
+            "name": "ssh_event",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 5,
+        "values": [
+          {
+            "events": 504,
+            "first_seen": "2026-07-12T18:39:40.000Z",
+            "last_seen": "2026-07-12T19:34:52.000Z",
+            "event_action": null,
+            "process": "sshd",
+            "user": null,
+            "ssh_method": null,
+            "ssh_event": null
+          },
+          {
+            "events": 77,
+            "first_seen": "2026-07-12T18:42:08.000Z",
+            "last_seen": "2026-07-12T19:34:52.000Z",
+            "event_action": "logged-on",
+            "process": "runuser",
+            "user": "",
+            "ssh_method": null,
+            "ssh_event": null
+          },
+          {
+            "events": 77,
+            "first_seen": "2026-07-12T18:42:08.000Z",
+            "last_seen": "2026-07-12T19:34:52.000Z",
+            "event_action": "logged-off",
+            "process": "runuser",
+            "user": "svc.monitoring",
+            "ssh_method": null,
+            "ssh_event": null
+          },
+          {
+            "events": 7,
+            "first_seen": "2026-07-12T19:17:01.000Z",
+            "last_seen": "2026-07-12T19:17:01.000Z",
+            "event_action": "logged-off",
+            "process": "CRON",
+            "user": "root",
+            "ssh_method": null,
+            "ssh_event": null
+          },
+          {
+            "events": 7,
+            "first_seen": "2026-07-12T19:17:01.000Z",
+            "last_seen": "2026-07-12T19:17:01.000Z",
+            "event_action": "logged-on",
+            "process": "CRON",
+            "user": "",
+            "ssh_method": null,
+            "ssh_event": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T18:35:57.000Z",
+        "2026-07-05T19:35:57.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-05T18:35:57.000Z\" AND @timestamp < \"2026-07-05T19:35:57.000Z\"\n        AND host.name == \"db-1\"\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY event_action = event.action,\n           process = process.name,\n           user = user.name,\n           ssh_method = system.auth.ssh.method,\n           ssh_event = system.auth.ssh.event\n| SORT events DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-05T18:35:57.000Z\" AND @timestamp < \"2026-07-05T19:35:57.000Z\"\n        AND host.name == \"db-1\"\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY event_action = event.action,\n           process = process.name,\n           user = user.name,\n           ssh_method = system.auth.ssh.method,\n           ssh_event = system.auth.ssh.event\n| SORT events DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "event_action",
+            "type": "keyword"
+          },
+          {
+            "name": "process",
+            "type": "keyword"
+          },
+          {
+            "name": "user",
+            "type": "keyword"
+          },
+          {
+            "name": "ssh_method",
+            "type": "keyword"
+          },
+          {
+            "name": "ssh_event",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 5,
+        "values": [
+          {
+            "events": 658,
+            "first_seen": "2026-07-05T18:36:17.000Z",
+            "last_seen": "2026-07-05T19:32:03.000Z",
+            "event_action": null,
+            "process": "sshd",
+            "user": null,
+            "ssh_method": null,
+            "ssh_event": null
+          },
+          {
+            "events": 84,
+            "first_seen": "2026-07-05T18:36:17.000Z",
+            "last_seen": "2026-07-05T19:31:54.000Z",
+            "event_action": "logged-off",
+            "process": "runuser",
+            "user": "svc.monitoring",
+            "ssh_method": null,
+            "ssh_event": null
+          },
+          {
+            "events": 84,
+            "first_seen": "2026-07-05T18:36:17.000Z",
+            "last_seen": "2026-07-05T19:31:54.000Z",
+            "event_action": "logged-on",
+            "process": "runuser",
+            "user": "",
+            "ssh_method": null,
+            "ssh_event": null
+          },
+          {
+            "events": 7,
+            "first_seen": "2026-07-05T19:17:01.000Z",
+            "last_seen": "2026-07-05T19:17:01.000Z",
+            "event_action": "logged-off",
+            "process": "CRON",
+            "user": "root",
+            "ssh_method": null,
+            "ssh_event": null
+          },
+          {
+            "events": 7,
+            "first_seen": "2026-07-05T19:17:01.000Z",
+            "last_seen": "2026-07-05T19:17:01.000Z",
+            "event_action": "logged-on",
+            "process": "CRON",
+            "user": "",
+            "ssh_method": null,
+            "ssh_event": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-28T18:35:57.000Z",
+        "2026-06-28T19:35:57.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-28T18:35:57.000Z\" AND @timestamp < \"2026-06-28T19:35:57.000Z\"\n        AND host.name == \"db-1\"\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY event_action = event.action,\n           process = process.name,\n           user = user.name,\n           ssh_method = system.auth.ssh.method,\n           ssh_event = system.auth.ssh.event\n| SORT events DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-28T18:35:57.000Z\" AND @timestamp < \"2026-06-28T19:35:57.000Z\"\n        AND host.name == \"db-1\"\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY event_action = event.action,\n           process = process.name,\n           user = user.name,\n           ssh_method = system.auth.ssh.method,\n           ssh_event = system.auth.ssh.event\n| SORT events DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "event_action",
+            "type": "keyword"
+          },
+          {
+            "name": "process",
+            "type": "keyword"
+          },
+          {
+            "name": "user",
+            "type": "keyword"
+          },
+          {
+            "name": "ssh_method",
+            "type": "keyword"
+          },
+          {
+            "name": "ssh_event",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 5,
+        "values": [
+          {
+            "events": 592,
+            "first_seen": "2026-06-28T18:37:41.000Z",
+            "last_seen": "2026-06-28T19:35:22.000Z",
+            "event_action": null,
+            "process": "sshd",
+            "user": null,
+            "ssh_method": null,
+            "ssh_event": null
+          },
+          {
+            "events": 128,
+            "first_seen": "2026-06-28T18:37:41.000Z",
+            "last_seen": "2026-06-28T19:29:58.000Z",
+            "event_action": "logged-off",
+            "process": "runuser",
+            "user": "svc.monitoring",
+            "ssh_method": null,
+            "ssh_event": null
+          },
+          {
+            "events": 128,
+            "first_seen": "2026-06-28T18:37:41.000Z",
+            "last_seen": "2026-06-28T19:29:58.000Z",
+            "event_action": "logged-on",
+            "process": "runuser",
+            "user": "",
+            "ssh_method": null,
+            "ssh_event": null
+          },
+          {
+            "events": 8,
+            "first_seen": "2026-06-28T19:17:01.000Z",
+            "last_seen": "2026-06-28T19:17:01.000Z",
+            "event_action": "logged-off",
+            "process": "CRON",
+            "user": "root",
+            "ssh_method": null,
+            "ssh_event": null
+          },
+          {
+            "events": 8,
+            "first_seen": "2026-06-28T19:17:01.000Z",
+            "last_seen": "2026-06-28T19:17:01.000Z",
+            "event_action": "logged-on",
+            "process": "CRON",
+            "user": "",
+            "ssh_method": null,
+            "ssh_event": null
+          }
+        ]
+      }
+    }
+  ]
+}

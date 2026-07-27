@@ -62,9 +62,14 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("case_dir", type=Path, help="golden case directory")
-    p.add_argument("--tag", default=f"{oracle_model()}_effort-{oracle_effort()}",
+    # Resolved once, at the boundary — `oracle_model`/`oracle_effort` read env vars with
+    # their own fallbacks, and a tag naming a model the run did not use is worse than no
+    # default at all.
+    p.add_argument("--tag", default=None,
                    help="projection tag (default: <model>_effort-<effort>)")
     ns = p.parse_args(argv)
+    if ns.tag is None:
+        ns.tag = f"{oracle_model()}_effort-{oracle_effort()}"
 
     case_dir = ns.case_dir.resolve()   # bind() requires an absolute trace root
     tag = ns.tag

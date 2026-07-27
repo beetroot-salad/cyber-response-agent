@@ -1,0 +1,769 @@
+{
+  "lead_id": "l-005",
+  "seq": 16,
+  "controls": [
+    {
+      "name": "C-7d",
+      "window": [
+        "2026-07-19T10:34:24.500Z",
+        "2026-07-19T11:34:24.500Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-19T10:34:24.500Z\" AND @timestamp < \"2026-07-19T11:34:24.500Z\"\n| WHERE host.name != \"db-1\"\n| STATS BY host.name, host.ip\n| SORT host.name, host.ip",
+      "live": false,
+      "payload": null
+    },
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T10:34:24.500Z",
+        "2026-07-12T11:34:24.500Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-12T10:34:24.500Z\" AND @timestamp < \"2026-07-12T11:34:24.500Z\"\n| WHERE host.name != \"db-1\"\n| STATS BY host.name, host.ip\n| SORT host.name, host.ip",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-12T10:34:24.500Z\" AND @timestamp < \"2026-07-12T11:34:24.500Z\"\n| WHERE host.name != \"db-1\"\n| STATS BY host.name, host.ip\n| SORT host.name, host.ip",
+        "columns": [
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "host.ip",
+            "type": "ip"
+          }
+        ],
+        "row_count": 84,
+        "values": [
+          {
+            "host.name": "canary-1",
+            "host.ip": "172.18.0.3"
+          },
+          {
+            "host.name": "canary-1",
+            "host.ip": "172.18.0.7"
+          },
+          {
+            "host.name": "canary-1",
+            "host.ip": "172.18.0.9"
+          },
+          {
+            "host.name": "canary-1",
+            "host.ip": "172.18.0.13"
+          },
+          {
+            "host.name": "canary-1",
+            "host.ip": "172.18.0.22"
+          },
+          {
+            "host.name": "ci-1",
+            "host.ip": "172.18.0.7"
+          },
+          {
+            "host.name": "ci-1",
+            "host.ip": "172.18.0.8"
+          },
+          {
+            "host.name": "ci-1",
+            "host.ip": "172.18.0.14"
+          },
+          {
+            "host.name": "ci-1",
+            "host.ip": "172.18.0.16"
+          },
+          {
+            "host.name": "ci-1",
+            "host.ip": "172.18.0.20"
+          },
+          {
+            "host.name": "config-mgmt-1",
+            "host.ip": "172.18.0.6"
+          },
+          {
+            "host.name": "config-mgmt-1",
+            "host.ip": "172.18.0.10"
+          },
+          {
+            "host.name": "config-mgmt-1",
+            "host.ip": "172.18.0.14"
+          },
+          {
+            "host.name": "config-mgmt-1",
+            "host.ip": "172.18.0.19"
+          },
+          {
+            "host.name": "config-mgmt-1",
+            "host.ip": "172.18.0.23"
+          },
+          {
+            "host.name": "config-mgmt-1",
+            "host.ip": "172.18.0.24"
+          },
+          {
+            "host.name": "dev-ws-1",
+            "host.ip": "172.18.0.4"
+          },
+          {
+            "host.name": "dev-ws-1",
+            "host.ip": "172.18.0.11"
+          },
+          {
+            "host.name": "dev-ws-1",
+            "host.ip": "172.18.0.20"
+          },
+          {
+            "host.name": "dev-ws-1",
+            "host.ip": "172.18.0.23"
+          },
+          {
+            "host.name": "dev-ws-1",
+            "host.ip": "172.18.0.25"
+          },
+          {
+            "host.name": "jump-box-1",
+            "host.ip": "172.18.0.3"
+          },
+          {
+            "host.name": "jump-box-1",
+            "host.ip": "172.18.0.6"
+          },
+          {
+            "host.name": "jump-box-1",
+            "host.ip": "172.18.0.11"
+          },
+          {
+            "host.name": "jump-box-1",
+            "host.ip": "172.18.0.13"
+          },
+          {
+            "host.name": "jump-box-1",
+            "host.ip": "172.18.0.17"
+          },
+          {
+            "host.name": "jump-box-1",
+            "host.ip": "172.18.0.19"
+          },
+          {
+            "host.name": "office-ws-1",
+            "host.ip": "172.18.0.2"
+          },
+          {
+            "host.name": "office-ws-1",
+            "host.ip": "172.18.0.11"
+          },
+          {
+            "host.name": "office-ws-1",
+            "host.ip": "172.18.0.13"
+          },
+          {
+            "host.name": "office-ws-1",
+            "host.ip": "172.18.0.15"
+          },
+          {
+            "host.name": "office-ws-1",
+            "host.ip": "172.18.0.22"
+          },
+          {
+            "host.name": "office-ws-2",
+            "host.ip": "172.18.0.5"
+          },
+          {
+            "host.name": "office-ws-2",
+            "host.ip": "172.18.0.6"
+          },
+          {
+            "host.name": "office-ws-2",
+            "host.ip": "172.18.0.9"
+          },
+          {
+            "host.name": "office-ws-2",
+            "host.ip": "172.18.0.12"
+          },
+          {
+            "host.name": "office-ws-2",
+            "host.ip": "172.18.0.25"
+          },
+          {
+            "host.name": "scanner-1",
+            "host.ip": "172.18.0.9"
+          },
+          {
+            "host.name": "scanner-1",
+            "host.ip": "172.18.0.11"
+          },
+          {
+            "host.name": "scanner-1",
+            "host.ip": "172.18.0.17"
+          },
+          {
+            "host.name": "scanner-1",
+            "host.ip": "172.18.0.18"
+          },
+          {
+            "host.name": "scanner-1",
+            "host.ip": "172.18.0.20"
+          },
+          {
+            "host.name": "scanner-1",
+            "host.ip": "172.18.0.22"
+          },
+          {
+            "host.name": "soc-playground",
+            "host.ip": "172.17.0.1"
+          },
+          {
+            "host.name": "soc-playground",
+            "host.ip": "172.18.0.1"
+          },
+          {
+            "host.name": "soc-playground",
+            "host.ip": "178.105.170.226"
+          },
+          {
+            "host.name": "soc-playground",
+            "host.ip": "2a01:4f8:1c1b:8c96::1"
+          },
+          {
+            "host.name": "soc-playground",
+            "host.ip": "fe80::c07:4eff:fe76:b57b"
+          },
+          {
+            "host.name": "soc-playground",
+            "host.ip": "fe80::ccc:9eff:fe70:ea7b"
+          },
+          {
+            "host.name": "soc-playground",
+            "host.ip": "fe80::cd5:56ff:fe8c:ae2e"
+          },
+          {
+            "host.name": "soc-playground",
+            "host.ip": "fe80::181b:46ff:fe8e:9732"
+          },
+          {
+            "host.name": "soc-playground",
+            "host.ip": "fe80::1822:b6ff:fead:d33a"
+          },
+          {
+            "host.name": "soc-playground",
+            "host.ip": "fe80::18e7:adff:fe07:826"
+          },
+          {
+            "host.name": "soc-playground",
+            "host.ip": "fe80::20ad:e6ff:febd:eb0a"
+          },
+          {
+            "host.name": "soc-playground",
+            "host.ip": "fe80::242d:93ff:feb6:fcb8"
+          },
+          {
+            "host.name": "soc-playground",
+            "host.ip": "fe80::2c3d:c5ff:fe1b:37c6"
+          },
+          {
+            "host.name": "soc-playground",
+            "host.ip": "fe80::3063:b1ff:fe7a:a51a"
+          },
+          {
+            "host.name": "soc-playground",
+            "host.ip": "fe80::30a5:baff:fe8a:8dc5"
+          },
+          {
+            "host.name": "soc-playground",
+            "host.ip": "fe80::34d6:47ff:fe77:8f4e"
+          },
+          {
+            "host.name": "soc-playground",
+            "host.ip": "fe80::6030:64ff:fe18:438f"
+          },
+          {
+            "host.name": "soc-playground",
+            "host.ip": "fe80::68ea:e3ff:fe36:193a"
+          },
+          {
+            "host.name": "soc-playground",
+            "host.ip": "fe80::7053:83ff:fe7c:b5f2"
+          },
+          {
+            "host.name": "soc-playground",
+            "host.ip": "fe80::7c01:7eff:fe0f:9a51"
+          },
+          {
+            "host.name": "soc-playground",
+            "host.ip": "fe80::9000:8ff:fec4:93b6"
+          },
+          {
+            "host.name": "soc-playground",
+            "host.ip": "fe80::9c68:e8ff:fe13:bb8b"
+          },
+          {
+            "host.name": "soc-playground",
+            "host.ip": "fe80::a464:feff:fe44:3143"
+          },
+          {
+            "host.name": "soc-playground",
+            "host.ip": "fe80::ac39:a2ff:fe1a:96ca"
+          },
+          {
+            "host.name": "soc-playground",
+            "host.ip": "fe80::c463:93ff:fe60:991d"
+          },
+          {
+            "host.name": "soc-playground",
+            "host.ip": "fe80::d847:c9ff:fe0b:efd7"
+          },
+          {
+            "host.name": "soc-playground",
+            "host.ip": "fe80::d8a2:1eff:febd:a370"
+          },
+          {
+            "host.name": "soc-playground",
+            "host.ip": "fe80::e8d8:72ff:fe0b:23d3"
+          },
+          {
+            "host.name": "soc-playground",
+            "host.ip": "fe80::f465:1cff:fe61:98e4"
+          },
+          {
+            "host.name": "soc-playground",
+            "host.ip": "fe80::fc3f:d3ff:fe2c:2205"
+          },
+          {
+            "host.name": "web-1",
+            "host.ip": "172.18.0.2"
+          },
+          {
+            "host.name": "web-1",
+            "host.ip": "172.18.0.3"
+          },
+          {
+            "host.name": "web-1",
+            "host.ip": "172.18.0.6"
+          },
+          {
+            "host.name": "web-1",
+            "host.ip": "172.18.0.18"
+          },
+          {
+            "host.name": "web-1",
+            "host.ip": "172.18.0.22"
+          },
+          {
+            "host.name": "web-2",
+            "host.ip": "172.18.0.5"
+          },
+          {
+            "host.name": "web-2",
+            "host.ip": "172.18.0.8"
+          },
+          {
+            "host.name": "web-2",
+            "host.ip": "172.18.0.13"
+          },
+          {
+            "host.name": "web-2",
+            "host.ip": "172.18.0.14"
+          },
+          {
+            "host.name": "web-2",
+            "host.ip": "172.18.0.16"
+          },
+          {
+            "host.name": "web-2",
+            "host.ip": "172.18.0.19"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T10:34:24.500Z",
+        "2026-07-05T11:34:24.500Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-05T10:34:24.500Z\" AND @timestamp < \"2026-07-05T11:34:24.500Z\"\n| WHERE host.name != \"db-1\"\n| STATS BY host.name, host.ip\n| SORT host.name, host.ip",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-05T10:34:24.500Z\" AND @timestamp < \"2026-07-05T11:34:24.500Z\"\n| WHERE host.name != \"db-1\"\n| STATS BY host.name, host.ip\n| SORT host.name, host.ip",
+        "columns": [
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "host.ip",
+            "type": "ip"
+          }
+        ],
+        "row_count": 83,
+        "values": [
+          {
+            "host.name": "canary-1",
+            "host.ip": "172.18.0.3"
+          },
+          {
+            "host.name": "canary-1",
+            "host.ip": "172.18.0.7"
+          },
+          {
+            "host.name": "canary-1",
+            "host.ip": "172.18.0.9"
+          },
+          {
+            "host.name": "canary-1",
+            "host.ip": "172.18.0.13"
+          },
+          {
+            "host.name": "canary-1",
+            "host.ip": "172.18.0.22"
+          },
+          {
+            "host.name": "ci-1",
+            "host.ip": "172.18.0.7"
+          },
+          {
+            "host.name": "ci-1",
+            "host.ip": "172.18.0.8"
+          },
+          {
+            "host.name": "ci-1",
+            "host.ip": "172.18.0.14"
+          },
+          {
+            "host.name": "ci-1",
+            "host.ip": "172.18.0.16"
+          },
+          {
+            "host.name": "ci-1",
+            "host.ip": "172.18.0.20"
+          },
+          {
+            "host.name": "config-mgmt-1",
+            "host.ip": "172.18.0.6"
+          },
+          {
+            "host.name": "config-mgmt-1",
+            "host.ip": "172.18.0.10"
+          },
+          {
+            "host.name": "config-mgmt-1",
+            "host.ip": "172.18.0.14"
+          },
+          {
+            "host.name": "config-mgmt-1",
+            "host.ip": "172.18.0.19"
+          },
+          {
+            "host.name": "config-mgmt-1",
+            "host.ip": "172.18.0.23"
+          },
+          {
+            "host.name": "config-mgmt-1",
+            "host.ip": "172.18.0.24"
+          },
+          {
+            "host.name": "dev-ws-1",
+            "host.ip": "172.18.0.4"
+          },
+          {
+            "host.name": "dev-ws-1",
+            "host.ip": "172.18.0.11"
+          },
+          {
+            "host.name": "dev-ws-1",
+            "host.ip": "172.18.0.20"
+          },
+          {
+            "host.name": "dev-ws-1",
+            "host.ip": "172.18.0.23"
+          },
+          {
+            "host.name": "dev-ws-1",
+            "host.ip": "172.18.0.25"
+          },
+          {
+            "host.name": "jump-box-1",
+            "host.ip": "172.18.0.3"
+          },
+          {
+            "host.name": "jump-box-1",
+            "host.ip": "172.18.0.6"
+          },
+          {
+            "host.name": "jump-box-1",
+            "host.ip": "172.18.0.11"
+          },
+          {
+            "host.name": "jump-box-1",
+            "host.ip": "172.18.0.13"
+          },
+          {
+            "host.name": "jump-box-1",
+            "host.ip": "172.18.0.17"
+          },
+          {
+            "host.name": "jump-box-1",
+            "host.ip": "172.18.0.19"
+          },
+          {
+            "host.name": "office-ws-1",
+            "host.ip": "172.18.0.2"
+          },
+          {
+            "host.name": "office-ws-1",
+            "host.ip": "172.18.0.11"
+          },
+          {
+            "host.name": "office-ws-1",
+            "host.ip": "172.18.0.13"
+          },
+          {
+            "host.name": "office-ws-1",
+            "host.ip": "172.18.0.15"
+          },
+          {
+            "host.name": "office-ws-1",
+            "host.ip": "172.18.0.22"
+          },
+          {
+            "host.name": "office-ws-2",
+            "host.ip": "172.18.0.5"
+          },
+          {
+            "host.name": "office-ws-2",
+            "host.ip": "172.18.0.6"
+          },
+          {
+            "host.name": "office-ws-2",
+            "host.ip": "172.18.0.9"
+          },
+          {
+            "host.name": "office-ws-2",
+            "host.ip": "172.18.0.12"
+          },
+          {
+            "host.name": "office-ws-2",
+            "host.ip": "172.18.0.25"
+          },
+          {
+            "host.name": "scanner-1",
+            "host.ip": "172.18.0.9"
+          },
+          {
+            "host.name": "scanner-1",
+            "host.ip": "172.18.0.11"
+          },
+          {
+            "host.name": "scanner-1",
+            "host.ip": "172.18.0.17"
+          },
+          {
+            "host.name": "scanner-1",
+            "host.ip": "172.18.0.18"
+          },
+          {
+            "host.name": "scanner-1",
+            "host.ip": "172.18.0.20"
+          },
+          {
+            "host.name": "scanner-1",
+            "host.ip": "172.18.0.22"
+          },
+          {
+            "host.name": "soc-playground",
+            "host.ip": "172.17.0.1"
+          },
+          {
+            "host.name": "soc-playground",
+            "host.ip": "172.18.0.1"
+          },
+          {
+            "host.name": "soc-playground",
+            "host.ip": "178.105.170.226"
+          },
+          {
+            "host.name": "soc-playground",
+            "host.ip": "2a01:4f8:1c1b:8c96::1"
+          },
+          {
+            "host.name": "soc-playground",
+            "host.ip": "fe80::c07:4eff:fe76:b57b"
+          },
+          {
+            "host.name": "soc-playground",
+            "host.ip": "fe80::ccc:9eff:fe70:ea7b"
+          },
+          {
+            "host.name": "soc-playground",
+            "host.ip": "fe80::cd5:56ff:fe8c:ae2e"
+          },
+          {
+            "host.name": "soc-playground",
+            "host.ip": "fe80::181b:46ff:fe8e:9732"
+          },
+          {
+            "host.name": "soc-playground",
+            "host.ip": "fe80::1822:b6ff:fead:d33a"
+          },
+          {
+            "host.name": "soc-playground",
+            "host.ip": "fe80::18e7:adff:fe07:826"
+          },
+          {
+            "host.name": "soc-playground",
+            "host.ip": "fe80::20ad:e6ff:febd:eb0a"
+          },
+          {
+            "host.name": "soc-playground",
+            "host.ip": "fe80::242d:93ff:feb6:fcb8"
+          },
+          {
+            "host.name": "soc-playground",
+            "host.ip": "fe80::3063:b1ff:fe7a:a51a"
+          },
+          {
+            "host.name": "soc-playground",
+            "host.ip": "fe80::30a5:baff:fe8a:8dc5"
+          },
+          {
+            "host.name": "soc-playground",
+            "host.ip": "fe80::34d6:47ff:fe77:8f4e"
+          },
+          {
+            "host.name": "soc-playground",
+            "host.ip": "fe80::68ea:e3ff:fe36:193a"
+          },
+          {
+            "host.name": "soc-playground",
+            "host.ip": "fe80::7053:83ff:fe7c:b5f2"
+          },
+          {
+            "host.name": "soc-playground",
+            "host.ip": "fe80::74fe:98ff:fe8f:9120"
+          },
+          {
+            "host.name": "soc-playground",
+            "host.ip": "fe80::7c01:7eff:fe0f:9a51"
+          },
+          {
+            "host.name": "soc-playground",
+            "host.ip": "fe80::9000:8ff:fec4:93b6"
+          },
+          {
+            "host.name": "soc-playground",
+            "host.ip": "fe80::9c68:e8ff:fe13:bb8b"
+          },
+          {
+            "host.name": "soc-playground",
+            "host.ip": "fe80::a464:feff:fe44:3143"
+          },
+          {
+            "host.name": "soc-playground",
+            "host.ip": "fe80::ac39:a2ff:fe1a:96ca"
+          },
+          {
+            "host.name": "soc-playground",
+            "host.ip": "fe80::c463:93ff:fe60:991d"
+          },
+          {
+            "host.name": "soc-playground",
+            "host.ip": "fe80::d847:c9ff:fe0b:efd7"
+          },
+          {
+            "host.name": "soc-playground",
+            "host.ip": "fe80::d8a2:1eff:febd:a370"
+          },
+          {
+            "host.name": "soc-playground",
+            "host.ip": "fe80::e8d8:72ff:fe0b:23d3"
+          },
+          {
+            "host.name": "soc-playground",
+            "host.ip": "fe80::f465:1cff:fe61:98e4"
+          },
+          {
+            "host.name": "soc-playground",
+            "host.ip": "fe80::fc3f:d3ff:fe2c:2205"
+          },
+          {
+            "host.name": "web-1",
+            "host.ip": "172.18.0.2"
+          },
+          {
+            "host.name": "web-1",
+            "host.ip": "172.18.0.3"
+          },
+          {
+            "host.name": "web-1",
+            "host.ip": "172.18.0.6"
+          },
+          {
+            "host.name": "web-1",
+            "host.ip": "172.18.0.18"
+          },
+          {
+            "host.name": "web-1",
+            "host.ip": "172.18.0.22"
+          },
+          {
+            "host.name": "web-2",
+            "host.ip": "172.18.0.5"
+          },
+          {
+            "host.name": "web-2",
+            "host.ip": "172.18.0.8"
+          },
+          {
+            "host.name": "web-2",
+            "host.ip": "172.18.0.13"
+          },
+          {
+            "host.name": "web-2",
+            "host.ip": "172.18.0.14"
+          },
+          {
+            "host.name": "web-2",
+            "host.ip": "172.18.0.16"
+          },
+          {
+            "host.name": "web-2",
+            "host.ip": "172.18.0.19"
+          }
+        ]
+      }
+    }
+  ],
+  "attack_contribution": {
+    "window": [
+      "2026-07-26T11:04:03.000Z",
+      "2026-07-26T11:04:46.000Z"
+    ],
+    "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-26T11:04:03.000Z\" AND @timestamp < \"2026-07-26T11:04:46.000Z\"\n| WHERE host.name != \"db-1\"\n| STATS BY host.name, host.ip\n| SORT host.name, host.ip",
+    "payload": {
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-26T11:04:03.000Z\" AND @timestamp < \"2026-07-26T11:04:46.000Z\"\n| WHERE host.name != \"db-1\"\n| STATS BY host.name, host.ip\n| SORT host.name, host.ip",
+      "columns": [
+        {
+          "name": "host.name",
+          "type": "keyword"
+        },
+        {
+          "name": "host.ip",
+          "type": "ip"
+        }
+      ],
+      "row_count": 3,
+      "values": [
+        {
+          "host.name": "ci-1",
+          "host.ip": "172.18.0.7"
+        },
+        {
+          "host.name": "jump-box-1",
+          "host.ip": "172.18.0.13"
+        },
+        {
+          "host.name": "web-1",
+          "host.ip": "172.18.0.6"
+        }
+      ]
+    }
+  }
+}

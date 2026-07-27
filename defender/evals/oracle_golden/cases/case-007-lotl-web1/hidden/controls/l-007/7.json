@@ -1,0 +1,109 @@
+{
+  "lead_id": "l-007",
+  "seq": 7,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T19:02:22.000Z",
+        "2026-07-12T20:02:22.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-12T19:02:22.000Z\" AND @timestamp < \"2026-07-12T20:02:22.000Z\"\n        AND host.name == \"web-1\"\n        AND message LIKE \"*sudo:*\"\n| STATS attempts = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY user.name\n| SORT attempts DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-12T19:02:22.000Z\" AND @timestamp < \"2026-07-12T20:02:22.000Z\"\n        AND host.name == \"web-1\"\n        AND message LIKE \"*sudo:*\"\n| STATS attempts = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY user.name\n| SORT attempts DESC",
+        "columns": [
+          {
+            "name": "attempts",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T19:02:22.000Z",
+        "2026-07-05T20:02:22.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-05T19:02:22.000Z\" AND @timestamp < \"2026-07-05T20:02:22.000Z\"\n        AND host.name == \"web-1\"\n        AND message LIKE \"*sudo:*\"\n| STATS attempts = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY user.name\n| SORT attempts DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-05T19:02:22.000Z\" AND @timestamp < \"2026-07-05T20:02:22.000Z\"\n        AND host.name == \"web-1\"\n        AND message LIKE \"*sudo:*\"\n| STATS attempts = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY user.name\n| SORT attempts DESC",
+        "columns": [
+          {
+            "name": "attempts",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "attempts": 84,
+            "first_seen": "2026-07-05T19:19:53.000Z",
+            "last_seen": "2026-07-05T19:42:09.000Z",
+            "user.name": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-28T19:02:22.000Z",
+        "2026-06-28T20:02:22.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-28T19:02:22.000Z\" AND @timestamp < \"2026-06-28T20:02:22.000Z\"\n        AND host.name == \"web-1\"\n        AND message LIKE \"*sudo:*\"\n| STATS attempts = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY user.name\n| SORT attempts DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-28T19:02:22.000Z\" AND @timestamp < \"2026-06-28T20:02:22.000Z\"\n        AND host.name == \"web-1\"\n        AND message LIKE \"*sudo:*\"\n| STATS attempts = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY user.name\n| SORT attempts DESC",
+        "columns": [
+          {
+            "name": "attempts",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    }
+  ]
+}

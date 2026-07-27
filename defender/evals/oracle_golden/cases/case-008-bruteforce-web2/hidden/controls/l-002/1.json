@@ -1,0 +1,78 @@
+{
+  "lead_id": "l-002",
+  "seq": 1,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T19:30:00.000Z",
+        "2026-07-12T20:30:00.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-12T19:30:00.000Z\" AND @timestamp < \"2026-07-12T20:30:00.000Z\"\n        AND host.name == \"web-2\"\n        AND event.outcome IS NOT NULL\n        AND event.outcome == \"failure\"\n| STATS failed_count = COUNT(*)\n| KEEP failed_count",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-12T19:30:00.000Z\" AND @timestamp < \"2026-07-12T20:30:00.000Z\"\n        AND host.name == \"web-2\"\n        AND event.outcome IS NOT NULL\n        AND event.outcome == \"failure\"\n| STATS failed_count = COUNT(*)\n| KEEP failed_count",
+        "columns": [
+          {
+            "name": "failed_count",
+            "type": "long"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "failed_count": 84
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T19:30:00.000Z",
+        "2026-07-05T20:30:00.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-05T19:30:00.000Z\" AND @timestamp < \"2026-07-05T20:30:00.000Z\"\n        AND host.name == \"web-2\"\n        AND event.outcome IS NOT NULL\n        AND event.outcome == \"failure\"\n| STATS failed_count = COUNT(*)\n| KEEP failed_count",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-05T19:30:00.000Z\" AND @timestamp < \"2026-07-05T20:30:00.000Z\"\n        AND host.name == \"web-2\"\n        AND event.outcome IS NOT NULL\n        AND event.outcome == \"failure\"\n| STATS failed_count = COUNT(*)\n| KEEP failed_count",
+        "columns": [
+          {
+            "name": "failed_count",
+            "type": "long"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "failed_count": 84
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-28T19:30:00.000Z",
+        "2026-06-28T20:30:00.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-28T19:30:00.000Z\" AND @timestamp < \"2026-06-28T20:30:00.000Z\"\n        AND host.name == \"web-2\"\n        AND event.outcome IS NOT NULL\n        AND event.outcome == \"failure\"\n| STATS failed_count = COUNT(*)\n| KEEP failed_count",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-28T19:30:00.000Z\" AND @timestamp < \"2026-06-28T20:30:00.000Z\"\n        AND host.name == \"web-2\"\n        AND event.outcome IS NOT NULL\n        AND event.outcome == \"failure\"\n| STATS failed_count = COUNT(*)\n| KEEP failed_count",
+        "columns": [
+          {
+            "name": "failed_count",
+            "type": "long"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "failed_count": 0
+          }
+        ]
+      }
+    }
+  ]
+}

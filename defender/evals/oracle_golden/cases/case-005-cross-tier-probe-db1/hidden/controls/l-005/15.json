@@ -1,0 +1,203 @@
+{
+  "lead_id": "l-005",
+  "seq": 15,
+  "controls": [
+    {
+      "name": "C-7d",
+      "window": [
+        "2026-07-19T10:34:24.500Z",
+        "2026-07-19T11:34:24.500Z"
+      ],
+      "query": "FROM logs-postgresql.log-*\n| WHERE @timestamp >= \"2026-07-19T10:34:24.500Z\" AND @timestamp < \"2026-07-19T11:34:24.500Z\"\n| WHERE host.name == \"db-1\"\n| KEEP @timestamp, host.name, host.ip, message\n| LIMIT 5",
+      "live": false,
+      "payload": null
+    },
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T10:34:24.500Z",
+        "2026-07-12T11:34:24.500Z"
+      ],
+      "query": "FROM logs-postgresql.log-*\n| WHERE @timestamp >= \"2026-07-12T10:34:24.500Z\" AND @timestamp < \"2026-07-12T11:34:24.500Z\"\n| WHERE host.name == \"db-1\"\n| KEEP @timestamp, host.name, host.ip, message\n| LIMIT 5",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-postgresql.log-*\n| WHERE @timestamp >= \"2026-07-12T10:34:24.500Z\" AND @timestamp < \"2026-07-12T11:34:24.500Z\"\n| WHERE host.name == \"db-1\"\n| KEEP @timestamp, host.name, host.ip, message\n| LIMIT 5",
+        "columns": [
+          {
+            "name": "@timestamp",
+            "type": "date"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "host.ip",
+            "type": "ip"
+          },
+          {
+            "name": "message",
+            "type": "text"
+          }
+        ],
+        "row_count": 5,
+        "values": [
+          {
+            "@timestamp": "2026-07-12T11:34:17.160Z",
+            "host.name": "db-1",
+            "host.ip": "172.18.0.16",
+            "message": "password authentication failed for user \"root\""
+          },
+          {
+            "@timestamp": "2026-07-12T11:34:17.160Z",
+            "host.name": "db-1",
+            "host.ip": "172.18.0.16",
+            "message": "Role \"root\" does not exist.\n\tConnection matched pg_hba.conf line 99: \"host    all             all             ::1/128                 scram-sha-256\""
+          },
+          {
+            "@timestamp": "2026-07-12T11:34:17.159Z",
+            "host.name": "db-1",
+            "host.ip": "172.18.0.16",
+            "message": "password authentication failed for user \"root\""
+          },
+          {
+            "@timestamp": "2026-07-12T11:34:17.159Z",
+            "host.name": "db-1",
+            "host.ip": "172.18.0.16",
+            "message": "Role \"root\" does not exist.\n\tConnection matched pg_hba.conf line 99: \"host    all             all             ::1/128                 scram-sha-256\""
+          },
+          {
+            "@timestamp": "2026-07-12T11:34:17.159Z",
+            "host.name": "db-1",
+            "host.ip": "172.18.0.16",
+            "message": "password authentication failed for user \"root\""
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T10:34:24.500Z",
+        "2026-07-05T11:34:24.500Z"
+      ],
+      "query": "FROM logs-postgresql.log-*\n| WHERE @timestamp >= \"2026-07-05T10:34:24.500Z\" AND @timestamp < \"2026-07-05T11:34:24.500Z\"\n| WHERE host.name == \"db-1\"\n| KEEP @timestamp, host.name, host.ip, message\n| LIMIT 5",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-postgresql.log-*\n| WHERE @timestamp >= \"2026-07-05T10:34:24.500Z\" AND @timestamp < \"2026-07-05T11:34:24.500Z\"\n| WHERE host.name == \"db-1\"\n| KEEP @timestamp, host.name, host.ip, message\n| LIMIT 5",
+        "columns": [
+          {
+            "name": "@timestamp",
+            "type": "date"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "host.ip",
+            "type": "ip"
+          },
+          {
+            "name": "message",
+            "type": "text"
+          }
+        ],
+        "row_count": 5,
+        "values": [
+          {
+            "@timestamp": "2026-07-05T11:34:17.160Z",
+            "host.name": "db-1",
+            "host.ip": "172.18.0.24",
+            "message": "password authentication failed for user \"root\""
+          },
+          {
+            "@timestamp": "2026-07-05T11:34:17.160Z",
+            "host.name": "db-1",
+            "host.ip": "172.18.0.24",
+            "message": "Role \"root\" does not exist.\n\tConnection matched pg_hba.conf line 99: \"host    all             all             ::1/128                 scram-sha-256\""
+          },
+          {
+            "@timestamp": "2026-07-05T11:34:17.160Z",
+            "host.name": "db-1",
+            "host.ip": "172.18.0.24",
+            "message": "password authentication failed for user \"root\""
+          },
+          {
+            "@timestamp": "2026-07-05T11:34:17.160Z",
+            "host.name": "db-1",
+            "host.ip": "172.18.0.24",
+            "message": "Role \"root\" does not exist.\n\tConnection matched pg_hba.conf line 99: \"host    all             all             ::1/128                 scram-sha-256\""
+          },
+          {
+            "@timestamp": "2026-07-05T11:34:17.160Z",
+            "host.name": "db-1",
+            "host.ip": "172.18.0.24",
+            "message": "password authentication failed for user \"root\""
+          }
+        ]
+      }
+    }
+  ],
+  "attack_contribution": {
+    "window": [
+      "2026-07-26T11:04:03.000Z",
+      "2026-07-26T11:04:46.000Z"
+    ],
+    "query": "FROM logs-postgresql.log-*\n| WHERE @timestamp >= \"2026-07-26T11:04:03.000Z\" AND @timestamp < \"2026-07-26T11:04:46.000Z\"\n| WHERE host.name == \"db-1\"\n| KEEP @timestamp, host.name, host.ip, message\n| LIMIT 5",
+    "payload": {
+      "query": "FROM logs-postgresql.log-*\n| WHERE @timestamp >= \"2026-07-26T11:04:03.000Z\" AND @timestamp < \"2026-07-26T11:04:46.000Z\"\n| WHERE host.name == \"db-1\"\n| KEEP @timestamp, host.name, host.ip, message\n| LIMIT 5",
+      "columns": [
+        {
+          "name": "@timestamp",
+          "type": "date"
+        },
+        {
+          "name": "host.name",
+          "type": "keyword"
+        },
+        {
+          "name": "host.ip",
+          "type": "ip"
+        },
+        {
+          "name": "message",
+          "type": "text"
+        }
+      ],
+      "row_count": 5,
+      "values": [
+        {
+          "@timestamp": "2026-07-26T11:04:36.967Z",
+          "host.name": "db-1",
+          "host.ip": "172.18.0.12",
+          "message": "password authentication failed for user \"root\""
+        },
+        {
+          "@timestamp": "2026-07-26T11:04:36.967Z",
+          "host.name": "db-1",
+          "host.ip": "172.18.0.12",
+          "message": "Role \"root\" does not exist.\n\tConnection matched pg_hba.conf line 99: \"host    all             all             ::1/128                 scram-sha-256\""
+        },
+        {
+          "@timestamp": "2026-07-26T11:04:36.967Z",
+          "host.name": "db-1",
+          "host.ip": "172.18.0.12",
+          "message": "password authentication failed for user \"root\""
+        },
+        {
+          "@timestamp": "2026-07-26T11:04:36.967Z",
+          "host.name": "db-1",
+          "host.ip": "172.18.0.12",
+          "message": "Role \"root\" does not exist.\n\tConnection matched pg_hba.conf line 99: \"host    all             all             ::1/128                 scram-sha-256\""
+        },
+        {
+          "@timestamp": "2026-07-26T11:04:36.967Z",
+          "host.name": "db-1",
+          "host.ip": "172.18.0.12",
+          "message": "password authentication failed for user \"root\""
+        }
+      ]
+    }
+  }
+}

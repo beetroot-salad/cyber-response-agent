@@ -1,0 +1,681 @@
+{
+  "lead_id": "l-007",
+  "seq": 24,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T18:35:57.000Z",
+        "2026-07-12T19:35:57.000Z"
+      ],
+      "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-12T18:35:57.000Z\" AND @timestamp < \"2026-07-12T19:35:57.000Z\"\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule      = falco.rule,\n           host.name,\n           container = falco.output_fields.container.name,\n           container_id = falco.output_fields.container.id\n| SORT events DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-12T18:35:57.000Z\" AND @timestamp < \"2026-07-12T19:35:57.000Z\"\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule      = falco.rule,\n           host.name,\n           container = falco.output_fields.container.name,\n           container_id = falco.output_fields.container.id\n| SORT events DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "rule",
+            "type": "keyword"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "container",
+            "type": "keyword"
+          },
+          {
+            "name": "container_id",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 20,
+        "values": [
+          {
+            "events": 360,
+            "first_seen": "2026-07-12T18:36:41.187Z",
+            "last_seen": "2026-07-12T19:35:50.823Z",
+            "rule": "BPF Program Not Profiled",
+            "host.name": "soc-playground",
+            "container": "host",
+            "container_id": "host"
+          },
+          {
+            "events": 120,
+            "first_seen": "2026-07-12T18:36:16.184Z",
+            "last_seen": "2026-07-12T19:35:20.815Z",
+            "rule": "Drop and execute new binary in container",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "58ffe39dd54f"
+          },
+          {
+            "events": 72,
+            "first_seen": "2026-07-12T18:39:41.215Z",
+            "last_seen": "2026-07-12T19:34:55.812Z",
+            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "a36492b5172b"
+          },
+          {
+            "events": 72,
+            "first_seen": "2026-07-12T18:38:29.203Z",
+            "last_seen": "2026-07-12T19:35:43.820Z",
+            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "ed96a85a7480"
+          },
+          {
+            "events": 64,
+            "first_seen": "2026-07-12T18:36:41.188Z",
+            "last_seen": "2026-07-12T19:35:50.823Z",
+            "rule": "Unexpected UDP Traffic",
+            "host.name": "soc-playground",
+            "container": "host",
+            "container_id": "host"
+          },
+          {
+            "events": 60,
+            "first_seen": "2026-07-12T18:36:41.188Z",
+            "last_seen": "2026-07-12T19:35:50.823Z",
+            "rule": "Launch Sensitive Mount Container",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "e1dc89faaa8b"
+          },
+          {
+            "events": 52,
+            "first_seen": "2026-07-12T18:40:41.222Z",
+            "last_seen": "2026-07-12T19:35:27.817Z",
+            "rule": "Launch Suspicious Network Tool in Container",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "7e76d1cea7c4"
+          },
+          {
+            "events": 40,
+            "first_seen": "2026-07-12T18:36:42.189Z",
+            "last_seen": "2026-07-12T19:35:28.818Z",
+            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "1df4bcd65ee4"
+          },
+          {
+            "events": 36,
+            "first_seen": "2026-07-12T18:38:29.203Z",
+            "last_seen": "2026-07-12T19:35:43.820Z",
+            "rule": "Unexpected UDP Traffic",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "ed96a85a7480"
+          },
+          {
+            "events": 36,
+            "first_seen": "2026-07-12T18:39:41.215Z",
+            "last_seen": "2026-07-12T19:34:55.813Z",
+            "rule": "Unexpected UDP Traffic",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "a36492b5172b"
+          },
+          {
+            "events": 32,
+            "first_seen": "2026-07-12T18:39:01.208Z",
+            "last_seen": "2026-07-12T19:32:32.788Z",
+            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "d1daf6f3b7c6"
+          },
+          {
+            "events": 28,
+            "first_seen": "2026-07-12T18:38:29.203Z",
+            "last_seen": "2026-07-12T19:35:43.820Z",
+            "rule": "Launch Suspicious Network Tool in Container",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "ffbff1299702"
+          },
+          {
+            "events": 28,
+            "first_seen": "2026-07-12T18:39:01.208Z",
+            "last_seen": "2026-07-12T19:34:22.806Z",
+            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "ffbff1299702"
+          },
+          {
+            "events": 26,
+            "first_seen": "2026-07-12T18:44:32.260Z",
+            "last_seen": "2026-07-12T19:22:52.672Z",
+            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "d8fb0192a17f"
+          },
+          {
+            "events": 24,
+            "first_seen": "2026-07-12T18:44:44.267Z",
+            "last_seen": "2026-07-12T19:35:27.817Z",
+            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "2c1e2ec93d17"
+          },
+          {
+            "events": 22,
+            "first_seen": "2026-07-12T18:36:57.191Z",
+            "last_seen": "2026-07-12T19:32:08.779Z",
+            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "922f03f16a11"
+          },
+          {
+            "events": 20,
+            "first_seen": "2026-07-12T18:36:42.189Z",
+            "last_seen": "2026-07-12T19:35:28.819Z",
+            "rule": "Unexpected UDP Traffic",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "1df4bcd65ee4"
+          },
+          {
+            "events": 18,
+            "first_seen": "2026-07-12T18:39:01.208Z",
+            "last_seen": "2026-07-12T19:31:38.773Z",
+            "rule": "Launch Suspicious Network Tool in Container",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "c58bf05facac"
+          },
+          {
+            "events": 18,
+            "first_seen": "2026-07-12T19:06:50.498Z",
+            "last_seen": "2026-07-12T19:07:19.509Z",
+            "rule": "Read sensitive file untrusted",
+            "host.name": "soc-playground",
+            "container": "host",
+            "container_id": "host"
+          },
+          {
+            "events": 17,
+            "first_seen": "2026-07-12T18:39:01.208Z",
+            "last_seen": "2026-07-12T19:32:32.788Z",
+            "rule": "Unexpected UDP Traffic",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "d1daf6f3b7c6"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T18:35:57.000Z",
+        "2026-07-05T19:35:57.000Z"
+      ],
+      "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-05T18:35:57.000Z\" AND @timestamp < \"2026-07-05T19:35:57.000Z\"\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule      = falco.rule,\n           host.name,\n           container = falco.output_fields.container.name,\n           container_id = falco.output_fields.container.id\n| SORT events DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-05T18:35:57.000Z\" AND @timestamp < \"2026-07-05T19:35:57.000Z\"\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule      = falco.rule,\n           host.name,\n           container = falco.output_fields.container.name,\n           container_id = falco.output_fields.container.id\n| SORT events DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "rule",
+            "type": "keyword"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "container",
+            "type": "keyword"
+          },
+          {
+            "name": "container_id",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 20,
+        "values": [
+          {
+            "events": 360,
+            "first_seen": "2026-07-05T18:36:33.191Z",
+            "last_seen": "2026-07-05T19:35:54.873Z",
+            "rule": "BPF Program Not Profiled",
+            "host.name": "soc-playground",
+            "container": "host",
+            "container_id": "host"
+          },
+          {
+            "events": 120,
+            "first_seen": "2026-07-05T18:36:04.185Z",
+            "last_seen": "2026-07-05T19:35:04.865Z",
+            "rule": "Drop and execute new binary in container",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "58ffe39dd54f"
+          },
+          {
+            "events": 94,
+            "first_seen": "2026-07-05T18:36:19.188Z",
+            "last_seen": "2026-07-05T19:32:04.831Z",
+            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "a36492b5172b"
+          },
+          {
+            "events": 72,
+            "first_seen": "2026-07-05T18:36:19.187Z",
+            "last_seen": "2026-07-05T19:35:54.872Z",
+            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "ed96a85a7480"
+          },
+          {
+            "events": 62,
+            "first_seen": "2026-07-05T18:36:33.192Z",
+            "last_seen": "2026-07-05T19:35:54.873Z",
+            "rule": "Unexpected UDP Traffic",
+            "host.name": "soc-playground",
+            "container": "host",
+            "container_id": "host"
+          },
+          {
+            "events": 60,
+            "first_seen": "2026-07-05T18:36:33.192Z",
+            "last_seen": "2026-07-05T19:35:54.873Z",
+            "rule": "Launch Sensitive Mount Container",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "e1dc89faaa8b"
+          },
+          {
+            "events": 53,
+            "first_seen": "2026-07-05T18:43:31.269Z",
+            "last_seen": "2026-07-05T19:34:47.860Z",
+            "rule": "Launch Suspicious Network Tool in Container",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "7e76d1cea7c4"
+          },
+          {
+            "events": 47,
+            "first_seen": "2026-07-05T18:36:19.188Z",
+            "last_seen": "2026-07-05T19:32:04.831Z",
+            "rule": "Unexpected UDP Traffic",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "a36492b5172b"
+          },
+          {
+            "events": 38,
+            "first_seen": "2026-07-05T18:39:23.218Z",
+            "last_seen": "2026-07-05T19:35:03.864Z",
+            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "2c1e2ec93d17"
+          },
+          {
+            "events": 36,
+            "first_seen": "2026-07-05T18:48:25.335Z",
+            "last_seen": "2026-07-05T19:32:01.829Z",
+            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "d1daf6f3b7c6"
+          },
+          {
+            "events": 36,
+            "first_seen": "2026-07-05T18:36:19.188Z",
+            "last_seen": "2026-07-05T19:35:54.872Z",
+            "rule": "Unexpected UDP Traffic",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "ed96a85a7480"
+          },
+          {
+            "events": 32,
+            "first_seen": "2026-07-05T18:38:40.210Z",
+            "last_seen": "2026-07-05T19:35:54.873Z",
+            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "d8fb0192a17f"
+          },
+          {
+            "events": 32,
+            "first_seen": "2026-07-05T18:40:03.228Z",
+            "last_seen": "2026-07-05T19:33:12.843Z",
+            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "ffbff1299702"
+          },
+          {
+            "events": 30,
+            "first_seen": "2026-07-05T18:37:28.199Z",
+            "last_seen": "2026-07-05T19:35:03.864Z",
+            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "1df4bcd65ee4"
+          },
+          {
+            "events": 24,
+            "first_seen": "2026-07-05T18:40:03.228Z",
+            "last_seen": "2026-07-05T19:35:54.872Z",
+            "rule": "Launch Suspicious Network Tool in Container",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "ffbff1299702"
+          },
+          {
+            "events": 24,
+            "first_seen": "2026-07-05T18:36:48.194Z",
+            "last_seen": "2026-07-05T19:28:52.793Z",
+            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "922f03f16a11"
+          },
+          {
+            "events": 22,
+            "first_seen": "2026-07-05T18:36:19.187Z",
+            "last_seen": "2026-07-05T19:32:32.836Z",
+            "rule": "Launch Suspicious Network Tool in Container",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "ed96a85a7480"
+          },
+          {
+            "events": 19,
+            "first_seen": "2026-07-05T18:39:23.218Z",
+            "last_seen": "2026-07-05T19:35:03.864Z",
+            "rule": "Unexpected UDP Traffic",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "2c1e2ec93d17"
+          },
+          {
+            "events": 18,
+            "first_seen": "2026-07-05T18:48:25.335Z",
+            "last_seen": "2026-07-05T19:32:01.829Z",
+            "rule": "Unexpected UDP Traffic",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "d1daf6f3b7c6"
+          },
+          {
+            "events": 18,
+            "first_seen": "2026-07-05T18:44:59.288Z",
+            "last_seen": "2026-07-05T19:26:40.763Z",
+            "rule": "Launch Suspicious Network Tool in Container",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "d1daf6f3b7c6"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-28T18:35:57.000Z",
+        "2026-06-28T19:35:57.000Z"
+      ],
+      "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-06-28T18:35:57.000Z\" AND @timestamp < \"2026-06-28T19:35:57.000Z\"\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule      = falco.rule,\n           host.name,\n           container = falco.output_fields.container.name,\n           container_id = falco.output_fields.container.id\n| SORT events DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-06-28T18:35:57.000Z\" AND @timestamp < \"2026-06-28T19:35:57.000Z\"\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule      = falco.rule,\n           host.name,\n           container = falco.output_fields.container.name,\n           container_id = falco.output_fields.container.id\n| SORT events DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "rule",
+            "type": "keyword"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "container",
+            "type": "keyword"
+          },
+          {
+            "name": "container_id",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 20,
+        "values": [
+          {
+            "events": 300,
+            "first_seen": "2026-06-28T18:36:15.522Z",
+            "last_seen": "2026-06-28T19:35:40.340Z",
+            "rule": "BPF Program Not Profiled",
+            "host.name": "soc-playground",
+            "container": "host",
+            "container_id": "host"
+          },
+          {
+            "events": 120,
+            "first_seen": "2026-06-28T18:36:15.521Z",
+            "last_seen": "2026-06-28T19:35:18.333Z",
+            "rule": "Drop and execute new binary in container",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "58ffe39dd54f"
+          },
+          {
+            "events": 72,
+            "first_seen": "2026-06-28T18:37:43.538Z",
+            "last_seen": "2026-06-28T19:35:25.336Z",
+            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "a36492b5172b"
+          },
+          {
+            "events": 66,
+            "first_seen": "2026-06-28T18:37:46.540Z",
+            "last_seen": "2026-06-28T19:35:18.332Z",
+            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "ed96a85a7480"
+          },
+          {
+            "events": 60,
+            "first_seen": "2026-06-28T18:36:15.522Z",
+            "last_seen": "2026-06-28T19:35:40.340Z",
+            "rule": "Launch Sensitive Mount Container",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "e1dc89faaa8b"
+          },
+          {
+            "events": 60,
+            "first_seen": "2026-06-28T18:36:15.522Z",
+            "last_seen": "2026-06-28T19:35:40.340Z",
+            "rule": "Unexpected UDP Traffic",
+            "host.name": "soc-playground",
+            "container": "host",
+            "container_id": "host"
+          },
+          {
+            "events": 50,
+            "first_seen": "2026-06-28T18:40:41.583Z",
+            "last_seen": "2026-06-28T19:34:26.315Z",
+            "rule": "Launch Suspicious Network Tool in Container",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "7e76d1cea7c4"
+          },
+          {
+            "events": 38,
+            "first_seen": "2026-06-28T18:39:28.571Z",
+            "last_seen": "2026-06-28T19:33:48.306Z",
+            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "d8fb0192a17f"
+          },
+          {
+            "events": 37,
+            "first_seen": "2026-06-28T18:37:43.538Z",
+            "last_seen": "2026-06-28T19:35:25.336Z",
+            "rule": "Unexpected UDP Traffic",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "a36492b5172b"
+          },
+          {
+            "events": 34,
+            "first_seen": "2026-06-28T18:37:28.534Z",
+            "last_seen": "2026-06-28T19:26:30.190Z",
+            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "ffbff1299702"
+          },
+          {
+            "events": 33,
+            "first_seen": "2026-06-28T18:37:46.540Z",
+            "last_seen": "2026-06-28T19:35:18.332Z",
+            "rule": "Unexpected UDP Traffic",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "ed96a85a7480"
+          },
+          {
+            "events": 32,
+            "first_seen": "2026-06-28T18:42:06.595Z",
+            "last_seen": "2026-06-28T19:27:51.224Z",
+            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "2c1e2ec93d17"
+          },
+          {
+            "events": 30,
+            "first_seen": "2026-06-28T18:38:08.546Z",
+            "last_seen": "2026-06-28T19:35:03.329Z",
+            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "1df4bcd65ee4"
+          },
+          {
+            "events": 29,
+            "first_seen": "2026-06-28T18:37:28.533Z",
+            "last_seen": "2026-06-28T19:33:48.306Z",
+            "rule": "Launch Suspicious Network Tool in Container",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "ed96a85a7480"
+          },
+          {
+            "events": 28,
+            "first_seen": "2026-06-28T18:41:31.591Z",
+            "last_seen": "2026-06-28T19:34:34.318Z",
+            "rule": "Launch Suspicious Network Tool in Container",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "ffbff1299702"
+          },
+          {
+            "events": 22,
+            "first_seen": "2026-06-28T18:40:41.583Z",
+            "last_seen": "2026-06-28T19:28:28.238Z",
+            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "922f03f16a11"
+          },
+          {
+            "events": 22,
+            "first_seen": "2026-06-28T18:44:02.623Z",
+            "last_seen": "2026-06-28T19:35:03.328Z",
+            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "d1daf6f3b7c6"
+          },
+          {
+            "events": 19,
+            "first_seen": "2026-06-28T18:39:28.571Z",
+            "last_seen": "2026-06-28T19:33:48.306Z",
+            "rule": "Unexpected UDP Traffic",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "d8fb0192a17f"
+          },
+          {
+            "events": 17,
+            "first_seen": "2026-06-28T18:37:28.534Z",
+            "last_seen": "2026-06-28T19:26:30.190Z",
+            "rule": "Unexpected UDP Traffic",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "ffbff1299702"
+          },
+          {
+            "events": 16,
+            "first_seen": "2026-06-28T18:42:06.596Z",
+            "last_seen": "2026-06-28T19:27:51.224Z",
+            "rule": "Unexpected UDP Traffic",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "2c1e2ec93d17"
+          }
+        ]
+      }
+    }
+  ]
+}

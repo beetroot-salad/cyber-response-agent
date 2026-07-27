@@ -1,0 +1,303 @@
+{
+  "lead_id": "l-001",
+  "seq": 10,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-11T00:00:00.000Z",
+        "2026-07-12T00:00:00.000Z"
+      ],
+      "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-11T00:00:00.000Z\" AND @timestamp < \"2026-07-12T00:00:00.000Z\"\n| STATS events = COUNT(*)\n        BY falco.output_fields.container.id, falco.output_fields.container.name\n| SORT events DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-11T00:00:00.000Z\" AND @timestamp < \"2026-07-12T00:00:00.000Z\"\n| STATS events = COUNT(*)\n        BY falco.output_fields.container.id, falco.output_fields.container.name\n| SORT events DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "falco.output_fields.container.id",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.container.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 14,
+        "values": [
+          {
+            "events": 10213,
+            "falco.output_fields.container.id": "host",
+            "falco.output_fields.container.name": "host"
+          },
+          {
+            "events": 3711,
+            "falco.output_fields.container.id": "a36492b5172b",
+            "falco.output_fields.container.name": "<NA>"
+          },
+          {
+            "events": 3452,
+            "falco.output_fields.container.id": "ed96a85a7480",
+            "falco.output_fields.container.name": "<NA>"
+          },
+          {
+            "events": 2876,
+            "falco.output_fields.container.id": "58ffe39dd54f",
+            "falco.output_fields.container.name": "<NA>"
+          },
+          {
+            "events": 2477,
+            "falco.output_fields.container.id": "ffbff1299702",
+            "falco.output_fields.container.name": "<NA>"
+          },
+          {
+            "events": 1945,
+            "falco.output_fields.container.id": "2c1e2ec93d17",
+            "falco.output_fields.container.name": "<NA>"
+          },
+          {
+            "events": 1925,
+            "falco.output_fields.container.id": "1df4bcd65ee4",
+            "falco.output_fields.container.name": "<NA>"
+          },
+          {
+            "events": 1909,
+            "falco.output_fields.container.id": "7e76d1cea7c4",
+            "falco.output_fields.container.name": "<NA>"
+          },
+          {
+            "events": 1785,
+            "falco.output_fields.container.id": "d8fb0192a17f",
+            "falco.output_fields.container.name": "<NA>"
+          },
+          {
+            "events": 1761,
+            "falco.output_fields.container.id": "d1daf6f3b7c6",
+            "falco.output_fields.container.name": "<NA>"
+          },
+          {
+            "events": 1722,
+            "falco.output_fields.container.id": "922f03f16a11",
+            "falco.output_fields.container.name": "<NA>"
+          },
+          {
+            "events": 1434,
+            "falco.output_fields.container.id": "e1dc89faaa8b",
+            "falco.output_fields.container.name": "<NA>"
+          },
+          {
+            "events": 305,
+            "falco.output_fields.container.id": "45388dd0bf3a",
+            "falco.output_fields.container.name": "<NA>"
+          },
+          {
+            "events": 303,
+            "falco.output_fields.container.id": "c58bf05facac",
+            "falco.output_fields.container.name": "<NA>"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-04T00:00:00.000Z",
+        "2026-07-05T00:00:00.000Z"
+      ],
+      "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-04T00:00:00.000Z\" AND @timestamp < \"2026-07-05T00:00:00.000Z\"\n| STATS events = COUNT(*)\n        BY falco.output_fields.container.id, falco.output_fields.container.name\n| SORT events DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-04T00:00:00.000Z\" AND @timestamp < \"2026-07-05T00:00:00.000Z\"\n| STATS events = COUNT(*)\n        BY falco.output_fields.container.id, falco.output_fields.container.name\n| SORT events DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "falco.output_fields.container.id",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.container.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 14,
+        "values": [
+          {
+            "events": 10499,
+            "falco.output_fields.container.id": "host",
+            "falco.output_fields.container.name": "host"
+          },
+          {
+            "events": 4004,
+            "falco.output_fields.container.id": "a36492b5172b",
+            "falco.output_fields.container.name": "<NA>"
+          },
+          {
+            "events": 3518,
+            "falco.output_fields.container.id": "ed96a85a7480",
+            "falco.output_fields.container.name": "<NA>"
+          },
+          {
+            "events": 2876,
+            "falco.output_fields.container.id": "58ffe39dd54f",
+            "falco.output_fields.container.name": "<NA>"
+          },
+          {
+            "events": 2618,
+            "falco.output_fields.container.id": "7e76d1cea7c4",
+            "falco.output_fields.container.name": "<NA>"
+          },
+          {
+            "events": 2552,
+            "falco.output_fields.container.id": "ffbff1299702",
+            "falco.output_fields.container.name": "<NA>"
+          },
+          {
+            "events": 1979,
+            "falco.output_fields.container.id": "922f03f16a11",
+            "falco.output_fields.container.name": "<NA>"
+          },
+          {
+            "events": 1950,
+            "falco.output_fields.container.id": "d8fb0192a17f",
+            "falco.output_fields.container.name": "<NA>"
+          },
+          {
+            "events": 1898,
+            "falco.output_fields.container.id": "d1daf6f3b7c6",
+            "falco.output_fields.container.name": "<NA>"
+          },
+          {
+            "events": 1792,
+            "falco.output_fields.container.id": "1df4bcd65ee4",
+            "falco.output_fields.container.name": "<NA>"
+          },
+          {
+            "events": 1765,
+            "falco.output_fields.container.id": "2c1e2ec93d17",
+            "falco.output_fields.container.name": "<NA>"
+          },
+          {
+            "events": 1434,
+            "falco.output_fields.container.id": "e1dc89faaa8b",
+            "falco.output_fields.container.name": "<NA>"
+          },
+          {
+            "events": 325,
+            "falco.output_fields.container.id": "45388dd0bf3a",
+            "falco.output_fields.container.name": "<NA>"
+          },
+          {
+            "events": 298,
+            "falco.output_fields.container.id": "c58bf05facac",
+            "falco.output_fields.container.name": "<NA>"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-27T00:00:00.000Z",
+        "2026-06-28T00:00:00.000Z"
+      ],
+      "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-06-27T00:00:00.000Z\" AND @timestamp < \"2026-06-28T00:00:00.000Z\"\n| STATS events = COUNT(*)\n        BY falco.output_fields.container.id, falco.output_fields.container.name\n| SORT events DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-06-27T00:00:00.000Z\" AND @timestamp < \"2026-06-28T00:00:00.000Z\"\n| STATS events = COUNT(*)\n        BY falco.output_fields.container.id, falco.output_fields.container.name\n| SORT events DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "falco.output_fields.container.id",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.container.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 14,
+        "values": [
+          {
+            "events": 9085,
+            "falco.output_fields.container.id": "host",
+            "falco.output_fields.container.name": "host"
+          },
+          {
+            "events": 3523,
+            "falco.output_fields.container.id": "a36492b5172b",
+            "falco.output_fields.container.name": "<NA>"
+          },
+          {
+            "events": 3297,
+            "falco.output_fields.container.id": "ed96a85a7480",
+            "falco.output_fields.container.name": "<NA>"
+          },
+          {
+            "events": 2872,
+            "falco.output_fields.container.id": "58ffe39dd54f",
+            "falco.output_fields.container.name": "<NA>"
+          },
+          {
+            "events": 2401,
+            "falco.output_fields.container.id": "ffbff1299702",
+            "falco.output_fields.container.name": "<NA>"
+          },
+          {
+            "events": 2053,
+            "falco.output_fields.container.id": "7e76d1cea7c4",
+            "falco.output_fields.container.name": "<NA>"
+          },
+          {
+            "events": 1920,
+            "falco.output_fields.container.id": "2c1e2ec93d17",
+            "falco.output_fields.container.name": "<NA>"
+          },
+          {
+            "events": 1901,
+            "falco.output_fields.container.id": "1df4bcd65ee4",
+            "falco.output_fields.container.name": "<NA>"
+          },
+          {
+            "events": 1865,
+            "falco.output_fields.container.id": "d1daf6f3b7c6",
+            "falco.output_fields.container.name": "<NA>"
+          },
+          {
+            "events": 1856,
+            "falco.output_fields.container.id": "d8fb0192a17f",
+            "falco.output_fields.container.name": "<NA>"
+          },
+          {
+            "events": 1791,
+            "falco.output_fields.container.id": "922f03f16a11",
+            "falco.output_fields.container.name": "<NA>"
+          },
+          {
+            "events": 1429,
+            "falco.output_fields.container.id": "e1dc89faaa8b",
+            "falco.output_fields.container.name": "<NA>"
+          },
+          {
+            "events": 310,
+            "falco.output_fields.container.id": "45388dd0bf3a",
+            "falco.output_fields.container.name": "<NA>"
+          },
+          {
+            "events": 303,
+            "falco.output_fields.container.id": "c58bf05facac",
+            "falco.output_fields.container.name": "<NA>"
+          }
+        ]
+      }
+    }
+  ]
+}

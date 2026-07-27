@@ -1,0 +1,66 @@
+# Facts about THIS capture environment that change how a difference between two
+# windows should be read. An input to both judge passes (#711) — visible and
+# revisable here rather than buried in a scoring module, which is where the
+# rotating-address rule used to live.
+capture_environment: playground-v2@412461512-restore-20260726
+
+unstable_identifiers:
+  note: >
+    playground-v2 assigns container addresses in start order, so the same address
+    is a different host after every lever-up (172.18.0.15 was db-1 through
+    2026-07-13 and office-ws-1 from ~07-17). A control window on a prior week
+    therefore compares an address against a different machine and every row reads
+    as new. Container ids are regenerated the same way, and the agent/session ids
+    are per-run identity rather than a property of the activity. Rows differing
+    ONLY in one of these columns are not a delta. Attribute by host.name instead,
+    and treat historical rows in an address-scoped payload as unattributed.
+  columns:
+    - source.ip
+    - destination.ip
+    - client.ip
+    - server.ip
+    - host.ip
+    - source.address
+    - destination.address
+    - related.ip
+    - container.id
+    - falco.output_fields.container.id
+    - agent.ephemeral_id
+    - zeek.session_id
+    - event.id
+  scope: >
+    An environment fact, not a general one. A real deployment with stable
+    addressing would want these columns treated as distinguishing.
+
+baseline_construction:
+  windows: >
+    Each control is the lead's own ES|QL with only its two @timestamp bounds
+    moved — whole weeks back (7/14/21 days), which keeps the weekday. The
+    playground's benign generators are schedule-shaped (weekday/weekend
+    multipliers), so a weekday control for a weekend capture is not a control.
+  duration: >
+    Control windows are widened symmetrically about the operation's midpoint to
+    at least one hour. Duration-matching was wrong: a 21-second control window
+    observes almost nothing, so a routine login graded as new activity. Widening
+    can only move a reading toward "indistinguishable", which is the safe
+    direction — it costs recall, never a false detection.
+  liveness: >
+    The stack is levered up and down between snapshots, so a control window can
+    land in a gap when the server did not exist. `window_live: false` means the
+    environment was not running: zero rows is "not measured", NOT "nothing
+    routine happens here". A dead window can never evidence suppression.
+
+state_and_lookup_systems: >
+  cmdb, identity, threat-intel and change-mgmt queries return current
+  configuration or an entity record, not an event stream. They carry no
+  @timestamp bounds to move, so they have no control and no baseline-diff
+  semantics — that is `state-only`, not a missing measurement.
+
+case_notes:
+  - >
+    Captured against a stack restored from snapshot 412461512, so every container
+    address and container id differs from earlier cases even where the host names
+    match.
+  - >
+    l-008 is a 20-query lead. Its payloads are the most likely to arrive
+    truncated; a truncated payload never evidences absence.

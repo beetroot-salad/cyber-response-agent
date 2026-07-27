@@ -1,0 +1,1 @@
+{"query": "FROM logs-zeek.ssh-*\n| WHERE source.ip == \"172.18.0.12\" AND destination.ip == \"172.18.0.5\"\n| STATS count = COUNT(*)\n| LIMIT 1", "columns": [{"name": "count", "type": "long"}], "row_count": 1, "values": [{"count": 0}]}

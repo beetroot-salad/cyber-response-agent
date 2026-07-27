@@ -1,0 +1,45 @@
+projections:
+- lead_id: l-003
+  events: []
+- lead_id: l-004
+  events: []
+- lead_id: l-002
+  events: []
+- lead_id: l-001
+  events:
+  - '@timestamp': '2026-07-27T09:44:30Z'
+    host.name: canary-1
+    falco.rule: <falco-rule>
+    falco.priority: <falco-priority>
+    falco.output_fields.proc.name: curl
+    falco.output_fields.proc.pname: bash
+    falco.output_fields.proc.cmdline: curl -fsS http://web-1/ -o /tmp/fetched_0.sh
+    falco.output_fields.user.name: root
+    falco.output_fields.user.loginuid: <loginuid>
+    falco.output_fields.proc.tty: <tty>
+  - '@timestamp': '2026-07-27T09:44:33Z'
+    host.name: canary-1
+    falco.rule: <falco-rule>
+    falco.priority: <falco-priority>
+    falco.output_fields.proc.name: bash
+    falco.output_fields.proc.pname: bash
+    falco.output_fields.proc.cmdline: echo IyEvYmluL2Jhc2gKZWNobyAicGxheWdyb3VuZCBhdHRhY2stc2ltIHJlYWNoZWQ6ICQobG9jYWx0aW1lKSIK
+      | base64 -d > /tmp/payload_0.sh
+    falco.output_fields.user.name: root
+    falco.output_fields.user.loginuid: <loginuid>
+    falco.output_fields.proc.tty: <tty>
+  - '@timestamp': '2026-07-27T09:44:34Z'
+    host.name: canary-1
+    falco.rule: <falco-rule>
+    falco.priority: <falco-priority>
+    falco.output_fields.proc.name: bash
+    falco.output_fields.proc.pname: bash
+    falco.output_fields.proc.cmdline: bash /tmp/payload_0.sh
+    falco.output_fields.user.name: root
+    falco.output_fields.user.loginuid: <loginuid>
+    falco.output_fields.proc.tty: <tty>
+- lead_id: l-006
+  events: []
+- lead_id: l-005
+  events:
+  - <standard environment noise>

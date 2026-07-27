@@ -1,0 +1,467 @@
+{
+  "lead_id": "l-004",
+  "seq": 14,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-06-12T20:06:42.000Z",
+        "2026-07-12T20:06:42.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-12T20:06:42.000Z\" AND @timestamp < \"2026-07-12T20:06:42.000Z\"\n        AND host.name == \"web-2\"\n        AND event.outcome IS NOT NULL\n| STATS accepted = COUNT(*) WHERE event.outcome == \"success\",\n        failed   = COUNT(*) WHERE event.outcome == \"failure\",\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY source.ip\n| SORT accepted DESC, failed DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-12T20:06:42.000Z\" AND @timestamp < \"2026-07-12T20:06:42.000Z\"\n        AND host.name == \"web-2\"\n        AND event.outcome IS NOT NULL\n| STATS accepted = COUNT(*) WHERE event.outcome == \"success\",\n        failed   = COUNT(*) WHERE event.outcome == \"failure\",\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY source.ip\n| SORT accepted DESC, failed DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "accepted",
+            "type": "long"
+          },
+          {
+            "name": "failed",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          }
+        ],
+        "row_count": 16,
+        "values": [
+          {
+            "accepted": 28374,
+            "failed": 0,
+            "first_seen": "2026-06-13T14:48:27.000Z",
+            "last_seen": "2026-07-12T08:22:28.000Z",
+            "source.ip": null
+          },
+          {
+            "accepted": 5706,
+            "failed": 0,
+            "first_seen": "2026-06-18T14:42:49.000Z",
+            "last_seen": "2026-07-12T08:22:28.000Z",
+            "source.ip": "172.18.0.20"
+          },
+          {
+            "accepted": 3164,
+            "failed": 0,
+            "first_seen": "2026-07-02T08:05:42.000Z",
+            "last_seen": "2026-07-12T19:41:05.000Z",
+            "source.ip": "172.18.0.14"
+          },
+          {
+            "accepted": 2420,
+            "failed": 0,
+            "first_seen": "2026-06-14T11:36:00.000Z",
+            "last_seen": "2026-06-18T14:19:06.000Z",
+            "source.ip": "172.18.0.24"
+          },
+          {
+            "accepted": 2364,
+            "failed": 0,
+            "first_seen": "2026-06-14T00:40:25.000Z",
+            "last_seen": "2026-07-01T22:28:29.000Z",
+            "source.ip": "172.18.0.21"
+          },
+          {
+            "accepted": 2296,
+            "failed": 0,
+            "first_seen": "2026-06-18T14:54:01.000Z",
+            "last_seen": "2026-07-02T02:41:03.000Z",
+            "source.ip": "172.18.0.9"
+          },
+          {
+            "accepted": 1365,
+            "failed": 0,
+            "first_seen": "2026-07-02T09:54:17.000Z",
+            "last_seen": "2026-07-12T12:07:14.000Z",
+            "source.ip": "172.18.0.17"
+          },
+          {
+            "accepted": 1030,
+            "failed": 0,
+            "first_seen": "2026-06-14T15:08:10.000Z",
+            "last_seen": "2026-06-18T13:19:30.000Z",
+            "source.ip": "172.18.0.23"
+          },
+          {
+            "accepted": 780,
+            "failed": 144,
+            "first_seen": "2026-06-13T16:57:15.000Z",
+            "last_seen": "2026-06-18T14:26:15.000Z",
+            "source.ip": "172.18.0.18"
+          },
+          {
+            "accepted": 72,
+            "failed": 0,
+            "first_seen": "2026-06-13T11:16:21.000Z",
+            "last_seen": "2026-06-14T09:24:46.000Z",
+            "source.ip": "172.18.0.15"
+          },
+          {
+            "accepted": 24,
+            "failed": 7776,
+            "first_seen": "2026-06-13T14:48:27.000Z",
+            "last_seen": "2026-07-02T01:43:09.000Z",
+            "source.ip": "172.18.0.11"
+          },
+          {
+            "accepted": 0,
+            "failed": 6816,
+            "first_seen": "2026-06-18T22:16:47.000Z",
+            "last_seen": "2026-07-02T01:54:55.000Z",
+            "source.ip": "172.18.0.10"
+          },
+          {
+            "accepted": 0,
+            "failed": 5208,
+            "first_seen": "2026-07-03T21:16:32.000Z",
+            "last_seen": "2026-07-12T13:38:26.000Z",
+            "source.ip": "172.18.0.6"
+          },
+          {
+            "accepted": 0,
+            "failed": 4536,
+            "first_seen": "2026-07-02T15:06:07.000Z",
+            "last_seen": "2026-07-12T19:32:33.000Z",
+            "source.ip": "172.18.0.8"
+          },
+          {
+            "accepted": 0,
+            "failed": 2280,
+            "first_seen": "2026-06-15T23:27:25.000Z",
+            "last_seen": "2026-06-18T12:36:17.000Z",
+            "source.ip": "172.18.0.7"
+          },
+          {
+            "accepted": 0,
+            "failed": 2280,
+            "first_seen": "2026-06-14T17:16:54.000Z",
+            "last_seen": "2026-06-18T05:04:07.000Z",
+            "source.ip": "172.18.0.4"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-06-05T20:06:42.000Z",
+        "2026-07-05T20:06:42.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-05T20:06:42.000Z\" AND @timestamp < \"2026-07-05T20:06:42.000Z\"\n        AND host.name == \"web-2\"\n        AND event.outcome IS NOT NULL\n| STATS accepted = COUNT(*) WHERE event.outcome == \"success\",\n        failed   = COUNT(*) WHERE event.outcome == \"failure\",\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY source.ip\n| SORT accepted DESC, failed DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-05T20:06:42.000Z\" AND @timestamp < \"2026-07-05T20:06:42.000Z\"\n        AND host.name == \"web-2\"\n        AND event.outcome IS NOT NULL\n| STATS accepted = COUNT(*) WHERE event.outcome == \"success\",\n        failed   = COUNT(*) WHERE event.outcome == \"failure\",\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY source.ip\n| SORT accepted DESC, failed DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "accepted",
+            "type": "long"
+          },
+          {
+            "name": "failed",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          }
+        ],
+        "row_count": 18,
+        "values": [
+          {
+            "accepted": 33712,
+            "failed": 0,
+            "first_seen": "2026-06-05T20:12:37.000Z",
+            "last_seen": "2026-07-05T19:42:10.000Z",
+            "source.ip": null
+          },
+          {
+            "accepted": 6563,
+            "failed": 0,
+            "first_seen": "2026-06-05T20:12:37.000Z",
+            "last_seen": "2026-07-05T19:42:09.000Z",
+            "source.ip": "172.18.0.20"
+          },
+          {
+            "accepted": 2420,
+            "failed": 0,
+            "first_seen": "2026-06-14T11:36:00.000Z",
+            "last_seen": "2026-06-18T14:19:06.000Z",
+            "source.ip": "172.18.0.24"
+          },
+          {
+            "accepted": 2364,
+            "failed": 0,
+            "first_seen": "2026-06-14T00:40:25.000Z",
+            "last_seen": "2026-07-01T22:28:29.000Z",
+            "source.ip": "172.18.0.21"
+          },
+          {
+            "accepted": 2296,
+            "failed": 0,
+            "first_seen": "2026-06-18T14:54:01.000Z",
+            "last_seen": "2026-07-02T02:41:03.000Z",
+            "source.ip": "172.18.0.9"
+          },
+          {
+            "accepted": 1800,
+            "failed": 0,
+            "first_seen": "2026-06-05T20:42:42.000Z",
+            "last_seen": "2026-06-10T04:24:37.000Z",
+            "source.ip": "172.18.0.25"
+          },
+          {
+            "accepted": 1356,
+            "failed": 7776,
+            "first_seen": "2026-06-05T23:49:43.000Z",
+            "last_seen": "2026-07-02T01:43:09.000Z",
+            "source.ip": "172.18.0.11"
+          },
+          {
+            "accepted": 1030,
+            "failed": 0,
+            "first_seen": "2026-06-14T15:08:10.000Z",
+            "last_seen": "2026-06-18T13:19:30.000Z",
+            "source.ip": "172.18.0.23"
+          },
+          {
+            "accepted": 1022,
+            "failed": 0,
+            "first_seen": "2026-07-02T08:05:42.000Z",
+            "last_seen": "2026-07-05T17:24:01.000Z",
+            "source.ip": "172.18.0.14"
+          },
+          {
+            "accepted": 780,
+            "failed": 144,
+            "first_seen": "2026-06-13T16:57:15.000Z",
+            "last_seen": "2026-06-18T14:26:15.000Z",
+            "source.ip": "172.18.0.18"
+          },
+          {
+            "accepted": 411,
+            "failed": 0,
+            "first_seen": "2026-06-12T15:08:05.000Z",
+            "last_seen": "2026-07-05T14:47:14.000Z",
+            "source.ip": "172.18.0.17"
+          },
+          {
+            "accepted": 72,
+            "failed": 0,
+            "first_seen": "2026-06-13T11:16:21.000Z",
+            "last_seen": "2026-06-14T09:24:46.000Z",
+            "source.ip": "172.18.0.15"
+          },
+          {
+            "accepted": 30,
+            "failed": 1344,
+            "first_seen": "2026-06-12T15:49:41.000Z",
+            "last_seen": "2026-07-05T19:32:00.000Z",
+            "source.ip": "172.18.0.6"
+          },
+          {
+            "accepted": 17,
+            "failed": 9192,
+            "first_seen": "2026-06-05T22:41:09.000Z",
+            "last_seen": "2026-06-18T05:04:07.000Z",
+            "source.ip": "172.18.0.4"
+          },
+          {
+            "accepted": 0,
+            "failed": 6816,
+            "first_seen": "2026-06-18T22:16:47.000Z",
+            "last_seen": "2026-07-02T01:54:55.000Z",
+            "source.ip": "172.18.0.10"
+          },
+          {
+            "accepted": 0,
+            "failed": 4968,
+            "first_seen": "2026-06-06T08:38:44.000Z",
+            "last_seen": "2026-06-10T00:36:27.000Z",
+            "source.ip": "172.18.0.12"
+          },
+          {
+            "accepted": 0,
+            "failed": 2280,
+            "first_seen": "2026-06-15T23:27:25.000Z",
+            "last_seen": "2026-06-18T12:36:17.000Z",
+            "source.ip": "172.18.0.7"
+          },
+          {
+            "accepted": 0,
+            "failed": 1176,
+            "first_seen": "2026-07-02T15:06:07.000Z",
+            "last_seen": "2026-07-05T09:38:22.000Z",
+            "source.ip": "172.18.0.8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-05-29T20:06:42.000Z",
+        "2026-06-28T20:06:42.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-05-29T20:06:42.000Z\" AND @timestamp < \"2026-06-28T20:06:42.000Z\"\n        AND host.name == \"web-2\"\n        AND event.outcome IS NOT NULL\n| STATS accepted = COUNT(*) WHERE event.outcome == \"success\",\n        failed   = COUNT(*) WHERE event.outcome == \"failure\",\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY source.ip\n| SORT accepted DESC, failed DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-05-29T20:06:42.000Z\" AND @timestamp < \"2026-06-28T20:06:42.000Z\"\n        AND host.name == \"web-2\"\n        AND event.outcome IS NOT NULL\n| STATS accepted = COUNT(*) WHERE event.outcome == \"success\",\n        failed   = COUNT(*) WHERE event.outcome == \"failure\",\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY source.ip\n| SORT accepted DESC, failed DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "accepted",
+            "type": "long"
+          },
+          {
+            "name": "failed",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          }
+        ],
+        "row_count": 16,
+        "values": [
+          {
+            "accepted": 40592,
+            "failed": 0,
+            "first_seen": "2026-05-29T20:41:13.000Z",
+            "last_seen": "2026-06-28T18:49:13.000Z",
+            "source.ip": null
+          },
+          {
+            "accepted": 7476,
+            "failed": 0,
+            "first_seen": "2026-05-29T20:19:00.000Z",
+            "last_seen": "2026-06-10T04:24:37.000Z",
+            "source.ip": "172.18.0.25"
+          },
+          {
+            "accepted": 7046,
+            "failed": 0,
+            "first_seen": "2026-05-29T20:41:13.000Z",
+            "last_seen": "2026-06-28T13:28:22.000Z",
+            "source.ip": "172.18.0.20"
+          },
+          {
+            "accepted": 4609,
+            "failed": 5856,
+            "first_seen": "2026-05-30T01:13:15.000Z",
+            "last_seen": "2026-06-28T15:09:27.000Z",
+            "source.ip": "172.18.0.11"
+          },
+          {
+            "accepted": 2420,
+            "failed": 0,
+            "first_seen": "2026-06-14T11:36:00.000Z",
+            "last_seen": "2026-06-18T14:19:06.000Z",
+            "source.ip": "172.18.0.24"
+          },
+          {
+            "accepted": 1484,
+            "failed": 0,
+            "first_seen": "2026-06-14T00:40:25.000Z",
+            "last_seen": "2026-06-28T15:53:17.000Z",
+            "source.ip": "172.18.0.21"
+          },
+          {
+            "accepted": 1448,
+            "failed": 0,
+            "first_seen": "2026-06-18T14:54:01.000Z",
+            "last_seen": "2026-06-28T18:49:13.000Z",
+            "source.ip": "172.18.0.9"
+          },
+          {
+            "accepted": 1030,
+            "failed": 0,
+            "first_seen": "2026-06-14T15:08:10.000Z",
+            "last_seen": "2026-06-18T13:19:30.000Z",
+            "source.ip": "172.18.0.23"
+          },
+          {
+            "accepted": 780,
+            "failed": 144,
+            "first_seen": "2026-06-13T16:57:15.000Z",
+            "last_seen": "2026-06-18T14:26:15.000Z",
+            "source.ip": "172.18.0.18"
+          },
+          {
+            "accepted": 75,
+            "failed": 0,
+            "first_seen": "2026-06-12T15:08:05.000Z",
+            "last_seen": "2026-06-12T15:48:09.000Z",
+            "source.ip": "172.18.0.17"
+          },
+          {
+            "accepted": 72,
+            "failed": 0,
+            "first_seen": "2026-06-13T11:16:21.000Z",
+            "last_seen": "2026-06-14T09:24:46.000Z",
+            "source.ip": "172.18.0.15"
+          },
+          {
+            "accepted": 30,
+            "failed": 0,
+            "first_seen": "2026-06-12T15:49:41.000Z",
+            "last_seen": "2026-06-12T15:50:37.000Z",
+            "source.ip": "172.18.0.6"
+          },
+          {
+            "accepted": 17,
+            "failed": 19128,
+            "first_seen": "2026-05-29T22:20:26.000Z",
+            "last_seen": "2026-06-18T05:04:07.000Z",
+            "source.ip": "172.18.0.4"
+          },
+          {
+            "accepted": 0,
+            "failed": 13608,
+            "first_seen": "2026-05-29T22:08:29.000Z",
+            "last_seen": "2026-06-10T00:36:27.000Z",
+            "source.ip": "172.18.0.12"
+          },
+          {
+            "accepted": 0,
+            "failed": 4992,
+            "first_seen": "2026-06-18T22:16:47.000Z",
+            "last_seen": "2026-06-28T14:10:28.000Z",
+            "source.ip": "172.18.0.10"
+          },
+          {
+            "accepted": 0,
+            "failed": 2280,
+            "first_seen": "2026-06-15T23:27:25.000Z",
+            "last_seen": "2026-06-18T12:36:17.000Z",
+            "source.ip": "172.18.0.7"
+          }
+        ]
+      }
+    }
+  ]
+}

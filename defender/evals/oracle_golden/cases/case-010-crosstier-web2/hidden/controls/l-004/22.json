@@ -1,0 +1,123 @@
+{
+  "lead_id": "l-004",
+  "seq": 22,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-06-12T20:06:42.000Z",
+        "2026-07-12T20:06:42.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-12T20:06:42.000Z\" AND @timestamp < \"2026-07-12T20:06:42.000Z\"\n        AND host.name == \"web-2\"\n        AND event.outcome IS NOT NULL\n        AND source.ip IS NOT NULL\n        AND user.name IS NULL\n| STATS accepted = COUNT(*) WHERE event.outcome == \"success\",\n        failed   = COUNT(*) WHERE event.outcome == \"failure\",\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-12T20:06:42.000Z\" AND @timestamp < \"2026-07-12T20:06:42.000Z\"\n        AND host.name == \"web-2\"\n        AND event.outcome IS NOT NULL\n        AND source.ip IS NOT NULL\n        AND user.name IS NULL\n| STATS accepted = COUNT(*) WHERE event.outcome == \"success\",\n        failed   = COUNT(*) WHERE event.outcome == \"failure\",\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)",
+        "columns": [
+          {
+            "name": "accepted",
+            "type": "long"
+          },
+          {
+            "name": "failed",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "accepted": 0,
+            "failed": 0,
+            "first_seen": null,
+            "last_seen": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-06-05T20:06:42.000Z",
+        "2026-07-05T20:06:42.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-05T20:06:42.000Z\" AND @timestamp < \"2026-07-05T20:06:42.000Z\"\n        AND host.name == \"web-2\"\n        AND event.outcome IS NOT NULL\n        AND source.ip IS NOT NULL\n        AND user.name IS NULL\n| STATS accepted = COUNT(*) WHERE event.outcome == \"success\",\n        failed   = COUNT(*) WHERE event.outcome == \"failure\",\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-05T20:06:42.000Z\" AND @timestamp < \"2026-07-05T20:06:42.000Z\"\n        AND host.name == \"web-2\"\n        AND event.outcome IS NOT NULL\n        AND source.ip IS NOT NULL\n        AND user.name IS NULL\n| STATS accepted = COUNT(*) WHERE event.outcome == \"success\",\n        failed   = COUNT(*) WHERE event.outcome == \"failure\",\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)",
+        "columns": [
+          {
+            "name": "accepted",
+            "type": "long"
+          },
+          {
+            "name": "failed",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "accepted": 0,
+            "failed": 0,
+            "first_seen": null,
+            "last_seen": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-05-29T20:06:42.000Z",
+        "2026-06-28T20:06:42.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-05-29T20:06:42.000Z\" AND @timestamp < \"2026-06-28T20:06:42.000Z\"\n        AND host.name == \"web-2\"\n        AND event.outcome IS NOT NULL\n        AND source.ip IS NOT NULL\n        AND user.name IS NULL\n| STATS accepted = COUNT(*) WHERE event.outcome == \"success\",\n        failed   = COUNT(*) WHERE event.outcome == \"failure\",\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-05-29T20:06:42.000Z\" AND @timestamp < \"2026-06-28T20:06:42.000Z\"\n        AND host.name == \"web-2\"\n        AND event.outcome IS NOT NULL\n        AND source.ip IS NOT NULL\n        AND user.name IS NULL\n| STATS accepted = COUNT(*) WHERE event.outcome == \"success\",\n        failed   = COUNT(*) WHERE event.outcome == \"failure\",\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)",
+        "columns": [
+          {
+            "name": "accepted",
+            "type": "long"
+          },
+          {
+            "name": "failed",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "accepted": 0,
+            "failed": 0,
+            "first_seen": null,
+            "last_seen": null
+          }
+        ]
+      }
+    }
+  ]
+}

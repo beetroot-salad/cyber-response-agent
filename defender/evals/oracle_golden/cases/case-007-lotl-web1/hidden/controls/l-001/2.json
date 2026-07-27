@@ -1,0 +1,140 @@
+{
+  "lead_id": "l-001",
+  "seq": 2,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T19:02:19.500Z",
+        "2026-07-12T20:02:19.500Z"
+      ],
+      "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-12T19:02:19.500Z\" AND @timestamp < \"2026-07-12T20:02:19.500Z\"\n| STATS min_ts = MIN(@timestamp), max_ts = MAX(@timestamp), count = COUNT(*)\n| LIMIT 1",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-12T19:02:19.500Z\" AND @timestamp < \"2026-07-12T20:02:19.500Z\"\n| STATS min_ts = MIN(@timestamp), max_ts = MAX(@timestamp), count = COUNT(*)\n| LIMIT 1",
+        "columns": [
+          {
+            "name": "min_ts",
+            "type": "date"
+          },
+          {
+            "name": "max_ts",
+            "type": "date"
+          },
+          {
+            "name": "count",
+            "type": "long"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "min_ts": "2026-07-12T19:02:44.452Z",
+            "max_ts": "2026-07-12T20:02:02.098Z",
+            "count": 1459
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T19:02:19.500Z",
+        "2026-07-05T20:02:19.500Z"
+      ],
+      "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-05T19:02:19.500Z\" AND @timestamp < \"2026-07-05T20:02:19.500Z\"\n| STATS min_ts = MIN(@timestamp), max_ts = MAX(@timestamp), count = COUNT(*)\n| LIMIT 1",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-05T19:02:19.500Z\" AND @timestamp < \"2026-07-05T20:02:19.500Z\"\n| STATS min_ts = MIN(@timestamp), max_ts = MAX(@timestamp), count = COUNT(*)\n| LIMIT 1",
+        "columns": [
+          {
+            "name": "min_ts",
+            "type": "date"
+          },
+          {
+            "name": "max_ts",
+            "type": "date"
+          },
+          {
+            "name": "count",
+            "type": "long"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "min_ts": "2026-07-05T19:02:38.496Z",
+            "max_ts": "2026-07-05T20:02:14.170Z",
+            "count": 1607
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-28T19:02:19.500Z",
+        "2026-06-28T20:02:19.500Z"
+      ],
+      "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-06-28T19:02:19.500Z\" AND @timestamp < \"2026-06-28T20:02:19.500Z\"\n| STATS min_ts = MIN(@timestamp), max_ts = MAX(@timestamp), count = COUNT(*)\n| LIMIT 1",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-06-28T19:02:19.500Z\" AND @timestamp < \"2026-06-28T20:02:19.500Z\"\n| STATS min_ts = MIN(@timestamp), max_ts = MAX(@timestamp), count = COUNT(*)\n| LIMIT 1",
+        "columns": [
+          {
+            "name": "min_ts",
+            "type": "date"
+          },
+          {
+            "name": "max_ts",
+            "type": "date"
+          },
+          {
+            "name": "count",
+            "type": "long"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "min_ts": "2026-06-28T19:02:28.865Z",
+            "max_ts": "2026-06-28T20:01:53.720Z",
+            "count": 1362
+          }
+        ]
+      }
+    }
+  ],
+  "attack_contribution": {
+    "window": [
+      "2026-07-26T19:32:17.000Z",
+      "2026-07-26T19:32:22.000Z"
+    ],
+    "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-26T19:32:17.000Z\" AND @timestamp < \"2026-07-26T19:32:22.000Z\"\n| STATS min_ts = MIN(@timestamp), max_ts = MAX(@timestamp), count = COUNT(*)\n| LIMIT 1",
+    "payload": {
+      "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-26T19:32:17.000Z\" AND @timestamp < \"2026-07-26T19:32:22.000Z\"\n| STATS min_ts = MIN(@timestamp), max_ts = MAX(@timestamp), count = COUNT(*)\n| LIMIT 1",
+      "columns": [
+        {
+          "name": "min_ts",
+          "type": "date"
+        },
+        {
+          "name": "max_ts",
+          "type": "date"
+        },
+        {
+          "name": "count",
+          "type": "long"
+        }
+      ],
+      "row_count": 1,
+      "values": [
+        {
+          "min_ts": null,
+          "max_ts": null,
+          "count": 0
+        }
+      ]
+    }
+  }
+}

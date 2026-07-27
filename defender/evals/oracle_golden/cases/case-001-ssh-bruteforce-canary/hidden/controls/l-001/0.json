@@ -1,0 +1,96 @@
+{
+  "lead_id": "l-001",
+  "seq": 0,
+  "controls": [
+    {
+      "name": "C-7d",
+      "window": [
+        "2026-07-18T07:17:06.032Z",
+        "2026-07-18T08:17:06.032Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-18T07:17:06.032Z\" AND @timestamp < \"2026-07-18T08:17:06.032Z\"\n        AND host.name == \"canary-1\"\n        AND event.outcome == \"failure\"\n| STATS failed_count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp),\n        sample_message = MAX(message)\n        BY source.ip, user.name\n| SORT failed_count DESC, source.ip ASC\n| LIMIT 1000",
+      "live": false,
+      "payload": null
+    },
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-11T07:17:06.032Z",
+        "2026-07-11T08:17:06.032Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-11T07:17:06.032Z\" AND @timestamp < \"2026-07-11T08:17:06.032Z\"\n        AND host.name == \"canary-1\"\n        AND event.outcome == \"failure\"\n| STATS failed_count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp),\n        sample_message = MAX(message)\n        BY source.ip, user.name\n| SORT failed_count DESC, source.ip ASC\n| LIMIT 1000",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-11T07:17:06.032Z\" AND @timestamp < \"2026-07-11T08:17:06.032Z\"\n        AND host.name == \"canary-1\"\n        AND event.outcome == \"failure\"\n| STATS failed_count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp),\n        sample_message = MAX(message)\n        BY source.ip, user.name\n| SORT failed_count DESC, source.ip ASC\n| LIMIT 1000",
+        "columns": [
+          {
+            "name": "failed_count",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "sample_message",
+            "type": "keyword"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-04T07:17:06.032Z",
+        "2026-07-04T08:17:06.032Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-04T07:17:06.032Z\" AND @timestamp < \"2026-07-04T08:17:06.032Z\"\n        AND host.name == \"canary-1\"\n        AND event.outcome == \"failure\"\n| STATS failed_count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp),\n        sample_message = MAX(message)\n        BY source.ip, user.name\n| SORT failed_count DESC, source.ip ASC\n| LIMIT 1000",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-04T07:17:06.032Z\" AND @timestamp < \"2026-07-04T08:17:06.032Z\"\n        AND host.name == \"canary-1\"\n        AND event.outcome == \"failure\"\n| STATS failed_count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp),\n        sample_message = MAX(message)\n        BY source.ip, user.name\n| SORT failed_count DESC, source.ip ASC\n| LIMIT 1000",
+        "columns": [
+          {
+            "name": "failed_count",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "sample_message",
+            "type": "keyword"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    }
+  ]
+}

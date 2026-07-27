@@ -1,0 +1,205 @@
+{
+  "lead_id": "l-009",
+  "seq": 7,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T19:40:00.000Z",
+        "2026-07-12T20:40:00.000Z"
+      ],
+      "query": "FROM .internal.alerts-security.alerts-default-*\n| WHERE @timestamp >= \"2026-07-12T19:40:00.000Z\" AND @timestamp < \"2026-07-12T20:40:00.000Z\"\n        AND host.name == \"web-2\"\n        AND kibana.alert.rule.rule_id == \"v2-sshd-success-after-failures\"\n| KEEP @timestamp, kibana.alert.rule.name, kibana.alert.reason, message, kibana.alert.ancestors.id, kibana.alert.ancestors.index, kibana.alert.ancestors.depth\n| SORT @timestamp ASC\n| LIMIT 5",
+      "live": true,
+      "payload": {
+        "query": "FROM .internal.alerts-security.alerts-default-*\n| WHERE @timestamp >= \"2026-07-12T19:40:00.000Z\" AND @timestamp < \"2026-07-12T20:40:00.000Z\"\n        AND host.name == \"web-2\"\n        AND kibana.alert.rule.rule_id == \"v2-sshd-success-after-failures\"\n| KEEP @timestamp, kibana.alert.rule.name, kibana.alert.reason, message, kibana.alert.ancestors.id, kibana.alert.ancestors.index, kibana.alert.ancestors.depth\n| SORT @timestamp ASC\n| LIMIT 5",
+        "columns": [
+          {
+            "name": "@timestamp",
+            "type": "date"
+          },
+          {
+            "name": "kibana.alert.rule.name",
+            "type": "keyword"
+          },
+          {
+            "name": "kibana.alert.reason",
+            "type": "keyword"
+          },
+          {
+            "name": "message",
+            "type": "text"
+          },
+          {
+            "name": "kibana.alert.ancestors.id",
+            "type": "keyword"
+          },
+          {
+            "name": "kibana.alert.ancestors.index",
+            "type": "keyword"
+          },
+          {
+            "name": "kibana.alert.ancestors.depth",
+            "type": "long"
+          }
+        ],
+        "row_count": 5,
+        "values": [
+          {
+            "@timestamp": "2026-07-12T19:41:37.009Z",
+            "kibana.alert.rule.name": "v2 sshd success after failures",
+            "kibana.alert.reason": "authentication event with process sshd, source 172.18.0.8 by svc.reports on web-2 created high alert v2 sshd success after failures.",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.8  user=svc.reports",
+            "kibana.alert.ancestors.id": "AZ9X0ZBwbysvOEFBDT46",
+            "kibana.alert.ancestors.index": ".ds-logs-system.auth-default-2026.06.23-000003",
+            "kibana.alert.ancestors.depth": 0
+          },
+          {
+            "@timestamp": "2026-07-12T19:41:37.009Z",
+            "kibana.alert.rule.name": "v2 sshd success after failures",
+            "kibana.alert.reason": "authentication event with process sshd, source 172.18.0.8:58298, by svc.reports on web-2 created high alert v2 sshd success after failures.",
+            "message": "Failed password for svc.reports from 172.18.0.8 port 58298 ssh2",
+            "kibana.alert.ancestors.id": "AZ9X0ZBwbysvOEFBDT44",
+            "kibana.alert.ancestors.index": ".ds-logs-system.auth-default-2026.06.23-000003",
+            "kibana.alert.ancestors.depth": 0
+          },
+          {
+            "@timestamp": "2026-07-12T19:41:37.010Z",
+            "kibana.alert.rule.name": "v2 sshd success after failures",
+            "kibana.alert.reason": "authentication event with process sshd, source 172.18.0.8:58304, by svc.reports on web-2 created high alert v2 sshd success after failures.",
+            "message": "Failed password for svc.reports from 172.18.0.8 port 58304 ssh2",
+            "kibana.alert.ancestors.id": "AZ9X0ZBwbysvOEFBDT47",
+            "kibana.alert.ancestors.index": ".ds-logs-system.auth-default-2026.06.23-000003",
+            "kibana.alert.ancestors.depth": 0
+          },
+          {
+            "@timestamp": "2026-07-12T19:41:37.010Z",
+            "kibana.alert.rule.name": "v2 sshd success after failures",
+            "kibana.alert.reason": "authentication, session event with process sshd, source 172.18.0.14:42584, by svc.config-mgmt on web-2 created high alert v2 sshd success after failures.",
+            "message": "Accepted password for svc.config-mgmt from 172.18.0.14 port 42584 ssh2",
+            "kibana.alert.ancestors.id": "AZ9X2ZBwbysvOEEoINSs",
+            "kibana.alert.ancestors.index": ".ds-logs-system.auth-default-2026.06.23-000003",
+            "kibana.alert.ancestors.depth": 0
+          },
+          {
+            "@timestamp": "2026-07-12T19:41:37.014Z",
+            "kibana.alert.rule.name": "v2 sshd success after failures",
+            "kibana.alert.reason": "authentication event with process sshd, on web-2 created high alert v2 sshd success after failures.",
+            "message": null,
+            "kibana.alert.ancestors.id": [
+              "5bf9f2924e86fbff71755044693814a19fa2660f1964094a23cabfffb736a204",
+              "7ec838d5c381c7e4deb9e54cbb22fd3fa06775fcf1ee9097c66e9c57fcbd2d4e",
+              "AZ9X0ZBwbysvOEFBDT44",
+              "AZ9X0ZBwbysvOEFBDT46",
+              "AZ9X0ZBwbysvOEFBDT47",
+              "AZ9X2ZBwbysvOEEoINSs",
+              "ae0bd19c68ae9c63651735aed3de631b7f70d689a017c8b8e59159c63f920f23",
+              "c3c9a7adfc2b7c042d09241ad53807546e094b0f3c042136c4779cfa036d3076"
+            ],
+            "kibana.alert.ancestors.index": [
+              "",
+              ".ds-logs-system.auth-default-2026.06.23-000003"
+            ],
+            "kibana.alert.ancestors.depth": [
+              0,
+              0,
+              0,
+              0,
+              1,
+              1,
+              1,
+              1
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T19:40:00.000Z",
+        "2026-07-05T20:40:00.000Z"
+      ],
+      "query": "FROM .internal.alerts-security.alerts-default-*\n| WHERE @timestamp >= \"2026-07-05T19:40:00.000Z\" AND @timestamp < \"2026-07-05T20:40:00.000Z\"\n        AND host.name == \"web-2\"\n        AND kibana.alert.rule.rule_id == \"v2-sshd-success-after-failures\"\n| KEEP @timestamp, kibana.alert.rule.name, kibana.alert.reason, message, kibana.alert.ancestors.id, kibana.alert.ancestors.index, kibana.alert.ancestors.depth\n| SORT @timestamp ASC\n| LIMIT 5",
+      "live": true,
+      "payload": {
+        "query": "FROM .internal.alerts-security.alerts-default-*\n| WHERE @timestamp >= \"2026-07-05T19:40:00.000Z\" AND @timestamp < \"2026-07-05T20:40:00.000Z\"\n        AND host.name == \"web-2\"\n        AND kibana.alert.rule.rule_id == \"v2-sshd-success-after-failures\"\n| KEEP @timestamp, kibana.alert.rule.name, kibana.alert.reason, message, kibana.alert.ancestors.id, kibana.alert.ancestors.index, kibana.alert.ancestors.depth\n| SORT @timestamp ASC\n| LIMIT 5",
+        "columns": [
+          {
+            "name": "@timestamp",
+            "type": "date"
+          },
+          {
+            "name": "kibana.alert.rule.name",
+            "type": "keyword"
+          },
+          {
+            "name": "kibana.alert.reason",
+            "type": "keyword"
+          },
+          {
+            "name": "message",
+            "type": "text"
+          },
+          {
+            "name": "kibana.alert.ancestors.id",
+            "type": "keyword"
+          },
+          {
+            "name": "kibana.alert.ancestors.index",
+            "type": "keyword"
+          },
+          {
+            "name": "kibana.alert.ancestors.depth",
+            "type": "long"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-28T19:40:00.000Z",
+        "2026-06-28T20:40:00.000Z"
+      ],
+      "query": "FROM .internal.alerts-security.alerts-default-*\n| WHERE @timestamp >= \"2026-06-28T19:40:00.000Z\" AND @timestamp < \"2026-06-28T20:40:00.000Z\"\n        AND host.name == \"web-2\"\n        AND kibana.alert.rule.rule_id == \"v2-sshd-success-after-failures\"\n| KEEP @timestamp, kibana.alert.rule.name, kibana.alert.reason, message, kibana.alert.ancestors.id, kibana.alert.ancestors.index, kibana.alert.ancestors.depth\n| SORT @timestamp ASC\n| LIMIT 5",
+      "live": true,
+      "payload": {
+        "query": "FROM .internal.alerts-security.alerts-default-*\n| WHERE @timestamp >= \"2026-06-28T19:40:00.000Z\" AND @timestamp < \"2026-06-28T20:40:00.000Z\"\n        AND host.name == \"web-2\"\n        AND kibana.alert.rule.rule_id == \"v2-sshd-success-after-failures\"\n| KEEP @timestamp, kibana.alert.rule.name, kibana.alert.reason, message, kibana.alert.ancestors.id, kibana.alert.ancestors.index, kibana.alert.ancestors.depth\n| SORT @timestamp ASC\n| LIMIT 5",
+        "columns": [
+          {
+            "name": "@timestamp",
+            "type": "date"
+          },
+          {
+            "name": "kibana.alert.rule.name",
+            "type": "keyword"
+          },
+          {
+            "name": "kibana.alert.reason",
+            "type": "keyword"
+          },
+          {
+            "name": "message",
+            "type": "text"
+          },
+          {
+            "name": "kibana.alert.ancestors.id",
+            "type": "keyword"
+          },
+          {
+            "name": "kibana.alert.ancestors.index",
+            "type": "keyword"
+          },
+          {
+            "name": "kibana.alert.ancestors.depth",
+            "type": "long"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    }
+  ]
+}

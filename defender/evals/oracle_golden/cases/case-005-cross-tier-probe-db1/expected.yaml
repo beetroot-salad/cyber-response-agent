@@ -1,0 +1,184 @@
+# Ground-truth labels for case-005-cross-tier-probe-db1, DERIVED MECHANICALLY by write_expected.py
+# from hidden/observed/ and hidden/controls/ (#711 M9). The projection is not one
+# of the inputs, which is the mechanical form of the rule "a label may be
+# corrected from the environment, never from the projection".
+#
+# Review before trusting, in this order:
+#   1. any lead labelled `needs-label` — the labeler declined to decide, and
+#      score.py will not match it against any real class. Declare the system in
+#      manifest.yaml `state_classes`, or measure a control it can use.
+#   2. `fields` — the values a correct projection must commit to. Derived as the
+#      row-key values present in the attack window and absent from every live
+#      control. Drop any that are an artifact of the query rather than the
+#      activity.
+#   3. `observed_fields` — everything else concrete the capture carries, graded
+#      only where the projection volunteers a value for the key.
+#
+# `intent_note` is never derived: it is a human's reading of what the lead was
+# FOR, and it explains a divergence without excusing it.
+case_id: case-005-cross-tier-probe-db1
+kind: observed
+result_classes_covered:
+- +event
+- '0'
+- needs-label
+leads:
+  l-004:
+    system: cmdb
+    class: '0'
+    template: host-trust-edges
+  l-001:
+    system: elastic
+    class: +event
+    template:
+    - sshd-accepted-detail
+    - sshd-auth-history
+    - sshd-auth-history-detail
+    heterogeneous: true
+    observed_fields:
+      accepted: 4
+      failed: 0
+      source.ip: 172.18.0.11
+      auth_method: other
+    fields:
+      user.name: dev.dana
+      event.outcome: failure
+  l-002:
+    system: elastic
+    class: +event
+    template: sshd-auth-history
+    label_note: 'Class decided BY HAND from the environment, before any projection existed for this case.
+      label.py abstained (`needs-label`) and was right to: all three sub-queries group only by a time
+      bucket or by source.ip, and both are dropped from a row key -- buckets because a shifted control
+      window sits at a different absolute time, source.ip because container addresses rotate across lever-ups.
+      Nothing comparable survives. Read directly, the payloads decide it: this is a 30-DAY history lead,
+      so its window OVERLAPS its own shifted controls -- the 2026-07-03 day bucket appears in the attack
+      window and in every control, while the 2026-07-26 bucket carrying the operation''s 64 failures appears
+      in none of them. A distinguishable row the controls lack is `+event`. The general refinement (a
+      timestamp bucket IS a usable key when the control window overlaps the attack window) is filed as
+      follow-up rather than changed here.'
+  l-003:
+    system: elastic
+    class: +event
+    template: detection-alerts
+    heterogeneous: true
+    observed_fields:
+      alerts: 15
+      rule: v2 sshd success after failures
+      rule_id: v2-sshd-success-after-failures
+      severity: high
+    fields:
+      host.name: db-1
+  l-006:
+    system: identity
+    class: '0'
+    template:
+    - access-check
+    - user-authorization
+  l-005:
+    system: elastic
+    class: +event
+    template:
+    - doc-fetch-by-id
+    - hostname-by-ip
+    - ip-to-host-search
+    - list-all-hosts
+    - sshd-auth-history
+    heterogeneous: true
+    observed_fields:
+      source.ip: 172.18.0.11
+      host.ip: 172.18.0.12
+      count: 21
+      _index: .ds-logs-system.auth-default-2026.07.25-000004
+    fields:
+      host.name: db-1
+      user.name: dev.dana
+  l-008:
+    system: elastic
+    class: +event
+    template:
+    - sshd-auth-history
+    - zeek-outbound-by-source
+    heterogeneous: true
+    observed_fields:
+      accepted: 0
+      failed: 144
+    fields:
+      host.name: db-1
+    label_note: '`auth_method` REMOVED from observed_fields by hand. The capture encodes this lead''s
+      144 failed attempts as `other`; the story states password authentication (`sshpass -p ...`), and
+      prompt.md tells the oracle to ground every value in the story. So `password` is the projection doing
+      exactly what it is told, and the mismatch is between the environment''s field VOCABULARY and the
+      story''s semantics -- not a fabrication. Ground truth a faithful projection cannot satisfy is not
+      ground truth.'
+  l-007:
+    system: elastic
+    class: +event
+    template:
+    - detection-alert-docs
+    - detection-alerts
+    - sshd-auth-history
+    - sshd-success-events-on-db1
+    - sshd-success-from-172.18.0.11
+    heterogeneous: true
+    observed_fields:
+      alerts: 70
+      accepted: 0
+      failed: 48
+      source.ip: 172.18.0.11
+      count: 16
+      rule: v2 sshd success after failures
+      rule_id: v2-sshd-success-after-failures
+      severity: high
+      auth_method: other
+    fields:
+      host.name: db-1
+      user.name: root
+  l-009:
+    system: cmdb
+    class: '0'
+    template:
+    - host-trust-edges
+    - list-all-hosts
+  l-011:
+    system: elastic
+    class: +event
+    template:
+    - zeek-ssh-172.18.0.11-all-time
+    - zeek-ssh-172.18.0.11-client-versions
+    - zeek-ssh-172.18.0.11-july25-08-12
+    - zeek-ssh-172.18.0.11-july26
+    - zeek-ssh-all-july26
+    - zeek-ssh-all-sources-july26
+    - zeek-ssh-any-existence
+    - zeek-ssh-client-version-by-source
+    - zeek-ssh-positive-control-window
+    - zeek-ssh-sample-fields
+    - zeek-ssh-time-range
+    heterogeneous: true
+    observed_fields:
+      events: 5
+      destination.ip: 172.18.0.6
+      zeek.ssh.client: SSH-2.0-OpenSSH_9.6p1 Ubuntu-3ubuntu13.16
+      zeek.ssh.algorithm.cipher: chacha20-poly1305@openssh.com
+      zeek.ssh.algorithm.mac: umac-64-etm@openssh.com
+    label_note: '`zeek.ssh.auth.success` REMOVED from observed_fields by hand, from the environment. The
+      row carrying `True` is a connection to 172.18.0.6 (jump-box-1), not to this operation''s target
+      db-1: the lead''s query is not host-scoped, so its envelope carries other hosts'' SSH traffic. Absence
+      from a shifted control window means a row is UNUSUAL, not that the activity caused it, and a one-off
+      baseline connection is unusual too. Grading the projection `wrong` for saying the db-1 attempt failed
+      -- which it did -- would penalise correct reasoning, and `wrong` gates a slice to no-update.'
+  l-010:
+    system: elastic
+    class: +event
+    template: sshd-auth-history
+    heterogeneous: true
+    observed_fields:
+      accepted: 0
+      failed: 4
+      source.ip: 172.18.0.11
+      failed_count: 10020
+      first_failed: '2026-05-26T11:58:57.303Z'
+      last_failed: '2026-06-09T23:28:15.614Z'
+      auth_method: other
+      host.name: web-2

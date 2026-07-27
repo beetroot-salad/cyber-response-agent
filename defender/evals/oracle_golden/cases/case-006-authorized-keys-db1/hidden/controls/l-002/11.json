@@ -1,0 +1,126 @@
+{
+  "lead_id": "l-002",
+  "seq": 11,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T18:35:57.000Z",
+        "2026-07-12T19:35:57.000Z"
+      ],
+      "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-12T18:35:57.000Z\" AND @timestamp < \"2026-07-12T19:35:57.000Z\"\n        AND host.name == \"db-1\"\n        AND (message LIKE \"*Accepted*\" OR message LIKE \"*Failed*\" OR message LIKE \"*authorized_keys*\" OR message LIKE \"*ssh*\")\n| STATS total = COUNT(*),\n        earliest = MIN(@timestamp),\n        latest = MAX(@timestamp)\n        BY data_stream.dataset, process.name, message\n| SORT total DESC\n| LIMIT 30",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-12T18:35:57.000Z\" AND @timestamp < \"2026-07-12T19:35:57.000Z\"\n        AND host.name == \"db-1\"\n        AND (message LIKE \"*Accepted*\" OR message LIKE \"*Failed*\" OR message LIKE \"*authorized_keys*\" OR message LIKE \"*ssh*\")\n| STATS total = COUNT(*),\n        earliest = MIN(@timestamp),\n        latest = MAX(@timestamp)\n        BY data_stream.dataset, process.name, message\n| SORT total DESC\n| LIMIT 30",
+        "columns": [
+          {
+            "name": "total",
+            "type": "long"
+          },
+          {
+            "name": "earliest",
+            "type": "date"
+          },
+          {
+            "name": "latest",
+            "type": "date"
+          },
+          {
+            "name": "data_stream.dataset",
+            "type": "keyword"
+          },
+          {
+            "name": "process.name",
+            "type": "keyword"
+          },
+          {
+            "name": "message",
+            "type": "text"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T18:35:57.000Z",
+        "2026-07-05T19:35:57.000Z"
+      ],
+      "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-05T18:35:57.000Z\" AND @timestamp < \"2026-07-05T19:35:57.000Z\"\n        AND host.name == \"db-1\"\n        AND (message LIKE \"*Accepted*\" OR message LIKE \"*Failed*\" OR message LIKE \"*authorized_keys*\" OR message LIKE \"*ssh*\")\n| STATS total = COUNT(*),\n        earliest = MIN(@timestamp),\n        latest = MAX(@timestamp)\n        BY data_stream.dataset, process.name, message\n| SORT total DESC\n| LIMIT 30",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-05T18:35:57.000Z\" AND @timestamp < \"2026-07-05T19:35:57.000Z\"\n        AND host.name == \"db-1\"\n        AND (message LIKE \"*Accepted*\" OR message LIKE \"*Failed*\" OR message LIKE \"*authorized_keys*\" OR message LIKE \"*ssh*\")\n| STATS total = COUNT(*),\n        earliest = MIN(@timestamp),\n        latest = MAX(@timestamp)\n        BY data_stream.dataset, process.name, message\n| SORT total DESC\n| LIMIT 30",
+        "columns": [
+          {
+            "name": "total",
+            "type": "long"
+          },
+          {
+            "name": "earliest",
+            "type": "date"
+          },
+          {
+            "name": "latest",
+            "type": "date"
+          },
+          {
+            "name": "data_stream.dataset",
+            "type": "keyword"
+          },
+          {
+            "name": "process.name",
+            "type": "keyword"
+          },
+          {
+            "name": "message",
+            "type": "text"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-28T18:35:57.000Z",
+        "2026-06-28T19:35:57.000Z"
+      ],
+      "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-06-28T18:35:57.000Z\" AND @timestamp < \"2026-06-28T19:35:57.000Z\"\n        AND host.name == \"db-1\"\n        AND (message LIKE \"*Accepted*\" OR message LIKE \"*Failed*\" OR message LIKE \"*authorized_keys*\" OR message LIKE \"*ssh*\")\n| STATS total = COUNT(*),\n        earliest = MIN(@timestamp),\n        latest = MAX(@timestamp)\n        BY data_stream.dataset, process.name, message\n| SORT total DESC\n| LIMIT 30",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-06-28T18:35:57.000Z\" AND @timestamp < \"2026-06-28T19:35:57.000Z\"\n        AND host.name == \"db-1\"\n        AND (message LIKE \"*Accepted*\" OR message LIKE \"*Failed*\" OR message LIKE \"*authorized_keys*\" OR message LIKE \"*ssh*\")\n| STATS total = COUNT(*),\n        earliest = MIN(@timestamp),\n        latest = MAX(@timestamp)\n        BY data_stream.dataset, process.name, message\n| SORT total DESC\n| LIMIT 30",
+        "columns": [
+          {
+            "name": "total",
+            "type": "long"
+          },
+          {
+            "name": "earliest",
+            "type": "date"
+          },
+          {
+            "name": "latest",
+            "type": "date"
+          },
+          {
+            "name": "data_stream.dataset",
+            "type": "keyword"
+          },
+          {
+            "name": "process.name",
+            "type": "keyword"
+          },
+          {
+            "name": "message",
+            "type": "text"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    }
+  ]
+}

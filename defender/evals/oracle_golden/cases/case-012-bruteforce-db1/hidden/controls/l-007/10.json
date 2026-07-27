@@ -1,0 +1,109 @@
+{
+  "lead_id": "l-007",
+  "seq": 10,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-06T09:59:11.000Z",
+        "2026-07-13T09:59:11.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-06T09:59:11.000Z\" AND @timestamp < \"2026-07-13T09:59:11.000Z\"\n        AND host.name == \"db-1\"\n        AND host.ip == \"172.18.0.16\"\n| STATS events = COUNT(*) BY event.outcome\n| SORT events DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-06T09:59:11.000Z\" AND @timestamp < \"2026-07-13T09:59:11.000Z\"\n        AND host.name == \"db-1\"\n        AND host.ip == \"172.18.0.16\"\n| STATS events = COUNT(*) BY event.outcome\n| SORT events DESC",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "event.outcome",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 2,
+        "values": [
+          {
+            "events": 21082,
+            "event.outcome": null
+          },
+          {
+            "events": 484,
+            "event.outcome": "success"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-06-29T09:59:11.000Z",
+        "2026-07-06T09:59:11.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-29T09:59:11.000Z\" AND @timestamp < \"2026-07-06T09:59:11.000Z\"\n        AND host.name == \"db-1\"\n        AND host.ip == \"172.18.0.16\"\n| STATS events = COUNT(*) BY event.outcome\n| SORT events DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-29T09:59:11.000Z\" AND @timestamp < \"2026-07-06T09:59:11.000Z\"\n        AND host.name == \"db-1\"\n        AND host.ip == \"172.18.0.16\"\n| STATS events = COUNT(*) BY event.outcome\n| SORT events DESC",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "event.outcome",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 3,
+        "values": [
+          {
+            "events": 21033,
+            "event.outcome": null
+          },
+          {
+            "events": 572,
+            "event.outcome": "success"
+          },
+          {
+            "events": 12,
+            "event.outcome": "failure"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-22T09:59:11.000Z",
+        "2026-06-29T09:59:11.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-22T09:59:11.000Z\" AND @timestamp < \"2026-06-29T09:59:11.000Z\"\n        AND host.name == \"db-1\"\n        AND host.ip == \"172.18.0.16\"\n| STATS events = COUNT(*) BY event.outcome\n| SORT events DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-22T09:59:11.000Z\" AND @timestamp < \"2026-06-29T09:59:11.000Z\"\n        AND host.name == \"db-1\"\n        AND host.ip == \"172.18.0.16\"\n| STATS events = COUNT(*) BY event.outcome\n| SORT events DESC",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "event.outcome",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 2,
+        "values": [
+          {
+            "events": 20956,
+            "event.outcome": null
+          },
+          {
+            "events": 488,
+            "event.outcome": "success"
+          }
+        ]
+      }
+    }
+  ]
+}

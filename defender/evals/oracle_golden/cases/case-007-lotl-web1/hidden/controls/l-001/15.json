@@ -1,0 +1,1329 @@
+{
+  "lead_id": "l-001",
+  "seq": 15,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-11T07:00:00.000Z",
+        "2026-07-11T11:00:00.000Z"
+      ],
+      "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-11T07:00:00.000Z\" AND @timestamp < \"2026-07-11T11:00:00.000Z\"\n        AND host.name == \"soc-playground\"\n| STATS events = COUNT(*)\n        BY falco.rule, falco.output_fields.container.id, falco.output_fields.proc.name, falco.output_fields.proc.pname, falco.output_fields.proc.cmdline\n| SORT events DESC\n| LIMIT 50",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-11T07:00:00.000Z\" AND @timestamp < \"2026-07-11T11:00:00.000Z\"\n        AND host.name == \"soc-playground\"\n| STATS events = COUNT(*)\n        BY falco.rule, falco.output_fields.container.id, falco.output_fields.proc.name, falco.output_fields.proc.pname, falco.output_fields.proc.cmdline\n| SORT events DESC\n| LIMIT 50",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "falco.rule",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.container.id",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.proc.name",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.proc.pname",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.proc.cmdline",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 50,
+        "values": [
+          {
+            "events": 1195,
+            "falco.rule": "BPF Program Not Profiled",
+            "falco.output_fields.container.id": "host",
+            "falco.output_fields.proc.name": "runc",
+            "falco.output_fields.proc.pname": "containerd-shim",
+            "falco.output_fields.proc.cmdline": "runc --root /var/run/docker/runtime-runc/moby --log /run/containerd/io.containerd.runtime.v2.task/moby/e1dc89faaa8b25f88634256db1102a70fe6cae5556ab95c77f9fb8ba330137a8/log.json --log-format json --systemd-cgroup create --bundle /run/containerd/io.containerd.runtime.v2.task/moby/e1dc89faaa8b25f88634256db1102a70fe6cae5556ab95c77f9fb8ba330137a8 --pid-file /run/containerd/io.containerd.runtime.v2.task/moby/e1dc89faaa8b25f88634256db1102a70fe6cae5556ab95c77f9fb8ba330137a8/init.pid e1dc89faaa8b25f88634256db1102a70fe6cae5556ab95c77f9fb8ba330137a8"
+          },
+          {
+            "events": 356,
+            "falco.rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "falco.output_fields.container.id": "a36492b5172b",
+            "falco.output_fields.proc.name": "sshd",
+            "falco.output_fields.proc.pname": "sshd",
+            "falco.output_fields.proc.cmdline": "sshd"
+          },
+          {
+            "events": 242,
+            "falco.rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "falco.output_fields.container.id": "ed96a85a7480",
+            "falco.output_fields.proc.name": "sshd",
+            "falco.output_fields.proc.pname": "sshd",
+            "falco.output_fields.proc.cmdline": "sshd"
+          },
+          {
+            "events": 240,
+            "falco.rule": "Drop and execute new binary in container",
+            "falco.output_fields.container.id": "58ffe39dd54f",
+            "falco.output_fields.proc.name": "curl",
+            "falco.output_fields.proc.pname": "sh",
+            "falco.output_fields.proc.cmdline": "curl -fsS -u elastic:ThtCKpHHSQSoXwERX4Go7PAvRcFDJuwX -H kbn-xsrf: x http://kibana:5601/api/fleet/outputs/fleet-default-output"
+          },
+          {
+            "events": 240,
+            "falco.rule": "Drop and execute new binary in container",
+            "falco.output_fields.container.id": "58ffe39dd54f",
+            "falco.output_fields.proc.name": "openssl",
+            "falco.output_fields.proc.pname": "sh",
+            "falco.output_fields.proc.cmdline": "openssl x509 -in /certs/ca/ca.crt -fingerprint -sha256 -noout"
+          },
+          {
+            "events": 240,
+            "falco.rule": "BPF Program Not Profiled",
+            "falco.output_fields.container.id": "host",
+            "falco.output_fields.proc.name": "<NA>",
+            "falco.output_fields.proc.pname": null,
+            "falco.output_fields.proc.cmdline": "<NA>"
+          },
+          {
+            "events": 239,
+            "falco.rule": "Launch Sensitive Mount Container",
+            "falco.output_fields.container.id": "e1dc89faaa8b",
+            "falco.output_fields.proc.name": "tini",
+            "falco.output_fields.proc.pname": "containerd-shim",
+            "falco.output_fields.proc.cmdline": "tini -- /usr/local/bin/docker-entrypoint"
+          },
+          {
+            "events": 180,
+            "falco.rule": "Unexpected UDP Traffic",
+            "falco.output_fields.container.id": "a36492b5172b",
+            "falco.output_fields.proc.name": "sshd",
+            "falco.output_fields.proc.pname": "sshd",
+            "falco.output_fields.proc.cmdline": "sshd -D -R"
+          },
+          {
+            "events": 142,
+            "falco.rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "falco.output_fields.container.id": "1df4bcd65ee4",
+            "falco.output_fields.proc.name": "sshd",
+            "falco.output_fields.proc.pname": "<NA>",
+            "falco.output_fields.proc.cmdline": "sshd"
+          },
+          {
+            "events": 136,
+            "falco.rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "falco.output_fields.container.id": "922f03f16a11",
+            "falco.output_fields.proc.name": "sshd",
+            "falco.output_fields.proc.pname": "<NA>",
+            "falco.output_fields.proc.cmdline": "sshd"
+          },
+          {
+            "events": 136,
+            "falco.rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "falco.output_fields.container.id": "ffbff1299702",
+            "falco.output_fields.proc.name": "sshd",
+            "falco.output_fields.proc.pname": "sshd",
+            "falco.output_fields.proc.cmdline": "sshd"
+          },
+          {
+            "events": 126,
+            "falco.rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "falco.output_fields.container.id": "d8fb0192a17f",
+            "falco.output_fields.proc.name": "sshd",
+            "falco.output_fields.proc.pname": "sshd",
+            "falco.output_fields.proc.cmdline": "sshd"
+          },
+          {
+            "events": 124,
+            "falco.rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "falco.output_fields.container.id": "2c1e2ec93d17",
+            "falco.output_fields.proc.name": "sshd",
+            "falco.output_fields.proc.pname": "sshd",
+            "falco.output_fields.proc.cmdline": "sshd"
+          },
+          {
+            "events": 121,
+            "falco.rule": "Unexpected UDP Traffic",
+            "falco.output_fields.container.id": "ed96a85a7480",
+            "falco.output_fields.proc.name": "sshd",
+            "falco.output_fields.proc.pname": "sshd",
+            "falco.output_fields.proc.cmdline": "sshd -D -R"
+          },
+          {
+            "events": 114,
+            "falco.rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "falco.output_fields.container.id": "d1daf6f3b7c6",
+            "falco.output_fields.proc.name": "sshd",
+            "falco.output_fields.proc.pname": "sshd",
+            "falco.output_fields.proc.cmdline": "sshd"
+          },
+          {
+            "events": 72,
+            "falco.rule": "Unexpected UDP Traffic",
+            "falco.output_fields.container.id": "1df4bcd65ee4",
+            "falco.output_fields.proc.name": "sshd",
+            "falco.output_fields.proc.pname": "<NA>",
+            "falco.output_fields.proc.cmdline": "sshd -D -R"
+          },
+          {
+            "events": 69,
+            "falco.rule": "Unexpected UDP Traffic",
+            "falco.output_fields.container.id": "922f03f16a11",
+            "falco.output_fields.proc.name": "sshd",
+            "falco.output_fields.proc.pname": "<NA>",
+            "falco.output_fields.proc.cmdline": "sshd -D -R"
+          },
+          {
+            "events": 69,
+            "falco.rule": "Unexpected UDP Traffic",
+            "falco.output_fields.container.id": "ffbff1299702",
+            "falco.output_fields.proc.name": "sshd",
+            "falco.output_fields.proc.pname": "sshd",
+            "falco.output_fields.proc.cmdline": "sshd -D -R"
+          },
+          {
+            "events": 63,
+            "falco.rule": "Unexpected UDP Traffic",
+            "falco.output_fields.container.id": "d8fb0192a17f",
+            "falco.output_fields.proc.name": "sshd",
+            "falco.output_fields.proc.pname": "sshd",
+            "falco.output_fields.proc.cmdline": "sshd -D -R"
+          },
+          {
+            "events": 62,
+            "falco.rule": "Unexpected UDP Traffic",
+            "falco.output_fields.container.id": "2c1e2ec93d17",
+            "falco.output_fields.proc.name": "sshd",
+            "falco.output_fields.proc.pname": "sshd",
+            "falco.output_fields.proc.cmdline": "sshd -D -R"
+          },
+          {
+            "events": 58,
+            "falco.rule": "Unexpected UDP Traffic",
+            "falco.output_fields.container.id": "d1daf6f3b7c6",
+            "falco.output_fields.proc.name": "sshd",
+            "falco.output_fields.proc.pname": "sshd",
+            "falco.output_fields.proc.cmdline": "sshd -D -R"
+          },
+          {
+            "events": 54,
+            "falco.rule": "Read sensitive file untrusted",
+            "falco.output_fields.container.id": "host",
+            "falco.output_fields.proc.name": "9",
+            "falco.output_fields.proc.pname": "<NA>",
+            "falco.output_fields.proc.cmdline": "9 --deserialize 38 --log-level info --log-target journal-or-kmsg"
+          },
+          {
+            "events": 51,
+            "falco.rule": "Launch Ingress Remote File Copy Tools in Container",
+            "falco.output_fields.container.id": "d1daf6f3b7c6",
+            "falco.output_fields.proc.name": "curl",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "curl -sf -o /dev/null http://127.0.0.1/"
+          },
+          {
+            "events": 51,
+            "falco.rule": "Launch Ingress Remote File Copy Tools in Container",
+            "falco.output_fields.container.id": "922f03f16a11",
+            "falco.output_fields.proc.name": "curl",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "curl -sf -o /dev/null http://127.0.0.1/"
+          },
+          {
+            "events": 51,
+            "falco.rule": "Launch Suspicious Network Tool in Container",
+            "falco.output_fields.container.id": "922f03f16a11",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.pname": "runuser",
+            "falco.output_fields.proc.cmdline": "nc -z 127.0.0.1 22"
+          },
+          {
+            "events": 50,
+            "falco.rule": "Launch Suspicious Network Tool in Container",
+            "falco.output_fields.container.id": "ed96a85a7480",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.pname": "runuser",
+            "falco.output_fields.proc.cmdline": "nc -z 127.0.0.1 22"
+          },
+          {
+            "events": 50,
+            "falco.rule": "Launch Ingress Remote File Copy Tools in Container",
+            "falco.output_fields.container.id": "ed96a85a7480",
+            "falco.output_fields.proc.name": "curl",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "curl -sf -o /dev/null http://127.0.0.1/"
+          },
+          {
+            "events": 48,
+            "falco.rule": "Launch Ingress Remote File Copy Tools in Container",
+            "falco.output_fields.container.id": "a36492b5172b",
+            "falco.output_fields.proc.name": "curl",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "curl -sf -o /dev/null http://127.0.0.1/"
+          },
+          {
+            "events": 48,
+            "falco.rule": "Launch Ingress Remote File Copy Tools in Container",
+            "falco.output_fields.container.id": "d8fb0192a17f",
+            "falco.output_fields.proc.name": "curl",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "curl -sf -o /dev/null http://127.0.0.1/"
+          },
+          {
+            "events": 48,
+            "falco.rule": "Launch Suspicious Network Tool in Container",
+            "falco.output_fields.container.id": "1df4bcd65ee4",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.pname": "runuser",
+            "falco.output_fields.proc.cmdline": "nc -z 127.0.0.1 22"
+          },
+          {
+            "events": 48,
+            "falco.rule": "Launch Ingress Remote File Copy Tools in Container",
+            "falco.output_fields.container.id": "1df4bcd65ee4",
+            "falco.output_fields.proc.name": "curl",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "curl -sf -o /dev/null http://127.0.0.1/"
+          },
+          {
+            "events": 48,
+            "falco.rule": "Launch Suspicious Network Tool in Container",
+            "falco.output_fields.container.id": "a36492b5172b",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.pname": "runuser",
+            "falco.output_fields.proc.cmdline": "nc -z 127.0.0.1 22"
+          },
+          {
+            "events": 46,
+            "falco.rule": "Launch Suspicious Network Tool in Container",
+            "falco.output_fields.container.id": "ffbff1299702",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 jump-box-1 22"
+          },
+          {
+            "events": 46,
+            "falco.rule": "Launch Suspicious Network Tool in Container",
+            "falco.output_fields.container.id": "d1daf6f3b7c6",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 db-1 22"
+          },
+          {
+            "events": 45,
+            "falco.rule": "Launch Suspicious Network Tool in Container",
+            "falco.output_fields.container.id": "2c1e2ec93d17",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.pname": "runuser",
+            "falco.output_fields.proc.cmdline": "nc -z 127.0.0.1 22"
+          },
+          {
+            "events": 45,
+            "falco.rule": "Launch Ingress Remote File Copy Tools in Container",
+            "falco.output_fields.container.id": "2c1e2ec93d17",
+            "falco.output_fields.proc.name": "curl",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "curl -sf -o /dev/null http://127.0.0.1/"
+          },
+          {
+            "events": 44,
+            "falco.rule": "Launch Suspicious Network Tool in Container",
+            "falco.output_fields.container.id": "d8fb0192a17f",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 db-1 22"
+          },
+          {
+            "events": 34,
+            "falco.rule": "Launch Ingress Remote File Copy Tools in Container",
+            "falco.output_fields.container.id": "ffbff1299702",
+            "falco.output_fields.proc.name": "curl",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "curl -sf -o /dev/null http://127.0.0.1/"
+          },
+          {
+            "events": 34,
+            "falco.rule": "Launch Suspicious Network Tool in Container",
+            "falco.output_fields.container.id": "ffbff1299702",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.pname": "runuser",
+            "falco.output_fields.proc.cmdline": "nc -z 127.0.0.1 22"
+          },
+          {
+            "events": 25,
+            "falco.rule": "Launch Suspicious Network Tool in Container",
+            "falco.output_fields.container.id": "45388dd0bf3a",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 web-2 22"
+          },
+          {
+            "events": 25,
+            "falco.rule": "Launch Suspicious Network Tool in Container",
+            "falco.output_fields.container.id": "45388dd0bf3a",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 web-1 22"
+          },
+          {
+            "events": 17,
+            "falco.rule": "Launch Suspicious Network Tool in Container",
+            "falco.output_fields.container.id": "ed96a85a7480",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 db-1 22"
+          },
+          {
+            "events": 16,
+            "falco.rule": "Launch Suspicious Network Tool in Container",
+            "falco.output_fields.container.id": "ed96a85a7480",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 dev-ws-1 22"
+          },
+          {
+            "events": 16,
+            "falco.rule": "Launch Suspicious Network Tool in Container",
+            "falco.output_fields.container.id": "7e76d1cea7c4",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 canary-1 22"
+          },
+          {
+            "events": 14,
+            "falco.rule": "Launch Suspicious Network Tool in Container",
+            "falco.output_fields.container.id": "7e76d1cea7c4",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 db-1 22"
+          },
+          {
+            "events": 13,
+            "falco.rule": "Unexpected UDP Traffic",
+            "falco.output_fields.container.id": "host",
+            "falco.output_fields.proc.name": "sshd",
+            "falco.output_fields.proc.pname": "sshd",
+            "falco.output_fields.proc.cmdline": "sshd -D -R"
+          },
+          {
+            "events": 13,
+            "falco.rule": "Launch Suspicious Network Tool in Container",
+            "falco.output_fields.container.id": "ed96a85a7480",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 web-1 22"
+          },
+          {
+            "events": 11,
+            "falco.rule": "Launch Suspicious Network Tool in Container",
+            "falco.output_fields.container.id": "7e76d1cea7c4",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 office-ws-2 22"
+          },
+          {
+            "events": 10,
+            "falco.rule": "Launch Suspicious Network Tool in Container",
+            "falco.output_fields.container.id": "c58bf05facac",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 jump-box-1 22"
+          },
+          {
+            "events": 10,
+            "falco.rule": "Launch Suspicious Network Tool in Container",
+            "falco.output_fields.container.id": "7e76d1cea7c4",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 web-2 22"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-04T07:00:00.000Z",
+        "2026-07-04T11:00:00.000Z"
+      ],
+      "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-04T07:00:00.000Z\" AND @timestamp < \"2026-07-04T11:00:00.000Z\"\n        AND host.name == \"soc-playground\"\n| STATS events = COUNT(*)\n        BY falco.rule, falco.output_fields.container.id, falco.output_fields.proc.name, falco.output_fields.proc.pname, falco.output_fields.proc.cmdline\n| SORT events DESC\n| LIMIT 50",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-04T07:00:00.000Z\" AND @timestamp < \"2026-07-04T11:00:00.000Z\"\n        AND host.name == \"soc-playground\"\n| STATS events = COUNT(*)\n        BY falco.rule, falco.output_fields.container.id, falco.output_fields.proc.name, falco.output_fields.proc.pname, falco.output_fields.proc.cmdline\n| SORT events DESC\n| LIMIT 50",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "falco.rule",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.container.id",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.proc.name",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.proc.pname",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.proc.cmdline",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 50,
+        "values": [
+          {
+            "events": 1190,
+            "falco.rule": "BPF Program Not Profiled",
+            "falco.output_fields.container.id": "host",
+            "falco.output_fields.proc.name": "runc",
+            "falco.output_fields.proc.pname": "containerd-shim",
+            "falco.output_fields.proc.cmdline": "runc --root /var/run/docker/runtime-runc/moby --log /run/containerd/io.containerd.runtime.v2.task/moby/e1dc89faaa8b25f88634256db1102a70fe6cae5556ab95c77f9fb8ba330137a8/log.json --log-format json --systemd-cgroup create --bundle /run/containerd/io.containerd.runtime.v2.task/moby/e1dc89faaa8b25f88634256db1102a70fe6cae5556ab95c77f9fb8ba330137a8 --pid-file /run/containerd/io.containerd.runtime.v2.task/moby/e1dc89faaa8b25f88634256db1102a70fe6cae5556ab95c77f9fb8ba330137a8/init.pid e1dc89faaa8b25f88634256db1102a70fe6cae5556ab95c77f9fb8ba330137a8"
+          },
+          {
+            "events": 404,
+            "falco.rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "falco.output_fields.container.id": "a36492b5172b",
+            "falco.output_fields.proc.name": "sshd",
+            "falco.output_fields.proc.pname": "sshd",
+            "falco.output_fields.proc.cmdline": "sshd"
+          },
+          {
+            "events": 312,
+            "falco.rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "falco.output_fields.container.id": "ed96a85a7480",
+            "falco.output_fields.proc.name": "sshd",
+            "falco.output_fields.proc.pname": "sshd",
+            "falco.output_fields.proc.cmdline": "sshd"
+          },
+          {
+            "events": 239,
+            "falco.rule": "Drop and execute new binary in container",
+            "falco.output_fields.container.id": "58ffe39dd54f",
+            "falco.output_fields.proc.name": "openssl",
+            "falco.output_fields.proc.pname": "sh",
+            "falco.output_fields.proc.cmdline": "openssl x509 -in /certs/ca/ca.crt -fingerprint -sha256 -noout"
+          },
+          {
+            "events": 239,
+            "falco.rule": "BPF Program Not Profiled",
+            "falco.output_fields.container.id": "host",
+            "falco.output_fields.proc.name": "<NA>",
+            "falco.output_fields.proc.pname": null,
+            "falco.output_fields.proc.cmdline": "<NA>"
+          },
+          {
+            "events": 239,
+            "falco.rule": "Drop and execute new binary in container",
+            "falco.output_fields.container.id": "58ffe39dd54f",
+            "falco.output_fields.proc.name": "curl",
+            "falco.output_fields.proc.pname": "sh",
+            "falco.output_fields.proc.cmdline": "curl -fsS -u elastic:ThtCKpHHSQSoXwERX4Go7PAvRcFDJuwX -H kbn-xsrf: x http://kibana:5601/api/fleet/outputs/fleet-default-output"
+          },
+          {
+            "events": 238,
+            "falco.rule": "Launch Sensitive Mount Container",
+            "falco.output_fields.container.id": "e1dc89faaa8b",
+            "falco.output_fields.proc.name": "tini",
+            "falco.output_fields.proc.pname": "containerd-shim",
+            "falco.output_fields.proc.cmdline": "tini -- /usr/local/bin/docker-entrypoint"
+          },
+          {
+            "events": 210,
+            "falco.rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "falco.output_fields.container.id": "ffbff1299702",
+            "falco.output_fields.proc.name": "sshd",
+            "falco.output_fields.proc.pname": "sshd",
+            "falco.output_fields.proc.cmdline": "sshd"
+          },
+          {
+            "events": 204,
+            "falco.rule": "Unexpected UDP Traffic",
+            "falco.output_fields.container.id": "a36492b5172b",
+            "falco.output_fields.proc.name": "sshd",
+            "falco.output_fields.proc.pname": "sshd",
+            "falco.output_fields.proc.cmdline": "sshd -D -R"
+          },
+          {
+            "events": 158,
+            "falco.rule": "Unexpected UDP Traffic",
+            "falco.output_fields.container.id": "ed96a85a7480",
+            "falco.output_fields.proc.name": "sshd",
+            "falco.output_fields.proc.pname": "sshd",
+            "falco.output_fields.proc.cmdline": "sshd -D -R"
+          },
+          {
+            "events": 154,
+            "falco.rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "falco.output_fields.container.id": "922f03f16a11",
+            "falco.output_fields.proc.name": "sshd",
+            "falco.output_fields.proc.pname": "<NA>",
+            "falco.output_fields.proc.cmdline": "sshd"
+          },
+          {
+            "events": 142,
+            "falco.rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "falco.output_fields.container.id": "d8fb0192a17f",
+            "falco.output_fields.proc.name": "sshd",
+            "falco.output_fields.proc.pname": "sshd",
+            "falco.output_fields.proc.cmdline": "sshd"
+          },
+          {
+            "events": 141,
+            "falco.rule": "Unexpected UDP Traffic",
+            "falco.output_fields.container.id": "host",
+            "falco.output_fields.proc.name": "sshd",
+            "falco.output_fields.proc.pname": "sshd",
+            "falco.output_fields.proc.cmdline": "sshd -D -R"
+          },
+          {
+            "events": 140,
+            "falco.rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "falco.output_fields.container.id": "d1daf6f3b7c6",
+            "falco.output_fields.proc.name": "sshd",
+            "falco.output_fields.proc.pname": "sshd",
+            "falco.output_fields.proc.cmdline": "sshd"
+          },
+          {
+            "events": 138,
+            "falco.rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "falco.output_fields.container.id": "2c1e2ec93d17",
+            "falco.output_fields.proc.name": "sshd",
+            "falco.output_fields.proc.pname": "sshd",
+            "falco.output_fields.proc.cmdline": "sshd"
+          },
+          {
+            "events": 130,
+            "falco.rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "falco.output_fields.container.id": "1df4bcd65ee4",
+            "falco.output_fields.proc.name": "sshd",
+            "falco.output_fields.proc.pname": "<NA>",
+            "falco.output_fields.proc.cmdline": "sshd"
+          },
+          {
+            "events": 108,
+            "falco.rule": "Read sensitive file untrusted",
+            "falco.output_fields.container.id": "host",
+            "falco.output_fields.proc.name": "9",
+            "falco.output_fields.proc.pname": "<NA>",
+            "falco.output_fields.proc.cmdline": "9 --deserialize 38 --log-level info --log-target journal-or-kmsg"
+          },
+          {
+            "events": 106,
+            "falco.rule": "Unexpected UDP Traffic",
+            "falco.output_fields.container.id": "ffbff1299702",
+            "falco.output_fields.proc.name": "sshd",
+            "falco.output_fields.proc.pname": "sshd",
+            "falco.output_fields.proc.cmdline": "sshd -D -R"
+          },
+          {
+            "events": 77,
+            "falco.rule": "Unexpected UDP Traffic",
+            "falco.output_fields.container.id": "922f03f16a11",
+            "falco.output_fields.proc.name": "sshd",
+            "falco.output_fields.proc.pname": "<NA>",
+            "falco.output_fields.proc.cmdline": "sshd -D -R"
+          },
+          {
+            "events": 72,
+            "falco.rule": "Unexpected UDP Traffic",
+            "falco.output_fields.container.id": "2c1e2ec93d17",
+            "falco.output_fields.proc.name": "sshd",
+            "falco.output_fields.proc.pname": "sshd",
+            "falco.output_fields.proc.cmdline": "sshd -D -R"
+          },
+          {
+            "events": 71,
+            "falco.rule": "Unexpected UDP Traffic",
+            "falco.output_fields.container.id": "d8fb0192a17f",
+            "falco.output_fields.proc.name": "sshd",
+            "falco.output_fields.proc.pname": "sshd",
+            "falco.output_fields.proc.cmdline": "sshd -D -R"
+          },
+          {
+            "events": 70,
+            "falco.rule": "Unexpected UDP Traffic",
+            "falco.output_fields.container.id": "d1daf6f3b7c6",
+            "falco.output_fields.proc.name": "sshd",
+            "falco.output_fields.proc.pname": "sshd",
+            "falco.output_fields.proc.cmdline": "sshd -D -R"
+          },
+          {
+            "events": 65,
+            "falco.rule": "Unexpected UDP Traffic",
+            "falco.output_fields.container.id": "1df4bcd65ee4",
+            "falco.output_fields.proc.name": "sshd",
+            "falco.output_fields.proc.pname": "<NA>",
+            "falco.output_fields.proc.cmdline": "sshd -D -R"
+          },
+          {
+            "events": 64,
+            "falco.rule": "Launch Suspicious Network Tool in Container",
+            "falco.output_fields.container.id": "ffbff1299702",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.pname": "runuser",
+            "falco.output_fields.proc.cmdline": "nc -z 127.0.0.1 22"
+          },
+          {
+            "events": 64,
+            "falco.rule": "Launch Ingress Remote File Copy Tools in Container",
+            "falco.output_fields.container.id": "ffbff1299702",
+            "falco.output_fields.proc.name": "curl",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "curl -sf -o /dev/null http://127.0.0.1/"
+          },
+          {
+            "events": 63,
+            "falco.rule": "Launch Suspicious Network Tool in Container",
+            "falco.output_fields.container.id": "d1daf6f3b7c6",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 db-1 22"
+          },
+          {
+            "events": 58,
+            "falco.rule": "Launch Suspicious Network Tool in Container",
+            "falco.output_fields.container.id": "ffbff1299702",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 jump-box-1 22"
+          },
+          {
+            "events": 56,
+            "falco.rule": "Launch Suspicious Network Tool in Container",
+            "falco.output_fields.container.id": "a36492b5172b",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.pname": "runuser",
+            "falco.output_fields.proc.cmdline": "nc -z 127.0.0.1 22"
+          },
+          {
+            "events": 56,
+            "falco.rule": "Launch Ingress Remote File Copy Tools in Container",
+            "falco.output_fields.container.id": "a36492b5172b",
+            "falco.output_fields.proc.name": "curl",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "curl -sf -o /dev/null http://127.0.0.1/"
+          },
+          {
+            "events": 54,
+            "falco.rule": "Launch Suspicious Network Tool in Container",
+            "falco.output_fields.container.id": "ed96a85a7480",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.pname": "runuser",
+            "falco.output_fields.proc.cmdline": "nc -z 127.0.0.1 22"
+          },
+          {
+            "events": 54,
+            "falco.rule": "Launch Ingress Remote File Copy Tools in Container",
+            "falco.output_fields.container.id": "ed96a85a7480",
+            "falco.output_fields.proc.name": "curl",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "curl -sf -o /dev/null http://127.0.0.1/"
+          },
+          {
+            "events": 52,
+            "falco.rule": "Launch Ingress Remote File Copy Tools in Container",
+            "falco.output_fields.container.id": "922f03f16a11",
+            "falco.output_fields.proc.name": "curl",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "curl -sf -o /dev/null http://127.0.0.1/"
+          },
+          {
+            "events": 52,
+            "falco.rule": "Launch Suspicious Network Tool in Container",
+            "falco.output_fields.container.id": "922f03f16a11",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.pname": "runuser",
+            "falco.output_fields.proc.cmdline": "nc -z 127.0.0.1 22"
+          },
+          {
+            "events": 49,
+            "falco.rule": "Launch Ingress Remote File Copy Tools in Container",
+            "falco.output_fields.container.id": "2c1e2ec93d17",
+            "falco.output_fields.proc.name": "curl",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "curl -sf -o /dev/null http://127.0.0.1/"
+          },
+          {
+            "events": 49,
+            "falco.rule": "Launch Suspicious Network Tool in Container",
+            "falco.output_fields.container.id": "2c1e2ec93d17",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.pname": "runuser",
+            "falco.output_fields.proc.cmdline": "nc -z 127.0.0.1 22"
+          },
+          {
+            "events": 49,
+            "falco.rule": "Launch Ingress Remote File Copy Tools in Container",
+            "falco.output_fields.container.id": "d1daf6f3b7c6",
+            "falco.output_fields.proc.name": "curl",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "curl -sf -o /dev/null http://127.0.0.1/"
+          },
+          {
+            "events": 47,
+            "falco.rule": "Launch Suspicious Network Tool in Container",
+            "falco.output_fields.container.id": "d8fb0192a17f",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 db-1 22"
+          },
+          {
+            "events": 42,
+            "falco.rule": "Launch Suspicious Network Tool in Container",
+            "falco.output_fields.container.id": "1df4bcd65ee4",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.pname": "runuser",
+            "falco.output_fields.proc.cmdline": "nc -z 127.0.0.1 22"
+          },
+          {
+            "events": 42,
+            "falco.rule": "Launch Ingress Remote File Copy Tools in Container",
+            "falco.output_fields.container.id": "1df4bcd65ee4",
+            "falco.output_fields.proc.name": "curl",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "curl -sf -o /dev/null http://127.0.0.1/"
+          },
+          {
+            "events": 38,
+            "falco.rule": "Launch Ingress Remote File Copy Tools in Container",
+            "falco.output_fields.container.id": "d8fb0192a17f",
+            "falco.output_fields.proc.name": "curl",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "curl -sf -o /dev/null http://127.0.0.1/"
+          },
+          {
+            "events": 23,
+            "falco.rule": "Launch Suspicious Network Tool in Container",
+            "falco.output_fields.container.id": "45388dd0bf3a",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 web-1 22"
+          },
+          {
+            "events": 22,
+            "falco.rule": "Launch Suspicious Network Tool in Container",
+            "falco.output_fields.container.id": "7e76d1cea7c4",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 dev-ws-1 22"
+          },
+          {
+            "events": 21,
+            "falco.rule": "Launch Suspicious Network Tool in Container",
+            "falco.output_fields.container.id": "7e76d1cea7c4",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 jump-box-1 22"
+          },
+          {
+            "events": 20,
+            "falco.rule": "Launch Suspicious Network Tool in Container",
+            "falco.output_fields.container.id": "7e76d1cea7c4",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 web-1 22"
+          },
+          {
+            "events": 20,
+            "falco.rule": "Launch Suspicious Network Tool in Container",
+            "falco.output_fields.container.id": "45388dd0bf3a",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 web-2 22"
+          },
+          {
+            "events": 19,
+            "falco.rule": "Launch Suspicious Network Tool in Container",
+            "falco.output_fields.container.id": "7e76d1cea7c4",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 web-2 22"
+          },
+          {
+            "events": 19,
+            "falco.rule": "Launch Suspicious Network Tool in Container",
+            "falco.output_fields.container.id": "7e76d1cea7c4",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 canary-1 22"
+          },
+          {
+            "events": 19,
+            "falco.rule": "Launch Suspicious Network Tool in Container",
+            "falco.output_fields.container.id": "7e76d1cea7c4",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 office-ws-2 22"
+          },
+          {
+            "events": 17,
+            "falco.rule": "Launch Suspicious Network Tool in Container",
+            "falco.output_fields.container.id": "7e76d1cea7c4",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 db-1 22"
+          },
+          {
+            "events": 15,
+            "falco.rule": "Launch Suspicious Network Tool in Container",
+            "falco.output_fields.container.id": "7e76d1cea7c4",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 office-ws-1 22"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-27T07:00:00.000Z",
+        "2026-06-27T11:00:00.000Z"
+      ],
+      "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-06-27T07:00:00.000Z\" AND @timestamp < \"2026-06-27T11:00:00.000Z\"\n        AND host.name == \"soc-playground\"\n| STATS events = COUNT(*)\n        BY falco.rule, falco.output_fields.container.id, falco.output_fields.proc.name, falco.output_fields.proc.pname, falco.output_fields.proc.cmdline\n| SORT events DESC\n| LIMIT 50",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-06-27T07:00:00.000Z\" AND @timestamp < \"2026-06-27T11:00:00.000Z\"\n        AND host.name == \"soc-playground\"\n| STATS events = COUNT(*)\n        BY falco.rule, falco.output_fields.container.id, falco.output_fields.proc.name, falco.output_fields.proc.pname, falco.output_fields.proc.cmdline\n| SORT events DESC\n| LIMIT 50",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "falco.rule",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.container.id",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.proc.name",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.proc.pname",
+            "type": "keyword"
+          },
+          {
+            "name": "falco.output_fields.proc.cmdline",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 50,
+        "values": [
+          {
+            "events": 1195,
+            "falco.rule": "BPF Program Not Profiled",
+            "falco.output_fields.container.id": "host",
+            "falco.output_fields.proc.name": "runc",
+            "falco.output_fields.proc.pname": "containerd-shim",
+            "falco.output_fields.proc.cmdline": "runc --root /var/run/docker/runtime-runc/moby --log /run/containerd/io.containerd.runtime.v2.task/moby/e1dc89faaa8b25f88634256db1102a70fe6cae5556ab95c77f9fb8ba330137a8/log.json --log-format json --systemd-cgroup create --bundle /run/containerd/io.containerd.runtime.v2.task/moby/e1dc89faaa8b25f88634256db1102a70fe6cae5556ab95c77f9fb8ba330137a8 --pid-file /run/containerd/io.containerd.runtime.v2.task/moby/e1dc89faaa8b25f88634256db1102a70fe6cae5556ab95c77f9fb8ba330137a8/init.pid e1dc89faaa8b25f88634256db1102a70fe6cae5556ab95c77f9fb8ba330137a8"
+          },
+          {
+            "events": 330,
+            "falco.rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "falco.output_fields.container.id": "a36492b5172b",
+            "falco.output_fields.proc.name": "sshd",
+            "falco.output_fields.proc.pname": "sshd",
+            "falco.output_fields.proc.cmdline": "sshd"
+          },
+          {
+            "events": 240,
+            "falco.rule": "Drop and execute new binary in container",
+            "falco.output_fields.container.id": "58ffe39dd54f",
+            "falco.output_fields.proc.name": "openssl",
+            "falco.output_fields.proc.pname": "sh",
+            "falco.output_fields.proc.cmdline": "openssl x509 -in /certs/ca/ca.crt -fingerprint -sha256 -noout"
+          },
+          {
+            "events": 240,
+            "falco.rule": "Drop and execute new binary in container",
+            "falco.output_fields.container.id": "58ffe39dd54f",
+            "falco.output_fields.proc.name": "curl",
+            "falco.output_fields.proc.pname": "sh",
+            "falco.output_fields.proc.cmdline": "curl -fsS -u elastic:ThtCKpHHSQSoXwERX4Go7PAvRcFDJuwX -H kbn-xsrf: x http://kibana:5601/api/fleet/outputs/fleet-default-output"
+          },
+          {
+            "events": 240,
+            "falco.rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "falco.output_fields.container.id": "ed96a85a7480",
+            "falco.output_fields.proc.name": "sshd",
+            "falco.output_fields.proc.pname": "sshd",
+            "falco.output_fields.proc.cmdline": "sshd"
+          },
+          {
+            "events": 239,
+            "falco.rule": "Launch Sensitive Mount Container",
+            "falco.output_fields.container.id": "e1dc89faaa8b",
+            "falco.output_fields.proc.name": "tini",
+            "falco.output_fields.proc.pname": "containerd-shim",
+            "falco.output_fields.proc.cmdline": "tini -- /usr/local/bin/docker-entrypoint"
+          },
+          {
+            "events": 172,
+            "falco.rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "falco.output_fields.container.id": "ffbff1299702",
+            "falco.output_fields.proc.name": "sshd",
+            "falco.output_fields.proc.pname": "sshd",
+            "falco.output_fields.proc.cmdline": "sshd"
+          },
+          {
+            "events": 168,
+            "falco.rule": "Unexpected UDP Traffic",
+            "falco.output_fields.container.id": "a36492b5172b",
+            "falco.output_fields.proc.name": "sshd",
+            "falco.output_fields.proc.pname": "sshd",
+            "falco.output_fields.proc.cmdline": "sshd -D -R"
+          },
+          {
+            "events": 167,
+            "falco.rule": "Unexpected UDP Traffic",
+            "falco.output_fields.container.id": "host",
+            "falco.output_fields.proc.name": "sshd",
+            "falco.output_fields.proc.pname": "sshd",
+            "falco.output_fields.proc.cmdline": "sshd -D -R"
+          },
+          {
+            "events": 154,
+            "falco.rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "falco.output_fields.container.id": "d8fb0192a17f",
+            "falco.output_fields.proc.name": "sshd",
+            "falco.output_fields.proc.pname": "<NA>",
+            "falco.output_fields.proc.cmdline": "sshd"
+          },
+          {
+            "events": 146,
+            "falco.rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "falco.output_fields.container.id": "1df4bcd65ee4",
+            "falco.output_fields.proc.name": "sshd",
+            "falco.output_fields.proc.pname": "sshd",
+            "falco.output_fields.proc.cmdline": "sshd"
+          },
+          {
+            "events": 144,
+            "falco.rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "falco.output_fields.container.id": "2c1e2ec93d17",
+            "falco.output_fields.proc.name": "sshd",
+            "falco.output_fields.proc.pname": "<NA>",
+            "falco.output_fields.proc.cmdline": "sshd"
+          },
+          {
+            "events": 128,
+            "falco.rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "falco.output_fields.container.id": "922f03f16a11",
+            "falco.output_fields.proc.name": "sshd",
+            "falco.output_fields.proc.pname": "<NA>",
+            "falco.output_fields.proc.cmdline": "sshd"
+          },
+          {
+            "events": 126,
+            "falco.rule": "Unexpected UDP Traffic",
+            "falco.output_fields.container.id": "ed96a85a7480",
+            "falco.output_fields.proc.name": "sshd",
+            "falco.output_fields.proc.pname": "sshd",
+            "falco.output_fields.proc.cmdline": "sshd -D -R"
+          },
+          {
+            "events": 126,
+            "falco.rule": "Read sensitive file untrusted",
+            "falco.output_fields.container.id": "host",
+            "falco.output_fields.proc.name": "9",
+            "falco.output_fields.proc.pname": "systemd",
+            "falco.output_fields.proc.cmdline": "9 --deserialize 132 --log-level info --log-target journal-or-kmsg"
+          },
+          {
+            "events": 120,
+            "falco.rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "falco.output_fields.container.id": "d1daf6f3b7c6",
+            "falco.output_fields.proc.name": "sshd",
+            "falco.output_fields.proc.pname": "<NA>",
+            "falco.output_fields.proc.cmdline": "sshd"
+          },
+          {
+            "events": 87,
+            "falco.rule": "Unexpected UDP Traffic",
+            "falco.output_fields.container.id": "ffbff1299702",
+            "falco.output_fields.proc.name": "sshd",
+            "falco.output_fields.proc.pname": "sshd",
+            "falco.output_fields.proc.cmdline": "sshd -D -R"
+          },
+          {
+            "events": 80,
+            "falco.rule": "Unexpected UDP Traffic",
+            "falco.output_fields.container.id": "d8fb0192a17f",
+            "falco.output_fields.proc.name": "sshd",
+            "falco.output_fields.proc.pname": "<NA>",
+            "falco.output_fields.proc.cmdline": "sshd -D -R"
+          },
+          {
+            "events": 76,
+            "falco.rule": "Unexpected UDP Traffic",
+            "falco.output_fields.container.id": "1df4bcd65ee4",
+            "falco.output_fields.proc.name": "sshd",
+            "falco.output_fields.proc.pname": "sshd",
+            "falco.output_fields.proc.cmdline": "sshd -D -R"
+          },
+          {
+            "events": 73,
+            "falco.rule": "Unexpected UDP Traffic",
+            "falco.output_fields.container.id": "2c1e2ec93d17",
+            "falco.output_fields.proc.name": "sshd",
+            "falco.output_fields.proc.pname": "<NA>",
+            "falco.output_fields.proc.cmdline": "sshd -D -R"
+          },
+          {
+            "events": 66,
+            "falco.rule": "Unexpected UDP Traffic",
+            "falco.output_fields.container.id": "922f03f16a11",
+            "falco.output_fields.proc.name": "sshd",
+            "falco.output_fields.proc.pname": "<NA>",
+            "falco.output_fields.proc.cmdline": "sshd -D -R"
+          },
+          {
+            "events": 60,
+            "falco.rule": "Unexpected UDP Traffic",
+            "falco.output_fields.container.id": "d1daf6f3b7c6",
+            "falco.output_fields.proc.name": "sshd",
+            "falco.output_fields.proc.pname": "<NA>",
+            "falco.output_fields.proc.cmdline": "sshd -D -R"
+          },
+          {
+            "events": 59,
+            "falco.rule": "Launch Suspicious Network Tool in Container",
+            "falco.output_fields.container.id": "d1daf6f3b7c6",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 db-1 22"
+          },
+          {
+            "events": 57,
+            "falco.rule": "Launch Suspicious Network Tool in Container",
+            "falco.output_fields.container.id": "1df4bcd65ee4",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.pname": "runuser",
+            "falco.output_fields.proc.cmdline": "nc -z 127.0.0.1 22"
+          },
+          {
+            "events": 57,
+            "falco.rule": "Launch Ingress Remote File Copy Tools in Container",
+            "falco.output_fields.container.id": "1df4bcd65ee4",
+            "falco.output_fields.proc.name": "curl",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "curl -sf -o /dev/null http://127.0.0.1/"
+          },
+          {
+            "events": 55,
+            "falco.rule": "Launch Suspicious Network Tool in Container",
+            "falco.output_fields.container.id": "ffbff1299702",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 jump-box-1 22"
+          },
+          {
+            "events": 54,
+            "falco.rule": "Launch Suspicious Network Tool in Container",
+            "falco.output_fields.container.id": "ffbff1299702",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.pname": "runuser",
+            "falco.output_fields.proc.cmdline": "nc -z 127.0.0.1 22"
+          },
+          {
+            "events": 54,
+            "falco.rule": "Launch Ingress Remote File Copy Tools in Container",
+            "falco.output_fields.container.id": "ffbff1299702",
+            "falco.output_fields.proc.name": "curl",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "curl -sf -o /dev/null http://127.0.0.1/"
+          },
+          {
+            "events": 51,
+            "falco.rule": "Launch Ingress Remote File Copy Tools in Container",
+            "falco.output_fields.container.id": "d8fb0192a17f",
+            "falco.output_fields.proc.name": "curl",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "curl -sf -o /dev/null http://127.0.0.1/"
+          },
+          {
+            "events": 51,
+            "falco.rule": "Launch Suspicious Network Tool in Container",
+            "falco.output_fields.container.id": "2c1e2ec93d17",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.pname": "runuser",
+            "falco.output_fields.proc.cmdline": "nc -z 127.0.0.1 22"
+          },
+          {
+            "events": 51,
+            "falco.rule": "Launch Ingress Remote File Copy Tools in Container",
+            "falco.output_fields.container.id": "2c1e2ec93d17",
+            "falco.output_fields.proc.name": "curl",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "curl -sf -o /dev/null http://127.0.0.1/"
+          },
+          {
+            "events": 49,
+            "falco.rule": "Launch Ingress Remote File Copy Tools in Container",
+            "falco.output_fields.container.id": "922f03f16a11",
+            "falco.output_fields.proc.name": "curl",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "curl -sf -o /dev/null http://127.0.0.1/"
+          },
+          {
+            "events": 49,
+            "falco.rule": "Launch Suspicious Network Tool in Container",
+            "falco.output_fields.container.id": "922f03f16a11",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.pname": "runuser",
+            "falco.output_fields.proc.cmdline": "nc -z 127.0.0.1 22"
+          },
+          {
+            "events": 49,
+            "falco.rule": "Launch Ingress Remote File Copy Tools in Container",
+            "falco.output_fields.container.id": "ed96a85a7480",
+            "falco.output_fields.proc.name": "curl",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "curl -sf -o /dev/null http://127.0.0.1/"
+          },
+          {
+            "events": 49,
+            "falco.rule": "Launch Suspicious Network Tool in Container",
+            "falco.output_fields.container.id": "ed96a85a7480",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.pname": "runuser",
+            "falco.output_fields.proc.cmdline": "nc -z 127.0.0.1 22"
+          },
+          {
+            "events": 47,
+            "falco.rule": "Launch Ingress Remote File Copy Tools in Container",
+            "falco.output_fields.container.id": "a36492b5172b",
+            "falco.output_fields.proc.name": "curl",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "curl -sf -o /dev/null http://127.0.0.1/"
+          },
+          {
+            "events": 47,
+            "falco.rule": "Launch Suspicious Network Tool in Container",
+            "falco.output_fields.container.id": "a36492b5172b",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.pname": "runuser",
+            "falco.output_fields.proc.cmdline": "nc -z 127.0.0.1 22"
+          },
+          {
+            "events": 42,
+            "falco.rule": "Launch Suspicious Network Tool in Container",
+            "falco.output_fields.container.id": "d8fb0192a17f",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 db-1 22"
+          },
+          {
+            "events": 38,
+            "falco.rule": "Launch Ingress Remote File Copy Tools in Container",
+            "falco.output_fields.container.id": "d1daf6f3b7c6",
+            "falco.output_fields.proc.name": "curl",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "curl -sf -o /dev/null http://127.0.0.1/"
+          },
+          {
+            "events": 22,
+            "falco.rule": "Launch Suspicious Network Tool in Container",
+            "falco.output_fields.container.id": "45388dd0bf3a",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 web-2 22"
+          },
+          {
+            "events": 19,
+            "falco.rule": "Launch Suspicious Network Tool in Container",
+            "falco.output_fields.container.id": "45388dd0bf3a",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 web-1 22"
+          },
+          {
+            "events": 16,
+            "falco.rule": "Launch Suspicious Network Tool in Container",
+            "falco.output_fields.container.id": "7e76d1cea7c4",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 web-1 22"
+          },
+          {
+            "events": 13,
+            "falco.rule": "Launch Suspicious Network Tool in Container",
+            "falco.output_fields.container.id": "7e76d1cea7c4",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 canary-1 22"
+          },
+          {
+            "events": 12,
+            "falco.rule": "Launch Suspicious Network Tool in Container",
+            "falco.output_fields.container.id": "ed96a85a7480",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 web-1 22"
+          },
+          {
+            "events": 12,
+            "falco.rule": "Launch Suspicious Network Tool in Container",
+            "falco.output_fields.container.id": "ed96a85a7480",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 web-2 22"
+          },
+          {
+            "events": 12,
+            "falco.rule": "Launch Suspicious Network Tool in Container",
+            "falco.output_fields.container.id": "ed96a85a7480",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 dev-ws-1 22"
+          },
+          {
+            "events": 11,
+            "falco.rule": "Launch Suspicious Network Tool in Container",
+            "falco.output_fields.container.id": "c58bf05facac",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 dev-ws-1 22"
+          },
+          {
+            "events": 11,
+            "falco.rule": "Launch Suspicious Network Tool in Container",
+            "falco.output_fields.container.id": "7e76d1cea7c4",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 office-ws-1 22"
+          },
+          {
+            "events": 10,
+            "falco.rule": "Launch Suspicious Network Tool in Container",
+            "falco.output_fields.container.id": "c58bf05facac",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 office-ws-1 22"
+          },
+          {
+            "events": 10,
+            "falco.rule": "Launch Suspicious Network Tool in Container",
+            "falco.output_fields.container.id": "c58bf05facac",
+            "falco.output_fields.proc.name": "nc",
+            "falco.output_fields.proc.pname": "bash",
+            "falco.output_fields.proc.cmdline": "nc -z -w1 office-ws-2 22"
+          }
+        ]
+      }
+    }
+  ]
+}

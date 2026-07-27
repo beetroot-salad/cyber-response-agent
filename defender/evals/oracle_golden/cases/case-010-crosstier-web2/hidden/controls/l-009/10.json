@@ -1,0 +1,172 @@
+{
+  "lead_id": "l-009",
+  "seq": 10,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T19:36:22.000Z",
+        "2026-07-12T20:36:22.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-12T19:36:22.000Z\" AND @timestamp < \"2026-07-12T20:36:22.000Z\"\n| WHERE host.name == \"web-2\"\n        AND message LIKE \"*Accepted*\"\n| STATS count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY user.name, source.ip",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-12T19:36:22.000Z\" AND @timestamp < \"2026-07-12T20:36:22.000Z\"\n| WHERE host.name == \"web-2\"\n        AND message LIKE \"*Accepted*\"\n| STATS count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY user.name, source.ip",
+        "columns": [
+          {
+            "name": "count",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "count": 7,
+            "first_seen": "2026-07-12T19:41:05.000Z",
+            "last_seen": "2026-07-12T19:41:05.000Z",
+            "user.name": "svc.config-mgmt",
+            "source.ip": "172.18.0.14"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T19:36:22.000Z",
+        "2026-07-05T20:36:22.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-05T19:36:22.000Z\" AND @timestamp < \"2026-07-05T20:36:22.000Z\"\n| WHERE host.name == \"web-2\"\n        AND message LIKE \"*Accepted*\"\n| STATS count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY user.name, source.ip",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-05T19:36:22.000Z\" AND @timestamp < \"2026-07-05T20:36:22.000Z\"\n| WHERE host.name == \"web-2\"\n        AND message LIKE \"*Accepted*\"\n| STATS count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY user.name, source.ip",
+        "columns": [
+          {
+            "name": "count",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "count": 7,
+            "first_seen": "2026-07-05T19:42:09.000Z",
+            "last_seen": "2026-07-05T19:42:09.000Z",
+            "user.name": "svc.deploy",
+            "source.ip": "172.18.0.20"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-28T19:36:22.000Z",
+        "2026-06-28T20:36:22.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-28T19:36:22.000Z\" AND @timestamp < \"2026-06-28T20:36:22.000Z\"\n| WHERE host.name == \"web-2\"\n        AND message LIKE \"*Accepted*\"\n| STATS count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY user.name, source.ip",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-28T19:36:22.000Z\" AND @timestamp < \"2026-06-28T20:36:22.000Z\"\n| WHERE host.name == \"web-2\"\n        AND message LIKE \"*Accepted*\"\n| STATS count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY user.name, source.ip",
+        "columns": [
+          {
+            "name": "count",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "count": 8,
+            "first_seen": "2026-06-28T20:22:09.000Z",
+            "last_seen": "2026-06-28T20:22:09.000Z",
+            "user.name": "svc.config-mgmt",
+            "source.ip": "172.18.0.20"
+          }
+        ]
+      }
+    }
+  ],
+  "attack_contribution": {
+    "window": [
+      "2026-07-26T20:06:02.000Z",
+      "2026-07-26T20:06:42.000Z"
+    ],
+    "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-26T20:06:02.000Z\" AND @timestamp < \"2026-07-26T20:06:42.000Z\"\n| WHERE host.name == \"web-2\"\n        AND message LIKE \"*Accepted*\"\n| STATS count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY user.name, source.ip",
+    "payload": {
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-26T20:06:02.000Z\" AND @timestamp < \"2026-07-26T20:06:42.000Z\"\n| WHERE host.name == \"web-2\"\n        AND message LIKE \"*Accepted*\"\n| STATS count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY user.name, source.ip",
+      "columns": [
+        {
+          "name": "count",
+          "type": "long"
+        },
+        {
+          "name": "first_seen",
+          "type": "date"
+        },
+        {
+          "name": "last_seen",
+          "type": "date"
+        },
+        {
+          "name": "user.name",
+          "type": "keyword"
+        },
+        {
+          "name": "source.ip",
+          "type": "ip"
+        }
+      ],
+      "row_count": 0,
+      "values": []
+    }
+  }
+}

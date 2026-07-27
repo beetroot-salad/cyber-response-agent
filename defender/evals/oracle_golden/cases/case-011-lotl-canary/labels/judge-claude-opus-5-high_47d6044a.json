@@ -1,0 +1,63 @@
+{
+  "judge": {
+    "model": "claude-opus-5",
+    "effort": "high",
+    "prompts_sha8": "47d6044a"
+  },
+  "leads": {
+    "l-001": {
+      "delta_kind": "undecidable",
+      "undecidable_reason": "payload-shape-unreadable",
+      "heterogeneous": null,
+      "evidence": "The lead contains exactly one query, `elastic.falco-alerts`, and its observed payload is marked `unreadable: true` \u2014 the capture never recorded the result, so it is not an empty result set and carries no evidence in either direction. The `baseline` array is likewise empty (`[]`), so there is no control window, no `window_live` flag, and no row counts to compare against. With zero readable rows on both sides, no surfaced field (falco.rule, priority, proc.name, proc.pname, proc.cmdline, user.name, loginuid, tty) can be examined for a distinction. The recorded STATS output of the falco-alerts ES|QL over 2026-07-27T09:34:35Z\u201309:54:35Z on canary-1, plus at least one live-window control of the same query string, would have settled it.",
+      "judge_model": "claude-opus-5",
+      "judge_effort": "high",
+      "cost_usd": 0.15665199999999999
+    },
+    "l-002": {
+      "delta_kind": "state-only",
+      "undecidable_reason": null,
+      "heterogeneous": null,
+      "evidence": "The lead's single query is `cmdb.host-trust-edges` with params `host: canary-1`, and the observed payload is one CMDB entity record (name `canary-1`, role `canary`, criticality `sandbox`, owner `team.sre`, `trust_edges_out: []`, and a two-entry `users` block for `svc.monitoring` and `svc.config-mgmt`), not an event stream. The `environment_notes` state_and_lookup_systems clause states explicitly that cmdb queries return current configuration or an entity record, carry no `@timestamp` bounds to move, and therefore have no control and no baseline-diff semantics. The empty `baseline` array is consistent with that \u2014 it is not a measured-but-empty control window, so no suppression or delta reading can be taken from it. With only one query in the lead and it being state-only, there is nothing to disagree with, so `heterogeneous` is null.",
+      "judge_model": "claude-opus-5",
+      "judge_effort": "high",
+      "cost_usd": 0.151235
+    },
+    "l-003": {
+      "delta_kind": "state-only",
+      "undecidable_reason": null,
+      "heterogeneous": null,
+      "evidence": "The lead contains a single query, `change-mgmt.active-changes`, with params `host: canary-1` and `at: 2026-07-27T09:44:35Z` \u2014 a change-management lookup, not an event stream with @timestamp bounds. `environment_notes.state_and_lookup_systems` explicitly lists change-mgmt alongside cmdb, identity and threat-intel as systems that return current configuration or an entity record and therefore carry no control window and no baseline-diff semantics. Consistent with that, `observed` seq 0 is an empty payload (`[]`, zero CR rows, i.e. no active change request covering canary-1 at that instant) and `baseline` is likewise empty with no window_live-bearing control. The empty result is a state answer, not a suppressed or absent stream, so the query and the lead are tagged `state-only`.",
+      "judge_model": "claude-opus-5",
+      "judge_effort": "high",
+      "cost_usd": 0.150921
+    },
+    "l-004": {
+      "delta_kind": "state-only",
+      "undecidable_reason": null,
+      "heterogeneous": false,
+      "evidence": "All five queries in this lead target the identity system (`identity.access-check`, `identity.user-authorization`, two `identity.positive-control` variants, and `identity.list-users`), which `environment_notes.state_and_lookup_systems` names explicitly as a lookup system returning an entity record or current configuration rather than an event stream, with no `@timestamp` bounds to move and therefore no control \u2014 hence the empty `baseline: []` is expected, not a missing measurement. The only recorded payload, seq 4, is a user-directory listing of `total: 16` records (sre.alice \u2026 ctr.kai), each carrying `username`, `email`, `first_name`, `last_name`, `enabled: true`, `realm_role` \u2014 a roster snapshot, not timestamped events; notably no `root` row appears among the 16. Seqs 0\u20133 are `unreadable: true` and carry no evidence either way, but that does not change the classification: state and lookup systems are tagged `state-only` regardless of whether their rows changed. No query here surfaces a baseline-diffable field, so no delta can be asserted or denied.",
+      "judge_model": "claude-opus-5",
+      "judge_effort": "high",
+      "cost_usd": 0.16687800000000003
+    },
+    "l-005": {
+      "delta_kind": "state-only",
+      "undecidable_reason": null,
+      "heterogeneous": false,
+      "evidence": "Both queries in this lead are `host-state` snapshots keyed only by `host: canary-1` \u2014 seq 0 returns a point-in-time `ps_output` forest with `captured_at: 2026-07-27T09:52:04Z`, and seq 1 returns the 26-line `/etc/passwd` entry list with `captured_at: 2026-07-27T09:52:36Z`. Neither carries @timestamp bounds that could be moved to a control window, and the `baseline` array is empty ([]) precisely because no time-shifted control exists for them. Per the environment notes on state and lookup systems, current-configuration and entity-record queries have no baseline-diff semantics, so both are tagged state-only regardless of content (the ps forest shows only tini/sshd/rsyslogd/cron/elastic-agent/scheduler.py plus the capturing `ps` itself, and passwd lists the standard system accounts plus sre.alice/ben/chen and svc.monitoring/config-mgmt). Both queries agree in kind, so heterogeneous is false.",
+      "judge_model": "claude-opus-5",
+      "judge_effort": "high",
+      "cost_usd": 0.055771999999999995
+    },
+    "l-006": {
+      "delta_kind": "state-only",
+      "undecidable_reason": null,
+      "heterogeneous": null,
+      "evidence": "The lead's single query `host-state.authorized-keys` (params host=canary-1, user=root) returns a host-state record \u2014 path `/root/.ssh/authorized_keys`, `captured_at: 2026-07-27T09:50:42Z`, and a 3-element `keys` array \u2014 not a timestamped event stream, and it carries no @timestamp bounds that could be moved, which is why `baseline` is an empty list rather than a control payload. Per `environment_notes.state_and_lookup_systems`, queries returning current configuration or an entity record have no baseline-diff semantics and are tagged `state-only` regardless of row content. The observed keys (three `ssh-rsa AAAAB3NzaC1yc2EAAAAD_fake_key_0_*_attacker attacker@elsewhere` entries) therefore cannot be scored as a delta here \u2014 there is no comparable window against which \"recently added\" could be measured from this payload alone. Only one query exists in the lead, so heterogeneity is null.",
+      "judge_model": "claude-opus-5",
+      "judge_effort": "high",
+      "cost_usd": 0.035094999999999994
+    }
+  }
+}

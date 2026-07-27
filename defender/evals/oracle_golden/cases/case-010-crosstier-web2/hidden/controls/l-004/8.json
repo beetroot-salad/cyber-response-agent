@@ -1,0 +1,108 @@
+{
+  "lead_id": "l-004",
+  "seq": 8,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-06-12T20:06:42.000Z",
+        "2026-07-12T20:06:42.000Z"
+      ],
+      "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-06-12T20:06:42.000Z\" AND @timestamp < \"2026-07-12T20:06:42.000Z\"\n        AND source.ip == \"172.18.0.12\"\n        AND destination.ip == \"172.18.0.5\"\n        AND destination.port == 22\n| STATS conn_count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n| LIMIT 5",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-06-12T20:06:42.000Z\" AND @timestamp < \"2026-07-12T20:06:42.000Z\"\n        AND source.ip == \"172.18.0.12\"\n        AND destination.ip == \"172.18.0.5\"\n        AND destination.port == 22\n| STATS conn_count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n| LIMIT 5",
+        "columns": [
+          {
+            "name": "conn_count",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "conn_count": 0,
+            "first_seen": null,
+            "last_seen": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-06-05T20:06:42.000Z",
+        "2026-07-05T20:06:42.000Z"
+      ],
+      "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-06-05T20:06:42.000Z\" AND @timestamp < \"2026-07-05T20:06:42.000Z\"\n        AND source.ip == \"172.18.0.12\"\n        AND destination.ip == \"172.18.0.5\"\n        AND destination.port == 22\n| STATS conn_count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n| LIMIT 5",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-06-05T20:06:42.000Z\" AND @timestamp < \"2026-07-05T20:06:42.000Z\"\n        AND source.ip == \"172.18.0.12\"\n        AND destination.ip == \"172.18.0.5\"\n        AND destination.port == 22\n| STATS conn_count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n| LIMIT 5",
+        "columns": [
+          {
+            "name": "conn_count",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "conn_count": 0,
+            "first_seen": null,
+            "last_seen": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-05-29T20:06:42.000Z",
+        "2026-06-28T20:06:42.000Z"
+      ],
+      "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-05-29T20:06:42.000Z\" AND @timestamp < \"2026-06-28T20:06:42.000Z\"\n        AND source.ip == \"172.18.0.12\"\n        AND destination.ip == \"172.18.0.5\"\n        AND destination.port == 22\n| STATS conn_count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n| LIMIT 5",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-05-29T20:06:42.000Z\" AND @timestamp < \"2026-06-28T20:06:42.000Z\"\n        AND source.ip == \"172.18.0.12\"\n        AND destination.ip == \"172.18.0.5\"\n        AND destination.port == 22\n| STATS conn_count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n| LIMIT 5",
+        "columns": [
+          {
+            "name": "conn_count",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "conn_count": 0,
+            "first_seen": null,
+            "last_seen": null
+          }
+        ]
+      }
+    }
+  ]
+}

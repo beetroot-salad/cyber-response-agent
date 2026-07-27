@@ -1,0 +1,465 @@
+{
+  "lead_id": "l-001",
+  "seq": 31,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T19:02:22.000Z",
+        "2026-07-12T20:02:22.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-12T19:02:22.000Z\" AND @timestamp < \"2026-07-12T20:02:22.000Z\"\n        AND host.name == \"web-1\"\n| STATS events = COUNT(*)\n        BY process.name, message, source.ip\n| SORT events DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-12T19:02:22.000Z\" AND @timestamp < \"2026-07-12T20:02:22.000Z\"\n        AND host.name == \"web-1\"\n| STATS events = COUNT(*)\n        BY process.name, message, source.ip\n| SORT events DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "process.name",
+            "type": "keyword"
+          },
+          {
+            "name": "message",
+            "type": "text"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          }
+        ],
+        "row_count": 20,
+        "values": [
+          {
+            "events": 154,
+            "process.name": "runuser",
+            "message": "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)",
+            "source.ip": null
+          },
+          {
+            "events": 154,
+            "process.name": "runuser",
+            "message": "pam_unix(runuser:session): session closed for user svc.monitoring",
+            "source.ip": null
+          },
+          {
+            "events": 63,
+            "process.name": "sshd",
+            "message": "error: kex_exchange_identification: Connection closed by remote host",
+            "source.ip": null
+          },
+          {
+            "events": 35,
+            "process.name": "runuser",
+            "message": "pam_unix(runuser:session): session opened for user svc.reports(uid=1004) by (uid=0)",
+            "source.ip": null
+          },
+          {
+            "events": 35,
+            "process.name": "runuser",
+            "message": "pam_unix(runuser:session): session closed for user svc.reports",
+            "source.ip": null
+          },
+          {
+            "events": 7,
+            "process.name": "sshd",
+            "message": "Received disconnect from 172.18.0.14 port 49772:11: disconnected by user",
+            "source.ip": null
+          },
+          {
+            "events": 7,
+            "process.name": "sshd",
+            "message": "pam_env(sshd:session): Unable to open env file: /etc/default/locale: No such file or directory",
+            "source.ip": null
+          },
+          {
+            "events": 7,
+            "process.name": "sshd",
+            "message": "pam_unix(sshd:session): session opened for user svc.config-mgmt(uid=1005) by (uid=0)",
+            "source.ip": null
+          },
+          {
+            "events": 7,
+            "process.name": "sshd",
+            "message": "Accepted password for svc.config-mgmt from 172.18.0.14 port 49772 ssh2",
+            "source.ip": "172.18.0.14"
+          },
+          {
+            "events": 7,
+            "process.name": "CRON",
+            "message": "pam_unix(cron:session): session opened for user root(uid=0) by (uid=0)",
+            "source.ip": null
+          },
+          {
+            "events": 7,
+            "process.name": "sshd",
+            "message": "Connection closed by 172.18.0.17 port 51468",
+            "source.ip": null
+          },
+          {
+            "events": 7,
+            "process.name": "sshd",
+            "message": "Connection closed by 172.18.0.17 port 33184",
+            "source.ip": null
+          },
+          {
+            "events": 7,
+            "process.name": "sshd",
+            "message": "Connection closed by 172.18.0.14 port 42524",
+            "source.ip": null
+          },
+          {
+            "events": 7,
+            "process.name": "sshd",
+            "message": "Disconnected from user svc.config-mgmt 172.18.0.14 port 49772",
+            "source.ip": null
+          },
+          {
+            "events": 7,
+            "process.name": "sshd",
+            "message": "pam_unix(sshd:session): session closed for user svc.config-mgmt",
+            "source.ip": null
+          },
+          {
+            "events": 7,
+            "process.name": "sshd",
+            "message": "Connection closed by 172.18.0.20 port 50570",
+            "source.ip": null
+          },
+          {
+            "events": 7,
+            "process.name": "sshd",
+            "message": "Connection closed by 172.18.0.17 port 38884",
+            "source.ip": null
+          },
+          {
+            "events": 7,
+            "process.name": "CRON",
+            "message": "pam_env(cron:session): Unable to open env file: /etc/default/locale: No such file or directory",
+            "source.ip": null
+          },
+          {
+            "events": 7,
+            "process.name": "sshd",
+            "message": "Connection closed by 172.18.0.22 port 40062",
+            "source.ip": null
+          },
+          {
+            "events": 7,
+            "process.name": "sshd",
+            "message": "Connection closed by 172.18.0.20 port 44430",
+            "source.ip": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T19:02:22.000Z",
+        "2026-07-05T20:02:22.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-05T19:02:22.000Z\" AND @timestamp < \"2026-07-05T20:02:22.000Z\"\n        AND host.name == \"web-1\"\n| STATS events = COUNT(*)\n        BY process.name, message, source.ip\n| SORT events DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-05T19:02:22.000Z\" AND @timestamp < \"2026-07-05T20:02:22.000Z\"\n        AND host.name == \"web-1\"\n| STATS events = COUNT(*)\n        BY process.name, message, source.ip\n| SORT events DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "process.name",
+            "type": "keyword"
+          },
+          {
+            "name": "message",
+            "type": "text"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          }
+        ],
+        "row_count": 20,
+        "values": [
+          {
+            "events": 126,
+            "process.name": "sshd",
+            "message": "error: kex_exchange_identification: Connection closed by remote host",
+            "source.ip": null
+          },
+          {
+            "events": 119,
+            "process.name": "runuser",
+            "message": "pam_unix(runuser:session): session closed for user svc.monitoring",
+            "source.ip": null
+          },
+          {
+            "events": 119,
+            "process.name": "runuser",
+            "message": "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)",
+            "source.ip": null
+          },
+          {
+            "events": 56,
+            "process.name": "runuser",
+            "message": "pam_unix(runuser:session): session closed for user svc.reports",
+            "source.ip": null
+          },
+          {
+            "events": 56,
+            "process.name": "runuser",
+            "message": "pam_unix(runuser:session): session opened for user svc.reports(uid=1004) by (uid=0)",
+            "source.ip": null
+          },
+          {
+            "events": 42,
+            "process.name": "sudo",
+            "message": "pam_unix(sudo:auth): conversation failed",
+            "source.ip": null
+          },
+          {
+            "events": 42,
+            "process.name": "sudo",
+            "message": "pam_unix(sudo:auth): auth could not identify password for [svc.deploy]",
+            "source.ip": null
+          },
+          {
+            "events": 42,
+            "process.name": "sshd",
+            "message": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=172.18.0.6  user=svc.reports",
+            "source.ip": "172.18.0.6"
+          },
+          {
+            "events": 14,
+            "process.name": "sshd",
+            "message": "pam_env(sshd:session): Unable to open env file: /etc/default/locale: No such file or directory",
+            "source.ip": null
+          },
+          {
+            "events": 14,
+            "process.name": "sshd",
+            "message": "pam_unix(sshd:session): session opened for user svc.deploy(uid=1006) by (uid=0)",
+            "source.ip": null
+          },
+          {
+            "events": 14,
+            "process.name": "sudo",
+            "message": "svc.deploy : a password is required ; PWD=/home/svc.deploy ; USER=root ; COMMAND=journalctl -u nginx -n 5",
+            "source.ip": null
+          },
+          {
+            "events": 14,
+            "process.name": "sshd",
+            "message": "pam_unix(sshd:session): session closed for user svc.deploy",
+            "source.ip": null
+          },
+          {
+            "events": 14,
+            "process.name": "sudo",
+            "message": "svc.deploy : a password is required ; PWD=/home/svc.deploy ; USER=root ; COMMAND=systemctl restart nginx",
+            "source.ip": null
+          },
+          {
+            "events": 14,
+            "process.name": "sudo",
+            "message": "svc.deploy : a password is required ; PWD=/home/svc.deploy ; USER=root ; COMMAND=/usr/bin/curl -fsS http://web-1/ -o /tmp/deploy.tgz",
+            "source.ip": null
+          },
+          {
+            "events": 7,
+            "process.name": "sshd",
+            "message": "Connection closed by 172.18.0.17 port 56562",
+            "source.ip": null
+          },
+          {
+            "events": 7,
+            "process.name": "sshd",
+            "message": "Accepted password for svc.deploy from 172.18.0.20 port 38838 ssh2",
+            "source.ip": "172.18.0.20"
+          },
+          {
+            "events": 7,
+            "process.name": "sshd",
+            "message": "Disconnected from user svc.deploy 172.18.0.20 port 38838",
+            "source.ip": null
+          },
+          {
+            "events": 7,
+            "process.name": "sshd",
+            "message": "Connection closed by 172.18.0.17 port 57850",
+            "source.ip": null
+          },
+          {
+            "events": 7,
+            "process.name": "sshd",
+            "message": "Received disconnect from 172.18.0.20 port 38838:11: disconnected by user",
+            "source.ip": null
+          },
+          {
+            "events": 7,
+            "process.name": "sshd",
+            "message": "Connection closed by 172.18.0.22 port 59428",
+            "source.ip": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-28T19:02:22.000Z",
+        "2026-06-28T20:02:22.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-28T19:02:22.000Z\" AND @timestamp < \"2026-06-28T20:02:22.000Z\"\n        AND host.name == \"web-1\"\n| STATS events = COUNT(*)\n        BY process.name, message, source.ip\n| SORT events DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-28T19:02:22.000Z\" AND @timestamp < \"2026-06-28T20:02:22.000Z\"\n        AND host.name == \"web-1\"\n| STATS events = COUNT(*)\n        BY process.name, message, source.ip\n| SORT events DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "process.name",
+            "type": "keyword"
+          },
+          {
+            "name": "message",
+            "type": "text"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          }
+        ],
+        "row_count": 20,
+        "values": [
+          {
+            "events": 152,
+            "process.name": "sshd",
+            "message": "error: kex_exchange_identification: Connection closed by remote host",
+            "source.ip": null
+          },
+          {
+            "events": 136,
+            "process.name": "runuser",
+            "message": "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)",
+            "source.ip": null
+          },
+          {
+            "events": 136,
+            "process.name": "runuser",
+            "message": "pam_unix(runuser:session): session closed for user svc.monitoring",
+            "source.ip": null
+          },
+          {
+            "events": 80,
+            "process.name": "runuser",
+            "message": "pam_unix(runuser:session): session closed for user svc.reports",
+            "source.ip": null
+          },
+          {
+            "events": 80,
+            "process.name": "runuser",
+            "message": "pam_unix(runuser:session): session opened for user svc.reports(uid=1004) by (uid=0)",
+            "source.ip": null
+          },
+          {
+            "events": 8,
+            "process.name": "sshd",
+            "message": "Connection closed by 172.18.0.9 port 55560",
+            "source.ip": null
+          },
+          {
+            "events": 8,
+            "process.name": "sshd",
+            "message": "Connection closed by 172.18.0.19 port 47622",
+            "source.ip": null
+          },
+          {
+            "events": 8,
+            "process.name": "sshd",
+            "message": "Connection closed by 172.18.0.9 port 45634",
+            "source.ip": null
+          },
+          {
+            "events": 8,
+            "process.name": "sshd",
+            "message": "Connection closed by 172.18.0.19 port 35994",
+            "source.ip": null
+          },
+          {
+            "events": 8,
+            "process.name": "CRON",
+            "message": "pam_env(cron:session): Unable to open env file: /etc/default/locale: No such file or directory",
+            "source.ip": null
+          },
+          {
+            "events": 8,
+            "process.name": "sshd",
+            "message": "Connection closed by 172.18.0.9 port 46062",
+            "source.ip": null
+          },
+          {
+            "events": 8,
+            "process.name": "sshd",
+            "message": "Connection closed by 172.18.0.9 port 48230",
+            "source.ip": null
+          },
+          {
+            "events": 8,
+            "process.name": "sshd",
+            "message": "Connection closed by 172.18.0.21 port 49016",
+            "source.ip": null
+          },
+          {
+            "events": 8,
+            "process.name": "sshd",
+            "message": "Connection closed by 172.18.0.21 port 45298",
+            "source.ip": null
+          },
+          {
+            "events": 8,
+            "process.name": "sshd",
+            "message": "Connection closed by 172.18.0.21 port 49334",
+            "source.ip": null
+          },
+          {
+            "events": 8,
+            "process.name": "sshd",
+            "message": "Connection closed by 172.18.0.19 port 39366",
+            "source.ip": null
+          },
+          {
+            "events": 8,
+            "process.name": "sshd",
+            "message": "Connection closed by 172.18.0.21 port 34232",
+            "source.ip": null
+          },
+          {
+            "events": 8,
+            "process.name": "sshd",
+            "message": "Connection closed by 172.18.0.9 port 34546",
+            "source.ip": null
+          },
+          {
+            "events": 8,
+            "process.name": "sshd",
+            "message": "Connection closed by 172.18.0.20 port 57074",
+            "source.ip": null
+          },
+          {
+            "events": 8,
+            "process.name": "sshd",
+            "message": "Connection closed by 172.18.0.20 port 58498",
+            "source.ip": null
+          }
+        ]
+      }
+    }
+  ]
+}

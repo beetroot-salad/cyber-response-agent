@@ -1,0 +1,161 @@
+{
+  "lead_id": "l-008",
+  "seq": 0,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-06T09:59:11.998Z",
+        "2026-07-13T09:59:11.998Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-06T09:59:11.998Z\" AND @timestamp < \"2026-07-13T09:59:11.998Z\"\n        AND user.name == \"svc.config-mgmt\"\n        AND host.name == \"office-ws-2\"\n        AND event.outcome IS NOT NULL\n| STATS accepted   = COUNT(*) WHERE event.outcome == \"success\",\n        failed     = COUNT(*) WHERE event.outcome == \"failure\",\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY auth_method = CASE(message LIKE \"*publickey*\", \"publickey\",\n                              message LIKE \"*password*\",  \"password\", \"other\"),\n           source.ip\n| SORT accepted DESC, failed DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-06T09:59:11.998Z\" AND @timestamp < \"2026-07-13T09:59:11.998Z\"\n        AND user.name == \"svc.config-mgmt\"\n        AND host.name == \"office-ws-2\"\n        AND event.outcome IS NOT NULL\n| STATS accepted   = COUNT(*) WHERE event.outcome == \"success\",\n        failed     = COUNT(*) WHERE event.outcome == \"failure\",\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY auth_method = CASE(message LIKE \"*publickey*\", \"publickey\",\n                              message LIKE \"*password*\",  \"password\", \"other\"),\n           source.ip\n| SORT accepted DESC, failed DESC",
+        "columns": [
+          {
+            "name": "accepted",
+            "type": "long"
+          },
+          {
+            "name": "failed",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "auth_method",
+            "type": "keyword"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "accepted": 2376,
+            "failed": 0,
+            "first_seen": "2026-07-06T09:59:31.052Z",
+            "last_seen": "2026-07-13T07:56:09.442Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.14"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-06-29T09:59:11.998Z",
+        "2026-07-06T09:59:11.998Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-29T09:59:11.998Z\" AND @timestamp < \"2026-07-06T09:59:11.998Z\"\n        AND user.name == \"svc.config-mgmt\"\n        AND host.name == \"office-ws-2\"\n        AND event.outcome IS NOT NULL\n| STATS accepted   = COUNT(*) WHERE event.outcome == \"success\",\n        failed     = COUNT(*) WHERE event.outcome == \"failure\",\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY auth_method = CASE(message LIKE \"*publickey*\", \"publickey\",\n                              message LIKE \"*password*\",  \"password\", \"other\"),\n           source.ip\n| SORT accepted DESC, failed DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-29T09:59:11.998Z\" AND @timestamp < \"2026-07-06T09:59:11.998Z\"\n        AND user.name == \"svc.config-mgmt\"\n        AND host.name == \"office-ws-2\"\n        AND event.outcome IS NOT NULL\n| STATS accepted   = COUNT(*) WHERE event.outcome == \"success\",\n        failed     = COUNT(*) WHERE event.outcome == \"failure\",\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY auth_method = CASE(message LIKE \"*publickey*\", \"publickey\",\n                              message LIKE \"*password*\",  \"password\", \"other\"),\n           source.ip\n| SORT accepted DESC, failed DESC",
+        "columns": [
+          {
+            "name": "accepted",
+            "type": "long"
+          },
+          {
+            "name": "failed",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "auth_method",
+            "type": "keyword"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          }
+        ],
+        "row_count": 2,
+        "values": [
+          {
+            "accepted": 1584,
+            "failed": 0,
+            "first_seen": "2026-06-29T10:02:35.768Z",
+            "last_seen": "2026-07-02T01:23:08.758Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.20"
+          },
+          {
+            "accepted": 1280,
+            "failed": 0,
+            "first_seen": "2026-07-02T08:05:43.996Z",
+            "last_seen": "2026-07-06T09:54:27.912Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.14"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-22T09:59:11.998Z",
+        "2026-06-29T09:59:11.998Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-22T09:59:11.998Z\" AND @timestamp < \"2026-06-29T09:59:11.998Z\"\n        AND user.name == \"svc.config-mgmt\"\n        AND host.name == \"office-ws-2\"\n        AND event.outcome IS NOT NULL\n| STATS accepted   = COUNT(*) WHERE event.outcome == \"success\",\n        failed     = COUNT(*) WHERE event.outcome == \"failure\",\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY auth_method = CASE(message LIKE \"*publickey*\", \"publickey\",\n                              message LIKE \"*password*\",  \"password\", \"other\"),\n           source.ip\n| SORT accepted DESC, failed DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-22T09:59:11.998Z\" AND @timestamp < \"2026-06-29T09:59:11.998Z\"\n        AND user.name == \"svc.config-mgmt\"\n        AND host.name == \"office-ws-2\"\n        AND event.outcome IS NOT NULL\n| STATS accepted   = COUNT(*) WHERE event.outcome == \"success\",\n        failed     = COUNT(*) WHERE event.outcome == \"failure\",\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY auth_method = CASE(message LIKE \"*publickey*\", \"publickey\",\n                              message LIKE \"*password*\",  \"password\", \"other\"),\n           source.ip\n| SORT accepted DESC, failed DESC",
+        "columns": [
+          {
+            "name": "accepted",
+            "type": "long"
+          },
+          {
+            "name": "failed",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "auth_method",
+            "type": "keyword"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "accepted": 2601,
+            "failed": 0,
+            "first_seen": "2026-06-22T10:30:46.847Z",
+            "last_seen": "2026-06-29T09:54:03.043Z",
+            "auth_method": "password",
+            "source.ip": "172.18.0.20"
+          }
+        ]
+      }
+    }
+  ]
+}

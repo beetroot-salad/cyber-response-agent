@@ -1,0 +1,429 @@
+{
+  "lead_id": "l-009",
+  "seq": 3,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T19:40:00.000Z",
+        "2026-07-12T20:40:00.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-12T19:40:00.000Z\" AND @timestamp < \"2026-07-12T20:40:00.000Z\"\n        AND host.name == \"web-2\"\n| STATS event_count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY process.name, event.outcome, user.name, source.ip\n| SORT event_count DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-12T19:40:00.000Z\" AND @timestamp < \"2026-07-12T20:40:00.000Z\"\n        AND host.name == \"web-2\"\n| STATS event_count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY process.name, event.outcome, user.name, source.ip\n| SORT event_count DESC",
+        "columns": [
+          {
+            "name": "event_count",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "process.name",
+            "type": "keyword"
+          },
+          {
+            "name": "event.outcome",
+            "type": "keyword"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          }
+        ],
+        "row_count": 10,
+        "values": [
+          {
+            "event_count": 301,
+            "first_seen": "2026-07-12T19:40:58.000Z",
+            "last_seen": "2026-07-12T20:39:01.000Z",
+            "process.name": "sshd",
+            "event.outcome": null,
+            "user.name": null,
+            "source.ip": null
+          },
+          {
+            "event_count": 210,
+            "first_seen": "2026-07-12T19:40:56.000Z",
+            "last_seen": "2026-07-12T20:38:35.000Z",
+            "process.name": "runuser",
+            "event.outcome": null,
+            "user.name": "",
+            "source.ip": null
+          },
+          {
+            "event_count": 182,
+            "first_seen": "2026-07-12T19:40:56.000Z",
+            "last_seen": "2026-07-12T20:38:08.000Z",
+            "process.name": "runuser",
+            "event.outcome": null,
+            "user.name": "svc.monitoring",
+            "source.ip": null
+          },
+          {
+            "event_count": 28,
+            "first_seen": "2026-07-12T19:47:00.000Z",
+            "last_seen": "2026-07-12T20:38:35.000Z",
+            "process.name": "runuser",
+            "event.outcome": null,
+            "user.name": "svc.reports",
+            "source.ip": null
+          },
+          {
+            "event_count": 7,
+            "first_seen": "2026-07-12T20:17:01.000Z",
+            "last_seen": "2026-07-12T20:17:01.000Z",
+            "process.name": "CRON",
+            "event.outcome": null,
+            "user.name": "",
+            "source.ip": null
+          },
+          {
+            "event_count": 7,
+            "first_seen": "2026-07-12T20:17:01.000Z",
+            "last_seen": "2026-07-12T20:17:01.000Z",
+            "process.name": "CRON",
+            "event.outcome": null,
+            "user.name": "root",
+            "source.ip": null
+          },
+          {
+            "event_count": 7,
+            "first_seen": "2026-07-12T19:41:05.000Z",
+            "last_seen": "2026-07-12T19:41:05.000Z",
+            "process.name": "sshd",
+            "event.outcome": null,
+            "user.name": "svc.config-mgmt",
+            "source.ip": null
+          },
+          {
+            "event_count": 7,
+            "first_seen": "2026-07-12T19:41:05.000Z",
+            "last_seen": "2026-07-12T19:41:05.000Z",
+            "process.name": "sshd",
+            "event.outcome": null,
+            "user.name": "",
+            "source.ip": null
+          },
+          {
+            "event_count": 7,
+            "first_seen": "2026-07-12T19:41:05.000Z",
+            "last_seen": "2026-07-12T19:41:05.000Z",
+            "process.name": "sshd",
+            "event.outcome": "success",
+            "user.name": "svc.config-mgmt",
+            "source.ip": "172.18.0.14"
+          },
+          {
+            "event_count": 7,
+            "first_seen": "2026-07-12T20:17:01.000Z",
+            "last_seen": "2026-07-12T20:17:01.000Z",
+            "process.name": "CRON",
+            "event.outcome": null,
+            "user.name": null,
+            "source.ip": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T19:40:00.000Z",
+        "2026-07-05T20:40:00.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-05T19:40:00.000Z\" AND @timestamp < \"2026-07-05T20:40:00.000Z\"\n        AND host.name == \"web-2\"\n| STATS event_count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY process.name, event.outcome, user.name, source.ip\n| SORT event_count DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-05T19:40:00.000Z\" AND @timestamp < \"2026-07-05T20:40:00.000Z\"\n        AND host.name == \"web-2\"\n| STATS event_count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY process.name, event.outcome, user.name, source.ip\n| SORT event_count DESC",
+        "columns": [
+          {
+            "name": "event_count",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "process.name",
+            "type": "keyword"
+          },
+          {
+            "name": "event.outcome",
+            "type": "keyword"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          }
+        ],
+        "row_count": 12,
+        "values": [
+          {
+            "event_count": 203,
+            "first_seen": "2026-07-05T19:40:58.000Z",
+            "last_seen": "2026-07-05T20:39:24.000Z",
+            "process.name": "runuser",
+            "event.outcome": null,
+            "user.name": "",
+            "source.ip": null
+          },
+          {
+            "event_count": 203,
+            "first_seen": "2026-07-05T19:42:09.000Z",
+            "last_seen": "2026-07-05T20:38:49.000Z",
+            "process.name": "sshd",
+            "event.outcome": null,
+            "user.name": null,
+            "source.ip": null
+          },
+          {
+            "event_count": 133,
+            "first_seen": "2026-07-05T19:40:58.000Z",
+            "last_seen": "2026-07-05T20:39:24.000Z",
+            "process.name": "runuser",
+            "event.outcome": null,
+            "user.name": "svc.monitoring",
+            "source.ip": null
+          },
+          {
+            "event_count": 70,
+            "first_seen": "2026-07-05T19:43:05.000Z",
+            "last_seen": "2026-07-05T20:34:32.000Z",
+            "process.name": "runuser",
+            "event.outcome": null,
+            "user.name": "svc.reports",
+            "source.ip": null
+          },
+          {
+            "event_count": 42,
+            "first_seen": "2026-07-05T19:42:10.000Z",
+            "last_seen": "2026-07-05T19:42:10.000Z",
+            "process.name": "sudo",
+            "event.outcome": "success",
+            "user.name": null,
+            "source.ip": null
+          },
+          {
+            "event_count": 21,
+            "first_seen": "2026-07-05T19:42:10.000Z",
+            "last_seen": "2026-07-05T19:42:10.000Z",
+            "process.name": "sudo",
+            "event.outcome": null,
+            "user.name": null,
+            "source.ip": null
+          },
+          {
+            "event_count": 7,
+            "first_seen": "2026-07-05T20:17:01.000Z",
+            "last_seen": "2026-07-05T20:17:01.000Z",
+            "process.name": "CRON",
+            "event.outcome": null,
+            "user.name": "root",
+            "source.ip": null
+          },
+          {
+            "event_count": 7,
+            "first_seen": "2026-07-05T19:42:09.000Z",
+            "last_seen": "2026-07-05T19:42:09.000Z",
+            "process.name": "sshd",
+            "event.outcome": null,
+            "user.name": "",
+            "source.ip": null
+          },
+          {
+            "event_count": 7,
+            "first_seen": "2026-07-05T20:17:01.000Z",
+            "last_seen": "2026-07-05T20:17:01.000Z",
+            "process.name": "CRON",
+            "event.outcome": null,
+            "user.name": "",
+            "source.ip": null
+          },
+          {
+            "event_count": 7,
+            "first_seen": "2026-07-05T19:42:09.000Z",
+            "last_seen": "2026-07-05T19:42:09.000Z",
+            "process.name": "sshd",
+            "event.outcome": "success",
+            "user.name": "svc.deploy",
+            "source.ip": "172.18.0.20"
+          },
+          {
+            "event_count": 7,
+            "first_seen": "2026-07-05T19:42:10.000Z",
+            "last_seen": "2026-07-05T19:42:10.000Z",
+            "process.name": "sshd",
+            "event.outcome": null,
+            "user.name": "svc.deploy",
+            "source.ip": null
+          },
+          {
+            "event_count": 7,
+            "first_seen": "2026-07-05T20:17:01.000Z",
+            "last_seen": "2026-07-05T20:17:01.000Z",
+            "process.name": "CRON",
+            "event.outcome": null,
+            "user.name": null,
+            "source.ip": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-28T19:40:00.000Z",
+        "2026-06-28T20:40:00.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-28T19:40:00.000Z\" AND @timestamp < \"2026-06-28T20:40:00.000Z\"\n        AND host.name == \"web-2\"\n| STATS event_count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY process.name, event.outcome, user.name, source.ip\n| SORT event_count DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-28T19:40:00.000Z\" AND @timestamp < \"2026-06-28T20:40:00.000Z\"\n        AND host.name == \"web-2\"\n| STATS event_count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY process.name, event.outcome, user.name, source.ip\n| SORT event_count DESC",
+        "columns": [
+          {
+            "name": "event_count",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "process.name",
+            "type": "keyword"
+          },
+          {
+            "name": "event.outcome",
+            "type": "keyword"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          }
+        ],
+        "row_count": 10,
+        "values": [
+          {
+            "event_count": 184,
+            "first_seen": "2026-06-28T19:45:13.000Z",
+            "last_seen": "2026-06-28T20:36:40.000Z",
+            "process.name": "sshd",
+            "event.outcome": null,
+            "user.name": null,
+            "source.ip": null
+          },
+          {
+            "event_count": 176,
+            "first_seen": "2026-06-28T19:42:43.000Z",
+            "last_seen": "2026-06-28T20:38:14.000Z",
+            "process.name": "runuser",
+            "event.outcome": null,
+            "user.name": "",
+            "source.ip": null
+          },
+          {
+            "event_count": 136,
+            "first_seen": "2026-06-28T19:42:43.000Z",
+            "last_seen": "2026-06-28T20:36:28.000Z",
+            "process.name": "runuser",
+            "event.outcome": null,
+            "user.name": "svc.monitoring",
+            "source.ip": null
+          },
+          {
+            "event_count": 40,
+            "first_seen": "2026-06-28T19:53:52.000Z",
+            "last_seen": "2026-06-28T20:38:14.000Z",
+            "process.name": "runuser",
+            "event.outcome": null,
+            "user.name": "svc.reports",
+            "source.ip": null
+          },
+          {
+            "event_count": 8,
+            "first_seen": "2026-06-28T20:22:09.000Z",
+            "last_seen": "2026-06-28T20:22:09.000Z",
+            "process.name": "sshd",
+            "event.outcome": null,
+            "user.name": "",
+            "source.ip": null
+          },
+          {
+            "event_count": 8,
+            "first_seen": "2026-06-28T20:22:09.000Z",
+            "last_seen": "2026-06-28T20:22:09.000Z",
+            "process.name": "sshd",
+            "event.outcome": null,
+            "user.name": "svc.config-mgmt",
+            "source.ip": null
+          },
+          {
+            "event_count": 8,
+            "first_seen": "2026-06-28T20:17:01.000Z",
+            "last_seen": "2026-06-28T20:17:01.000Z",
+            "process.name": "CRON",
+            "event.outcome": null,
+            "user.name": "root",
+            "source.ip": null
+          },
+          {
+            "event_count": 8,
+            "first_seen": "2026-06-28T20:17:01.000Z",
+            "last_seen": "2026-06-28T20:17:01.000Z",
+            "process.name": "CRON",
+            "event.outcome": null,
+            "user.name": "",
+            "source.ip": null
+          },
+          {
+            "event_count": 8,
+            "first_seen": "2026-06-28T20:17:01.000Z",
+            "last_seen": "2026-06-28T20:17:01.000Z",
+            "process.name": "CRON",
+            "event.outcome": null,
+            "user.name": null,
+            "source.ip": null
+          },
+          {
+            "event_count": 8,
+            "first_seen": "2026-06-28T20:22:09.000Z",
+            "last_seen": "2026-06-28T20:22:09.000Z",
+            "process.name": "sshd",
+            "event.outcome": "success",
+            "user.name": "svc.config-mgmt",
+            "source.ip": "172.18.0.20"
+          }
+        ]
+      }
+    }
+  ]
+}

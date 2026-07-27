@@ -1,0 +1,45 @@
+# Append-only record of held-out results (#711 AC 2).
+#
+# A held-out case is scored ONCE per oracle tag. The result is appended here with
+# the sha256 of its `scores/<tag>.json`, and `validate_cases.py` fails if that
+# file ever stops matching — so a rewritten result, a deleted one, or a second run
+# kept under the same tag are all detected. To record a new oracle version, add a
+# NEW tag; never re-run an existing one for a better number.
+#
+# What this does NOT do, stated plainly rather than implied: it cannot stop anyone
+# reading a held-out case while editing `oracle/prompt.md`. The case tree is
+# readable by anything with repo access, and unlike the defender's held-out nets
+# there is no process boundary here to attach a guard to. Enforcement of THAT is
+# review, and `defender/docs/oracle-calibration.md` says so.
+entries:
+- case: case-009-bruteforce-baseline-id
+  tag: glm-5.2_effort-none_prompt-711
+  sha256: 6fcf8a9e50bb4a0132e5a855d835facf365eed58bd816ff8c74938edc3fb685d
+  recorded: '2026-07-26'
+  retired: The case's story was rendered by a pre-fix story_from_run.py that included the catalog's static
+    description, which names the scenario's DEFAULT target. So the oracle was handed one input saying
+    the target was db-1 (the resolved fact) and canary-1 (the description). Its 3/6 measures that contradiction,
+    not the oracle. The case is removed from cases/; this entry stays because a held-out result is never
+    silently unmade -- retiring one is a recorded act.
+- case: case-005-cross-tier-probe-db1
+  tag: glm-5.2_effort-none_prompt-711
+  sha256: 5ee49ccfc99dad7ffebaa022566e8d5934b43c9d026faa3f3769d3036cb0dbe0
+  recorded: '2026-07-26'
+  retired: The scorer that produced it was replaced by the two-pass judge (#711). That artifact graded
+    the projection against `expected.yaml`'s hand-derived four-way class; the contract is now the judge's
+    own measurement of the telemetry. `class_match` over a class the labels asserted is not a weaker version
+    of `faithful` over a delta that was measured -- it is a different question, so the number is not restated
+    or carried forward. case-005 is re-scored under the next entry's tag, which names the judge that produced
+    it. This entry stays because a held-out result is never silently unmade.
+- case: case-005-cross-tier-probe-db1
+  tag: glm-5.2_effort-none_prompt-711__judge-claude-opus-5-high_47d6044a
+  sha256: 5650ba7deab451d792bc6d968de53d5f4f8e70ad53c8f8fd6b1b1e959f659390
+  recorded: '2026-07-27'
+- case: case-008-bruteforce-web2
+  tag: glm-5.2_effort-none_prompt-711__judge-claude-opus-5-high_47d6044a
+  sha256: 9a942287bbb9eea5ab9bdb300534f509078af6837aab019bb35f4c55a0d8d946
+  recorded: '2026-07-27'
+- case: case-010-crosstier-web2
+  tag: glm-5.2_effort-none_prompt-711__judge-claude-opus-5-high_47d6044a
+  sha256: ed494843fea12f020dfd9a7e38522b321fb0b559917bd44a552773c5b18c6b66
+  recorded: '2026-07-27'

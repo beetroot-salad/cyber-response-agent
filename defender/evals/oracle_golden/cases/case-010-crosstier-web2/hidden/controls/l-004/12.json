@@ -1,0 +1,198 @@
+{
+  "lead_id": "l-004",
+  "seq": 12,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-06-12T20:06:42.000Z",
+        "2026-07-12T20:06:42.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-12T20:06:42.000Z\" AND @timestamp < \"2026-07-12T20:06:42.000Z\"\n        AND host.name == \"web-2\"\n        AND event.outcome IS NOT NULL\n| STATS accepted = COUNT(*) WHERE event.outcome == \"success\",\n        failed   = COUNT(*) WHERE event.outcome == \"failure\"\n        BY user.name\n| SORT accepted DESC, failed DESC\n| LIMIT 50",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-12T20:06:42.000Z\" AND @timestamp < \"2026-07-12T20:06:42.000Z\"\n        AND host.name == \"web-2\"\n        AND event.outcome IS NOT NULL\n| STATS accepted = COUNT(*) WHERE event.outcome == \"success\",\n        failed   = COUNT(*) WHERE event.outcome == \"failure\"\n        BY user.name\n| SORT accepted DESC, failed DESC\n| LIMIT 50",
+        "columns": [
+          {
+            "name": "accepted",
+            "type": "long"
+          },
+          {
+            "name": "failed",
+            "type": "long"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 7,
+        "values": [
+          {
+            "accepted": 28374,
+            "failed": 0,
+            "user.name": null
+          },
+          {
+            "accepted": 10312,
+            "failed": 0,
+            "user.name": "svc.config-mgmt"
+          },
+          {
+            "accepted": 4400,
+            "failed": 0,
+            "user.name": "svc.deploy"
+          },
+          {
+            "accepted": 1561,
+            "failed": 0,
+            "user.name": "sre.ben"
+          },
+          {
+            "accepted": 1549,
+            "failed": 0,
+            "user.name": "sre.chen"
+          },
+          {
+            "accepted": 1399,
+            "failed": 0,
+            "user.name": "sre.alice"
+          },
+          {
+            "accepted": 0,
+            "failed": 29040,
+            "user.name": "svc.reports"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-06-05T20:06:42.000Z",
+        "2026-07-05T20:06:42.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-05T20:06:42.000Z\" AND @timestamp < \"2026-07-05T20:06:42.000Z\"\n        AND host.name == \"web-2\"\n        AND event.outcome IS NOT NULL\n| STATS accepted = COUNT(*) WHERE event.outcome == \"success\",\n        failed   = COUNT(*) WHERE event.outcome == \"failure\"\n        BY user.name\n| SORT accepted DESC, failed DESC\n| LIMIT 50",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-05T20:06:42.000Z\" AND @timestamp < \"2026-07-05T20:06:42.000Z\"\n        AND host.name == \"web-2\"\n        AND event.outcome IS NOT NULL\n| STATS accepted = COUNT(*) WHERE event.outcome == \"success\",\n        failed   = COUNT(*) WHERE event.outcome == \"failure\"\n        BY user.name\n| SORT accepted DESC, failed DESC\n| LIMIT 50",
+        "columns": [
+          {
+            "name": "accepted",
+            "type": "long"
+          },
+          {
+            "name": "failed",
+            "type": "long"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 7,
+        "values": [
+          {
+            "accepted": 33712,
+            "failed": 0,
+            "user.name": null
+          },
+          {
+            "accepted": 10062,
+            "failed": 0,
+            "user.name": "svc.config-mgmt"
+          },
+          {
+            "accepted": 5257,
+            "failed": 0,
+            "user.name": "svc.deploy"
+          },
+          {
+            "accepted": 1700,
+            "failed": 0,
+            "user.name": "sre.chen"
+          },
+          {
+            "accepted": 1643,
+            "failed": 0,
+            "user.name": "sre.alice"
+          },
+          {
+            "accepted": 1499,
+            "failed": 0,
+            "user.name": "sre.ben"
+          },
+          {
+            "accepted": 0,
+            "failed": 33696,
+            "user.name": "svc.reports"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-05-29T20:06:42.000Z",
+        "2026-06-28T20:06:42.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-05-29T20:06:42.000Z\" AND @timestamp < \"2026-06-28T20:06:42.000Z\"\n        AND host.name == \"web-2\"\n        AND event.outcome IS NOT NULL\n| STATS accepted = COUNT(*) WHERE event.outcome == \"success\",\n        failed   = COUNT(*) WHERE event.outcome == \"failure\"\n        BY user.name\n| SORT accepted DESC, failed DESC\n| LIMIT 50",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-05-29T20:06:42.000Z\" AND @timestamp < \"2026-06-28T20:06:42.000Z\"\n        AND host.name == \"web-2\"\n        AND event.outcome IS NOT NULL\n| STATS accepted = COUNT(*) WHERE event.outcome == \"success\",\n        failed   = COUNT(*) WHERE event.outcome == \"failure\"\n        BY user.name\n| SORT accepted DESC, failed DESC\n| LIMIT 50",
+        "columns": [
+          {
+            "name": "accepted",
+            "type": "long"
+          },
+          {
+            "name": "failed",
+            "type": "long"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 7,
+        "values": [
+          {
+            "accepted": 40592,
+            "failed": 0,
+            "user.name": null
+          },
+          {
+            "accepted": 13260,
+            "failed": 0,
+            "user.name": "svc.config-mgmt"
+          },
+          {
+            "accepted": 6348,
+            "failed": 0,
+            "user.name": "svc.deploy"
+          },
+          {
+            "accepted": 2388,
+            "failed": 0,
+            "user.name": "sre.chen"
+          },
+          {
+            "accepted": 2251,
+            "failed": 0,
+            "user.name": "sre.alice"
+          },
+          {
+            "accepted": 2240,
+            "failed": 0,
+            "user.name": "sre.ben"
+          },
+          {
+            "accepted": 0,
+            "failed": 46008,
+            "user.name": "svc.reports"
+          }
+        ]
+      }
+    }
+  ]
+}

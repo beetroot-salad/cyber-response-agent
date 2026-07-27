@@ -1,0 +1,150 @@
+{
+  "lead_id": "l-001",
+  "seq": 0,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T18:35:57.000Z",
+        "2026-07-12T19:35:57.000Z"
+      ],
+      "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-12T18:35:57.000Z\" AND @timestamp < \"2026-07-12T19:35:57.000Z\"\n        AND host.name == \"db-1\"\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule      = falco.rule,\n           proc      = falco.output_fields.proc.name,\n           parent    = falco.output_fields.proc.pname,\n           cmdline   = falco.output_fields.proc.cmdline,\n           container = falco.output_fields.container.id\n| SORT events DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-12T18:35:57.000Z\" AND @timestamp < \"2026-07-12T19:35:57.000Z\"\n        AND host.name == \"db-1\"\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule      = falco.rule,\n           proc      = falco.output_fields.proc.name,\n           parent    = falco.output_fields.proc.pname,\n           cmdline   = falco.output_fields.proc.cmdline,\n           container = falco.output_fields.container.id\n| SORT events DESC",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "rule",
+            "type": "keyword"
+          },
+          {
+            "name": "proc",
+            "type": "keyword"
+          },
+          {
+            "name": "parent",
+            "type": "keyword"
+          },
+          {
+            "name": "cmdline",
+            "type": "keyword"
+          },
+          {
+            "name": "container",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T18:35:57.000Z",
+        "2026-07-05T19:35:57.000Z"
+      ],
+      "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-05T18:35:57.000Z\" AND @timestamp < \"2026-07-05T19:35:57.000Z\"\n        AND host.name == \"db-1\"\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule      = falco.rule,\n           proc      = falco.output_fields.proc.name,\n           parent    = falco.output_fields.proc.pname,\n           cmdline   = falco.output_fields.proc.cmdline,\n           container = falco.output_fields.container.id\n| SORT events DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-05T18:35:57.000Z\" AND @timestamp < \"2026-07-05T19:35:57.000Z\"\n        AND host.name == \"db-1\"\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule      = falco.rule,\n           proc      = falco.output_fields.proc.name,\n           parent    = falco.output_fields.proc.pname,\n           cmdline   = falco.output_fields.proc.cmdline,\n           container = falco.output_fields.container.id\n| SORT events DESC",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "rule",
+            "type": "keyword"
+          },
+          {
+            "name": "proc",
+            "type": "keyword"
+          },
+          {
+            "name": "parent",
+            "type": "keyword"
+          },
+          {
+            "name": "cmdline",
+            "type": "keyword"
+          },
+          {
+            "name": "container",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-28T18:35:57.000Z",
+        "2026-06-28T19:35:57.000Z"
+      ],
+      "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-06-28T18:35:57.000Z\" AND @timestamp < \"2026-06-28T19:35:57.000Z\"\n        AND host.name == \"db-1\"\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule      = falco.rule,\n           proc      = falco.output_fields.proc.name,\n           parent    = falco.output_fields.proc.pname,\n           cmdline   = falco.output_fields.proc.cmdline,\n           container = falco.output_fields.container.id\n| SORT events DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-06-28T18:35:57.000Z\" AND @timestamp < \"2026-06-28T19:35:57.000Z\"\n        AND host.name == \"db-1\"\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule      = falco.rule,\n           proc      = falco.output_fields.proc.name,\n           parent    = falco.output_fields.proc.pname,\n           cmdline   = falco.output_fields.proc.cmdline,\n           container = falco.output_fields.container.id\n| SORT events DESC",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "rule",
+            "type": "keyword"
+          },
+          {
+            "name": "proc",
+            "type": "keyword"
+          },
+          {
+            "name": "parent",
+            "type": "keyword"
+          },
+          {
+            "name": "cmdline",
+            "type": "keyword"
+          },
+          {
+            "name": "container",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    }
+  ]
+}

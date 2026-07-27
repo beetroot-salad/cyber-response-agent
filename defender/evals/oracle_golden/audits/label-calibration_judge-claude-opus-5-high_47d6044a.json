@@ -1,0 +1,416 @@
+{
+  "judge_model": "claude-opus-5",
+  "judge_effort": "high",
+  "tag_suffix": "judge-claude-opus-5-high_47d6044a",
+  "cost_usd": 6.7757,
+  "prompts_sha8": "47d6044a",
+  "repeats": 5,
+  "leads": 18,
+  "agreeing": 17,
+  "divergences": 0,
+  "abstentions": 1,
+  "mean_self_agreement": 0.978,
+  "rows": [
+    {
+      "case": "case-001-ssh-bruteforce-canary",
+      "lead": "l-001",
+      "hand_class": "+event",
+      "accepted_delta_kinds": [
+        "present"
+      ],
+      "modal_delta_kind": "present",
+      "agrees": true,
+      "self_agreement": 1.0,
+      "labels": [
+        "present",
+        "present",
+        "present",
+        "present",
+        "present"
+      ],
+      "undecidable_reasons": [],
+      "evidence": "Across the observation window (2026-07-25T07:45:35Z\u201307:48:37Z) seq 3 reports total_failed=95 with distinct_src_ips=1 and distinct_users=1 on canary-1, seq 0 collapses to a single group (source.ip 172.18.0.15 / user.name root, failed_count=95), seq 1 shows 10 distinct message rows including one pam_unix authentication-failure group of 48 plus nine individual \"Failed password for root from 172.18.0.15 port NNNNN ssh2\" lines, and seq 2 shows per-minute counts of 13/32/28/22. Both live controls (C-14d 2026-07-11 and C-21d 2026-07-04, window_live: true, each a full hour) return row_count 0 for seq 0/1/2 and total_failed=0, distinct_src_ips=0, distinct_users=0 for seq 3; the dead C-7d control (window_live: false, payload null) is ignored. The distinction does not rest on source.ip (unstable in playground-v2) \u2014 it is carried by user.name=root, the sshd message strings, and the raw failure counts, none of which appear at all in the live baselines. No payload was truncated or unreadable, and all four queries point the same way, so the lead is homogeneous.",
+      "abstained": false,
+      "diverges": false
+    },
+    {
+      "case": "case-001-ssh-bruteforce-canary",
+      "lead": "l-002",
+      "hand_class": "+event",
+      "accepted_delta_kinds": [
+        "present"
+      ],
+      "modal_delta_kind": "present",
+      "agrees": true,
+      "self_agreement": 1.0,
+      "labels": [
+        "present",
+        "present",
+        "present",
+        "present",
+        "present"
+      ],
+      "undecidable_reasons": [],
+      "evidence": "Query seq 1 (logs-system.auth-*) returns 2 rows in the operation window, both host-scoped to canary-1 and user.name \"root\": auth_method \"other\" with failed=48 (07:45:35Z\u201307:48:37Z) and auth_method \"password\" with failed=48 (07:45:37Z\u201307:48:39Z), accepted=0 in both. Its two live controls (C-14d 2026-07-11 and C-21d 2026-07-04, both window_live: true, neither truncated) return row_count 0, so the delta is carried by surfaced, stable fields \u2014 user.name, auth_method, and the failed counts \u2014 not by the unstable source.ip 172.18.0.15; the C-7d control is window_live: false and is simply not evidence either way. Query seq 0 (detection alerts for v2-sshd-success-after-failures on canary-1) returns row_count 0 observed and row_count 0 in both live controls, i.e. absent \u2014 no success-after-failure alert fired, and no accepted auth appears anywhere in the payloads. The lead is therefore present on the union while its two queries disagree, hence heterogeneous.",
+      "abstained": false,
+      "diverges": false
+    },
+    {
+      "case": "case-001-ssh-bruteforce-canary",
+      "lead": "l-003",
+      "hand_class": "0",
+      "accepted_delta_kinds": [
+        "state-only"
+      ],
+      "modal_delta_kind": "state-only",
+      "agrees": true,
+      "self_agreement": 1.0,
+      "labels": [
+        "state-only",
+        "state-only",
+        "state-only",
+        "state-only",
+        "state-only"
+      ],
+      "undecidable_reasons": [],
+      "evidence": "The lead's single query is `cmdb.host-trust-edges` with param `host: canary-1`, and the observed payload is one CMDB entity record (name `canary-1`, role `canary`, criticality `sandbox`, owner `team.sre`, `trust_edges_out: []`, two users `svc.monitoring` and `svc.config-mgmt`) rather than any event stream. Per `environment_notes.state_and_lookup_systems`, cmdb lookups carry no `@timestamp` bounds to move and therefore have no control window \u2014 the empty `baseline` here is the expected absence of baseline semantics, not an unmeasured or dark window. With only one query in the lead and that query being a lookup, there is nothing to diff and no cross-query disagreement to record.",
+      "abstained": false,
+      "diverges": false
+    },
+    {
+      "case": "case-001-ssh-bruteforce-canary",
+      "lead": "l-004",
+      "hand_class": "+event",
+      "accepted_delta_kinds": [
+        "present"
+      ],
+      "modal_delta_kind": "present",
+      "agrees": true,
+      "self_agreement": 1.0,
+      "labels": [
+        "present",
+        "present",
+        "present",
+        "present",
+        "present"
+      ],
+      "undecidable_reasons": [],
+      "evidence": "Query seq 4 (`WHERE source.ip == \"172.18.0.15\"`, grouped by zeek.ssh.client/destination.ip) returned 0 rows in both live controls (C-14d 2026-07-11 and C-21d 2026-07-04, row_count 0), while the observed payload carries a 48-event group `zeek.ssh.client: SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.15` \u2192 `destination.ip: 172.18.0.9` confined to 2026-07-25T07:45:35.517Z\u201307:48:37.065Z; seq 5 shows the same group and seq 3's raw rows for that burst carry `event.outcome: failure`, `zeek.ssh.auth.success: false`, `zeek.ssh.auth.attempts: 1` with distinct source.ports (58630/49990/49998/50014) seconds apart \u2014 a failed-auth run, not an address artifact. The distinction is carried by fields beyond the unstable address columns: zeek.ssh.client (populated vs. null/absent), event.outcome=failure, and the op-window @timestamps; the live controls contain only inbound sessions to .15 (from .8/.6/.17/.22/.14, client null, server 8.9p1) and no source-side rows at all. Seq 1 corroborates in-window: 172.18.0.9:22 conns with last_seen 2026-07-25T07:48:37.064Z and 169.254.169.254:80/443 with last_seen 2026-07-25T07:34:18.360Z, neither of which appears in either live control (which show only 172.18.0.7:9200 plus inbound 22/5432/80/443/8080); seq 2 likewise shows canary-1 system.auth last_seen 2026-07-25T07:48:39.000Z, a host.name absent from both control payloads. All decidable queries point the same way; seq 0 was unreadable but was not needed.",
+      "abstained": false,
+      "diverges": false
+    },
+    {
+      "case": "case-001-ssh-bruteforce-canary",
+      "lead": "l-005",
+      "hand_class": "0",
+      "accepted_delta_kinds": [
+        "state-only"
+      ],
+      "modal_delta_kind": "state-only",
+      "agrees": true,
+      "self_agreement": 1.0,
+      "labels": [
+        "state-only",
+        "state-only",
+        "state-only",
+        "state-only",
+        "state-only"
+      ],
+      "undecidable_reasons": [],
+      "evidence": "The lead's single query is `threat-intel.ip-reputation-lookup` for value 172.18.0.15, which returns an entity record (value, type, verdict: unknown, score: 0, sources: [], tags: [], first_seen: null, last_seen: null) rather than an event stream. Per `environment_notes.state_and_lookup_systems`, threat-intel lookups carry no @timestamp bounds to move, so they have no control window \u2014 consistent with the empty `baseline` array, which is an absence of baseline semantics, not an empty measurement. No field in this payload can carry a baseline-diff, so the lead is tagged state-only regardless of content. With only one decidable query, heterogeneity is null.",
+      "abstained": false,
+      "diverges": false
+    },
+    {
+      "case": "case-001-ssh-bruteforce-canary",
+      "lead": "l-006",
+      "hand_class": "+event",
+      "accepted_delta_kinds": [
+        "present"
+      ],
+      "modal_delta_kind": "present",
+      "agrees": true,
+      "self_agreement": 1.0,
+      "labels": [
+        "present",
+        "present",
+        "present",
+        "present",
+        "present"
+      ],
+      "undecidable_reasons": [],
+      "evidence": "Query seq 1 (host-broken-out, 24h+alert window) returns 2 rows in `observed` \u2014 host.name canary-1 / auth_method \"other\" with failed=48 and canary-1 / \"password\" with failed=47, accepted=0 for both, first_seen 2026-07-25T07:45:35Z and last_seen 07:48:37Z \u2014 while all three of its controls (C-7d, C-14d, C-21d, all window_live: true) return row_count 0; seq 5 (1h bucket) and seq 6 (1m bucket) carry the same 95 failures, seq 6 resolving them into a sustained per-minute cadence (7+6, 16+16, 14+14, 11+11 failures across buckets 07:45\u201307:48) against live, empty C-14d/C-21d controls. The distinction is carried by fields these queries do surface \u2014 host.name = canary-1, failed counts, accepted=0, and the bucket timestamps \u2014 not by the unstable source.ip, which is only a filter, so the address-reassignment note does not neutralize it. The lead's queries disagree: seq 0 and seq 2 (24h pre-alert on canary-1: row_count 0 / total=0) and seq 3 (other hosts during the alert: row_count 0) match their empty live baselines, showing no prior history and no cross-host spread, while seq 1/4/5/6 carry the burst. Seq 4's all-time payload shows canary-1 rows extending to 2026-07-25T07:48:39Z, but its historical rows on jump-box-1/web-*/db-1 are address-scoped and unattributed under the environment notes.",
+      "abstained": false,
+      "diverges": false
+    },
+    {
+      "case": "case-001-ssh-bruteforce-canary",
+      "lead": "l-007",
+      "hand_class": "0",
+      "accepted_delta_kinds": [
+        "state-only"
+      ],
+      "modal_delta_kind": "state-only",
+      "agrees": true,
+      "self_agreement": 1.0,
+      "labels": [
+        "state-only",
+        "state-only",
+        "state-only",
+        "state-only",
+        "state-only"
+      ],
+      "undecidable_reasons": [],
+      "evidence": "The lead's single query, cmdb.host-trust-edges with param host=db-1, returns one CMDB\nentity record for db-1 (role: db, criticality: prod, owner: team.data, trust_edges_out: [],\nthree users: svc.monitoring, svc.backups, svc.config-mgmt) rather than any event stream.\nPer environment_notes.state_and_lookup_systems, cmdb queries carry no @timestamp bounds\nto move, so the empty `baseline` array is the expected absence of a control, not a\nmeasured zero. No field in this payload has baseline-diff semantics, so the query and\nthe lead are tagged state-only; with only one decidable query, heterogeneity is null.",
+      "abstained": false,
+      "diverges": false
+    },
+    {
+      "case": "case-001-ssh-bruteforce-canary",
+      "lead": "l-008",
+      "hand_class": "0",
+      "accepted_delta_kinds": [
+        "state-only"
+      ],
+      "modal_delta_kind": "state-only",
+      "agrees": true,
+      "self_agreement": 1.0,
+      "labels": [
+        "state-only",
+        "state-only",
+        "state-only",
+        "state-only",
+        "state-only"
+      ],
+      "undecidable_reasons": [],
+      "evidence": "Every query in this lead is an `identity.*` template (access-check, list-all-users, user-authorization) returning current entity records \u2014 e.g. seq 1 returns `total: 16` user records with username/email/realm_role, and seq 4\u201319 return per-user `authorized_hosts`/`sudo_hosts` arrays such as svc.config-mgmt's nine hosts including canary-1 and db-1, and seq 2/3 return `authorized: true, via: override`. Per `environment_notes.state_and_lookup_systems`, identity queries carry no `@timestamp` bounds to move, which is why `baseline` is an empty list `[]` \u2014 no control exists rather than a control that returned nothing. All decidable queries are the same lookup kind, so they do not disagree. The single unreadable payload (seq 0, can-access root/canary-1) does not change the classification, since the lead's system type alone fixes it as state-only.",
+      "abstained": false,
+      "diverges": false
+    },
+    {
+      "case": "case-001-ssh-bruteforce-canary",
+      "lead": "l-009",
+      "hand_class": "0",
+      "accepted_delta_kinds": [
+        "state-only"
+      ],
+      "modal_delta_kind": "state-only",
+      "agrees": true,
+      "self_agreement": 1.0,
+      "labels": [
+        "state-only",
+        "state-only",
+        "state-only",
+        "state-only",
+        "state-only"
+      ],
+      "undecidable_reasons": [],
+      "evidence": "All four queries in this lead are change-mgmt templates (`change-mgmt.active-changes` for canary-1 and db-1 at 2026-07-25T07:48:00Z, and `change-mgmt.list-changes` for both hosts), which `environment_notes.state_and_lookup_systems` classifies as returning current configuration/entity records rather than an event stream, with no `@timestamp` bounds to move and therefore no baseline. Consistently, `baseline` is an empty list \u2014 no control payloads exist for these queries at all. Observed content is a change-ticket register: seq 0 and seq 3 return `[]` (no active changes at 07:48Z for canary-1 or db-1), seq 1 returns `total: 0, changes: []` for canary-1, and seq 2 returns `total: 10` db-1 tickets \u2014 one planned CHG-1043 Postgres bump (window 2026-05-02T04:00\u201306:00Z) and nine approved standing nightly backup changes CHG-DB-BACKUP-2026071\n8T0200Z\u202620260726T0200Z, all 02:00\u201303:00Z windows. No row carries an SSH-testing or penetration-test authorization, but per the rules these queries are tagged `state-only` regardless of row content; all four agree, so `heterogeneous` is false.",
+      "abstained": false,
+      "diverges": false
+    },
+    {
+      "case": "case-002-authorized-keys-falco",
+      "lead": "l-001",
+      "hand_class": "+event",
+      "accepted_delta_kinds": [
+        "present"
+      ],
+      "modal_delta_kind": "present",
+      "agrees": true,
+      "self_agreement": 1.0,
+      "labels": [
+        "present",
+        "present",
+        "present",
+        "present",
+        "present"
+      ],
+      "undecidable_reasons": [],
+      "evidence": "The single query (elastic.falco-alerts) returned row_count 1 over the operation window: a 2026-07-25T09:29:02.246Z alert with falco.rule \"Adding ssh keys to authorized_keys\", falco.output_fields.fd.name \"/root/.ssh/authorized_keys\", user.name \"root\", evt.type \"openat\", and a proc.cmdline appending \"ssh-rsa AAAAB3NzaC1yc2EAAAAD_fake_key_0_${ts}_attacker attacker@elsewhere\" to /root/.ssh/authorized_keys. Two of the three controls (C-14d and C-21d) have window_live true and returned row_count 0 with empty values for the identical query string, so the rule fires zero times in routine hour-long weekday windows; only C-7d is dead (window_live false) and is disregarded. The distinction is carried by stable surfaced fields \u2014 proc.cmdline, fd.name and user.name \u2014 not by falco.output_fields.container.id (\"1df4bcd65ee4\"), which environment_notes marks unstable and which alone could not evidence a delta. Nothing is truncated or unreadable, so the observed rows are distinguishable from a non-empty-capable live baseline.",
+      "abstained": false,
+      "diverges": false
+    },
+    {
+      "case": "case-002-authorized-keys-falco",
+      "lead": "l-002",
+      "hand_class": "0",
+      "accepted_delta_kinds": [
+        "state-only"
+      ],
+      "modal_delta_kind": "state-only",
+      "agrees": true,
+      "self_agreement": 1.0,
+      "labels": [
+        "state-only",
+        "state-only",
+        "state-only",
+        "state-only",
+        "state-only"
+      ],
+      "undecidable_reasons": [],
+      "evidence": "The lead contains a single query, `cmdb.host-trust-edges`, with params `{host: canary-1}` and no `@timestamp` bounds. The observed payload is a single row carrying `_note: state lookup` and echoing the params, and the baseline is an empty list because a CMDB lookup has no time window to shift. `environment_notes.state_and_lookup_systems` states explicitly that cmdb queries return an entity record rather than an event stream and therefore have no baseline-diff semantics. No surfaced field carries an event-stream distinction, so this is `state-only` rather than a missing or empty measurement.",
+      "abstained": false,
+      "diverges": false
+    },
+    {
+      "case": "case-003-suppression-devws",
+      "lead": "l-001",
+      "hand_class": "0",
+      "accepted_delta_kinds": [
+        "absent"
+      ],
+      "modal_delta_kind": "undecidable",
+      "agrees": false,
+      "self_agreement": 0.6,
+      "labels": [
+        "undecidable",
+        "undecidable",
+        "absent",
+        "absent",
+        "undecidable"
+      ],
+      "undecidable_reasons": [
+        "insufficient-baseline",
+        "insufficient-baseline",
+        "insufficient-baseline"
+      ],
+      "evidence": "The single query (elastic.sshd-auth-history) returned row_count 0 over the 10-minute\noperation window 2026-07-25T09:35\u201309:45, so there is nothing in the observed payload to\ndistinguish. The controls do not settle whether that emptiness is a delta: C-7d\n(2026-07-18) has window_live false with a null payload and carries no information;\nC-14d (live) returned exactly 1 row (accepted=6, failed=0, source.ip 172.18.0.14,\nuser.name svc.config-mgmt, first_seen == last_seen 2026-07-11T09:47:08.297Z); and C-21d\n(also live) returned row_count 0 with an empty values list. One live hour with a single\nbursty 6-event service login and another live hour with nothing means routine sshd auth\non dev-ws-1 is intermittent at hour scale, so a 10-minute observed window containing\nzero rows is not separable from ordinary sparsity \u2014 I can claim neither `suppressed` nor\n`absent`. A live, non-empty control at the observed window's own duration and time-of-day\n(or a live 7-day control instead of the levered-down 2026-07-18 one) would have decided it.",
+      "abstained": true,
+      "diverges": false
+    },
+    {
+      "case": "case-003-suppression-devws",
+      "lead": "l-002",
+      "hand_class": "-noise",
+      "accepted_delta_kinds": [
+        "suppressed"
+      ],
+      "modal_delta_kind": "suppressed",
+      "agrees": true,
+      "self_agreement": 1.0,
+      "labels": [
+        "suppressed",
+        "suppressed",
+        "suppressed",
+        "suppressed",
+        "suppressed"
+      ],
+      "undecidable_reasons": [],
+      "evidence": "The single query (elastic.syslog-ip-search, STATS COUNT(*) BY data_stream.dataset for host.name == \"dev-ws-1\") returns row_count: 0 with values: [] over the 09:35\u201309:45Z operation window. Both live controls are non-empty and consistent: C-14d (window_live: true) returns 5 dataset rows totalling 828 events (system.auth 444, elastic_agent.metricbeat 360, elastic_agent 12, elastic_agent.filebeat 6, system.syslog 6), and C-21d (window_live: true) returns the same 5 datasets totalling 912 events. Even after scaling the 60-minute controls down to the 10-minute observed window, the steady metricbeat rate of 360/hr (6/min) alone predicts ~60 events, so zero rows across every dataset is a real go-dark, not a sampling artifact. The dead C-7d control (window_live: false, payload null) is excluded and plays no part; the distinction is carried by the events count per data_stream.dataset, which drops from 828/912 to nothing.",
+      "abstained": false,
+      "diverges": false
+    },
+    {
+      "case": "case-003-suppression-devws",
+      "lead": "l-003",
+      "hand_class": "0",
+      "accepted_delta_kinds": [
+        "absent"
+      ],
+      "modal_delta_kind": "absent",
+      "agrees": true,
+      "self_agreement": 1.0,
+      "labels": [
+        "absent",
+        "absent",
+        "absent",
+        "absent",
+        "absent"
+      ],
+      "undecidable_reasons": [],
+      "evidence": "The lead has a single query (elastic.sshd-auth-history, scoped to host.name == \"web-1\"), and its observed payload over 2026-07-25T09:35\u201309:45Z is a well-formed, non-truncated result with row_count: 0 and values: [] \u2014 no accepted/failed rows at all, so there are no rows that could differ from baseline in any surfaced field. The controls do not establish a non-empty live baseline: C-7d (2026-07-18) has window_live: false and payload: null, so it measures nothing, and C-21d (2026-07-04) is window_live: true with row_count: 0 \u2014 an empty hour on web-1 is routine here. Only C-14d (2026-07-11) is live and non-empty (2 rows: svc.config-mgmt accepted=6/failed=0 from 172.18.0.14, and svc.reports accepted=0/failed=72 from 172.18.0.6), and that is a 60-minute widened window versus the observed 10-minute window, so its absence in a six-times-shorter slice does not show the stream went dark. With one live control empty and the observed window empty, the reading is no delta rather than suppression.",
+      "abstained": false,
+      "diverges": false
+    },
+    {
+      "case": "case-003-suppression-devws",
+      "lead": "l-004",
+      "hand_class": "0",
+      "accepted_delta_kinds": [
+        "state-only"
+      ],
+      "modal_delta_kind": "state-only",
+      "agrees": true,
+      "self_agreement": 1.0,
+      "labels": [
+        "state-only",
+        "state-only",
+        "state-only",
+        "state-only",
+        "state-only"
+      ],
+      "undecidable_reasons": [],
+      "evidence": "The lead's single query is `cmdb.host-trust-edges` with params `{host: dev-ws-1}`, and its observed payload carries only `_note: \"state lookup; not an event stream\"` plus the echoed params \u2014 no event rows, no `@timestamp`-bounded columns. The `baseline` array is empty because, per `environment_notes.state_and_lookup_systems`, cmdb queries carry no timestamp bounds to move and therefore have no control window; that absence is by construction, not a missing measurement. No field in this payload (role, criticality, owner, or trust edges) is even populated as an event stream to diff, so baseline-diff semantics do not apply. Per the rule that cmdb/identity/threat-intel/change-mgmt queries are `state-only` regardless of row changes, the lead is tagged `state-only`, and with only one decidable query `heterogeneous` is null.",
+      "abstained": false,
+      "diverges": false
+    },
+    {
+      "case": "case-004-noise-stolen-cred",
+      "lead": "l-001",
+      "hand_class": "+noise",
+      "accepted_delta_kinds": [
+        "indistinguishable"
+      ],
+      "modal_delta_kind": "indistinguishable",
+      "agrees": true,
+      "self_agreement": 1.0,
+      "labels": [
+        "indistinguishable",
+        "indistinguishable",
+        "indistinguishable",
+        "indistinguishable",
+        "indistinguishable"
+      ],
+      "undecidable_reasons": [],
+      "evidence": "The single query returns one row in the observed window (accepted=5, failed=0, user.name=sre.alice, auth_method=password, source.ip=172.18.0.6, first_seen 10:32:43 \u2192 last_seen 10:33:26), and the live C-14d control returns a structurally identical single row (accepted=6, failed=0, user.name=sre.alice, auth_method=password, source.ip=172.18.0.17). The only surfaced columns that differ are source.ip \u2014 listed in environment_notes as an unstable identifier in playground-v2 and therefore not a delta \u2014 and the aggregate counts/timestamps, where observed (5 accepted, 0 failed) is no higher than the live baseline (6 accepted, 0 failed) despite the baseline window being a full hour. No failed logins, no publickey/other auth_method, and no second source group appear that the baseline lacks, so no surfaced field carries a distinction. The dead C-7d window and the empty-but-live C-21d window do not change this, since C-14d supplies a non-empty live baseline and the observed window is not empty.",
+      "abstained": false,
+      "diverges": false
+    },
+    {
+      "case": "case-004-noise-stolen-cred",
+      "lead": "l-002",
+      "hand_class": "0",
+      "accepted_delta_kinds": [
+        "absent"
+      ],
+      "modal_delta_kind": "absent",
+      "agrees": true,
+      "self_agreement": 1.0,
+      "labels": [
+        "absent",
+        "absent",
+        "absent",
+        "absent",
+        "absent"
+      ],
+      "undecidable_reasons": [],
+      "evidence": "The lead's single query (elastic.sshd-auth-history, STATS failed BY source.ip, user.name over db-1 failures) returned row_count 0 with values [] in the operation window 2026-07-25T10:32:00Z\u201310:35:00Z, and the payload is not truncated. Both live controls \u2014 C-14d (2026-07-11, window_live true) and C-21d (2026-07-04, window_live true) \u2014 also returned row_count 0 with identical column sets (failed/source.ip/user.name); only C-7d was dead (window_live false, payload null) and is disregarded. Observed matches its live baseline exactly: zero failed-auth aggregation rows in both, so no field carries any distinction, and suppression is ruled out because the live baselines are themselves empty. With only one decidable query in the lead, heterogeneity is undefined.",
+      "abstained": false,
+      "diverges": false
+    },
+    {
+      "case": "case-004-noise-stolen-cred",
+      "lead": "l-003",
+      "hand_class": "0",
+      "accepted_delta_kinds": [
+        "state-only"
+      ],
+      "modal_delta_kind": "state-only",
+      "agrees": true,
+      "self_agreement": 1.0,
+      "labels": [
+        "state-only",
+        "state-only",
+        "state-only",
+        "state-only",
+        "state-only"
+      ],
+      "undecidable_reasons": [],
+      "evidence": "The lead's single query is `cmdb.host-trust-edges` with params `{host: db-1}`, and the observed payload is explicitly `_note: state lookup` echoing only those params \u2014 it carries no event rows, no `@timestamp`, and no columns beyond the lookup parameter. The `baseline` array is empty precisely because, per `environment_notes.state_and_lookup_systems`, cmdb queries have no timestamp bounds to move and therefore no control window. This is a CMDB entity record rather than an event stream, so no baseline-diff semantics apply regardless of content. With only one query in the lead, there is nothing for it to disagree with, so `heterogeneous` is null.",
+      "abstained": false,
+      "diverges": false
+    }
+  ],
+  "decided": 17
+}

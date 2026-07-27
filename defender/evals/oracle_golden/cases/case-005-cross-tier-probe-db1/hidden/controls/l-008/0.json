@@ -1,0 +1,112 @@
+{
+  "lead_id": "l-008",
+  "seq": 0,
+  "controls": [
+    {
+      "name": "C-7d",
+      "window": [
+        "2026-07-19T08:00:00.000Z",
+        "2026-07-19T12:00:00.000Z"
+      ],
+      "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-07-19T08:00:00.000Z\" AND @timestamp < \"2026-07-19T12:00:00.000Z\"\n        AND source.ip == \"172.18.0.11\"\n| STATS conns      = COUNT(*),\n        bytes_out  = SUM(source.bytes),\n        bytes_in   = SUM(destination.bytes),\n        dest_ips   = COUNT_DISTINCT(destination.ip),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY destination.ip, destination.port\n| SORT conns DESC",
+      "live": false,
+      "payload": null
+    },
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T08:00:00.000Z",
+        "2026-07-12T12:00:00.000Z"
+      ],
+      "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-07-12T08:00:00.000Z\" AND @timestamp < \"2026-07-12T12:00:00.000Z\"\n        AND source.ip == \"172.18.0.11\"\n| STATS conns      = COUNT(*),\n        bytes_out  = SUM(source.bytes),\n        bytes_in   = SUM(destination.bytes),\n        dest_ips   = COUNT_DISTINCT(destination.ip),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY destination.ip, destination.port\n| SORT conns DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-07-12T08:00:00.000Z\" AND @timestamp < \"2026-07-12T12:00:00.000Z\"\n        AND source.ip == \"172.18.0.11\"\n| STATS conns      = COUNT(*),\n        bytes_out  = SUM(source.bytes),\n        bytes_in   = SUM(destination.bytes),\n        dest_ips   = COUNT_DISTINCT(destination.ip),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY destination.ip, destination.port\n| SORT conns DESC",
+        "columns": [
+          {
+            "name": "conns",
+            "type": "long"
+          },
+          {
+            "name": "bytes_out",
+            "type": "long"
+          },
+          {
+            "name": "bytes_in",
+            "type": "long"
+          },
+          {
+            "name": "dest_ips",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "destination.ip",
+            "type": "ip"
+          },
+          {
+            "name": "destination.port",
+            "type": "long"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T08:00:00.000Z",
+        "2026-07-05T12:00:00.000Z"
+      ],
+      "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-07-05T08:00:00.000Z\" AND @timestamp < \"2026-07-05T12:00:00.000Z\"\n        AND source.ip == \"172.18.0.11\"\n| STATS conns      = COUNT(*),\n        bytes_out  = SUM(source.bytes),\n        bytes_in   = SUM(destination.bytes),\n        dest_ips   = COUNT_DISTINCT(destination.ip),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY destination.ip, destination.port\n| SORT conns DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-07-05T08:00:00.000Z\" AND @timestamp < \"2026-07-05T12:00:00.000Z\"\n        AND source.ip == \"172.18.0.11\"\n| STATS conns      = COUNT(*),\n        bytes_out  = SUM(source.bytes),\n        bytes_in   = SUM(destination.bytes),\n        dest_ips   = COUNT_DISTINCT(destination.ip),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY destination.ip, destination.port\n| SORT conns DESC",
+        "columns": [
+          {
+            "name": "conns",
+            "type": "long"
+          },
+          {
+            "name": "bytes_out",
+            "type": "long"
+          },
+          {
+            "name": "bytes_in",
+            "type": "long"
+          },
+          {
+            "name": "dest_ips",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "destination.ip",
+            "type": "ip"
+          },
+          {
+            "name": "destination.port",
+            "type": "long"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    }
+  ]
+}

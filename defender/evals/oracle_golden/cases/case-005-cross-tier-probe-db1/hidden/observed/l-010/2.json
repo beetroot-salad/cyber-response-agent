@@ -1,0 +1,1 @@
+{"query": "FROM logs-system.auth-*\n| WHERE user.name == \"dev.dana\"\n        AND source.ip == \"172.18.0.11\"\n        AND event.outcome == \"success\"\n| STATS accepted_count = COUNT(*)\n| LIMIT 10", "columns": [{"name": "accepted_count", "type": "long"}], "row_count": 1, "values": [{"accepted_count": 14}]}

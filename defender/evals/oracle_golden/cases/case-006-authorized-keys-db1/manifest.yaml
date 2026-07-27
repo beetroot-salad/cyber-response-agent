@@ -1,0 +1,49 @@
+case_id: case-006-authorized-keys-db1
+kind: observed
+# --- calibration metadata (#711) ---
+# Assigned by the generator BEFORE the first replay: nothing has been scored
+# at this point, so no result could have influenced which side this lands on.
+split: dev
+unit:
+  activity_family: persistence/T1098.004
+  host_pair: canary-1->db-1
+capture_environment: playground-v2@412854206-restore-20260726
+# Declare a class for every state/lookup system this case's leads touch.
+# A lookup has no @timestamp bounds to move, so it has no baseline and no
+# diff semantics — the judge reads that as `state-only`, not as a gap.
+state_classes: {}
+attack:
+  scenario: persistence-authorized-keys
+  seed: 61
+  runner_run_id: persistence-authorized-keys-61-7f0d4259
+  window: ["2026-07-26T19:05:54+00:00", "2026-07-26T19:05:57+00:00"]
+  alert_rule: synthetic-persistence-authorized-keys
+  # `captured` = a real rule fired and its alert was extracted.
+  # `synthesised` = nothing fired; the alert was built from the runner record
+  # so the activity's telemetry is not discarded. The oracle never sees the
+  # alert either way (oracle/prompt.md:1) — it only shapes the lead set.
+  alert_source: synthesised
+generated_by: generate_case.py
+
+# ---------------------------------------------------------------- DEFECTIVE
+# This case is NOT part of the dataset. It is kept because the capture is real and
+# the defect is instructive, not because it can be scored.
+#
+# The unit above claims `->db-1`. The activity never touched db-1: scenario
+# `persistence-authorized-keys` is LOCAL -- none of its steps interpolate ${target}, so it acted on
+# canary-1 exactly as it always does. `--target db-1` reached only the runner's
+# record, the story's "directed at" header and the synthesised alert, so
+# `defender/run.py` investigated db-1 and every lead here queries an envelope
+# that cannot contain the activity.
+#
+# The evidence is in this case's own hidden/ tree: db-1's `/root/.ssh/authorized_keys` is EMPTY in this case's own capture (hidden/observed/l-001/24.json: `keys: []`), and `FROM logs-falco.alerts-* WHERE host.name == "db-1"` returns 0 rows for all time.
+#
+# Not recoverable by editing this file. The leads are a gather against the wrong
+# host; fixing it means a lever-up on snapshot 412854206-restore-20260726, a fresh
+# `defender/run.py` against an alert on canary-1, and a new capture.
+#
+# `generate_case.retarget_problem` now refuses this before the stack is touched.
+defective: >-
+  the leads investigate db-1; the activity ran on canary-1. Scenario
+  `persistence-authorized-keys` does not read ${target}, so the recruiter's --target moved only the
+  metadata. Re-capture required; no manifest edit recovers it.

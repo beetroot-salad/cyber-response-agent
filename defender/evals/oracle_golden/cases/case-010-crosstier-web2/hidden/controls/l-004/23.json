@@ -1,0 +1,169 @@
+{
+  "lead_id": "l-004",
+  "seq": 23,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-11T00:00:00.000Z",
+        "2026-07-12T20:06:42.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE host.name == \"web-2\"\n        AND @timestamp >= \"2026-07-11T00:00:00.000Z\" AND @timestamp < \"2026-07-12T20:06:42.000Z\"\n| STATS count = COUNT(*)\n        BY host.ip\n| SORT count DESC\n| LIMIT 10",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE host.name == \"web-2\"\n        AND @timestamp >= \"2026-07-11T00:00:00.000Z\" AND @timestamp < \"2026-07-12T20:06:42.000Z\"\n| STATS count = COUNT(*)\n        BY host.ip\n| SORT count DESC\n| LIMIT 10",
+        "columns": [
+          {
+            "name": "count",
+            "type": "long"
+          },
+          {
+            "name": "host.ip",
+            "type": "ip"
+          }
+        ],
+        "row_count": 7,
+        "values": [
+          {
+            "count": 4450,
+            "host.ip": "172.18.0.5"
+          },
+          {
+            "count": 4450,
+            "host.ip": "172.18.0.8"
+          },
+          {
+            "count": 4450,
+            "host.ip": "172.18.0.14"
+          },
+          {
+            "count": 4450,
+            "host.ip": "172.18.0.13"
+          },
+          {
+            "count": 4450,
+            "host.ip": "172.18.0.16"
+          },
+          {
+            "count": 4450,
+            "host.ip": "172.18.0.19"
+          },
+          {
+            "count": 4450,
+            "host.ip": "172.18.0.12"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-04T00:00:00.000Z",
+        "2026-07-05T20:06:42.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE host.name == \"web-2\"\n        AND @timestamp >= \"2026-07-04T00:00:00.000Z\" AND @timestamp < \"2026-07-05T20:06:42.000Z\"\n| STATS count = COUNT(*)\n        BY host.ip\n| SORT count DESC\n| LIMIT 10",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE host.name == \"web-2\"\n        AND @timestamp >= \"2026-07-04T00:00:00.000Z\" AND @timestamp < \"2026-07-05T20:06:42.000Z\"\n| STATS count = COUNT(*)\n        BY host.ip\n| SORT count DESC\n| LIMIT 10",
+        "columns": [
+          {
+            "name": "count",
+            "type": "long"
+          },
+          {
+            "name": "host.ip",
+            "type": "ip"
+          }
+        ],
+        "row_count": 7,
+        "values": [
+          {
+            "count": 4815,
+            "host.ip": "172.18.0.8"
+          },
+          {
+            "count": 4815,
+            "host.ip": "172.18.0.14"
+          },
+          {
+            "count": 4815,
+            "host.ip": "172.18.0.12"
+          },
+          {
+            "count": 4815,
+            "host.ip": "172.18.0.13"
+          },
+          {
+            "count": 4815,
+            "host.ip": "172.18.0.16"
+          },
+          {
+            "count": 4815,
+            "host.ip": "172.18.0.19"
+          },
+          {
+            "count": 4815,
+            "host.ip": "172.18.0.5"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-27T00:00:00.000Z",
+        "2026-06-28T20:06:42.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE host.name == \"web-2\"\n        AND @timestamp >= \"2026-06-27T00:00:00.000Z\" AND @timestamp < \"2026-06-28T20:06:42.000Z\"\n| STATS count = COUNT(*)\n        BY host.ip\n| SORT count DESC\n| LIMIT 10",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE host.name == \"web-2\"\n        AND @timestamp >= \"2026-06-27T00:00:00.000Z\" AND @timestamp < \"2026-06-28T20:06:42.000Z\"\n| STATS count = COUNT(*)\n        BY host.ip\n| SORT count DESC\n| LIMIT 10",
+        "columns": [
+          {
+            "name": "count",
+            "type": "long"
+          },
+          {
+            "name": "host.ip",
+            "type": "ip"
+          }
+        ],
+        "row_count": 8,
+        "values": [
+          {
+            "count": 4679,
+            "host.ip": "172.18.0.5"
+          },
+          {
+            "count": 4679,
+            "host.ip": "172.18.0.8"
+          },
+          {
+            "count": 4679,
+            "host.ip": "172.18.0.10"
+          },
+          {
+            "count": 4679,
+            "host.ip": "172.18.0.14"
+          },
+          {
+            "count": 4679,
+            "host.ip": "172.18.0.13"
+          },
+          {
+            "count": 4679,
+            "host.ip": "172.18.0.16"
+          },
+          {
+            "count": 4679,
+            "host.ip": "172.18.0.19"
+          },
+          {
+            "count": 4679,
+            "host.ip": "172.18.0.12"
+          }
+        ]
+      }
+    }
+  ]
+}

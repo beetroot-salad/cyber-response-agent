@@ -1,0 +1,80 @@
+{
+  "lead_id": "l-001",
+  "seq": 2,
+  "controls": [
+    {
+      "name": "C-7d",
+      "window": [
+        "2026-07-18T07:17:06.032Z",
+        "2026-07-18T08:17:06.032Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-18T07:17:06.032Z\" AND @timestamp < \"2026-07-18T08:17:06.032Z\"\n        AND host.name == \"canary-1\"\n        AND event.outcome == \"failure\"\n| STATS failed_per_minute = COUNT(*),\n        first_in_minute = MIN(@timestamp),\n        last_in_minute = MAX(@timestamp)\n        BY minute = DATE_TRUNC(1 minute, @timestamp)\n| SORT minute ASC\n| LIMIT 1000",
+      "live": false,
+      "payload": null
+    },
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-11T07:17:06.032Z",
+        "2026-07-11T08:17:06.032Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-11T07:17:06.032Z\" AND @timestamp < \"2026-07-11T08:17:06.032Z\"\n        AND host.name == \"canary-1\"\n        AND event.outcome == \"failure\"\n| STATS failed_per_minute = COUNT(*),\n        first_in_minute = MIN(@timestamp),\n        last_in_minute = MAX(@timestamp)\n        BY minute = DATE_TRUNC(1 minute, @timestamp)\n| SORT minute ASC\n| LIMIT 1000",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-11T07:17:06.032Z\" AND @timestamp < \"2026-07-11T08:17:06.032Z\"\n        AND host.name == \"canary-1\"\n        AND event.outcome == \"failure\"\n| STATS failed_per_minute = COUNT(*),\n        first_in_minute = MIN(@timestamp),\n        last_in_minute = MAX(@timestamp)\n        BY minute = DATE_TRUNC(1 minute, @timestamp)\n| SORT minute ASC\n| LIMIT 1000",
+        "columns": [
+          {
+            "name": "failed_per_minute",
+            "type": "long"
+          },
+          {
+            "name": "first_in_minute",
+            "type": "date"
+          },
+          {
+            "name": "last_in_minute",
+            "type": "date"
+          },
+          {
+            "name": "minute",
+            "type": "date"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-04T07:17:06.032Z",
+        "2026-07-04T08:17:06.032Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-04T07:17:06.032Z\" AND @timestamp < \"2026-07-04T08:17:06.032Z\"\n        AND host.name == \"canary-1\"\n        AND event.outcome == \"failure\"\n| STATS failed_per_minute = COUNT(*),\n        first_in_minute = MIN(@timestamp),\n        last_in_minute = MAX(@timestamp)\n        BY minute = DATE_TRUNC(1 minute, @timestamp)\n| SORT minute ASC\n| LIMIT 1000",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-04T07:17:06.032Z\" AND @timestamp < \"2026-07-04T08:17:06.032Z\"\n        AND host.name == \"canary-1\"\n        AND event.outcome == \"failure\"\n| STATS failed_per_minute = COUNT(*),\n        first_in_minute = MIN(@timestamp),\n        last_in_minute = MAX(@timestamp)\n        BY minute = DATE_TRUNC(1 minute, @timestamp)\n| SORT minute ASC\n| LIMIT 1000",
+        "columns": [
+          {
+            "name": "failed_per_minute",
+            "type": "long"
+          },
+          {
+            "name": "first_in_minute",
+            "type": "date"
+          },
+          {
+            "name": "last_in_minute",
+            "type": "date"
+          },
+          {
+            "name": "minute",
+            "type": "date"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    }
+  ]
+}

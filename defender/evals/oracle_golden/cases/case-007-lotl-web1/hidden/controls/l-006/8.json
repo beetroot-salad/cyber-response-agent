@@ -1,0 +1,105 @@
+{
+  "lead_id": "l-006",
+  "seq": 8,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T19:02:22.000Z",
+        "2026-07-12T20:02:22.000Z"
+      ],
+      "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-12T19:02:22.000Z\" AND @timestamp < \"2026-07-12T20:02:22.000Z\"\n        AND host.name == \"soc-playground\"\n| STATS count = COUNT(*)\n        BY falco.output_fields.container.name\n| SORT count DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-12T19:02:22.000Z\" AND @timestamp < \"2026-07-12T20:02:22.000Z\"\n        AND host.name == \"soc-playground\"\n| STATS count = COUNT(*)\n        BY falco.output_fields.container.name\n| SORT count DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "count",
+            "type": "long"
+          },
+          {
+            "name": "falco.output_fields.container.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 2,
+        "values": [
+          {
+            "count": 1015,
+            "falco.output_fields.container.name": "<NA>"
+          },
+          {
+            "count": 444,
+            "falco.output_fields.container.name": "host"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T19:02:22.000Z",
+        "2026-07-05T20:02:22.000Z"
+      ],
+      "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-05T19:02:22.000Z\" AND @timestamp < \"2026-07-05T20:02:22.000Z\"\n        AND host.name == \"soc-playground\"\n| STATS count = COUNT(*)\n        BY falco.output_fields.container.name\n| SORT count DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-05T19:02:22.000Z\" AND @timestamp < \"2026-07-05T20:02:22.000Z\"\n        AND host.name == \"soc-playground\"\n| STATS count = COUNT(*)\n        BY falco.output_fields.container.name\n| SORT count DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "count",
+            "type": "long"
+          },
+          {
+            "name": "falco.output_fields.container.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 2,
+        "values": [
+          {
+            "count": 1139,
+            "falco.output_fields.container.name": "<NA>"
+          },
+          {
+            "count": 468,
+            "falco.output_fields.container.name": "host"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-28T19:02:22.000Z",
+        "2026-06-28T20:02:22.000Z"
+      ],
+      "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-06-28T19:02:22.000Z\" AND @timestamp < \"2026-06-28T20:02:22.000Z\"\n        AND host.name == \"soc-playground\"\n| STATS count = COUNT(*)\n        BY falco.output_fields.container.name\n| SORT count DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-06-28T19:02:22.000Z\" AND @timestamp < \"2026-06-28T20:02:22.000Z\"\n        AND host.name == \"soc-playground\"\n| STATS count = COUNT(*)\n        BY falco.output_fields.container.name\n| SORT count DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "count",
+            "type": "long"
+          },
+          {
+            "name": "falco.output_fields.container.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 2,
+        "values": [
+          {
+            "count": 1002,
+            "falco.output_fields.container.name": "<NA>"
+          },
+          {
+            "count": 360,
+            "falco.output_fields.container.name": "host"
+          }
+        ]
+      }
+    }
+  ]
+}

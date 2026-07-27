@@ -1,0 +1,8 @@
+projections:
+- lead_id: l-001
+  events:
+  - <standard environment noise>
+- lead_id: l-002
+  events: []
+- lead_id: l-003
+  events: []

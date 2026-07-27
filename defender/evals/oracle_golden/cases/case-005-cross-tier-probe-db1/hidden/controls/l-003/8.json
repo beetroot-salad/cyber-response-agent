@@ -1,0 +1,124 @@
+{
+  "lead_id": "l-003",
+  "seq": 8,
+  "controls": [
+    {
+      "name": "C-7d",
+      "window": [
+        "2026-07-19T10:30:00.000Z",
+        "2026-07-19T12:00:00.000Z"
+      ],
+      "query": "FROM .internal.alerts-security.alerts-default-*\n| WHERE @timestamp >= \"2026-07-19T10:30:00.000Z\" AND @timestamp < \"2026-07-19T12:00:00.000Z\"\n        AND host.name != \"db-1\"\n        AND (kibana.alert.reason LIKE \"*db-1*\" OR kibana.alert.rule.name LIKE \"*db-1*\" OR message LIKE \"*db-1*\")\n| STATS alerts     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule     = kibana.alert.rule.name,\n           rule_id  = kibana.alert.rule.rule_id,\n           severity = kibana.alert.severity,\n           host.name\n| SORT alerts DESC",
+      "live": false,
+      "payload": null
+    },
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T10:30:00.000Z",
+        "2026-07-12T12:00:00.000Z"
+      ],
+      "query": "FROM .internal.alerts-security.alerts-default-*\n| WHERE @timestamp >= \"2026-07-12T10:30:00.000Z\" AND @timestamp < \"2026-07-12T12:00:00.000Z\"\n        AND host.name != \"db-1\"\n        AND (kibana.alert.reason LIKE \"*db-1*\" OR kibana.alert.rule.name LIKE \"*db-1*\" OR message LIKE \"*db-1*\")\n| STATS alerts     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule     = kibana.alert.rule.name,\n           rule_id  = kibana.alert.rule.rule_id,\n           severity = kibana.alert.severity,\n           host.name\n| SORT alerts DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM .internal.alerts-security.alerts-default-*\n| WHERE @timestamp >= \"2026-07-12T10:30:00.000Z\" AND @timestamp < \"2026-07-12T12:00:00.000Z\"\n        AND host.name != \"db-1\"\n        AND (kibana.alert.reason LIKE \"*db-1*\" OR kibana.alert.rule.name LIKE \"*db-1*\" OR message LIKE \"*db-1*\")\n| STATS alerts     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule     = kibana.alert.rule.name,\n           rule_id  = kibana.alert.rule.rule_id,\n           severity = kibana.alert.severity,\n           host.name\n| SORT alerts DESC",
+        "columns": [
+          {
+            "name": "alerts",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "rule",
+            "type": "keyword"
+          },
+          {
+            "name": "rule_id",
+            "type": "keyword"
+          },
+          {
+            "name": "severity",
+            "type": "keyword"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "alerts": 47,
+            "first_seen": "2026-07-12T10:31:44.054Z",
+            "last_seen": "2026-07-12T11:56:46.783Z",
+            "rule": "v2 Falco: suspicious network tool in container",
+            "rule_id": "v2-falco-suspicious-network-tool",
+            "severity": "medium",
+            "host.name": "soc-playground"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T10:30:00.000Z",
+        "2026-07-05T12:00:00.000Z"
+      ],
+      "query": "FROM .internal.alerts-security.alerts-default-*\n| WHERE @timestamp >= \"2026-07-05T10:30:00.000Z\" AND @timestamp < \"2026-07-05T12:00:00.000Z\"\n        AND host.name != \"db-1\"\n        AND (kibana.alert.reason LIKE \"*db-1*\" OR kibana.alert.rule.name LIKE \"*db-1*\" OR message LIKE \"*db-1*\")\n| STATS alerts     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule     = kibana.alert.rule.name,\n           rule_id  = kibana.alert.rule.rule_id,\n           severity = kibana.alert.severity,\n           host.name\n| SORT alerts DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM .internal.alerts-security.alerts-default-*\n| WHERE @timestamp >= \"2026-07-05T10:30:00.000Z\" AND @timestamp < \"2026-07-05T12:00:00.000Z\"\n        AND host.name != \"db-1\"\n        AND (kibana.alert.reason LIKE \"*db-1*\" OR kibana.alert.rule.name LIKE \"*db-1*\" OR message LIKE \"*db-1*\")\n| STATS alerts     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule     = kibana.alert.rule.name,\n           rule_id  = kibana.alert.rule.rule_id,\n           severity = kibana.alert.severity,\n           host.name\n| SORT alerts DESC",
+        "columns": [
+          {
+            "name": "alerts",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "rule",
+            "type": "keyword"
+          },
+          {
+            "name": "rule_id",
+            "type": "keyword"
+          },
+          {
+            "name": "severity",
+            "type": "keyword"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "alerts": 61,
+            "first_seen": "2026-07-05T10:31:38.909Z",
+            "last_seen": "2026-07-05T11:56:38.716Z",
+            "rule": "v2 Falco: suspicious network tool in container",
+            "rule_id": "v2-falco-suspicious-network-tool",
+            "severity": "medium",
+            "host.name": "soc-playground"
+          }
+        ]
+      }
+    }
+  ]
+}

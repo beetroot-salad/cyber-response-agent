@@ -1,0 +1,66 @@
+{
+  "tag": "glm-5.2_effort-none_prompt-711__judge-claude-opus-5-high_47d6044a",
+  "projection": "glm-5.2_effort-none_prompt-711.yaml",
+  "case": "case-004-noise-stolen-cred",
+  "kind": "observed",
+  "judge": {
+    "model": "claude-opus-5",
+    "effort": "high",
+    "prompts_sha8": "47d6044a"
+  },
+  "n_leads": 3,
+  "mechanical": {
+    "missing_leads": [],
+    "unscored_leads": [],
+    "duplicate_leads": [],
+    "malformed_leads": {},
+    "forbidden_emitted": [],
+    "concrete_value_leads": []
+  },
+  "judged": true,
+  "faithful": "3/3",
+  "abstentions": 0,
+  "by_system": {
+    "cmdb": "1/1",
+    "elastic": "2/2"
+  },
+  "cost_usd": 0.2082,
+  "rows": [
+    {
+      "lead": "l-001",
+      "system": "elastic",
+      "delta_kind": "indistinguishable",
+      "faithful": true,
+      "cause": null,
+      "heterogeneous": null,
+      "undecidable_reason": null,
+      "form_notes": null,
+      "rationale": "The operation window returns one row \u2014 `sre.alice`, `password`, accepted 5, failed 0,\nsource.ip 172.18.0.6 \u2014 and the live C-14d control returns a structurally identical row\n(`sre.alice`, `password`, accepted 6, failed 0, source.ip 172.18.0.17). The only\ncategorical difference is `source.ip`, which `environment_notes` lists as an unstable\nidentifier in playground-v2, so it cannot carry a delta; accepted 5 vs 6 with failed=0\nin both is not a distinguishing field. That matches the measurement's `indistinguishable`\nreading, and the projection's noise marker is exactly the honest output for an envelope\nwhose surfaced fields are baseline-identical.",
+      "evidence": "The single query returns one row in the operation window (user.name `sre.alice`, auth_method `password`, accepted 5, failed 0, first_seen 10:32:43Z, last_seen 10:33:26Z, source.ip 172.18.0.6), and the live C-14d control returns a structurally identical single row (`sre.alice`, `password`, accepted 6, failed 0, source.ip 172.18.0.17). The only column that differs categorically is `source.ip`, which `environment_notes` lists as an unstable identifier in playground-v2 (container addresses reassigned per lever-up), so it cannot evidence a delta; user.name, auth_method, and failed=0 are all baseline-identical, and accepted 5 vs 6 is not a categorical distinction. The other controls do not overturn this: C-7d has `window_live: false` (not measured), and C-21d is live but empty, which only fails to corroborate rather than contradicting C-14d. No surfaced field distinguishes the observed rows from baseline rows, so this reads as additional but indistinguishable activity, not `present`."
+    },
+    {
+      "lead": "l-002",
+      "system": "elastic",
+      "delta_kind": "absent",
+      "faithful": true,
+      "cause": null,
+      "heterogeneous": null,
+      "undecidable_reason": null,
+      "form_notes": null,
+      "rationale": "The lead's only query returned row_count 0 with empty `values` over 2026-07-25T10:32:00Z\u201310:35:00Z, untruncated and readable, and the two live controls (C-14d 2026-07-11 and C-21d 2026-07-04, both `window_live: true`) returned the identical row_count 0 / empty `values` with the same failed/source.ip/user.name columns. The story explicitly states the attacker issues no failed authentications, so a failure-scoped aggregate query carries nothing from this activity. The empty projection `[]` matches the measurement's `delta_kind: absent` exactly: no delta asserted, no suppression marker over an envelope whose live baseline was already empty, and no invented failed-auth or novel-source row. C-7d being dead is immaterial since the two live controls settle the routine reading.",
+      "evidence": "The lead's single query (elastic.sshd-auth-history) returned row_count 0 with an empty `values` list over the operation window 2026-07-25T10:32:00Z\u201310:35:00Z, and the payload is not truncated or unreadable. Two live control windows (C-14d at 2026-07-11 and C-21d at 2026-07-04, both `window_live: true`) returned the identical shape: row_count 0, empty `values`, same columns (failed/source.ip/user.name). C-7d is dead (`window_live: false`, payload null) and carries no weight, but the two live controls are sufficient to establish that zero failed-sshd rows on db-1 is the routine reading. Observed equals a live, non-truncated baseline of zero, so there is no delta and no suppression (suppression would require a non-empty live baseline)."
+    },
+    {
+      "lead": "l-003",
+      "system": "cmdb",
+      "delta_kind": "state-only",
+      "faithful": true,
+      "cause": null,
+      "heterogeneous": null,
+      "undecidable_reason": null,
+      "form_notes": "projection is an empty list rather than an explicit state-only/no-delta marker",
+      "rationale": "The lead holds one query, `cmdb.host-trust-edges` with `{host: db-1}`, and the observed\npayload contains only `_note: state lookup` plus the echoed params \u2014 no role, criticality,\nowner, or authorized-user rows, and no `@timestamp`. Per `environment_notes.state_and_lookup_systems`\nthe empty `baseline` is expected for cmdb lookups (no timestamp bounds to move), which is why\n`measurement` reads this as `state-only` rather than a missing control. Since the story's\nactivity (an accepted SSH login and on-host recon) changes no CMDB entity record, and the\nobserved payload carries no record content to reproduce, the empty projection asserts no\ninvented delta and omits none that the telemetry shows. Emitting a concrete CMDB record here\nwould instead have been fabrication, so declining to emit anything is the faithful reading.",
+      "evidence": "The lead contains a single query, `cmdb.host-trust-edges` with params `{host: db-1}`, and the observed payload carries only `_note: state lookup` plus the echoed params \u2014 no event rows, no `@timestamp` field. The `baseline` array is empty because, per `environment_notes.state_and_lookup_systems`, cmdb queries carry no `@timestamp` bounds to move and therefore have no control window; that empty baseline is not a missing measurement. With one CMDB entity-record query and no event stream, there is nothing to diff, so the lead is tagged `state-only` regardless of row content. Only one query is decidable, so `heterogeneous` is null."
+    }
+  ]
+}

@@ -1,0 +1,90 @@
+{
+  "judge": {
+    "model": "claude-opus-5",
+    "effort": "high",
+    "prompts_sha8": "47d6044a"
+  },
+  "leads": {
+    "l-001": {
+      "delta_kind": "present",
+      "undecidable_reason": null,
+      "heterogeneous": false,
+      "evidence": "All four observed queries return non-empty failure activity on canary-1: seq 3 reports total_failed=95, distinct_src_ips=1, distinct_users=1 spanning 07:45:35Z\u201307:48:37Z; seq 0 shows a single group of failed_count=95 for user.name=root; seq 2 breaks it into four minute buckets (13, 32, 28, 22); seq 1 shows message rows including 48 pam_unix \"authentication failure ... user=root\" and individual \"Failed password for root from 172.18.0.15 port NNNNN ssh2\" lines. The two live control windows (C-14d and C-21d, both window_live: true, one-hour widened) return row_count=0 for seq 0/1/2 and total_failed=0, distinct_src_ips=0, distinct_users=0 for seq 3; only C-7d is dead and is disregarded. The distinction does not rest on the unstable source.ip column \u2014 user.name=root, the message text, and the per-minute COUNT(*) values are all stable surfaced fields that go from nothing in live baselines to 95 events here. Every decidable query points the same way, so the lead is homogeneous.",
+      "judge_model": "claude-opus-5",
+      "judge_effort": "high",
+      "cost_usd": 0.12914799999999999
+    },
+    "l-002": {
+      "delta_kind": "present",
+      "undecidable_reason": null,
+      "heterogeneous": true,
+      "evidence": "Query seq 1 (logs-system.auth-*) returns 2 rows over the operation window, both `user.name: root`\non canary-1 with `accepted: 0` and `failed: 48` (96 failures total), one row `auth_method: other`\n(07:45:35Z\u201307:48:37Z) and one `auth_method: password` (07:45:37Z\u201307:48:39Z); both live controls\n(C-14d and C-21d, `window_live: true`) returned `row_count: 0` for the identical aggregation over\none-hour windows, so the distinction is carried by user.name/auth_method/failed counts, not by the\nunstable `source.ip` 172.18.0.15. Query seq 0 (v2-sshd-success-after-failures alerts) is `row_count: 0`\nobserved and `row_count: 0` in both live controls \u2014 no delta there, and no `accepted > 0` row exists\nanywhere in the payloads, so the queries disagree and the lead is heterogeneous. The C-7d control is\n`window_live: false` with a null payload, but the two live controls suffice to establish the baseline.",
+      "judge_model": "claude-opus-5",
+      "judge_effort": "high",
+      "cost_usd": 0.083121
+    },
+    "l-003": {
+      "delta_kind": "state-only",
+      "undecidable_reason": null,
+      "heterogeneous": null,
+      "evidence": "The lead's single query, `cmdb.host-trust-edges` with params `host: canary-1`, returns one CMDB entity record \u2014 `name: canary-1`, `role: canary`, `criticality: sandbox`, `owner: team.sre`, `trust_edges_out: []`, and a two-entry `users` override (`svc.monitoring` nologin/no-sudo, `svc.config-mgmt` /bin/bash with sudo) \u2014 not an event stream. The `environment_notes` state_and_lookup_systems clause states explicitly that cmdb queries return current configuration or an entity record, carry no `@timestamp` bounds to move, and therefore have no control and no baseline-diff semantics. The empty `baseline: []` here is consistent with that: it is the absence of a control by construction, not a measured zero, so it cannot support `absent` or `suppressed`. With only one query in the lead, there is nothing for the queries to disagree about.",
+      "judge_model": "claude-opus-5",
+      "judge_effort": "high",
+      "cost_usd": 0.032536999999999996
+    },
+    "l-004": {
+      "delta_kind": "present",
+      "undecidable_reason": null,
+      "heterogeneous": false,
+      "evidence": "Query seq 4 (`WHERE source.ip == \"172.18.0.15\"`, grouped by zeek.ssh.client) returned row_count 0 in both live controls (C-14d 2026-07-11 and C-21d 2026-07-04, window_live true), while the observed payload carries 17 rows of 172.18.0.15 acting as SSH client, including 48 events to 172.18.0.9 with zeek.ssh.client \"SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.15\" first_seen 2026-07-25T07:45:35.517Z / last_seen 07:48:37.065Z. Seq 3's raw rows make the distinction non-identifier-based: the four 2026-07-25 records carry event.outcome \"failure\", zeek.ssh.auth.success false, zeek.ssh.auth.attempts 1, populated algorithm.cipher/key_exchange and zeek.ssh.host_key 03:fd:5c:\u2026:41, whereas every baseline seq-3 row (C-14d and C-21d) has event.outcome null, auth.attempts 0, auth.success null and all algorithm/client fields null. Those differing columns (zeek.ssh.client, event.outcome, zeek.ssh.auth.*) are not in the environment's unstable-identifier list, so the delta survives the caveat that 172.18.0.15 is a different container (office-ws-1 vs db-1) than in the 07-04/07-11 controls; seq 5 agrees, adding a source.ip 172.18.0.15 \u2192 172.18.0.9 row with both client and server \"OpenSSH_8.9p1\" that no control window contains, and seq 1 is consistent (95 conns to 172.18.0.9:22, last_seen 2026-07-25T07:48:37) rather than contradictory. Seq 0 is unreadable but was not needed.",
+      "judge_model": "claude-opus-5",
+      "judge_effort": "high",
+      "cost_usd": 0.6911289999999999
+    },
+    "l-005": {
+      "delta_kind": "state-only",
+      "undecidable_reason": null,
+      "heterogeneous": null,
+      "evidence": "The lead's single query is `threat-intel.ip-reputation-lookup` for value 172.18.0.15, which returns an entity record (value, type, verdict: unknown, score: 0, sources: [], tags: [], first_seen: null, last_seen: null) rather than an event stream. Per `environment_notes.state_and_lookup_systems`, threat-intel lookups carry no @timestamp bounds to move, so they have no control window \u2014 consistent with the empty `baseline` array here, which is an absence of baseline semantics rather than an empty measurement. No campaign or actor association is surfaced; the record is a bare unknown-reputation entry with zero sources. With only one query in the lead, there is no cross-query disagreement to record.",
+      "judge_model": "claude-opus-5",
+      "judge_effort": "high",
+      "cost_usd": 0.029571
+    },
+    "l-006": {
+      "delta_kind": "present",
+      "undecidable_reason": null,
+      "heterogeneous": true,
+      "evidence": "Three queries surface distinguishable rows in the operation window: seq 1 returns 2 rows on host.name=canary-1 (failed=48 auth_method=\"other\", failed=47 auth_method=\"password\", accepted=0, first_seen 2026-07-25T07:45:35Z, last_seen 07:48:37Z), seq 5 reproduces the same 95 failures in a single 07:00 hourly bucket, and seq 6 breaks them into 8 per-minute rows (7+6, 16+16, 14+14, 11+11 failures) \u2014 a sustained ~30/min failure burst. The matching baseline query strings over live control windows (C-7d, C-14d, C-21d for seq 0/1/2/5; C-14d and C-21d for seq 3/4/6) all return row_count 0 or total=0, so the distinction is carried by host.name plus the failed/accepted counts and bucket cadence, not merely by the unstable source.ip filter. seq 0, 2 and 3 are themselves empty in the observed window (no pre-alert canary-1 activity, total=0 in the prior 24h, no other hosts during the alert), matching their live baselines \u2014 hence heterogeneous, but the lead's envelope is present. seq 4's older jump-box-1/web-1/db-1 rows are treated as unattributed historical address-scoped rows per environment_notes and are not relied on.",
+      "judge_model": "claude-opus-5",
+      "judge_effort": "high",
+      "cost_usd": 0.23534
+    },
+    "l-007": {
+      "delta_kind": "state-only",
+      "undecidable_reason": null,
+      "heterogeneous": null,
+      "evidence": "The lead's single query, cmdb.host-trust-edges with param host=db-1, is a CMDB entity\nlookup returning one record (name: db-1, role: db, criticality: prod, owner: team.data,\ntrust_edges_out: [], three users: svc.monitoring, svc.backups, svc.config-mgmt), not\nan event stream, and it carries no @timestamp bounds to move \u2014 hence the empty\nbaseline array. Per environment_notes.state_and_lookup_systems, cmdb queries are\nstate-only and have no baseline-diff semantics, so the empty baseline is not evidence\nof anything. Notably trust_edges_out is an empty list, so no declared SSH trust edge\nto canary-1 or any canary-tier host is surfaced. With only one query in the lead and\nit being state-only, heterogeneity is null.",
+      "judge_model": "claude-opus-5",
+      "judge_effort": "high",
+      "cost_usd": 0.032751999999999996
+    },
+    "l-008": {
+      "delta_kind": "state-only",
+      "undecidable_reason": null,
+      "heterogeneous": false,
+      "evidence": "Every query in this lead is an `identity` system query (identity.access-check, identity.list-all-users, identity.user-authorization), which the environment notes explicitly classify as returning current configuration or an entity record rather than an event stream; the payloads carry no `@timestamp` field and the baseline array is empty because there are no time bounds to move. The observed rows are entity records \u2014 e.g. seq 1 returns `total: 16` user records with `username`/`realm_role`/`enabled`, and seq 4\u201319 return per-user `authorized_hosts`/`sudo_hosts` lists (sre.alice, sre.chen, sre.ben, svc.config-mgmt and svc.monitoring all include `canary-1`, and seq 2/3 report `authorized: true, via: override` for the two service accounts). The seq 0 payload (root on canary-1) is `unreadable: true`, but that does not change the classification, since no identity query has baseline-diff semantics regardless of its contents. No field here can carry a baseline delta, so the lead is tagged `state-only` uniformly across all its queries.",
+      "judge_model": "claude-opus-5",
+      "judge_effort": "high",
+      "cost_usd": 0.076132
+    },
+    "l-009": {
+      "delta_kind": "state-only",
+      "undecidable_reason": null,
+      "heterogeneous": false,
+      "evidence": "All four queries in this lead are change-mgmt templates (`change-mgmt.active-changes` for canary-1 and db-1 at 2026-07-25T07:48:00Z, and `change-mgmt.list-changes` for canary-1 and db-1), which environment_notes classifies explicitly as a state/lookup system returning current configuration records rather than an event stream, with no @timestamp bounds to move and hence no control. Consistently, `baseline` is an empty list \u2014 no control payloads exist for any of the four queries. The observed payloads are seq 0 `[]`, seq 1 `total: 0, changes: []` (canary-1 has no change records at all), seq 2 `total: 10` db-1 changes (one planned CHG-1043 postgres bump for 2026-05-02 and nine approved OPS-STANDING-DB-BACKUP nightly windows 07-18..07-26, all 02:00\u201303:00Z), and seq 3 `[]` (no db-1 change active at 07:48:00Z). No query surfaces an event-stream field, so baseline-diff semantics do not apply regardless of content; all four agree, so heterogeneous is false.",
+      "judge_model": "claude-opus-5",
+      "judge_effort": "high",
+      "cost_usd": 0.06092500000000001
+    }
+  }
+}

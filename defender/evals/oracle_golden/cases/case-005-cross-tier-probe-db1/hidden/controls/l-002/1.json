@@ -1,0 +1,129 @@
+{
+  "lead_id": "l-002",
+  "seq": 1,
+  "controls": [
+    {
+      "name": "C-7d",
+      "window": [
+        "2026-06-19T00:00:00.000Z",
+        "2026-07-19T11:08:28.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-19T00:00:00.000Z\" AND @timestamp < \"2026-07-19T11:08:28.000Z\"\n        AND host.name == \"db-1\"\n        AND event.outcome == \"failure\"\n        AND message LIKE \"*Failed password*\"\n| STATS failed_count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY source.ip\n| SORT failed_count DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-19T00:00:00.000Z\" AND @timestamp < \"2026-07-19T11:08:28.000Z\"\n        AND host.name == \"db-1\"\n        AND event.outcome == \"failure\"\n        AND message LIKE \"*Failed password*\"\n| STATS failed_count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY source.ip\n| SORT failed_count DESC",
+        "columns": [
+          {
+            "name": "failed_count",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "failed_count": 24,
+            "first_seen": "2026-07-03T12:05:23.000Z",
+            "last_seen": "2026-07-03T12:05:57.000Z",
+            "source.ip": "172.18.0.13"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-06-12T00:00:00.000Z",
+        "2026-07-12T11:08:28.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-12T00:00:00.000Z\" AND @timestamp < \"2026-07-12T11:08:28.000Z\"\n        AND host.name == \"db-1\"\n        AND event.outcome == \"failure\"\n        AND message LIKE \"*Failed password*\"\n| STATS failed_count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY source.ip\n| SORT failed_count DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-12T00:00:00.000Z\" AND @timestamp < \"2026-07-12T11:08:28.000Z\"\n        AND host.name == \"db-1\"\n        AND event.outcome == \"failure\"\n        AND message LIKE \"*Failed password*\"\n| STATS failed_count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY source.ip\n| SORT failed_count DESC",
+        "columns": [
+          {
+            "name": "failed_count",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "failed_count": 24,
+            "first_seen": "2026-07-03T12:05:23.000Z",
+            "last_seen": "2026-07-03T12:05:57.000Z",
+            "source.ip": "172.18.0.13"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-06-05T00:00:00.000Z",
+        "2026-07-05T11:08:28.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-05T00:00:00.000Z\" AND @timestamp < \"2026-07-05T11:08:28.000Z\"\n        AND host.name == \"db-1\"\n        AND event.outcome == \"failure\"\n        AND message LIKE \"*Failed password*\"\n| STATS failed_count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY source.ip\n| SORT failed_count DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-05T00:00:00.000Z\" AND @timestamp < \"2026-07-05T11:08:28.000Z\"\n        AND host.name == \"db-1\"\n        AND event.outcome == \"failure\"\n        AND message LIKE \"*Failed password*\"\n| STATS failed_count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY source.ip\n| SORT failed_count DESC",
+        "columns": [
+          {
+            "name": "failed_count",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          }
+        ],
+        "row_count": 2,
+        "values": [
+          {
+            "failed_count": 64,
+            "first_seen": "2026-06-08T06:36:07.000Z",
+            "last_seen": "2026-06-08T06:36:34.000Z",
+            "source.ip": "172.18.0.21"
+          },
+          {
+            "failed_count": 24,
+            "first_seen": "2026-07-03T12:05:23.000Z",
+            "last_seen": "2026-07-03T12:05:57.000Z",
+            "source.ip": "172.18.0.13"
+          }
+        ]
+      }
+    }
+  ]
+}

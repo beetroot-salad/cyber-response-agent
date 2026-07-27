@@ -1,0 +1,553 @@
+{
+  "lead_id": "l-007",
+  "seq": 21,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-06-17T00:00:00.000Z",
+        "2026-07-18T00:00:00.000Z"
+      ],
+      "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-06-17T00:00:00.000Z\" AND @timestamp < \"2026-07-18T00:00:00.000Z\"\n        AND falco.rule == \"Adding ssh keys to authorized_keys\"\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule      = falco.rule,\n           host.name,\n           container = falco.output_fields.container.name,\n           container_id = falco.output_fields.container.id,\n           proc      = falco.output_fields.proc.name,\n           parent    = falco.output_fields.proc.pname,\n           cmdline   = falco.output_fields.proc.cmdline,\n           user      = falco.output_fields.user.name\n| SORT events DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-06-17T00:00:00.000Z\" AND @timestamp < \"2026-07-18T00:00:00.000Z\"\n        AND falco.rule == \"Adding ssh keys to authorized_keys\"\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule      = falco.rule,\n           host.name,\n           container = falco.output_fields.container.name,\n           container_id = falco.output_fields.container.id,\n           proc      = falco.output_fields.proc.name,\n           parent    = falco.output_fields.proc.pname,\n           cmdline   = falco.output_fields.proc.cmdline,\n           user      = falco.output_fields.user.name\n| SORT events DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "rule",
+            "type": "keyword"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "container",
+            "type": "keyword"
+          },
+          {
+            "name": "container_id",
+            "type": "keyword"
+          },
+          {
+            "name": "proc",
+            "type": "keyword"
+          },
+          {
+            "name": "parent",
+            "type": "keyword"
+          },
+          {
+            "name": "cmdline",
+            "type": "keyword"
+          },
+          {
+            "name": "user",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 8,
+        "values": [
+          {
+            "events": 30,
+            "first_seen": "2026-06-17T11:59:44.664Z",
+            "last_seen": "2026-07-11T11:16:04.473Z",
+            "rule": "Adding ssh keys to authorized_keys",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "d1daf6f3b7c6",
+            "proc": "bash",
+            "parent": "sshd",
+            "cmdline": "bash -c mkdir -p ~/.ssh && chmod 700 ~/.ssh && \\\n   echo \"ssh-rsa AAAAB3rotated$(date +%s) svc.config-mgmt@rotation\" >> ~/.ssh/authorized_keys && \\\n   chmod 600 ~/.ssh/authorized_keys",
+            "user": "<NA>"
+          },
+          {
+            "events": 22,
+            "first_seen": "2026-06-17T14:02:55.594Z",
+            "last_seen": "2026-07-13T04:58:33.972Z",
+            "rule": "Adding ssh keys to authorized_keys",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "922f03f16a11",
+            "proc": "bash",
+            "parent": "sshd",
+            "cmdline": "bash -c mkdir -p ~/.ssh && chmod 700 ~/.ssh && \\\n   echo \"ssh-rsa AAAAB3rotated$(date +%s) svc.config-mgmt@rotation\" >> ~/.ssh/authorized_keys && \\\n   chmod 600 ~/.ssh/authorized_keys",
+            "user": "<NA>"
+          },
+          {
+            "events": 21,
+            "first_seen": "2026-06-17T16:25:45.921Z",
+            "last_seen": "2026-07-09T17:50:46.344Z",
+            "rule": "Adding ssh keys to authorized_keys",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "ffbff1299702",
+            "proc": "bash",
+            "parent": "sshd",
+            "cmdline": "bash -c mkdir -p ~/.ssh && chmod 700 ~/.ssh && \\\n   echo \"ssh-rsa AAAAB3rotated$(date +%s) svc.config-mgmt@rotation\" >> ~/.ssh/authorized_keys && \\\n   chmod 600 ~/.ssh/authorized_keys",
+            "user": "<NA>"
+          },
+          {
+            "events": 21,
+            "first_seen": "2026-06-17T14:20:54.921Z",
+            "last_seen": "2026-07-11T14:50:03.844Z",
+            "rule": "Adding ssh keys to authorized_keys",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "2c1e2ec93d17",
+            "proc": "bash",
+            "parent": "sshd",
+            "cmdline": "bash -c mkdir -p ~/.ssh && chmod 700 ~/.ssh && \\\n   echo \"ssh-rsa AAAAB3rotated$(date +%s) svc.config-mgmt@rotation\" >> ~/.ssh/authorized_keys && \\\n   chmod 600 ~/.ssh/authorized_keys",
+            "user": "<NA>"
+          },
+          {
+            "events": 18,
+            "first_seen": "2026-06-17T14:52:42.487Z",
+            "last_seen": "2026-07-09T21:47:44.060Z",
+            "rule": "Adding ssh keys to authorized_keys",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "a36492b5172b",
+            "proc": "bash",
+            "parent": "sshd",
+            "cmdline": "bash -c mkdir -p ~/.ssh && chmod 700 ~/.ssh && \\\n   echo \"ssh-rsa AAAAB3rotated$(date +%s) svc.config-mgmt@rotation\" >> ~/.ssh/authorized_keys && \\\n   chmod 600 ~/.ssh/authorized_keys",
+            "user": "<NA>"
+          },
+          {
+            "events": 17,
+            "first_seen": "2026-06-18T13:53:07.679Z",
+            "last_seen": "2026-07-11T22:16:32.806Z",
+            "rule": "Adding ssh keys to authorized_keys",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "1df4bcd65ee4",
+            "proc": "bash",
+            "parent": "sshd",
+            "cmdline": "bash -c mkdir -p ~/.ssh && chmod 700 ~/.ssh && \\\n   echo \"ssh-rsa AAAAB3rotated$(date +%s) svc.config-mgmt@rotation\" >> ~/.ssh/authorized_keys && \\\n   chmod 600 ~/.ssh/authorized_keys",
+            "user": "<NA>"
+          },
+          {
+            "events": 17,
+            "first_seen": "2026-06-18T13:34:36.411Z",
+            "last_seen": "2026-07-09T15:00:34.331Z",
+            "rule": "Adding ssh keys to authorized_keys",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "d8fb0192a17f",
+            "proc": "bash",
+            "parent": "sshd",
+            "cmdline": "bash -c mkdir -p ~/.ssh && chmod 700 ~/.ssh && \\\n   echo \"ssh-rsa AAAAB3rotated$(date +%s) svc.config-mgmt@rotation\" >> ~/.ssh/authorized_keys && \\\n   chmod 600 ~/.ssh/authorized_keys",
+            "user": "<NA>"
+          },
+          {
+            "events": 10,
+            "first_seen": "2026-06-18T16:27:31.427Z",
+            "last_seen": "2026-07-11T21:54:02.555Z",
+            "rule": "Adding ssh keys to authorized_keys",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "ed96a85a7480",
+            "proc": "bash",
+            "parent": "sshd",
+            "cmdline": "bash -c mkdir -p ~/.ssh && chmod 700 ~/.ssh && \\\n   echo \"ssh-rsa AAAAB3rotated$(date +%s) svc.config-mgmt@rotation\" >> ~/.ssh/authorized_keys && \\\n   chmod 600 ~/.ssh/authorized_keys",
+            "user": "<NA>"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-06-10T00:00:00.000Z",
+        "2026-07-11T00:00:00.000Z"
+      ],
+      "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-06-10T00:00:00.000Z\" AND @timestamp < \"2026-07-11T00:00:00.000Z\"\n        AND falco.rule == \"Adding ssh keys to authorized_keys\"\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule      = falco.rule,\n           host.name,\n           container = falco.output_fields.container.name,\n           container_id = falco.output_fields.container.id,\n           proc      = falco.output_fields.proc.name,\n           parent    = falco.output_fields.proc.pname,\n           cmdline   = falco.output_fields.proc.cmdline,\n           user      = falco.output_fields.user.name\n| SORT events DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-06-10T00:00:00.000Z\" AND @timestamp < \"2026-07-11T00:00:00.000Z\"\n        AND falco.rule == \"Adding ssh keys to authorized_keys\"\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule      = falco.rule,\n           host.name,\n           container = falco.output_fields.container.name,\n           container_id = falco.output_fields.container.id,\n           proc      = falco.output_fields.proc.name,\n           parent    = falco.output_fields.proc.pname,\n           cmdline   = falco.output_fields.proc.cmdline,\n           user      = falco.output_fields.user.name\n| SORT events DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "rule",
+            "type": "keyword"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "container",
+            "type": "keyword"
+          },
+          {
+            "name": "container_id",
+            "type": "keyword"
+          },
+          {
+            "name": "proc",
+            "type": "keyword"
+          },
+          {
+            "name": "parent",
+            "type": "keyword"
+          },
+          {
+            "name": "cmdline",
+            "type": "keyword"
+          },
+          {
+            "name": "user",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 10,
+        "values": [
+          {
+            "events": 36,
+            "first_seen": "2026-06-10T01:20:07.872Z",
+            "last_seen": "2026-07-09T17:41:28.245Z",
+            "rule": "Adding ssh keys to authorized_keys",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "d1daf6f3b7c6",
+            "proc": "bash",
+            "parent": "sshd",
+            "cmdline": "bash -c mkdir -p ~/.ssh && chmod 700 ~/.ssh && \\\n   echo \"ssh-rsa AAAAB3rotated$(date +%s) svc.config-mgmt@rotation\" >> ~/.ssh/authorized_keys && \\\n   chmod 600 ~/.ssh/authorized_keys",
+            "user": "<NA>"
+          },
+          {
+            "events": 24,
+            "first_seen": "2026-06-14T01:49:51.578Z",
+            "last_seen": "2026-07-09T17:50:46.344Z",
+            "rule": "Adding ssh keys to authorized_keys",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "ffbff1299702",
+            "proc": "bash",
+            "parent": "sshd",
+            "cmdline": "bash -c mkdir -p ~/.ssh && chmod 700 ~/.ssh && \\\n   echo \"ssh-rsa AAAAB3rotated$(date +%s) svc.config-mgmt@rotation\" >> ~/.ssh/authorized_keys && \\\n   chmod 600 ~/.ssh/authorized_keys",
+            "user": "<NA>"
+          },
+          {
+            "events": 22,
+            "first_seen": "2026-06-16T08:20:25.951Z",
+            "last_seen": "2026-07-10T18:50:25.493Z",
+            "rule": "Adding ssh keys to authorized_keys",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "922f03f16a11",
+            "proc": "bash",
+            "parent": "sshd",
+            "cmdline": "bash -c mkdir -p ~/.ssh && chmod 700 ~/.ssh && \\\n   echo \"ssh-rsa AAAAB3rotated$(date +%s) svc.config-mgmt@rotation\" >> ~/.ssh/authorized_keys && \\\n   chmod 600 ~/.ssh/authorized_keys",
+            "user": "<NA>"
+          },
+          {
+            "events": 22,
+            "first_seen": "2026-06-16T10:48:25.161Z",
+            "last_seen": "2026-07-08T19:10:52.748Z",
+            "rule": "Adding ssh keys to authorized_keys",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "2c1e2ec93d17",
+            "proc": "bash",
+            "parent": "sshd",
+            "cmdline": "bash -c mkdir -p ~/.ssh && chmod 700 ~/.ssh && \\\n   echo \"ssh-rsa AAAAB3rotated$(date +%s) svc.config-mgmt@rotation\" >> ~/.ssh/authorized_keys && \\\n   chmod 600 ~/.ssh/authorized_keys",
+            "user": "<NA>"
+          },
+          {
+            "events": 20,
+            "first_seen": "2026-06-15T04:17:34.304Z",
+            "last_seen": "2026-07-09T21:47:44.060Z",
+            "rule": "Adding ssh keys to authorized_keys",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "a36492b5172b",
+            "proc": "bash",
+            "parent": "sshd",
+            "cmdline": "bash -c mkdir -p ~/.ssh && chmod 700 ~/.ssh && \\\n   echo \"ssh-rsa AAAAB3rotated$(date +%s) svc.config-mgmt@rotation\" >> ~/.ssh/authorized_keys && \\\n   chmod 600 ~/.ssh/authorized_keys",
+            "user": "<NA>"
+          },
+          {
+            "events": 19,
+            "first_seen": "2026-06-15T14:09:22.360Z",
+            "last_seen": "2026-07-09T15:00:34.331Z",
+            "rule": "Adding ssh keys to authorized_keys",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "d8fb0192a17f",
+            "proc": "bash",
+            "parent": "sshd",
+            "cmdline": "bash -c mkdir -p ~/.ssh && chmod 700 ~/.ssh && \\\n   echo \"ssh-rsa AAAAB3rotated$(date +%s) svc.config-mgmt@rotation\" >> ~/.ssh/authorized_keys && \\\n   chmod 600 ~/.ssh/authorized_keys",
+            "user": "<NA>"
+          },
+          {
+            "events": 17,
+            "first_seen": "2026-06-15T17:48:13.823Z",
+            "last_seen": "2026-07-09T16:33:26.448Z",
+            "rule": "Adding ssh keys to authorized_keys",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "1df4bcd65ee4",
+            "proc": "bash",
+            "parent": "sshd",
+            "cmdline": "bash -c mkdir -p ~/.ssh && chmod 700 ~/.ssh && \\\n   echo \"ssh-rsa AAAAB3rotated$(date +%s) svc.config-mgmt@rotation\" >> ~/.ssh/authorized_keys && \\\n   chmod 600 ~/.ssh/authorized_keys",
+            "user": "<NA>"
+          },
+          {
+            "events": 13,
+            "first_seen": "2026-06-13T21:46:23.338Z",
+            "last_seen": "2026-07-03T12:47:10.690Z",
+            "rule": "Adding ssh keys to authorized_keys",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "ed96a85a7480",
+            "proc": "bash",
+            "parent": "sshd",
+            "cmdline": "bash -c mkdir -p ~/.ssh && chmod 700 ~/.ssh && \\\n   echo \"ssh-rsa AAAAB3rotated$(date +%s) svc.config-mgmt@rotation\" >> ~/.ssh/authorized_keys && \\\n   chmod 600 ~/.ssh/authorized_keys",
+            "user": "<NA>"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-14T09:19:35.747Z",
+            "last_seen": "2026-06-14T09:19:35.747Z",
+            "rule": "Adding ssh keys to authorized_keys",
+            "host.name": "soc-playground",
+            "container": "host",
+            "container_id": "host",
+            "proc": "<NA>",
+            "parent": null,
+            "cmdline": "<NA>",
+            "user": "<NA>"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-14T10:09:29.255Z",
+            "last_seen": "2026-06-14T10:09:29.255Z",
+            "rule": "Adding ssh keys to authorized_keys",
+            "host.name": "soc-playground",
+            "container": "host",
+            "container_id": "host",
+            "proc": "nano",
+            "parent": "bash",
+            "cmdline": "nano /root/.ssh/authorized_keys",
+            "user": "root"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-03T00:00:00.000Z",
+        "2026-07-04T00:00:00.000Z"
+      ],
+      "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-06-03T00:00:00.000Z\" AND @timestamp < \"2026-07-04T00:00:00.000Z\"\n        AND falco.rule == \"Adding ssh keys to authorized_keys\"\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule      = falco.rule,\n           host.name,\n           container = falco.output_fields.container.name,\n           container_id = falco.output_fields.container.id,\n           proc      = falco.output_fields.proc.name,\n           parent    = falco.output_fields.proc.pname,\n           cmdline   = falco.output_fields.proc.cmdline,\n           user      = falco.output_fields.user.name\n| SORT events DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-06-03T00:00:00.000Z\" AND @timestamp < \"2026-07-04T00:00:00.000Z\"\n        AND falco.rule == \"Adding ssh keys to authorized_keys\"\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule      = falco.rule,\n           host.name,\n           container = falco.output_fields.container.name,\n           container_id = falco.output_fields.container.id,\n           proc      = falco.output_fields.proc.name,\n           parent    = falco.output_fields.proc.pname,\n           cmdline   = falco.output_fields.proc.cmdline,\n           user      = falco.output_fields.user.name\n| SORT events DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "rule",
+            "type": "keyword"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "container",
+            "type": "keyword"
+          },
+          {
+            "name": "container_id",
+            "type": "keyword"
+          },
+          {
+            "name": "proc",
+            "type": "keyword"
+          },
+          {
+            "name": "parent",
+            "type": "keyword"
+          },
+          {
+            "name": "cmdline",
+            "type": "keyword"
+          },
+          {
+            "name": "user",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 10,
+        "values": [
+          {
+            "events": 37,
+            "first_seen": "2026-06-03T00:41:51.155Z",
+            "last_seen": "2026-07-03T12:23:04.381Z",
+            "rule": "Adding ssh keys to authorized_keys",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "d1daf6f3b7c6",
+            "proc": "bash",
+            "parent": "sshd",
+            "cmdline": "bash -c mkdir -p ~/.ssh && chmod 700 ~/.ssh && \\\n   echo \"ssh-rsa AAAAB3rotated$(date +%s) svc.config-mgmt@rotation\" >> ~/.ssh/authorized_keys && \\\n   chmod 600 ~/.ssh/authorized_keys",
+            "user": "<NA>"
+          },
+          {
+            "events": 26,
+            "first_seen": "2026-06-03T00:51:01.267Z",
+            "last_seen": "2026-07-03T13:15:49.059Z",
+            "rule": "Adding ssh keys to authorized_keys",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "ffbff1299702",
+            "proc": "bash",
+            "parent": "sshd",
+            "cmdline": "bash -c mkdir -p ~/.ssh && chmod 700 ~/.ssh && \\\n   echo \"ssh-rsa AAAAB3rotated$(date +%s) svc.config-mgmt@rotation\" >> ~/.ssh/authorized_keys && \\\n   chmod 600 ~/.ssh/authorized_keys",
+            "user": "<NA>"
+          },
+          {
+            "events": 23,
+            "first_seen": "2026-06-04T12:34:56.020Z",
+            "last_seen": "2026-07-03T12:47:10.690Z",
+            "rule": "Adding ssh keys to authorized_keys",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "ed96a85a7480",
+            "proc": "bash",
+            "parent": "sshd",
+            "cmdline": "bash -c mkdir -p ~/.ssh && chmod 700 ~/.ssh && \\\n   echo \"ssh-rsa AAAAB3rotated$(date +%s) svc.config-mgmt@rotation\" >> ~/.ssh/authorized_keys && \\\n   chmod 600 ~/.ssh/authorized_keys",
+            "user": "<NA>"
+          },
+          {
+            "events": 22,
+            "first_seen": "2026-06-03T04:48:01.647Z",
+            "last_seen": "2026-07-03T18:28:23.833Z",
+            "rule": "Adding ssh keys to authorized_keys",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "a36492b5172b",
+            "proc": "bash",
+            "parent": "sshd",
+            "cmdline": "bash -c mkdir -p ~/.ssh && chmod 700 ~/.ssh && \\\n   echo \"ssh-rsa AAAAB3rotated$(date +%s) svc.config-mgmt@rotation\" >> ~/.ssh/authorized_keys && \\\n   chmod 600 ~/.ssh/authorized_keys",
+            "user": "<NA>"
+          },
+          {
+            "events": 21,
+            "first_seen": "2026-06-04T08:56:21.722Z",
+            "last_seen": "2026-07-03T16:27:33.429Z",
+            "rule": "Adding ssh keys to authorized_keys",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "2c1e2ec93d17",
+            "proc": "bash",
+            "parent": "sshd",
+            "cmdline": "bash -c mkdir -p ~/.ssh && chmod 700 ~/.ssh && \\\n   echo \"ssh-rsa AAAAB3rotated$(date +%s) svc.config-mgmt@rotation\" >> ~/.ssh/authorized_keys && \\\n   chmod 600 ~/.ssh/authorized_keys",
+            "user": "<NA>"
+          },
+          {
+            "events": 19,
+            "first_seen": "2026-06-04T01:50:42.530Z",
+            "last_seen": "2026-07-03T12:38:54.591Z",
+            "rule": "Adding ssh keys to authorized_keys",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "922f03f16a11",
+            "proc": "bash",
+            "parent": "sshd",
+            "cmdline": "bash -c mkdir -p ~/.ssh && chmod 700 ~/.ssh && \\\n   echo \"ssh-rsa AAAAB3rotated$(date +%s) svc.config-mgmt@rotation\" >> ~/.ssh/authorized_keys && \\\n   chmod 600 ~/.ssh/authorized_keys",
+            "user": "<NA>"
+          },
+          {
+            "events": 18,
+            "first_seen": "2026-06-05T08:14:14.036Z",
+            "last_seen": "2026-07-02T18:50:29.204Z",
+            "rule": "Adding ssh keys to authorized_keys",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "d8fb0192a17f",
+            "proc": "bash",
+            "parent": "sshd",
+            "cmdline": "bash -c mkdir -p ~/.ssh && chmod 700 ~/.ssh && \\\n   echo \"ssh-rsa AAAAB3rotated$(date +%s) svc.config-mgmt@rotation\" >> ~/.ssh/authorized_keys && \\\n   chmod 600 ~/.ssh/authorized_keys",
+            "user": "<NA>"
+          },
+          {
+            "events": 18,
+            "first_seen": "2026-06-04T12:36:04.030Z",
+            "last_seen": "2026-07-03T02:53:34.672Z",
+            "rule": "Adding ssh keys to authorized_keys",
+            "host.name": "soc-playground",
+            "container": "<NA>",
+            "container_id": "1df4bcd65ee4",
+            "proc": "bash",
+            "parent": "sshd",
+            "cmdline": "bash -c mkdir -p ~/.ssh && chmod 700 ~/.ssh && \\\n   echo \"ssh-rsa AAAAB3rotated$(date +%s) svc.config-mgmt@rotation\" >> ~/.ssh/authorized_keys && \\\n   chmod 600 ~/.ssh/authorized_keys",
+            "user": "<NA>"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-14T09:19:35.747Z",
+            "last_seen": "2026-06-14T09:19:35.747Z",
+            "rule": "Adding ssh keys to authorized_keys",
+            "host.name": "soc-playground",
+            "container": "host",
+            "container_id": "host",
+            "proc": "<NA>",
+            "parent": null,
+            "cmdline": "<NA>",
+            "user": "<NA>"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-14T10:09:29.255Z",
+            "last_seen": "2026-06-14T10:09:29.255Z",
+            "rule": "Adding ssh keys to authorized_keys",
+            "host.name": "soc-playground",
+            "container": "host",
+            "container_id": "host",
+            "proc": "nano",
+            "parent": "bash",
+            "cmdline": "nano /root/.ssh/authorized_keys",
+            "user": "root"
+          }
+        ]
+      }
+    }
+  ]
+}

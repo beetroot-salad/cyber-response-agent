@@ -1,0 +1,233 @@
+{
+  "lead_id": "l-007",
+  "seq": 8,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T18:35:57.000Z",
+        "2026-07-12T19:35:57.000Z"
+      ],
+      "query": "FROM .internal.alerts-security.alerts-default-*\n| WHERE @timestamp >= \"2026-07-12T18:35:57.000Z\" AND @timestamp < \"2026-07-12T19:35:57.000Z\"\n| STATS alerts     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule     = kibana.alert.rule.name,\n           rule_id  = kibana.alert.rule.rule_id,\n           severity = kibana.alert.severity\n| SORT alerts DESC\n| LIMIT 10",
+      "live": true,
+      "payload": {
+        "query": "FROM .internal.alerts-security.alerts-default-*\n| WHERE @timestamp >= \"2026-07-12T18:35:57.000Z\" AND @timestamp < \"2026-07-12T19:35:57.000Z\"\n| STATS alerts     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule     = kibana.alert.rule.name,\n           rule_id  = kibana.alert.rule.rule_id,\n           severity = kibana.alert.severity\n| SORT alerts DESC\n| LIMIT 10",
+        "columns": [
+          {
+            "name": "alerts",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "rule",
+            "type": "keyword"
+          },
+          {
+            "name": "rule_id",
+            "type": "keyword"
+          },
+          {
+            "name": "severity",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 5,
+        "values": [
+          {
+            "alerts": 256,
+            "first_seen": "2026-07-12T18:36:46.276Z",
+            "last_seen": "2026-07-12T19:31:46.134Z",
+            "rule": "v2 Falco: suspicious network tool in container",
+            "rule_id": "v2-falco-suspicious-network-tool",
+            "severity": "medium"
+          },
+          {
+            "alerts": 6,
+            "first_seen": "2026-07-12T18:36:46.174Z",
+            "last_seen": "2026-07-12T19:26:46.087Z",
+            "rule": "v2 internal port-scan burst",
+            "rule_id": "v2-internal-port-scan",
+            "severity": "medium"
+          },
+          {
+            "alerts": 5,
+            "first_seen": "2026-07-12T18:46:37.094Z",
+            "last_seen": "2026-07-12T18:46:37.099Z",
+            "rule": "v2 sshd success after failures",
+            "rule_id": "v2-sshd-success-after-failures",
+            "severity": "high"
+          },
+          {
+            "alerts": 2,
+            "first_seen": "2026-07-12T18:46:37.102Z",
+            "last_seen": "2026-07-12T18:46:37.105Z",
+            "rule": "v2 sshd failed-auth burst",
+            "rule_id": "v2-sshd-failed-auth-burst",
+            "severity": "medium"
+          },
+          {
+            "alerts": 1,
+            "first_seen": "2026-07-12T19:06:31.059Z",
+            "last_seen": "2026-07-12T19:06:31.059Z",
+            "rule": "v2 sudo activity burst",
+            "rule_id": "v2-off-hours-sudo",
+            "severity": "medium"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T18:35:57.000Z",
+        "2026-07-05T19:35:57.000Z"
+      ],
+      "query": "FROM .internal.alerts-security.alerts-default-*\n| WHERE @timestamp >= \"2026-07-05T18:35:57.000Z\" AND @timestamp < \"2026-07-05T19:35:57.000Z\"\n| STATS alerts     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule     = kibana.alert.rule.name,\n           rule_id  = kibana.alert.rule.rule_id,\n           severity = kibana.alert.severity\n| SORT alerts DESC\n| LIMIT 10",
+      "live": true,
+      "payload": {
+        "query": "FROM .internal.alerts-security.alerts-default-*\n| WHERE @timestamp >= \"2026-07-05T18:35:57.000Z\" AND @timestamp < \"2026-07-05T19:35:57.000Z\"\n| STATS alerts     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule     = kibana.alert.rule.name,\n           rule_id  = kibana.alert.rule.rule_id,\n           severity = kibana.alert.severity\n| SORT alerts DESC\n| LIMIT 10",
+        "columns": [
+          {
+            "name": "alerts",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "rule",
+            "type": "keyword"
+          },
+          {
+            "name": "rule_id",
+            "type": "keyword"
+          },
+          {
+            "name": "severity",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 5,
+        "values": [
+          {
+            "alerts": 204,
+            "first_seen": "2026-07-05T18:36:38.064Z",
+            "last_seen": "2026-07-05T19:31:37.882Z",
+            "rule": "v2 Falco: suspicious network tool in container",
+            "rule_id": "v2-falco-suspicious-network-tool",
+            "severity": "medium"
+          },
+          {
+            "alerts": 7,
+            "first_seen": "2026-07-05T18:41:41.032Z",
+            "last_seen": "2026-07-05T19:31:40.882Z",
+            "rule": "v2 internal port-scan burst",
+            "rule_id": "v2-internal-port-scan",
+            "severity": "medium"
+          },
+          {
+            "alerts": 5,
+            "first_seen": "2026-07-05T19:31:22.858Z",
+            "last_seen": "2026-07-05T19:31:22.866Z",
+            "rule": "v2 sshd success after failures",
+            "rule_id": "v2-sshd-success-after-failures",
+            "severity": "high"
+          },
+          {
+            "alerts": 3,
+            "first_seen": "2026-07-05T18:51:28.945Z",
+            "last_seen": "2026-07-05T19:21:28.855Z",
+            "rule": "v2 sudo activity burst",
+            "rule_id": "v2-off-hours-sudo",
+            "severity": "medium"
+          },
+          {
+            "alerts": 1,
+            "first_seen": "2026-07-05T19:31:22.868Z",
+            "last_seen": "2026-07-05T19:31:22.868Z",
+            "rule": "v2 sshd failed-auth burst",
+            "rule_id": "v2-sshd-failed-auth-burst",
+            "severity": "medium"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-28T18:35:57.000Z",
+        "2026-06-28T19:35:57.000Z"
+      ],
+      "query": "FROM .internal.alerts-security.alerts-default-*\n| WHERE @timestamp >= \"2026-06-28T18:35:57.000Z\" AND @timestamp < \"2026-06-28T19:35:57.000Z\"\n| STATS alerts     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule     = kibana.alert.rule.name,\n           rule_id  = kibana.alert.rule.rule_id,\n           severity = kibana.alert.severity\n| SORT alerts DESC\n| LIMIT 10",
+      "live": true,
+      "payload": {
+        "query": "FROM .internal.alerts-security.alerts-default-*\n| WHERE @timestamp >= \"2026-06-28T18:35:57.000Z\" AND @timestamp < \"2026-06-28T19:35:57.000Z\"\n| STATS alerts     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule     = kibana.alert.rule.name,\n           rule_id  = kibana.alert.rule.rule_id,\n           severity = kibana.alert.severity\n| SORT alerts DESC\n| LIMIT 10",
+        "columns": [
+          {
+            "name": "alerts",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "rule",
+            "type": "keyword"
+          },
+          {
+            "name": "rule_id",
+            "type": "keyword"
+          },
+          {
+            "name": "severity",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 3,
+        "values": [
+          {
+            "alerts": 194,
+            "first_seen": "2026-06-28T18:37:57.108Z",
+            "last_seen": "2026-06-28T19:32:57.094Z",
+            "rule": "v2 Falco: suspicious network tool in container",
+            "rule_id": "v2-falco-suspicious-network-tool",
+            "severity": "medium"
+          },
+          {
+            "alerts": 6,
+            "first_seen": "2026-06-28T18:37:57.177Z",
+            "last_seen": "2026-06-28T19:27:57.135Z",
+            "rule": "v2 internal port-scan burst",
+            "rule_id": "v2-internal-port-scan",
+            "severity": "medium"
+          },
+          {
+            "alerts": 2,
+            "first_seen": "2026-06-28T18:50:39.145Z",
+            "last_seen": "2026-06-28T19:05:39.094Z",
+            "rule": "v2 sudo activity burst",
+            "rule_id": "v2-off-hours-sudo",
+            "severity": "medium"
+          }
+        ]
+      }
+    }
+  ]
+}

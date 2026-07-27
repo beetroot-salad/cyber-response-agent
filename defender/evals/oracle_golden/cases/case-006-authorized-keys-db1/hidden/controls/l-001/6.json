@@ -1,0 +1,153 @@
+{
+  "lead_id": "l-001",
+  "seq": 6,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T18:35:57.000Z",
+        "2026-07-12T19:35:57.000Z"
+      ],
+      "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-12T18:35:57.000Z\" AND @timestamp < \"2026-07-12T19:35:57.000Z\"\n        AND host.name == \"db-1\"\n| STATS events = COUNT(*)\n        BY data_stream.dataset\n| SORT events DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-12T18:35:57.000Z\" AND @timestamp < \"2026-07-12T19:35:57.000Z\"\n        AND host.name == \"db-1\"\n| STATS events = COUNT(*)\n        BY data_stream.dataset\n| SORT events DESC",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "data_stream.dataset",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 6,
+        "values": [
+          {
+            "events": 20160,
+            "data_stream.dataset": "postgresql.log"
+          },
+          {
+            "events": 1800,
+            "data_stream.dataset": "elastic_agent.metricbeat"
+          },
+          {
+            "events": 672,
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 14,
+            "data_stream.dataset": "elastic_agent"
+          },
+          {
+            "events": 7,
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 6,
+            "data_stream.dataset": "elastic_agent.filebeat"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T18:35:57.000Z",
+        "2026-07-05T19:35:57.000Z"
+      ],
+      "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-05T18:35:57.000Z\" AND @timestamp < \"2026-07-05T19:35:57.000Z\"\n        AND host.name == \"db-1\"\n| STATS events = COUNT(*)\n        BY data_stream.dataset\n| SORT events DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-05T18:35:57.000Z\" AND @timestamp < \"2026-07-05T19:35:57.000Z\"\n        AND host.name == \"db-1\"\n| STATS events = COUNT(*)\n        BY data_stream.dataset\n| SORT events DESC",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "data_stream.dataset",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 6,
+        "values": [
+          {
+            "events": 20160,
+            "data_stream.dataset": "postgresql.log"
+          },
+          {
+            "events": 1800,
+            "data_stream.dataset": "elastic_agent.metricbeat"
+          },
+          {
+            "events": 840,
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 14,
+            "data_stream.dataset": "elastic_agent"
+          },
+          {
+            "events": 7,
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 2,
+            "data_stream.dataset": "elastic_agent.filebeat"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-28T18:35:57.000Z",
+        "2026-06-28T19:35:57.000Z"
+      ],
+      "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-06-28T18:35:57.000Z\" AND @timestamp < \"2026-06-28T19:35:57.000Z\"\n        AND host.name == \"db-1\"\n| STATS events = COUNT(*)\n        BY data_stream.dataset\n| SORT events DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-06-28T18:35:57.000Z\" AND @timestamp < \"2026-06-28T19:35:57.000Z\"\n        AND host.name == \"db-1\"\n| STATS events = COUNT(*)\n        BY data_stream.dataset\n| SORT events DESC",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "data_stream.dataset",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 6,
+        "values": [
+          {
+            "events": 23040,
+            "data_stream.dataset": "postgresql.log"
+          },
+          {
+            "events": 1800,
+            "data_stream.dataset": "elastic_agent.metricbeat"
+          },
+          {
+            "events": 864,
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "events": 10,
+            "data_stream.dataset": "elastic_agent"
+          },
+          {
+            "events": 8,
+            "data_stream.dataset": "system.syslog"
+          },
+          {
+            "events": 2,
+            "data_stream.dataset": "elastic_agent.filebeat"
+          }
+        ]
+      }
+    }
+  ]
+}

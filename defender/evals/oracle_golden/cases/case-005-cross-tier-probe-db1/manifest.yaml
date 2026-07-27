@@ -1,0 +1,24 @@
+case_id: case-005-cross-tier-probe-db1
+kind: observed
+# --- calibration metadata (#711) ---
+# Assigned by the generator BEFORE the first replay: nothing has been scored
+# at this point, so no result could have influenced which side this lands on.
+split: held-out
+unit:
+  activity_family: data-access/T1021.004
+  host_pair: office-ws-1->db-1
+capture_environment: playground-v2@412461512-restore-20260726
+# Declare a class for every state/lookup system this case's leads touch, or
+# label.py emits `needs-label` rather than defaulting them to `0`.
+# A password-guessing run changes no inventory record and no identity
+# configuration, so both lookups return the state they would have returned anyway.
+state_classes:
+  cmdb: "0"
+  identity: "0"
+attack:
+  scenario: cross-tier-ssh-probe
+  seed: 77
+  runner_run_id: cross-tier-ssh-probe-77-f39bd004
+  window: ["2026-07-26T11:04:03+00:00", "2026-07-26T11:04:46+00:00"]
+  alert_rule: v2-sshd-failed-auth-burst
+generated_by: generate_case.py

@@ -1,0 +1,45 @@
+projections:
+- lead_id: l-002
+  events: []
+- lead_id: l-001
+  events:
+  - '@timestamp': '2026-07-27T10:39:55+00:00'
+    message: Failed password for dev.dana from 172.18.0.16 port <client-port-1> ssh2
+    source.ip: 172.18.0.16
+    user.name: dev.dana
+    event.outcome: failure
+    event_type: auth_failed
+    auth_method: password
+    host.name: web-1
+  - '@timestamp': '2026-07-27T10:40:06+00:00'
+    message: Failed password for dev.dana from 172.18.0.16 port <client-port-2> ssh2
+    source.ip: 172.18.0.16
+    user.name: dev.dana
+    event.outcome: failure
+    event_type: auth_failed
+    auth_method: password
+    host.name: web-1
+  - '@timestamp': '2026-07-27T10:40:17+00:00'
+    message: Failed password for dev.dana from 172.18.0.16 port <client-port-3> ssh2
+    source.ip: 172.18.0.16
+    user.name: dev.dana
+    event.outcome: failure
+    event_type: auth_failed
+    auth_method: password
+    host.name: web-1
+  - '@timestamp': '2026-07-27T10:40:28+00:00'
+    message: Failed password for dev.dana from 172.18.0.16 port <client-port-4> ssh2
+    source.ip: 172.18.0.16
+    user.name: dev.dana
+    event.outcome: failure
+    event_type: auth_failed
+    auth_method: password
+    host.name: web-1
+- lead_id: l-006
+  events: []
+- lead_id: l-003
+  events: []
+- lead_id: l-004
+  events: []
+- lead_id: l-005
+  events: []

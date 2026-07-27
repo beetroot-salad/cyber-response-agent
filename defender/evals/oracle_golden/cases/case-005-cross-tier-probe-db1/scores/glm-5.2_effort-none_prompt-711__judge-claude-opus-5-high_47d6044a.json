@@ -1,0 +1,170 @@
+{
+  "tag": "glm-5.2_effort-none_prompt-711__judge-claude-opus-5-high_47d6044a",
+  "projection": "glm-5.2_effort-none_prompt-711.yaml",
+  "case": "case-005-cross-tier-probe-db1",
+  "kind": "observed",
+  "judge": {
+    "model": "claude-opus-5",
+    "effort": "high",
+    "prompts_sha8": "47d6044a"
+  },
+  "n_leads": 11,
+  "mechanical": {
+    "missing_leads": [],
+    "unscored_leads": [],
+    "duplicate_leads": [],
+    "malformed_leads": {
+      "l-002": "not in the marker vocabulary: '+ 4 sshd \"Failed password for dev.dana from <office-ws-1-ip>\" events on db-1 at 2026-07-26 ~11:04 (at 11:04:0x, 11:04:1x, 11:04:2x, 11:04:3x) \u2014 adds to the daily_count bucket for 2026-07-26, adds/increments source.ip=<office-ws-1-ip> in the per-source-IP breakdown (first_seen ~2026-07-26T11:04:03Z, last_seen ~2026-07-26T11:04:39Z), and contributes 4 counts to the 11:00 hour_of_day bucket'"
+    },
+    "forbidden_emitted": [],
+    "concrete_value_leads": [
+      "l-001",
+      "l-008",
+      "l-011"
+    ]
+  },
+  "judged": true,
+  "faithful": "5/11",
+  "abstentions": 0,
+  "by_system": {
+    "cmdb": "2/2",
+    "cmdb+elastic": "0/1",
+    "elastic": "2/7",
+    "identity": "1/1"
+  },
+  "cost_usd": 3.9262,
+  "rows": [
+    {
+      "lead": "l-001",
+      "system": "elastic",
+      "delta_kind": "present",
+      "faithful": true,
+      "cause": null,
+      "heterogeneous": true,
+      "undecidable_reason": null,
+      "form_notes": "Granularity: projection collapses the pam_unix companion rows and splits each attempt into password/publickey pairs; timestamps are step-start rather than sshd emission times.",
+      "rationale": "The measurement records delta_kind present and heterogeneous true, and the projection emits eight concrete failed-auth mappings for dev.dana at 11:04:03/17/28/39 with placeholdered source IP and port, which matches the observed seq-1 delta of 12 failure rows clustered 11:04:06-11:04:44 carrying \"Invalid user dev.dana\" and \"Failed password for invalid user dev.dana ... ssh2\" against live controls (C-14d, C-21d) that show only accepted=6 / failed=0 for sre.ben.\nSource.ip is left as a placeholder, which is correct both as story-ungrounded compliance and because source.ip is an unstable-identifier column here.\nForm divergences are real but non-substantive: the projection omits the pam_unix authentication-failure and \"check pass; user unknown\" companion lines and the leading-space user.name variant, uses step-start rather than log-emission timestamps, and adds a publickey-labelled attempt per step that the observed messages do not name; the delta claim (repeated dev.dana failed SSH auth on db-1 from one source, no Accepted rows) still matches, and seq-2's empty Accepted result is consistent with the projection asserting no successes.",
+      "evidence": "The seq-1 detail query returns 16 rows in the observed window, all clustered 11:04:06\u201311:04:44, of which 12 carry event.outcome=failure with messages \"Invalid user dev.dana from 172.18.0.11 port \u2026\", \"Failed password for invalid user dev.dana \u2026 ssh2\", and \"pam_unix(sshd:auth): authentication failure; \u2026 rhost=172.18.0.11\"; the two live controls (C-14d, C-21d) return 6 rows each, every one event.outcome=success with message \"Accepted password for sre.ben \u2026\" and zero failures. The distinction is carried by event.outcome (failure vs success), user.name (dev.dana / \" dev.dana\" vs sre.ben) and the message text itself, none of which are unstable-identifier columns \u2014 source.ip 172.18.0.11 is excluded from the comparison per environment_notes but is not needed. Seq 0 corroborates: four STATS groups totalling 12 failed and 4 accepted (the accepted rows being \"pam_unix \u2026 check pass; user unknown\" with null source.ip/user.name), versus a single control group of accepted=6 / failed=0 for sre.ben. Seq 2 disagrees with its siblings \u2014 it returns row_count 0 for Accepted lines while both live controls return 6 Accepted rows for sre.ben \u2014 so the lead's queries are heterogeneous, but the union is unambiguously present."
+    },
+    {
+      "lead": "l-002",
+      "system": "elastic",
+      "delta_kind": "present",
+      "faithful": false,
+      "cause": "C-MALFORMED",
+      "heterogeneous": false,
+      "undecidable_reason": null,
+      "form_notes": "not in the marker vocabulary: '+ 4 sshd \"Failed password for dev.dana from <office-ws-1-ip>\" events on db-1 at 2026-07-26 ~11:04 (at 11:04:0x, 11:04:1x, 11:04:2x, 11:04:3x) \u2014 adds to the daily_count bucket for 2026-07-26, adds/increments source.ip=<office-ws-1-ip> in the per-source-IP breakdown (first_seen ~2026-07-26T11:04:03Z, last_seen ~2026-07-26T11:04:39Z), and contributes 4 counts to the 11:00 hour_of_day bucket'",
+      "rationale": "mechanical pre-check; the judge was not called",
+      "evidence": "All three queries surface a 2026-07-26 burst absent from every live control. seq 0 adds a day row `daily_count: 64, day: 2026-07-26` on top of the recurring `24 / 2026-07-03` row that appears in C-7d, C-14d and C-21d alike; seq 2 splits that 64 across three hour buckets (08:00=12, 09:00=48, 11:00=4), whereas every baseline burst occupies exactly one hour bucket (06-08T06:00=64, 07-03T12:00=24). seq 1 attributes it to `source.ip 172.18.0.11` with `first_seen 08:25:12` / `last_seen 11:04:44` \u2014 a ~2h40m span, versus the baseline bursts' 27s (172.18.0.21, 06:36:07\u219206:36:34) and 34s (172.18.0.13, 12:05:23\u219212:05:57). Since source.ip is an unstable identifier here, the distinction is carried not by the address but by the surfaced temporal fields: hour_of_day multiplicity and the first_seen/last_seen duration, which no live control matches."
+    },
+    {
+      "lead": "l-003",
+      "system": "elastic",
+      "delta_kind": "present",
+      "faithful": false,
+      "cause": "C-MISSED-DELTA",
+      "heterogeneous": true,
+      "undecidable_reason": null,
+      "form_notes": "projection is an empty list, so it carries no marker at all \u2014 not even an indistinguishable-noise marker",
+      "rationale": "Observed seq 0 (host.name == \"db-1\") returns two rows \u2014 15 alerts of `v2-sshd-success-after-failures` (high, 11:08:28.824\u201311:08:28.857Z) and 1 alert of `v2-sshd-failed-auth-burst` (medium, 11:08:28.895Z) \u2014 and the same two db-1 rows are the only rows in seq 5, seq 6, and seq 7, while both live controls (C-14d 2026-07-12 and C-21d 2026-07-05) return row_count 0 for the identical db-1-scoped query. host.name is the stable attribution column per environment_notes, so host.name=db-1 paired with rule_id/severity is a genuinely distinguishing surfaced field, and the measurement records delta_kind: present. The projection is an empty list: it represents none of these rows, neither the db-1 alert pair that appears against an empty live baseline nor the sibling-query disagreement (seq 1/2/4/8 empty against non-empty live baselines) that makes the lead heterogeneous. Emitting nothing where the lead's queries carry 16 new db-1 alert rows is a missed delta, not a defensible noise call.",
+      "evidence": "Observed seq 0 (host.name == \"db-1\") returns 2 rows \u2014 15 alerts of rule_id `v2-sshd-success-after-failures` (severity high, 11:08:28.824\u201311:08:28.857Z) and 1 alert of `v2-sshd-failed-auth-burst` (medium, 11:08:28.895Z) \u2014 while both live controls (C-14d 2026-07-12 and C-21d 2026-07-05) return row_count 0 for the identical db-1-scoped query; the distinguishing surfaced fields are host.name=db-1 paired with rule_id/severity, and host.name is the stable attribution column per environment_notes. The same two db-1 rows are the *only* rows in the unfiltered seq 5 and wider-window seq 6 payloads, whereas their live baselines carry 6 and 6/13 rows dominated by soc-playground Falco (311/640) and jump-box-1 sshd alerts, so the observed window both adds db-1 alerts and lacks the routine benign rules. Sibling queries disagree: seq 1 (`v2-cross-tier-ssh-pivot`) is empty against a C-21d baseline of 3 pivot alerts (dev-ws-1, web-2, null host), seq 2 (non-db-1 hosts) and seq 4 (null host) are empty against non-empty live baselines, and seq 8 is empty against 47/61 soc-playground Falco alerts \u2014 hence heterogeneous: true. Seq 3 is unreadable and carries no weight; it was not needed, since seq 0/5/6/7 already decide the lead."
+    },
+    {
+      "lead": "l-004",
+      "system": "cmdb",
+      "delta_kind": "state-only",
+      "faithful": true,
+      "cause": null,
+      "heterogeneous": null,
+      "undecidable_reason": null,
+      "form_notes": "state-only lead; projection empty against a static CMDB entity record",
+      "rationale": "The lead's single query `cmdb.host-trust-edges` returns a CMDB entity record for db-1\n(`role: db`, `criticality: prod`, `owner: team.data`, `trust_edges_out: []`, three\n`users` entries) \u2014 current configuration, not an event stream. Per\n`state_and_lookup_systems` and the measurement's `state-only` verdict, cmdb queries\ncarry no `@timestamp` bounds, so the empty `baseline` ([]) is expected and there is\nno baseline-diff semantics to apply. The story's activity (four denied SSH attempts\nfrom office-ws-1 to db-1) does not alter db-1's static CMDB record, so the delta this\nenvelope contributes is nothing. An empty projection faithfully represents that\nabsence of delta \u2014 it neither invents a change nor omits one.",
+      "evidence": "The lead contains a single query, `cmdb.host-trust-edges` with param `host: db-1`, which returns a CMDB entity record \u2014 `name: db-1`, `role: db`, `criticality: prod`, `owner: team.data`, `change_window: sat 04:00-06:00 UTC`, `trust_edges_out: []`, and three `users` entries (svc.monitoring, svc.backups, svc.config-mgmt) \u2014 not an event stream. Per `state_and_lookup_systems`, cmdb queries carry no `@timestamp` bounds to move, so the empty `baseline` ([]) is expected and is not a missing or dead-window measurement. There is no baseline-diff semantics to apply regardless of the record's contents, so the lead is tagged `state-only`. With only one decidable query, `heterogeneous` is null."
+    },
+    {
+      "lead": "l-005",
+      "system": "cmdb+elastic",
+      "delta_kind": "present",
+      "faithful": false,
+      "cause": "C-EVENT-AS-NOISE",
+      "heterogeneous": true,
+      "undecidable_reason": null,
+      "form_notes": null,
+      "rationale": "Query seq 8 (`logs-system.auth-*`, db-1, 11:00\u201311:10 window, `event.outcome == \"failure\"`, STATS BY source.ip, user.name) returns three rows carrying `user.name` values `dev.dana`, `null`, and `' dev.dana'`, while both live controls (C-14d 2026-07-12 and C-21d 2026-07-05, each widened to a full hour) return row_count 0; the dead C-7d window is irrelevant because two live controls settle it. `user.name` is not in the environment's unstable-identifier list, so this is a stable, surfaced distinguishing field \u2014 exactly the failed-SSH-password activity the story describes from office-ws-1 to db-1. The projection emitted only `<standard environment noise>`, representing none of those rows, which is the noise marker over an envelope whose queries do carry a distinction. The remaining queries' differences (host.ip/source.ip/destination.ip-keyed rows in seqs 3/4/9/10/11/14/15/17/18/19/22/28/33/34) are indeed unstable-column noise, so the marker is right for those siblings but wrong for the lead as a whole.",
+      "evidence": "Query seq 8 (`FROM logs-system.auth-* | WHERE host.name == \"db-1\" ... event.outcome == \"failure\" | STATS BY source.ip, user.name`) is the one query whose observed window carries a distinction in a stable, surfaced field: it returns 3 rows with user.name values `dev.dana`, `null`, and `' dev.dana'` (leading-space variant), whereas both live controls (C-14d 2026-07-12 and C-21d 2026-07-05, each widened to a full hour) return row_count 0 \u2014 so failed db-1 authentications with these user.name values exist only in the observed window, and the C-7d control being dead does not matter because two live controls settle it. Its companion success query (seq 23) shows 35 source.ip/user.name pairs vs 1 and 0 rows in the live controls, but that query carries no @timestamp bound in the observed run (counts like 247958 in seq 24 confirm the observed elastic queries are unbounded), so it is not a clean window comparison. Every other difference \u2014 seq 3/17/22 (host.name sets keyed on host.ip == 172.18.0.11), seq 4/9/10/28/33/34 (zeek source.ip/destination.ip), seq 11/14/15/18/19 (host.ip, client.ip) \u2014 differs only in columns listed as unstable in environment_notes (host.ip, source.ip, destination.ip, related.ip, container.id, zeek.session_id) for a snapshot-restored stack, so those rows are not deltas; seq 0 is a CMDB roster (state-only) and seqs 1, 5, 6, 12, 13, 29\u201331 are unreadable."
+    },
+    {
+      "lead": "l-006",
+      "system": "identity",
+      "delta_kind": "state-only",
+      "faithful": true,
+      "cause": null,
+      "heterogeneous": false,
+      "undecidable_reason": null,
+      "form_notes": "projection is an empty list where the observed payloads carry two static identity records; a granularity/coverage difference, not a delta claim",
+      "rationale": "The measurement of record classifies this lead as `state-only`: both queries\n(`identity.access-check` for dev.dana/db-1 and `identity.user-authorization` for\ndev.dana) are identity-system lookups that return an entity record rather than an\nevent stream, and the environment notes state such queries carry no `@timestamp`\nbounds and have no baseline-diff semantics \u2014 consistent with `baseline: []`. The\nobserved rows (`authorized: false`, `via: null`, `role: developer`, `sudo: false`;\nand `enabled: true`, `realm_role: developer`, `authorized_hosts: [dev-ws-1,\njump-box-1, office-ws-1]`, `sudo_hosts: [office-ws-1]`) are pre-existing\nconfiguration that four rejected SSH password attempts from office-ws-1 neither\ncreate nor modify \u2014 db-1's absence from `authorized_hosts` is a standing fact, not\nsomething the story's activity produced. The empty projection therefore asserts no\nchange where the telemetry shows no activity-attributable change, so it neither\ninvents a delta nor misses one; it also avoids fabricating concrete identity values\n(email, names, role) the story never grounds.",
+      "evidence": "Both queries in this lead are identity-system lookups (`identity.access-check` for dev.dana on db-1, and `identity.user-authorization` for dev.dana), and the environment notes state explicitly that identity queries return an entity record or current configuration rather than an event stream, carry no `@timestamp` bounds to move, and therefore have no control and no baseline-diff semantics. Consistent with that, `baseline` is an empty list \u2014 not a measured empty window, but the absence of any baseline construct for this system. The observed payloads are configuration facts: seq 0 returns `authorized: false`, `via: null`, `role: developer`, `sudo: false`, `shell: null`; seq 1 returns `enabled: true`, `realm_role: developer`, `authorized_hosts: [dev-ws-1, jump-box-1, office-ws-1]` (db-1 absent), `sudo_hosts: [office-ws-1]`. Both queries agree in kind, so the lead is uniformly `state-only` and not heterogeneous."
+    },
+    {
+      "lead": "l-007",
+      "system": "elastic",
+      "delta_kind": "present",
+      "faithful": false,
+      "cause": "C-MISSED-DELTA",
+      "heterogeneous": true,
+      "undecidable_reason": null,
+      "form_notes": "projection is an empty list \u2014 it asserts nothing at all, so no granularity comparison applies",
+      "rationale": "The observed payloads carry the story's activity plainly: seq 1 shows failures for\nuser.name \"dev.dana\" and \" dev.dana\" with last_seen 2026-07-26T11:04:41.000Z and\n11:04:44.000Z, and seq 2 surfaces the host-scoped message \"pam_unix(sshd:auth): check\npass; user unknown\" (count 16, last_seen 11:04:41.000Z) that is absent from both live\ncontrols (C-14d and C-21d contain only \"Accepted password for sre.ben/sre.alice/\nsre.chen/svc.config-mgmt\" rows). Seq 0 shows 70 alerts for v2-sshd-success-after-failures\non db-1 against row_count 0 in both live baseline windows. The alert docs in seq 4 name\n\"Invalid user dev.dana from 172.18.0.11 port 51678\" and \"Failed password for invalid\nuser dev.dana\" at original_time 11:04:30/11:04:32/11:04:41, matching the story's four\nsshpass attempts exactly. The projection is empty and therefore represents none of\nthis distinguishable change, matching the measurement's delta_kind: present.",
+      "evidence": "Query seq 0 returns 70 alerts for rule_id \"v2-sshd-success-after-failures\" on db-1 (first_seen 08:28:04.891Z, last_seen 11:08:28.857Z, severity high), while both live control windows (C-14d 2026-07-12 and C-21d 2026-07-05, window_live true) return row_count 0 for the identical query \u2014 the `alerts` count and rule_id carry the distinction (C-7d is dead and carries no weight). Query seq 2 is host-scoped, not address-scoped, and surfaces a message value absent from both live baselines: \"pam_unix(sshd:auth): check pass; user unknown\" with count 16 and event.outcome success (08:25:10Z\u201311:04:41Z), whereas C-14d/C-21d contain only \"Accepted password for sre.ben/sre.alice/sre.chen/svc.config-mgmt ...\" rows at count 6; the `message` field is the distinguishing column. Query seq 1 adds 48+48+16+16+16 failures for user.name root and dev.dana/\" dev.dana\" against empty live baselines, though it is scoped on the unstable source.ip 172.18.0.11 so it is corroborating rather than load-bearing. The lead is heterogeneous: query seq 3 (success events from 172.18.0.11) is row_count 0 in observed and 0 in both live controls \u2014 no delta \u2014 and seq 4 is truncated (returned 5 of total 70), so it evidences nothing about absence."
+    },
+    {
+      "lead": "l-008",
+      "system": "elastic",
+      "delta_kind": "present",
+      "faithful": true,
+      "cause": null,
+      "heterogeneous": true,
+      "undecidable_reason": null,
+      "form_notes": "Granularity and field-merge divergence only: the oracle emits four per-attempt event\nmappings against three STATS aggregate payloads, collapses each attempt to a single\n`auth_method: password` row rather than the observed \"other\"/\"password\" split, and\ncarries Zeek-shaped columns (destination.ip, destination.port, source.bytes,\ndestination.bytes) on the same rows that express the sshd auth claim.\n",
+      "rationale": "Observed seq 1 shows db-1 with accepted=0, failed=144 spanning 08:25:10 to 11:04:44,\nand seq 2 splits db-1's failures into \"other\"=80 and \"password\"=64 with last_seen\n11:04:41 and 11:04:44 \u2014 both live controls (C-14d 2026-07-12 and C-21d 2026-07-05,\nwindow_live true) return row_count 0 for the identical query strings, so the delta is\nreal and carried by `failed` and `host.name`, not by the unstable source.ip filter\nconstant. The projection represents exactly that: four failed password-auth attempts\nfrom 172.18.0.11 to host.name db-1 at 11:04:03/17/28/39, accepted nowhere, which\nmatches the story's four denials and lands inside the observed db-1 failure envelope.\nThe oracle correctly places all four on db-1 only and asserts no Accepted event,\nconsistent with seq 0's empty Zeek result (live baselines also empty, so no delta was\nmissed there) and with accepted=0 everywhere; the web-1 and web-2 failure groups are\noutside the story's activity and are not the oracle's to project. Its Zeek-derived\ncolumns are all placeholdered (<db-1-ip>, <source-bytes>, <destination-bytes>) or\ngrounded (port 22), so nothing fully concrete is fabricated.",
+      "evidence": "The two sshd queries (seq 1, seq 2) return substantial rows in the operation window \u2014 seq 1 shows three host.name groups with accepted=0 and failed=144 (db-1, 08:25:10\u219211:04:44), failed=96 (web-1, 08:38:28\u219208:41:25) and failed=12 (web-2, 09:43:38\u219209:44:12), and seq 2 splits the same 252 failures into publickey-absent \"other\" (80/48/8) and \"password\" (64/48/4) buckets per host \u2014 while both live controls (C-14d 2026-07-12 and C-21d 2026-07-05, window_live: true) return row_count 0 for the identical query strings; the dead C-7d control is uninformative but not needed. The distinction is carried by `failed` counts and `host.name`, not by the unstable `source.ip`, which is a fixed filter constant identical in observed and baseline, so the environment's address-reassignment caveat does not erase the delta. No payload is marked truncated or unreadable. Seq 0 (Zeek connection logs) disagrees: observed row_count 0 against live baselines also at row_count 0, i.e. no delta on that stream \u2014 hence heterogeneous, but the lead's envelope is present on the union."
+    },
+    {
+      "lead": "l-009",
+      "system": "cmdb",
+      "delta_kind": "state-only",
+      "faithful": true,
+      "cause": null,
+      "heterogeneous": false,
+      "undecidable_reason": null,
+      "form_notes": "projection is an empty list rather than an explicit state-only/no-delta marker",
+      "rationale": "All four queries in l-009 are `cmdb` lookups (list-all-hosts plus host-trust-edges for dev-ws-1, jump-box-1, office-ws-1), which environment_notes classifies as state-only: they return current configuration records with no @timestamp bounds, which is why `baseline: []` is expected rather than missing. The observed payloads are pure inventory \u2014 seq 0's 11 host records and seq 1-3's records for dev-ws-1 (trust_edges_out [jump-box-1]), jump-box-1 (trust_edges_out [web-1, web-2, db-1, dev-ws-1]) and office-ws-1 (owner dev.dana, trust_edges_out []) \u2014 and none of them carries an IP/address field or any event the four failed `sshpass` SSH attempts from office-ws-1 to db-1 could have written. The story's activity therefore changes nothing these queries surface, so the empty projection correctly asserts no delta and invents nothing; it also avoids fabricating a hostname for 172.18.0.11, which no observed row maps. This matches the measurement's `state-only`, `heterogeneous: false` reading.",
+      "evidence": "All four queries in this lead are `cmdb` queries (cmdb.list-all-hosts once, cmdb.host-trust-edges for dev-ws-1, jump-box-1, office-ws-1), which per environment_notes return current configuration/entity records rather than an event stream and carry no @timestamp bounds to move \u2014 hence the empty `baseline: []` is expected, not a missing measurement. The observed payloads are inventory records: seq 0 lists total 11 hosts with name/role/criticality/owner/trust_edges_out/users, and seq 1-3 return the same records for dev-ws-1 (dev, team.dev, trust_edges_out [jump-box-1]), jump-box-1 (prod, team.sre, trust_edges_out [web-1, web-2, db-1, dev-ws-1]) and office-ws-1 (preprod, dev.dana, trust_edges_out []). No payload surfaces any IP or address column at all, so 172.18.0.11 cannot be mapped to a host name from these rows; container addressing is also listed as unstable in this environment. All four queries are state-only, so they do not disagree."
+    },
+    {
+      "lead": "l-010",
+      "system": "elastic",
+      "delta_kind": "present",
+      "faithful": false,
+      "cause": "C-EVENT-AS-NOISE",
+      "heterogeneous": true,
+      "undecidable_reason": null,
+      "form_notes": "projection is a single lead-wide marker rather than per-query rows, so no per-seq granularity to assess",
+      "rationale": "Seq 0's observed 30-day aggregate carries a row `failed: 16, source.ip 172.18.0.11,\nhost.name db-1, first_seen 2026-07-26T08:25:10Z, last_seen 2026-07-26T11:04:41Z` \u2014\nwhose last_seen coincides with the story's fourth `sshpass` attempt at 11:04:39\u201311:04:46 \u2014\nplus a `failed: 4, 172.18.0.11, web-2` row, and neither has any counterpart in the\nthree live controls (C-7d/C-14d/C-21d carry only jump-box-1, db-1 via 172.18.0.13/21,\nand web-1). The distinguishing fields are ones these queries do surface: `host.name`\n(web-2 appears in no control) and the failure timestamps on 2026-07-26, which lie\noutside every control window, so the delta does not rest on the unstable `source.ip`\ncolumn. The measurement records `delta_kind: present, heterogeneous: true`, and the\nprojection emitted only `<standard environment noise>`, representing none of those\nfailed-auth rows against db-1 and web-2. That is the noise marker asserted where the\nlead's queries do carry a distinguishing field.",
+      "evidence": "Seq 0's observed 30-day payload has 9 rows versus 7/10/15 in the three live controls (C-7d/C-14d/C-21d), and two of the observed rows have no counterpart in any control: `failed: 16, source.ip 172.18.0.11, host.name db-1, first_seen 2026-07-26T08:25:10Z, last_seen 2026-07-26T11:04:41Z` and `failed: 4, source.ip 172.18.0.11, host.name web-2, 2026-07-26T09:43:38Z\u201309:44:10Z`. The distinguishing field is `host.name`: web-2 appears in no control payload (controls carry only jump-box-1, db-1, web-1), so the delta does not rest on `source.ip`, which environment_notes marks unstable; the failure timestamps on 2026-07-26 also fall outside every control window. Seq 2/3 do not add to this \u2014 their `accepted_count: 14` at jump-box-1 with first_seen == last_seen == 2026-06-12T15:55:04.801Z is exactly the row already present in the seq-0 C-14d and C-21d controls (accepted 14, failed 0, 172.18.0.11, jump-box-1), i.e. pre-window historical activity, and their own 1-hour controls returned 0 only because a bound was inserted into an otherwise unbounded query. Seq 1 (upper-bounded at 2026-07-26T00:00:00Z, no control supplied) contains no 172.18.0.11 rows at all, so the lead's queries disagree: one surfaces the delta, the rest look at quiet or pre-op ground."
+    },
+    {
+      "lead": "l-011",
+      "system": "elastic",
+      "delta_kind": "suppressed",
+      "faithful": false,
+      "cause": "C-INVENTED-DELTA",
+      "heterogeneous": true,
+      "undecidable_reason": null,
+      "form_notes": "projection emits both legacy (zeek.ssh.auth_success/cipher_alg) and ECS (zeek.ssh.algorithm.*) field spellings; harmless duplication that did not affect the verdict",
+      "rationale": "The zeek.ssh stream carries no rows at all across the operation window: seq 8 gives\nmax_ts = 2026-07-25T10:35:43.717Z over 143,371 events, and every 07-26-bounded query\n(seq 1, 2, 4, 5, 7) returns row_count 0 while their live C-14d/C-21d controls return\n5, 20, and 7 grouped rows respectively (e.g. 172.18.0.22 at 672 events on 07-12).\nThe projection nonetheless asserts four concrete Zeek SSH session rows at\n2026-07-26T11:04:03/17/28/39 from 172.18.0.11 to port 22 with auth.success=false \u2014\nrecords that appear in no observed payload and could not, since the stream is dark\npast 07-25. The only 172.18.0.11 rows anywhere (seq 9, seq 10) carry baseline-identical\nclient strings (SSH-2.0-OpenSSH_9.6p1 Ubuntu-3ubuntu13.16 / 8.9p1) from 07-25 and\nearlier, so nothing in the lead supports the projected events; the measurement's\n`suppressed` reading is the opposite of what the projection represents.",
+      "evidence": "Every query bounded to the operation day returns nothing: seq 2 (all SSH traffic, 2026-07-26T08:00\u201312:00) has row_count 0 while its live controls C-14d and C-21d return 5 rows each (e.g. 172.18.0.23\u2192172.18.0.17:22, server SSH-2.0-OpenSSH_9.6p1); seq 7 (BY source.ip over 07-26) has row_count 0 while C-14d and C-21d each list 7 sources totalling ~2400\u20132600 events (172.18.0.22 at 672 and 581), and seq 5 likewise goes from 20 grouped rows in both live controls to 0. Consistent with that, the unbounded seq 8 gives max_ts = 2026-07-25T10:35:43.717Z over 143,371 total events, i.e. the zeek.ssh stream carries no rows anywhere past 07-25 \u2014 the stream is dark across the whole operation window, so the source-scoped queries (seq 1, 4) are empty on both sides and read absent, which is the disagreement recorded in heterogeneous. Nothing distinguishable ever surfaces for 172.18.0.11: the only rows for that address (seq 9, 07-25 window, 5+1+1 events; seq 10 all-time) carry zeek.ssh.client values SSH-2.0-OpenSSH_9.6p1 Ubuntu-3ubuntu13.16 / SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.15 with chacha20-poly1305@openssh.com and umac-64-etm@openssh.com \u2014 identical to baseline values \u2014 and no hydra/medusa/paramiko-style string appears in any payload, while the addresses themselves are listed as unstable identifiers and cannot evidence a delta."
+    }
+  ]
+}

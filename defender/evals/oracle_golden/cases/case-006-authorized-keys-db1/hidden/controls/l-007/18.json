@@ -1,0 +1,473 @@
+{
+  "lead_id": "l-007",
+  "seq": 18,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T00:00:00.000Z",
+        "2026-07-13T00:00:00.000Z"
+      ],
+      "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-12T00:00:00.000Z\" AND @timestamp < \"2026-07-13T00:00:00.000Z\"\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule      = falco.rule,\n           host.name,\n           container = falco.output_fields.container.name\n| SORT events DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-12T00:00:00.000Z\" AND @timestamp < \"2026-07-13T00:00:00.000Z\"\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule      = falco.rule,\n           host.name,\n           container = falco.output_fields.container.name\n| SORT events DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "rule",
+            "type": "keyword"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "container",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 15,
+        "values": [
+          {
+            "events": 8600,
+            "first_seen": "2026-07-12T00:00:02.870Z",
+            "last_seen": "2026-07-12T23:59:03.671Z",
+            "rule": "BPF Program Not Profiled",
+            "host.name": "soc-playground",
+            "container": "host"
+          },
+          {
+            "events": 8530,
+            "first_seen": "2026-07-12T00:00:17.874Z",
+            "last_seen": "2026-07-12T23:59:50.680Z",
+            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "host.name": "soc-playground",
+            "container": "<NA>"
+          },
+          {
+            "events": 5601,
+            "first_seen": "2026-07-12T00:00:17.874Z",
+            "last_seen": "2026-07-12T23:59:50.680Z",
+            "rule": "Launch Suspicious Network Tool in Container",
+            "host.name": "soc-playground",
+            "container": "<NA>"
+          },
+          {
+            "events": 4320,
+            "first_seen": "2026-07-12T00:00:17.874Z",
+            "last_seen": "2026-07-12T23:59:50.680Z",
+            "rule": "Unexpected UDP Traffic",
+            "host.name": "soc-playground",
+            "container": "<NA>"
+          },
+          {
+            "events": 2876,
+            "first_seen": "2026-07-12T00:00:42.877Z",
+            "last_seen": "2026-07-12T23:59:43.678Z",
+            "rule": "Drop and execute new binary in container",
+            "host.name": "soc-playground",
+            "container": "<NA>"
+          },
+          {
+            "events": 2287,
+            "first_seen": "2026-07-12T00:00:17.874Z",
+            "last_seen": "2026-07-12T23:59:50.680Z",
+            "rule": "Launch Ingress Remote File Copy Tools in Container",
+            "host.name": "soc-playground",
+            "container": "<NA>"
+          },
+          {
+            "events": 1600,
+            "first_seen": "2026-07-12T00:00:42.877Z",
+            "last_seen": "2026-07-12T23:59:03.671Z",
+            "rule": "Unexpected UDP Traffic",
+            "host.name": "soc-playground",
+            "container": "host"
+          },
+          {
+            "events": 1433,
+            "first_seen": "2026-07-12T00:00:42.877Z",
+            "last_seen": "2026-07-12T23:59:03.671Z",
+            "rule": "Launch Sensitive Mount Container",
+            "host.name": "soc-playground",
+            "container": "<NA>"
+          },
+          {
+            "events": 675,
+            "first_seen": "2026-07-12T06:12:50.935Z",
+            "last_seen": "2026-07-12T19:07:19.509Z",
+            "rule": "Read sensitive file untrusted",
+            "host.name": "soc-playground",
+            "container": "host"
+          },
+          {
+            "events": 227,
+            "first_seen": "2026-07-12T00:05:45.928Z",
+            "last_seen": "2026-07-12T23:48:40.557Z",
+            "rule": "Sudo execution",
+            "host.name": "soc-playground",
+            "container": "<NA>"
+          },
+          {
+            "events": 75,
+            "first_seen": "2026-07-12T06:12:50.935Z",
+            "last_seen": "2026-07-12T19:07:19.509Z",
+            "rule": "User mgmt binaries",
+            "host.name": "soc-playground",
+            "container": "host"
+          },
+          {
+            "events": 33,
+            "first_seen": "2026-07-12T06:25:02.069Z",
+            "last_seen": "2026-07-12T06:48:33.335Z",
+            "rule": "Launch Package Management Process in Container",
+            "host.name": "soc-playground",
+            "container": "<NA>"
+          },
+          {
+            "events": 10,
+            "first_seen": "2026-07-12T03:51:25.405Z",
+            "last_seen": "2026-07-12T21:41:12.222Z",
+            "rule": "Read environment variable from /proc files",
+            "host.name": "soc-playground",
+            "container": "<NA>"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-12T01:26:04.793Z",
+            "last_seen": "2026-07-12T01:26:04.793Z",
+            "rule": "Non sudo setuid",
+            "host.name": "soc-playground",
+            "container": "host"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-12T07:40:42.883Z",
+            "last_seen": "2026-07-12T07:40:42.883Z",
+            "rule": "Read ssh information",
+            "host.name": "soc-playground",
+            "container": "host"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T00:00:00.000Z",
+        "2026-07-06T00:00:00.000Z"
+      ],
+      "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-05T00:00:00.000Z\" AND @timestamp < \"2026-07-06T00:00:00.000Z\"\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule      = falco.rule,\n           host.name,\n           container = falco.output_fields.container.name\n| SORT events DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-05T00:00:00.000Z\" AND @timestamp < \"2026-07-06T00:00:00.000Z\"\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule      = falco.rule,\n           host.name,\n           container = falco.output_fields.container.name\n| SORT events DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "rule",
+            "type": "keyword"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "container",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 15,
+        "values": [
+          {
+            "events": 8676,
+            "first_seen": "2026-07-05T00:00:17.695Z",
+            "last_seen": "2026-07-05T23:58:16.723Z",
+            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "host.name": "soc-playground",
+            "container": "<NA>"
+          },
+          {
+            "events": 8600,
+            "first_seen": "2026-07-05T00:00:02.692Z",
+            "last_seen": "2026-07-05T23:59:06.730Z",
+            "rule": "BPF Program Not Profiled",
+            "host.name": "soc-playground",
+            "container": "host"
+          },
+          {
+            "events": 5290,
+            "first_seen": "2026-07-05T00:00:17.695Z",
+            "last_seen": "2026-07-05T23:58:16.723Z",
+            "rule": "Launch Suspicious Network Tool in Container",
+            "host.name": "soc-playground",
+            "container": "<NA>"
+          },
+          {
+            "events": 4403,
+            "first_seen": "2026-07-05T00:00:17.696Z",
+            "last_seen": "2026-07-05T23:58:16.723Z",
+            "rule": "Unexpected UDP Traffic",
+            "host.name": "soc-playground",
+            "container": "<NA>"
+          },
+          {
+            "events": 2876,
+            "first_seen": "2026-07-05T00:00:18.696Z",
+            "last_seen": "2026-07-05T23:59:31.733Z",
+            "rule": "Drop and execute new binary in container",
+            "host.name": "soc-playground",
+            "container": "<NA>"
+          },
+          {
+            "events": 2404,
+            "first_seen": "2026-07-05T00:00:17.695Z",
+            "last_seen": "2026-07-05T23:58:13.722Z",
+            "rule": "Launch Ingress Remote File Copy Tools in Container",
+            "host.name": "soc-playground",
+            "container": "<NA>"
+          },
+          {
+            "events": 1526,
+            "first_seen": "2026-07-05T00:00:33.700Z",
+            "last_seen": "2026-07-05T23:59:06.730Z",
+            "rule": "Unexpected UDP Traffic",
+            "host.name": "soc-playground",
+            "container": "host"
+          },
+          {
+            "events": 1433,
+            "first_seen": "2026-07-05T00:00:33.700Z",
+            "last_seen": "2026-07-05T23:59:06.730Z",
+            "rule": "Launch Sensitive Mount Container",
+            "host.name": "soc-playground",
+            "container": "<NA>"
+          },
+          {
+            "events": 233,
+            "first_seen": "2026-07-05T00:07:17.775Z",
+            "last_seen": "2026-07-05T23:57:45.717Z",
+            "rule": "Sudo execution",
+            "host.name": "soc-playground",
+            "container": "<NA>"
+          },
+          {
+            "events": 216,
+            "first_seen": "2026-07-05T08:17:29.196Z",
+            "last_seen": "2026-07-05T20:08:38.247Z",
+            "rule": "Read sensitive file untrusted",
+            "host.name": "soc-playground",
+            "container": "host"
+          },
+          {
+            "events": 33,
+            "first_seen": "2026-07-05T06:25:02.923Z",
+            "last_seen": "2026-07-05T06:52:35.228Z",
+            "rule": "Launch Package Management Process in Container",
+            "host.name": "soc-playground",
+            "container": "<NA>"
+          },
+          {
+            "events": 24,
+            "first_seen": "2026-07-05T08:17:29.197Z",
+            "last_seen": "2026-07-05T20:08:38.247Z",
+            "rule": "User mgmt binaries",
+            "host.name": "soc-playground",
+            "container": "host"
+          },
+          {
+            "events": 4,
+            "first_seen": "2026-07-05T08:05:08.059Z",
+            "last_seen": "2026-07-05T17:51:20.669Z",
+            "rule": "Read environment variable from /proc files",
+            "host.name": "soc-playground",
+            "container": "<NA>"
+          },
+          {
+            "events": 2,
+            "first_seen": "2026-07-05T07:11:05.432Z",
+            "last_seen": "2026-07-05T07:11:05.433Z",
+            "rule": "Non sudo setuid",
+            "host.name": "soc-playground",
+            "container": "host"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-05T07:40:38.777Z",
+            "last_seen": "2026-07-05T07:40:38.777Z",
+            "rule": "Read ssh information",
+            "host.name": "soc-playground",
+            "container": "host"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-28T00:00:00.000Z",
+        "2026-06-29T00:00:00.000Z"
+      ],
+      "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-06-28T00:00:00.000Z\" AND @timestamp < \"2026-06-29T00:00:00.000Z\"\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule      = falco.rule,\n           host.name,\n           container = falco.output_fields.container.name\n| SORT events DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-06-28T00:00:00.000Z\" AND @timestamp < \"2026-06-29T00:00:00.000Z\"\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule      = falco.rule,\n           host.name,\n           container = falco.output_fields.container.name\n| SORT events DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "rule",
+            "type": "keyword"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "container",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 13,
+        "values": [
+          {
+            "events": 8580,
+            "first_seen": "2026-06-28T00:00:17.522Z",
+            "last_seen": "2026-06-28T23:59:48.076Z",
+            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "host.name": "soc-playground",
+            "container": "<NA>"
+          },
+          {
+            "events": 7145,
+            "first_seen": "2026-06-28T00:00:42.529Z",
+            "last_seen": "2026-06-28T23:59:48.075Z",
+            "rule": "BPF Program Not Profiled",
+            "host.name": "soc-playground",
+            "container": "host"
+          },
+          {
+            "events": 5631,
+            "first_seen": "2026-06-28T00:00:17.521Z",
+            "last_seen": "2026-06-28T23:59:48.076Z",
+            "rule": "Launch Suspicious Network Tool in Container",
+            "host.name": "soc-playground",
+            "container": "<NA>"
+          },
+          {
+            "events": 4386,
+            "first_seen": "2026-06-28T00:00:17.522Z",
+            "last_seen": "2026-06-28T23:59:48.076Z",
+            "rule": "Unexpected UDP Traffic",
+            "host.name": "soc-playground",
+            "container": "<NA>"
+          },
+          {
+            "events": 2874,
+            "first_seen": "2026-06-28T00:00:27.526Z",
+            "last_seen": "2026-06-28T23:59:56.080Z",
+            "rule": "Drop and execute new binary in container",
+            "host.name": "soc-playground",
+            "container": "<NA>"
+          },
+          {
+            "events": 2299,
+            "first_seen": "2026-06-28T00:00:24.525Z",
+            "last_seen": "2026-06-28T23:59:55.078Z",
+            "rule": "Launch Ingress Remote File Copy Tools in Container",
+            "host.name": "soc-playground",
+            "container": "<NA>"
+          },
+          {
+            "events": 1599,
+            "first_seen": "2026-06-28T00:00:42.529Z",
+            "last_seen": "2026-06-28T23:59:48.075Z",
+            "rule": "Unexpected UDP Traffic",
+            "host.name": "soc-playground",
+            "container": "host"
+          },
+          {
+            "events": 1429,
+            "first_seen": "2026-06-28T00:00:42.530Z",
+            "last_seen": "2026-06-28T23:59:48.075Z",
+            "rule": "Launch Sensitive Mount Container",
+            "host.name": "soc-playground",
+            "container": "<NA>"
+          },
+          {
+            "events": 211,
+            "first_seen": "2026-06-28T00:07:34.642Z",
+            "last_seen": "2026-06-28T23:49:08.936Z",
+            "rule": "Sudo execution",
+            "host.name": "soc-playground",
+            "container": "<NA>"
+          },
+          {
+            "events": 126,
+            "first_seen": "2026-06-28T07:11:07.657Z",
+            "last_seen": "2026-06-28T12:23:53.154Z",
+            "rule": "Read sensitive file untrusted",
+            "host.name": "soc-playground",
+            "container": "host"
+          },
+          {
+            "events": 33,
+            "first_seen": "2026-06-28T06:25:01.989Z",
+            "last_seen": "2026-06-28T06:46:17.302Z",
+            "rule": "Launch Package Management Process in Container",
+            "host.name": "soc-playground",
+            "container": "<NA>"
+          },
+          {
+            "events": 6,
+            "first_seen": "2026-06-28T06:36:48.143Z",
+            "last_seen": "2026-06-28T18:16:50.251Z",
+            "rule": "Non sudo setuid",
+            "host.name": "soc-playground",
+            "container": "host"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-28T14:51:16.308Z",
+            "last_seen": "2026-06-28T14:51:16.308Z",
+            "rule": "Read ssh information",
+            "host.name": "soc-playground",
+            "container": "host"
+          }
+        ]
+      }
+    }
+  ]
+}

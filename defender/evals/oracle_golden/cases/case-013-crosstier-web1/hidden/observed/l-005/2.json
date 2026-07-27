@@ -1,0 +1,1 @@
+{"name": "ci-1", "role": "ci-host", "criticality": "prod", "owner": "team.platform", "change_window": "sun 04:00-05:00 UTC", "os": {"distro": "ubuntu", "version": "22.04"}, "service": null, "trust_edges_out": ["web-1", "web-2"], "users": [{"username": "svc.monitoring", "shell": "/usr/sbin/nologin", "sudo": false}, {"username": "svc.deploy", "shell": "/bin/bash", "sudo": false}]}

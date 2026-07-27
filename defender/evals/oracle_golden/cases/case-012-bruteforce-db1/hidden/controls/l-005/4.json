@@ -1,0 +1,232 @@
+{
+  "lead_id": "l-005",
+  "seq": 4,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-13T09:27:39.000Z",
+        "2026-07-13T10:27:39.000Z"
+      ],
+      "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-13T09:27:39.000Z\" AND @timestamp < \"2026-07-13T10:27:39.000Z\"\n| WHERE host.ip == \"172.18.0.16\"\n| STATS events = COUNT(*), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp)\n    BY host.name\n| SORT events DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-13T09:27:39.000Z\" AND @timestamp < \"2026-07-13T10:27:39.000Z\"\n| WHERE host.ip == \"172.18.0.16\"\n| STATS events = COUNT(*), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp)\n    BY host.name\n| SORT events DESC",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 5,
+        "values": [
+          {
+            "events": 3014,
+            "first_seen": "2026-07-13T09:27:47.158Z",
+            "last_seen": "2026-07-13T10:27:37.160Z",
+            "host.name": "db-1"
+          },
+          {
+            "events": 680,
+            "first_seen": "2026-07-13T09:27:47.000Z",
+            "last_seen": "2026-07-13T10:27:38.000Z",
+            "host.name": "web-2"
+          },
+          {
+            "events": 78,
+            "first_seen": "2026-07-13T09:30:41.000Z",
+            "last_seen": "2026-07-13T10:25:58.000Z",
+            "host.name": "office-ws-1"
+          },
+          {
+            "events": 63,
+            "first_seen": "2026-07-13T09:35:50.000Z",
+            "last_seen": "2026-07-13T10:27:37.911Z",
+            "host.name": "ci-1"
+          },
+          {
+            "events": 25,
+            "first_seen": "2026-07-13T09:28:07.708Z",
+            "last_seen": "2026-07-13T10:24:47.007Z",
+            "host.name": "scanner-1"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-06T09:27:39.000Z",
+        "2026-07-06T10:27:39.000Z"
+      ],
+      "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-06T09:27:39.000Z\" AND @timestamp < \"2026-07-06T10:27:39.000Z\"\n| WHERE host.ip == \"172.18.0.16\"\n| STATS events = COUNT(*), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp)\n    BY host.name\n| SORT events DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-06T09:27:39.000Z\" AND @timestamp < \"2026-07-06T10:27:39.000Z\"\n| WHERE host.ip == \"172.18.0.16\"\n| STATS events = COUNT(*), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp)\n    BY host.name\n| SORT events DESC",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 5,
+        "values": [
+          {
+            "events": 3025,
+            "first_seen": "2026-07-06T09:27:47.159Z",
+            "last_seen": "2026-07-06T10:27:37.160Z",
+            "host.name": "db-1"
+          },
+          {
+            "events": 778,
+            "first_seen": "2026-07-06T09:27:48.000Z",
+            "last_seen": "2026-07-06T10:27:38.000Z",
+            "host.name": "web-2"
+          },
+          {
+            "events": 118,
+            "first_seen": "2026-07-06T09:28:25.000Z",
+            "last_seen": "2026-07-06T10:20:37.000Z",
+            "host.name": "office-ws-1"
+          },
+          {
+            "events": 39,
+            "first_seen": "2026-07-06T09:29:58.076Z",
+            "last_seen": "2026-07-06T10:21:23.687Z",
+            "host.name": "scanner-1"
+          },
+          {
+            "events": 28,
+            "first_seen": "2026-07-06T09:29:05.000Z",
+            "last_seen": "2026-07-06T10:22:29.000Z",
+            "host.name": "ci-1"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-29T09:27:39.000Z",
+        "2026-06-29T10:27:39.000Z"
+      ],
+      "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-06-29T09:27:39.000Z\" AND @timestamp < \"2026-06-29T10:27:39.000Z\"\n| WHERE host.ip == \"172.18.0.16\"\n| STATS events = COUNT(*), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp)\n    BY host.name\n| SORT events DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-06-29T09:27:39.000Z\" AND @timestamp < \"2026-06-29T10:27:39.000Z\"\n| WHERE host.ip == \"172.18.0.16\"\n| STATS events = COUNT(*), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp)\n    BY host.name\n| SORT events DESC",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 5,
+        "values": [
+          {
+            "events": 3068,
+            "first_seen": "2026-06-29T09:27:43.763Z",
+            "last_seen": "2026-06-29T10:27:33.776Z",
+            "host.name": "db-1"
+          },
+          {
+            "events": 774,
+            "first_seen": "2026-06-29T09:27:47.000Z",
+            "last_seen": "2026-06-29T10:27:37.000Z",
+            "host.name": "web-2"
+          },
+          {
+            "events": 112,
+            "first_seen": "2026-06-29T09:31:24.000Z",
+            "last_seen": "2026-06-29T10:27:26.000Z",
+            "host.name": "office-ws-1"
+          },
+          {
+            "events": 33,
+            "first_seen": "2026-06-29T09:30:57.064Z",
+            "last_seen": "2026-06-29T10:25:59.635Z",
+            "host.name": "scanner-1"
+          },
+          {
+            "events": 24,
+            "first_seen": "2026-06-29T09:28:42.000Z",
+            "last_seen": "2026-06-29T10:26:30.000Z",
+            "host.name": "ci-1"
+          }
+        ]
+      }
+    }
+  ],
+  "attack_contribution": {
+    "window": [
+      "2026-07-27T09:56:05.000Z",
+      "2026-07-27T09:59:13.000Z"
+    ],
+    "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-27T09:56:05.000Z\" AND @timestamp < \"2026-07-27T09:59:13.000Z\"\n| WHERE host.ip == \"172.18.0.16\"\n| STATS events = COUNT(*), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp)\n    BY host.name\n| SORT events DESC",
+    "payload": {
+      "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-27T09:56:05.000Z\" AND @timestamp < \"2026-07-27T09:59:13.000Z\"\n| WHERE host.ip == \"172.18.0.16\"\n| STATS events = COUNT(*), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp)\n    BY host.name\n| SORT events DESC",
+      "columns": [
+        {
+          "name": "events",
+          "type": "long"
+        },
+        {
+          "name": "first_seen",
+          "type": "date"
+        },
+        {
+          "name": "last_seen",
+          "type": "date"
+        },
+        {
+          "name": "host.name",
+          "type": "keyword"
+        }
+      ],
+      "row_count": 1,
+      "values": [
+        {
+          "events": 19,
+          "first_seen": "2026-07-27T09:56:08.927Z",
+          "last_seen": "2026-07-27T09:59:08.927Z",
+          "host.name": "office-ws-1"
+        }
+      ]
+    }
+  }
+}

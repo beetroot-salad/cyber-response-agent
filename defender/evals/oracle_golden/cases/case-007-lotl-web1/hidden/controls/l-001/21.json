@@ -1,0 +1,279 @@
+{
+  "lead_id": "l-001",
+  "seq": 21,
+  "controls": [
+    {
+      "name": "C-14d",
+      "window": [
+        "2026-07-12T19:02:22.000Z",
+        "2026-07-12T20:02:22.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-12T19:02:22.000Z\" AND @timestamp < \"2026-07-12T20:02:22.000Z\"\n        AND host.name == \"web-1\"\n| STATS events = COUNT(*)\n        BY process.name, user.name, source.ip\n| SORT events DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-12T19:02:22.000Z\" AND @timestamp < \"2026-07-12T20:02:22.000Z\"\n        AND host.name == \"web-1\"\n| STATS events = COUNT(*)\n        BY process.name, user.name, source.ip\n| SORT events DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "process.name",
+            "type": "keyword"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          }
+        ],
+        "row_count": 10,
+        "values": [
+          {
+            "events": 189,
+            "process.name": "runuser",
+            "user.name": "",
+            "source.ip": null
+          },
+          {
+            "events": 154,
+            "process.name": "runuser",
+            "user.name": "svc.monitoring",
+            "source.ip": null
+          },
+          {
+            "events": 147,
+            "process.name": "sshd",
+            "user.name": null,
+            "source.ip": null
+          },
+          {
+            "events": 35,
+            "process.name": "runuser",
+            "user.name": "svc.reports",
+            "source.ip": null
+          },
+          {
+            "events": 7,
+            "process.name": "sshd",
+            "user.name": "",
+            "source.ip": null
+          },
+          {
+            "events": 7,
+            "process.name": "sshd",
+            "user.name": "svc.config-mgmt",
+            "source.ip": null
+          },
+          {
+            "events": 7,
+            "process.name": "CRON",
+            "user.name": "root",
+            "source.ip": null
+          },
+          {
+            "events": 7,
+            "process.name": "CRON",
+            "user.name": "",
+            "source.ip": null
+          },
+          {
+            "events": 7,
+            "process.name": "CRON",
+            "user.name": null,
+            "source.ip": null
+          },
+          {
+            "events": 7,
+            "process.name": "sshd",
+            "user.name": "svc.config-mgmt",
+            "source.ip": "172.18.0.14"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-05T19:02:22.000Z",
+        "2026-07-05T20:02:22.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-05T19:02:22.000Z\" AND @timestamp < \"2026-07-05T20:02:22.000Z\"\n        AND host.name == \"web-1\"\n| STATS events = COUNT(*)\n        BY process.name, user.name, source.ip\n| SORT events DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-05T19:02:22.000Z\" AND @timestamp < \"2026-07-05T20:02:22.000Z\"\n        AND host.name == \"web-1\"\n| STATS events = COUNT(*)\n        BY process.name, user.name, source.ip\n| SORT events DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "process.name",
+            "type": "keyword"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          }
+        ],
+        "row_count": 12,
+        "values": [
+          {
+            "events": 336,
+            "process.name": "sshd",
+            "user.name": null,
+            "source.ip": null
+          },
+          {
+            "events": 175,
+            "process.name": "runuser",
+            "user.name": "",
+            "source.ip": null
+          },
+          {
+            "events": 126,
+            "process.name": "sudo",
+            "user.name": null,
+            "source.ip": null
+          },
+          {
+            "events": 119,
+            "process.name": "runuser",
+            "user.name": "svc.monitoring",
+            "source.ip": null
+          },
+          {
+            "events": 84,
+            "process.name": "sshd",
+            "user.name": "svc.reports",
+            "source.ip": "172.18.0.6"
+          },
+          {
+            "events": 56,
+            "process.name": "runuser",
+            "user.name": "svc.reports",
+            "source.ip": null
+          },
+          {
+            "events": 14,
+            "process.name": "sshd",
+            "user.name": "",
+            "source.ip": null
+          },
+          {
+            "events": 14,
+            "process.name": "sshd",
+            "user.name": "svc.deploy",
+            "source.ip": null
+          },
+          {
+            "events": 14,
+            "process.name": "sshd",
+            "user.name": "svc.deploy",
+            "source.ip": "172.18.0.20"
+          },
+          {
+            "events": 7,
+            "process.name": "CRON",
+            "user.name": "root",
+            "source.ip": null
+          },
+          {
+            "events": 7,
+            "process.name": "CRON",
+            "user.name": "",
+            "source.ip": null
+          },
+          {
+            "events": 7,
+            "process.name": "CRON",
+            "user.name": null,
+            "source.ip": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-28T19:02:22.000Z",
+        "2026-06-28T20:02:22.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-28T19:02:22.000Z\" AND @timestamp < \"2026-06-28T20:02:22.000Z\"\n        AND host.name == \"web-1\"\n| STATS events = COUNT(*)\n        BY process.name, user.name, source.ip\n| SORT events DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-28T19:02:22.000Z\" AND @timestamp < \"2026-06-28T20:02:22.000Z\"\n        AND host.name == \"web-1\"\n| STATS events = COUNT(*)\n        BY process.name, user.name, source.ip\n| SORT events DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "process.name",
+            "type": "keyword"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          }
+        ],
+        "row_count": 7,
+        "values": [
+          {
+            "events": 304,
+            "process.name": "sshd",
+            "user.name": null,
+            "source.ip": null
+          },
+          {
+            "events": 216,
+            "process.name": "runuser",
+            "user.name": "",
+            "source.ip": null
+          },
+          {
+            "events": 136,
+            "process.name": "runuser",
+            "user.name": "svc.monitoring",
+            "source.ip": null
+          },
+          {
+            "events": 80,
+            "process.name": "runuser",
+            "user.name": "svc.reports",
+            "source.ip": null
+          },
+          {
+            "events": 8,
+            "process.name": "CRON",
+            "user.name": "",
+            "source.ip": null
+          },
+          {
+            "events": 8,
+            "process.name": "CRON",
+            "user.name": "root",
+            "source.ip": null
+          },
+          {
+            "events": 8,
+            "process.name": "CRON",
+            "user.name": null,
+            "source.ip": null
+          }
+        ]
+      }
+    }
+  ]
+}

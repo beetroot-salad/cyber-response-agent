@@ -1,0 +1,107 @@
+projections:
+- lead_id: l-003
+  events: []
+- lead_id: l-002
+  events:
+  - '@timestamp': '2026-07-26T20:06:09Z'
+    host.name: web-2
+    event.action: sshd
+    event.outcome: failure
+    user.name: dev.dana
+    source.ip: <office-ws-1-ip>
+    message: Failed password for dev.dana from <office-ws-1-ip> port <ephemeral-port>
+      ssh2
+  - '@timestamp': '2026-07-26T20:06:20Z'
+    host.name: web-2
+    event.action: sshd
+    event.outcome: failure
+    user.name: dev.dana
+    source.ip: <office-ws-1-ip>
+    message: Failed password for dev.dana from <office-ws-1-ip> port <ephemeral-port>
+      ssh2
+  - '@timestamp': '2026-07-26T20:06:31Z'
+    host.name: web-2
+    event.action: sshd
+    event.outcome: failure
+    user.name: dev.dana
+    source.ip: <office-ws-1-ip>
+    message: Failed password for dev.dana from <office-ws-1-ip> port <ephemeral-port>
+      ssh2
+  - '@timestamp': '2026-07-26T20:06:42Z'
+    host.name: web-2
+    event.action: sshd
+    event.outcome: failure
+    user.name: dev.dana
+    source.ip: <office-ws-1-ip>
+    message: Failed password for dev.dana from <office-ws-1-ip> port <ephemeral-port>
+      ssh2
+- lead_id: l-004
+  events:
+  - '@timestamp': '2026-07-26T20:06:02+00:00'
+    host.name: web-2
+    event.outcome: failure
+    user.name: dev.dana
+    source.ip: <office-ws-1-ip>
+    auth_method: password
+  - '@timestamp': '2026-07-26T20:06:15+00:00'
+    host.name: web-2
+    event.outcome: failure
+    user.name: dev.dana
+    source.ip: <office-ws-1-ip>
+    auth_method: password
+  - '@timestamp': '2026-07-26T20:06:26+00:00'
+    host.name: web-2
+    event.outcome: failure
+    user.name: dev.dana
+    source.ip: <office-ws-1-ip>
+    auth_method: password
+  - '@timestamp': '2026-07-26T20:06:37+00:00'
+    host.name: web-2
+    event.outcome: failure
+    user.name: dev.dana
+    source.ip: <office-ws-1-ip>
+    auth_method: password
+- lead_id: l-005
+  events: []
+- lead_id: l-006
+  events: []
+- lead_id: l-008
+  events: []
+- lead_id: l-007
+  events:
+  - '@timestamp': '2026-07-26T20:06:09+00:00'
+    host.name: web-2
+    kibana.alert.rule.rule_id: v2-sshd-failed-auth-burst
+    kibana.alert.rule.name: <v2-sshd-failed-auth-burst>
+    kibana.alert.severity: <severity>
+  - '@timestamp': '2026-07-26T20:06:31+00:00'
+    host.name: web-2
+    kibana.alert.rule.rule_id: v2-sshd-failed-auth-burst
+    kibana.alert.rule.name: <v2-sshd-failed-auth-burst>
+    kibana.alert.severity: <severity>
+- lead_id: l-009
+  events:
+  - '@timestamp': '2026-07-26T20:06:02+00:00'
+    process.name: sshd
+    event.outcome: failure
+    user.name: dev.dana
+    source.ip: <office-ws-1-ip>
+    message: <Failed password for dev.dana from <office-ws-1-ip> port <src-port> ssh2>
+  - '@timestamp': '2026-07-26T20:06:15+00:00'
+    process.name: sshd
+    event.outcome: failure
+    user.name: dev.dana
+    source.ip: <office-ws-1-ip>
+    message: <Failed password for dev.dana from <office-ws-1-ip> port <src-port> ssh2>
+  - '@timestamp': '2026-07-26T20:06:26+00:00'
+    process.name: sshd
+    event.outcome: failure
+    user.name: dev.dana
+    source.ip: <office-ws-1-ip>
+    message: <Failed password for dev.dana from <office-ws-1-ip> port <src-port> ssh2>
+  - '@timestamp': '2026-07-26T20:06:37+00:00'
+    process.name: sshd
+    event.outcome: failure
+    user.name: dev.dana
+    source.ip: <office-ws-1-ip>
+    message: <Failed password for dev.dana from <office-ws-1-ip> port <src-port> ssh2>
