@@ -26,6 +26,7 @@ from defender.learning.author.branch import AuthorBranch, BranchError
 from defender.learning.core.faults import run_or_dead_letter
 from defender.learning.core.markers import quarantine_marker, rewrite_marker
 from defender.learning.core.persist import read_pitfalls
+from defender.learning.core.quarantine import preserve_tainted_tree
 
 
 class _LeadAuthorRetry(Exception):
@@ -341,6 +342,24 @@ def _run_worktree_batch(
             pr = branch.finish_batch(batch_id, wt)
         except BranchError as e:
             _log(f"{label}: finish_batch failed: {e} — work stays queued, retry next tick")
+    except box_mod.RunTainted as taint:
+        # #747: the `finally` below destroys this tree, and on the taint path it is the ONLY
+        # copy — the scrub raises before finish_batch, so nothing was ever committed or
+        # pushed (decision 8), and the curator's edits plus whatever the box planted exist
+        # nowhere else. `box.py` lets a taint outrank the work's own failure on the grounds
+        # that the crash-path tree "is the one a human then opens by hand"; without this
+        # handler that justification was false here, because the tree was gone before anyone
+        # read the traceback.
+        #
+        # An except clause rather than a check inside the `finally`: handlers run BEFORE the
+        # finally, which is exactly the ordering needed, and the intent reads off the
+        # structure. The re-raise is load-bearing — preserving the tree must not swallow the
+        # signal that it is tainted.
+        preserve_tainted_tree(
+            wt, branch.quarantine_dir,
+            batch_id=batch_id, branch=branch.branch_name(batch_id), label=label, taint=taint,
+        )
+        raise
     finally:
         # A cleanup failure leaves a worktree that is both possibly-tainted and, if do_work
         # raised before the scan could clear it, never walked. Suppressed so it cannot mask

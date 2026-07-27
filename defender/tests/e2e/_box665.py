@@ -19,6 +19,7 @@ TypeError/AttributeError until built).
 """
 from __future__ import annotations
 
+import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -335,11 +336,23 @@ class RecordingBranch:
     (commit+push+PR) whose ordering vs box teardown S7 pins."""
 
     def __init__(self, worktree_base: Path, *, branch_prefix: str = "lessons/",
-                 events: list | None = None):
+                 events: list | None = None, destroy_on_cleanup: bool = False):
         self.branch_prefix = branch_prefix
         self._base = worktree_base
         self.events: list[str] = events if events is not None else []
         self.finished: list[str] = []
+        # #747: the real `cleanup` runs `git worktree remove --force` and the tree is GONE.
+        # Off by default so the ordering tests keep observing a cheap event; on for the
+        # quarantine tests, where "the archive outlived the tree" is the whole demand and a
+        # non-destroying fake would let a broken preserve step pass.
+        self.destroy_on_cleanup = destroy_on_cleanup
+
+    @property
+    def quarantine_dir(self) -> Path:
+        return self._base / "quarantine"
+
+    def branch_name(self, batch_id: str) -> str:
+        return f"{self.branch_prefix}{batch_id}"
 
     def open_pr_exists(self) -> bool:
         self.events.append("open_pr_exists")
@@ -358,6 +371,8 @@ class RecordingBranch:
 
     def cleanup(self, wt: Path) -> None:
         self.events.append("cleanup")
+        if self.destroy_on_cleanup:
+            shutil.rmtree(wt, ignore_errors=True)
 
 
 # --------------------------------------------------------------------------- #

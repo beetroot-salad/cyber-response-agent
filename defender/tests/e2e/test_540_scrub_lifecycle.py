@@ -67,6 +67,7 @@ from pydantic_ai.exceptions import ModelRetry  # noqa: E402
 from defender.runtime.box import (  # noqa: E402
     BoxFault,
     BoxResult,
+    Finding,
     RunTainted,
     container_name,
     scrub,
@@ -396,6 +397,145 @@ def test_scrub_raises_on_a_within_bind_hardlink(tmp_path):
     assert "1.json" in str(e.value) or "0.json" in str(e.value)
 
 
+def test_the_taint_names_every_planted_entry_not_only_the_first(tmp_path):
+    """d_taint_names_every_finding (#747) — the walk runs to COMPLETION and the taint names
+    every offending entry it found. Raising from inside the walk means a box that planted
+    five things gets reported as one, and the operator's picture of the incident is
+    whichever entry `os.walk` happened to reach first.
+
+    The planted entries are deliberately spread across directories and both violation
+    families (three link shapes, one hard link), so an implementation that collects within a
+    directory but still raises at the first directory boundary fails here.
+
+    The hard link yields TWO findings, not one, and that is the point rather than an
+    accident of counting: `os.link` gives one inode two names, and after it both
+    `report.md` and `report.hardlink.md` carry `st_nlink == 2`. Raise-on-first reported
+    whichever the walk reached first and left the operator hunting for the other end of an
+    alias it never named. Five findings for four `os.*` calls is the collect-all walk
+    telling the truth about what is on disk."""
+    run = _clean_run_dir(tmp_path)
+    os.symlink("/etc/passwd", run / "gather_raw" / "l-001" / "passwd.json")
+    os.symlink("/root/.ssh/id_rsa", run / "gather_raw" / "l-001" / "key.json")
+    os.symlink("/etc/shadow", run / "shadow.md")
+    os.link(run / "report.md", run / "report.hardlink.md")
+
+    with pytest.raises(RunTainted) as e:
+        scrub(run)
+
+    message = str(e.value)
+    for name in ("passwd.json", "key.json", "shadow.md", "report.hardlink.md", "report.md"):
+        assert name in message, f"{name} was planted but never reported"
+    assert len(e.value.findings) == 5, \
+        f"expected 5 findings, got {len(e.value.findings)}: {e.value.findings}"
+    aliased = {f.path.name for f in e.value.findings if f.kind == "hardlink"}
+    assert aliased == {"report.md", "report.hardlink.md"}, \
+        f"both names of the aliased inode must be reported, got {aliased}"
+
+
+def test_the_taint_records_where_each_symlink_pointed(tmp_path):
+    """d_taint_records_readlink_target (#747) — for a symlink the report records the TARGET,
+    not merely that a link was there.
+
+    This is the single most useful triage fact and the one the report never carried: a
+    symlink has no bytes to inspect (its size is 0), so the target string IS the planted
+    payload. Without it, "a link appeared at gather_raw/l-001/0.json" cannot distinguish
+    tooling leaving a relative link from an in-box RCE reaching for a host private key —
+    and those two demand completely different responses.
+
+    Two links with distinct targets, and BOTH targets asserted: an implementation that
+    reports paths alone (or that readlinks only the first) passes a one-link test."""
+    run = _clean_run_dir(tmp_path)
+    os.symlink("/root/.ssh/id_rsa", run / "gather_raw" / "l-001" / "key.json")
+    os.symlink("/etc/passwd", run / "gather_raw" / "l-001" / "passwd.json")
+
+    with pytest.raises(RunTainted) as e:
+        scrub(run)
+
+    message = str(e.value)
+    assert "/root/.ssh/id_rsa" in message, "the link target is missing from the report"
+    assert "/etc/passwd" in message, "only one of the two link targets was resolved"
+
+    by_name = {f.path.name: f for f in e.value.findings}
+    assert by_name["key.json"].target == "/root/.ssh/id_rsa"
+    assert by_name["passwd.json"].target == "/etc/passwd"
+
+
+def test_the_findings_are_structured_not_only_prose(tmp_path):
+    """d_taint_findings_are_structured (#747) — the findings ride on the exception as typed
+    `Finding` records, so a caller that needs to persist them (#747's quarantine manifest is
+    the first) reads fields instead of re-parsing the operator-facing message.
+
+    A report that exists only as prose forces its consumer to become a parser of that prose,
+    which then silently breaks the next time the wording is improved. The shapes that have
+    no target — a hard link here — carry `None` rather than an empty string, so 'no target'
+    and 'target is the empty string' stay distinguishable."""
+    run = _clean_run_dir(tmp_path)
+    os.symlink("/etc/passwd", run / "gather_raw" / "l-001" / "passwd.json")
+    os.link(run / "report.md", run / "report.hardlink.md")
+
+    with pytest.raises(RunTainted) as e:
+        scrub(run)
+
+    assert all(isinstance(f, Finding) for f in e.value.findings)
+    by_name = {f.path.name: f for f in e.value.findings}
+
+    link = by_name["passwd.json"]
+    assert link.kind == "type"
+    assert link.filemode == "l"
+    assert link.target == "/etc/passwd"
+
+    hard = by_name["report.hardlink.md"]
+    assert hard.kind == "hardlink"
+    assert hard.nlink == 2
+    assert hard.target is None, "a hard link has no target to read; None, not ''"
+
+
+def test_the_taint_message_is_stable_across_runs(tmp_path):
+    """d_taint_message_is_deterministic (#747) — the same tainted tree produces the same
+    message twice.
+
+    `os.walk` yields in the filesystem's order, which is neither sorted nor promised to be
+    stable, so a report assembled in walk order is one an operator cannot diff between two
+    runs or cite in a ticket. The findings are sorted by path before rendering. Asserting
+    equality across two scrubs of ONE tree (rather than a hardcoded expected string) keeps
+    the demand on stability rather than on wording."""
+    run = _clean_run_dir(tmp_path)
+    for i in range(8):
+        os.symlink(f"/etc/target-{i}", run / "gather_raw" / "l-001" / f"{i}.link.json")
+
+    with pytest.raises(RunTainted) as first:
+        scrub(run)
+    with pytest.raises(RunTainted) as second:
+        scrub(run)
+
+    assert str(first.value) == str(second.value)
+    assert [f.path for f in first.value.findings] == sorted(f.path for f in first.value.findings)
+
+
+def test_the_message_is_capped_but_the_findings_are_not(tmp_path):
+    """d_taint_message_caps_render_not_collection (#747) — past the render cap the message
+    shows a bounded prefix and ANNOUNCES the remainder; `findings` still carries every entry.
+
+    A taint requires an in-box RCE, and an RCE can plant an unbounded number of entries. The
+    message reaches stderr and `[loop] FATAL:`, so rendering all of them turns the operator's
+    first signal into a wall of text — but silently truncating would reintroduce this issue's
+    own bug in a smaller form (a report that looks complete and is not). Cap the render,
+    never the collection, and say how many were held back."""
+    run = _clean_run_dir(tmp_path)
+    planted = 25
+    for i in range(planted):
+        os.symlink(f"/etc/target-{i}", run / "gather_raw" / "l-001" / f"{i:02d}.link.json")
+
+    with pytest.raises(RunTainted) as e:
+        scrub(run)
+
+    assert len(e.value.findings) == planted, "the collection was capped, not just the render"
+    message = str(e.value)
+    assert str(planted) in message, "the total is not stated"
+    assert "more" in message, "the held-back remainder is not announced"
+    assert message.count("symlink -> ") < planted, "the render was not capped at all"
+
+
 def test_scrub_does_not_flag_a_directory_by_nlink(tmp_path):
     """d_scrub_s_isreg_guard_required — a real directory whose link count exceeds 1 passes the
     scrub: the `st_nlink > 1` test applies ONLY behind the `S_ISREG` guard.
@@ -682,8 +822,14 @@ def test_the_drain_scrub_survives_a_crashed_do_work(tmp_path):
     Milder than #738 was, and the test says so rather than inheriting its severity: on that path
     `finish_batch` (the commit+push+PR supply-chain step the scrub guards) never runs either,
     and the outer `finally` calls `branch.cleanup(wt)`. It fails closed by DESTROYING the tree
-    rather than by CHECKING it — but that cleanup is wrapped in `contextlib.suppress(Exception)`,
-    so a cleanup that fails leaves a worktree both tainted and never walked, with no signal.
+    rather than by CHECKING it — and a cleanup that fails leaves a worktree both tainted and
+    never walked (#746 made that failure logged rather than swallowed, so it is no longer
+    silent, but the tree still leaks).
+
+    #747 closed the other half this paragraph used to name: when the tree is destroyed after a
+    TAINT specifically, it is now archived to quarantine first, so the evidence outlives the
+    `finally` that reports it. That path is demanded in `test_747_taint_quarantine.py`; this
+    test still owns the ordinary crash path, where there is no taint and nothing to preserve.
 
     The assertion is that the scrub RAN, and ran after the teardown. `has_work` and the box
     start both succeed, so the only thing standing between this test and green is where the
