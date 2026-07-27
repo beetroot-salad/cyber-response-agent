@@ -375,6 +375,9 @@ def render_judge_page(run_dir: Path) -> str:
         for v in active_views(case_id, str(report.get("disposition", "?")))
     ]
     toc_sections = [(v, judge_finding_count(d) if d else None) for v, d in docs]
+    # Rendered once and handed to both the TOC and the page body: the bundle is empty when the
+    # run left no raw artifacts, and the TOC linked it regardless (#748).
+    raw_bundle = render_judge_raw_bundle(case_id)
 
     byline = _byline([
         f"events={n_events}",
@@ -389,7 +392,7 @@ def render_judge_page(run_dir: Path) -> str:
 {render_header(case_id, active="judge", byline=byline)}
 {render_judge_headline(report, docs)}
 <div class="layout">
-  {render_judge_toc(toc_sections)}
+  {render_judge_toc(toc_sections, raw_bundle=bool(raw_bundle))}
   <article class="content">
     {render_alert_block(run_dir, open_=True)}
     {render_judge_defender_summary(run_dir)}
@@ -399,7 +402,7 @@ def render_judge_page(run_dir: Path) -> str:
         + render_judge_oracle_section(case_id, v)
         for v, d in docs
     )}
-    {render_judge_raw_bundle(case_id)}
+    {raw_bundle}
     {render_store_transcript_section(run_dir)}
   </article>
 </div>

@@ -23,7 +23,12 @@ from defender.learning.core.persist import (
     append_actor_observations,
     append_environment_observations,
 )
-from defender.learning.core.validate import validate_judge_benign_doc, validate_judge_doc
+from defender.learning.core.validate import (
+    ADVERSARIAL_JUDGE_OPTIONAL_KEYS,
+    BENIGN_JUDGE_OPTIONAL_KEYS,
+    validate_judge_benign_doc,
+    validate_judge_doc,
+)
 
 
 # These four env-backed knobs are read once, HERE, when the module is imported — the
@@ -66,6 +71,11 @@ class Direction:
     # `directions_for` dispatches on and the judge view reads to tell "this direction was
     # never selected" from "it was selected and its artifacts are missing" (#716).
     dispositions: frozenset[str]
+    # The optional top-level keys THIS direction's judge doc may carry, as `validate`
+    # enforces them. Declared here beside the artifact names so the transcript view can ask
+    # which sections a direction has instead of inferring it from which validator the
+    # direction points at — three keys were accepted and only one rendered (#748).
+    judge_optional_keys: frozenset[str]
     obs_trigger: ObsTrigger
     # Actor artifacts only some directions produce — declared HERE with the rest of the
     # names, so the transcript view reads them off the Direction instead of restating the
@@ -115,6 +125,7 @@ ADVERSARIAL = Direction(
     telemetry_name="projected_telemetry.yaml",
     judge_name="judge_findings.yaml",
     dispositions=frozenset({"benign", "inconclusive"}),
+    judge_optional_keys=ADVERSARIAL_JUDGE_OPTIONAL_KEYS,
     archetype_name="actor_archetype.txt",
     menu_name="actor_menu.txt",
     obs_trigger=ObsTrigger(
@@ -147,6 +158,7 @@ BENIGN = Direction(
     telemetry_name="projected_telemetry_benign.yaml",
     judge_name="judge_benign_findings.yaml",
     dispositions=frozenset({"malicious", "inconclusive"}),
+    judge_optional_keys=BENIGN_JUDGE_OPTIONAL_KEYS,
     obs_trigger=ObsTrigger(
         pending_file=lambda p: p.environment_observations.file,
         threshold_env="LEARNING_AUTHOR_ENV_THRESHOLD",

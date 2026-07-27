@@ -436,6 +436,14 @@ pre.story { background: var(--bg-3); }
 .finding-detection-confirmed .ftype { color: var(--good); }
 .finding-observability .ftype { color: var(--warn); }
 .finding-lead-set .ftype { color: var(--accent); }
+/* Actor observations: what the judge learned about the ACTOR's story, not the defender —
+   same card shape as a finding, tinted with the actor accent. */
+.actor-obs-misprediction, .actor-obs-framing-choice, .actor-obs-discarded-class {
+  border-left-color: var(--accent-actor);
+}
+.actor-obs-misprediction .ftype,
+.actor-obs-framing-choice .ftype,
+.actor-obs-discarded-class .ftype { color: var(--accent-actor); }
 .finding-head .ftopic { color: var(--text-bright); font-weight: 500; font-size: 13px; }
 .finding-head .fanchor { font-family: 'SF Mono', Menlo, Consolas, monospace; color: var(--text-dim); font-size: 11px; text-align: right; }
 .finding-body { white-space: pre-wrap; line-height: 1.6; color: var(--text); }
@@ -461,6 +469,22 @@ pre.story { background: var(--bg-3); }
 .citation.citation-investigation { border-left-color: var(--accent-defender); }
 .citation.citation-actor { border-left-color: var(--accent-actor); }
 .citation.citation-projected_telemetry { border-left-color: var(--accent-oracle); }
+
+/* The one compact citable line a benign disposition grounds — mono, because a future benign
+   judge reads it back verbatim. */
+.resolution-method {
+  background: var(--bg-3);
+  border: 1px solid var(--border-2);
+  border-left: 4px solid var(--accent-judge);
+  border-radius: 5px;
+  padding: 10px 14px;
+  margin: 8px 0;
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 12px;
+  color: var(--text);
+  white-space: pre-wrap;
+  scroll-margin-top: 96px;
+}
 
 pre.encounter { background: var(--bg-3); line-height: 1.55; }
 pre.invlang { background: var(--bg-3); }
