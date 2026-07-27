@@ -7,18 +7,48 @@ available at this scale and none is made below.
 
 ## Recommendation
 
-**Do not port yet, and do not read this as a defence of GLM 5.2.** The run did not fail to
-find a difference between the two models — it found that *the incumbent's run-to-run variance
-is larger than any model difference this design can resolve*. That is a finding about the
-judge stage, not about K3, and it blocks the port decision either way.
-
-Two things are settled and one is not:
+**Ported.** `JUDGE_MODEL` / `BENIGN_JUDGE_MODEL` now default to `kimi-k3` — on **stability**,
+not on per-verdict quality. Sections 1–3 below were written before the deciding measurement
+and read as "do not port yet"; §0 is what changed and supersedes them.
 
 | Question | Answer |
 |---|---|
-| Does K3 satisfy the judge's structured-output contract? | **Yes** — `cand_parse_failure_rate` 0%, `cand_punt_rate` 0%. This was the main wiring risk and it is cleared. |
-| What does K3 cost? | **Unanswerable from public pricing** — the honest range spans 15×. See below. |
-| Is K3 a better judge? | **Not established.** Suggestive, not shown. See the adjudication caveat. |
+| Is K3 stable on the same frozen input? | **Yes** — 4/4 reps, both cases. GLM: 0/2. This is the whole argument. |
+| Does K3 satisfy the structured-output contract? | **Yes** — 0% parse failures across all reps. |
+| What does K3 cost? | **Unanswerable from public pricing** — the honest range spans 15×. See §2. |
+| Is K3 a *better reasoner*? | **Not established, and not claimed.** See §3. |
+
+## 0. The deciding measurement — K3's own self-consistency (added after §1–3)
+
+§1 concluded the port question was unanswerable because the reference was a coin flip. That
+was half the picture: the harness runs the reference twice and the candidate **once**, so
+K3's own stability had never been measured. It is the actual decision variable, and it is
+cheap to get — the fixtures are frozen, so no lab is needed. Running K3 as both reference and
+candidate (`--ref-model kimi-k3 --cand-model kimi-k3`, `results/k3-floor-report.md`) gives
+four draws per case:
+
+| case | direction | rep 1 | rep 2 | rep 3 | rep 4 |
+|---|---|---|---|---|---|
+| 001 | adversarial | `caught` | `caught` | `caught` | `incoherent` |
+| 002 | benign | `refuted` | `refuted` | `refuted` | `refuted` |
+
+**K3 self-consistency floor: 100%** (0 systematic flips), against GLM's **0%** on the same
+fixtures at the same effort. That is the port rationale: a judge that returns the same label
+on the same frozen input is worth more to a training loop than one whose prose is marginally
+better argued, because the loop's ground truth is the label, not the prose.
+
+Two things this does *not* say:
+
+- **The 4th rep punted `incoherent` on the adversarial leg** — a 25% punt rate on one leg at
+  n=4. A punt loses a training signal where a flip corrupts one, so this is still strictly
+  better than what it replaces, but it wants a wider case set to size properly. It also
+  revises §1's "`cand_punt_rate` 0%", which was one draw.
+- **Ignore that report's "BELOW the noise floor — NOT yet equivalent" line.** Running a model
+  against itself makes the floor 100% by construction, so any non-determinism reads as
+  failure. It is an artifact of the self-vs-self configuration, not a result.
+
+With GLM sampling near-randomly, §3's adjudication result is also weaker than it looks — it
+partly measured *which GLM draw* K3 was matched against. It is not load-bearing for the port.
 
 ## 1. The incumbent is not self-consistent — this is the headline
 
@@ -114,16 +144,16 @@ citations that do not carry the claims made on them, and K3 does it less.
 
 ## 4. What to do next
 
-1. **Characterise the judge's noise floor before comparing models at all.** ≥5 reps of the
-   incumbent over ≥8 cases. If the 0/2 here reflects the real rate, the finding is that the
-   judge stage needs stabilising (higher effort, a tightened rubric, self-consistency
-   sampling with a majority vote) — a much larger win than any model swap, and a prerequisite
-   for measuring one.
+1. **Confirm K3's floor at ≥8 cases.** 4/4 on two cases is enough to prefer K3 over a judge
+   that is 0/2, and that is all the port claims. It is not enough to call K3 *stable* — and
+   the `incoherent` punt says it is not perfectly so. Widen the case set before treating the
+   judge's ground truth as trustworthy. Note also that no other stage has ever been measured
+   this way: the oracle, both actors, and the curators all still default to `glm-5.2`, and the
+   near-empty projections in this run make the oracle the obvious next candidate.
 2. **Settle K3's price from the billing dashboard** for this run. Everything else about cost
    is guesswork.
-3. **Re-run the comparison only once the floor is known**, at the plan's original 8 cases, with
-   an adjudicator that states its own outcome *before* seeing either verdict — the anchoring
-   above is a fixable prompt defect (`adjudicate.py` currently shows both verdicts up front).
+3. **Fix `adjudicate.py` before trusting it again** — it shows both verdicts up front, which
+   is what let the adjudicator anchor. It should state its own outcome first, then see them.
 
 ## Run artifacts
 
@@ -134,6 +164,7 @@ runs/{ref-a,ref-b,cand}/      per-arm judge traces
 results/ab-report.md          the harness's own report
 results/cost.json             per-invocation token + cost record
 results/adjudication/         prompts, Opus adjudications, blind-label mapping
+results/k3-floor-report.md    K3 run against itself — the self-consistency measurement in §0
 snapshot_cases.py             LEARN output → frozen case layout
 analyze.py                    traces → tokens, cost, price sensitivity
 adjudicate.py                 blind paired adjudication
