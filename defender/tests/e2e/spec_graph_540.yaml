@@ -104,16 +104,30 @@ demands:
      binds: ["interacts(scrub->run_dir)"]}
   - {id: d_clean_tree_passes_scrub, kind: behavior, form: test, discharged_by: test_a_clean_run_dir_passes_the_scrub,
      binds: ["interacts(scrub->run_dir)"]}   # POSITIVE CONTROL for the whole scrub family
-  - {id: d_scrub_precedes_first_consumer, kind: seam, form: test, discharged_by: test_scrub_runs_before_the_first_run_dir_consumer,
-     binds: ["drives(run_main->run_investigation)", "interacts(scrub->run_dir)", "interacts(run_main->run_dir)"]}
+  # #741: these were `kind: seam`/AST-shape assertions over run_main's statement sequence.
+  # They are EXECUTED now, over the extracted run_lifecycle's injection seam — hence the
+  # re-pointed binds and the kind promotion. AM-1 (below) is what they close.
+  - {id: d_scrub_precedes_first_consumer, kind: behavior, form: test, discharged_by: test_scrub_runs_before_the_first_run_dir_consumer,
+     binds: ["drives(run_lifecycle->run_investigation)", "drives(run_lifecycle->stop_and_scrub)", "interacts(scrub->run_dir)", "interacts(run_main->run_dir)"]}
   - {id: d_no_consumer_runs_on_a_tainted_tree, kind: negative, form: test, discharged_by: test_no_consumer_runs_when_the_scrub_raises,
-     binds: ["interacts(run_main->run_dir)", "interacts(visualize_run->run_dir)", "interacts(persist_copy_shared_inputs->run_dir)"]}
+     binds: ["drives(run_main->run_lifecycle)", "interacts(run_main->run_dir)", "interacts(visualize_run->run_dir)", "interacts(persist_copy_shared_inputs->run_dir)"]}
   - {id: d_scrub_survives_a_crashed_driver, kind: behavior, form: test, discharged_by: test_the_scrub_survives_a_crashed_investigation,
-     binds: ["drives(run_main->run_investigation)", "interacts(scrub->run_dir)", "interacts(run_main->run_dir)"]}   # #738: ORDER cannot see reachability
+     binds: ["drives(run_lifecycle->run_investigation)", "drives(stop_and_scrub->scrub)", "interacts(scrub->run_dir)"]}   # #738: ORDER cannot see reachability
+  # #741: the second writable lane. The drain's scrub had #738's exact shape until this landed.
+  - {id: d_scrub_survives_a_crashed_drain, kind: behavior, form: test, discharged_by: test_the_drain_scrub_survives_a_crashed_do_work,
+     binds: ["drives(stop_and_scrub->scrub)", "drives(stop_and_scrub->stop_box)"]}
+  # #741: the reap's own rules, previously unpinned anywhere — each lane only ever asserted
+  # its own composition, never the ordering/preference the two now share.
+  - {id: d_reap_scrubs_a_dead_box, kind: behavior, form: test, discharged_by: test_the_reap_scrubs_once_the_box_is_down,
+     binds: ["drives(stop_and_scrub->stop_box)", "drives(stop_and_scrub->scrub)"]}
+  - {id: d_reap_skips_the_scrub_on_a_failed_teardown, kind: negative, form: test, discharged_by: test_a_failed_teardown_skips_the_scrub_rather_than_racing_it,
+     binds: ["drives(stop_and_scrub->stop_box)", "drives(stop_and_scrub->scrub)"]}
+  - {id: d_reap_taint_outranks_in_flight, kind: behavior, form: test, discharged_by: test_a_taint_outranks_the_work_s_own_failure,
+     binds: ["drives(stop_and_scrub->scrub)"]}
 
   # ---- O10 / O11 — lifecycle, fail-closed, teardown ----
   - {id: d_construction_failure_refuses_the_run, kind: behavior, form: test, discharged_by: test_box_construction_failure_refuses_the_run,
-     binds: [start_box, "drives(run_main->start_box)"]}
+     binds: [start_box, "drives(run_lifecycle->start_box)", "drives(run_lifecycle->run_investigation)"]}
   - {id: d_startup_probes_rather_than_detects, kind: behavior, form: test, discharged_by: test_startup_attempts_a_box_rather_than_detecting_a_binary,
      binds: [start_box]}
   - {id: d_path_identity_sentinel, kind: behavior, form: test, discharged_by: test_path_identity_sentinel_fails_closed,
@@ -123,7 +137,7 @@ demands:
   - {id: d_container_name_is_run_id_derived, kind: shape, form: test, discharged_by: test_container_name_is_defender_run_run_id,
      binds: [container_name.identity]}
   - {id: d_box_torn_down_on_crash, kind: behavior, form: test, discharged_by: test_box_does_not_outlive_a_crashed_driver,
-     binds: [stop_box, "drives(run_main->stop_box)"]}
+     binds: [stop_box, "drives(run_lifecycle->stop_and_scrub)", "drives(stop_and_scrub->stop_box)"]}
   - {id: d_teardown_is_idempotent, kind: behavior, form: test, discharged_by: test_teardown_of_an_absent_box_succeeds,
      binds: [stop_box]}
   - {id: d_reaper_keys_on_return_code_not_stderr, kind: negative, form: test, discharged_by: test_reaper_does_not_treat_stderr_as_failure,
@@ -269,6 +283,9 @@ structure:
     - {id: BoxExecutor,         frame: leg,         provenance: design}
     - {id: box_entrypoint,      frame: leg,         provenance: design}  # python3 -m defender.runtime.bash_exec — NEW surface (C51)
     - {id: scrub,               frame: leg,         provenance: design}
+    # --- #741: the lifecycle, lifted out of run_main so its demands can be EXECUTED ---
+    - {id: run_lifecycle,       frame: composition, provenance: code}   # run.py _run_investigation_lifecycle
+    - {id: stop_and_scrub,      frame: leg,         provenance: code}   # box.py — the reap, shared by both writable lanes
 
   boundaries:
     # ---------------- the box's mount + isolation surface ----------------
@@ -510,9 +527,15 @@ structure:
     - {from: gather_only_script, to: AgentDeps, mode: invoke, via: direct-ctor, provenance: code}
 
   drives:
-    - {from: run_main,          to: run_investigation, provenance: code,   multiplicity: serial}
-    - {from: run_main,          to: start_box,         provenance: design, multiplicity: serial}
-    - {from: run_main,          to: stop_box,          provenance: design, multiplicity: serial}
+    # #741: run_main no longer drives the box directly — it drives the lifecycle, which owns
+    # the box's whole span. The re-pointed edges are what let the demands below bind to a
+    # surface a test can actually call; run_main stays the argv entrypoint.
+    - {from: run_main,          to: run_lifecycle,     provenance: code,   multiplicity: serial}
+    - {from: run_lifecycle,     to: run_investigation, provenance: code,   multiplicity: serial}
+    - {from: run_lifecycle,     to: start_box,         provenance: code,   multiplicity: serial}
+    - {from: run_lifecycle,     to: stop_and_scrub,    provenance: code,   multiplicity: serial}
+    - {from: stop_and_scrub,    to: stop_box,          provenance: code,   multiplicity: serial}
+    - {from: stop_and_scrub,    to: scrub,             provenance: code,   multiplicity: serial}
     - {from: run_investigation, to: _tool_bash,        provenance: code,   multiplicity: serial}
     - {from: _tool_bash,        to: BoxExecutor,       provenance: design, multiplicity: serial}
     - {from: BoxExecutor,       to: box_entrypoint,    provenance: design, multiplicity: serial}
@@ -712,7 +735,7 @@ handoff:
     - "CG-5 OPEN: _do_cd's target.resolve() is the one place the executor dereferences a path the gate did not re-check — after decide_bash returned, in a package whose stated purpose is eliminating exactly that differential. The cwd demands pin the ANCHOR at three sites; none pins the post-gate dereference. C21 (image-present links resolve in-box) makes it live."
     - "CG-6 OPEN: learn_drain binds no demand. The queue marker carries a resolved run_dir path read by a different process at unbounded delay, and evals/harness_lead.py:103 copytrees a whole real run dir WITHOUT passing through run.py, so the scrub never runs on that path at all."
     - "CG-7 OPEN: a UDS the box CREATES inside the rw bind is a host-connectable egress channel that --network=none does not govern. d_no_socket_mounted_inward covers only the inward direction."
-    - "AM-1: the ordering demands pin AST statement order and except-clause shape, not behaviour — they pass on a scrub() that returns without walking, or one hoisted into a helper the AST walk no longer sees. Recorded as an instrument limitation; the demand kinds read as if they pinned behaviour."
+    - "AM-1 REPAIRED IN #741: the ordering demands pinned AST statement order and except-clause shape, not behaviour — they passed on a scrub() that returns without walking, or one hoisted into a helper the AST walk no longer sees. #738 was the second of those reaching production. The instrument is gone: run.py's box span is extracted into `_run_investigation_lifecycle`, which carries the `start_box=`/`stop_box=`/`scrub=`/`investigate=` seam its two siblings (drains._run_worktree_batch, run_cycle.run_one) already had, and all five demands over it are now executed against a recorded event log. The `investigate=` seam is a SYNC callable wrapping asyncio.run precisely so the crash path needs no event loop and no model credentials — the second half of the original objection. Verified by mutation: re-siting the scrub outside the finalizer reddens d_scrub_survives_a_crashed_driver, and dropping the box-down guard reddens d_reap_skips_the_scrub_on_a_failed_teardown. What REMAINS syntactic is one narrow claim in d_no_consumer_runs_on_a_tainted_tree — that neither run_main nor run_lifecycle catches the taint — which is a genuine claim about except-clause shape rather than a stand-in for one."
     - "AM-2: d_infrastructure_fault_text_reaches_the_model_labelled binds the wire facet, one layer BELOW where its premise located the fault (_format_bash_result, host-side). The test asserts at the right altitude; the demand's binds do not."
     - "F12 was dismissed no-consequence on PRE-DELTA reasoning. Post-delta both integrity tables are in the box's write set and cross_check_tables is precisely the fact that the only checker of the two-table contract cannot fail a run. Outcome stands (carried by w_scrub_certifies_link_shape_only) but that waiver should name cross_check_tables as the home for H2's follow-up."
     - "F11 was UNDER-called: run_common.visualize is subprocess.run(capture_output=True) with NO timeout and failure never raised — so the visualize leg of d_no_consumer_runs_on_a_tainted_tree is unfalsifiable from run.py's exit code, and H4's blocking-open case has a second, untimed home there with no join deadline to convert a hang into a failure."
@@ -727,7 +750,7 @@ handoff:
     - "NULL-STUB COVERAGE IS PARTIAL IN THIS ENVIRONMENT: 42 tests fail on their own demand-specific assertion, 10 pass (each classified in nullstub_passes), and 25 SKIP because this sandbox is docker-outside-of-Docker — F8's startup sentinel cannot pass when bind sources resolve on a filesystem the test process cannot see. A skipped test binds nothing here. Those 25 run for real on a native daemon, including CI ubuntu-latest, and their discrimination is UNVERIFIED until then."
     - "The suite was authored by three parallel agents. They diverged on the executor method name (run vs run_parsed); reconciled to run_parsed, which is what M7 and the existing bash_exec.run_parsed both name. Caught by a cross-file API check, not by either author — the composition failure a throughput cut invites."
     - "test_scrub_raises_on_a_fifo_socket_or_device_node binds only PARTIALLY: it proves FIFO, socket and device nodes all raise, but cannot distinguish H4's allowlist from an equivalent denylist, because no test can construct an st_mode type nobody enumerated. The allowlist SHAPE must be enforced at code review. The H4 motivating case is bound as a TERMINATION assertion (a join deadline), so an implementation that opens the FIFO fails instead of hanging CI."
-    - "The ordering and crash-teardown demands are asserted against the AST of run.py main() — statement order and control-flow shape, never line numbers — because main() has no injection seam for the box or the scrub and driving it end-to-end needs model credentials."
+    - "SUPERSEDED BY #741. Was: 'the ordering and crash-teardown demands are asserted against the AST of run.py main() — statement order and control-flow shape, never line numbers — because main() has no injection seam for the box or the scrub and driving it end-to-end needs model credentials.' Both halves of that premise are now false: the seam exists on `_run_investigation_lifecycle`, and the injected `investigate=` is synchronous, so no credentials and no event loop are involved. See AM-1 REPAIRED."
     - "C41 and three other claims could not be probed in this environment (docker-outside-of-Docker, live network egress). Listed under deferred."
     - "The worktree was missing its defender/.venv symlink, which every sibling worktree has. Without it 16 tests fail on ModuleNotFoundError: pydantic_ai — a provisioning gap, not a defect. The symlink was created (gitignored, zero repo diff); the real baseline is 2203 passed, 8 skipped, 0 failed."
     - "R6 fired on judgment, not on its formal trigger, because the rendered sinks were absent from the extracted graph. model_context was added afterwards. A clean R6 on the original graph would have certified the blind spot — recorded because it is the extraction-completeness failure mode, the gate's single point of failure."

@@ -322,24 +322,33 @@ def _run_worktree_batch(
     wt_paths = paths.with_repo_root(wt)
     pr = None
     try:
-        # O7: the box is torn down on ANY exit from do_work, ordinary or exceptional — never
-        # leaked, and never skipped by a do_work failure.
+        # O7/S7 (#741): the box is torn down and the written tree scanned on ANY exit from
+        # do_work, ordinary or exceptional. Both halves live in `stop_and_scrub`, which owns
+        # the ordering (teardown first — the rw bind must be released before the walk, or the
+        # scan races a live writer), the only-scrub-a-provably-dead-box rule, and the
+        # exception preference. The scan lands BEFORE finish_batch's commit+push+PR
+        # supply-chain step ever reads the tree (decision 8); a failed teardown blocks both
+        # the scan and finish_batch (R2).
+        work_ok = False
         try:
             do_work(wt_paths, box=box)
+            work_ok = True
         finally:
-            stop_box(box)
-        # O7/S7: the box (holding the rw bind) is already released here, then the written
-        # tree is scanned for a tainting entry, BEFORE finish_batch's commit+push+PR
-        # supply-chain step ever reads it (decision 8) — a failed teardown (above) blocks
-        # both scrub and finish_batch (R2).
-        scrub(wt)
+            box_mod.stop_and_scrub(
+                box, wt, stop_box=stop_box, scrub_tree=scrub, in_flight=not work_ok,
+            )
         try:
             pr = branch.finish_batch(batch_id, wt)
         except BranchError as e:
             _log(f"{label}: finish_batch failed: {e} — work stays queued, retry next tick")
     finally:
-        with contextlib.suppress(Exception):
+        # A cleanup failure leaves a worktree that is both possibly-tainted and, if do_work
+        # raised before the scan could clear it, never walked. Suppressed so it cannot mask
+        # the real failure, but never silent — that silence was the whole residue #741 named.
+        try:
             branch.cleanup(wt)
+        except Exception as e:  # noqa: BLE001 — best-effort cleanup; the real fault outranks it
+            _log(f"{label}: worktree cleanup failed: {e} — {wt} leaked, scrub state unknown")
 
     if pr is None:
         _log(f"{label}: batch produced no commits — no PR opened")
