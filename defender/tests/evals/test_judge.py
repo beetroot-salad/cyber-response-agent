@@ -224,7 +224,7 @@ def test_a_malformed_verdict_is_a_grammar_error(raw, why):
 
 # ----------------------------------------------------------------------- the call
 
-def test_a_grammar_failure_is_retried_once():
+def test_a_grammar_failure_is_retried():
     call = _call("not a mapping", LABEL_OK)
     got = judge.label_lead(judge.load_lead_inputs(CASE, "l-001"), model="m", effort="high",
                            call=call)
@@ -232,12 +232,34 @@ def test_a_grammar_failure_is_retried_once():
     assert len(call.sent) == 2
 
 
-def test_a_second_grammar_failure_raises_rather_than_looping():
+def test_the_retry_complains_about_the_envelope_and_nothing_else():
+    """A retry is for a malformed envelope around a real judgement, not for a verdict we
+    dislike. The re-ask names the parse failure and the YAML rule that avoids it; the
+    payload the judgement is made from is byte-identical, and nothing in the note says
+    what a good answer would look like.
+
+    It is not decoration: a real case-005 verdict wrote its `rationale` as a plain
+    scalar containing `pam_unix(sshd:auth): authentication failure`, which YAML cannot
+    carry, and two byte-identical attempts both produced it."""
+    call = _call("rationale: pam_unix(sshd:auth): authentication failure", LABEL_OK)
+    judge.label_lead(judge.load_lead_inputs(CASE, "l-001"), model="m", effort="high",
+                     call=call)
+    first, second = call.sent[0]["user"], call.sent[1]["user"]
+    assert second.startswith(first), "the judgement's own payload must not change"
+    note = second[len(first):]
+    assert "did not parse" in note
+    assert "block scalar" in note
+    assert "unchanged in substance" in note
+    for tell in ("suppressed", "present", "faithful", "delta_kind:"):
+        assert tell not in note, f"the retry note hints at an answer: {tell!r}"
+
+
+def test_grammar_failures_stop_rather_than_looping():
     call = _call("not a mapping")
     with pytest.raises(judge.GrammarError):
         judge.label_lead(judge.load_lead_inputs(CASE, "l-001"), model="m", effort="high",
                          call=call)
-    assert len(call.sent) == 2
+    assert len(call.sent) == judge.GRAMMAR_ATTEMPTS
 
 
 def test_the_prompt_is_sent_as_instructions_so_it_stays_a_cacheable_prefix():

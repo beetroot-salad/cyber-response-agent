@@ -176,6 +176,17 @@ def _control(record: dict) -> dict:
     return control
 
 
+def lead_systems(lead: dict) -> set[str]:
+    """The systems a lead's queries read, from their `query_id` prefixes.
+
+    `query_id` is `{system}.{kebab-name}` (defender/CLAUDE.md), so a lead's systems are a
+    property of the envelope rather than an attribution anyone made. Both the label
+    pass's calibration (`audit_judge`) and the report's slice axis (`score.system_of`)
+    key off this, and they must not drift apart.
+    """
+    return {(q.get("query_id") or "").split(".")[0] for q in lead.get("queries") or []}
+
+
 def load_leads(case_dir: Path) -> list[dict]:
     text = (case_dir / "oracle_visible" / "leads.jsonl").read_text(encoding="utf-8")
     return [json.loads(line) for line in text.splitlines() if line.strip()]
@@ -410,20 +421,53 @@ def call_model(instructions: str, user: str, model: str, effort: str) -> CallRes
                       cost_usd=report.get("total_cost_usd"))
 
 
+#: How many attempts one pass gets before its GrammarError propagates.
+GRAMMAR_ATTEMPTS = 3
+
+
+def _reparse_note(error: Exception) -> str:
+    """The only thing a retry adds: a complaint about the ENVELOPE, never the judgement.
+
+    The first version of the retry re-sent a byte-identical payload, on the reasoning
+    that a retry is for a malformed envelope around a real judgement and not for a
+    verdict we dislike. That reasoning is right and this preserves it — nothing here
+    describes the telemetry, the projection, or what a good answer looks like. It names
+    the parse failure and the YAML rule that avoids it.
+
+    It was needed: a real case-005 verdict wrote its `rationale` as a plain scalar
+    containing `pam_unix(sshd:auth): authentication failure`, and a plain YAML scalar
+    cannot carry `: `. Two identical attempts both produced it, because nothing told the
+    model its output had not parsed.
+    """
+    return (
+        "\n\n<retry>\n"
+        f"Your previous response did not parse: {error}\n"
+        "Emit the SAME judgement again, unchanged in substance, as a single valid YAML "
+        "document. Do not reconsider it — only its form was wrong. Most often the cause "
+        "is a multi-word value written as a plain scalar while containing `: ` or `#`; "
+        "write every prose value as a block scalar (`key: |` then an indented line).\n"
+        "</retry>"
+    )
+
+
 def _pass(prompt_path: Path, user: str, parse, *, model: str, effort: str,
           call: CallFn) -> dict:
-    """Run one pass, retrying ONCE on a grammar failure.
+    """Run one pass, re-asking on a grammar failure until `GRAMMAR_ATTEMPTS` are spent.
 
-    A retry is for a malformed envelope around a real judgement, not for a verdict we
-    dislike — nothing about the payload changes between the two attempts.
+    Only the envelope complaint changes between attempts — see `_reparse_note`. The
+    payload the judgement is made from is byte-identical every time.
     """
     instructions = prompt_path.read_text(encoding="utf-8")
-    try:
-        result = call(instructions, user, model, effort)
-        parsed = parse(result.text)
-    except GrammarError:
-        result = call(instructions, user, model, effort)
-        parsed = parse(result.text)
+    payload = user
+    for attempt in range(GRAMMAR_ATTEMPTS):
+        result = call(instructions, payload, model, effort)
+        try:
+            parsed = parse(result.text)
+            break
+        except GrammarError as exc:
+            if attempt == GRAMMAR_ATTEMPTS - 1:
+                raise
+            payload = user + _reparse_note(exc)
     # Provenance, not grammar: which judge actually answered, recorded per lead so the
     # committed artifact can be checked against the tag it was filed under.
     return {**parsed, "judge_model": result.model, "judge_effort": result.effort,

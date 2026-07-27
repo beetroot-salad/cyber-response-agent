@@ -67,8 +67,8 @@ CLASS_TO_DELTA_KIND = {
 }
 
 
-def lead_systems(lead: dict) -> set[str]:
-    return {(q.get("query_id") or "").split(".")[0] for q in lead.get("queries") or []}
+#: Anchored in `judge.py` so the calibration and the report's slice axis cannot drift.
+lead_systems = judge.lead_systems
 
 
 def expected_delta_kinds(case_class: str, lead: dict) -> tuple[str, ...]:
