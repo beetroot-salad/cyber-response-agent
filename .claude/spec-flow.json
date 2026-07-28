@@ -1,5 +1,5 @@
 {
-  "project": "defender — an LLM SOC-analyst agent (python, pytest, uv)",
+  "project": "defender \u2014 an LLM SOC-analyst agent (python, pytest, uv)",
   "gate": {
     "ciConfig": ".github/workflows/ci.yml",
     "test": "cd defender && uv run pytest tests/ -m \"not llm and not live\"",
@@ -7,15 +7,15 @@
       "defender/.venv/bin/ruff check . --select E,F --ignore E402,E501",
       "defender/.venv/bin/ruff check defender",
       "defender/.venv/bin/mypy --config-file defender/pyproject.toml",
-      "the baseline-ratcheted custom lints under scripts/lint/lint_*.py (monkeypatch, unsafe-jsonl-io, raw-git-subprocess, unanchored-default, vulture, duplicate-helpers, …) — each blocks only on a NEW finding, and each documents an inline-suppression escape hatch in its own module"
+      "the baseline-ratcheted custom lints under scripts/lint/lint_*.py (monkeypatch, unsafe-jsonl-io, raw-git-subprocess, unanchored-default, vulture, duplicate-helpers, \u2026) \u2014 each blocks only on a NEW finding, and each documents an inline-suppression escape hatch in its own module"
     ],
-    "notes": "`.github/workflows/ci.yml` is the source of truth — run what it runs; don't trust this list to stay current. Running in a git worktree? The shared `.venv` editable install points at the main checkout — prepend `PYTHONPATH=<worktree-root>` to the pytest call or you test the wrong tree."
+    "notes": "`.github/workflows/ci.yml` is the source of truth \u2014 run what it runs; don't trust this list to stay current. Running in a git worktree? The shared `.venv` editable install points at the main checkout \u2014 prepend `PYTHONPATH=<worktree-root>` to the pytest call or you test the wrong tree."
   },
   "tests": {
     "language": "python",
     "dir": "defender/tests",
-    "harness": "defender/tests/e2e/_replay_harness.py — a new scenario is a few lines of `Turn(...)`, not fresh plumbing. Build on it rather than inventing parallel machinery.",
-    "idioms": "Fakes enter through the entry point's injection seams (a `deps` parameter, a constructor argument), never `monkeypatch.setattr` — CI ratchets new setattr sites (`scripts/lint/lint_monkeypatch.py`)."
+    "harness": "defender/tests/e2e/_replay_harness.py \u2014 a new scenario is a few lines of `Turn(...)`, not fresh plumbing. Build on it rather than inventing parallel machinery.",
+    "idioms": "Fakes enter through the entry point's injection seams (a `deps` parameter, a constructor argument), never `monkeypatch.setattr` \u2014 CI ratchets new setattr sites (`scripts/lint/lint_monkeypatch.py`)."
   },
   "specGraph": {
     "artifacts": "defender/tests/**/spec_graph_*.yaml",
@@ -49,7 +49,9 @@
           "defender/scripts/adapters/ticket_adapter.py::get_ticket",
           "defender/scripts/adapters/ticket_adapter.py::health_check"
         ],
-        "grep": ["ticket_adapter.py"]
+        "grep": [
+          "ticket_adapter.py"
+        ]
       },
       "wire_log": {
         "writers": [
@@ -59,7 +61,36 @@
           "defender/runtime/observe.py::write_trace",
           "defender/scripts/visualize/visualize_messages.py::load_messages"
         ],
-        "grep": ["llm_requests.jsonl", "logger.messages"]
+        "grep": [
+          "llm_requests.jsonl",
+          "logger.messages"
+        ]
+      },
+      "learning_queue": {
+        "writers": [
+          "defender/learning/core/persist.py::_rewrite_queue",
+          "defender/learning/core/persist.py::append_findings",
+          "defender/learning/core/persist.py::_append_observations",
+          "defender/learning/core/persist.py::append_pitfalls",
+          "defender/learning/author/drain.py::retire",
+          "defender/learning/author/drain.py::stuck_report_file"
+        ],
+        "readers": [
+          "defender/learning/author/drain.py::read_batch",
+          "defender/learning/core/persist.py::read_pitfalls",
+          "defender/learning/core/drains.py::_pending_queue_count",
+          "defender/learning/author/verify_forward/shared.py::load_observation"
+        ],
+        "grep": [
+          "findings.jsonl",
+          "_observations.jsonl",
+          "pitfalls.jsonl",
+          "channel.file",
+          "channel.append_lock",
+          "channel.drain_lock",
+          "deadletter.jsonl",
+          "stuck.jsonl"
+        ]
       },
       "runs_base": {
         "writers": [
@@ -70,18 +101,25 @@
           "defender/evals/held_out.py::index_runs",
           "defender/learning/ops/trace_lesson.py::in_context_cases"
         ],
-        "grep": ["DEFENDER_RUNS_BASE", "runs_dir.iterdir", "runs_base"]
+        "grep": [
+          "DEFENDER_RUNS_BASE",
+          "runs_dir.iterdir",
+          "runs_base"
+        ]
       }
     }
   },
   "conventions": {
     "defaultBranch": "main",
-    "dangerLens": "adversarial input — alert data is attacker-influenced by definition, and malicious input is well-formed on purpose. Use this as write-tests' fourth enumeration lens unless the change's danger zone is clearly elsewhere (environment/resource, or concurrency when the design admits parallel invocation)."
+    "dangerLens": "adversarial input \u2014 alert data is attacker-influenced by definition, and malicious input is well-formed on purpose. Use this as write-tests' fourth enumeration lens unless the change's danger zone is clearly elsewhere (environment/resource, or concurrency when the design admits parallel invocation)."
   },
   "codeGraph": {
     "tool": "pyrefly",
     "configDir": "defender",
-    "searchPath": ["..", "."],
+    "searchPath": [
+      "..",
+      "."
+    ],
     "notes": "defender is a namespace package (no defender/__init__.py; pyproject at defender/, not the repo root), so pyrefly's import root defaults to defender/ and `defender.x` imports silently resolve to Unknown. searchPath is relative to configDir: `..` = repo root (makes `defender` a top-level package, mirroring pytest's pythonpath=['..']), `.` = defender/. The pyrefly-refs helper writes a temp configDir/pyrefly.toml from these and removes it per run."
   }
 }
