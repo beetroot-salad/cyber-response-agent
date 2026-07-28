@@ -552,7 +552,7 @@ def test_the_request_logging_guard_stays_around_the_log_path_only(tmp_path):
 # the run-end flush — R11's true `finally`
 # ==========================================================================
 
-def test_run_end_flush_captures_the_terminal_response_on_every_exit(tmp_path):
+def test_run_end_flush_captures_the_terminal_response_on_every_exit(tmp_path, monkeypatch):
     """A run that ends by `UsageLimitExceeded`, `BudgetKill`, `RunAborted` or an uncaught
     exception type has its terminal response in the store, captured by a SINGLE run-end
     flush in a true `finally` rather than by per-arm flushes — observable through a
@@ -579,6 +579,7 @@ def test_run_end_flush_captures_the_terminal_response_on_every_exit(tmp_path):
     # (2) BudgetKill — a real cap trip
     rd = materialize(tmp_path / "budget", GOLDEN)
     opened = []
+    monkeypatch.setenv("DEFENDER_BUDGET_ENFORCE", "1")
     drive(rd, run_id="flush-budget", salt=SALT,
           main=ReplayFn(_read_alert_turns(rd, 15)),
           limits=caps(max_tool_calls=1, wall_clock_timeout=3600, grace_seconds=600),
