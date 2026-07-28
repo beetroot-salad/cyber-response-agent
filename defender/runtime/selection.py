@@ -17,6 +17,7 @@ from pydantic_ai.messages import ModelMessagesTypeAdapter, ModelRequest, UserPro
 from .session_store import (  # noqa: F401 — re-exported, identity checked by the suite
     IngestTailUnderflow,
     ROLES,
+    StoreAppendError,
     UnknownReadRole,
     hydrate,
     path_row_ids,
@@ -44,7 +45,13 @@ def _fold_impl(  # noqa: PLR0913 — mint-time stamping needs the run's identity
     text: str | None = None,
 ) -> int:
     if boundary is None:
-        boundary = _default_boundary(store, session_id)
+        # correction R2/FE-2 (binding): `_default_boundary` no longer stands in as this
+        # fold's placeholder default — it over-counts once a fold has displaced rows off
+        # the path (FK16 / #753, deliberately unfixed here) — so a caller with no
+        # boundary of its own fails closed rather than silently taking that count.
+        raise ValueError(
+            "boundary is required; selection.fold no longer defaults it from the "
+            "session's own row count")
     existing = store.connection.execute(
         "SELECT id FROM message WHERE session_id = ? AND agent_id = ? "
         "AND synthesized = 1 AND seq = ?",
@@ -53,7 +60,17 @@ def _fold_impl(  # noqa: PLR0913 — mint-time stamping needs the run's identity
     if existing is not None:
         return existing[0]
     ids = path_row_ids(store, session_id)
-    root = ids[0] if ids else None
+    if not ids:
+        raise StoreAppendError(
+            "cannot fold a session whose path is empty: there is no row for the "
+            "frontier to parent onto")
+    root = ids[0]
+    root_session = store.connection.execute(
+        "SELECT session_id FROM message WHERE id = ?", (root,)).fetchone()
+    if root_session is None or root_session[0] != session_id:
+        raise StoreAppendError(
+            "a fold refuses to parent its frontier onto a row belonging to another "
+            "session — the folding session's own lineage root must be its own row")
     # The caller owns the frontier's CONTENT (the driver passes the invlang record of the
     # loops being folded); the placeholder is a shape-only default for callers that have
     # no record to carry — a fold whose frontier says only "boundary N" discards the
@@ -64,7 +81,7 @@ def _fold_impl(  # noqa: PLR0913 — mint-time stamping needs the run's identity
         timestamp=datetime.now(UTC),
     )
     new_ids = store.append(session_id, [frontier], agent_id=agent_id,
-                           synthesized=True, parent_id=root, seq=boundary)
+                           synthesized=True, parent_id=root, seq=boundary, reason="fold")
     return new_ids[0]
 
 
