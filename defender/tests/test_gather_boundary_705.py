@@ -245,13 +245,18 @@ def test_gather_boundary_drops_the_leads_a_fold_displaced(tmp_path):
     lineage root — and a #696 boundary picker that saw them would fork the source
     defender from a state it no longer occupies.
 
-    The positive control is the same read before the fold, and the lead on the surviving
-    root turn, which the fold does not displace."""
+    The positive control is the lead on the ROOT turn, which the fold reparents its
+    frontier onto rather than displacing: the post-fold read must still serve `l-root`.
+    Without a lead surviving the fold, "the displaced lead is gone" would be satisfied
+    just as well by a view that returned nothing at all for a folded session."""
     ss, selection = store_mod(), selection_mod()
     store = make_store(tmp_path)
     session_id = store.new_session(agent_id="main")
 
-    store.append(session_id, [user_request("investigate")], agent_id="main")
+    root_row = _append_gather_call(store, session_id, {"lead_id": "l-root"},
+                                   tool_call_id="r")
+    store.append(session_id, [tool_return_request("gather", "summary", tool_call_id="r")],
+                 agent_id="main")
     gather_row = _append_gather_call(store, session_id, {"lead_id": "l-displaced"},
                                      tool_call_id="d")
     store.append(session_id, [tool_return_request("gather", "summary", tool_call_id="d")],
@@ -261,22 +266,27 @@ def test_gather_boundary_drops_the_leads_a_fold_displaced(tmp_path):
         return {row[0] for row in sql(
             store, "SELECT lead_id FROM gather_boundary WHERE session_id = ?", (sid,))}
 
-    assert leads(session_id) == {"l-displaced"}, "control: the lead is served before the fold"
+    assert leads(session_id) == {"l-root", "l-displaced"}, (
+        "control: both leads are served before the fold")
     assert gather_row in ss.path_row_ids(store, session_id)
 
-    selection.fold(store, session_id, agent_id="main", boundary=3)
+    selection.fold(store, session_id, agent_id="main", boundary=4)
     assert gather_row not in ss.path_row_ids(store, session_id), (
         "the fixture must actually displace the lead-bearing turn")
+    assert root_row in ss.path_row_ids(store, session_id), (
+        "the fixture must also leave a lead-bearing turn ON the path, or the assertion "
+        "below cannot tell 'displaced' from 'the view went blank'")
 
-    assert leads(session_id) == set(), (
-        "the fold displaced the only lead-bearing turn; the boundary must not still "
-        "serve it off a row the conversation can no longer reach")
+    assert leads(session_id) == {"l-root"}, (
+        "the fold displaced one lead-bearing turn and kept the other; the boundary must "
+        "not still serve a lead off a row the conversation can no longer reach, and must "
+        "still serve the one it can")
     assert gather_row not in {row[0] for row in sql(
         store, "SELECT message_id FROM gather_boundary")}, (
         "and it must be reachable from NO session, not merely filtered out of this "
         "one — an unscoped read is what the caller-side predicate never constrained")
     assert sql(store, "SELECT COUNT(*) FROM message WHERE session_id = ? AND kind = 'response'",
-               (session_id,)) == [(1,)], (
+               (session_id,)) == [(2,)], (
         "and the displaced row is still IN the file — the view excludes it by path, "
         "not because anything deleted it")
 
