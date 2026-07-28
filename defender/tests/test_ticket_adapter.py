@@ -21,7 +21,7 @@ import pytest
 from defender.runtime.verbs import VerbContext
 from defender.scripts.adapters import _stub_transport as transport
 from defender.scripts.adapters import ticket_adapter
-from defender.scripts.adapters.faults import ConfigFault, UpstreamFault
+from defender.scripts.adapters.faults import ConfigFault, TransportFault, UpstreamFault
 
 #: Captured before the autouse `_stub_config` fixture swaps it out, so the config tests
 #: below can drive the REAL loader against a config file in the throwaway tree.
@@ -276,3 +276,60 @@ def test_list_filters_ride_urlencoded_not_raw(monkeypatch, ctx, label, q):
     # them (rather than comparing segment count to `len(parsed)`, which an injected
     # `&c=d` satisfies by adding one of each) is what makes this row discriminating.
     assert query.count("&") == 2, "a filter value injected a query-parameter separator"
+
+
+# ── the case-opened boundary verb (Fork J / d33) ─────────────────────────────────────────
+
+
+def test_case_opened_at_yields_a_timestamp_and_never_the_record(monkeypatch, ctx):
+    """This is the ONE verb that reaches a ticket without `require_closed`, because the case
+    under judgment is by definition still open. Its answer-key guarantee is therefore not a
+    status filter but the RETURN TYPE: the in-flight record is fetched, one field is read off
+    it, and everything else is discarded unreturned — so no caller, however wired, can read
+    the answer key through this verb.
+
+    The fixture is deliberately loud: a record whose every other field is a marker string. A
+    `str` return cannot carry any of them, so the assertion is that NONE appear anywhere in
+    what the verb hands back.
+    """
+    record = {
+        "key": "20260720T0000Z-sshd-672",
+        "status": "in_progress",
+        "created": "2026-07-20T00:00:00+00:00",
+        "summary": "ANSWER-KEY-SUMMARY",
+        "description": "ANSWER-KEY-DESCRIPTION",
+        "resolution": "ANSWER-KEY-RESOLUTION",
+        "comments": [{"author": "soc", "body": "ANSWER-KEY-COMMENT"}],
+    }
+    monkeypatch.setattr(transport, "http_get_obj",  # lint-monkeypatch: ok — transport has no in-process DI seam (this file's established pattern)
+                        lambda *a, **k: record)
+    out = ticket_adapter.case_opened_at(ctx, key="20260720T0000Z-sshd-672")
+    assert out == "2026-07-20T00:00:00+00:00"
+    assert isinstance(out, str), "a non-scalar return would let the whole record through"
+    for marker in ("SUMMARY", "DESCRIPTION", "RESOLUTION", "COMMENT"):
+        assert f"ANSWER-KEY-{marker}" not in out
+
+
+def test_case_opened_at_percent_encodes_the_key_like_every_other_reader(monkeypatch, ctx):
+    """#684's encoding fix applies here too — a new reader that interpolated the key raw would
+    reopen the request-reshaping hole on a path the screen depends on."""
+    seen = {}
+
+    def fake_get_obj(_ctx, _config, path, **_kw):
+        seen["path"] = path
+        return {"created": "2026-01-01T00:00:00+00:00"}
+
+    monkeypatch.setattr(transport, "http_get_obj", fake_get_obj)  # lint-monkeypatch: ok — transport has no in-process DI seam (this file's established pattern)
+    ticket_adapter.case_opened_at(ctx, key="SOC 42/x?y")
+    assert seen["path"] == f"/tickets/{urllib.parse.quote('SOC 42/x?y', safe='')}"
+
+
+def test_case_opened_at_faults_as_infra_when_the_store_cannot_date_the_case(monkeypatch, ctx):
+    """A ticket carrying no string `created` is a malformed envelope, and must fail as INFRA
+    rather than resolve to "no boundary". The two are not interchangeable: the judge treats a
+    404 as permission to proceed with the other screens, so a missing-field answer that landed
+    in the same bucket would silently stand the recency arm down on a broken store."""
+    monkeypatch.setattr(transport, "http_get_obj",  # lint-monkeypatch: ok — transport has no in-process DI seam (this file's established pattern)
+                        lambda *a, **k: {"key": "SOC-1", "status": "open"})
+    with pytest.raises(TransportFault):
+        ticket_adapter.case_opened_at(ctx, key="SOC-1")

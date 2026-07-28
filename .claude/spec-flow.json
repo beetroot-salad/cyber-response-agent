@@ -47,6 +47,7 @@
         "readers": [
           "defender/scripts/adapters/ticket_adapter.py::list_tickets",
           "defender/scripts/adapters/ticket_adapter.py::get_ticket",
+          "defender/scripts/adapters/ticket_adapter.py::case_opened_at",
           "defender/scripts/adapters/ticket_adapter.py::health_check"
         ],
         "grep": [

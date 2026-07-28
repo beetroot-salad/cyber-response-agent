@@ -35,7 +35,10 @@ REVERSED two of the classifier's recommendations; the fork letters below name th
             faults non-closed items before the envelope.
   Fork H  — Fork C's exclusion extends to a CLOSED ticket whose payload names the case's own
             key; any other quoted non-closed ticket rides the salted envelope unredacted
-            (O2 scoped record-wise; the residual is the graph's N-note).
+            (O2 scoped record-wise; the residual is the graph's N-note). #683's merge gate
+            bound that extension to BOTH surfaces — it had been get-only, which left the
+            precedent search serving what the confirm withholds; list drops the naming item
+            per-item and serves its siblings (d31).
   f2      — names are frozen: bit ``closed_tickets``; tools ``list_closed_tickets`` /
             ``get_closed_ticket``.
 

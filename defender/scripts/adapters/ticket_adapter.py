@@ -51,7 +51,7 @@ if (_root := str(_Path(__file__).resolve().parents[3])) not in _sys.path:
 
 from defender.runtime.verbs import VerbContext
 from defender.scripts.adapters import _stub_transport as transport
-from defender.scripts.adapters.faults import AdapterFault, UpstreamFault
+from defender.scripts.adapters.faults import AdapterFault, TransportFault, UpstreamFault
 
 SYSTEM = "ticket"
 PREFIX = "TICKET"
@@ -87,6 +87,39 @@ def key_pattern(ctx: VerbContext) -> str:
     store attempts, and a fault raised from this module is by contract an exit-code envelope.
     """
     return _config(ctx)["KEY_PATTERN"]
+
+
+def case_opened_at(ctx: VerbContext, *, key: str) -> str:
+    """When the case `key` was opened, as the store's own `created` timestamp — NEVER the
+    record.
+
+    This is the one verb that reaches a ticket without `require_closed`, because the case
+    under judgment is by definition still in flight. The answer-key defense is the RETURN
+    TYPE, not a status filter: a `str` cannot carry a summary, a resolution, or a comment,
+    so no caller of this verb — however it is wired — can read the in-flight ticket through
+    it. The record exists only as a local here, exactly as it does inside the judge's own
+    free-text screen, and is discarded unreturned.
+
+    It exists so the judge can date its recency screen against the ticket store's OWN clock.
+    Comparing the store's timestamps to a clock the judge carries would make the screen's
+    boundary depend on skew between two machines; comparing them to a timestamp the store
+    itself minted cannot.
+
+    A 404 is an `UpstreamFault` (exit 1) like any other missing ticket: the case was never
+    filed, which is a real answer, not a failure. A store whose ticket carries no string
+    `created` is malformed, and fails as INFRA — the recency screen must never quietly
+    stand down because a field went missing.
+    """
+    payload = transport.http_get_obj(
+        ctx, _config(ctx), f"/tickets/{urllib.parse.quote(key, safe='')}",
+    )
+    created = payload.get("created")
+    if not isinstance(created, str) or not created:
+        raise TransportFault(
+            f"ticket {key} carries no string 'created' timestamp "
+            f"(got {type(created).__name__}) — the case-opened boundary is unreadable"
+        )
+    return created
 
 
 def health_check(ctx: VerbContext) -> dict:
@@ -153,6 +186,7 @@ VERBS = {
     "list-tickets": list_tickets,
     "get-ticket": get_ticket,
     "key-pattern": key_pattern,
+    "case-opened-at": case_opened_at,
 }
 
 

@@ -13,21 +13,24 @@ import pytest
 pytest.importorskip("pydantic_ai")  # CI installs the runtime extra; skip otherwise
 
 from defender.scripts.adapters import _stub_transport as transport  # noqa: E402
-from defender.scripts.adapters.faults import ConfigFault  # noqa: E402
+from defender.scripts.adapters.faults import ConfigFault, UpstreamFault  # noqa: E402
 from defender.tests.e2e._replay_harness import DEFENDER, Turn, VerbRecorder  # noqa: E402
 from defender.tests._closed_ticket_672 import (  # noqa: E402
+    DATED,
     CASE,
     CLOSED_TKT,
     DONE,
     OTHER_KEY,
     SHIPPED_KEY_PATTERN,
     TOOL_GET,
+    WRAP_RE,
     _case,
     _drive,
     _feedback,
     _get,
     _get_calls,
     _list,
+    _list_calls,
     _store_calls,
     _ticket_registry,
     _tool_delta,
@@ -278,8 +281,8 @@ def test_case_own_key_refused_at_tool_boundary(tmp_path):
     the fake now serves its default closed record per call, so a conforming implementation
     PASSES and a non-screening one FAILS on the keys the store was asked for."""
     rec = VerbRecorder()
-    self_listed = {"key": CASE, "status": "closed", "summary": "TKT-SELF-LISTED"}
-    other_ok = {"key": "SOC-OK2", "status": "closed", "summary": "TKT-LIST-OK"}
+    self_listed = {**DATED, "key": CASE, "status": "closed", "summary": "TKT-SELF-LISTED"}
+    other_ok = {**DATED, "key": "SOC-OK2", "status": "closed", "summary": "TKT-LIST-OK"}
     run = _drive(
         tmp_path,
         [_get(CASE), _get(OTHER_KEY), _list(q="precedent"), DONE],
@@ -319,7 +322,7 @@ def _names_self(field: str) -> dict:
     (#684/F3: the old fixture put the self-key in ``summary`` only, so a screen scoped to
     ``summary`` stayed green while a self-key in ``resolution`` leaked). ``comments`` puts
     it one level DOWN, so a screen over the top-level values alone also fails a row."""
-    tkt = {"key": "SOC-800", "status": "closed", "summary": "nightly TKT-QUOTES-SELF"}
+    tkt = {**DATED, "key": "SOC-800", "status": "closed", "summary": "nightly TKT-QUOTES-SELF"}
     if field == "key":
         tkt["key"] = CASE
     elif field == "comments":
@@ -345,7 +348,7 @@ def test_closed_ticket_naming_self_key_refused(tmp_path, field):
     to the payload's top level, fails at least one row."""
     rec = VerbRecorder()
     names_self = _names_self(field)
-    names_other = {"key": "SOC-801", "status": "closed",
+    names_other = {**DATED, "key": "SOC-801", "status": "closed",
                    "summary": "see also open ticket 20260101T0000Z-other-case TKT-QUOTES-OTHER"}
     run = _drive(
         tmp_path,
@@ -374,6 +377,67 @@ def test_closed_ticket_naming_self_key_refused(tmp_path, field):
     assert "TKT-CONTENT-777" in run.all_text
 
 
+@pytest.mark.parametrize("field", ["resolution", "comments"])
+def test_listed_ticket_naming_self_key_dropped(tmp_path, field):
+    """[d31_self_key_payload_screen_on_list] (#683, merge gate) d25's screen was scoped to
+    `get`, so the judge's PRIMARY surface — the precedent search — could serve a sibling
+    closed ticket whose free text NAMES the case under judgment: the identical payload that
+    a confirm withholds. The gate ruled the asymmetry a defect (protected asset, higher
+    traffic), not a scoping the N-note had earned, so the same predicate now binds both
+    surfaces and the SAME fixture drives them.
+
+    The withhold SHAPE differs from `get`'s, per #684/F2's per-item resolution: this path
+    DROPS the naming item and serves its siblings from the same response, because faulting a
+    listing over one sibling's wording would gut O1's precedent search. So the demand is a
+    CONJUNCTION on the list call's own response — the drop AND the serve — and the listing
+    stays a success view rather than becoming d25's whole-read refusal.
+
+    The N-note's surviving half is a positive control: a sibling quoting some OTHER ticket's
+    key rides through unredacted, so this cannot be discharged by a screen that drops
+    anything key-shaped.
+
+    NOT parametrized over `key`: a listed item whose key IS the self-case is already excluded
+    by d24/V-A's identity filter, so that row would stay green against the get-scoped screen
+    this test exists to fail."""
+    rec = VerbRecorder()
+    listing = {"tickets": [
+        {**DATED, "key": "SOC-OK", "status": "closed", "summary": "TKT-ITEM-CLOSED"},
+        _names_self(field),
+        {**DATED, "key": "SOC-801", "status": "closed",
+         "summary": "see also open ticket 20260101T0000Z-other-case TKT-QUOTES-OTHER"},
+    ], "total": 9}   # deliberately DISAGREES with len(tickets): a passed-through count fails
+    run = _drive(tmp_path, [_list(q="precedent"), DONE],
+                 registry=_ticket_registry(rec, lst=[("return", listing)]))
+    assert run.out.strip()
+    delta = _tool_delta(run)
+    assert "TKT-QUOTES-SELF" not in run.all_text, (
+        f"a listed sibling naming the self-case in `{field}` was served — the precedent "
+        "search still delivers what the confirm withholds"
+    )
+    assert "duplicate of in-flight" not in run.all_text, "the quoting free text leaked"
+    # The per-item arm, asserted as a conjunction on this call's own response: the drop does
+    # not cost the siblings, and the response is a SUCCESS view, not d25's refusal.
+    assert "TKT-ITEM-CLOSED" in delta, (
+        "the clean sibling was not served in the SAME response the naming item was dropped "
+        "from — a whole-listing fault is not the resolved per-item arm"
+    )
+    assert "exit=0" in delta, "the screened listing must still be a success view"
+    assert run.rows()[0]["exit_code"] == 0, "a per-item drop is not a fault"
+    # A business drop contributes NOTHING to the breaker. `record_outcome` writes the file only
+    # for an infra exit code, so the discriminating form is that no breaker state exists at all
+    # — the `.get(...) is falsy` spelling passes vacuously against an absent file.
+    assert run.breaker() == {}, "a per-item policy drop contributed to the ticket breaker"
+    # The N-note half still declined: an OTHER ticket's key rides wrapped, unredacted — and
+    # `wrapped` is the demand's `salt` bind, so observe the frame rather than assume it.
+    assert "TKT-QUOTES-OTHER" in delta
+    assert WRAP_RE.search(delta), (
+        "the served listing did not ride the per-bind salted untrusted envelope"
+    )
+    # #683 item 2: the envelope's count reports what was SERVED, not the store's count over
+    # matches it never returned — the sampled view prints `total` as confirmable precedents.
+    assert '"total": 2' in delta, "the screened listing advertises records it withheld"
+
+
 def test_list_response_non_closed_item_dropped_or_faulted(tmp_path):
     """[d24_list_item_recheck] (Fork G, §7-minted) The list path re-checks each returned
     item's status CLIENT-SIDE and drops or faults non-closed items before the envelope —
@@ -392,10 +456,10 @@ def test_list_response_non_closed_item_dropped_or_faulted(tmp_path):
     own response: drop-or-fault is per ITEM, not per listing."""
     rec = VerbRecorder()
     mixed = {"tickets": [
-        {"key": "SOC-OK", "status": "closed", "summary": "TKT-ITEM-CLOSED"},
-        {"key": "SOC-BAD", "status": "in_progress", "summary": "TKT-ITEM-INPROGRESS"},
-        {"key": "SOC-VAR", "status": "Closed", "summary": "TKT-ITEM-CASEVARIANT"},
-        {"key": CASE, "status": "closed", "summary": "TKT-ITEM-SELF"},
+        {**DATED, "key": "SOC-OK", "status": "closed", "summary": "TKT-ITEM-CLOSED"},
+        {**DATED, "key": "SOC-BAD", "status": "in_progress", "summary": "TKT-ITEM-INPROGRESS"},
+        {**DATED, "key": "SOC-VAR", "status": "Closed", "summary": "TKT-ITEM-CASEVARIANT"},
+        {**DATED, "key": CASE, "status": "closed", "summary": "TKT-ITEM-SELF"},
     ], "total": 4}
     run = _drive(tmp_path, [_list(label="x"), DONE],
                  registry=_ticket_registry(rec, lst=[("return", mixed)]))
@@ -423,11 +487,170 @@ def test_list_response_non_closed_item_dropped_or_faulted(tmp_path):
     # Duplicates: the status-only re-check does not dedup.
     rec2 = VerbRecorder()
     dupes = {"tickets": [
-        {"key": "SOC-DUP", "status": "closed", "summary": "TKT-DUP-A"},
-        {"key": "SOC-DUP", "status": "closed", "summary": "TKT-DUP-B"},
+        {**DATED, "key": "SOC-DUP", "status": "closed", "summary": "TKT-DUP-A"},
+        {**DATED, "key": "SOC-DUP", "status": "closed", "summary": "TKT-DUP-B"},
     ], "total": 2}
     run2 = _drive(tmp_path, [_list(label="x"), DONE],
                   registry=_ticket_registry(rec2, lst=[("return", dupes)]),
                   case=_case(tmp_path, name=CASE + "-dup"))
     assert "TKT-DUP-A" in run2.all_text
     assert "TKT-DUP-B" in run2.all_text
+
+
+# ── Fork J: the recency arm ──────────────────────────────────────────────────────────────
+
+AFTER_CASE = {"created": "2026-05-02T09:15:00+00:00", "updated": "2026-07-20T06:30:00+00:00"}
+
+
+def test_listed_ticket_written_after_case_opened_dropped(tmp_path):
+    """[d32_recency_screen] (Fork J) Every other self-case arm screens on what a record SAYS,
+    so all of them are defeated by a sibling that describes the live case WITHOUT spelling its
+    key — the service and the date, in prose, which is how an analyst actually writes. This
+    fixture is exactly that: a closed ticket whose text names no key at all, so the identity
+    filter, the free-text screen, and the closed-only re-check all pass it. Only its
+    timestamp gives it away.
+
+    The withhold shape is the per-item one #684/F2 resolved, so the demand is a CONJUNCTION on
+    one response: the contaminated record is dropped AND the genuinely-older sibling is served
+    from the same listing, at exit 0.
+
+    `updated`, not `created`, is the dated field — the fixture was CREATED long before the case
+    and amended during it, which is the leak this arm exists to close and the one a
+    creation-dated screen would admit."""
+    rec = VerbRecorder()
+    listing = {"tickets": [
+        {**DATED, "key": "SOC-OLD", "status": "closed", "summary": "TKT-PRECEDENT-OLD"},
+        {**AFTER_CASE, "key": "SOC-NEW", "status": "closed",
+         "summary": "sshd brute force on the jump host, 20 July — same pattern, benign",
+         "resolution": "TKT-WRITTEN-DURING-CASE"},
+    ], "total": 2}
+    run = _drive(tmp_path, [_list(q="sshd"), DONE],
+                 registry=_ticket_registry(rec, lst=[("return", listing)]))
+    assert run.out.strip()
+    delta = _tool_delta(run)
+    assert "TKT-WRITTEN-DURING-CASE" not in run.all_text, (
+        "a ticket last written after the case opened was served as precedent — it cannot be "
+        "precedent for a case that did not exist when it was written"
+    )
+    assert "20 July" not in delta, "the contaminating free text leaked"
+    assert "TKT-PRECEDENT-OLD" in delta, (
+        "the genuinely-older sibling was not served in the SAME response — a whole-listing "
+        "fault is not the resolved per-item arm"
+    )
+    assert "exit=0" in delta, "a per-item recency drop must still be a success view"
+    assert run.rows()[0]["exit_code"] == 0, "a per-item drop is not a fault"
+    assert run.breaker() == {}, "a per-item policy drop contributed to the ticket breaker"
+    assert '"total": 1' in delta, "the screened listing advertises a record it withheld"
+
+
+def test_fetched_ticket_written_after_case_opened_withheld(tmp_path):
+    """[d32_recency_screen] The confirm surface answers with ONE record, so the same predicate
+    fails the whole read rather than dropping an item — under the distinguishable policy code,
+    which is what lets a later reader tell a withheld read from a genuine 404.
+
+    Driving the SAME shape of fixture through both surfaces is the point: #683's defect was two
+    screens disagreeing about one record, and this arm must not reintroduce it one fork later."""
+    rec = VerbRecorder()
+    fresh = {**AFTER_CASE, "key": "SOC-NEW", "status": "closed",
+             "summary": "sshd brute force on the jump host, 20 July",
+             "resolution": "TKT-CONFIRM-DURING-CASE"}
+    run = _drive(tmp_path, [_get("SOC-NEW"), DONE],
+                 registry=_ticket_registry(rec, get=[("return", fresh)]))
+    assert run.out.strip()
+    assert "TKT-CONFIRM-DURING-CASE" not in run.all_text, (
+        "the confirm served a record the listing withholds — the two surfaces disagree again"
+    )
+    assert run.rows()[0]["exit_code"] == 3, (
+        "a recency withhold must carry the distinguishable policy code, not a generic "
+        "business refusal a 404 also carries"
+    )
+    assert run.breaker() == {}, "a policy withhold contributed to the ticket breaker"
+    assert "after the case you are scoring was opened" in _tool_delta(run), (
+        "the model was not told WHY the read was refused, so it cannot correct its citation"
+    )
+
+
+def test_undated_ticket_withheld_on_both_surfaces(tmp_path):
+    """[d32_recency_screen] A record carrying no usable timestamp is not older, it is UNDATED.
+    It is withheld, on the same reasoning gather refuses a ticket it cannot prove distinct from
+    its own case: on the surface where the answer key is at stake, unprovable is not safe.
+
+    Both surfaces, because a screen that only holds on the confirm is the #683 defect."""
+    rec = VerbRecorder()
+    undated = {"key": "SOC-UNDATED", "status": "closed", "summary": "TKT-NO-STAMP"}
+    listed = _drive(tmp_path, [_list(q="x"), DONE],
+                    registry=_ticket_registry(
+                        rec, lst=[("return", {"tickets": [undated], "total": 1})]))
+    assert "TKT-NO-STAMP" not in listed.all_text, "an undated record rode the precedent search"
+    assert listed.rows()[0]["exit_code"] == 0, "a per-item drop is not a fault"
+
+    fetched = _drive(tmp_path, [_get("SOC-UNDATED"), DONE],
+                     registry=_ticket_registry(VerbRecorder(), get=[("return", undated)]),
+                     case=_case(tmp_path, name=CASE + "-undated"))
+    assert "TKT-NO-STAMP" not in fetched.all_text, "an undated record rode the confirm"
+    assert fetched.rows()[0]["exit_code"] == 3
+
+
+def test_case_with_no_ticket_leaves_the_precedent_search_usable(tmp_path):
+    """[d32_recency_screen] A case that never filed a ticket has no boundary to screen
+    against — and the store saying so (a 404, a real answer) must NOT fault the read. Most
+    cases never open a ticket; failing here would make the precedent search unusable for them
+    and buy nothing, since the other three conjuncts are unaffected.
+
+    The discriminating half is that the OTHER arms still run with no boundary in hand: the
+    self-naming sibling is still dropped."""
+    rec = VerbRecorder()
+    listing = {"tickets": [
+        {**DATED, "key": "SOC-OLD", "status": "closed", "summary": "TKT-NO-BOUNDARY-SERVED"},
+        {**DATED, "key": "SOC-NAMES", "status": "closed",
+         "summary": f"duplicate of in-flight {CASE} TKT-STILL-SCREENED"},
+    ], "total": 2}
+    run = _drive(tmp_path, [_list(q="x"), DONE],
+                 registry=_ticket_registry(
+                     rec, lst=[("return", listing)],
+                     case_opened=("raise", UpstreamFault(f"ticket {CASE} not found"))))
+    delta = _tool_delta(run)
+    assert "TKT-NO-BOUNDARY-SERVED" in delta, (
+        "a case with no ticket lost its precedent search — a 404 on the boundary is an "
+        "answer, not a fault"
+    )
+    assert "exit=0" in delta
+    assert "TKT-STILL-SCREENED" not in run.all_text, (
+        "with no boundary the OTHER self-case arms stopped running too"
+    )
+    assert run.breaker() == {}, "a missing case ticket contributed to the ticket breaker"
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "why"),
+    [
+        ({"case_opened": ("raise", ConfigFault("ticket URL_BASE unset"))}, "store unreachable"),
+        ({"case_opened": ("return", "not-a-timestamp")}, "boundary unparseable"),
+        ({"case_opened": None}, "adapter declares no such verb"),
+    ],
+    ids=["unreachable", "unparseable", "undeclared"],
+)
+def test_unreadable_case_boundary_fails_the_read_closed(tmp_path, kwargs, why):
+    """[d32_recency_screen] The three ways the environment can fail to date the case, all
+    resolved the same way: FAIL THE READ. An arm that stands down when its input is missing
+    protects nothing — and the failure modes here are indistinguishable from the inside, so
+    "serve unscreened, it is probably fine" would be a guess made on the answer-key path.
+
+    Loud in the three channels this module owns, and the discriminating half is the first:
+    the store is never asked for precedent at all, so this cannot be discharged by an
+    implementation that reads the listing and then discards it."""
+    rec = VerbRecorder()
+    run = _drive(tmp_path, [_list(q="x"), DONE],
+                 registry=_ticket_registry(rec, **kwargs))
+    assert _list_calls(rec) == [], (
+        f"the precedent read reached the store with no usable boundary ({why})"
+    )
+    assert "TKT-CONTENT-777" not in run.all_text, "an unscreened listing was served"
+    row = run.rows()[0]
+    assert row["exit_code"] == 2, "an unreadable boundary is an infra fault, not a refusal"
+    assert row["verb"] == "case-opened-at", (
+        "the row names a verb that did not run — the trail must record what actually failed"
+    )
+    assert run.breaker().get("systems", {}).get("ticket", {}).get("failures"), (
+        "a persistently undatable store never trips the ticket breaker"
+    )

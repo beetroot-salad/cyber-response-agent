@@ -50,15 +50,33 @@ DONE = Turn(text=_YAML)
 # key the judge's deps carry (run_id); the closed-ticket tools refuse it structurally.
 CASE = "20260720T0000Z-sshd-672"
 
+# When the case under judgment was opened, per the ticket store's own clock — the boundary the
+# recency screen (Fork J) dates every candidate against. It matches the alert timestamp `_case`
+# writes, because the agent files its ticket when it opens the investigation.
+CASE_OPENED = "2026-07-20T00:00:00+00:00"
+
+OTHER_KEY = "SOC-777"
+
+#: The stamps a fixture needs to be datable as older than the case. Every ticket fixture in the
+#: suite carries them — including the ones a test expects to be DROPPED, so that each such test
+#: still discriminates on the arm it is about (an undated fixture would be withheld by the
+#: recency screen whatever else were true of it, and the assertion would pass vacuously).
+DATED = {"created": "2026-05-02T09:15:00+00:00", "updated": "2026-05-02T11:40:00+00:00"}
+
+
+def dated(**fields) -> dict:
+    """A ticket fixture stamped before `CASE_OPENED` — overridable per field."""
+    return {**DATED, **fields}
+
+
 # One well-known closed ticket every happy-path fake returns. The marker strings are what
 # the assertions grep for in the model-visible channel.
-OTHER_KEY = "SOC-777"
-CLOSED_TKT = {
-    "key": OTHER_KEY,
-    "status": "closed",
-    "summary": "nightly scan cleared TKT-CONTENT-777",
-    "resolution": "benign — [grounded: approved-window] TKT-RESOLUTION-777",
-}
+CLOSED_TKT = dated(
+    key=OTHER_KEY,
+    status="closed",
+    summary="nightly scan cleared TKT-CONTENT-777",
+    resolution="benign — [grounded: approved-window] TKT-RESOLUTION-777",
+)
 
 WRAP_RE = re.compile(r"<run-([0-9a-f]{32})-untrusted>")
 
@@ -90,6 +108,7 @@ def _ticket_registry(
     lst_default=None,
     key_pattern=("return", SHIPPED_KEY_PATTERN),
     declare_key_pattern=True,
+    case_opened=("return", CASE_OPENED),
 ) -> FakeVerbs:
     """A fake `ticket` verb table with the REAL declared param surfaces (the Fork D probe's
     executed `declared_params`: get-ticket {key, require_closed=False}; list-tickets
@@ -99,7 +118,10 @@ def _ticket_registry(
 
     `key_pattern` serves the grammar (default: the value the shipped config declares, so every
     other test drives the real screen); `declare_key_pattern=False` builds a registry whose
-    adapter declares NO such verb — the misconfigured-store shape, which must fail closed."""
+    adapter declares NO such verb — the misconfigured-store shape, which must fail closed.
+    `case_opened` serves the recency screen's boundary; passing `case_opened=None` builds a
+    registry declaring no such verb — the same undeclared-verb shape, spelled in one parameter
+    because the pair spelling would push this helper past the argument-count lint."""
     lst_default = lst_default or ("return", {"tickets": [dict(CLOSED_TKT)], "total": 1})
     get_q, lst_q = deque(get), deque(lst)
 
@@ -122,11 +144,17 @@ def _ticket_registry(
         recorder.record("key-pattern", ctx, {})
         return _outcome(deque(), key_pattern)
 
+    def case_opened_at(ctx, *, key: str):
+        recorder.record("case-opened-at", ctx, {"key": key})
+        return _outcome(deque(), case_opened)
+
     table = {
         "get-ticket": get_ticket, "list-tickets": list_tickets, "health-check": health_check,
     }
     if declare_key_pattern:
         table["key-pattern"] = key_pattern_verb
+    if case_opened is not None:
+        table["case-opened-at"] = case_opened_at
     return FakeVerbs({"ticket": table})
 
 
