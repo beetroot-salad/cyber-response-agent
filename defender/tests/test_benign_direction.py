@@ -419,12 +419,19 @@ def test_verify_env_case_entities_from_prologue_not_row(tmp_path: Path) -> None:
     assert verify_forward_env.case_entities_arg({}, tmp_path / "runs") == ""
 
 
-def _run_verify_env(lesson: Path, obs_id: str, corpus: Path, pending: Path) -> str:
+def _run_verify_env(
+    lesson: Path, obs_id: str, corpus: Path, pending: Path, runs: Path
+) -> str:
     """Drive the REAL environment forward-check in-process (#558 — it has no CLI any more).
 
     The corpus, the pending queue and the runs dir arrive on the ``CheckContext`` exactly as the
     curator's ``forward_check`` tool builds one from its deps. ``run_verify`` is never called:
-    the env check is a deterministic retrieval, so it touches no model."""
+    the env check is a deterministic retrieval, so it touches no model.
+
+    ``runs`` is the real runs root (#648): the check resolves the observation's source bundle
+    UNDER it, so handing it the corpus dir — as this helper once did, back when an absolute
+    ``source_run_dir`` was honored verbatim and the root was never consulted — now leaves the
+    bundle unresolvable."""
     from defender.learning.author.verify_forward.checks import ENV_CHECK, CheckContext
 
     def _never(**_kw):
@@ -433,7 +440,7 @@ def _run_verify_env(lesson: Path, obs_id: str, corpus: Path, pending: Path) -> s
     ctx = CheckContext(
         check=ENV_CHECK, lesson_path=lesson, lesson_text=lesson.read_text(),
         source_id=obs_id, direction="adversarial",
-        runs_dir=lesson.parent, pending=pending, corpus_dir=corpus,
+        runs_dir=runs, pending=pending, corpus_dir=corpus,
         repo_root=REAL_REPO, check_index=0, run_verify=_never,
     )
     return ENV_CHECK.run(ctx)
@@ -458,13 +465,13 @@ def test_verify_env_bad_when_lesson_selector_unsatisfiable(tmp_path: Path) -> No
         "alert_rule_ids: [rule-100110]\nstatus: live\n"
         "entities:\n  - {type: process, class: process:nc}",
     )
-    assert _run_verify_env(bad, "case-1/0", corpus, pending) == "BAD"
+    assert _run_verify_env(bad, "case-1/0", corpus, pending, run.parent) == "BAD"
     good = _write_lesson(
         corpus, "good",
         "alert_rule_ids: [rule-100110]\nstatus: live\n"
         "entities:\n  - {type: process, class: nc}",
     )
-    assert _run_verify_env(good, "case-1/0", corpus, pending) == "GOOD"
+    assert _run_verify_env(good, "case-1/0", corpus, pending, run.parent) == "GOOD"
 
 
 def test_verify_env_bad_when_rule_anchor_missing_canonical_key(tmp_path: Path) -> None:
@@ -485,7 +492,7 @@ def test_verify_env_bad_when_rule_anchor_missing_canonical_key(tmp_path: Path) -
         "alert_rule_ids: [some-other-rule]\nstatus: live\n"
         "entities:\n  - {type: process, class: nc}",
     )
-    assert _run_verify_env(lesson, "case-1/0", corpus, pending) == "BAD"
+    assert _run_verify_env(lesson, "case-1/0", corpus, pending, run.parent) == "BAD"
 
 
 

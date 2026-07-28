@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 import yaml
 
 from defender._io import read_jsonl_rows, read_text_utf8
-from defender._run_paths import RunPaths
+from defender._run_paths import RunPaths, contained_payload
 from defender.runtime.circuit_breaker import error_class_for_exit
 
 if TYPE_CHECKING:
@@ -96,11 +96,7 @@ def load_queries(run_dir: Path) -> list[QueryRow]:
         lead_id = rec.get("lead_id")
         if not lead_id:
             continue
-        payload_path = rec.get("payload_path")
-        if payload_path and not Path(payload_path).is_absolute():
-            raw_ref = run_dir / payload_path
-        else:
-            raw_ref = None
+        raw_ref = contained_payload(run_dir, rec.get("payload_path"))
         params = rec.get("params")
         exit_code = _as_int(rec.get("exit_code", 0))
         if "error_class" in rec:
