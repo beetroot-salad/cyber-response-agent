@@ -42,6 +42,26 @@ _WS_ROOT = Path(__file__).resolve().parents[2]
 
 
 
+def _rows_without_attempts(text: str) -> list[dict]:
+    """The queue's rows with the retirement counter dropped.
+
+    #719: a post-agent abort now BUMPS every row it was authoring (behaviour change 2 of
+    four), so "the queue is intact for retry" is no longer a byte comparison — the rows
+    themselves must be unchanged, and the count must have moved by exactly one."""
+    import json as _json
+
+    return [
+        {k: v for k, v in _json.loads(line).items() if k != "attempts"}
+        for line in text.splitlines() if line.strip()
+    ]
+
+
+def _attempts(text: str) -> list[int]:
+    import json as _json
+
+    return [_json.loads(line).get("attempts") for line in text.splitlines() if line.strip()]
+
+
 def _write_lesson(tmp_repo, name: str, finding_id: str) -> None:
     """Write a lesson into the working tree — the agent runs NO git (the loop commits)."""
     body = (
@@ -72,10 +92,14 @@ def test_survival_partial_write_rollback(tmp_repo, helpers):
     """A mid-batch fault (the in-process ``run_stage`` RunUnprocessable, surfaced through
     the seam as ``AuthorError``) after the agent wrote some lesson bytes: no partial
     commit lands, the queue is NOT rotated (findings retryable), and — once the drain's
-    rollback (``_discard_worktree_changes`` = ``git reset --hard`` + ``git clean``)
-    restores the corpus — a re-drain authors the finding EXACTLY once (no silent
-    double-author). The un-rolled-back leftover is load-bearing: the clean-scope gate
-    refuses the re-drain until it is discarded."""
+    rollback restores the corpus — a re-drain authors the finding EXACTLY once (no silent
+    double-author).
+
+    REVERSED BY #719: the leftover used to be load-bearing here, because the clean-scope
+    gate refused the re-drain until something outside the drain discarded it — which is
+    precisely how a retiring fault wedged its own channel. The drain now restores the
+    corpus itself on a retiring fault, so the retry the attempt bump exists to allow
+    actually happens."""
     a = tmp_repo.author
     helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-P", "benign")
     helpers.write_finding(tmp_repo.paths.pending_file, finding_id="run-P/0", run_id="run-P")
@@ -93,19 +117,14 @@ def test_survival_partial_write_rollback(tmp_repo, helpers):
     assert queued_ids() == {"run-P/0"}
     assert not tmp_repo.cfg.channel.consumed.exists()
 
-    assert tmp_repo.run_git("status", "--porcelain").stdout.strip() != ""
+    assert tmp_repo.run_git("status", "--porcelain").stdout.strip() == "", (
+        "the half-written lesson must be rolled back by the drain itself (#719)"
+    )
 
     def succeed(findings, batch_id, cfg):
         _write_lesson(tmp_repo, "full", "run-P/0")
         return {"committed": ["run-P/0"], "held_forward_bad": [],
                 "consumed_skip": [], "commit_message": "defender: lesson full"}
-
-    assert a.run_batch(cfg=replace(tmp_repo.cfg, invoke_agent=succeed)) == 2
-    assert queued_ids() == {"run-P/0"}
-
-    tmp_repo.run_git("reset", "--hard", "--quiet")
-    tmp_repo.run_git("clean", "-fdq")
-    assert tmp_repo.run_git("status", "--porcelain").stdout.strip() == ""
 
     assert a.run_batch(cfg=replace(tmp_repo.cfg, invoke_agent=succeed)) == 0
     assert _commit_count(tmp_repo) == commits_before + 1
@@ -123,14 +142,15 @@ def test_survival_committed_dirty_crosscheck(tmp_repo, helpers):
     a = tmp_repo.author
     helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-X", "benign")
     helpers.write_finding(tmp_repo.paths.pending_file, finding_id="run-X/0", run_id="run-X")
-    pre = tmp_repo.paths.pending_file.read_text()
+    pre = _rows_without_attempts(tmp_repo.paths.pending_file.read_text())
 
     def committed_but_clean(findings, batch_id, cfg):
         return {"committed": ["run-X/0"], "held_forward_bad": [],
                 "consumed_skip": [], "commit_message": "m"}
 
     assert a.run_batch(cfg=replace(tmp_repo.cfg, invoke_agent=committed_but_clean)) == 2
-    assert tmp_repo.paths.pending_file.read_text() == pre
+    assert _rows_without_attempts(tmp_repo.paths.pending_file.read_text()) == pre
+    assert _attempts(tmp_repo.paths.pending_file.read_text()) == [1] * len(pre)
     assert not tmp_repo.cfg.channel.consumed.exists()
 
     def dirty_but_no_commit(findings, batch_id, cfg):
@@ -140,7 +160,10 @@ def test_survival_committed_dirty_crosscheck(tmp_repo, helpers):
                 "commit_message": None}
 
     assert a.run_batch(cfg=replace(tmp_repo.cfg, invoke_agent=dirty_but_no_commit)) == 2
-    assert tmp_repo.paths.pending_file.read_text() == pre
+    assert _rows_without_attempts(tmp_repo.paths.pending_file.read_text()) == pre
+    # Second abort in the same test, so the lifetime count is at 2 — it does not reset
+    # between ticks (#719).
+    assert _attempts(tmp_repo.paths.pending_file.read_text()) == [2] * len(pre)
     assert not tmp_repo.cfg.channel.consumed.exists()
 
     tmp_repo.run_git("reset", "--hard", "--quiet")
@@ -166,7 +189,7 @@ def test_survival_scope_gate_strays(tmp_repo, helpers):
     a = tmp_repo.author
     helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-S", "benign")
     helpers.write_finding(tmp_repo.paths.pending_file, finding_id="run-S/0", run_id="run-S")
-    pre = tmp_repo.paths.pending_file.read_text()
+    pre = _rows_without_attempts(tmp_repo.paths.pending_file.read_text())
 
     def writes_new_stray(findings, batch_id, cfg):
         (tmp_repo.root / "scratch.txt").write_text("oops")
@@ -175,7 +198,8 @@ def test_survival_scope_gate_strays(tmp_repo, helpers):
                 "consumed_skip": [], "commit_message": "defender: lesson in-scope"}
 
     assert a.run_batch(cfg=replace(tmp_repo.cfg, invoke_agent=writes_new_stray)) == 2
-    assert tmp_repo.paths.pending_file.read_text() == pre
+    assert _rows_without_attempts(tmp_repo.paths.pending_file.read_text()) == pre
+    assert _attempts(tmp_repo.paths.pending_file.read_text()) == [1] * len(pre)
 
     tmp_repo.run_git("reset", "--hard", "--quiet")
     tmp_repo.run_git("clean", "-fdq")

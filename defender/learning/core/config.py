@@ -20,10 +20,22 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 
 @dataclass(frozen=True)
 class QueueChannel:
+    """One file-backed queue, with its LOCK TOPOLOGY and its row key as data (#719).
+
+    The two lock roles are separate fields because they serialise different things:
+    `append_lock` excludes concurrent appenders (and the drain's own read/rotate/retire
+    window) from each other, while `drain_lock` is the non-blocking "one drainer per
+    channel" gate. A channel no drain holds exclusively — `pitfalls`, drained inside the
+    lead-author tick — carries `None` for the drain role and takes no exclusive lock.
+
+    `id_key` is the field a row is identified by; it used to be a literal hard-coded at
+    each read, rotate and dedup site."""
 
     file: Path
     consumed: Path
-    lock: Path
+    append_lock: Path
+    drain_lock: Path | None
+    id_key: str
 
 
 @dataclass(frozen=True)
@@ -67,7 +79,12 @@ class LoopPaths(DefenderPaths):
         return QueueChannel(
             file=self.pitfalls_pending_dir / "pitfalls.jsonl",
             consumed=self.pitfalls_pending_dir / "pitfalls.consumed.jsonl",
-            lock=self.pitfalls_pending_dir / ".pitfalls.lock",
+            append_lock=self.pitfalls_pending_dir / ".pitfalls.lock",
+            # No drain-role lock: the pitfalls queue is drained inside the lead-author
+            # tick, which nothing else contends for, so one file serves the append role
+            # alone (#719).
+            drain_lock=None,
+            id_key="pitfall_id",
         )
 
     @property
@@ -96,10 +113,17 @@ class LoopPaths(DefenderPaths):
 
     @property
     def findings_lock_file(self) -> Path:
-        """The lessons drain's READ-side lock, held while `read_batch` slurps the queue.
+        """The findings queue's APPEND-role lock — `findings.append_lock` under another
+        name, kept because the live-run appender (`persist.append_findings`) reaches it
+        off `paths` rather than off a channel.
 
-        Distinct from `findings.lock` below, which is the drain-wide queue lock the batch
-        envelope takes. Two locks, two jobs — do not fold this into the channel."""
+        REVERSED BY #719. What stood here was a prohibition: the read-side lock and the
+        drain-wide lock do different jobs, therefore keep them out of the channel. The
+        premise held and the conclusion did not. They are still two roles — they are now
+        two FIELDS on `QueueChannel`, so a channel's lock topology is readable off one
+        object instead of reconstructed from which lock each call site happened to pass.
+        The findings channel already had the split; the three observation channels gained
+        it here."""
         return self.pending_dir / ".findings.lock"
 
     @property
@@ -107,7 +131,9 @@ class LoopPaths(DefenderPaths):
         return QueueChannel(
             file=self.pending_file,
             consumed=self.pending_dir / "consumed.jsonl",
-            lock=self.pending_dir / ".lock",
+            append_lock=self.findings_lock_file,
+            drain_lock=self.pending_dir / ".lock",
+            id_key="finding_id",
         )
 
     @property
@@ -115,7 +141,11 @@ class LoopPaths(DefenderPaths):
         return QueueChannel(
             file=self.pending_dir / "actor_observations.jsonl",
             consumed=self.pending_dir / "actor_observations.consumed.jsonl",
-            lock=self.pending_dir / ".actor.lock",
+            # The append-lock identity does not move (#719): an appender running older
+            # code keeps taking the same file, so the rollover needs no coordination.
+            append_lock=self.pending_dir / ".actor.lock",
+            drain_lock=self.pending_dir / ".actor.drain.lock",
+            id_key="observation_id",
         )
 
     @property
@@ -123,7 +153,9 @@ class LoopPaths(DefenderPaths):
         return QueueChannel(
             file=self.pending_dir / "environment_observations.jsonl",
             consumed=self.pending_dir / "environment_observations.consumed.jsonl",
-            lock=self.pending_dir / ".environment.lock",
+            append_lock=self.pending_dir / ".environment.lock",
+            drain_lock=self.pending_dir / ".environment.drain.lock",
+            id_key="observation_id",
         )
 
     @property
@@ -131,7 +163,9 @@ class LoopPaths(DefenderPaths):
         return QueueChannel(
             file=self.pending_dir / "actor_environment_observations.jsonl",
             consumed=self.pending_dir / "actor_environment_observations.consumed.jsonl",
-            lock=self.pending_dir / ".actor_environment.lock",
+            append_lock=self.pending_dir / ".actor_environment.lock",
+            drain_lock=self.pending_dir / ".actor_environment.drain.lock",
+            id_key="observation_id",
         )
 
 

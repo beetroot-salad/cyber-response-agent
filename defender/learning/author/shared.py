@@ -75,6 +75,31 @@ def acquire_flock(path: Path) -> Any | None:
     return fh
 
 
+def acquire_flock_within(path: Path, *, timeout_seconds: int) -> Any | None:
+    """Non-blocking acquisition retried until a deadline; `None` once it expires (#719).
+
+    The drain's wait on a channel's APPEND lock. `acquire_flock` gives up instantly, which
+    would make an appender's ordinary hold look like a permanent one; a plain blocking
+    acquisition would let one channel's stuck appender hold the repo lock — and therefore
+    every sibling channel's tick — indefinitely. The deadline is the caller's configured
+    repo-lock wait, so the two bounds cannot drift apart."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fh = path.open("a+", encoding="utf-8")
+    deadline = time.monotonic() + max(1, timeout_seconds)
+    while True:
+        try:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return fh
+        except BlockingIOError:
+            if time.monotonic() >= deadline:
+                fh.close()
+                return None
+            time.sleep(0.05)
+        except BaseException:
+            fh.close()
+            raise
+
+
 def release_flock(fh: Any) -> None:
     if fh is None:
         return
@@ -154,7 +179,7 @@ def assert_clean_corpus_dir(repo_root: Path, corpus_dir: Path, corpus_dir_rel: s
         )
 
 
-def _result_list(result: dict, key: str) -> list[Any]:
+def result_list(result: dict, key: str) -> list[Any]:
     value = result.get(key, [])
     if value is None:
         return []
@@ -163,7 +188,7 @@ def _result_list(result: dict, key: str) -> list[Any]:
     return value
 
 
-def _commit_message(result: dict, noun: str) -> str:
+def commit_message(result: dict, noun: str) -> str:
     msg = result.get("commit_message")
     # A commit message that renders as nothing is no message at all -- and this gate is
     # what stands between the loop and committing a lesson edit unexplained (#722).
@@ -203,7 +228,7 @@ def validate_agent_result_partition(
     expected = {row[id_key] for row in to_author}
     occurrences: dict[str, list[str]] = {}
     for bucket in buckets:
-        for entry in _result_list(result, bucket):
+        for entry in result_list(result, bucket):
             rid = _result_entry_id(bucket, entry, id_key)
             occurrences.setdefault(rid, []).append(bucket)
 
@@ -259,7 +284,7 @@ def verify_agent_state(
             f"agent changed files outside {corpus_dir_rel}*.md: {new_stray}; "
             "refusing to commit/rotate"
         )
-    committed = _result_list(result, "committed")
+    committed = result_list(result, "committed")
     corpus_dirty = not corpus_dir_clean(repo_root, corpus_dir)
     if committed and not corpus_dirty:
         raise AuthorError(

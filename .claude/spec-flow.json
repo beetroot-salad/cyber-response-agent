@@ -76,7 +76,7 @@
           "defender/learning/author/drain.py::stuck_report_file"
         ],
         "readers": [
-          "defender/learning/author/drain.py::read_batch",
+          "defender/learning/author/drain.py::_tick",
           "defender/learning/core/persist.py::read_pitfalls",
           "defender/learning/core/drains.py::_pending_queue_count",
           "defender/learning/author/verify_forward/shared.py::load_observation"

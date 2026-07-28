@@ -72,8 +72,23 @@ def _run_stage(stage, *, allow_run_error=False):
 
 The drain re-raise clauses (`_drain_lead_author_markers`, `_drain_pitfalls`)
 catch `StageAbort` (was `FatalConfigError`) before their broad
-`except Exception` quarantine — catching the base keeps any future systemic type
-re-raising for free, and composes with #442's `dead_letter`. `_process_marker`'s
+`except Exception` quarantine — catching the base means a future systemic type
+inherits the re-raise without a code change, and composes with #442's
+`dead_letter`.
+
+**This no longer holds on the four corpus-author channels (#719).** Those drains
+do not classify by catching a systemic base at all: retirement is reachable only
+from an explicitly enumerated **retire set** — `AuthorError`, `GitError`,
+`ModelRetry` — and every other class, systemic or novel, is simply not caught. A
+new exception type therefore inherits NOTHING there: it escapes uncaught and
+leaves its row queued, which is the deliberate alternative to counting an
+unanticipated failure toward an attempt ceiling and deleting real work. Note in
+particular that `GitError` is a member of that retire set while remaining in the
+systemic re-raise set the marker and pitfalls legs use, so one class is
+classified two ways depending on the channel. Add a base class here and you
+change the marker legs' behaviour; you do not change the corpus authors'.
+
+`_process_marker`'s
 broad guard is unchanged (it still catches `RunUnprocessable` → quarantine); its
 asymmetry comment retargets: `run_one` raises no `StageAbort`, so no re-raise
 clause is needed there, and adding a `RunUnprocessable` re-raise would regress

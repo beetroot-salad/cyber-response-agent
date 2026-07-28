@@ -4,6 +4,8 @@ distinct outcome policy + commit trailer + generation counter, but share the
 transaction envelope (issue #298)."""
 from __future__ import annotations
 
+import dataclasses
+
 import subprocess
 
 from defender.learning.author import curator as curator
@@ -27,7 +29,7 @@ def _ids(rows: list[dict]) -> set[str]:
 
 
 def test_adversarial_outcome_policy_authors_caught_incoherent() -> None:
-    held, consumed_pre, to_author = curator._partition_pre_author(
+    held, consumed_pre, to_author = curator._gate_observations(
         _rows(), aenv.build_adversarial_config()
     )
     assert _ids(to_author) == {"t/0", "t/1"}
@@ -35,7 +37,7 @@ def test_adversarial_outcome_policy_authors_caught_incoherent() -> None:
 
 
 def test_benign_outcome_policy_authors_only_survived() -> None:
-    held, consumed_pre, to_author = curator._partition_pre_author(
+    held, consumed_pre, to_author = curator._gate_observations(
         _rows(), aenv.build_benign_config()
     )
     assert _ids(to_author) == {"t/2"}
@@ -47,7 +49,7 @@ def test_configs_are_distinct() -> None:
     assert b.trailer_label == "Benign-Actor-Model"
     assert a.trailer_label == "Actor-Env-Model"
     assert b.channel.file != a.channel.file
-    assert b.channel.lock != a.channel.lock
+    assert b.channel.append_lock != a.channel.append_lock
     assert b.outcome_author == frozenset({"survived"})
     assert a.outcome_author == frozenset({"caught", "incoherent"})
     assert author_actor_env.run_batch.__module__ == "defender.learning.author.benign_actor.env"
@@ -77,13 +79,18 @@ def test_commit_corpus_uses_per_config_label(tmp_path, monkeypatch) -> None:
             capture_output=True, text=True, check=True,
         ).stdout
 
+    # #719: the commit is a config field, so the generation and the model come off the
+    # config rather than being handed in per call.
+    adv = dataclasses.replace(adv, generation_fn=lambda: 3, actor_model="claude-x")
+    ben = dataclasses.replace(ben, generation_fn=lambda: 2, actor_model="claude-y")
+
     (corpus / "a.md").write_text("x\n")
-    curator.commit_corpus(3, "claude-x", "adversarial batch", adv)
+    curator.commit_observations("adversarial batch", adv)
     msg = _head_msg()
     assert "Generation: 3" in msg
     assert "Actor-Env-Model: claude-x" in msg
     assert "Benign-Actor-Model" not in msg
 
     (corpus / "b.md").write_text("y\n")
-    curator.commit_corpus(2, "claude-y", "benign batch", ben)
+    curator.commit_observations("benign batch", ben)
     assert "Benign-Actor-Model: claude-y" in _head_msg()

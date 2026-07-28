@@ -527,7 +527,7 @@ def test_exactly_one_function_rewrites_a_pending_file(tmp_path: Path):
     the rewrite survives, which only the merging rotation gives."""
     import defender.learning as learning_pkg  # type: ignore[import-not-found]
 
-    root = Path(learning_pkg.__file__).resolve().parent
+    root = Path(learning_pkg.__path__[0]).resolve()  # namespace pkg: __file__ is None
     writers: dict[str, set[str]] = {}
     for py in sorted(root.rglob("*.py")):
         if py.name == "markers.py":

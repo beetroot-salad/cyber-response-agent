@@ -14,7 +14,7 @@ def test_lock_refuses_concurrent_run(tmp_repo, helpers):
 
     The author drives this through ``shared.run_batch_envelope``; the lock primitive
     is ``shared.acquire_flock`` on the cfg's queue lock-file."""
-    lock_file = tmp_repo.cfg.channel.lock
+    lock_file = tmp_repo.cfg.channel.drain_lock
     fh = shared.acquire_flock(lock_file)
     assert fh is not None
     try:

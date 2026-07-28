@@ -460,7 +460,7 @@ def run_in_subprocess(script: str, *, repo: Path, env_extra: dict[str, str] | No
     test that needs a second actor gets a second process, never an in-process env poke."""
     import defender  # type: ignore[import-not-found]
 
-    root = Path(defender.__file__).resolve().parents[1]
+    root = Path(defender.__path__[0]).resolve().parent  # namespace pkg: __file__ is None
     env = dict(os.environ)
     env["PYTHONPATH"] = str(root) + os.pathsep + env.get("PYTHONPATH", "")
     env.update(env_extra or {})

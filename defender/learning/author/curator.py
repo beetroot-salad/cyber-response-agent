@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import json
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,14 +9,12 @@ from collections.abc import Callable
 
 
 from defender.learning.author import shared as _shared
-from defender.learning.author._config import CorpusAuthorConfig
+from defender.learning.author import drain
+from defender.learning.author._config import BucketSpec, CorpusAuthorConfig
 from defender.learning.author.verify_forward.checks import ForwardCheck
 from defender._corpus import iter_lesson_paths, iter_lessons
-from defender._io import append_jsonl, read_jsonl_rows, write_atomic
 from defender._run_paths import resolve_run_bundle
-from defender.learning.core import config
 from defender.learning.core.config import StageContext, StageWiring, make_logger
-from defender.learning.core.persist import rotate_queue_locked
 
 
 
@@ -39,10 +36,6 @@ class CuratorConfig(CorpusAuthorConfig):
     actor_model: str
 
 
-
-
-def read_batch(cfg: CuratorConfig) -> list[dict]:
-    return read_jsonl_rows(cfg.channel.file)
 
 
 _EXISTING_IDS_CACHE: dict[tuple[str, tuple[tuple[str, int], ...]], set[str]] = {}
@@ -122,154 +115,45 @@ def invoke_curator_agent(
 
 
 
-def git_head_sha(repo_root: Path) -> str:
-    return _shared.git_head_sha(repo_root)
+OBSERVATION_BUCKETS: tuple[BucketSpec, ...] = (
+    BucketSpec(name="committed", disposition="committed", reason_field=None, formatter=str),
+    BucketSpec(
+        name="consumed_skip", disposition="consumed", reason_field="skip_reason",
+        formatter=str,
+    ),
+)
 
 
-def changes_outside_corpus(repo_root: Path, corpus_dir_rel: str) -> list[str]:
-    return _shared.changes_outside(repo_root, corpus_dir_rel)
-
-
-def commit_corpus(
-    generation: int, model: str, message: str, cfg: CuratorConfig,
-) -> str | None:
+def commit_observations(message: str, cfg: CuratorConfig) -> str | None:
+    """The observation directions' corpus commit: the loop owns provenance, so the
+    generation counter and the direction's own model trailer are appended here rather than
+    trusted from the agent's message."""
     return _shared.commit_corpus(
         cfg.repo_root,
         cfg.corpus_dir,
         message,
-        trailers=[("Generation", str(generation)), (cfg.trailer_label, model)],
+        trailers=[
+            ("Generation", str(cfg.generation_fn())),
+            (cfg.trailer_label, cfg.actor_model),
+        ],
     )
 
 
-def corpus_dir_clean(repo_root: Path, corpus_dir: Path) -> bool:
-    return _shared.corpus_dir_clean(repo_root, corpus_dir)
+def run_batch(*, hold_committed: bool = False, cfg: CuratorConfig, box: Any = None) -> int:
+    """The observation directions' entry point — a config builder's counterpart, not a
+    driver: the batch body lives in `drain.run_batch` (#719)."""
+    return drain.run_batch(cfg=cfg, hold_committed=hold_committed, box=box)
 
 
-def _result_list(result: dict, key: str) -> list[Any]:
-    return _shared._result_list(result, key)
-
-
-def _commit_message(result: dict) -> str:
-    return _shared._commit_message(result, "observations")
-
-
-
-
-def rotate_queue(
-    *,
-    held: list[dict],
-    consumed: list[dict],
-    commit_sha: str | None,
-    cfg: CuratorConfig,
-) -> None:
-    rotate_queue_locked(
-        pending_file=cfg.channel.file,
-        consumed_file=cfg.channel.consumed,
-        lock_file=cfg.channel.lock,
-        id_key="observation_id",
-        held=held,
-        consumed=consumed,
-        commit_sha=commit_sha,
-        merge_concurrent=False,
-    )
-
-
-
-
-def _deadletter_file(queue_file: Path) -> Path:
-    return queue_file.with_suffix(".deadletter.jsonl")
-
-
-def _dead_letter_or_bump(
-    batch: list[dict], *, queue_file: Path, pending_dir: Path, id_key: str, reason: str,
-) -> None:
-    batch_ids = {o[id_key] for o in batch}
-    max_attempts = config.author_max_attempts()
-    survivors: list[dict] = []
-    quarantined: list[dict] = []
-    for row in read_jsonl_rows(queue_file):
-        if row.get(id_key) not in batch_ids:
-            survivors.append(row)
-            continue
-        rec = dict(row)
-        rec["attempts"] = int(row.get("attempts") or 0) + 1
-        if rec["attempts"] >= max_attempts:
-            rec["deadletter_reason"] = reason
-            quarantined.append(rec)
-        else:
-            survivors.append(rec)
-    if quarantined:
-        pending_dir.mkdir(parents=True, exist_ok=True)
-        append_jsonl(_deadletter_file(queue_file), quarantined)
-    write_atomic(queue_file, "".join(json.dumps(r) + "\n" for r in survivors))
-
-
-
-
-def run_batch(*, hold_committed: bool, cfg: CuratorConfig) -> int:
-    return _shared.run_batch_envelope(
-        queue_lock_file=cfg.channel.lock,
-        repo_lock_file=cfg.repo_lock_file,
-        repo_lock_wait_seconds=cfg.repo_lock_wait_seconds,
-        repo_root=cfg.repo_root,
-        corpus_dir=cfg.corpus_dir,
-        corpus_dir_rel=cfg.corpus_dir_rel,
-        log=make_logger(cfg.log_prefix),
-        inner=lambda: _run_batch_inner(hold_committed=hold_committed, cfg=cfg),
-    )
-
-
-def _run_batch_inner(*, hold_committed: bool, cfg: CuratorConfig) -> int:
-    log = make_logger(cfg.log_prefix)
-    batch = read_batch(cfg)
-    if not batch:
-        log("queue empty — nothing to author")
-        return 0
-    all_obs = _shared.by_id(batch, "observation_id")
-    held, consumed_pre, to_author = _partition_pre_author(batch, cfg)
-
-    batch_id = uuid.uuid4().hex[:12]
-    generation = cfg.generation_fn()
-    log(
-        f"batch={batch_id} generation={generation} actor_model={cfg.actor_model} "
-        f"total={len(batch)} to_author={len(to_author)} "
-        f"held={len(held)} pre_consumed={len(consumed_pre)}"
-    )
-
-    commit_sha: str | None = None
-    committed: list[dict] = []
-    consumed_skip: list[dict] = []
-    if to_author:
-        rc, commit_sha, committed, consumed_skip = _author_to_author(
-            to_author, all_obs, batch_id, generation, cfg,
-        )
-        if rc != 0:
-            return rc
-
-    held_committed, rotated_committed = _shared.partition_committed(
-        committed, hold_committed=hold_committed
-    )
-    try:
-        rotate_queue(
-            held=held + held_committed,
-            consumed=consumed_pre + rotated_committed + consumed_skip,
-            commit_sha=commit_sha,
-            cfg=cfg,
-        )
-    except AuthorError as e:
-        log(f"FATAL during rotate: {e}")
-        return 2
-    log(
-        f"done batch={batch_id} committed={len(committed)} "
-        f"consumed_skip={len(consumed_skip)} pre_consumed={len(consumed_pre)} "
-        f"held={len(held)} commit_sha={commit_sha}"
-    )
-    return 0
-
-
-def _partition_pre_author(
+def _gate_observations(
     batch: list[dict], cfg: CuratorConfig,
 ) -> tuple[list[dict], list[dict], list[dict]]:
+    """The observation directions' pre-author policy: idempotency against the corpus,
+    then the direction's outcome policy, then source-bundle existence.
+
+    Direction-specific by NAME as well as by body (#719): the findings direction runs a
+    different policy of the same shape, and the two sharing one name was a collision that
+    read as duplication."""
     existing = existing_observation_ids(cfg.corpus_dir)
     log = make_logger(cfg.log_prefix)
     held: list[dict] = []
@@ -304,56 +188,3 @@ def _partition_pre_author(
             continue
         to_author.append(entry)
     return held, consumed_pre, to_author
-
-
-def _author_to_author(
-    to_author: list[dict], all_obs: dict[str, dict],
-    batch_id: str, generation: int, cfg: CuratorConfig,
-) -> tuple[int, str | None, list[dict], list[dict]]:
-    log = make_logger(cfg.log_prefix)
-    baseline_stray = changes_outside_corpus(cfg.repo_root, cfg.corpus_dir_rel)
-    try:
-        result = cfg.invoke_agent(to_author, batch_id, cfg)
-    except AuthorError as e:
-        log(f"FATAL: {e}")
-        _dead_letter_or_bump(
-            to_author, queue_file=cfg.channel.file, pending_dir=cfg.pending_dir,
-            id_key="observation_id", reason=str(e),
-        )
-        return 2, None, [], []
-    try:
-        _shared.verify_agent_state(
-            cfg.repo_root, result, cfg.corpus_dir, cfg.corpus_dir_rel,
-            "observations", baseline_stray,
-        )
-        _shared.validate_agent_result_partition(
-            result, to_author, id_key="observation_id",
-            buckets=("committed", "consumed_skip"), noun="observations",
-        )
-        commit_sha: str | None = None
-        if _result_list(result, "committed"):
-            commit_sha = commit_corpus(
-                generation, cfg.actor_model, _commit_message(result), cfg,
-            )
-    except AuthorError as e:
-        log(f"FATAL: {e}")
-        return 2, None, [], []
-    committed: list[dict] = []
-    consumed_skip: list[dict] = []
-    for oid in _result_list(result, "committed"):
-        src = all_obs.get(oid)
-        if src is None:
-            raise AuthorError(f"author committed unknown observation_id={oid!r}")
-        rec = dict(src)
-        rec["consumed_category"] = "consumed_committed"
-        committed.append(rec)
-    for entry in _result_list(result, "consumed_skip"):
-        oid = entry.get("observation_id")
-        src = all_obs.get(oid)
-        if src is None:
-            raise AuthorError(f"author skipped unknown observation_id={oid!r}")
-        rec = dict(src)
-        rec["consumed_category"] = "consumed_skip"
-        rec["skip_reason"] = entry.get("reason", "")
-        consumed_skip.append(rec)
-    return 0, commit_sha, committed, consumed_skip

@@ -47,7 +47,10 @@ DELEGATORS = (
 def repo_root() -> Path:
     import defender  # type: ignore[import-not-found]
 
-    return Path(defender.__file__).resolve().parents[1]
+    # `defender` is a PEP-420 NAMESPACE package (deliberately: no top-level
+    # `__init__.py`), so `__file__` is None and `Path(...)` on it raises. `__path__[0]`
+    # is the same directory this helper meant to name.
+    return Path(defender.__path__[0]).resolve().parent
 
 
 def tracked_files() -> list[Path]:

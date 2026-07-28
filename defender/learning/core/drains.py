@@ -14,12 +14,14 @@ from defender.learning.core.config import (
     DEFAULT_PATHS,
     LoopPaths,
     _log,
+    author_max_attempts,
     env_int,
     merge_mode,
     pitfalls_threshold,
 )
 from defender import _git
 from defender.runtime import box as box_mod
+from defender.learning.author import drain
 from defender.learning.author import shared as _author_shared
 from defender.learning.core.directions import BY_NAME
 from defender.learning.author.branch import AuthorBranch, BranchError
@@ -201,16 +203,31 @@ def _invoke_pitfalls(paths: LoopPaths, *, box: Any = None) -> int:
     return rc if rc is not None else 0
 
 
+def _retire_pitfalls_batch(paths: LoopPaths, batch_ids: list[str], e: Exception) -> None:
+    _log(f"lead_author_drain: pitfalls curation error: {e!r}; discarding edits")
+    if not batch_ids:
+        return
+    drain.retire(
+        channel=paths.pitfalls,
+        batch_ids=batch_ids,
+        reason=str(e),
+        max_attempts=author_max_attempts(),
+    )
+
+
 def _drain_pitfalls(
     paths: LoopPaths,
     run_pitfalls: Callable[..., int],
     *,
     box: Any = None,
 ) -> None:
+    # "The batch" is the id set fixed at THIS read, before the leg runs — a pitfall
+    # appended while the curation was in flight is outside it and must not be bumped.
+    batch_ids = [str(r["pitfall_id"]) for r in read_pitfalls(paths) if r.get("pitfall_id")]
     try:
         run_or_dead_letter(
             lambda: run_pitfalls(paths, box=box),
-            lambda e: _log(f"lead_author_drain: pitfalls curation error: {e!r}; discarding edits"),
+            functools.partial(_retire_pitfalls_batch, paths, batch_ids),
         )
     finally:
         _discard_worktree_changes(paths.repo_root)
