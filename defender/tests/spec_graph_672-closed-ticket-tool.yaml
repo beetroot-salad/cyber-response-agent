@@ -75,8 +75,9 @@ base: 07596adfde6ccfb5ef3eab9a727de13c4c52f39c
 
 # ===========================================================================
 # DEMANDS — the spec proper (20-demands.md, verbatim semantics; 20 test + 2 clause
-# at phase D; phase E minted d22-d25 + w1/w2, the F round minted d26-d29 + w3 —
-# now 28 test + 2 clause + 3 waiver).
+# at phase D; phase E minted d22-d25 + w1/w2, the F round minted d26-d29 + w3, #684 minted
+# d30, #683's merge gate minted d31, and Fork J (the recency arm) minted d32-d33
+# — now 32 test + 2 clause + 3 waiver).
 # form:test demands are POINTERS — their outcome prose is the docstring seed in
 # 20-demands.md, destined for the named test at phase E.
 # ===========================================================================
@@ -377,6 +378,63 @@ demands:
     form: test
     binds: ["interacts(benign_judge->list_closed_tickets).response", "salt", "benign_judge"]
     discharged_by: test_listed_ticket_naming_self_key_dropped
+
+  - id: d32_recency_screen
+    kind: negative      # Fork J: d24/d25/d31 all screen on what a record SAYS, so every one of
+                        # them is defeated by a sibling that describes the live case WITHOUT
+                        # spelling its key — the service and the date, in prose. That is the
+                        # ordinary way an analyst writes, not an exotic evasion, so the
+                        # transitive N-note does not cover it: the content is the answer key
+                        # itself, not a pointer to some other ticket.
+                        # This arm screens on WHEN the record was last written. Precedent is by
+                        # definition older than the case, so the screen costs O1 nothing it was
+                        # entitled to; contamination is by definition newer, so no wording
+                        # evades it. `updated`, not `created` — the leak rides in content
+                        # APPENDED to an old ticket while the case was live, which a
+                        # creation-dated screen admits.
+                        # Withhold SHAPE follows #684/F2 exactly as d31 does: list drops the
+                        # item and serves its siblings at exit 0; get fails the whole read
+                        # under POLICY_REFUSAL_EXIT. Both surfaces from one predicate — #683's
+                        # defect was two screens disagreeing about one record, and a fourth
+                        # conjunct must not reintroduce it.
+                        # An UNDATED record is withheld, not served: on the answer-key surface,
+                        # unprovable is not safe (the same disposition query_tool.py:147 takes
+                        # for a ticket it cannot prove distinct).
+    form: test
+    binds: ["interacts(benign_judge->list_closed_tickets).response",
+            "interacts(benign_judge->get_closed_ticket).response", "benign_judge"]
+    discharged_by: test_listed_ticket_written_after_case_opened_dropped
+                        # siblings on the same node: the confirm half
+                        # (test_fetched_ticket_written_after_case_opened_withheld) and the
+                        # undated disposition (test_undated_ticket_withheld_on_both_surfaces).
+
+  - id: d33_case_opened_boundary
+    kind: behavior      # Where d32's boundary COMES FROM, which is the load-bearing half. It is
+                        # the ticket store's own `created` for the in-flight ticket, reached
+                        # through a verb (`case-opened-at`) whose RETURN TYPE is a bare
+                        # timestamp — the record is unreachable through it by construction, the
+                        # same shape of guarantee `require_closed` gives on the two reading
+                        # verbs. Not a clock the judge carries: comparing our clock to the
+                        # store's timestamps would make the screen's boundary depend on skew
+                        # between two machines, and the run SQLite carries no wall-clock instant
+                        # to take it from anyway (#754's schema is seq-ordered by design).
+                        # Two ways to find no boundary, resolved OPPOSITELY — this split is the
+                        # demand, not a rider:
+                        #   - the store says the case has no ticket (a 404, a real answer) →
+                        #     the read PROCEEDS with the other three conjuncts standing alone.
+                        #     Most cases never open a ticket; failing here would make the
+                        #     precedent search unusable for them and buy nothing.
+                        #   - anything else (store unreachable, `created` missing or
+                        #     unparseable, adapter declaring no such verb) → FAIL THE READ, zero
+                        #     precedent store attempts, loud in all three channels the tool owns.
+                        #     Same disposition d30 takes for a missing key grammar, for the same
+                        #     reason: an arm that stands down when its input is missing protects
+                        #     nothing, and the failure modes are indistinguishable from inside.
+    form: test
+    binds: ["interacts(benign_judge->list_closed_tickets).payload",
+            "ticket_store.access[typed-tool]"]
+    discharged_by: test_unreadable_case_boundary_fails_the_read_closed
+                        # the proceed half: test_case_with_no_ticket_leaves_the_precedent_search_usable
 
   - id: d30_key_grammar_from_config
     kind: behavior      # #684: minted when F1's tighten exposed that d10's screen was
