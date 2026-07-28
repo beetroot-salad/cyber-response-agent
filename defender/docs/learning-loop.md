@@ -337,7 +337,7 @@ audit-only. Queueable finding types are `lead-set`, `lead-quality`,
    touches only `defender/lessons/*.md`, and that the lessons dir is clean.
    Then it atomically rotates `_pending/findings.jsonl`, appends consumed
    findings to `_pending/consumed.jsonl`, and logs no-commit held/skip batches
-   to `_pending/held_report.log`.
+   to `_pending/findings.held_report.log`.
 
 ### Why Lessons, Not an Addendum Library
 
@@ -395,7 +395,7 @@ defender/learning/runs/{run_id}/
 defender/learning/_pending/
   findings.jsonl              # queueable findings
   consumed.jsonl              # consumed committed/idempotent/skipped findings
-  held_report.log             # no-commit held/skip summaries
+  findings.held_report.log    # no-commit held/skip summaries (findings channel)
 
 defender/lessons/
   *.md                        # committed pitfall lessons read at PLAN time

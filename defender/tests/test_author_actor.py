@@ -19,9 +19,9 @@ from pathlib import Path
 import pytest
 import yaml
 
-from defender import _git  # type: ignore[import-not-found]
 from defender.learning.author import curator as curator  # type: ignore[import-not-found]
 from defender.learning.author import shared as shared  # type: ignore[import-not-found]
+from defender.learning.core import persist  # type: ignore[import-not-found]
 from defender.learning.author.malicious_actor import run as aa  # type: ignore[import-not-found]
 from defender.learning.core.config import LoopPaths  # type: ignore[import-not-found]
 
@@ -310,16 +310,17 @@ def test_commit_corpus_appends_provenance(tmp_path: Path):
     cfg = _cfg(ctx, _consume_all)
     (ctx["lessons"] / "x.md").write_text("hello\n")
 
-    new_sha = curator.commit_corpus(
-        3, "claude-sonnet-4-6", "defender/actor: lesson batch abc", cfg
+    new_sha = shared.commit_corpus(
+        cfg.repo_root, cfg.corpus_dir, "defender/actor: lesson batch abc",
+        trailers=[("Generation", "3"), ("Actor-Model", "claude-sonnet-4-6")],
     )
-    assert new_sha == curator.git_head_sha(ctx["repo"])
+    assert new_sha == shared.git_head_sha(ctx["repo"])
     msg = _head_message(ctx["repo"])
     assert "Generation: 3" in msg
     assert "Actor-Model: claude-sonnet-4-6" in msg
     assert shared.actor_generation_count(ctx["repo"]) == 2
     assert _head_files(ctx["repo"]) == ["defender/lessons-actor/x.md"]
-    assert curator.changes_outside_corpus(ctx["repo"], cfg.corpus_dir_rel) == []
+    assert shared.changes_outside(ctx["repo"], cfg.corpus_dir_rel) == []
 
 
 def test_committed_batch_gets_trailers_stamped_by_loop(tmp_path: Path):
@@ -355,7 +356,7 @@ def test_committed_batch_gets_trailers_stamped_by_loop(tmp_path: Path):
     ]
     by_id = {r["observation_id"]: r for r in consumed}
     assert by_id["a/0"]["consumed_category"] == "consumed_committed"
-    assert by_id["a/0"]["consumed_commit"] == curator.git_head_sha(ctx["repo"])
+    assert by_id["a/0"]["consumed_commit"] == shared.git_head_sha(ctx["repo"])
     assert (ctx["pending"] / "actor_observations.jsonl").read_text().strip() == ""
 
 
@@ -370,7 +371,7 @@ def test_commit_failure_is_atomic_queue_intact(tmp_path: Path):
     hook.write_text("#!/bin/sh\nexit 1\n")
     hook.chmod(0o755)
     _write_queue(ctx["pending"], [_row("a/0", "caught")])
-    head_before = curator.git_head_sha(ctx["repo"])
+    head_before = shared.git_head_sha(ctx["repo"])
 
     def committing_invoke(observations, batch_id, cfg):
         oid = observations[0]["observation_id"]
@@ -383,15 +384,20 @@ def test_commit_failure_is_atomic_queue_intact(tmp_path: Path):
             "commit_message": f"defender/actor: lesson batch {batch_id}",
         }
 
-    with pytest.raises(_git.GitError):
-        curator.run_batch(hold_committed=False, cfg=_cfg(ctx, committing_invoke))
-    assert curator.git_head_sha(ctx["repo"]) == head_before
+    # #719: a commit-time GitError is a member of the retire set, so it no longer
+    # escapes — the batch faults (rc 2), the row's attempt count bumps, and it stays
+    # queued for retry until the ceiling. The atomicity the test exists for is unchanged:
+    # no commit lands, nothing is consumed, and the corpus is left usable.
+    assert curator.run_batch(hold_committed=False, cfg=_cfg(ctx, committing_invoke)) == 2
+    assert shared.git_head_sha(ctx["repo"]) == head_before
     left = [
         json.loads(line)
         for line in (ctx["pending"] / "actor_observations.jsonl").read_text().splitlines()
         if line.strip()
     ]
     assert {r["observation_id"] for r in left} == {"a/0"}
+    assert [r["attempts"] for r in left] == [1]
+    assert shared.corpus_dir_clean(ctx["repo"], ctx["lessons"])
     consumed_path = ctx["pending"] / "actor_observations.consumed.jsonl"
     assert not consumed_path.exists() or consumed_path.read_text().strip() == ""
 
@@ -482,8 +488,10 @@ def test_rotate_queue_preserves_held_and_appends_consumed(tmp_path: Path):
         {**_row("c/0", "caught"), "consumed_category": "consumed_committed"},
         {**_row("s/0", "caught"), "consumed_category": "consumed_skip", "skip_reason": "low"},
     ]
-    curator.rotate_queue(
-        held=held, consumed=consumed, commit_sha="abc123", cfg=_cfg(ctx, _consume_all)
+    ch = _cfg(ctx, _consume_all).channel
+    persist.rotate_queue_locked(
+        pending_file=ch.file, consumed_file=ch.consumed, lock_file=ch.append_lock,
+        id_key=ch.id_key, held=held, consumed=consumed, commit_sha="abc123",
     )
 
     left = [
@@ -646,27 +654,40 @@ def test_index_cli_hides_stale_lessons_by_default(tmp_path: Path):
 def test_read_batch_skips_torn_line(tmp_path):
     """A torn last line from an interrupted append is skipped, not raised.
 
-    Before #446 ``read_batch`` re-rolled ``json.loads`` with no try/except, so a
+    Before #446 the batch read re-rolled ``json.loads`` with no try/except, so a
     half-written record raised ``JSONDecodeError`` — a type that escapes every
     drain guard and crashed the ``author_drain`` every tick. It now delegates to
     the shared tolerant reader, so the valid rows come through and the queue
-    stays processable."""
+    stays processable. Driven through the shared drain body since #719 folded the
+    per-direction reader away."""
     ctx = _isolate(tmp_path)
-    cfg = _cfg(ctx, _consume_all)
+    seen: list[list[dict]] = []
+
+    def capture(observations, batch_id, cfg):
+        seen.append(list(observations))
+        return _consume_all(observations, batch_id, cfg)
+
+    cfg = _cfg(ctx, capture)
     cfg.channel.file.parent.mkdir(parents=True, exist_ok=True)
     cfg.channel.file.write_text(
-        json.dumps(_row("r1/0", "survived")) + "\n"
+        json.dumps(_row("r1/0", "caught")) + "\n"
         + "\n"
-        + json.dumps(_row("r2/0", "survived")) + "\n"
+        + json.dumps(_row("r2/0", "caught")) + "\n"
         + '{"observation_id": "r3/0"'
     )
-    batch = curator.read_batch(cfg)
-    assert [r["observation_id"] for r in batch] == ["r1/0", "r2/0"]
+    (ctx["pending"].parent / "runs" / "r1").mkdir(parents=True, exist_ok=True)
+    (ctx["pending"].parent / "runs" / "r2").mkdir(parents=True, exist_ok=True)
+    assert curator.run_batch(hold_committed=False, cfg=cfg) == 0
+    assert [r["observation_id"] for r in seen[0]] == ["r1/0", "r2/0"]
 
 
 def test_read_batch_missing_file_is_empty(tmp_path):
     ctx = _isolate(tmp_path)
-    cfg = _cfg(ctx, _consume_all)
+
+    def never(observations, batch_id, cfg):
+        raise AssertionError("an absent queue must not reach the agent")
+
+    cfg = _cfg(ctx, never)
     if cfg.channel.file.exists():
         cfg.channel.file.unlink()
-    assert curator.read_batch(cfg) == []
+    assert curator.run_batch(hold_committed=False, cfg=cfg) == 0

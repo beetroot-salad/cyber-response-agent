@@ -493,7 +493,7 @@ def test_append_actor_observations_creates_lock_file(tmp_path: Path):
     doc = _judge_doc("caught", [_obs(0)])
 
     assert append_actor_observations(doc, "case-x", "rule-5710", lrd, paths=paths) == 1
-    assert paths.actor_observations.lock.is_file()
+    assert paths.actor_observations.append_lock.is_file()
 
 
 def test_append_actor_observations_skips_passthrough_outcome(tmp_path: Path):

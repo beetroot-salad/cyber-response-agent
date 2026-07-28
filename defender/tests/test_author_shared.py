@@ -4,7 +4,7 @@ The loop is the sole committer; the agent runs no git. These exercise the
 corpus-agnostic helpers that ``author.py`` and ``_author_curator.py`` both adapt
 over — ``commit_corpus`` (pathspec-scoped, optional provenance trailers),
 ``changes_outside`` (the stray scope-gate), ``corpus_dir_clean``,
-``verify_agent_state``, ``git_head_sha``, ``_commit_message``, ``_result_list``.
+``verify_agent_state``, ``git_head_sha``, ``commit_message``, ``result_list``.
 
 The git layer takes the repo root as a parameter, so every test **injects** a
 tmp repo directly — no monkeypatching of module globals (that was the smell the
@@ -245,7 +245,7 @@ def test_git_head_sha_matches_rev_parse(tmp_path):
 
 
 def test_commit_message_returns_the_message():
-    assert shared._commit_message({"commit_message": "hi"}, "findings") == "hi"
+    assert shared.commit_message({"commit_message": "hi"}, "findings") == "hi"
 
 
 @pytest.mark.parametrize("noun", ["findings", "observations"])
@@ -253,15 +253,15 @@ def test_commit_message_rejects_empty_with_corpus_noun(noun):
     """The missing/empty-message error names the corpus's unit of work — the single token
     that differs between the two corpora, proven here against one shared implementation."""
     with pytest.raises(shared.AuthorError, match=f"committed {noun} without"):
-        shared._commit_message({"commit_message": ""}, noun)
+        shared.commit_message({"commit_message": ""}, noun)
 
 
 def test_result_list_normalizes_and_validates():
-    assert shared._result_list({}, "committed") == []
-    assert shared._result_list({"committed": None}, "committed") == []
-    assert shared._result_list({"committed": ["a"]}, "committed") == ["a"]
+    assert shared.result_list({}, "committed") == []
+    assert shared.result_list({"committed": None}, "committed") == []
+    assert shared.result_list({"committed": ["a"]}, "committed") == ["a"]
     with pytest.raises(shared.AuthorError, match="must be a list"):
-        shared._result_list({"committed": "x"}, "committed")
+        shared.result_list({"committed": "x"}, "committed")
 
 
 
@@ -352,12 +352,12 @@ def test_commit_message_rejects_a_message_that_renders_as_nothing(tag, text):
     explanation. `not msg.strip()` let the zero-width spellings through (#722), so a
     curator could commit under a message a reviewer sees as blank."""
     with pytest.raises(shared.AuthorError, match="without a non-empty"):
-        shared._commit_message({"commit_message": text}, "findings")
+        shared.commit_message({"commit_message": text}, "findings")
 
 
 def test_commit_message_still_accepts_a_real_message_verbatim():
     """The control — including a message that merely CARRIES an invisible character."""
-    assert shared._commit_message({"commit_message": "﻿fold two findings"}, "findings") == (
+    assert shared.commit_message({"commit_message": "﻿fold two findings"}, "findings") == (
         "﻿fold two findings"
     )
 

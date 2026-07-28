@@ -53,9 +53,16 @@ def read_jsonl_rows(path: Path) -> list[dict]:
         if not s:
             continue
         try:
-            rows.append(json.loads(s))
+            obj = json.loads(s)
         except json.JSONDecodeError:
             continue
+        # A JSONL line is a ROW: `"x"`, `3` and `[...]` are all valid JSON and none of them
+        # is one. Without this the declared `list[dict]` was a lie and every consumer's
+        # `row.get(...)` raised AttributeError on the first such line — a class no drain
+        # guard names, so it crashed the worker every tick, which is exactly the failure
+        # the tolerant reader exists to prevent.
+        if isinstance(obj, dict):
+            rows.append(obj)
     return rows
 
 

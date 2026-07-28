@@ -49,7 +49,9 @@
           "defender/scripts/adapters/ticket_adapter.py::get_ticket",
           "defender/scripts/adapters/ticket_adapter.py::health_check"
         ],
-        "grep": ["ticket_adapter.py"]
+        "grep": [
+          "ticket_adapter.py"
+        ]
       },
       "wire_log": {
         "writers": [
@@ -59,7 +61,36 @@
           "defender/runtime/observe.py::write_trace",
           "defender/scripts/visualize/visualize_messages.py::load_messages"
         ],
-        "grep": ["llm_requests.jsonl", "logger.messages"]
+        "grep": [
+          "llm_requests.jsonl",
+          "logger.messages"
+        ]
+      },
+      "learning_queue": {
+        "writers": [
+          "defender/learning/core/persist.py::_rewrite_queue",
+          "defender/learning/core/persist.py::append_findings",
+          "defender/learning/core/persist.py::_append_observations",
+          "defender/learning/core/persist.py::append_pitfalls",
+          "defender/learning/author/drain.py::retire",
+          "defender/learning/author/drain.py::_record_stuck"
+        ],
+        "readers": [
+          "defender/learning/author/drain.py::_tick",
+          "defender/learning/core/persist.py::read_pitfalls",
+          "defender/learning/core/drains.py::_pending_queue_count",
+          "defender/learning/author/verify_forward/shared.py::load_observation"
+        ],
+        "grep": [
+          "findings.jsonl",
+          "_observations.jsonl",
+          "pitfalls.jsonl",
+          "channel.file",
+          "channel.append_lock",
+          "channel.drain_lock",
+          "deadletter.jsonl",
+          "stuck.jsonl"
+        ]
       },
       "session_store": {
         "writers": [
@@ -96,7 +127,11 @@
           "defender/evals/held_out.py::index_runs",
           "defender/learning/ops/trace_lesson.py::in_context_cases"
         ],
-        "grep": ["DEFENDER_RUNS_BASE", "runs_dir.iterdir", "runs_base"]
+        "grep": [
+          "DEFENDER_RUNS_BASE",
+          "runs_dir.iterdir",
+          "runs_base"
+        ]
       }
     }
   },
@@ -107,7 +142,10 @@
   "codeGraph": {
     "tool": "pyrefly",
     "configDir": "defender",
-    "searchPath": ["..", "."],
+    "searchPath": [
+      "..",
+      "."
+    ],
     "notes": "defender is a namespace package (no defender/__init__.py; pyproject at defender/, not the repo root), so pyrefly's import root defaults to defender/ and `defender.x` imports silently resolve to Unknown. searchPath is relative to configDir: `..` = repo root (makes `defender` a top-level package, mirroring pytest's pythonpath=['..']), `.` = defender/. The pyrefly-refs helper writes a temp configDir/pyrefly.toml from these and removes it per run."
   }
 }

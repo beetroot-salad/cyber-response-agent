@@ -10,8 +10,9 @@ the spec:
     fix);
   * the DLQ tests are RED until the attempts-bump / ``deadletter.jsonl`` mechanism
     lands. Today a per-run authoring fault returns rc 2 and leaves the active queue
-    UNTOUCHED (``_run_batch_inner`` returns before ``rotate_queue``), so a poison batch
-    is retried every tick forever — there is no ``attempts`` field and no sidecar.
+    UNTOUCHED (the pre-#719 batch driver returns before rotating the queue), so a
+    poison batch is retried every tick forever — there is no ``attempts`` field and
+    no sidecar.
 
 Every assertion is on OBSERVABLE post-state only — the active queue file, the
 ``deadletter.jsonl`` sidecar, the return rc, or a propagated exception — never on an
@@ -141,8 +142,9 @@ def _max_attempts_seen(paths: LoopPaths) -> int:
 
 def _fault_fake(observations: list[dict], batch_id: str, cfg) -> dict:
     """A per-run authoring fault. The ported invoke seam raises ``AuthorError`` on a
-    ``RunUnprocessable`` / unparseable AUTHOR_RESULT; ``_author_to_author`` maps it to
-    rc 2. This fake injects only that raise — it makes no DLQ decision."""
+    ``RunUnprocessable`` / unparseable AUTHOR_RESULT; the drain body maps it to rc 2
+    (#719: via the shared retire seam). This fake injects only that raise — it makes
+    no DLQ decision."""
     raise curator.AuthorError("simulated per-run authoring fault")
 
 

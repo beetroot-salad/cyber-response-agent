@@ -120,7 +120,7 @@ Emit a single JSON object on its own line, prefixed with `AUTHOR_RESULT: `:
 AUTHOR_RESULT: {"committed": ["{finding_id}", ...], "held_forward_bad": [{"finding_id": "...", "reason": "..."}], "consumed_skip": [{"finding_id": "...", "reason": "..."}], "commit_message": "{message}" or null, "observability_gaps": ["{finding_id}", ...]}
 ```
 
-The orchestrator parses this line. Make sure every finding from the input appears in exactly one of `committed`, `held_forward_bad`, or `consumed_skip`. `commit_message` summarizes this batch's lesson edits; set it whenever `committed` is non-empty, or `null` if there are no lesson edits (every finding was BAD/skip; held-back lessons are surfaced in `_pending/held_report.log` regardless). Use this message shape (a JSON string, so newlines are `\n`):
+The orchestrator parses this line. Make sure every finding from the input appears in exactly one of `committed`, `held_forward_bad`, or `consumed_skip`. `commit_message` summarizes this batch's lesson edits; set it whenever `committed` is non-empty, or `null` if there are no lesson edits (every finding was BAD/skip; held-back lessons are surfaced in `_pending/findings.held_report.log` regardless). Use this message shape (a JSON string, so newlines are `\n`):
 
 ```
 defender: lesson batch {batch_id}

@@ -12,6 +12,26 @@ from dataclasses import replace
 import pytest
 
 
+def _rows_without_attempts(text: str) -> list[dict]:
+    """The queue's rows with the retirement counter dropped.
+
+    #719: a post-agent abort now BUMPS every row it was authoring (behaviour change 2 of
+    four), so "the queue is intact for retry" is no longer a byte comparison — the rows
+    themselves must be unchanged, and the count must have moved by exactly one."""
+    import json as _json
+
+    return [
+        {k: v for k, v in _json.loads(line).items() if k != "attempts"}
+        for line in text.splitlines() if line.strip()
+    ]
+
+
+def _attempts(text: str) -> list[int]:
+    import json as _json
+
+    return [_json.loads(line).get("attempts") for line in text.splitlines() if line.strip()]
+
+
 def _write_lesson(tmp_repo, name: str, finding_id: str) -> None:
     """Write a lesson into the working tree — no git (the loop commits)."""
     body = (
@@ -60,7 +80,7 @@ def test_committed_finding_without_commit_message_aborts(tmp_repo, helpers, monk
     a = tmp_repo.author
     helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-1b", "benign")
     helpers.write_finding(tmp_repo.paths.pending_file, finding_id="run-1b/0", run_id="run-1b")
-    pre_pending = tmp_repo.paths.pending_file.read_text()
+    pre_pending = _rows_without_attempts(tmp_repo.paths.pending_file.read_text())
 
     def fake_invoke(findings, batch_id, cfg):
         _write_lesson(tmp_repo, "lessonB", "run-1b/0")
@@ -72,7 +92,8 @@ def test_committed_finding_without_commit_message_aborts(tmp_repo, helpers, monk
 
     cfg = replace(tmp_repo.cfg, invoke_agent=fake_invoke)
     assert a.run_batch(cfg=cfg) == 2
-    assert tmp_repo.paths.pending_file.read_text() == pre_pending
+    assert _rows_without_attempts(tmp_repo.paths.pending_file.read_text()) == pre_pending
+    assert _attempts(tmp_repo.paths.pending_file.read_text()) == [1] * len(pre_pending)
     assert not tmp_repo.cfg.channel.consumed.exists()
 
 
@@ -131,7 +152,7 @@ def test_committed_but_corpus_clean_aborts(tmp_repo, helpers, monkeypatch):
     a = tmp_repo.author
     helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-4", "benign")
     helpers.write_finding(tmp_repo.paths.pending_file, finding_id="run-4/0", run_id="run-4")
-    pre_pending = tmp_repo.paths.pending_file.read_text()
+    pre_pending = _rows_without_attempts(tmp_repo.paths.pending_file.read_text())
 
     def fake_invoke(findings, batch_id, cfg):
         return {
@@ -143,7 +164,8 @@ def test_committed_but_corpus_clean_aborts(tmp_repo, helpers, monkeypatch):
 
     cfg = replace(tmp_repo.cfg, invoke_agent=fake_invoke)
     assert a.run_batch(cfg=cfg) == 2
-    assert tmp_repo.paths.pending_file.read_text() == pre_pending
+    assert _rows_without_attempts(tmp_repo.paths.pending_file.read_text()) == pre_pending
+    assert _attempts(tmp_repo.paths.pending_file.read_text()) == [1] * len(pre_pending)
 
 
 def test_no_commit_but_left_corpus_edits_aborts(tmp_repo, helpers, monkeypatch):
@@ -151,7 +173,7 @@ def test_no_commit_but_left_corpus_edits_aborts(tmp_repo, helpers, monkeypatch):
     a = tmp_repo.author
     helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-5", "benign")
     helpers.write_finding(tmp_repo.paths.pending_file, finding_id="run-5/0", run_id="run-5")
-    pre_pending = tmp_repo.paths.pending_file.read_text()
+    pre_pending = _rows_without_attempts(tmp_repo.paths.pending_file.read_text())
 
     def fake_invoke(findings, batch_id, cfg):
         (tmp_repo.paths.lessons_dir / "orphan.md").write_text("uncommitted\n")
@@ -164,7 +186,8 @@ def test_no_commit_but_left_corpus_edits_aborts(tmp_repo, helpers, monkeypatch):
 
     cfg = replace(tmp_repo.cfg, invoke_agent=fake_invoke)
     assert a.run_batch(cfg=cfg) == 2
-    assert tmp_repo.paths.pending_file.read_text() == pre_pending
+    assert _rows_without_attempts(tmp_repo.paths.pending_file.read_text()) == pre_pending
+    assert _attempts(tmp_repo.paths.pending_file.read_text()) == [1] * len(pre_pending)
 
 
 def test_agent_result_missing_finding_aborts(tmp_repo, helpers, monkeypatch):
@@ -172,7 +195,7 @@ def test_agent_result_missing_finding_aborts(tmp_repo, helpers, monkeypatch):
     helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-6", "benign")
     helpers.write_finding(tmp_repo.paths.pending_file, finding_id="run-6/0", run_id="run-6")
     helpers.write_finding(tmp_repo.paths.pending_file, finding_id="run-6/1", run_id="run-6")
-    pre_pending = tmp_repo.paths.pending_file.read_text()
+    pre_pending = _rows_without_attempts(tmp_repo.paths.pending_file.read_text())
 
     def fake_invoke(findings, batch_id, cfg):
         return {
@@ -185,7 +208,8 @@ def test_agent_result_missing_finding_aborts(tmp_repo, helpers, monkeypatch):
     cfg = replace(tmp_repo.cfg, invoke_agent=fake_invoke)
     rc = a.run_batch(cfg=cfg)
     assert rc == 2
-    assert tmp_repo.paths.pending_file.read_text() == pre_pending
+    assert _rows_without_attempts(tmp_repo.paths.pending_file.read_text()) == pre_pending
+    assert _attempts(tmp_repo.paths.pending_file.read_text()) == [1] * len(pre_pending)
 
 
 def test_prestaged_stray_does_not_ride_into_lesson_commit(
@@ -251,7 +275,7 @@ def test_agent_result_duplicate_classification_aborts(
     a = tmp_repo.author
     helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-6b", "benign")
     helpers.write_finding(tmp_repo.paths.pending_file, finding_id="run-6b/0", run_id="run-6b")
-    pre_pending = tmp_repo.paths.pending_file.read_text()
+    pre_pending = _rows_without_attempts(tmp_repo.paths.pending_file.read_text())
 
     def fake_invoke(findings, batch_id, cfg):
         return agent_result
@@ -259,7 +283,8 @@ def test_agent_result_duplicate_classification_aborts(
     cfg = replace(tmp_repo.cfg, invoke_agent=fake_invoke)
     rc = a.run_batch(cfg=cfg)
     assert rc == 2
-    assert tmp_repo.paths.pending_file.read_text() == pre_pending
+    assert _rows_without_attempts(tmp_repo.paths.pending_file.read_text()) == pre_pending
+    assert _attempts(tmp_repo.paths.pending_file.read_text()) == [1] * len(pre_pending)
     assert not tmp_repo.cfg.channel.consumed.exists()
 
 
@@ -269,7 +294,7 @@ def test_agent_writes_outside_lessons_aborts(tmp_repo, helpers, monkeypatch):
     a = tmp_repo.author
     helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-7", "benign")
     helpers.write_finding(tmp_repo.paths.pending_file, finding_id="run-7/0", run_id="run-7")
-    pre_pending = tmp_repo.paths.pending_file.read_text()
+    pre_pending = _rows_without_attempts(tmp_repo.paths.pending_file.read_text())
 
     def fake_invoke(findings, batch_id, cfg):
         (tmp_repo.root / "scratch.txt").write_text("oops")
@@ -284,4 +309,5 @@ def test_agent_writes_outside_lessons_aborts(tmp_repo, helpers, monkeypatch):
     cfg = replace(tmp_repo.cfg, invoke_agent=fake_invoke)
     rc = a.run_batch(cfg=cfg)
     assert rc == 2
-    assert tmp_repo.paths.pending_file.read_text() == pre_pending
+    assert _rows_without_attempts(tmp_repo.paths.pending_file.read_text()) == pre_pending
+    assert _attempts(tmp_repo.paths.pending_file.read_text()) == [1] * len(pre_pending)

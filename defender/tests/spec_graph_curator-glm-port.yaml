@@ -20,7 +20,7 @@ demands:
   - id: return-contract
     kind: behavior
     form: test
-    outcome: {nl: "The ported invoke seam keeps its signature invoke_agent(rows, batch_id, cfg) -> dict returning {committed:[bare-id-strings], consumed_skip:[{id,reason}], (curator A also held_forward_bad:[{finding_id,reason}]), commit_message:str}; on any authoring failure it raises AuthorError so _author_to_author maps it to rc 2. The returned dict — not run_stage's text — is the whole output."}
+    outcome: {nl: "The ported invoke seam keeps its signature invoke_agent(rows, batch_id, cfg) -> dict returning {committed:[bare-id-strings], consumed_skip:[{id,reason}], (curator A also held_forward_bad:[{finding_id,reason}]), commit_message:str}; on any authoring failure it raises AuthorError so the drain's authoring step maps it to rc 2. The returned dict — not run_stage's text — is the whole output."}
     binds: ["interacts(curator_A->run_stage).response", "invoke_seam"]
   - id: marker-parse-relocated
     kind: shape
@@ -494,7 +494,7 @@ handoff:
     - "Q1 corpus navigation: precompute-manifest vs extend-reader-lane vs (chosen) flat per-curator bash reader allowlist. RESOLVED by the user to option 3 — cleanest (zero blast radius on the shared _CORPUS_SUBDIRS / live MAIN-GATHER runtime; mirrors claude -p's per-agent allowed_tools). Prompts get a small Glob/Grep->bash rewrite."
     - "Q2 per-batch failure contract: rc-2-retry-forever vs dead-letter-queue. RESOLVED by the user to ADD a DLQ. rc mapping itself is FORCED to RunUnprocessable->AuthorError->rc2 (invoke_agent returns a dict, so no rc-124 lane like the lead author's); the DLQ rides on top via a per-row attempts counter + deadletter.jsonl, batch-granular. Systemic faults still exit 2."
     - "Silent branch caught in diff: the lifecycle lens asserted rc124 for RunUnprocessable while dependency+strong asserted rc2 — resolved to rc2 (architecturally forced); the ~4 lifecycle rc124 stubs were dropped."
-    - "Resolved without the human: commit_corpus git-failure -> AuthorError/rc2 (preserve today, low impact); source_key naming collision -> two distinct demands (metered-key ordering + batch_id/trace anchor); rotate_queue atomic-replace crash -> OUT OF SCOPE (kept envelope, unchanged by the port)."
+    - "Resolved without the human: commit_corpus git-failure -> AuthorError/rc2 (preserve today, low impact); source_key naming collision -> two distinct demands (metered-key ordering + batch_id/trace anchor); queue-rotation atomic-replace crash -> OUT OF SCOPE (kept envelope, unchanged by the port)."
   deviations:
     - "Formal-slot validation is a MANUAL hand-check against schema.md (no spec_graph linter yet, #537)."
     - "One CORPUS_AUTHOR role confirmed sufficient for all four curators (strong-author verdict): A's held_forward_bad divergence lives in the envelope's result partition, not the engine."
