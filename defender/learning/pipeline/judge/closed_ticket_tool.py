@@ -37,14 +37,26 @@ absence by registration, N3):
   - **Self-key exclusion** (Fork C/H) — the case-under-judgment's own key (``deps.run_id``, via
     the shared ``runtime.ticket_screen.self_case_key`` — the SAME definition gather screens on,
     so the two answer-key defenses cannot drift apart) is refused pre-store on ``get``, filtered
-    per-item by identity on ``list``, and — on ``get`` only — screened out of a fetched closed
-    ticket whose free text NAMES it. That last withhold files the dedicated non-infra
-    ``POLICY_REFUSAL_EXIT``, not the adapter's generic business code, so the audit trail tells a
-    withheld self-read apart from a genuine 404 (Fork H is ``get``-scoped; the ``list`` path
-    carries the status + identity screens only, so a listed sibling's free text that names the
-    self-case is NOT redacted — the graph's N-note).
+    per-item by identity on ``list``, and screened out of a genuinely-closed ticket whose free
+    text NAMES it on BOTH surfaces. #683 extended that last screen off ``get``-only: ``list`` is
+    the judge's higher-traffic surface, so scoping it to ``get`` left the asymmetry sitting on
+    the protected asset itself — a sibling ticket could deliver through the precedent search
+    exactly the content the identical payload would have been withheld for on a confirm.
+
+    The two surfaces still differ in HOW they withhold, because #684 (F2) resolved list's arm to
+    be per ITEM: ``get`` fails the whole read under the dedicated non-infra
+    ``POLICY_REFUSAL_EXIT`` — not the adapter's generic business code, so the audit trail tells a
+    withheld self-read apart from a genuine 404 — while ``list`` drops the naming item and serves
+    its siblings, since faulting a whole listing over one sibling's wording would gut the
+    precedent search (O1). The cost of the per-item arm is that a list drop is invisible in the
+    capture row, which records the post-screen payload at exit 0; that is Fork G's pre-existing
+    property, not new here.
+
+    What stays accepted (the graph's N-note) is the TRANSITIVE path, on both surfaces: a closed
+    ticket quoting some OTHER non-closed ticket rides the salted untrusted envelope unredacted.
+    Only the self-case's identifier is an identifier this seam knows.
   - **Item re-check** (Fork G) — ``list`` re-checks each returned item's status client-side and
-    drops non-closed (or self-key) records before the envelope.
+    drops non-closed (or self-naming) records before the envelope.
 
 Capture + breaker mirror the ``query`` tool FULLY (Fork B/E): every store attempt writes one
 capture row to the JUDGE's ``executed_queries.jsonl`` with its payload persisted by-ref, an
@@ -271,19 +283,42 @@ def _capture_and_view(
     return _go()
 
 
+def _names_self_case(record: Any, self_key: str) -> bool:
+    """Fork H's predicate: does this record NAME the case under judgment anywhere in its content?
+
+    Serialized WHOLE rather than field-by-field, because the self-key may ride in a resolution, a
+    nested comment, or the key itself. That is strictly wider than gather's identity-only screen,
+    and deliberately so — gather correlates, the judge scores.
+
+    Shared by both surfaces since #683, so the ``get`` withhold and the ``list`` drop cannot come
+    to different answers about the same payload — the whole defect #683 recorded was two screens
+    disagreeing about one record.
+    """
+    return self_key in json.dumps(record, default=str)
+
+
 def _screen_listing(deps: AgentDeps, payload: Any) -> tuple[Any, int, str]:
-    """Fork G + V-A: keep only genuinely-closed items that are not the self-case's own record,
-    per-item, before the envelope.
+    """Fork G + V-A + Fork H: keep only genuinely-closed items that neither ARE nor NAME the
+    self-case's record, per-item, before the envelope.
 
     The envelope shape check and the ``(payload, exit_code, detail)`` contract are the shared
     ticket screen (``runtime.ticket_screen``); bound here is the judge's own predicate, whose
     CLOSED-only half is the judge's alone — gather keeps every lifecycle state because it is
-    correlating, not scoring. Duplicates survive (the re-check is status + self-key identity,
-    never a dedup); a non-dict item is dropped as unreadable."""
+    correlating, not scoring. Duplicates survive (the screen is status + self-reference, never a
+    dedup); a non-dict item is dropped as unreadable.
+
+    The identity conjunct is NOT redundant against the free-text one. A self-key carrying a
+    character ``json.dumps`` escapes (a non-ASCII run id → ``\\uXXXX``) would slip the substring
+    test while exact identity still catches it, so the narrow arm stays as the robust one and the
+    wide arm extends it."""
     self_key = self_case_key(deps)
     return screen_list(
         payload,
-        keep=lambda t: t.get("status") == "closed" and t.get("key") != self_key,
+        keep=lambda t: (
+            t.get("status") == "closed"
+            and t.get("key") != self_key
+            and not _names_self_case(t, self_key)
+        ),
     )
 
 
@@ -345,16 +380,16 @@ def _screen_fetched_ticket(deps: AgentDeps, payload: Any) -> tuple[Any, int, str
     case's own key is withheld (Fork H — a business refusal, so it never trips the breaker; the
     one transitive answer-key path whose identifier this seam knows).
 
-    The predicate runs over the SERIALIZED WHOLE payload, not one field: the self-key may ride
-    in a resolution, a nested comment, or the key itself. That is strictly wider than gather's
-    identity-only screen, and deliberately so — gather correlates, the judge scores."""
+    Where ``list`` drops such an item and serves the rest, ``get`` has a single record to answer
+    with, so the whole read fails — under the distinguishable policy code, which is what buys the
+    audit trail its withhold-vs-404 split."""
     self_key = self_case_key(deps)
     return screen_get(
         payload,
         withhold=lambda ticket: (
             "the fetched ticket references the case under judgment; its content is withheld "
             "to keep the answer key unreadable."
-            if self_key in json.dumps(ticket, default=str) else None
+            if _names_self_case(ticket, self_key) else None
         ),
     )
 

@@ -374,6 +374,60 @@ def test_closed_ticket_naming_self_key_refused(tmp_path, field):
     assert "TKT-CONTENT-777" in run.all_text
 
 
+@pytest.mark.parametrize("field", ["resolution", "comments"])
+def test_listed_ticket_naming_self_key_dropped(tmp_path, field):
+    """[d31_self_key_payload_screen_on_list] (#683, merge gate) d25's screen was scoped to
+    `get`, so the judge's PRIMARY surface — the precedent search — could serve a sibling
+    closed ticket whose free text NAMES the case under judgment: the identical payload that
+    a confirm withholds. The gate ruled the asymmetry a defect (protected asset, higher
+    traffic), not a scoping the N-note had earned, so the same predicate now binds both
+    surfaces and the SAME fixture drives them.
+
+    The withhold SHAPE differs from `get`'s, per #684/F2's per-item resolution: this path
+    DROPS the naming item and serves its siblings from the same response, because faulting a
+    listing over one sibling's wording would gut O1's precedent search. So the demand is a
+    CONJUNCTION on the list call's own response — the drop AND the serve — and the listing
+    stays a success view rather than becoming d25's whole-read refusal.
+
+    The N-note's surviving half is a positive control: a sibling quoting some OTHER ticket's
+    key rides through unredacted, so this cannot be discharged by a screen that drops
+    anything key-shaped.
+
+    NOT parametrized over `key`: a listed item whose key IS the self-case is already excluded
+    by d24/V-A's identity filter, so that row would stay green against the get-scoped screen
+    this test exists to fail."""
+    rec = VerbRecorder()
+    listing = {"tickets": [
+        {"key": "SOC-OK", "status": "closed", "summary": "TKT-ITEM-CLOSED"},
+        _names_self(field),
+        {"key": "SOC-801", "status": "closed",
+         "summary": "see also open ticket 20260101T0000Z-other-case TKT-QUOTES-OTHER"},
+    ], "total": 9}   # the store's own count spans un-returned matches too
+    run = _drive(tmp_path, [_list(q="precedent"), DONE],
+                 registry=_ticket_registry(rec, lst=[("return", listing)]))
+    assert run.out.strip()
+    delta = _tool_delta(run)
+    assert "TKT-QUOTES-SELF" not in run.all_text, (
+        f"a listed sibling naming the self-case in `{field}` was served — the precedent "
+        "search still delivers what the confirm withholds"
+    )
+    assert "duplicate of in-flight" not in run.all_text, "the quoting free text leaked"
+    # The per-item arm, asserted as a conjunction on this call's own response: the drop does
+    # not cost the siblings, and the response is a SUCCESS view, not d25's refusal.
+    assert "TKT-ITEM-CLOSED" in delta, (
+        "the clean sibling was not served in the SAME response the naming item was dropped "
+        "from — a whole-listing fault is not the resolved per-item arm"
+    )
+    assert "exit=0" in delta, "the screened listing must still be a success view"
+    assert run.rows()[0]["exit_code"] == 0, "a per-item drop is not a fault"
+    assert not run.breaker().get("systems", {}).get("ticket", {}).get("failures")
+    # The N-note half still declined: an OTHER ticket's key rides wrapped, unredacted.
+    assert "TKT-QUOTES-OTHER" in delta
+    # #683 item 2: the envelope's count reports what was SERVED, not the store's count over
+    # matches it never returned — the sampled view prints `total` as confirmable precedents.
+    assert '"total": 2' in delta, "the screened listing advertises records it withheld"
+
+
 def test_list_response_non_closed_item_dropped_or_faulted(tmp_path):
     """[d24_list_item_recheck] (Fork G, §7-minted) The list path re-checks each returned
     item's status CLIENT-SIDE and drops or faults non-closed items before the envelope —
