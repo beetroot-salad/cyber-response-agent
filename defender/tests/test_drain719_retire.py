@@ -72,7 +72,10 @@ def test_folded_drain_rc_alphabet_after_the_pitfalls_fault_conversion(tmp_path: 
     )
     assert drain.run_batch(cfg=findings_fault) == 2
 
-    h.seed(paths.pitfalls, [h.row_for("pitfalls", f"r:l-{i:03d}:0") for i in range(2)])
+    # Enough rows to clear the curation threshold. Seeded below it, `run_pitfalls` returns
+    # before it ever reaches an agent — so the rc it was asked about was never produced, and
+    # the assertion passed over decision 1 path 1 instead of driving it.
+    h.seed(paths.pitfalls, [h.row_for("pitfalls", f"r:l-{i:03d}:0") for i in range(5)])
     with pytest.raises(author_shared.AuthorError):
         pitfalls_curator.run_pitfalls(paths=paths, invoke=lambda *a, **k: 7)
 
@@ -168,25 +171,51 @@ def test_a_faulted_batch_bumps_every_row_and_retires_only_the_ceiling_crossers(t
 
 
 def test_an_intervening_success_does_not_reset_the_attempt_count(tmp_path: Path):
-    """Decision 2: the count is LIFETIME. A row that failed, was authored successfully on a
-    later tick, was requeued, and failed again carries its whole history — being authored
-    once confers no exemption, and nothing on the success path clears the field."""
+    """Decision 2: the count is LIFETIME. A row that failed, rode through a tick that
+    succeeded, and failed again carries its whole history — a clean tick confers no
+    exemption, and nothing on the success path clears the field.
+
+    RE-STAGED, because the staging this was first written with is unreachable against the
+    real pre-author gate. It committed the row and requeued it with `hold_committed`, then
+    expected the NEXT tick to author and fault it again — but a row whose id is now in the
+    corpus is exactly what the idempotency gate exists to catch, so that tick consumed it
+    without ever reaching the agent and returned 0. Making it fault again would mean
+    re-authoring work already in the corpus, which is the behaviour decision 9's reconciling
+    tick demands the opposite of.
+
+    So the intervening success is a tick the agent HOLDS the row back from: it succeeds,
+    rotates, writes the held report, and leaves the row queued and still authorable. That is
+    the one shape in which a row can survive a clean tick and fail again — which is why this
+    runs on the findings channel, the only one with a held bucket."""
     paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "actor_observations")
-    h.seed(ch, [h.row_for("actor_observations", "a/0")])
+    ch = h.channel_of(paths, "findings")
+    h.write_source_refs(paths, "run-I")
+    h.seed(ch, [h.row_for("findings", "run-I/0")])
 
     fault = h.cfg_for(
         paths,
-        "actor_observations",
+        "findings",
         max_attempts=2,
         invoke_agent=h.raising(author_shared.AuthorError("first failure")),
     )
     assert drain.run_batch(cfg=fault) == 2
-    assert h.attempts_of(ch, "a/0") == 1
+    assert h.attempts_of(ch, "run-I/0") == 1
 
-    ok = h.cfg_for(paths, "actor_observations", max_attempts=2, invoke_agent=h.committing())
-    assert drain.run_batch(cfg=ok, hold_committed=True) == 0
-    assert h.attempts_of(ch, "a/0") == 1, "an authored-then-requeued row keeps its count"
+    def hold_back(rows, batch_id, cfg):
+        return {
+            "committed": [],
+            "consumed_skip": [],
+            "held_forward_bad": [
+                {"finding_id": r["finding_id"], "reason": "the forward check says no"}
+                for r in rows
+            ],
+            "commit_message": "",
+        }
+
+    ok = h.recording(hold_back)
+    assert drain.run_batch(cfg=h.cfg_for(paths, "findings", max_attempts=2, invoke_agent=ok)) == 0
+    assert len(ok.calls) == 1, "the successful tick never reached the agent"
+    assert h.attempts_of(ch, "run-I/0") == 1, "a clean tick reset the count"
 
     assert drain.run_batch(cfg=fault) == 2
     assert h.pending(ch) == []

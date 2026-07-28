@@ -339,7 +339,10 @@ def test_the_retire_set_is_the_same_on_findings_as_on_the_observation_channels(t
             paths, name, max_attempts=1, invoke_agent=h.raising(ModelRetry("killed"))
         )
         assert drain.run_batch(cfg=member) == 2, f"{name}: a member did not fault the batch"
-        member_seen[name] = (h.pending(ch), tuple(r["attempts"] for r in h.graveyard(ch)))
+        # `pending == []` rather than the pending list itself: the observable is "the queue
+        # was emptied", and a list of dicts cannot go in the set this compares across
+        # channels. As first written it raised TypeError before asserting anything.
+        member_seen[name] = (h.pending(ch) == [], tuple(r["attempts"] for r in h.graveyard(ch)))
 
         rows = [h.row_for(name, rid)]
         h.seed(ch, rows)
@@ -350,7 +353,7 @@ def test_the_retire_set_is_the_same_on_findings_as_on_the_observation_channels(t
             drain.run_batch(cfg=non_member)
         non_member_seen[name] = h.pending(ch) == rows
 
-    assert set(member_seen.values()) == {([], (1,))}, member_seen
+    assert set(member_seen.values()) == {(True, (1,))}, member_seen
     assert set(non_member_seen.values()) == {True}, non_member_seen
 
 
@@ -394,6 +397,10 @@ def test_non_member_systemic_faults_skip_retirement_and_git_error_does_not(tmp_p
     _unwedge_git(paths.repo_root)
 
     h.seed(ch, rows)
+    # Against the count this channel already carries, not against zero: the GitError probe
+    # above deliberately retired a row into this same graveyard, so the empty-graveyard
+    # spelling asserted that the earlier half of the test had not happened.
+    before = len(h.graveyard(ch))
     outside = h.cfg_for(
         paths,
         "actor_observations",
@@ -404,7 +411,7 @@ def test_non_member_systemic_faults_skip_retirement_and_git_error_does_not(tmp_p
     with pytest.raises(author_shared.AuthorError):
         drain.run_batch(cfg=outside)
     assert h.pending(ch) == rows
-    assert h.graveyard(ch) == []
+    assert len(h.graveyard(ch)) == before, "a member raised out of reach retired something"
 
 
 def test_the_retire_set_clauses_span_the_agent_call_through_the_corpus_commit_and_no_further(
@@ -587,6 +594,9 @@ def test_externally_killed_box_command_is_not_reported_as_a_successful_batch(tmp
 
     assert ModelRetry in tuple(drain.RETIRE_SET), "ModelRetry was dropped from the retire set"
     h.seed(ch, [h.row_for("actor_observations", "a/1")])
+    # The control batch above authored a/0 and consumed it, so the ledger is not empty here
+    # and never was: what this asserts is that the KILLED batch adds nothing to it.
+    consumed_before = len(h.consumed(ch))
     killed = h.cfg_for(
         paths,
         "actor_observations",
@@ -595,7 +605,9 @@ def test_externally_killed_box_command_is_not_reported_as_a_successful_batch(tmp
     )
     assert drain.run_batch(cfg=killed) != 0, "an absorbed kill is not a successful batch"
     assert h.attempts_of(ch, "a/1") == 1
-    assert h.consumed(ch) == [], "nothing was consumed by a batch that did not author"
+    assert len(h.consumed(ch)) == consumed_before, (
+        "nothing was consumed by a batch that did not author"
+    )
 
 
 # =======================================================================================
