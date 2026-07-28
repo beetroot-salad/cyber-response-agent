@@ -174,9 +174,10 @@ def _gate_observations(
             consumed_pre.append(rec)
             continue
         src = entry.get("source_run_dir", "")
-        if src and not resolve_run_bundle(cfg.runs_dir, src).is_dir():
+        bundle = resolve_run_bundle(cfg.runs_dir, src) if src else None
+        if bundle is not None and not bundle.is_dir():
             log(f"source bundle missing for observation {oid} "
-                f"(source_run_dir={src!r} → {resolve_run_bundle(cfg.runs_dir, src)}) — holding")
+                f"(source_run_dir={src!r} → {bundle}) — holding")
             rec = dict(entry)
             rec["held_reason"] = "source_bundle_missing"
             held.append(rec)

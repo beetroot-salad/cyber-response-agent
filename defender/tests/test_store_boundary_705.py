@@ -217,10 +217,10 @@ def test_the_store_is_unreachable_from_inside_the_box(tmp_path):
 
 
 def test_host_readers_do_not_dereference_a_symlink_out_of_the_run_dir(tmp_path):
-    """The real host collector — `lead_repository.stage_tables`, the
-    `shutil.copytree(..., symlinks=False)` at `lead_repository.py:203` — does not follow a
-    symlink out of the run dir: the store's bytes do not enter the staged tree, and a merely
-    DANGLING symlink does not abort the collection.
+    """The real host collector — `lead_repository.stage_tables` — does not follow a symlink out
+    of the run dir: the store's bytes do not enter the staged tree, and a merely DANGLING
+    symlink does not abort the collection. (Since #648 the collector goes further and refuses
+    to stage a link at all, rather than preserving it as one; either satisfies this demand.)
 
     adv:PO5b (executed): the box CAN write `run_dir/gather_raw/leak.db ->
     <sibling>/sessions/<case>.db` — creating it succeeds even though reading the target is

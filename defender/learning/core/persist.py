@@ -16,6 +16,7 @@ import yaml
 from defender._clock import now_iso
 from defender._text import is_content_less
 from defender._io import append_jsonl, read_jsonl_rows, write_atomic
+from defender._run_paths import artifact_file
 from defender.learning.core.config import (
     ADVERSARIAL_AUDIT_ONLY_FINDING_TYPES,
     BENIGN_AUDIT_ONLY_FINDING_TYPES,
@@ -24,6 +25,7 @@ from defender.learning.core.config import (
     LoopPaths,
     QueueChannel,
     RunPaths,
+    make_logger,
 )
 from defender.learning.core.validate import _benign_outcome_keyword, _outcome_keyword
 
@@ -176,6 +178,19 @@ _SHARED_COPY_ARTIFACTS = ("alert", "report", "investigation")
 
 _SHARED_INPUTS_LOCK = threading.Lock()
 
+_persist_log = make_logger("persist")
+
+
+def _refused(run_dir: Path, entries: list[Path]) -> None:
+    """A staging refusal is loud. It means the run's tree holds something the box's exit scrub
+    would have tainted the run for, so it is evidence about the run, not a copy detail — and
+    silence here would read downstream as a case that simply gathered nothing."""
+    for entry in entries:
+        _persist_log(
+            f"REFUSED to stage {entry} from {run_dir}: not a regular file or a real directory "
+            "(a run writes neither links nor special files; #648)"
+        )
+
 
 def _copy_shared_inputs(run_dir: Path, learning_run_dir: Path) -> None:
     learning_run_dir.mkdir(parents=True, exist_ok=True)
@@ -183,8 +198,12 @@ def _copy_shared_inputs(run_dir: Path, learning_run_dir: Path) -> None:
     with _SHARED_INPUTS_LOCK:
         for name in _SHARED_COPY_ARTIFACTS:
             src = getattr(src_paths, name)
-            if not src.is_file():
-                raise RunUnprocessable(f"missing source artifact for persist: {src}")
+            if not artifact_file(src):
+                # `is_file()` would answer about a link's TARGET and copy those bytes in under
+                # the artifact's name (#648) — the three named here are the ones the actor and
+                # the judge read as the case itself, so a link at one is fatal, not skippable.
+                raise RunUnprocessable(
+                    f"source artifact for persist is missing or is not a regular file: {src}")
             dst = getattr(dst_paths, name)
             if name == "investigation":
                 from defender.skills.invlang.validate import validate_companion
@@ -197,11 +216,13 @@ def _copy_shared_inputs(run_dir: Path, learning_run_dir: Path) -> None:
                     )
             shutil.copy2(src, dst)
         loaded = run_dir / "lessons_loaded.jsonl"
-        if loaded.is_file():
+        if artifact_file(loaded):
             shutil.copy2(loaded, learning_run_dir / "lessons_loaded.jsonl")
+        elif loaded.exists() or loaded.is_symlink():
+            _refused(run_dir, [loaded])
         from defender.learning import lead_repository
 
-        lead_repository.stage_tables(run_dir, learning_run_dir)
+        _refused(run_dir, lead_repository.stage_tables(run_dir, learning_run_dir))
 
 
 def _write_source_refs(

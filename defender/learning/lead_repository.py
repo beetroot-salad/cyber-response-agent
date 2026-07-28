@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 import yaml
 
 from defender._io import read_jsonl_rows, read_text_utf8
-from defender._run_paths import RunPaths, contained_payload
+from defender._run_paths import RunPaths, artifact_dir, artifact_file, contained_payload
 from defender.runtime.circuit_breaker import error_class_for_exit
 
 if TYPE_CHECKING:
@@ -187,17 +187,50 @@ def actor_view(run_dir: Path) -> dict:
 
 
 
-def stage_tables(src_run_dir: Path, dst_dir: Path) -> None:
+def stage_tables(src_run_dir: Path, dst_dir: Path) -> list[Path]:
+    """Copy the two tables into the learning run dir, refusing anything that is not a regular
+    file or a real directory. Returns what it refused, so the caller can say so out loud.
+
+    Only real artifacts cross this boundary (#648). The run dir is the box's rw bind, so a link
+    planted at an artifact's name would otherwise have its TARGET copied in — the escape
+    happens here, at the copy, and after it the planted bytes are an ordinary in-run file that
+    no read-time gate can distinguish. A boxed run whose tree holds a link never reaches this
+    point (the exit scrub taints it), so a refusal here means the tree skipped that scrub.
+
+    Refusing rather than aborting: a dangling link left in the gather tree must not cost the
+    run its whole learning pass (#705), and every consumer already tolerates a missing payload.
+    """
     src_run_dir = Path(src_run_dir)
     dst_dir = Path(dst_dir)
     dst_dir.mkdir(parents=True, exist_ok=True)
+    refused: list[Path] = []
     queries_src = RunPaths(src_run_dir).executed_queries
-    if queries_src.is_file():
+    if artifact_file(queries_src):
         shutil.copy2(queries_src, RunPaths(dst_dir).executed_queries)
+    elif queries_src.exists() or queries_src.is_symlink():
+        refused.append(queries_src)
     gather_src = RunPaths(src_run_dir).gather_raw
-    if gather_src.is_dir():
+    if artifact_dir(gather_src):
+        # `symlinks=True` alongside the ignore hook: the hook decides from an `lstat` taken
+        # before the copy, so the flag is what keeps a link planted inside that window from
+        # being dereferenced anyway.
         shutil.copytree(gather_src, RunPaths(dst_dir).gather_raw, symlinks=True,
-                       dirs_exist_ok=True)
+                       ignore=_refuse_non_artifacts(refused), dirs_exist_ok=True)
+    elif gather_src.exists() or gather_src.is_symlink():
+        refused.append(gather_src)
+    return refused
+
+
+def _refuse_non_artifacts(refused: list[Path]):
+    """`copytree`'s ignore hook, recording as it goes: drops every entry at every depth that is
+    not a regular file or a real directory."""
+    def _ignore(directory, names):
+        here = Path(directory)
+        dropped = {n for n in names
+                   if not (artifact_file(here / n) or artifact_dir(here / n))}
+        refused.extend(here / n for n in sorted(dropped))
+        return dropped
+    return _ignore
 
 
 
