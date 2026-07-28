@@ -138,15 +138,71 @@ CREATE TABLE IF NOT EXISTS session_head_log (
     reason TEXT NOT NULL
 ) STRICT;
 
-CREATE VIEW IF NOT EXISTS gather_boundary AS
+-- gather_boundary — the danger-lens surface, scoped to each session's PATH from its
+-- recorded head (#753 / FK16). `session_id` names the session whose conversation the row
+-- is on, NOT the session that happens to own the row: a fork therefore sees the prefix it
+-- inherited, because its defender genuinely holds those turns, and a folded session stops
+-- seeing the turns the fold displaced, because they are reachable from nothing. Session
+-- scoping falls out of that — no read can serve one session another's leads — so a caller
+-- adding `WHERE session_id = ?` is CHOOSING a session, not repairing the view.
+--
+-- The walk is by rowid and `extract_lead_id` still runs only on `kind='response'` rows, so
+-- the added cost is small next to the per-row Python extraction: measured 53.6 ms -> 66.5 ms
+-- for a 2200-row session read out of a file also holding 20 gather legs. Two caveats C16's
+-- number does NOT cover. The recursion itself is NOT narrowed — parents chain THROUGH
+-- request rows, so every row on every path is visited whatever the outer predicate, and a
+-- caller's `session_id` cannot be pushed into it. And a shared prefix is walked (and its
+-- leads extracted) once per DESCENDANT on an unscoped read: N forks off an L-row prefix
+-- cost N*L, not L. Both are bounded by the per-case file, which is one case's run.
+--
+-- `UNION` (not `UNION ALL`) is the recursion's cycle guard: a looped parent chain repeats
+-- a (session, message, parent) triple and the duplicate is discarded, so a corrupted file
+-- ends the walk instead of hanging the reader. The view therefore DEGRADES on a cycle
+-- (each row in the ring, once) where `_walk_parents` FAILS CLOSED (`CyclicParentChain`) —
+-- deliberate: a lens that hangs is worse than one that over-reports, and the reader that
+-- projects the conversation is the one that must refuse.
+--
+-- A phantom `parent_id` — an id no `message` row resolves, reachable only by direct file
+-- damage — is the SECOND asymmetry, and it runs the other way from the cycle one: the
+-- recursion's `JOIN` simply finds nothing, so the walk stops early and the view silently
+-- serves a TRUNCATED path, under-reporting leads. `_walk_parents` terminates there too,
+-- but its read-side callers fail closed on it (`UnresolvablePathElement`). Stated here
+-- because a lens that quietly drops rows is the failure a reader cannot see.
+--
+-- Dropped and rebuilt on every open rather than `IF NOT EXISTS`: a view holds no data,
+-- and #753 redefined this one after #744 shipped it unscoped. `IF NOT EXISTS` would have
+-- left a file created in between serving the old, unscoped definition forever, with the
+-- reader given no signal — the exact trap the redefinition exists to disarm.
+--
+-- The rebuild is ONE transaction, not two statements. Every `open_store` runs this script,
+-- and two of them race on a per-case file the moment concurrent gather legs each open their
+-- own handle: unwrapped, both DROP, then both CREATE, and the loser dies on `view
+-- gather_boundary already exists`. A concurrent reader querying the view inside the same
+-- window gets `no such table: gather_boundary`. `BEGIN IMMEDIATE` closes both: the losing
+-- opener waits out `busy_timeout` and then finds the view already correct, and no reader
+-- can observe the gap between the DROP and the CREATE.
+BEGIN IMMEDIATE;
+DROP VIEW IF EXISTS gather_boundary;
+CREATE VIEW gather_boundary AS
+WITH RECURSIVE session_path(session_id, message_id, parent_id) AS (
+    SELECT s.session_id, m.id, m.parent_id
+    FROM session s
+    JOIN message m ON m.id = s.head_message_id
+    UNION
+    SELECT sp.session_id, m.id, m.parent_id
+    FROM session_path sp
+    JOIN message m ON m.id = sp.parent_id
+)
 SELECT
     m.id AS message_id,
-    m.session_id AS session_id,
+    sp.session_id AS session_id,
     m.kind AS kind,
     extract_lead_id(p.payload) AS lead_id
-FROM message m
+FROM session_path sp
+JOIN message m ON m.id = sp.message_id
 JOIN message_payload p ON p.message_id = m.id
 WHERE m.kind = 'response';
+COMMIT;
 """
 
 
@@ -369,12 +425,17 @@ class StoreHandle:
 
 
 def _walk_parents(conn: sqlite3.Connection, tip: int) -> list[int]:
-    """Tip-to-root row ids, refusing a cyclic chain. The one walk both the reader
+    """Tip-to-root row ids, refusing a cyclic chain. The one PYTHON walk both the reader
     (`path_row_ids`) and the writer (`append`'s write-time cycle guard) go through, so a
     corrupted chain cannot stay invisible at write time and surface only later, at read
     time. Terminates cleanly (and returns a phantom id as the path's oldest element,
     rather than raising) when an id along the chain resolves no `message` row — the
-    read-side callers (`hydrate`, `synthesized_flags`) are what fail closed on that."""
+    read-side callers (`hydrate`, `synthesized_flags`) are what fail closed on that.
+
+    `gather_boundary`'s `WITH RECURSIVE` (in `DDL`) is a SECOND implementation of this
+    same walk, in SQL, and it is deliberately weaker on both corruption shapes: a cycle
+    degrades instead of raising, and a phantom id truncates the path silently. Any change
+    to the traversal rule here has to be made there too — they are not one walk."""
     ids: list[int] = []
     seen: set[int] = set()
     current: int | None = tip
@@ -638,11 +699,18 @@ def open_store(*, case_id: str, runs_base: Path) -> StoreHandle:
 def open_store_for_read(store_path: Path) -> StoreHandle:
     """Open an EXISTING store file for reading only — never creates one.
 
-    `open_store` deliberately creates-if-missing (the writer's DDL is `IF NOT EXISTS`);
-    a reader (the visualizer, run after the fact from just a `run_dir`) must fail closed
+    `open_store` deliberately creates-if-missing (its table DDL is `IF NOT EXISTS`); a
+    reader (the visualizer, run after the fact from just a `run_dir`) must fail closed
     instead of silently conjuring an empty database where a real one used to be. It is
     also the only opener that ever meets a file it did not create, so it refuses a stale
-    version exactly as `open_store` does, at the same pre-DDL, pre-WAL point."""
+    version exactly as `open_store` does, at the same pre-DDL, pre-WAL point.
+
+    RESIDUE (#753): this opener issues NO DDL at all, and `SCHEMA_VERSION` did not move
+    when `gather_boundary` was rescoped — so a file whose last WRITER was pre-#753 still
+    carries the old, unscoped view definition, and this path will serve it with no signal
+    that its `session_id` column means the owning session rather than the session whose
+    path the row is on. Nothing reads the view through here today; #696 goes through
+    `open_store`, which rebuilds it. A reader added here must rebuild it first."""
     store_path = Path(store_path)
     if not store_path.is_file():
         raise FileNotFoundError(f"session store not found: {store_path}")
