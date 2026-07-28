@@ -250,8 +250,13 @@ class StoreHandle:
         separate fallback column left to consult — and its own `session_head_log` entry,
         both inside one `BEGIN IMMEDIATE`: a fault between the two writes would leave a
         session with a head and no branch-point record, exactly the unreachable-lineage-
-        without-a-record state the design forbids. `last_render_len` is set to the length
-        of the inherited prefix so the first `ingest` does not re-append it (PR-24)."""
+        without-a-record state the design forbids. `last_render_len` is seeded to the
+        SEND-role length of the inherited prefix (the same length `render()` would compute
+        via `hydrate(..., role="send")`), not the raw row count: if `at_message_id` is
+        itself a response with an unresolved tool call — the natural boundary for a
+        dispatched sub-agent — the raw count over-counts by one against what `ingest`'s
+        `last_render_len` bookkeeping treats as already-rendered, which would misclassify
+        the fork's own first live tail (or raise `IngestTailUnderflow` outright)."""
         new_id = uuid.uuid4().hex
         conn = self.connection
         conn.execute("BEGIN IMMEDIATE")
@@ -262,7 +267,12 @@ class StoreHandle:
                 (session_id,)).fetchone()
             case_id = row[0] if row else self.case_id
             agent_id = row[1] if row else None
-            prefix_len = len(_walk_parents(conn, at_message_id))
+            prefix_ids = _walk_parents(conn, at_message_id)
+            prefix_ids.reverse()
+            prefix_payloads = _fetch_payloads(conn, prefix_ids)
+            _require_resolved(prefix_ids, prefix_payloads)
+            prefix_messages = [_message_from_payload(prefix_payloads[i]) for i in prefix_ids]
+            prefix_len = _complete_prefix_len(prefix_messages)
             conn.execute(
                 "INSERT INTO session (session_id, case_id, parent_session_id, agent_id, "
                 "head_message_id, truncated_by, last_render_len) "
@@ -299,7 +309,7 @@ class StoreHandle:
         conn.execute("BEGIN IMMEDIATE")
         committed = False
         try:
-            prev_head, first_parent, is_linear = _classify_move(
+            prev_head, first_parent, _is_linear = _classify_move(
                 conn, session_id, parent_id=parent_id, reason=reason, synthesized=synthesized)
             ids: list[int] = []
             pid = first_parent
@@ -313,7 +323,7 @@ class StoreHandle:
                 )
                 ids.append(pid)
             _move_head(conn, session_id, prev_head=prev_head, new_head=ids[-1],
-                      attached_to=first_parent, is_linear=is_linear, reason=reason)
+                      attached_to=first_parent, reason=reason)
             conn.execute("COMMIT")
             committed = True
             conn.execute("SELECT 1")
@@ -500,13 +510,17 @@ def _classify_move(
     return prev_head, first_parent, is_linear
 
 
-def _move_head(  # noqa: PLR0913 — the log row's full coordinate set
+def _move_head(
     conn: sqlite3.Connection, session_id: str, *, prev_head: int | None, new_head: int,
-    attached_to: int | None, is_linear: bool, reason: str | None,
+    attached_to: int | None, reason: str | None,
 ) -> None:
+    """`is_linear` is deliberately NOT a parameter here: it is `attached_to == prev_head`,
+    already known from those two — carrying it separately would let a caller pass a value
+    that disagrees with the very fields it derives from."""
     conn.execute(
         "UPDATE session SET head_message_id = ? WHERE session_id = ?",
         (new_head, session_id))
+    is_linear = attached_to == prev_head
     if not is_linear or reason is not None:
         conn.execute(
             "INSERT INTO session_head_log (session_id, from_message_id, "
@@ -709,14 +723,32 @@ def branch_point(store: Any, session_id: str) -> int | None:
     return row[0] if row is not None else None
 
 
+def main_session_id(store: Any, *, agent_id: str = "main") -> str:
+    """The ROOT-OF-LINEAGE session for `agent_id` in this store: never an ordering pick.
+
+    A forked session inherits its parent's `agent_id`, so it can carry `agent_id='main'`
+    too and sort ahead of the session it forked from — an ORDER-BY-anything fallback would
+    silently resolve the wrong lineage. Raises on zero or more than one match: failing
+    loudly is the one failure a caller of this can afford, since picking one would render
+    (or otherwise act on) the wrong session's history without any signal that it did."""
+    rows = store.connection.execute(
+        "SELECT session_id FROM session WHERE agent_id = ? AND parent_session_id IS NULL",
+        (agent_id,),
+    ).fetchall()
+    if len(rows) != 1:
+        raise ValueError(
+            f"expected exactly one root-of-lineage {agent_id!r} session; found {len(rows)}")
+    return rows[0][0]
+
+
 # --------------------------------------------------------------------------
 # the one role-scoped reader
 # --------------------------------------------------------------------------
 
 def _check_schema_version(store: Any) -> None:
-    version = store.connection.execute("PRAGMA user_version").fetchone()[0]
-    if version != SCHEMA_VERSION:
-        raise UnknownSchemaVersion(f"store reports schema version {version}")
+    """Same refusal `_refuse_stale_version` makes at open time, re-checked at read time
+    against the handle actually in hand — one comparison, not two copies of it."""
+    _refuse_stale_version(store.connection)
 
 
 def _fetch_message_rows(conn: sqlite3.Connection, ids: list[int]) -> dict[int, dict]:

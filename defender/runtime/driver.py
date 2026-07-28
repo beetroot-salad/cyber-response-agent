@@ -452,6 +452,19 @@ def _default_store_factory(case_id: str, run_dir: Path) -> Any:
     return session_store.open_store(case_id=case_id, runs_base=run_dir.parent)
 
 
+def _run_summary(  # noqa: PLR0913 — one dict literal's full field set, named once
+    *, output: Any, model_name: str | None, requests: int, truncated_by: str | None,
+    exit_reason: str | None, case_id: str, store_path: Any,
+) -> dict:
+    """The one shape `run_investigation` returns through, on every exit — setup-failure
+    and the normal end alike — so the two exits cannot drift apart on a field name."""
+    return {
+        "output": output, "model": model_name, "requests": requests,
+        "truncated_by": truncated_by, "exit_reason": exit_reason,
+        "case_id": case_id, "store_path": store_path,
+    }
+
+
 def _flush_run_end(run: Any, store: Any, session_id: str, truncated_by: str | None) -> None:
     """R11's true `finally`: capture the terminal exchange (whatever `run` actually holds
     on ANY exit, clean or not) and stamp `truncated_by`, both best-effort so a broken
@@ -555,22 +568,33 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
 
     case_id = uuid.uuid4().hex
     factory = store_factory if store_factory is not None else _default_store_factory  # lint-default: ok — DI seam owning its default (R12's fifth seam)
+    store = None
     try:
         store = factory(case_id, run_dir)
         session_store.write_case_pointer(run_dir, case_id=case_id, store_path=store.path)
         session_id = store.new_session(agent_id="main")
-    except (sqlite3.Error, session_store.StoreError) as e:
+    except (sqlite3.Error, session_store.StoreError, OSError) as e:
         # FK-G: the store is opened during SETUP, outside `_drive_agent`'s own handler —
-        # so without this, a stale-version file takes the whole process down instead of
-        # ending the run through the same handled `truncated_by="store"` exit. Not one
-        # model turn is driven.
+        # so without this, a stale-version file (or a plain filesystem fault: an unwritable
+        # run_dir/runs_base for the pointer write or the store's own mkdir) takes the whole
+        # process down instead of ending the run through the same handled
+        # `truncated_by="store"` exit. Not one model turn is driven.
         print(f"[run.py] store setup failed ({e!r}); ending the run", file=sys.stderr)
+        if store is not None:
+            # `factory()` can succeed — a live connection, DDL already run — and a LATER
+            # call in this same try (`write_case_pointer`, `new_session`) still fail;
+            # without this the connection (and its WAL/-shm sidecars) is never closed.
+            try:
+                store.close()
+            except Exception as close_err:  # noqa: BLE001 — best-effort on an already-failing path
+                print(f"[run.py] store close after setup failure also failed "
+                      f"({close_err!r})", file=sys.stderr)
         logger.close()
-        return {
-            "output": None, "model": model_name, "requests": logger.n_requests,
-            "truncated_by": "store", "exit_reason": type(e).__name__,
-            "case_id": case_id, "store_path": None,
-        }
+        return _run_summary(
+            output=None, model_name=model_name, requests=logger.n_requests,
+            truncated_by="store", exit_reason=type(e).__name__,
+            case_id=case_id, store_path=None,
+        )
 
     agent = build_agent(
         defender_dir, logger, make_model, main_model=model_name, verbs=verbs, limits=limits,
@@ -595,8 +619,8 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
         (run_dir / "tool_trace.jsonl").write_text("", encoding="utf-8")
     logger.close()
     output = result.output if result is not None else None
-    return {
-        "output": output, "model": model_name, "requests": logger.n_requests,
-        "truncated_by": truncated_by, "exit_reason": exit_reason,
-        "case_id": case_id, "store_path": store.path,
-    }
+    return _run_summary(
+        output=output, model_name=model_name, requests=logger.n_requests,
+        truncated_by=truncated_by, exit_reason=exit_reason,
+        case_id=case_id, store_path=store.path,
+    )

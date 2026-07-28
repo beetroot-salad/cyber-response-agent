@@ -316,19 +316,11 @@ def _main_session_analysis(run_dir: Path) -> list[tuple[Any, str]]:
     store_path = ss.resolve_store_path(run_dir)
     store = ss.open_store_for_read(store_path)
     try:
-        # The ROOT-OF-LINEAGE main session: `agent_id = 'main'` AND `parent_session_id IS
-        # NULL` — never an ordering pick (FK-F). A forked main session also carries
-        # agent_id 'main' and can sort ahead of the session it forked from, so an
-        # ORDER-BY-anything fallback would silently render the wrong transcript; failing
-        # loudly on zero or more than one match is the one failure this reader can afford.
-        rows = store.connection.execute(
-            "SELECT session_id FROM session WHERE agent_id = 'main' "
-            "AND parent_session_id IS NULL"
-        ).fetchall()
-        if len(rows) != 1:
-            raise ValueError(
-                f"expected exactly one root-of-lineage main session; found {len(rows)}")
-        session_id = rows[0][0]
+        # The ROOT-OF-LINEAGE main session (FK-F) — `session_store.main_session_id` owns
+        # the schema knowledge (`agent_id`/`parent_session_id`) this used to duplicate here
+        # as inline SQL, alongside this same PR's other lineage readers (`branch_point`,
+        # `displaced_tip`, `fold_history`).
+        session_id = ss.main_session_id(store)
         messages = ss.hydrate(store, session_id, role="analysis")
         coords = ss.hydrate(store, session_id, role="actor")
         return list(zip(messages, [c["coord"] for c in coords], strict=True))
