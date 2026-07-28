@@ -138,13 +138,49 @@ CREATE TABLE IF NOT EXISTS session_head_log (
     reason TEXT NOT NULL
 ) STRICT;
 
-CREATE VIEW IF NOT EXISTS gather_boundary AS
+-- gather_boundary — the danger-lens surface, scoped to each session's PATH from its
+-- recorded head (#753 / FK16). `session_id` names the session whose conversation the row
+-- is on, NOT the session that happens to own the row: a fork therefore sees the prefix it
+-- inherited, because its defender genuinely holds those turns, and a folded session stops
+-- seeing the turns the fold displaced, because they are reachable from nothing. Session
+-- scoping falls out of that — no read can serve one session another's leads — so a caller
+-- adding `WHERE session_id = ?` is CHOOSING a session, not repairing the view.
+--
+-- The walk is by rowid and the `kind='response'` narrowing C16 measured is unchanged, so
+-- the added cost is small next to the per-row Python extraction: measured 53.6 ms -> 66.5 ms
+-- for a 2200-row session read out of a file also holding 20 gather legs. A caller's
+-- `session_id` cannot be pushed into the recursion, so every session's path is walked
+-- whatever the predicate — bounded by the per-case file, which is one case's run.
+--
+-- `UNION` (not `UNION ALL`) is the recursion's cycle guard: a looped parent chain repeats
+-- a (session, message, parent) triple and the duplicate is discarded, so a corrupted file
+-- ends the walk instead of hanging the reader. The view therefore DEGRADES on a cycle
+-- (each row in the ring, once) where `_walk_parents` FAILS CLOSED (`CyclicParentChain`) —
+-- deliberate: a lens that hangs is worse than one that over-reports, and the reader that
+-- projects the conversation is the one that must refuse.
+--
+-- Dropped and rebuilt on every open rather than `IF NOT EXISTS`: a view holds no data,
+-- and #753 redefined this one after #744 shipped it unscoped. `IF NOT EXISTS` would have
+-- left a file created in between serving the old, unscoped definition forever, with the
+-- reader given no signal — the exact trap the redefinition exists to disarm.
+DROP VIEW IF EXISTS gather_boundary;
+CREATE VIEW gather_boundary AS
+WITH RECURSIVE session_path(session_id, message_id, parent_id) AS (
+    SELECT s.session_id, m.id, m.parent_id
+    FROM session s
+    JOIN message m ON m.id = s.head_message_id
+    UNION
+    SELECT sp.session_id, m.id, m.parent_id
+    FROM session_path sp
+    JOIN message m ON m.id = sp.parent_id
+)
 SELECT
     m.id AS message_id,
-    m.session_id AS session_id,
+    sp.session_id AS session_id,
     m.kind AS kind,
     extract_lead_id(p.payload) AS lead_id
-FROM message m
+FROM session_path sp
+JOIN message m ON m.id = sp.message_id
 JOIN message_payload p ON p.message_id = m.id
 WHERE m.kind = 'response';
 """
