@@ -1,5 +1,5 @@
 {
-  "project": "defender \u2014 an LLM SOC-analyst agent (python, pytest, uv)",
+  "project": "defender — an LLM SOC-analyst agent (python, pytest, uv)",
   "gate": {
     "ciConfig": ".github/workflows/ci.yml",
     "test": "cd defender && uv run pytest tests/ -m \"not llm and not live\"",
@@ -7,15 +7,15 @@
       "defender/.venv/bin/ruff check . --select E,F --ignore E402,E501",
       "defender/.venv/bin/ruff check defender",
       "defender/.venv/bin/mypy --config-file defender/pyproject.toml",
-      "the baseline-ratcheted custom lints under scripts/lint/lint_*.py (monkeypatch, unsafe-jsonl-io, raw-git-subprocess, unanchored-default, vulture, duplicate-helpers, \u2026) \u2014 each blocks only on a NEW finding, and each documents an inline-suppression escape hatch in its own module"
+      "the baseline-ratcheted custom lints under scripts/lint/lint_*.py (monkeypatch, unsafe-jsonl-io, raw-git-subprocess, unanchored-default, vulture, duplicate-helpers, …) — each blocks only on a NEW finding, and each documents an inline-suppression escape hatch in its own module"
     ],
-    "notes": "`.github/workflows/ci.yml` is the source of truth \u2014 run what it runs; don't trust this list to stay current. Running in a git worktree? The shared `.venv` editable install points at the main checkout \u2014 prepend `PYTHONPATH=<worktree-root>` to the pytest call or you test the wrong tree."
+    "notes": "`.github/workflows/ci.yml` is the source of truth — run what it runs; don't trust this list to stay current. Running in a git worktree? The shared `.venv` editable install points at the main checkout — prepend `PYTHONPATH=<worktree-root>` to the pytest call or you test the wrong tree."
   },
   "tests": {
     "language": "python",
     "dir": "defender/tests",
-    "harness": "defender/tests/e2e/_replay_harness.py \u2014 a new scenario is a few lines of `Turn(...)`, not fresh plumbing. Build on it rather than inventing parallel machinery.",
-    "idioms": "Fakes enter through the entry point's injection seams (a `deps` parameter, a constructor argument), never `monkeypatch.setattr` \u2014 CI ratchets new setattr sites (`scripts/lint/lint_monkeypatch.py`)."
+    "harness": "defender/tests/e2e/_replay_harness.py — a new scenario is a few lines of `Turn(...)`, not fresh plumbing. Build on it rather than inventing parallel machinery.",
+    "idioms": "Fakes enter through the entry point's injection seams (a `deps` parameter, a constructor argument), never `monkeypatch.setattr` — CI ratchets new setattr sites (`scripts/lint/lint_monkeypatch.py`)."
   },
   "specGraph": {
     "artifacts": "defender/tests/**/spec_graph_*.yaml",
@@ -73,7 +73,7 @@
           "defender/learning/core/persist.py::_append_observations",
           "defender/learning/core/persist.py::append_pitfalls",
           "defender/learning/author/drain.py::retire",
-          "defender/learning/author/drain.py::stuck_report_file"
+          "defender/learning/author/drain.py::_record_stuck"
         ],
         "readers": [
           "defender/learning/author/drain.py::_tick",
@@ -111,7 +111,7 @@
   },
   "conventions": {
     "defaultBranch": "main",
-    "dangerLens": "adversarial input \u2014 alert data is attacker-influenced by definition, and malicious input is well-formed on purpose. Use this as write-tests' fourth enumeration lens unless the change's danger zone is clearly elsewhere (environment/resource, or concurrency when the design admits parallel invocation)."
+    "dangerLens": "adversarial input — alert data is attacker-influenced by definition, and malicious input is well-formed on purpose. Use this as write-tests' fourth enumeration lens unless the change's danger zone is clearly elsewhere (environment/resource, or concurrency when the design admits parallel invocation)."
   },
   "codeGraph": {
     "tool": "pyrefly",

@@ -36,7 +36,7 @@ class CorpusAuthorConfig:
     The two drains — `author/curator.py` (the actor/environment curators) and
     `author/lessons/run.py` (the lessons curator) — used to carry the same fields under
     divergent names: `corpus_dir` vs `lessons_dir`, `channel.file` vs `pending_file`. Both
-    fed the SAME `shared.run_batch_envelope`, so the divergence bought nothing and cost a
+    fed the SAME batch envelope, so the divergence bought nothing and cost a
     20-parameter adapter at `curator_engine.run_curator_stage` to normalize between them.
 
     Subclassed rather than composed, for the reason `LoopPaths(DefenderPaths)` gives: an

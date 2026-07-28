@@ -6,7 +6,7 @@ import json
 import random
 import re
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from pathlib import Path
 from uuid import uuid4
 from typing import Any
@@ -50,15 +50,6 @@ def release_repo_lock(fh: Any) -> None:
         fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
     finally:
         fh.close()
-
-
-@contextlib.contextmanager
-def repo_lock(lock_file: Path, *, timeout_seconds: int) -> Iterator[Any]:
-    fh = acquire_repo_lock(lock_file, timeout_seconds=timeout_seconds)
-    try:
-        yield fh
-    finally:
-        release_repo_lock(fh)
 
 
 def acquire_flock(path: Path) -> Any | None:
@@ -298,36 +289,6 @@ def verify_agent_state(
         )
 
 
-
-
-def run_batch_envelope(
-    *,
-    queue_lock_file: Path,
-    repo_lock_file: Path,
-    repo_lock_wait_seconds: int,
-    repo_root: Path,
-    corpus_dir: Path,
-    corpus_dir_rel: str,
-    log: Callable[[str], None],
-    inner: Callable[[], int],
-) -> int:
-    queue_lock = acquire_flock(queue_lock_file)
-    if queue_lock is None:
-        log("queue lock held by another process — skipping this tick")
-        return 0
-    try:
-        with repo_lock(repo_lock_file, timeout_seconds=repo_lock_wait_seconds):
-            try:
-                assert_clean_corpus_dir(repo_root, corpus_dir, corpus_dir_rel)
-            except AuthorError as e:
-                log(f"FATAL: {e}")
-                return 2
-            return inner()
-    except TimeoutError as e:
-        log(f"repo lock unavailable: {e}; queue intact")
-        return 0
-    finally:
-        release_flock(queue_lock)
 
 
 _MANIFEST_PROVENANCE_DROP = frozenset(

@@ -5,6 +5,7 @@ import fcntl
 import json
 import shutil
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -30,22 +31,50 @@ from defender.learning.core.validate import _benign_outcome_keyword, _outcome_ke
 
 
 @contextlib.contextmanager
-def queue_lock(lock_path: Path):
-    """Blocking exclusive hold of a queue's append-role lock.
+def queue_lock(lock_path: Path, *, timeout_seconds: int | None = None):
+    """Exclusive hold of a queue's append-role lock.
 
-    Public because the folded drain (#719) reaches it for the retire seam's read/graveyard
-    window; the unbounded wait is deliberate there, where the drain's own read uses the
-    deadline-bounded acquisition instead."""
+    APPENDERS pass no deadline and wait forever: an append that gave up would lose the row
+    it is carrying, and an appender waits on nothing but other appenders and the short
+    rewrite window.
+
+    THE DRAIN passes one, and must. It reaches this while holding the repo lock, which
+    globally serialises all four corpus channels — so a wedged appender on one channel's
+    lock would otherwise stall every sibling channel's tick with no bound at all, which is
+    the failure the drain's own deadline-bounded read exists to prevent. Expiry raises
+    `TimeoutError`, deliberately NOT a member of the drain's retire set: the batch is stuck
+    and recorded, never bumped, because a busy lock is not the batch's fault."""
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     fh = lock_path.open("a+", encoding="utf-8")
     try:
-        fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+        if timeout_seconds is None:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+        else:
+            _flock_within(fh, lock_path, timeout_seconds)
+    except BaseException:
+        fh.close()
+        raise
+    try:
         yield
     finally:
         try:
             fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
         finally:
             fh.close()
+
+
+def _flock_within(fh: Any, lock_path: Path, timeout_seconds: int) -> None:
+    deadline = time.monotonic() + max(1, timeout_seconds)
+    while True:
+        try:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return
+        except BlockingIOError as exc:
+            if time.monotonic() >= deadline:
+                raise TimeoutError(
+                    f"queue lock {lock_path} held by an appender for >{timeout_seconds}s"
+                ) from exc
+            time.sleep(0.05)
 
 
 #: The pre-#719 spelling, kept so in-module callers and the suites that drive the real
@@ -101,9 +130,10 @@ def rotate_queue_locked(
     held: list[dict],
     consumed: list[dict],
     commit_sha: str | None,
+    timeout_seconds: int | None = None,
 ) -> None:
     pending_file.parent.mkdir(parents=True, exist_ok=True)
-    with queue_lock(lock_file):
+    with queue_lock(lock_file, timeout_seconds=timeout_seconds):
         _rewrite_queue(pending_file, consumed_file, id_key, held, consumed, commit_sha)
 
 

@@ -88,6 +88,14 @@ systemic re-raise set the marker and pitfalls legs use, so one class is
 classified two ways depending on the channel. Add a base class here and you
 change the marker legs' behaviour; you do not change the corpus authors'.
 
+**Membership is by ORIGIN as well as by class there.** `GitError` is a member
+because a failed corpus commit is the batch's problem; the same class raised by
+a git command the drain used to *read* repo state is not, and arrives as
+`GitProbeError` — outside the set, so the batch keeps its attempt count and the
+tick is recorded as stuck. Without the split, an index-lock collision during a
+read-only probe spent one of a healthy batch's three lives, and a permanent
+repo misconfiguration retired correct work in three ticks.
+
 `_process_marker`'s
 broad guard is unchanged (it still catches `RunUnprocessable` → quarantine); its
 asymmetry comment retargets: `run_one` raises no `StageAbort`, so no re-raise

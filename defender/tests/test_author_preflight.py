@@ -12,8 +12,8 @@ from defender.learning.author import shared
 def test_lock_refuses_concurrent_run(tmp_repo, helpers):
     """A second author tick exits cleanly while the first holds the queue lock.
 
-    The author drives this through ``shared.run_batch_envelope``; the lock primitive
-    is ``shared.acquire_flock`` on the cfg's queue lock-file."""
+    The author drives this through the shared drain body's drain-role gate; the lock
+    primitive is ``shared.acquire_flock`` on the channel's drain lock-file."""
     lock_file = tmp_repo.cfg.channel.drain_lock
     fh = shared.acquire_flock(lock_file)
     assert fh is not None
