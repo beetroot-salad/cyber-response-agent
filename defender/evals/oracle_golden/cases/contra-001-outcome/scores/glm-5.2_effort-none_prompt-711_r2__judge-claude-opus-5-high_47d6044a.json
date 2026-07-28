@@ -1,0 +1,31 @@
+{
+  "tag": "glm-5.2_effort-none_prompt-711_r2__judge-claude-opus-5-high_47d6044a",
+  "projection": "glm-5.2_effort-none_prompt-711_r2.yaml",
+  "case": "contra-001-outcome",
+  "kind": "contradiction",
+  "judge": {
+    "model": "claude-opus-5",
+    "effort": "high",
+    "prompts_sha8": "47d6044a"
+  },
+  "n_leads": 9,
+  "mechanical": {
+    "missing_leads": [],
+    "unscored_leads": [],
+    "duplicate_leads": [],
+    "malformed_leads": {},
+    "forbidden_emitted": [
+      "success"
+    ],
+    "concrete_value_leads": [
+      "l-001",
+      "l-002",
+      "l-004",
+      "l-006"
+    ],
+    "expectation_failures": []
+  },
+  "judged": false,
+  "rows": [],
+  "why_unjudged": "a contradiction case reuses its base's envelopes and changes only the story, so the story it tells was never fired and no telemetry was ever captured for it. There is nothing to grade a projection against; it is scored by the mechanical checks alone."
+}

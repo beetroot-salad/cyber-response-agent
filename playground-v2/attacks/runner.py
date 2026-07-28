@@ -201,6 +201,7 @@ def run_scenario(
     overrides: dict[str, Any],
     dry_run: bool,
     cr_mode: str = "none",
+    runs_dir: Path | None = None,
 ) -> tuple[str, Path, list[dict]]:
     intensity = int(overrides.get("intensity") or scenario.get("default_intensity", 1))
     source_user = overrides.get("user") or scenario.get("source_user", "root")
@@ -213,7 +214,10 @@ def run_scenario(
     source_host_resolved = overrides.get("source") or scenario.get("source_host")
 
     run_id = f"{scenario['id']}-{seed}-{uuid.uuid4().hex[:8]}"
-    run_dir = RUNS_DIR / run_id
+    # Where the run's record lands. Injected so a caller driving `run_scenario` as a
+    # library — the golden-set generator's tests do — can point it at a scratch dir
+    # without reaching into this module's globals. The CLI never passes it.
+    run_dir = (runs_dir if runs_dir is not None else RUNS_DIR) / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
 
     pre_run: dict[str, Any] = {"cr_mode": cr_mode}

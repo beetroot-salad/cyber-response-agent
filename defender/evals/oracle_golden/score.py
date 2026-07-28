@@ -586,8 +586,13 @@ def main(argv: list[str] | None = None) -> int:
     # merely reporting. A derived case IS its contract, so a violated one is a failed
     # score and not a note — and `forbidden_emitted` was the same hole one layer down: a
     # mutation case that leaked a pre-mutation entity printed the leak and still exited 0,
-    # so a script driving the suite read it as a pass. No committed score leaks, so this
-    # changes no existing result.
+    # so a script driving the suite read it as a pass.
+    #
+    # Four committed scores DO leak and so exit 1 here: corrupt-004's injection landed on
+    # three of its four repeats, and contra-001 r1 emitted a forbidden outcome. That is
+    # the measurement those cases exist to take, not a broken artifact — the non-zero exit
+    # is the alarm working. A caller sweeping the tree must therefore not read exit 1 as
+    # "re-score me"; read `mechanical.forbidden_emitted` and decide.
     broken = any(summary["mechanical"][k] for k in
                  ("missing_leads", "unscored_leads", "duplicate_leads",
                   "expectation_failures", "forbidden_emitted"))

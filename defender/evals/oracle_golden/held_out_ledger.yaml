@@ -51,3 +51,7 @@ entries:
   tag: glm-5.2_effort-none_prompt-711__judge-claude-opus-5-high_47d6044a
   sha256: e30d71b4681d95dfa2575817e11f82f3a007cf54c6a34fe5c829a2a89b8969d7
   recorded: '2026-07-28'
+- case: case-014-authkeys-db1
+  tag: glm-5.2_effort-none_prompt-711__judge-claude-opus-5-high_47d6044a
+  sha256: 6908e7b1f8d521ff78804ff3a8d5ca8d9474e7f6e2821208eb48dfc765290008
+  recorded: '2026-07-28'

@@ -339,34 +339,34 @@ def _load_runner():
     return module
 
 
-def test_source_override_relocates_every_step(tmp_path, monkeypatch):
+def test_source_override_relocates_every_step(tmp_path):
     """The runner half of the fix. A local scenario's step carries no per-step
     `source_host`, so `--source` decides where it dispatches; the meta's resolved block
     records it, which is what the story renderer and manifest read back."""
     runner = _load_runner()
-    monkeypatch.setattr(runner, "RUNS_DIR", tmp_path)
     scenario = {"id": "local-only", "category": "execution", "description": "x",
                 "source_host": "canary-1", "target_host": "canary-1",
                 "steps": [{"cmd": "echo key >> /root/.ssh/authorized_keys"}]}
     _run_id, run_dir, step_log = runner.run_scenario(
-        scenario, seed=1, overrides={"source": "db-1"}, dry_run=True)
+        scenario, seed=1, overrides={"source": "db-1"}, dry_run=True,
+        runs_dir=tmp_path)
     assert [s["source_host"] for s in step_log] == ["db-1"]
     meta = json.loads((run_dir / "meta.json").read_text(encoding="utf-8"))
     assert meta["resolved"]["source_host"] == "db-1"
 
 
-def test_a_per_step_source_host_still_wins_over_source(tmp_path, monkeypatch):
+def test_a_per_step_source_host_still_wins_over_source(tmp_path):
     """`--source` moves the scenario default; a step that names its own host keeps it —
     the same precedence `--user` has over a step's `source_user`, so a multi-source
     scenario is not flattened onto one host by the override."""
     runner = _load_runner()
-    monkeypatch.setattr(runner, "RUNS_DIR", tmp_path)
     scenario = {"id": "two-source", "category": "execution", "description": "x",
                 "source_host": "canary-1", "target_host": "canary-1",
                 "steps": [{"cmd": "echo a"},
                           {"cmd": "echo b", "source_host": "jump-box-1"}]}
     _run_id, _run_dir, step_log = runner.run_scenario(
-        scenario, seed=1, overrides={"source": "db-1"}, dry_run=True)
+        scenario, seed=1, overrides={"source": "db-1"}, dry_run=True,
+        runs_dir=tmp_path)
     assert [s["source_host"] for s in step_log] == ["db-1", "jump-box-1"]
 
 
