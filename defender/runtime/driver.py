@@ -555,9 +555,22 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
 
     case_id = uuid.uuid4().hex
     factory = store_factory if store_factory is not None else _default_store_factory  # lint-default: ok — DI seam owning its default (R12's fifth seam)
-    store = factory(case_id, run_dir)
-    session_store.write_case_pointer(run_dir, case_id=case_id, store_path=store.path)
-    session_id = store.new_session(agent_id="main")
+    try:
+        store = factory(case_id, run_dir)
+        session_store.write_case_pointer(run_dir, case_id=case_id, store_path=store.path)
+        session_id = store.new_session(agent_id="main")
+    except (sqlite3.Error, session_store.StoreError) as e:
+        # FK-G: the store is opened during SETUP, outside `_drive_agent`'s own handler —
+        # so without this, a stale-version file takes the whole process down instead of
+        # ending the run through the same handled `truncated_by="store"` exit. Not one
+        # model turn is driven.
+        print(f"[run.py] store setup failed ({e!r}); ending the run", file=sys.stderr)
+        logger.close()
+        return {
+            "output": None, "model": model_name, "requests": logger.n_requests,
+            "truncated_by": "store", "exit_reason": type(e).__name__,
+            "case_id": case_id, "store_path": None,
+        }
 
     agent = build_agent(
         defender_dir, logger, make_model, main_model=model_name, verbs=verbs, limits=limits,

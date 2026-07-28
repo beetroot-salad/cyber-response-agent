@@ -50,12 +50,27 @@ def _seed_session_store(run: Path, messages: list[dict]) -> None:
 
     from defender.runtime import session_store as ss
 
-    store = ss.open_store(case_id="visualize-runtime-fixture", runs_base=run.parent)
+    # A per-test-unique case_id: `store_path_for` resolves off `runs_base.parent`, which
+    # for this fixture (`runs_base = run.parent = tmp_path`) is the shared parent every
+    # test in this file's pytest run gets its own `tmp_path` under — so a fixed case_id
+    # collides across tests into one shared store file and one shared `main` session
+    # lineage. #754's `_main_session_analysis` refuses that ambiguity outright instead of
+    # silently picking one, which is what surfaces this fixture's own pre-existing
+    # cross-test collision.
+    store = ss.open_store(
+        case_id=f"visualize-runtime-fixture-{run.parent.name}", runs_base=run.parent)
     ss.write_case_pointer(run, case_id=store.case_id, store_path=store.path)
     sessions: dict[str, str] = {}
     for rec in messages:
         agent_id = rec.get("agent_id", "main")
-        session_id = sessions.setdefault(agent_id, store.new_session(agent_id=agent_id))
+        # `dict.setdefault(k, expr)` evaluates `expr` eagerly, so `store.new_session(...)`
+        # as the default arg minted one orphan `main` session PER MESSAGE — nine rows,
+        # only the first ever used for an append — and the old rowid-ordered picker
+        # masked it by always grabbing that same first row. #754's root-of-lineage
+        # picker refuses the ambiguity outright, which is what surfaces it.
+        if agent_id not in sessions:
+            sessions[agent_id] = store.new_session(agent_id=agent_id)
+        session_id = sessions[agent_id]
         message = ModelMessagesTypeAdapter.validate_python([rec["message"]])[0]
         store.append(session_id, [message], agent_id=agent_id)
     store.close()

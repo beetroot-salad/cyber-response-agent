@@ -316,20 +316,19 @@ def _main_session_analysis(run_dir: Path) -> list[tuple[Any, str]]:
     store_path = ss.resolve_store_path(run_dir)
     store = ss.open_store_for_read(store_path)
     try:
-        # The main session by its RECORDED agent_id, not by insertion order. `ORDER BY
-        # rowid` held only because run_investigation happens to open main's session before
-        # any gather dispatch opens one; anything that creates a session earlier (a
-        # warm-up, a mid-run fork, a replay tool seeding a gather session first) would
-        # silently render the wrong transcript. Falls back to rowid for a store written
-        # before `session.agent_id` existed.
-        row = store.connection.execute(
-            "SELECT session_id FROM session WHERE agent_id = 'main' ORDER BY rowid LIMIT 1"
-        ).fetchone() or store.connection.execute(
-            "SELECT session_id FROM session ORDER BY rowid LIMIT 1"
-        ).fetchone()
-        if row is None:
-            return []
-        session_id = row[0]
+        # The ROOT-OF-LINEAGE main session: `agent_id = 'main'` AND `parent_session_id IS
+        # NULL` — never an ordering pick (FK-F). A forked main session also carries
+        # agent_id 'main' and can sort ahead of the session it forked from, so an
+        # ORDER-BY-anything fallback would silently render the wrong transcript; failing
+        # loudly on zero or more than one match is the one failure this reader can afford.
+        rows = store.connection.execute(
+            "SELECT session_id FROM session WHERE agent_id = 'main' "
+            "AND parent_session_id IS NULL"
+        ).fetchall()
+        if len(rows) != 1:
+            raise ValueError(
+                f"expected exactly one root-of-lineage main session; found {len(rows)}")
+        session_id = rows[0][0]
         messages = ss.hydrate(store, session_id, role="analysis")
         coords = ss.hydrate(store, session_id, role="actor")
         return list(zip(messages, [c["coord"] for c in coords], strict=True))
