@@ -1,0 +1,63 @@
+{
+  "judge": {
+    "model": "claude-opus-5",
+    "effort": "high",
+    "prompts_sha8": "47d6044a"
+  },
+  "leads": {
+    "l-001": {
+      "delta_kind": "present",
+      "undecidable_reason": null,
+      "heterogeneous": false,
+      "evidence": "The squid access query (seq 0) returned row_count 48 over the operation window, while all three controls (C-21d, C-28d, C-35d), each with window_live: true, returned row_count 0 with empty values arrays. The observed rows carry distinguishing content in fields these queries surface \u2014 url.original values ifconfig.me:443, pastebin.com:443, transfer.sh:443, raw.githubusercontent.com:443, api.telegram.org:443, example.com:443, all with http.request.method CONNECT and squid.result_status TCP_TUNNEL/200 except transfer.sh which is consistently TCP_TUNNEL/503 with 0 bytes \u2014 none of which appear in any baseline. The distinction does not rest on source.ip (172.18.0.6), which environment_notes marks unstable; url.original, result_status and response bytes (~5.4\u20135.7KB, plus ~47.6KB per pastebin fetch) carry it, on a ~7-second beacon cadence from 07:06:11 to 07:06:46. Truncation of the payload at 40 of 48 rows does not affect this reading, since presence rather than absence is being established; seq 1 is unreadable and seq 2 is a cmdb entity record (state-only), neither of which contradicts seq 0.",
+      "judge_model": "claude-opus-5",
+      "judge_effort": "high",
+      "cost_usd": 0.139417
+    },
+    "l-002": {
+      "delta_kind": "state-only",
+      "undecidable_reason": null,
+      "heterogeneous": false,
+      "evidence": "Both queries in this lead are identity system lookups (`identity.access-check`, `identity.user-authorization`) returning an entity record and its authorization state, not an event stream. The observed payloads are a permission verdict (`authorized: true`, `via: override`, `role: developer`, `sudo: true`) and a user record (`username: dev.dana`, `enabled: true`, `realm_role: developer`, `authorized_hosts: [dev-ws-1, jump-box-1, office-ws-1]`, `sudo_hosts: [office-ws-1]`) \u2014 neither carries a `@timestamp` bound that a control window could move. The empty `baseline` is therefore expected and structural, not a measurement gap; `environment_notes.state_and_lookup_systems` names identity queries explicitly as `state-only`. Both queries agree, so the lead is not heterogeneous.",
+      "judge_model": "claude-opus-5",
+      "judge_effort": "high",
+      "cost_usd": 0.043712
+    },
+    "l-003": {
+      "delta_kind": "state-only",
+      "undecidable_reason": null,
+      "heterogeneous": null,
+      "evidence": "The lead has a single query, `cmdb.host-trust-edges` for host `office-ws-1`, which returns one CMDB entity record: role `office-ws`, criticality `preprod`, owner `dev.dana`, `trust_edges_out: []`, and a three-entry `users` block (`dev.dana` sudo true, `svc.monitoring` nologin, `svc.config-mgmt` sudo true). The environment notes state explicitly that cmdb queries return current configuration or an entity record, carry no `@timestamp` bounds to move, and therefore have no control and no baseline-diff semantics. The empty `baseline` here is the expected consequence of that, not a measurement gap, so the empty array is not evidence of suppression or novelty. No egress/proxy policy field appears in the record at all.",
+      "judge_model": "claude-opus-5",
+      "judge_effort": "high",
+      "cost_usd": 0.04306599999999999
+    },
+    "l-004": {
+      "delta_kind": "present",
+      "undecidable_reason": null,
+      "heterogeneous": false,
+      "evidence": "Four decidable event queries (seq 2, 4, 5, 6) all return non-empty over the operation window while every one of their controls \u2014 C-21d, C-28d, C-35d, all `window_live: true` \u2014 returns `row_count: 0`. Seq 5 is decisive because its distinction is carried in `dest` (url.original), a stable surfaced field, not an unstable address: 6 destinations with 15\u201316 requests each, including api.telegram.org:443, pastebin.com:443 (713857 bytes_out), transfer.sh:443 (0 bytes_out), ifconfig.me:443 and raw.githubusercontent.com:443, all first_seen 2026-07-28T06:13\u201306:24 and last_seen ~07:06:46. Seq 2 and 6 also carry `identity: dev.dana` with requests=91, denied=0, bytes_out=1052816 against empty live baselines, so the delta does not rest on source.ip 172.18.0.6, which environment_notes marks unstable. Seq 3 (cmdb.get-host) is state-only and seq 0\u20131 are unreadable, but neither is needed; no decidable query dissents.",
+      "judge_model": "claude-opus-5",
+      "judge_effort": "high",
+      "cost_usd": 0.157771
+    },
+    "l-005": {
+      "delta_kind": "state-only",
+      "undecidable_reason": null,
+      "heterogeneous": false,
+      "evidence": "All seven queries in this lead are `threat-intel` templates: six `domain-reputation-lookup` calls (transfer.sh, ifconfig.me, api.telegram.org, example.com, pastebin.com, raw.githubusercontent.com) and one `list-all-indicators` returning `total: 15`. The environment notes state explicitly that threat-intel queries return an entity record or current configuration, carry no `@timestamp` bounds to move, and therefore have no control and no baseline-diff semantics \u2014 consistent with `baseline: []` being empty by construction rather than by measurement. The six lookups all returned `verdict: unknown`, `score: 0`, empty `sources`/`tags`, and null `first_seen`/`last_seen`; the indicator list contains only unrelated entries (e.g. `evil-c2.example` score 95 tags c2/emotet, `45.9.148.108` score 88 tags c2/cobalt-strike) and none of the six queried domains. Every query is uniformly a lookup, so there is no disagreement among them.",
+      "judge_model": "claude-opus-5",
+      "judge_effort": "high",
+      "cost_usd": 0.07068100000000001
+    },
+    "l-007": {
+      "delta_kind": "state-only",
+      "undecidable_reason": null,
+      "heterogeneous": null,
+      "evidence": "The lead's single query is `change-mgmt.active-changes` with params `host: office-ws-1` and `at: 2026-07-28T07:06:53Z`, which the environment notes explicitly classify as a state/lookup system: change-mgmt returns a current change-request record, not an event stream, and carries no `@timestamp` bounds to move. Consistent with that, `baseline` is an empty list \u2014 no control was constructed, rather than a control that measured zero rows. The observed payload is a single seq 0 with `payload: []`, i.e. no CR covering office-ws-1 at that instant, but under the notes this carries no baseline-diff semantics regardless of its contents. Tagged `state-only`; only one query exists, so `heterogeneous` is null.",
+      "judge_model": "claude-opus-5",
+      "judge_effort": "high",
+      "cost_usd": 0.040851
+    }
+  }
+}

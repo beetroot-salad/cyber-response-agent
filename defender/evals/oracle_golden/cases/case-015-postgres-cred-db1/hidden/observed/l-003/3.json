@@ -1,0 +1,1 @@
+{"query": "FROM logs-keycloak.events-*\n| WHERE @timestamp >= \"2026-07-20T00:00:00Z\" AND @timestamp < \"2026-07-28T00:00:00Z\"\n        AND loggerName == \"org.keycloak.events\"\n| STATS events = COUNT(*)\n| LIMIT 1", "columns": [{"name": "events", "type": "long"}], "row_count": 1, "values": [{"events": 0}]}

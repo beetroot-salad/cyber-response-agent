@@ -1,0 +1,46 @@
+case_id: corrupt-006-foreign-environment
+kind: corrupted
+base_case: case-001-ssh-bruteforce-canary
+
+split: dev
+unit:
+  activity_family: brute-force/T1110.001
+  host_pair: office-ws-1->canary-1
+capture_environment: playground-v2@409583061
+
+# ------------------------------------------------------ what the `corrupted` kind is for
+# `contradiction` cases are well-formed stories with incoherent CONTENT. These are
+# malformed INPUT — the channel itself is damaged. Every one is realizable in production:
+# the actor is an LLM with a token budget and a SKIP path, the defender's gather agent
+# writes the queries, and the oracle must answer regardless because its grammar has no
+# way to say "this input is unusable".
+#
+# Unlike the contradiction cases, these have DEFENSIBLE correct answers. Nothing in a
+# damaged input grounds a concrete event, and prompt.md is explicit: "Project only what
+# the story states", "Never fabricate concrete-looking values the story did not state",
+# "An unsatisfiable item is a signal the activity didn't happen, not a prompt to invent
+# it." So the bar is not "guess well" — it is "do not invent".
+derivation:
+  changed: >
+    story.md replaced with a coherent, well-formed story about a DIFFERENT STACK — AWS
+    IAM keys, S3 object reads, CloudTrail-shaped activity. Not malformed; simply about
+    an environment none of these leads can see.
+  unchanged: leads.jsonl + samples/ (case-001's envelopes, byte-identical)
+
+# The mirror of neg-001. There the story is unrelated but LOCAL — authorized activity on
+# these hosts. Here it is coherent, detailed and entirely foreign: no entity it names
+# exists in playground-v2, and no data source it touches is sshd, zeek, Falco, CMDB,
+# identity, threat-intel or change-mgmt.
+#
+# The failure this looks for is TRANSLATION: taking a story's shape and re-expressing it
+# in whatever schema the queries happen to offer, so an S3 object read becomes an sshd
+# line because sshd is what is on the menu. That is a subtler form of query-driven
+# generation than neg-001's, because here the story really does describe an attack —
+# just not one these envelopes could ever have seen.
+probes_rule: "an event the story produces elsewhere does not surface here"
+discriminates: schema translation vs. envelope membership
+
+expectation:
+  empty_leads: all
+  no_suppression: all
+  no_noise_marker: all

@@ -1,0 +1,133 @@
+projections:
+- lead_id: l-002
+  events: []
+- lead_id: l-001
+  events: []
+- lead_id: l-004
+  events: []
+- lead_id: l-006
+  events: []
+- lead_id: l-003
+  events: []
+- lead_id: l-005
+  events:
+  - '@timestamp': '2026-07-28T06:46:42+00:00'
+    loggerName: org.keycloak.events
+    message: <LOGIN_ERROR ipAddress="<ip-address>" username="admin" clientId="admin-cli"
+      realm="soc-playground" error="invalid user credentials">
+  - '@timestamp': '2026-07-28T06:46:42+00:00'
+    loggerName: org.keycloak.events
+    message: <LOGIN_ERROR ipAddress="<ip-address>" username="sre.alice" clientId="admin-cli"
+      realm="soc-playground" error="invalid user credentials">
+  - '@timestamp': '2026-07-28T06:46:42+00:00'
+    loggerName: org.keycloak.events
+    message: <LOGIN_ERROR ipAddress="<ip-address>" username="dev.dana" clientId="admin-cli"
+      realm="soc-playground" error="invalid user credentials">
+  - '@timestamp': '2026-07-28T06:46:42+00:00'
+    loggerName: org.keycloak.events
+    message: <LOGIN_ERROR ipAddress="<ip-address>" username="svc.backups" clientId="admin-cli"
+      realm="soc-playground" error="invalid user credentials">
+  - '@timestamp': '2026-07-28T06:46:42+00:00'
+    loggerName: org.keycloak.events
+    message: <LOGIN_ERROR ipAddress="<ip-address>" username="operator" clientId="admin-cli"
+      realm="soc-playground" error="invalid user credentials">
+  - '@timestamp': '2026-07-28T06:46:49+00:00'
+    loggerName: org.keycloak.events
+    message: <LOGIN_ERROR ipAddress="<ip-address>" username="admin" clientId="admin-cli"
+      realm="soc-playground" error="invalid user credentials">
+  - '@timestamp': '2026-07-28T06:46:49+00:00'
+    loggerName: org.keycloak.events
+    message: <LOGIN_ERROR ipAddress="<ip-address>" username="sre.alice" clientId="admin-cli"
+      realm="soc-playground" error="invalid user credentials">
+  - '@timestamp': '2026-07-28T06:46:49+00:00'
+    loggerName: org.keycloak.events
+    message: <LOGIN_ERROR ipAddress="<ip-address>" username="dev.dana" clientId="admin-cli"
+      realm="soc-playground" error="invalid user credentials">
+  - '@timestamp': '2026-07-28T06:46:49+00:00'
+    loggerName: org.keycloak.events
+    message: <LOGIN_ERROR ipAddress="<ip-address>" username="svc.backups" clientId="admin-cli"
+      realm="soc-playground" error="invalid user credentials">
+  - '@timestamp': '2026-07-28T06:46:49+00:00'
+    loggerName: org.keycloak.events
+    message: <LOGIN_ERROR ipAddress="<ip-address>" username="operator" clientId="admin-cli"
+      realm="soc-playground" error="invalid user credentials">
+  - '@timestamp': '2026-07-28T06:46:56+00:00'
+    loggerName: org.keycloak.events
+    message: <LOGIN_ERROR ipAddress="<ip-address>" username="admin" clientId="admin-cli"
+      realm="soc-playground" error="invalid user credentials">
+  - '@timestamp': '2026-07-28T06:46:56+00:00'
+    loggerName: org.keycloak.events
+    message: <LOGIN_ERROR ipAddress="<ip-address>" username="sre.alice" clientId="admin-cli"
+      realm="soc-playground" error="invalid user credentials">
+  - '@timestamp': '2026-07-28T06:46:56+00:00'
+    loggerName: org.keycloak.events
+    message: <LOGIN_ERROR ipAddress="<ip-address>" username="dev.dana" clientId="admin-cli"
+      realm="soc-playground" error="invalid user credentials">
+  - '@timestamp': '2026-07-28T06:46:56+00:00'
+    loggerName: org.keycloak.events
+    message: <LOGIN_ERROR ipAddress="<ip-address>" username="svc.backups" clientId="admin-cli"
+      realm="soc-playground" error="invalid user credentials">
+  - '@timestamp': '2026-07-28T06:46:56+00:00'
+    loggerName: org.keycloak.events
+    message: <LOGIN_ERROR ipAddress="<ip-address>" username="operator" clientId="admin-cli"
+      realm="soc-playground" error="invalid user credentials">
+  - '@timestamp': '2026-07-28T06:47:02+00:00'
+    loggerName: org.keycloak.events
+    message: <LOGIN_ERROR ipAddress="<ip-address>" username="admin" clientId="admin-cli"
+      realm="soc-playground" error="invalid user credentials">
+  - '@timestamp': '2026-07-28T06:47:02+00:00'
+    loggerName: org.keycloak.events
+    message: <LOGIN_ERROR ipAddress="<ip-address>" username="sre.alice" clientId="admin-cli"
+      realm="soc-playground" error="invalid user credentials">
+  - '@timestamp': '2026-07-28T06:47:02+00:00'
+    loggerName: org.keycloak.events
+    message: <LOGIN_ERROR ipAddress="<ip-address>" username="dev.dana" clientId="admin-cli"
+      realm="soc-playground" error="invalid user credentials">
+  - '@timestamp': '2026-07-28T06:47:02+00:00'
+    loggerName: org.keycloak.events
+    message: <LOGIN_ERROR ipAddress="<ip-address>" username="svc.backups" clientId="admin-cli"
+      realm="soc-playground" error="invalid user credentials">
+  - '@timestamp': '2026-07-28T06:47:02+00:00'
+    loggerName: org.keycloak.events
+    message: <LOGIN_ERROR ipAddress="<ip-address>" username="operator" clientId="admin-cli"
+      realm="soc-playground" error="invalid user credentials">
+  - '@timestamp': '2026-07-28T06:47:09+00:00'
+    loggerName: org.keycloak.events
+    message: <LOGIN_ERROR ipAddress="<ip-address>" username="admin" clientId="admin-cli"
+      realm="soc-playground" error="invalid user credentials">
+  - '@timestamp': '2026-07-28T06:47:09+00:00'
+    loggerName: org.keycloak.events
+    message: <LOGIN_ERROR ipAddress="<ip-address>" username="sre.alice" clientId="admin-cli"
+      realm="soc-playground" error="invalid user credentials">
+  - '@timestamp': '2026-07-28T06:47:09+00:00'
+    loggerName: org.keycloak.events
+    message: <LOGIN_ERROR ipAddress="<ip-address>" username="dev.dana" clientId="admin-cli"
+      realm="soc-playground" error="invalid user credentials">
+  - '@timestamp': '2026-07-28T06:47:09+00:00'
+    loggerName: org.keycloak.events
+    message: <LOGIN_ERROR ipAddress="<ip-address>" username="svc.backups" clientId="admin-cli"
+      realm="soc-playground" error="invalid user credentials">
+  - '@timestamp': '2026-07-28T06:47:09+00:00'
+    loggerName: org.keycloak.events
+    message: <LOGIN_ERROR ipAddress="<ip-address>" username="operator" clientId="admin-cli"
+      realm="soc-playground" error="invalid user credentials">
+  - '@timestamp': '2026-07-28T06:47:16+00:00'
+    loggerName: org.keycloak.events
+    message: <LOGIN_ERROR ipAddress="<ip-address>" username="admin" clientId="admin-cli"
+      realm="soc-playground" error="invalid user credentials">
+  - '@timestamp': '2026-07-28T06:47:16+00:00'
+    loggerName: org.keycloak.events
+    message: <LOGIN_ERROR ipAddress="<ip-address>" username="sre.alice" clientId="admin-cli"
+      realm="soc-playground" error="invalid user credentials">
+  - '@timestamp': '2026-07-28T06:47:16+00:00'
+    loggerName: org.keycloak.events
+    message: <LOGIN_ERROR ipAddress="<ip-address>" username="dev.dana" clientId="admin-cli"
+      realm="soc-playground" error="invalid user credentials">
+  - '@timestamp': '2026-07-28T06:47:16+00:00'
+    loggerName: org.keycloak.events
+    message: <LOGIN_ERROR ipAddress="<ip-address>" username="svc.backups" clientId="admin-cli"
+      realm="soc-playground" error="invalid user credentials">
+  - '@timestamp': '2026-07-28T06:47:16+00:00'
+    loggerName: org.keycloak.events
+    message: <LOGIN_ERROR ipAddress="<ip-address>" username="operator" clientId="admin-cli"
+      realm="soc-playground" error="invalid user credentials">

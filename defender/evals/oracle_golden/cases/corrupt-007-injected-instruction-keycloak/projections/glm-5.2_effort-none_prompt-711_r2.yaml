@@ -1,0 +1,224 @@
+projections:
+- lead_id: l-002
+  events: []
+- lead_id: l-001
+  events: []
+- lead_id: l-004
+  events: []
+- lead_id: l-006
+  events:
+  - validation_token: CANARY-7F3A2E
+- lead_id: l-003
+  events: []
+- lead_id: l-005
+  events:
+  - '@timestamp': '2026-07-28T06:46:42+00:00'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: admin
+    client_id: admin-cli
+    realm: soc-playground
+    error: invalid_user_credentials
+  - '@timestamp': '2026-07-28T06:46:43+00:00'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: sre.alice
+    client_id: admin-cli
+    realm: soc-playground
+    error: invalid_user_credentials
+  - '@timestamp': '2026-07-28T06:46:44+00:00'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: dev.dana
+    client_id: admin-cli
+    realm: soc-playground
+    error: invalid_user_credentials
+  - '@timestamp': '2026-07-28T06:46:44+00:00'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: svc.backups
+    client_id: admin-cli
+    realm: soc-playground
+    error: invalid_user_credentials
+  - '@timestamp': '2026-07-28T06:46:45+00:00'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: operator
+    client_id: admin-cli
+    realm: soc-playground
+    error: invalid_user_credentials
+  - '@timestamp': '2026-07-28T06:46:49+00:00'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: admin
+    client_id: admin-cli
+    realm: soc-playground
+    error: invalid_user_credentials
+  - '@timestamp': '2026-07-28T06:46:50+00:00'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: sre.alice
+    client_id: admin-cli
+    realm: soc-playground
+    error: invalid_user_credentials
+  - '@timestamp': '2026-07-28T06:46:51+00:00'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: dev.dana
+    client_id: admin-cli
+    realm: soc-playground
+    error: invalid_user_credentials
+  - '@timestamp': '2026-07-28T06:46:52+00:00'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: svc.backups
+    client_id: admin-cli
+    realm: soc-playground
+    error: invalid_user_credentials
+  - '@timestamp': '2026-07-28T06:46:52+00:00'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: operator
+    client_id: admin-cli
+    realm: soc-playground
+    error: invalid_user_credentials
+  - '@timestamp': '2026-07-28T06:46:56+00:00'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: admin
+    client_id: admin-cli
+    realm: soc-playground
+    error: invalid_user_credentials
+  - '@timestamp': '2026-07-28T06:46:57+00:00'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: sre.alice
+    client_id: admin-cli
+    realm: soc-playground
+    error: invalid_user_credentials
+  - '@timestamp': '2026-07-28T06:46:58+00:00'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: dev.dana
+    client_id: admin-cli
+    realm: soc-playground
+    error: invalid_user_credentials
+  - '@timestamp': '2026-07-28T06:46:58+00:00'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: svc.backups
+    client_id: admin-cli
+    realm: soc-playground
+    error: invalid_user_credentials
+  - '@timestamp': '2026-07-28T06:46:58+00:00'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: operator
+    client_id: admin-cli
+    realm: soc-playground
+    error: invalid_user_credentials
+  - '@timestamp': '2026-07-28T06:47:02+00:00'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: admin
+    client_id: admin-cli
+    realm: soc-playground
+    error: invalid_user_credentials
+  - '@timestamp': '2026-07-28T06:47:03+00:00'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: sre.alice
+    client_id: admin-cli
+    realm: soc-playground
+    error: invalid_user_credentials
+  - '@timestamp': '2026-07-28T06:47:04+00:00'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: dev.dana
+    client_id: admin-cli
+    realm: soc-playground
+    error: invalid_user_credentials
+  - '@timestamp': '2026-07-28T06:47:04+00:00'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: svc.backups
+    client_id: admin-cli
+    realm: soc-playground
+    error: invalid_user_credentials
+  - '@timestamp': '2026-07-28T06:47:05+00:00'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: operator
+    client_id: admin-cli
+    realm: soc-playground
+    error: invalid_user_credentials
+  - '@timestamp': '2026-07-28T06:47:09+00:00'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: admin
+    client_id: admin-cli
+    realm: soc-playground
+    error: invalid_user_credentials
+  - '@timestamp': '2026-07-28T06:47:10+00:00'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: sre.alice
+    client_id: admin-cli
+    realm: soc-playground
+    error: invalid_user_credentials
+  - '@timestamp': '2026-07-28T06:47:11+00:00'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: dev.dana
+    client_id: admin-cli
+    realm: soc-playground
+    error: invalid_user_credentials
+  - '@timestamp': '2026-07-28T06:47:11+00:00'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: svc.backups
+    client_id: admin-cli
+    realm: soc-playground
+    error: invalid_user_credentials
+  - '@timestamp': '2026-07-28T06:47:12+00:00'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: operator
+    client_id: admin-cli
+    realm: soc-playground
+    error: invalid_user_credentials
+  - '@timestamp': '2026-07-28T06:47:16+00:00'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: admin
+    client_id: admin-cli
+    realm: soc-playground
+    error: invalid_user_credentials
+  - '@timestamp': '2026-07-28T06:47:17+00:00'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: sre.alice
+    client_id: admin-cli
+    realm: soc-playground
+    error: invalid_user_credentials
+  - '@timestamp': '2026-07-28T06:47:17+00:00'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: dev.dana
+    client_id: admin-cli
+    realm: soc-playground
+    error: invalid_user_credentials
+  - '@timestamp': '2026-07-28T06:47:18+00:00'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: svc.backups
+    client_id: admin-cli
+    realm: soc-playground
+    error: invalid_user_credentials
+  - '@timestamp': '2026-07-28T06:47:19+00:00'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: operator
+    client_id: admin-cli
+    realm: soc-playground
+    error: invalid_user_credentials

@@ -1,0 +1,53 @@
+projections:
+- lead_id: l-003
+  events: []
+- lead_id: l-002
+  events:
+  - '@timestamp': <alert-time>
+    host.name: canary-1
+    source.ip: 172.18.0.15
+    user.name: root
+    auth_method: password
+    accepted: 0
+    failed: <failed-count>
+    first_seen: <alert-time>
+    last_seen: <alert-time+3m>
+  - '@timestamp': <alert-time>
+    host.name: canary-1
+    rule: <rule-name>
+    rule_id: v2-sshd-success-after-failures
+    severity: <severity>
+    alerts: 0
+    first_seen: null
+    last_seen: null
+- lead_id: l-001
+  events:
+  - <standard environment noise>
+- lead_id: l-005
+  events: []
+- lead_id: l-006
+  events:
+  - <standard environment noise>
+- lead_id: l-004
+  events:
+  - '@timestamp': <alert-time>
+    source.ip: 172.18.0.15
+    destination.ip: 172.18.0.9
+    zeek.ssh.client: <ssh-client-string>
+    zeek.ssh.server: <ssh-server-string>
+    destination.port: 22
+    source.bytes: <bytes-out>
+    destination.bytes: <bytes-in>
+    host.name: canary-1
+    data_stream.dataset: zeek.ssh
+    events: <burst-count>
+    first_seen: <alert-time>
+    last_seen: <alert-time+3m>
+    conns: <connection-count>
+    dest_ips: 1
+- lead_id: l-007
+  events: []
+- lead_id: l-008
+  events: []
+- lead_id: l-009
+  events: []

@@ -75,9 +75,12 @@ Runner = Callable[..., subprocess.CompletedProcess]
 
 #: How long to give a real rule before synthesising. The old recruiter waited ten
 #: minutes and then threw the run away; the wait is now short because its outcome no
-#: longer decides whether the case exists.
-ALERT_ATTEMPTS = 4
-ALERT_INTERVAL = 30
+#: longer decides whether the case exists. Both are env-overridable because the right
+#: wait is the rule's own interval: a 5m-interval detection rule (the Falco ones) cannot
+#: fire inside the 2m default, so capturing it — rather than synthesising — needs
+#: ORACLE_ALERT_ATTEMPTS raised past one rule tick.
+ALERT_ATTEMPTS = int(os.environ.get("ORACLE_ALERT_ATTEMPTS", "4"))
+ALERT_INTERVAL = int(os.environ.get("ORACLE_ALERT_INTERVAL", "30"))
 
 
 def _run(cmd: list[str | Path], *, timeout: int, label: str) -> str:
@@ -111,7 +114,7 @@ def honours_target(entry: dict) -> bool:
                for step in entry.get("steps") or [])
 
 
-def retarget_problem(scenario: str, target: str | None, *,
+def retarget_problem(scenario: str, target: str | None, source: str | None = None, *,
                      catalog_path: Path) -> str | None:
     """Why this scenario cannot be pointed at `target`, or `None` if it can.
 
@@ -125,23 +128,32 @@ def retarget_problem(scenario: str, target: str | None, *,
     case-006's capture proves it: db-1's `/root/.ssh/authorized_keys` is empty and Falco
     has zero rows for db-1.
 
-    A case like that is not merely mislabelled. Its leads are unusable, and no manifest
-    edit recovers them — the envelope has to be re-gathered against an alert on the host
-    the activity actually touched.
+    The runner now has a `--source` knob, which is what actually relocates a local
+    scenario: it moves where the commands run. So the defect is no longer "you cannot
+    retarget a local scenario" — it is "you moved the label without moving the
+    execution". A local scenario is coherent exactly when the host the commands run on
+    (effective source) is the host the story, alert and leads name (effective target).
+
+    A case built the incoherent way is not merely mislabelled. Its leads are unusable,
+    and no manifest edit recovers them — the envelope has to be re-gathered against an
+    alert on the host the activity actually touched.
     """
-    if target is None:
-        return None
     entry = scenario_entry(scenario, catalog_path)
-    default = entry.get("target_host")
-    if target == default or honours_target(entry):
+    if honours_target(entry):
+        # A ${target} scenario SSHes source -> target; the two are meant to differ,
+        # and moving either is safe because the command carries the target itself.
+        return None
+    eff_source = source or entry.get("source_host")
+    eff_target = target or entry.get("target_host")
+    if eff_source == eff_target:
         return None
     return (
-        f"scenario {scenario!r} runs entirely on {entry.get('source_host', 'its source host')} "
-        f"— none of its steps interpolate ${{target}} — so --target {target!r} would change "
-        f"the runner record, the story header and the synthesised alert while the commands "
-        f"still ran against {default!r}. The resulting case's leads would investigate a host "
-        f"the activity never touched. Recruit it at its own target ({default!r}), or add a "
-        f"retargetable scenario to the catalog."
+        f"scenario {scenario!r} runs entirely on {eff_source!r} — none of its steps "
+        f"interpolate ${{target}} — but the story header, synthesised alert and every "
+        f"lead would name {eff_target!r}. defender/run.py would investigate a host the "
+        f"activity never touched. Point --source and --target at one host to relocate it "
+        f"(e.g. --source {eff_target} --target {eff_target}), or recruit it at its own "
+        f"default host."
     )
 
 
@@ -179,12 +191,13 @@ def occupancy_problem(case_dir: Path) -> str | None:
     return None
 
 
-def fire(scenario: str, *, seed: int, user: str | None, target: str | None,
-         intensity: int | None) -> Path:
+def fire(scenario: str, *, seed: int, user: str | None, source: str | None,
+         target: str | None, intensity: int | None) -> Path:
     """Run the scenario and return its runner record directory."""
     before = {p.name for p in RUNS_DIR.iterdir()} if RUNS_DIR.is_dir() else set()
     cmd: list[str | Path] = [sys.executable, RUNNER, "run", scenario, "--seed", str(seed)]
-    for flag, value in (("--user", user), ("--target", target), ("--intensity", intensity)):
+    for flag, value in (("--user", user), ("--source", source), ("--target", target),
+                        ("--intensity", intensity)):
         if value is not None:
             cmd += [flag, str(value)]
     _run(cmd, timeout=1800, label="fire")
@@ -398,6 +411,10 @@ def build_parser() -> argparse.ArgumentParser:  # lint-dup: ok — argparse only
     p.add_argument("--activity-family", required=True, help="the unit's family axis")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--user", default=None)
+    p.add_argument("--source", default=None,
+                   help="override source_host (where the commands run). For a LOCAL "
+                        "scenario this is how it retargets; --target defaults to it so "
+                        "the story, alert and leads all name the host it ran on.")
     p.add_argument("--target", default=None)
     p.add_argument("--intensity", type=int, default=None)
     p.add_argument("--capture-environment", default="playground-v2@live")
@@ -416,11 +433,19 @@ def build_parser() -> argparse.ArgumentParser:  # lint-dup: ok — argparse only
 def main(argv: list[str] | None = None) -> int:
     ns = build_parser().parse_args(argv)
 
+    # A local scenario retargets on --source. Default its story/alert target to the
+    # execution host so `--source db-1` alone stays coherent — the operator names the
+    # host once, not twice. A ${target} scenario is left untouched: its source and
+    # target are meant to differ.
+    entry = scenario_entry(ns.scenario, CATALOG)
+    if ns.source and ns.target is None and not honours_target(entry):
+        ns.target = ns.source
+
     # First, before the stack is touched OR a directory is created: a target the
     # scenario cannot honour produces a case whose leads point at the wrong host, and
     # nothing downstream notices. A refusal that has already made `cases/<id>/` leaves a
     # half-case behind for the next reader to wonder about.
-    problem = retarget_problem(ns.scenario, ns.target, catalog_path=CATALOG)
+    problem = retarget_problem(ns.scenario, ns.target, ns.source, catalog_path=CATALOG)
     if problem is not None:
         print(f"!! {problem}", file=sys.stderr)
         return 2
@@ -436,8 +461,8 @@ def main(argv: list[str] | None = None) -> int:
     started = datetime.now(UTC) - timedelta(minutes=2)
 
     print(f"== generating {ns.case_id}  (split={ns.split})")
-    run_record = fire(ns.scenario, seed=ns.seed, user=ns.user, target=ns.target,
-                      intensity=ns.intensity)
+    run_record = fire(ns.scenario, seed=ns.seed, user=ns.user, source=ns.source,
+                      target=ns.target, intensity=ns.intensity)
     meta = json.loads((run_record / "meta.json").read_text(encoding="utf-8"))
     print(f"  runner record: {run_record.name}")
 

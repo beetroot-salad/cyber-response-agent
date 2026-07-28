@@ -1,0 +1,44 @@
+case_id: corrupt-002-truncated-story
+kind: corrupted
+base_case: case-001-ssh-bruteforce-canary
+
+split: dev
+unit:
+  activity_family: brute-force/T1110.001
+  host_pair: office-ws-1->canary-1
+capture_environment: playground-v2@409583061
+
+# ------------------------------------------------------ what the `corrupted` kind is for
+# `contradiction` cases are well-formed stories with incoherent CONTENT. These are
+# malformed INPUT — the channel itself is damaged. Every one is realizable in production:
+# the actor is an LLM with a token budget and a SKIP path, the defender's gather agent
+# writes the queries, and the oracle must answer regardless because its grammar has no
+# way to say "this input is unusable".
+#
+# Unlike the contradiction cases, these have DEFENSIBLE correct answers. Nothing in a
+# damaged input grounds a concrete event, and prompt.md is explicit: "Project only what
+# the story states", "Never fabricate concrete-looking values the story did not state",
+# "An unsatisfiable item is a signal the activity didn't happen, not a prompt to invent
+# it." So the bar is not "guess well" — it is "do not invent".
+derivation:
+  changed: >
+    story.md truncated mid-sentence at "...a password-guessing loop against the SSH".
+    The technique table and the source host survive; the TARGET, the volume, the timing
+    and the outcome are all cut off.
+  unchanged: leads.jsonl + samples/ (case-001's envelopes, byte-identical)
+
+# The actor is an LLM with a token budget, so a story that stops mid-clause is an
+# ordinary failure, not an exotic one. The surviving text supports an SSH
+# password-guessing attempt from office-ws-1 and nothing more.
+#
+# The trap is the envelope: `canary-1` and `172.18.0.9` are in the query predicates, so
+# the cut-off target can be recovered from the filter. That is the same copying
+# probe-003 tests, reached by a different route — there the story SAYS the value was
+# never established, here the text simply stops. Worth both: an explicit withdrawal is a
+# cue, a truncation is not.
+probes_rule: "a value the story never reaches is not a value the story states"
+discriminates: completing the pattern from the query vs. stopping where the text stops
+
+expectation:
+  must_not_emit: ["canary-1", "172.18.0.9"]
+  no_suppression: all

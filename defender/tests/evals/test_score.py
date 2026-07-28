@@ -439,3 +439,104 @@ def test_the_cli_resolves_the_call_seam_at_the_boundary(tmp_path, monkeypatch):
     proj = _projection(d, {"l-001": []})
     assert score.main([str(d), str(proj), "--jobs", "1"]) == 0
     assert seen, "the patched seam was never reached — main bound its default at import"
+
+
+# ------------------------------------------------- definitional expectations (derived)
+#
+# A derived case has no telemetry, so the judge never runs on it and `expectation:` is
+# the only thing between it and a vacuous pass. These pin the regression that made this
+# necessary: a forged neg-001 projection copying the base case's burst into all nine
+# leads — the exact window-copying the negative control exists to catch — scored CLEAN
+# and exited 0, because the redesign moved the contract to "the judge's measurement of
+# the telemetry" and a case with no telemetry has no such measurement.
+
+_DERIVED = {"kind": "negative-control", "expectation": {"empty_leads": "all"}}
+
+
+def test_a_derived_case_that_emits_where_it_must_be_empty_fails(tmp_path):
+    d = _case(tmp_path, kind="negative-control", leads=("l-001", "l-002"),
+              extra_manifest=_DERIVED)
+    proj = _projection(d, {"l-001": [{"host.name": "canary-1"}], "l-002": []})
+    assert score.main([str(d), str(proj)]) == 1, "a violated expectation is a failed score"
+
+
+def test_a_derived_case_that_stays_empty_passes(tmp_path):
+    d = _case(tmp_path, kind="negative-control", leads=("l-001", "l-002"),
+              extra_manifest=_DERIVED)
+    proj = _projection(d, {"l-001": [], "l-002": []})
+    assert score.main([str(d), str(proj)]) == 0
+
+
+def test_the_noise_marker_is_not_a_way_to_be_empty(tmp_path):
+    """`+ noise` asserts the activity IS in this envelope and merely looks routine. For an
+    envelope the activity never touches, that is a claim of presence, not a quantity — and
+    the failure text has to say which, or it reads as "emitted 1 item"."""
+    d = _case(tmp_path, kind="negative-control", extra_manifest=_DERIVED)
+    proj = _projection(d, {"l-001": ["<standard environment noise>"]})
+    failures = score.expectation_failures(
+        {"empty_leads": "all"}, {"l-001": ["<standard environment noise>"]}, ["l-001"])
+    assert len(failures) == 1
+    assert "noise-marker" in failures[0]
+    assert score.main([str(d), str(proj)]) == 1
+
+
+def test_suppression_is_refused_where_the_story_blinds_nothing(tmp_path):
+    d = _case(tmp_path, kind="spec-probe",
+              extra_manifest={"kind": "spec-probe",
+                              "expectation": {"no_suppression": "all"}})
+    proj = _projection(d, {"l-001": ["<suppressed: the host went dark>"]})
+    assert score.main([str(d), str(proj)]) == 1
+
+
+def test_must_emit_catches_a_projection_that_passes_by_saying_nothing(tmp_path):
+    """The leak check is one-sided: an all-empty projection emits no forbidden value and
+    sails through it. `must_emit` is the other half — mutation cases assert that the
+    mutated value actually LANDED, which until now lived only in manifest prose."""
+    d = _case(tmp_path, kind="mutation",
+              extra_manifest={"kind": "mutation",
+                              "expectation": {"must_emit": ["172.18.0.30"]}})
+    assert score.main([str(d), str(_projection(d, {"l-001": []}))]) == 1
+    landed = _projection(d, {"l-001": [{"source.ip": "172.18.0.30"}]}, name="b.yaml")
+    assert score.main([str(d), str(landed)]) == 0
+
+
+def test_a_concrete_value_the_story_does_state_is_not_a_violation(tmp_path):
+    """probe-003's correction. The first version of that case demanded no concrete value
+    anywhere and failed the oracle for emitting `host.name: canary-1` — which its story
+    states outright. prompt.md says to placeholder what the story does NOT state, so the
+    contract is value-specific (`must_not_emit`), never "abstain from everything"."""
+    d = _case(tmp_path, kind="spec-probe",
+              extra_manifest={"kind": "spec-probe",
+                              "expectation": {"must_not_emit": ["172.18.0.15", "root"]}})
+    honest = _projection(d, {"l-001": [
+        {"host.name": "canary-1", "event.outcome": "failure",
+         "source.ip": "<attacker-workstation-ip>", "user.name": "<target-account>"}]})
+    assert score.main([str(d), str(honest)]) == 0, "placeholdered withdrawals are correct"
+    copied = _projection(d, {"l-001": [
+        {"host.name": "canary-1", "source.ip": "172.18.0.15"}]}, name="b.yaml")
+    assert score.main([str(d), str(copied)]) == 1, "recovered from the query, not the story"
+
+
+def test_the_noise_marker_can_be_refused_where_a_delta_is_measured(tmp_path):
+    """`no_noise_marker` is the mirror of `no_suppression`. probe-005 needs it: adding two
+    unsatisfiable `what_to_summarize` items to case-001 — same story byte-for-byte, same
+    queries — collapsed a judge-measured `present` lead to `<standard environment noise>`,
+    turning a verified catch into an apparent evasion."""
+    d = _case(tmp_path, kind="spec-probe",
+              extra_manifest={"kind": "spec-probe",
+                              "expectation": {"no_noise_marker": ["l-001"]}})
+    denied = _projection(d, {"l-001": ["<standard environment noise>"]})
+    assert score.main([str(d), str(denied)]) == 1
+    projected = _projection(d, {"l-001": [{"event.outcome": "failure"}]}, name="b.yaml")
+    assert score.main([str(d), str(projected)]) == 0
+
+
+def test_a_clause_naming_a_lead_the_case_lacks_asserts_nothing_loudly(tmp_path):
+    """`_requested` resolves against the case's own ids, so a typo'd lead id cannot make a
+    contract look enforced while checking nothing. The case still has to assert something
+    real elsewhere — `validate_cases.check_expectation` is what catches a case whose whole
+    contract evaporates this way."""
+    assert score.expectation_failures(
+        {"empty_leads": ["l-999"]}, {"l-001": [{"a": 1}]}, ["l-001"]) == []
+    assert score.expectation_failures(
+        {"empty_leads": "all"}, {"l-001": [{"a": 1}]}, ["l-001"]) != []

@@ -53,7 +53,8 @@ REQUIRED_FILES = ("manifest.yaml", "environment.yaml",
 
 #: Kinds that carry no capture of their own: they reuse a base case's envelopes and
 #: change only the story, so `hidden/` is absent BY DESIGN and its absence is not a gap.
-DERIVED_KINDS = ("mutation", "negative-control")
+DERIVED_KINDS = ("mutation", "negative-control", "spec-probe", "contradiction",
+                 "corrupted")
 
 #: Vocabulary only an eval author writes — the scoring frame, not the operation.
 #: Mirrored in `story_from_run.py`, which lints its own rendered output.
@@ -95,7 +96,30 @@ def check_case(case_dir: Path, by_id: dict[str, dict]) -> list[str]:
         problems.append(f"{name}: story.md leaks the evaluation frame: {tells}")
 
     problems += check_split_and_unit(name, manifest, by_id)
+    problems += check_expectation(name, manifest)
     return problems
+
+
+def check_expectation(name: str, manifest: dict) -> list[str]:
+    """A derived case must assert something, because nothing else will.
+
+    An observed case is graded against the judge's measurement of `hidden/`. A derived
+    case has no `hidden/`, so the judge never runs on it and `expectation:` is the ONLY
+    thing standing between it and a vacuous pass. This check exists because that gap was
+    real: after the judge redesign, a forged `neg-001` projection copying the base case's
+    burst into all nine leads — the exact window-copying the negative control exists to
+    catch — scored clean and exited 0.
+    """
+    if manifest.get("kind") not in DERIVED_KINDS:
+        return []
+    expectation = manifest.get("expectation") or {}
+    if not any(expectation.get(k) for k in
+               ("empty_leads", "no_suppression", "no_noise_marker", "must_emit",
+                "must_not_emit")):
+        return [f"{name}: a {manifest.get('kind')} case declares no `expectation:` — the "
+                f"judge never runs on it, so it would pass no matter what the oracle "
+                f"emitted. Declare what its story settles."]
+    return []
 
 
 def check_identity(case_dir: Path, manifest: dict) -> list[str]:

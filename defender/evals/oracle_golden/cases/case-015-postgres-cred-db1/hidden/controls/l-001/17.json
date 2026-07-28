@@ -1,0 +1,348 @@
+{
+  "lead_id": "l-001",
+  "seq": 17,
+  "controls": [
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-06T20:02:30.000Z",
+        "2026-07-06T21:02:30.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE host.name == \"office-ws-1\" AND @timestamp >= \"2026-07-06T20:02:30.000Z\" AND @timestamp < \"2026-07-06T21:02:30.000Z\"\n| STATS count = COUNT(*), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp) BY event.action, process.name, user.name, source.ip\n| SORT count DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE host.name == \"office-ws-1\" AND @timestamp >= \"2026-07-06T20:02:30.000Z\" AND @timestamp < \"2026-07-06T21:02:30.000Z\"\n| STATS count = COUNT(*), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp) BY event.action, process.name, user.name, source.ip\n| SORT count DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "count",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "event.action",
+            "type": "keyword"
+          },
+          {
+            "name": "process.name",
+            "type": "keyword"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          }
+        ],
+        "row_count": 10,
+        "values": [
+          {
+            "count": 84,
+            "first_seen": "2026-07-06T20:07:02.000Z",
+            "last_seen": "2026-07-06T21:00:56.000Z",
+            "event.action": null,
+            "process.name": "sshd",
+            "user.name": null,
+            "source.ip": null
+          },
+          {
+            "count": 27,
+            "first_seen": "2026-07-06T20:07:02.000Z",
+            "last_seen": "2026-07-06T21:01:18.000Z",
+            "event.action": "logged-on",
+            "process.name": "runuser",
+            "user.name": "",
+            "source.ip": null
+          },
+          {
+            "count": 21,
+            "first_seen": "2026-07-06T20:07:02.000Z",
+            "last_seen": "2026-07-06T20:54:46.000Z",
+            "event.action": "logged-off",
+            "process.name": "runuser",
+            "user.name": "svc.monitoring",
+            "source.ip": null
+          },
+          {
+            "count": 6,
+            "first_seen": "2026-07-06T20:08:49.000Z",
+            "last_seen": "2026-07-06T20:09:05.000Z",
+            "event.action": "logged-on",
+            "process.name": "sshd",
+            "user.name": "",
+            "source.ip": null
+          },
+          {
+            "count": 6,
+            "first_seen": "2026-07-06T20:08:49.000Z",
+            "last_seen": "2026-07-06T20:09:05.000Z",
+            "event.action": "logged-off",
+            "process.name": "sshd",
+            "user.name": "svc.config-mgmt",
+            "source.ip": null
+          },
+          {
+            "count": 6,
+            "first_seen": "2026-07-06T20:08:49.000Z",
+            "last_seen": "2026-07-06T20:09:05.000Z",
+            "event.action": "ssh_login",
+            "process.name": "sshd",
+            "user.name": "svc.config-mgmt",
+            "source.ip": "172.18.0.14"
+          },
+          {
+            "count": 6,
+            "first_seen": "2026-07-06T20:56:33.000Z",
+            "last_seen": "2026-07-06T21:01:18.000Z",
+            "event.action": "logged-off",
+            "process.name": "runuser",
+            "user.name": "dev.dana",
+            "source.ip": null
+          },
+          {
+            "count": 3,
+            "first_seen": "2026-07-06T20:17:01.000Z",
+            "last_seen": "2026-07-06T20:17:01.000Z",
+            "event.action": "logged-off",
+            "process.name": "CRON",
+            "user.name": "root",
+            "source.ip": null
+          },
+          {
+            "count": 3,
+            "first_seen": "2026-07-06T20:17:01.000Z",
+            "last_seen": "2026-07-06T20:17:01.000Z",
+            "event.action": "logged-on",
+            "process.name": "CRON",
+            "user.name": "",
+            "source.ip": null
+          },
+          {
+            "count": 3,
+            "first_seen": "2026-07-06T20:17:01.000Z",
+            "last_seen": "2026-07-06T20:17:01.000Z",
+            "event.action": null,
+            "process.name": "CRON",
+            "user.name": null,
+            "source.ip": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-29T20:02:30.000Z",
+        "2026-06-29T21:02:30.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE host.name == \"office-ws-1\" AND @timestamp >= \"2026-06-29T20:02:30.000Z\" AND @timestamp < \"2026-06-29T21:02:30.000Z\"\n| STATS count = COUNT(*), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp) BY event.action, process.name, user.name, source.ip\n| SORT count DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE host.name == \"office-ws-1\" AND @timestamp >= \"2026-06-29T20:02:30.000Z\" AND @timestamp < \"2026-06-29T21:02:30.000Z\"\n| STATS count = COUNT(*), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp) BY event.action, process.name, user.name, source.ip\n| SORT count DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "count",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "event.action",
+            "type": "keyword"
+          },
+          {
+            "name": "process.name",
+            "type": "keyword"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          }
+        ],
+        "row_count": 6,
+        "values": [
+          {
+            "count": 136,
+            "first_seen": "2026-06-29T20:04:29.000Z",
+            "last_seen": "2026-06-29T20:58:50.000Z",
+            "event.action": null,
+            "process.name": "sshd",
+            "user.name": null,
+            "source.ip": null
+          },
+          {
+            "count": 52,
+            "first_seen": "2026-06-29T20:04:28.000Z",
+            "last_seen": "2026-06-29T20:58:50.000Z",
+            "event.action": "logged-on",
+            "process.name": "runuser",
+            "user.name": "",
+            "source.ip": null
+          },
+          {
+            "count": 52,
+            "first_seen": "2026-06-29T20:04:29.000Z",
+            "last_seen": "2026-06-29T20:58:50.000Z",
+            "event.action": "logged-off",
+            "process.name": "runuser",
+            "user.name": "svc.monitoring",
+            "source.ip": null
+          },
+          {
+            "count": 4,
+            "first_seen": "2026-06-29T20:17:01.000Z",
+            "last_seen": "2026-06-29T20:17:01.000Z",
+            "event.action": "logged-off",
+            "process.name": "CRON",
+            "user.name": "root",
+            "source.ip": null
+          },
+          {
+            "count": 4,
+            "first_seen": "2026-06-29T20:17:01.000Z",
+            "last_seen": "2026-06-29T20:17:01.000Z",
+            "event.action": "logged-on",
+            "process.name": "CRON",
+            "user.name": "",
+            "source.ip": null
+          },
+          {
+            "count": 4,
+            "first_seen": "2026-06-29T20:17:01.000Z",
+            "last_seen": "2026-06-29T20:17:01.000Z",
+            "event.action": null,
+            "process.name": "CRON",
+            "user.name": null,
+            "source.ip": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-35d",
+      "window": [
+        "2026-06-22T20:02:30.000Z",
+        "2026-06-22T21:02:30.000Z"
+      ],
+      "query": "FROM logs-system.auth-*\n| WHERE host.name == \"office-ws-1\" AND @timestamp >= \"2026-06-22T20:02:30.000Z\" AND @timestamp < \"2026-06-22T21:02:30.000Z\"\n| STATS count = COUNT(*), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp) BY event.action, process.name, user.name, source.ip\n| SORT count DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-system.auth-*\n| WHERE host.name == \"office-ws-1\" AND @timestamp >= \"2026-06-22T20:02:30.000Z\" AND @timestamp < \"2026-06-22T21:02:30.000Z\"\n| STATS count = COUNT(*), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp) BY event.action, process.name, user.name, source.ip\n| SORT count DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "count",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "event.action",
+            "type": "keyword"
+          },
+          {
+            "name": "process.name",
+            "type": "keyword"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          }
+        ],
+        "row_count": 7,
+        "values": [
+          {
+            "count": 152,
+            "first_seen": "2026-06-22T20:04:00.000Z",
+            "last_seen": "2026-06-22T21:01:09.000Z",
+            "event.action": null,
+            "process.name": "sshd",
+            "user.name": null,
+            "source.ip": null
+          },
+          {
+            "count": 60,
+            "first_seen": "2026-06-22T20:04:00.000Z",
+            "last_seen": "2026-06-22T21:01:09.000Z",
+            "event.action": "logged-on",
+            "process.name": "runuser",
+            "user.name": "",
+            "source.ip": null
+          },
+          {
+            "count": 56,
+            "first_seen": "2026-06-22T20:04:00.000Z",
+            "last_seen": "2026-06-22T21:01:09.000Z",
+            "event.action": "logged-off",
+            "process.name": "runuser",
+            "user.name": "svc.monitoring",
+            "source.ip": null
+          },
+          {
+            "count": 4,
+            "first_seen": "2026-06-22T20:17:01.000Z",
+            "last_seen": "2026-06-22T20:17:01.000Z",
+            "event.action": "logged-on",
+            "process.name": "CRON",
+            "user.name": "",
+            "source.ip": null
+          },
+          {
+            "count": 4,
+            "first_seen": "2026-06-22T20:17:01.000Z",
+            "last_seen": "2026-06-22T20:17:01.000Z",
+            "event.action": null,
+            "process.name": "CRON",
+            "user.name": null,
+            "source.ip": null
+          },
+          {
+            "count": 4,
+            "first_seen": "2026-06-22T20:17:01.000Z",
+            "last_seen": "2026-06-22T20:17:01.000Z",
+            "event.action": "logged-off",
+            "process.name": "CRON",
+            "user.name": "root",
+            "source.ip": null
+          },
+          {
+            "count": 4,
+            "first_seen": "2026-06-22T20:31:13.000Z",
+            "last_seen": "2026-06-22T20:31:13.000Z",
+            "event.action": "logged-off",
+            "process.name": "runuser",
+            "user.name": "dev.dana",
+            "source.ip": null
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,186 @@
+{
+  "lead_id": "l-006",
+  "seq": 2,
+  "controls": [
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-07T06:15:00.000Z",
+        "2026-07-07T07:15:00.000Z"
+      ],
+      "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-07T06:15:00.000Z\" AND @timestamp < \"2026-07-07T07:15:00.000Z\"\n        AND host.name == \"soc-playground\"\n        AND falco.rule != \"Sudo execution\"\n        AND (falco.rule LIKE \"*Write*\" \n             OR falco.rule LIKE \"*write*\" \n             OR falco.rule LIKE \"*cron*\" \n             OR falco.rule LIKE \"*authorized*\" \n             OR falco.rule LIKE \"*Read sensitive*\"\n             OR falco.rule LIKE \"*Sensitive*\")\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule      = falco.rule,\n           proc      = falco.output_fields.proc.name,\n           parent    = falco.output_fields.proc.pname,\n           container = falco.output_fields.container.id\n| SORT events DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-07T06:15:00.000Z\" AND @timestamp < \"2026-07-07T07:15:00.000Z\"\n        AND host.name == \"soc-playground\"\n        AND falco.rule != \"Sudo execution\"\n        AND (falco.rule LIKE \"*Write*\" \n             OR falco.rule LIKE \"*write*\" \n             OR falco.rule LIKE \"*cron*\" \n             OR falco.rule LIKE \"*authorized*\" \n             OR falco.rule LIKE \"*Read sensitive*\"\n             OR falco.rule LIKE \"*Sensitive*\")\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule      = falco.rule,\n           proc      = falco.output_fields.proc.name,\n           parent    = falco.output_fields.proc.pname,\n           container = falco.output_fields.container.id\n| SORT events DESC",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "rule",
+            "type": "keyword"
+          },
+          {
+            "name": "proc",
+            "type": "keyword"
+          },
+          {
+            "name": "parent",
+            "type": "keyword"
+          },
+          {
+            "name": "container",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 2,
+        "values": [
+          {
+            "events": 60,
+            "first_seen": "2026-07-07T06:15:23.362Z",
+            "last_seen": "2026-07-07T07:14:40.032Z",
+            "rule": "Launch Sensitive Mount Container",
+            "proc": "tini",
+            "parent": "containerd-shim",
+            "container": "e1dc89faaa8b"
+          },
+          {
+            "events": 9,
+            "first_seen": "2026-07-07T06:16:10.371Z",
+            "last_seen": "2026-07-07T06:16:10.371Z",
+            "rule": "Read sensitive file untrusted",
+            "proc": "9",
+            "parent": "<NA>",
+            "container": "host"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-30T06:15:00.000Z",
+        "2026-06-30T07:15:00.000Z"
+      ],
+      "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-06-30T06:15:00.000Z\" AND @timestamp < \"2026-06-30T07:15:00.000Z\"\n        AND host.name == \"soc-playground\"\n        AND falco.rule != \"Sudo execution\"\n        AND (falco.rule LIKE \"*Write*\" \n             OR falco.rule LIKE \"*write*\" \n             OR falco.rule LIKE \"*cron*\" \n             OR falco.rule LIKE \"*authorized*\" \n             OR falco.rule LIKE \"*Read sensitive*\"\n             OR falco.rule LIKE \"*Sensitive*\")\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule      = falco.rule,\n           proc      = falco.output_fields.proc.name,\n           parent    = falco.output_fields.proc.pname,\n           container = falco.output_fields.container.id\n| SORT events DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-06-30T06:15:00.000Z\" AND @timestamp < \"2026-06-30T07:15:00.000Z\"\n        AND host.name == \"soc-playground\"\n        AND falco.rule != \"Sudo execution\"\n        AND (falco.rule LIKE \"*Write*\" \n             OR falco.rule LIKE \"*write*\" \n             OR falco.rule LIKE \"*cron*\" \n             OR falco.rule LIKE \"*authorized*\" \n             OR falco.rule LIKE \"*Read sensitive*\"\n             OR falco.rule LIKE \"*Sensitive*\")\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule      = falco.rule,\n           proc      = falco.output_fields.proc.name,\n           parent    = falco.output_fields.proc.pname,\n           container = falco.output_fields.container.id\n| SORT events DESC",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "rule",
+            "type": "keyword"
+          },
+          {
+            "name": "proc",
+            "type": "keyword"
+          },
+          {
+            "name": "parent",
+            "type": "keyword"
+          },
+          {
+            "name": "container",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "events": 60,
+            "first_seen": "2026-06-30T06:15:32.548Z",
+            "last_seen": "2026-06-30T07:14:56.425Z",
+            "rule": "Launch Sensitive Mount Container",
+            "proc": "tini",
+            "parent": "containerd-shim",
+            "container": "e1dc89faaa8b"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-35d",
+      "window": [
+        "2026-06-23T06:15:00.000Z",
+        "2026-06-23T07:15:00.000Z"
+      ],
+      "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-06-23T06:15:00.000Z\" AND @timestamp < \"2026-06-23T07:15:00.000Z\"\n        AND host.name == \"soc-playground\"\n        AND falco.rule != \"Sudo execution\"\n        AND (falco.rule LIKE \"*Write*\" \n             OR falco.rule LIKE \"*write*\" \n             OR falco.rule LIKE \"*cron*\" \n             OR falco.rule LIKE \"*authorized*\" \n             OR falco.rule LIKE \"*Read sensitive*\"\n             OR falco.rule LIKE \"*Sensitive*\")\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule      = falco.rule,\n           proc      = falco.output_fields.proc.name,\n           parent    = falco.output_fields.proc.pname,\n           container = falco.output_fields.container.id\n| SORT events DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-06-23T06:15:00.000Z\" AND @timestamp < \"2026-06-23T07:15:00.000Z\"\n        AND host.name == \"soc-playground\"\n        AND falco.rule != \"Sudo execution\"\n        AND (falco.rule LIKE \"*Write*\" \n             OR falco.rule LIKE \"*write*\" \n             OR falco.rule LIKE \"*cron*\" \n             OR falco.rule LIKE \"*authorized*\" \n             OR falco.rule LIKE \"*Read sensitive*\"\n             OR falco.rule LIKE \"*Sensitive*\")\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule      = falco.rule,\n           proc      = falco.output_fields.proc.name,\n           parent    = falco.output_fields.proc.pname,\n           container = falco.output_fields.container.id\n| SORT events DESC",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "rule",
+            "type": "keyword"
+          },
+          {
+            "name": "proc",
+            "type": "keyword"
+          },
+          {
+            "name": "parent",
+            "type": "keyword"
+          },
+          {
+            "name": "container",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 2,
+        "values": [
+          {
+            "events": 59,
+            "first_seen": "2026-06-23T06:15:55.962Z",
+            "last_seen": "2026-06-23T07:14:21.845Z",
+            "rule": "Launch Sensitive Mount Container",
+            "proc": "tini",
+            "parent": "containerd-shim",
+            "container": "e1dc89faaa8b"
+          },
+          {
+            "events": 36,
+            "first_seen": "2026-06-23T06:23:36.070Z",
+            "last_seen": "2026-06-23T06:51:48.494Z",
+            "rule": "Read sensitive file untrusted",
+            "proc": "9",
+            "parent": "systemd",
+            "container": "host"
+          }
+        ]
+      }
+    }
+  ]
+}

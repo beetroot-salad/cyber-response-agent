@@ -1,0 +1,213 @@
+{
+  "lead_id": "l-001",
+  "seq": 0,
+  "controls": [
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-06T20:02:30.000Z",
+        "2026-07-06T21:02:30.000Z"
+      ],
+      "query": "FROM logs-postgresql.log-*\n| WHERE @timestamp >= \"2026-07-06T20:02:30.000Z\" AND @timestamp < \"2026-07-06T21:02:30.000Z\"\n        AND host.name == \"db-1\"\n| EVAL msg = message\n| EVAL is_auth_fail = msg LIKE \"*password authentication failed*\"\n| EVAL is_fatal = msg LIKE \"*FATAL*\"\n| EVAL is_connection = msg LIKE \"*connection*\"\n| EVAL is_auth_ok = msg LIKE \"*authentication*\" AND NOT (msg LIKE \"*failed*\")\n| EVAL is_select = msg LIKE \"*SELECT*\"\n| EVAL is_statement = msg LIKE \"*STATEMENT*\" OR msg LIKE \"*statement*\"\n| STATS total_events = COUNT(*),\n        auth_fail_count = COUNT(*) WHERE is_auth_fail,\n        fatal_count = COUNT(*) WHERE is_fatal,\n        connection_count = COUNT(*) WHERE is_connection,\n        auth_ok_count = COUNT(*) WHERE is_auth_ok,\n        select_count = COUNT(*) WHERE is_select,\n        statement_count = COUNT(*) WHERE is_statement,\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY host.name",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-postgresql.log-*\n| WHERE @timestamp >= \"2026-07-06T20:02:30.000Z\" AND @timestamp < \"2026-07-06T21:02:30.000Z\"\n        AND host.name == \"db-1\"\n| EVAL msg = message\n| EVAL is_auth_fail = msg LIKE \"*password authentication failed*\"\n| EVAL is_fatal = msg LIKE \"*FATAL*\"\n| EVAL is_connection = msg LIKE \"*connection*\"\n| EVAL is_auth_ok = msg LIKE \"*authentication*\" AND NOT (msg LIKE \"*failed*\")\n| EVAL is_select = msg LIKE \"*SELECT*\"\n| EVAL is_statement = msg LIKE \"*STATEMENT*\" OR msg LIKE \"*statement*\"\n| STATS total_events = COUNT(*),\n        auth_fail_count = COUNT(*) WHERE is_auth_fail,\n        fatal_count = COUNT(*) WHERE is_fatal,\n        connection_count = COUNT(*) WHERE is_connection,\n        auth_ok_count = COUNT(*) WHERE is_auth_ok,\n        select_count = COUNT(*) WHERE is_select,\n        statement_count = COUNT(*) WHERE is_statement,\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY host.name",
+        "columns": [
+          {
+            "name": "total_events",
+            "type": "long"
+          },
+          {
+            "name": "auth_fail_count",
+            "type": "long"
+          },
+          {
+            "name": "fatal_count",
+            "type": "long"
+          },
+          {
+            "name": "connection_count",
+            "type": "long"
+          },
+          {
+            "name": "auth_ok_count",
+            "type": "long"
+          },
+          {
+            "name": "select_count",
+            "type": "long"
+          },
+          {
+            "name": "statement_count",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "total_events": 11520,
+            "auth_fail_count": 5760,
+            "fatal_count": 0,
+            "connection_count": 0,
+            "auth_ok_count": 0,
+            "select_count": 0,
+            "statement_count": 0,
+            "first_seen": "2026-07-06T20:02:37.159Z",
+            "last_seen": "2026-07-06T21:02:27.160Z",
+            "host.name": "db-1"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-29T20:02:30.000Z",
+        "2026-06-29T21:02:30.000Z"
+      ],
+      "query": "FROM logs-postgresql.log-*\n| WHERE @timestamp >= \"2026-06-29T20:02:30.000Z\" AND @timestamp < \"2026-06-29T21:02:30.000Z\"\n        AND host.name == \"db-1\"\n| EVAL msg = message\n| EVAL is_auth_fail = msg LIKE \"*password authentication failed*\"\n| EVAL is_fatal = msg LIKE \"*FATAL*\"\n| EVAL is_connection = msg LIKE \"*connection*\"\n| EVAL is_auth_ok = msg LIKE \"*authentication*\" AND NOT (msg LIKE \"*failed*\")\n| EVAL is_select = msg LIKE \"*SELECT*\"\n| EVAL is_statement = msg LIKE \"*STATEMENT*\" OR msg LIKE \"*statement*\"\n| STATS total_events = COUNT(*),\n        auth_fail_count = COUNT(*) WHERE is_auth_fail,\n        fatal_count = COUNT(*) WHERE is_fatal,\n        connection_count = COUNT(*) WHERE is_connection,\n        auth_ok_count = COUNT(*) WHERE is_auth_ok,\n        select_count = COUNT(*) WHERE is_select,\n        statement_count = COUNT(*) WHERE is_statement,\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY host.name",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-postgresql.log-*\n| WHERE @timestamp >= \"2026-06-29T20:02:30.000Z\" AND @timestamp < \"2026-06-29T21:02:30.000Z\"\n        AND host.name == \"db-1\"\n| EVAL msg = message\n| EVAL is_auth_fail = msg LIKE \"*password authentication failed*\"\n| EVAL is_fatal = msg LIKE \"*FATAL*\"\n| EVAL is_connection = msg LIKE \"*connection*\"\n| EVAL is_auth_ok = msg LIKE \"*authentication*\" AND NOT (msg LIKE \"*failed*\")\n| EVAL is_select = msg LIKE \"*SELECT*\"\n| EVAL is_statement = msg LIKE \"*STATEMENT*\" OR msg LIKE \"*statement*\"\n| STATS total_events = COUNT(*),\n        auth_fail_count = COUNT(*) WHERE is_auth_fail,\n        fatal_count = COUNT(*) WHERE is_fatal,\n        connection_count = COUNT(*) WHERE is_connection,\n        auth_ok_count = COUNT(*) WHERE is_auth_ok,\n        select_count = COUNT(*) WHERE is_select,\n        statement_count = COUNT(*) WHERE is_statement,\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY host.name",
+        "columns": [
+          {
+            "name": "total_events",
+            "type": "long"
+          },
+          {
+            "name": "auth_fail_count",
+            "type": "long"
+          },
+          {
+            "name": "fatal_count",
+            "type": "long"
+          },
+          {
+            "name": "connection_count",
+            "type": "long"
+          },
+          {
+            "name": "auth_ok_count",
+            "type": "long"
+          },
+          {
+            "name": "select_count",
+            "type": "long"
+          },
+          {
+            "name": "statement_count",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "total_events": 14400,
+            "auth_fail_count": 7200,
+            "fatal_count": 0,
+            "connection_count": 0,
+            "auth_ok_count": 0,
+            "select_count": 0,
+            "statement_count": 0,
+            "first_seen": "2026-06-29T20:02:33.764Z",
+            "last_seen": "2026-06-29T21:02:23.774Z",
+            "host.name": "db-1"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-35d",
+      "window": [
+        "2026-06-22T20:02:30.000Z",
+        "2026-06-22T21:02:30.000Z"
+      ],
+      "query": "FROM logs-postgresql.log-*\n| WHERE @timestamp >= \"2026-06-22T20:02:30.000Z\" AND @timestamp < \"2026-06-22T21:02:30.000Z\"\n        AND host.name == \"db-1\"\n| EVAL msg = message\n| EVAL is_auth_fail = msg LIKE \"*password authentication failed*\"\n| EVAL is_fatal = msg LIKE \"*FATAL*\"\n| EVAL is_connection = msg LIKE \"*connection*\"\n| EVAL is_auth_ok = msg LIKE \"*authentication*\" AND NOT (msg LIKE \"*failed*\")\n| EVAL is_select = msg LIKE \"*SELECT*\"\n| EVAL is_statement = msg LIKE \"*STATEMENT*\" OR msg LIKE \"*statement*\"\n| STATS total_events = COUNT(*),\n        auth_fail_count = COUNT(*) WHERE is_auth_fail,\n        fatal_count = COUNT(*) WHERE is_fatal,\n        connection_count = COUNT(*) WHERE is_connection,\n        auth_ok_count = COUNT(*) WHERE is_auth_ok,\n        select_count = COUNT(*) WHERE is_select,\n        statement_count = COUNT(*) WHERE is_statement,\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY host.name",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-postgresql.log-*\n| WHERE @timestamp >= \"2026-06-22T20:02:30.000Z\" AND @timestamp < \"2026-06-22T21:02:30.000Z\"\n        AND host.name == \"db-1\"\n| EVAL msg = message\n| EVAL is_auth_fail = msg LIKE \"*password authentication failed*\"\n| EVAL is_fatal = msg LIKE \"*FATAL*\"\n| EVAL is_connection = msg LIKE \"*connection*\"\n| EVAL is_auth_ok = msg LIKE \"*authentication*\" AND NOT (msg LIKE \"*failed*\")\n| EVAL is_select = msg LIKE \"*SELECT*\"\n| EVAL is_statement = msg LIKE \"*STATEMENT*\" OR msg LIKE \"*statement*\"\n| STATS total_events = COUNT(*),\n        auth_fail_count = COUNT(*) WHERE is_auth_fail,\n        fatal_count = COUNT(*) WHERE is_fatal,\n        connection_count = COUNT(*) WHERE is_connection,\n        auth_ok_count = COUNT(*) WHERE is_auth_ok,\n        select_count = COUNT(*) WHERE is_select,\n        statement_count = COUNT(*) WHERE is_statement,\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY host.name",
+        "columns": [
+          {
+            "name": "total_events",
+            "type": "long"
+          },
+          {
+            "name": "auth_fail_count",
+            "type": "long"
+          },
+          {
+            "name": "fatal_count",
+            "type": "long"
+          },
+          {
+            "name": "connection_count",
+            "type": "long"
+          },
+          {
+            "name": "auth_ok_count",
+            "type": "long"
+          },
+          {
+            "name": "select_count",
+            "type": "long"
+          },
+          {
+            "name": "statement_count",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "total_events": 14400,
+            "auth_fail_count": 7200,
+            "fatal_count": 0,
+            "connection_count": 0,
+            "auth_ok_count": 0,
+            "select_count": 0,
+            "statement_count": 0,
+            "first_seen": "2026-06-22T20:02:33.761Z",
+            "last_seen": "2026-06-22T21:02:23.772Z",
+            "host.name": "db-1"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,63 @@
+case_id: probe-003-ungrounded-entities
+kind: spec-probe
+base_case: case-001-ssh-bruteforce-canary
+
+# --- calibration metadata (#711) — see defender/docs/oracle-calibration.md ---
+split: dev
+unit:
+  activity_family: brute-force/T1110.001
+  host_pair: office-ws-1->canary-1
+capture_environment: playground-v2@409583061
+
+derivation:
+  from: case-001-ssh-bruteforce-canary/oracle_visible
+  changed: >
+    story.md only — case-001's operation with two entities WITHDRAWN rather than altered.
+    The source address and the target account are stated as unestablished; everything
+    else (canary-1, the burst structure, the timing, the outcome) is unchanged.
+  unchanged: leads.jsonl + samples/ (case-001's envelopes, byte-identical)
+
+# ---------------------------------------------------------------- the rule under test
+# oracle/prompt.md, "Choosing the result":
+#
+#   "Ground every value in the story. Use entities the story names. For a class of
+#    activity named without a specific entity, use one `<angle-placeholder>` per implied
+#    entity. Never fabricate concrete-looking values the story did not state."
+#
+# And, on where a value may NOT come from:
+#
+#   "never copy a timestamp from a query's window bounds. A window only *filters*."
+#
+# The trap is that the withdrawn values are sitting in the QUERIES. l-004, l-005 and
+# l-006 carry `172.18.0.15` in their own predicates and l-008 carries `root`, so a
+# projection can recover both entities without the story ever naming them — which is
+# precisely the copying this suite exists to detect. The story states that neither was
+# established, so the honest projection carries `<source-ip>` and `<username>`
+# placeholders, or nothing.
+probes_rule: "ground every value in the story; placeholder what it does not state"
+discriminates: query-copying vs. story-grounded values
+
+# This is mut-001's complement. mut-001 CHANGES an entity and checks the new value is
+# carried and the old one is not; a projection can pass it by copying from the story.
+# This one REMOVES an entity that remains visible in the query, so the only way to pass
+# is to notice the story does not support it.
+expectation:
+  # The two WITHDRAWN entities, and nothing else. They sit in the query predicates
+  # (l-004/l-005/l-006 carry the address, l-008 carries the account), so emitting either
+  # as a concrete value means it came from the envelope rather than the story — which is
+  # the copying this probe exists to detect. Placeholders and emptiness both pass;
+  # recovering a withdrawn value is the single failure.
+  must_not_emit: ["172.18.0.15", "root"]
+  # The story performs no blinding action, so darkness is not on the menu here either.
+  no_suppression: all
+  # NOT asserted: `empty_leads`. The activity really did happen against canary-1 and the
+  # canary-scoped envelopes really would carry it, so emptiness is not required and
+  # demanding it would test a different rule than the one named above.
+  #
+  # ALSO NOT ASSERTED, and this is the correction that matters: the first version of this
+  # case demanded that NO value anywhere be concrete. That failed the oracle for emitting
+  # `host.name: canary-1` and `event.outcome: failure` — both of which the story states
+  # outright. prompt.md says to placeholder the values the story does NOT state, not to
+  # abstain from every concrete value, and the check was reading a rule that is not
+  # there. The oracle was right and the contract was wrong; `placeholder_only` has been
+  # removed from the vocabulary rather than kept with a narrower scope.

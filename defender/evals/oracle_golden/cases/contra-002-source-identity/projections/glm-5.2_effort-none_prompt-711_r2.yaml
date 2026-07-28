@@ -1,0 +1,86 @@
+projections:
+- lead_id: l-003
+  events: []
+- lead_id: l-002
+  events:
+  - '@timestamp': <alert-time>
+    host.name: canary-1
+    auth_method: password
+    source.ip: 172.18.0.15
+    user.name: root
+    accepted: 0
+    failed: <failed-attempt-count>
+    first_seen: <alert-time>
+    last_seen: <alert-time+3m>
+  - '@timestamp': <alert-time>
+    kibana.alert.rule.rule_id: v2-sshd-success-after-failures
+    kibana.alert.rule.name: <rule-name>
+    kibana.alert.severity: <severity>
+    host.name: canary-1
+    alerts: <alert-count>
+    first_seen: <alert-time>
+    last_seen: <alert-time+3m>
+- lead_id: l-001
+  events:
+  - '@timestamp': <alert-time>
+    host.name: canary-1
+    event.outcome: failure
+    source.ip: 172.18.0.15
+    user.name: root
+    message: Failed password for root from 172.18.0.15 port <port> ssh2
+  - '@timestamp': <alert-time+3m>
+    host.name: canary-1
+    event.outcome: failure
+    source.ip: 172.18.0.15
+    user.name: root
+    message: Failed password for root from 172.18.0.15 port <port> ssh2
+- lead_id: l-005
+  events: []
+- lead_id: l-006
+  events:
+  - '@timestamp': <alert-time>
+    source.ip: 172.18.0.15
+    host.name: canary-1
+    event.outcome: failure
+    auth_method: password
+    accepted: 0
+    failed: <failed-count>
+    first_seen: <alert-time>
+    last_seen: <alert-time+~3m>
+    bucket: <alert-hour>
+  - '@timestamp': <alert-time>
+    source.ip: 172.18.0.15
+    host.name: canary-1
+    event.outcome: failure
+    auth_method: password
+    accepted: 0
+    failed: <failed-count-per-minute>
+    first_seen: <alert-time>
+    last_seen: <alert-time+~3m>
+    bucket: <alert-minute>
+- lead_id: l-004
+  events:
+  - '@timestamp': <alert-time>
+    source.ip: 172.18.0.15
+    destination.ip: 172.18.0.9
+    destination.port: 22
+    zeek.ssh.client: <ssh-client-string>
+    zeek.ssh.server: <ssh-server-string>
+    source.bytes: <bytes-out>
+    destination.bytes: <bytes-in>
+    host.name: canary-1
+    data_stream.dataset: zeek.ssh
+  - '@timestamp': <alert-time>
+    source.ip: 172.18.0.15
+    destination.ip: 172.18.0.9
+    destination.port: 22
+    source.bytes: <bytes-out>
+    destination.bytes: <bytes-in>
+    host.name: canary-1
+    data_stream.dataset: zeek.connection
+- lead_id: l-007
+  events: []
+- lead_id: l-008
+  events: []
+- lead_id: l-009
+  events: []

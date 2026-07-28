@@ -1,0 +1,183 @@
+{
+  "lead_id": "l-002",
+  "seq": 0,
+  "controls": [
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-06-30T06:17:32.000Z",
+        "2026-07-07T06:17:32.000Z"
+      ],
+      "query": "FROM logs-nginx.access-*\n| WHERE @timestamp >= \"2026-06-30T06:17:32.000Z\" AND @timestamp < \"2026-07-07T06:17:32.000Z\"\n        AND host.name == \"web-1\"\n| STATS total_requests = COUNT(*),\n        distinct_source_ips = COUNT_DISTINCT(source.ip),\n        distinct_paths = COUNT_DISTINCT(url.path),\n        off_host_requests = COUNT(*) WHERE source.ip != \"127.0.0.1\",\n        loopback_requests = COUNT(*) WHERE source.ip == \"127.0.0.1\",\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n| EVAL duration_hours = DATE_DIFF(\"hour\", first_seen, last_seen)",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-nginx.access-*\n| WHERE @timestamp >= \"2026-06-30T06:17:32.000Z\" AND @timestamp < \"2026-07-07T06:17:32.000Z\"\n        AND host.name == \"web-1\"\n| STATS total_requests = COUNT(*),\n        distinct_source_ips = COUNT_DISTINCT(source.ip),\n        distinct_paths = COUNT_DISTINCT(url.path),\n        off_host_requests = COUNT(*) WHERE source.ip != \"127.0.0.1\",\n        loopback_requests = COUNT(*) WHERE source.ip == \"127.0.0.1\",\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n| EVAL duration_hours = DATE_DIFF(\"hour\", first_seen, last_seen)",
+        "columns": [
+          {
+            "name": "total_requests",
+            "type": "long"
+          },
+          {
+            "name": "distinct_source_ips",
+            "type": "long"
+          },
+          {
+            "name": "distinct_paths",
+            "type": "long"
+          },
+          {
+            "name": "off_host_requests",
+            "type": "long"
+          },
+          {
+            "name": "loopback_requests",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "duration_hours",
+            "type": "integer"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "total_requests": 203803,
+            "distinct_source_ips": 5,
+            "distinct_paths": 2,
+            "off_host_requests": 4079,
+            "loopback_requests": 199724,
+            "first_seen": "2026-06-30T06:17:40.000Z",
+            "last_seen": "2026-07-07T06:17:30.000Z",
+            "duration_hours": 167
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-23T06:17:32.000Z",
+        "2026-06-30T06:17:32.000Z"
+      ],
+      "query": "FROM logs-nginx.access-*\n| WHERE @timestamp >= \"2026-06-23T06:17:32.000Z\" AND @timestamp < \"2026-06-30T06:17:32.000Z\"\n        AND host.name == \"web-1\"\n| STATS total_requests = COUNT(*),\n        distinct_source_ips = COUNT_DISTINCT(source.ip),\n        distinct_paths = COUNT_DISTINCT(url.path),\n        off_host_requests = COUNT(*) WHERE source.ip != \"127.0.0.1\",\n        loopback_requests = COUNT(*) WHERE source.ip == \"127.0.0.1\",\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n| EVAL duration_hours = DATE_DIFF(\"hour\", first_seen, last_seen)",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-nginx.access-*\n| WHERE @timestamp >= \"2026-06-23T06:17:32.000Z\" AND @timestamp < \"2026-06-30T06:17:32.000Z\"\n        AND host.name == \"web-1\"\n| STATS total_requests = COUNT(*),\n        distinct_source_ips = COUNT_DISTINCT(source.ip),\n        distinct_paths = COUNT_DISTINCT(url.path),\n        off_host_requests = COUNT(*) WHERE source.ip != \"127.0.0.1\",\n        loopback_requests = COUNT(*) WHERE source.ip == \"127.0.0.1\",\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n| EVAL duration_hours = DATE_DIFF(\"hour\", first_seen, last_seen)",
+        "columns": [
+          {
+            "name": "total_requests",
+            "type": "long"
+          },
+          {
+            "name": "distinct_source_ips",
+            "type": "long"
+          },
+          {
+            "name": "distinct_paths",
+            "type": "long"
+          },
+          {
+            "name": "off_host_requests",
+            "type": "long"
+          },
+          {
+            "name": "loopback_requests",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "duration_hours",
+            "type": "integer"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "total_requests": 255184,
+            "distinct_source_ips": 3,
+            "distinct_paths": 2,
+            "off_host_requests": 5188,
+            "loopback_requests": 249996,
+            "first_seen": "2026-06-23T06:17:40.000Z",
+            "last_seen": "2026-06-30T06:17:30.000Z",
+            "duration_hours": 167
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-35d",
+      "window": [
+        "2026-06-16T06:17:32.000Z",
+        "2026-06-23T06:17:32.000Z"
+      ],
+      "query": "FROM logs-nginx.access-*\n| WHERE @timestamp >= \"2026-06-16T06:17:32.000Z\" AND @timestamp < \"2026-06-23T06:17:32.000Z\"\n        AND host.name == \"web-1\"\n| STATS total_requests = COUNT(*),\n        distinct_source_ips = COUNT_DISTINCT(source.ip),\n        distinct_paths = COUNT_DISTINCT(url.path),\n        off_host_requests = COUNT(*) WHERE source.ip != \"127.0.0.1\",\n        loopback_requests = COUNT(*) WHERE source.ip == \"127.0.0.1\",\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n| EVAL duration_hours = DATE_DIFF(\"hour\", first_seen, last_seen)",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-nginx.access-*\n| WHERE @timestamp >= \"2026-06-16T06:17:32.000Z\" AND @timestamp < \"2026-06-23T06:17:32.000Z\"\n        AND host.name == \"web-1\"\n| STATS total_requests = COUNT(*),\n        distinct_source_ips = COUNT_DISTINCT(source.ip),\n        distinct_paths = COUNT_DISTINCT(url.path),\n        off_host_requests = COUNT(*) WHERE source.ip != \"127.0.0.1\",\n        loopback_requests = COUNT(*) WHERE source.ip == \"127.0.0.1\",\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n| EVAL duration_hours = DATE_DIFF(\"hour\", first_seen, last_seen)",
+        "columns": [
+          {
+            "name": "total_requests",
+            "type": "long"
+          },
+          {
+            "name": "distinct_source_ips",
+            "type": "long"
+          },
+          {
+            "name": "distinct_paths",
+            "type": "long"
+          },
+          {
+            "name": "off_host_requests",
+            "type": "long"
+          },
+          {
+            "name": "loopback_requests",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "duration_hours",
+            "type": "integer"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "total_requests": 276068,
+            "distinct_source_ips": 5,
+            "distinct_paths": 2,
+            "off_host_requests": 5340,
+            "loopback_requests": 270728,
+            "first_seen": "2026-06-16T06:17:40.000Z",
+            "last_seen": "2026-06-23T06:17:30.000Z",
+            "duration_hours": 167
+          }
+        ]
+      }
+    }
+  ]
+}

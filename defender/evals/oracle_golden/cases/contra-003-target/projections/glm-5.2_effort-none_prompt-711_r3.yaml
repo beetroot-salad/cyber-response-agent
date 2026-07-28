@@ -1,0 +1,69 @@
+projections:
+- lead_id: l-003
+  events: []
+- lead_id: l-002
+  events: []
+- lead_id: l-001
+  events:
+  - <standard environment noise>
+- lead_id: l-005
+  events: []
+- lead_id: l-006
+  events:
+  - <standard environment noise>
+- lead_id: l-004
+  events:
+  - '@timestamp': <alert-time>
+    source.ip: 172.18.0.15
+    destination.ip: 172.18.0.9
+    zeek.ssh.client: <ssh-client-version>
+    zeek.ssh.server: <ssh-server-version>
+    destination.port: 22
+  - '@timestamp': <alert-time+10s>
+    source.ip: 172.18.0.15
+    destination.ip: 172.18.0.9
+    zeek.ssh.client: <ssh-client-version>
+    zeek.ssh.server: <ssh-server-version>
+    destination.port: 22
+  - '@timestamp': <alert-time+20s>
+    source.ip: 172.18.0.15
+    destination.ip: 172.18.0.9
+    zeek.ssh.client: <ssh-client-version>
+    zeek.ssh.server: <ssh-server-version>
+    destination.port: 22
+  - '@timestamp': <alert-time+30s>
+    source.ip: 172.18.0.15
+    destination.ip: 172.18.0.9
+    zeek.ssh.client: <ssh-client-version>
+    zeek.ssh.server: <ssh-server-version>
+    destination.port: 22
+  - '@timestamp': <alert-time+40s>
+    source.ip: 172.18.0.15
+    destination.ip: 172.18.0.9
+    zeek.ssh.client: <ssh-client-version>
+    zeek.ssh.server: <ssh-server-version>
+    destination.port: 22
+  - '@timestamp': <alert-time+50s>
+    source.ip: 172.18.0.15
+    destination.ip: 172.18.0.9
+    zeek.ssh.client: <ssh-client-version>
+    zeek.ssh.server: <ssh-server-version>
+    destination.port: 22
+  - '@timestamp': <alert-time+60s>
+    source.ip: 172.18.0.15
+    destination.ip: 172.18.0.9
+    zeek.ssh.client: <ssh-client-version>
+    zeek.ssh.server: <ssh-server-version>
+    destination.port: 22
+  - '@timestamp': <alert-time+70s>
+    source.ip: 172.18.0.15
+    destination.ip: 172.18.0.9
+    zeek.ssh.client: <ssh-client-version>
+    zeek.ssh.server: <ssh-server-version>
+    destination.port: 22
+- lead_id: l-007
+  events: []
+- lead_id: l-008
+  events: []
+- lead_id: l-009
+  events: []

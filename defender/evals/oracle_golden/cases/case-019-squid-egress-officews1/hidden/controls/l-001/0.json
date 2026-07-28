@@ -1,0 +1,162 @@
+{
+  "lead_id": "l-001",
+  "seq": 0,
+  "controls": [
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-07T06:36:53.000Z",
+        "2026-07-07T07:36:53.000Z"
+      ],
+      "query": "FROM logs-squid.access-*\n| WHERE @timestamp >= \"2026-07-07T06:36:53.000Z\" AND @timestamp < \"2026-07-07T07:36:53.000Z\"\n| KEEP @timestamp, source.ip, host.name, user.name, url.original, http.request.method, http.response.bytes, squid.elapsed_ms, squid.result_status\n| SORT @timestamp ASC\n| LIMIT 1000",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-squid.access-*\n| WHERE @timestamp >= \"2026-07-07T06:36:53.000Z\" AND @timestamp < \"2026-07-07T07:36:53.000Z\"\n| KEEP @timestamp, source.ip, host.name, user.name, url.original, http.request.method, http.response.bytes, squid.elapsed_ms, squid.result_status\n| SORT @timestamp ASC\n| LIMIT 1000",
+        "columns": [
+          {
+            "name": "@timestamp",
+            "type": "date"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          },
+          {
+            "name": "url.original",
+            "type": "keyword"
+          },
+          {
+            "name": "http.request.method",
+            "type": "keyword"
+          },
+          {
+            "name": "http.response.bytes",
+            "type": "long"
+          },
+          {
+            "name": "squid.elapsed_ms",
+            "type": "long"
+          },
+          {
+            "name": "squid.result_status",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-30T06:36:53.000Z",
+        "2026-06-30T07:36:53.000Z"
+      ],
+      "query": "FROM logs-squid.access-*\n| WHERE @timestamp >= \"2026-06-30T06:36:53.000Z\" AND @timestamp < \"2026-06-30T07:36:53.000Z\"\n| KEEP @timestamp, source.ip, host.name, user.name, url.original, http.request.method, http.response.bytes, squid.elapsed_ms, squid.result_status\n| SORT @timestamp ASC\n| LIMIT 1000",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-squid.access-*\n| WHERE @timestamp >= \"2026-06-30T06:36:53.000Z\" AND @timestamp < \"2026-06-30T07:36:53.000Z\"\n| KEEP @timestamp, source.ip, host.name, user.name, url.original, http.request.method, http.response.bytes, squid.elapsed_ms, squid.result_status\n| SORT @timestamp ASC\n| LIMIT 1000",
+        "columns": [
+          {
+            "name": "@timestamp",
+            "type": "date"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          },
+          {
+            "name": "url.original",
+            "type": "keyword"
+          },
+          {
+            "name": "http.request.method",
+            "type": "keyword"
+          },
+          {
+            "name": "http.response.bytes",
+            "type": "long"
+          },
+          {
+            "name": "squid.elapsed_ms",
+            "type": "long"
+          },
+          {
+            "name": "squid.result_status",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    },
+    {
+      "name": "C-35d",
+      "window": [
+        "2026-06-23T06:36:53.000Z",
+        "2026-06-23T07:36:53.000Z"
+      ],
+      "query": "FROM logs-squid.access-*\n| WHERE @timestamp >= \"2026-06-23T06:36:53.000Z\" AND @timestamp < \"2026-06-23T07:36:53.000Z\"\n| KEEP @timestamp, source.ip, host.name, user.name, url.original, http.request.method, http.response.bytes, squid.elapsed_ms, squid.result_status\n| SORT @timestamp ASC\n| LIMIT 1000",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-squid.access-*\n| WHERE @timestamp >= \"2026-06-23T06:36:53.000Z\" AND @timestamp < \"2026-06-23T07:36:53.000Z\"\n| KEEP @timestamp, source.ip, host.name, user.name, url.original, http.request.method, http.response.bytes, squid.elapsed_ms, squid.result_status\n| SORT @timestamp ASC\n| LIMIT 1000",
+        "columns": [
+          {
+            "name": "@timestamp",
+            "type": "date"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          },
+          {
+            "name": "url.original",
+            "type": "keyword"
+          },
+          {
+            "name": "http.request.method",
+            "type": "keyword"
+          },
+          {
+            "name": "http.response.bytes",
+            "type": "long"
+          },
+          {
+            "name": "squid.elapsed_ms",
+            "type": "long"
+          },
+          {
+            "name": "squid.result_status",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    }
+  ]
+}

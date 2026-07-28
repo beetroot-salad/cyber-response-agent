@@ -572,9 +572,14 @@ db-1 and `cross-tier-ssh-probe` fires on web-2. What does fail is narrower and
 sharper:
 
 > **The two Falco-dependent scenarios — `persistence-authorized-keys` and
-> `living-off-the-land` — raise nothing once retargeted off `canary-1`.** Their
-> rules appear scoped to the default host, so those families cannot contribute a
-> second unit until that is fixed.
+> `living-off-the-land` — raised nothing once retargeted off `canary-1`.** The pilot
+> read this as the Falco rules being host-scoped. **That diagnosis was wrong** (fixed
+> 2026-07-27): the rules are cluster-wide, and both scenarios are *local* — their
+> commands act on the host they run on and never interpolate `${target}`, so `--target`
+> moved only the runner record while the write still happened on `canary-1`. The runner
+> had no way to move *where the commands ran*. `--source` (below) is that knob:
+> `persistence-authorized-keys --source db-1` fires `v2-falco-authorized-keys-modification`
+> on db-1 — the first time that rule ever fired on a non-canary host (case-014).
 
 Three things for whoever recruits next:
 
@@ -595,12 +600,27 @@ Three things for whoever recruits next:
 ## Status
 
 `defender/evals/oracle_golden/README.md` carries the current coverage table and
-per-case results. Open work, in the order it matters:
+per-case results.
 
-1. **make the two Falco-dependent scenarios detectable when retargeted** — the
-   unit count does grow without it (2026-07-27 added three dev units and took
-   held-out to three), but `persistence-authorized-keys` and `living-off-the-land`
-   still cannot contribute a second unit each (see the pilot above);
+**2026-07-28:** `nginx.access`, `keycloak.events` and `squid.access` are now each a scored
+observed case (case-016/017/019; README §2026-07-28) — held-out grew 4→6 units, and
+**`C-MISSED-DELTA` cleared the establishment bar** (6 instances across 5 units): the oracle
+projects a baseline-overview lead empty when its window overlaps the activity, reproduced on
+nginx and squid independently. Two capture levers proved necessary and are worth reusing:
+force alert *synthesis* (a sentinel `--rule`) so a real Falco `curl`-CONNECT alert cannot
+hijack the investigation onto `zeek.http` instead of the intended source, and prune the
+over-broad correlate-everything lead before it trips the verdict judge (squid `l-006`,
+162 KB) — the same investigation-bounding constraint as item 1.
+
+Open work, in the order it matters:
+
+1. ~~**make the two Falco-dependent scenarios detectable when retargeted**~~ **Done
+   2026-07-27** — the runner grew a `--source` flag (the local-scenario retarget knob);
+   `persistence-authorized-keys --source db-1` fired the authorized-keys rule on db-1 and
+   was captured + scored as case-014, a new held-out Falco unit. A `sudo-escalation-burst`
+   scenario retargets the same way. What is *still* open: the verdict judge cannot hold a
+   many-query `+event` lead's payload (case-015's postgres capture — see the README
+   finding), so bounding the investigation is the next constraint on this family;
 2. wire the trust resolver into lesson scoring (the safety criterion);
 3. ~~**find out whether the held-out/dev gap is real.**~~ **Provisionally answered
    2026-07-27, and the answer is no.** On one unit held-out read 2/8 active against
@@ -633,13 +653,14 @@ per-case results. Open work, in the order it matters:
    | shape | split | active |
    |---|---|---|
    | actor prose | dev | 5/7 = 0.71 |
-   | transcript | dev | 3/6 = 0.50 |
-   | transcript | held-out | 9/17 = 0.53 |
+   | transcript | dev | 5/8 = 0.63 |
+   | transcript | held-out | 11/22 = 0.50 |
 
-   Within the transcript shape dev and held-out agree (0.50 / 0.53), which is what
+   Within the transcript shape dev and held-out roughly agree (0.63 / 0.50), which is what
    retired item 3. What remains is a shape effect the suite cannot currently
    measure, because shape is confounded with capture date and nearly with split —
-   and every future recruit deepens it. `n` is 7 against 23, so this is a
+   and every future recruit deepens it (the 2026-07-28 held-out captures are both
+   transcript). `n` is 7 against 30, so this is a
    hypothesis. Settle it cheaply and without the stack: hand-render one captured
    operation's story in actor-prose shape and score it against the **same**
    `hidden/` tree. That is not a mutation — the story describes what actually
