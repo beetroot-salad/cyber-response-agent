@@ -43,3 +43,11 @@ entries:
   tag: glm-5.2_effort-none_prompt-711__judge-claude-opus-5-high_47d6044a
   sha256: ed494843fea12f020dfd9a7e38522b321fb0b559917bd44a552773c5b18c6b66
   recorded: '2026-07-27'
+- case: case-016-nginx-scan-web1
+  tag: glm-5.2_effort-none_prompt-711__judge-claude-opus-5-high_47d6044a
+  sha256: 014216c1e4b5c4219d8be393cc9ca9bebf456582df9361d5f0703784e576d8f2
+  recorded: '2026-07-28'
+- case: case-019-squid-egress-officews1
+  tag: glm-5.2_effort-none_prompt-711__judge-claude-opus-5-high_47d6044a
+  sha256: e30d71b4681d95dfa2575817e11f82f3a007cf54c6a34fe5c829a2a89b8969d7
+  recorded: '2026-07-28'

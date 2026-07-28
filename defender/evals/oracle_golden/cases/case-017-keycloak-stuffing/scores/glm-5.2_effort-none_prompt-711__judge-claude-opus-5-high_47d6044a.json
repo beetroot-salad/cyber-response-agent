@@ -1,0 +1,107 @@
+{
+  "tag": "glm-5.2_effort-none_prompt-711__judge-claude-opus-5-high_47d6044a",
+  "projection": "glm-5.2_effort-none_prompt-711.yaml",
+  "case": "case-017-keycloak-stuffing",
+  "kind": "observed",
+  "judge": {
+    "model": "claude-opus-5",
+    "effort": "high",
+    "prompts_sha8": "47d6044a"
+  },
+  "n_leads": 6,
+  "mechanical": {
+    "missing_leads": [],
+    "unscored_leads": [],
+    "duplicate_leads": [],
+    "malformed_leads": {},
+    "forbidden_emitted": [],
+    "concrete_value_leads": [
+      "l-005"
+    ],
+    "expectation_failures": []
+  },
+  "judged": true,
+  "faithful": "6/6",
+  "abstentions": 0,
+  "by_system": {
+    "change-mgmt": "1/1",
+    "cmdb": "1/1",
+    "elastic": "3/3",
+    "ticket": "1/1"
+  },
+  "cost_usd": 2.7422,
+  "rows": [
+    {
+      "lead": "l-001",
+      "system": "elastic",
+      "delta_kind": "absent",
+      "faithful": true,
+      "cause": null,
+      "heterogeneous": null,
+      "undecidable_reason": null,
+      "form_notes": "projection is an empty list rather than an explicit indistinguishable-noise marker",
+      "rationale": "The only readable payload (seq 1) returns 6 rows whose every surfaced field \u2014\nuser.name=root, proc.pname=bash, proc.name/uid/tty null, and cmdline drawn from the\nsame three-command set \"sudo -n systemctl status elastic-agent\" / \"sudo -n journalctl\n-u elastic-agent -n 10\" / \"sudo -n ss -tnlp\" \u2014 is identical to the live controls\n(C-21d 3 rows, C-28d 13 rows, C-35d 10 rows), and the two same-millisecond triads at\n06:41:01 and 06:41:41 mirror C-28d's 06:33:48/06:34:07 pair. The one column that could\nseparate them, falco.output_fields.container.id (ed96a85a7480, which most baseline\nrows also carry), is listed in environment_notes as an unstable identifier that cannot\nevidence a delta. The story's activity is Keycloak token requests over curl, which\nproduces no sudo events at all, so there is nothing for this lead to carry. The empty\nprojection asserts no change and invents nothing, matching the measurement's\ndelta_kind: absent; seq 0 being unreadable does not disturb this since it differs from\nseq 1 only by adding proc.loginuid.",
+      "evidence": "The one readable query (seq 1) returns 6 rows, all with falco.output_fields.user.name=root, proc.pname=bash, proc.name/uid/tty null, and cmdline drawn from exactly the same three-command set seen in every control \u2014 \"sudo -n systemctl status elastic-agent\", \"sudo -n journalctl -u elastic-agent -n 10\", \"sudo -n ss -tnlp\" \u2014 emitted as two same-millisecond triads at 06:41:01 and 06:41:41. The live controls carry the identical triad with identical user/pname/cmdline values: C-21d 3 rows, C-35d 10 rows, C-28d 13 rows including near-adjacent bursts at 06:33:48 and 06:34:07 (19 s apart), so neither the command set nor the burst cadence is new, and 6 rows over 15 minutes is not above the 3\u201313 rows/hour control range. The only column that could separate observed from baseline is falco.output_fields.container.id (ed96a85a7480, matching most baseline rows anyway), and environment_notes lists that column as an unstable identifier that cannot evidence a delta. Seq 0 is unreadable, but it differs from seq 1 only by adding proc.loginuid, and seq 1 alone settles the lead."
+    },
+    {
+      "lead": "l-002",
+      "system": "cmdb",
+      "delta_kind": "state-only",
+      "faithful": true,
+      "cause": null,
+      "heterogeneous": null,
+      "undecidable_reason": null,
+      "form_notes": null,
+      "rationale": "Both queries in the lead are cmdb templates (cmdb.host-trust-edges, cmdb.list-all-hosts),\nwhich environment_notes classifies as state-only \u2014 current configuration with no\n@timestamp bounds and thus no baseline-diff semantics, consistent with the empty\nbaseline array and the measurement's `delta_kind: state-only`. The activity is a\nKeycloak password-spray from office-ws-1; it mutates no CMDB inventory record, so the\nreadable seq 1 listing (total: 11, soc-playground absent) reflects static configuration\nunchanged by the story. The host-scoped seq 0 payload is unreadable but does not bear\non the delta. With no distinguishable change for these queries to carry, the empty\nprojection faithfully represents a null delta.",
+      "evidence": "Both queries in this lead are cmdb templates (cmdb.host-trust-edges, cmdb.list-all-hosts), and environment_notes states cmdb returns current configuration or an entity record with no @timestamp bounds to move, hence no control and no baseline-diff semantics \u2014 consistent with the empty `baseline` array. The one readable payload (seq 1) is an inventory listing with total: 11 and hosts canary-1, ci-1, config-mgmt-1, db-1, dev-ws-1, jump-box-1, office-ws-1, office-ws-2, scanner-1, web-1, web-2, each carrying role/criticality/owner/trust_edges_out/users fields; soc-playground does not appear among them. The seq 0 host-scoped payload is unreadable, but that does not change the classification: state-only applies regardless of whether rows changed, so only one decidable query exists and heterogeneity is null."
+    },
+    {
+      "lead": "l-003",
+      "system": "change-mgmt",
+      "delta_kind": "state-only",
+      "faithful": true,
+      "cause": null,
+      "heterogeneous": null,
+      "undecidable_reason": null,
+      "form_notes": null,
+      "rationale": "The lead's single query `change-mgmt.active-changes` is a state/lookup system per\n`environment_notes` (`state_and_lookup_systems`): it returns current configuration,\ncarries no `@timestamp` bounds, and has no baseline-diff semantics \u2014 `measurement`\nconfirms `delta_kind: state-only`. The `observed` payload is `[]` (no CR rows, hence\nno CR id, status, window, host scope, requester, or CHG-RUNNER prefix), and the\nprojection is likewise `[]`, correctly reporting no active change requests. There is\nnothing for the oracle to distinguish and it invents nothing; the empty projection\nmatches the empty lookup result.",
+      "evidence": "The lead contains a single query, `change-mgmt.active-changes`, parameterised by host `soc-playground` and instant `2026-07-28T06:45:14Z`. The environment notes state explicitly that change-mgmt queries return current configuration or an entity record rather than an event stream, carry no `@timestamp` bounds to move, and therefore have no control and no baseline-diff semantics. The observed payload is an empty list (zero CR rows, so no CR id, status, window_start/window_end, host scope, requester, or CHG-RUNNER prefix to report) and the baseline is likewise empty, but per the rules that changed-or-unchanged distinction is irrelevant for a state/lookup system. Tagged `state-only` regardless of row content; `heterogeneous` is null because fewer than two decidable queries exist."
+    },
+    {
+      "lead": "l-004",
+      "system": "ticket",
+      "delta_kind": "state-only",
+      "faithful": true,
+      "cause": null,
+      "heterogeneous": false,
+      "undecidable_reason": null,
+      "form_notes": "empty-projection-over-state-only-lookups",
+      "rationale": "All nine queries are ticket lookups (`status`/`q` filters plus an unfiltered\n`ticket.all-tickets`) and every observed payload is `total: 0` with `tickets: []`,\nwhile `baseline` is empty because these change-management queries carry no\n`@timestamp` bounds to move \u2014 the `state-only` no-control condition the measurement\nrecords. No field (key, summary, status, labels, comments) is populated in either\ndirection, so there is no delta to represent. The empty projection `[]` faithfully\nasserts no change, which matches the measurement.",
+      "evidence": "All nine queries in this lead are ticket lookups (status/keyword filters such as\nstatus=open, status=in_progress, q=soc-playground, q=sudo, q=keycloak, q=credential\nstuffing, and an unfiltered ticket.all-tickets) against the ticketing/change-management\nsystem, which returns ticket records rather than a timestamped event stream. Every\nobserved payload is `total: 0` with `tickets: []`, and the `baseline` array is empty\nbecause these queries carry no `@timestamp` bounds that could be moved to a control\nwindow \u2014 exactly the no-control condition the environment notes describe for\nchange-mgmt lookups. No field in these payloads (key, summary, status, labels,\ncomments) is populated in either direction, so there is nothing to diff, and per the\nrules such lookup systems are tagged state-only regardless of row content."
+    },
+    {
+      "lead": "l-005",
+      "system": "elastic",
+      "delta_kind": "present",
+      "faithful": true,
+      "cause": null,
+      "heterogeneous": true,
+      "undecidable_reason": null,
+      "form_notes": "26 projected event rows vs 30 observed dev.dana LOGIN_ERROR rows; per-event granularity only, no aggregate/loggerName rows",
+      "rationale": "Observed seq 6 carries 30 LOGIN_ERROR rows for username `dev.dana` / client_id `admin-cli` from 172.18.0.6 in six bursts between 06:46:51.659Z and 06:47:20.670Z, and all three live controls (C-21d/C-28d/C-35d) for seq 0/1/2/6 return row_count 0 while seq 7 proves those windows were measured \u2014 so the delta is exactly this burst, on the non-unstable fields `username` and `client_id`. The projection emits that burst at the right granularity, with the correct user and clientId, six clusters in the right shape, and placeholders the IP, which is both story-ungrounded and on the unstable-identifier list.\nThe lead's heterogeneity is the successful-LOGIN half: seq 3 and seq 4 are row_count 0 in observed and in every control, so there is nothing for the projection to represent there, and it correctly emits no LOGIN rows \u2014 matching seq 0's `logins: 0, logouts: 0, refresh_tokens: 0`.\nIt also correctly omits the 06:13:33 `smoke.test` row and the extra loggerName values in seq 7, neither of which the story's activity produced. The 26-vs-30 count and the absence of an aggregate row are granularity divergences recorded in form_notes, not a misrepresented delta.",
+      "evidence": "Observed seq 0/1/2/6 carry 31 `org.keycloak.events` LOGIN_ERROR rows between 06:13:33.104Z and 06:47:20.670Z \u2014 30 for username `dev.dana` / client_id `admin-cli` in six ~7-second bursts from 06:46:51 to 06:47:20, plus one `smoke.test` at 06:13:33 \u2014 while all three live controls (C-21d/C-28d/C-35d) return row_count 0 for the same queries; seq 7 confirms those control windows were measured and non-empty (4\u20135 rows of `org.keycloak.events.jpa.JpaEventStoreProvider`), so the zeros are real absence, not a dead stack. The distinguishing fields are `username` and `client_id` (dev.dana/admin-cli) and the LOGIN_ERROR counts, none of which are on the unstable-identifier list; ip_address 172.18.0.6 alone would not have counted. Queries disagree: seq 3 and seq 4 (successful LOGIN by ip/user/client, both the 06:55 and widened 07:00 bound) return row_count 0 in observed and in every control, i.e. `absent` \u2014 there is no successful-login half of the stuffing signature, and seq 0 records logins=0, logouts=0, refresh_tokens=0. Seq 7 additionally shows ten extra loggerName values in observed (io.quarkus, infinispan, exportimport) against a single logger in baseline, consistent with a stack start inside the window."
+    },
+    {
+      "lead": "l-006",
+      "system": "elastic",
+      "delta_kind": "indistinguishable",
+      "faithful": true,
+      "cause": null,
+      "heterogeneous": false,
+      "undecidable_reason": null,
+      "form_notes": "projection is an empty list rather than an explicit indistinguishable-noise marker; both assert \"no distinguishable delta\"",
+      "rationale": "The rule-summary query (seq 3), untruncated on both sides, returns the same eleven falco.rule\nvalues in the observed window as live control C-21d, with no cron, write-below-etc, or\nauthorized-keys rule present in either, and the targeted seq 2 query returns only the two rules\n(Read sensitive file untrusted, Launch Sensitive Mount Container) that the controls also return.\nIn the untruncated seq 1 payload every (rule, proc, parent) tuple \u2014 including Drop and\nexecute/openssl/sh, Launch Suspicious Network Tool/nc/runuser and Ingress/curl/bash in\n2c1e2ec93d17 \u2014 has a counterpart in C-21d; only falco.output_fields.container.id groupings and\nraw counts differ, and environment_notes marks container ids as regenerated per lever-up while the\ncontrols' own counts swing wider (Read sensitive file untrusted 9 / 0 / 36 across controls) than\nthe observed 54. The story's curl loop against keycloak produces no categorical field these\nqueries surface that the baseline lacks, so an empty projection asserting no delta matches the\nmeasurement of record.",
+      "evidence": "The rule-summary query (seq 3, untruncated on both sides) returns exactly the same 11\nfalco.rule values in the observed window as live control C-21d \u2014 Unexpected UDP Traffic,\nBPF Program Not Profiled, Redirect STDOUT/STDIN, Launch Ingress Remote File Copy, Launch\nSuspicious Network Tool, Read sensitive file untrusted, Drop and execute new binary, Read\nenvironment variable from /proc files, Launch Sensitive Mount Container, Launch Package\nManagement Process, User mgmt binaries \u2014 with no cron, write-below-etc, or authorized-keys\nrule in either; the targeted seq 2 query returns only the same two rules (Read sensitive\nfile untrusted, Launch Sensitive Mount Container) that C-21d and C-35d return. In the\nuntruncated seq 1 payloads every (rule, proc, parent) tuple observed (e.g. Drop and\nexecute/openssl/sh, Launch Suspicious Network Tool/nc/runuser, Ingress/curl/runuser) also\nappears in C-21d; the only columns that differ are falco.output_fields.container.id\ngroupings, which environment_notes lists as regenerated per lever-up and therefore not a\ndelta. Counts differ in both directions against 60-minute controls versus a ~23-minute\nobserved span (Read sensitive file untrusted 54 vs 9/0/36; Redirect 132 vs 386/394/380;\nLaunch Suspicious Network Tool 58 vs 245/202/278), but the baselines themselves swing by\nmore than that, and no surfaced categorical field carries a value the controls lack."
+    }
+  ]
+}

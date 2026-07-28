@@ -1,0 +1,45 @@
+{
+  "judge": {
+    "model": "claude-opus-5",
+    "effort": "high",
+    "prompts_sha8": "47d6044a"
+  },
+  "leads": {
+    "l-001": {
+      "delta_kind": "present",
+      "undecidable_reason": null,
+      "heterogeneous": null,
+      "evidence": "The observed window returns 16 rows, of which 12 are single-request GETs at 06:17:31\u201306:17:32Z from curl/7.81.0 against paths that appear in none of the three baselines: /admin, /.env, /server-status, /phpmyadmin, /wp-login.php, /actuator/health, /.aws/credentials, /.ssh/id_rsa, /.git/config, /backup.sql, /config.php, /api/v1/users, all status 404 on host.name web-1. All three controls (C-21d, C-28d, C-35d, each window_live: true) return exactly 3 rows apiece, whose only paths are /nginx_status (404, Metricbeat UA) and / (200, curl/7.81.0) \u2014 the same two path/status pairs that also make up the observed window's routine rows. The distinguishing field is `path` (url.path), together with the 1\u20132 second burst spread in first_seen/last_seen; these are stable columns, not the address/container/session identifiers that environment_notes disqualifies, so the delta does not rest on source.ip 172.18.0.6. An additional /smoke-test-marker row at 06:13:22Z is likewise absent from every baseline.",
+      "judge_model": "claude-opus-5",
+      "judge_effort": "high",
+      "cost_usd": 0.10863
+    },
+    "l-002": {
+      "delta_kind": "present",
+      "undecidable_reason": null,
+      "heterogeneous": true,
+      "evidence": "The path breakdown (seq 3) returns 15 rows in the observed window against exactly 2 rows (/nginx_status, /) in all three live controls; the 13 new url.path values include /.env (3), /admin (3), /.aws/credentials (2), /wp-login.php (2), /phpmyadmin (2), /.ssh/id_rsa (2), /.git/config (2), /backup.sql (2), /config.php (2), /server-status (2), /actuator/health (2), /api/v1/users (2) and /smoke-test-marker (1). The overview (seq 0) corroborates with distinct_paths = 15 versus 2/2/2 in C-21d/C-28d/C-35d, and the by-ip payload (seq 1) shows one source with distinct_paths = 13 where every control row had distinct_paths = 1 (the source.ip value itself is an unstable identifier here and carries no weight). Queries disagree: the status-code payload (seq 2) surfaces only 404/200, the same two codes as every control, and the user-agent payload (seq 4) surfaces the same three agents (Metricbeat, curl/7.81.0, curl/8.5.0) as baseline, so those two are baseline-identical in their surfaced categorical fields; the volume and cadence gaps (2989 requests over a 13-hour first_seen/last_seen span versus ~200\u2013276k over 167 hours) reflect capture coverage, not suppression.",
+      "judge_model": "claude-opus-5",
+      "judge_effort": "high",
+      "cost_usd": 0.35438400000000003
+    },
+    "l-003": {
+      "delta_kind": "state-only",
+      "undecidable_reason": null,
+      "heterogeneous": false,
+      "evidence": "Both queries in this lead are `identity.*` templates returning an entity record, not an event stream: seq 0 returns an access-check verdict (`authorized: false`, `via: null`, `role: developer`, `sudo: false`) and seq 1 returns the dev.dana user record (`enabled: true`, `realm_role: developer`, `authorized_hosts: [dev-ws-1, jump-box-1, office-ws-1]`, `sudo_hosts: [office-ws-1]`). The `environment_notes` state_and_lookup_systems clause names identity explicitly as carrying no `@timestamp` bounds to move, hence no control and no baseline-diff semantics \u2014 consistent with `baseline` being an empty list rather than a measured quiet window. Neither query surfaces a timestamped row set that could be compared across windows, so the empty baseline is expected rather than `insufficient-baseline`. Both queries are state lookups, so they agree.",
+      "judge_model": "claude-opus-5",
+      "judge_effort": "high",
+      "cost_usd": 0.164411
+    },
+    "l-004": {
+      "delta_kind": "state-only",
+      "undecidable_reason": null,
+      "heterogeneous": false,
+      "evidence": "Both queries in this lead are CMDB lookups (`cmdb.host-trust-edges` for web-1, `cmdb.list-hosts-by-owner` for dev.dana), and the payloads are entity records \u2014 web-1 returns role `web`, criticality `prod`, owner `team.web`, `trust_edges_out: [db-1]`, and a four-entry `users` block; the owner query returns `total: 1` with the single host `office-ws-1` (role `office-ws`, criticality `preprod`, owner `dev.dana`). Neither payload carries `@timestamp` bounds or event rows, and `baseline` is an empty list precisely because there are no time bounds to move. Per `state_and_lookup_systems`, cmdb queries return current configuration rather than an event stream and have no baseline-diff semantics, so both queries are `state-only` and they agree with one another.",
+      "judge_model": "claude-opus-5",
+      "judge_effort": "high",
+      "cost_usd": 0.166919
+    }
+  }
+}

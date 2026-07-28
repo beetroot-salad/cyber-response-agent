@@ -1,0 +1,273 @@
+{
+  "lead_id": "l-006",
+  "seq": 3,
+  "controls": [
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-07T06:15:00.000Z",
+        "2026-07-07T07:15:00.000Z"
+      ],
+      "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-07T06:15:00.000Z\" AND @timestamp < \"2026-07-07T07:15:00.000Z\"\n        AND host.name == \"soc-playground\"\n        AND falco.rule != \"Sudo execution\"\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule = falco.rule\n| SORT events DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-07T06:15:00.000Z\" AND @timestamp < \"2026-07-07T07:15:00.000Z\"\n        AND host.name == \"soc-playground\"\n        AND falco.rule != \"Sudo execution\"\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule = falco.rule\n| SORT events DESC",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "rule",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 11,
+        "values": [
+          {
+            "events": 386,
+            "first_seen": "2026-07-07T06:15:06.351Z",
+            "last_seen": "2026-07-07T07:14:50.037Z",
+            "rule": "Redirect STDOUT/STDIN to Network Connection in Container"
+          },
+          {
+            "events": 360,
+            "first_seen": "2026-07-07T06:15:23.358Z",
+            "last_seen": "2026-07-07T07:14:40.032Z",
+            "rule": "BPF Program Not Profiled"
+          },
+          {
+            "events": 257,
+            "first_seen": "2026-07-07T06:15:06.351Z",
+            "last_seen": "2026-07-07T07:14:50.037Z",
+            "rule": "Unexpected UDP Traffic"
+          },
+          {
+            "events": 245,
+            "first_seen": "2026-07-07T06:15:06.351Z",
+            "last_seen": "2026-07-07T07:14:50.037Z",
+            "rule": "Launch Suspicious Network Tool in Container"
+          },
+          {
+            "events": 120,
+            "first_seen": "2026-07-07T06:15:16.356Z",
+            "last_seen": "2026-07-07T07:14:22.027Z",
+            "rule": "Drop and execute new binary in container"
+          },
+          {
+            "events": 99,
+            "first_seen": "2026-07-07T06:15:06.351Z",
+            "last_seen": "2026-07-07T07:14:19.025Z",
+            "rule": "Launch Ingress Remote File Copy Tools in Container"
+          },
+          {
+            "events": 60,
+            "first_seen": "2026-07-07T06:15:23.362Z",
+            "last_seen": "2026-07-07T07:14:40.032Z",
+            "rule": "Launch Sensitive Mount Container"
+          },
+          {
+            "events": 33,
+            "first_seen": "2026-07-07T06:25:01.475Z",
+            "last_seen": "2026-07-07T06:51:38.790Z",
+            "rule": "Launch Package Management Process in Container"
+          },
+          {
+            "events": 10,
+            "first_seen": "2026-07-07T06:25:02.477Z",
+            "last_seen": "2026-07-07T06:25:17.480Z",
+            "rule": "Read environment variable from /proc files"
+          },
+          {
+            "events": 9,
+            "first_seen": "2026-07-07T06:16:10.371Z",
+            "last_seen": "2026-07-07T06:16:10.371Z",
+            "rule": "Read sensitive file untrusted"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-07T06:16:10.371Z",
+            "last_seen": "2026-07-07T06:16:10.371Z",
+            "rule": "User mgmt binaries"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-30T06:15:00.000Z",
+        "2026-06-30T07:15:00.000Z"
+      ],
+      "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-06-30T06:15:00.000Z\" AND @timestamp < \"2026-06-30T07:15:00.000Z\"\n        AND host.name == \"soc-playground\"\n        AND falco.rule != \"Sudo execution\"\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule = falco.rule\n| SORT events DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-06-30T06:15:00.000Z\" AND @timestamp < \"2026-06-30T07:15:00.000Z\"\n        AND host.name == \"soc-playground\"\n        AND falco.rule != \"Sudo execution\"\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule = falco.rule\n| SORT events DESC",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "rule",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 8,
+        "values": [
+          {
+            "events": 394,
+            "first_seen": "2026-06-30T06:15:57.551Z",
+            "last_seen": "2026-06-30T07:14:59.427Z",
+            "rule": "Redirect STDOUT/STDIN to Network Connection in Container"
+          },
+          {
+            "events": 300,
+            "first_seen": "2026-06-30T06:15:32.547Z",
+            "last_seen": "2026-06-30T07:14:56.424Z",
+            "rule": "BPF Program Not Profiled"
+          },
+          {
+            "events": 267,
+            "first_seen": "2026-06-30T06:15:32.548Z",
+            "last_seen": "2026-06-30T07:14:59.427Z",
+            "rule": "Unexpected UDP Traffic"
+          },
+          {
+            "events": 202,
+            "first_seen": "2026-06-30T06:15:57.550Z",
+            "last_seen": "2026-06-30T07:14:59.426Z",
+            "rule": "Launch Suspicious Network Tool in Container"
+          },
+          {
+            "events": 120,
+            "first_seen": "2026-06-30T06:15:18.541Z",
+            "last_seen": "2026-06-30T07:14:34.413Z",
+            "rule": "Drop and execute new binary in container"
+          },
+          {
+            "events": 112,
+            "first_seen": "2026-06-30T06:15:25.544Z",
+            "last_seen": "2026-06-30T07:13:59.408Z",
+            "rule": "Launch Ingress Remote File Copy Tools in Container"
+          },
+          {
+            "events": 60,
+            "first_seen": "2026-06-30T06:15:32.548Z",
+            "last_seen": "2026-06-30T07:14:56.425Z",
+            "rule": "Launch Sensitive Mount Container"
+          },
+          {
+            "events": 33,
+            "first_seen": "2026-06-30T06:25:03.673Z",
+            "last_seen": "2026-06-30T06:53:50.103Z",
+            "rule": "Launch Package Management Process in Container"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-35d",
+      "window": [
+        "2026-06-23T06:15:00.000Z",
+        "2026-06-23T07:15:00.000Z"
+      ],
+      "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-06-23T06:15:00.000Z\" AND @timestamp < \"2026-06-23T07:15:00.000Z\"\n        AND host.name == \"soc-playground\"\n        AND falco.rule != \"Sudo execution\"\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule = falco.rule\n| SORT events DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-06-23T06:15:00.000Z\" AND @timestamp < \"2026-06-23T07:15:00.000Z\"\n        AND host.name == \"soc-playground\"\n        AND falco.rule != \"Sudo execution\"\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule = falco.rule\n| SORT events DESC",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "rule",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 9,
+        "values": [
+          {
+            "events": 380,
+            "first_seen": "2026-06-23T06:15:33.954Z",
+            "last_seen": "2026-06-23T07:14:56.849Z",
+            "rule": "Redirect STDOUT/STDIN to Network Connection in Container"
+          },
+          {
+            "events": 300,
+            "first_seen": "2026-06-23T06:15:33.955Z",
+            "last_seen": "2026-06-23T07:14:56.849Z",
+            "rule": "Unexpected UDP Traffic"
+          },
+          {
+            "events": 295,
+            "first_seen": "2026-06-23T06:15:55.961Z",
+            "last_seen": "2026-06-23T07:14:21.844Z",
+            "rule": "BPF Program Not Profiled"
+          },
+          {
+            "events": 278,
+            "first_seen": "2026-06-23T06:15:33.954Z",
+            "last_seen": "2026-06-23T07:14:56.849Z",
+            "rule": "Launch Suspicious Network Tool in Container"
+          },
+          {
+            "events": 120,
+            "first_seen": "2026-06-23T06:15:40.957Z",
+            "last_seen": "2026-06-23T07:14:56.848Z",
+            "rule": "Drop and execute new binary in container"
+          },
+          {
+            "events": 97,
+            "first_seen": "2026-06-23T06:15:33.954Z",
+            "last_seen": "2026-06-23T07:14:56.848Z",
+            "rule": "Launch Ingress Remote File Copy Tools in Container"
+          },
+          {
+            "events": 59,
+            "first_seen": "2026-06-23T06:15:55.962Z",
+            "last_seen": "2026-06-23T07:14:21.845Z",
+            "rule": "Launch Sensitive Mount Container"
+          },
+          {
+            "events": 36,
+            "first_seen": "2026-06-23T06:23:36.070Z",
+            "last_seen": "2026-06-23T06:51:48.494Z",
+            "rule": "Read sensitive file untrusted"
+          },
+          {
+            "events": 33,
+            "first_seen": "2026-06-23T06:25:01.088Z",
+            "last_seen": "2026-06-23T06:53:47.550Z",
+            "rule": "Launch Package Management Process in Container"
+          }
+        ]
+      }
+    }
+  ]
+}

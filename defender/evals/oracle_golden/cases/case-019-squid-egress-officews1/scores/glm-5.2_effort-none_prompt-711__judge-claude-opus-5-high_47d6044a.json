@@ -1,0 +1,108 @@
+{
+  "tag": "glm-5.2_effort-none_prompt-711__judge-claude-opus-5-high_47d6044a",
+  "projection": "glm-5.2_effort-none_prompt-711.yaml",
+  "case": "case-019-squid-egress-officews1",
+  "kind": "observed",
+  "judge": {
+    "model": "claude-opus-5",
+    "effort": "high",
+    "prompts_sha8": "47d6044a"
+  },
+  "n_leads": 6,
+  "mechanical": {
+    "missing_leads": [],
+    "unscored_leads": [],
+    "duplicate_leads": [],
+    "malformed_leads": {},
+    "forbidden_emitted": [],
+    "concrete_value_leads": [
+      "l-001"
+    ],
+    "expectation_failures": []
+  },
+  "judged": true,
+  "faithful": "5/6",
+  "abstentions": 0,
+  "by_system": {
+    "change-mgmt": "1/1",
+    "cmdb": "1/1",
+    "cmdb+elastic": "1/2",
+    "identity": "1/1",
+    "threat-intel": "1/1"
+  },
+  "cost_usd": 1.3614,
+  "rows": [
+    {
+      "lead": "l-001",
+      "system": "cmdb+elastic",
+      "delta_kind": "present",
+      "faithful": true,
+      "cause": null,
+      "heterogeneous": false,
+      "undecidable_reason": null,
+      "form_notes": "bytes reported as 0 for every row where observed carries 5.4\u201347.6KB; result_status given as bare HTTP codes (200/301/302/503) rather than the proxy's TCP_TUNNEL/xxx form; host.name projected as office-ws-1 where the log labels the collector soc-playground; round cadence ~5s vs observed ~7s",
+      "rationale": "The measurement records delta_kind present: seq 0 returned 48 rows over the operation window against three live controls (C-21d, C-28d, C-35d) all at row_count 0, and the distinguishing content sits in url.original, http.request.method and squid.result_status. The projection emits exactly 48 CONNECT rows across eight rounds of six, naming example.com, ifconfig.me, transfer.sh, raw.githubusercontent.com, pastebin.com and api.telegram.org under user.name dev.dana, and marks transfer.sh as the sole failure \u2014 matching the observed TCP_TUNNEL/503 with 0 bytes and 3ms elapsed against TCP_TUNNEL/200 for the rest. It correctly placeholders the unstable source.ip (observed 172.18.0.6) and squid.elapsed_ms rather than inventing them, and asserts no suppression or absence anywhere. The value-level divergences \u2014 bytes flattened to 0 where observed shows 5383\u201347598, and 301/302 statuses carried over from the story's own curl output instead of the proxy's tunnel status \u2014 are mapping/granularity errors over an envelope whose delta is otherwise represented, not an invented or missed change.",
+      "evidence": "The squid access query (seq 0) returned row_count 48 over the operation window, while all three controls (C-21d, C-28d, C-35d), each with window_live: true, returned row_count 0 with empty values arrays. The observed rows carry distinguishing content in fields these queries surface \u2014 url.original values ifconfig.me:443, pastebin.com:443, transfer.sh:443, raw.githubusercontent.com:443, api.telegram.org:443, example.com:443, all with http.request.method CONNECT and squid.result_status TCP_TUNNEL/200 except transfer.sh which is consistently TCP_TUNNEL/503 with 0 bytes \u2014 none of which appear in any baseline. The distinction does not rest on source.ip (172.18.0.6), which environment_notes marks unstable; url.original, result_status and response bytes (~5.4\u20135.7KB, plus ~47.6KB per pastebin fetch) carry it, on a ~7-second beacon cadence from 07:06:11 to 07:06:46. Truncation of the payload at 40 of 48 rows does not affect this reading, since presence rather than absence is being established; seq 1 is unreadable and seq 2 is a cmdb entity record (state-only), neither of which contradicts seq 0."
+    },
+    {
+      "lead": "l-002",
+      "system": "identity",
+      "delta_kind": "state-only",
+      "faithful": true,
+      "cause": null,
+      "heterogeneous": false,
+      "undecidable_reason": null,
+      "form_notes": "projection is empty where the observed payloads carry two concrete state records; graded as no-delta rather than omission",
+      "rationale": "Both queries in this lead (`identity.access-check`, `identity.user-authorization`) are identity lookups, and the measurement of record classifies the envelope as `state-only` \u2014 the payloads are a permission verdict (`authorized: true`, `via: override`, `sudo: true`) and an entity record (`enabled: true`, `realm_role: developer`, `authorized_hosts: [dev-ws-1, jump-box-1, office-ws-1]`), neither of which carries a `@timestamp` bound a control window could move. `environment_notes.state_and_lookup_systems` names identity queries explicitly as having no baseline-diff semantics, so the empty `baseline` is structural rather than a measurement gap or a dead window. The story's activity is eight repetitions of a proxied `curl` loop as `dev.dana`; it creates, modifies, or removes nothing in the identity store, so `authorized: true`/`via: override`/`sudo_hosts: [office-ws-1]` are pre-existing configuration present with or without the activity. An empty projection therefore asserts no change over a lead whose delta is zero by construction \u2014 it neither omits a distinguishable change nor invents one, and it fabricates no concrete value.",
+      "evidence": "Both queries in this lead are identity system lookups (`identity.access-check`, `identity.user-authorization`) returning an entity record and its authorization state, not an event stream. The observed payloads are a permission verdict (`authorized: true`, `via: override`, `role: developer`, `sudo: true`) and a user record (`username: dev.dana`, `enabled: true`, `realm_role: developer`, `authorized_hosts: [dev-ws-1, jump-box-1, office-ws-1]`, `sudo_hosts: [office-ws-1]`) \u2014 neither carries a `@timestamp` bound that a control window could move. The empty `baseline` is therefore expected and structural, not a measurement gap; `environment_notes.state_and_lookup_systems` names identity queries explicitly as `state-only`. Both queries agree, so the lead is not heterogeneous."
+    },
+    {
+      "lead": "l-003",
+      "system": "cmdb",
+      "delta_kind": "state-only",
+      "faithful": true,
+      "cause": null,
+      "heterogeneous": null,
+      "undecidable_reason": null,
+      "form_notes": "projection is entirely empty rather than restating the CMDB record as unchanged state",
+      "rationale": "The lead's only query, `cmdb.host-trust-edges` for `office-ws-1`, returns a single\nconfiguration record (role `office-ws`, criticality `preprod`, owner `dev.dana`,\n`trust_edges_out: []`, three-entry `users` block), and the environment notes classify\ncmdb as `state-only` \u2014 no `@timestamp` bounds, no control, no baseline-diff semantics \u2014\nwhich the measurement confirms. Nothing in the story (repeated `curl` runs through\n`squid:3128` as `dev.dana`) writes to or alters a CMDB entity record, so the activity\nproduces no delta in this envelope. The empty projection therefore asserts no change\nwhere none exists: it fabricates no concrete value, invents no delta, and claims no\nsuppression over the empty `baseline` array. Omitting the record itself is a granularity\nchoice about routine, activity-independent content, not an unrepresented change.",
+      "evidence": "The lead has a single query, `cmdb.host-trust-edges` for host `office-ws-1`, which returns one CMDB entity record: role `office-ws`, criticality `preprod`, owner `dev.dana`, `trust_edges_out: []`, and a three-entry `users` block (`dev.dana` sudo true, `svc.monitoring` nologin, `svc.config-mgmt` sudo true). The environment notes state explicitly that cmdb queries return current configuration or an entity record, carry no `@timestamp` bounds to move, and therefore have no control and no baseline-diff semantics. The empty `baseline` here is the expected consequence of that, not a measurement gap, so the empty array is not evidence of suppression or novelty. No egress/proxy policy field appears in the record at all."
+    },
+    {
+      "lead": "l-004",
+      "system": "cmdb+elastic",
+      "delta_kind": "present",
+      "faithful": false,
+      "cause": "C-MISSED-DELTA",
+      "heterogeneous": false,
+      "undecidable_reason": null,
+      "form_notes": null,
+      "rationale": "The measurement of record reads this envelope as `delta_kind: present`, and the payloads\nbear it out: seq 5 returns six destination rows (example.com:443 at 16 requests, plus\napi.telegram.org:443, pastebin.com:443 with 713857 bytes_out, transfer.sh:443 with 0\nbytes_out, ifconfig.me:443, raw.githubusercontent.com:443 at 15 each), while all three\nlive controls C-21d/C-28d/C-35d return `row_count: 0`. That distinction rides on `dest`\n(url.original), a stable field, so it does not depend on the unstable source.ip\n172.18.0.6; seq 2 and seq 6 independently carry `identity: dev.dana`, requests=91,\ndenied=0, bytes_out=1052816 against empty live baselines. The projection is an empty\nlist, representing none of this \u2014 not even the noise marker \u2014 so it omits a\ndistinguishable change the lead's queries plainly surface. The unreadable seq 0\u20131 and\nstate-only seq 3 do not rescue it, since four decidable queries agree and none dissent.",
+      "evidence": "Four decidable event queries (seq 2, 4, 5, 6) all return non-empty over the operation window while every one of their controls \u2014 C-21d, C-28d, C-35d, all `window_live: true` \u2014 returns `row_count: 0`. Seq 5 is decisive because its distinction is carried in `dest` (url.original), a stable surfaced field, not an unstable address: 6 destinations with 15\u201316 requests each, including api.telegram.org:443, pastebin.com:443 (713857 bytes_out), transfer.sh:443 (0 bytes_out), ifconfig.me:443 and raw.githubusercontent.com:443, all first_seen 2026-07-28T06:13\u201306:24 and last_seen ~07:06:46. Seq 2 and 6 also carry `identity: dev.dana` with requests=91, denied=0, bytes_out=1052816 against empty live baselines, so the delta does not rest on source.ip 172.18.0.6, which environment_notes marks unstable. Seq 3 (cmdb.get-host) is state-only and seq 0\u20131 are unreadable, but neither is needed; no decidable query dissents."
+    },
+    {
+      "lead": "l-005",
+      "system": "threat-intel",
+      "delta_kind": "state-only",
+      "faithful": true,
+      "cause": null,
+      "heterogeneous": false,
+      "undecidable_reason": null,
+      "form_notes": "projection is entirely empty rather than an explicit state-only/no-delta marker",
+      "rationale": "All seven queries are `threat-intel` lookups, which the environment notes classify as\nstate-only: they carry no `@timestamp` bounds, so `baseline: []` is empty by construction\nand not a measurement, and the measurement pass independently reads this envelope as\n`state-only`, `heterogeneous: false`. The six `domain-reputation-lookup` payloads\n(transfer.sh, ifconfig.me, api.telegram.org, example.com, pastebin.com,\nraw.githubusercontent.com) each return `verdict: unknown`, `score: 0`, empty\n`sources`/`tags`, and null `first_seen`/`last_seen` \u2014 records that exist identically\nwhether or not the curl loops ran \u2014 and `list-all-indicators` returns a fixed 15-entry\ncatalogue whose malicious rows (`evil-c2.example` 95/c2-emotet, `45.9.148.108`\n88/c2-cobalt-strike) name none of the queried domains. Nothing in the payloads is\nattributable to the activity, so an empty projection asserts no change where the\ntelemetry shows none; it neither invents a reputation verdict nor claims suppression.\nThe only divergence is form: the oracle emitted nothing instead of an explicit\nno-delta marker, which does not change the claim being made.",
+      "evidence": "All seven queries in this lead are `threat-intel` templates: six `domain-reputation-lookup` calls (transfer.sh, ifconfig.me, api.telegram.org, example.com, pastebin.com, raw.githubusercontent.com) and one `list-all-indicators` returning `total: 15`. The environment notes state explicitly that threat-intel queries return an entity record or current configuration, carry no `@timestamp` bounds to move, and therefore have no control and no baseline-diff semantics \u2014 consistent with `baseline: []` being empty by construction rather than by measurement. The six lookups all returned `verdict: unknown`, `score: 0`, empty `sources`/`tags`, and null `first_seen`/`last_seen`; the indicator list contains only unrelated entries (e.g. `evil-c2.example` score 95 tags c2/emotet, `45.9.148.108` score 88 tags c2/cobalt-strike) and none of the six queried domains. Every query is uniformly a lookup, so there is no disagreement among them."
+    },
+    {
+      "lead": "l-007",
+      "system": "change-mgmt",
+      "delta_kind": "state-only",
+      "faithful": true,
+      "cause": null,
+      "heterogeneous": null,
+      "undecidable_reason": null,
+      "form_notes": "projection is an empty list rather than an explicit \"no matching CRs\" confirmation; granularity only",
+      "rationale": "The lead contains one query, `change-mgmt.active-changes` for host `office-ws-1` at 2026-07-28T07:06:53Z, which the environment notes classify as a state/lookup system with no timestamp bounds to move and therefore no baseline-diff semantics.\nThe observed payload is `seq: 0, payload: []` \u2014 no change request covers office-ws-1 at that instant \u2014 and `baseline` is an empty list because no control was constructed.\nThe oracle projected `[]`, asserting no rows for this envelope, which matches the observed empty result exactly and invents no CR id, window, or requester that the story never grounds.\nSince the story's activity is curl-through-squid egress and creates no change-management record, there is no delta for the projection to have missed.",
+      "evidence": "The lead's single query is `change-mgmt.active-changes` with params `host: office-ws-1` and `at: 2026-07-28T07:06:53Z`, which the environment notes explicitly classify as a state/lookup system: change-mgmt returns a current change-request record, not an event stream, and carries no `@timestamp` bounds to move. Consistent with that, `baseline` is an empty list \u2014 no control was constructed, rather than a control that measured zero rows. The observed payload is a single seq 0 with `payload: []`, i.e. no CR covering office-ws-1 at that instant, but under the notes this carries no baseline-diff semantics regardless of its contents. Tagged `state-only`; only one query exists, so `heterogeneous` is null."
+    }
+  ]
+}

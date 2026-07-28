@@ -1,0 +1,138 @@
+{
+  "lead_id": "l-001",
+  "seq": 14,
+  "controls": [
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-06T20:03:30.000Z",
+        "2026-07-06T21:03:30.000Z"
+      ],
+      "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-07-06T20:03:30.000Z\" AND @timestamp < \"2026-07-06T21:03:30.000Z\"\n        AND destination.port == 5432\n        AND source.ip == \"172.18.0.21\"\n| STATS count = COUNT(*), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp), total_bytes = SUM(destination.bytes) BY source.ip, destination.ip, destination.port\n| SORT count DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-07-06T20:03:30.000Z\" AND @timestamp < \"2026-07-06T21:03:30.000Z\"\n        AND destination.port == 5432\n        AND source.ip == \"172.18.0.21\"\n| STATS count = COUNT(*), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp), total_bytes = SUM(destination.bytes) BY source.ip, destination.ip, destination.port\n| SORT count DESC",
+        "columns": [
+          {
+            "name": "count",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "total_bytes",
+            "type": "long"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "destination.ip",
+            "type": "ip"
+          },
+          {
+            "name": "destination.port",
+            "type": "long"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-29T20:03:30.000Z",
+        "2026-06-29T21:03:30.000Z"
+      ],
+      "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-06-29T20:03:30.000Z\" AND @timestamp < \"2026-06-29T21:03:30.000Z\"\n        AND destination.port == 5432\n        AND source.ip == \"172.18.0.21\"\n| STATS count = COUNT(*), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp), total_bytes = SUM(destination.bytes) BY source.ip, destination.ip, destination.port\n| SORT count DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-06-29T20:03:30.000Z\" AND @timestamp < \"2026-06-29T21:03:30.000Z\"\n        AND destination.port == 5432\n        AND source.ip == \"172.18.0.21\"\n| STATS count = COUNT(*), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp), total_bytes = SUM(destination.bytes) BY source.ip, destination.ip, destination.port\n| SORT count DESC",
+        "columns": [
+          {
+            "name": "count",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "total_bytes",
+            "type": "long"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "destination.ip",
+            "type": "ip"
+          },
+          {
+            "name": "destination.port",
+            "type": "long"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    },
+    {
+      "name": "C-35d",
+      "window": [
+        "2026-06-22T20:03:30.000Z",
+        "2026-06-22T21:03:30.000Z"
+      ],
+      "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-06-22T20:03:30.000Z\" AND @timestamp < \"2026-06-22T21:03:30.000Z\"\n        AND destination.port == 5432\n        AND source.ip == \"172.18.0.21\"\n| STATS count = COUNT(*), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp), total_bytes = SUM(destination.bytes) BY source.ip, destination.ip, destination.port\n| SORT count DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-06-22T20:03:30.000Z\" AND @timestamp < \"2026-06-22T21:03:30.000Z\"\n        AND destination.port == 5432\n        AND source.ip == \"172.18.0.21\"\n| STATS count = COUNT(*), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp), total_bytes = SUM(destination.bytes) BY source.ip, destination.ip, destination.port\n| SORT count DESC",
+        "columns": [
+          {
+            "name": "count",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "total_bytes",
+            "type": "long"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "destination.ip",
+            "type": "ip"
+          },
+          {
+            "name": "destination.port",
+            "type": "long"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    }
+  ]
+}

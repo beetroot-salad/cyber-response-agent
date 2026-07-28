@@ -1,0 +1,45 @@
+{
+  "judge": {
+    "model": "claude-opus-5",
+    "effort": "high",
+    "prompts_sha8": "47d6044a"
+  },
+  "leads": {
+    "l-001": {
+      "delta_kind": "present",
+      "undecidable_reason": null,
+      "heterogeneous": true,
+      "evidence": "Query seq 12 (FATAL grouped by user.name, 20:30\u201320:37) returns 6 rows in `observed` \u2014 root (152), and dbadmin/pgadmin/reporting/superuser/backup at 10 each, all first_seen 20:31:32.05\u201320:31:32.21 and last_seen 20:32:03.26\u201320:32:03.42 \u2014 whereas all three live controls (C-21d/C-28d/C-35d) return exactly one row, user.name root (5760/7200/7200). The distinguishing field is user.name, which these queries surface directly. Query seq 6 corroborates through `message`: the day-scoped prefix histogram carries 28 rows including `password authentication failed for user \"backup\"/\"dbadmin\"/\"pgadmin\"/\"reporting\"/\"superuser\"/\"admin\"/\"postgres\"` and `User \"postgres\" has no password assigned`, while every control returns only the two root-prefix rows. Siblings disagree: seq 10 and seq 0 show only root/FATAL/DETAIL content identical to baseline, and the Zeek queries (seq 13/14/23/25) differ from their zero-row controls solely in source.ip/destination.ip/zeek.session_id/event.id, which environment_notes marks unstable and therefore non-evidential.",
+      "judge_model": "claude-opus-5",
+      "judge_effort": "high",
+      "cost_usd": 1.4632969999999998
+    },
+    "l-002": {
+      "delta_kind": "state-only",
+      "undecidable_reason": null,
+      "heterogeneous": false,
+      "evidence": "All five queries in this lead are `cmdb.*` templates (host-trust-edges \u00d73, list-all-hosts, list-office-ws-hosts), which `environment_notes.state_and_lookup_systems` designates as configuration/entity lookups carrying no `@timestamp` bounds \u2014 hence the empty `baseline` array is expected, not a missing measurement. The payloads return entity records: db-1 with `service: {kind: postgres, port: 5432}` and `trust_edges_out: []`, office-ws-1 and office-ws-2 with `trust_edges_out: []`, and a `total: 11` host roster in which only web-1, web-2, jump-box-1, config-mgmt-1 and scanner-1 list `db-1` as a trust edge. Seq 0 is `unreadable`, but it is a duplicate host-trust-edges lookup on the same state system, so it cannot change the classification. No event-stream field is surfaced anywhere in this lead, so there is nothing to baseline-diff.",
+      "judge_model": "claude-opus-5",
+      "judge_effort": "high",
+      "cost_usd": 0.07946
+    },
+    "l-003": {
+      "delta_kind": "absent",
+      "undecidable_reason": null,
+      "heterogeneous": false,
+      "evidence": "The two identity queries (seq 0, 1) return an entity record \u2014 enabled true, realm_role developer, authorized_hosts dev-ws-1/jump-box-1/office-ws-1, and authorized false / via null for db-1 \u2014 which is current configuration with no timestamp bounds and therefore no baseline-diff semantics. The two ES|QL queries decide the lead: seq 2 returns one row of events=0, logins=0, login_error=0, logouts=0, first_seen=null, last_seen=null, and all three live controls (C-21d, C-28d, C-35d) return exactly the same all-zero row. Seq 3's stream-health count returns events=0 in the observed window and events=0 in all three live controls, so the keycloak event stream is empty in both observed and baseline \u2014 an empty observed window against an empty live baseline is not suppression. No surfaced field (events, logins, login_error, logouts, first_seen, last_seen) differs from baseline in any direction.",
+      "judge_model": "claude-opus-5",
+      "judge_effort": "high",
+      "cost_usd": 0.090742
+    },
+    "l-005": {
+      "delta_kind": "undecidable",
+      "undecidable_reason": "insufficient-baseline",
+      "heterogeneous": null,
+      "evidence": "The `baseline` block is an empty list \u2014 no control payload exists for any of the six queries, so there is nothing to compare the observed window against. The observed window is far from empty: seq 2/4/5 each return 12 rows, dominated by two 600-count rows (\"password authentication failed for user \\\"root\\\"\" and the matching \"Role \\\"root\\\" does not exist.\" pg_hba line 99 message, user.name root, spanning 20:20:04.670Z\u201320:44:54.679Z), plus ten 10-count rows for dbadmin, backup, pgadmin, superuser and reporting confined to 20:31:32\u201320:32:03. Seq 1 returned row_count 0 while its near-identical sibling seq 2 returned 12, and seq 0 and seq 3 are unreadable, but neither fact decides the lead. What would settle it is a control run of the seq 4 or seq 5 ES|QL over a live shifted window showing whether these user.name/message pairs and their counts are routine on db-1.",
+      "judge_model": "claude-opus-5",
+      "judge_effort": "high",
+      "cost_usd": 0.13691099999999998
+    }
+  }
+}

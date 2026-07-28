@@ -1,0 +1,18 @@
+projections:
+- lead_id: l-002
+  events: []
+- lead_id: l-003
+  events:
+  - <standard environment noise>
+- lead_id: l-001
+  events:
+  - '@timestamp': '2026-07-27T20:17:30+00:00'
+    falco.rule: Adding ssh keys to authorized_keys
+    falco.priority: <priority>
+    falco.output_fields.container.name: <container-name>
+    falco.output_fields.proc.name: <proc-name>
+    falco.output_fields.proc.cmdline: echo ssh-rsa AAAAB3NzaC1yc2EAAAAD_fake_key_0_<ts>_attacker
+      attacker@elsewhere >> /root/.ssh/authorized_keys
+    falco.output_fields.user.name: root
+    falco.output_fields.proc.pname: <proc-pname>
+    falco.output_fields.target.file: /root/.ssh/authorized_keys

@@ -205,6 +205,12 @@ def run_scenario(
     intensity = int(overrides.get("intensity") or scenario.get("default_intensity", 1))
     source_user = overrides.get("user") or scenario.get("source_user", "root")
     target_host = overrides.get("target") or scenario["target_host"]
+    # `--source` moves the scenario-level dispatch host. A per-step `source_host`
+    # still wins (mirrors `--user` vs per-step `source_user`), so a multi-source
+    # scenario keeps its own routing; a single-host scenario is relocated wholesale.
+    # This is the knob a LOCAL scenario retargets on: its commands run ON the source
+    # and never read ${target}, so moving the target alone changes only the record.
+    source_host_resolved = overrides.get("source") or scenario.get("source_host")
 
     run_id = f"{scenario['id']}-{seed}-{uuid.uuid4().hex[:8]}"
     run_dir = RUNS_DIR / run_id
@@ -237,7 +243,7 @@ def run_scenario(
     for step_index, step in enumerate(scenario["steps"]):
         repeat_raw = step.get("repeat", 1)
         repeats = intensity if repeat_raw == "${intensity}" else int(repeat_raw)
-        source_host = step.get("source_host") or scenario.get("source_host")
+        source_host = step.get("source_host") or source_host_resolved
         step_user = step.get("source_user") or source_user
         allow_fail = bool(step.get("allow_fail", False))
         delay_s_between = float(step.get("delay_s_between", 0))
@@ -308,6 +314,7 @@ def _write_meta(
         "resolved": {
             "intensity": int(overrides.get("intensity") or scenario.get("default_intensity", 1)),
             "source_user": overrides.get("user") or scenario.get("source_user", "root"),
+            "source_host": overrides.get("source") or scenario.get("source_host"),
             "target_host": overrides.get("target") or scenario["target_host"],
         },
         "pre_run": pre_run,
@@ -340,6 +347,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     scenario = catalog[args.scenario]
     overrides = {
         "user": args.user,
+        "source": args.source,
         "target": args.target,
         "intensity": args.intensity,
     }
@@ -361,6 +369,8 @@ def main() -> int:
     prun.add_argument("scenario", help="scenario id (see `list`)")
     prun.add_argument("--seed", type=int, default=42, help="PRNG seed (default 42)")
     prun.add_argument("--user", help="override source_user")
+    prun.add_argument("--source", help="override source_host (where commands run; "
+                                       "how a local scenario retargets)")
     prun.add_argument("--target", help="override target_host")
     prun.add_argument("--intensity", type=int, help="override default_intensity")
     prun.add_argument(

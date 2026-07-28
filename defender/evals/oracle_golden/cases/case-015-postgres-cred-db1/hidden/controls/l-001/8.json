@@ -1,0 +1,93 @@
+{
+  "lead_id": "l-001",
+  "seq": 8,
+  "controls": [
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-06T20:00:00.000Z",
+        "2026-07-07T00:00:00.000Z"
+      ],
+      "query": "FROM logs-postgresql*\n| WHERE host.name == \"db-1\" AND @timestamp >= \"2026-07-06T20:00:00.000Z\" AND @timestamp < \"2026-07-07T00:00:00.000Z\"\n| STATS count = COUNT(*) BY data_stream.dataset\n| SORT count DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-postgresql*\n| WHERE host.name == \"db-1\" AND @timestamp >= \"2026-07-06T20:00:00.000Z\" AND @timestamp < \"2026-07-07T00:00:00.000Z\"\n| STATS count = COUNT(*) BY data_stream.dataset\n| SORT count DESC",
+        "columns": [
+          {
+            "name": "count",
+            "type": "long"
+          },
+          {
+            "name": "data_stream.dataset",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "count": 46080,
+            "data_stream.dataset": "postgresql.log"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-29T20:00:00.000Z",
+        "2026-06-30T00:00:00.000Z"
+      ],
+      "query": "FROM logs-postgresql*\n| WHERE host.name == \"db-1\" AND @timestamp >= \"2026-06-29T20:00:00.000Z\" AND @timestamp < \"2026-06-30T00:00:00.000Z\"\n| STATS count = COUNT(*) BY data_stream.dataset\n| SORT count DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-postgresql*\n| WHERE host.name == \"db-1\" AND @timestamp >= \"2026-06-29T20:00:00.000Z\" AND @timestamp < \"2026-06-30T00:00:00.000Z\"\n| STATS count = COUNT(*) BY data_stream.dataset\n| SORT count DESC",
+        "columns": [
+          {
+            "name": "count",
+            "type": "long"
+          },
+          {
+            "name": "data_stream.dataset",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "count": 57600,
+            "data_stream.dataset": "postgresql.log"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-35d",
+      "window": [
+        "2026-06-22T20:00:00.000Z",
+        "2026-06-23T00:00:00.000Z"
+      ],
+      "query": "FROM logs-postgresql*\n| WHERE host.name == \"db-1\" AND @timestamp >= \"2026-06-22T20:00:00.000Z\" AND @timestamp < \"2026-06-23T00:00:00.000Z\"\n| STATS count = COUNT(*) BY data_stream.dataset\n| SORT count DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-postgresql*\n| WHERE host.name == \"db-1\" AND @timestamp >= \"2026-06-22T20:00:00.000Z\" AND @timestamp < \"2026-06-23T00:00:00.000Z\"\n| STATS count = COUNT(*) BY data_stream.dataset\n| SORT count DESC",
+        "columns": [
+          {
+            "name": "count",
+            "type": "long"
+          },
+          {
+            "name": "data_stream.dataset",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "count": 57600,
+            "data_stream.dataset": "postgresql.log"
+          }
+        ]
+      }
+    }
+  ]
+}

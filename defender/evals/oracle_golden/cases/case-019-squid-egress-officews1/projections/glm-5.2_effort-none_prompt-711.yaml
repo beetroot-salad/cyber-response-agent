@@ -1,0 +1,445 @@
+projections:
+- lead_id: l-003
+  events: []
+- lead_id: l-002
+  events: []
+- lead_id: l-004
+  events: []
+- lead_id: l-001
+  events:
+  - '@timestamp': '2026-07-28T07:06:00Z'
+    source.ip: <office-ws-1-ip>
+    host.name: office-ws-1
+    user.name: dev.dana
+    url.original: https://example.com
+    http.request.method: CONNECT
+    http.response.bytes: 0
+    squid.elapsed_ms: <elapsed-ms>
+    squid.result_status: '200'
+  - '@timestamp': '2026-07-28T07:06:01Z'
+    source.ip: <office-ws-1-ip>
+    host.name: office-ws-1
+    user.name: dev.dana
+    url.original: https://ifconfig.me
+    http.request.method: CONNECT
+    http.response.bytes: 0
+    squid.elapsed_ms: <elapsed-ms>
+    squid.result_status: '200'
+  - '@timestamp': '2026-07-28T07:06:02Z'
+    source.ip: <office-ws-1-ip>
+    host.name: office-ws-1
+    user.name: dev.dana
+    url.original: https://transfer.sh
+    http.request.method: CONNECT
+    http.response.bytes: 0
+    squid.elapsed_ms: <elapsed-ms>
+    squid.result_status: '503'
+  - '@timestamp': '2026-07-28T07:06:02Z'
+    source.ip: <office-ws-1-ip>
+    host.name: office-ws-1
+    user.name: dev.dana
+    url.original: https://raw.githubusercontent.com
+    http.request.method: CONNECT
+    http.response.bytes: 0
+    squid.elapsed_ms: <elapsed-ms>
+    squid.result_status: '301'
+  - '@timestamp': '2026-07-28T07:06:02Z'
+    source.ip: <office-ws-1-ip>
+    host.name: office-ws-1
+    user.name: dev.dana
+    url.original: https://pastebin.com
+    http.request.method: CONNECT
+    http.response.bytes: 0
+    squid.elapsed_ms: <elapsed-ms>
+    squid.result_status: '200'
+  - '@timestamp': '2026-07-28T07:06:02Z'
+    source.ip: <office-ws-1-ip>
+    host.name: office-ws-1
+    user.name: dev.dana
+    url.original: https://api.telegram.org
+    http.request.method: CONNECT
+    http.response.bytes: 0
+    squid.elapsed_ms: <elapsed-ms>
+    squid.result_status: '302'
+  - '@timestamp': '2026-07-28T07:06:07Z'
+    source.ip: <office-ws-1-ip>
+    host.name: office-ws-1
+    user.name: dev.dana
+    url.original: https://example.com
+    http.request.method: CONNECT
+    http.response.bytes: 0
+    squid.elapsed_ms: <elapsed-ms>
+    squid.result_status: '200'
+  - '@timestamp': '2026-07-28T07:06:08Z'
+    source.ip: <office-ws-1-ip>
+    host.name: office-ws-1
+    user.name: dev.dana
+    url.original: https://ifconfig.me
+    http.request.method: CONNECT
+    http.response.bytes: 0
+    squid.elapsed_ms: <elapsed-ms>
+    squid.result_status: '200'
+  - '@timestamp': '2026-07-28T07:06:09Z'
+    source.ip: <office-ws-1-ip>
+    host.name: office-ws-1
+    user.name: dev.dana
+    url.original: https://transfer.sh
+    http.request.method: CONNECT
+    http.response.bytes: 0
+    squid.elapsed_ms: <elapsed-ms>
+    squid.result_status: '503'
+  - '@timestamp': '2026-07-28T07:06:09Z'
+    source.ip: <office-ws-1-ip>
+    host.name: office-ws-1
+    user.name: dev.dana
+    url.original: https://raw.githubusercontent.com
+    http.request.method: CONNECT
+    http.response.bytes: 0
+    squid.elapsed_ms: <elapsed-ms>
+    squid.result_status: '301'
+  - '@timestamp': '2026-07-28T07:06:09Z'
+    source.ip: <office-ws-1-ip>
+    host.name: office-ws-1
+    user.name: dev.dana
+    url.original: https://pastebin.com
+    http.request.method: CONNECT
+    http.response.bytes: 0
+    squid.elapsed_ms: <elapsed-ms>
+    squid.result_status: '200'
+  - '@timestamp': '2026-07-28T07:06:10Z'
+    source.ip: <office-ws-1-ip>
+    host.name: office-ws-1
+    user.name: dev.dana
+    url.original: https://api.telegram.org
+    http.request.method: CONNECT
+    http.response.bytes: 0
+    squid.elapsed_ms: <elapsed-ms>
+    squid.result_status: '302'
+  - '@timestamp': '2026-07-28T07:06:15Z'
+    source.ip: <office-ws-1-ip>
+    host.name: office-ws-1
+    user.name: dev.dana
+    url.original: https://example.com
+    http.request.method: CONNECT
+    http.response.bytes: 0
+    squid.elapsed_ms: <elapsed-ms>
+    squid.result_status: '200'
+  - '@timestamp': '2026-07-28T07:06:16Z'
+    source.ip: <office-ws-1-ip>
+    host.name: office-ws-1
+    user.name: dev.dana
+    url.original: https://ifconfig.me
+    http.request.method: CONNECT
+    http.response.bytes: 0
+    squid.elapsed_ms: <elapsed-ms>
+    squid.result_status: '200'
+  - '@timestamp': '2026-07-28T07:06:16Z'
+    source.ip: <office-ws-1-ip>
+    host.name: office-ws-1
+    user.name: dev.dana
+    url.original: https://transfer.sh
+    http.request.method: CONNECT
+    http.response.bytes: 0
+    squid.elapsed_ms: <elapsed-ms>
+    squid.result_status: '503'
+  - '@timestamp': '2026-07-28T07:06:17Z'
+    source.ip: <office-ws-1-ip>
+    host.name: office-ws-1
+    user.name: dev.dana
+    url.original: https://raw.githubusercontent.com
+    http.request.method: CONNECT
+    http.response.bytes: 0
+    squid.elapsed_ms: <elapsed-ms>
+    squid.result_status: '301'
+  - '@timestamp': '2026-07-28T07:06:17Z'
+    source.ip: <office-ws-1-ip>
+    host.name: office-ws-1
+    user.name: dev.dana
+    url.original: https://pastebin.com
+    http.request.method: CONNECT
+    http.response.bytes: 0
+    squid.elapsed_ms: <elapsed-ms>
+    squid.result_status: '200'
+  - '@timestamp': '2026-07-28T07:06:17Z'
+    source.ip: <office-ws-1-ip>
+    host.name: office-ws-1
+    user.name: dev.dana
+    url.original: https://api.telegram.org
+    http.request.method: CONNECT
+    http.response.bytes: 0
+    squid.elapsed_ms: <elapsed-ms>
+    squid.result_status: '302'
+  - '@timestamp': '2026-07-28T07:06:22Z'
+    source.ip: <office-ws-1-ip>
+    host.name: office-ws-1
+    user.name: dev.dana
+    url.original: https://example.com
+    http.request.method: CONNECT
+    http.response.bytes: 0
+    squid.elapsed_ms: <elapsed-ms>
+    squid.result_status: '200'
+  - '@timestamp': '2026-07-28T07:06:23Z'
+    source.ip: <office-ws-1-ip>
+    host.name: office-ws-1
+    user.name: dev.dana
+    url.original: https://ifconfig.me
+    http.request.method: CONNECT
+    http.response.bytes: 0
+    squid.elapsed_ms: <elapsed-ms>
+    squid.result_status: '200'
+  - '@timestamp': '2026-07-28T07:06:23Z'
+    source.ip: <office-ws-1-ip>
+    host.name: office-ws-1
+    user.name: dev.dana
+    url.original: https://transfer.sh
+    http.request.method: CONNECT
+    http.response.bytes: 0
+    squid.elapsed_ms: <elapsed-ms>
+    squid.result_status: '503'
+  - '@timestamp': '2026-07-28T07:06:24Z'
+    source.ip: <office-ws-1-ip>
+    host.name: office-ws-1
+    user.name: dev.dana
+    url.original: https://raw.githubusercontent.com
+    http.request.method: CONNECT
+    http.response.bytes: 0
+    squid.elapsed_ms: <elapsed-ms>
+    squid.result_status: '301'
+  - '@timestamp': '2026-07-28T07:06:24Z'
+    source.ip: <office-ws-1-ip>
+    host.name: office-ws-1
+    user.name: dev.dana
+    url.original: https://pastebin.com
+    http.request.method: CONNECT
+    http.response.bytes: 0
+    squid.elapsed_ms: <elapsed-ms>
+    squid.result_status: '200'
+  - '@timestamp': '2026-07-28T07:06:24Z'
+    source.ip: <office-ws-1-ip>
+    host.name: office-ws-1
+    user.name: dev.dana
+    url.original: https://api.telegram.org
+    http.request.method: CONNECT
+    http.response.bytes: 0
+    squid.elapsed_ms: <elapsed-ms>
+    squid.result_status: '302'
+  - '@timestamp': '2026-07-28T07:06:29Z'
+    source.ip: <office-ws-1-ip>
+    host.name: office-ws-1
+    user.name: dev.dana
+    url.original: https://example.com
+    http.request.method: CONNECT
+    http.response.bytes: 0
+    squid.elapsed_ms: <elapsed-ms>
+    squid.result_status: '200'
+  - '@timestamp': '2026-07-28T07:06:30Z'
+    source.ip: <office-ws-1-ip>
+    host.name: office-ws-1
+    user.name: dev.dana
+    url.original: https://ifconfig.me
+    http.request.method: CONNECT
+    http.response.bytes: 0
+    squid.elapsed_ms: <elapsed-ms>
+    squid.result_status: '200'
+  - '@timestamp': '2026-07-28T07:06:30Z'
+    source.ip: <office-ws-1-ip>
+    host.name: office-ws-1
+    user.name: dev.dana
+    url.original: https://transfer.sh
+    http.request.method: CONNECT
+    http.response.bytes: 0
+    squid.elapsed_ms: <elapsed-ms>
+    squid.result_status: '503'
+  - '@timestamp': '2026-07-28T07:06:31Z'
+    source.ip: <office-ws-1-ip>
+    host.name: office-ws-1
+    user.name: dev.dana
+    url.original: https://raw.githubusercontent.com
+    http.request.method: CONNECT
+    http.response.bytes: 0
+    squid.elapsed_ms: <elapsed-ms>
+    squid.result_status: '301'
+  - '@timestamp': '2026-07-28T07:06:31Z'
+    source.ip: <office-ws-1-ip>
+    host.name: office-ws-1
+    user.name: dev.dana
+    url.original: https://pastebin.com
+    http.request.method: CONNECT
+    http.response.bytes: 0
+    squid.elapsed_ms: <elapsed-ms>
+    squid.result_status: '200'
+  - '@timestamp': '2026-07-28T07:06:32Z'
+    source.ip: <office-ws-1-ip>
+    host.name: office-ws-1
+    user.name: dev.dana
+    url.original: https://api.telegram.org
+    http.request.method: CONNECT
+    http.response.bytes: 0
+    squid.elapsed_ms: <elapsed-ms>
+    squid.result_status: '302'
+  - '@timestamp': '2026-07-28T07:06:37Z'
+    source.ip: <office-ws-1-ip>
+    host.name: office-ws-1
+    user.name: dev.dana
+    url.original: https://example.com
+    http.request.method: CONNECT
+    http.response.bytes: 0
+    squid.elapsed_ms: <elapsed-ms>
+    squid.result_status: '200'
+  - '@timestamp': '2026-07-28T07:06:38Z'
+    source.ip: <office-ws-1-ip>
+    host.name: office-ws-1
+    user.name: dev.dana
+    url.original: https://ifconfig.me
+    http.request.method: CONNECT
+    http.response.bytes: 0
+    squid.elapsed_ms: <elapsed-ms>
+    squid.result_status: '200'
+  - '@timestamp': '2026-07-28T07:06:38Z'
+    source.ip: <office-ws-1-ip>
+    host.name: office-ws-1
+    user.name: dev.dana
+    url.original: https://transfer.sh
+    http.request.method: CONNECT
+    http.response.bytes: 0
+    squid.elapsed_ms: <elapsed-ms>
+    squid.result_status: '503'
+  - '@timestamp': '2026-07-28T07:06:39Z'
+    source.ip: <office-ws-1-ip>
+    host.name: office-ws-1
+    user.name: dev.dana
+    url.original: https://raw.githubusercontent.com
+    http.request.method: CONNECT
+    http.response.bytes: 0
+    squid.elapsed_ms: <elapsed-ms>
+    squid.result_status: '301'
+  - '@timestamp': '2026-07-28T07:06:39Z'
+    source.ip: <office-ws-1-ip>
+    host.name: office-ws-1
+    user.name: dev.dana
+    url.original: https://pastebin.com
+    http.request.method: CONNECT
+    http.response.bytes: 0
+    squid.elapsed_ms: <elapsed-ms>
+    squid.result_status: '200'
+  - '@timestamp': '2026-07-28T07:06:39Z'
+    source.ip: <office-ws-1-ip>
+    host.name: office-ws-1
+    user.name: dev.dana
+    url.original: https://api.telegram.org
+    http.request.method: CONNECT
+    http.response.bytes: 0
+    squid.elapsed_ms: <elapsed-ms>
+    squid.result_status: '302'
+  - '@timestamp': '2026-07-28T07:06:44Z'
+    source.ip: <office-ws-1-ip>
+    host.name: office-ws-1
+    user.name: dev.dana
+    url.original: https://example.com
+    http.request.method: CONNECT
+    http.response.bytes: 0
+    squid.elapsed_ms: <elapsed-ms>
+    squid.result_status: '200'
+  - '@timestamp': '2026-07-28T07:06:45Z'
+    source.ip: <office-ws-1-ip>
+    host.name: office-ws-1
+    user.name: dev.dana
+    url.original: https://ifconfig.me
+    http.request.method: CONNECT
+    http.response.bytes: 0
+    squid.elapsed_ms: <elapsed-ms>
+    squid.result_status: '200'
+  - '@timestamp': '2026-07-28T07:06:45Z'
+    source.ip: <office-ws-1-ip>
+    host.name: office-ws-1
+    user.name: dev.dana
+    url.original: https://transfer.sh
+    http.request.method: CONNECT
+    http.response.bytes: 0
+    squid.elapsed_ms: <elapsed-ms>
+    squid.result_status: '503'
+  - '@timestamp': '2026-07-28T07:06:46Z'
+    source.ip: <office-ws-1-ip>
+    host.name: office-ws-1
+    user.name: dev.dana
+    url.original: https://raw.githubusercontent.com
+    http.request.method: CONNECT
+    http.response.bytes: 0
+    squid.elapsed_ms: <elapsed-ms>
+    squid.result_status: '301'
+  - '@timestamp': '2026-07-28T07:06:46Z'
+    source.ip: <office-ws-1-ip>
+    host.name: office-ws-1
+    user.name: dev.dana
+    url.original: https://pastebin.com
+    http.request.method: CONNECT
+    http.response.bytes: 0
+    squid.elapsed_ms: <elapsed-ms>
+    squid.result_status: '200'
+  - '@timestamp': '2026-07-28T07:06:46Z'
+    source.ip: <office-ws-1-ip>
+    host.name: office-ws-1
+    user.name: dev.dana
+    url.original: https://api.telegram.org
+    http.request.method: CONNECT
+    http.response.bytes: 0
+    squid.elapsed_ms: <elapsed-ms>
+    squid.result_status: '302'
+  - '@timestamp': '2026-07-28T07:06:51Z'
+    source.ip: <office-ws-1-ip>
+    host.name: office-ws-1
+    user.name: dev.dana
+    url.original: https://example.com
+    http.request.method: CONNECT
+    http.response.bytes: 0
+    squid.elapsed_ms: <elapsed-ms>
+    squid.result_status: '200'
+  - '@timestamp': '2026-07-28T07:06:52Z'
+    source.ip: <office-ws-1-ip>
+    host.name: office-ws-1
+    user.name: dev.dana
+    url.original: https://ifconfig.me
+    http.request.method: CONNECT
+    http.response.bytes: 0
+    squid.elapsed_ms: <elapsed-ms>
+    squid.result_status: '200'
+  - '@timestamp': '2026-07-28T07:06:52Z'
+    source.ip: <office-ws-1-ip>
+    host.name: office-ws-1
+    user.name: dev.dana
+    url.original: https://transfer.sh
+    http.request.method: CONNECT
+    http.response.bytes: 0
+    squid.elapsed_ms: <elapsed-ms>
+    squid.result_status: '503'
+  - '@timestamp': '2026-07-28T07:06:53Z'
+    source.ip: <office-ws-1-ip>
+    host.name: office-ws-1
+    user.name: dev.dana
+    url.original: https://raw.githubusercontent.com
+    http.request.method: CONNECT
+    http.response.bytes: 0
+    squid.elapsed_ms: <elapsed-ms>
+    squid.result_status: '301'
+  - '@timestamp': '2026-07-28T07:06:53Z'
+    source.ip: <office-ws-1-ip>
+    host.name: office-ws-1
+    user.name: dev.dana
+    url.original: https://pastebin.com
+    http.request.method: CONNECT
+    http.response.bytes: 0
+    squid.elapsed_ms: <elapsed-ms>
+    squid.result_status: '200'
+  - '@timestamp': '2026-07-28T07:06:53Z'
+    source.ip: <office-ws-1-ip>
+    host.name: office-ws-1
+    user.name: dev.dana
+    url.original: https://api.telegram.org
+    http.request.method: CONNECT
+    http.response.bytes: 0
+    squid.elapsed_ms: <elapsed-ms>
+    squid.result_status: '302'
+- lead_id: l-007
+  events: []
+- lead_id: l-005
+  events: []

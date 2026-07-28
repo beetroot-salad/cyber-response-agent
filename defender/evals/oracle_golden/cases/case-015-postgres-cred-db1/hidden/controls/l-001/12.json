@@ -1,0 +1,123 @@
+{
+  "lead_id": "l-001",
+  "seq": 12,
+  "controls": [
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-06T20:03:30.000Z",
+        "2026-07-06T21:03:30.000Z"
+      ],
+      "query": "FROM logs-postgresql.log-*\n| WHERE host.name == \"db-1\" AND @timestamp >= \"2026-07-06T20:03:30.000Z\" AND @timestamp < \"2026-07-06T21:03:30.000Z\"\n        AND log.level == \"FATAL\"\n| STATS count = COUNT(*), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp) BY user.name\n| SORT count DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-postgresql.log-*\n| WHERE host.name == \"db-1\" AND @timestamp >= \"2026-07-06T20:03:30.000Z\" AND @timestamp < \"2026-07-06T21:03:30.000Z\"\n        AND log.level == \"FATAL\"\n| STATS count = COUNT(*), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp) BY user.name\n| SORT count DESC",
+        "columns": [
+          {
+            "name": "count",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "count": 5760,
+            "first_seen": "2026-07-06T20:03:37.159Z",
+            "last_seen": "2026-07-06T21:03:27.159Z",
+            "user.name": "root"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-29T20:03:30.000Z",
+        "2026-06-29T21:03:30.000Z"
+      ],
+      "query": "FROM logs-postgresql.log-*\n| WHERE host.name == \"db-1\" AND @timestamp >= \"2026-06-29T20:03:30.000Z\" AND @timestamp < \"2026-06-29T21:03:30.000Z\"\n        AND log.level == \"FATAL\"\n| STATS count = COUNT(*), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp) BY user.name\n| SORT count DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-postgresql.log-*\n| WHERE host.name == \"db-1\" AND @timestamp >= \"2026-06-29T20:03:30.000Z\" AND @timestamp < \"2026-06-29T21:03:30.000Z\"\n        AND log.level == \"FATAL\"\n| STATS count = COUNT(*), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp) BY user.name\n| SORT count DESC",
+        "columns": [
+          {
+            "name": "count",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "count": 7200,
+            "first_seen": "2026-06-29T20:03:33.764Z",
+            "last_seen": "2026-06-29T21:03:23.771Z",
+            "user.name": "root"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-35d",
+      "window": [
+        "2026-06-22T20:03:30.000Z",
+        "2026-06-22T21:03:30.000Z"
+      ],
+      "query": "FROM logs-postgresql.log-*\n| WHERE host.name == \"db-1\" AND @timestamp >= \"2026-06-22T20:03:30.000Z\" AND @timestamp < \"2026-06-22T21:03:30.000Z\"\n        AND log.level == \"FATAL\"\n| STATS count = COUNT(*), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp) BY user.name\n| SORT count DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-postgresql.log-*\n| WHERE host.name == \"db-1\" AND @timestamp >= \"2026-06-22T20:03:30.000Z\" AND @timestamp < \"2026-06-22T21:03:30.000Z\"\n        AND log.level == \"FATAL\"\n| STATS count = COUNT(*), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp) BY user.name\n| SORT count DESC",
+        "columns": [
+          {
+            "name": "count",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "count": 7200,
+            "first_seen": "2026-06-22T20:03:33.763Z",
+            "last_seen": "2026-06-22T21:03:23.773Z",
+            "user.name": "root"
+          }
+        ]
+      }
+    }
+  ]
+}

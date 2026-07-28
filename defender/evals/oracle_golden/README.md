@@ -345,35 +345,40 @@ calibration and must not substitute for a trusted slice.
 
 ## Current coverage
 
-Scored 2026-07-27 under judge tag `judge-claude-opus-5-high_47d6044a`. Every slice is
-`insufficient` or `no-update` at the unit floor — these are the *first* measurements
-under this design, not a certification. `report.py` prints the full breakdown.
+Scored 2026-07-27, extended 2026-07-28, under judge tag `judge-claude-opus-5-high_47d6044a`.
+Every slice is `insufficient` or `no-update` at the unit floor — these are the *first*
+measurements under this design, not a certification. `report.py` prints the full breakdown.
 
 | split | oracle tag | active | quiet | abstained | units |
 |---|---|---|---|---|---|
 | dev | `glm-5.2_effort-none` | **4/7** | 9/10 | 1 | 4 |
-| dev | `glm-5.2_effort-none_prompt-711` | **8/13** | 18/19 | 4 | 6 |
-| held-out | `glm-5.2_effort-none_prompt-711` | **9/17** | 8/8 | 1 | 3 |
+| dev | `glm-5.2_effort-none_prompt-711` | **10/15** | 22/23 | 4 | 8 |
+| held-out | `glm-5.2_effort-none_prompt-711` | **11/22** | 15/15 | 2 | 6 |
 
 The active band is the headline and the quiet band is reported beside it, never pooled
-into one number. Only the `_prompt-711` tag carries the three units recruited on
-2026-07-27 (case-011/012/013); the older tag is still the 4-unit seed set, which is why
-its denominators are smaller.
+into one number. Only the `_prompt-711` tag carries the units recruited on 2026-07-27
+(case-011/012/013 and the Falco/postgres captures below); the older tag is still the
+4-unit seed set, which is why its denominators are smaller. **Run `report.py` for the
+current numbers — the table is a snapshot and the §2026-07-27 subsection below records
+what the last capture changed.**
 
-**Held-out cleared the unit floor on 2026-07-27** when case-008 and case-010 — captured
-2026-07-26 and held unscored since — were replayed and scored, taking it from 1 unit to
-3. Its active band publishes an interval for the first time: **0.53 [0.21, 0.94]**, and
-`elastic x present` is **0.54 [0.21, 0.94] over 3 units** beside dev's 0.71 [0.30, 0.95]
-over 4. Read the change to the *story* before the change to the number: on one unit
-held-out read 2/8, which is the evidence §Status called "the first evidence for what #711
-suspected". Across three it reads 0.53 against dev's 0.61, and the gap is inside one
-lead of the judge's own noise floor. **case-005 was an outlier, not a trend** — and the
-two cases that show it were assigned held-out by the generator before any replay, so
-neither the split nor the order of scoring was chosen after seeing a result.
+**Held-out cleared the unit floor on 2026-07-27** (case-008/case-010 replayed, then
+**case-014** Falco-on-db-1 made it 4); **2026-07-28 took it to 6** with **case-016**
+(nginx path-scan) and **case-019** (squid proxy-egress). The active band holds at
+**11/22 = 0.50 [0.19, 0.81]** over 6 units, and `elastic x present` is **8/16 = 0.50
+[0.12, 0.77] over 5 units** beside dev's 0.75 [0.38, 0.96]. The number did not move when
+the units grew: 0.50 on 4 units, still 0.50 on 6. **case-005 was never the outlier the
+single-unit read feared — the miss rate is real and stable.** Every held-out unit was
+assigned by the generator before any replay, so neither the split nor the order of scoring
+was chosen after seeing a result.
 
-`C-MISSED-DELTA` is the leading cause on both sides and is now **4 instances across 3
-units** on held-out — meeting the unit half of the ≥5-across-≥3-units bar that makes a
-cause *established*, and one instance short of the other half. It is the cause to watch.
+`C-MISSED-DELTA` is now **established on held-out — 6 instances across 5 units**, past the
+≥5-across-≥3-units bar. case-016 `l-002` (nginx) and case-019 `l-004` (squid) each landed
+one, and both are the *same* shape: a baseline-overview lead whose 7-day window ends at the
+activity, so the window *contains* the scan, yet the oracle projects it empty. The miss
+reproduced independently on two new sources the same day — it is a property of the oracle,
+not of one stream. This is the first cause to clear the bar, and the one to fix.
+`C-EVENT-AS-NOISE` holds at **3 across 2 units**.
 
 **The judge's own noise floor is one lead** (`audits/verdict-selfagreement_*`, 0.988
 self-agreement over 5 repeats). Against a 13-lead active band that is ~8 points, so a
@@ -396,9 +401,9 @@ measurement re-derived them from telemetry rather than inheriting them from the 
 same lead the label-pass calibration abstained on. It is adjudicated by **re-measurement**
 on a lever-up against snapshot `412421678` — never by tuning the prompt until it decides.
 
-**`delta_kind` coverage** over the 62 labelled leads — `state-only` 25, `present` 24,
-`undecidable` 5, `indistinguishable` 4, `suppressed` 2, `absent` 2. All five deciding
-kinds are exercised, but the distribution is the thing to read: the active band is 77%
+**`delta_kind` coverage** over the 78 labelled leads — `state-only` 34, `present` 29,
+`undecidable` 5, `indistinguishable` 5, `absent` 3, `suppressed` 2. All five deciding
+kinds are exercised, but the distribution is the thing to read: the active band is ~80%
 `present`, and the two kinds that actually gate learning — `indistinguishable` (do not
 manufacture a catch out of routine traffic) and `suppressed` (do not read absence as a
 detection) — carry 4 and 2 leads. One of the two `suppressed` leads is the set's chronic
@@ -410,6 +415,89 @@ case-006 and case-007, which are `defective:` and unscoreable. Still pending: a
 suppression capture on a stream with a measured non-zero baseline in its own envelope;
 routine **benign** observed cases; more mutation entities; and wiring the trust resolver
 into lesson scoring.
+
+### 2026-07-27 session: Falco retargeting unblocked + new elastic sources
+
+The single-Falco-host cap is gone. Both Falco scenarios ran their commands *locally* on
+their source host and never read `${target}`, so retargeting moved only the story label —
+which is why the #711 pilot recorded them "detectable on canary-1 only". A runner
+`--source` flag now relocates where the commands run (mirroring `--user`; a per-step
+`source_host` still wins), and the generator defaults `--target` to it for a local
+scenario so story/alert/leads stay coherent. `persistence-authorized-keys --source db-1`
+fires `v2-falco-authorized-keys-modification` on db-1 — the first time that rule has ever
+fired on a non-canary host — captured as **case-014**.
+
+| case | kind | split | unit | new source | result |
+|---|---|---|---|---|---|
+| `case-014-authkeys-db1` | observed, **captured** | held-out | persistence/T1098.004, db-1→db-1 | elastic **falco-alerts** on db-1 | 1/2 decided; l-003 **`C-EVENT-AS-NOISE`** (oracle called the co-occurring-events lead noise; judge says `present`); l-001 abstained `insufficient-baseline` (controls gap, below) |
+| `case-015-postgres-cred-db1` | observed, synthesised | dev | credential-access/T1110-postgres, office-ws-1→db-1 | elastic **postgresql.log** (+ identity, cmdb, zeek) | 4 leads (over-broad `l-004` pruned, below); judge **labels committed** — `present` on the postgres FATAL-auth-failure/read lead, `state-only`/`absent` on the cmdb/identity lookups, `undecidable` on the FATAL-by-user lead. The oracle replay agreed on all decided classes, but the projection/score is **not committed**: the verdict pass cannot hold `l-001`'s 316 KB payload (below). |
+
+New gather templates so the oracle can *query* every live elastic stream:
+`elastic.nginx-access-history` and `elastic.keycloak-auth-events`. New catalog scenarios:
+`postgres-cred-probe`, `web-path-scan`, `sudo-escalation-burst`, `keycloak-cred-stuffing`.
+
+**Sources templated but not captured, and why.** `nginx.access` is live and its scan
+signal is clean; `keycloak.events` and `squid.access` are dark under baseline but their
+scenarios regenerate the streams on demand — **all three were captured 2026-07-28, below.**
+`squid` was *not* "shipped but dead" for the reason first recorded here: its logging is
+fully wired, and it was dark only because no baseline routes egress through the proxy — the
+`proxy-egress-burst` scenario fixes that. `unbound.queries` alone stays dead (query logging
+disabled — lifecycle notices only); a template that returns nothing is a dead end in the
+gather catalog, so it gets none. That one is an environment gap, not coverage.
+
+**Three instrument findings this session surfaced:**
+
+- **`controls.py` shifts an ES|QL inline-window predicate, not a KQL `native_query` +
+  `start`/`end` lead.** The gather issues the Falco rule-name filter as KQL, so case-014's
+  `+event` lead got no control and the judge could only abstain `insufficient-baseline`.
+  Fix needs a KQL control-execution path (the `query`/`_search` verb, not `_query`).
+- **The verdict pass cannot grade an oversized lead.** case-015's `l-004` (a broad
+  `logs-*` query, 521 KB with its 400 KB of controls) exits the judge call outright, and
+  even after pruning it, `l-001`'s 316 KB payload trips the *verdict* pass — though its
+  *label* pass fit, so the ceiling sits between the two. The ≤42 KB lookup leads grade
+  fine. Two lessons: bound the investigation (this one ran 79 queries across 5 leads), and
+  prefer a source-scoped index over `logs-*`. Until the judge chunks a lead, a
+  many-query `+event` lead over verbose rows is committed with labels but no score.
+- **Control windows have a dead gap.** This snapshot is live 06-15→07-13 and today only;
+  the default 7/14/21-day offsets land in the 07-14→07-26 lever-down hole. Use
+  `--offsets-days 21,28,35` (07-06 / 06-29 / 06-22 — live, same weekday). The generator
+  now takes `--offsets-days`, and `ORACLE_ALERT_ATTEMPTS` env-overrides the poll window so
+  a 5-minute-interval detection rule is *captured* rather than synthesised.
+
+### 2026-07-28 session: nginx / keycloak / squid captured and scored
+
+Three previously-uncovered elastic sources, each now a scored case. Held-out grew 4→6
+units and **`C-MISSED-DELTA` cleared the establishment bar** (§Current coverage).
+
+| case | kind | split | unit | new source | result |
+|---|---|---|---|---|---|
+| `case-016-nginx-scan-web1` | observed, synthesised | held-out | data-access/T1595, office-ws-1→web-1 | elastic **nginx.access** | **3/4**; l-001 `present` faithful (12-path scan vs a 2-path loopback baseline); l-002 **`C-MISSED-DELTA`** — its 7-day baseline window ends at the scan, so it *contains* it, but the oracle projected empty |
+| `case-017-keycloak-stuffing` | observed, captured | dev | credential-access/T1110-keycloak, office-ws-1→office-ws-1 | elastic **keycloak.events** (+ change-mgmt, ticket) | **6/6**; l-005 `present` faithful (the LOGIN_ERROR burst); the `state-only`/`absent`/`indistinguishable` leads all faithful |
+| `case-019-squid-egress-officews1` | observed, synthesised | held-out | exfiltration/T1048-proxy-egress, office-ws-1→office-ws-1 | elastic **squid.access** (+ threat-intel) | **5/6** (over-broad `l-006` pruned); l-001 `present` faithful (proxy egress under `dev.dana`); l-004 **`C-MISSED-DELTA`** (same overlap-window shape as nginx l-002) |
+
+New gather template `elastic.squid-proxy-access` (`user.name` / `source.ip` / `url.original`
+from the dissected `soc` logformat); new scenario `proxy-egress-burst`. `keycloak-cred-stuffing`
+was re-modelled: its `target_host` was `keycloak`, a *service* whose events carry
+`host.name=soc-playground`, so a host-scoped lead would have named a host the telemetry
+never labels — the coherence guard rightly refused it. It is now a local scenario at the
+actor host, reaching the IdP by DNS, attributing by `ipAddress`/`username`.
+
+**Two capture-mechanism findings:**
+
+- **A real detection alert hijacks the investigation away from the intended source.** The
+  proxy's external `curl` CONNECT trips `v2-falco-suspicious-network-tool`; an unforced
+  squid run *captured* that alert, which anchored the whole investigation on the container
+  process and sent it to `zeek.http` — it never queried `squid.access`. Forcing alert
+  *synthesis* (a sentinel `--rule` no rule matches) lets the proxy-egress story drive the
+  lead set, and the re-run then queried `squid.access` seven times. The oracle never sees
+  the alert, so synthesis costs nothing and buys a source-focused investigation. The same
+  lever fixes the inverse hazard: a scenario with no dedicated rule can anchor on an
+  *unrelated* baseline alert (case-017 caught a baseline `off-hours-sudo` fire), which
+  sentinel-rule synthesis also sidesteps.
+- **`C-MISSED-DELTA` reproduced on two independent new sources the same day** (nginx
+  `l-002`, squid `l-004`) — the overlap-window miss above. That independent reproduction is
+  what carried the cause over the establishment bar; it is the oracle's behaviour, not a
+  quirk of one stream.
 
 ### What the spec probes found (2026-07-27, `glm-5.2_effort-none_prompt-711`)
 

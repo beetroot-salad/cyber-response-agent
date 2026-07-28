@@ -1,0 +1,102 @@
+{
+  "lead_id": "l-005",
+  "seq": 5,
+  "controls": [
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-07T00:00:00.000Z",
+        "2026-07-08T00:00:00.000Z"
+      ],
+      "query": "FROM logs-keycloak.events-*\n| WHERE @timestamp >= \"2026-07-07T00:00:00.000Z\" AND @timestamp < \"2026-07-08T00:00:00.000Z\"\n  AND loggerName == \"org.keycloak.events\"\n| EVAL event_type = CASE(\n    message LIKE \"*type=\\\"LOGIN_ERROR\\\"*\", \"LOGIN_ERROR\",\n    message LIKE \"*type=\\\"LOGIN\\\"*\", \"LOGIN\",\n    message LIKE \"*type=\\\"LOGOUT\\\"*\", \"LOGOUT\",\n    message LIKE \"*type=\\\"REFRESH_TOKEN\\\"*\", \"REFRESH_TOKEN\",\n    \"OTHER\"\n  )\n| STATS count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n  BY event_type\n| SORT count DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-keycloak.events-*\n| WHERE @timestamp >= \"2026-07-07T00:00:00.000Z\" AND @timestamp < \"2026-07-08T00:00:00.000Z\"\n  AND loggerName == \"org.keycloak.events\"\n| EVAL event_type = CASE(\n    message LIKE \"*type=\\\"LOGIN_ERROR\\\"*\", \"LOGIN_ERROR\",\n    message LIKE \"*type=\\\"LOGIN\\\"*\", \"LOGIN\",\n    message LIKE \"*type=\\\"LOGOUT\\\"*\", \"LOGOUT\",\n    message LIKE \"*type=\\\"REFRESH_TOKEN\\\"*\", \"REFRESH_TOKEN\",\n    \"OTHER\"\n  )\n| STATS count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n  BY event_type\n| SORT count DESC",
+        "columns": [
+          {
+            "name": "count",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "event_type",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-30T00:00:00.000Z",
+        "2026-07-01T00:00:00.000Z"
+      ],
+      "query": "FROM logs-keycloak.events-*\n| WHERE @timestamp >= \"2026-06-30T00:00:00.000Z\" AND @timestamp < \"2026-07-01T00:00:00.000Z\"\n  AND loggerName == \"org.keycloak.events\"\n| EVAL event_type = CASE(\n    message LIKE \"*type=\\\"LOGIN_ERROR\\\"*\", \"LOGIN_ERROR\",\n    message LIKE \"*type=\\\"LOGIN\\\"*\", \"LOGIN\",\n    message LIKE \"*type=\\\"LOGOUT\\\"*\", \"LOGOUT\",\n    message LIKE \"*type=\\\"REFRESH_TOKEN\\\"*\", \"REFRESH_TOKEN\",\n    \"OTHER\"\n  )\n| STATS count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n  BY event_type\n| SORT count DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-keycloak.events-*\n| WHERE @timestamp >= \"2026-06-30T00:00:00.000Z\" AND @timestamp < \"2026-07-01T00:00:00.000Z\"\n  AND loggerName == \"org.keycloak.events\"\n| EVAL event_type = CASE(\n    message LIKE \"*type=\\\"LOGIN_ERROR\\\"*\", \"LOGIN_ERROR\",\n    message LIKE \"*type=\\\"LOGIN\\\"*\", \"LOGIN\",\n    message LIKE \"*type=\\\"LOGOUT\\\"*\", \"LOGOUT\",\n    message LIKE \"*type=\\\"REFRESH_TOKEN\\\"*\", \"REFRESH_TOKEN\",\n    \"OTHER\"\n  )\n| STATS count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n  BY event_type\n| SORT count DESC",
+        "columns": [
+          {
+            "name": "count",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "event_type",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    },
+    {
+      "name": "C-35d",
+      "window": [
+        "2026-06-23T00:00:00.000Z",
+        "2026-06-24T00:00:00.000Z"
+      ],
+      "query": "FROM logs-keycloak.events-*\n| WHERE @timestamp >= \"2026-06-23T00:00:00.000Z\" AND @timestamp < \"2026-06-24T00:00:00.000Z\"\n  AND loggerName == \"org.keycloak.events\"\n| EVAL event_type = CASE(\n    message LIKE \"*type=\\\"LOGIN_ERROR\\\"*\", \"LOGIN_ERROR\",\n    message LIKE \"*type=\\\"LOGIN\\\"*\", \"LOGIN\",\n    message LIKE \"*type=\\\"LOGOUT\\\"*\", \"LOGOUT\",\n    message LIKE \"*type=\\\"REFRESH_TOKEN\\\"*\", \"REFRESH_TOKEN\",\n    \"OTHER\"\n  )\n| STATS count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n  BY event_type\n| SORT count DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-keycloak.events-*\n| WHERE @timestamp >= \"2026-06-23T00:00:00.000Z\" AND @timestamp < \"2026-06-24T00:00:00.000Z\"\n  AND loggerName == \"org.keycloak.events\"\n| EVAL event_type = CASE(\n    message LIKE \"*type=\\\"LOGIN_ERROR\\\"*\", \"LOGIN_ERROR\",\n    message LIKE \"*type=\\\"LOGIN\\\"*\", \"LOGIN\",\n    message LIKE \"*type=\\\"LOGOUT\\\"*\", \"LOGOUT\",\n    message LIKE \"*type=\\\"REFRESH_TOKEN\\\"*\", \"REFRESH_TOKEN\",\n    \"OTHER\"\n  )\n| STATS count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n  BY event_type\n| SORT count DESC",
+        "columns": [
+          {
+            "name": "count",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "event_type",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 0,
+        "values": []
+      }
+    }
+  ]
+}

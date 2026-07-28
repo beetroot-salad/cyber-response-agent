@@ -287,6 +287,89 @@ def test_the_guard_reads_the_real_catalog():
         "cross-tier-ssh-probe", "web-2", catalog_path=real) is None
 
 
+# ------------------------------------------------ relocating a local scenario (--source)
+
+def test_a_local_scenario_moves_when_source_and_target_agree(catalog):
+    """`--source` moves where the commands run. When it lands on the same host the story
+    names, every lead investigates the host the activity touched — the incoherence the
+    guard exists to catch is gone, so the recruit is allowed."""
+    assert generate_case.retarget_problem(
+        "local-only", "db-1", "db-1", catalog_path=catalog) is None
+
+
+def test_moving_only_the_source_is_still_incoherent(catalog):
+    """Moving the execution to db-1 while the story still names canary-1 is the mirror of
+    the original defect, and just as unusable — refuse it, and name the host the commands
+    actually ran on."""
+    problem = generate_case.retarget_problem(
+        "local-only", None, "db-1", catalog_path=catalog)
+    assert problem is not None
+    assert "db-1" in problem, "it must name where the commands actually ran"
+
+
+def test_source_alone_autofills_the_target_in_main(catalog, tmp_path, monkeypatch):
+    """`--source db-1` on a local scenario is the whole retarget: main defaults the
+    story/alert target to the execution host, so the operator names it once and the guard
+    that follows sees a coherent (db-1 -> db-1) pair rather than refusing."""
+    captured = {}
+
+    def fake_fire(scenario, *, seed, user, source, target, intensity):
+        captured["source"], captured["target"] = source, target
+        raise SystemExit(0)  # stop before the stack is touched; we only want the args
+
+    monkeypatch.setattr(generate_case, "CATALOG", catalog)
+    monkeypatch.setattr(generate_case, "fire", fake_fire)
+    with pytest.raises(SystemExit):
+        generate_case.main(["--scenario", "local-only", "--source", "db-1",
+                            "--case-id", "case-src", "--split", "dev",
+                            "--activity-family", "persistence/T1098.004",
+                            "--cases-dir", str(tmp_path / "cases")])
+    assert captured == {"source": "db-1", "target": "db-1"}
+
+
+# ---------------------------------------------------- the runner's own --source plumbing
+
+def _load_runner():
+    """Import `runner.py` from the path the generator already resolves to it."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("_attack_runner", generate_case.RUNNER)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_source_override_relocates_every_step(tmp_path, monkeypatch):
+    """The runner half of the fix. A local scenario's step carries no per-step
+    `source_host`, so `--source` decides where it dispatches; the meta's resolved block
+    records it, which is what the story renderer and manifest read back."""
+    runner = _load_runner()
+    monkeypatch.setattr(runner, "RUNS_DIR", tmp_path)
+    scenario = {"id": "local-only", "category": "execution", "description": "x",
+                "source_host": "canary-1", "target_host": "canary-1",
+                "steps": [{"cmd": "echo key >> /root/.ssh/authorized_keys"}]}
+    _run_id, run_dir, step_log = runner.run_scenario(
+        scenario, seed=1, overrides={"source": "db-1"}, dry_run=True)
+    assert [s["source_host"] for s in step_log] == ["db-1"]
+    meta = json.loads((run_dir / "meta.json").read_text(encoding="utf-8"))
+    assert meta["resolved"]["source_host"] == "db-1"
+
+
+def test_a_per_step_source_host_still_wins_over_source(tmp_path, monkeypatch):
+    """`--source` moves the scenario default; a step that names its own host keeps it —
+    the same precedence `--user` has over a step's `source_user`, so a multi-source
+    scenario is not flattened onto one host by the override."""
+    runner = _load_runner()
+    monkeypatch.setattr(runner, "RUNS_DIR", tmp_path)
+    scenario = {"id": "two-source", "category": "execution", "description": "x",
+                "source_host": "canary-1", "target_host": "canary-1",
+                "steps": [{"cmd": "echo a"},
+                          {"cmd": "echo b", "source_host": "jump-box-1"}]}
+    _run_id, _run_dir, step_log = runner.run_scenario(
+        scenario, seed=1, overrides={"source": "db-1"}, dry_run=True)
+    assert [s["source_host"] for s in step_log] == ["db-1", "jump-box-1"]
+
+
 # --------------------------------------------------- the occupied-case-id guard (#711)
 
 def test_a_free_case_id_is_not_refused(tmp_path):

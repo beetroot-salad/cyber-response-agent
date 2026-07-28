@@ -1,0 +1,2274 @@
+{
+  "lead_id": "l-006",
+  "seq": 0,
+  "controls": [
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-07T06:15:00.000Z",
+        "2026-07-07T07:15:00.000Z"
+      ],
+      "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-07T06:15:00.000Z\" AND @timestamp < \"2026-07-07T07:15:00.000Z\"\n        AND host.name == \"soc-playground\"\n        AND falco.rule != \"Sudo execution\"\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule      = falco.rule,\n           proc      = falco.output_fields.proc.name,\n           parent    = falco.output_fields.proc.pname,\n           container = falco.output_fields.container.id\n| SORT events DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-07T06:15:00.000Z\" AND @timestamp < \"2026-07-07T07:15:00.000Z\"\n        AND host.name == \"soc-playground\"\n        AND falco.rule != \"Sudo execution\"\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule      = falco.rule,\n           proc      = falco.output_fields.proc.name,\n           parent    = falco.output_fields.proc.pname,\n           container = falco.output_fields.container.id\n| SORT events DESC",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "rule",
+            "type": "keyword"
+          },
+          {
+            "name": "proc",
+            "type": "keyword"
+          },
+          {
+            "name": "parent",
+            "type": "keyword"
+          },
+          {
+            "name": "container",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 83,
+        "values": [
+          {
+            "events": 300,
+            "first_seen": "2026-07-07T06:15:23.361Z",
+            "last_seen": "2026-07-07T07:14:40.032Z",
+            "rule": "BPF Program Not Profiled",
+            "proc": "runc",
+            "parent": "containerd-shim",
+            "container": "host"
+          },
+          {
+            "events": 96,
+            "first_seen": "2026-07-07T06:15:06.351Z",
+            "last_seen": "2026-07-07T07:14:50.037Z",
+            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "proc": "sshd",
+            "parent": "sshd",
+            "container": "a36492b5172b"
+          },
+          {
+            "events": 94,
+            "first_seen": "2026-07-07T06:15:13.354Z",
+            "last_seen": "2026-07-07T07:10:46.992Z",
+            "rule": "Launch Suspicious Network Tool in Container",
+            "proc": "nc",
+            "parent": "bash",
+            "container": "7e76d1cea7c4"
+          },
+          {
+            "events": 66,
+            "first_seen": "2026-07-07T06:15:06.351Z",
+            "last_seen": "2026-07-07T07:14:37.031Z",
+            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "proc": "sshd",
+            "parent": "sshd",
+            "container": "ed96a85a7480"
+          },
+          {
+            "events": 60,
+            "first_seen": "2026-07-07T06:15:23.362Z",
+            "last_seen": "2026-07-07T07:14:40.032Z",
+            "rule": "Launch Sensitive Mount Container",
+            "proc": "tini",
+            "parent": "containerd-shim",
+            "container": "e1dc89faaa8b"
+          },
+          {
+            "events": 60,
+            "first_seen": "2026-07-07T06:15:23.362Z",
+            "last_seen": "2026-07-07T07:14:40.032Z",
+            "rule": "Unexpected UDP Traffic",
+            "proc": "iptables",
+            "parent": null,
+            "container": "host"
+          },
+          {
+            "events": 60,
+            "first_seen": "2026-07-07T06:15:16.356Z",
+            "last_seen": "2026-07-07T07:14:22.027Z",
+            "rule": "Drop and execute new binary in container",
+            "proc": "curl",
+            "parent": "sh",
+            "container": "58ffe39dd54f"
+          },
+          {
+            "events": 60,
+            "first_seen": "2026-07-07T06:15:16.356Z",
+            "last_seen": "2026-07-07T07:14:22.027Z",
+            "rule": "Drop and execute new binary in container",
+            "proc": "openssl",
+            "parent": "sh",
+            "container": "58ffe39dd54f"
+          },
+          {
+            "events": 60,
+            "first_seen": "2026-07-07T06:15:23.358Z",
+            "last_seen": "2026-07-07T07:14:40.032Z",
+            "rule": "BPF Program Not Profiled",
+            "proc": "<NA>",
+            "parent": null,
+            "container": "host"
+          },
+          {
+            "events": 49,
+            "first_seen": "2026-07-07T06:15:06.351Z",
+            "last_seen": "2026-07-07T07:14:50.037Z",
+            "rule": "Unexpected UDP Traffic",
+            "proc": "sshd",
+            "parent": "sshd",
+            "container": "a36492b5172b"
+          },
+          {
+            "events": 48,
+            "first_seen": "2026-07-07T06:17:46.395Z",
+            "last_seen": "2026-07-07T07:12:21.008Z",
+            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "proc": "sshd",
+            "parent": "sshd",
+            "container": "d1daf6f3b7c6"
+          },
+          {
+            "events": 46,
+            "first_seen": "2026-07-07T06:16:32.379Z",
+            "last_seen": "2026-07-07T07:11:01.994Z",
+            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "proc": "sshd",
+            "parent": "<NA>",
+            "container": "1df4bcd65ee4"
+          },
+          {
+            "events": 38,
+            "first_seen": "2026-07-07T06:17:07.383Z",
+            "last_seen": "2026-07-07T07:09:04.971Z",
+            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "proc": "sshd",
+            "parent": "sshd",
+            "container": "ffbff1299702"
+          },
+          {
+            "events": 36,
+            "first_seen": "2026-07-07T06:18:16.402Z",
+            "last_seen": "2026-07-07T07:14:47.035Z",
+            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "proc": "sshd",
+            "parent": "sshd",
+            "container": "d8fb0192a17f"
+          },
+          {
+            "events": 34,
+            "first_seen": "2026-07-07T06:15:13.354Z",
+            "last_seen": "2026-07-07T07:13:44.022Z",
+            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "proc": "sshd",
+            "parent": "sshd",
+            "container": "2c1e2ec93d17"
+          },
+          {
+            "events": 33,
+            "first_seen": "2026-07-07T06:15:06.351Z",
+            "last_seen": "2026-07-07T07:14:37.032Z",
+            "rule": "Unexpected UDP Traffic",
+            "proc": "sshd",
+            "parent": "sshd",
+            "container": "ed96a85a7480"
+          },
+          {
+            "events": 24,
+            "first_seen": "2026-07-07T06:17:46.395Z",
+            "last_seen": "2026-07-07T07:12:21.008Z",
+            "rule": "Unexpected UDP Traffic",
+            "proc": "sshd",
+            "parent": "sshd",
+            "container": "d1daf6f3b7c6"
+          },
+          {
+            "events": 23,
+            "first_seen": "2026-07-07T06:16:32.379Z",
+            "last_seen": "2026-07-07T07:11:01.994Z",
+            "rule": "Unexpected UDP Traffic",
+            "proc": "sshd",
+            "parent": "<NA>",
+            "container": "1df4bcd65ee4"
+          },
+          {
+            "events": 22,
+            "first_seen": "2026-07-07T06:15:26.363Z",
+            "last_seen": "2026-07-07T07:14:19.026Z",
+            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "proc": "sshd",
+            "parent": "<NA>",
+            "container": "922f03f16a11"
+          },
+          {
+            "events": 20,
+            "first_seen": "2026-07-07T06:15:06.351Z",
+            "last_seen": "2026-07-07T07:12:14.005Z",
+            "rule": "Launch Ingress Remote File Copy Tools in Container",
+            "proc": "curl",
+            "parent": "bash",
+            "container": "a36492b5172b"
+          },
+          {
+            "events": 20,
+            "first_seen": "2026-07-07T06:15:06.351Z",
+            "last_seen": "2026-07-07T07:12:14.005Z",
+            "rule": "Launch Suspicious Network Tool in Container",
+            "proc": "nc",
+            "parent": "runuser",
+            "container": "a36492b5172b"
+          },
+          {
+            "events": 19,
+            "first_seen": "2026-07-07T06:17:07.384Z",
+            "last_seen": "2026-07-07T07:09:04.971Z",
+            "rule": "Unexpected UDP Traffic",
+            "proc": "sshd",
+            "parent": "sshd",
+            "container": "ffbff1299702"
+          },
+          {
+            "events": 18,
+            "first_seen": "2026-07-07T06:15:13.354Z",
+            "last_seen": "2026-07-07T07:13:44.022Z",
+            "rule": "Unexpected UDP Traffic",
+            "proc": "sshd",
+            "parent": "sshd",
+            "container": "2c1e2ec93d17"
+          },
+          {
+            "events": 18,
+            "first_seen": "2026-07-07T06:18:16.402Z",
+            "last_seen": "2026-07-07T07:14:47.035Z",
+            "rule": "Unexpected UDP Traffic",
+            "proc": "sshd",
+            "parent": "sshd",
+            "container": "d8fb0192a17f"
+          },
+          {
+            "events": 16,
+            "first_seen": "2026-07-07T06:17:46.395Z",
+            "last_seen": "2026-07-07T07:12:21.008Z",
+            "rule": "Launch Suspicious Network Tool in Container",
+            "proc": "nc",
+            "parent": "bash",
+            "container": "45388dd0bf3a"
+          },
+          {
+            "events": 16,
+            "first_seen": "2026-07-07T06:18:42.407Z",
+            "last_seen": "2026-07-07T07:07:32.956Z",
+            "rule": "Launch Suspicious Network Tool in Container",
+            "proc": "nc",
+            "parent": "bash",
+            "container": "ed96a85a7480"
+          },
+          {
+            "events": 16,
+            "first_seen": "2026-07-07T06:17:31.392Z",
+            "last_seen": "2026-07-07T07:09:54.982Z",
+            "rule": "Launch Ingress Remote File Copy Tools in Container",
+            "proc": "curl",
+            "parent": "bash",
+            "container": "d8fb0192a17f"
+          },
+          {
+            "events": 14,
+            "first_seen": "2026-07-07T06:16:32.379Z",
+            "last_seen": "2026-07-07T07:11:01.994Z",
+            "rule": "Launch Ingress Remote File Copy Tools in Container",
+            "proc": "curl",
+            "parent": "bash",
+            "container": "1df4bcd65ee4"
+          },
+          {
+            "events": 14,
+            "first_seen": "2026-07-07T06:16:32.379Z",
+            "last_seen": "2026-07-07T07:11:01.994Z",
+            "rule": "Launch Suspicious Network Tool in Container",
+            "proc": "nc",
+            "parent": "runuser",
+            "container": "1df4bcd65ee4"
+          },
+          {
+            "events": 14,
+            "first_seen": "2026-07-07T06:15:44.367Z",
+            "last_seen": "2026-07-07T07:13:44.022Z",
+            "rule": "Launch Ingress Remote File Copy Tools in Container",
+            "proc": "curl",
+            "parent": "bash",
+            "container": "2c1e2ec93d17"
+          },
+          {
+            "events": 14,
+            "first_seen": "2026-07-07T06:15:06.351Z",
+            "last_seen": "2026-07-07T07:14:37.031Z",
+            "rule": "Launch Suspicious Network Tool in Container",
+            "proc": "nc",
+            "parent": "bash",
+            "container": "ffbff1299702"
+          },
+          {
+            "events": 13,
+            "first_seen": "2026-07-07T06:15:41.365Z",
+            "last_seen": "2026-07-07T07:12:14.006Z",
+            "rule": "Launch Suspicious Network Tool in Container",
+            "proc": "nc",
+            "parent": "bash",
+            "container": "d8fb0192a17f"
+          },
+          {
+            "events": 13,
+            "first_seen": "2026-07-07T06:18:26.405Z",
+            "last_seen": "2026-07-07T06:55:03.824Z",
+            "rule": "Launch Suspicious Network Tool in Container",
+            "proc": "nc",
+            "parent": "bash",
+            "container": "c58bf05facac"
+          },
+          {
+            "events": 12,
+            "first_seen": "2026-07-07T06:15:44.367Z",
+            "last_seen": "2026-07-07T07:13:44.022Z",
+            "rule": "Launch Suspicious Network Tool in Container",
+            "proc": "nc",
+            "parent": "runuser",
+            "container": "2c1e2ec93d17"
+          },
+          {
+            "events": 11,
+            "first_seen": "2026-07-07T06:15:26.363Z",
+            "last_seen": "2026-07-07T07:14:19.026Z",
+            "rule": "Unexpected UDP Traffic",
+            "proc": "sshd",
+            "parent": "<NA>",
+            "container": "922f03f16a11"
+          },
+          {
+            "events": 10,
+            "first_seen": "2026-07-07T06:17:07.383Z",
+            "last_seen": "2026-07-07T07:09:04.971Z",
+            "rule": "Launch Suspicious Network Tool in Container",
+            "proc": "nc",
+            "parent": "runuser",
+            "container": "ffbff1299702"
+          },
+          {
+            "events": 10,
+            "first_seen": "2026-07-07T06:17:07.383Z",
+            "last_seen": "2026-07-07T07:09:04.971Z",
+            "rule": "Launch Ingress Remote File Copy Tools in Container",
+            "proc": "curl",
+            "parent": "bash",
+            "container": "ffbff1299702"
+          },
+          {
+            "events": 9,
+            "first_seen": "2026-07-07T06:16:10.371Z",
+            "last_seen": "2026-07-07T06:16:10.371Z",
+            "rule": "Read sensitive file untrusted",
+            "proc": "9",
+            "parent": "<NA>",
+            "container": "host"
+          },
+          {
+            "events": 8,
+            "first_seen": "2026-07-07T06:17:46.395Z",
+            "last_seen": "2026-07-07T07:03:28.914Z",
+            "rule": "Launch Suspicious Network Tool in Container",
+            "proc": "nc",
+            "parent": "runuser",
+            "container": "ed96a85a7480"
+          },
+          {
+            "events": 8,
+            "first_seen": "2026-07-07T06:17:46.394Z",
+            "last_seen": "2026-07-07T07:03:28.914Z",
+            "rule": "Launch Ingress Remote File Copy Tools in Container",
+            "proc": "curl",
+            "parent": "bash",
+            "container": "ed96a85a7480"
+          },
+          {
+            "events": 8,
+            "first_seen": "2026-07-07T06:28:58.518Z",
+            "last_seen": "2026-07-07T07:14:50.037Z",
+            "rule": "Launch Suspicious Network Tool in Container",
+            "proc": "nc",
+            "parent": "bash",
+            "container": "d1daf6f3b7c6"
+          },
+          {
+            "events": 8,
+            "first_seen": "2026-07-07T06:15:26.363Z",
+            "last_seen": "2026-07-07T07:14:19.025Z",
+            "rule": "Launch Ingress Remote File Copy Tools in Container",
+            "proc": "curl",
+            "parent": "bash",
+            "container": "922f03f16a11"
+          },
+          {
+            "events": 7,
+            "first_seen": "2026-07-07T06:15:26.363Z",
+            "last_seen": "2026-07-07T07:14:19.025Z",
+            "rule": "Launch Suspicious Network Tool in Container",
+            "proc": "nc",
+            "parent": "runuser",
+            "container": "922f03f16a11"
+          },
+          {
+            "events": 6,
+            "first_seen": "2026-07-07T06:26:17.489Z",
+            "last_seen": "2026-07-07T07:13:11.015Z",
+            "rule": "Launch Ingress Remote File Copy Tools in Container",
+            "proc": "curl",
+            "parent": "bash",
+            "container": "d1daf6f3b7c6"
+          },
+          {
+            "events": 5,
+            "first_seen": "2026-07-07T06:25:02.477Z",
+            "last_seen": "2026-07-07T06:25:02.477Z",
+            "rule": "Read environment variable from /proc files",
+            "proc": "elastic-otel-co",
+            "parent": null,
+            "container": "c58bf05facac"
+          },
+          {
+            "events": 5,
+            "first_seen": "2026-07-07T06:25:17.480Z",
+            "last_seen": "2026-07-07T06:25:17.480Z",
+            "rule": "Read environment variable from /proc files",
+            "proc": "elastic-otel-co",
+            "parent": null,
+            "container": "922f03f16a11"
+          },
+          {
+            "events": 2,
+            "first_seen": "2026-07-07T06:20:33.432Z",
+            "last_seen": "2026-07-07T06:30:46.543Z",
+            "rule": "Launch Ingress Remote File Copy Tools in Container",
+            "proc": "curl",
+            "parent": "runuser",
+            "container": "2c1e2ec93d17"
+          },
+          {
+            "events": 2,
+            "first_seen": "2026-07-07T06:16:09.370Z",
+            "last_seen": "2026-07-07T06:16:11.372Z",
+            "rule": "Unexpected UDP Traffic",
+            "proc": "sshd",
+            "parent": "sshd",
+            "container": "host"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-07T06:32:52.571Z",
+            "last_seen": "2026-07-07T06:32:52.571Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "run-parts",
+            "container": "d8fb0192a17f"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-07T06:32:52.571Z",
+            "last_seen": "2026-07-07T06:32:52.571Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "apt.systemd.dai",
+            "parent": "run-parts",
+            "container": "d8fb0192a17f"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-07T06:35:26.602Z",
+            "last_seen": "2026-07-07T06:35:26.602Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "apt.systemd.dai",
+            "parent": "run-parts",
+            "container": "ed96a85a7480"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-07T06:38:06.636Z",
+            "last_seen": "2026-07-07T06:38:06.636Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "run-parts",
+            "container": "922f03f16a11"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-07T06:38:06.636Z",
+            "last_seen": "2026-07-07T06:38:06.636Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "apt.systemd.dai",
+            "parent": "run-parts",
+            "container": "922f03f16a11"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-07T06:40:16.666Z",
+            "last_seen": "2026-07-07T06:40:16.666Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "run-parts",
+            "container": "1df4bcd65ee4"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-07T06:40:16.666Z",
+            "last_seen": "2026-07-07T06:40:16.666Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "apt.systemd.dai",
+            "parent": "run-parts",
+            "container": "1df4bcd65ee4"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-07T06:43:35.703Z",
+            "last_seen": "2026-07-07T06:43:35.703Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "run-parts",
+            "container": "d1daf6f3b7c6"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-07T06:43:35.703Z",
+            "last_seen": "2026-07-07T06:43:35.703Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "apt.systemd.dai",
+            "parent": "run-parts",
+            "container": "d1daf6f3b7c6"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-07T06:35:26.603Z",
+            "last_seen": "2026-07-07T06:35:26.603Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "run-parts",
+            "container": "ed96a85a7480"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-07T06:44:00.706Z",
+            "last_seen": "2026-07-07T06:44:00.706Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "run-parts",
+            "container": "a36492b5172b"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-07T06:44:00.706Z",
+            "last_seen": "2026-07-07T06:44:00.706Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "apt.systemd.dai",
+            "parent": "run-parts",
+            "container": "a36492b5172b"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-07T06:45:20.728Z",
+            "last_seen": "2026-07-07T06:45:20.728Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "run-parts",
+            "container": "7e76d1cea7c4"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-07T06:45:20.728Z",
+            "last_seen": "2026-07-07T06:45:20.728Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "apt.systemd.dai",
+            "parent": "run-parts",
+            "container": "7e76d1cea7c4"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-07T06:48:25.755Z",
+            "last_seen": "2026-07-07T06:48:25.755Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "run-parts",
+            "container": "2c1e2ec93d17"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-07T06:48:25.755Z",
+            "last_seen": "2026-07-07T06:48:25.755Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "apt.systemd.dai",
+            "parent": "run-parts",
+            "container": "2c1e2ec93d17"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-07T06:16:10.371Z",
+            "last_seen": "2026-07-07T06:16:10.371Z",
+            "rule": "User mgmt binaries",
+            "proc": "systemd",
+            "parent": "<NA>",
+            "container": "host"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-07T06:25:01.475Z",
+            "last_seen": "2026-07-07T06:25:01.475Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "apt-config",
+            "container": "1df4bcd65ee4"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-07T06:51:38.790Z",
+            "last_seen": "2026-07-07T06:51:38.790Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "run-parts",
+            "container": "ffbff1299702"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-07T06:25:01.475Z",
+            "last_seen": "2026-07-07T06:25:01.475Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "apt-config",
+            "container": "d8fb0192a17f"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-07T06:25:01.475Z",
+            "last_seen": "2026-07-07T06:25:01.475Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "apt-config",
+            "container": "c58bf05facac"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-07T06:25:01.475Z",
+            "last_seen": "2026-07-07T06:25:01.475Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "apt-config",
+            "container": "7e76d1cea7c4"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-07T06:25:01.475Z",
+            "last_seen": "2026-07-07T06:25:01.475Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "apt-config",
+            "container": "ed96a85a7480"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-07T06:25:01.475Z",
+            "last_seen": "2026-07-07T06:25:01.475Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "apt-config",
+            "container": "a36492b5172b"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-07T06:25:01.475Z",
+            "last_seen": "2026-07-07T06:25:01.475Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "apt-config",
+            "container": "45388dd0bf3a"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-07T06:25:02.476Z",
+            "last_seen": "2026-07-07T06:25:02.476Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "apt-config",
+            "container": "ffbff1299702"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-07T06:25:02.477Z",
+            "last_seen": "2026-07-07T06:25:02.477Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "apt-config",
+            "container": "2c1e2ec93d17"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-07T06:25:02.477Z",
+            "last_seen": "2026-07-07T06:25:02.477Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "apt-config",
+            "container": "922f03f16a11"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-07T06:25:32.483Z",
+            "last_seen": "2026-07-07T06:25:32.483Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "run-parts",
+            "container": "c58bf05facac"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-07T06:25:01.475Z",
+            "last_seen": "2026-07-07T06:25:01.475Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "apt-config",
+            "container": "d1daf6f3b7c6"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-07T06:25:32.483Z",
+            "last_seen": "2026-07-07T06:25:32.483Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "apt.systemd.dai",
+            "parent": "run-parts",
+            "container": "c58bf05facac"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-07T06:27:46.505Z",
+            "last_seen": "2026-07-07T06:27:46.505Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "run-parts",
+            "container": "45388dd0bf3a"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-07T06:27:46.505Z",
+            "last_seen": "2026-07-07T06:27:46.505Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "apt.systemd.dai",
+            "parent": "run-parts",
+            "container": "45388dd0bf3a"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-07T06:51:38.790Z",
+            "last_seen": "2026-07-07T06:51:38.790Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "apt.systemd.dai",
+            "parent": "run-parts",
+            "container": "ffbff1299702"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-07-07T07:04:35.923Z",
+            "last_seen": "2026-07-07T07:04:35.923Z",
+            "rule": "Launch Ingress Remote File Copy Tools in Container",
+            "proc": "curl",
+            "parent": "runuser",
+            "container": "922f03f16a11"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-30T06:15:00.000Z",
+        "2026-06-30T07:15:00.000Z"
+      ],
+      "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-06-30T06:15:00.000Z\" AND @timestamp < \"2026-06-30T07:15:00.000Z\"\n        AND host.name == \"soc-playground\"\n        AND falco.rule != \"Sudo execution\"\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule      = falco.rule,\n           proc      = falco.output_fields.proc.name,\n           parent    = falco.output_fields.proc.pname,\n           container = falco.output_fields.container.id\n| SORT events DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-06-30T06:15:00.000Z\" AND @timestamp < \"2026-06-30T07:15:00.000Z\"\n        AND host.name == \"soc-playground\"\n        AND falco.rule != \"Sudo execution\"\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule      = falco.rule,\n           proc      = falco.output_fields.proc.name,\n           parent    = falco.output_fields.proc.pname,\n           container = falco.output_fields.container.id\n| SORT events DESC",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "rule",
+            "type": "keyword"
+          },
+          {
+            "name": "proc",
+            "type": "keyword"
+          },
+          {
+            "name": "parent",
+            "type": "keyword"
+          },
+          {
+            "name": "container",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 77,
+        "values": [
+          {
+            "events": 300,
+            "first_seen": "2026-06-30T06:15:32.547Z",
+            "last_seen": "2026-06-30T07:14:56.424Z",
+            "rule": "BPF Program Not Profiled",
+            "proc": "runc",
+            "parent": "containerd-shim",
+            "container": "host"
+          },
+          {
+            "events": 78,
+            "first_seen": "2026-06-30T06:16:22.555Z",
+            "last_seen": "2026-06-30T07:11:14.376Z",
+            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "proc": "sshd",
+            "parent": "sshd",
+            "container": "ed96a85a7480"
+          },
+          {
+            "events": 76,
+            "first_seen": "2026-06-30T06:15:57.551Z",
+            "last_seen": "2026-06-30T07:12:04.385Z",
+            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "proc": "sshd",
+            "parent": "sshd",
+            "container": "a36492b5172b"
+          },
+          {
+            "events": 60,
+            "first_seen": "2026-06-30T06:15:32.548Z",
+            "last_seen": "2026-06-30T07:14:56.424Z",
+            "rule": "Unexpected UDP Traffic",
+            "proc": "iptables",
+            "parent": null,
+            "container": "host"
+          },
+          {
+            "events": 60,
+            "first_seen": "2026-06-30T06:15:18.541Z",
+            "last_seen": "2026-06-30T07:14:34.413Z",
+            "rule": "Drop and execute new binary in container",
+            "proc": "openssl",
+            "parent": "sh",
+            "container": "58ffe39dd54f"
+          },
+          {
+            "events": 60,
+            "first_seen": "2026-06-30T06:15:18.541Z",
+            "last_seen": "2026-06-30T07:14:34.413Z",
+            "rule": "Drop and execute new binary in container",
+            "proc": "curl",
+            "parent": "sh",
+            "container": "58ffe39dd54f"
+          },
+          {
+            "events": 60,
+            "first_seen": "2026-06-30T06:15:32.548Z",
+            "last_seen": "2026-06-30T07:14:56.425Z",
+            "rule": "Launch Sensitive Mount Container",
+            "proc": "tini",
+            "parent": "containerd-shim",
+            "container": "e1dc89faaa8b"
+          },
+          {
+            "events": 56,
+            "first_seen": "2026-06-30T06:19:09.585Z",
+            "last_seen": "2026-06-30T07:13:59.408Z",
+            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "proc": "sshd",
+            "parent": "sshd",
+            "container": "ffbff1299702"
+          },
+          {
+            "events": 55,
+            "first_seen": "2026-06-30T06:21:15.619Z",
+            "last_seen": "2026-06-30T07:01:14.231Z",
+            "rule": "Launch Suspicious Network Tool in Container",
+            "proc": "nc",
+            "parent": "bash",
+            "container": "7e76d1cea7c4"
+          },
+          {
+            "events": 52,
+            "first_seen": "2026-06-30T06:23:09.644Z",
+            "last_seen": "2026-06-30T07:14:59.427Z",
+            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "proc": "sshd",
+            "parent": "<NA>",
+            "container": "d1daf6f3b7c6"
+          },
+          {
+            "events": 41,
+            "first_seen": "2026-06-30T06:16:22.555Z",
+            "last_seen": "2026-06-30T07:11:14.376Z",
+            "rule": "Unexpected UDP Traffic",
+            "proc": "sshd",
+            "parent": "sshd",
+            "container": "ed96a85a7480"
+          },
+          {
+            "events": 40,
+            "first_seen": "2026-06-30T06:15:57.550Z",
+            "last_seen": "2026-06-30T07:12:04.385Z",
+            "rule": "Unexpected UDP Traffic",
+            "proc": "sshd",
+            "parent": "sshd",
+            "container": "a36492b5172b"
+          },
+          {
+            "events": 38,
+            "first_seen": "2026-06-30T06:21:09.614Z",
+            "last_seen": "2026-06-30T07:14:49.418Z",
+            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "proc": "sshd",
+            "parent": "<NA>",
+            "container": "d8fb0192a17f"
+          },
+          {
+            "events": 36,
+            "first_seen": "2026-06-30T06:21:09.615Z",
+            "last_seen": "2026-06-30T07:12:07.387Z",
+            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "proc": "sshd",
+            "parent": "sshd",
+            "container": "1df4bcd65ee4"
+          },
+          {
+            "events": 31,
+            "first_seen": "2026-06-30T06:19:09.586Z",
+            "last_seen": "2026-06-30T07:13:59.408Z",
+            "rule": "Unexpected UDP Traffic",
+            "proc": "sshd",
+            "parent": "sshd",
+            "container": "ffbff1299702"
+          },
+          {
+            "events": 30,
+            "first_seen": "2026-06-30T06:29:25.734Z",
+            "last_seen": "2026-06-30T07:12:44.396Z",
+            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "proc": "sshd",
+            "parent": "<NA>",
+            "container": "2c1e2ec93d17"
+          },
+          {
+            "events": 28,
+            "first_seen": "2026-06-30T06:21:09.615Z",
+            "last_seen": "2026-06-30T07:12:14.390Z",
+            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "proc": "sshd",
+            "parent": "<NA>",
+            "container": "922f03f16a11"
+          },
+          {
+            "events": 26,
+            "first_seen": "2026-06-30T06:23:09.644Z",
+            "last_seen": "2026-06-30T07:14:59.427Z",
+            "rule": "Unexpected UDP Traffic",
+            "proc": "sshd",
+            "parent": "<NA>",
+            "container": "d1daf6f3b7c6"
+          },
+          {
+            "events": 20,
+            "first_seen": "2026-06-30T06:21:09.614Z",
+            "last_seen": "2026-06-30T07:14:49.418Z",
+            "rule": "Unexpected UDP Traffic",
+            "proc": "sshd",
+            "parent": "<NA>",
+            "container": "d8fb0192a17f"
+          },
+          {
+            "events": 19,
+            "first_seen": "2026-06-30T06:21:12.616Z",
+            "last_seen": "2026-06-30T07:14:59.426Z",
+            "rule": "Launch Suspicious Network Tool in Container",
+            "proc": "nc",
+            "parent": "bash",
+            "container": "45388dd0bf3a"
+          },
+          {
+            "events": 18,
+            "first_seen": "2026-06-30T06:21:09.615Z",
+            "last_seen": "2026-06-30T07:12:07.387Z",
+            "rule": "Unexpected UDP Traffic",
+            "proc": "sshd",
+            "parent": "sshd",
+            "container": "1df4bcd65ee4"
+          },
+          {
+            "events": 18,
+            "first_seen": "2026-06-30T06:19:38.592Z",
+            "last_seen": "2026-06-30T07:13:59.408Z",
+            "rule": "Launch Suspicious Network Tool in Container",
+            "proc": "nc",
+            "parent": "runuser",
+            "container": "ffbff1299702"
+          },
+          {
+            "events": 18,
+            "first_seen": "2026-06-30T06:19:38.591Z",
+            "last_seen": "2026-06-30T07:13:59.408Z",
+            "rule": "Launch Ingress Remote File Copy Tools in Container",
+            "proc": "curl",
+            "parent": "bash",
+            "container": "ffbff1299702"
+          },
+          {
+            "events": 18,
+            "first_seen": "2026-06-30T06:15:57.551Z",
+            "last_seen": "2026-06-30T07:10:20.361Z",
+            "rule": "Launch Ingress Remote File Copy Tools in Container",
+            "proc": "curl",
+            "parent": "bash",
+            "container": "d1daf6f3b7c6"
+          },
+          {
+            "events": 16,
+            "first_seen": "2026-06-30T06:29:25.734Z",
+            "last_seen": "2026-06-30T07:12:44.396Z",
+            "rule": "Unexpected UDP Traffic",
+            "proc": "sshd",
+            "parent": "<NA>",
+            "container": "2c1e2ec93d17"
+          },
+          {
+            "events": 15,
+            "first_seen": "2026-06-30T06:18:16.574Z",
+            "last_seen": "2026-06-30T07:09:30.352Z",
+            "rule": "Launch Ingress Remote File Copy Tools in Container",
+            "proc": "curl",
+            "parent": "bash",
+            "container": "ed96a85a7480"
+          },
+          {
+            "events": 15,
+            "first_seen": "2026-06-30T06:19:45.595Z",
+            "last_seen": "2026-06-30T07:12:44.395Z",
+            "rule": "Launch Ingress Remote File Copy Tools in Container",
+            "proc": "curl",
+            "parent": "bash",
+            "container": "2c1e2ec93d17"
+          },
+          {
+            "events": 15,
+            "first_seen": "2026-06-30T06:18:16.574Z",
+            "last_seen": "2026-06-30T07:09:30.353Z",
+            "rule": "Launch Suspicious Network Tool in Container",
+            "proc": "nc",
+            "parent": "runuser",
+            "container": "ed96a85a7480"
+          },
+          {
+            "events": 14,
+            "first_seen": "2026-06-30T06:21:09.615Z",
+            "last_seen": "2026-06-30T07:12:14.390Z",
+            "rule": "Unexpected UDP Traffic",
+            "proc": "sshd",
+            "parent": "<NA>",
+            "container": "922f03f16a11"
+          },
+          {
+            "events": 14,
+            "first_seen": "2026-06-30T06:15:25.544Z",
+            "last_seen": "2026-06-30T07:07:49.325Z",
+            "rule": "Launch Ingress Remote File Copy Tools in Container",
+            "proc": "curl",
+            "parent": "bash",
+            "container": "d8fb0192a17f"
+          },
+          {
+            "events": 13,
+            "first_seen": "2026-06-30T06:21:09.614Z",
+            "last_seen": "2026-06-30T07:14:49.417Z",
+            "rule": "Launch Suspicious Network Tool in Container",
+            "proc": "nc",
+            "parent": "bash",
+            "container": "ed96a85a7480"
+          },
+          {
+            "events": 11,
+            "first_seen": "2026-06-30T06:15:57.551Z",
+            "last_seen": "2026-06-30T07:00:53.224Z",
+            "rule": "Launch Suspicious Network Tool in Container",
+            "proc": "nc",
+            "parent": "bash",
+            "container": "d8fb0192a17f"
+          },
+          {
+            "events": 11,
+            "first_seen": "2026-06-30T06:19:45.595Z",
+            "last_seen": "2026-06-30T07:12:44.395Z",
+            "rule": "Launch Suspicious Network Tool in Container",
+            "proc": "nc",
+            "parent": "runuser",
+            "container": "2c1e2ec93d17"
+          },
+          {
+            "events": 11,
+            "first_seen": "2026-06-30T06:18:34.580Z",
+            "last_seen": "2026-06-30T07:14:56.423Z",
+            "rule": "Launch Suspicious Network Tool in Container",
+            "proc": "nc",
+            "parent": "bash",
+            "container": "c58bf05facac"
+          },
+          {
+            "events": 11,
+            "first_seen": "2026-06-30T06:16:22.555Z",
+            "last_seen": "2026-06-30T07:11:14.375Z",
+            "rule": "Launch Suspicious Network Tool in Container",
+            "proc": "nc",
+            "parent": "bash",
+            "container": "ffbff1299702"
+          },
+          {
+            "events": 10,
+            "first_seen": "2026-06-30T06:15:57.550Z",
+            "last_seen": "2026-06-30T07:12:04.385Z",
+            "rule": "Launch Suspicious Network Tool in Container",
+            "proc": "nc",
+            "parent": "bash",
+            "container": "d1daf6f3b7c6"
+          },
+          {
+            "events": 10,
+            "first_seen": "2026-06-30T06:24:48.671Z",
+            "last_seen": "2026-06-30T07:12:07.387Z",
+            "rule": "Launch Suspicious Network Tool in Container",
+            "proc": "nc",
+            "parent": "runuser",
+            "container": "1df4bcd65ee4"
+          },
+          {
+            "events": 10,
+            "first_seen": "2026-06-30T06:24:48.670Z",
+            "last_seen": "2026-06-30T07:12:07.387Z",
+            "rule": "Launch Ingress Remote File Copy Tools in Container",
+            "proc": "curl",
+            "parent": "bash",
+            "container": "1df4bcd65ee4"
+          },
+          {
+            "events": 10,
+            "first_seen": "2026-06-30T06:20:34.609Z",
+            "last_seen": "2026-06-30T07:10:34.367Z",
+            "rule": "Launch Suspicious Network Tool in Container",
+            "proc": "nc",
+            "parent": "runuser",
+            "container": "a36492b5172b"
+          },
+          {
+            "events": 10,
+            "first_seen": "2026-06-30T06:20:34.609Z",
+            "last_seen": "2026-06-30T07:10:34.366Z",
+            "rule": "Launch Ingress Remote File Copy Tools in Container",
+            "proc": "curl",
+            "parent": "bash",
+            "container": "a36492b5172b"
+          },
+          {
+            "events": 8,
+            "first_seen": "2026-06-30T06:21:09.615Z",
+            "last_seen": "2026-06-30T07:12:14.389Z",
+            "rule": "Launch Ingress Remote File Copy Tools in Container",
+            "proc": "curl",
+            "parent": "bash",
+            "container": "922f03f16a11"
+          },
+          {
+            "events": 8,
+            "first_seen": "2026-06-30T06:21:09.615Z",
+            "last_seen": "2026-06-30T07:12:14.390Z",
+            "rule": "Launch Suspicious Network Tool in Container",
+            "proc": "nc",
+            "parent": "runuser",
+            "container": "922f03f16a11"
+          },
+          {
+            "events": 4,
+            "first_seen": "2026-06-30T06:25:18.678Z",
+            "last_seen": "2026-06-30T07:08:28.337Z",
+            "rule": "Launch Ingress Remote File Copy Tools in Container",
+            "proc": "curl",
+            "parent": "runuser",
+            "container": "2c1e2ec93d17"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-30T06:26:52.703Z",
+            "last_seen": "2026-06-30T06:26:52.703Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "apt.systemd.dai",
+            "parent": "run-parts",
+            "container": "c58bf05facac"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-30T06:27:27.712Z",
+            "last_seen": "2026-06-30T06:27:27.712Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "run-parts",
+            "container": "d8fb0192a17f"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-30T06:27:27.712Z",
+            "last_seen": "2026-06-30T06:27:27.712Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "apt.systemd.dai",
+            "parent": "run-parts",
+            "container": "d8fb0192a17f"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-30T06:27:52.720Z",
+            "last_seen": "2026-06-30T06:27:52.720Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "apt.systemd.dai",
+            "parent": "run-parts",
+            "container": "a36492b5172b"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-30T06:28:27.724Z",
+            "last_seen": "2026-06-30T06:28:27.724Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "run-parts",
+            "container": "45388dd0bf3a"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-30T06:28:27.724Z",
+            "last_seen": "2026-06-30T06:28:27.724Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "apt.systemd.dai",
+            "parent": "run-parts",
+            "container": "45388dd0bf3a"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-30T06:31:48.768Z",
+            "last_seen": "2026-06-30T06:31:48.768Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "apt.systemd.dai",
+            "parent": "run-parts",
+            "container": "ffbff1299702"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-30T06:32:23.775Z",
+            "last_seen": "2026-06-30T06:32:23.775Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "apt.systemd.dai",
+            "parent": "run-parts",
+            "container": "1df4bcd65ee4"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-30T06:32:23.776Z",
+            "last_seen": "2026-06-30T06:32:23.776Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "run-parts",
+            "container": "1df4bcd65ee4"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-30T06:40:15.906Z",
+            "last_seen": "2026-06-30T06:40:15.906Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "run-parts",
+            "container": "7e76d1cea7c4"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-30T06:31:48.768Z",
+            "last_seen": "2026-06-30T06:31:48.768Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "run-parts",
+            "container": "ffbff1299702"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-30T06:40:15.906Z",
+            "last_seen": "2026-06-30T06:40:15.906Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "apt.systemd.dai",
+            "parent": "run-parts",
+            "container": "7e76d1cea7c4"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-30T06:44:37.967Z",
+            "last_seen": "2026-06-30T06:44:37.967Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "apt.systemd.dai",
+            "parent": "run-parts",
+            "container": "ed96a85a7480"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-30T06:44:37.968Z",
+            "last_seen": "2026-06-30T06:44:37.968Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "run-parts",
+            "container": "ed96a85a7480"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-30T06:27:52.720Z",
+            "last_seen": "2026-06-30T06:27:52.720Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "run-parts",
+            "container": "a36492b5172b"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-30T06:49:55.032Z",
+            "last_seen": "2026-06-30T06:49:55.032Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "run-parts",
+            "container": "922f03f16a11"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-30T06:49:55.032Z",
+            "last_seen": "2026-06-30T06:49:55.032Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "apt.systemd.dai",
+            "parent": "run-parts",
+            "container": "922f03f16a11"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-30T06:19:45.595Z",
+            "last_seen": "2026-06-30T06:19:45.595Z",
+            "rule": "Unexpected UDP Traffic",
+            "proc": "sshd",
+            "parent": null,
+            "container": "2c1e2ec93d17"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-30T06:26:52.703Z",
+            "last_seen": "2026-06-30T06:26:52.703Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "run-parts",
+            "container": "c58bf05facac"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-30T06:25:03.673Z",
+            "last_seen": "2026-06-30T06:25:03.673Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "apt-config",
+            "container": "45388dd0bf3a"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-30T06:25:03.674Z",
+            "last_seen": "2026-06-30T06:25:03.674Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "apt-config",
+            "container": "7e76d1cea7c4"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-30T06:25:03.674Z",
+            "last_seen": "2026-06-30T06:25:03.674Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "apt-config",
+            "container": "922f03f16a11"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-30T06:25:03.674Z",
+            "last_seen": "2026-06-30T06:25:03.674Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "apt-config",
+            "container": "ed96a85a7480"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-30T06:25:03.674Z",
+            "last_seen": "2026-06-30T06:25:03.674Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "apt-config",
+            "container": "1df4bcd65ee4"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-30T06:25:03.674Z",
+            "last_seen": "2026-06-30T06:25:03.674Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "apt-config",
+            "container": "d1daf6f3b7c6"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-30T06:25:03.674Z",
+            "last_seen": "2026-06-30T06:25:03.674Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "apt-config",
+            "container": "c58bf05facac"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-30T06:25:03.674Z",
+            "last_seen": "2026-06-30T06:25:03.674Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "apt-config",
+            "container": "2c1e2ec93d17"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-30T06:25:03.674Z",
+            "last_seen": "2026-06-30T06:25:03.674Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "apt-config",
+            "container": "ffbff1299702"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-30T06:25:03.675Z",
+            "last_seen": "2026-06-30T06:25:03.675Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "apt-config",
+            "container": "d8fb0192a17f"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-30T06:26:52.703Z",
+            "last_seen": "2026-06-30T06:26:52.703Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "run-parts",
+            "container": "d1daf6f3b7c6"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-30T06:25:03.674Z",
+            "last_seen": "2026-06-30T06:25:03.674Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "apt-config",
+            "container": "a36492b5172b"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-30T06:26:52.703Z",
+            "last_seen": "2026-06-30T06:26:52.703Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "apt.systemd.dai",
+            "parent": "run-parts",
+            "container": "d1daf6f3b7c6"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-30T06:53:50.103Z",
+            "last_seen": "2026-06-30T06:53:50.103Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "run-parts",
+            "container": "2c1e2ec93d17"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-30T06:53:50.103Z",
+            "last_seen": "2026-06-30T06:53:50.103Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "apt.systemd.dai",
+            "parent": "run-parts",
+            "container": "2c1e2ec93d17"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-35d",
+      "window": [
+        "2026-06-23T06:15:00.000Z",
+        "2026-06-23T07:15:00.000Z"
+      ],
+      "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-06-23T06:15:00.000Z\" AND @timestamp < \"2026-06-23T07:15:00.000Z\"\n        AND host.name == \"soc-playground\"\n        AND falco.rule != \"Sudo execution\"\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule      = falco.rule,\n           proc      = falco.output_fields.proc.name,\n           parent    = falco.output_fields.proc.pname,\n           container = falco.output_fields.container.id\n| SORT events DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-06-23T06:15:00.000Z\" AND @timestamp < \"2026-06-23T07:15:00.000Z\"\n        AND host.name == \"soc-playground\"\n        AND falco.rule != \"Sudo execution\"\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule      = falco.rule,\n           proc      = falco.output_fields.proc.name,\n           parent    = falco.output_fields.proc.pname,\n           container = falco.output_fields.container.id\n| SORT events DESC",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "rule",
+            "type": "keyword"
+          },
+          {
+            "name": "proc",
+            "type": "keyword"
+          },
+          {
+            "name": "parent",
+            "type": "keyword"
+          },
+          {
+            "name": "container",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 77,
+        "values": [
+          {
+            "events": 295,
+            "first_seen": "2026-06-23T06:15:55.961Z",
+            "last_seen": "2026-06-23T07:14:21.844Z",
+            "rule": "BPF Program Not Profiled",
+            "proc": "runc",
+            "parent": "containerd-shim",
+            "container": "host"
+          },
+          {
+            "events": 132,
+            "first_seen": "2026-06-23T06:19:10.005Z",
+            "last_seen": "2026-06-23T07:10:10.791Z",
+            "rule": "Launch Suspicious Network Tool in Container",
+            "proc": "nc",
+            "parent": "bash",
+            "container": "7e76d1cea7c4"
+          },
+          {
+            "events": 86,
+            "first_seen": "2026-06-23T06:17:17.975Z",
+            "last_seen": "2026-06-23T07:11:46.813Z",
+            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "proc": "sshd",
+            "parent": "sshd",
+            "container": "a36492b5172b"
+          },
+          {
+            "events": 62,
+            "first_seen": "2026-06-23T06:17:18.976Z",
+            "last_seen": "2026-06-23T07:09:05.779Z",
+            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "proc": "sshd",
+            "parent": "sshd",
+            "container": "ed96a85a7480"
+          },
+          {
+            "events": 60,
+            "first_seen": "2026-06-23T06:15:40.957Z",
+            "last_seen": "2026-06-23T07:14:56.848Z",
+            "rule": "Drop and execute new binary in container",
+            "proc": "curl",
+            "parent": "sh",
+            "container": "58ffe39dd54f"
+          },
+          {
+            "events": 60,
+            "first_seen": "2026-06-23T06:15:40.957Z",
+            "last_seen": "2026-06-23T07:14:56.848Z",
+            "rule": "Drop and execute new binary in container",
+            "proc": "openssl",
+            "parent": "sh",
+            "container": "58ffe39dd54f"
+          },
+          {
+            "events": 59,
+            "first_seen": "2026-06-23T06:15:55.962Z",
+            "last_seen": "2026-06-23T07:14:21.845Z",
+            "rule": "Launch Sensitive Mount Container",
+            "proc": "tini",
+            "parent": "containerd-shim",
+            "container": "e1dc89faaa8b"
+          },
+          {
+            "events": 59,
+            "first_seen": "2026-06-23T06:15:55.962Z",
+            "last_seen": "2026-06-23T07:14:21.845Z",
+            "rule": "Unexpected UDP Traffic",
+            "proc": "iptables",
+            "parent": null,
+            "container": "host"
+          },
+          {
+            "events": 48,
+            "first_seen": "2026-06-23T06:19:52.013Z",
+            "last_seen": "2026-06-23T07:14:56.849Z",
+            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "proc": "sshd",
+            "parent": "sshd",
+            "container": "ffbff1299702"
+          },
+          {
+            "events": 46,
+            "first_seen": "2026-06-23T06:23:36.070Z",
+            "last_seen": "2026-06-23T06:53:04.530Z",
+            "rule": "Unexpected UDP Traffic",
+            "proc": "sshd",
+            "parent": "sshd",
+            "container": "host"
+          },
+          {
+            "events": 45,
+            "first_seen": "2026-06-23T06:17:17.975Z",
+            "last_seen": "2026-06-23T07:11:46.813Z",
+            "rule": "Unexpected UDP Traffic",
+            "proc": "sshd",
+            "parent": "sshd",
+            "container": "a36492b5172b"
+          },
+          {
+            "events": 44,
+            "first_seen": "2026-06-23T06:18:25.991Z",
+            "last_seen": "2026-06-23T07:13:56.839Z",
+            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "proc": "sshd",
+            "parent": "<NA>",
+            "container": "d8fb0192a17f"
+          },
+          {
+            "events": 42,
+            "first_seen": "2026-06-23T06:19:10.005Z",
+            "last_seen": "2026-06-23T07:12:49.825Z",
+            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "proc": "sshd",
+            "parent": "<NA>",
+            "container": "d1daf6f3b7c6"
+          },
+          {
+            "events": 38,
+            "first_seen": "2026-06-23T06:15:33.954Z",
+            "last_seen": "2026-06-23T07:14:21.844Z",
+            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "proc": "sshd",
+            "parent": "sshd",
+            "container": "1df4bcd65ee4"
+          },
+          {
+            "events": 36,
+            "first_seen": "2026-06-23T06:23:36.070Z",
+            "last_seen": "2026-06-23T06:51:48.494Z",
+            "rule": "Read sensitive file untrusted",
+            "proc": "9",
+            "parent": "systemd",
+            "container": "host"
+          },
+          {
+            "events": 34,
+            "first_seen": "2026-06-23T06:17:10.972Z",
+            "last_seen": "2026-06-23T07:12:14.819Z",
+            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "proc": "sshd",
+            "parent": "<NA>",
+            "container": "2c1e2ec93d17"
+          },
+          {
+            "events": 32,
+            "first_seen": "2026-06-23T06:17:18.977Z",
+            "last_seen": "2026-06-23T07:09:05.779Z",
+            "rule": "Unexpected UDP Traffic",
+            "proc": "sshd",
+            "parent": "sshd",
+            "container": "ed96a85a7480"
+          },
+          {
+            "events": 26,
+            "first_seen": "2026-06-23T06:18:55.998Z",
+            "last_seen": "2026-06-23T07:04:05.699Z",
+            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "proc": "sshd",
+            "parent": "<NA>",
+            "container": "922f03f16a11"
+          },
+          {
+            "events": 24,
+            "first_seen": "2026-06-23T06:19:52.013Z",
+            "last_seen": "2026-06-23T07:14:56.849Z",
+            "rule": "Unexpected UDP Traffic",
+            "proc": "sshd",
+            "parent": "sshd",
+            "container": "ffbff1299702"
+          },
+          {
+            "events": 22,
+            "first_seen": "2026-06-23T06:18:25.991Z",
+            "last_seen": "2026-06-23T07:13:56.839Z",
+            "rule": "Unexpected UDP Traffic",
+            "proc": "sshd",
+            "parent": "<NA>",
+            "container": "d8fb0192a17f"
+          },
+          {
+            "events": 21,
+            "first_seen": "2026-06-23T06:19:10.006Z",
+            "last_seen": "2026-06-23T07:12:49.825Z",
+            "rule": "Unexpected UDP Traffic",
+            "proc": "sshd",
+            "parent": "<NA>",
+            "container": "d1daf6f3b7c6"
+          },
+          {
+            "events": 20,
+            "first_seen": "2026-06-23T06:15:33.955Z",
+            "last_seen": "2026-06-23T07:14:21.844Z",
+            "rule": "Unexpected UDP Traffic",
+            "proc": "sshd",
+            "parent": "sshd",
+            "container": "1df4bcd65ee4"
+          },
+          {
+            "events": 17,
+            "first_seen": "2026-06-23T06:25:32.095Z",
+            "last_seen": "2026-06-23T07:10:20.797Z",
+            "rule": "Launch Suspicious Network Tool in Container",
+            "proc": "nc",
+            "parent": "bash",
+            "container": "c58bf05facac"
+          },
+          {
+            "events": 17,
+            "first_seen": "2026-06-23T06:17:10.972Z",
+            "last_seen": "2026-06-23T07:12:14.820Z",
+            "rule": "Unexpected UDP Traffic",
+            "proc": "sshd",
+            "parent": "<NA>",
+            "container": "2c1e2ec93d17"
+          },
+          {
+            "events": 15,
+            "first_seen": "2026-06-23T06:19:52.013Z",
+            "last_seen": "2026-06-23T07:14:56.848Z",
+            "rule": "Launch Ingress Remote File Copy Tools in Container",
+            "proc": "curl",
+            "parent": "bash",
+            "container": "ffbff1299702"
+          },
+          {
+            "events": 15,
+            "first_seen": "2026-06-23T06:19:03.003Z",
+            "last_seen": "2026-06-23T07:11:46.812Z",
+            "rule": "Launch Suspicious Network Tool in Container",
+            "proc": "nc",
+            "parent": "bash",
+            "container": "d1daf6f3b7c6"
+          },
+          {
+            "events": 15,
+            "first_seen": "2026-06-23T06:19:52.013Z",
+            "last_seen": "2026-06-23T07:14:56.848Z",
+            "rule": "Launch Suspicious Network Tool in Container",
+            "proc": "nc",
+            "parent": "runuser",
+            "container": "ffbff1299702"
+          },
+          {
+            "events": 14,
+            "first_seen": "2026-06-23T06:18:25.991Z",
+            "last_seen": "2026-06-23T06:57:53.609Z",
+            "rule": "Launch Suspicious Network Tool in Container",
+            "proc": "nc",
+            "parent": "runuser",
+            "container": "a36492b5172b"
+          },
+          {
+            "events": 14,
+            "first_seen": "2026-06-23T06:18:25.991Z",
+            "last_seen": "2026-06-23T06:57:53.609Z",
+            "rule": "Launch Ingress Remote File Copy Tools in Container",
+            "proc": "curl",
+            "parent": "bash",
+            "container": "a36492b5172b"
+          },
+          {
+            "events": 14,
+            "first_seen": "2026-06-23T06:18:55.998Z",
+            "last_seen": "2026-06-23T07:04:05.699Z",
+            "rule": "Unexpected UDP Traffic",
+            "proc": "sshd",
+            "parent": "<NA>",
+            "container": "922f03f16a11"
+          },
+          {
+            "events": 14,
+            "first_seen": "2026-06-23T06:17:18.975Z",
+            "last_seen": "2026-06-23T07:08:19.764Z",
+            "rule": "Launch Suspicious Network Tool in Container",
+            "proc": "nc",
+            "parent": "bash",
+            "container": "ffbff1299702"
+          },
+          {
+            "events": 13,
+            "first_seen": "2026-06-23T06:17:10.971Z",
+            "last_seen": "2026-06-23T07:09:55.788Z",
+            "rule": "Launch Ingress Remote File Copy Tools in Container",
+            "proc": "curl",
+            "parent": "bash",
+            "container": "d8fb0192a17f"
+          },
+          {
+            "events": 13,
+            "first_seen": "2026-06-23T06:29:50.169Z",
+            "last_seen": "2026-06-23T07:09:05.778Z",
+            "rule": "Launch Suspicious Network Tool in Container",
+            "proc": "nc",
+            "parent": "runuser",
+            "container": "ed96a85a7480"
+          },
+          {
+            "events": 13,
+            "first_seen": "2026-06-23T06:29:50.169Z",
+            "last_seen": "2026-06-23T07:09:05.778Z",
+            "rule": "Launch Ingress Remote File Copy Tools in Container",
+            "proc": "curl",
+            "parent": "bash",
+            "container": "ed96a85a7480"
+          },
+          {
+            "events": 12,
+            "first_seen": "2026-06-23T06:15:33.954Z",
+            "last_seen": "2026-06-23T07:14:21.843Z",
+            "rule": "Launch Suspicious Network Tool in Container",
+            "proc": "nc",
+            "parent": "runuser",
+            "container": "1df4bcd65ee4"
+          },
+          {
+            "events": 12,
+            "first_seen": "2026-06-23T06:15:33.954Z",
+            "last_seen": "2026-06-23T07:14:21.843Z",
+            "rule": "Launch Ingress Remote File Copy Tools in Container",
+            "proc": "curl",
+            "parent": "bash",
+            "container": "1df4bcd65ee4"
+          },
+          {
+            "events": 11,
+            "first_seen": "2026-06-23T06:17:17.974Z",
+            "last_seen": "2026-06-23T07:14:56.849Z",
+            "rule": "Launch Suspicious Network Tool in Container",
+            "proc": "nc",
+            "parent": "bash",
+            "container": "ed96a85a7480"
+          },
+          {
+            "events": 11,
+            "first_seen": "2026-06-23T06:17:10.972Z",
+            "last_seen": "2026-06-23T07:12:14.819Z",
+            "rule": "Launch Suspicious Network Tool in Container",
+            "proc": "nc",
+            "parent": "runuser",
+            "container": "2c1e2ec93d17"
+          },
+          {
+            "events": 11,
+            "first_seen": "2026-06-23T06:17:10.971Z",
+            "last_seen": "2026-06-23T07:12:14.819Z",
+            "rule": "Launch Ingress Remote File Copy Tools in Container",
+            "proc": "curl",
+            "parent": "bash",
+            "container": "2c1e2ec93d17"
+          },
+          {
+            "events": 10,
+            "first_seen": "2026-06-23T06:19:10.005Z",
+            "last_seen": "2026-06-23T07:05:56.733Z",
+            "rule": "Launch Ingress Remote File Copy Tools in Container",
+            "proc": "curl",
+            "parent": "bash",
+            "container": "d1daf6f3b7c6"
+          },
+          {
+            "events": 9,
+            "first_seen": "2026-06-23T06:18:25.990Z",
+            "last_seen": "2026-06-23T07:04:53.708Z",
+            "rule": "Launch Suspicious Network Tool in Container",
+            "proc": "nc",
+            "parent": "bash",
+            "container": "45388dd0bf3a"
+          },
+          {
+            "events": 9,
+            "first_seen": "2026-06-23T06:18:55.998Z",
+            "last_seen": "2026-06-23T07:04:05.698Z",
+            "rule": "Launch Suspicious Network Tool in Container",
+            "proc": "nc",
+            "parent": "runuser",
+            "container": "922f03f16a11"
+          },
+          {
+            "events": 9,
+            "first_seen": "2026-06-23T06:18:55.998Z",
+            "last_seen": "2026-06-23T07:04:05.698Z",
+            "rule": "Launch Ingress Remote File Copy Tools in Container",
+            "proc": "curl",
+            "parent": "bash",
+            "container": "922f03f16a11"
+          },
+          {
+            "events": 6,
+            "first_seen": "2026-06-23T06:20:44.020Z",
+            "last_seen": "2026-06-23T07:11:21.808Z",
+            "rule": "Launch Suspicious Network Tool in Container",
+            "proc": "nc",
+            "parent": "bash",
+            "container": "d8fb0192a17f"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-23T06:30:13.176Z",
+            "last_seen": "2026-06-23T06:30:13.176Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "run-parts",
+            "container": "1df4bcd65ee4"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-23T06:30:13.176Z",
+            "last_seen": "2026-06-23T06:30:13.176Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "apt.systemd.dai",
+            "parent": "run-parts",
+            "container": "1df4bcd65ee4"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-23T06:32:25.206Z",
+            "last_seen": "2026-06-23T06:32:25.206Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "run-parts",
+            "container": "a36492b5172b"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-23T06:36:46.272Z",
+            "last_seen": "2026-06-23T06:36:46.272Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "run-parts",
+            "container": "45388dd0bf3a"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-23T06:36:46.272Z",
+            "last_seen": "2026-06-23T06:36:46.272Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "apt.systemd.dai",
+            "parent": "run-parts",
+            "container": "45388dd0bf3a"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-23T06:44:13.367Z",
+            "last_seen": "2026-06-23T06:44:13.367Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "run-parts",
+            "container": "922f03f16a11"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-23T06:44:13.367Z",
+            "last_seen": "2026-06-23T06:44:13.367Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "apt.systemd.dai",
+            "parent": "run-parts",
+            "container": "922f03f16a11"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-23T06:46:30.397Z",
+            "last_seen": "2026-06-23T06:46:30.397Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "run-parts",
+            "container": "2c1e2ec93d17"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-23T06:46:30.397Z",
+            "last_seen": "2026-06-23T06:46:30.397Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "apt.systemd.dai",
+            "parent": "run-parts",
+            "container": "2c1e2ec93d17"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-23T06:50:20.471Z",
+            "last_seen": "2026-06-23T06:50:20.471Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "apt.systemd.dai",
+            "parent": "run-parts",
+            "container": "d8fb0192a17f"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-23T06:50:20.472Z",
+            "last_seen": "2026-06-23T06:50:20.472Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "run-parts",
+            "container": "d8fb0192a17f"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-23T06:53:18.539Z",
+            "last_seen": "2026-06-23T06:53:18.539Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "run-parts",
+            "container": "ed96a85a7480"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-23T06:53:18.539Z",
+            "last_seen": "2026-06-23T06:53:18.539Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "apt.systemd.dai",
+            "parent": "run-parts",
+            "container": "ed96a85a7480"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-23T06:32:25.206Z",
+            "last_seen": "2026-06-23T06:32:25.206Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "apt.systemd.dai",
+            "parent": "run-parts",
+            "container": "a36492b5172b"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-23T06:53:28.543Z",
+            "last_seen": "2026-06-23T06:53:28.543Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "run-parts",
+            "container": "c58bf05facac"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-23T06:53:28.543Z",
+            "last_seen": "2026-06-23T06:53:28.543Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "apt.systemd.dai",
+            "parent": "run-parts",
+            "container": "c58bf05facac"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-23T06:25:01.088Z",
+            "last_seen": "2026-06-23T06:25:01.088Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "apt-config",
+            "container": "c58bf05facac"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-23T06:29:07.153Z",
+            "last_seen": "2026-06-23T06:29:07.153Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "apt.systemd.dai",
+            "parent": "run-parts",
+            "container": "ffbff1299702"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-23T06:25:01.088Z",
+            "last_seen": "2026-06-23T06:25:01.088Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "apt-config",
+            "container": "a36492b5172b"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-23T06:25:02.089Z",
+            "last_seen": "2026-06-23T06:25:02.089Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "apt-config",
+            "container": "d1daf6f3b7c6"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-23T06:25:02.089Z",
+            "last_seen": "2026-06-23T06:25:02.089Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "apt-config",
+            "container": "1df4bcd65ee4"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-23T06:25:02.089Z",
+            "last_seen": "2026-06-23T06:25:02.089Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "apt-config",
+            "container": "2c1e2ec93d17"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-23T06:25:02.089Z",
+            "last_seen": "2026-06-23T06:25:02.089Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "apt-config",
+            "container": "7e76d1cea7c4"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-23T06:25:02.089Z",
+            "last_seen": "2026-06-23T06:25:02.089Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "apt-config",
+            "container": "922f03f16a11"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-23T06:25:02.089Z",
+            "last_seen": "2026-06-23T06:25:02.089Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "apt-config",
+            "container": "45388dd0bf3a"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-23T06:25:02.089Z",
+            "last_seen": "2026-06-23T06:25:02.089Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "apt-config",
+            "container": "ed96a85a7480"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-23T06:25:02.090Z",
+            "last_seen": "2026-06-23T06:25:02.090Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "apt-config",
+            "container": "ffbff1299702"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-23T06:27:12.127Z",
+            "last_seen": "2026-06-23T06:27:12.127Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "run-parts",
+            "container": "7e76d1cea7c4"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-23T06:27:12.127Z",
+            "last_seen": "2026-06-23T06:27:12.127Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "apt.systemd.dai",
+            "parent": "run-parts",
+            "container": "7e76d1cea7c4"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-23T06:25:02.088Z",
+            "last_seen": "2026-06-23T06:25:02.088Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "apt-config",
+            "container": "d8fb0192a17f"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-23T06:29:07.153Z",
+            "last_seen": "2026-06-23T06:29:07.153Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "run-parts",
+            "container": "ffbff1299702"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-23T06:53:47.550Z",
+            "last_seen": "2026-06-23T06:53:47.550Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "dpkg",
+            "parent": "run-parts",
+            "container": "d1daf6f3b7c6"
+          },
+          {
+            "events": 1,
+            "first_seen": "2026-06-23T06:53:47.550Z",
+            "last_seen": "2026-06-23T06:53:47.550Z",
+            "rule": "Launch Package Management Process in Container",
+            "proc": "apt.systemd.dai",
+            "parent": "run-parts",
+            "container": "d1daf6f3b7c6"
+          }
+        ]
+      }
+    }
+  ]
+}
