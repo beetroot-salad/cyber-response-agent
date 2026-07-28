@@ -559,7 +559,7 @@ def test_ingest_tail_is_exactly_response_then_request_including_across_a_fold(tm
             tuple(ids))]
         kinds_per_turn.append(kinds)
         if turn == 1:
-            sel.fold(store, session_id, agent_id="main")
+            sel.fold(store, session_id, agent_id="main", boundary=5)
 
     assert kinds_per_turn == [["response", "request"]] * 4, kinds_per_turn
 
@@ -609,9 +609,9 @@ def test_one_frontier_row_per_fold_boundary(tmp_path):
     session_id = store.new_session(agent_id="main")
     sel.ingest(store, session_id, [user_request("orientation")], agent_id="main")
 
-    first = sel.fold(store, session_id, agent_id="main")
+    first = sel.fold(store, session_id, agent_id="main", boundary=1)
     for _ in range(3):
-        assert sel.fold(store, session_id, agent_id="main") == first, (
+        assert sel.fold(store, session_id, agent_id="main", boundary=1) == first, (
             "the frontier for one boundary must be reused, not re-minted per render")
 
     sel.ingest(store, session_id,
@@ -642,9 +642,10 @@ def test_folds_are_restart_shaped_with_an_empty_tail(tmp_path):
         live = live + [tool_call_response(tool_call_id=f"t{turn}"),
                        tool_return_request(tool_call_id=f"t{turn}")]
     sel.ingest(store, session_id, live, agent_id="main")
-    sel.fold(store, session_id, agent_id="main")
+    sel.fold(store, session_id, agent_id="main", boundary=7)
 
-    rendered = sel.render(store, session_id, live, agent_id="main", fold=True)
+    rendered = sel.render(store, session_id, live, agent_id="main", fold=True,
+                          boundary=7)
     assert len(rendered) == 2, (
         f"a folded render is [orientation, frontier] with an EMPTY tail; got {len(rendered)}")
     flags = ss.synthesized_flags(store, session_id, role="send")
@@ -700,12 +701,13 @@ def test_compaction_on_a_restored_history_survives_against_selection(tmp_path):
             tool_return_request(tool_call_id="a")]
     sel.ingest(store, session_id, live, agent_id="main")
     boundary_before = sel.fold_boundary(store, session_id)
-    frontier = sel.fold(store, session_id, agent_id="main")
+    frontier = sel.fold(store, session_id, agent_id="main", boundary=3)
 
     assert boundary_before != frontier
     assert sel.fold_boundary(store, session_id) == frontier, (
         "the boundary is a store query on the frontier row, not a text scan")
-    rendered = sel.render(store, session_id, live, agent_id="main", fold=True)
+    rendered = sel.render(store, session_id, live, agent_id="main", fold=True,
+                          boundary=3)
     assert len(rendered) == 2, rendered
     flat = " ".join(str(p.content) for m in rendered for p in getattr(m, "parts", [])
                     if hasattr(p, "content"))

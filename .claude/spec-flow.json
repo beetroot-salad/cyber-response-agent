@@ -61,6 +61,32 @@
         ],
         "grep": ["llm_requests.jsonl", "logger.messages"]
       },
+      "session_store": {
+        "writers": [
+          "defender/runtime/session_store.py::StoreHandle.new_session",
+          "defender/runtime/session_store.py::StoreHandle.fork",
+          "defender/runtime/session_store.py::StoreHandle.append",
+          "defender/runtime/session_store.py::StoreHandle.write_config",
+          "defender/runtime/session_store.py::StoreHandle.set_truncated_by",
+          "defender/runtime/session_store.py::StoreHandle.set_last_render_len",
+          "defender/runtime/session_store.py::open_store",
+          "defender/runtime/session_store.py::write_case_pointer"
+        ],
+        "readers": [
+          "defender/runtime/session_store.py::hydrate",
+          "defender/runtime/session_store.py::synthesized_flags",
+          "defender/runtime/session_store.py::path_row_ids",
+          "defender/runtime/session_store.py::ends_on_complete_pair",
+          "defender/runtime/session_store.py::open_store_for_read",
+          "defender/runtime/session_store.py::resolve_store_path",
+          "defender/runtime/selection.py::render",
+          "defender/runtime/selection.py::ingest",
+          "defender/runtime/selection.py::fold",
+          "defender/runtime/observe.py::write_trace",
+          "defender/scripts/visualize/visualize_run.py::_main_session_analysis"
+        ],
+        "grep": ["session_store", "sessions/", "session_store_pointer.json", "path_row_ids", "open_store"]
+      },
       "runs_base": {
         "writers": [
           "defender/run_common.py::materialize_run_dir"

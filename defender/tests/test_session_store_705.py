@@ -144,7 +144,17 @@ def test_reader_refuses_an_unknown_user_version(tmp_path):
     normally.
 
     `is:PO1` established that a never-versioned file reads 0, so the refusal is
-    symmetric: below the known version (0, the un-set sentinel) and above it alike."""
+    symmetric: below the known version (0, the un-set sentinel) and above it alike.
+
+    RE-EXPRESSED AT THE NEW RAISE POINT by #754's correction C1: `_check_schema_version`
+    moves into `open_store`, so the refusal now arrives when the file is OPENED and not one
+    call later at `hydrate`. B16 (executed simulation) is why the change is made here rather
+    than left to break silently — with `open_store` outside the `pytest.raises` block this
+    test ERRORS for both bogus values. The demand this discharges is unchanged; only where
+    the refusal lands is. #754's `test_an_unknown_user_version_is_still_refused_at_the_new_raise_point`
+    carries the same guarantee on the reader side, and version 1 — which this test's
+    computed `(0, SCHEMA_VERSION + 1)` pair stops covering once SCHEMA_VERSION is 2 — is
+    pinned by name there (correction C2)."""
     ss = store_mod()
     store = make_store(tmp_path)
     session_id = store.new_session(agent_id="main")
@@ -165,9 +175,8 @@ def test_reader_refuses_an_unknown_user_version(tmp_path):
         raw.execute(f"PRAGMA user_version = {bogus}")
         raw.commit()
         raw.close()
-        reopened = ss.open_store(case_id="case-alpha", runs_base=runs_base(tmp_path))
         with pytest.raises(ss.UnknownSchemaVersion):
-            ss.hydrate(reopened, session_id, role="analysis")
+            ss.open_store(case_id="case-alpha", runs_base=runs_base(tmp_path))
 
 
 def test_every_store_connection_sets_the_foreign_keys_pragma_itself(tmp_path):

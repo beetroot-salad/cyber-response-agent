@@ -199,9 +199,13 @@ def nine_row_fixture(store, *, folded_body: str = "pre-fold chatter"):
                           agent_id="main", parent_id=ids[2])[0]
     ids[4] = store.append(main, [text_response(folded_body)],
                           agent_id="main", parent_id=ids[3])[0]
-    # the fold: the frontier is re-parented to the ROOT, orphaning 2,3,4
+    # the fold: the frontier is re-parented to the ROOT, orphaning 2,3,4. `reason="fold"` is
+    # #754's, not #705's: re-parenting off the session's head is a NON-LINEAR move under the
+    # head-pointer rule, and a non-linear move with no reason is refused (obligation 7). The
+    # fixture hand-builds a fold, so it hands over the reason a fold hands over.
     ids[5] = store.append(main, [user_request("FRONTIER: summary of turns 2-4")],
-                          agent_id="main", synthesized=True, parent_id=ids[1])[0]
+                          agent_id="main", synthesized=True, parent_id=ids[1],
+                          reason="fold")[0]
     ids[6] = store.append(main, [tool_call_response("query", tool_call_id="t6")],
                           agent_id="main", parent_id=ids[5])[0]
     ids[7] = store.append(main, [tool_return_request("query", tool_call_id="t6")],
