@@ -24,7 +24,11 @@ from defender.learning.pipeline.judge.engine_pydantic import _run_judge_pydantic
 from defender.learning.pipeline.judge.engine_pydantic import JUDGE_DEF  # noqa: E402
 from defender.learning.pipeline.judge.run import _ToolScope  # noqa: E402
 from defender.runtime import permission  # noqa: E402
-from defender.runtime.agent_definition import RunScope, compile_policy_for  # noqa: E402
+from defender.runtime.agent_definition import (  # noqa: E402
+    RunScope,
+    compile_policy_for,
+    effective_tools_for,
+)
 from defender.runtime.permission.command_shape import SQL_SHIM  # noqa: E402
 from defender.tests._engine_helpers import fake_model as _fake_model  # noqa: E402
 from defender.tests._engine_helpers import replay_turns as _replay  # noqa: E402
@@ -48,6 +52,7 @@ def _judge_policy(tmp_path, *, read_roots=()):
         JUDGE_DEF, run_dir=tmp_path,
         scope=RunScope(add_dirs=tuple(read_roots)),
         defender_dir=tmp_path,
+        tools=effective_tools_for(JUDGE_DEF),
     )
 
 _YAML = "outcome: skip-passthrough\ndefender_findings: []\n"
@@ -283,9 +288,11 @@ def test_judge_read_roots_reach_a_gather_raw_outside_the_run_dir(tmp_path):
         JUDGE_DEF, run_dir=learning,
         scope=RunScope(add_dirs=(investigation / "gather_raw",)),
         defender_dir=tmp_path / "defender",
+        tools=effective_tools_for(JUDGE_DEF),
     )
     without_root = compile_policy_for(
         JUDGE_DEF, run_dir=learning, defender_dir=tmp_path / "defender",
+        tools=effective_tools_for(JUDGE_DEF),
     )
     assert gate(with_root)
     assert not gate(without_root)

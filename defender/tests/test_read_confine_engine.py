@@ -23,7 +23,11 @@ from defender.learning.core import config  # noqa: E402
 from defender._untrusted import wrap  # noqa: E402
 from defender.learning.pipeline.actor_engine import ACTOR_DEF, ActorDeps  # noqa: E402
 from defender.runtime import permission, tools  # noqa: E402
-from defender.runtime.agent_definition import RunScope, compile_policy_for  # noqa: E402
+from defender.runtime.agent_definition import (  # noqa: E402
+    RunScope,
+    compile_policy_for,
+    effective_tools_for,
+)
 from defender.runtime.permission import AgentPolicy  # noqa: E402
 from defender.runtime.permission.grant import PROGRAMS, Route  # noqa: E402
 
@@ -112,6 +116,7 @@ def test_judge_policy_is_cat_and_sql_only(tmp_path):
     cmp_dir.mkdir()
     pol = compile_policy_for(
         JUDGE_DEF, tmp_path / "run", scope=RunScope(add_dirs=(cmp_dir,)), defender_dir=_DEFENDER,
+        tools=effective_tools_for(JUDGE_DEF),
     )
     assert {g.program for g in pol.bash_allow} == {"cat", "defender-sql"}
     cat = next(g for g in pol.bash_allow if g.program == "cat")

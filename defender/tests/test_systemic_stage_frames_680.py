@@ -19,7 +19,7 @@ from types import SimpleNamespace
 from pydantic_ai.models import override_allow_model_requests
 
 from defender.learning.core.config import StageContext, StageWiring  # noqa: E402
-from defender.agents import JUDGE_DEF, MAIN_DEF, ORACLE_DEF
+from defender.agents import MAIN_DEF, ORACLE_DEF
 from defender.learning.core import config
 from defender.learning.pipeline import _pydantic_stage
 from defender.runtime.agent_definition import RunScope, bind
@@ -38,6 +38,7 @@ from defender.tests._engine_helpers import fake_model, replay_turns
 from defender.tests._frames680 import (
     DEFENDER,
     FRAME_RE,
+    JUDGE_BENIGN_DEF,
     ROOT,
     RUN_SALT,
     STAGE_SALT,
@@ -254,7 +255,7 @@ def test_main_bash_call_occurs_before_and_after_a_learning_bash_call(tmp_path):
     p.write_text("x")
     learning = _deps(
         tmp_path / "learn",
-        JUDGE_DEF,
+        JUDGE_BENIGN_DEF,
         read_root=root,
         box=Box(BoxResult(0, b"learn", b"")),
     )
@@ -628,7 +629,7 @@ def test_d7_one_stage_salt_reaches_frames_and_tool_wraps(tmp_path):
         artifact.write_text("artifact")
         box = RecordingBox(BashResultSpec(out=b"artifact"))
         deps = bind(
-            JUDGE_DEF,
+            JUDGE_BENIGN_DEF,
             learning,
             salt=salt,
             scope=RunScope(add_dirs=(comparison,)),
@@ -885,7 +886,7 @@ def test_d20_learning_stage_bash_output_is_salt_tagged(tmp_path):
     judge_artifact = judge_root / "x"
     judge_artifact.write_text("x")
     judge = bind(
-        JUDGE_DEF,
+        JUDGE_BENIGN_DEF,
         tmp_path / "judge-run",
         salt=None,
         scope=RunScope(add_dirs=(judge_root,)),

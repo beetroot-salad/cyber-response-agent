@@ -12,6 +12,7 @@ if (_root := str(_Path(__file__).resolve().parents[3])) not in _sys.path:
 
 from defender.runtime.verbs import VerbContext, verb
 from defender.scripts.adapters import _stub_transport as transport
+from defender.scripts.adapters.confinement import confine_index, guard_outbound
 from defender.scripts.adapters.faults import ConfigFault, TransportFault, UpstreamFault
 
 SYSTEM = "elastic"
@@ -96,6 +97,7 @@ def _container_for(ctx: VerbContext, url: str, config: dict) -> str:
 
 
 def _http_json(ctx, method, url, config, headers=None, body=None, timeout=None):
+    guard_outbound(ctx, SYSTEM, url, method=method)
     container = _container_for(ctx, url, config)
     secs = int(timeout or REQUEST_TIMEOUT_SEC)
     rc, stdout, stderr = transport.docker_exec_curl(
@@ -181,6 +183,9 @@ def _search_verb(
 ) -> dict:
     config = load_config(ctx)
     resolved = index or config[index_key]
+    resolved = confine_index(
+        resolved, (config["ELASTIC_EVENTS_INDEX"], config["ELASTIC_ALERTS_INDEX"]),
+    )
     docs, total, truncated = _search(
         ctx, config, resolved, native_query, start, end,
         time_field="@timestamp", limit=limit,

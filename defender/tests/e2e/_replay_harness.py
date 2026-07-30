@@ -61,6 +61,8 @@ from defender import run_common  # noqa: E402
 from defender.runtime import box as box_mod  # noqa: E402
 from defender.runtime import driver  # noqa: E402
 from defender.runtime.providers import BuiltModel  # noqa: E402
+from defender.runtime.verb_grant import VerbGrant  # noqa: E402
+from defender.runtime.verbs import VerbRegistry  # noqa: E402
 
 DEFENDER = Path(__file__).resolve().parents[2]
 GOLDEN = DEFENDER / "fixtures-e2e" / "golden-v2sshd"
@@ -185,17 +187,22 @@ class VerbRecorder:
         return self.calls[0]
 
 
-class FakeVerbs:
+class FakeVerbs(VerbRegistry):
     """An injected verb registry — the drop-in for the production `ModuleVerbRegistry`.
 
     Dumb data: `{system: {verb: fn}}`. It declares the systems it was built with (a system
     mapped to an EMPTY dict is a DECLARED system with no verbs — the fail-closed case, and
     the reason this is a plain table rather than a defaultdict), and hands back the mapping
-    for one. It makes no admission decision: an unknown system raises `KeyError`, and what
-    the tool does about that is the tool's contract, not the fake's."""
+    for one. It makes no admission decision beyond a real, everything-it-declares `VerbGrant`
+    built from its own table (#632 — pre-dating the per-role grant, this pre-authorization-era
+    fake grants itself full access rather than making every #611-era scenario author one)."""
 
     def __init__(self, table: Mapping[str, Mapping[str, Callable[..., Any]]]):
         self._table = {s: dict(v) for s, v in table.items()}
+        super().__init__(VerbGrant(
+            role="fake",
+            entries=tuple((s, v, "r") for s, verbs in self._table.items() for v in verbs),
+        ))
 
     def systems(self) -> tuple[str, ...]:
         return tuple(sorted(self._table))

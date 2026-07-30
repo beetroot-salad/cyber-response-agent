@@ -41,6 +41,7 @@ from pathlib import Path
 from typing import Any
 
 from defender.runtime.verbs import VerbContext
+from defender.scripts.adapters.confinement import guard_outbound
 from defender.scripts.adapters.faults import (
     USAGE_EXIT_CODE,
     ConfigFault,
@@ -247,25 +248,34 @@ def split_status(stdout: str) -> tuple[str, str]:
 
 
 def http_get(
-    ctx: VerbContext, config: dict[str, str], path: str, *, params: dict | None = None
+    ctx: VerbContext, config: dict[str, str], path: str, *, system: str,
+    params: dict | None = None,
 ) -> dict | list:
     """GET <URL_BASE><path>?<params>, return parsed JSON.
 
     Raises `TransportFault` (infra) on docker/unreachable/5xx and `UpstreamFault` (a query
     error, carrying the vendor's own `detail`) on a 4xx — a 404 included.
+
+    `system` is REQUIRED, not defaulted: it is the target-fidelity confinement's own key
+    (`confine_read_endpoint`, #632 D4) — every one of this family's six systems funnels
+    through this one function, so a caller that forgot to name itself would confine against
+    the wrong system's allowlist rather than its own, silently.
     """
     qs = ("?" + urllib.parse.urlencode(params)) if params else ""
     url = f"{config['URL_BASE'].rstrip('/')}{path}{qs}"
-    return _request(ctx, config, url, method="GET")
+    return _request(ctx, config, url, system=system, method="GET")
 
 
-def http_post(ctx: VerbContext, config: dict[str, str], path: str, body: dict) -> dict | list:
+def http_post(
+    ctx: VerbContext, config: dict[str, str], path: str, body: dict, *, system: str,
+) -> dict | list:
     url = f"{config['URL_BASE'].rstrip('/')}{path}"
-    return _request(ctx, config, url, method="POST", body=body)
+    return _request(ctx, config, url, system=system, method="POST", body=body)
 
 
 def http_get_obj(
-    ctx: VerbContext, config: dict[str, str], path: str, *, params: dict | None = None
+    ctx: VerbContext, config: dict[str, str], path: str, *, system: str,
+    params: dict | None = None,
 ) -> dict[str, Any]:
     """`http_get` for endpoints whose contract is a JSON *object*. Narrows the
     `dict | list` parse to `dict[str, Any]` so callers get typed `.get()`/indexing,
@@ -273,7 +283,7 @@ def http_get_obj(
     instead of crashing later on `list.get`. List endpoints keep raw `http_get` + their
     `isinstance(payload, list)` guard. Per-endpoint response schemas are the next step —
     see #409."""
-    payload = http_get(ctx, config, path, params=params)
+    payload = http_get(ctx, config, path, system=system, params=params)
     if not isinstance(payload, dict):
         raise TransportFault(
             f"expected a JSON object from {path}, got {type(payload).__name__}"
@@ -334,8 +344,16 @@ def _raise_on_http_error(code: int, body_text: str, url: str) -> None:
 
 
 def _request(
-    ctx: VerbContext, config: dict[str, str], url: str, *, method: str, body: dict | None = None
+    ctx: VerbContext, config: dict[str, str], url: str, *, system: str, method: str,
+    body: dict | None = None,
 ) -> dict | list:
+    # Target-fidelity confinement (#632 D4), BEFORE any transport is attempted: every one of
+    # the five HTTP stub systems funnels through this one function (g26's own measurement —
+    # "one transport function carries every outbound request in the tree"), so wiring the
+    # read-endpoint allowlist here, not in each adapter, is what makes the seam actually cover
+    # all six systems rather than just elastic's own private transport helper.
+    guard_outbound(ctx, system, url, method=method)
+
     bastion = config["BASTION_HOST"]
     timeout = int(config.get("TIMEOUT_SEC", "10"))
     rc, stdout, stderr = docker_exec_curl(
@@ -360,7 +378,7 @@ def health_check(ctx: VerbContext, config: dict[str, str], system_label: str) ->
     Returns data, like every other verb — prose printed to stdout has no answer under
     "a verb returns its payload", and the queries table would record an empty payload for
     the one call whose whole point is to say whether the system is up."""
-    payload = http_get_obj(ctx, config, "/health")
+    payload = http_get_obj(ctx, config, "/health", system=system_label)
     return {"system": system_label, "connected": True, **payload}
 
 

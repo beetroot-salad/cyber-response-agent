@@ -47,6 +47,7 @@ from defender.runtime import permission  # noqa: E402
 from defender.runtime.agent_definition import (  # noqa: E402
     RunScope,
     compile_policy_for,
+    effective_tools_for,
     read_allow_of,
 )
 from defender.runtime.permission import AgentPolicy  # noqa: E402
@@ -233,9 +234,16 @@ def test_reduction_is_per_policy_not_global(tmp_path):
 
 def _judge_gate(cmd, run_dir, *, read_roots=()):
     """The judge's policy off its REAL compile seam (never a hand-copied regex: a copy keeps
-    passing against the old grammar after the real one is tightened)."""
+    passing against the old grammar after the real one is tightened).
+
+    `tools=` states the benign leg's effective capability (#632) — `JUDGE_DEF`'s static
+    `closed_tickets` bit stays False (only `_run_judge_pydantic`'s per-leg `replace()` turns it
+    on, together with the effective grant, d73), so a bare compile against the definition's own
+    non-empty verb_grant always disagrees under §7 R7. This probe is about the bash gate, not
+    the verb grant, so it states the effective ToolSet the real benign build actually uses."""
     pol = compile_policy_for(
         JUDGE_DEF, run_dir, scope=RunScope(add_dirs=tuple(read_roots)), defender_dir=_DEFENDER,
+        tools=effective_tools_for(JUDGE_DEF),
     )
     return permission.decide_bash(cmd, policy=pol, run_dir=run_dir, defender_dir=_DEFENDER)
 

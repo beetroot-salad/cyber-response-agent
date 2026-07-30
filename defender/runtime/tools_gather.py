@@ -24,6 +24,7 @@ from defender.hooks.record_lead import claim_lead as _claim_lead
 from defender.hooks.inject_system_skill_description import descriptor_catalog as _descriptor_catalog
 from defender._untrusted import wrap as _wrap
 from defender.scripts.gather_tools.record_query import LEAD_ID_RE as _LEAD_ID_RE
+from defender.runtime.verb_grant import VerbGrant
 
 
 
@@ -60,12 +61,13 @@ def _repo_rel(defender_dir: Path, path: Path) -> str:
         return str(path)
 
 
-def _template_index(defender_dir: Path) -> str:
+def _template_index(defender_dir: Path, verb_grant: VerbGrant | None = None) -> str:
     entries = [
         f"- `{t.id}` — `{_repo_rel(defender_dir, t.path)}`\n"
         f"  {' '.join(t.goal.split())}"
         for t in iter_query_templates(_catalog_dir(defender_dir))
         if t.status == "established" and "_draft" not in t.path.parts
+        and (verb_grant is None or verb_grant.allows(t.system, t.verb))
     ]
     return "\n".join(entries)
 
@@ -91,6 +93,7 @@ _INDEX_UNAVAILABLE = (
 
 def _gather_prompt(
     deps: AgentDeps, request: GatherRequest, catalog: str | None,
+    verb_grant: VerbGrant | None = None,
 ) -> str:
     wts = "\n".join(f"  - {d}" for d in request.what_to_summarize) or "  - (unspecified)"
     block = (
@@ -115,7 +118,7 @@ def _gather_prompt(
             "descriptor lacks; not on every dispatch.\n\n"
             f"{catalog}\n"
         )
-    index = _template_index(deps.defender_dir)
+    index = _template_index(deps.defender_dir, verb_grant)
     block += (_INDEX_HEADER + index + "\n") if index else _INDEX_UNAVAILABLE
     return block
 
@@ -250,6 +253,7 @@ def _persist_gather_summary(run_dir: Path, lead_id: str, wrapped: str) -> None:
 
 async def _run_gather(
     deps: AgentDeps, gather_factory, request_limit: int, request: GatherRequest,
+    verb_grant: VerbGrant,
 ) -> str:
     lead_id, system = request.lead_id, request.system
     if not _LEAD_ID_RE.match(lead_id):
@@ -266,13 +270,15 @@ async def _run_gather(
     if circuit_breaker.is_tripped(deps.run_dir, system):
         return circuit_breaker.down_message(deps.run_dir, system)
 
+    from defender.runtime.agent_definition import bind
+    from defender.runtime.driver import GATHER_DEF
+
     catalog = _descriptor_catalog(
-        deps.defender_dir / "skills", deps.defender_dir / "scripts" / "adapters"
+        deps.defender_dir / "skills", deps.defender_dir / "scripts" / "adapters",
+        verb_grant,
     )
 
     gagent = gather_factory(f"gather:{lead_id}")
-    from defender.runtime.agent_definition import bind
-    from defender.runtime.driver import GATHER_DEF
     gbase = bind(
         GATHER_DEF, deps.run_dir, salt=deps.salt, defender_dir=deps.defender_dir, box=deps.box,
     )
@@ -283,7 +289,7 @@ async def _run_gather(
         lead_id=lead_id,
         budget_started_monotonic=deps.budget_started_monotonic,
     )
-    prompt = _gather_prompt(deps, request, catalog)
+    prompt = _gather_prompt(deps, request, catalog, verb_grant)
     try:
         result = await gagent.run(
             prompt, deps=gdeps,
@@ -321,7 +327,7 @@ async def _run_gather(
 
 
 def register_gather_tool(
-    main_agent, gather_factory, request_limit: int,
+    main_agent, gather_factory, request_limit: int, verb_grant: VerbGrant,
 ) -> None:
 
     @main_agent.tool
@@ -338,5 +344,5 @@ def register_gather_tool(
         multiple `gather` calls in one turn to dispatch sibling leads in parallel."""
         request = GatherRequest(lead_id, system, goal, tuple(what_to_summarize))
         return await tools._run_gather(
-            ctx.deps, gather_factory, request_limit, request,
+            ctx.deps, gather_factory, request_limit, request, verb_grant,
         )

@@ -33,6 +33,7 @@ from defender.runtime.agent_definition import (
     AgentDefinition,
     RunScope,
     compile_policy_for,
+    effective_tools_for,
 )
 from defender.runtime.agent_role import AgentRole
 from defender.runtime.permission import AgentPolicy
@@ -64,9 +65,12 @@ def _scope_for(
 def _policy(
     defn: AgentDefinition, run_dir: Path, defender_dir: Path, corpus_name: str | None = None,
 ) -> AgentPolicy:
+    # effective_tools_for is the one place that knows any role's typed-capability switching
+    # (#632) — this audit tool asks for "the effective tools for this role" and never names a
+    # bit itself, so its own source carries no map of typed capabilities to attack (N4).
     return compile_policy_for(
         defn, run_dir, scope=_scope_for(defn.role, defender_dir, corpus_name),
-        defender_dir=defender_dir,
+        defender_dir=defender_dir, tools=effective_tools_for(defn),
     )
 
 

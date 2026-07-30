@@ -44,9 +44,17 @@ from defender.learning.pipeline.benign_actor.run import invoke_actor_benign
 from defender.learning.pipeline.judge.run import build_judge_invocation
 from defender.learning.pipeline.malicious_actor.run import invoke_actor
 from defender.learning.pipeline.oracle.sample import build_lead_user_prompt
-from defender.runtime.agent_definition import RunScope, bind
+from defender.runtime.agent_definition import RunScope, bind, effective_tools_for
 from defender.runtime.box import BoxResult
 from defender.runtime.tools import _tool_bash, _tool_read_file
+
+#: #632's §7 R7 grant/capability agreement: JUDGE_DEF's static `closed_tickets` bit stays
+#: False (only the per-leg replace() in _run_judge_pydantic turns it on, together with the
+#: effective grant, d73), so a bare `bind(JUDGE_DEF, ...)` always disagrees against the
+#: definition's own non-empty verb_grant. Every drive in this #680 frame-wrapping suite is
+#: about the bash/read-file lane, not the verb grant, so it binds the benign leg's effective
+#: shape — matching the real per-leg build.
+JUDGE_BENIGN_DEF = replace(JUDGE_DEF, tools=effective_tools_for(JUDGE_DEF))
 
 SALT_RE = re.compile(r"<run-([0-9a-f]{32})-([^>]+)>\n(.*?)\n</run-\1-\2>", re.DOTALL)
 ROOT = Path(__file__).resolve().parents[2]
@@ -480,7 +488,7 @@ def _corpus_author_deps_scene(tmp_path: Path, result: BoxResult):
 def _judge_read_scene(tmp_path):
     root = tmp_path / "comparison"
     root.mkdir(parents=True)
-    return _deps(tmp_path / "deps", JUDGE_DEF, read_root=root), root
+    return _deps(tmp_path / "deps", JUDGE_BENIGN_DEF, read_root=root), root
 
 
 def _main_bash(tmp_path, payload):
@@ -558,7 +566,7 @@ def _judge_deps(tmp_path: Path, *, box=None):
     comparison.mkdir(parents=True)
     defender_dir.mkdir(parents=True)
     deps = bind(
-        JUDGE_DEF,
+        JUDGE_BENIGN_DEF,
         run_dir,
         salt=STAGE_SALT,
         defender_dir=defender_dir,

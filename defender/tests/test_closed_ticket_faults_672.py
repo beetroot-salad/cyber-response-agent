@@ -15,6 +15,8 @@ pytest.importorskip("pydantic_ai")  # CI installs the runtime extra; skip otherw
 
 from defender.learning.core.config import RunUnprocessable  # noqa: E402
 from defender.runtime import circuit_breaker  # noqa: E402
+from defender.runtime.verb_grant import VerbGrant  # noqa: E402
+from defender.runtime.verbs import VerbRegistry  # noqa: E402
 from defender.scripts.adapters.faults import ConfigFault, TransportFault, UpstreamFault  # noqa: E402
 from defender.tests.e2e._replay_harness import VerbRecorder  # noqa: E402
 from defender.tests._closed_ticket_672 import (  # noqa: E402
@@ -138,11 +140,18 @@ def test_unmapped_fault_returns_envelope(tmp_path):
     assert run.breaker().get("systems", {}).get("ticket", {}).get("failures") == 1
 
 
-class _ResolutionFaultVerbs:
+class _ResolutionFaultVerbs(VerbRegistry):
     """A registry whose verb RESOLUTION itself faults — the production shape when
     ``ModuleVerbRegistry.verbs('ticket')`` lazily imports a broken adapter (an import-time error,
     or a malformed/absent ``VERBS`` mapping → ``KeyError``). Every happy-path fake resolves
-    cleanly, so this is the only way to drive the resolution seam."""
+    cleanly, so this is the only way to drive the resolution seam.
+
+    A real ``VerbGrant`` naming ``ticket.get-ticket`` (#632) — ``decide()`` must admit the call
+    before it ever reaches ``verbs()``, so the grant has to actually reach the verb under test
+    for the resolution fault below it to be observed at all."""
+
+    def __init__(self):
+        super().__init__(VerbGrant(role="judge", entries=(("ticket", "get-ticket", "r"),)))
 
     def systems(self):
         return ("ticket",)

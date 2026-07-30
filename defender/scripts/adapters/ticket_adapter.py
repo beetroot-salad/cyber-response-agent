@@ -111,7 +111,7 @@ def case_opened_at(ctx: VerbContext, *, key: str) -> str:
     stand down because a field went missing.
     """
     payload = transport.http_get_obj(
-        ctx, _config(ctx), f"/tickets/{urllib.parse.quote(key, safe='')}",
+        ctx, _config(ctx), f"/tickets/{urllib.parse.quote(key, safe='')}", system=SYSTEM,
     )
     created = payload.get("created")
     if not isinstance(created, str) or not created:
@@ -150,7 +150,7 @@ def list_tickets(
         params["label"] = label
     if q:
         params["q"] = q
-    return transport.http_get(ctx, _config(ctx), "/tickets", params=params or None)
+    return transport.http_get(ctx, _config(ctx), "/tickets", system=SYSTEM, params=params or None)
 
 
 def get_ticket(ctx: VerbContext, *, key: str, require_closed: bool = False) -> dict:
@@ -172,7 +172,7 @@ def get_ticket(ctx: VerbContext, *, key: str, require_closed: bool = False) -> d
     `params=`; encoding here makes the two paths symmetric.
     """
     payload = transport.http_get_obj(
-        ctx, _config(ctx), f"/tickets/{urllib.parse.quote(key, safe='')}",
+        ctx, _config(ctx), f"/tickets/{urllib.parse.quote(key, safe='')}", system=SYSTEM,
     )
     if require_closed and payload.get("status") != "closed":
         raise UpstreamFault(

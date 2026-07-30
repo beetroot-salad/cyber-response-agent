@@ -15,7 +15,6 @@ opposite.
 query(system="identity", verb="health-check",          params={})
 query(system="identity", verb="can-access",            params={"user": "<user>", "host": "<host>"})
 query(system="identity", verb="get-user",              params={"user": "<user>"})
-query(system="identity", verb="list-authorized-hosts", params={"user": "<user>"})
 query(system="identity", verb="list-users",            params={"role": "X", "enabled": true})
 query(system="identity", verb="list-roles",            params={})
 ```

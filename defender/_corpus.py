@@ -62,6 +62,7 @@ class QueryTemplate:
     goal: str
     query: str
     body: str
+    verb: str = ""
 
 
 def section_bodies(body: str) -> dict[str, str]:
@@ -106,6 +107,7 @@ def iter_query_templates(catalog_dir: Path) -> Iterator[QueryTemplate]:
         sections = section_bodies(body)
         parent = path.parent
         system = parent.parent.name if parent.name == "_draft" else parent.name
+        verb = fm.get("verb")
         yield QueryTemplate(
             path=path,
             id=tid,
@@ -114,4 +116,5 @@ def iter_query_templates(catalog_dir: Path) -> Iterator[QueryTemplate]:
             goal=sections.get("Goal", ""),
             query=sections.get("Query", ""),
             body=body,
+            verb=verb if isinstance(verb, str) else "",
         )

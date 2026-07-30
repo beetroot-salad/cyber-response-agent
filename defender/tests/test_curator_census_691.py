@@ -145,7 +145,7 @@ def test_one_shared_spawn_request_drives_every_role_in_the_registry(tmp_path):
     bare-scope policy (the shared name changes nothing for a non-declaring role), then the curator
     consumes the SAME request's name into a real corpus-rooted write scope (c19/g19). RED today: the
     shared scope carries a corpus_name field that does not exist, and the curator is unbindable."""
-    from defender.runtime.agent_definition import RunScope, compile_policy_for
+    from defender.runtime.agent_definition import RunScope, compile_policy_for, effective_tools_for
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
     shared = RunScope(corpus_name="lessons")  # RED: no field
     non_curator = 0
@@ -157,10 +157,12 @@ def test_one_shared_spawn_request_drives_every_role_in_the_registry(tmp_path):
             # VERIFIER, LEAD_AUTHOR) already raises on a bare RunScope() regardless of
             # corpus_name, so it is not a "generic bare-scope caller" candidate; only compare
             # roles for which the bare scope itself is buildable.
-            bare = compile_policy_for(defn, rd, scope=RunScope())
+            bare = compile_policy_for(defn, rd, scope=RunScope(), tools=effective_tools_for(defn))
         except ValueError:
             continue
-        with_name = compile_policy_for(defn, rd, scope=shared)      # the shared request drives it
+        with_name = compile_policy_for(
+            defn, rd, scope=shared, tools=effective_tools_for(defn),
+        )      # the shared request drives it
         assert with_name.write_allow == bare.write_allow           # the shared name is inert here
         assert with_name.read_allow == bare.read_allow
         non_curator += 1
@@ -190,11 +192,13 @@ def test_shared_runscope_reused_across_role_loop_iterations(tmp_path):
     """Reusing one RunScope across role-loop iterations has no observable effect on the next role's
     bind — bind READS the scope, never writes back to it. Drive two binds from one scope object;
     the second's policy is independent of the first. RED today (corpus_name field / bindable)."""
-    from defender.runtime.agent_definition import RunScope, compile_policy_for
+    from defender.runtime.agent_definition import RunScope, compile_policy_for, effective_tools_for
     rd = pending_run_dir(tmp_path)
     scope = RunScope(corpus_name="lessons")  # RED: no field
     p1 = compile_policy_for(AGENTS[AgentRole.GATHER], rd, scope=scope)
-    p2 = compile_policy_for(AGENTS[AgentRole.JUDGE], rd, scope=scope)
+    p2 = compile_policy_for(
+        AGENTS[AgentRole.JUDGE], rd, scope=scope, tools=effective_tools_for(AGENTS[AgentRole.JUDGE]),
+    )
     # two distinct roles compiled from the ONE reused scope get distinct policies — the shared
     # scope did not leak the first role's policy into the second (discriminating: fails if bind
     # mutated the scope so the second bind reproduced the first).

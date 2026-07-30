@@ -41,11 +41,11 @@ def health_check(ctx: VerbContext) -> dict:
 
 def active_changes(ctx: VerbContext, *, host: str, at: str) -> dict | list:
     params = {"host": host, "at": _require_utc(at)}
-    return transport.http_get(ctx, _config(ctx), "/changes/active", params=params)
+    return transport.http_get(ctx, _config(ctx), "/changes/active", system=SYSTEM, params=params)
 
 
 def get_change(ctx: VerbContext, *, cr_id: str) -> dict:
-    return transport.http_get_obj(ctx, _config(ctx), f"/changes/{cr_id}")
+    return transport.http_get_obj(ctx, _config(ctx), f"/changes/{cr_id}", system=SYSTEM)
 
 
 def list_changes(
@@ -66,7 +66,7 @@ def list_changes(
         params["host"] = host
     if active_at:
         params["active_at"] = _require_utc(active_at)
-    return transport.http_get(ctx, _config(ctx), "/changes", params=params or None)
+    return transport.http_get(ctx, _config(ctx), "/changes", system=SYSTEM, params=params or None)
 
 
 VERBS = {

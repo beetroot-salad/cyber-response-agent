@@ -82,6 +82,7 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
 )
 
 from defender.runtime import query_tool  # noqa: E402
+from defender.runtime.verb_grant import DENY_ALL, VerbGrant  # noqa: E402
 from defender.runtime.verbs import (  # noqa: E402
     ModuleVerbRegistry,
     VerbContext,
@@ -289,7 +290,7 @@ def test_verbs_registry_declares_surface():
     """verbs_registry_declares_surface — every adapter module exports a VERBS mapping of
     verb → callable whose ANNOTATED signature declares that verb's params, and
     `declared_params` (the one reader the tool's validator uses) reads exactly that."""
-    reg = ModuleVerbRegistry(ADAPTERS_DIR)
+    reg = ModuleVerbRegistry(ADAPTERS_DIR, DENY_ALL)
     on_disk = sorted(
         p.name[: -len("_adapter.py")].replace("_", "-") for p in ADAPTERS_DIR.glob("*_adapter.py")
     )
@@ -449,7 +450,8 @@ def test_descriptor_catalog_advertises_only_declared_systems(tmp_path):
         {"hollow": _ADAPTER_NO_VERBS, "solid": _ADAPTER_WITH_VERBS},
         described=("hollow", "solid"),
     )
-    catalog = descriptor_catalog(tree / "skills", tree / "scripts" / "adapters")
+    grant = VerbGrant(role="gather", entries=(("solid", "look", "r"),))
+    catalog = descriptor_catalog(tree / "skills", tree / "scripts" / "adapters", grant)
     assert catalog is not None
     assert "`solid`" in catalog
     assert "hollow" not in catalog, "a system with no declared verbs was advertised to gather"
@@ -462,13 +464,14 @@ def test_descriptor_catalog_does_not_freeze_the_tree(tmp_path):
     a = _make_tree(tmp_path / "a", {"probe": _TREE_PROBE}, described=("probe",))
     b = _make_tree(tmp_path / "b", {"probe": _TREE_PROBE}, described=("probe",))
 
-    assert descriptor_catalog(a / "skills", a / "scripts" / "adapters") is not None
-    assert descriptor_catalog(b / "skills", b / "scripts" / "adapters") is not None
+    grant = VerbGrant(role="gather", entries=(("probe", "whoami", "r"),))
+    assert descriptor_catalog(a / "skills", a / "scripts" / "adapters", grant) is not None
+    assert descriptor_catalog(b / "skills", b / "scripts" / "adapters", grant) is not None
 
     ctx_a = VerbContext(defender_dir=a, run_dir=tmp_path / "run", env={})
     ctx_b = VerbContext(defender_dir=b, run_dir=tmp_path / "run", env={})
-    fn_a = ModuleVerbRegistry(a / "scripts" / "adapters").verbs("probe")["whoami"]
-    fn_b = ModuleVerbRegistry(b / "scripts" / "adapters").verbs("probe")["whoami"]
+    fn_a = ModuleVerbRegistry(a / "scripts" / "adapters", DENY_ALL).verbs("probe")["whoami"]
+    fn_b = ModuleVerbRegistry(b / "scripts" / "adapters", DENY_ALL).verbs("probe")["whoami"]
 
     assert fn_a(ctx_a) == {"tree": str(a)}
     assert fn_b(ctx_b) == {"tree": str(b)}, \
@@ -483,7 +486,7 @@ def test_no_verb_names_a_program_or_command():
     """no_verb_names_a_program_or_command — no verb signature declares a param that is a
     program, a command, or a path in the DRIVER's namespace. host-state's fim-checksum path
     (a path on a target host, via docker exec) is the declared exception."""
-    reg = ModuleVerbRegistry(ADAPTERS_DIR)
+    reg = ModuleVerbRegistry(ADAPTERS_DIR, DENY_ALL)
     offenders = [
         (system, verb, name)
         for system in reg.systems()
@@ -1240,7 +1243,7 @@ def test_ticket_cli_dual_surface_survives():
     (#672 moved the benign judge's closed-ticket read off this CLI onto two typed in-process
     tools, so the judge is no longer a subprocess consumer — but the CLI + its flag survive for
     the two that remain, d14.)"""
-    verbs = ModuleVerbRegistry(ADAPTERS_DIR).verbs("ticket")
+    verbs = ModuleVerbRegistry(ADAPTERS_DIR, DENY_ALL).verbs("ticket")
     assert {"list-tickets", "get-ticket"} <= set(verbs)
 
     parser = ticket_adapter.build_parser()

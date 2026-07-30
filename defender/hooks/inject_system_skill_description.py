@@ -6,6 +6,7 @@ from pathlib import Path
 
 from defender._frontmatter import parse_frontmatter_or_none
 from defender._io import read_text_soft
+from defender.runtime.verb_grant import DENY_ALL, VerbGrant
 from defender.runtime.verbs import ModuleVerbRegistry
 
 DEFENDER_DIR = Path(__file__).resolve().parent.parent
@@ -37,11 +38,20 @@ def read_description(system: str, skills_dir: Path = SKILLS_DIR) -> str | None:
 
 @cache
 def descriptor_catalog(
-    skills_dir: Path = SKILLS_DIR, adapters_dir: Path = ADAPTERS_DIR
+    skills_dir: Path, adapters_dir: Path, grant: VerbGrant,
 ) -> str | None:
-    registry = ModuleVerbRegistry(adapters_dir)
+    # DENY_ALL, not `grant`: this registry exists only to enumerate real systems and probe
+    # whether each one's adapter actually IMPORTS (the `except` below) — narrowing to the
+    # caller's grant happens after, against `grant.systems` directly. Constructing with
+    # `grant` would run ModuleVerbRegistry's load check against these REAL adapters, which a
+    # caller-supplied grant naming a system/verb this tree doesn't declare (a test's fake
+    # registry's own auto-derived grant, #632) would fail for a reason that has nothing to do
+    # with which systems this catalog should describe.
+    registry = ModuleVerbRegistry(adapters_dir, DENY_ALL)
     lines = []
     for system in registry.systems():
+        if system not in grant.systems:
+            continue
         try:
             verbs = registry.verbs(system)
         except Exception:  # noqa: BLE001 — a system that will not load is unreachable, not fatal

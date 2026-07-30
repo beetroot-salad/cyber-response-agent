@@ -29,6 +29,7 @@ from defender.runtime.agent_definition import (  # noqa: E402
     ResolvedRoots,
     RunScope,
     compile_policy_for,
+    effective_tools_for,
 )
 from defender.runtime.agent_role import AgentRole  # noqa: E402
 from defender.runtime.permission.command_shape import SQL_SHIM  # noqa: E402
@@ -54,6 +55,13 @@ from defender.tests._closed_ticket_672 import (  # noqa: E402
 )
 
 pytestmark = pytest.mark.e2e
+
+#: #632's §7 R7 effective-ToolSet parameter: JUDGE_DEF's static `closed_tickets` bit stays
+#: False (only the per-leg replace() in _run_judge_pydantic turns it on, together with the
+#: effective grant, d73), so a bare compile against the definition's own non-empty verb_grant
+#: always disagrees. These tests are all about the BASH lane's shape, so they state the benign
+#: leg's effective capability, matching the real per-leg build.
+_JUDGE_EFFECTIVE_TOOLS = effective_tools_for(JUDGE_DEF)
 
 
 
@@ -339,7 +347,9 @@ def test_judge_bash_grants_exactly_cat_sql(tmp_path):
     denial, not a sandbox fault."""
     scope = RunScope(add_dirs=(tmp_path / "gr",))
     (tmp_path / "gr").mkdir()
-    policy = compile_policy_for(JUDGE_DEF, tmp_path, scope=scope, defender_dir=tmp_path)
+    policy = compile_policy_for(
+        JUDGE_DEF, tmp_path, scope=scope, defender_dir=tmp_path, tools=_JUDGE_EFFECTIVE_TOOLS,
+    )
     assert {g.program for g in policy.bash_allow} == {"cat", SQL_SHIM}
 
     # The per-invocation carriage cannot even EXPRESS a ticket pin any more.
@@ -396,7 +406,7 @@ def test_benign_store_routes_census(tmp_path):
     assert _store_calls(rec), "positive control: the typed route is live"
 
     scope = RunScope(add_dirs=(run.run_dir / "gather_raw",))
-    policy = compile_policy_for(JUDGE_DEF, run.lrd, scope=scope)
+    policy = compile_policy_for(JUDGE_DEF, run.lrd, scope=scope, tools=_JUDGE_EFFECTIVE_TOOLS)
     assert {g.program for g in policy.bash_allow} == {"cat", SQL_SHIM}
 
 
@@ -447,6 +457,8 @@ def test_operator_policy_cli_after_demo_scope_removal(tmp_path):
     src = Path(policy_cli.__file__).read_text(encoding="utf-8")
     assert "case_ticket" not in src, "the wrong-script demo path is still referenced"
 
-    policy = compile_policy_for(JUDGE_DEF, tmp_path, scope=scope, defender_dir=tmp_path)
+    policy = compile_policy_for(
+        JUDGE_DEF, tmp_path, scope=scope, defender_dir=tmp_path, tools=_JUDGE_EFFECTIVE_TOOLS,
+    )
     assert {g.program for g in policy.bash_allow} == {"cat", SQL_SHIM}
     assert BIT not in src                        # N6: no typed-tool display grew here

@@ -87,6 +87,7 @@ from __future__ import annotations
 
 import os
 import re
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -118,6 +119,7 @@ from defender.runtime.agent_definition import (  # noqa: E402
     bind,
     compile_policy,
     compile_policy_for,
+    effective_tools_for,
     read_allow_of,
     resolve_roots,
 )
@@ -133,6 +135,13 @@ from defender.agents import (  # noqa: E402
 )
 
 _DEFENDER = PATHS.defender_dir
+
+# #632's §7 R7 grant/capability agreement: JUDGE_DEF's static `closed_tickets` bit stays False
+# (only the per-leg replace() in _run_judge_pydantic turns it on, together with the effective
+# grant, d73), so a bare `bind(JUDGE_DEF, ...)` always disagrees against the definition's own
+# non-empty verb_grant. These probes are about the bash lane/deps shape, not the verb grant, so
+# they bind the benign leg's effective shape — matching the real per-leg build.
+_JUDGE_BENIGN_DEF = replace(JUDGE_DEF, tools=effective_tools_for(JUDGE_DEF))
 
 # `decide_write` requires both run roots since #681 (its former `run_dir=None` default silently
 # skipped the #629 output-structure gate). Every write probe below threads them; the shape
@@ -252,7 +261,7 @@ def test_d1_judge_via_bind(tmp_path):
     cmp = tmp_path / "cmp"
     cmp.mkdir()
     tcli = tmp_path / "ticket_adapter.py"
-    jdeps = bind(JUDGE_DEF, run, scope=RunScope(add_dirs=(cmp,)))
+    jdeps = bind(_JUDGE_BENIGN_DEF, run, scope=RunScope(add_dirs=(cmp,)))
     assert isinstance(jdeps, JudgeDeps)
     jpol = jdeps.policy
     assert jpol.read_roots == (cmp,)
@@ -520,7 +529,7 @@ def test_d2_deps_class_maps_every_bindable_role(tmp_path):
     cases = [
         (bind(MAIN_DEF, tmp_path), AgentDeps),
         (bind(GATHER_DEF, tmp_path), GatherDeps),
-        (bind(JUDGE_DEF, tmp_path), JudgeDeps),
+        (bind(_JUDGE_BENIGN_DEF, tmp_path), JudgeDeps),
         (bind(ACTOR_DEF, tmp_path, scope=RunScope(read_confine=(tmp_path / "env",))), ActorDeps),
         (bind(ORACLE_DEF, tmp_path), OracleDeps),
         (bind(VERIFY_DEF, tmp_path, defender_dir=tmp_path / "vwt" / "defender"), VerifierDeps),
@@ -768,7 +777,7 @@ def test_d5_judge_actor_bash_lane_preserved(tmp_path):
     # GREEN@HEAD: decide_bash for judge/actor is identical after #551/#575.
     run = tmp_path / "run"
     cmp = tmp_path / "cmp"
-    jpol = bind(JUDGE_DEF, run, scope=RunScope(add_dirs=(cmp,))).policy
+    jpol = bind(_JUDGE_BENIGN_DEF, run, scope=RunScope(add_dirs=(cmp,))).policy
     assert permission.decide_bash(f"cat {cmp}/a.json", policy=jpol, run_dir=run, defender_dir=_DEFENDER).allow
     assert not permission.decide_bash("cat /etc/shadow", policy=jpol, run_dir=run, defender_dir=_DEFENDER).allow
 

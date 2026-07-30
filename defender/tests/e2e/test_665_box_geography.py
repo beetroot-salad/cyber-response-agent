@@ -499,8 +499,16 @@ def test_sandboxed_is_derived_not_settable(tmp_path):
 # The return contract (demand #0 / F0 / F12 / SB-return → R9)
 # ======================================================================= #
 def _judge_deps(run_dir: Path, box):
-    """Judge deps (a learning role) through the REAL bind, carrying an injected box."""
-    return bind(JUDGE_DEF, run_dir, salt=SALT, defender_dir=DEFENDER, box=box)
+    """Judge deps (a learning role) through the REAL bind, carrying an injected box.
+
+    Binds the benign leg's effective ToolSet (#632, §7 R7): JUDGE_DEF's static
+    `closed_tickets` bit stays False (only the per-leg replace() in _run_judge_pydantic turns
+    it on, together with the effective grant, d73), so a bare bind() always disagrees with
+    the definition's own non-empty verb_grant. This probe is about the box transport, not the
+    verb grant."""
+    from dataclasses import replace
+    benign = replace(JUDGE_DEF, tools=replace(JUDGE_DEF.tools, closed_tickets=True))
+    return bind(benign, run_dir, salt=SALT, defender_dir=DEFENDER, box=box)
 
 
 def test_boxed_lane_returns_command_output(tmp_path):

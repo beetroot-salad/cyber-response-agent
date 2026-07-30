@@ -350,11 +350,18 @@ def test_judge_cat_operand_reaches_defender_dir_beyond_its_declared_gate_roots(t
     (run_dir, defender_dir, *read_roots), so a path under defender_dir is WITHIN what the gate
     intends the judge to read — the ro infra mount and the judge gate root coincide by design
     (M3b overlap is ordinary), not by accidental mount width."""
+    from dataclasses import replace
+
     from defender.learning.pipeline.judge.engine_pydantic import JUDGE_DEF
+    from defender.runtime.agent_definition import ToolSet
 
     run_dir = tmp_path / "lrd"
     run_dir.mkdir()
-    policy = compile_policy_for(JUDGE_DEF, run_dir, defender_dir=DEFENDER)
+    # Binds the benign leg's effective ToolSet (#632, §7 R7) — see test_665_box_geography.py's
+    # _judge_deps for the same reasoning; this probe is about the cat gate scope, not the
+    # verb grant.
+    benign = replace(JUDGE_DEF, tools=ToolSet(read=True, bash=True, closed_tickets=True))
+    policy = compile_policy_for(benign, run_dir, defender_dir=DEFENDER)
     decision = decide_bash(f"cat {DEFENDER / 'SKILL.md'}", policy=policy, run_dir=run_dir,
                            defender_dir=DEFENDER, cwd_anchor=run_dir)
     assert decision.allow, "defender_dir is one of the judge's declared cat gate roots, not beyond it"

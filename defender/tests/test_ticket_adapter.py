@@ -54,7 +54,7 @@ def _stub_config(monkeypatch):
 def test_require_closed_passes_on_closed(monkeypatch, ctx):
     monkeypatch.setattr(  # lint-monkeypatch: ok — transport has no in-process DI seam (this file's established pattern)
         transport, "http_get_obj",
-                        lambda c, cfg, p, params=None: {"key": "c", "status": "closed",
+                        lambda c, cfg, p, system=None, params=None: {"key": "c", "status": "closed",
                                                         "resolution": "benign — r"})
     payload = ticket_adapter.get_ticket(ctx, key="c", require_closed=True)
     assert payload["status"] == "closed"
@@ -64,7 +64,7 @@ def test_require_closed_rejects_open(monkeypatch, ctx):
     # #338/#611: the refusal of a non-closed ticket is a query error — now raised as UpstreamFault
     # (the capture layer maps it to exit 1), not SystemExit(1). The answer-key guard stands.
     monkeypatch.setattr(transport, "http_get_obj",  # lint-monkeypatch: ok — transport has no in-process DI seam (this file's established pattern)
-                        lambda c, cfg, p, params=None: {"key": "c", "status": "open"})
+                        lambda c, cfg, p, system=None, params=None: {"key": "c", "status": "open"})
     with pytest.raises(UpstreamFault):
         ticket_adapter.get_ticket(ctx, key="c", require_closed=True)
 
@@ -72,7 +72,7 @@ def test_require_closed_rejects_open(monkeypatch, ctx):
 def test_no_flag_allows_any_status(monkeypatch, ctx):
     # Without require_closed the adapter is unchanged (open tickets still fetch).
     monkeypatch.setattr(transport, "http_get_obj",  # lint-monkeypatch: ok — transport has no in-process DI seam (this file's established pattern)
-                        lambda c, cfg, p, params=None: {"key": "c", "status": "open"})
+                        lambda c, cfg, p, system=None, params=None: {"key": "c", "status": "open"})
     payload = ticket_adapter.get_ticket(ctx, key="c", require_closed=False)
     assert payload["status"] == "open"
 
@@ -82,7 +82,7 @@ def test_list_require_closed_pins_status_over_widening(monkeypatch, ctx):
     # list — the scoped read can't reach the in-flight OPEN ticket.
     seen = {}
 
-    def fake_get(c, cfg, path, params=None):
+    def fake_get(c, cfg, path, system=None, params=None):
         seen["params"] = params
         return {"tickets": [], "total": 0}
 
@@ -94,7 +94,7 @@ def test_list_require_closed_pins_status_over_widening(monkeypatch, ctx):
 def test_list_no_flag_passes_status_through(monkeypatch, ctx):
     seen = {}
 
-    def fake_get(c, cfg, path, params=None):
+    def fake_get(c, cfg, path, system=None, params=None):
         seen["params"] = params
         return {"tickets": [], "total": 0}
 
@@ -194,7 +194,7 @@ def test_get_ticket_percent_encodes_the_key_into_the_path(monkeypatch, ctx, key,
     whether or not a consumer screens."""
     seen = {}
 
-    def fake_get_obj(c, cfg, path, params=None):
+    def fake_get_obj(c, cfg, path, system=None, params=None):
         seen["path"] = path
         return {"key": key, "status": "closed"}
 
@@ -218,7 +218,7 @@ def test_reader_fetches_the_key_the_writer_minted(monkeypatch, ctx):
 
     seen = {}
 
-    def fake_get_obj(c, cfg, path, params=None):
+    def fake_get_obj(c, cfg, path, system=None, params=None):
         seen["path"] = path
         return {"key": "k", "status": "closed"}
 
@@ -256,7 +256,7 @@ def test_list_filters_ride_urlencoded_not_raw(monkeypatch, ctx, label, q):
     metacharacter survives into the built URL as a delimiter."""
     seen = {}
 
-    def fake_request(c, cfg, url, method="GET", body=None):
+    def fake_request(c, cfg, url, system=None, method="GET", body=None):
         seen["url"] = url
         return {"tickets": [], "total": 0}
 

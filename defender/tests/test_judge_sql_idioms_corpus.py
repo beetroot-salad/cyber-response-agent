@@ -288,11 +288,12 @@ def test_every_command_the_prompt_teaches_passes_the_judges_own_gate(prompt):
     pytest.importorskip("pydantic_ai")
     from defender.runtime import permission
     from defender.learning.pipeline.judge.engine_pydantic import JUDGE_DEF
-    from defender.runtime.agent_definition import RunScope, compile_policy_for
+    from defender.runtime.agent_definition import RunScope, compile_policy_for, effective_tools_for
 
     root = Path("/abs/path")
     policy = compile_policy_for(
         JUDGE_DEF, Path("/run"), scope=RunScope(add_dirs=(root,)), defender_dir=_DEFENDER,
+        tools=effective_tools_for(JUDGE_DEF),
     )
     commands = _PROMPT_CMD_RE.findall((_JUDGE / prompt).read_text())
     assert commands, "the prompt shows no defender-sql command — did the example shape change?"
