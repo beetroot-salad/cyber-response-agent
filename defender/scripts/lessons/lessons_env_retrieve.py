@@ -26,6 +26,37 @@ import argparse
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_CORPUS = REPO_ROOT / "defender" / "lessons-environment"
+CORPUS_NAME = DEFAULT_CORPUS.name
+
+
+def _resolve_corpus(raw: str | None, ap: argparse.ArgumentParser) -> Path:
+    """`--corpus` is a RELOCATION seam, not a corpus selector — it exists so the
+    forward-check can point this walk at a worktree's copy of the environment corpus and
+    so tests can drive it over a fixture. It is not a route to a *different* corpus.
+
+    That distinction is load-bearing because this script is a PINNED grant for the actor
+    (`learning/pipeline/actor_engine.py`), and a pinned grant is argv-blind by design
+    (`docs/runtime-gates.md`): the gate admits `python3 <this script> <anything>` and never
+    inspects the operands, so containment is entirely this function's job. Without it the
+    malicious actor — the one agent the gray-box design deliberately blinds to the
+    defender's playbook — could pass `--corpus defender/lessons` and enumerate the corpus
+    `decide_read` denies it. The sibling `defender-lessons --show` already holds this line
+    with a post-`resolve()` containment check; this is the same control.
+
+    The rule is the LEAF NAME rather than one absolute path, because the legitimate
+    relocations (worktree, fixture) change the root but never the corpus. The actor cannot
+    write, so within its reachable tree a directory named `lessons-environment` IS the
+    environment corpus; resolving first means a symlink or `..` cannot dress another corpus
+    up in that name."""
+    if raw is None:
+        return DEFAULT_CORPUS
+    corpus = Path(raw).resolve()
+    if corpus.name != CORPUS_NAME:
+        ap.error(
+            f"--corpus must name a {CORPUS_NAME!r} directory (got {corpus.name!r}); this "
+            "script retrieves environment lessons only"
+        )
+    return corpus
 
 
 def _parse_case_entities(value: str | None) -> list[tuple[str, str]]:
@@ -134,10 +165,10 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--alert-rule-ids", help="Alert rule id(s) for the case — the retrieval anchor; comma-separated, OR within the list")
     ap.add_argument("--subject", help="Exact subject match (single value — subject is the equivalence key / fold key)")
     ap.add_argument("--include-stale", action="store_true", help="Include lessons with status: stale (author-only; the runtime actor must never see stale claims)")
-    ap.add_argument("--corpus", help="Corpus directory (default: defender/lessons-environment)")
+    ap.add_argument("--corpus", help=f"Relocated {CORPUS_NAME} directory (worktree or fixture); the leaf name must still be {CORPUS_NAME}. Default: defender/{CORPUS_NAME}")
     ns = ap.parse_args(argv[1:])
 
-    corpus = Path(ns.corpus) if ns.corpus else DEFAULT_CORPUS
+    corpus = _resolve_corpus(ns.corpus, ap)
     case_entities = _parse_case_entities(ns.entities)
     entities_provided = ns.entities is not None
     want_rule_ids = csv_set(ns.alert_rule_ids)

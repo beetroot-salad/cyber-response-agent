@@ -39,7 +39,13 @@ hooks). The gates:
   imports no `learning/` private — the registry lives at `defender/agents.py`). Two
   grants are `pins_path` exemptions, where the operand IS the program and the pattern is
   the containment: the actor's pinned `python3 <script>` and the lead author's / curator's
-  `rm <path>`. (The benign judge's closed-ticket read was a third such exemption; #672
+  `rm <path>`. Those two admit arbitrary trailing argv by design, so **the pinned script
+  is the containment for everything after its own name** — a corpus-selecting flag on a
+  pinned script is a hole in the gate unless the script closes it. `lessons_env_retrieve`
+  (the actor's pinned script) now closes its `--corpus`, checking the operand *after*
+  `resolve()` against the corpus it serves (#776); `defender-lessons --show`, a shim grant
+  rather than a pins_path one, has always held the same line the same way.
+  (The benign judge's closed-ticket read was a third such exemption; #672
   moved it off bash into two typed host-side tools, so no ticket shape rides any bash lane
   now.) Containment is **positive enumeration**: main cannot
   read `gather_raw` because that shape is not in its list — there is no `RAW_MARKER`
