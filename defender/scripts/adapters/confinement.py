@@ -159,6 +159,17 @@ class TransportCapture:
         self.requests.append(CapturedRequest(system=system, url=url, method=method))
 
 
+def guard_outbound(ctx: Any, system: str, url: str, *, method: str) -> None:
+    """Confine, then record — the ONE thing every outbound HTTP path in the tree does before
+    it opens a connection. The two transports that carry every request (the shared stub
+    transport and elastic's own helper) call this rather than each restating the pair, so a
+    third transport cannot half-adopt the seam."""
+    confine_read_endpoint(system, url, method=method, verb_class="r")
+    capture = getattr(ctx, "capture", None)
+    if capture is not None:
+        capture.record(system=system, url=url, method=method)
+
+
 # ── the elastic index (D3) confinement ───────────────────────────────────────────────────
 
 
@@ -240,5 +251,6 @@ __all__ = [
     "confine_host_state_call",
     "confine_index",
     "confine_read_endpoint",
+    "guard_outbound",
     "normalize_endpoint",
 ]

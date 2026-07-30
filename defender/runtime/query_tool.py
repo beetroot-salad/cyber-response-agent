@@ -157,14 +157,15 @@ class QueryCapture(AbstractCapability[Any]):
         self._registry = registry
         self._role = role
         self._seq_lock = asyncio.Lock()
-        self._denial_logger: Any = None
 
     def _denial_logger_for(self, run_dir: Any) -> Any:
+        # Process-wide per run dir, NOT per capability: one QueryCapture is built per gather
+        # lead against one shared run dir, and RequestLogger refuses a second open of a path
+        # it already holds — a per-capability logger makes the run's SECOND denial raise
+        # FileExistsError out of the tool wrapper instead of returning the refusal.
         from . import observe
 
-        if self._denial_logger is None:
-            self._denial_logger = observe.RequestLogger(run_dir / observe.POLICY_DENIALS)
-        return self._denial_logger
+        return observe.denial_logger(run_dir)
 
     def _decide_guarded(self, system: str, verb: str) -> tuple[Any, str | None]:
         """THE grant decision, guarded against a broken adapter import — mirroring the old
@@ -207,14 +208,13 @@ class QueryCapture(AbstractCapability[Any]):
             )
             raise
 
-    async def _authorize(
-        self, deps, system: str, verb: str, params: dict, model_query_id: Any, self_key: str,
+    async def _grant_check(
+        self, deps, system: str, verb: str, params: dict,
     ) -> tuple[Any, str | None]:
-        """Everything ahead of execution: THE GRANT CHECK first (§7 R3/R23, reversed at phase
-        F — a denied call always produces its denial record and never an evidence row,
-        whatever else is wrong with it), then the traversal screen, param validation and the
-        self-ticket screen. Returns `(decision, early_result)` — `early_result` is set when the
-        caller must return/raise without ever reaching execution."""
+        """THE GRANT CHECK, ahead of everything else (§7 R3/R23, reversed at phase F — a denied
+        call always produces its denial record and never an evidence row, whatever else is
+        wrong with it). Returns `(decision, early_result)`; `early_result` is set when the
+        caller must return without ever reaching execution."""
         decision, load_error = self._decide_guarded(system, verb)
         if load_error is not None:
             row, text = await self._record(
@@ -241,6 +241,15 @@ class QueryCapture(AbstractCapability[Any]):
             )
             raise ModelRetry(decision.refusal or f"unresolvable: {system}.{verb}")
 
+        return decision, None
+
+    async def _screen(
+        self, deps, decision: Any, system: str, verb: str, params: dict,
+        model_query_id: Any, self_key: str,
+    ) -> None:
+        """The per-call screens BELOW the grant and the breaker: the traversal screen, param
+        validation, and the self-ticket screen. Raises `ModelRetry` (after its usage row) when
+        one of them refuses."""
         reason = self._traversal_reject(model_query_id)
         if reason is None:
             reason = validate_params(decision.fn, params)
@@ -255,8 +264,6 @@ class QueryCapture(AbstractCapability[Any]):
             )
             raise ModelRetry(reason)
 
-        return decision, None
-
     async def wrap_tool_execute(self, ctx, *, call, args, handler, **_):  # noqa: ANN001 — **_ absorbs the framework's tool_def
         if call.tool_name != TOOL_NAME:
             return await handler(args)
@@ -268,15 +275,20 @@ class QueryCapture(AbstractCapability[Any]):
         model_query_id = args.get("query_id")
         self_key = self_case_key(deps)
 
-        _decision, early_result = await self._authorize(
-            deps, system, verb, params, model_query_id, self_key,
-        )
+        decision, early_result = await self._grant_check(deps, system, verb, params)
         if early_result is not None:
             return early_result
 
+        # The breaker sits between the grant and the screens, where it sat before the grant
+        # landed: a system already known down answers "down" rather than a param complaint
+        # plus a usage row for a call that was never going to reach it.
         tripped = _tripped_message(deps, system)
         if tripped is not None:
             return tripped
+
+        await self._screen(
+            deps, decision, system, verb, params, model_query_id, self_key,
+        )
 
         query_id = resolve_query_id(system, verb, _as_str(model_query_id) or None)
 

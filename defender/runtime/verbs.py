@@ -301,10 +301,11 @@ class ModuleVerbRegistry(VerbRegistry):
     def __init__(self, adapters_dir: Path, grant: VerbGrant):
         super().__init__(grant)
         self.adapters_dir = Path(adapters_dir)
-        offenders = [
-            (s, v) for s, v, _ in grant.entries
-            if v not in declared_verb_names(self.adapters_dir, s)
-        ]
+        # One cold read+parse per SYSTEM, not per grant entry: `declared_verb_names` re-reads
+        # and re-parses the adapter every call, and the shipped gather grant names 28 entries
+        # across 7 systems.
+        declared = {s: declared_verb_names(self.adapters_dir, s) for s, _, _ in grant.entries}
+        offenders = [(s, v) for s, v, _ in grant.entries if v not in declared[s]]
         if offenders:
             named = ", ".join(f"{s}.{v}" for s, v in offenders)
             raise GrantError(

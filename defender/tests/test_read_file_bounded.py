@@ -56,7 +56,9 @@ def _judge_policy(tmp: Path) -> AgentPolicy:
     # so a bare bind() always disagrees with the definition's own non-empty verb_grant. This
     # probe is about the bash lane, so it binds the benign leg's effective capability.
     from dataclasses import replace
-    benign = replace(JUDGE_DEF, tools=replace(JUDGE_DEF.tools, closed_tickets=True))
+
+    from defender.runtime.agent_definition import effective_tools_for
+    benign = replace(JUDGE_DEF, tools=effective_tools_for(JUDGE_DEF))
     return bind(benign, tmp / "run", scope=RunScope(add_dirs=())).policy
 
 

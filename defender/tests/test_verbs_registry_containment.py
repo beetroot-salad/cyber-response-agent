@@ -77,7 +77,13 @@ def test_a_broken_adapter_module_does_not_kill_the_catalog(tmp_path):
             f"---\nname: {name}\ndescription: the {name} system\n---\n", encoding="utf-8",
         )
 
-    grant = VerbGrant(role="gather", entries=(("good", "health-check", "r"),))
+    # The grant must REACH `broken` (#632): the catalog skips a system the grant withholds
+    # BEFORE it ever probes the import, so a grant naming only `good` would satisfy the
+    # assertion below without the import-failure guard existing at all.
+    grant = VerbGrant(
+        role="gather",
+        entries=(("good", "health-check", "r"), ("broken", "health-check", "r")),
+    )
     catalog = descriptor_catalog(skills, adapters, grant)
     assert catalog is not None, "one broken adapter emptied the whole catalog"
     assert "`good`" in catalog

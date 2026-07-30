@@ -72,9 +72,9 @@ from defender.learning.core import config  # noqa: E402
 from defender.runtime import permission, tools  # noqa: E402
 from defender.runtime.agent_definition import (  # noqa: E402
     RunScope,
-    ToolSet,
     bind,
     compile_policy_for,
+    effective_tools_for,
 )
 from defender.runtime.permission import (  # noqa: E402
     OPENS_NOTHING,
@@ -141,7 +141,7 @@ def _judge(env):
     cmp_dir = env.tmp / "cmp"
     cmp_dir.mkdir(exist_ok=True)
     scope = RunScope(add_dirs=(cmp_dir,))
-    effective = ToolSet(read=True, bash=True, closed_tickets=True)
+    effective = effective_tools_for(JUDGE_DEF)
     return compile_policy_for(JUDGE_DEF, env.run, scope=scope, defender_dir=env.dfn, tools=effective)
 
 

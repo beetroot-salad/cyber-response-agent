@@ -28,8 +28,8 @@ from defender.learning.tickets import ticket_seeds  # noqa: E402
 from defender.runtime.agent_definition import (  # noqa: E402
     ResolvedRoots,
     RunScope,
-    ToolSet,
     compile_policy_for,
+    effective_tools_for,
 )
 from defender.runtime.agent_role import AgentRole  # noqa: E402
 from defender.runtime.permission.command_shape import SQL_SHIM  # noqa: E402
@@ -61,7 +61,7 @@ pytestmark = pytest.mark.e2e
 #: effective grant, d73), so a bare compile against the definition's own non-empty verb_grant
 #: always disagrees. These tests are all about the BASH lane's shape, so they state the benign
 #: leg's effective capability, matching the real per-leg build.
-_JUDGE_EFFECTIVE_TOOLS = ToolSet(read=True, bash=True, closed_tickets=True)
+_JUDGE_EFFECTIVE_TOOLS = effective_tools_for(JUDGE_DEF)
 
 
 

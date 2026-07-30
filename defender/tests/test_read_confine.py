@@ -46,8 +46,8 @@ from defender.learning.core import config  # noqa: E402
 from defender.runtime import permission  # noqa: E402
 from defender.runtime.agent_definition import (  # noqa: E402
     RunScope,
-    ToolSet,
     compile_policy_for,
+    effective_tools_for,
     read_allow_of,
 )
 from defender.runtime.permission import AgentPolicy  # noqa: E402
@@ -243,7 +243,7 @@ def _judge_gate(cmd, run_dir, *, read_roots=()):
     the verb grant, so it states the effective ToolSet the real benign build actually uses."""
     pol = compile_policy_for(
         JUDGE_DEF, run_dir, scope=RunScope(add_dirs=tuple(read_roots)), defender_dir=_DEFENDER,
-        tools=ToolSet(read=True, bash=True, closed_tickets=True),
+        tools=effective_tools_for(JUDGE_DEF),
     )
     return permission.decide_bash(cmd, policy=pol, run_dir=run_dir, defender_dir=_DEFENDER)
 

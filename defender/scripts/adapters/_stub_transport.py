@@ -41,7 +41,7 @@ from pathlib import Path
 from typing import Any
 
 from defender.runtime.verbs import VerbContext
-from defender.scripts.adapters.confinement import confine_read_endpoint
+from defender.scripts.adapters.confinement import guard_outbound
 from defender.scripts.adapters.faults import (
     USAGE_EXIT_CODE,
     ConfigFault,
@@ -352,10 +352,7 @@ def _request(
     # "one transport function carries every outbound request in the tree"), so wiring the
     # read-endpoint allowlist here, not in each adapter, is what makes the seam actually cover
     # all six systems rather than just elastic's own private transport helper.
-    confine_read_endpoint(system, url, method=method, verb_class="r")
-    capture = getattr(ctx, "capture", None)
-    if capture is not None:
-        capture.record(system=system, url=url, method=method)
+    guard_outbound(ctx, system, url, method=method)
 
     bastion = config["BASTION_HOST"]
     timeout = int(config.get("TIMEOUT_SEC", "10"))

@@ -451,24 +451,18 @@ def _screen_listing(
     )
 
 
-class _DenialAuditor:
-    """One lazily-opened policy-denial logger per built stage — the fixed `POLICY_DENIALS`
-    stream under the JUDGE's own run dir (§7 R1), never eagerly created (a run with nothing
-    denied must leave no such file)."""
-
-    def __init__(self) -> None:
-        self._logger: observe.RequestLogger | None = None
-
-    def log(self, run_dir: Path, *, verb: str, params: dict) -> None:
-        if self._logger is None:
-            self._logger = observe.RequestLogger(run_dir / observe.POLICY_DENIALS)
-        self._logger.log_policy_denial(
-            role="judge", system=SYSTEM, verb=verb, call_id=f"{SYSTEM}.{verb}", params=params,
-        )
+def _log_denial(run_dir: Path, *, verb: str, params: dict) -> None:
+    """The fixed `POLICY_DENIALS` stream under the JUDGE's own run dir (§7 R1), opened lazily
+    (a run with nothing denied must leave no such file) and owned per RUN DIR rather than per
+    built stage — `RequestLogger` refuses a second open of a path it already holds, so a
+    per-stage writer turns a second stage's first denial into an uncaught `FileExistsError`."""
+    observe.denial_logger(run_dir).log_policy_denial(
+        role="judge", system=SYSTEM, verb=verb, call_id=f"{SYSTEM}.{verb}", params=params,
+    )
 
 
 async def _grant_gate(
-    deps: AgentDeps, verbs: Any, denials: _DenialAuditor, lock: asyncio.Lock, verb: str,
+    deps: AgentDeps, verbs: Any, lock: asyncio.Lock, verb: str,
 ) -> str | None:
     """THE grant decision, ahead of every one of the judge site's own screens (key grammar,
     key schema, self-case-key) — exactly the runtime's ordering, mirrored at the second
@@ -489,7 +483,7 @@ async def _grant_gate(
             deps, lock, verb, {}, None, _fault_exit(e), str(e) or type(e).__name__,
         )
     if decision.outcome == DENIED:
-        denials.log(deps.run_dir, verb=verb, params={})
+        _log_denial(deps.run_dir, verb=verb, params={})
         return _format_bash_result(
             DEFAULT_FAULT_EXIT, "", _wrap(decision.refusal or "", "untrusted", deps.salt), "",
         )
@@ -616,7 +610,6 @@ def register_closed_ticket_tools(agent: Any, verbs: Any) -> None:
     # One lock per built agent: the two tools share the capture sink (seq counts rows), so a
     # one-turn parallel pair must not race the seq→write window (the query tool's `_seq_lock`).
     seq_lock = asyncio.Lock()
-    denials = _DenialAuditor()
 
     @agent.tool
     async def list_closed_tickets(
@@ -628,7 +621,7 @@ def register_closed_ticket_tools(agent: Any, verbs: Any) -> None:
         get_closed_ticket. Only cases already closed BEFORE the alert you are scoring was
         opened are returned: the in-flight ticket is never returned, and neither is anything
         written while this case was live."""
-        refusal = await _grant_gate(ctx.deps, verbs, denials, seq_lock, "list-tickets")
+        refusal = await _grant_gate(ctx.deps, verbs, seq_lock, "list-tickets")
         if refusal is not None:
             return refusal
         return await _list_body(ctx.deps, seq_lock, verbs, label, q)
@@ -640,7 +633,7 @@ def register_closed_ticket_tools(agent: Any, verbs: Any) -> None:
         in-flight ticket for the alert you are scoring, nor a ticket last written after that
         alert was opened. A cited seed the store can't confirm,
         or whose grounded conditions these actuals contradict, does not survive on that basis."""
-        refusal = await _grant_gate(ctx.deps, verbs, denials, seq_lock, "get-ticket")
+        refusal = await _grant_gate(ctx.deps, verbs, seq_lock, "get-ticket")
         if refusal is not None:
             return refusal
         return await _get_body(ctx.deps, seq_lock, verbs, key)

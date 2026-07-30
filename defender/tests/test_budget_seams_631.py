@@ -199,6 +199,7 @@ def test_budget_kill_is_not_control_flow(tmp_path):
         asyncio.run(runtime_tools._run_gather(
             deps, killing_factory, 40,
             GatherRequest("l-001", "elastic", "goal", ("what",)),
+            GATHER_DEF.verb_grant,
         ))
     assert seen_gather_deps[0].budget_started_monotonic == deps.budget_started_monotonic
 
@@ -510,7 +511,10 @@ def _registered_names(defn) -> set[str]:
     )
     if defn is MAIN_DEF:
         from defender.runtime.tools import register_gather_tool
-        register_gather_tool(agent, lambda agent_id: agent, driver.GATHER_REQUEST_LIMIT)
+        register_gather_tool(
+            agent, lambda agent_id: agent, driver.GATHER_REQUEST_LIMIT,
+            driver.GATHER_DEF.verb_grant,
+        )
     return set(agent._function_toolset.tools)
 
 

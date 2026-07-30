@@ -143,7 +143,10 @@ def _bare_offenders(
 ) -> set[tuple[str, str]]:
     all_names = {n for names in declared_by_system.values() for n in names}
     pairs: set[tuple[str, str]] = set()
-    for name in sorted(all_names, key=len, reverse=True):
+    for name in all_names:
+        # The word-boundary guard already stops a short name matching inside a longer one, so
+        # the order names are tried in carries nothing; and every match of ONE name attributes
+        # to the same pair(s), so the first one outside an excluded span settles it.
         pattern = re.compile(rf"(?<![\w-]){re.escape(name)}(?![\w-])")
         for m in pattern.finditer(text):
             span = m.span()
@@ -151,10 +154,11 @@ def _bare_offenders(
                 continue
             if owning_system is not None and name in declared_by_system.get(owning_system, ()):
                 pairs.add((owning_system, name))
-                continue
+                break
             for system, names in declared_by_system.items():
                 if name in names:
                     pairs.add((system, name))
+            break
     return pairs
 
 

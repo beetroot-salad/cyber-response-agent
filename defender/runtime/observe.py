@@ -43,7 +43,9 @@ def _normalize_for_digest(value: Any) -> Any:
     if isinstance(value, float):
         return value if math.isfinite(value) else f"<non-finite:{value!r}>"
     if isinstance(value, dict):
-        return {str(k): _normalize_for_digest(v) for k, v in sorted(value.items(), key=lambda kv: str(kv[0]))}
+        # No pre-sort: `_params_digest` dumps with sort_keys=True, which orders the stringified
+        # keys itself — sorting here as well only pays for the same ordering twice.
+        return {str(k): _normalize_for_digest(v) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
         return [_normalize_for_digest(v) for v in value]
     if value is None or isinstance(value, (str, int, bool)):
@@ -207,6 +209,24 @@ class RequestLogger:
         with contextlib.suppress(Exception):
             self._fh.close()
 
+
+#: The ONE policy-denial writer per run dir, shared by every denial site in this process.
+#: `RequestLogger` refuses a second open of a path it already holds (`_ACTIVE_PATHS`), and the
+#: runtime builds a separate `QueryCapture` for EVERY gather lead against one shared run dir —
+#: so a per-capability logger turns the second denied call of a run into an uncaught
+#: `FileExistsError` out of the tool wrapper instead of a refusal. Still lazy: nothing is
+#: opened until a denial actually happens, so a clean run leaves no such file.
+_DENIAL_LOGGERS: dict[str, RequestLogger] = {}
+
+
+def denial_logger(run_dir: Path) -> RequestLogger:
+    path = Path(run_dir) / POLICY_DENIALS
+    key = str(path.resolve())
+    logger = _DENIAL_LOGGERS.get(key)
+    if logger is None:
+        logger = RequestLogger(path)
+        _DENIAL_LOGGERS[key] = logger
+    return logger
 
 
 def _tool_args(value: Any) -> dict:

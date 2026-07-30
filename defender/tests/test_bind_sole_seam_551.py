@@ -119,6 +119,7 @@ from defender.runtime.agent_definition import (  # noqa: E402
     bind,
     compile_policy,
     compile_policy_for,
+    effective_tools_for,
     read_allow_of,
     resolve_roots,
 )
@@ -140,7 +141,7 @@ _DEFENDER = PATHS.defender_dir
 # grant, d73), so a bare `bind(JUDGE_DEF, ...)` always disagrees against the definition's own
 # non-empty verb_grant. These probes are about the bash lane/deps shape, not the verb grant, so
 # they bind the benign leg's effective shape — matching the real per-leg build.
-_JUDGE_BENIGN_DEF = replace(JUDGE_DEF, tools=replace(JUDGE_DEF.tools, closed_tickets=True))
+_JUDGE_BENIGN_DEF = replace(JUDGE_DEF, tools=effective_tools_for(JUDGE_DEF))
 
 # `decide_write` requires both run roots since #681 (its former `run_dir=None` default silently
 # skipped the #629 output-structure gate). Every write probe below threads them; the shape
