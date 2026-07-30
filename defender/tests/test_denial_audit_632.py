@@ -26,6 +26,7 @@ Two authoring hazards this file is written around rather than into:
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -70,6 +71,27 @@ def _gather_registry(rec: VerbRecorder) -> ScopedFakeVerbs:
         recording_table(rec, {"elastic": ("query", "esql")}),
         grant_of("gather", (GRANTED_PAIR,)),
     )
+
+
+_COMMENT = re.compile(r"<!--.*?-->", re.S)
+_SCRIPT = re.compile(r"<script\b.*?</script\s*>", re.S | re.I)
+_DOC = re.compile(r"<html\b.*?</html\s*>", re.S | re.I)
+
+
+def _visible_html(html: str) -> str:
+    """The part of a rendered page an analyst can actually see: inside the document element,
+    with comments and script bodies removed.
+
+    Written as a filter rather than as a substring assertion because the two are not the same
+    claim. `"esql" in html` is satisfied by a denial rendered as a comment, or appended after
+    `</html>`, or parked in a script's data — all of which leave the analyst's page blank of
+    the thing this demand exists to put on it, and all of which a file-level grep calls a
+    pass. A page with no document element at all is treated as invisible, because a renderer
+    that stopped emitting one is exactly the regression this would otherwise hide."""
+    found = _DOC.search(html)
+    if found is None:
+        return ""
+    return _SCRIPT.sub(" ", _COMMENT.sub(" ", found.group(0)))
 
 
 def _denials(run) -> list[dict]:
@@ -177,6 +199,15 @@ def test_the_denial_record_is_a_bounded_normalized_projection_of_the_call(tmp_pa
     denial into an infrastructure fault. The record's purpose is the policy fact, not the
     payload.
 
+    THE DIGEST IS OVER THE PARAMETER VALUES, not over the parameter names. A digest of the
+    sorted key set makes two denials that differ only in what was asked for byte-identical in
+    the audit stream — the analyst can see that gather was refused `esql` a hundred times and
+    never that ninety-nine of them probed one index and one probed another, which is the only
+    reason the column exists. It also kills the non-finite guard below by making it dead code:
+    if no value is ever serialized, no value can ever arrive as a bare `NaN`. The three
+    drives below are the discrimination: same keys and different values must differ, same
+    values must agree, and the hostile blob must still normalize.
+
     The projection also carries a load this demand did not originally have. Once the grant
     check runs AHEAD of the traversal screen, normalization is the only thing standing
     between a hostile model-authored call id and the durable record — the job R23's ordering
@@ -196,9 +227,16 @@ def test_the_denial_record_is_a_bounded_normalized_projection_of_the_call(tmp_pa
                              call_id="elastic.ad-hoc", params=hostile)
     logger.log_policy_denial(role="gather", system="elastic", verb="esql",
                              call_id="elastic.ad-hoc", params={"native_query": "FROM logs"})
+    # Same key, different value — the pair a name-only digest cannot separate.
+    logger.log_policy_denial(role="gather", system="elastic", verb="esql",
+                             call_id="elastic.ad-hoc", params={"native_query": "FROM secrets"})
+    # Same key, same value again — the digest must be a function of the call, not of a clock
+    # or a counter, or "these two differ" says nothing.
+    logger.log_policy_denial(role="gather", system="elastic", verb="esql",
+                             call_id="elastic.ad-hoc", params={"native_query": "FROM logs"})
     logger.close()
 
-    line, control = path.read_text(encoding="utf-8").splitlines()
+    line, control, other_value, repeat = path.read_text(encoding="utf-8").splitlines()
     record = json.loads(line)
 
     # The expected side is written HERE, as literals. Comparing against the target's own
@@ -221,6 +259,13 @@ def test_the_denial_record_is_a_bounded_normalized_projection_of_the_call(tmp_pa
 
     assert json.loads(control)["params_digest"], \
         "a well-formed call's digest is empty — the projection identifies nothing"
+    assert json.loads(control)["params_digest"] != json.loads(other_value)["params_digest"], (
+        "two denials differing only in their parameter VALUES carry the same digest — the "
+        "digest is over the parameter names, so the audit stream cannot tell one probe from "
+        "another and the non-finite guard above is dead code"
+    )
+    assert json.loads(control)["params_digest"] == json.loads(repeat)["params_digest"], \
+        "the same call digests differently twice — the digest is not a function of the call"
 
 
 
@@ -234,18 +279,32 @@ def test_a_denial_is_visible_in_the_rendered_run_html(tmp_path: Path):
     budget-refusal stream: both rendered fine, and the record appeared nowhere, because
     every consumer filters on a closed set of record kinds (g9/g23). So a denial can be
     durably on disk and absent from the analyst's page with every test green — teaching a
-    consumer to stop filtering it is the actual work this demand names."""
+    consumer to stop filtering it is the actual work this demand names.
+
+    THE CONTENT MUST BE IN THE DOCUMENT THE BROWSER RENDERS, which is a stricter and more
+    honest reading of "where an analyst opens it" than a substring of the file. A plain
+    substring assertion is satisfied by a denial emitted as an HTML COMMENT, or appended
+    outside the document element: every string is present, the file parses, and the analyst
+    sees a page with no denial on it — a page that is, from the reader's side,
+    indistinguishable from the silent drop the probe already found. The comparison below
+    strips comments and everything outside the document element first, so what is asserted is
+    what renders."""
     rec = VerbRecorder()
     r = run_gather(tmp_path, verbs=_gather_registry(rec), turns=[q(*DENIED_PAIR), DONE],
                    run_id="d9")
     assert r.denials, "the drive produced no denial to render"
 
     html = render_runtime_page(r.run_dir)
+    visible = _visible_html(html)
 
-    assert "esql" in html, "the denied verb does not appear in the analyst's page"
-    assert "elastic" in html
-    assert observe.POLICY_DENIAL_EVENT_TYPE in html or "denied" in html.lower(), \
+    assert "esql" in visible, \
+        "the denied verb does not appear in the page's rendered body — it is commented out, " \
+        "or sits outside the document element, where an analyst never sees it"
+    assert "elastic" in visible
+    assert observe.POLICY_DENIAL_EVENT_TYPE in visible or "denied" in visible.lower(), \
         "the page renders the call but never says it was refused by policy"
+    assert "esql" not in _visible_html("<html><body>ok</body></html>"), \
+        "the visibility filter is inert — it would pass a page with no denial in it"
 
 
 def test_a_stream_written_before_the_denial_record_existed_still_renders(tmp_path: Path):

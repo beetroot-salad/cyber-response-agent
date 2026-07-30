@@ -60,6 +60,7 @@ from defender.tests._verb_authorization_632 import (  # noqa: E402
     q,
     recording_table,
     run_gather,
+    ticket_envelope,
 )
 from defender.tests.e2e._replay_harness import VerbRecorder  # noqa: E402
 
@@ -95,7 +96,7 @@ def test_a_denied_verb_returns_a_legible_refusal_and_the_run_continues(tmp_path:
 
     assert rec.calls == [], "the denied verb body ran"
     assert r.gather.calls >= 2, "the refusal did not come back as a result the loop continued past"
-    assert r.rows == [], "a well-formed denied call wrote an evidence row"
+    assert r.rows == [], "a denied call wrote an evidence row"
     assert r.breaker.get("total_failures", 0) == 0
     assert "esql" in r.gather_saw
 
@@ -183,10 +184,24 @@ def test_a_refusal_lists_only_the_roles_granted_subset(tmp_path: Path):
 
 
 def test_a_denied_gather_verb_leaves_no_queries_row_and_no_payload_file(tmp_path: Path):
-    """A denied gather verb allocates no sequence number and writes neither a queries row
-    nor a `gather_raw/{lead_id}/{seq}.json` payload — the grant decision runs before the
-    allocation. Both derive their sequence by counting their own rows, so not writing a row
-    IS not allocating a sequence.
+    """A denied gather verb CONSERVES the run's evidence surface and allocates nothing of its
+    own: everything the run had written before the denied call is byte-identical afterwards,
+    and the three things a query call allocates — the lead-scoped payload directory, a
+    queries row, a sequence number — are all absent.
+
+    CONSERVATION IS THE LOAD-BEARING HALF, and absence alone is not enough. "Leaves nothing
+    behind" read as an empty tree is satisfiable by DESTROYING evidence, and an implementer
+    attacking exactly this assertion did that: after a denial it deleted the lead's dispatch
+    sidecar and its queries row, which is strictly worse than the state it was hiding. A
+    snapshot taken before the call and required to match afterwards catches that; a scoped
+    absence check cannot, because the deleted file is absent either way.
+
+    The two kinds of state are DISJOINT BY PATH, which is what makes both halves assertable
+    at once. Dispatch writes one flat sidecar at the root of the payload tree, consumes no
+    sequence number and does not create the lead-scoped subdirectory; a query call writes only
+    inside that subdirectory. A recursive glob of the whole tree conflates them and demands an
+    empty tree no correct implementation can produce — which is why the scoped
+    `payload_files` and the conservation snapshot replace it rather than joining it.
 
     Also carries the whole-lead consensus: a lead every query of which was denied leaves
     ZERO rows on the evidence surface, which is what keeps a denial out of the learning
@@ -198,8 +213,9 @@ def test_a_denied_gather_verb_leaves_no_queries_row_and_no_payload_file(tmp_path
     "well-formed denied calls only" scoping is withdrawn — it existed only because
     authorization used to run last."""
     rec = VerbRecorder()
-    r = run_gather(tmp_path, verbs=_registry(rec),
-                   turns=[q(*DENIED_PAIR), q("elastic", "alerts"), DONE], run_id="d3")
+    r = run_gather(tmp_path / "denied", verbs=_registry(rec),
+                   turns=[q(*DENIED_PAIR), q("elastic", "alerts"), DONE], run_id="d3",
+                   watch=True)
 
     assert rec.calls == [], "a denied verb body ran"
     assert r.rows == [], "a lead whose every query was denied still put rows on the evidence surface"
@@ -207,6 +223,30 @@ def test_a_denied_gather_verb_leaves_no_queries_row_and_no_payload_file(tmp_path
     assert not (r.run_dir / "gather_raw" / LEAD).exists(), \
         "the lead-scoped payload directory was allocated for a denial"
     assert len(r.denials) == 2, "the two denials are not both in the audit stream"
+
+    # Conservation. The snapshots straddle the two denied calls; the first is the state the
+    # dispatch left, and it must survive them byte for byte.
+    assert len(r.snapshots) >= 3, "the drive did not straddle both denied calls"
+    before, after = r.snapshots[0], r.snapshots[-1]
+    assert before, "the pre-call snapshot is empty — conservation would hold vacuously"
+    assert after == before, (
+        "a denial changed the evidence surface the run had already allocated: "
+        f"removed={sorted(set(before) - set(after))} added={sorted(set(after) - set(before))} "
+        f"rewritten={sorted(k for k in set(before) & set(after) if before[k] != after[k])}"
+    )
+    assert (r.run_dir / "gather_raw" / f"{LEAD}.lead.json").is_file(), \
+        "the lead's own dispatch sidecar was destroyed to make the tree look untouched"
+
+    # The sequence counter, observed where it is observable: the FIRST granted call after two
+    # denials still takes seq 0. A denial that quietly consumed a number shows up here and
+    # nowhere else, because the counter has no other reader.
+    kept = VerbRecorder()
+    later = run_gather(tmp_path / "then-granted", verbs=_registry(kept),
+                       turns=[q(*DENIED_PAIR), q(*DENIED_PAIR), q(*GRANTED_PAIR), DONE],
+                       run_id="d3-seq")
+    assert [c.verb for c in kept.calls] == ["query"]
+    assert [row["seq"] for row in later.rows] == [0], \
+        "a denial consumed a sequence number the granted call then skipped"
 
 
 def test_a_granted_gather_verb_still_writes_its_row_and_its_payload(tmp_path: Path):
@@ -414,25 +454,55 @@ def test_a_denial_is_decided_from_the_grant_without_importing_the_adapter(tmp_pa
     refusal nor masks it. This is what makes the deny decision independent of the
     fault-containment posture — and what the load check's totality rests on.
 
+    THE DENIAL LEG IS DRIVEN ON THE UNLOADABLE SYSTEM, and that placement is the whole point.
+    Putting only the UNRESOLVABLE verdict on the broken adapter leaves the denial leg decided
+    against a module that imports cleanly, so the property "no import is needed to deny" is
+    never observed — and an implementation that wraps the decision in a broad `except` and
+    falls back to UNRESOLVABLE passes, silently downgrading every denial on any system whose
+    adapter is momentarily unimportable into an outcome that is neither refused as policy nor
+    audited. `cmdb` below therefore has a grant entry (so the grant REACHES it), a second
+    declared verb the grant withholds (so that verb is a denial), and an adapter that raises
+    on import (so any implementation that touches it to decide raises or downgrades).
+
     The two labels differ and both are decided without the import (§7 R11, read literally):
-    `cmdb` is a system this grant reaches nowhere, so it is UNRESOLVABLE, while
-    `elastic.esql` is a verb withheld on a system the grant does reach, so it is DENIED.
-    Neither verdict needs the adapter, which is the property under test."""
+    `mystery` is a system this grant reaches nowhere, so it is UNRESOLVABLE, while
+    `elastic.esql` and `cmdb.list-hosts` are verbs withheld on systems the grant does reach,
+    so they are DENIED. Neither verdict needs the adapter, which is the property under test.
+
+    The audit half is driven end to end rather than at the decision seam, because "downgraded
+    to unresolvable" and "denied" differ in what lands on disk: the downgrade writes a queries
+    row and no denial record, which is the observable that separates the exploit from the
+    correct implementation."""
     adapters = tmp_path / "adapters"
     adapters.mkdir()
     (adapters / "elastic_adapter.py").write_text(
         "def query(ctx, *, native_query: str) -> dict:\n    return {}\n"
         "VERBS = {'query': query, 'esql': query}\n", encoding="utf-8")
     (adapters / "cmdb_adapter.py").write_text(
-        "raise ImportError('boom')\nVERBS = {'get-host': None}\n", encoding="utf-8")
+        "raise ImportError('boom')\n"
+        "VERBS = {'get-host': None, 'list-hosts': None}\n", encoding="utf-8")
 
     from defender.runtime.verbs import ModuleVerbRegistry
 
-    reg = ModuleVerbRegistry(adapters, grant_of("gather", (("elastic", "query"),)))
-    assert reg.decide("cmdb", "get-host").outcome == UNDECLARED, \
-        "an unloadable system the grant reaches nowhere resolved to something other than unresolvable"
+    grant = grant_of("gather", (("elastic", "query"), ("cmdb", "get-host")))
+    reg = ModuleVerbRegistry(adapters, grant)
+    assert reg.decide("mystery", "get-host").outcome == UNDECLARED, \
+        "a system the grant reaches nowhere resolved to something other than unresolvable"
     assert reg.decide("elastic", "esql").outcome == DENIED
     assert reg.decide("elastic", "query").outcome == GRANTED
+    assert reg.decide("cmdb", "list-hosts").outcome == DENIED, (
+        "a verb withheld on a system whose adapter cannot be imported was not denied — the "
+        "decision reached for the module instead of the grant, or swallowed the import error "
+        "and downgraded the denial to unresolvable"
+    )
+
+    r = run_gather(tmp_path / "run", verbs=reg, system="cmdb",
+                   turns=[q("cmdb", "list-hosts"), DONE], run_id="d38-unloadable")
+    assert r.rows == [], \
+        "the denial on an unloadable system was recorded as an unresolvable query instead"
+    assert len(r.denials) == 1, \
+        "a denial on an unloadable system produced no audit record — it was downgraded"
+    assert r.denials[0]["verb"] == "list-hosts"
 
 
 def test_a_transient_adapter_import_failure_does_not_stick_across_a_run(tmp_path: Path):
@@ -530,41 +600,92 @@ def test_gather_is_denied_ticket_get_ticket(tmp_path: Path):
 def test_gather_list_tickets_still_reaches_the_store(tmp_path: Path):
     """Gather's `ticket.list-tickets` still reaches the ticket store, unchanged. The
     positive control for the denial above: the same system, through the same registry
-    lookup, on the verb the verb_grant does name."""
+    lookup, on the verb the verb_grant does name.
+
+    THE FAKE ANSWERS IN THE STORE'S REAL ENVELOPE SHAPE, and that is a correction rather than
+    a detail. The list endpoint answers `{"total", "tickets"}` and gather's ticket screen
+    enforces that shape as a contract — a bare array is filed as malformed. A fake handing
+    back a bare array while this test demanded `exit_code == 0` made the two demands
+    contradict at the edges: the only implementation satisfying both is one whose screen skips
+    non-object payloads, which is exactly the bypass that lets the self-case exclusion be
+    dodged by changing the response's shape."""
     rec = VerbRecorder()
-    reg = ScopedFakeVerbs(
-        recording_table(rec, {"ticket": ("list-tickets", "get-ticket")}),
-        GATHER_DEF.verb_grant,
-    )
+
+    def list_tickets(ctx, **params):
+        rec.record("list-tickets", ctx, params)
+        return ticket_envelope("SOC-777")
+
+    table = recording_table(rec, {"ticket": ("get-ticket",)})
+    table["ticket"]["list-tickets"] = list_tickets
+    reg = ScopedFakeVerbs(table, GATHER_DEF.verb_grant)
     r = run_gather(tmp_path, verbs=reg, system="ticket",
                    turns=[q("ticket", "list-tickets", {}), DONE], run_id="d34")
 
     assert [c.verb for c in rec.calls] == ["list-tickets"]
     assert len(r.rows) == 1
     assert r.rows[0]["exit_code"] == 0
+    assert "SOC-777" in r.gather_delta, "the granted read's own content never reached the model"
     assert r.denials == []
 
 
 def test_the_self_case_list_filter_still_excludes_the_current_ticket(tmp_path: Path):
-    """The list-path identity filter still excludes the current investigation's own ticket,
-    unchanged by the verb_grant. The guard is KEPT rather than retired with its tests (§7
-    R17): narrowing gather to `list-tickets` makes its hand-written GET branch unreachable,
-    and one dead branch is cheap — deleting it would make any future widening of the grant
-    silently re-open the self-read."""
+    """The list-path identity filter still EXCLUDES the current investigation's own ticket
+    from what gather sees, unchanged by the verb_grant. The guard is KEPT rather than retired
+    with its tests (§7 R17): narrowing gather to `list-tickets` makes its hand-written GET
+    branch unreachable, and one dead branch is cheap — deleting it would make any future
+    widening of the grant silently re-open the self-read.
+
+    THE SELF KEY IS THE RUN'S OWN ID, and the exclusion is asserted on the model-visible
+    result rather than on the call count. A fixture returning two tickets neither of which
+    IS the current case exercises nothing: the filter runs, removes nothing, and every
+    assertion about call counts and exit codes passes over a screen that was never asked to
+    screen. The store below returns the run's own key beside a foreign one, so the surviving
+    difference between "the screen ran" and "the screen was deleted" is visible in the text
+    the model got back.
+
+    The second drive is the shape half. A screen that only inspects an object envelope is
+    bypassed by answering with a bare array — and gather's ticket screen deliberately files
+    that shape as MALFORMED rather than passing it through, because reading a bare array as
+    the ticket list would invent a shape the store does not document, on the one path where
+    inventing one hands the model its own answer key. Withheld, not silently forwarded."""
+    run_id = "d23-self-case"
     rec = VerbRecorder()
 
     def list_tickets(ctx, *, status=None, label=None, q=None, require_closed=False):
         rec.record("list-tickets", ctx, {"status": status, "label": label, "q": q})
-        return {"tickets": [{"key": "SELF-1", "status": "open"},
-                            {"key": "SOC-777", "status": "closed"}], "total": 2}
+        return ticket_envelope(run_id, "SOC-777")
 
     reg = ScopedFakeVerbs({"ticket": {"list-tickets": list_tickets}}, GATHER_DEF.verb_grant)
-    r = run_gather(tmp_path, verbs=reg, system="ticket",
-                   turns=[q("ticket", "list-tickets", {}), DONE], run_id="d23")
+    r = run_gather(tmp_path / "envelope", verbs=reg, system="ticket",
+                   turns=[q("ticket", "list-tickets", {}), DONE], run_id=run_id)
 
     assert len(rec.calls) == 1, "the filter was applied by refusing the call instead of filtering it"
     assert len(r.rows) == 1
     assert r.rows[0]["exit_code"] == 0
+    assert "SOC-777" in r.gather_delta, \
+        "the screen dropped the whole listing — the exclusion below would hold vacuously"
+    assert run_id not in r.gather_delta, \
+        "the current investigation's own ticket survived gather's self-case exclusion"
+    payload = (r.run_dir / "gather_raw" / LEAD / "0.json").read_text(encoding="utf-8")
+    assert run_id not in payload, \
+        "the unscreened listing was captured to the payload tree, where the loop rereads it"
+
+    shaped = VerbRecorder()
+
+    def bare_list(ctx, **params):
+        shaped.record("list-tickets", ctx, params)
+        return [{"key": run_id, "status": "open"}, {"key": "SOC-777", "status": "closed"}]
+
+    bare = ScopedFakeVerbs({"ticket": {"list-tickets": bare_list}}, GATHER_DEF.verb_grant)
+    b = run_gather(tmp_path / "bare", verbs=bare, system="ticket",
+                   turns=[q("ticket", "list-tickets", {}), DONE], run_id="d23b")
+
+    assert len(shaped.calls) == 1
+    assert len(b.rows) == 1
+    assert b.rows[0]["exit_code"] != 0, \
+        "a non-object listing bypassed the screen instead of being filed as malformed"
+    assert "d23b" not in b.gather_delta, \
+        "a bare array bypassed the self-case exclusion — the screen keys on the payload's shape"
 
 
 def test_an_impersonated_query_id_does_not_change_the_grant_decision(tmp_path: Path):

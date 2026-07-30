@@ -22,6 +22,11 @@ its own declared entries — an assertion no shipped allowlist can fail — and 
 request itself would stay unobserved, since the project's lint forbids the
 `monkeypatch.setattr` that is the only other way to see it.
 
+The allowlist's own AUTHORING integrity is a third demand here, not part of either rule: the
+table stops being a bare module constant and is assembled through a constructor that refuses a
+method-less entry, because F1 made the method the axis that separates the ticket read from the
+ticket write and nothing in production noticed an entry authored without one.
+
 Recorded and NOT built (RS9): `elastic.esql` selects its target inside the ES|QL FROM
 clause rather than through a param, so the verb-level target check does not reach it at
 all, and O2 stays undischarged for the capability carrying 610 of ~1000 recorded calls.
@@ -29,6 +34,9 @@ Nothing here may read as though target confinement holds surface-general.
 """
 from __future__ import annotations
 
+import inspect
+import re
+from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
@@ -41,7 +49,9 @@ from defender.scripts.adapters import elastic_adapter, host_state_adapter  # noq
 from defender.scripts.adapters.confinement import (  # noqa: E402
     HOST_STATE_PROGRAMS,
     READ_ENDPOINT_ALLOWLIST,
+    AllowlistError,
     ConfinementFault,
+    ReadEndpointAllowlist,
     TransportCapture,
     confine_host,
     confine_host_state_call,
@@ -54,29 +64,44 @@ from defender.scripts.adapters.faults import TransportFault  # noqa: E402
 pytestmark = pytest.mark.e2e
 
 CONFIGURED_PATTERNS = ("logs-*", "security-audit-*")
-# The four estate-write endpoints that exist at HEAD, two of them ungated (g14). Every one
-# lives outside the adapter set, and every one must fail the read-endpoint rule.
+# The four estate-write endpoints that exist at HEAD, two of them ungated (g14), as
+# (system, path, METHOD) triples — the shape the rule now keys on.
+#
+# THE SYSTEM LITERAL IS THE ONE THE WRITER REALLY CARRIES, and correcting it is half of why
+# the method axis had to exist. The three ticket-store mutations are reached by a post-run
+# script whose system identity is `case-history`, not `ticket`, and both configs resolve to
+# the SAME host — so neither the system label nor the host separates a read from a write, and
+# the previous literal `"ticket"` papered that over. What separates them is the method.
+TICKET_WRITER_SYSTEM = "case-history"
 WRITE_ENDPOINTS = (
-    "/tickets",
-    "/tickets/SOC-1/transitions",
-    "/tickets/SOC-1/comments",
-    "/logs-2026.01.01/_update/1",
+    (TICKET_WRITER_SYSTEM, "/tickets", "POST"),
+    (TICKET_WRITER_SYSTEM, "/tickets/SOC-1/transitions", "POST"),
+    (TICKET_WRITER_SYSTEM, "/tickets/SOC-1/comments", "POST"),
+    ("elastic", "/logs-2026.01.01/_update/1", "POST"),
 )
+# The collision the endpoint-only rule could not survive, kept as its own case because it is
+# the test's whole stated purpose: a FUTURE read-classed verb wrapping the write client would
+# carry the `ticket` system name and request the same `/tickets` path the real `list-tickets`
+# read requests. Path alone admits and refuses one call; path+method does not.
+TICKET_READ_PATH = "/tickets"
 # The paths the five stub adapters really request, read off their own `http_get`/`http_get_obj`
 # call sites and written HERE rather than taken from the allowlist — the whole point is that
 # the two lists are independent, so a divergence is a failure rather than a tautology.
-# Placeholders are bound because the check runs on resolved targets. Elastic's four are not
-# here: they arrive through the capture seam on a real drive.
-REAL_STUB_ENDPOINTS = (
-    ("change-mgmt", "/health"), ("change-mgmt", "/changes"),
-    ("change-mgmt", "/changes/active"), ("change-mgmt", "/changes/CR-1042"),
-    ("cmdb", "/health"), ("cmdb", "/hosts"), ("cmdb", "/hosts/web-1"), ("cmdb", "/roles"),
-    ("identity", "/health"), ("identity", "/users"), ("identity", "/roles"),
-    ("identity", "/users/dev.dana"), ("identity", "/users/dev.dana/can_access"),
-    ("identity", "/users/dev.dana/authorized_hosts"),
-    ("threat-intel", "/health"), ("threat-intel", "/indicators"),
-    ("threat-intel", "/lookup/1.2.3.4"),
-    ("ticket", "/health"), ("ticket", "/tickets"), ("ticket", "/tickets/SOC-777"),
+# Placeholders are bound because the check runs on resolved targets. Every one is a GET: the
+# measurement over all 27 real (system, path, method) triples found no stub read on any other
+# method. Elastic's are not here: they arrive through the capture seam on a real drive.
+REAL_STUB_ENDPOINTS = tuple(
+    (system, path, "GET") for system, path in (
+        ("change-mgmt", "/health"), ("change-mgmt", "/changes"),
+        ("change-mgmt", "/changes/active"), ("change-mgmt", "/changes/CR-1042"),
+        ("cmdb", "/health"), ("cmdb", "/hosts"), ("cmdb", "/hosts/web-1"), ("cmdb", "/roles"),
+        ("identity", "/health"), ("identity", "/users"), ("identity", "/roles"),
+        ("identity", "/users/dev.dana"), ("identity", "/users/dev.dana/can_access"),
+        ("identity", "/users/dev.dana/authorized_hosts"),
+        ("threat-intel", "/health"), ("threat-intel", "/indicators"),
+        ("threat-intel", "/lookup/1.2.3.4"),
+        ("ticket", "/health"), ("ticket", TICKET_READ_PATH), ("ticket", "/tickets/SOC-777"),
+    )
 )
 
 
@@ -98,6 +123,24 @@ def _tree(root: Path, *, url: str = "http://127.0.0.1:1") -> Path:
 
 def _ctx(tmp_path: Path) -> VerbContext:
     return VerbContext(defender_dir=_tree(tmp_path / "tree"), run_dir=tmp_path / "run", env={})
+
+
+def _kibana_status_path() -> str:
+    """The second endpoint `elastic.health-check` reaches, recovered from the ADAPTER's own
+    source rather than restated here.
+
+    The verb builds it as `KIBANA_URL + <path>`, on a different host from every other elastic
+    read, and the first request failing is the only reason a drive against an unreachable tree
+    never gets there. Reading it off the source keeps the allowlist obligation attached to the
+    code that creates it: retarget the verb and this fixture follows, so the allowlist entry
+    is required to follow too."""
+    src = inspect.getsource(elastic_adapter.health_check)
+    found = re.findall(r'KIBANA_URL"\]\.rstrip\("/"\)\s*\+\s*"([^"]+)"', src)
+    assert len(found) == 1, (
+        f"the elastic health-check verb no longer builds exactly one Kibana-host URL "
+        f"({found}) — the read allowlist's fourth entry is derived from that call site"
+    )
+    return found[0]
 
 
 
@@ -194,20 +237,37 @@ def test_an_index_expression_whose_reach_widens_refuses_the_whole_call(
         elastic_adapter.VERBS["query"](ctx, native_query="FROM x", index=widening)
 
 
-def test_an_inventory_host_and_a_configured_index_still_run(tmp_path: Path):
-    """An inventory host and a configured index still reach their stores unchanged — the
-    confinement refuses the OUTSIDE, not the inside. The positive control both refusals
-    need: without it, a rule that refused everything would pass every negative above.
+@pytest.mark.parametrize("inside", [
+    "logs-*",                 # a configured pattern, fed back verbatim
+    "logs-2026.01.01",        # a CONCRETE index under it — the daily index every real read hits
+    "logs-2026.01.*",         # a strictly NARROWER wildcard
+    "security-audit-2026.01", # the same, on the second configured pattern
+])
+def test_an_inventory_host_and_a_configured_index_still_run(tmp_path: Path, inside: str):
+    """An inventory host and an index whose REACH falls inside the configured patterns still
+    reach their stores unchanged — the confinement refuses the OUTSIDE, not the inside. The
+    positive control both refusals need: without it, a rule that refused everything would
+    pass every negative above.
+
+    THE CONTROL IS NOT THE CONFIGURED PATTERN FED BACK VERBATIM, and that is the whole of
+    what this parametrization adds. Re-feeding `logs-*` is satisfied by bare string equality
+    against the configured set — which computes no reach relation at all and rejects every
+    concrete index the system really reads, so a confinement that had replaced reach with
+    equality would ship green and break every elastic read on the first daily index. The
+    subsuming cases below are what make the positive control an independent observation: each
+    is a distinct string whose REACH is contained by a configured pattern, and none of them
+    is in the configured set.
 
     The observable difference is which fault arrives: an in-bounds target gets past the gate
     and fails on the (deliberately unreachable) transport, while an out-of-bounds one never
     reaches it."""
     confine_host("web-1")
-    assert confine_index("logs-*", CONFIGURED_PATTERNS) == "logs-*"
+    assert confine_index(inside, CONFIGURED_PATTERNS) == inside, \
+        "an index whose reach is inside the configured patterns was rewritten or refused"
 
     ctx = _ctx(tmp_path)
     with pytest.raises(TransportFault):
-        elastic_adapter.VERBS["query"](ctx, native_query="FROM x", index="logs-*")
+        elastic_adapter.VERBS["query"](ctx, native_query="FROM x", index=inside)
     with pytest.raises(TransportFault):
         host_state_adapter.VERBS["proc-tree"](ctx, host="web-1")
 
@@ -273,6 +333,10 @@ def test_the_transport_capture_seam_records_every_resolved_request(tmp_path: Pat
     assert request.system == "elastic"
     assert normalize_endpoint(request.url) == "/logs-*/_search", \
         "the seam records something other than the resolved request target"
+    assert request.method == "POST", (
+        "the seam records no HTTP method — the read allowlist keys on (path, method) pairs, "
+        "so a capture without the method leaves the rule's second half unobservable"
+    )
 
     unobserved = VerbContext(defender_dir=_tree(tmp_path / "bare"), run_dir=tmp_path / "run2",
                              env={})
@@ -282,10 +346,20 @@ def test_the_transport_capture_seam_records_every_resolved_request(tmp_path: Pat
 
 def test_an_r_classed_verb_may_only_reach_a_declared_read_endpoint(tmp_path: Path):
     """A verb classed `r` may only reach a declared read endpoint for its system, including
-    a future verb wrapping the write client that already exists. The rule keys on the
-    ENDPOINT because a method-based one does not work — Elasticsearch's search and ES|QL are
-    both POST-with-body READS (c17, refuted), so "an `r` verb may not POST or send a body"
-    would reject two working verbs.
+    a future verb wrapping the write client that already exists. The allowlist's entries are
+    `(URL pattern, HTTP METHOD)` PAIRS, and the capture seam records the method beside the
+    path.
+
+    THE METHOD IS IN THE KEY BECAUSE WITHOUT IT THE RULE IS UNSATISFIABLE, not merely weak.
+    The ticket store's "list the tickets" read and the writer's "create a ticket" mutation
+    resolve to the same path under configs pointing at the same host, so a rule seeing only
+    `(system, path)` is asked to admit and refuse one identical call. Over the 27 distinct
+    (system, path, method) triples the real adapters and the real writer produce, path alone
+    collides exactly once — here — and path+method collides nowhere.
+
+    c17 is not overturned. It refuted a GLOBAL "an `r` verb may not POST", and elastic's two
+    POST-with-body reads are listed pairs that still pass; what it never refuted is an
+    allowlist whose entries each name a method.
 
     Checked against REAL endpoints, never against the allowlist's own entries. Feeding each
     declared pattern back to the checker is a tautology: it holds for whatever set ships, so
@@ -295,10 +369,30 @@ def test_an_r_classed_verb_may_only_reach_a_declared_read_endpoint(tmp_path: Pat
     censused). If the allowlist and the adapters diverge, this fails.
 
     The closed set is what makes it checkable in the other direction: every estate-write
-    endpoint falls outside it, so an `r` verb that grew one fails."""
-    assert set(READ_ENDPOINT_ALLOWLIST) >= {"elastic", "cmdb", "identity", "ticket"}
-    for system, patterns in READ_ENDPOINT_ALLOWLIST.items():
-        assert patterns, f"{system} declares an empty read-endpoint allowlist — an open gate"
+    endpoint falls outside it under its own system and its own method, so an `r` verb that
+    grew one fails."""
+    # THE REQUIREMENT IS EVERY SYSTEM THIS TEST DRIVES A READ ON, computed from the two
+    # sources the drive below uses rather than hand-listed. Stated as four names while six
+    # systems get driven, an implementer who builds to the assertion fails the loop on a
+    # message about a URL instead of about a missing system — and the list drifts again the
+    # next time a stub read is added.
+    required = {"elastic", *(system for system, _, _ in REAL_STUB_ENDPOINTS)}
+    assert required <= set(READ_ENDPOINT_ALLOWLIST), (
+        f"the read allowlist declares no endpoints for "
+        f"{sorted(required - set(READ_ENDPOINT_ALLOWLIST))} — this test drives a real read on "
+        f"all {len(required)} of {sorted(required)}, so every one of them needs entries"
+    )
+    for system, entries in READ_ENDPOINT_ALLOWLIST.items():
+        assert entries, f"{system} declares an empty read-endpoint allowlist — an open gate"
+        for entry in entries:
+            assert len(entry) == 2, (
+                f"{system} declares a read-endpoint entry that is not an "
+                f"(endpoint, method) pair ({entry!r})"
+            )
+            assert entry[1], (
+                f"{system} declares a read-endpoint entry with no method ({entry!r}) — an "
+                f"endpoint-only key cannot separate the ticket read from the ticket write"
+            )
 
     capture = TransportCapture()
     ctx = VerbContext(defender_dir=_tree(tmp_path / "tree"), run_dir=tmp_path / "run", env={},
@@ -312,26 +406,159 @@ def test_an_r_classed_verb_may_only_reach_a_declared_read_endpoint(tmp_path: Pat
 
     assert len(capture.requests) >= 4, "some real elastic verb reached no captured endpoint"
     for request in capture.requests:
-        confine_read_endpoint(request.system, request.url, verb_class="r")
+        assert request.method, "the capture seam records no method — the rule has no key"
+        confine_read_endpoint(request.system, request.url, method=request.method,
+                              verb_class="r")
 
-    for system, endpoint in REAL_STUB_ENDPOINTS:
-        confine_read_endpoint(system, f"http://host{endpoint}", verb_class="r")
+    for system, endpoint, method in REAL_STUB_ENDPOINTS:
+        confine_read_endpoint(system, f"http://host{endpoint}", method=method, verb_class="r")
 
-    for endpoint in WRITE_ENDPOINTS:
+    # THE THREE TICKET-STORE WRITE REFUSALS BELOW REST ON THIS, and until now nothing said so.
+    # `case-history` is the ticket WRITER's own system identity and a really configured system
+    # in this tree — it has a config of its own — so an implementer who declares read endpoints
+    # under it in good faith turns three of the four negatives green without touching a line of
+    # this test. It reaches the estate as a writer only: no adapter declares a verb for it, so
+    # a correct read allowlist has nothing to list.
+    assert TICKET_WRITER_SYSTEM not in READ_ENDPOINT_ALLOWLIST, (
+        f"the read allowlist declares read endpoints for {TICKET_WRITER_SYSTEM}, the ticket "
+        f"WRITER's system identity — three of the four write refusals below then pass for a "
+        f"reason this test no longer controls"
+    )
+
+    for system, endpoint, method in WRITE_ENDPOINTS:
         with pytest.raises(ConfinementFault):
-            confine_read_endpoint("ticket", f"http://host{endpoint}", verb_class="r")
+            confine_read_endpoint(system, f"http://host{endpoint}", method=method,
+                                  verb_class="r")
+
+    # The collision itself, both ways round, under the ONE system name a read-classed verb
+    # wrapping the write client would carry. This pair is the reason the axis exists: drop
+    # either assertion and the rule is either unsatisfiable or blind to the case it was
+    # written for.
+    confine_read_endpoint("ticket", f"http://host{TICKET_READ_PATH}", method="GET",
+                          verb_class="r")
+    with pytest.raises(ConfinementFault):
+        confine_read_endpoint("ticket", f"http://host{TICKET_READ_PATH}", method="POST",
+                              verb_class="r")
+
+
+def test_the_read_endpoint_allowlist_cannot_be_built_with_a_methodless_entry():
+    """The read-endpoint allowlist CANNOT BE BUILT with an entry that names no HTTP method: it
+    is assembled through a validating constructor that refuses one, and the shipped table is
+    what that constructor returned.
+
+    Symmetric with the grant's authoring integrity, and minted for the same reason. Three
+    hand-authored tables now carry the model's permissions. The per-role grant refuses a bad
+    class token and a conflicting duplicate at construction; the generated roster must
+    regenerate to its committed bytes, so a hand-edit is a load failure. The allowlist — the
+    newest of the three — had nothing of the kind: a method-less entry was caught by one
+    assertion over one committed literal, and by nothing in production.
+
+    It is load-bearing rather than tidy because F1 resolved the ticket read/write collision by
+    making THE METHOD the discriminating axis. An entry authored without one silently reopens
+    exactly the collision the fork was resolved to close, and the read and the write are one
+    resolved path on one host, so nothing else separates them.
+
+    A SHAPE CHECK OVER THE COMMITTED CONSTANT IS NOT THIS DEMAND, which is why the endpoint
+    rule's own test keeping one changes nothing here: that assertion certifies the literal
+    that ships today and says nothing about an allowlist assembled or extended by any other
+    route — the shape a future adapter registering its own read endpoints would take. So the
+    refusal is observed by DRIVING construction, and the shipped table is required to be an
+    instance of the constructed type: without that, a validating constructor nothing calls
+    satisfies every raise below.
+
+    THE TYPE MUST STAY A MAPPING OF SYSTEM TO ENTRIES. That is a joint constraint with the
+    endpoint rule's own test rather than a convenience — that test takes the table's key set,
+    iterates it by system and subscripts it, so a validating type that is not a Mapping makes
+    the two demands unsatisfiable together.
+
+    The positive control is the same entry WITH its method: it constructs, it keeps the pair it
+    was authored with, and the shipped table — which went through the same constructor — still
+    admits a real read. Without it, an implementation whose constructor refuses everything
+    passes all four refusals here and breaks every elastic read in the tree."""
+    assert isinstance(READ_ENDPOINT_ALLOWLIST, ReadEndpointAllowlist), (
+        "the shipped read-endpoint allowlist is not a constructed allowlist, so nothing in "
+        "production refuses a method-less entry — the constructor is not on the path the "
+        "shipped table takes, which is the only path an author's mistake travels"
+    )
+    assert isinstance(READ_ENDPOINT_ALLOWLIST, Mapping), (
+        "the allowlist type is not a Mapping — the endpoint rule's own test reads this table "
+        "by key set, by system and by subscript"
+    )
+
+    for methodless in (
+        ("/tickets",),         # a one-element entry: no method at all
+        ("/tickets", ""),      # a present-but-empty method token
+        ("/tickets", None),    # the shape a half-migrated entry takes
+        "/tickets",            # a bare path string, the pre-F1 entry shape
+    ):
+        with pytest.raises(AllowlistError):
+            ReadEndpointAllowlist({"ticket": (methodless,)})
+
+    ok = ReadEndpointAllowlist({"ticket": ((TICKET_READ_PATH, "GET"),)})
+    assert tuple(ok["ticket"]) == ((TICKET_READ_PATH, "GET"),), \
+        "a well-authored (endpoint, method) pair did not survive construction"
+    confine_read_endpoint("elastic", "http://es:9200/_cluster/health", method="GET",
+                          verb_class="r")
 
 
 def test_the_two_post_with_body_reads_still_pass_the_endpoint_check():
     """Elastic's `_search` and `_query` — both POST-with-body reads — still pass the endpoint
-    check, so the rule keys on the endpoint and not the method. The standing guard for the
-    refutation that killed the method-based rule."""
-    confine_read_endpoint("elastic", "http://es:9200/logs-*/_search", verb_class="r")
-    confine_read_endpoint("elastic", "http://es:9200/_query?format=json", verb_class="r")
-    confine_read_endpoint("elastic", "http://es:9200/_cluster/health", verb_class="r")
+    check as LISTED PAIRS, so what the rule rejects is an unlisted (path, method) and never
+    "POST" as such. The standing guard for the refutation that killed the blanket rule.
+
+    The negative half is per-pair too: the same host and the same listed path under a
+    mutating method is refused, which is the property a method-blind allowlist cannot state
+    at all."""
+    confine_read_endpoint("elastic", "http://es:9200/logs-*/_search", method="POST",
+                          verb_class="r")
+    confine_read_endpoint("elastic", "http://es:9200/_query?format=json", method="POST",
+                          verb_class="r")
+    confine_read_endpoint("elastic", "http://es:9200/_cluster/health", method="GET",
+                          verb_class="r")
 
     with pytest.raises(ConfinementFault):
-        confine_read_endpoint("elastic", "http://es:9200/logs-*/_update/1", verb_class="r")
+        confine_read_endpoint("elastic", "http://es:9200/logs-*/_update/1", method="POST",
+                              verb_class="r")
+    with pytest.raises(ConfinementFault):
+        confine_read_endpoint("elastic", "http://es:9200/logs-*/_search", method="DELETE",
+                              verb_class="r")
+
+
+def test_the_elastic_read_allowlist_carries_the_kibana_host_endpoint():
+    """The elastic read allowlist carries the endpoint on the KIBANA host that
+    `elastic.health-check` reaches, alongside the three on the Elasticsearch host.
+
+    This is a demand no correct implementation could satisfy without it, not a coverage gap.
+    `health-check` is granted to gather on every system its grant reaches and it issues TWO
+    requests, not one: the cluster-health GET against `ELASTICSEARCH_URL`, then a status GET
+    against `KIBANA_URL` — a different base URL, and the only elastic read that leaves the
+    Elasticsearch host. Every captured request is confined, so an allowlist enumerating three
+    endpoints refuses the second the moment the first succeeds. No fixture in this suite named
+    it before, and the standing guard beside this one listed three.
+
+    It is not reachable through the capture seam on a hermetic drive: the first request fails
+    on the deliberately unreachable transport and the verb never issues the second. So the
+    target is recovered from the ADAPTER's own source rather than restated as a literal — the
+    obligation stays attached to the call site that creates it, and retargeting the verb moves
+    both together. Recorded rather than papered over: this half is pinned against the source
+    and the rule, not against a driven request.
+
+    The method half applies here too — the same path under a mutating method is refused, so
+    listing the endpoint does not open it."""
+    path = _kibana_status_path()
+    assert path == "/api/status", \
+        "the Kibana-host endpoint moved; the elastic read allowlist must move with it"
+
+    confine_read_endpoint("elastic", f"http://kibana:5601{path}", method="GET", verb_class="r")
+
+    with pytest.raises(ConfinementFault):
+        confine_read_endpoint("elastic", f"http://kibana:5601{path}", method="POST",
+                              verb_class="r")
+
+    assert any(pattern.endswith(path) for pattern, _ in READ_ENDPOINT_ALLOWLIST["elastic"]), (
+        f"elastic's read allowlist declares no entry for {path}, the second endpoint its "
+        f"health-check verb reaches — a correct implementation fails the confinement drive"
+    )
 
 
 def test_the_endpoint_check_binds_on_the_resolved_normalized_path_without_the_query_string():
@@ -345,10 +572,12 @@ def test_the_endpoint_check_binds_on_the_resolved_normalized_path_without_the_qu
     assert normalize_endpoint("http://es:9200/logs-*/_search?pretty=true&x=1") == "/logs-*/_search"
     assert normalize_endpoint("http://es:9200//logs-*//_search/") == "/logs-*/_search"
 
-    confine_read_endpoint("elastic", "http://es:9200/logs-*/_search?pretty=true", verb_class="r")
+    confine_read_endpoint("elastic", "http://es:9200/logs-*/_search?pretty=true", method="POST",
+                          verb_class="r")
 
     with pytest.raises(ConfinementFault):
         confine_read_endpoint("elastic", "http://es:9200/logs-*/_search/../../_update/1",
-                              verb_class="r")
+                              method="POST", verb_class="r")
     with pytest.raises(ConfinementFault):
-        confine_read_endpoint("elastic", "http://es:9200/%5Flogs/../_update/1", verb_class="r")
+        confine_read_endpoint("elastic", "http://es:9200/%5Flogs/../_update/1", method="POST",
+                              verb_class="r")

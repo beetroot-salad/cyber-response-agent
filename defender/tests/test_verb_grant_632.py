@@ -10,6 +10,7 @@ disagree — D6 in particular is refuted (g10), not narrowed.
 """
 from __future__ import annotations
 
+import importlib
 from dataclasses import replace
 from pathlib import Path
 
@@ -18,7 +19,7 @@ import pytest
 pytest.importorskip("pydantic_ai")
 
 from defender.learning.pipeline.judge.engine_pydantic import JUDGE_DEF  # noqa: E402
-from defender.runtime.agent_definition import compile_policy_for  # noqa: E402
+from defender.runtime.agent_definition import bind, compile_policy_for  # noqa: E402
 from defender.runtime.driver import GATHER_DEF, MAIN_DEF  # noqa: E402
 from defender.runtime.verbs import ModuleVerbRegistry  # noqa: E402
 from defender.tests.e2e._replay_harness import VerbRecorder  # noqa: E402
@@ -28,6 +29,7 @@ from defender.tests._closed_ticket_672 import (  # noqa: E402
     DONE as JUDGE_DONE,
     _drive,
     _list,
+    _ticket_registry,
 )
 from defender.tests._verb_authorization_632 import (  # noqa: E402
     ADAPTERS_DIR,
@@ -39,6 +41,7 @@ from defender.tests._verb_authorization_632 import (  # noqa: E402
     GRANTED,
     HEALTH_CHECK,
     JUDGE_ROLE as JUDGE_DEF_ROLE,
+    SYSTEMS,
     UNDECLARED,
     UNGRANTED_PAIRS,
     VERB_CLASSES,
@@ -85,9 +88,18 @@ def test_a_verb_registry_cannot_be_constructed_without_a_grant(tmp_path: Path):
 
 def test_a_registry_shaped_object_is_rejected_at_the_seam_the_build_path_reaches(tmp_path: Path):
     """A registry-shaped object that never went through the verb_registry constructor is
-    refused at the entry point the build path actually reaches, so `unconstructable` is not
-    one duck-typed helper away from decorative (§7 R15). Positive control: the same drive
-    with a real scoped registry runs the granted verb."""
+    refused at EVERY entry point that takes a registry, so `unconstructable` is not one
+    duck-typed helper away from decorative (§7 R15). Positive control: the same drives with a
+    real scoped registry run the granted verb.
+
+    BOTH MODEL-FACING ENTRY POINTS ARE DRIVEN, and that is the tightening. A guard wired at
+    the outermost entry point alone leaves the second one open: the judge's leg takes its own
+    registry through its own seam and never passes through the runtime's, so a table that
+    merely answers the registry's questions reaches the closed-ticket tool and runs
+    unauthorized while every assertion about the runtime's entry point stays green. The
+    duck-typed stand-in below carries a `decide()` that answers GRANTED to everything — it
+    holds no grant, which is exactly why a structural check ("does it answer?") cannot tell it
+    from the real thing and only the TYPE can."""
     rec = VerbRecorder()
     shaped = RegistryShaped(recording_table(rec, {"elastic": ("query",)}))
 
@@ -100,6 +112,21 @@ def test_a_registry_shaped_object_is_rejected_at_the_seam_the_build_path_reaches
                     run_id="typed632")
     assert [c.verb for c in rec.calls] == ["query"]
     assert len(ok.rows) == 1
+
+    # The second model-facing site: the judge's own leg, through its own registry seam.
+    judge_rec = VerbRecorder()
+    duck_judge = RegistryShaped({"ticket": dict(_ticket_registry(judge_rec).verbs("ticket"))})
+    with pytest.raises((TypeError, ValueError)):
+        _drive(tmp_path / "duck-judge", [JUDGE_DONE], registry=duck_judge)
+    assert judge_rec.calls == [], \
+        "a duck-typed registry reached a ticket verb at the judge site — the type guard is " \
+        "wired at the runtime entry point only"
+
+    typed_rec = VerbRecorder()
+    run = _drive(tmp_path / "typed-judge", [_list(label=None), JUDGE_DONE],
+                 registry=scoped_ticket_registry(typed_rec, BENIGN_JUDGE_PAIRS))
+    assert TOOL_LIST in run.tool_names(), "the judge control never registered its tool"
+    assert [c.verb for c in typed_rec.calls] == ["list-tickets"]
 
 
 def test_two_roles_in_one_process_never_share_a_scoped_registry():
@@ -231,6 +258,15 @@ def test_a_grant_and_a_switched_off_tool_disagree_in_either_direction_at_build(t
     that correction is the adversarial-stage test beside this one; without it, an implementer
     satisfies this test and finds the malicious judge no longer builds.
 
+    THE RULE IS PINNED ON THE PRODUCTION BIND PATH, not only on the operator-facing wrapper.
+    `bind` compiles its policy directly; the wrapper is a second door onto the same builder.
+    A check installed in the wrapper alone satisfies every assertion written through it while
+    running on NO real build — every shipped agent would bind with a grant its capability bit
+    contradicts, and the demand's whole content is that this state cannot be built. The bind
+    drive below uses a NON-judge role for the second half of the same reason: a check that
+    names the judge as an exception passes every judge-shaped case in this test and fails
+    exactly there. One rule, no carve-out, on the path production takes.
+
     THE LAST BLOCK DRIVES THE JUDGE'S OWN STAGE BUILD, and it is the half that pins the
     wiring rather than the seam. Handing an effective ToolSet in from a test body proves the
     parameter EXISTS; it does not prove the stage passes it. An implementation that accepts
@@ -268,6 +304,26 @@ def test_a_grant_and_a_switched_off_tool_disagree_in_either_direction_at_build(t
     with pytest.raises(GrantError):
         compile_policy_for(replace(MAIN_DEF, verb_grant=grant_of("main", (("elastic", "query"),))),
                            run_dir)
+
+    # ON THE PRODUCTION BIND PATH, for a role that is not the judge. `bind` compiles its
+    # policy directly and does NOT go through the operator-facing wrapper above, so a check
+    # installed only in that wrapper never runs on any real build — every assertion above
+    # passes while every shipped agent binds with a grant its capability bit contradicts. And
+    # driving it on a NON-judge role is what closes the other half: a check that exempts the
+    # judge by name satisfies the judge-shaped cases above and fails here.
+    for defn, grant in (
+        # a grant naming verbs behind a switched-off query capability
+        (replace(GATHER_DEF, tools=replace(GATHER_DEF.tools, query=False)),
+         grant_of("gather", (("elastic", "query"),))),
+        # the capability on, and a grant that reaches none of its verbs
+        (GATHER_DEF, DENY_ALL),
+    ):
+        with pytest.raises(GrantError):
+            bind(replace(defn, verb_grant=grant), run_dir)
+
+    # The agreeing pair at the same site: the real definition, its real grant, its real bit.
+    assert bind(GATHER_DEF, run_dir) is not None, \
+        "the bind path refuses the shipped agreeing configuration — the check is not the rule"
 
     # Through the judge's REAL stage build, where the bit is set by the runtime replace().
     starved = VerbRecorder()
@@ -354,7 +410,7 @@ def test_the_shipped_grants_name_exactly_the_censused_verbs():
         assert pair not in judge, f"{pair} is granted to nobody but appears in the judge's grant"
 
 
-def test_a_grant_naming_a_verb_the_registry_lacks_fails_at_load():
+def test_a_grant_naming_a_verb_the_registry_lacks_fails_at_load(tmp_path: Path):
     """A verb_grant naming a `(system, verb)` the registry does not admit fails at LOAD, and
     the check is TOTAL — a phantom verb is caught even in a system the role never calls, and
     even when that system's adapter would raise on import, because the names are read cold
@@ -370,8 +426,31 @@ def test_a_grant_naming_a_verb_the_registry_lacks_fails_at_load():
     with pytest.raises(GrantError):
         ModuleVerbRegistry(ADAPTERS_DIR, wrong_system)
 
-    assert "esql" in declared_verb_names(ADAPTERS_DIR, "elastic"), \
-        "the cold name reader cannot see a verb that exists — the load check is vacuous"
+    # THE COLD READER IS CROSS-CHECKED AGAINST THE IMPORTED NAMES, on every shipped adapter.
+    # Without this the reader is unfalsifiable in the direction that matters: a syntactic scan
+    # of the `VERBS = {...}` literal agrees with itself, so an adapter whose table is built any
+    # other way declares NOTHING to the check while declaring everything to the runtime — and
+    # a grant naming a phantom verb on that system then passes at load. Importing is legal
+    # HERE, in the test, precisely because it is what the production reader must not do.
+    for system in SYSTEMS:
+        module = importlib.import_module(f"defender.scripts.adapters.{system.replace('-', '_')}_adapter")
+        assert set(declared_verb_names(ADAPTERS_DIR, system)) == set(module.VERBS), (
+            f"the cold reader and the real {system} adapter disagree on which verbs exist — "
+            f"cold={sorted(declared_verb_names(ADAPTERS_DIR, system))} "
+            f"imported={sorted(module.VERBS)}"
+        )
+
+    # An adapter whose table is assembled rather than written as a literal: the check must not
+    # go quiet on it. Either the reader resolves the names or the load fails — what it may not
+    # do is treat "I could not read this system" as "this system declares whatever you like".
+    adapters = tmp_path / "adapters"
+    adapters.mkdir()
+    (adapters / "alpha_adapter.py").write_text(
+        "def look(ctx, *, name: str) -> dict:\n    return {'name': name}\n"
+        "VERBS = {}\n"
+        "for _n, _f in (('look', look),):\n    VERBS[_n] = _f\n", encoding="utf-8")
+    with pytest.raises(GrantError):
+        ModuleVerbRegistry(adapters, grant_of("gather", (("alpha", "no-such-verb"),)))
 
 
 def test_grant_authoring_integrity_rejects_a_bad_class_token_and_a_conflicting_duplicate():

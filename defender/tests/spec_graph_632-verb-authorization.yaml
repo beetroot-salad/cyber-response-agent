@@ -49,7 +49,7 @@ design: "#632 — .spec-flow/632-design.md: authorization for the verb surface (
 base: d01001e642780f4fe2c7c9868a578e013a45e40f
 
 # ===========================================================================
-# DEMANDS — the spec proper. 77 = 65 test + 9 clause + 3 waiver.
+# DEMANDS — the spec proper. 80 = 68 test + 9 clause + 3 waiver.
 #   d0-d37   the 20-demands leaf's 38 (31 test + 7 clause), binds RESOLVED and, where a
 #            census corrected them, RE-BOUND (d1, d4, d7, d18 — see the header).
 #   d38-d49  minted here from 45-dispositions' consensus (12 test).
@@ -59,6 +59,15 @@ base: d01001e642780f4fe2c7c9868a578e013a45e40f
 #            site's own refusal ordering.
 #   d73      the closing pass's one mint (third reconciliation, finding 2): the shipped-
 #            configuration correction §7 R7's first direction forces at the judge.
+#   d74-d75  the REPAIR PASS's two mints (170-resolutions M1/M2), both of the same class as
+#            the two blockers — an obligation a CORRECT implementation could not satisfy, and
+#            an obligation nothing in the suite required at all: the elastic read allowlist's
+#            fourth endpoint (on the Kibana host, reached by a granted verb), and the judge's
+#            own generated roster.
+#   d76      the CORRECTION ROUND's one mint (195-resolutions G1): the read-endpoint
+#            allowlist's AUTHORING integrity. F1 made the HTTP method the axis that separates
+#            the ticket read from the ticket write, and nothing in production refused an entry
+#            authored without one.
 #   w1-w3    §7's three recorded waivers.
 #
 # PHASE-F RE-RUN — the two decisions that moved, and which demands they moved:
@@ -81,6 +90,27 @@ base: d01001e642780f4fe2c7c9868a578e013a45e40f
 #     WITHDRAWN (d3, d4, d55, d53). What R23's ordering used to buy — a hostile
 #     model-authored id kept out of the record — is now bought by d66's normalization, and
 #     d53 asserts it there.
+# THE REPAIR PASS — three human fork resolutions on findings that came back from
+# write-code-from-spec (which REFUSED to implement, on two unsatisfiable demands) and from an
+# adversarial implementer (which greened the suite with deliberately dishonest code):
+#   * F1 — the read-endpoint allowlist keys on (URL pattern, HTTP METHOD) PAIRS, and the
+#     capture seam records the method. The endpoint-only key was unsatisfiable, not weak: the
+#     ticket read and the ticket write are one resolved path. Measured: over the 27 real
+#     (system, path, method) triples, path alone collides exactly once and path+method never.
+#     c17 is not overturned — it killed a GLOBAL "an r verb may not POST", never a per-entry
+#     method. Reshapes d17/d36/d59/d71. Dropping /tickets from the write set was REJECTED: it
+#     greens the test and unbacks its own stated purpose.
+#   * F2 — a denial CONSERVES pre-call run state (snapshot, byte-identical) as well as leaving
+#     the three scoped absences. Absence alone is satisfiable by destroying evidence, which is
+#     what the adversary did against this exact test. Reshapes d3.
+#   * F3 — the audit gains a FOURTH attribution rule: each generated roster is scored against
+#     its OWN role's grant, every other surface against gather's, and the audit's interface
+#     becomes a mapping of which grant governs which file. Reshapes d45/d70. Excluding rosters
+#     from the audited surface was REJECTED — it breaks no assertion, which is exactly why the
+#     suite could not distinguish it from the dishonest edit.
+# Nine further demands were TIGHTENED rather than reshaped, each until the exploit the
+# adversary greened with goes red; the tightening is recorded on the demand it belongs to.
+#
 # A form:test demand is a POINTER: its observable-outcome prose is the seed sentence in
 # 20-demands.md / 45-dispositions.md, authored into the named test's docstring at phase E.
 # ===========================================================================
@@ -182,6 +212,11 @@ demands:
     kind: behavior
     form: test
     binds: ["host_state_target", "elastic_index"]
+    # TIGHTENED IN THE REPAIR PASS — H6. The positive control re-fed a CONFIGURED
+    # PATTERN back to the checker, which bare string equality satisfies — and bare equality
+    # computes no reach relation at all, so it also rejects every concrete daily index the
+    # system really reads while passing every negative above. The control is now parametrized
+    # over indices whose reach is contained but whose text is not in the configured set.
     discharged_by: test_an_inventory_host_and_a_configured_index_still_run
 
   - id: d13_esql_target_unconfined
@@ -216,6 +251,13 @@ demands:
     # do not exist. g4 makes the check TOTAL — the grant partitions the 25 non-health-check verbs
     # exactly, with no residue, and every name resolves in the live registry.
     binds: ["verb_grant"]
+    # TIGHTENED IN THE REPAIR PASS — H12. Nothing cross-checked the cold verb-name
+    # reader against reality, so a syntactic scan of the `VERBS = {...}` literal agreed with
+    # itself: an adapter whose table is assembled any other way declares NOTHING to the check
+    # while declaring everything to the runtime, and a grant naming a phantom verb on that
+    # system then passes at load. The reader is now compared against the IMPORTED names on every
+    # shipped adapter (importing is legal in the test precisely because production must not),
+    # and an adapter with a programmatically built table must not make the check go quiet.
     discharged_by: test_a_grant_naming_a_verb_the_registry_lacks_fails_at_load
 
   - id: d17_read_class_endpoint_allowlist
@@ -232,18 +274,95 @@ demands:
     # elastic's four through the transport capture seam d71 mints (a real drive, real resolved
     # URLs), and the stub systems' as literals read off the adapters' own call sites. The
     # write-endpoint half already bit and is unchanged.
+    # REPAIR PASS (F1) — THE ALLOWLIST KEYS ON (PATTERN, METHOD) PAIRS. As written this demand
+    # was UNSATISFIABLE: the ticket store's list-tickets read and the writer's create-a-ticket
+    # mutation resolve to the same path under configs pointing at the same host, so one rule
+    # over (system, path) had to admit and refuse one identical call. write-code-from-spec
+    # refused to implement on exactly this, and the adversary rediscovered it independently.
+    # The axis is measured, not guessed: 27 real (system, path, method) triples, path-only
+    # overlap {"/tickets"}, path+method overlap {}. The write-endpoint fixture also stops
+    # passing the literal "ticket" for the three ticket-store mutations — they are reached
+    # under the system identity `case-history`, whose configured host is the SAME one, so the
+    # system label never separated them and the literal misdescribed the surface.
     binds: ["read_endpoint_allowlist",
             "read_endpoint_allowlist.access[http-elastic]",
             "read_endpoint_allowlist.access[http-stub]",
             "verb_class.domain.distinguished[r]",
             "interacts(elastic_adapter->estate).payload"]
+    cites: [g26]   # the 27-triple measurement that established the pair separates read from write
     discharged_by: test_an_r_classed_verb_may_only_reach_a_declared_read_endpoint
 
   - id: d36_post_with_body_reads_still_pass
     kind: behavior
     form: test
-    binds: ["read_endpoint_allowlist", "read_endpoint_allowlist.access[http-elastic]"]
+    # REPAIR PASS (F1): the standing guard now states what c17 actually refuted. The two
+    # POST-with-body reads pass as LISTED PAIRS, so what the rule rejects is an unlisted
+    # (path, method) and never "POST" as such — and the same listed path under a mutating
+    # method is refused, which is the discrimination a method-blind allowlist cannot express.
+    binds: ["read_endpoint_allowlist", "read_endpoint_allowlist.access[http-elastic]",
+            "verb_class.domain.distinguished[r]"]
+    cites: [g26]   # elastic's two POST reads and the all-POST writer set are that probe's own count
     discharged_by: test_the_two_post_with_body_reads_still_pass_the_endpoint_check
+
+  - id: d74_elastic_read_allowlist_carries_the_kibana_endpoint
+    kind: domain-outcome
+    form: test
+    # REPAIR-PASS MINT (170-resolutions M1, from the grounding leaf's red flag 1). The elastic
+    # `health-check` verb — granted to gather on every system its grant reaches — issues TWO
+    # requests, not one: the cluster-health GET against ELASTICSEARCH_URL and a status GET
+    # against KIBANA_URL, a different host and the only elastic read that leaves the
+    # Elasticsearch box. d17 confines EVERY captured request, so an allowlist enumerating three
+    # elastic endpoints refuses a CORRECT implementation the moment the first request succeeds
+    # and the second is issued. That makes this the same class as the two blockers — a demand
+    # unsatisfiable by correct code — and it was in neither the implementer's nor the
+    # adversary's findings. No fixture in the committed suite named the endpoint and the
+    # standing guard enumerated three.
+    # Recorded, not papered over: this endpoint is NOT reachable through the capture seam on a
+    # hermetic drive, because the first request fails on the unreachable transport and the verb
+    # never issues the second. The test therefore recovers the target from the ADAPTER's own
+    # source rather than restating it, so the obligation stays attached to the call site that
+    # creates it and a retarget moves both together.
+    binds: ["read_endpoint_allowlist", "read_endpoint_allowlist.access[http-elastic]",
+            "interacts(elastic_adapter->estate)"]
+    cites: [g26]   # the Kibana-host GET is one of that probe's four elastic reads
+    discharged_by: test_the_elastic_read_allowlist_carries_the_kibana_host_endpoint
+
+  - id: d76_read_endpoint_allowlist_authoring_integrity
+    kind: behavior
+    # CORRECTION-ROUND MINT (195-resolutions G1, from the third reconciliation's finding 1).
+    # THE ALLOWLIST STOPS BEING A BARE MODULE CONSTANT and gains a validating constructor: a
+    # `(URL pattern, method)` entry naming no method cannot be BUILT. That is a production
+    # surface addition, which is why this is a demand rather than a test-local shape check.
+    # Symmetric with d67, the grant's authoring integrity, and minted for the same reason:
+    # three hand-authored tables now carry the model's permissions, two of them fail loudly on
+    # a bad author (d67's class-token/duplicate refusal, and the roster's regenerate-to-the-
+    # committed-bytes check), and the allowlist — the newest, added by F1 — failed on nothing.
+    # Under F1 a method-less entry silently reopens the ticket read/write collision the fork
+    # was resolved to close, because the method is the only axis that separates them.
+    # WHY THE DISCHARGE IS A DRIVEN CONSTRUCTION AND NOT A SHAPE ASSERTION over the committed
+    # literal: the shape check certifies the set that ships today and says nothing about an
+    # allowlist assembled or extended by another route — the shape a future adapter
+    # registering its own read endpoints would take. The test also requires the SHIPPED table
+    # to be an instance of the constructed type, or a validating constructor nothing calls
+    # satisfies every raise.
+    # `kind: behavior`, NOT domain-outcome as d67 is: d67 binds two distinguished members of
+    # the verb_class domain, and the missing-method case has no domain member to bind —
+    # `http_method` is an axis in the registry, not a valued input with a domain facet. What
+    # is pinned is a raise on a driven construction, which is behavior's own definition.
+    # POSITIVE CONTROL, in the same test (d67's shape): the same entry WITH its method
+    # constructs, keeps the pair it was authored with, and the shipped table still admits a
+    # real read — so a constructor that refuses everything fails rather than passing four
+    # refusals for free.
+    # JOINT CONSTRAINT WITH d17, asserted so it cannot be discovered at implementation: the
+    # validating type must still be a Mapping of system -> entries, because d17's test takes
+    # the table's key set, iterates it by system and subscripts it. A validating type that is
+    # not a Mapping makes d17 and d76 unsatisfiable together.
+    form: test
+    binds: ["read_endpoint_allowlist",
+            "read_endpoint_allowlist.access[http-elastic]",
+            "read_endpoint_allowlist.access[http-stub]"]
+    cites: [g26]   # the 27-triple measurement is what makes the method load-bearing rather than decorative
+    discharged_by: test_the_read_endpoint_allowlist_cannot_be_built_with_a_methodless_entry
 
   - id: d37_undeclared_verb_keeps_todays_treatment
     kind: behavior
@@ -310,6 +429,12 @@ demands:
     # the DENIAL'S OWN CONTENT in the rendered output; the new consumer that stops filtering it
     # is the actual work. Its complementary control is d54.
     binds: ["interacts(visualize_runtime->policy_denial_stream)"]
+    # TIGHTENED IN THE REPAIR PASS — H5. A substring assertion over the rendered file is
+    # satisfied by a denial emitted as an HTML COMMENT, or appended outside the document
+    # element: every string present, the page blank of the thing this demand exists to put on
+    # it — which is indistinguishable, from the analyst's side, from the silent drop g23 found.
+    # The assertion is now on the visible document, with comments and script bodies stripped,
+    # and the filter itself carries a control proving it is not inert.
     discharged_by: test_a_denial_is_visible_in_the_rendered_run_html
 
   - id: d54_old_stream_still_renders
@@ -340,7 +465,23 @@ demands:
     # PHASE-F: the "WELL-FORMED denied calls only" narrowing R3/R23 forced onto this demand is
     # WITHDRAWN. With authorization running first there is no path on which a denied call
     # writes a row, so the obligation is surface-general again over denied calls.
-    binds: ["interacts(query_tool->executed_queries)", "interacts(query_tool->gather_raw)"]
+    # REPAIR PASS (F2) — THE DEMAND BECOMES CONSERVATION PLUS SCOPED ABSENCE. As written it
+    # asserted an EMPTY payload tree, which no correct implementation can produce: dispatch
+    # writes one flat sidecar at the root of that tree before any query runs, and the assertion
+    # globbed the whole tree recursively. The two kinds of state are disjoint by path —
+    # dispatch allocates the sidecar and no sequence and not the lead-scoped subdirectory; a
+    # query call writes only inside that subdirectory — so the absence half is now scoped to
+    # it, which is the predicate the test already carried one line below the broken one.
+    # Absence alone is NOT the repair. The adversary greened this exact assertion by DELETING
+    # the dispatch sidecar and the lead's queries row after a denial — destroying real evidence
+    # to satisfy "leaves nothing behind", which is strictly worse than the state it hid. So the
+    # demand now snapshots the evidence surface before the denied call and requires it
+    # BYTE-IDENTICAL afterwards, observed from inside one real run (the replay model snapshots
+    # at each request, straddling the call). The unadvanced sequence counter is observed where
+    # it is observable at all: the first GRANTED call after two denials still takes seq 0.
+    binds: ["interacts(query_tool->executed_queries)", "interacts(query_tool->gather_raw)",
+            "gather_raw.identity"]
+    cites: [g27]   # dispatch-state vs query-state disjointness by path is what makes both halves assertable at once
     discharged_by: test_a_denied_gather_verb_leaves_no_queries_row_and_no_payload_file
 
   - id: d31_granted_gather_call_positive_control
@@ -464,6 +605,11 @@ demands:
     # the two-roles test must use two DISTINCT REAL role ids, never placeholders, or it passes
     # under exactly the falsy-collapse it exists to exclude.
     binds: ["descriptor_catalog.identity", "verb_roster.identity"]
+    # TIGHTENED IN THE REPAIR PASS — H11. Adding the grant as a third argument is
+    # exactly the edit that drops the catalog's existing resolve check — narrowing by grant
+    # reads like the whole filter, and nothing downstream notices a system named to the model
+    # that cannot be reached. Conservation, not new scope: a granted system whose adapter will
+    # not import must still be absent from the catalog.
     discharged_by: test_two_roles_in_one_process_each_get_their_own_catalog
 
   # --- the grant's contents -----------------------------------------------------------------
@@ -485,6 +631,12 @@ demands:
     kind: behavior
     form: test
     binds: ["interacts(query_tool->ticket_store)", "ticket_store.access[query-tool]"]
+    # TIGHTENED IN THE REPAIR PASS — H8, and a fixture that made two demands
+    # contradict. The fake answered with a bare array while this test required exit_code == 0,
+    # and the store's real list endpoint answers an object envelope which gather's screen
+    # enforces as a contract — so the only implementation satisfying both was one whose screen
+    # skips non-object payloads, which is exactly the bypass that dodges the self-case
+    # exclusion. The fake now answers in the store's real shape.
     discharged_by: test_gather_list_tickets_still_reaches_the_store
 
   - id: d23_self_case_list_filter_survives
@@ -493,6 +645,12 @@ demands:
     # FORK 17 recommends keeping the guard rather than retiring it with its tests: the grant makes
     # its GET branch unreachable, but it is the only thing standing if the grant is ever widened.
     binds: ["interacts(query_tool->ticket_store)"]
+    # TIGHTENED IN THE REPAIR PASS — H8. The fixture returned two tickets NEITHER of
+    # which was the current case, so the screen ran, removed nothing, and every assertion about
+    # call counts and exit codes passed over a guard never asked to guard. The self key is the
+    # run's own id; the store now returns it beside a foreign key, the exclusion is asserted on
+    # the model-visible delta and on the captured payload, and a second drive pins that a bare
+    # array is filed as malformed rather than forwarded unscreened.
     discharged_by: test_the_self_case_list_filter_still_excludes_the_current_ticket
 
   - id: d27_health_check_granted_uniformly
@@ -547,6 +705,14 @@ demands:
     # nowhere, so under R11 read literally its verdict is UNRESOLVABLE, not DENIED. Both
     # verdicts are asserted, because what the demand is about is that NEITHER needs the import.
     binds: ["verb_grant", "interacts(query_tool->verb_registry)", "interacts(query_tool->verb_registry).response"]
+    # TIGHTENED IN THE REPAIR PASS — H1. The discharging test put only the UNRESOLVABLE
+    # verdict on the unloadable adapter, so the DENIAL leg was decided against a module that
+    # imports cleanly and the property "no import is needed to deny" was never observed. An
+    # implementation wrapping the decision in a broad `except` and falling back to UNRESOLVABLE
+    # greened it, silently downgrading a denial into an outcome that is neither refused as
+    # policy nor audited. The denial leg now runs on the unimportable system — grant reaches it,
+    # withholds the verb — and the run is driven end to end, because "downgraded" and "denied"
+    # differ in what lands on disk: a queries row and no denial record.
     discharged_by: test_a_denial_is_decided_from_the_grant_without_importing_the_adapter
 
   - id: d39_adapter_failure_is_not_remembered
@@ -647,7 +813,23 @@ demands:
     # committed file that names a declared verb only in bare form is reachable by the audit
     # under a grant that names nothing. Without the second half the zero is a claim about the
     # instrument rather than about the tree.
+    # REPAIR PASS (F3) — A FOURTH ATTRIBUTION RULE, AND A KEYED INTERFACE. The three rules
+    # above attribute a NAME to a (system, verb) pair and say nothing about which ROLE's
+    # permissions a file is judged against, so the moment a second role ships a generated
+    # roster the audit reports it as an offence: the judge's grant names two ticket verbs
+    # gather's withholds, and those two ARE two of the four counter-examples this demand's zero
+    # is built on. Rule 4: a generated roster is scored against its OWN role's grant, read off
+    # the role-keyed path it is committed under; every other audited surface against gather's,
+    # which is well defined because those surfaces have exactly one production consumer. The
+    # audit's interface therefore changes from an unkeyed tuple of grants to a MAPPING of which
+    # grant governs which file.
+    # Excluding rosters from the audited surface was REJECTED and the rejection is ASSERTED,
+    # not just recorded: it breaks no other assertion, which is precisely what makes it
+    # indistinguishable from the dishonest edit, so the test now requires that scoring the
+    # judge's roster against gather's grant FLAGS it. A roster quietly dropped from the audited
+    # set fails there rather than passing everything.
     binds: ["system_skill_prose", "query_templates", "verb_roster", "verb_grant"]
+    cites: [g28]   # the exact collision (two withheld pairs ARE two counter-examples) is that probe's finding
     discharged_by: test_no_model_read_surface_names_a_verb_the_grant_withholds
 
   - id: d46_compiled_policy_answers_role_capability
@@ -819,6 +1001,7 @@ demands:
     binds: ["read_endpoint_allowlist.access[http-elastic]",
             "read_endpoint_allowlist.access[http-stub]",
             "interacts(elastic_adapter->estate).payload"]
+    cites: [g26]   # the resolved path AND the method literal are what that probe captured at the call site
     discharged_by: test_the_endpoint_check_binds_on_the_resolved_normalized_path_without_the_query_string
 
   - id: d60_grant_default_is_an_empty_deny_all
@@ -877,6 +1060,11 @@ demands:
     # d73 finds the malicious judge stops building, which is exactly the failure this pass
     # exists to prevent.
     binds: ["verb_grant", "agent_policy", "compile_policy"]
+    # TIGHTENED IN THE REPAIR PASS — H3. Every direction was driven through the
+    # operator-facing policy wrapper, which `bind` does not call — so a check installed only
+    # there runs on NO real build, and a check carrying a literal JUDGE carve-out satisfies
+    # every judge-shaped case in the test. Both directions are now driven through `bind`, on a
+    # NON-judge role, with the shipped agreeing configuration as the control.
     discharged_by: test_a_grant_and_a_switched_off_tool_disagree_in_either_direction_at_build
 
   - id: d73_capability_off_stage_builds_with_a_scoped_off_grant
@@ -955,6 +1143,11 @@ demands:
     # and the durable record — the job R23's ordering used to do. d53 asserts that half on the
     # denial path it now travels.
     binds: ["interacts(query_tool->policy_denial_stream).payload", "model_params"]
+    # TIGHTENED IN THE REPAIR PASS — H4. `params_digest` as the sorted parameter NAMES
+    # satisfied every assertion here: two denials differing only in what was asked for are then
+    # byte-identical in the audit stream, and the non-finite guard is dead code because no value
+    # is ever serialized. The digest is now pinned as a function of the VALUES — same keys and
+    # different values must differ, the same call twice must agree.
     discharged_by: test_the_denial_record_is_a_bounded_normalized_projection_of_the_call
 
   - id: d67_grant_authoring_integrity_fails_at_load
@@ -977,6 +1170,11 @@ demands:
     # fail-loud guard, which build_agent_core routes around, so a test pinned there would pin
     # dead code green.
     binds: ["verb_registry.access[duck-typed]", "interacts(run_investigation->verb_registry)"]
+    # TIGHTENED IN THE REPAIR PASS — H2. The type guard was pinned at ONE entry point.
+    # The judge's leg takes its own registry through its own seam and never passes through the
+    # runtime's, so a duck-typed table handed to the closed-ticket tool ran unauthorized with
+    # every assertion green. Both model-facing entry points are now driven, each with its own
+    # positive control.
     discharged_by: test_a_registry_shaped_object_is_rejected_at_the_seam_the_build_path_reaches
 
   - id: d69_impersonated_query_id_changes_nothing
@@ -996,8 +1194,37 @@ demands:
     # not an established list. Written as a live census read off the tree on every run, the
     # enumeration re-probes reality instead of being pinned once from a hand-recalled list —
     # which is what a stale enumeration would silently become the first surface someone adds.
+    # REPAIR PASS — two additions. (F3) BOTH ROSTERS ARE IN THE CENSUS, asserted here as well
+    # as at the audit, because dropping them from the surface set is the free exit from the
+    # correspondence demand and it breaks nothing else. (#700-SHAPED DECK REPLAY) the census
+    # now also checks that the prose's REFERENTS survived: correcting an artifact that
+    # advertises a withheld verb has a cheaper neighbour — rename or delete it and the audit
+    # goes quiet while everything pointing at it keeps pointing. The golden replay corpus names
+    # committed template ids from a directory this change never touches (21 of its 243
+    # query_ids resolve to a template today, written here as literals so the two sides stay
+    # independent), each template's declared id must match its own path, and the gather skill's
+    # prose must still name paths that exist.
     binds: ["system_skill_prose", "query_templates", "verb_roster"]
+    cites: [g28]   # "no committed assertion requires a roster inside the audited set" is that probe's observation
     discharged_by: test_the_committed_model_read_surfaces_are_the_enumerated_set
+
+  - id: d75_the_judge_has_its_own_generated_roster
+    kind: uniqueness
+    form: test
+    # REPAIR-PASS MINT (170-resolutions M2, from the grounding leaf's red flag 3). Every roster
+    # assertion in the committed suite named gather, and NOTHING required a judge roster to
+    # exist. Under F3 that silence would let the judge's model-facing verb prose stay
+    # hand-authored — the hole the earlier human decision closed — while the audit reported
+    # green, so the change could ship half-implemented with no test objecting. The demand: the
+    # judge's roster exists, is generated from the JUDGE's grant, regenerates to the committed
+    # bytes, and is audited against that grant rather than gather's.
+    # It is `kind: uniqueness` because what it pins is one roster PER ROLE on a role-keyed
+    # path — the same key verb_roster.identity already declares, which nothing until now
+    # exercised for a second role.
+    binds: ["verb_roster", "verb_roster.identity", "verb_grant",
+            "interacts(roster_generator->verb_roster)"]
+    cites: [g28]   # "nothing in the suite requires a judge roster to exist" is that probe's observation
+    discharged_by: test_the_judge_has_its_own_generated_roster_scored_against_its_own_grant
 
   # ===========================================================================
   # PHASE-F MINTS (d71-d72) — the two decisions the reconciler's findings 6 and 8
@@ -1019,6 +1246,11 @@ demands:
     # lint ratchets against, so "no seam" meant "unobservable", not "observed differently".
     binds: ["transport_capture", "interacts(elastic_adapter->transport_capture)",
             "interacts(elastic_adapter->estate).payload"]
+    # REPAIR PASS (F1): the seam records the HTTP METHOD beside the resolved target. Without
+    # it the allowlist's key has no second half to bind on. The axis costs one field: every
+    # outbound request in the tree funnels through one transport function that already takes
+    # the method as a required keyword, and that function is the one this seam wraps.
+    cites: [g26]   # "one transport function, method already a required keyword" is that probe's observation
     discharged_by: test_the_transport_capture_seam_records_every_resolved_request
 
   - id: d72_judge_site_grant_check_precedes_its_own_screens
@@ -1071,9 +1303,15 @@ demands:
 structure:
   # AXIS REGISTRY. Every key_axes / interpolates member below is one of these — two passes
   # coining different names for one axis is the join-breaker this list exists to prevent.
-  axes: [lead_id, seq, role, system, verb, batch_id, pid, site]
+  axes: [lead_id, seq, role, system, verb, batch_id, pid, site, http_method]
   # `site` added at phase E: §7 R1's policy-denial stream is one fixed FILENAME whose only
   # varying axis is which model-facing site's run dir it lands under.
+  # `http_method` added in the REPAIR PASS (F1): the read-endpoint rule's key is the PAIR
+  # (URL pattern, method), so the method is a first-class axis of the allowlist and of what the
+  # transport capture seam records. It is registered rather than left implicit because two
+  # artifacts now name it — the allowlist's entries and the capture seam's records — and two
+  # passes coining different names for one axis is the join-breaker the registry exists to
+  # prevent.
 
   actors:
     # --- execution contexts. g15 bounds them to three, all reaching run_investigation, so
@@ -1180,7 +1418,7 @@ structure:
       facets:
         identity:
           key_axes: [role, system]
-          evidence: {nl: "R-A2 makes the roster grant-derived, and the grant is per (role, system, verb) — so one rendered roster exists per role, sectioned per system. FORK 9(d) leaves open how a system with ZERO granted verbs for a role is rendered (omitted, present but empty, or a generation failure), which is the only part of this key still undecided."}
+          evidence: {nl: "R-A2 makes the roster grant-derived, and the grant is per (role, system, verb) — so one rendered roster exists per role, sectioned per system. §7 R9(d) settled the zero-granted case: the system is omitted entirely. The repair pass made the per-ROLE half of this key load-bearing rather than theoretical — until then only gather had a roster, so nothing exercised a second one, and the audit that scores rosters had no way to say which role's grant governs which file (d75, and F3's fourth attribution rule)."}
           sharing: unique-key
         payload:
           # R6 territory, and the reason the roster is modelled as a rendered sink rather than a
@@ -1197,13 +1435,25 @@ structure:
       provenance: design
       facets:
         access:
-          # D4 keys on the ENDPOINT because a method-based rule fails: elastic's _search and _query
-          # are both POST-with-body READS, so "an r verb may not POST or send a body" rejects two
-          # working verbs (c17, refuted). g12 re-confirmed the HTTP set at HEAD: 4 elastic/kibana
-          # patterns, 14 (system, path) stub pairs over 13 distinct patterns.
+          # REPAIR PASS (F1): D4 keys on the (ENDPOINT, METHOD) PAIR. c17 refuted a GLOBAL
+          # "an r verb may not POST or send a body" — elastic's _search and _query are both
+          # POST-with-body READS, and a blanket ban rejects two working verbs — and that is all
+          # it refuted. A per-entry method keeps both as listed pairs and is the only axis that
+          # separates the ticket read from the ticket write, which resolve to the same path on
+          # the same host: over the 27 real (system, path, method) triples, path-only overlap
+          # between reads and writes is {"/tickets"} and path+method overlap is empty. The
+          # endpoint-only key was therefore not weak but UNSATISFIABLE, and write-code-from-spec
+          # refused to implement on it. g12 re-confirmed the HTTP set at HEAD: 4 elastic/kibana
+          # patterns, 14 (system, path) stub pairs over 13 distinct patterns — and one of those
+          # four elastic patterns, the Kibana-host status path, was missing from every fixture
+          # in the suite (d74).
+          # CORRECTION ROUND (G1): this table is a CONSTRUCTED VALUE, not a module literal —
+          # a method-less entry cannot be built, on either HTTP cell. Bound by d76, which is
+          # what makes F1's "the method is load-bearing" rest on production behaviour instead
+          # of on one assertion over the one constant that ships today.
           constraints_by_via:
-            http-elastic: {trust: attacker-influenced, constraints: [read-endpoint-allowlist, index-confinement]}
-            http-stub:    {trust: attacker-influenced, constraints: [read-endpoint-allowlist]}
+            http-elastic: {trust: attacker-influenced, constraints: [read-endpoint-method-allowlist, index-confinement]}
+            http-stub:    {trust: attacker-influenced, constraints: [read-endpoint-method-allowlist]}
             docker-exec:  {trust: attacker-influenced, constraints: [argv-head-allowlist, container-inventory]}
             # UNKNOWN #4 RESOLVED — §7 R4: CHECK THE PAIR, the program against a per-system
             # allowlist AND the container target against the declared inventory. Both halves, not
@@ -1425,7 +1675,8 @@ structure:
       facets: {}
       # Phase F, finding 6. The observation seam the adapters expose for their own outbound
       # requests: a sink on the VerbContext each verb already receives, written with the
-      # RESOLVED request target before the transport runs. Facetless — it carries no contract
+      # RESOLVED request target — and, since the repair pass, the HTTP METHOD — before the
+      # transport runs. Facetless — it carries no contract
       # of its own; it exists so the endpoint rule and the payload obligation on
       # interacts(elastic_adapter->estate) have something to bind against that is not the
       # allowlist's own declared entries. d71 pins it.
@@ -1607,7 +1858,7 @@ claims:
   - {id: c17, source: discuss, kind: referential, probe_kind: read, verdict: refuted,
      claim: "A method-based transport rule — an `r`-classed verb must not use a non-GET method or a body — is implementable without breaking existing read verbs.",
      probe: "read the three _http_json call sites in scripts/adapters/elastic_adapter.py",
-     observed: "REFUTED. Elastic's _search and esql are both POST-with-body READS — that is Elasticsearch's protocol, not a smell. D4 therefore keys on the ENDPOINT allowlist."}
+     observed: "REFUTED. Elastic's _search and esql are both POST-with-body READS — that is Elasticsearch's protocol, not a smell. What this kills is a GLOBAL, method-ONLY rule ('an r-classed verb may not POST'); it says nothing about an allowlist ENTRY that names a method beside its path. REWORDED AT THE REPAIR PASS: the old sentence here read 'D4 therefore keys on the ENDPOINT allowlist', which no longer describes what shipped. Fork F1 keys D4's allowlist on (URL PATTERN, HTTP METHOD) PAIRS, and the two POST reads pass as listed pairs — see g26, whose measurement is what established that the pair separates read from write. The verdict is unchanged; only the consequence sentence was stale."}
   - {id: c18, source: discuss, kind: census, probe_kind: search, verdict: holds,
      claim: "Gather's real capability need is 21 of the 32 registered verbs; two are used by nothing, and two more are used only by the judge.",
      probe: "parsed verb:/id: frontmatter from the 14 committed query templates, joined against every executed_queries.jsonl across 20 past runs, cross-checked against the live registry",
@@ -1775,6 +2026,104 @@ claims:
      probe: "called hooks.record_lead.claim_lead directly with one forced-collision lead_id from two threads released by a threading.Barrier (same process, same GIL) and separately from two multiprocessing fork workers (true OS parallelism, no GIL), both against one shared run_dir",
      observed: "Both the thread pair and the process pair produced exactly one winner (return 0, sidecar written) and one loser (return 2, the id-reuse path tools_gather turns into ModelRetry); never two winners, never zero. The guard is os.open(..., O_CREAT|O_EXCL|O_WRONLY) — a single atomic syscall the OS itself serializes, so it holds identically across threads and separate processes. EXTENDS g7; this is what W3 waives on."}
 
+  # ---- promoted by the repair pass's re-ground leaf (g26-g28) ----
+  # These three ARE the probes the human's three repair-pass fork resolutions rest on. They
+  # were executed and recorded in .spec-flow/frontiers/100-reground.md as rg1/rg2/rg3 and
+  # lived only in the frontier chain until now; the ledger ships in the artifact (rules.md),
+  # so a citation pointing at a side file the diff does not carry is indistinguishable from
+  # an uncited rationale downstream. Renumbered onto this ledger's own sequence; text carried
+  # across verbatim, not re-probed and not re-worded stronger than what was measured. One
+  # correction of record: 100-reground.md typed rg3 `kind: seam`, which is a DEMAND kind and
+  # not one of the six claim kinds — the instrument it actually used (executing the suite's
+  # own attribution rules over a rendered judge roster) makes it a `behavior` claim, and it
+  # is filed as one here.
+  - id: g26
+    kind: behavior
+    probe_kind: executed
+    verdict: holds
+    claim: >-
+      D4 is repairable — a per-system allowlist keyed on the (endpoint, HTTP method) PAIR
+      discriminates the real reachable surface, admitting every read an adapter actually
+      performs (including elastic's two POST-with-body reads) while rejecting every
+      estate-write endpoint, INCLUDING the `/tickets` collision that makes the endpoint-only
+      rule unsatisfiable.
+    probe: >-
+      executed — replaced the single HTTP chokepoint (`docker_exec_curl`) with a recorder and
+      drove every verb in every shipped adapter's VERBS table plus all four ticket-writer
+      entry points against a synthetic config tree, capturing (system, resolved path, method
+      literal) at the call site; then computed the path-only and (path, method) overlaps
+      between the adapter-read set and the writer set. Two write call sites that the drive
+      did not reach (they need a report artifact) were read off source instead; both are
+      literal POST.
+    observed: >-
+      27 distinct (system, path, method) triples. Every stub adapter read is GET; elastic
+      reads are two POST (search, ES|QL) and two GET (cluster health, Kibana status); every
+      writer mutation is POST. Path-only overlap between reads and writes = {"/tickets"};
+      (path, method) overlap = {} (empty). The method literal is a required keyword argument
+      at all three HTTP chokepoints, and all three funnel through one transport function —
+      the same function the spec's capture seam wraps — so the axis costs one extra recorded
+      field. c17's refutation is narrower than the design read it as: it kills "an r-classed
+      verb may not POST", not "the allowlist may mention a method". Separately observed: the
+      writer's system identity is `case-history`, whose configured base URL is the SAME host
+      as `ticket`'s, so neither the system label nor the host separates read from write.
+
+  - id: g27
+    kind: behavior
+    probe_kind: executed
+    verdict: holds
+    claim: >-
+      O6 ("a denial moves no state") is pinnable — the state a QUERY CALL allocates is
+      disjoint, by path, from the state the RUN allocates at dispatch, so a predicate exists
+      that a denial satisfies and that dispatch cannot falsify. Re-verifies c4 at the current
+      base rather than inheriting it.
+    probe: >-
+      executed — built a bare run directory; snapshotted the payload tree, the queries-row
+      count and the derived sequence number; ran the real dispatch hook; re-snapshotted; then
+      drove the production query capability's execute path twice through today's two reject
+      branches (unknown verb on a known system, unknown system) with real run dependencies,
+      re-snapshotting after each.
+    observed: >-
+      Dispatch allocates exactly one artifact — a flat per-lead sidecar file directly at the
+      root of the payload tree — and allocates NO sequence number, NO queries row, and NOT
+      the lead-scoped subdirectory. A query call allocates only inside the lead-scoped
+      subdirectory (one file per sequence number), advances the sequence number, and appends
+      one queries row. The two never share a directory level. c4 HOLDS at the current base:
+      both of today's reject branches wrote a payload file AND a queries row before raising
+      their retry, and the sequence advanced each time. The failing assertion globs the whole
+      payload tree recursively, which catches the dispatch sidecar; the sibling assertion two
+      lines below it — that the lead-scoped subdirectory does not exist — is already the
+      correct predicate and is falsified by nothing dispatch does.
+
+  - id: g28
+    kind: behavior          # 100-reground.md wrote `seam`, which is a demand kind, not a claim kind
+    probe_kind: executed
+    verdict: holds
+    claim: >-
+      H10 holds — committing a grant-derived roster for more than one role makes the
+      real-tree audit red under the committed attribution rules, because those rules
+      attribute a name to a (system, verb) pair and never to a ROLE, while the real-tree
+      assertion scores every model-read surface against ONE role's grant.
+    probe: >-
+      executed — read the committed pair sets out of the spec helper and computed the
+      set differences directly; rendered a judge roster in the roster's own committed
+      rendering contract (qualified `system.verb` ids) and ran the suite's own roster-parsing
+      function plus the qualified-attribution rule over it, scoring against gather's pair set.
+      Separately traced the consumers of the per-system prose injector and enumerated every
+      roster-path call site in the suite.
+    observed: >-
+      The judge's grant names three pairs; gather's grant withholds two of them, and those
+      two ARE two of the four pairs the suite's "committed prose still advertises a withheld
+      verb" counter-example set is built from. So a committed judge roster is red under
+      gather's grant by the qualified rule, with no ambiguity and no dependence on the
+      bare-name rules. Per-role attribution is EXPRESSIBLE but not expressed: the grant object
+      carries its own role, and the roster path function is role-keyed, so each roster file is
+      attributable to a role by construction — but the audit takes an unkeyed tuple of grants,
+      and none of its three attribution rules mentions a role. The non-roster surfaces are
+      cleanly gather's: the per-system prose injector has exactly ONE consumer in production,
+      the gather dispatch path. Nothing in the suite requires a judge roster to exist; every
+      roster assertion names gather. And no committed assertion requires a roster file to be
+      inside the audited surface set.
+
 # ===========================================================================
 # GATE — phase D's gate leaf. `spec-graph gate --residue` computes 40 R1-R5
 # firings mechanically; this block is the leaf's judgment on top of that:
@@ -1922,6 +2271,11 @@ handoff:
     - "FORK 19 -> R19, accepted: pin the negative. Demand d69; RS8 recorded."
     - "FORK 20 -> R20, accepted: three recorded non-obligations, RS9/RS10/RS11, carried as clauses d13/d50/d51. Both clause IDS WERE RENAMED at phase F: the blind reader could not recover what `judge_side_never_invited_bound_absent` or `audit_stream_in_the_denied_roles_read_scope` claimed from any reading of the suite, and the second read as the OPPOSITE of what its clause says. Their prose now states the claim in a sentence, and both are explicit handoff.drops entries so a cold reader meets the reason rather than the silence."
     - "PHASE-F ADDITIONS, from the reconciler's findings rather than from a fork: d71 mints the transport capture seam phase E had routed forward as a deviation (finding 6), and d72 fixes the refusal ordering at the JUDGE site, which R3/R23 decided for the runtime's call only and left to whoever implements the second model-facing tool (finding 8)."
+    - "REPAIR PASS -> F1: the read-endpoint allowlist keys on (URL pattern, HTTP METHOD) PAIRS and the transport capture seam records the method. This is a REPAIR of an unsatisfiable demand, not a new decision: as written, d17 asked one rule over (system, path) to both admit and refuse the identical ticket-store call, because the list-tickets read and the create-a-ticket write resolve to the same path under configs pointing at the same host. write-code-from-spec refused to implement on it and the adversary rediscovered it independently. The measurement: 27 real (system, path, method) triples over every shipped adapter verb and all four ticket-writer entry points; path-only read/write overlap {\"/tickets\"}, path+method overlap empty. c17 is NOT overturned — it killed a global 'an r verb may not POST', which a per-entry method leaves untouched. Rejected, with the reason recorded because a later reader will re-propose it: dropping /tickets from the write set greens the test while unbacking its own stated purpose, catching a future read-classed verb that wraps the write client — which would request exactly that URL under exactly the ticket system name. Also folded in: the three ticket-store write endpoints are reached under the system identity `case-history`, not `ticket`, so the committed fixture's literal misdescribed the surface and the method is what carries the discrimination. Demands d17/d36/d59/d71; mint d74."
+    - "REPAIR PASS -> F2: the denial demand becomes CONSERVATION of pre-call run state — snapshot, require byte-identical — plus the three scoped absences (no lead-scoped subdirectory, empty row table, unadvanced sequence counter). Two things were wrong and only one was a slip. The slip: the assertion globbed the whole payload tree, which dispatch populates with one flat sidecar before any query runs, so no correct implementation could pass it. The finding: absence alone is satisfiable by DESTROYING evidence, and the adversary did exactly that against this test — deleting the dispatch sidecar and the lead's queries row after a denial, which is strictly worse than the state it hides. Conservation catches that; scoped absence cannot, because the deleted file is absent either way. The two kinds of state are disjoint by path, which is what lets both halves be asserted at once. Demand d3."
+    - "REPAIR PASS -> F3: the audit gains a FOURTH attribution rule — each generated roster is scored against its OWN role's grant, every other audited surface against gather's — and its interface changes from an unkeyed tuple of grants to a mapping of which grant governs which file. Forced by an exact collision, not an incidental one: the two verbs the judge's grant names and gather's withholds ARE two of the four counter-examples the audit's reach-zero demand is built on, so committing a correct judge roster is an offence under a single-grant audit. Rejected: excluding rosters from the audited surface, which costs nothing and breaks no committed assertion — precisely why it is indistinguishable from what a dishonest implementer does to clear the red. Under rule 4 that exit is closed by construction, and the closure is ASSERTED (scoring the judge's roster against gather's grant must flag it) rather than only recorded. Demands d45/d70; mint d75."
+    - "REPAIR-PASS MINTS: d74 (the elastic read allowlist carries the Kibana-host endpoint `health-check` reaches — the same class as the two blockers, a demand no correct implementation could satisfy, and in neither the implementer's nor the adversary's findings) and d75 (the judge has a generated roster, generated from the judge's grant and scored against it — nothing in the committed suite required a judge roster to exist, so the change could have shipped with the judge's model-facing verb prose still hand-authored and every test green)."
+    - "CORRECTION ROUND -> G1: the read-endpoint allowlist gains an AUTHORING-INTEGRITY demand symmetric with the grant's — it cannot be BUILT with an entry naming no HTTP method, discharged by driving construction and observing a raise, never by asserting the shape of the committed constant. The human's reason, accepted as recommended: F1 resolved the ticket read/write collision by making the method the discriminating axis, so an entry authored without one silently reopens the collision the fork was resolved to close, and the other two authored tables the model's permissions rest on (the per-role grant, the generated roster) both already fail loudly on a bad author. Consequence for the implementer: the allowlist stops being a bare module constant and gains a validating constructor — a production-surface addition, which is why it is a demand and not a test-local check. Rejected: recording a deliberate no on the ground that the constant has exactly one author today, because 'one author' is not a property the code enforces and an allowlist extended by another route would be unchecked. Demand d76."
     - "CLOSING-PASS ADDITION: d73, the shipped-configuration correction R7's amendment forces. It is the only demand in this graph that binds a `drives()` address, which is why `binds`' unexercised-seam rule reported clean on every earlier run by construction rather than by measurement."
   refuted:
     - "D6 is REFUTED, not narrowed (g10). descriptor_catalog emits one line per SYSTEM and no verbs; the roster the model works from is hand-written skill prose it Reads, and all four grant-withheld verbs are advertised there today with copy-paste call examples — one file actively instructs the model to use one. D2's `the accepted cost is bounded because the model is never invited` had no mechanism behind it. Correction: R-A2 makes the roster grant-derived and the correspondence a DEMAND (d18/d45/d70), not an assumption."
@@ -1963,8 +2317,16 @@ handoff:
   nullstub_passes:
     - "test_an_in_bounds_calls_backend_outage_is_recorded_exactly_as_today — parity: its second assertion (`error_class_for_exit(ConfinementFault(\"x\").exit_code) != \"infra\"`) passes against the null stub because ANY exit_code not in INFRA_EXIT_CODES={2,124} satisfies it, including a nulled one — the assertion is a negative guard against one specific implementation mistake (reusing an infra code), not an independent pin. Its positive control lives in test_denial_gather_632.py::test_a_denial_does_not_move_the_circuit_breaker (breaker totals stay zero after real denials) and ::test_an_infra_fault_still_moves_the_circuit_breaker (the breaker DOES move on a genuine infra fault) — those two, not this one, carry the discriminating weight."
   deviations:
-    - "THE BATON — read this entry first; it is written for someone with no access to the session that produced this spec. WHAT THIS IS: 77 demands (65 executable, 9 clauses the spec deliberately mints nothing for, 3 waivers), red at import against base d01001e6 by construction. The suite names surfaces that do not exist; `defender/tests/_verb_authorization_632.py`'s docstring is the inventory of what must be built. WHO DECIDED WHAT: every R-numbered decision in .spec-flow/frontiers/70-resolutions.md is the HUMAN's — 23 resolutions, 3 waivers, 13 residuals, closing all 20 forks; R7 and R8 carry closing-pass amendments the human also made. Everything else — which observable a demand pins, how a test drives it — is the run's, and where the run chose rather than the human, the demand says so. WHAT WAS REVERSED MID-RUN: the refusal ordering, twice decided. R3 and R23 first put the malformed check and the traversal screen AHEAD of the grant check; both were reversed on composition, because three separately-reachable refusal paths in front of authorization let a caller choose to be refused without being recorded — one unrecognised parameter suppressed every denial record for the life of a run. The grant check now runs FIRST. Its costs are named in R3/R23 and RS6, not absorbed. WHAT RAN DEGRADED: see the four entries below — a weak third answering copy, a design doc never revised, a null-stub gate that could not mechanize, and a conservation check that has NOT RUN against this suite. WHAT SHIPS UNREPAIRED: the four accepted residuals entry below. THE SINGLE NEXT ACTION: hand to write-code-from-spec, and implement d73 FIRST — the judge's grant must be scoped off beside its capability bit before anything else, because R7's first direction applied to today's configuration stops the adversarial judge stage building, and every other demand can be satisfied while that failure sits in the run."
+    - "THE REPAIR PASS — read this beside THE BATON, which predates it. This suite was kicked back from write-code-from-spec, which REFUSED to implement on two demands no correct code could satisfy, and from an adversarial implementer that greened the whole suite with deliberately dishonest code. A human resolved three design forks (F1/F2/F3 in .spec-flow/frontiers/170-resolutions.md); this pass applied them, minted the two demands those resolutions carried, and tightened nine tests until the exploit each admitted goes red. It re-derived no intent and touched no test that was already discriminating."
+    - "THE REPAIR PASS'S LEDGER LANDED ONE PASS LATE, and the gap is worth reading because it is the ledger's own failure mode. The three executed probes the human's F1/F2/F3 resolutions rest on were recorded in 100-reground.md and NOT promoted into this block — so for one whole pass the spec's three most load-bearing repairs were grounded in a side file the diff does not carry, which is indistinguishable downstream from an uncited rationale. They are now g26 (the 27 (system, path, method) triples), g27 (dispatch-state and query-state disjoint by path) and g28 (the roster attribution collision), carried across verbatim rather than re-probed, and cited from the nine demands they ground: g26 from d17/d36/d59/d71/d74, g27 from d3, g28 from d45/d70/d75. Nothing mechanical caught this — no citation was DANGLING, because none existed. c17's `observed` was reworded in the same pass: its verdict (`refuted`) is untouched and still correct, but its closing sentence still said D4 keys on the endpoint allowlist, which F1 replaced with (URL pattern, HTTP method) pairs."
+    - "INPUTS, in authority order: .spec-flow/frontiers/170-resolutions.md (the human's three fork resolutions, two minted demands, and the routed tightening scope) and 100-reground.md (the three executed probes behind them — the 27 (system, path, method) triples, the dispatch-vs-query state split, the roster attribution finding). Then this graph and suite. Then the original chain's 05-early-resolutions.md and 70-resolutions.md for anything predating the pass. The design doc remains unrevised and refuted in places; it is still last."
+    - "SCOPE: 3 fork resolutions applied (F1/F2/F3), 2 demands minted (d74/d75), 9 non-discriminating tests tightened (H1-H6, H8, H11, H12 from issue 632 comment 5118917483) plus the #700-shaped deck replay. Conservation: 12 adversary findings = 3 resolved as forks (H7/H9 the two blockers, H10 the design gap) + 9 tightened; 4 grounding red flags = 2 folded into resolutions (RF2 into F1, RF4 into F3) + 2 minted (RF1 -> d74, RF3 -> d75). No drops, no waivers."
+    - "THE CORRECTION ROUND, after the repair pass and on the same suite. Inputs in authority order: .spec-flow/frontiers/195-resolutions.md (the human's two decisions), then 192-reconciliation.md's findings 1/3/4 and 191-blind.md. SCOPE: 1 demand minted (d76, resolution G1), 1 residual recorded (G2, in the entry below), 1 test added with its positive control, 1 test repaired for legibility with NO change in what it requires, and the blind frontier's frontmatter re-emitted in the shape the conservation checker actually reads — it had declared its inputs as a flat mapping, so the checker skipped the file and reported clean, which in its output is indistinguishable from passing. Nothing already discriminating was touched. Conservation: 2 decisions in, 2 out (G1 -> d76, G2 -> the recorded residual); 2 defects routed to this leaf, both discharged (the frontmatter shape, the four-versus-six systems); 0 drops, 0 waivers."
+    - "A THIRD UNSATISFIABLE PAIR WAS FOUND AND REPAIRED WITHOUT WEAKENING EITHER DEMAND, and it is the near-miss worth reading. d34's fake answered `list-tickets` with a bare array while asserting exit_code == 0; the store's real list endpoint answers an object envelope and gather's ticket screen files a bare array as MALFORMED. The only implementation satisfying both d34 and the screen is one that skips non-object payloads — which is exactly H8's bypass of the self-case exclusion, so the contradicting fixture was the thing MAKING the exploit necessary. Repaired in the fixture (the fake now answers the store's real shape), not in either demand. Adjacent to it: d23's fixture returned two tickets neither of which was the current case, so the exclusion it exists to pin was never exercised at all — the self key is the run's own id, and nothing in the fixture was it."
+    - "WHAT WAS DELIBERATELY LEFT: d17's Kibana-host endpoint (d74) is pinned against the adapter's source and the rule, NOT against a driven request. It is not reachable through the capture seam on a hermetic drive — the cluster-health request fails first on the unreachable transport and the verb never issues the second — so a drive-backed assertion would need a reachable Elasticsearch. Recorded here rather than left as an unexplained asymmetry with the other three elastic targets, which DO arrive through the seam."
+    - "THE BATON — read this entry first; it is written for someone with no access to the session that produced this spec. WHAT THIS IS: 80 demands (68 executable, 9 clauses the spec deliberately mints nothing for, 3 waivers), red at import against base d01001e6 by construction. That count was recomputed from the demand list in the correction round rather than incremented: it had read 77/65 since before the repair pass's two mints, so the baton and the demand block's own header disagreed by two, which is one instance of the self-accounting break the third reconciliation flagged across the chain. The suite names surfaces that do not exist; `defender/tests/_verb_authorization_632.py`'s docstring is the inventory of what must be built. WHO DECIDED WHAT: every R-numbered decision in .spec-flow/frontiers/70-resolutions.md is the HUMAN's — 23 resolutions, 3 waivers, 13 residuals, closing all 20 forks; R7 and R8 carry closing-pass amendments the human also made. Everything else — which observable a demand pins, how a test drives it — is the run's, and where the run chose rather than the human, the demand says so. WHAT WAS REVERSED MID-RUN: the refusal ordering, twice decided. R3 and R23 first put the malformed check and the traversal screen AHEAD of the grant check; both were reversed on composition, because three separately-reachable refusal paths in front of authorization let a caller choose to be refused without being recorded — one unrecognised parameter suppressed every denial record for the life of a run. The grant check now runs FIRST. Its costs are named in R3/R23 and RS6, not absorbed. WHAT RAN DEGRADED: see the four entries below — a weak third answering copy, a design doc never revised, a null-stub gate that could not mechanize, and a conservation check that has NOT RUN against this suite. WHAT SHIPS UNREPAIRED: the four accepted residuals entry below. THE SINGLE NEXT ACTION: hand to write-code-from-spec, and implement d73 FIRST — the judge's grant must be scoped off beside its capability bit before anything else, because R7's first direction applied to today's configuration stops the adversarial judge stage building, and every other demand can be satisfied while that failure sits in the run."
     - "CONSERVATION HAS NOT RUN AGAINST THIS SUITE, and no green anywhere in this run should be read as saying it did. The blind read on record (91-blind.md) answered 136 questions against a SUPERSEDED suite: it predates two re-authors, so its cold read states the PRE-REVERSAL refusal ordering as the suite's intent, and it never saw the two phase-F obligations, the phase-G one, or any demand re-authored under R11's literal reading. The mechanical pass regenerated the question sets afterwards; nobody answered them, and regenerated questions are not a run check. The disposition on the reader's one surviving flag is recorded in the next entry and is what bounds the loss — this suite's blind read measures whether the assertions exist and discriminate, not independently that intent was conserved, so a stale one costs less than it would elsewhere. It still costs something: undischarged intent and invented scope are exactly what conservation is the instrument for, and no other check in this run looks for them. Re-run it against the shipped suite, or carry this as a named residual into the merge decision — but do not treat the question as asked. The same holds one level down for the cold reconciliation: three have run, and the two changes the closing pass made — the audit's form rules (d45) and the configuration correction (d73) — post-date all three. `spec-graph frontiers` reports that as a live finding rather than a silence: the two reconciliation frontiers echo this suite at 64 tests and it is 65, and their echoes were left accurate to what they read rather than edited to match."
+    - "NAMED RESIDUAL FOR THE MERGE DECISION (195-resolutions G2) — THE JUDGE'S MODEL-FACING ENTRY POINT SHIPS WITH NEITHER EXECUTION EVIDENCE NOR CONSERVATION EVIDENCE. Read this as the current state of the entry above, which it narrows rather than repeals: a blind conservation read HAS now run (.spec-flow/frontiers/191-blind.md, 16 questions over this pass's touched surface, 14 answered from the tests alone), so the suite is no longer wholly unmeasured — but the judge site is exactly what it could not reach. Two things coincide there, with one cause. Of the four tightenings this spec could not EXECUTE, two are at the judge's closed-ticket tool; and the blind read could not MEASURE those two either, because its read set was scoped by filename pattern and the judge-side drives plus their default response shapes live in a support file from an earlier issue, outside that pattern. So the second model-facing site — the one whose duck-typed-registry hole and refusal ordering this spec exists to close — carries an assertion that has never been run and has never been independently read back. THE CAUSE IS THAT THE PRODUCTION WIRING DOES NOT EXIST YET, and `write-code-from-spec` drives that surface for real: it is the phase that turns those two arguments into observations. The human decided to record this rather than spend another reader pass buying evidence the next phase buys properly. The instrument defect behind it is real and deferred by decision: a conservation reader scoped by filename pattern will keep missing transitive test-support imports, and the fix belongs in the phase contract rather than in this run."
     - "THE DOCSTRING CONVENTION IS KEPT — a decision, not an oversight. The blind reader's fourth flag was that every test file narrates the design inline (refuted claims by id, resolution numbers, residual ids), so a cold reader recovers the intent map from the prose rather than from the assertions, and a blind read cannot discriminate `the tests carry the intent` from `the docstrings restate it`. Answered by keeping the prose: the schema makes a form:test demand a POINTER whose entire outcome prose lives in the named test's docstring — check_binds scans that docstring IN PLACE OF a demand `outcome` — so trimming rationale deletes the only place several obligations are written down, and it is also the guide write-code-from-spec reads to know why an assertion is shaped as it is. What is given up: a blind read of this suite is weaker evidence about conservation than it would be of a terser suite. The mechanical checks (premise-disposition, refuted-claims, null-stub) and the cold reconciler carry that question instead, and both have caught what a blind read could not. This is the disposition of the flag, not a report that the check ran — it has not, per the entry above."
     - "THE THIRD ANSWERING COPY IS THINNER THAN THE OTHER TWO, and the consensus counts rest on it. Phase C answers each premise in three independent copies; the third was produced twice on a weak model and REJECTED BOTH TIMES for asserting outcomes where the design doc is silent — the exact failure that turns a three-way agreement into one voice repeated. It was re-run on a stronger model, and the copy that ships answers 41 of 81 premises with 40 explicit hedges. So the third opinion agrees where it speaks and abstains often: 26 consensus assertions and 12 silent branches were re-judged against it, and the fork count rose 33 -> 38 because of it. A premise carried by copies 1 and 2 with a hedge from copy 3 is 2/3, not 3/3, wherever this spec says `consensus`."
     - "THE DESIGN DOC WAS NEVER REVISED, so this artifact is the only place the corrected design exists. .spec-flow/632-design.md still reads D6 as written, and D6 is REFUTED, not narrowed — plus seven further design claims the ledger refuted outright (`refuted:` above). The authority order is: 05-early-resolutions.md (binding), then 70-resolutions.md (§7), then the ledger's executed claims, then the doc for whatever those three do not overturn. Anyone who reads the doc and this spec together and trusts the doc will implement a mechanism that was measured not to exist."

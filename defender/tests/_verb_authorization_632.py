@@ -59,6 +59,22 @@ The surface this suite pins
     The grant-derived model-facing roster (05-early-resolutions R-A2) and the build-time
     audit over every artifact the model reads (§7 R8/R9).
 
+    THE AUDIT IS KEYED BY ROLE, not handed an unkeyed bag of grants (170-resolutions F3).
+    `audit_read_surfaces(defender_dir, grants)` takes a MAPPING of role -> `VerbGrant` and
+    decides, per file, which grant governs it. That is the fourth attribution rule, and it
+    exists because the three below cannot express it: they attribute a NAME to a
+    `(system, verb)` pair and never to a ROLE, while every role now ships its own generated
+    roster. The judge's roster names two ticket verbs gather's grant withholds, so scoring
+    the whole tree against one role's grant makes a correct second roster an offence.
+      4. A GENERATED ROSTER is scored against ITS OWN ROLE's grant — the role is read off the
+         roster's own committed path, which is role-keyed by construction. Every other
+         audited surface is scored against `AUDIT_DEFAULT_ROLE`'s grant, because the
+         non-roster surfaces have exactly one production consumer (the gather dispatch path).
+    Excluding rosters from the audited surface was rejected: it breaks no assertion, which is
+    precisely the problem — it is indistinguishable from what a dishonest implementer does to
+    clear the red. Under rule 4 that exit is closed by construction, and the test asserts the
+    closure directly by scoring the judge's roster against gather's grant and requiring a hit.
+
     THE ROSTER ADDRESSES A VERB BY ITS (system, verb) PAIR, never by its bare name.
     Authorization is a property of the pair — the suite asserts exactly that at the decision
     point, where `identity.list-roles` is GRANTED to gather while `cmdb.list-roles` is granted
@@ -97,6 +113,34 @@ The surface this suite pins
     URL for the row-shaped rule to apply to (§7 R4). Plus `TransportCapture` — the
     observation seam the endpoint rule is checked through, so the allowlist meets the URLs
     the adapters really build rather than its own declared entries.
+
+    THE ALLOWLIST IS A CONSTRUCTED VALUE, NOT A MODULE LITERAL: `ReadEndpointAllowlist` is a
+    validating Mapping constructor that raises `AllowlistError` at AUTHORING time for an entry
+    naming no HTTP method, and `READ_ENDPOINT_ALLOWLIST` is what it returned. This is the
+    grant's authoring-integrity guarantee applied to the third hand-authored table the model's
+    permissions rest on — the per-role grant refuses a bad class token at construction and the
+    generated roster must regenerate to its committed bytes, while a method-less allowlist entry
+    was caught by a single assertion over a single committed literal and by nothing in
+    production. It has to be a Mapping because the endpoint rule's own test reads the table by
+    key set, by system and by subscript.
+
+    THE ALLOWLIST KEYS ON `(URL PATTERN, HTTP METHOD)` PAIRS, and the capture seam records
+    the method beside the path (170-resolutions F1). An endpoint-only key is UNSATISFIABLE,
+    not merely weak: the ticket store's "list the tickets" read and its "create a ticket"
+    write are the same resolved path, so one rule over `(system, path)` is asked to admit and
+    refuse the identical call. The measurement behind the repair: over the 27 distinct
+    (system, path, method) triples every shipped adapter verb and every ticket-writer entry
+    point really produces, path alone collides exactly once — on `/tickets` — and path+method
+    collides zero times. c17 is NOT overturned by this: it refuted a GLOBAL "an `r` verb may
+    not POST", which a per-entry method leaves untouched — elastic's two POST-with-body reads
+    are listed pairs and still pass. Every outbound request in the tree already funnels
+    through one transport function that takes the method as a required keyword, and it is the
+    same function this seam wraps, so the axis costs one recorded field.
+
+    Dropping `/tickets` from the write set was rejected, and the reason is recorded because a
+    later reader will re-propose it: it greens the test while unbacking the test's own stated
+    purpose — catching a future read-classed verb that wraps the write client, which would
+    request exactly that URL under exactly the `ticket` system name.
 
 Fakes inject faults; they never classify. A fake verb records what it was handed and then
 returns its payload or raises its fault — every exit code, error class, refusal string,
@@ -187,6 +231,59 @@ WITHHELD_FROM_GATHER: tuple[tuple[str, str], ...] = (
 )
 HEALTH_CHECK = "health-check"
 JUDGE_ROLE = "judge"
+GATHER_ROLE = "gather"
+
+# The store's real list envelope. `list_tickets` answers `{"total", "tickets"}` and the
+# gather-side screen enforces that shape as a CONTRACT (`ticket_screen.screen_list` files a
+# bare array as malformed), so a fake handing back a bare list is not a lighter fixture — it
+# is a different observable, and one no correct implementation can score as a clean read.
+# Written here once because two demands share it: the granted-call positive control and the
+# self-case exclusion.
+def ticket_envelope(*keys: str) -> dict:
+    return {"tickets": [{"key": k, "status": "closed"} for k in keys], "total": len(keys)}
+
+
+# The evidence surface a denial must conserve: the payload tree and the queries table, both
+# under the run dir. Scoped deliberately — `llm_requests.jsonl` and the tool trace move on
+# every model call, so folding them in would make conservation unassertable, while these two
+# are exactly what the run allocated and exactly what an implementation that "leaves nothing
+# behind" by DELETING evidence would have to disturb.
+EVIDENCE_SURFACE = ("gather_raw", "executed_queries.jsonl")
+
+
+def evidence_snapshot(run_dir: Path) -> dict[str, bytes]:
+    """Every file on the run's evidence surface, relative path -> exact bytes.
+
+    Bytes, not a listing: the exploit this exists to catch deletes a file and re-creates a
+    shorter one, which a name-set comparison cannot see."""
+    out: dict[str, bytes] = {}
+    for name in EVIDENCE_SURFACE:
+        p = run_dir / name
+        if p.is_file():
+            out[name] = p.read_bytes()
+        elif p.is_dir():
+            for f in sorted(p.rglob("*")):
+                if f.is_file():
+                    out[str(f.relative_to(run_dir))] = f.read_bytes()
+    return out
+
+
+class WatchingReplay(ReplayFn):
+    """A replay model that snapshots the run's evidence surface at every model request.
+
+    This is how conservation is observed from INSIDE one real run rather than by comparing
+    two runs: the gather leg is called once to emit its query and again once the tool result
+    comes back, so consecutive snapshots straddle exactly the call under test. Comparing two
+    separate runs could not work — the artifacts carry timestamps and a run id."""
+
+    def __init__(self, turns: list[Turn], run_dir: Path):
+        super().__init__(turns)
+        self.run_dir = run_dir
+        self.snapshots: list[dict[str, bytes]] = []
+
+    def __call__(self, messages, info):  # noqa: ANN001 — the framework's callable protocol
+        self.snapshots.append(evidence_snapshot(self.run_dir))
+        return super().__call__(messages, info)
 
 # One verb name, withheld on one system and granted on another. It is the reason every roster
 # assertion in this suite reads pairs: `list-roles` must appear (identity grants it to gather)
@@ -251,6 +348,20 @@ def roster_pairs(text: str) -> set[tuple[str, str]]:
 def grant_of(role: str, pairs, *, verb_class: str = "r") -> VerbGrant:
     """A `VerbGrant` over `pairs`, every entry expecting `verb_class`."""
     return VerbGrant(role=role, entries=tuple((s, v, verb_class) for s, v in pairs))
+
+
+def shipped_grants() -> dict[str, VerbGrant]:
+    """The role -> grant mapping the real-tree audit is handed: every role that ships a
+    generated roster, keyed by the role its roster is committed under.
+
+    Built from the shipped definitions rather than from literals, because what this mapping
+    must cover is "every role with a roster on disk" — a literal list would go stale the
+    first time a third role gets one, and the audit would then score that role's roster
+    against gather's grant and report an offence that is not one."""
+    from defender.learning.pipeline.judge.engine_pydantic import JUDGE_DEF
+    from defender.runtime.driver import GATHER_DEF
+
+    return {GATHER_ROLE: GATHER_DEF.verb_grant, JUDGE_ROLE: JUDGE_DEF.verb_grant}
 
 
 def scoped_ticket_registry(rec: VerbRecorder, pairs, **kw) -> ScopedFakeVerbs:
@@ -340,12 +451,43 @@ class _Run:
 
     @property
     def payload_files(self) -> list[Path]:
-        root = self.run_dir / "gather_raw"
+        """The payloads a QUERY CALL allocates: `gather_raw/{lead_id}/{seq}.json`, inside the
+        lead-scoped subdirectory and nowhere else.
+
+        Scoped, not globbed. Dispatch writes one flat `gather_raw/{lead_id}.lead.json`
+        sidecar at the ROOT of this tree before any query runs, consumes no sequence number
+        and does not create the lead-scoped subdirectory at all — so a recursive glob of the
+        whole tree conflates run state with query state and demands an empty tree no correct
+        implementation can produce. The two never share a directory level; that measured
+        disjointness is what makes this property assertable."""
+        root = self.run_dir / "gather_raw" / LEAD
         return sorted(p for p in root.rglob("*.json") if p.is_file()) if root.is_dir() else []
+
+    @property
+    def snapshots(self) -> list[dict[str, bytes]]:
+        """The evidence-surface snapshots taken at each gather model request, present only
+        when the drive asked for them."""
+        return getattr(self.gather, "snapshots", [])
 
     @property
     def gather_saw(self) -> str:
         return self.gather.seen[-1] if self.gather.seen else ""
+
+    @property
+    def gather_delta(self) -> str:
+        """The model-visible text the drive ADDED past the first request — the channel a tool
+        result or a refusal comes back on.
+
+        `seen` entries are cumulative flattened histories, so this delta is exactly what the
+        tool calls contributed. Assertions that something is ABSENT need it: the ambient
+        gather prompt names the tree, the run and the systems, so `not in seen[-1]` can fail
+        for reasons that have nothing to do with the tool result under test."""
+        if not self.gather.seen:
+            return ""
+        head = self.gather.seen[0]
+        assert self.gather.seen[-1].startswith(head), \
+            "the flattened history is not append-only — the delta is not the drive's own result"
+        return self.gather.seen[-1][len(head):]
 
     @property
     def breaker(self) -> dict:
@@ -365,11 +507,14 @@ DONE = Turn(text="Summary: measured the lead.")
 
 
 def run_gather(tmp_path: Path, *, verbs, turns: list[Turn], system: str = "elastic",
-               run_id: str = "vauth632") -> _Run:
+               run_id: str = "vauth632", watch: bool = False) -> _Run:
     """Drive a REAL run: main dispatches one gather lead, the nested gather agent replays
     `turns` against the INJECTED scoped registry. Everything between the two fakes —
     dispatch, the query tool, the grant decision, the capture capability, the breaker, the
-    two tables and the policy-denial stream — is production code."""
+    two tables and the policy-denial stream — is production code.
+
+    `watch` snapshots the evidence surface at every gather model request, which is what the
+    conservation half of the denial demand reads."""
     run_dir = materialize(tmp_path, GOLDEN_AB3)
     main = ReplayFn([
         Turn(tool_calls=[("gather", {
@@ -378,7 +523,7 @@ def run_gather(tmp_path: Path, *, verbs, turns: list[Turn], system: str = "elast
         })]),
         Turn(text="Investigation complete."),
     ])
-    gather = ReplayFn(turns)
+    gather = WatchingReplay(turns, run_dir) if watch else ReplayFn(turns)
     drive(run_dir, run_id=run_id, salt=SALT, main=main, gather=gather, verbs=verbs)
     return _Run(run_dir, main, gather)
 
@@ -387,6 +532,12 @@ __all__ = [
     "ADAPTERS_DIR",
     "BENIGN_JUDGE_PAIRS",
     "COLLIDING_VERB",
+    "EVIDENCE_SURFACE",
+    "GATHER_ROLE",
+    "WatchingReplay",
+    "evidence_snapshot",
+    "shipped_grants",
+    "ticket_envelope",
     "DENIED",
     "DENY_ALL",
     "DONE",
