@@ -65,7 +65,7 @@ from pydantic_ai import ModelRetry  # noqa: E402
 from defender import agents as agents_registry  # noqa: E402
 from defender.runtime import bash_exec, box, permission  # noqa: E402
 from defender.runtime import tools as runtime_tools  # noqa: E402
-from defender.runtime.agent_definition import RunScope, bind  # noqa: E402
+from defender.runtime.agent_definition import RunScope, bind, effective_tools_for  # noqa: E402
 from defender.runtime.agent_role import AgentRole  # noqa: E402
 from defender.runtime.driver import MAIN_DEF  # noqa: E402
 
@@ -702,7 +702,12 @@ def test_every_bash_enabled_role_executes_through_a_box(tmp_path):
             )
         else:
             role_scope = scope
-        deps = bind(defn, run_dir, scope=role_scope, salt=SALT, defender_dir=tree)
+        # effective_tools_for (#632, §7 R7): the judge's static tools/verb_grant disagree by
+        # construction (only its per-leg replace() in _run_judge_pydantic agrees them); this
+        # probe is about the box lane, not the verb grant.
+        from dataclasses import replace as _replace
+        bindable = _replace(defn, tools=effective_tools_for(defn))
+        deps = bind(bindable, run_dir, scope=role_scope, salt=SALT, defender_dir=tree)
         assert isinstance(deps.box, box.BoxExecutor), \
             f"{defn.role.name} has bash but no box on its deps"
 

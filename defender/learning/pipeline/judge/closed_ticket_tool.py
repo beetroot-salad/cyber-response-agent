@@ -468,12 +468,26 @@ class _DenialAuditor:
 
 
 async def _grant_gate(
-    deps: AgentDeps, verbs: Any, denials: _DenialAuditor, verb: str,
+    deps: AgentDeps, verbs: Any, denials: _DenialAuditor, lock: asyncio.Lock, verb: str,
 ) -> str | None:
     """THE grant decision, ahead of every one of the judge site's own screens (key grammar,
     key schema, self-case-key) — exactly the runtime's ordering, mirrored at the second
-    model-facing site so it does not carry an audit hole the first one closed."""
-    decision = verbs.decide(SYSTEM, verb)
+    model-facing site so it does not carry an audit hole the first one closed.
+
+    A fault RESOLVING the verb (``decide()`` importing a broken adapter to check its
+    declared class, mirroring the runtime's own load-error treatment) faults-and-continues
+    like any other resolution fault — a row, an infra breaker contribution, no unwind out of
+    ``agent.iter()`` — rather than propagating out of this gate uncaught."""
+    try:
+        decision = verbs.decide(SYSTEM, verb)
+    except CONTROL_FLOW_EXCEPTIONS:
+        raise
+    except (KeyboardInterrupt, GeneratorExit, asyncio.CancelledError):
+        raise
+    except BaseException as e:  # noqa: BLE001 — the registry could not resolve this verb
+        return await _capture_and_view(
+            deps, lock, verb, {}, None, _fault_exit(e), str(e) or type(e).__name__,
+        )
     if decision.outcome == DENIED:
         denials.log(deps.run_dir, verb=verb, params={})
         return _format_bash_result(
@@ -614,7 +628,7 @@ def register_closed_ticket_tools(agent: Any, verbs: Any) -> None:
         get_closed_ticket. Only cases already closed BEFORE the alert you are scoring was
         opened are returned: the in-flight ticket is never returned, and neither is anything
         written while this case was live."""
-        refusal = await _grant_gate(ctx.deps, verbs, denials, "list-tickets")
+        refusal = await _grant_gate(ctx.deps, verbs, denials, seq_lock, "list-tickets")
         if refusal is not None:
             return refusal
         return await _list_body(ctx.deps, seq_lock, verbs, label, q)
@@ -626,7 +640,7 @@ def register_closed_ticket_tools(agent: Any, verbs: Any) -> None:
         in-flight ticket for the alert you are scoring, nor a ticket last written after that
         alert was opened. A cited seed the store can't confirm,
         or whose grounded conditions these actuals contradict, does not survive on that basis."""
-        refusal = await _grant_gate(ctx.deps, verbs, denials, "get-ticket")
+        refusal = await _grant_gate(ctx.deps, verbs, denials, seq_lock, "get-ticket")
         if refusal is not None:
             return refusal
         return await _get_body(ctx.deps, seq_lock, verbs, key)

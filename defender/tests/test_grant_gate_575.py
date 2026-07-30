@@ -72,6 +72,7 @@ from defender.learning.core import config  # noqa: E402
 from defender.runtime import permission, tools  # noqa: E402
 from defender.runtime.agent_definition import (  # noqa: E402
     RunScope,
+    ToolSet,
     bind,
     compile_policy_for,
 )
@@ -129,12 +130,19 @@ def _read(env, path, which="gather"):
 
 
 def _judge(env):
-    """The judge's policy via the real bind seam. Both legs compile the same bash lane now
-    (#672): the benign closed-ticket read is a typed tool, not a bash grant."""
+    """The judge's policy via `compile_policy_for`, not the bare `bind` seam (#632).
+    `JUDGE_DEF`'s static `closed_tickets` bit stays False (only the per-leg `replace()` in
+    `_run_judge_pydantic` turns it on, together with the effective grant, d73) while its
+    `verb_grant` is the real non-empty census grant — a bare `bind(JUDGE_DEF, ...)` therefore
+    always disagrees under §7 R7's check. That's not a gap in the rule: a bare, unreplaced
+    `bind()` was never a real judge build to begin with, benign or adversarial, so this policy
+    probe states the effective ToolSet its bash-grant audit actually wants — the benign leg's
+    shape, matching the grant `JUDGE_DEF` already carries — the same way the real builder does."""
     cmp_dir = env.tmp / "cmp"
     cmp_dir.mkdir(exist_ok=True)
     scope = RunScope(add_dirs=(cmp_dir,))
-    return bind(JUDGE_DEF, env.run, scope=scope, defender_dir=env.dfn).policy
+    effective = ToolSet(read=True, bash=True, closed_tickets=True)
+    return compile_policy_for(JUDGE_DEF, env.run, scope=scope, defender_dir=env.dfn, tools=effective)
 
 
 def _actor(env):

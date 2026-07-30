@@ -43,11 +43,13 @@ from defender.hooks.budget_enforcer import (  # noqa: E402
     update_budget_locked,
 )
 from defender.runtime import driver, observe  # noqa: E402
-from defender.runtime.agent_definition import bind  # noqa: E402
+from defender.runtime.agent_definition import bind, effective_tools_for  # noqa: E402
 from defender.runtime.agent_role import AgentRole  # noqa: E402
 from defender.runtime.driver import GATHER_DEF, MAIN_DEF  # noqa: E402
 from defender.runtime.providers import BuiltModel  # noqa: E402
 from defender.runtime.query_tool import CONTROL_FLOW_EXCEPTIONS  # noqa: E402
+from defender.runtime.verb_grant import VerbGrant  # noqa: E402
+from defender.runtime.verbs import VerbRegistry  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFENDER = REPO_ROOT / "defender"
@@ -105,7 +107,11 @@ def drive_agent(defn, run_dir: Path, turns, *, limits, enforce: bool | None = No
     from defender import run_common
     from defender.runtime import box as box_mod
     box = box_mod.unboxed_executor(env=run_common.run_env(DEFENDER, run_dir))
-    deps = bind(defn, run_dir, salt="0011223344556677", defender_dir=DEFENDER, box=box)
+    # effective_tools_for (#632, §7 R7): a bare bind() of a role whose static tools/verb_grant
+    # disagree (the judge — see agent_definition.effective_tools_for) would raise; this probe
+    # is about the budget/accounting hooks, not the verb grant.
+    bindable = _replace(defn, tools=effective_tools_for(defn))
+    deps = bind(bindable, run_dir, salt="0011223344556677", defender_dir=DEFENDER, box=box)
     import asyncio
 
     async def _go():
@@ -146,7 +152,10 @@ def test_budget_kill_is_not_control_flow(tmp_path):
     run_dir = _run_dir(tmp_path)
     open_budget(run_dir, "run-1")
 
-    class KillingVerbs:
+    class KillingVerbs(VerbRegistry):
+        def __init__(self):
+            super().__init__(VerbGrant(role="gather", entries=(("elastic", "esql", "r"),)))
+
         def systems(self):
             return ("elastic",)
 
@@ -161,7 +170,10 @@ def test_budget_kill_is_not_control_flow(tmp_path):
         "the kill was filed as a query fault — a row claims a call that never ran"
     )
 
-    class KillingRegistry:
+    class KillingRegistry(VerbRegistry):
+        def __init__(self):
+            super().__init__(VerbGrant(role="gather", entries=(("elastic", "esql", "r"),)))
+
         def systems(self):
             raise BudgetKill("tail exhausted")
 

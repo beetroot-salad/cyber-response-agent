@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -129,6 +129,24 @@ def _require_write_co_constraint(
 
 def read_allow_of(bash_allow: tuple[Grant, ...]) -> PathShapes:
     return next((g.scope for g in bash_allow if g.program == "cat"), PathShapes())
+
+
+def effective_tools_for(defn: AgentDefinition) -> ToolSet:
+    """The ToolSet a generic, out-of-band consumer — the operator policy CLI, a permission-gate
+    probe — should compile this role's policy against, for a role whose static `defn.tools`
+    does not already show its real capability.
+
+    The judge is the one role today whose `closed_tickets` bit is switched per LEG by a
+    runtime `replace()` well past `AGENTS` (`_run_judge_pydantic`, d73), so `defn.tools` alone
+    always reads as the benign-off, grant-on disagreement `bind()`/`compile_policy` would
+    refuse to build (§7 R7, #632). A generic consumer that just wants "what may this role do"
+    gets the richer (benign) leg's shape — the same one the real per-leg builder uses when the
+    capability is on. This is the ONE place that knows any role's typed-capability switching;
+    a consumer asks for the effective tools and never names a bit itself (N4 — the operator
+    surface must not carry a map of typed capabilities to attack)."""
+    if defn.role is AgentRole.JUDGE:
+        return replace(defn.tools, closed_tickets=True)
+    return defn.tools
 
 
 def _require_verb_grant_agreement(defn: AgentDefinition, tools: ToolSet) -> None:
@@ -276,6 +294,7 @@ __all__ = [
     "build_registry",
     "compile_policy",
     "compile_policy_for",
+    "effective_tools_for",
     "read_allow_of",
     "resolve_roots",
 ]

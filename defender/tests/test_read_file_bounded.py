@@ -51,7 +51,13 @@ def _gather_policy(tmp: Path) -> AgentPolicy:
 
 def _judge_policy(tmp: Path) -> AgentPolicy:
     from defender.learning.pipeline.judge.engine_pydantic import JUDGE_DEF
-    return bind(JUDGE_DEF, tmp / "run", scope=RunScope(add_dirs=())).policy
+    # #632's §7 R7: JUDGE_DEF's static closed_tickets bit stays False (only the per-leg
+    # replace() in _run_judge_pydantic turns it on, together with the effective grant, d73),
+    # so a bare bind() always disagrees with the definition's own non-empty verb_grant. This
+    # probe is about the bash lane, so it binds the benign leg's effective capability.
+    from dataclasses import replace
+    benign = replace(JUDGE_DEF, tools=replace(JUDGE_DEF.tools, closed_tickets=True))
+    return bind(benign, tmp / "run", scope=RunScope(add_dirs=())).policy
 
 
 def _admits(policy: AgentPolicy, command: str, run_dir: Path) -> bool:

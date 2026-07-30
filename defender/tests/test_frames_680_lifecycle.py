@@ -21,7 +21,7 @@ from pydantic_ai.models import override_allow_model_requests
 
 from defender.learning.author.curator_engine import ForwardCheckConfig  # noqa: E402
 from defender.learning.core.config import StageContext, StageWiring  # noqa: E402
-from defender.agents import JUDGE_DEF, ORACLE_DEF
+from defender.agents import ORACLE_DEF
 from defender.learning.author import shared as author_shared
 from defender.learning.core import config
 from defender.learning.core.config import RunUnprocessable, StageAbort
@@ -41,6 +41,7 @@ from defender.tests._engine_helpers import (
 )
 from defender.tests._frames680 import (
     FRAME_RE,
+    JUDGE_BENIGN_DEF,
     RUN_SALT,
     SALT_RE,
     Box,
@@ -180,7 +181,7 @@ def _stage_attempt(
     run.mkdir(parents=True, exist_ok=True)
     tree.mkdir(parents=True, exist_ok=True)
     scope = RunScope(add_dirs=(read_root,)) if read_root is not None else RunScope()
-    deps = bind(JUDGE_DEF, run, defender_dir=tree, scope=scope)
+    deps = bind(JUDGE_BENIGN_DEF, run, defender_dir=tree, scope=scope)
     prompt_scene = scene / ("prompt-" + trace_name.replace(".", "-"))
     observation = _judge_fixture(prompt_scene, hostile="lifecycle body", salt=deps.salt)
     instructions = scene / ("instructions-" + trace_name + ".md")
@@ -342,7 +343,7 @@ def test_judge_uses_both_artifact_read_lanes_during_one_stage_lifetime(tmp_path)
     p = root / "x"
     p.write_text("x")
     deps = _deps(
-        tmp_path / "deps", JUDGE_DEF, read_root=root, box=Box(BoxResult(0, b"x", b""))
+        tmp_path / "deps", JUDGE_BENIGN_DEF, read_root=root, box=Box(BoxResult(0, b"x", b""))
     )
     read_out = _tool_read_file(deps, str(p))
     bash_out = _tool_bash(deps, f"cat {p}")
@@ -858,7 +859,7 @@ def test_one_stage_uses_read_file_and_bash_for_cross_agent_artifacts(tmp_path):
     artifact = root / "x"
     artifact.write_text("same artifact")
     deps = bind(
-        JUDGE_DEF,
+        JUDGE_BENIGN_DEF,
         run,
         scope=RunScope(add_dirs=(root,)),
         box=Box(BoxResult(0, b"same artifact", b"")),
@@ -937,7 +938,7 @@ def test_judge_reissues_an_admitted_bash_read_after_a_prior_result(tmp_path):
     artifact = root / "x"
     artifact.write_text("x")
     fake = Box(BoxResult(0, b"first", b""))
-    deps = bind(JUDGE_DEF, run, scope=RunScope(add_dirs=(root,)), box=fake)
+    deps = bind(JUDGE_BENIGN_DEF, run, scope=RunScope(add_dirs=(root,)), box=fake)
     first = _tool_bash(deps, f"cat {artifact}")
     fake.result = BoxResult(0, b"second", b"")
     second = _tool_bash(deps, f"cat {artifact}")

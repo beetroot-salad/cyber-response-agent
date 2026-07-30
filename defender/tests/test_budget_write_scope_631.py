@@ -46,6 +46,8 @@ from defender.hooks.budget_enforcer import (  # noqa: E402
 )
 from defender.runtime import driver, observe, permission  # noqa: E402
 from defender.runtime.agent_definition import bind, compile_policy_for  # noqa: E402
+from defender.runtime.verb_grant import VerbGrant  # noqa: E402
+from defender.runtime.verbs import VerbRegistry  # noqa: E402
 from defender.runtime.driver import GATHER_DEF, MAIN_DEF  # noqa: E402
 from defender.runtime.providers import BuiltModel  # noqa: E402
 from defender.skills.invlang.validate import validate_companion  # noqa: E402
@@ -387,7 +389,10 @@ def _drive_one_query(run_dir: Path, params: dict) -> list[dict]:
     """Drive ONE real `query` call on a real GATHER agent against an injected verb
     registry — the tool boundary is where the value is accepted, so the fault enters
     the way a model's own call enters it."""
-    class Verbs:
+    class Verbs(VerbRegistry):
+        def __init__(self):
+            super().__init__(VerbGrant(role="gather", entries=(("elastic", "esql", "r"),)))
+
         def systems(self):
             return ("elastic",)
 
