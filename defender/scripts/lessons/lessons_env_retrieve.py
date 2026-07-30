@@ -165,7 +165,7 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--alert-rule-ids", help="Alert rule id(s) for the case — the retrieval anchor; comma-separated, OR within the list")
     ap.add_argument("--subject", help="Exact subject match (single value — subject is the equivalence key / fold key)")
     ap.add_argument("--include-stale", action="store_true", help="Include lessons with status: stale (author-only; the runtime actor must never see stale claims)")
-    ap.add_argument("--corpus", help=f"Relocated {CORPUS_NAME} directory (worktree or fixture); the leaf name must still be {CORPUS_NAME}")
+    ap.add_argument("--corpus", help=f"Relocated {CORPUS_NAME} directory (worktree or fixture); the leaf name must still be {CORPUS_NAME}. Default: defender/{CORPUS_NAME}")
     ns = ap.parse_args(argv[1:])
 
     corpus = _resolve_corpus(ns.corpus, ap)

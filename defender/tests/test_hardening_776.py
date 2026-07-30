@@ -18,6 +18,7 @@ pytest.importorskip("pydantic_ai")  # CI installs the runtime extra; skip otherw
 
 from pydantic_ai.exceptions import ModelRetry  # noqa: E402
 
+from defender._paths import DefenderPaths  # noqa: E402
 from defender.agents import ACTOR_DEF, GATHER_DEF, MAIN_DEF  # noqa: E402
 from defender.learning.author.verify_forward import env as fwd_env  # noqa: E402
 from defender.learning.core import config  # noqa: E402
@@ -26,6 +27,7 @@ from defender.runtime.agent_definition import RunScope, bind  # noqa: E402
 from defender.runtime.box import BoxResult  # noqa: E402
 from defender.runtime.driver import _gather_instructions  # noqa: E402
 from defender.runtime.tools import _tool_bash  # noqa: E402
+from defender.scripts.lessons._lessons_common import rel_to_repo  # noqa: E402
 
 from defender.tests._curator_691_harness import (  # noqa: E402
     corpus as corpus_dir,
@@ -220,10 +222,8 @@ def test_a_basename_collision_no_longer_certifies_a_lesson(tmp_path):
     nested.parent.mkdir(parents=True)
     nested.write_text("---\nsubject: x\n---\nbody\n", encoding="utf-8")
 
-    returned = ["defender/lessons-environment/vpn-egress.md"]
-    assert not fwd_env.lesson_returned(
-        nested, returned, repo_root=repo, corpus_dir=corpus
-    )
+    returned = [str(corpus / "vpn-egress.md")]
+    assert not fwd_env.lesson_returned(nested, returned, corpus_dir=corpus)
 
 
 def test_a_lesson_in_a_different_corpus_is_not_this_corpuss_lesson(tmp_path):
@@ -232,50 +232,71 @@ def test_a_lesson_in_a_different_corpus_is_not_this_corpuss_lesson(tmp_path):
     repo = tmp_path / "repo"
     env_corpus = repo / "defender" / "lessons-environment"
     other = _lesson(repo / "defender" / "lessons-actor", "vpn-egress")
-    _lesson(env_corpus, "vpn-egress")
-    assert not fwd_env.lesson_returned(
-        other, ["defender/lessons-environment/vpn-egress.md"],
-        repo_root=repo, corpus_dir=env_corpus,
-    )
+    hit = _lesson(env_corpus, "vpn-egress")
+    assert not fwd_env.lesson_returned(other, [str(hit)], corpus_dir=env_corpus)
 
 
-@pytest.mark.parametrize("spelling", ["relative", "absolute"])
-def test_the_real_lesson_is_a_hit_in_either_returned_spelling(tmp_path, spelling):
-    """Positive control, and the reason the comparison resolves rather than string-matches:
-    the retrieval script prints repo-relative paths when it shares a repo root with the
-    corpus and absolute ones when it does not — the worktree case. Both must land."""
-    repo = tmp_path / "repo"
-    corpus = repo / "defender" / "lessons-environment"
+def test_the_real_lesson_is_a_hit(tmp_path):
+    """Positive control: identity must still LAND, or every lesson reverts."""
+    corpus = tmp_path / "repo" / "defender" / "lessons-environment"
     lesson = _lesson(corpus, "vpn-egress")
-    returned = [
-        "defender/lessons-environment/vpn-egress.md" if spelling == "relative"
-        else str(lesson)
-    ]
-    assert fwd_env.lesson_returned(lesson, returned, repo_root=repo, corpus_dir=corpus)
+    assert fwd_env.lesson_returned(lesson, [str(lesson)], corpus_dir=corpus)
+
+
+def test_the_batch_worktree_is_nested_under_the_checkout_the_script_reads_from(tmp_path):
+    """The geometry that made the spelling ambiguous, pinned because the whole anchor rests
+    on it. `worktree_base` is `<repo>/.worktrees`, so a curator's corpus is INSIDE the
+    checkout the retrieval script lives in — which means the script's `relative_to` succeeds
+    and it prints a `.worktrees/…` spelling, not the absolute path a separate tree would get.
+    If worktrees ever move outside the repo this test fails and the anchor below is moot."""
+    assert DefenderPaths(tmp_path / "repo").worktree_base.parent == tmp_path / "repo"
+    assert RETRIEVE.resolve().parents[3] == fwd_env.RETRIEVE_REPO_ROOT
+    assert (fwd_env.RETRIEVE_REPO_ROOT / "defender").is_dir()
+
+
+@pytest.mark.parametrize("where", ["under the script's checkout", "outside it"])
+def test_a_returned_hit_resolves_against_the_root_the_script_spelled_it_against(where):
+    """The spelling regression. The curator's `repo_root` is its WORKTREE; the retrieval
+    script's is the MAIN checkout the worktree hangs under — two different directories, and
+    the `.worktrees/…` line is meaningful against the second one only. Anchoring at the
+    curator's root resolved every hit to a path that does not exist, so every environment
+    lesson forward-checked BAD and got reverted.
+
+    Both geometries round-trip through the one anchor: pure path arithmetic on either side,
+    so this pins the contract without needing either tree to exist."""
+    root = (
+        fwd_env.RETRIEVE_REPO_ROOT if where == "under the script's checkout"
+        else Path("/nowhere/other-checkout")
+    )
+    lesson = root / ".worktrees" / "lessons-abc" / "defender" / "lessons-environment" / "l.md"
+    printed = rel_to_repo(lesson, fwd_env.RETRIEVE_REPO_ROOT)
+    assert fwd_env.absolute_hit(printed) == str(lesson)
+    assert fwd_env.lesson_returned(
+        lesson, [fwd_env.absolute_hit(printed)], corpus_dir=lesson.parent
+    )
 
 
 def test_a_lesson_retrieval_did_not_return_is_still_a_miss(tmp_path):
     """The check must stay able to fail — a BAD verdict is what reverts an unretrievable
     lesson, so an identity comparison that accidentally matched everything would be worse
     than the basename one it replaces."""
-    repo = tmp_path / "repo"
-    corpus = repo / "defender" / "lessons-environment"
+    corpus = tmp_path / "repo" / "defender" / "lessons-environment"
     lesson = _lesson(corpus, "vpn-egress")
-    _lesson(corpus, "sudo-cadence")
-    assert not fwd_env.lesson_returned(
-        lesson, ["defender/lessons-environment/sudo-cadence.md"],
-        repo_root=repo, corpus_dir=corpus,
-    )
+    other = _lesson(corpus, "sudo-cadence")
+    assert not fwd_env.lesson_returned(lesson, [str(other)], corpus_dir=corpus)
 
 
-def test_the_curator_can_no_longer_write_a_lesson_the_walk_cannot_see(tmp_path):
+@pytest.mark.parametrize("invisible", ["sub/buried.md", "_buried.md"])
+def test_the_curator_can_no_longer_write_a_lesson_the_walk_cannot_see(tmp_path, invisible):
     """The other half of the same defect, closed at the source: the write allow admitted
-    `<corpus>/SEG(/SEG)*.md` while every corpus reader walks one level. A curator can still
-    author into its corpus; it can no longer author into a hole."""
+    `<corpus>/SEG(/SEG)*.md` while every corpus reader goes through `iter_lesson_paths` —
+    `glob('*.md')`, flat, MINUS any `_`-prefixed name (the corpus `_TEMPLATE.md`). Depth and
+    a leading underscore are the same hole in two spellings, so both are refused. A curator
+    can still author into its corpus; it can no longer author into a hole."""
     wt, run = make_worktree(tmp_path), pending_run_dir(tmp_path)
     deps = curator_deps(wt, run, "lessons")
     (corpus_dir(wt, "lessons") / "sub").mkdir(parents=True, exist_ok=True)
     with pytest.raises(ModelRetry):
-        write_file(deps, rel("lessons", "sub/buried.md"), "body\n")
+        write_file(deps, rel("lessons", invisible), "body\n")
     write_file(deps, rel("lessons", "visible.md"), "body\n")  # positive control
     assert (corpus_dir(wt, "lessons") / "visible.md").is_file()

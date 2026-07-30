@@ -80,25 +80,29 @@ def build_write_allow(root: Path, *, suffix: str = "") -> re.Pattern[str]:
 
 
 def build_scoped_write_allow(root: Path, *, suffix: str = "") -> re.Pattern[str]:
-    """Build one `AgentPolicy.write_allow` pattern admitting DIRECT CHILDREN of `root`,
-    narrowed to the SAME filename segment class the read side's `Grant.scope` shapes use
-    (`grant.SEG`, `[\\w.@=+-]+`) rather than `build_write_allow`'s `[^\\x00]*` — so a write and
-    its matching read-back admit EXACTLY the same names (#691 MD-7), foreclosing a
-    space/newline write-only name from the frame-injection channel a wide tail would
-    otherwise open. `root` is `resolve()`d to align with the RESOLVED operand `decide_write`
-    matches against, same as `build_write_allow`.
+    """Build one `AgentPolicy.write_allow` pattern admitting exactly the DIRECT CHILDREN of
+    `root` that the corpus walk can see, narrowed to the SAME filename segment class the read
+    side's `Grant.scope` shapes use (`grant.SEG`, `[\\w.@=+-]+`) rather than
+    `build_write_allow`'s `[^\\x00]*`, foreclosing a space/newline write-only name from the
+    frame-injection channel a wide tail would otherwise open (#691 MD-7). The read-back grants
+    stay WIDER (the curator's `cat`/`rm` carry `under(corpus, TREE)`), which is the safe
+    direction: every name this admits is readable back, and nothing writable is unreadable.
+    `root` is `resolve()`d to align with the RESOLVED operand `decide_write` matches against,
+    same as `build_write_allow`.
 
-    ONE level, not a subtree (#776): its only caller is the curator's lesson-corpus write
-    allow, and every corpus reader — retrieval, the manifest, the idempotency scan, the
-    frontend — walks `glob('*.md')`, flat. A nested write therefore produced a file that no
-    reader could ever see, which the environment forward-check then certified as
-    retrievability-verified off a basename collision with a top-level sibling. Admitting
-    only what the walk can see removes the shape at the source; `verify_forward/env.py`
-    rejects it independently."""
+    WHAT THE WALK CAN SEE, exactly (#776): its only caller is the curator's lesson-corpus
+    write allow, and every corpus reader — retrieval, the manifest, the idempotency scan, the
+    frontend — goes through `_corpus.iter_lesson_paths`, which is `glob('*.md')` (flat) MINUS
+    any name starting `_` (the corpus `_TEMPLATE.md`). A write outside that set produced a
+    file no reader could ever see, which the environment forward-check then certified as
+    retrievability-verified off a basename collision with a visible sibling. So the tail is
+    one level AND non-underscore: `<corpus>/sub/x.md` and `<corpus>/_x.md` are equally
+    invisible, and both are now refused at the source. `verify_forward/env.py` rejects the
+    same shape independently."""
     from .grant import SEG
 
     base = re.escape(str(root.resolve()))
-    tail = rf"/{SEG}"
+    tail = rf"/(?!_){SEG}"
     if suffix:
         tail += re.escape(suffix)
     return re.compile(base + tail)
