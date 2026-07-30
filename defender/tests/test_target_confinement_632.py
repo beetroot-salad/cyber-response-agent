@@ -46,6 +46,7 @@ pytest.importorskip("pydantic_ai")
 from defender.runtime.circuit_breaker import error_class_for_exit  # noqa: E402
 from defender.runtime.verbs import VerbContext  # noqa: E402
 from defender.scripts.adapters import elastic_adapter, host_state_adapter  # noqa: E402
+from defender.scripts.adapters import identity_adapter  # noqa: E402
 from defender.scripts.adapters.confinement import (  # noqa: E402
     HOST_STATE_PROGRAMS,
     READ_ENDPOINT_ALLOWLIST,
@@ -439,6 +440,70 @@ def test_an_r_classed_verb_may_only_reach_a_declared_read_endpoint(tmp_path: Pat
     with pytest.raises(ConfinementFault):
         confine_read_endpoint("ticket", f"http://host{TICKET_READ_PATH}", method="POST",
                               verb_class="r")
+
+
+def _stub_tree(root: Path, system: str, prefix: str, *, bastion: str) -> Path:
+    """A real defender tree carrying one stub system's config.env — the shape
+    `_stub_transport.load_config` reads, not a monkeypatch of it. `bastion` names a
+    docker context this host has never heard of, so a call that gets PAST confinement
+    still never reaches a real container: it fails on the docker exec, the same
+    ordering the elastic fixture above pins."""
+    d = root / "knowledge" / "environment" / "systems" / system
+    d.mkdir(parents=True)
+    (d / "config.env").write_text(
+        f"{prefix}_URL_BASE=http://stub-{system}\n"
+        f"{prefix}_BASTION_HOST={bastion}\n"
+        f"{prefix}_TIMEOUT_SEC=2\n",
+        encoding="utf-8",
+    )
+    return root
+
+
+def test_a_non_elastic_stub_adapter_is_confined_through_the_real_shared_transport(
+    tmp_path: Path,
+):
+    """The read-endpoint rule is enforced for a STUB system (identity, not elastic) by
+    driving its REAL adapter through the REAL, unmocked `_stub_transport.py` — the shared
+    function all five stub systems route through — rather than by calling
+    `confine_read_endpoint` as a standalone function on a literal string.
+
+    `test_an_r_classed_verb_may_only_reach_a_declared_read_endpoint` above checks the stub
+    systems' entries against paths read off the adapters as LITERALS (g12's census); it
+    never drives a stub adapter's own call site, so it would still pass if the wiring lived
+    only in `elastic_adapter.py`'s private `_http_json` and every stub adapter's shared
+    transport skipped the check entirely — which is exactly what shipped until this test
+    was added (#632 adversary finding: the shared transport carries five systems' worth of
+    calls and none of them were confined).
+
+    The adversarial half drives `identity_adapter.get_user` with a `user` value of
+    `"../../secret"`: the verb builds `/users/../../secret`, no different from any other
+    path segment as far as the adapter's own code is concerned, and `normalize_endpoint`
+    resolves it to `/secret` — outside identity's declared allowlist. If `_request` no
+    longer called `confine_read_endpoint` (this fix reverted), this call would sail past
+    the check and reach `docker_exec_curl` instead of stopping at a `ConfinementFault`."""
+    ctx = VerbContext(
+        defender_dir=_stub_tree(tmp_path / "tree", "identity", "IDENTITY",
+                                bastion="no-such-context-632-test"),
+        run_dir=tmp_path / "run", env={}, capture=TransportCapture(),
+    )
+
+    with pytest.raises(ConfinementFault):
+        identity_adapter.get_user(ctx, user="../../secret")
+    assert not ctx.capture.requests, (
+        "the out-of-bounds request was captured before being refused — confinement must "
+        "run before the capture, and BEFORE any transport is attempted"
+    )
+
+    with pytest.raises(TransportFault):
+        identity_adapter.get_user(ctx, user="dev.dana")
+    assert ctx.capture.requests, (
+        "the in-bounds call recorded nothing — the real adapter never reached the shared "
+        "transport's capture seam"
+    )
+    request = ctx.capture.requests[-1]
+    assert request.system == "identity"
+    assert normalize_endpoint(request.url) == "/users/dev.dana"
+    assert request.method == "GET"
 
 
 def test_the_read_endpoint_allowlist_cannot_be_built_with_a_methodless_entry():

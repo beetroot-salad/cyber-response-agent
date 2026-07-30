@@ -24,16 +24,16 @@ def health_check(ctx: VerbContext) -> dict:
 
 def can_access(ctx: VerbContext, *, user: str, host: str) -> dict:
     return transport.http_get_obj(
-        ctx, _config(ctx), f"/users/{user}/can_access", params={"host": host},
+        ctx, _config(ctx), f"/users/{user}/can_access", system=SYSTEM, params={"host": host},
     )
 
 
 def get_user(ctx: VerbContext, *, user: str) -> dict:
-    return transport.http_get_obj(ctx, _config(ctx), f"/users/{user}")
+    return transport.http_get_obj(ctx, _config(ctx), f"/users/{user}", system=SYSTEM)
 
 
 def list_authorized_hosts(ctx: VerbContext, *, user: str) -> dict | list:
-    return transport.http_get(ctx, _config(ctx), f"/users/{user}/authorized_hosts")
+    return transport.http_get(ctx, _config(ctx), f"/users/{user}/authorized_hosts", system=SYSTEM)
 
 
 def list_users(
@@ -44,11 +44,11 @@ def list_users(
         params["role"] = role
     if enabled is not None:
         params["enabled"] = "true" if enabled else "false"
-    return transport.http_get(ctx, _config(ctx), "/users", params=params or None)
+    return transport.http_get(ctx, _config(ctx), "/users", system=SYSTEM, params=params or None)
 
 
 def list_roles(ctx: VerbContext) -> dict | list:  # lint-dup: ok — distinct service
-    return transport.http_get(ctx, _config(ctx), "/roles")
+    return transport.http_get(ctx, _config(ctx), "/roles", system=SYSTEM)
 
 
 VERBS = {

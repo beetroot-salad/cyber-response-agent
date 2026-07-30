@@ -28,7 +28,7 @@ def health_check(ctx: VerbContext) -> dict:
 
 def lookup(ctx: VerbContext, *, value: str) -> dict:
     quoted = urllib.parse.quote(value, safe="")
-    return transport.http_get_obj(ctx, _config(ctx), f"/lookup/{quoted}")
+    return transport.http_get_obj(ctx, _config(ctx), f"/lookup/{quoted}", system=SYSTEM)
 
 
 def list_indicators(
@@ -49,7 +49,7 @@ def list_indicators(
         params["type"] = type
     if tag:
         params["tag"] = tag
-    return transport.http_get(ctx, _config(ctx), "/indicators", params=params or None)
+    return transport.http_get(ctx, _config(ctx), "/indicators", system=SYSTEM, params=params or None)
 
 
 VERBS = {

@@ -23,7 +23,7 @@ def health_check(ctx: VerbContext) -> dict:
 
 
 def get_host(ctx: VerbContext, *, host: str) -> dict:
-    return transport.http_get_obj(ctx, _config(ctx), f"/hosts/{host}")
+    return transport.http_get_obj(ctx, _config(ctx), f"/hosts/{host}", system=SYSTEM)
 
 
 def list_hosts(
@@ -35,11 +35,11 @@ def list_hosts(
 ) -> dict | list:
     params = {k: v for k, v in
               (("role", role), ("criticality", criticality), ("owner", owner)) if v}
-    return transport.http_get(ctx, _config(ctx), "/hosts", params=params or None)
+    return transport.http_get(ctx, _config(ctx), "/hosts", system=SYSTEM, params=params or None)
 
 
 def list_roles(ctx: VerbContext) -> dict | list:  # lint-dup: ok — distinct service
-    return transport.http_get(ctx, _config(ctx), "/roles")
+    return transport.http_get(ctx, _config(ctx), "/roles", system=SYSTEM)
 
 
 VERBS = {
