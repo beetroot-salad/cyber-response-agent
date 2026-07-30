@@ -15,7 +15,7 @@
 **/.mypy_cache
 **/.ruff_cache
 
-# JS deps (dev-orchestrator)
+# JS deps
 **/node_modules
 
 # Transient / large local state — never needed to build the agent
