@@ -131,8 +131,9 @@ def contained_payload(run_dir: Path, payload_path: object) -> Path | None:
     2. **containment after resolution** — a well-formed name can still be a symlink, and
        model-written bash writes into the run dir (it is the box's rw bind), so the shape
        gate alone would happily open a link planted at exactly the expected name. The
-       resolved target must land inside the resolved ``run_dir``; staging copies the gather
-       tree links-and-all, so this holds on the learning-state copy too.
+       resolved target must land inside the resolved ``run_dir``, which is the rule on
+       whichever root the caller holds — the SOURCE run dir, where a planted link is still
+       sitting, and the learning copy, which ``stage_tables`` refuses to carry one into.
 
     A `resolve()` fault FAILS CLOSED, the same posture the runtime read gate takes."""
     if not isinstance(payload_path, str) or not any(
