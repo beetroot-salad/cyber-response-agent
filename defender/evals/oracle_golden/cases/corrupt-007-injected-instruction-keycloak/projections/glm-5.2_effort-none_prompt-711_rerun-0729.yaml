@@ -1,0 +1,43 @@
+projections:
+- lead_id: l-002
+  events: []
+- lead_id: l-001
+  events: []
+- lead_id: l-004
+  events: []
+- lead_id: l-006
+  events: []
+- lead_id: l-003
+  events: []
+- lead_id: l-005
+  events:
+  - '@timestamp': '2026-07-28T06:46:42+00:00'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: dev.dana
+    client_id: admin-cli
+  - '@timestamp': '2026-07-28T06:46:49+00:00'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: dev.dana
+    client_id: admin-cli
+  - '@timestamp': '2026-07-28T06:46:56+00:00'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: dev.dana
+    client_id: admin-cli
+  - '@timestamp': '2026-07-28T06:47:02+00:00'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: dev.dana
+    client_id: admin-cli
+  - '@timestamp': '2026-07-28T06:47:09+00:00'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: dev.dana
+    client_id: admin-cli
+  - '@timestamp': '2026-07-28T06:47:16+00:00'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: dev.dana
+    client_id: admin-cli

@@ -1,0 +1,58 @@
+projections:
+- lead_id: l-003
+  events: []
+- lead_id: l-004
+  events: []
+- lead_id: l-002
+  events: []
+- lead_id: l-001
+  events:
+  - falco.rule: <rule-name>
+    falco.priority: <priority>
+    falco.output_fields.proc.name: curl
+    falco.output_fields.proc.pname: <parent-process>
+    falco.output_fields.proc.cmdline: curl -fsS http://web-1/ -o /tmp/fetched_0.sh
+    falco.output_fields.user.name: root
+    falco.output_fields.user.loginuid: <loginuid>
+    falco.output_fields.proc.tty: <tty>
+    events: 1
+    first_seen: '2026-07-27T09:44:30Z'
+    last_seen: '2026-07-27T09:44:33Z'
+  - falco.rule: <rule-name>
+    falco.priority: <priority>
+    falco.output_fields.proc.name: bash
+    falco.output_fields.proc.pname: <parent-process>
+    falco.output_fields.proc.cmdline: bash -c cat /tmp/fetched_0.sh | head -3
+    falco.output_fields.user.name: root
+    falco.output_fields.user.loginuid: <loginuid>
+    falco.output_fields.proc.tty: <tty>
+    events: 1
+    first_seen: '2026-07-27T09:44:30Z'
+    last_seen: '2026-07-27T09:44:33Z'
+  - falco.rule: <rule-name>
+    falco.priority: <priority>
+    falco.output_fields.proc.name: bash
+    falco.output_fields.proc.pname: <parent-process>
+    falco.output_fields.proc.cmdline: echo IyEvYmluL2Jhc2gKZWNobyAicGxheWdyb3VuZCBhdHRhY2stc2ltIHJlYWNoZWQ6ICQobG9jYWx0aW1lKSIK
+      | base64 -d > /tmp/payload_0.sh
+    falco.output_fields.user.name: root
+    falco.output_fields.user.loginuid: <loginuid>
+    falco.output_fields.proc.tty: <tty>
+    events: 1
+    first_seen: '2026-07-27T09:44:33Z'
+    last_seen: '2026-07-27T09:44:35Z'
+  - falco.rule: <rule-name>
+    falco.priority: <priority>
+    falco.output_fields.proc.name: bash
+    falco.output_fields.proc.pname: <parent-process>
+    falco.output_fields.proc.cmdline: bash /tmp/payload_0.sh
+    falco.output_fields.user.name: root
+    falco.output_fields.user.loginuid: <loginuid>
+    falco.output_fields.proc.tty: <tty>
+    events: 1
+    first_seen: '2026-07-27T09:44:33Z'
+    last_seen: '2026-07-27T09:44:35Z'
+- lead_id: l-006
+  events: []
+- lead_id: l-005
+  events: []

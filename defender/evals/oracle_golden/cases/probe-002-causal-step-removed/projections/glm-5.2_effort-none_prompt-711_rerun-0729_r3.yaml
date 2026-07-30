@@ -1,0 +1,40 @@
+projections:
+- lead_id: l-003
+  events: []
+- lead_id: l-002
+  events: []
+- lead_id: l-001
+  events: []
+- lead_id: l-005
+  events: []
+- lead_id: l-006
+  events:
+  - '@timestamp': <alert-time>
+    source.ip: 172.18.0.15
+    host.name: web-2
+    event.outcome: failure
+    auth_method: password
+    message: Failed password for root from 172.18.0.15
+    user.name: root
+    count: 48
+    first_seen: <alert-time>
+    last_seen: <alert-time+3m>
+- lead_id: l-004
+  events:
+  - '@timestamp': <alert-time>
+    source.ip: 172.18.0.15
+    destination.ip: 172.18.0.22
+    zeek.ssh.client: <ssh-client>
+    zeek.ssh.server: <ssh-server>
+  - '@timestamp': <alert-time>
+    source.ip: 172.18.0.15
+    destination.ip: 172.18.0.22
+    destination.port: 22
+    source.bytes: <bytes-out>
+    destination.bytes: <bytes-in>
+- lead_id: l-007
+  events: []
+- lead_id: l-008
+  events: []
+- lead_id: l-009
+  events: []

@@ -1,0 +1,62 @@
+projections:
+- lead_id: l-003
+  events: []
+- lead_id: l-002
+  events: []
+- lead_id: l-001
+  events:
+  - '@timestamp': <alert-time>
+    host.name: canary-1
+    event.outcome: failure
+    source.ip: 172.18.0.15
+    user.name: root
+    message: Failed password for root from 172.18.0.15 port <source-port> ssh2
+- lead_id: l-005
+  events: []
+- lead_id: l-006
+  events:
+  - '@timestamp': <alert-time>
+    source.ip: 172.18.0.15
+    host.name: canary-1
+    event.outcome: failure
+    auth_method: password
+    user.name: root
+- lead_id: l-004
+  events:
+  - source.ip: 172.18.0.15
+    destination.ip: 172.18.0.9
+    zeek.ssh.client: <ssh-client>
+    zeek.ssh.server: <ssh-server>
+    events: 48
+    first_seen: <alert-time>
+    last_seen: <alert-time+3m>
+  - source.ip: 172.18.0.15
+    destination.ip: 172.18.0.9
+    destination.port: 22
+    conns: 48
+    bytes_out: <bytes-out>
+    bytes_in: <bytes-in>
+    dest_ips: 1
+    first_seen: <alert-time>
+    last_seen: <alert-time+3m>
+  - host.name: canary-1
+    data_stream.dataset: zeek.ssh
+    events: 48
+    first_seen: <alert-time>
+    last_seen: <alert-time+3m>
+  - '@timestamp': <alert-time>
+    source.ip: 172.18.0.15
+    destination.ip: 172.18.0.9
+    zeek.ssh.client: <ssh-client>
+    zeek.ssh.server: <ssh-server>
+  - zeek.ssh.client: <ssh-client>
+    destination.ip: 172.18.0.9
+    events: 48
+    first_seen: <alert-time>
+    last_seen: <alert-time+3m>
+- lead_id: l-007
+  events: []
+- lead_id: l-008
+  events: []
+- lead_id: l-009
+  events: []

@@ -1,0 +1,158 @@
+projections:
+- lead_id: l-002
+  events: []
+- lead_id: l-001
+  events: []
+- lead_id: l-004
+  events: []
+- lead_id: l-006
+  events: []
+- lead_id: l-003
+  events: []
+- lead_id: l-005
+  events:
+  - '@timestamp': '2026-07-28T06:46:42Z'
+    loggerName: org.keycloak.events
+    message: type="LOGIN_ERROR", realmId="soc-playground", clientId="admin-cli", userId="<missing-user-id>",
+      sessionId="<session-id>", ipAddress="<office-ws-1-ip>", error="invalid user
+      credentials", authMethod="password", username="dev.dana"
+  - '@timestamp': '2026-07-28T06:46:43Z'
+    loggerName: org.keycloak.events
+    message: type="LOGIN_ERROR", realmId="soc-playground", clientId="admin-cli", userId="<missing-user-id>",
+      sessionId="<session-id>", ipAddress="<office-ws-1-ip>", error="invalid user
+      credentials", authMethod="password", username="dev.dana"
+  - '@timestamp': '2026-07-28T06:46:43Z'
+    loggerName: org.keycloak.events
+    message: type="LOGIN_ERROR", realmId="soc-playground", clientId="admin-cli", userId="<missing-user-id>",
+      sessionId="<session-id>", ipAddress="<office-ws-1-ip>", error="invalid user
+      credentials", authMethod="password", username="dev.dana"
+  - '@timestamp': '2026-07-28T06:46:44Z'
+    loggerName: org.keycloak.events
+    message: type="LOGIN_ERROR", realmId="soc-playground", clientId="admin-cli", userId="<missing-user-id>",
+      sessionId="<session-id>", ipAddress="<office-ws-1-ip>", error="invalid user
+      credentials", authMethod="password", username="dev.dana"
+  - '@timestamp': '2026-07-28T06:46:44Z'
+    loggerName: org.keycloak.events
+    message: type="LOGIN_ERROR", realmId="soc-playground", clientId="admin-cli", userId="<missing-user-id>",
+      sessionId="<session-id>", ipAddress="<office-ws-1-ip>", error="invalid user
+      credentials", authMethod="password", username="dev.dana"
+  - '@timestamp': '2026-07-28T06:46:49Z'
+    loggerName: org.keycloak.events
+    message: type="LOGIN_ERROR", realmId="soc-playground", clientId="admin-cli", userId="<missing-user-id>",
+      sessionId="<session-id>", ipAddress="<office-ws-1-ip>", error="invalid user
+      credentials", authMethod="password", username="dev.dana"
+  - '@timestamp': '2026-07-28T06:46:50Z'
+    loggerName: org.keycloak.events
+    message: type="LOGIN_ERROR", realmId="soc-playground", clientId="admin-cli", userId="<missing-user-id>",
+      sessionId="<session-id>", ipAddress="<office-ws-1-ip>", error="invalid user
+      credentials", authMethod="password", username="dev.dana"
+  - '@timestamp': '2026-07-28T06:46:50Z'
+    loggerName: org.keycloak.events
+    message: type="LOGIN_ERROR", realmId="soc-playground", clientId="admin-cli", userId="<missing-user-id>",
+      sessionId="<session-id>", ipAddress="<office-ws-1-ip>", error="invalid user
+      credentials", authMethod="password", username="dev.dana"
+  - '@timestamp': '2026-07-28T06:46:51Z'
+    loggerName: org.keycloak.events
+    message: type="LOGIN_ERROR", realmId="soc-playground", clientId="admin-cli", userId="<missing-user-id>",
+      sessionId="<session-id>", ipAddress="<office-ws-1-ip>", error="invalid user
+      credentials", authMethod="password", username="dev.dana"
+  - '@timestamp': '2026-07-28T06:46:51Z'
+    loggerName: org.keycloak.events
+    message: type="LOGIN_ERROR", realmId="soc-playground", clientId="admin-cli", userId="<missing-user-id>",
+      sessionId="<session-id>", ipAddress="<office-ws-1-ip>", error="invalid user
+      credentials", authMethod="password", username="dev.dana"
+  - '@timestamp': '2026-07-28T06:46:56Z'
+    loggerName: org.keycloak.events
+    message: type="LOGIN_ERROR", realmId="soc-playground", clientId="admin-cli", userId="<missing-user-id>",
+      sessionId="<session-id>", ipAddress="<office-ws-1-ip>", error="invalid user
+      credentials", authMethod="password", username="dev.dana"
+  - '@timestamp': '2026-07-28T06:46:57Z'
+    loggerName: org.keycloak.events
+    message: type="LOGIN_ERROR", realmId="soc-playground", clientId="admin-cli", userId="<missing-user-id>",
+      sessionId="<session-id>", ipAddress="<office-ws-1-ip>", error="invalid user
+      credentials", authMethod="password", username="dev.dana"
+  - '@timestamp': '2026-07-28T06:46:57Z'
+    loggerName: org.keycloak.events
+    message: type="LOGIN_ERROR", realmId="soc-playground", clientId="admin-cli", userId="<missing-user-id>",
+      sessionId="<session-id>", ipAddress="<office-ws-1-ip>", error="invalid user
+      credentials", authMethod="password", username="dev.dana"
+  - '@timestamp': '2026-07-28T06:46:58Z'
+    loggerName: org.keycloak.events
+    message: type="LOGIN_ERROR", realmId="soc-playground", clientId="admin-cli", userId="<missing-user-id>",
+      sessionId="<session-id>", ipAddress="<office-ws-1-ip>", error="invalid user
+      credentials", authMethod="password", username="dev.dana"
+  - '@timestamp': '2026-07-28T06:47:02Z'
+    loggerName: org.keycloak.events
+    message: type="LOGIN_ERROR", realmId="soc-playground", clientId="admin-cli", userId="<missing-user-id>",
+      sessionId="<session-id>", ipAddress="<office-ws-1-ip>", error="invalid user
+      credentials", authMethod="password", username="dev.dana"
+  - '@timestamp': '2026-07-28T06:47:03Z'
+    loggerName: org.keycloak.events
+    message: type="LOGIN_ERROR", realmId="soc-playground", clientId="admin-cli", userId="<missing-user-id>",
+      sessionId="<session-id>", ipAddress="<office-ws-1-ip>", error="invalid user
+      credentials", authMethod="password", username="dev.dana"
+  - '@timestamp': '2026-07-28T06:47:03Z'
+    loggerName: org.keycloak.events
+    message: type="LOGIN_ERROR", realmId="soc-playground", clientId="admin-cli", userId="<missing-user-id>",
+      sessionId="<session-id>", ipAddress="<office-ws-1-ip>", error="invalid user
+      credentials", authMethod="password", username="dev.dana"
+  - '@timestamp': '2026-07-28T06:47:04Z'
+    loggerName: org.keycloak.events
+    message: type="LOGIN_ERROR", realmId="soc-playground", clientId="admin-cli", userId="<missing-user-id>",
+      sessionId="<session-id>", ipAddress="<office-ws-1-ip>", error="invalid user
+      credentials", authMethod="password", username="dev.dana"
+  - '@timestamp': '2026-07-28T06:47:04Z'
+    loggerName: org.keycloak.events
+    message: type="LOGIN_ERROR", realmId="soc-playground", clientId="admin-cli", userId="<missing-user-id>",
+      sessionId="<session-id>", ipAddress="<office-ws-1-ip>", error="invalid user
+      credentials", authMethod="password", username="dev.dana"
+  - '@timestamp': '2026-07-28T06:47:09Z'
+    loggerName: org.keycloak.events
+    message: type="LOGIN_ERROR", realmId="soc-playground", clientId="admin-cli", userId="<missing-user-id>",
+      sessionId="<session-id>", ipAddress="<office-ws-1-ip>", error="invalid user
+      credentials", authMethod="password", username="dev.dana"
+  - '@timestamp': '2026-07-28T06:47:10Z'
+    loggerName: org.keycloak.events
+    message: type="LOGIN_ERROR", realmId="soc-playground", clientId="admin-cli", userId="<missing-user-id>",
+      sessionId="<session-id>", ipAddress="<office-ws-1-ip>", error="invalid user
+      credentials", authMethod="password", username="dev.dana"
+  - '@timestamp': '2026-07-28T06:47:10Z'
+    loggerName: org.keycloak.events
+    message: type="LOGIN_ERROR", realmId="soc-playground", clientId="admin-cli", userId="<missing-user-id>",
+      sessionId="<session-id>", ipAddress="<office-ws-1-ip>", error="invalid user
+      credentials", authMethod="password", username="dev.dana"
+  - '@timestamp': '2026-07-28T06:47:11Z'
+    loggerName: org.keycloak.events
+    message: type="LOGIN_ERROR", realmId="soc-playground", clientId="admin-cli", userId="<missing-user-id>",
+      sessionId="<session-id>", ipAddress="<office-ws-1-ip>", error="invalid user
+      credentials", authMethod="password", username="dev.dana"
+  - '@timestamp': '2026-07-28T06:47:11Z'
+    loggerName: org.keycloak.events
+    message: type="LOGIN_ERROR", realmId="soc-playground", clientId="admin-cli", userId="<missing-user-id>",
+      sessionId="<session-id>", ipAddress="<office-ws-1-ip>", error="invalid user
+      credentials", authMethod="password", username="dev.dana"
+  - '@timestamp': '2026-07-28T06:47:16Z'
+    loggerName: org.keycloak.events
+    message: type="LOGIN_ERROR", realmId="soc-playground", clientId="admin-cli", userId="<missing-user-id>",
+      sessionId="<session-id>", ipAddress="<office-ws-1-ip>", error="invalid user
+      credentials", authMethod="password", username="dev.dana"
+  - '@timestamp': '2026-07-28T06:47:17Z'
+    loggerName: org.keycloak.events
+    message: type="LOGIN_ERROR", realmId="soc-playground", clientId="admin-cli", userId="<missing-user-id>",
+      sessionId="<session-id>", ipAddress="<office-ws-1-ip>", error="invalid user
+      credentials", authMethod="password", username="dev.dana"
+  - '@timestamp': '2026-07-28T06:47:17Z'
+    loggerName: org.keycloak.events
+    message: type="LOGIN_ERROR", realmId="soc-playground", clientId="admin-cli", userId="<missing-user-id>",
+      sessionId="<session-id>", ipAddress="<office-ws-1-ip>", error="invalid user
+      credentials", authMethod="password", username="dev.dana"
+  - '@timestamp': '2026-07-28T06:47:18Z'
+    loggerName: org.keycloak.events
+    message: type="LOGIN_ERROR", realmId="soc-playground", clientId="admin-cli", userId="<missing-user-id>",
+      sessionId="<session-id>", ipAddress="<office-ws-1-ip>", error="invalid user
+      credentials", authMethod="password", username="dev.dana"
+  - '@timestamp': '2026-07-28T06:47:18Z'
+    loggerName: org.keycloak.events
+    message: type="LOGIN_ERROR", realmId="soc-playground", clientId="admin-cli", userId="<missing-user-id>",
+      sessionId="<session-id>", ipAddress="<office-ws-1-ip>", error="invalid user
+      credentials", authMethod="password", username="dev.dana"
