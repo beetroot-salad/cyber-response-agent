@@ -467,7 +467,12 @@ def build_agent(  # noqa: PLR0913 — composition root: config + DI seams + the 
             extra_capabilities=gather_extra, session_id=gather_session_id,
         )
 
-    register_gather_tool(agent, _build_gather, GATHER_REQUEST_LIMIT)
+    from .verbs import VerbRegistry
+
+    effective_gather_grant = (
+        verbs.grant if isinstance(verbs, VerbRegistry) else GATHER_DEF.verb_grant
+    )
+    register_gather_tool(agent, _build_gather, GATHER_REQUEST_LIMIT, effective_gather_grant)
     return agent
 
 

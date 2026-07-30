@@ -11,8 +11,11 @@ ActionContract-shaped adapter for that ecosystem; this adapter is
 v2-flavored (`_stub_transport.py` + docker-exec-curl) and
 read-only.
 
-This file is split by audience. **Visibility surface** is read by
-the defender, the author skill, and the actor-reviewer judge.
+This file briefs **gather**, which reaches this store through the `query`
+tool — its verb_grant names `list-tickets` only. The judge's closed-ticket
+reads (a full-record lookup and the store's key grammar) are separate typed
+tools it registers directly (`learning/pipeline/judge/closed_ticket_tool.py`);
+they are not part of gather's catalog and are not documented here.
 **Execution** is read only by code paths that dispatch queries.
 
 ## Visibility surface
@@ -22,8 +25,6 @@ the defender, the author skill, and the actor-reviewer judge.
 | Subcommand | Measurement |
 |---|---|
 | `list-tickets [--status X] [--label X] [--q X]` | Filtered ticket list with summary + labels |
-| `get-ticket <key>` | Full ticket record incl. description + comments |
-| `key-pattern` | This store's key grammar (regex, unanchored) — config, not data |
 
 ### gaps
 
@@ -36,7 +37,7 @@ the defender, the author skill, and the actor-reviewer judge.
 - **No cross-link surface.** Tickets do not reference CRs, hosts, or
   users in a structured way; references live in free-text
   description / comments and must be substring-matched via `--q`.
-- **No history surface.** `get-ticket` returns current status; no
+- **No history surface.** A ticket lookup returns current status only; no
   transition log. Comments are append-only and form the closest
   proxy.
 - **Schema lock — v1 shape.** The store carries v1 ticket fields
@@ -51,10 +52,9 @@ the defender, the author skill, and the actor-reviewer judge.
   tickets carry a `resolution` field; open tickets have
   `resolution: null`.
 - **The current investigation's own ticket is excluded by identity.**
-  Gather rejects a direct `get-ticket` for its run id and removes that record
-  from `list-tickets` results before the payload is cached. Other open and
-  in-progress tickets remain available for correlation, including tickets
-  whose free text references the current case.
+  Gather removes that record from `list-tickets` results before the payload
+  is cached. Other open and in-progress tickets remain available for
+  correlation, including tickets whose free text references the current case.
 - **`labels` are short tags.** Common ones: `brute-force`,
   `false-positive`, `change-window`, `escalated`. Treat them as
   curator-supplied hypothesis hints, not refutations.
@@ -68,8 +68,8 @@ the defender, the author skill, and the actor-reviewer judge.
 
 - **Use for precedent matching at REPORT time** — when a similar
   alert has been investigated before, the matched_ticket_id is the
-  citation; use `get-ticket` to confirm the precedent's disposition
-  is still applicable.
+  citation; confirm the precedent's disposition is still applicable via
+  `list-tickets --q <ticket key>`.
 - **Use for "is this alert already on the SOC's radar"** —
   `list-tickets --q <host or user>` finds open work touching the
   same entities.
@@ -98,13 +98,11 @@ the defender, the author skill, and the actor-reviewer judge.
 ```
 query(system="ticket", verb="health-check", params={})
 query(system="ticket", verb="list-tickets", params={"status": "X", "label": "X", "q": "X"})
-query(system="ticket", verb="get-ticket",   params={"key": "<key>"})
-query(system="ticket", verb="key-pattern",  params={})
 ```
 
 Reached with the **`query` tool** — there is no command, no shim, and no `--help`.
-Params bind **by name**, with literal JSON types. `get-ticket` requires `key`;
-every `list-tickets` param is an optional filter.
+Params bind **by name**, with literal JSON types; every `list-tickets` param
+is an optional filter.
 
 **Do not Read `ticket_adapter.py` source to discover params.** This SKILL plus the
 systems catalog in your dispatch prompt is the authoritative surface, and a call

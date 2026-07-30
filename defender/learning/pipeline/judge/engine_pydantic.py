@@ -79,13 +79,12 @@ JUDGE_DEF = AgentDefinition(
     role=AgentRole.JUDGE,
     model=judge_model,
     effort=judge_effort(),
-    # closed_tickets=True agrees with the definition's own non-empty verb_grant, so a PLAIN
-    # bind(JUDGE_DEF, ...) — every caller outside `_run_judge_pydantic`'s own stage build,
-    # e.g. the operator policy CLI or a permission-gate test — compiles without the §7 R7
-    # agreement check tripping. `_run_judge_pydantic` OVERRIDES both this bit and the grant
-    # together per stage (benign ON, adversarial OFF+DENY_ALL, d73) — the static default here
-    # is never what a real judge run actually builds with.
-    tools=ToolSet(read=True, bash=True, closed_tickets=True),
+    # closed_tickets stays False here — every ToolSet bit on JUDGE_DEF defaults False, so a
+    # generic build (build_judge_agent with no verbs=, a permission-gate probe) never demands
+    # a registry it wasn't handed. `_run_judge_pydantic` is the ONLY site that turns this bit
+    # on, via a runtime replace() that scopes the verb_grant beside it in the SAME step (d73) —
+    # so the real per-leg build never sees this static default at all, agreeing or not.
+    tools=ToolSet(read=True, bash=True),
     bash_shapes=(_judge_bash_shapes,),
     deps_cls=JudgeDeps,
     deny_reason=_JUDGE_DENY_REASON,

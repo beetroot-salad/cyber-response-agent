@@ -48,8 +48,9 @@ not the input path.
   than expecting a tag endpoint.
 - **`users:` per-host overrides are visible but unfiltered.**
   `get-host` returns the `users:` block when one exists, but there
-  is no endpoint to filter hosts by per-host user; use the identity
-  stub's `list-authorized-hosts <user>` instead.
+  is no endpoint to filter hosts by per-host user, and the identity
+  stub's per-user host lookup is not part of gather's catalog either
+  — filter the returned `users:` block client-side instead.
 
 ### read_guidance
 

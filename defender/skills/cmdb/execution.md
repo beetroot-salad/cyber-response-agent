@@ -13,26 +13,26 @@ Params bind **by name**, with literal JSON types.
 query(system="cmdb", verb="health-check", params={})
 query(system="cmdb", verb="get-host",   params={"host": "<name>"})
 query(system="cmdb", verb="list-hosts", params={"role": "X", "criticality": "X", "owner": "X"})
-query(system="cmdb", verb="list-roles", params={})
 ```
 
 `get-host` requires `host`; every `list-hosts` param is an optional filter.
+cmdb declares a role-listing verb too, but gather's verb_grant does not name
+it — not part of gather's catalog.
 
 **Do not Read `cmdb_adapter.py` source to discover params.** This file plus the systems
 catalog in your dispatch prompt is the authoritative surface, and a call with an
 unknown/missing/mistyped param is rejected with the declared list anyway.
 
 Each verb returns the upstream JSON response unchanged — a flat object
-for `get-host`, a list/object for `list-hosts` / `list-roles`. That
+for `get-host`, a list/object for `list-hosts`. That
 payload IS the output; the harness captures it under
 `gather_raw/{lead_id}/{seq}.json`.
 
 `get-host` is keyed by inventory host name (e.g. `scanner-1`, `web-1`).
 Feeding a runtime identifier — container id, docker container name —
 404s. If a lead needs the inventory record for a runtime entity, run
-the resolution lead first (`list-hosts` plus inventory-side fields, or
-the identity stub's `list-authorized-hosts` verb, keyed on `user`, if the
-principal is a user), then bind the resolved name into `get-host`.
+the resolution lead first (`list-hosts` plus inventory-side fields),
+then bind the resolved name into `get-host`.
 
 ## Connectivity
 
