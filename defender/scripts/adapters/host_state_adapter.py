@@ -42,6 +42,8 @@ def _raise_on_docker_error(ctx: VerbContext, rc: int, stderr: str, host: str) ->
         "No such container" in s or "is not running" in s
         or "Cannot connect to the Docker daemon" in s
         or "error during connect" in s
+        or "context not found" in s
+        or "unable to resolve docker endpoint" in s
     )
     if transport_down:
         raise TransportFault(

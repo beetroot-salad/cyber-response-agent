@@ -30,6 +30,7 @@ from defender._frontmatter import parse_frontmatter_or_none
 from defender.evals.held_out import predicted_disposition
 from defender.learning.core.config import DISPOSITION_ENUM
 from defender.runtime import orient
+from defender.runtime.verb_grant import VerbGrant
 from defender.scripts.visualize import visualize_primitives as vp
 
 DEFENDER = Path(__file__).resolve().parents[1]
@@ -156,19 +157,21 @@ def test_d0_descriptor_catalog_seam(tmp_path):
     _skill(skills, "alpha", b"---\nname: defender-alpha\ndescription: alpha desc\n---\nbody\n")
     _skill(skills, "beta", b"---\nname: defender-beta\n---\nbody\n")
 
+    grant = VerbGrant(role="gather", entries=(("alpha", "ping", "r"), ("beta", "ping", "r")))
+
     hook.descriptor_catalog.cache_clear()
-    out = hook.descriptor_catalog(skills_dir=skills, adapters_dir=adapters)
+    out = hook.descriptor_catalog(skills, adapters, grant)
     assert out == "- `alpha`: alpha desc"
 
     empty_adapters = tmp_path / "adapters2"
     empty_adapters.mkdir()
     (empty_adapters / "beta_adapter.py").write_text("# adapter\nVERBS = {\"ping\": lambda ctx: {}}\n", encoding="utf-8")
     hook.descriptor_catalog.cache_clear()
-    assert hook.descriptor_catalog(skills_dir=skills, adapters_dir=empty_adapters) is None
+    assert hook.descriptor_catalog(skills, empty_adapters, grant) is None
 
     hook.descriptor_catalog.cache_clear()
-    a = hook.descriptor_catalog(skills_dir=skills, adapters_dir=adapters)
-    b = hook.descriptor_catalog(skills_dir=skills, adapters_dir=empty_adapters)
+    a = hook.descriptor_catalog(skills, adapters, grant)
+    b = hook.descriptor_catalog(skills, empty_adapters, grant)
     assert a == "- `alpha`: alpha desc"
     assert b is None
 
@@ -301,9 +304,10 @@ def test_d_unfenced_skill_none(tmp_path):
     (adapters / "evil_adapter.py").write_text("# a\nVERBS = {\"ping\": lambda ctx: {}}\n", encoding="utf-8")
     (adapters / "good_adapter.py").write_text("# a\nVERBS = {\"ping\": lambda ctx: {}}\n", encoding="utf-8")
 
+    grant = VerbGrant(role="gather", entries=(("evil", "ping", "r"), ("good", "ping", "r")))
     assert hook.read_description("evil", skills_dir=skills) is None
     hook.descriptor_catalog.cache_clear()
-    catalog = hook.descriptor_catalog(skills_dir=skills, adapters_dir=adapters) or ""
+    catalog = hook.descriptor_catalog(skills, adapters, grant) or ""
     assert "BOGUS" not in catalog
     assert "`evil`" not in catalog
     assert hook.read_description("good", skills_dir=skills) == "real desc"
@@ -319,7 +323,8 @@ def test_d_fenced_skill_desc(tmp_path):
     (adapters / "good_adapter.py").write_text("# a\nVERBS = {\"ping\": lambda ctx: {}}\n", encoding="utf-8")
     assert hook.read_description("good", skills_dir=skills) == "real desc"
     hook.descriptor_catalog.cache_clear()
-    assert hook.descriptor_catalog(skills_dir=skills, adapters_dir=adapters) == "- `good`: real desc"
+    grant = VerbGrant(role="gather", entries=(("good", "ping", "r"),))
+    assert hook.descriptor_catalog(skills, adapters, grant) == "- `good`: real desc"
 
 
 def test_d_trailing_space_opener_none(tmp_path):
@@ -378,9 +383,11 @@ def test_d_block_scalar_multiparagraph_green(tmp_path):
 
 
 def test_d_catalog_survival():
+    from defender.runtime.driver import GATHER_DEF
+
     hook = _hook()
     hook.descriptor_catalog.cache_clear()
-    out = hook.descriptor_catalog()
+    out = hook.descriptor_catalog(hook.SKILLS_DIR, hook.ADAPTERS_DIR, GATHER_DEF.verb_grant)
     assert out is not None
     adapters_dir = DEFENDER / "scripts" / "adapters"
     systems = sorted(
