@@ -266,13 +266,15 @@ async def _run_gather(
     if circuit_breaker.is_tripped(deps.run_dir, system):
         return circuit_breaker.down_message(deps.run_dir, system)
 
+    from defender.runtime.agent_definition import bind
+    from defender.runtime.driver import GATHER_DEF
+
     catalog = _descriptor_catalog(
-        deps.defender_dir / "skills", deps.defender_dir / "scripts" / "adapters"
+        deps.defender_dir / "skills", deps.defender_dir / "scripts" / "adapters",
+        GATHER_DEF.verb_grant,
     )
 
     gagent = gather_factory(f"gather:{lead_id}")
-    from defender.runtime.agent_definition import bind
-    from defender.runtime.driver import GATHER_DEF
     gbase = bind(
         GATHER_DEF, deps.run_dir, salt=deps.salt, defender_dir=deps.defender_dir, box=deps.box,
     )

@@ -5,7 +5,6 @@ import datetime
 import json
 import re
 import subprocess
-import sys
 
 import sys as _sys
 from pathlib import Path as _Path
@@ -15,6 +14,7 @@ if (_root := str(_Path(__file__).resolve().parents[3])) not in _sys.path:
 
 from defender.runtime.verbs import VerbContext
 from defender.scripts.adapters import _stub_transport as transport
+from defender.scripts.adapters.confinement import confine_host_state_call
 from defender.scripts.adapters.faults import TransportFault, UpstreamFault
 
 SYSTEM = "host-state"
@@ -26,15 +26,6 @@ SAFE_USERNAME_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9._-]{0,63}$")
 SAFE_PATH_RE = re.compile(r"^[A-Za-z0-9_./@:+-]+$")
 DEFAULT_TIMEOUT_SEC = 15
 HEALTH_TIMEOUT_SEC = 10
-
-
-def _check_host(host: str) -> None:
-    if host not in KNOWN_HOSTS:
-        print(
-            f"warning: host {host!r} is not in the known inventory "
-            f"({', '.join(KNOWN_HOSTS)}); attempting anyway.",
-            file=sys.stderr,
-        )
 
 
 def _exec(
@@ -115,14 +106,14 @@ def container_inspect(ctx: VerbContext, *, container_id: str) -> dict:
 
 
 def proc_tree(ctx: VerbContext, *, host: str) -> dict:
-    _check_host(host)
+    confine_host_state_call("ps", host)
     rc, out, err = _exec(ctx, host, ["ps", "-eo", "pid,ppid,user,stat,etime,cmd", "--forest"])
     _raise_on_docker_error(ctx, rc, err, host)
     return {"host": host, "captured_at": _utcnow_z(), "ps_output": out}
 
 
 def passwd(ctx: VerbContext, *, host: str) -> dict:
-    _check_host(host)
+    confine_host_state_call("cat", host)
     rc, out, err = _exec(ctx, host, ["cat", "/etc/passwd"])
     _raise_on_docker_error(ctx, rc, err, host)
     entries = [line for line in out.splitlines() if line and not line.startswith("#")]
@@ -130,7 +121,7 @@ def passwd(ctx: VerbContext, *, host: str) -> dict:
 
 
 def authorized_keys(ctx: VerbContext, *, host: str, user: str = "root") -> dict:
-    _check_host(host)
+    confine_host_state_call("getent", host)
     if not SAFE_USERNAME_RE.match(user):
         raise UpstreamFault(f"refusing unsafe user value: {user!r}")
     rc, home_out, err = _exec(ctx, host, ["getent", "passwd", user])
@@ -141,6 +132,7 @@ def authorized_keys(ctx: VerbContext, *, host: str, user: str = "root") -> dict:
         raise UpstreamFault(f"malformed passwd record for {user!r}: {home_out!r}")
     home = parts[5]
     ak_path = f"{home}/.ssh/authorized_keys"
+    confine_host_state_call("cat", host)
     rc, out, err = _exec(ctx, host, ["cat", ak_path])
     if rc != 0:
         s = err.strip()
@@ -160,7 +152,7 @@ def authorized_keys(ctx: VerbContext, *, host: str, user: str = "root") -> dict:
 
 
 def fim_checksum(ctx: VerbContext, *, host: str, path: str) -> dict:
-    _check_host(host)
+    confine_host_state_call("sha256sum", host)
     if not SAFE_PATH_RE.match(path) or not path.startswith("/"):
         raise UpstreamFault(f"refusing unsafe path value: {path!r}")
     rc, out, err = _exec(ctx, host, ["sha256sum", path])
@@ -174,7 +166,7 @@ def fim_checksum(ctx: VerbContext, *, host: str, path: str) -> dict:
 
 
 def package_list(ctx: VerbContext, *, host: str) -> dict:
-    _check_host(host)
+    confine_host_state_call("dpkg-query", host)
     fmt = r"${Package} ${Version}\n"
     rc, out, err = _exec(ctx, host, ["dpkg-query", "-W", "-f=" + fmt], timeout_sec=30)
     _raise_on_docker_error(ctx, rc, err, host)

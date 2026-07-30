@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .grant import PROGRAMS, Grant, PathShapes
+from ..verb_grant import DENY_ALL, VerbGrant
 
 _DEFAULT_DENY_REASON = (
     "Blocked: this command is not permitted for this agent (read-only viewers and "
@@ -23,6 +24,7 @@ class AgentPolicy:
     write_allow: tuple[re.Pattern[str], ...] = ()
     deny_reason: str = _DEFAULT_DENY_REASON
     budget_enforced: bool = False
+    verb_allow: VerbGrant = DENY_ALL
 
     def __post_init__(self) -> None:
         untabled = sorted({g.program for g in self.bash_allow if g.program not in PROGRAMS})

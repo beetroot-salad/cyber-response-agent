@@ -36,6 +36,7 @@ from .tools import (
     register_gather_tool,
     register_tools,
 )
+from .verb_grant import VerbGrant
 from .verbs import ModuleVerbRegistry
 
 from defender._env import env_bool
@@ -205,10 +206,16 @@ def build_agent_core(  # noqa: PLR0913 — the single build site's config + 3 DI
         from defender._paths import PATHS
 
         from .query_tool import QueryCapture
+        from .verbs import VerbRegistry
 
         if verbs is None:
-            verbs = ModuleVerbRegistry(PATHS.defender_dir / "scripts" / "adapters")
-        capabilities.append(QueryCapture(verbs))
+            verbs = ModuleVerbRegistry(PATHS.defender_dir / "scripts" / "adapters", defn.verb_grant)
+        if not isinstance(verbs, VerbRegistry):
+            raise TypeError(
+                f"the query tool needs a real VerbRegistry, got {type(verbs).__name__} — a "
+                "registry-shaped stand-in that never went through the constructor is refused"
+            )
+        capabilities.append(QueryCapture(verbs, defn.role.value))
     agent: Agent[Any, str] = Agent(
         built.model,
         deps_type=deps_type,
@@ -253,6 +260,33 @@ MAIN_DEF = AgentDefinition(
     budget_enforced=True,
 )
 
+#: The gather grant (#632, c18): the census over the 14 committed query templates plus 20
+#: past runs' history — 21 read verbs across 7 systems, plus `health-check` granted uniformly
+#: per system rather than per verb (the split carries no security content). `cmdb.list-roles`
+#: and `identity.list-authorized-hosts` are granted to nobody: in the registry, exercised by
+#: no template and no run.
+GATHER_PAIRS: tuple[tuple[str, str], ...] = (
+    ("change-mgmt", "active-changes"), ("change-mgmt", "get-change"),
+    ("change-mgmt", "list-changes"),
+    ("cmdb", "get-host"), ("cmdb", "list-hosts"),
+    ("elastic", "alerts"), ("elastic", "esql"), ("elastic", "query"),
+    ("host-state", "authorized-keys"), ("host-state", "container-inspect"),
+    ("host-state", "fim-checksum"), ("host-state", "package-list"),
+    ("host-state", "passwd"), ("host-state", "proc-tree"),
+    ("identity", "can-access"), ("identity", "get-user"), ("identity", "list-roles"),
+    ("identity", "list-users"),
+    ("threat-intel", "list-indicators"), ("threat-intel", "lookup"),
+    ("ticket", "list-tickets"),
+)
+
+
+def _gather_verb_grant() -> VerbGrant:
+    systems = sorted({s for s, _ in GATHER_PAIRS})
+    entries = tuple((s, v, "r") for s, v in GATHER_PAIRS)
+    entries += tuple((s, "health-check", "r") for s in systems)
+    return VerbGrant(role=AgentRole.GATHER.value, entries=entries)
+
+
 GATHER_DEF = AgentDefinition(
     role=AgentRole.GATHER,
     model=gather_model,
@@ -263,6 +297,7 @@ GATHER_DEF = AgentDefinition(
     deps_cls=GatherDeps,
     deny_reason=permission.GATHER_FALLTHROUGH_DENY_REASON,
     budget_enforced=True,
+    verb_grant=_gather_verb_grant(),
 )
 
 
@@ -560,7 +595,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     model_name = resolve_main_model(model_name)
     make_model = make_model or providers.build_for_effort
     adapters = defender_dir / "scripts" / "adapters"
-    verbs = verbs if verbs is not None else ModuleVerbRegistry(adapters)  # lint-default: ok — DI seam owning its default (tree-derived; no signature default possible)
+    verbs = verbs if verbs is not None else ModuleVerbRegistry(adapters, GATHER_DEF.verb_grant)  # lint-default: ok — DI seam owning its default (tree-derived; no signature default possible)
     limits = limits if limits is not None else DEFAULT_LIMITS  # lint-default: ok — DI seam owning its default (the cap table, threaded inward)
     budget_started_monotonic = time.monotonic()
     open_budget(run_dir, run_id)

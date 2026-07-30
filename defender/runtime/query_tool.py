@@ -39,7 +39,7 @@ from .ticket_screen import (
     screen_list,
     self_case_key,
 )
-from .verbs import VerbContext, validate_params
+from .verbs import DENIED, GRANTED, VerbContext, validate_params
 
 TOOL_NAME = "query"
 
@@ -153,37 +153,26 @@ def _screen_ticket_payload(
 
 class QueryCapture(AbstractCapability[Any]):
 
-    def __init__(self, registry: Any):
+    def __init__(self, registry: Any, role: str = "gather"):
         self._registry = registry
+        self._role = role
         self._seq_lock = asyncio.Lock()
+        self._denial_logger: Any = None
 
+    def _denial_logger_for(self, run_dir: Any) -> Any:
+        from . import observe
 
-    def _reject(
-        self, system: str, verb: str, params: dict, model_query_id: Any = None,
-    ) -> str | None:
+        if self._denial_logger is None:
+            self._denial_logger = observe.RequestLogger(run_dir / observe.POLICY_DENIALS)
+        return self._denial_logger
+
+    def _decide_guarded(self, system: str, verb: str) -> tuple[Any, str | None]:
+        """THE grant decision, guarded against a broken adapter import — mirroring the old
+        `_reject_guarded`'s load-error treatment (§7 R2's O3 timing: the agreement check is
+        deferred to first resolution, not policy compile, so a broken sibling adapter must
+        not unwind the stage)."""
         try:
-            verbs = self._registry.verbs(system)
-        except KeyError:
-            return (
-                f"unknown system {system!r}. Pick one the dispatch catalog names; a system is "
-                "not a path and not a program."
-            )
-        if not verbs:
-            return f"system {system!r} declares no verbs — it is unreachable, not unfiltered."
-        if verb not in verbs:
-            return f"unknown verb {verb!r} for {system}. Declared verbs: {sorted(verbs)}."
-        if model_query_id and any(t in str(model_query_id) for t in _QID_TRAVERSAL):
-            return (
-                f"invalid query_id {model_query_id!r}: no '/', '\\', '..' or NUL — it becomes a "
-                "catalog path segment. Coin a `{system}.{kebab-name}` id."
-            )
-        return validate_params(verbs[verb], params)
-
-    def _reject_guarded(
-        self, system: str, verb: str, params: dict, model_query_id: Any = None,
-    ) -> tuple[str | None, str | None]:
-        try:
-            return self._reject(system, verb, params, model_query_id), None
+            return self._registry.decide(system, verb), None
         except CONTROL_FLOW_EXCEPTIONS:
             raise
         except (BudgetKill, KeyboardInterrupt, GeneratorExit, asyncio.CancelledError):
@@ -191,6 +180,13 @@ class QueryCapture(AbstractCapability[Any]):
         except BaseException as e:  # noqa: BLE001 — the registry could not LOAD this system's module
             return None, f"{system} adapter failed to load: {type(e).__name__}: {e}"
 
+    def _traversal_reject(self, model_query_id: Any) -> str | None:
+        if model_query_id and any(t in str(model_query_id) for t in _QID_TRAVERSAL):
+            return (
+                f"invalid query_id {model_query_id!r}: no '/', '\\', '..' or NUL — it becomes a "
+                "catalog path segment. Coin a `{system}.{kebab-name}` id."
+            )
+        return None
 
     async def wrap_tool_validate(self, ctx, *, call, args, handler, **_):  # noqa: ANN001 — **_ absorbs the framework's tool_def
         if call.tool_name != TOOL_NAME:
@@ -211,6 +207,56 @@ class QueryCapture(AbstractCapability[Any]):
             )
             raise
 
+    async def _authorize(
+        self, deps, system: str, verb: str, params: dict, model_query_id: Any, self_key: str,
+    ) -> tuple[Any, str | None]:
+        """Everything ahead of execution: THE GRANT CHECK first (§7 R3/R23, reversed at phase
+        F — a denied call always produces its denial record and never an evidence row,
+        whatever else is wrong with it), then the traversal screen, param validation and the
+        self-ticket screen. Returns `(decision, early_result)` — `early_result` is set when the
+        caller must return/raise without ever reaching execution."""
+        decision, load_error = self._decide_guarded(system, verb)
+        if load_error is not None:
+            row, text = await self._record(
+                deps, system=system, verb=verb,
+                query_id=resolve_query_id(system, verb, None), params=params, payload=None,
+                exit_code=DEFAULT_FAULT_EXIT, detail=load_error,
+            )
+            return None, self._model_view(deps, row, text, DEFAULT_FAULT_EXIT, load_error)
+
+        if decision.outcome == DENIED:
+            self._denial_logger_for(deps.run_dir).log_policy_denial(
+                role=self._role, system=system, verb=verb,
+                call_id=f"{system}.{verb}", params=params,
+            )
+            return None, _format_bash_result(
+                DEFAULT_FAULT_EXIT, "", _wrap(decision.refusal or "", "untrusted", deps.salt), "",
+            )
+
+        if decision.outcome != GRANTED:
+            await self._record(
+                deps, system=system, verb=verb,
+                query_id=resolve_query_id(system, verb, None), params=params, payload=None,
+                exit_code=USAGE_EXIT_CODE, detail=decision.refusal or "unresolvable",
+            )
+            raise ModelRetry(decision.refusal or f"unresolvable: {system}.{verb}")
+
+        reason = self._traversal_reject(model_query_id)
+        if reason is None:
+            reason = validate_params(decision.fn, params)
+        if reason is None:
+            reason = _self_ticket_reject_reason(self_key, system, verb, params)
+        if reason is not None:
+            await self._record(
+                deps, system=system, verb=verb,
+                query_id=resolve_query_id(system, verb, None),
+                params=params, payload=None,
+                exit_code=USAGE_EXIT_CODE, detail=reason,
+            )
+            raise ModelRetry(reason)
+
+        return decision, None
+
     async def wrap_tool_execute(self, ctx, *, call, args, handler, **_):  # noqa: ANN001 — **_ absorbs the framework's tool_def
         if call.tool_name != TOOL_NAME:
             return await handler(args)
@@ -222,28 +268,15 @@ class QueryCapture(AbstractCapability[Any]):
         model_query_id = args.get("query_id")
         self_key = self_case_key(deps)
 
+        _decision, early_result = await self._authorize(
+            deps, system, verb, params, model_query_id, self_key,
+        )
+        if early_result is not None:
+            return early_result
+
         tripped = _tripped_message(deps, system)
         if tripped is not None:
             return tripped
-
-        reason, load_error = self._reject_guarded(system, verb, params, model_query_id)
-        if load_error is not None:
-            row, text = await self._record(
-                deps, system=system, verb=verb,
-                query_id=resolve_query_id(system, verb, None), params=params, payload=None,
-                exit_code=DEFAULT_FAULT_EXIT, detail=load_error,
-            )
-            return self._model_view(deps, row, text, DEFAULT_FAULT_EXIT, load_error)
-        if reason is None:
-            reason = _self_ticket_reject_reason(self_key, system, verb, params)
-        if reason is not None:
-            await self._record(
-                deps, system=system, verb=verb,
-                query_id=resolve_query_id(system, verb, None),
-                params=params, payload=None,
-                exit_code=USAGE_EXIT_CODE, detail=reason,
-            )
-            raise ModelRetry(reason)
 
         query_id = resolve_query_id(system, verb, _as_str(model_query_id) or None)
 

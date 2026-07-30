@@ -13,6 +13,7 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
 from defender._corpus import iter_query_templates  # noqa: E402
 from defender._frontmatter import parse_frontmatter_or_none  # noqa: E402
 from defender._io import read_text_soft  # noqa: E402
+from defender.runtime.verb_grant import DENY_ALL  # noqa: E402
 from defender.runtime.verbs import (  # noqa: E402
     ADAPTER_SUFFIX,
     ModuleVerbRegistry,
@@ -55,7 +56,7 @@ def _defender_dir() -> Path:
 
 def check_registry(report: Report, defender: Path, system: str):
     adapter = defender / "scripts" / "adapters" / f"{system.replace('-', '_')}{ADAPTER_SUFFIX}"
-    registry = ModuleVerbRegistry(defender / "scripts" / "adapters")
+    registry = ModuleVerbRegistry(defender / "scripts" / "adapters", DENY_ALL)
     try:
         verbs = registry.verbs(system)
     except KeyError:

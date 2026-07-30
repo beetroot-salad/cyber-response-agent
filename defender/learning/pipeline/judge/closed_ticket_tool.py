@@ -68,7 +68,7 @@ from pydantic_ai import RunContext
 from pydantic_ai.exceptions import ModelRetry
 
 from defender._io import append_jsonl, read_jsonl_rows
-from defender.runtime import circuit_breaker
+from defender.runtime import circuit_breaker, observe
 from defender.runtime.query_tool import (
     CONTROL_FLOW_EXCEPTIONS,
     DEFAULT_FAULT_EXIT,
@@ -77,7 +77,7 @@ from defender.runtime.query_tool import (
 from defender.runtime.ticket_screen import screen_get, screen_list, self_case_key
 from defender.runtime.tools import AgentDeps, _bash_env, _format_bash_result
 from defender._untrusted import wrap as _wrap
-from defender.runtime.verbs import VerbContext
+from defender.runtime.verbs import DENIED, GRANTED, VerbContext
 from defender.scripts.adapters.faults import AdapterFault
 from defender.scripts.gather_tools.record_query import (
     _is_event_payload,
@@ -287,6 +287,43 @@ def _screen_listing(deps: AgentDeps, payload: Any) -> tuple[Any, int, str]:
     )
 
 
+class _DenialAuditor:
+    """One lazily-opened policy-denial logger per built stage — the fixed `POLICY_DENIALS`
+    stream under the JUDGE's own run dir (§7 R1), never eagerly created (a run with nothing
+    denied must leave no such file)."""
+
+    def __init__(self) -> None:
+        self._logger: observe.RequestLogger | None = None
+
+    def log(self, run_dir: Path, *, verb: str, params: dict) -> None:
+        if self._logger is None:
+            self._logger = observe.RequestLogger(run_dir / observe.POLICY_DENIALS)
+        self._logger.log_policy_denial(
+            role="judge", system=SYSTEM, verb=verb, call_id=f"{SYSTEM}.{verb}", params=params,
+        )
+
+
+async def _grant_gate(
+    deps: AgentDeps, verbs: Any, denials: _DenialAuditor, verb: str,
+) -> str | None:
+    """THE grant decision, ahead of every one of the judge site's own screens (key grammar,
+    key schema, self-case-key) — exactly the runtime's ordering, mirrored at the second
+    model-facing site so it does not carry an audit hole the first one closed."""
+    decision = verbs.decide(SYSTEM, verb)
+    if decision.outcome == DENIED:
+        denials.log(deps.run_dir, verb=verb, params={})
+        return _format_bash_result(
+            DEFAULT_FAULT_EXIT, "", _wrap(decision.refusal or "", "untrusted", deps.salt), "",
+        )
+    if decision.outcome != GRANTED:
+        return _format_bash_result(
+            DEFAULT_FAULT_EXIT, "",
+            _wrap(decision.refusal or f"unresolvable: {SYSTEM}.{verb}", "untrusted", deps.salt),
+            "",
+        )
+    return None
+
+
 async def _list_body(deps: AgentDeps, lock: asyncio.Lock, verbs: Any,
                      label: str | None, q: str | None) -> str:
     """``list_closed_tickets`` end-to-end: honor the breaker, drive the verb closed-only,
@@ -372,6 +409,7 @@ def register_closed_ticket_tools(agent: Any, verbs: Any) -> None:
     # One lock per built agent: the two tools share the capture sink (seq counts rows), so a
     # one-turn parallel pair must not race the seq→write window (the query tool's `_seq_lock`).
     seq_lock = asyncio.Lock()
+    denials = _DenialAuditor()
 
     @agent.tool
     async def list_closed_tickets(
@@ -382,6 +420,9 @@ def register_closed_ticket_tools(agent: Any, verbs: Any) -> None:
         precedent a survive-verdict would rest on, then confirm the one you cite with
         get_closed_ticket. The in-flight ticket for the alert you are scoring is never
         returned."""
+        refusal = await _grant_gate(ctx.deps, verbs, denials, "list-tickets")
+        if refusal is not None:
+            return refusal
         return await _list_body(ctx.deps, seq_lock, verbs, label, q)
 
     @agent.tool
@@ -390,6 +431,9 @@ def register_closed_ticket_tools(agent: Any, verbs: Any) -> None:
         construction — a non-closed or missing ticket refuses). Never returns the open
         in-flight ticket for the alert you are scoring. A cited seed the store can't confirm,
         or whose grounded conditions these actuals contradict, does not survive on that basis."""
+        refusal = await _grant_gate(ctx.deps, verbs, denials, "get-ticket")
+        if refusal is not None:
+            return refusal
         return await _get_body(ctx.deps, seq_lock, verbs, key)
 
 

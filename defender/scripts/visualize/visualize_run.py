@@ -401,6 +401,32 @@ def render_judge_page(run_dir: Path) -> str:
 """
 
 
+def _render_policy_denials_section(run_dir: Path) -> str:
+    """A denial is durable on disk (`observe.POLICY_DENIALS`) and unrelated to every other
+    record kind this page already filters on — folding it into an existing filtered stream is
+    exactly how a denial goes silently unrendered (#632, g9/g23). Rendered as its own section
+    inside the document element, never a comment, so it survives `_visible_html`-shaped
+    scraping as well as a human's eyes."""
+    from defender.runtime import observe
+
+    path = run_dir / observe.POLICY_DENIALS
+    if not path.is_file():
+        return ""
+    rows = [r for r in read_jsonl_rows(path) if r.get("event_type") == observe.POLICY_DENIAL_EVENT_TYPE]
+    if not rows:
+        return ""
+    items = "".join(
+        f'<li class="denial-row">DENIED <code>{esc(str(r.get("system", "")))}.'
+        f'{esc(str(r.get("verb", "")))}</code> — role {esc(str(r.get("role", "")))}, '
+        f'{esc(str(r.get("ts", "")))}</li>'
+        for r in rows
+    )
+    return section(
+        "sec-policy-denials", "defender", "Policy denials",
+        f"— {len(rows)} call(s) refused by the verb grant", f'<ul class="denial-list">{items}</ul>',
+    )
+
+
 def render_runtime_page(run_dir: Path) -> str:
     case_id = run_dir.name
     events = read_jsonl_rows(run_dir / "tool_trace.jsonl")
@@ -481,6 +507,7 @@ def render_runtime_page(run_dir: Path) -> str:
   {render_runtime_toc(phases, n_tx, n_leads, tx_phases, leads)}
   <article class="content content-runtime">
     {render_runtime_headline(run_dir, report, health, leads)}
+    {_render_policy_denials_section(run_dir)}
     {metrics_html}
     {render_alert_block(run_dir, open_=False)}
     {investigation_html}

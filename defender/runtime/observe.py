@@ -4,6 +4,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 from typing import Any
@@ -17,11 +18,43 @@ from pydantic_ai.messages import (
     ToolReturnPart,
 )
 
+from defender._clock import now_iso
 from defender._env import env_int
 
 from defender.scripts.pricing import usage_cost
 
 WIRE_LOG_ENSURE_ASCII = True
+
+#: The fixed policy-denial stream, ONE per site (§7 R1): the same filename, the same writer
+#: class (`RequestLogger`), at the runtime under the run dir and at the judge under its own
+#: run dir — mirroring the durable request stream's own discipline (appended and flushed per
+#: record, so it survives an abort) without folding denials into it, which would make "no
+#: denial happened" indistinguishable from "the file predates this change" for a reader that
+#: has to filter by record kind.
+POLICY_DENIALS = "policy_denials.jsonl"
+POLICY_DENIAL_EVENT_TYPE = "policy_denial"
+
+#: The bounded, normalized projection §7 R12 demands: the policy FACT, never the raw
+#: model-controlled parameter blob.
+_DENIAL_PARAM_DIGEST_LEN = 16
+
+
+def _normalize_for_digest(value: Any) -> Any:
+    if isinstance(value, float):
+        return value if math.isfinite(value) else f"<non-finite:{value!r}>"
+    if isinstance(value, dict):
+        return {str(k): _normalize_for_digest(v) for k, v in sorted(value.items(), key=lambda kv: str(kv[0]))}
+    if isinstance(value, (list, tuple)):
+        return [_normalize_for_digest(v) for v in value]
+    if value is None or isinstance(value, (str, int, bool)):
+        return value
+    return repr(value)
+
+
+def _params_digest(params: Any) -> str:
+    normalized = _normalize_for_digest(params)
+    text = json.dumps(normalized, sort_keys=True, ensure_ascii=True)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:_DENIAL_PARAM_DIGEST_LEN]
 
 
 
@@ -90,6 +123,7 @@ class RequestLogger:
         self.messages: list[dict] = []
         self._seq: dict[str, int] = {}
         self.n_requests = 0
+        self._denial_seq = 0
 
     def _emit(
         self, agent_id: str, kind: str, message: dict, cap: int, **extra: Any
@@ -134,6 +168,31 @@ class RequestLogger:
             wire_sha=_wire_digest(request_messages),
         )
         self.n_requests += 1
+
+    def log_policy_denial(
+        self, *, role: str, system: str, verb: str, call_id: str, params: Any,
+    ) -> dict:
+        """Append one policy-denial record — the bounded, normalized projection §7 R12
+        demands: role, system, verb, call id, and a digest of the parameter VALUES (never the
+        raw blob). A failed write is NOT swallowed (§7 R2): it propagates to the caller, after
+        the refusal it audits has already taken effect — deliberately not inheriting
+        `log_budget_refusal`'s blanket suppressor, whose record can vanish while the refusal
+        still happens."""
+        seq = self._denial_seq
+        self._denial_seq += 1
+        rec = {
+            "event_type": POLICY_DENIAL_EVENT_TYPE,
+            "ts": now_iso(),
+            "seq": seq,
+            "role": role,
+            "system": system,
+            "verb": verb,
+            "call_id": call_id,
+            "params_digest": _params_digest(params),
+        }
+        self._fh.write(json.dumps(rec, ensure_ascii=True) + "\n")
+        self._fh.flush()
+        return rec
 
     def log_budget_refusal(self, *, tool_name: str, agent_id: str = "main") -> None:
         rec = {"event_type": "budget_refusal", "kind": "budget_refusal",

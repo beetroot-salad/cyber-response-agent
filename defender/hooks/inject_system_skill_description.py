@@ -6,6 +6,7 @@ from pathlib import Path
 
 from defender._frontmatter import parse_frontmatter_or_none
 from defender._io import read_text_soft
+from defender.runtime.verb_grant import VerbGrant
 from defender.runtime.verbs import ModuleVerbRegistry
 
 DEFENDER_DIR = Path(__file__).resolve().parent.parent
@@ -37,11 +38,13 @@ def read_description(system: str, skills_dir: Path = SKILLS_DIR) -> str | None:
 
 @cache
 def descriptor_catalog(
-    skills_dir: Path = SKILLS_DIR, adapters_dir: Path = ADAPTERS_DIR
+    skills_dir: Path, adapters_dir: Path, grant: VerbGrant,
 ) -> str | None:
-    registry = ModuleVerbRegistry(adapters_dir)
+    registry = ModuleVerbRegistry(adapters_dir, grant)
     lines = []
     for system in registry.systems():
+        if system not in grant.systems:
+            continue
         try:
             verbs = registry.verbs(system)
         except Exception:  # noqa: BLE001 — a system that will not load is unreachable, not fatal

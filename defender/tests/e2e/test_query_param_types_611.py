@@ -22,6 +22,7 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
+from defender.runtime.verb_grant import DENY_ALL  # noqa: E402
 from defender.runtime.verbs import (  # noqa: E402
     ModuleVerbRegistry,
     VerbContext,
@@ -165,7 +166,7 @@ def test_well_typed_params_including_optionals_and_containers_are_admitted(tmp_p
 def test_the_real_registry_rejects_a_mistyped_param(system, verb, params, why):
     """The shipped adapters, not a fake: each of these signatures has a non-`str` param a model
     can plausibly send as a string, and each was admitted before."""
-    fn = ModuleVerbRegistry(ADAPTERS_DIR).verbs(system)[verb]
+    fn = ModuleVerbRegistry(ADAPTERS_DIR, DENY_ALL).verbs(system)[verb]
     reason = validate_params(fn, params)
     assert reason is not None, f"{system}.{verb} admitted a mistyped {why}"
     assert why in reason, f"the rejection does not name the offending param: {reason}"
@@ -173,7 +174,7 @@ def test_the_real_registry_rejects_a_mistyped_param(system, verb, params, why):
 
 def test_the_real_registry_admits_its_own_declared_types():
     """Positive control on the real signatures."""
-    reg = ModuleVerbRegistry(ADAPTERS_DIR)
+    reg = ModuleVerbRegistry(ADAPTERS_DIR, DENY_ALL)
     assert validate_params(
         reg.verbs("elastic")["query"], {"native_query": "FROM logs", "limit": 20},
     ) is None

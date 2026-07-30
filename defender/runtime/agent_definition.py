@@ -10,6 +10,7 @@ from defender._paths import PATHS
 from .agent_role import AgentRole
 from .permission import AgentPolicy, require_anchor_root
 from .permission.grant import Grant, PathShapes
+from .verb_grant import DENY_ALL, GrantError, VerbGrant
 
 if TYPE_CHECKING:
     from .tools import AgentDeps
@@ -52,6 +53,7 @@ class AgentDefinition:
     read_allow_override: PathShapes | None = None
     deny_reason: str = _DEFAULT_DENY_REASON
     budget_enforced: bool = False
+    verb_grant: VerbGrant = DENY_ALL
 
 
 
@@ -129,8 +131,29 @@ def read_allow_of(bash_allow: tuple[Grant, ...]) -> PathShapes:
     return next((g.scope for g in bash_allow if g.program == "cat"), PathShapes())
 
 
-def compile_policy(defn: AgentDefinition, roots: ResolvedRoots) -> AgentPolicy:
+def _require_verb_grant_agreement(defn: AgentDefinition, tools: ToolSet) -> None:
+    """§7 R7: a role's verb_grant and the bit that reaches a verb-bearing tool agree, in
+    EITHER direction. A grant naming verbs while every verb-bearing bit (`query`,
+    `closed_tickets`) is off is a stale grant behind a switched-off capability; a verb-bearing
+    bit on with an empty grant is a capability with nothing behind it. Checked against `tools`
+    — the EFFECTIVE ToolSet a build actually has, not only the one `defn` declares — because a
+    stage can switch its capability on with a runtime `replace()` after `bind` compiled its
+    policy from the static definition (g16)."""
+    has_verb_tool = bool(tools.query or tools.closed_tickets)
+    has_grant = bool(defn.verb_grant.entries)
+    if has_verb_tool != has_grant:
+        raise GrantError(
+            f"{defn.role.name}: verb_grant/tool-capability disagreement — "
+            f"verb-bearing tool bit is {'on' if has_verb_tool else 'off'} while the "
+            f"verb_grant is {'non-empty' if has_grant else 'empty'} ({defn.verb_grant.entries})"
+        )
+
+
+def compile_policy(
+    defn: AgentDefinition, roots: ResolvedRoots, *, tools: ToolSet | None = None,
+) -> AgentPolicy:
     _require_write_co_constraint(defn.tools, defn.write_shapes)
+    _require_verb_grant_agreement(defn, tools if tools is not None else defn.tools)
     bash_allow = tuple(g for build in defn.bash_shapes for g in build(roots))
     read_allow = (
         read_allow_of(bash_allow) if defn.read_allow_override is None
@@ -144,6 +167,7 @@ def compile_policy(defn: AgentDefinition, roots: ResolvedRoots) -> AgentPolicy:
         write_allow=tuple(pat for build in defn.write_shapes for pat in build(roots)),
         deny_reason=defn.deny_reason,
         budget_enforced=defn.budget_enforced,
+        verb_allow=defn.verb_grant,
     )
 
 
@@ -207,9 +231,10 @@ def _build_roots(
 def compile_policy_for(
     defn: AgentDefinition, run_dir: Path, *,
     scope: RunScope = _DEFAULT_SCOPE, defender_dir: Path | None = None,
+    tools: ToolSet | None = None,
 ) -> AgentPolicy:
     roots = _build_roots(defn, run_dir, scope, defender_dir)
-    return compile_policy(defn, roots)
+    return compile_policy(defn, roots, tools=tools)
 
 
 def bind(

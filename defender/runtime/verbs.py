@@ -1,6 +1,7 @@
 
 from __future__ import annotations
 
+import ast
 import importlib.util
 import inspect
 import re
@@ -10,6 +11,8 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Union, get_args, get_origin
+
+from .verb_grant import GrantError, VerbGrant
 
 _SYSTEM_RE = re.compile(r"[a-z0-9][a-z0-9-]*\Z")
 
@@ -22,6 +25,7 @@ class VerbContext:
     defender_dir: Path
     run_dir: Path
     env: Mapping[str, str]
+    capture: Any = None
 
 
 Verb = Callable[..., Any]
@@ -30,6 +34,7 @@ Verb = Callable[..., Any]
 
 _ENGINE_ATTR = "__verb_engine__"
 _BODY_PARAM_ATTR = "__verb_body_param__"
+_VERB_CLASS_ATTR = "__verb_class__"
 
 _ENGINE_DECL: dict[tuple[str, str], tuple[str, str]] = {
     ("elastic", "esql"): ("esql", "query"),          # lint-shippable: ok — real queries-table `system` value
@@ -38,11 +43,14 @@ _ENGINE_DECL: dict[tuple[str, str], tuple[str, str]] = {
 }
 
 
-def verb(*, engine: str = "none", body_param: str | None = None) -> Callable[[Verb], Verb]:
+def verb(
+    *, engine: str = "none", body_param: str | None = None, verb_class: str = "r",
+) -> Callable[[Verb], Verb]:
 
     def decorate(fn: Verb) -> Verb:
         setattr(fn, _ENGINE_ATTR, engine)
         setattr(fn, _BODY_PARAM_ATTR, body_param)
+        setattr(fn, _VERB_CLASS_ATTR, verb_class)
         return fn
 
     return decorate
@@ -54,6 +62,12 @@ def engine_of(fn: Verb) -> str:
 
 def body_param_of(fn: Verb) -> str | None:
     return getattr(fn, _BODY_PARAM_ATTR, None)
+
+
+def verb_class_of(fn: Verb) -> str:
+    """The verb_class a verb body declares via `@verb(verb_class=…)`, defaulting to the
+    read-only class for an undecorated body — every shipped verb today is `r`."""
+    return getattr(fn, _VERB_CLASS_ATTR, "r")
 
 
 def engine_for(system: str, verb_name: str) -> str:
@@ -158,22 +172,155 @@ def _load_adapter_module(path: Path) -> Any:
     return _MODULES[key]
 
 
-class ModuleVerbRegistry:
+def _adapter_path(adapters_dir: Path, system: str) -> Path | None:
+    if not _SYSTEM_RE.match(system):
+        return None
+    root = Path(adapters_dir).resolve()
+    path = (Path(adapters_dir) / (system.replace("-", "_") + ADAPTER_SUFFIX)).resolve()
+    if root not in path.parents or not path.is_file():
+        return None
+    return path
 
-    def __init__(self, adapters_dir: Path):
+
+def declared_verb_names(adapters_dir: Path, system: str) -> frozenset[str]:
+    """Every verb name a system's adapter declares, read COLD off its `VERBS = {...}` literal
+    — no import, so a system whose module cannot even be imported still declares what it
+    declares. Only string-literal keys of a top-level dict LITERAL assignment are seen; a
+    table assembled any other way (a loop, a comprehension) declares nothing to this reader,
+    which is deliberate — the load check that consumes this must fail rather than treat an
+    unreadable table as a blank cheque (§7 R10)."""
+    path = _adapter_path(adapters_dir, system)
+    if path is None:
+        return frozenset()
+    try:
+        source = path.read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=str(path))
+    except (OSError, SyntaxError):
+        return frozenset()
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Assign) and isinstance(node.value, ast.Dict)):
+            continue
+        if not any(isinstance(t, ast.Name) and t.id == "VERBS" for t in node.targets):
+            continue
+        for key in node.value.keys:
+            if isinstance(key, ast.Constant) and isinstance(key.value, str):
+                names.add(key.value)
+    return frozenset(names)
+
+
+GRANTED = "GRANTED"
+DENIED = "DENIED"
+UNDECLARED = "UNDECLARED"
+
+
+@dataclass(frozen=True)
+class VerbDecision:
+
+    outcome: str
+    fn: Verb | None
+    refusal: str | None
+
+
+class VerbRegistry:
+    """The nominally-typed verb-registry seam (§7 R15): every construction route requires a
+    real `VerbGrant`, so an unscoped registry is unconstructable rather than merely un-passed,
+    and every entry point that takes a registry checks the TYPE — a registry-shaped stand-in
+    that never went through this constructor is refused, because a structural check ("does it
+    answer verbs()/decide()?") cannot tell a real grant apart from a duck-typed one that
+    answers GRANTED to everything."""
+
+    def __init__(self, grant: VerbGrant):
+        if not isinstance(grant, VerbGrant):
+            raise GrantError(
+                f"a verb registry requires a real VerbGrant, got {type(grant).__name__}"
+            )
+        self.grant = grant
+
+    def systems(self) -> tuple[str, ...]:
+        raise NotImplementedError
+
+    def verbs(self, system: str) -> Mapping[str, Verb]:
+        raise NotImplementedError
+
+    def _cold_verb_names(self, system: str) -> frozenset[str] | None:
+        """Verb names `system` REALLY declares, resolved without importing when a subclass
+        can (`ModuleVerbRegistry` overrides this with the cold AST reader). `None` tells
+        `decide` no cold source exists, so it falls back to `self.verbs(system)` — cheap for
+        an in-memory fake, the reason a real-adapter subclass must override rather than
+        inherit this default."""
+        return None
+
+    def decide(self, system: str, verb: str) -> VerbDecision:
+        """THE grant decision point. Decided from the grant ALONE first — no adapter is
+        resolved (no import) unless the grant admits the call — so a denial or an
+        unresolvable verdict on a system whose adapter cannot even be imported is still
+        reached, and reached without importing it (§7 R11's UNDECLARED/DENIED split, read
+        literally). A verb name outside what the system REALLY declares (a case or whitespace
+        near-miss) is UNDECLARED even when the grant otherwise reaches the system — DENIED is
+        reserved for a real, withheld verb."""
+        if not self.grant.allows(system, verb):
+            if system in self.grant.systems:
+                cold = self._cold_verb_names(system)
+                if cold is not None:
+                    real = verb in cold
+                else:
+                    try:
+                        real = verb in self.verbs(system)
+                    except KeyError:
+                        real = False
+                if real:
+                    return VerbDecision(
+                        DENIED, None,
+                        f"{system}.{verb} is not granted to role {self.grant.role!r}.",
+                    )
+            return VerbDecision(
+                UNDECLARED, None,
+                f"unresolvable: {system}.{verb} (unknown, or role {self.grant.role!r} holds "
+                "no grant reaching it).",
+            )
+        try:
+            verbs = self.verbs(system)
+        except KeyError:
+            return VerbDecision(UNDECLARED, None, f"unknown system {system!r}.")
+        fn = verbs.get(verb)
+        if fn is None:
+            return VerbDecision(UNDECLARED, None, f"unknown verb {verb!r} for {system}.")
+        declared_class = verb_class_of(fn)
+        expected_class = self.grant.class_of(system, verb)
+        if expected_class is not None and declared_class != expected_class:
+            raise GrantError(
+                f"{system}.{verb} is declared class {declared_class!r} but the grant for role "
+                f"{self.grant.role!r} expects {expected_class!r} — grant/declaration disagreement"
+            )
+        return VerbDecision(GRANTED, fn, None)
+
+
+class ModuleVerbRegistry(VerbRegistry):
+
+    def __init__(self, adapters_dir: Path, grant: VerbGrant):
+        super().__init__(grant)
         self.adapters_dir = Path(adapters_dir)
+        offenders = [
+            (s, v) for s, v, _ in grant.entries
+            if v not in declared_verb_names(self.adapters_dir, s)
+        ]
+        if offenders:
+            named = ", ".join(f"{s}.{v}" for s, v in offenders)
+            raise GrantError(
+                f"verb_grant for role {grant.role!r} names verb(s) the adapters under "
+                f"{self.adapters_dir} do not declare: {named}"
+            )
 
     def systems(self) -> tuple[str, ...]:
         return tuple(sorted(_system_of(p) for p in self.adapters_dir.glob("*" + ADAPTER_SUFFIX)))
 
+    def _cold_verb_names(self, system: str) -> frozenset[str] | None:
+        return declared_verb_names(self.adapters_dir, system)
+
     def verbs(self, system: str) -> Mapping[str, Verb]:
-        if not _SYSTEM_RE.match(system):
-            raise KeyError(system)
-        root = self.adapters_dir.resolve()
-        path = (self.adapters_dir / (system.replace("-", "_") + ADAPTER_SUFFIX)).resolve()
-        if root not in path.parents:
-            raise KeyError(system)
-        if not path.is_file():
+        path = _adapter_path(self.adapters_dir, system)
+        if path is None:
             raise KeyError(system)
         verbs = getattr(_load_adapter_module(path), "VERBS", None)
         if not isinstance(verbs, Mapping):
@@ -183,14 +330,21 @@ class ModuleVerbRegistry:
 
 __all__ = [
     "ADAPTER_SUFFIX",
+    "DENIED",
+    "GRANTED",
+    "UNDECLARED",
     "ModuleVerbRegistry",
     "Verb",
     "VerbContext",
+    "VerbDecision",
+    "VerbRegistry",
     "body_param_for",
     "body_param_of",
     "declared_params",
+    "declared_verb_names",
     "engine_for",
     "engine_of",
     "validate_params",
     "verb",
+    "verb_class_of",
 ]
