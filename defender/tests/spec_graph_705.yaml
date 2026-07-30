@@ -351,10 +351,9 @@ demands:
   - {id: gather_boundary_stays_narrowed_to_kind_response, kind: behavior, form: test,
      discharged_by: test_gather_boundary_stays_narrowed_to_kind_response,
      binds: ["gather_boundary", "message.kind"]}
-     # fork: FK16 (second half) — the published view carries NO session predicate, so over a
-     # multi-session per-case file it returns other sessions' (and a fork's) rows. That is a
-     # design gap, not a probe question: O3 keys rows by session_id, O1 keys the FILE by
-     # case_id, and O11 puts a fork's rows in the same file.
+     # was FK16 (second half) — CLOSED by #753: the view now scopes itself to each session's
+     # path from its recorded head, so the kind='response' narrowing is no longer the only
+     # predicate it carries. C16's timing caveat is unchanged; the walk is by rowid.
 
   # =========================================================================
   # WIRE LOG  (O24, O25, O27) + the consumers the census missed
@@ -906,11 +905,28 @@ demands:
   - {id: gather_boundary_is_scoped_to_one_session, kind: behavior, form: test,
      discharged_by: test_gather_boundary_is_scoped_to_one_session,
      binds: ["gather_boundary", "session.session_id", "message.identity"]}
-     # FK16's SECOND half, a design gap rather than a probe question (R17 adopted the judge's
-     # sequencing; the recommendation was to decide the session predicate as a design
-     # question). O3 keys rows by session_id, O1 keys the FILE by case_id, and O11 puts a
-     # fork's rows in the same file — so the view as published cannot be correct for a
-     # forked case.
+     # FK16's SECOND half, CLOSED by #753 — and closed one level up from where FK16 stated
+     # it. The predicate is the session's PATH from its recorded head, not its session_id:
+     # session scoping falls out (O3 keys rows by session_id, O1 keys the FILE by case_id,
+     # O11 puts a fork's rows in the same file), and the fold case a session predicate alone
+     # cannot reach is closed with it. The demand was discharged before #753 only because
+     # the TEST supplied `WHERE session_id = ?`; it now asserts the view's own guarantee,
+     # including over an unscoped read.
+
+  - {id: gather_boundary_drops_the_leads_a_fold_displaced, kind: negative, form: test,
+     discharged_by: test_gather_boundary_drops_the_leads_a_fold_displaced,
+     binds: ["gather_boundary", "session.session_id", "message.identity"]}
+     # #753's path half, expressible only after #754 stored the head: a folded session's
+     # displaced turns still carry its session_id, so `WHERE session_id = ?` returns them.
+     # #696's fork-boundary picker would then offer a state the source defender never
+     # occupied. The rows stay IN the file — the view excludes them by reachability.
+
+  - {id: a_cyclic_parent_chain_ends_the_boundarys_walk_instead_of_hanging, kind: negative, form: test,
+     discharged_by: test_a_cyclic_parent_chain_ends_the_boundarys_walk_instead_of_hanging,
+     binds: ["gather_boundary", "message.identity"]}
+     # #753 put a recursion where the view had none, so a corrupted parent chain gained a way
+     # to hang a reader. The view degrades (each row in the ring once) where the Python walk
+     # fails closed — asymmetric on purpose, and asserted rather than left to the reader.
 
   - {id: a_thinking_part_shaped_like_a_sql_fragment_round_trips_inert, kind: negative, form: test,
      discharged_by: test_a_thinking_part_shaped_like_a_sql_fragment_round_trips_inert,
@@ -1854,7 +1870,7 @@ handoff:
     - "FK13 — the wording of O26's exemption clause. 3/3 agree it must name `_pydantic_stage` by path and say the read survives as CONTROL FLOW; routed only because phase B marked both premises. The cheapest fork on the list; the human can close it in one line."
     - "FK14 — the reader's role vocabulary: what an unrecognized role does, what a missing/None role does, who is trusted to supply the value, whether a direct row-id read of an off-path (folded) row is refused, and whether the CURATOR (G16's second gray-box boundary) reads the store at all. R5 makes the leak preventable by a BRANCH, so a fail-open default would put a security boundary on a caller-supplied value with no enumeration. OPEN."
     - "FK15 — the transaction granularity of an append. O33 splits payload into its own table; O10 says the pair is NOT a storage transaction; nothing says what IS one. The message->message_payload FK makes an untorn row pair a schema requirement, not a preference — under no wrapping transaction the store can hold rows that violate O5 with no writer at fault. The resume half (append atop an orphan vs refuse) is a real ought. OPEN."
-    - "FK16 — args shapes outside the enumerated three (now PROBED — see RG-2/RG-3) and whether gather_boundary scopes by session. The second half is NOT a probe question: O3 keys rows by session_id, O1 keys the FILE by case_id, and O11 puts a fork's rows in the same file, so the view as published cannot be correct for a forked case. Either the view takes a session parameter or the demand states that a multi-session file is out of its contract. OPEN."
+    - "FK16 — args shapes outside the enumerated three (PROBED — see RG-2/RG-3) and whether gather_boundary scopes by session. CLOSED by #753, and closed one level above where this fork stated it: the answer was neither of the two options named here. The view scopes to each session's PATH from `session.head_message_id` (#754), a WITH RECURSIVE walk inside the view itself; session scoping is a corollary, so no caller supplies a predicate for correctness, and the fold case — displaced turns that still carry the folding session's session_id, which a session parameter would have served — is closed with it. A caller's `WHERE session_id = ?` now chooses a session rather than repairing the view."
     - "FK17 — the trust walk. Four values reach a sink whose sanitizer nobody named. TWO are new surfaces this PR creates and stay open: `case_id` interpolated into a filesystem path by R1's resolver (nothing states it is validated against path-composing characters), and message payload text rendered into transcript.html through a NEW store-backed path (the log-derived renderer's escaping is not inherited by the store-derived one, and R4 makes that path carry every payload the model ever saw). The other two are CORRECTED by probe: adv:PO7 refutes 'nobody asserts a sanitizer exists' for lead_id, and adv:PO5 closes the symlink half on the mount set while opening the host-side leg (RG-1). OPEN on the two new surfaces."
     - "FK18 — the ingest tail across a restart, and the duplicate trailing flush. `len(last_render)` lives only in the driving process's memory; a fresh process recomputes it from nothing, and PR4 confirms a shorter live list silently ingests NOTHING with no diagnostic possible from the slice. Recommendation: persist the last-render length (or last-appended row id) on the session row. OPEN."
     - "FK19 — the config_sha hashing discipline: canonicalised (sorted-key) vs literal serialisation, and whether all four fields are required. A literal serialisation makes the sha depend on dict insertion order across two code paths, defeating O14's stated purpose with no warning signal. OPEN."

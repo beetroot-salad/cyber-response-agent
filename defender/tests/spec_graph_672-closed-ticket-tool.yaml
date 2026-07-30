@@ -50,6 +50,10 @@
 #   Fork G — client-side per-item closed re-check on the list path (d24 minted).
 #   Fork H — O2 scoped record-wise + the self-key payload screen (d25 minted); the
 #            residual transitive path is the N-note on ticket_store.domain below.
+#            #683 NARROWED that N-note: the screen was get-scoped, and the merge gate ruled
+#            the surface asymmetry unacceptable on the protected asset — the SELF-key half now
+#            binds BOTH surfaces (d31 minted, per-item on list). Only the OTHER-ticket
+#            transitive half remains declined.
 #   f2     — names CONFIRMED: `closed_tickets`, `get_closed_ticket`, `list_closed_tickets`.
 #   Waivers w1/w2 mint the two open R3 cells as examined declines (see gate note).
 #   Two design corrections fold into M6's rewrite scope: judge/run.py:80's false
@@ -71,8 +75,9 @@ base: 07596adfde6ccfb5ef3eab9a727de13c4c52f39c
 
 # ===========================================================================
 # DEMANDS — the spec proper (20-demands.md, verbatim semantics; 20 test + 2 clause
-# at phase D; phase E minted d22-d25 + w1/w2, the F round minted d26-d29 + w3 —
-# now 28 test + 2 clause + 3 waiver).
+# at phase D; phase E minted d22-d25 + w1/w2, the F round minted d26-d29 + w3, #684 minted
+# d30, #683's merge gate minted d31, and Fork J (the recency arm) minted d32-d33
+# — now 32 test + 2 clause + 3 waiver).
 # form:test demands are POINTERS — their outcome prose is the docstring seed in
 # 20-demands.md, destined for the named test at phase E.
 # ===========================================================================
@@ -349,8 +354,87 @@ demands:
                         # test is parametrized over the field carrying the self-key
                         # (resolution / key / a nested comment) — the old single-field
                         # fixture (summary) left a summary-scoped screen green.
+                        # #683: this node is now the GET half only — it keeps the whole-read
+                        # refusal under the distinguishable policy code. The list half is d31.
     binds: ["interacts(benign_judge->get_closed_ticket).response", "salt"]
     discharged_by: test_closed_ticket_naming_self_key_refused
+
+  - id: d31_self_key_payload_screen_on_list
+    kind: negative      # #683 (merge gate, cold review of PR #678): d25's screen was scoped to
+                        # get, so the judge's PRIMARY surface — the precedent search — could
+                        # serve a sibling closed ticket whose summary/resolution NAMES the
+                        # case under judgment: exactly the content the identical payload is
+                        # withheld for on a confirm. The asymmetry sat on the protected asset
+                        # and on the higher-traffic surface, so the gate ruled it a defect
+                        # rather than a scoping the N-note had earned.
+                        # The withhold SHAPE differs from d25's by #684/F2's per-item
+                        # resolution: list DROPS the naming item and serves its siblings,
+                        # because faulting a listing over one sibling's wording guts O1. So
+                        # the demand is a CONJUNCTION on that call's own response, as d24's is.
+                        # Positive control inside the test: a sibling quoting some OTHER
+                        # ticket's key survives — the transitive half of the N-note is still
+                        # declined, and this node must not be discharged by a screen that
+                        # simply drops anything key-shaped.
+    form: test
+    binds: ["interacts(benign_judge->list_closed_tickets).response", "salt", "benign_judge"]
+    discharged_by: test_listed_ticket_naming_self_key_dropped
+
+  - id: d32_recency_screen
+    kind: negative      # Fork J: d24/d25/d31 all screen on what a record SAYS, so every one of
+                        # them is defeated by a sibling that describes the live case WITHOUT
+                        # spelling its key — the service and the date, in prose. That is the
+                        # ordinary way an analyst writes, not an exotic evasion, so the
+                        # transitive N-note does not cover it: the content is the answer key
+                        # itself, not a pointer to some other ticket.
+                        # This arm screens on WHEN the record was last written. Precedent is by
+                        # definition older than the case, so the screen costs O1 nothing it was
+                        # entitled to; contamination is by definition newer, so no wording
+                        # evades it. `updated`, not `created` — the leak rides in content
+                        # APPENDED to an old ticket while the case was live, which a
+                        # creation-dated screen admits.
+                        # Withhold SHAPE follows #684/F2 exactly as d31 does: list drops the
+                        # item and serves its siblings at exit 0; get fails the whole read
+                        # under POLICY_REFUSAL_EXIT. Both surfaces from one predicate — #683's
+                        # defect was two screens disagreeing about one record, and a fourth
+                        # conjunct must not reintroduce it.
+                        # An UNDATED record is withheld, not served: on the answer-key surface,
+                        # unprovable is not safe (the same disposition query_tool.py:147 takes
+                        # for a ticket it cannot prove distinct).
+    form: test
+    binds: ["interacts(benign_judge->list_closed_tickets).response",
+            "interacts(benign_judge->get_closed_ticket).response", "benign_judge"]
+    discharged_by: test_listed_ticket_written_after_case_opened_dropped
+                        # siblings on the same node: the confirm half
+                        # (test_fetched_ticket_written_after_case_opened_withheld) and the
+                        # undated disposition (test_undated_ticket_withheld_on_both_surfaces).
+
+  - id: d33_case_opened_boundary
+    kind: behavior      # Where d32's boundary COMES FROM, which is the load-bearing half. It is
+                        # the ticket store's own `created` for the in-flight ticket, reached
+                        # through a verb (`case-opened-at`) whose RETURN TYPE is a bare
+                        # timestamp — the record is unreachable through it by construction, the
+                        # same shape of guarantee `require_closed` gives on the two reading
+                        # verbs. Not a clock the judge carries: comparing our clock to the
+                        # store's timestamps would make the screen's boundary depend on skew
+                        # between two machines, and the run SQLite carries no wall-clock instant
+                        # to take it from anyway (#754's schema is seq-ordered by design).
+                        # Two ways to find no boundary, resolved OPPOSITELY — this split is the
+                        # demand, not a rider:
+                        #   - the store says the case has no ticket (a 404, a real answer) →
+                        #     the read PROCEEDS with the other three conjuncts standing alone.
+                        #     Most cases never open a ticket; failing here would make the
+                        #     precedent search unusable for them and buy nothing.
+                        #   - anything else (store unreachable, `created` missing or
+                        #     unparseable, adapter declaring no such verb) → FAIL THE READ, zero
+                        #     precedent store attempts, loud in all three channels the tool owns.
+                        #     Same disposition d30 takes for a missing key grammar, for the same
+                        #     reason: an arm that stands down when its input is missing protects
+                        #     nothing, and the failure modes are indistinguishable from inside.
+    form: test
+    binds: ["interacts(benign_judge->list_closed_tickets).payload",
+            "ticket_store.access[typed-tool]"]
+    discharged_by: test_unreadable_case_boundary_fails_the_read_closed
+                        # the proceed half: test_case_with_no_ticket_leaves_the_precedent_search_usable
 
   - id: d30_key_grammar_from_config
     kind: behavior      # #684: minted when F1's tighten exposed that d10's screen was
@@ -517,7 +601,7 @@ structure:
         payload:
           parts: [{role: args, source: model-authored}]
           invariants: []
-          nl: "the model-facing call schema is exactly {label, q} — no require_closed, no status (x8); filter values with shell/URL metacharacters inherit the pre-existing host-side transport's handling (dispositions — the in-process call removes the model-text-to-argv assembly; #672 chose an ASYMMETRY here — label/q keep riding list_tickets' urlencoding, no new screen — and #684 made the two paths symmetric instead by encoding the get path's key as well; the filter encoding is now pinned executably in test_ticket_adapter.py rather than asserted in prose). The response side is inside O2's controlled surface (Fork G, §7): each returned item's status is re-checked client-side before the envelope (d24), and — V-A, F round — the case-under-judgment's OWN record is excluded per-item by IDENTITY even when genuinely closed (the get-path screen mirrored onto list, d23/d24); duplicates still survive (no dedup)."
+          nl: "the model-facing call schema is exactly {label, q} — no require_closed, no status (x8); filter values with shell/URL metacharacters inherit the pre-existing host-side transport's handling (dispositions — the in-process call removes the model-text-to-argv assembly; #672 chose an ASYMMETRY here — label/q keep riding list_tickets' urlencoding, no new screen — and #684 made the two paths symmetric instead by encoding the get path's key as well; the filter encoding is now pinned executably in test_ticket_adapter.py rather than asserted in prose). The response side is inside O2's controlled surface (Fork G, §7): each returned item's status is re-checked client-side before the envelope (d24), and — V-A, F round — the case-under-judgment's OWN record is excluded per-item by IDENTITY even when genuinely closed (the get-path screen mirrored onto list, d23/d24); and — #683 — an item that merely NAMES that case in its free text is dropped the same way, so this surface withholds what the confirm withholds (d31). Duplicates still survive (no dedup)."
 
     - id: closed_tickets      # the NEW ToolSet bit (doc-proposed name — fork f2)
       provenance: design
@@ -550,7 +634,7 @@ structure:
           sharing: unique-key
         domain:
           type: enum
-          refinement: {nl: "ticket lifecycle status as the store reports it (the real server enum is open|in_progress|closed — p1, executed probe); the design's contract is BINARY — closed is readable, everything else refuses: open, in_progress, any unenumerated state, and a status-less 200 all fall on the refuse side, as business refusals that never trip the breaker (Fork E's taxonomy line). Fork C RESOLVED (§7): the case-under-judgment's OWN ticket is a protected asset — its key is excluded at the tool boundary even once closed (d23), and — V-A — the protection covers BOTH tool paths: get refuses the key pre-store, list filters the self item by identity before the envelope. Fork H RESOLVED: O2 is scoped RECORD-WISE, with the targeted self-key payload screen (d25); N-NOTE — the residual transitive path (a closed ticket's free text quoting some OTHER non-closed ticket) is accepted: it rides the salted untrusted envelope unredacted, and general free-text screening is not implementable at this seam and not owed."}
+          refinement: {nl: "ticket lifecycle status as the store reports it (the real server enum is open|in_progress|closed — p1, executed probe); the design's contract is BINARY — closed is readable, everything else refuses: open, in_progress, any unenumerated state, and a status-less 200 all fall on the refuse side, as business refusals that never trip the breaker (Fork E's taxonomy line). Fork C RESOLVED (§7): the case-under-judgment's OWN ticket is a protected asset — its key is excluded at the tool boundary even once closed (d23), and — V-A — the protection covers BOTH tool paths: get refuses the key pre-store, list filters the self item by identity before the envelope. Fork H RESOLVED: O2 is scoped RECORD-WISE, with the targeted self-key payload screen — on BOTH surfaces since #683 (d25 on get, refusing the whole read; d31 on list, dropping the naming item per #684/F2's per-item arm and serving its siblings). #683 narrowed what the N-NOTE declines: the SELF-key half was get-scoped, which left the judge's primary surface serving exactly what the confirm withholds, so the gate closed it. N-NOTE (as narrowed) — the residual transitive path (a closed ticket's free text quoting some OTHER non-closed ticket) stays accepted: it rides the salted untrusted envelope unredacted, and general free-text screening is not implementable at this seam and not owed."}
           default: "open"     # the state a ticket is created in (open_case_ticket, run.py:148)
           distinguished: ["open"]   # the answer-key state — MUST be individually exercised (d5)
           falsy_valid: false
@@ -974,6 +1058,7 @@ handoff:
     - "Fork F — run cutoff cuts the in-flight call loose, documented; an unfinished attempt is the one attempt. -> d9/d8"
     - "Fork G — the list path re-checks each returned item's status client-side before the envelope. -> d24"
     - "Fork H — Fork C's exclusion extends to a closed ticket whose payload names the case's own key; any other quoted non-closed ticket rides the envelope unredacted (O2 scoped record-wise). -> d25"
+    - "Fork H (#683 merge gate) — that extension binds BOTH surfaces, not get alone: a listed sibling naming the case under judgment is dropped per-item and its siblings served. Only the OTHER-ticket transitive path stays declined. -> d31"
     - "f2 — tool/bit names CONFIRMED as the doc proposed: closed_tickets, get_closed_ticket, list_closed_tickets."
     - "Silent branch (wrong-JSON-type key) — pinned LAYER-AGNOSTICALLY: a retry-class response and zero store attempts, whether the framework's schema validation or the tool body rejects. -> d10"
     - "Waivers w1/w2 — the two open R3 cells resolved as examined declines, not silences."

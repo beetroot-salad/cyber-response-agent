@@ -1,0 +1,77 @@
+projections:
+- lead_id: l-003
+  events: []
+- lead_id: l-002
+  events: []
+- lead_id: l-001
+  events:
+  - source.ip: 172.18.0.15
+    user.name: root
+    failed_count: <burst-total>
+    first_seen: <alert-time>
+    last_seen: <alert-time+~3m>
+    sample_message: Failed password for root from 172.18.0.15 port <ephemeral-port>
+      ssh2
+  - source.ip: 172.18.0.15
+    user.name: root
+    message: Failed password for root from 172.18.0.15 port <ephemeral-port> ssh2
+    failed_count: <per-burst>
+    first_seen: <alert-time>
+    last_seen: <alert-time+~3m>
+  - minute: <alert-time>
+    failed_per_minute: <burst-1-count>
+    first_in_minute: <alert-time>
+    last_in_minute: <alert-time>
+  - minute: <alert-time+1m>
+    failed_per_minute: <burst-2-count>
+    first_in_minute: <alert-time+1m>
+    last_in_minute: <alert-time+1m>
+  - minute: <alert-time+2m>
+    failed_per_minute: <burst-3-count>
+    first_in_minute: <alert-time+2m>
+    last_in_minute: <alert-time+2m>
+  - total_failed: <burst-total>
+    distinct_src_ips: 1
+    distinct_users: 1
+    first_seen: <alert-time>
+    last_seen: <alert-time+~3m>
+- lead_id: l-005
+  events: []
+- lead_id: l-006
+  events:
+  - host.name: canary-1
+    source.ip: 172.18.0.15
+    event.outcome: failure
+    auth_method: password
+    user.name: root
+    '@timestamp': <alert-time>
+    accepted: 0
+    failed: <failed-count>
+    first_seen: <alert-time>
+    last_seen: <alert-time>
+- lead_id: l-004
+  events:
+  - '@timestamp': <alert-time>
+    source.ip: 172.18.0.15
+    destination.ip: 172.18.0.9
+    destination.port: 22
+    zeek.ssh.client: <ssh-client-string>
+    zeek.ssh.server: <ssh-server-string>
+    ssh.client: <ssh-client-string>
+    ssh.server: <ssh-server-string>
+    host.name: <host.name>
+    data_stream.dataset: zeek.ssh
+  - '@timestamp': <alert-time>
+    source.ip: 172.18.0.15
+    destination.ip: 172.18.0.9
+    destination.port: 22
+    source.bytes: <bytes-out>
+    destination.bytes: <bytes-in>
+    host.name: <host.name>
+    data_stream.dataset: zeek.connection
+- lead_id: l-007
+  events: []
+- lead_id: l-008
+  events: []
+- lead_id: l-009
+  events: []

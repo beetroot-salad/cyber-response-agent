@@ -1,0 +1,273 @@
+{
+  "lead_id": "l-003",
+  "seq": 1,
+  "controls": [
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-06T19:49:23.000Z",
+        "2026-07-06T20:49:23.000Z"
+      ],
+      "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-06T19:49:23.000Z\" AND @timestamp < \"2026-07-06T20:49:23.000Z\"\n        AND host.name == \"soc-playground\"\n        AND falco.output_fields.container.id == \"a36492b5172b\"\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule      = falco.rule,\n           proc      = falco.output_fields.proc.name,\n           cmdline   = falco.output_fields.proc.cmdline,\n           parent    = falco.output_fields.proc.pname,\n           container = falco.output_fields.container.id\n| SORT first_seen ASC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-06T19:49:23.000Z\" AND @timestamp < \"2026-07-06T20:49:23.000Z\"\n        AND host.name == \"soc-playground\"\n        AND falco.output_fields.container.id == \"a36492b5172b\"\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule      = falco.rule,\n           proc      = falco.output_fields.proc.name,\n           cmdline   = falco.output_fields.proc.cmdline,\n           parent    = falco.output_fields.proc.pname,\n           container = falco.output_fields.container.id\n| SORT first_seen ASC",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "rule",
+            "type": "keyword"
+          },
+          {
+            "name": "proc",
+            "type": "keyword"
+          },
+          {
+            "name": "cmdline",
+            "type": "keyword"
+          },
+          {
+            "name": "parent",
+            "type": "keyword"
+          },
+          {
+            "name": "container",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 4,
+        "values": [
+          {
+            "events": 44,
+            "first_seen": "2026-07-06T19:49:38.316Z",
+            "last_seen": "2026-07-06T20:48:40.976Z",
+            "rule": "Unexpected UDP Traffic",
+            "proc": "sshd",
+            "cmdline": "sshd -D -R",
+            "parent": "sshd",
+            "container": "a36492b5172b"
+          },
+          {
+            "events": 88,
+            "first_seen": "2026-07-06T19:49:38.316Z",
+            "last_seen": "2026-07-06T20:48:40.976Z",
+            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "proc": "sshd",
+            "cmdline": "sshd",
+            "parent": "sshd",
+            "container": "a36492b5172b"
+          },
+          {
+            "events": 6,
+            "first_seen": "2026-07-06T19:57:51.413Z",
+            "last_seen": "2026-07-06T20:46:05.953Z",
+            "rule": "Launch Ingress Remote File Copy Tools in Container",
+            "proc": "curl",
+            "cmdline": "curl -sf -o /dev/null http://127.0.0.1/",
+            "parent": "bash",
+            "container": "a36492b5172b"
+          },
+          {
+            "events": 6,
+            "first_seen": "2026-07-06T19:57:51.414Z",
+            "last_seen": "2026-07-06T20:46:05.953Z",
+            "rule": "Launch Suspicious Network Tool in Container",
+            "proc": "nc",
+            "cmdline": "nc -z 127.0.0.1 22",
+            "parent": "runuser",
+            "container": "a36492b5172b"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-29T19:49:23.000Z",
+        "2026-06-29T20:49:23.000Z"
+      ],
+      "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-06-29T19:49:23.000Z\" AND @timestamp < \"2026-06-29T20:49:23.000Z\"\n        AND host.name == \"soc-playground\"\n        AND falco.output_fields.container.id == \"a36492b5172b\"\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule      = falco.rule,\n           proc      = falco.output_fields.proc.name,\n           cmdline   = falco.output_fields.proc.cmdline,\n           parent    = falco.output_fields.proc.pname,\n           container = falco.output_fields.container.id\n| SORT first_seen ASC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-06-29T19:49:23.000Z\" AND @timestamp < \"2026-06-29T20:49:23.000Z\"\n        AND host.name == \"soc-playground\"\n        AND falco.output_fields.container.id == \"a36492b5172b\"\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule      = falco.rule,\n           proc      = falco.output_fields.proc.name,\n           cmdline   = falco.output_fields.proc.cmdline,\n           parent    = falco.output_fields.proc.pname,\n           container = falco.output_fields.container.id\n| SORT first_seen ASC",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "rule",
+            "type": "keyword"
+          },
+          {
+            "name": "proc",
+            "type": "keyword"
+          },
+          {
+            "name": "cmdline",
+            "type": "keyword"
+          },
+          {
+            "name": "parent",
+            "type": "keyword"
+          },
+          {
+            "name": "container",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 4,
+        "values": [
+          {
+            "events": 7,
+            "first_seen": "2026-06-29T19:51:14.506Z",
+            "last_seen": "2026-06-29T20:45:50.300Z",
+            "rule": "Launch Ingress Remote File Copy Tools in Container",
+            "proc": "curl",
+            "cmdline": "curl -sf -o /dev/null http://127.0.0.1/",
+            "parent": "bash",
+            "container": "a36492b5172b"
+          },
+          {
+            "events": 34,
+            "first_seen": "2026-06-29T19:51:14.507Z",
+            "last_seen": "2026-06-29T20:48:54.349Z",
+            "rule": "Unexpected UDP Traffic",
+            "proc": "sshd",
+            "cmdline": "sshd -D -R",
+            "parent": "sshd",
+            "container": "a36492b5172b"
+          },
+          {
+            "events": 7,
+            "first_seen": "2026-06-29T19:51:14.507Z",
+            "last_seen": "2026-06-29T20:45:50.300Z",
+            "rule": "Launch Suspicious Network Tool in Container",
+            "proc": "nc",
+            "cmdline": "nc -z 127.0.0.1 22",
+            "parent": "runuser",
+            "container": "a36492b5172b"
+          },
+          {
+            "events": 68,
+            "first_seen": "2026-06-29T19:51:14.507Z",
+            "last_seen": "2026-06-29T20:48:54.349Z",
+            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "proc": "sshd",
+            "cmdline": "sshd",
+            "parent": "sshd",
+            "container": "a36492b5172b"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-35d",
+      "window": [
+        "2026-06-22T19:49:23.000Z",
+        "2026-06-22T20:49:23.000Z"
+      ],
+      "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-06-22T19:49:23.000Z\" AND @timestamp < \"2026-06-22T20:49:23.000Z\"\n        AND host.name == \"soc-playground\"\n        AND falco.output_fields.container.id == \"a36492b5172b\"\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule      = falco.rule,\n           proc      = falco.output_fields.proc.name,\n           cmdline   = falco.output_fields.proc.cmdline,\n           parent    = falco.output_fields.proc.pname,\n           container = falco.output_fields.container.id\n| SORT first_seen ASC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-06-22T19:49:23.000Z\" AND @timestamp < \"2026-06-22T20:49:23.000Z\"\n        AND host.name == \"soc-playground\"\n        AND falco.output_fields.container.id == \"a36492b5172b\"\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule      = falco.rule,\n           proc      = falco.output_fields.proc.name,\n           cmdline   = falco.output_fields.proc.cmdline,\n           parent    = falco.output_fields.proc.pname,\n           container = falco.output_fields.container.id\n| SORT first_seen ASC",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "rule",
+            "type": "keyword"
+          },
+          {
+            "name": "proc",
+            "type": "keyword"
+          },
+          {
+            "name": "cmdline",
+            "type": "keyword"
+          },
+          {
+            "name": "parent",
+            "type": "keyword"
+          },
+          {
+            "name": "container",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 4,
+        "values": [
+          {
+            "events": 100,
+            "first_seen": "2026-06-22T19:52:07.206Z",
+            "last_seen": "2026-06-22T20:48:24.037Z",
+            "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+            "proc": "sshd",
+            "cmdline": "sshd",
+            "parent": "sshd",
+            "container": "a36492b5172b"
+          },
+          {
+            "events": 51,
+            "first_seen": "2026-06-22T19:52:07.207Z",
+            "last_seen": "2026-06-22T20:48:24.037Z",
+            "rule": "Unexpected UDP Traffic",
+            "proc": "sshd",
+            "cmdline": "sshd -D -R",
+            "parent": "sshd",
+            "container": "a36492b5172b"
+          },
+          {
+            "events": 9,
+            "first_seen": "2026-06-22T19:53:29.227Z",
+            "last_seen": "2026-06-22T20:46:17.012Z",
+            "rule": "Launch Suspicious Network Tool in Container",
+            "proc": "nc",
+            "cmdline": "nc -z 127.0.0.1 22",
+            "parent": "runuser",
+            "container": "a36492b5172b"
+          },
+          {
+            "events": 9,
+            "first_seen": "2026-06-22T19:53:29.227Z",
+            "last_seen": "2026-06-22T20:46:17.012Z",
+            "rule": "Launch Ingress Remote File Copy Tools in Container",
+            "proc": "curl",
+            "cmdline": "curl -sf -o /dev/null http://127.0.0.1/",
+            "parent": "bash",
+            "container": "a36492b5172b"
+          }
+        ]
+      }
+    }
+  ]
+}

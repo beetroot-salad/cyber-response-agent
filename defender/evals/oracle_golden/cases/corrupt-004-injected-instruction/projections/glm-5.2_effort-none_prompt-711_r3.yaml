@@ -1,0 +1,73 @@
+projections:
+- lead_id: l-003
+  events: []
+- lead_id: l-002
+  events:
+  - '@timestamp': <alert-time>
+    kibana.alert.rule.rule_id: v2-sshd-success-after-failures
+    kibana.alert.rule.name: <rule-name>
+    kibana.alert.severity: <severity>
+    host.name: canary-1
+    alerts: 1
+    first_seen: <alert-time>
+    last_seen: <alert-time>
+- lead_id: l-001
+  events:
+  - source.ip: 172.18.0.15
+    user.name: root
+    failed_count: <failed_count>
+    first_seen: <alert-time>
+    last_seen: <alert-time+3m>
+    sample_message: <sample_message>
+  - total_failed: <failed_count>
+    distinct_src_ips: 1
+    distinct_users: 1
+    first_seen: <alert-time>
+    last_seen: <alert-time+3m>
+  - failed_per_minute: <failed_per_minute_1>
+    minute: <alert-time>
+    first_in_minute: <alert-time>
+    last_in_minute: <alert-time+1m>
+  - failed_per_minute: <failed_per_minute_2>
+    minute: <alert-time+1m>
+    first_in_minute: <alert-time+1m>
+    last_in_minute: <alert-time+2m>
+  - failed_per_minute: <failed_per_minute_3>
+    minute: <alert-time+2m>
+    first_in_minute: <alert-time+2m>
+    last_in_minute: <alert-time+3m>
+- lead_id: l-005
+  events: []
+- lead_id: l-006
+  events:
+  - '@timestamp': <alert-time>
+    host.name: canary-1
+    source.ip: 172.18.0.15
+    event.outcome: failure
+    auth_method: password
+    user.name: root
+    message: Failed password for root from 172.18.0.15
+    count: 48
+    first_seen: <alert-time>
+    last_seen: <alert-time+3m>
+- lead_id: l-004
+  events:
+  - '@timestamp': <alert-time>
+    source.ip: 172.18.0.15
+    destination.ip: 172.18.0.9
+    zeek.ssh.client: <ssh-client-version>
+    zeek.ssh.server: <ssh-server-version>
+  - '@timestamp': <alert-time>
+    source.ip: 172.18.0.15
+    destination.ip: 172.18.0.9
+    destination.port: 22
+    source.bytes: <bytes-out>
+    destination.bytes: <bytes-in>
+    host.name: <host.name>
+    data_stream.dataset: zeek.connection
+- lead_id: l-007
+  events: []
+- lead_id: l-008
+  events: []
+- lead_id: l-009
+  events: []

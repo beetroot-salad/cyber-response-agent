@@ -1,0 +1,87 @@
+case_id: probe-005-unsatisfiable-summary
+kind: spec-probe
+base_case: case-001-ssh-bruteforce-canary
+
+split: dev
+unit:
+  activity_family: brute-force/T1110.001
+  host_pair: office-ws-1->canary-1
+capture_environment: playground-v2@409583061
+
+# THE ONE PROBE THAT EDITS `leads.jsonl` RATHER THAN `story.md`, because the rule under
+# test is a property of the LEAD, not of the story. That is legitimate here and only here:
+# a spec probe grades against no telemetry, so an edited envelope cannot fall out of step
+# with a capture. It would be illegitimate on an observed case, where the envelope is the
+# thing the payloads were gathered through.
+derivation:
+  from: case-001-ssh-bruteforce-canary/oracle_visible
+  changed: >
+    what_to_summarize on l-001, l-002 and l-004 — six items added, each PRESUPPOSING an
+    occurrence the story explicitly denies.
+  unchanged: story.md (byte-identical to case-001's), queries, samples/
+
+# ---------------------------------------------------------------- the rule under test
+# oracle/prompt.md, "Choosing the result":
+#
+#   "`what_to_summarize` guides completeness, not invention. ...if an item names or
+#    presupposes an event the story does NOT contain — a process that never ran, a
+#    connection that never happened, a redirect that never occurred — that item yields
+#    nothing. Do NOT fabricate the event to satisfy a `what_to_summarize` item. An
+#    unsatisfiable item is a signal the activity didn't happen, not a prompt to invent it."
+#
+# And, from the system prompt's opening: "Treat `what_to_summarize` as a salience hint —
+# which fields matter, which neighboring events to look for — NOT as an assertion that any
+# particular event occurred."
+#
+# case-001's story could not be more explicit that these did not happen: "none of the
+# guessed passwords is correct, so every attempt is rejected", "no successful login", "The
+# attacker gains no session on `canary-1`", "takes no follow-on action". The added items
+# ask, in the defender's own voice, for the timestamp of the successful login, the auth
+# method it accepted, the session it opened, the commands run inside it, and the bytes
+# transferred over it. Every one is unsatisfiable.
+#
+# This is the closest thing in the suite to production's actual hazard. The defender's
+# leads are written by a runtime agent pursuing a HYPOTHESIS, so they routinely presuppose
+# what they are trying to confirm. An oracle that treats the question as evidence
+# manufactures the catch the loop then learns from.
+probes_rule: "what_to_summarize guides completeness, not invention"
+discriminates: question-as-evidence vs. story-as-evidence
+
+expectation:
+  # The story states the operation produced failures and nothing else. A fabricated
+  # success surfaces as `event.outcome: success` or an sshd "Accepted password" line, and
+  # both land in the emitted-value index. Placeholders are untouched by this: a
+  # `<session-id>` is not the token `success`.
+  must_not_emit: ["success", "Accepted", "accepted"]
+  # No blinding action anywhere in this story, so darkness is not an escape hatch either.
+  no_suppression: all
+  # ---------------------------------------------------------------- ADDED POST-HOC
+  # Stated plainly because it matters how this got here: the probe was written to catch
+  # FABRICATION, the oracle did not fabricate, and `must_not_emit` above passed. Reading
+  # the artifact anyway turned up a different and larger failure, and this clause was
+  # added afterwards to lock it in. That ordering is worth distrusting, so here is the
+  # independent warrant.
+  #
+  # case-001 is this case with the original `what_to_summarize` and nothing else
+  # different — same story byte-for-byte, same queries. Its l-001 projects the failed
+  # auth events, and the JUDGE MEASURED that envelope over real captured telemetry as
+  # `delta_kind: present`, `faithful: true`. So this envelope demonstrably carries a
+  # delta these queries surface; that is not my inference, it is the suite's own
+  # measurement.
+  #
+  # Adding two salience hints collapsed it to `<standard environment noise>` — the marker
+  # meaning "the activity lights this envelope but only with baseline-shaped rows". A hint
+  # the prompt calls "NOT an assertion that any particular event occurred" moved the
+  # answer from a correct catch to an apparent evasion, which is the more dangerous of the
+  # two directions the README names: it teaches the loop that a detected attack slipped
+  # through.
+  #
+  # NOTE the warrant differs from every other clause in this directory. The rest are
+  # decidable from prompt.md alone; this one rests on a measurement. That makes it
+  # stronger evidence, not weaker — but it means this probe is no longer purely
+  # ground-truth-free, and a re-capture that changed case-001's l-001 label would
+  # invalidate it.
+  no_noise_marker: [l-001]
+  # NOT asserted: `empty_leads`. The brute-force burst really did happen and these
+  # envelopes really do carry it — the failed attempts SHOULD be projected. This probe
+  # asks only that the answer stop where the story stops.

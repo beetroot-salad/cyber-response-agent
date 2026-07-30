@@ -135,8 +135,13 @@ def run_pitfalls(
 
     rc = (invoke or _invoke_pitfalls_agent)(handoffs, repo_root=repo_root, box=box)
     if rc != 0:
-        _log(f"FATAL: pitfalls curator exited rc={rc}; leaving queue intact")
-        return 2
+        # RAISED, not returned (#719). The rc was the pitfalls channel's dominant failure
+        # and nothing ever inspected it, so a repeatedly failing batch was discarded
+        # silently and forever. `AuthorError` is a member of the drain's retire set, so
+        # the fault now reaches the same bounded retirement every other queue has.
+        raise _author_shared.AuthorError(
+            f"pitfalls curator exited rc={rc}; leaving queue intact"
+        )
 
     changed = _verify_pitfalls_state(repo_root, baseline_stray)
     sha = None

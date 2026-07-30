@@ -9,6 +9,10 @@ if (_root := str(Path(__file__).resolve().parents[4])) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender.learning.author import curator as _curator
+# Imported by name, not reached as `_curator._gate_observations`: a private
+# ATTRIBUTE read across modules is the reach #719 removes; a private import is
+# the repo's ordinary convention.
+from defender.learning.author.curator import _gate_observations
 from defender.learning.author import shared as _shared
 from defender.learning.core.config import (
     DEFAULT_PATHS,
@@ -19,6 +23,7 @@ from defender.learning.core.config import (
     author_env_model,
     author_env_request_limit,
     author_env_timeout,
+    author_max_attempts,
     benign_actor_model,
     repo_lock_wait_seconds,
 )
@@ -74,6 +79,11 @@ def _env_config(  # noqa: PLR0913 — every parameter is the per-direction field
         author_timeout=author_env_timeout(),
         author_effort=author_env_effort(),
         invoke_agent=invoke_agent,
+        gate=_gate_observations,
+        buckets=_curator.OBSERVATION_BUCKETS,
+        commit_fn=_curator.commit_observations,
+        noun="observations",
+        max_attempts=author_max_attempts(),
         box=box,
     )
 

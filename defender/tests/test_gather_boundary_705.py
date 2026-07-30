@@ -26,7 +26,9 @@ import pytest
 
 from defender.tests._session_store_705 import (
     make_store,
+    selection_mod,
     sql,
+    store_mod,
     text_response,
     tool_call_response,
     tool_return_request,
@@ -195,28 +197,129 @@ def test_gather_boundary_stays_narrowed_to_kind_response(tmp_path):
 
 
 def test_gather_boundary_is_scoped_to_one_session(tmp_path):
-    """The boundary is asked for one session's leads and returns only that session's
-    rows, so a per-case file holding a second execution AND a fork does not serve one
-    session another's leads.
+    """The boundary carries the scoping predicate ITSELF: a per-case file holding a
+    second execution and a fork never serves one session another's leads, and the
+    caller's `WHERE session_id = ?` chooses a session rather than repairing the view.
 
-    FK16's second half is a design gap, not a probe question: O3 keys rows by
-    `session_id`, O1 keys the FILE by `case_id`, and O11 puts a fork's rows in the same
-    file — so the view as published cannot be correct for a forked case. The positive
-    control is that each session's own lead IS reachable."""
+    FK16's second half, closed by #753. The discriminating half is the row an
+    unscoped read must NOT be able to reach: `l-second` belongs to a session that is
+    not on `first`'s path or `fork`'s, so a view that returned every response row in
+    the file — the shape #744 shipped — would serve it to both. The fork DOES see the
+    prefix it inherited (`l-first`): those turns are on its conversation, its
+    defender genuinely holds them, and #696 has to be able to fork at one of them.
+
+    The `session_id` column therefore names the session whose path the row is on, not
+    the session that owns the row, so a shared prefix row appears once per descendant."""
     store = make_store(tmp_path)
     first = store.new_session(agent_id="main")
-    _append_gather_call(store, first, {"lead_id": "l-first"}, tool_call_id="a")
+    first_row = _append_gather_call(store, first, {"lead_id": "l-first"}, tool_call_id="a")
     second = store.new_session(agent_id="main")
     _append_gather_call(store, second, {"lead_id": "l-second"}, tool_call_id="b")
-    fork = store.fork(first, at_message_id=sql(store, "SELECT id FROM message LIMIT 1")[0][0])
+    fork = store.fork(first, at_message_id=first_row)
     _append_gather_call(store, fork, {"lead_id": "l-fork"}, tool_call_id="c")
 
     for session_id, expected in ((first, {"l-first"}), (second, {"l-second"}),
-                                 (fork, {"l-fork"})):
+                                 (fork, {"l-first", "l-fork"})):
         got = {row[0] for row in sql(
             store, "SELECT lead_id FROM gather_boundary WHERE session_id = ?", (session_id,))}
         assert got == expected, (
-            f"session {session_id} saw {got}; the view must carry a session predicate")
+            f"session {session_id} saw {got}; the view must scope by the session's path")
+
+    ss = store_mod()
+    unscoped = sql(store, "SELECT session_id, message_id FROM gather_boundary")
+    assert unscoped, "positive control: the unscoped read is not empty"
+    for session_id, message_id in unscoped:
+        assert message_id in ss.path_row_ids(store, session_id), (
+            f"the unscoped read paired session {session_id} with message {message_id}, "
+            "which is not on that session's path — the guarantee a caller-side "
+            "predicate could not give")
+
+
+def test_gather_boundary_drops_the_leads_a_fold_displaced(tmp_path):
+    """A session that has folded stops serving the leads on the turns the fold cut.
+
+    This is the half of #753 that only exists once compaction is on, and the half a
+    session predicate alone cannot reach: the displaced rows still carry the folding
+    session's `session_id`, so `WHERE session_id = ?` returns them. They are simply no
+    longer reachable from the session's head — the fold reparents its frontier onto the
+    lineage root — and a #696 boundary picker that saw them would fork the source
+    defender from a state it no longer occupies.
+
+    The positive control is the lead on the ROOT turn, which the fold reparents its
+    frontier onto rather than displacing: the post-fold read must still serve `l-root`.
+    Without a lead surviving the fold, "the displaced lead is gone" would be satisfied
+    just as well by a view that returned nothing at all for a folded session."""
+    ss, selection = store_mod(), selection_mod()
+    store = make_store(tmp_path)
+    session_id = store.new_session(agent_id="main")
+
+    root_row = _append_gather_call(store, session_id, {"lead_id": "l-root"},
+                                   tool_call_id="r")
+    store.append(session_id, [tool_return_request("gather", "summary", tool_call_id="r")],
+                 agent_id="main")
+    gather_row = _append_gather_call(store, session_id, {"lead_id": "l-displaced"},
+                                     tool_call_id="d")
+    store.append(session_id, [tool_return_request("gather", "summary", tool_call_id="d")],
+                 agent_id="main")
+
+    def leads(sid: str) -> set:
+        return {row[0] for row in sql(
+            store, "SELECT lead_id FROM gather_boundary WHERE session_id = ?", (sid,))}
+
+    assert leads(session_id) == {"l-root", "l-displaced"}, (
+        "control: both leads are served before the fold")
+    assert gather_row in ss.path_row_ids(store, session_id)
+
+    selection.fold(store, session_id, agent_id="main", boundary=4)
+    assert gather_row not in ss.path_row_ids(store, session_id), (
+        "the fixture must actually displace the lead-bearing turn")
+    assert root_row in ss.path_row_ids(store, session_id), (
+        "the fixture must also leave a lead-bearing turn ON the path, or the assertion "
+        "below cannot tell 'displaced' from 'the view went blank'")
+
+    assert leads(session_id) == {"l-root"}, (
+        "the fold displaced one lead-bearing turn and kept the other; the boundary must "
+        "not still serve a lead off a row the conversation can no longer reach, and must "
+        "still serve the one it can")
+    assert gather_row not in {row[0] for row in sql(
+        store, "SELECT message_id FROM gather_boundary")}, (
+        "and it must be reachable from NO session, not merely filtered out of this "
+        "one — an unscoped read is what the caller-side predicate never constrained")
+    assert sql(store, "SELECT COUNT(*) FROM message WHERE session_id = ? AND kind = 'response'",
+               (session_id,)) == [(2,)], (
+        "and the displaced row is still IN the file — the view excludes it by path, "
+        "not because anything deleted it")
+
+
+def test_a_cyclic_parent_chain_ends_the_boundarys_walk_instead_of_hanging(tmp_path):
+    """A `parent_id` chain that loops — reachable only by direct file damage, since the
+    foreign key keeps a phantom id out of every write the store's own API can make —
+    terminates the view's recursive walk and returns each row in the ring once.
+
+    #753 put a recursion where the view previously had none, so a corrupted file gained a
+    way to hang a reader. `UNION` is the guard: the repeated triple is discarded. The
+    contract is deliberately WEAKER than the Python walk's on the same shape — the view
+    degrades, `path_row_ids` raises — because a danger lens that never returns is worse
+    than one that over-reports, while the reader that projects the conversation into a
+    prompt must refuse outright."""
+    ss = store_mod()
+    store = make_store(tmp_path)
+    session_id = store.new_session(agent_id="main")
+    rows = [_append_gather_call(store, session_id, {"lead_id": f"l-{i}"}, tool_call_id=f"c{i}")
+            for i in range(3)]
+
+    raw = sqlite3.connect(str(store.path))
+    raw.execute("UPDATE message SET parent_id = ? WHERE id = ?", (rows[-1], rows[0]))
+    raw.commit()
+    raw.close()
+
+    seen = sql(store, "SELECT message_id FROM gather_boundary WHERE session_id = ?",
+               (session_id,))
+    assert sorted(r[0] for r in seen) == sorted(rows), seen
+    assert len(seen) == len(set(seen)), f"the walk revisited a row: {seen}"
+
+    with pytest.raises(ss.CyclicParentChain):
+        ss.path_row_ids(store, session_id)
 
 
 def test_a_thinking_part_shaped_like_a_sql_fragment_round_trips_inert(tmp_path):

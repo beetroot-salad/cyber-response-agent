@@ -1,0 +1,36 @@
+{
+  "judge": {
+    "model": "claude-opus-5",
+    "effort": "high",
+    "prompts_sha8": "47d6044a"
+  },
+  "leads": {
+    "l-001": {
+      "delta_kind": "undecidable",
+      "undecidable_reason": "insufficient-baseline",
+      "heterogeneous": null,
+      "evidence": "The `baseline` block is an empty list \u2014 no control payload was captured for any of the three query strings, so there is nothing to diff the observed window against. Observed seq 0 (`_id: \"AZ-lOaD-23Huse3YvZvx\"` in .ds-logs-falco.alerts-default-2026.06.29-000007) and seq 1 (the 20:19\u201320:20 rule query) both return total 0 / returned 0 with truncated false, while seq 2 (20:00\u201321:00) returns total 3, all three being `falco.rule: \"Adding ssh keys to authorized_keys\"`, priority Warning, `fd.name: /root/.ssh/authorized_keys`, `proc.name: bash`, `proc.pname: containerd-shim`, `user.name: root`, `container.name: <NA>`, at 20:11:32.775, 20:14:11.072 and 20:17:30.874 \u2014 with identical `proc.cmdline` appending an `..._attacker attacker@elsewhere` key. Whether that rule fires at this rate routinely on soc-playground cannot be established here, and the only cross-window-varying field present (`falco.output_fields.container.id: a36492b5172b`) is listed as an unstable identifier and so could not evidence a delta anyway. A control run of the same `falco.rule` query over a live one-hour window a week back would have settled it.",
+      "judge_model": "claude-opus-5",
+      "judge_effort": "high",
+      "cost_usd": 0.285015
+    },
+    "l-002": {
+      "delta_kind": "state-only",
+      "undecidable_reason": null,
+      "heterogeneous": null,
+      "evidence": "The lead contains a single query, `change-mgmt.active-changes`, parameterized by host `soc-playground` and an instant `at: 2026-07-27T20:19:23Z` rather than a time range. The environment notes state explicitly that change-mgmt queries return a current change record set, carry no `@timestamp` bounds to move, and therefore have no control window or baseline-diff semantics. Consistent with that, `observed` seq 0 is an empty array and `baseline` is an empty list \u2014 not an empty control window but the absence of any baseline construct at all. The empty result means no CR record covers that host at that instant; it is a lookup answer, not a stream delta.",
+      "judge_model": "claude-opus-5",
+      "judge_effort": "high",
+      "cost_usd": 0.16068700000000002
+    },
+    "l-003": {
+      "delta_kind": "present",
+      "undecidable_reason": null,
+      "heterogeneous": null,
+      "evidence": "The ES|QL aggregation (seq 1) returns 5 grouped rows in the observed window versus 4 in each of the three live controls (C-21d, C-28d, C-35d). Four rows are byte-identical in every surfaced field across observed and all controls \u2014 \"Redirect STDOUT/STDIN to Network Connection in Container\" (proc sshd, cmdline \"sshd\", parent sshd), \"Unexpected UDP Traffic\" (sshd, \"sshd -D -R\"), \"Launch Ingress Remote File Copy Tools in Container\" (curl, \"curl -sf -o /dev/null http://127.0.0.1/\", parent bash), and \"Launch Suspicious Network Tool in Container\" (nc, \"nc -z 127.0.0.1 22\", parent runuser) \u2014 differing only in counts, which tracks the 30m observed window against 60m controls. The fifth observed row, rule=\"Adding ssh keys to authorized_keys\", events=3, proc=bash, parent=containerd-shim, cmdline appending \"ssh-rsa AAAAB3NzaC1yc2EAAAAD_fake_key_0_${ts}_attacker\" to /root/.ssh/authorized_keys, first_seen 20:11:33.548Z, has no counterpart in any control; the distinction is carried by the rule, proc, parent and cmdline columns, not by the unstable container.id (a36492b5172b, identical everywhere). The seq 0 payload is a single-document _id fetch of that same 20:17:30 authorized_keys alert with no control window, so it is not independently decidable and heterogeneity cannot be assessed.",
+      "judge_model": "claude-opus-5",
+      "judge_effort": "high",
+      "cost_usd": 0.266781
+    }
+  }
+}

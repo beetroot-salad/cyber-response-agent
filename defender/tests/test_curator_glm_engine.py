@@ -207,14 +207,14 @@ def test_marker_empty_commit_message_rejected(tmp_path):
         ),
     )
     with pytest.raises(AuthorError):
-        _shared._commit_message(result, "observations")
+        _shared.commit_message(result, "observations")
     ok = _stage(
         tmp_path,
         run_author=lambda *a, **kw: (
             'AUTHOR_RESULT: {"committed": ["obs-1"], "consumed_skip": [], "commit_message": "Fold obs-1"}'
         ),
     )
-    assert _shared._commit_message(ok, "observations") == "Fold obs-1"
+    assert _shared.commit_message(ok, "observations") == "Fold obs-1"
 
 
 

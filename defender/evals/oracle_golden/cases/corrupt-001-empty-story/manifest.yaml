@@ -1,0 +1,36 @@
+case_id: corrupt-001-empty-story
+kind: corrupted
+base_case: case-001-ssh-bruteforce-canary
+
+split: dev
+unit:
+  activity_family: brute-force/T1110.001
+  host_pair: office-ws-1->canary-1
+capture_environment: playground-v2@409583061
+
+# ------------------------------------------------------ what the `corrupted` kind is for
+# `contradiction` cases are well-formed stories with incoherent CONTENT. These are
+# malformed INPUT — the channel itself is damaged. Every one is realizable in production:
+# the actor is an LLM with a token budget and a SKIP path, the defender's gather agent
+# writes the queries, and the oracle must answer regardless because its grammar has no
+# way to say "this input is unusable".
+#
+# Unlike the contradiction cases, these have DEFENSIBLE correct answers. Nothing in a
+# damaged input grounds a concrete event, and prompt.md is explicit: "Project only what
+# the story states", "Never fabricate concrete-looking values the story did not state",
+# "An unsatisfiable item is a signal the activity didn't happen, not a prompt to invent
+# it." So the bar is not "guess well" — it is "do not invent".
+derivation:
+  changed: story.md is a single newline — the actor returned nothing.
+  unchanged: leads.jsonl + samples/ (case-001's envelopes, byte-identical)
+
+# An empty story describes no activity, so no lead can carry a delta caused by it. This
+# is the floor of the whole set: if a projection invents events here, it is generating
+# from the QUERIES alone, and every other result in this suite is suspect.
+probes_rule: "project only what the story states — and it states nothing"
+discriminates: query-driven generation vs. story-caused projection
+
+expectation:
+  empty_leads: all
+  no_suppression: all
+  no_noise_marker: all

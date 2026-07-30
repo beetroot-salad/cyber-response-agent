@@ -5,6 +5,7 @@ import fcntl
 import json
 import shutil
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,7 @@ import yaml
 from defender._clock import now_iso
 from defender._text import is_content_less
 from defender._io import append_jsonl, read_jsonl_rows, write_atomic
+from defender._run_paths import artifact_file
 from defender.learning.core.config import (
     ADVERSARIAL_AUDIT_ONLY_FINDING_TYPES,
     BENIGN_AUDIT_ONLY_FINDING_TYPES,
@@ -23,6 +25,7 @@ from defender.learning.core.config import (
     LoopPaths,
     QueueChannel,
     RunPaths,
+    make_logger,
 )
 from defender.learning.core.validate import _benign_outcome_keyword, _outcome_keyword
 
@@ -30,17 +33,55 @@ from defender.learning.core.validate import _benign_outcome_keyword, _outcome_ke
 
 
 @contextlib.contextmanager
-def _flock(lock_path: Path):
+def queue_lock(lock_path: Path, *, timeout_seconds: int | None = None):
+    """Exclusive hold of a queue's append-role lock.
+
+    APPENDERS pass no deadline and wait forever: an append that gave up would lose the row
+    it is carrying, and an appender waits on nothing but other appenders and the short
+    rewrite window.
+
+    THE DRAIN passes one, and must. It reaches this while holding the repo lock, which
+    globally serialises all four corpus channels — so a wedged appender on one channel's
+    lock would otherwise stall every sibling channel's tick with no bound at all, which is
+    the failure the drain's own deadline-bounded read exists to prevent. Expiry raises
+    `TimeoutError`, deliberately NOT a member of the drain's retire set: the batch is stuck
+    and recorded, never bumped, because a busy lock is not the batch's fault."""
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     fh = lock_path.open("a+", encoding="utf-8")
     try:
-        fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+        if timeout_seconds is None:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+        else:
+            _flock_within(fh, lock_path, timeout_seconds)
+    except BaseException:
+        fh.close()
+        raise
+    try:
         yield
     finally:
         try:
             fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
         finally:
             fh.close()
+
+
+def _flock_within(fh: Any, lock_path: Path, timeout_seconds: int) -> None:
+    deadline = time.monotonic() + max(1, timeout_seconds)
+    while True:
+        try:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return
+        except BlockingIOError as exc:
+            if time.monotonic() >= deadline:
+                raise TimeoutError(
+                    f"queue lock {lock_path} held by an appender for >{timeout_seconds}s"
+                ) from exc
+            time.sleep(0.05)
+
+
+#: The pre-#719 spelling, kept so in-module callers and the suites that drive the real
+#: primitive keep one name to reach for.
+_flock = queue_lock
 
 
 def _load_jsonl_ids(path: Path, key: str) -> set[str]:
@@ -59,15 +100,16 @@ def _rewrite_queue(
     held: list[dict],
     consumed: list[dict],
     commit_sha: str | None,
-    *,
-    merge: bool,
 ) -> None:
-    if merge:
-        processed = {e[id_key] for e in held} | {e[id_key] for e in consumed}
-        current = read_jsonl_rows(pending_file)
-        survivors = list(held) + [r for r in current if r.get(id_key) not in processed]
-    else:
-        survivors = list(held)
+    # ALWAYS merges (#719). The `merge=False` fast path dropped any row appended between
+    # the batch's read and its rewrite; the knob is gone rather than defaulted, because a
+    # boolean would have preserved the row-loss in a less visible place.
+    #
+    # `.get`, not `[...]`: a row carrying no value under `id_key` cannot be matched, and
+    # the drain routes such rows here deliberately so they leave the queue.
+    processed = {e.get(id_key) for e in held} | {e.get(id_key) for e in consumed}
+    current = read_jsonl_rows(pending_file)
+    survivors = list(held) + [r for r in current if r.get(id_key) not in processed]
     write_atomic(pending_file, "".join(json.dumps(entry) + "\n" for entry in survivors))
     if consumed:
         now = now_iso()
@@ -90,18 +132,11 @@ def rotate_queue_locked(
     held: list[dict],
     consumed: list[dict],
     commit_sha: str | None,
-    merge_concurrent: bool = True,
+    timeout_seconds: int | None = None,
 ) -> None:
     pending_file.parent.mkdir(parents=True, exist_ok=True)
-    if merge_concurrent:
-        with _flock(lock_file):
-            _rewrite_queue(
-                pending_file, consumed_file, id_key, held, consumed, commit_sha, merge=True
-            )
-    else:
-        _rewrite_queue(
-            pending_file, consumed_file, id_key, held, consumed, commit_sha, merge=False
-        )
+    with queue_lock(lock_file, timeout_seconds=timeout_seconds):
+        _rewrite_queue(pending_file, consumed_file, id_key, held, consumed, commit_sha)
 
 
 def _slugify(s: str) -> str:
@@ -143,6 +178,19 @@ _SHARED_COPY_ARTIFACTS = ("alert", "report", "investigation")
 
 _SHARED_INPUTS_LOCK = threading.Lock()
 
+_persist_log = make_logger("persist")
+
+
+def _refused(run_dir: Path, entries: list[Path]) -> None:
+    """A staging refusal is loud. It means the run's tree holds something the box's exit scrub
+    would have tainted the run for, so it is evidence about the run, not a copy detail — and
+    silence here would read downstream as a case that simply gathered nothing."""
+    for entry in entries:
+        _persist_log(
+            f"REFUSED to stage {entry} from {run_dir}: not a regular file or a real directory "
+            "(a run writes neither links nor special files; #648)"
+        )
+
 
 def _copy_shared_inputs(run_dir: Path, learning_run_dir: Path) -> None:
     learning_run_dir.mkdir(parents=True, exist_ok=True)
@@ -150,8 +198,12 @@ def _copy_shared_inputs(run_dir: Path, learning_run_dir: Path) -> None:
     with _SHARED_INPUTS_LOCK:
         for name in _SHARED_COPY_ARTIFACTS:
             src = getattr(src_paths, name)
-            if not src.is_file():
-                raise RunUnprocessable(f"missing source artifact for persist: {src}")
+            if not artifact_file(src):
+                # `is_file()` would answer about a link's TARGET and copy those bytes in under
+                # the artifact's name (#648) — the three named here are the ones the actor and
+                # the judge read as the case itself, so a link at one is fatal, not skippable.
+                raise RunUnprocessable(
+                    f"source artifact for persist is missing or is not a regular file: {src}")
             dst = getattr(dst_paths, name)
             if name == "investigation":
                 from defender.skills.invlang.validate import validate_companion
@@ -164,11 +216,13 @@ def _copy_shared_inputs(run_dir: Path, learning_run_dir: Path) -> None:
                     )
             shutil.copy2(src, dst)
         loaded = run_dir / "lessons_loaded.jsonl"
-        if loaded.is_file():
+        if artifact_file(loaded):
             shutil.copy2(loaded, learning_run_dir / "lessons_loaded.jsonl")
+        elif loaded.exists() or loaded.is_symlink():
+            _refused(run_dir, [loaded])
         from defender.learning import lead_repository
 
-        lead_repository.stage_tables(run_dir, learning_run_dir)
+        _refused(run_dir, lead_repository.stage_tables(run_dir, learning_run_dir))
 
 
 def _write_source_refs(
@@ -260,7 +314,7 @@ def append_findings(
         for n, f in enumerate(judge_doc["defender_findings"])
         if f["type"] not in audit_only_types
     ]
-    with _flock(paths.findings_lock_file):
+    with queue_lock(paths.findings_lock_file):
         return append_jsonl(paths.pending_file, rows)
 
 
@@ -269,7 +323,7 @@ def append_findings(
 def append_pitfalls(rows: list[dict], *, paths: LoopPaths = DEFAULT_PATHS) -> int:
     if not rows:
         return 0
-    with _flock(paths.pitfalls.lock):
+    with queue_lock(paths.pitfalls.append_lock):
         return append_jsonl(paths.pitfalls.file, rows)
 
 
@@ -289,12 +343,11 @@ def rotate_pitfalls(
     rotate_queue_locked(
         pending_file=paths.pitfalls.file,
         consumed_file=paths.pitfalls.consumed,
-        lock_file=paths.pitfalls.lock,
-        id_key="pitfall_id",
+        lock_file=paths.pitfalls.append_lock,
+        id_key=paths.pitfalls.id_key,
         held=[],
         consumed=consumed,
         commit_sha=commit_sha,
-        merge_concurrent=True,
     )
 
 
@@ -310,7 +363,7 @@ def _append_observations(
     *,
     id_prefix: str = "",
 ) -> int:
-    with _flock(lock_file):
+    with queue_lock(lock_file):
         existing = _load_jsonl_ids(queue_file, "observation_id") | _load_jsonl_ids(
             consumed_file, "observation_id"
         )
@@ -355,7 +408,7 @@ def append_actor_observations(
 
     ch = paths.actor_observations
     return _append_observations(
-        ch.file, ch.consumed, ch.lock,
+        ch.file, ch.consumed, ch.append_lock,
         run_id, observations, build_row,
     )
 
@@ -421,7 +474,7 @@ def _append_env_fact_observations(
         return row
 
     return _append_observations(
-        ch.file, ch.consumed, ch.lock,
+        ch.file, ch.consumed, ch.append_lock,
         run_id, observations, build_row,
         id_prefix=id_prefix,
     )

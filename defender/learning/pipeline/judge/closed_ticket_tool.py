@@ -12,9 +12,9 @@ grammar* (a flag a mechanical migration could drop) to *unreachable by construct
 ``status`` / ``require_closed`` slot exists on either model-facing schema.
 
 The security property is the answer-key defense (O2/O3): the benign judge must never read the
-*open in-flight ticket* for the case it is scoring. This module realizes it four ways, none of
-which is a runtime direction check (the adversarial leg simply never registers these tools —
-absence by registration, N3):
+*open in-flight ticket* for the case it is scoring, nor anything written about that case while
+it was live. This module realizes it five ways, none of which is a runtime direction check (the
+adversarial leg simply never registers these tools — absence by registration, N3):
 
   - **Closed-pin** — ``require_closed=True`` on the wire; the verb body pins the outgoing
     ``status=closed`` and refuses a non-closed body as a business fault (exit 1).
@@ -37,14 +37,49 @@ absence by registration, N3):
   - **Self-key exclusion** (Fork C/H) — the case-under-judgment's own key (``deps.run_id``, via
     the shared ``runtime.ticket_screen.self_case_key`` — the SAME definition gather screens on,
     so the two answer-key defenses cannot drift apart) is refused pre-store on ``get``, filtered
-    per-item by identity on ``list``, and — on ``get`` only — screened out of a fetched closed
-    ticket whose free text NAMES it. That last withhold files the dedicated non-infra
-    ``POLICY_REFUSAL_EXIT``, not the adapter's generic business code, so the audit trail tells a
-    withheld self-read apart from a genuine 404 (Fork H is ``get``-scoped; the ``list`` path
-    carries the status + identity screens only, so a listed sibling's free text that names the
-    self-case is NOT redacted — the graph's N-note).
+    per-item by identity on ``list``, and screened out of a genuinely-closed ticket whose free
+    text NAMES it on BOTH surfaces. #683 extended that last screen off ``get``-only: ``list`` is
+    the judge's higher-traffic surface, so scoping it to ``get`` left the asymmetry sitting on
+    the protected asset itself — a sibling ticket could deliver through the precedent search
+    exactly the content the identical payload would have been withheld for on a confirm.
+
+    The two surfaces still differ in HOW they withhold, because #684 (F2) resolved list's arm to
+    be per ITEM: ``get`` fails the whole read under the dedicated non-infra
+    ``POLICY_REFUSAL_EXIT`` — not the adapter's generic business code, so the audit trail tells a
+    withheld self-read apart from a genuine 404 — while ``list`` drops the naming item and serves
+    its siblings, since faulting a whole listing over one sibling's wording would gut the
+    precedent search (O1). The cost of the per-item arm is that a list drop is invisible in the
+    capture row, which records the post-screen payload at exit 0; that is Fork G's pre-existing
+    property, not new here.
+
+    What stays accepted (the graph's N-note) is the TRANSITIVE path, on both surfaces: a closed
+    ticket quoting some OTHER non-closed ticket rides the salted untrusted envelope unredacted.
+    Only the self-case's identifier is an identifier this seam knows.
   - **Item re-check** (Fork G) — ``list`` re-checks each returned item's status client-side and
-    drops non-closed (or self-key) records before the envelope.
+    drops non-closed records before the envelope, alongside the two self-case arms above: the
+    identity filter (the item's own key IS the case) and, since #683, the free-text screen (the
+    item NAMES the case). All three are conjuncts of one per-item predicate; none replaced
+    another.
+  - **Recency** (Fork J) — every arm above screens on what a record SAYS, so all three are
+    defeated by a sibling that describes the live case without spelling its key: the service
+    and the date, in prose. This arm screens on WHEN the record was last written instead, and
+    withholds anything not provably older than the case. Precedent is by definition older, so
+    the arm costs the search nothing it was entitled to; contamination is by definition newer,
+    so no wording evades it.
+
+    The boundary is the ticket store's OWN ``created`` for the in-flight ticket, reached
+    through a verb (``case-opened-at``) whose return type is a bare timestamp — the record is
+    unreachable through it by construction, the same way ``require_closed`` makes the in-flight
+    ticket unreachable through the two reading verbs. Dating the screen by a clock the judge
+    carried instead would make the boundary depend on skew against the store's clock.
+
+    Two ways it can find no boundary, resolved oppositely: a case that never filed a ticket
+    (a 404 — a real answer) leaves the other conjuncts to stand alone and the read proceeds,
+    because failing there would make the precedent search unusable for most cases; anything
+    else — a broken store, a missing ``created``, an adapter declaring no such verb — FAILS
+    THE READ loud, because an arm that stands down when the environment breaks protects
+    nothing. An undated record is withheld for the same reason gather refuses a ticket it
+    cannot prove distinct: unprovable is not the same as safe.
 
 Capture + breaker mirror the ``query`` tool FULLY (Fork B/E): every store attempt writes one
 capture row to the JUDGE's ``executed_queries.jsonl`` with its payload persisted by-ref, an
@@ -59,6 +94,7 @@ and fault detail alike — rides inside the per-bind salted untrusted envelope.
 from __future__ import annotations
 
 import asyncio
+import datetime as _dt
 import json
 import re
 from pathlib import Path
@@ -100,6 +136,92 @@ _PAYLOAD_DIR = "ticket_reads"
 #: resolved through the SAME registry seam as the store reads, so the screen has no second
 #: route to the environment and tests drive it with the same fake.
 _KEY_PATTERN_VERB = "key-pattern"
+
+#: The verb that yields the instant the case under judgment was opened — the ticket store's own
+#: ``created`` for the in-flight ticket, and nothing else from it. Reached through the SAME
+#: registry seam as the store reads and the key grammar, so the recency screen has no second
+#: route to the environment.
+_CASE_OPENED_VERB = "case-opened-at"
+
+
+def _parse_instant(raw: Any) -> _dt.datetime | None:
+    """One store timestamp → an aware UTC datetime, or ``None`` if it is not one.
+
+    A naive value is READ AS UTC rather than rejected: the store mints ``datetime.now(utc)``,
+    but a hand-written seed file may omit the offset, and treating that as unparseable would
+    drop legitimate precedent for a formatting detail. A naive value in some other zone would
+    be misread — the error is bounded by that zone's offset, which cannot approach the gap
+    between seeded precedent and a live case.
+    """
+    if not isinstance(raw, str) or not raw:
+        return None
+    try:
+        parsed = _dt.datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=_dt.UTC)
+
+
+def _predates_case(record: Any, opened_at: _dt.datetime) -> bool:
+    """Fork J's predicate: is EVERY word of this record provably older than the case?
+
+    Screened on ``updated``, falling back to ``created`` — the LAST write, not the first,
+    because the leak this arm exists to close rides in content APPENDED to an old ticket
+    after the case opened: a comment on a three-year-old record naming the live incident.
+    Dating such a record by its creation would admit it. The free-text screen catches this
+    only when the appended text spells the case key; a paraphrase — the incident by service
+    and date — defeats that screen and not this one.
+
+    A record whose timestamp is missing or unparseable is NOT older, it is UNDATED, and is
+    dropped: gather already refuses a ticket it cannot prove distinct from its own case, and
+    a ticket that cannot be proved to predate the case is the same shape of unknown on the
+    surface where the answer key is at stake.
+
+    The cost is accepted and one-directional: a ticket the investigating agent itself touched
+    during the run goes invisible to the judge. That content is the agent's own writing, not
+    independent precedent, so withholding it is not a loss of evidence.
+    """
+    if not isinstance(record, dict):
+        return False
+    stamped = record.get("updated")
+    instant = _parse_instant(stamped if stamped is not None else record.get("created"))
+    return instant is not None and instant < opened_at
+
+
+async def _case_opened_at(
+    deps: AgentDeps, verbs: Any,
+) -> tuple[_dt.datetime | None, int, str]:
+    """The instant the case under judgment was opened → ``(boundary, exit_code, detail)``.
+
+    Three outcomes, and the split between them is the whole design:
+
+      - a usable timestamp → the recency arm runs;
+      - the store answers that no such ticket exists (a business fault — a 404 for a case the
+        agent never filed) → ``(None, 0, "")``: there is no boundary to screen against, the
+        other conjuncts stand alone, and the read PROCEEDS. Failing here would make the
+        precedent search unusable for every case that never opened a ticket;
+      - anything else — an unreachable store, a malformed ``created``, an adapter declaring no
+        such verb → the fault is returned and the caller FAILS THE READ, loud, in the three
+        channels this module already owns. The screen cannot silently stand down: an arm that
+        stops running when the environment breaks is an arm that protects nothing.
+
+    Mirroring ``_key_grammar``, a SUCCESSFUL resolution writes no capture row — it is a
+    boundary lookup, not a precedent read — while every non-success is recorded by the caller.
+    """
+    opened, exit_code, detail = await _run_verb(
+        deps, verbs, _CASE_OPENED_VERB, {"key": self_case_key(deps)},
+    )
+    if exit_code == 1:
+        return None, 0, ""
+    if exit_code != 0:
+        return None, exit_code, f"case-opened boundary unavailable: {detail}"
+    instant = _parse_instant(opened)
+    if instant is None:
+        return None, DEFAULT_FAULT_EXIT, (
+            f"case-opened boundary unusable: {_CASE_OPENED_VERB} returned "
+            f"{type(opened).__name__} {opened!r}, not an ISO-8601 instant"
+        )
+    return instant, 0, ""
 
 
 def _key_reject_reason(key: str, grammar: re.Pattern[str]) -> str | None:
@@ -271,19 +393,61 @@ def _capture_and_view(
     return _go()
 
 
-def _screen_listing(deps: AgentDeps, payload: Any) -> tuple[Any, int, str]:
-    """Fork G + V-A: keep only genuinely-closed items that are not the self-case's own record,
-    per-item, before the envelope.
+def _names_self_case(record: Any, self_key: str) -> bool:
+    """Fork H's predicate: does this record NAME the case under judgment anywhere in its content?
+
+    Serialized WHOLE rather than field-by-field, because the self-key may ride in a resolution, a
+    nested comment, or the key itself. That is strictly wider than gather's identity-only screen,
+    and deliberately so — gather correlates, the judge scores.
+
+    Shared by both surfaces since #683, so the ``get`` withhold and the ``list`` drop cannot come
+    to different answers about the same payload — the whole defect #683 recorded was two screens
+    disagreeing about one record.
+
+    ``ensure_ascii=False`` is load-bearing, not cosmetic. Under the default the encoder rewrites
+    every non-ASCII character as ``\\uXXXX``, so a self-key carrying one would never appear
+    literally in the serialization and a sibling naming it in free text would slip the test
+    silently — the exact leak this predicate exists to close. Today ``self_case_key`` is a run id
+    that ``_run_id.is_valid_run_id`` forces ASCII, so the two spellings coincide; pinning the
+    encoder here means a later widening of what a case id may contain cannot quietly reopen it.
+    """
+    return self_key in json.dumps(record, default=str, ensure_ascii=False)
+
+
+def _screen_listing(
+    deps: AgentDeps, payload: Any, opened_at: _dt.datetime | None,
+) -> tuple[Any, int, str]:
+    """Fork G + V-A + Fork H + Fork J: keep only genuinely-closed items that neither ARE nor
+    NAME the self-case's record AND were last written before the case opened, per-item, before
+    the envelope.
 
     The envelope shape check and the ``(payload, exit_code, detail)`` contract are the shared
     ticket screen (``runtime.ticket_screen``); bound here is the judge's own predicate, whose
     CLOSED-only half is the judge's alone — gather keeps every lifecycle state because it is
-    correlating, not scoring. Duplicates survive (the re-check is status + self-key identity,
-    never a dedup); a non-dict item is dropped as unreadable."""
+    correlating, not scoring. Duplicates survive (the screen is status + self-reference, never a
+    dedup); a non-dict item is dropped as unreadable.
+
+    The identity conjunct is kept as the arm that owes nothing to a serializer: it compares the
+    record's own key value directly, so however ``_names_self_case`` renders a record, the
+    self-case's OWN listing entry is still excluded. The free-text arm is the wider one and the
+    only one that catches a SIBLING naming the case; neither substitutes for the other's failure
+    mode.
+
+    The recency arm is wider still, and is the only one that does not depend on the case being
+    NAMED at all: it screens on WHEN the words were written rather than on what they say, so a
+    sibling that describes the live incident by service and date — never spelling the key —
+    is dropped by it and by nothing else here. ``opened_at`` is ``None`` only when the store
+    says the case has no ticket, in which case there is no boundary and the other three
+    conjuncts stand alone."""
     self_key = self_case_key(deps)
     return screen_list(
         payload,
-        keep=lambda t: t.get("status") == "closed" and t.get("key") != self_key,
+        keep=lambda t: (
+            t.get("status") == "closed"
+            and t.get("key") != self_key
+            and not _names_self_case(t, self_key)
+            and (opened_at is None or _predates_case(t, opened_at))
+        ),
     )
 
 
@@ -327,14 +491,23 @@ async def _grant_gate(
 async def _list_body(deps: AgentDeps, lock: asyncio.Lock, verbs: Any,
                      label: str | None, q: str | None) -> str:
     """``list_closed_tickets`` end-to-end: honor the breaker, drive the verb closed-only,
-    re-check each returned item client-side (Fork G/V-A), then capture + view."""
+    re-check each returned item client-side (Fork G/V-A/J), then capture + view."""
     if circuit_breaker.is_tripped(deps.run_dir, SYSTEM):
         return circuit_breaker.down_message(deps.run_dir, SYSTEM)
+    opened_at, boundary_exit, boundary_detail = await _case_opened_at(deps, verbs)
+    if boundary_exit != 0:
+        # No boundary, no listing — and the row is filed under the verb that actually ran and
+        # FAILED, for the reason `_key_grammar`'s failure is: the store was never asked for
+        # precedent, and a row naming `list-tickets` would put an attempt that never happened
+        # into the trail that evidences what was attempted.
+        return await _capture_and_view(
+            deps, lock, _CASE_OPENED_VERB, {}, None, boundary_exit, boundary_detail,
+        )
     payload, exit_code, detail = await _run_verb(
         deps, verbs, "list-tickets", {"label": label, "q": q, "require_closed": True},
     )
     if exit_code == 0:
-        payload, exit_code, detail = _screen_listing(deps, payload)
+        payload, exit_code, detail = _screen_listing(deps, payload, opened_at)
     return await _capture_and_view(
         deps, lock, "list-tickets", {"label": label, "q": q}, payload, exit_code, detail,
     )
@@ -343,8 +516,9 @@ async def _list_body(deps: AgentDeps, lock: asyncio.Lock, verbs: Any,
 async def _get_body(deps: AgentDeps, lock: asyncio.Lock, verbs: Any, key: str) -> str:
     """``get_closed_ticket`` end-to-end: honor the breaker, resolve the environment's key
     grammar (fail closed if it is missing), screen the key against it (Fork A) and against the
-    self-case's own key (Fork C), drive the verb closed-only, screen a self-key-naming payload
-    (Fork H), then capture + view."""
+    self-case's own key (Fork C), resolve the case-opened boundary (fail closed if the store
+    cannot supply it), drive the verb closed-only, screen a self-key-naming or
+    written-after-the-case payload (Fork H/J), then capture + view."""
     if circuit_breaker.is_tripped(deps.run_dir, SYSTEM):
         return circuit_breaker.down_message(deps.run_dir, SYSTEM)
     grammar, cfg_exit, cfg_detail = await _key_grammar(deps, verbs)
@@ -366,34 +540,53 @@ async def _get_body(deps: AgentDeps, lock: asyncio.Lock, verbs: Any, key: str) -
             "that key is the in-flight ticket for the case you are scoring — it is the answer "
             "key, never readable through this confirm. Cite a past CLOSED case."
         )
+    opened_at, boundary_exit, boundary_detail = await _case_opened_at(deps, verbs)
+    if boundary_exit != 0:
+        return await _capture_and_view(
+            deps, lock, _CASE_OPENED_VERB, {}, None, boundary_exit, boundary_detail,
+        )
     payload, exit_code, detail = await _run_verb(
         deps, verbs, "get-ticket", {"key": key, "require_closed": True},
     )
     if exit_code == 0:
-        payload, exit_code, detail = _screen_fetched_ticket(deps, payload)
+        payload, exit_code, detail = _screen_fetched_ticket(deps, payload, opened_at)
     return await _capture_and_view(
         deps, lock, "get-ticket", {"key": key}, payload, exit_code, detail,
     )
 
 
-def _screen_fetched_ticket(deps: AgentDeps, payload: Any) -> tuple[Any, int, str]:
+def _screen_fetched_ticket(
+    deps: AgentDeps, payload: Any, opened_at: _dt.datetime | None,
+) -> tuple[Any, int, str]:
     """A successfully-fetched ``get`` payload → its (payload, exit_code, detail): a non-object
     body is a malformed infra fault, and a genuinely-closed ticket whose free text NAMES the
     case's own key is withheld (Fork H — a business refusal, so it never trips the breaker; the
     one transitive answer-key path whose identifier this seam knows).
 
-    The predicate runs over the SERIALIZED WHOLE payload, not one field: the self-key may ride
-    in a resolution, a nested comment, or the key itself. That is strictly wider than gather's
-    identity-only screen, and deliberately so — gather correlates, the judge scores."""
+    Where ``list`` drops such an item and serves the rest, ``get`` has a single record to answer
+    with, so the whole read fails — under the distinguishable policy code, which is what buys the
+    audit trail its withhold-vs-404 split.
+
+    The recency arm (Fork J) rides the SAME withhold, so a confirm and a listing cannot come to
+    different answers about one record — the asymmetry #683 recorded, kept closed as the screen
+    grows a third reason to withhold."""
     self_key = self_case_key(deps)
-    return screen_get(
-        payload,
-        withhold=lambda ticket: (
-            "the fetched ticket references the case under judgment; its content is withheld "
-            "to keep the answer key unreadable."
-            if self_key in json.dumps(ticket, default=str) else None
-        ),
-    )
+
+    def _withhold(ticket: dict[str, Any]) -> str | None:
+        if _names_self_case(ticket, self_key):
+            return (
+                "the fetched ticket references the case under judgment; its content is "
+                "withheld to keep the answer key unreadable."
+            )
+        if opened_at is not None and not _predates_case(ticket, opened_at):
+            return (
+                "that ticket was last written after the case you are scoring was opened, so "
+                "it cannot be precedent for it — its content is withheld. Cite a case closed "
+                "before this one began."
+            )
+        return None
+
+    return screen_get(payload, withhold=_withhold)
 
 
 def register_closed_ticket_tools(agent: Any, verbs: Any) -> None:
@@ -418,8 +611,9 @@ def register_closed_ticket_tools(agent: Any, verbs: Any) -> None:
         """List CLOSED past cases from the case-history store (closed-only, by construction).
         `label` filters by signature label; `q` is a free-text search. Use it to find the
         precedent a survive-verdict would rest on, then confirm the one you cite with
-        get_closed_ticket. The in-flight ticket for the alert you are scoring is never
-        returned."""
+        get_closed_ticket. Only cases already closed BEFORE the alert you are scoring was
+        opened are returned: the in-flight ticket is never returned, and neither is anything
+        written while this case was live."""
         refusal = await _grant_gate(ctx.deps, verbs, denials, "list-tickets")
         if refusal is not None:
             return refusal
@@ -429,7 +623,8 @@ def register_closed_ticket_tools(agent: Any, verbs: Any) -> None:
     async def get_closed_ticket(ctx: RunContext[Any], key: str) -> str:
         """Confirm one CITED closed past case by its case id `key` (closed-only, by
         construction — a non-closed or missing ticket refuses). Never returns the open
-        in-flight ticket for the alert you are scoring. A cited seed the store can't confirm,
+        in-flight ticket for the alert you are scoring, nor a ticket last written after that
+        alert was opened. A cited seed the store can't confirm,
         or whose grounded conditions these actuals contradict, does not survive on that basis."""
         refusal = await _grant_gate(ctx.deps, verbs, denials, "get-ticket")
         if refusal is not None:

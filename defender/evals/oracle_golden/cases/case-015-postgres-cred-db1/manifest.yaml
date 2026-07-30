@@ -1,0 +1,32 @@
+case_id: case-015-postgres-cred-db1
+kind: observed
+# --- calibration metadata (#711) ---
+# Assigned by the generator BEFORE the first replay: nothing has been scored
+# at this point, so no result could have influenced which side this lands on.
+split: dev
+unit:
+  activity_family: credential-access/T1110-postgres
+  host_pair: office-ws-1->db-1
+capture_environment: playground-v2@live
+# No `state_classes:` here. It was the class-labelling architecture's way of
+# declaring which lookups had nothing to diff; the label pass now derives
+# `state-only` from the lead's own query systems and `environment.yaml`, so a
+# hand-declared class could only disagree with the measurement (#711 §5).
+attack:
+  scenario: postgres-cred-probe
+  seed: 42
+  runner_run_id: postgres-cred-probe-42-ca862020
+  window: ["2026-07-27T20:31:29+00:00", "2026-07-27T20:32:05+00:00"]
+  alert_rule: synthetic-postgres-cred-probe
+  # `captured` = a real rule fired and its alert was extracted.
+  # `synthesised` = nothing fired; the alert was built from the runner record
+  # so the activity's telemetry is not discarded. The oracle never sees the
+  # alert either way (oracle/prompt.md:1) — it only shapes the lead set.
+  alert_source: synthesised
+generated_by: generate_case.py
+# The gather's own `l-004` was dropped post-capture: it queried the whole `logs-*`
+# alias rather than a source-scoped index (SCHEMA.md asks for the latter), which both
+# duplicated the postgresql.log coverage of l-001/l-005 and produced a 400 KB
+# control set the verdict judge cannot hold in context. The four kept leads are the
+# source-scoped ones. The over-broad-lead limit is recorded in README (2026-07-27).
+pruned_leads: [l-004]

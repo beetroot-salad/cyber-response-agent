@@ -1,0 +1,105 @@
+{
+  "lead_id": "l-001",
+  "seq": 5,
+  "controls": [
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-06T20:00:00.000Z",
+        "2026-07-07T00:00:00.000Z"
+      ],
+      "query": "FROM logs-postgresql.log-*\n| WHERE host.name == \"db-1\" AND @timestamp >= \"2026-07-06T20:00:00.000Z\" AND @timestamp < \"2026-07-07T00:00:00.000Z\"\n| EVAL msg_prefix = SUBSTRING(message, 0, 40)\n| STATS count = COUNT(*) BY msg_prefix\n| SORT count DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-postgresql.log-*\n| WHERE host.name == \"db-1\" AND @timestamp >= \"2026-07-06T20:00:00.000Z\" AND @timestamp < \"2026-07-07T00:00:00.000Z\"\n| EVAL msg_prefix = SUBSTRING(message, 0, 40)\n| STATS count = COUNT(*) BY msg_prefix\n| SORT count DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "count",
+            "type": "long"
+          },
+          {
+            "name": "msg_prefix",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 2,
+        "values": [
+          {
+            "count": 23040,
+            "msg_prefix": "Role \"root\" does not exist.\n\tConnection "
+          },
+          {
+            "count": 23040,
+            "msg_prefix": "password authentication failed for user "
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-29T20:00:00.000Z",
+        "2026-06-30T00:00:00.000Z"
+      ],
+      "query": "FROM logs-postgresql.log-*\n| WHERE host.name == \"db-1\" AND @timestamp >= \"2026-06-29T20:00:00.000Z\" AND @timestamp < \"2026-06-30T00:00:00.000Z\"\n| EVAL msg_prefix = SUBSTRING(message, 0, 40)\n| STATS count = COUNT(*) BY msg_prefix\n| SORT count DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-postgresql.log-*\n| WHERE host.name == \"db-1\" AND @timestamp >= \"2026-06-29T20:00:00.000Z\" AND @timestamp < \"2026-06-30T00:00:00.000Z\"\n| EVAL msg_prefix = SUBSTRING(message, 0, 40)\n| STATS count = COUNT(*) BY msg_prefix\n| SORT count DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "count",
+            "type": "long"
+          },
+          {
+            "name": "msg_prefix",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 2,
+        "values": [
+          {
+            "count": 28800,
+            "msg_prefix": "Role \"root\" does not exist.\n\tConnection "
+          },
+          {
+            "count": 28800,
+            "msg_prefix": "password authentication failed for user "
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-35d",
+      "window": [
+        "2026-06-22T20:00:00.000Z",
+        "2026-06-23T00:00:00.000Z"
+      ],
+      "query": "FROM logs-postgresql.log-*\n| WHERE host.name == \"db-1\" AND @timestamp >= \"2026-06-22T20:00:00.000Z\" AND @timestamp < \"2026-06-23T00:00:00.000Z\"\n| EVAL msg_prefix = SUBSTRING(message, 0, 40)\n| STATS count = COUNT(*) BY msg_prefix\n| SORT count DESC\n| LIMIT 20",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-postgresql.log-*\n| WHERE host.name == \"db-1\" AND @timestamp >= \"2026-06-22T20:00:00.000Z\" AND @timestamp < \"2026-06-23T00:00:00.000Z\"\n| EVAL msg_prefix = SUBSTRING(message, 0, 40)\n| STATS count = COUNT(*) BY msg_prefix\n| SORT count DESC\n| LIMIT 20",
+        "columns": [
+          {
+            "name": "count",
+            "type": "long"
+          },
+          {
+            "name": "msg_prefix",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 2,
+        "values": [
+          {
+            "count": 28800,
+            "msg_prefix": "Role \"root\" does not exist.\n\tConnection "
+          },
+          {
+            "count": 28800,
+            "msg_prefix": "password authentication failed for user "
+          }
+        ]
+      }
+    }
+  ]
+}

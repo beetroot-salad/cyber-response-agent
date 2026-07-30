@@ -1,0 +1,122 @@
+projections:
+- lead_id: l-003
+  events: []
+- lead_id: l-002
+  events: []
+- lead_id: l-001
+  events:
+  - '@timestamp': <alert-time>
+    host.name: canary-1
+    event.outcome: failure
+    source.ip: 172.18.0.15
+    user.name: root
+    message: Failed password for root from 172.18.0.15 port <port> ssh2
+  - '@timestamp': <alert-time+~3m>
+    host.name: canary-1
+    event.outcome: failure
+    source.ip: 172.18.0.15
+    user.name: root
+    message: Failed password for root from 172.18.0.15 port <port> ssh2
+- lead_id: l-005
+  events:
+  - verdict: benign
+    score: <score>
+    tags: []
+    campaigns: []
+    threat_actors: []
+- lead_id: l-006
+  events:
+  - '@timestamp': <alert-time>
+    source.ip: 172.18.0.15
+    host.name: canary-1
+    user.name: root
+    event.outcome: failure
+    event.action: ssh_connection_failed
+    auth.method: password
+    message: Failed password for root from 172.18.0.15
+    event.id: <event-id-1>
+  - '@timestamp': <alert-time+~10s>
+    source.ip: 172.18.0.15
+    host.name: canary-1
+    user.name: root
+    event.outcome: failure
+    event.action: ssh_connection_failed
+    auth.method: password
+    message: Failed password for root from 172.18.0.15
+    event.id: <event-id-2>
+  - '@timestamp': <alert-time+~20s>
+    source.ip: 172.18.0.15
+    host.name: canary-1
+    user.name: root
+    event.outcome: failure
+    event.action: ssh_connection_failed
+    auth.method: password
+    message: Failed password for root from 172.18.0.15
+    event.id: <event-id-3>
+  - '@timestamp': <alert-time+~30s>
+    source.ip: 172.18.0.15
+    host.name: canary-1
+    user.name: root
+    event.outcome: failure
+    event.action: ssh_connection_failed
+    auth.method: password
+    message: Failed password for root from 172.18.0.15
+    event.id: <event-id-4>
+  - '@timestamp': <alert-time+~40s>
+    source.ip: 172.18.0.15
+    host.name: canary-1
+    user.name: root
+    event.outcome: failure
+    event.action: ssh_connection_failed
+    auth.method: password
+    message: Failed password for root from 172.18.0.15
+    event.id: <event-id-5>
+  - '@timestamp': <alert-time+~50s>
+    source.ip: 172.18.0.15
+    host.name: canary-1
+    user.name: root
+    event.outcome: failure
+    event.action: ssh_connection_failed
+    auth.method: password
+    message: Failed password for root from 172.18.0.15
+    event.id: <event-id-6>
+  - '@timestamp': <alert-time+~60s>
+    source.ip: 172.18.0.15
+    host.name: canary-1
+    user.name: root
+    event.outcome: failure
+    event.action: ssh_connection_failed
+    auth.method: password
+    message: Failed password for root from 172.18.0.15
+    event.id: <event-id-7>
+  - '@timestamp': <alert-time+~70s>
+    source.ip: 172.18.0.15
+    host.name: canary-1
+    user.name: root
+    event.outcome: failure
+    event.action: ssh_connection_failed
+    auth.method: password
+    message: Failed password for root from 172.18.0.15
+    event.id: <event-id-8>
+- lead_id: l-004
+  events:
+  - '@timestamp': <alert-time>
+    source.ip: 172.18.0.15
+    destination.ip: 172.18.0.9
+    zeek.ssh.client: <ssh-client>
+    zeek.ssh.server: <ssh-server>
+    host.name: <host.name>
+  - '@timestamp': <alert-time+~3m>
+    source.ip: 172.18.0.15
+    destination.ip: 172.18.0.9
+    destination.port: 22
+    source.bytes: <bytes-out>
+    destination.bytes: <bytes-in>
+    host.name: <host.name>
+    data_stream.dataset: zeek.ssh
+- lead_id: l-007
+  events: []
+- lead_id: l-008
+  events: []
+- lead_id: l-009
+  events: []

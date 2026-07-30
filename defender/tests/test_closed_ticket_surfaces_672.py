@@ -35,6 +35,7 @@ from defender.runtime.permission.command_shape import SQL_SHIM  # noqa: E402
 from defender.scripts.adapters.faults import UpstreamFault  # noqa: E402
 from defender.tests.e2e._replay_harness import DEFENDER, Turn, VerbRecorder  # noqa: E402
 from defender.tests._closed_ticket_672 import (  # noqa: E402
+    DATED,
     BIT,
     CASE,
     CLOSED_TKT,
@@ -66,8 +67,8 @@ def test_repeated_reads_are_fresh_live_and_unreconciled(tmp_path):
     writes its own capture row (the audit records the disagreement without resolving it)
     and all share the one breaker."""
     rec = VerbRecorder()
-    v1 = {"key": OTHER_KEY, "status": "closed", "summary": "TKT-V1 pre-enrichment"}
-    v2 = {"key": OTHER_KEY, "status": "closed", "summary": "TKT-V2 post-enrichment"}
+    v1 = {**DATED, "key": OTHER_KEY, "status": "closed", "summary": "TKT-V1 pre-enrichment"}
+    v2 = {**DATED, "key": OTHER_KEY, "status": "closed", "summary": "TKT-V2 post-enrichment"}
     run = _drive(tmp_path, [_get(OTHER_KEY), _get(OTHER_KEY), DONE],
                  registry=_ticket_registry(rec, get=[("return", v1), ("return", v2)]))
     assert run.out.strip()
@@ -88,8 +89,8 @@ def test_two_ticket_calls_one_turn_rows_independent(tmp_path):
     seq-race stays unexercised and UNCLAIMED; what is pinned is per-call row/payload-path
     independence for the one-turn call shape."""
     rec = VerbRecorder()
-    a = {"key": "SOC-A", "status": "closed", "summary": "TKT-PAR-A"}
-    b = {"key": "SOC-B", "status": "closed", "summary": "TKT-PAR-B"}
+    a = {**DATED, "key": "SOC-A", "status": "closed", "summary": "TKT-PAR-A"}
+    b = {**DATED, "key": "SOC-B", "status": "closed", "summary": "TKT-PAR-B"}
     run = _drive(
         tmp_path,
         [Turn(tool_calls=[(TOOL_GET, {"key": "SOC-A"}), (TOOL_GET, {"key": "SOC-B"})]), DONE],
@@ -113,7 +114,7 @@ def test_ticket_flips_state_between_list_and_get(tmp_path):
     guarantee exists anywhere). The listing served it as closed; the get refuses it live
     (c2/g5's refusal class); there is no cross-call reconciliation between the two views."""
     rec = VerbRecorder()
-    listing = {"tickets": [{"key": "SOC-FLIP", "status": "closed", "summary": "TKT-FLIP-LISTED"}],
+    listing = {"tickets": [{**DATED, "key": "SOC-FLIP", "status": "closed", "summary": "TKT-FLIP-LISTED"}],
                "total": 1}
     run = _drive(
         tmp_path,

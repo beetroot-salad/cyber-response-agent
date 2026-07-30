@@ -1,0 +1,105 @@
+{
+  "lead_id": "l-002",
+  "seq": 3,
+  "controls": [
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-06-30T06:17:32.000Z",
+        "2026-07-07T06:17:32.000Z"
+      ],
+      "query": "FROM logs-nginx.access-*\n| WHERE @timestamp >= \"2026-06-30T06:17:32.000Z\" AND @timestamp < \"2026-07-07T06:17:32.000Z\"\n        AND host.name == \"web-1\"\n| STATS requests = COUNT(*)\n        BY url.path\n| SORT requests DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-nginx.access-*\n| WHERE @timestamp >= \"2026-06-30T06:17:32.000Z\" AND @timestamp < \"2026-07-07T06:17:32.000Z\"\n        AND host.name == \"web-1\"\n| STATS requests = COUNT(*)\n        BY url.path\n| SORT requests DESC",
+        "columns": [
+          {
+            "name": "requests",
+            "type": "long"
+          },
+          {
+            "name": "url.path",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 2,
+        "values": [
+          {
+            "requests": 193324,
+            "url.path": "/nginx_status"
+          },
+          {
+            "requests": 10479,
+            "url.path": "/"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-23T06:17:32.000Z",
+        "2026-06-30T06:17:32.000Z"
+      ],
+      "query": "FROM logs-nginx.access-*\n| WHERE @timestamp >= \"2026-06-23T06:17:32.000Z\" AND @timestamp < \"2026-06-30T06:17:32.000Z\"\n        AND host.name == \"web-1\"\n| STATS requests = COUNT(*)\n        BY url.path\n| SORT requests DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-nginx.access-*\n| WHERE @timestamp >= \"2026-06-23T06:17:32.000Z\" AND @timestamp < \"2026-06-30T06:17:32.000Z\"\n        AND host.name == \"web-1\"\n| STATS requests = COUNT(*)\n        BY url.path\n| SORT requests DESC",
+        "columns": [
+          {
+            "name": "requests",
+            "type": "long"
+          },
+          {
+            "name": "url.path",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 2,
+        "values": [
+          {
+            "requests": 241920,
+            "url.path": "/nginx_status"
+          },
+          {
+            "requests": 13264,
+            "url.path": "/"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-35d",
+      "window": [
+        "2026-06-16T06:17:32.000Z",
+        "2026-06-23T06:17:32.000Z"
+      ],
+      "query": "FROM logs-nginx.access-*\n| WHERE @timestamp >= \"2026-06-16T06:17:32.000Z\" AND @timestamp < \"2026-06-23T06:17:32.000Z\"\n        AND host.name == \"web-1\"\n| STATS requests = COUNT(*)\n        BY url.path\n| SORT requests DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-nginx.access-*\n| WHERE @timestamp >= \"2026-06-16T06:17:32.000Z\" AND @timestamp < \"2026-06-23T06:17:32.000Z\"\n        AND host.name == \"web-1\"\n| STATS requests = COUNT(*)\n        BY url.path\n| SORT requests DESC",
+        "columns": [
+          {
+            "name": "requests",
+            "type": "long"
+          },
+          {
+            "name": "url.path",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 2,
+        "values": [
+          {
+            "requests": 262090,
+            "url.path": "/nginx_status"
+          },
+          {
+            "requests": 13978,
+            "url.path": "/"
+          }
+        ]
+      }
+    }
+  ]
+}

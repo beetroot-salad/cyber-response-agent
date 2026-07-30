@@ -61,7 +61,7 @@ layering inversion or `sys.path` dance.
 returning `[(XY, path)]` records. This is a **correctness upgrade**, not just a
 move: today's `changes_outside` parses non-`-z` output and mishandles spaced
 paths. The three call shapes reduce to it — `changes_outside` filters the
-records, the boolean predicate `corpus_dir_clean` becomes `bool(git_status(...))`,
+records, the boolean clean-corpus predicate becomes `bool(git_status(...))`,
 and `path_validation._porcelain_records` *is* it.
 
 The worktree helpers cover both existing managers with one signature:

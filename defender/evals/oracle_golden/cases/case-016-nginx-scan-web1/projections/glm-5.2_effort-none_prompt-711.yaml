@@ -1,0 +1,117 @@
+projections:
+- lead_id: l-004
+  events: []
+- lead_id: l-003
+  events: []
+- lead_id: l-002
+  events: []
+- lead_id: l-001
+  events:
+  - host.name: web-1
+    source.ip: <office-ws-1-ip>
+    path: /admin
+    method: GET
+    status: 404
+    user_agent: curl/8.<version>
+    requests: 1
+    first_seen: '2026-07-28T06:17:29+00:00'
+    last_seen: '2026-07-28T06:17:29+00:00'
+  - host.name: web-1
+    source.ip: <office-ws-1-ip>
+    path: /.env
+    method: GET
+    status: 404
+    user_agent: curl/8.<version>
+    requests: 1
+    first_seen: '2026-07-28T06:17:29+00:00'
+    last_seen: '2026-07-28T06:17:29+00:00'
+  - host.name: web-1
+    source.ip: <office-ws-1-ip>
+    path: /wp-login.php
+    method: GET
+    status: 404
+    user_agent: curl/8.<version>
+    requests: 1
+    first_seen: '2026-07-28T06:17:29+00:00'
+    last_seen: '2026-07-28T06:17:29+00:00'
+  - host.name: web-1
+    source.ip: <office-ws-1-ip>
+    path: /api/v1/users
+    method: GET
+    status: 404
+    user_agent: curl/8.<version>
+    requests: 1
+    first_seen: '2026-07-28T06:17:29+00:00'
+    last_seen: '2026-07-28T06:17:29+00:00'
+  - host.name: web-1
+    source.ip: <office-ws-1-ip>
+    path: /.git/config
+    method: GET
+    status: 404
+    user_agent: curl/8.<version>
+    requests: 1
+    first_seen: '2026-07-28T06:17:29+00:00'
+    last_seen: '2026-07-28T06:17:29+00:00'
+  - host.name: web-1
+    source.ip: <office-ws-1-ip>
+    path: /phpmyadmin
+    method: GET
+    status: 404
+    user_agent: curl/8.<version>
+    requests: 1
+    first_seen: '2026-07-28T06:17:30+00:00'
+    last_seen: '2026-07-28T06:17:30+00:00'
+  - host.name: web-1
+    source.ip: <office-ws-1-ip>
+    path: /server-status
+    method: GET
+    status: 404
+    user_agent: curl/8.<version>
+    requests: 1
+    first_seen: '2026-07-28T06:17:30+00:00'
+    last_seen: '2026-07-28T06:17:30+00:00'
+  - host.name: web-1
+    source.ip: <office-ws-1-ip>
+    path: /config.php
+    method: GET
+    status: 404
+    user_agent: curl/8.<version>
+    requests: 1
+    first_seen: '2026-07-28T06:17:30+00:00'
+    last_seen: '2026-07-28T06:17:30+00:00'
+  - host.name: web-1
+    source.ip: <office-ws-1-ip>
+    path: /backup.sql
+    method: GET
+    status: 404
+    user_agent: curl/8.<version>
+    requests: 1
+    first_seen: '2026-07-28T06:17:30+00:00'
+    last_seen: '2026-07-28T06:17:30+00:00'
+  - host.name: web-1
+    source.ip: <office-ws-1-ip>
+    path: /.aws/credentials
+    method: GET
+    status: 404
+    user_agent: curl/8.<version>
+    requests: 1
+    first_seen: '2026-07-28T06:17:31+00:00'
+    last_seen: '2026-07-28T06:17:31+00:00'
+  - host.name: web-1
+    source.ip: <office-ws-1-ip>
+    path: /actuator/health
+    method: GET
+    status: 404
+    user_agent: curl/8.<version>
+    requests: 1
+    first_seen: '2026-07-28T06:17:31+00:00'
+    last_seen: '2026-07-28T06:17:31+00:00'
+  - host.name: web-1
+    source.ip: <office-ws-1-ip>
+    path: /.ssh/id_rsa
+    method: GET
+    status: 404
+    user_agent: curl/8.<version>
+    requests: 1
+    first_seen: '2026-07-28T06:17:31+00:00'
+    last_seen: '2026-07-28T06:17:31+00:00'

@@ -1,0 +1,105 @@
+{
+  "lead_id": "l-002",
+  "seq": 2,
+  "controls": [
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-06-30T06:17:32.000Z",
+        "2026-07-07T06:17:32.000Z"
+      ],
+      "query": "FROM logs-nginx.access-*\n| WHERE @timestamp >= \"2026-06-30T06:17:32.000Z\" AND @timestamp < \"2026-07-07T06:17:32.000Z\"\n        AND host.name == \"web-1\"\n| STATS requests = COUNT(*)\n        BY http.response.status_code\n| SORT requests DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-nginx.access-*\n| WHERE @timestamp >= \"2026-06-30T06:17:32.000Z\" AND @timestamp < \"2026-07-07T06:17:32.000Z\"\n        AND host.name == \"web-1\"\n| STATS requests = COUNT(*)\n        BY http.response.status_code\n| SORT requests DESC",
+        "columns": [
+          {
+            "name": "requests",
+            "type": "long"
+          },
+          {
+            "name": "http.response.status_code",
+            "type": "long"
+          }
+        ],
+        "row_count": 2,
+        "values": [
+          {
+            "requests": 193324,
+            "http.response.status_code": 404
+          },
+          {
+            "requests": 10479,
+            "http.response.status_code": 200
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-23T06:17:32.000Z",
+        "2026-06-30T06:17:32.000Z"
+      ],
+      "query": "FROM logs-nginx.access-*\n| WHERE @timestamp >= \"2026-06-23T06:17:32.000Z\" AND @timestamp < \"2026-06-30T06:17:32.000Z\"\n        AND host.name == \"web-1\"\n| STATS requests = COUNT(*)\n        BY http.response.status_code\n| SORT requests DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-nginx.access-*\n| WHERE @timestamp >= \"2026-06-23T06:17:32.000Z\" AND @timestamp < \"2026-06-30T06:17:32.000Z\"\n        AND host.name == \"web-1\"\n| STATS requests = COUNT(*)\n        BY http.response.status_code\n| SORT requests DESC",
+        "columns": [
+          {
+            "name": "requests",
+            "type": "long"
+          },
+          {
+            "name": "http.response.status_code",
+            "type": "long"
+          }
+        ],
+        "row_count": 2,
+        "values": [
+          {
+            "requests": 241920,
+            "http.response.status_code": 404
+          },
+          {
+            "requests": 13264,
+            "http.response.status_code": 200
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-35d",
+      "window": [
+        "2026-06-16T06:17:32.000Z",
+        "2026-06-23T06:17:32.000Z"
+      ],
+      "query": "FROM logs-nginx.access-*\n| WHERE @timestamp >= \"2026-06-16T06:17:32.000Z\" AND @timestamp < \"2026-06-23T06:17:32.000Z\"\n        AND host.name == \"web-1\"\n| STATS requests = COUNT(*)\n        BY http.response.status_code\n| SORT requests DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-nginx.access-*\n| WHERE @timestamp >= \"2026-06-16T06:17:32.000Z\" AND @timestamp < \"2026-06-23T06:17:32.000Z\"\n        AND host.name == \"web-1\"\n| STATS requests = COUNT(*)\n        BY http.response.status_code\n| SORT requests DESC",
+        "columns": [
+          {
+            "name": "requests",
+            "type": "long"
+          },
+          {
+            "name": "http.response.status_code",
+            "type": "long"
+          }
+        ],
+        "row_count": 2,
+        "values": [
+          {
+            "requests": 262090,
+            "http.response.status_code": 404
+          },
+          {
+            "requests": 13978,
+            "http.response.status_code": 200
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,69 @@
+{
+  "tag": "glm-5.2_effort-none_prompt-711__judge-claude-opus-5-high_47d6044a",
+  "projection": "glm-5.2_effort-none_prompt-711.yaml",
+  "case": "case-014-authkeys-db1",
+  "kind": "observed",
+  "judge": {
+    "model": "claude-opus-5",
+    "effort": "high",
+    "prompts_sha8": "47d6044a"
+  },
+  "n_leads": 3,
+  "mechanical": {
+    "missing_leads": [],
+    "unscored_leads": [],
+    "duplicate_leads": [],
+    "malformed_leads": {},
+    "forbidden_emitted": [],
+    "concrete_value_leads": [
+      "l-001"
+    ],
+    "expectation_failures": []
+  },
+  "judged": true,
+  "faithful": "1/2",
+  "abstentions": 1,
+  "by_system": {
+    "change-mgmt": "1/1",
+    "elastic": "0/1"
+  },
+  "cost_usd": 0.9634,
+  "rows": [
+    {
+      "lead": "l-001",
+      "system": "elastic",
+      "delta_kind": "undecidable",
+      "faithful": null,
+      "cause": null,
+      "heterogeneous": null,
+      "undecidable_reason": "insufficient-baseline",
+      "form_notes": null,
+      "rationale": "the label pass could not measure this envelope; not graded",
+      "evidence": "The `baseline` block is an empty list \u2014 no control payload was captured for any of the three query strings, so there is nothing to diff the observed window against. Observed seq 0 (`_id: \"AZ-lOaD-23Huse3YvZvx\"` in .ds-logs-falco.alerts-default-2026.06.29-000007) and seq 1 (the 20:19\u201320:20 rule query) both return total 0 / returned 0 with truncated false, while seq 2 (20:00\u201321:00) returns total 3, all three being `falco.rule: \"Adding ssh keys to authorized_keys\"`, priority Warning, `fd.name: /root/.ssh/authorized_keys`, `proc.name: bash`, `proc.pname: containerd-shim`, `user.name: root`, `container.name: <NA>`, at 20:11:32.775, 20:14:11.072 and 20:17:30.874 \u2014 with identical `proc.cmdline` appending an `..._attacker attacker@elsewhere` key. Whether that rule fires at this rate routinely on soc-playground cannot be established here, and the only cross-window-varying field present (`falco.output_fields.container.id: a36492b5172b`) is listed as an unstable identifier and so could not evidence a delta anyway. A control run of the same `falco.rule` query over a live one-hour window a week back would have settled it."
+    },
+    {
+      "lead": "l-002",
+      "system": "change-mgmt",
+      "delta_kind": "state-only",
+      "faithful": true,
+      "cause": null,
+      "heterogeneous": null,
+      "undecidable_reason": null,
+      "form_notes": "projection is an empty list rather than an explicit \"no covering CR\" marker; observed is likewise an empty array, so the granularity difference is cosmetic",
+      "rationale": "The lead holds a single `change-mgmt.active-changes` lookup keyed to host `soc-playground` at the instant `2026-07-27T20:19:23Z`, and the environment notes classify change-mgmt as a state/lookup system with no `@timestamp` bounds to move and therefore no baseline-diff semantics \u2014 matching `measurement`'s `state-only` reading. `observed` seq 0 is `[]` and `baseline` is `[]`, so there is no CR row for the activity to add, remove, or alter. The oracle emitted `[]`, which asserts exactly that: no approved change record covers the host at that instant. It invented no CR id, requester, or window, and claimed no suppression over an envelope with nothing to suppress, so the projection matches the measured (null) delta.",
+      "evidence": "The lead contains a single query, `change-mgmt.active-changes`, parameterized by host `soc-playground` and an instant `at: 2026-07-27T20:19:23Z` rather than a time range. The environment notes state explicitly that change-mgmt queries return a current change record set, carry no `@timestamp` bounds to move, and therefore have no control window or baseline-diff semantics. Consistent with that, `observed` seq 0 is an empty array and `baseline` is an empty list \u2014 not an empty control window but the absence of any baseline construct at all. The empty result means no CR record covers that host at that instant; it is a lookup answer, not a stream delta."
+    },
+    {
+      "lead": "l-003",
+      "system": "elastic",
+      "delta_kind": "present",
+      "faithful": false,
+      "cause": "C-EVENT-AS-NOISE",
+      "heterogeneous": null,
+      "undecidable_reason": null,
+      "form_notes": null,
+      "rationale": "The observed ES|QL aggregation (seq 1) returns a fifth grouped row absent from all three live controls: rule=\"Adding ssh keys to authorized_keys\", events=3, proc=bash, parent=containerd-shim, cmdline appending \"ssh-rsa AAAAB3NzaC1yc2EAAAAD_fake_key_0_${ts}_attacker\" to /root/.ssh/authorized_keys. Each control (C-21d, C-28d, C-35d, all window_live: true) returns only the four routine rows \u2014 sshd redirect, unexpected UDP, curl ingress, nc network tool \u2014 byte-identical in every surfaced field to their observed counterparts, so the difference is not carried by the unstable container.id (a36492b5172b everywhere) but by rule, proc, parent and cmdline, which these queries do surface. The seq 0 single-document fetch returns the same 20:17:30.874 authorized_keys alert with the story's exact command line. The projection emitted only the indistinguishable-noise marker, discarding a delta the lead's own columns plainly carry.",
+      "evidence": "The ES|QL aggregation (seq 1) returns 5 grouped rows in the observed window versus 4 in each of the three live controls (C-21d, C-28d, C-35d). Four rows are byte-identical in every surfaced field across observed and all controls \u2014 \"Redirect STDOUT/STDIN to Network Connection in Container\" (proc sshd, cmdline \"sshd\", parent sshd), \"Unexpected UDP Traffic\" (sshd, \"sshd -D -R\"), \"Launch Ingress Remote File Copy Tools in Container\" (curl, \"curl -sf -o /dev/null http://127.0.0.1/\", parent bash), and \"Launch Suspicious Network Tool in Container\" (nc, \"nc -z 127.0.0.1 22\", parent runuser) \u2014 differing only in counts, which tracks the 30m observed window against 60m controls. The fifth observed row, rule=\"Adding ssh keys to authorized_keys\", events=3, proc=bash, parent=containerd-shim, cmdline appending \"ssh-rsa AAAAB3NzaC1yc2EAAAAD_fake_key_0_${ts}_attacker\" to /root/.ssh/authorized_keys, first_seen 20:11:33.548Z, has no counterpart in any control; the distinction is carried by the rule, proc, parent and cmdline columns, not by the unstable container.id (a36492b5172b, identical everywhere). The seq 0 payload is a single-document _id fetch of that same 20:17:30 authorized_keys alert with no control window, so it is not independently decidable and heterogeneity cannot be assessed."
+    }
+  ]
+}

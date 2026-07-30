@@ -47,6 +47,20 @@ discriminates: entity-copying vs. story-tracking projection
 result_classes_covered: ["+event", "0"]
 lead_source: inherited from case-001 (captured from defender run oracle-fidelity-1)
 
+# THE CONTRACT — enforced by `score.py`, which exits non-zero on a violation. Only the
+# forbidden half (`must_not_emit`, in expected.yaml) was ever checked; the case's whole
+# positive claim — that the projection TRACKS the mutated story — rested on a sentence in
+# `projections[].result`. Both committed projections already satisfy every line below, so
+# this records measured behaviour rather than inventing a bar.
+expectation:
+  # The sharper of the two discriminators: every query in l-004 and l-006 hard-filters
+  # `source.ip == "172.18.0.15"`, so moving the attacker to .30 puts the activity outside
+  # those envelopes entirely. A projection that copies case-001 emits the old burst here.
+  empty_leads: [l-004, l-006]
+  # The mutation has to actually land. Without this, a projection that emitted nothing
+  # anywhere would pass the leak check perfectly by saying nothing at all.
+  must_emit: ["172.18.0.30", "admin"]
+
 projections:
   - tag: glm-5.2_effort-none
     oracle_model: glm-5.2

@@ -1,0 +1,39 @@
+case_id: case-019-squid-egress-officews1
+kind: observed
+# --- calibration metadata (#711) ---
+# Assigned by the generator BEFORE the first replay: nothing has been scored
+# at this point, so no result could have influenced which side this lands on.
+split: held-out
+unit:
+  activity_family: exfiltration/T1048-proxy-egress
+  host_pair: office-ws-1->office-ws-1
+capture_environment: playground-v2@live
+# No `state_classes:` here. It was the class-labelling architecture's way of
+# declaring which lookups had nothing to diff; the label pass now derives
+# `state-only` from the lead's own query systems and `environment.yaml`, so a
+# hand-declared class could only disagree with the measurement (#711 §5).
+attack:
+  scenario: proxy-egress-burst
+  seed: 42
+  runner_run_id: proxy-egress-burst-42-51747981
+  window: ["2026-07-28T07:05:59+00:00", "2026-07-28T07:06:53+00:00"]
+  alert_rule: synthetic-proxy-egress-burst
+  # `captured` = a real rule fired and its alert was extracted.
+  # `synthesised` = nothing fired; the alert was built from the runner record
+  # so the activity's telemetry is not discarded. The oracle never sees the
+  # alert either way (oracle/prompt.md:1) — it only shapes the lead set.
+  alert_source: synthesised
+  # Synthesis was FORCED (--rule sentinel). The proxy's external CONNECT via curl
+  # does trip v2-falco-suspicious-network-tool, and an earlier unforced run
+  # (ex-case-018) captured that Falco alert — which anchored the whole
+  # investigation on the container process and steered it to zeek.http, so it
+  # never queried logs-squid.access. Bypassing the alert lets the proxy-egress
+  # story drive the lead set, and the investigation then exercises the squid
+  # source it is meant to cover.
+generated_by: generate_case.py
+# l-006 dropped post-capture: a 32-query "correlate everything on office-ws-1" sprawl
+# (squid + zeek.{http,dns,connection} + falco + host-state + two `logs-*` wildcards),
+# 162 KB of observed+control payload — over-broad, redundant with the source-scoped
+# squid coverage in l-001/l-004, and heavy enough to risk the verdict judge's context
+# (the limit recorded in README, 2026-07-27). The six kept leads are source-scoped.
+pruned_leads: [l-006]

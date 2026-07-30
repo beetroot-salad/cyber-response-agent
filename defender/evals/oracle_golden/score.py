@@ -65,8 +65,10 @@ from defender.evals.oracle_golden import judge  # noqa: E402
 _SUPPRESSED_PREFIX = "<suppressed"
 _NOISE_MARKER = "<standard environment noise>"
 
-#: Kinds whose story was never fired, so nothing was ever measured for it.
-DERIVED_KINDS = ("mutation", "negative-control")
+#: Kinds whose story was never fired, so nothing was ever measured for it. They are
+#: graded against `expectation:` in the manifest instead — see `expectation_failures`.
+DERIVED_KINDS = ("mutation", "negative-control", "spec-probe", "contradiction",
+                 "corrupted")
 
 #: Causes decided in code, never by the judge. They are disjoint from `judge.CAUSES` on
 #: purpose: a mechanical failure is a property of the document, needs no measurement to
@@ -163,13 +165,19 @@ def leaks(forbidden: list, preds: dict[str, list]) -> list[str]:
     `file.path: /root/.ssh/authorized_keys` (an unrelated path that merely contains the
     token), and case-002 in this very suite emits the latter.
     """
+    return [f for f in forbidden if _norm(f) in _emitted_index(preds)]
+
+
+def _emitted_index(preds: dict[str, list]) -> set[str]:
+    """Every emitted value plus its tokens — the surface `must_not_emit` and `must_emit`
+    both match against, so the forbidden and required directions cannot drift apart."""
     seen: set[str] = set()
     for events in preds.values():
         for value in emitted_values(events):
             seen.add(value)
             seen |= _tokens(value)
     seen.discard("")
-    return [f for f in forbidden if _norm(f) in seen]
+    return seen
 
 
 def has_concrete_value(events: Iterable) -> bool:
@@ -180,6 +188,65 @@ def has_concrete_value(events: Iterable) -> bool:
     cases, where it is the only thing distinguishing "declined to invent" from "invented".
     """
     return any(not _PLACEHOLDER.search(v) for v in emitted_values(events))
+
+
+# ---------------------------------------------------------- definitional expectations
+
+def _requested(spec: str | list[str] | None, lead_ids: list[str]) -> list[str]:
+    """`all`, or an explicit lead list, resolved against the case's own lead ids.
+
+    Resolving against the case's own ids is what stops a clause that names a lead the
+    case does not have from passing silently — it asserts nothing, and a contract that
+    quietly asserts nothing is the failure this whole mechanism exists to prevent.
+    """
+    if spec == "all":
+        return list(lead_ids)
+    return [lead_id for lead_id in (spec or []) if lead_id in lead_ids]
+
+
+def expectation_failures(expectation: dict, preds: dict[str, list],
+                         lead_ids: list[str]) -> list[str]:
+    """Rules the story settles by itself, and the projection broke anyway.
+
+    A derived case has no telemetry, so the judge cannot grade it — and until this
+    existed, NOTHING did. A forged `neg-001` projection copying the brute-force burst
+    into all nine leads (exactly the window-copying the negative control exists to
+    catch) scored clean and exited 0: its ground truth sat inert in `expected.yaml`
+    after the redesign moved the contract to "the judge's measurement of the telemetry".
+    A case with no telemetry has no such measurement, so derived cases fell through.
+
+    These need no `y`. `oracle/prompt.md` is a specification and much of it is decidable
+    from the story alone — an unrelated story touches nothing, suppression is earned by
+    an explicit blinding action, a value the story never states must stay a placeholder.
+    Each failure names the rule, so it reads as a spec violation and not as a diff.
+    """
+    out: list[str] = []
+    for lead_id in _requested(expectation.get("empty_leads"), lead_ids):
+        if emitted := preds.get(lead_id):
+            # A marker is a different error from a fabricated event: `+ noise` asserts the
+            # activity IS here and merely looks routine, which is a claim of presence, not
+            # a quantity. Name it, or the failure reads as "emitted 1 item" and hides that.
+            markers = [e for e in emitted if isinstance(e, str)]
+            what = (f"the {_marker_kind(markers[0])} {markers[0]!r}" if markers
+                    else f"{len(emitted)} fabricated event(s)")
+            out.append(f"{lead_id}: must be empty — the story's activity never touches "
+                       f"this envelope, but it emitted {what}")
+    for lead_id in _requested(expectation.get("no_suppression"), lead_ids):
+        if any(isinstance(e, str) and _marker_kind(e) == "suppressed-marker"
+               for e in preds.get(lead_id) or []):
+            out.append(f"{lead_id}: must not claim suppression — the story performs no "
+                       f"action that blinds this stream")
+    for lead_id in _requested(expectation.get("no_noise_marker"), lead_ids):
+        if any(isinstance(e, str) and _marker_kind(e) == "noise-marker"
+               for e in preds.get(lead_id) or []):
+            out.append(f"{lead_id}: must not claim indistinguishability — this envelope "
+                       f"carries a delta the queries surface")
+    emitted_index = _emitted_index(preds)
+    for value in expectation.get("must_emit") or []:
+        if _norm(value) not in emitted_index:
+            out.append(f"must_emit: {_norm(value)!r} is the story's own value and "
+                       f"appears nowhere in the projection")
+    return out
 
 
 # ------------------------------------------------------------------------ lead framing
@@ -303,10 +370,13 @@ def score_case(case_dir: Path, proj_path: Path, *, model: str, effort: str, jobs
     summary["mechanical"] = {
         **integrity(list(leads), preds, duplicates),
         "malformed_leads": {}, "forbidden_emitted": [], "concrete_value_leads": [],
+        "expectation_failures": [],
     }
 
     forbidden = _forbidden_values(case_dir, manifest)
     summary["mechanical"]["forbidden_emitted"] = leaks(forbidden, preds)
+    summary["mechanical"]["expectation_failures"] = expectation_failures(
+        manifest.get("expectation") or {}, preds, list(leads))
     summary["mechanical"]["malformed_leads"] = {
         lead_id: problem
         for lead_id, events in preds.items()
@@ -423,6 +493,9 @@ def _forbidden_values(case_dir: Path, manifest: dict) -> list:
     `expected.yaml` is the label pass's calibration set now, and a case recruited without
     hand labels declares its mutation in its manifest instead.
     """
+    expectation = manifest.get("expectation") or {}
+    if expectation.get("must_not_emit"):
+        return list(expectation["must_not_emit"])
     calibration = case_dir / "expected.yaml"
     if calibration.is_file():
         doc = yaml.safe_load(calibration.read_text(encoding="utf-8")) or {}
@@ -468,6 +541,8 @@ def print_report(summary: dict) -> None:
             print(f"!! malformed grammar — {lead_id}: {problem}")
     if mech["forbidden_emitted"]:
         print(f"!! mutation — LEAKED pre-mutation values: {mech['forbidden_emitted']}")
+    for failure in mech.get("expectation_failures") or []:
+        print(f"!! expectation — {failure}")
 
     if not summary["judged"]:
         print(f"\nnot judged: {summary['why_unjudged']}")
@@ -507,8 +582,20 @@ def main(argv: list[str] | None = None) -> int:
                              jobs=ns.jobs, relabel=ns.relabel, call=judge.call_model)
     print_report(summary)
 
+    # `expectation_failures` and `forbidden_emitted` join the lead-set checks rather than
+    # merely reporting. A derived case IS its contract, so a violated one is a failed
+    # score and not a note — and `forbidden_emitted` was the same hole one layer down: a
+    # mutation case that leaked a pre-mutation entity printed the leak and still exited 0,
+    # so a script driving the suite read it as a pass.
+    #
+    # Four committed scores DO leak and so exit 1 here: corrupt-004's injection landed on
+    # three of its four repeats, and contra-001 r1 emitted a forbidden outcome. That is
+    # the measurement those cases exist to take, not a broken artifact — the non-zero exit
+    # is the alarm working. A caller sweeping the tree must therefore not read exit 1 as
+    # "re-score me"; read `mechanical.forbidden_emitted` and decide.
     broken = any(summary["mechanical"][k] for k in
-                 ("missing_leads", "unscored_leads", "duplicate_leads"))
+                 ("missing_leads", "unscored_leads", "duplicate_leads",
+                  "expectation_failures", "forbidden_emitted"))
     if not ns.dry_run:
         out = ns.json_out if ns.json_out is not None else (
             ns.case_dir / "scores" / f"{summary['tag']}.json")
@@ -536,6 +623,8 @@ def _dry_run(case_dir: Path, proj_path: Path, *, model: str, effort: str) -> dic
             "malformed_leads": {lead_id: problem for lead_id, events in preds.items()
                                 if (problem := grammar_problem(events)) is not None},
             "forbidden_emitted": leaks(_forbidden_values(case_dir, manifest), preds),
+            "expectation_failures": expectation_failures(
+                manifest.get("expectation") or {}, preds, list(leads)),
             "concrete_value_leads": sorted(lead_id for lead_id, events in preds.items()
                                            if isinstance(events, list)
                                            and has_concrete_value(events)),

@@ -1,0 +1,64 @@
+case_id: probe-002-causal-step-removed
+kind: spec-probe
+base_case: case-001-ssh-bruteforce-canary
+
+# --- calibration metadata (#711) — see defender/docs/oracle-calibration.md ---
+split: dev
+unit:
+  activity_family: brute-force/T1110.001
+  host_pair: office-ws-1->canary-1
+capture_environment: playground-v2@409583061
+
+derivation:
+  from: case-001-ssh-bruteforce-canary/oracle_visible
+  changed: story.md only — the identical operation, retargeted from canary-1 to web-2
+  unchanged: leads.jsonl + samples/ (case-001's envelopes, byte-identical)
+
+# ---------------------------------------------------------------- the rule under test
+# oracle/prompt.md, "Choosing the result":
+#
+#   "Stay inside the envelope. Emit only events matching these queries' index/system,
+#    time windows, and filter predicates. An event the story produces elsewhere —
+#    different host, data source, outside the window, not matching the filter — does NOT
+#    surface here."
+#
+# This is the hardest all-quiet story to get right, and deliberately harder than
+# neg-001's. The technique, the actor, the source host, the account, the password list,
+# the burst count and the clock window are all case-001's. ONE token moved: the target is
+# web-2, not canary-1. Every salience cue a projection could pattern-match on still
+# points at "brute force, now, these leads" — and the destination-scoped envelopes must
+# still come back empty, because the operation never touched canary-1.
+probes_rule: "stay inside the envelope — a filter predicate the story does not satisfy"
+discriminates: salience/technique matching vs. reading the queries' own filter predicates
+
+expectation:
+  # Destination-scoped: every query in these filters `host.name == "canary-1"`, and the
+  # story's activity is on web-2, so nothing it writes can surface.
+  #   l-001, l-002, l-006  elastic, canary-1-scoped
+  #   l-003, l-007, l-009  cmdb / change-mgmt — state lookups, no event stream
+  #   l-005                threat-intel — a reputation lookup, no event stream
+  #   l-008                identity access-check — state
+  empty_leads: [l-001, l-002, l-003, l-005, l-006, l-007, l-008, l-009]
+  no_suppression: all
+
+# ------------------------------------------------------------------ l-004 IS NOT ASSERTED
+# `elastic.zeek-ssh-by-ip` filters on `source.ip == "172.18.0.15"` and NOT on the
+# destination host. The story's attacker still operates from 172.18.0.15, so SSH toward
+# web-2 legitimately falls INSIDE this envelope — an empty projection here would be
+# wrong and a populated one right. It is left unasserted rather than guessed because
+# whether zeek writes an `ssh` record for a connection that fails password auth is a
+# property of the deployment's zeek configuration, not of `oracle/prompt.md`, and this
+# file may only assert what the prompt settles.
+#
+# Two consequences, stated rather than left to be discovered:
+#   1. this probe is ONE-SIDED — it catches over-emission, not under-emission, so a
+#      projection that emptied everything would pass it. Read it together with
+#      probe-003, which fails a projection that says nothing concrete anywhere;
+#   2. l-004 is the case-001 lead most worth watching by hand. If a projection empties
+#      it too, that is evidence of blanket-emptying rather than envelope reasoning, and
+#      it belongs in the write-up even though nothing here fails on it.
+unasserted_leads:
+  l-004: >
+    source-scoped, not destination-scoped — the story's activity is genuinely inside this
+    envelope. Correct content depends on zeek's logging behaviour, which prompt.md does
+    not settle, so it is observed rather than asserted.

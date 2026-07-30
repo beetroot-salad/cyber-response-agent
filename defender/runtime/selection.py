@@ -46,9 +46,11 @@ def _fold_impl(  # noqa: PLR0913 — mint-time stamping needs the run's identity
 ) -> int:
     if boundary is None:
         # correction R2/FE-2 (binding): `_default_boundary` no longer stands in as this
-        # fold's placeholder default — it over-counts once a fold has displaced rows off
-        # the path (FK16 / #753, deliberately unfixed here) — so a caller with no
-        # boundary of its own fails closed rather than silently taking that count.
+        # fold's placeholder default — it counts the session's non-synthesized ROWS, which
+        # over-counts once a fold has displaced some off the path — so a caller with no
+        # boundary of its own fails closed rather than silently taking that count. (#753
+        # gave `gather_boundary` a path predicate; this count still has none, by design:
+        # a frontier's seq is keyed to rows written, not to rows still reachable.)
         raise ValueError(
             "boundary is required; selection.fold no longer defaults it from the "
             "session's own row count")

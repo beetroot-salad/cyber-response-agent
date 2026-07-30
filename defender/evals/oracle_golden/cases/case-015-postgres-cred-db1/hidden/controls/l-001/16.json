@@ -1,0 +1,278 @@
+{
+  "lead_id": "l-001",
+  "seq": 16,
+  "controls": [
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-06T20:00:00.000Z",
+        "2026-07-07T00:00:00.000Z"
+      ],
+      "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-06T20:00:00.000Z\" AND @timestamp < \"2026-07-07T00:00:00.000Z\"\n        AND (host.ip == \"172.18.0.21\" OR source.ip == \"172.18.0.21\" OR client.ip == \"172.18.0.21\")\n| STATS count = COUNT(*) BY host.name, source.ip, host.ip, data_stream.dataset\n| SORT count DESC\n| LIMIT 10",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-06T20:00:00.000Z\" AND @timestamp < \"2026-07-07T00:00:00.000Z\"\n        AND (host.ip == \"172.18.0.21\" OR source.ip == \"172.18.0.21\" OR client.ip == \"172.18.0.21\")\n| STATS count = COUNT(*) BY host.name, source.ip, host.ip, data_stream.dataset\n| SORT count DESC\n| LIMIT 10",
+        "columns": [
+          {
+            "name": "count",
+            "type": "long"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "host.ip",
+            "type": "ip"
+          },
+          {
+            "name": "data_stream.dataset",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 3,
+        "values": [
+          {
+            "count": 259,
+            "host.name": "office-ws-1",
+            "source.ip": null,
+            "host.ip": "172.18.0.21",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "count": 5,
+            "host.name": "office-ws-1",
+            "source.ip": "172.18.0.14",
+            "host.ip": "172.18.0.21",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "count": 4,
+            "host.name": "office-ws-1",
+            "source.ip": null,
+            "host.ip": "172.18.0.21",
+            "data_stream.dataset": "system.syslog"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-29T20:00:00.000Z",
+        "2026-06-30T00:00:00.000Z"
+      ],
+      "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-06-29T20:00:00.000Z\" AND @timestamp < \"2026-06-30T00:00:00.000Z\"\n        AND (host.ip == \"172.18.0.21\" OR source.ip == \"172.18.0.21\" OR client.ip == \"172.18.0.21\")\n| STATS count = COUNT(*) BY host.name, source.ip, host.ip, data_stream.dataset\n| SORT count DESC\n| LIMIT 10",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-06-29T20:00:00.000Z\" AND @timestamp < \"2026-06-30T00:00:00.000Z\"\n        AND (host.ip == \"172.18.0.21\" OR source.ip == \"172.18.0.21\" OR client.ip == \"172.18.0.21\")\n| STATS count = COUNT(*) BY host.name, source.ip, host.ip, data_stream.dataset\n| SORT count DESC\n| LIMIT 10",
+        "columns": [
+          {
+            "name": "count",
+            "type": "long"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "host.ip",
+            "type": "ip"
+          },
+          {
+            "name": "data_stream.dataset",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 10,
+        "values": [
+          {
+            "count": 2915,
+            "host.name": null,
+            "source.ip": "172.18.0.21",
+            "host.ip": null,
+            "data_stream.dataset": "zeek.connection"
+          },
+          {
+            "count": 2843,
+            "host.name": null,
+            "source.ip": "172.18.0.21",
+            "host.ip": null,
+            "data_stream.dataset": "zeek.ssl"
+          },
+          {
+            "count": 1440,
+            "host.name": "jump-box-1",
+            "source.ip": null,
+            "host.ip": "172.18.0.21",
+            "data_stream.dataset": "elastic_agent.metricbeat"
+          },
+          {
+            "count": 569,
+            "host.name": "jump-box-1",
+            "source.ip": null,
+            "host.ip": "172.18.0.21",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "count": 330,
+            "host.name": "office-ws-1",
+            "source.ip": null,
+            "host.ip": "172.18.0.21",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "count": 91,
+            "host.name": "jump-box-1",
+            "source.ip": "172.18.0.15",
+            "host.ip": "172.18.0.21",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "count": 72,
+            "host.name": null,
+            "source.ip": "172.18.0.21",
+            "host.ip": null,
+            "data_stream.dataset": "zeek.ssh"
+          },
+          {
+            "count": 42,
+            "host.name": "jump-box-1",
+            "source.ip": null,
+            "host.ip": "172.18.0.21",
+            "data_stream.dataset": "elastic_agent"
+          },
+          {
+            "count": 10,
+            "host.name": "jump-box-1",
+            "source.ip": null,
+            "host.ip": "172.18.0.21",
+            "data_stream.dataset": "elastic_agent.filebeat"
+          },
+          {
+            "count": 4,
+            "host.name": "office-ws-1",
+            "source.ip": "172.18.0.20",
+            "host.ip": "172.18.0.21",
+            "data_stream.dataset": "system.auth"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-35d",
+      "window": [
+        "2026-06-22T20:00:00.000Z",
+        "2026-06-23T00:00:00.000Z"
+      ],
+      "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-06-22T20:00:00.000Z\" AND @timestamp < \"2026-06-23T00:00:00.000Z\"\n        AND (host.ip == \"172.18.0.21\" OR source.ip == \"172.18.0.21\" OR client.ip == \"172.18.0.21\")\n| STATS count = COUNT(*) BY host.name, source.ip, host.ip, data_stream.dataset\n| SORT count DESC\n| LIMIT 10",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-06-22T20:00:00.000Z\" AND @timestamp < \"2026-06-23T00:00:00.000Z\"\n        AND (host.ip == \"172.18.0.21\" OR source.ip == \"172.18.0.21\" OR client.ip == \"172.18.0.21\")\n| STATS count = COUNT(*) BY host.name, source.ip, host.ip, data_stream.dataset\n| SORT count DESC\n| LIMIT 10",
+        "columns": [
+          {
+            "name": "count",
+            "type": "long"
+          },
+          {
+            "name": "host.name",
+            "type": "keyword"
+          },
+          {
+            "name": "source.ip",
+            "type": "ip"
+          },
+          {
+            "name": "host.ip",
+            "type": "ip"
+          },
+          {
+            "name": "data_stream.dataset",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 10,
+        "values": [
+          {
+            "count": 2895,
+            "host.name": null,
+            "source.ip": "172.18.0.21",
+            "host.ip": null,
+            "data_stream.dataset": "zeek.connection"
+          },
+          {
+            "count": 2847,
+            "host.name": null,
+            "source.ip": "172.18.0.21",
+            "host.ip": null,
+            "data_stream.dataset": "zeek.ssl"
+          },
+          {
+            "count": 1440,
+            "host.name": "jump-box-1",
+            "source.ip": null,
+            "host.ip": "172.18.0.21",
+            "data_stream.dataset": "elastic_agent.metricbeat"
+          },
+          {
+            "count": 423,
+            "host.name": "jump-box-1",
+            "source.ip": null,
+            "host.ip": "172.18.0.21",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "count": 287,
+            "host.name": "office-ws-1",
+            "source.ip": null,
+            "host.ip": "172.18.0.21",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "count": 48,
+            "host.name": "jump-box-1",
+            "source.ip": "172.18.0.15",
+            "host.ip": "172.18.0.21",
+            "data_stream.dataset": "system.auth"
+          },
+          {
+            "count": 48,
+            "host.name": "jump-box-1",
+            "source.ip": null,
+            "host.ip": "172.18.0.21",
+            "data_stream.dataset": "elastic_agent"
+          },
+          {
+            "count": 48,
+            "host.name": null,
+            "source.ip": "172.18.0.21",
+            "host.ip": null,
+            "data_stream.dataset": "zeek.ssh"
+          },
+          {
+            "count": 10,
+            "host.name": "jump-box-1",
+            "source.ip": null,
+            "host.ip": "172.18.0.21",
+            "data_stream.dataset": "elastic_agent.filebeat"
+          },
+          {
+            "count": 4,
+            "host.name": "jump-box-1",
+            "source.ip": null,
+            "host.ip": "172.18.0.21",
+            "data_stream.dataset": "system.syslog"
+          }
+        ]
+      }
+    }
+  ]
+}

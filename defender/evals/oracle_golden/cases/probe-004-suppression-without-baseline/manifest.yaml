@@ -1,0 +1,74 @@
+case_id: probe-004-suppression-without-baseline
+kind: spec-probe
+base_case: case-001-ssh-bruteforce-canary
+
+split: dev
+unit:
+  activity_family: brute-force/T1110.001
+  host_pair: office-ws-1->canary-1
+capture_environment: playground-v2@409583061
+
+derivation:
+  from: case-001-ssh-bruteforce-canary/oracle_visible
+  changed: >
+    story.md only — case-001's operation with a REAL blinding action added: the monitoring
+    agent on canary-1 is stopped before the guessing begins.
+  unchanged: leads.jsonl + samples/ (case-001's envelopes, byte-identical)
+
+# ---------------------------------------------------------------- the rule under test
+# oracle/prompt.md, "Choosing the result" — the SECOND suppression clause, which is a
+# separate rule from the first and is the one that is currently failing in the wild:
+#
+#   "Suppression also requires a baseline to remove. The action is necessary but not
+#    sufficient: these queries must plausibly have been *returning something* before it...
+#    If the answer is 'nothing' — a filter narrow enough that it rarely matches, a data
+#    source this host does not emit, A LOOKUP WITH NO EVENT STREAM — then blinding the
+#    host removes nothing these queries can see, and the answer is `0` even though the
+#    story really does perform the blinding action."
+#
+# probe-001 tests the first clause (no action => no suppression). This tests the second,
+# and it is the harder one: here the story DOES perform a textbook blinding action, named
+# with a concrete command, on the very host the leads investigate. Everything invites the
+# suppression marker. It is still wrong on the state and lookup systems, because stopping
+# a log shipper removes nothing from a CMDB record, an identity authorization, a
+# threat-intel reputation or a change-management ticket. Those have no event stream to go
+# dark, which is the prompt's own listed example of a baseline that was never there.
+#
+# WHY THIS ONE MATTERS. `C-SUPPRESS-UNBASELINED` is a live, measured failure (case-003
+# l-001), and the sanctioned prompt fix for it produced a NULL result — all 36 leads
+# projected identically. That fix could only ever have been tested against captures that
+# happened to contain the condition. This probe manufactures the condition on demand.
+probes_rule: "suppression also requires a baseline to remove"
+discriminates: blinding-action-present vs. baseline-actually-existed
+
+expectation:
+  # The state and lookup systems. `environment.yaml` says it outright: these "return
+  # current configuration or an entity record, not an event stream. They carry no
+  # @timestamp bounds to move, so they have no control and no baseline-diff semantics."
+  # Nothing the attacker stopped can remove anything from them.
+  #   l-003, l-007  cmdb          l-005  threat-intel
+  #   l-008         identity      l-009  change-mgmt
+  no_suppression: [l-003, l-005, l-007, l-008, l-009]
+  # The story explicitly says none of these systems was touched, so they are empty too —
+  # a `0`, reached by the ordinary route rather than by blinding.
+  empty_leads: [l-003, l-005, l-007, l-008, l-009]
+
+# --------------------------------------------------- l-001, l-002, l-004, l-006 UNASSERTED
+# The elastic leads read `canary-1`'s shipped logs, and the story really does stop that
+# host's shipper, so suppression there is at least arguable and possibly correct. Whether
+# it is right depends on whether each envelope carried a baseline — which is a measured
+# property of the deployment, not something prompt.md settles, so this file may not assert
+# it. Deliberately left to observation:
+#
+#   the interesting read is whether the projection distinguishes AMONG them. l-006 filters
+#   `source.ip == "172.18.0.15"` on canary-1 — an envelope whose baseline is one specific
+#   workstation's SSH to a canary, which is exactly the "filter narrow enough that it
+#   rarely matches" the prompt names. A projection that marks every elastic lead
+#   suppressed identically has applied the action, not the baseline test.
+unasserted_leads:
+  l-001: elastic — canary-1 sshd; the shipper really is stopped, so suppression may be right
+  l-002: elastic — canary-1 detection alerts; same
+  l-004: elastic — zeek, source-scoped; zeek is not shipped by the stopped agent on canary-1
+  l-006: >
+    elastic — canary-1 sshd narrowed to one source address. The narrowest envelope of the
+    four and the one most likely to have had no baseline to lose. Watch this one.

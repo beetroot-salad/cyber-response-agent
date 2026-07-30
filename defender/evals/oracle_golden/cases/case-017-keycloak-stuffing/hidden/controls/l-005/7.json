@@ -1,0 +1,93 @@
+{
+  "lead_id": "l-005",
+  "seq": 7,
+  "controls": [
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-07T05:45:00.000Z",
+        "2026-07-07T06:55:00.000Z"
+      ],
+      "query": "FROM logs-keycloak.events-*\n| WHERE @timestamp >= \"2026-07-07T05:45:00.000Z\" AND @timestamp < \"2026-07-07T06:55:00.000Z\"\n| STATS count = COUNT(*)\n  BY loggerName\n| SORT count DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-keycloak.events-*\n| WHERE @timestamp >= \"2026-07-07T05:45:00.000Z\" AND @timestamp < \"2026-07-07T06:55:00.000Z\"\n| STATS count = COUNT(*)\n  BY loggerName\n| SORT count DESC",
+        "columns": [
+          {
+            "name": "count",
+            "type": "long"
+          },
+          {
+            "name": "loggerName",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "count": 4,
+            "loggerName": "org.keycloak.events.jpa.JpaEventStoreProvider"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-30T05:45:00.000Z",
+        "2026-06-30T06:55:00.000Z"
+      ],
+      "query": "FROM logs-keycloak.events-*\n| WHERE @timestamp >= \"2026-06-30T05:45:00.000Z\" AND @timestamp < \"2026-06-30T06:55:00.000Z\"\n| STATS count = COUNT(*)\n  BY loggerName\n| SORT count DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-keycloak.events-*\n| WHERE @timestamp >= \"2026-06-30T05:45:00.000Z\" AND @timestamp < \"2026-06-30T06:55:00.000Z\"\n| STATS count = COUNT(*)\n  BY loggerName\n| SORT count DESC",
+        "columns": [
+          {
+            "name": "count",
+            "type": "long"
+          },
+          {
+            "name": "loggerName",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "count": 5,
+            "loggerName": "org.keycloak.events.jpa.JpaEventStoreProvider"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-35d",
+      "window": [
+        "2026-06-23T05:45:00.000Z",
+        "2026-06-23T06:55:00.000Z"
+      ],
+      "query": "FROM logs-keycloak.events-*\n| WHERE @timestamp >= \"2026-06-23T05:45:00.000Z\" AND @timestamp < \"2026-06-23T06:55:00.000Z\"\n| STATS count = COUNT(*)\n  BY loggerName\n| SORT count DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-keycloak.events-*\n| WHERE @timestamp >= \"2026-06-23T05:45:00.000Z\" AND @timestamp < \"2026-06-23T06:55:00.000Z\"\n| STATS count = COUNT(*)\n  BY loggerName\n| SORT count DESC",
+        "columns": [
+          {
+            "name": "count",
+            "type": "long"
+          },
+          {
+            "name": "loggerName",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "count": 5,
+            "loggerName": "org.keycloak.events.jpa.JpaEventStoreProvider"
+          }
+        ]
+      }
+    }
+  ]
+}

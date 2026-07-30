@@ -1,0 +1,159 @@
+{
+  "lead_id": "l-005",
+  "seq": 4,
+  "controls": [
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-06T20:02:30.000Z",
+        "2026-07-06T21:02:30.000Z"
+      ],
+      "query": "FROM logs-postgresql.log-*\n| WHERE @timestamp >= \"2026-07-06T20:02:30.000Z\" AND @timestamp < \"2026-07-06T21:02:30.000Z\"\n        AND host.name == \"db-1\"\n| STATS cnt = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY message, user.name\n| SORT cnt DESC\n| LIMIT 30",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-postgresql.log-*\n| WHERE @timestamp >= \"2026-07-06T20:02:30.000Z\" AND @timestamp < \"2026-07-06T21:02:30.000Z\"\n        AND host.name == \"db-1\"\n| STATS cnt = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY message, user.name\n| SORT cnt DESC\n| LIMIT 30",
+        "columns": [
+          {
+            "name": "cnt",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "message",
+            "type": "text"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 2,
+        "values": [
+          {
+            "cnt": 5760,
+            "first_seen": "2026-07-06T20:02:37.159Z",
+            "last_seen": "2026-07-06T21:02:27.160Z",
+            "message": "Role \"root\" does not exist.\n\tConnection matched pg_hba.conf line 99: \"host    all             all             ::1/128                 scram-sha-256\"",
+            "user.name": "root"
+          },
+          {
+            "cnt": 5760,
+            "first_seen": "2026-07-06T20:02:37.159Z",
+            "last_seen": "2026-07-06T21:02:27.160Z",
+            "message": "password authentication failed for user \"root\"",
+            "user.name": "root"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-29T20:02:30.000Z",
+        "2026-06-29T21:02:30.000Z"
+      ],
+      "query": "FROM logs-postgresql.log-*\n| WHERE @timestamp >= \"2026-06-29T20:02:30.000Z\" AND @timestamp < \"2026-06-29T21:02:30.000Z\"\n        AND host.name == \"db-1\"\n| STATS cnt = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY message, user.name\n| SORT cnt DESC\n| LIMIT 30",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-postgresql.log-*\n| WHERE @timestamp >= \"2026-06-29T20:02:30.000Z\" AND @timestamp < \"2026-06-29T21:02:30.000Z\"\n        AND host.name == \"db-1\"\n| STATS cnt = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY message, user.name\n| SORT cnt DESC\n| LIMIT 30",
+        "columns": [
+          {
+            "name": "cnt",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "message",
+            "type": "text"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 2,
+        "values": [
+          {
+            "cnt": 7200,
+            "first_seen": "2026-06-29T20:02:33.764Z",
+            "last_seen": "2026-06-29T21:02:23.774Z",
+            "message": "Role \"root\" does not exist.\n\tConnection matched pg_hba.conf line 99: \"host    all             all             ::1/128                 scram-sha-256\"",
+            "user.name": "root"
+          },
+          {
+            "cnt": 7200,
+            "first_seen": "2026-06-29T20:02:33.764Z",
+            "last_seen": "2026-06-29T21:02:23.774Z",
+            "message": "password authentication failed for user \"root\"",
+            "user.name": "root"
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-35d",
+      "window": [
+        "2026-06-22T20:02:30.000Z",
+        "2026-06-22T21:02:30.000Z"
+      ],
+      "query": "FROM logs-postgresql.log-*\n| WHERE @timestamp >= \"2026-06-22T20:02:30.000Z\" AND @timestamp < \"2026-06-22T21:02:30.000Z\"\n        AND host.name == \"db-1\"\n| STATS cnt = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY message, user.name\n| SORT cnt DESC\n| LIMIT 30",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-postgresql.log-*\n| WHERE @timestamp >= \"2026-06-22T20:02:30.000Z\" AND @timestamp < \"2026-06-22T21:02:30.000Z\"\n        AND host.name == \"db-1\"\n| STATS cnt = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY message, user.name\n| SORT cnt DESC\n| LIMIT 30",
+        "columns": [
+          {
+            "name": "cnt",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          },
+          {
+            "name": "message",
+            "type": "text"
+          },
+          {
+            "name": "user.name",
+            "type": "keyword"
+          }
+        ],
+        "row_count": 2,
+        "values": [
+          {
+            "cnt": 7200,
+            "first_seen": "2026-06-22T20:02:33.761Z",
+            "last_seen": "2026-06-22T21:02:23.772Z",
+            "message": "Role \"root\" does not exist.\n\tConnection matched pg_hba.conf line 99: \"host    all             all             ::1/128                 scram-sha-256\"",
+            "user.name": "root"
+          },
+          {
+            "cnt": 7200,
+            "first_seen": "2026-06-22T20:02:33.761Z",
+            "last_seen": "2026-06-22T21:02:23.772Z",
+            "message": "password authentication failed for user \"root\"",
+            "user.name": "root"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,82 @@
+{
+  "tag": "glm-5.2_effort-none_prompt-711__judge-claude-opus-5-high_47d6044a",
+  "projection": "glm-5.2_effort-none_prompt-711.yaml",
+  "case": "case-016-nginx-scan-web1",
+  "kind": "observed",
+  "judge": {
+    "model": "claude-opus-5",
+    "effort": "high",
+    "prompts_sha8": "47d6044a"
+  },
+  "n_leads": 4,
+  "mechanical": {
+    "missing_leads": [],
+    "unscored_leads": [],
+    "duplicate_leads": [],
+    "malformed_leads": {},
+    "forbidden_emitted": [],
+    "concrete_value_leads": [
+      "l-001"
+    ],
+    "expectation_failures": []
+  },
+  "judged": true,
+  "faithful": "3/4",
+  "abstentions": 0,
+  "by_system": {
+    "cmdb": "1/1",
+    "elastic": "1/2",
+    "identity": "1/1"
+  },
+  "cost_usd": 1.4917,
+  "rows": [
+    {
+      "lead": "l-001",
+      "system": "elastic",
+      "delta_kind": "present",
+      "faithful": true,
+      "cause": null,
+      "heterogeneous": null,
+      "undecidable_reason": null,
+      "form_notes": "timestamps shifted ~2s early (06:17:29\u201331 vs observed 06:17:31\u201332); user_agent projected as curl/8.<version> where observed carries curl/7.81.0; unrelated /smoke-test-marker row at 06:13:22Z not represented",
+      "rationale": "The measurement's delta is the 12 single-request GET/404 rows on host.name web-1 at 06:17:31\u201332Z whose distinguishing field is `path` \u2014 /admin, /.env, /wp-login.php, /api/v1/users, /.git/config, /phpmyadmin, /server-status, /config.php, /backup.sql, /.aws/credentials, /actuator/health, /.ssh/id_rsa \u2014 none of which appear in C-21d, C-28d or C-35d, whose only paths are /nginx_status (404) and / (200). The projection emits exactly those twelve paths, each with requests: 1, method GET, status 404, host.name web-1, and first_seen/last_seen collapsed into a 2\u20133 second burst, which is the same claim at the same granularity. source.ip is placeholdered as <office-ws-1-ip>, which is correct both as placeholder compliance and because environment_notes disqualifies source.ip as a distinguishing column here, so nothing rides on the observed 172.18.0.6. The user_agent \"curl/8.<version>\" mis-picks the major version against the observed curl/7.81.0, but it carries a placeholder and so is not a fully concrete fabricated value; the ~2s timestamp offset likewise does not change the represented delta. No routine baseline rows (/nginx_status, /) were re-emitted as events, and no suppression or extra change was asserted.",
+      "evidence": "The observed window returns 16 rows, of which 12 are single-request GETs at 06:17:31\u201306:17:32Z from curl/7.81.0 against paths that appear in none of the three baselines: /admin, /.env, /server-status, /phpmyadmin, /wp-login.php, /actuator/health, /.aws/credentials, /.ssh/id_rsa, /.git/config, /backup.sql, /config.php, /api/v1/users, all status 404 on host.name web-1. All three controls (C-21d, C-28d, C-35d, each window_live: true) return exactly 3 rows apiece, whose only paths are /nginx_status (404, Metricbeat UA) and / (200, curl/7.81.0) \u2014 the same two path/status pairs that also make up the observed window's routine rows. The distinguishing field is `path` (url.path), together with the 1\u20132 second burst spread in first_seen/last_seen; these are stable columns, not the address/container/session identifiers that environment_notes disqualifies, so the delta does not rest on source.ip 172.18.0.6. An additional /smoke-test-marker row at 06:13:22Z is likewise absent from every baseline."
+    },
+    {
+      "lead": "l-002",
+      "system": "elastic",
+      "delta_kind": "present",
+      "faithful": false,
+      "cause": "C-MISSED-DELTA",
+      "heterogeneous": true,
+      "undecidable_reason": null,
+      "form_notes": null,
+      "rationale": "The lead's 7-day window ends at 2026-07-28T06:17:32Z, so it contains the scan itself: the path breakdown (seq 3) returns 15 url.path rows against exactly 2 (/nginx_status, /) in all three live controls, and the 12 new paths \u2014 /admin, /.env, /wp-login.php, /api/v1/users, /.git/config, /phpmyadmin, /server-status, /config.php, /backup.sql, /.aws/credentials, /actuator/health, /.ssh/id_rsa \u2014 are precisely the story's curl loop. The overview (seq 0) corroborates with distinct_paths = 15 versus 2/2/2, and seq 1 shows a single source with distinct_paths = 13 where every control row had distinct_paths = 1. The projection is empty, representing none of this. Even granting that the status-code and user-agent queries are baseline-identical, the lead as a whole carries distinguishable rows, so silence is not the honest answer here.",
+      "evidence": "The path breakdown (seq 3) returns 15 rows in the observed window against exactly 2 rows (/nginx_status, /) in all three live controls; the 13 new url.path values include /.env (3), /admin (3), /.aws/credentials (2), /wp-login.php (2), /phpmyadmin (2), /.ssh/id_rsa (2), /.git/config (2), /backup.sql (2), /config.php (2), /server-status (2), /actuator/health (2), /api/v1/users (2) and /smoke-test-marker (1). The overview (seq 0) corroborates with distinct_paths = 15 versus 2/2/2 in C-21d/C-28d/C-35d, and the by-ip payload (seq 1) shows one source with distinct_paths = 13 where every control row had distinct_paths = 1 (the source.ip value itself is an unstable identifier here and carries no weight). Queries disagree: the status-code payload (seq 2) surfaces only 404/200, the same two codes as every control, and the user-agent payload (seq 4) surfaces the same three agents (Metricbeat, curl/7.81.0, curl/8.5.0) as baseline, so those two are baseline-identical in their surfaced categorical fields; the volume and cadence gaps (2989 requests over a 13-hour first_seen/last_seen span versus ~200\u2013276k over 167 hours) reflect capture coverage, not suppression."
+    },
+    {
+      "lead": "l-003",
+      "system": "identity",
+      "delta_kind": "state-only",
+      "faithful": true,
+      "cause": null,
+      "heterogeneous": false,
+      "undecidable_reason": null,
+      "form_notes": "projection is an empty list rather than an explicit \"no change\" marker",
+      "rationale": "Both queries in this lead are `identity.*` lookups returning entity state \u2014 seq 0 the\naccess-check verdict (`authorized: false`, `via: null`, `role: developer`, `sudo: false`)\nand seq 1 the dev.dana record (`enabled: true`, `realm_role: developer`,\n`authorized_hosts: [dev-ws-1, jump-box-1, office-ws-1]`, `sudo_hosts: [office-ws-1]`).\nThe measurement reads this as `state-only`, and `environment_notes.state_and_lookup_systems`\nnames identity explicitly as carrying no timestamp bounds and hence no baseline-diff\nsemantics, which is why `baseline` is `[]` rather than a dead window. The story's activity\nis a curl sweep of twelve paths on web-1 that returned all 404s; nothing in it mutates a\nrealm role, an authorized_hosts list, or an enabled flag, so the identity records observed\nare identical to what they would be with no activity. An empty projection therefore\nrepresents a zero delta correctly, and it also avoids inventing concrete role/host values\nthe story never grounds.",
+      "evidence": "Both queries in this lead are `identity.*` templates returning an entity record, not an event stream: seq 0 returns an access-check verdict (`authorized: false`, `via: null`, `role: developer`, `sudo: false`) and seq 1 returns the dev.dana user record (`enabled: true`, `realm_role: developer`, `authorized_hosts: [dev-ws-1, jump-box-1, office-ws-1]`, `sudo_hosts: [office-ws-1]`). The `environment_notes` state_and_lookup_systems clause names identity explicitly as carrying no `@timestamp` bounds to move, hence no control and no baseline-diff semantics \u2014 consistent with `baseline` being an empty list rather than a measured quiet window. Neither query surfaces a timestamped row set that could be compared across windows, so the empty baseline is expected rather than `insufficient-baseline`. Both queries are state lookups, so they agree."
+    },
+    {
+      "lead": "l-004",
+      "system": "cmdb",
+      "delta_kind": "state-only",
+      "faithful": true,
+      "cause": null,
+      "heterogeneous": false,
+      "undecidable_reason": null,
+      "form_notes": null,
+      "rationale": "Both queries in the lead are CMDB lookups \u2014 `cmdb.host-trust-edges` for web-1 and `cmdb.list-hosts-by-owner` for dev.dana \u2014 and the observed payloads are entity records (web-1: role `web`, criticality `prod`, owner `team.web`, `trust_edges_out: [db-1]`; owner query: `total: 1`, `office-ws-1`), carrying no `@timestamp` bounds or event rows. Per `state_and_lookup_systems` and the measurement, these are `state-only`: current configuration that has no baseline-diff semantics, which is why `baseline` is an empty list rather than a missing measurement. The activity (a burst of 404 curl probes) changes no CMDB record, so there is no distinguishable delta for the projection to represent. The empty projection asserts no change, invents nothing, and omits nothing the telemetry surfaces \u2014 faithful.",
+      "evidence": "Both queries in this lead are CMDB lookups (`cmdb.host-trust-edges` for web-1, `cmdb.list-hosts-by-owner` for dev.dana), and the payloads are entity records \u2014 web-1 returns role `web`, criticality `prod`, owner `team.web`, `trust_edges_out: [db-1]`, and a four-entry `users` block; the owner query returns `total: 1` with the single host `office-ws-1` (role `office-ws`, criticality `preprod`, owner `dev.dana`). Neither payload carries `@timestamp` bounds or event rows, and `baseline` is an empty list precisely because there are no time bounds to move. Per `state_and_lookup_systems`, cmdb queries return current configuration rather than an event stream and have no baseline-diff semantics, so both queries are `state-only` and they agree with one another."
+    }
+  ]
+}

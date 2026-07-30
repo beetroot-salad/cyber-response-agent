@@ -1,0 +1,153 @@
+{
+  "lead_id": "l-003",
+  "seq": 2,
+  "controls": [
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-06-29T00:00:00.000Z",
+        "2026-07-07T00:00:00.000Z"
+      ],
+      "query": "FROM logs-keycloak.events-*\n| WHERE @timestamp >= \"2026-06-29T00:00:00.000Z\" AND @timestamp < \"2026-07-07T00:00:00.000Z\"\n        AND loggerName == \"org.keycloak.events\"\n        AND message LIKE \"*username=\\\"dev.dana\\\"*\"\n| STATS events      = COUNT(*),\n        logins      = COUNT(*) WHERE message LIKE \"*type=\\\"LOGIN\\\"*\",\n        login_error = COUNT(*) WHERE message LIKE \"*type=\\\"LOGIN_ERROR\\\"*\",\n        logouts     = COUNT(*) WHERE message LIKE \"*type=\\\"LOGOUT\\\"*\",\n        first_seen  = MIN(@timestamp),\n        last_seen   = MAX(@timestamp)",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-keycloak.events-*\n| WHERE @timestamp >= \"2026-06-29T00:00:00.000Z\" AND @timestamp < \"2026-07-07T00:00:00.000Z\"\n        AND loggerName == \"org.keycloak.events\"\n        AND message LIKE \"*username=\\\"dev.dana\\\"*\"\n| STATS events      = COUNT(*),\n        logins      = COUNT(*) WHERE message LIKE \"*type=\\\"LOGIN\\\"*\",\n        login_error = COUNT(*) WHERE message LIKE \"*type=\\\"LOGIN_ERROR\\\"*\",\n        logouts     = COUNT(*) WHERE message LIKE \"*type=\\\"LOGOUT\\\"*\",\n        first_seen  = MIN(@timestamp),\n        last_seen   = MAX(@timestamp)",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "logins",
+            "type": "long"
+          },
+          {
+            "name": "login_error",
+            "type": "long"
+          },
+          {
+            "name": "logouts",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "events": 0,
+            "logins": 0,
+            "login_error": 0,
+            "logouts": 0,
+            "first_seen": null,
+            "last_seen": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-22T00:00:00.000Z",
+        "2026-06-30T00:00:00.000Z"
+      ],
+      "query": "FROM logs-keycloak.events-*\n| WHERE @timestamp >= \"2026-06-22T00:00:00.000Z\" AND @timestamp < \"2026-06-30T00:00:00.000Z\"\n        AND loggerName == \"org.keycloak.events\"\n        AND message LIKE \"*username=\\\"dev.dana\\\"*\"\n| STATS events      = COUNT(*),\n        logins      = COUNT(*) WHERE message LIKE \"*type=\\\"LOGIN\\\"*\",\n        login_error = COUNT(*) WHERE message LIKE \"*type=\\\"LOGIN_ERROR\\\"*\",\n        logouts     = COUNT(*) WHERE message LIKE \"*type=\\\"LOGOUT\\\"*\",\n        first_seen  = MIN(@timestamp),\n        last_seen   = MAX(@timestamp)",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-keycloak.events-*\n| WHERE @timestamp >= \"2026-06-22T00:00:00.000Z\" AND @timestamp < \"2026-06-30T00:00:00.000Z\"\n        AND loggerName == \"org.keycloak.events\"\n        AND message LIKE \"*username=\\\"dev.dana\\\"*\"\n| STATS events      = COUNT(*),\n        logins      = COUNT(*) WHERE message LIKE \"*type=\\\"LOGIN\\\"*\",\n        login_error = COUNT(*) WHERE message LIKE \"*type=\\\"LOGIN_ERROR\\\"*\",\n        logouts     = COUNT(*) WHERE message LIKE \"*type=\\\"LOGOUT\\\"*\",\n        first_seen  = MIN(@timestamp),\n        last_seen   = MAX(@timestamp)",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "logins",
+            "type": "long"
+          },
+          {
+            "name": "login_error",
+            "type": "long"
+          },
+          {
+            "name": "logouts",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "events": 0,
+            "logins": 0,
+            "login_error": 0,
+            "logouts": 0,
+            "first_seen": null,
+            "last_seen": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-35d",
+      "window": [
+        "2026-06-15T00:00:00.000Z",
+        "2026-06-23T00:00:00.000Z"
+      ],
+      "query": "FROM logs-keycloak.events-*\n| WHERE @timestamp >= \"2026-06-15T00:00:00.000Z\" AND @timestamp < \"2026-06-23T00:00:00.000Z\"\n        AND loggerName == \"org.keycloak.events\"\n        AND message LIKE \"*username=\\\"dev.dana\\\"*\"\n| STATS events      = COUNT(*),\n        logins      = COUNT(*) WHERE message LIKE \"*type=\\\"LOGIN\\\"*\",\n        login_error = COUNT(*) WHERE message LIKE \"*type=\\\"LOGIN_ERROR\\\"*\",\n        logouts     = COUNT(*) WHERE message LIKE \"*type=\\\"LOGOUT\\\"*\",\n        first_seen  = MIN(@timestamp),\n        last_seen   = MAX(@timestamp)",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-keycloak.events-*\n| WHERE @timestamp >= \"2026-06-15T00:00:00.000Z\" AND @timestamp < \"2026-06-23T00:00:00.000Z\"\n        AND loggerName == \"org.keycloak.events\"\n        AND message LIKE \"*username=\\\"dev.dana\\\"*\"\n| STATS events      = COUNT(*),\n        logins      = COUNT(*) WHERE message LIKE \"*type=\\\"LOGIN\\\"*\",\n        login_error = COUNT(*) WHERE message LIKE \"*type=\\\"LOGIN_ERROR\\\"*\",\n        logouts     = COUNT(*) WHERE message LIKE \"*type=\\\"LOGOUT\\\"*\",\n        first_seen  = MIN(@timestamp),\n        last_seen   = MAX(@timestamp)",
+        "columns": [
+          {
+            "name": "events",
+            "type": "long"
+          },
+          {
+            "name": "logins",
+            "type": "long"
+          },
+          {
+            "name": "login_error",
+            "type": "long"
+          },
+          {
+            "name": "logouts",
+            "type": "long"
+          },
+          {
+            "name": "first_seen",
+            "type": "date"
+          },
+          {
+            "name": "last_seen",
+            "type": "date"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "events": 0,
+            "logins": 0,
+            "login_error": 0,
+            "logouts": 0,
+            "first_seen": null,
+            "last_seen": null
+          }
+        ]
+      }
+    }
+  ]
+}

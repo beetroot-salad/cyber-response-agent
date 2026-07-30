@@ -24,7 +24,7 @@ def test_agent_exception_leaves_queue_intact(tmp_repo, helpers, monkeypatch):
     assert [r.get("attempts") for r in rows] == [1]
     assert not tmp_repo.paths.pending_file.with_suffix(".deadletter.jsonl").exists()
 
-    fh = shared.acquire_flock(tmp_repo.cfg.channel.lock)
+    fh = shared.acquire_flock(tmp_repo.cfg.channel.drain_lock)
     assert fh is not None
     shared.release_flock(fh)
 

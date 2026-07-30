@@ -1,0 +1,198 @@
+{
+  "lead_id": "l-001",
+  "seq": 24,
+  "controls": [
+    {
+      "name": "C-21d",
+      "window": [
+        "2026-07-06T19:37:30.000Z",
+        "2026-07-06T20:37:30.000Z"
+      ],
+      "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-07-06T19:37:30.000Z\" AND @timestamp < \"2026-07-06T20:37:30.000Z\"\n        AND source.ip == \"172.18.0.21\" AND destination.ip == \"172.18.0.12\" AND destination.port == 5432\n| STATS count = COUNT(*), total_dest_bytes = SUM(destination.bytes), total_src_bytes = SUM(source.bytes), max_dest_bytes = MAX(destination.bytes), max_src_bytes = MAX(source.bytes), avg_dest_bytes = AVG(destination.bytes), avg_src_bytes = AVG(source.bytes), min_ts = MIN(@timestamp), max_ts = MAX(@timestamp)\n| SORT count DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-07-06T19:37:30.000Z\" AND @timestamp < \"2026-07-06T20:37:30.000Z\"\n        AND source.ip == \"172.18.0.21\" AND destination.ip == \"172.18.0.12\" AND destination.port == 5432\n| STATS count = COUNT(*), total_dest_bytes = SUM(destination.bytes), total_src_bytes = SUM(source.bytes), max_dest_bytes = MAX(destination.bytes), max_src_bytes = MAX(source.bytes), avg_dest_bytes = AVG(destination.bytes), avg_src_bytes = AVG(source.bytes), min_ts = MIN(@timestamp), max_ts = MAX(@timestamp)\n| SORT count DESC",
+        "columns": [
+          {
+            "name": "count",
+            "type": "long"
+          },
+          {
+            "name": "total_dest_bytes",
+            "type": "long"
+          },
+          {
+            "name": "total_src_bytes",
+            "type": "long"
+          },
+          {
+            "name": "max_dest_bytes",
+            "type": "long"
+          },
+          {
+            "name": "max_src_bytes",
+            "type": "long"
+          },
+          {
+            "name": "avg_dest_bytes",
+            "type": "double"
+          },
+          {
+            "name": "avg_src_bytes",
+            "type": "double"
+          },
+          {
+            "name": "min_ts",
+            "type": "date"
+          },
+          {
+            "name": "max_ts",
+            "type": "date"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "count": 0,
+            "total_dest_bytes": null,
+            "total_src_bytes": null,
+            "max_dest_bytes": null,
+            "max_src_bytes": null,
+            "avg_dest_bytes": null,
+            "avg_src_bytes": null,
+            "min_ts": null,
+            "max_ts": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-28d",
+      "window": [
+        "2026-06-29T19:37:30.000Z",
+        "2026-06-29T20:37:30.000Z"
+      ],
+      "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-06-29T19:37:30.000Z\" AND @timestamp < \"2026-06-29T20:37:30.000Z\"\n        AND source.ip == \"172.18.0.21\" AND destination.ip == \"172.18.0.12\" AND destination.port == 5432\n| STATS count = COUNT(*), total_dest_bytes = SUM(destination.bytes), total_src_bytes = SUM(source.bytes), max_dest_bytes = MAX(destination.bytes), max_src_bytes = MAX(source.bytes), avg_dest_bytes = AVG(destination.bytes), avg_src_bytes = AVG(source.bytes), min_ts = MIN(@timestamp), max_ts = MAX(@timestamp)\n| SORT count DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-06-29T19:37:30.000Z\" AND @timestamp < \"2026-06-29T20:37:30.000Z\"\n        AND source.ip == \"172.18.0.21\" AND destination.ip == \"172.18.0.12\" AND destination.port == 5432\n| STATS count = COUNT(*), total_dest_bytes = SUM(destination.bytes), total_src_bytes = SUM(source.bytes), max_dest_bytes = MAX(destination.bytes), max_src_bytes = MAX(source.bytes), avg_dest_bytes = AVG(destination.bytes), avg_src_bytes = AVG(source.bytes), min_ts = MIN(@timestamp), max_ts = MAX(@timestamp)\n| SORT count DESC",
+        "columns": [
+          {
+            "name": "count",
+            "type": "long"
+          },
+          {
+            "name": "total_dest_bytes",
+            "type": "long"
+          },
+          {
+            "name": "total_src_bytes",
+            "type": "long"
+          },
+          {
+            "name": "max_dest_bytes",
+            "type": "long"
+          },
+          {
+            "name": "max_src_bytes",
+            "type": "long"
+          },
+          {
+            "name": "avg_dest_bytes",
+            "type": "double"
+          },
+          {
+            "name": "avg_src_bytes",
+            "type": "double"
+          },
+          {
+            "name": "min_ts",
+            "type": "date"
+          },
+          {
+            "name": "max_ts",
+            "type": "date"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "count": 0,
+            "total_dest_bytes": null,
+            "total_src_bytes": null,
+            "max_dest_bytes": null,
+            "max_src_bytes": null,
+            "avg_dest_bytes": null,
+            "avg_src_bytes": null,
+            "min_ts": null,
+            "max_ts": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "C-35d",
+      "window": [
+        "2026-06-22T19:37:30.000Z",
+        "2026-06-22T20:37:30.000Z"
+      ],
+      "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-06-22T19:37:30.000Z\" AND @timestamp < \"2026-06-22T20:37:30.000Z\"\n        AND source.ip == \"172.18.0.21\" AND destination.ip == \"172.18.0.12\" AND destination.port == 5432\n| STATS count = COUNT(*), total_dest_bytes = SUM(destination.bytes), total_src_bytes = SUM(source.bytes), max_dest_bytes = MAX(destination.bytes), max_src_bytes = MAX(source.bytes), avg_dest_bytes = AVG(destination.bytes), avg_src_bytes = AVG(source.bytes), min_ts = MIN(@timestamp), max_ts = MAX(@timestamp)\n| SORT count DESC",
+      "live": true,
+      "payload": {
+        "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-06-22T19:37:30.000Z\" AND @timestamp < \"2026-06-22T20:37:30.000Z\"\n        AND source.ip == \"172.18.0.21\" AND destination.ip == \"172.18.0.12\" AND destination.port == 5432\n| STATS count = COUNT(*), total_dest_bytes = SUM(destination.bytes), total_src_bytes = SUM(source.bytes), max_dest_bytes = MAX(destination.bytes), max_src_bytes = MAX(source.bytes), avg_dest_bytes = AVG(destination.bytes), avg_src_bytes = AVG(source.bytes), min_ts = MIN(@timestamp), max_ts = MAX(@timestamp)\n| SORT count DESC",
+        "columns": [
+          {
+            "name": "count",
+            "type": "long"
+          },
+          {
+            "name": "total_dest_bytes",
+            "type": "long"
+          },
+          {
+            "name": "total_src_bytes",
+            "type": "long"
+          },
+          {
+            "name": "max_dest_bytes",
+            "type": "long"
+          },
+          {
+            "name": "max_src_bytes",
+            "type": "long"
+          },
+          {
+            "name": "avg_dest_bytes",
+            "type": "double"
+          },
+          {
+            "name": "avg_src_bytes",
+            "type": "double"
+          },
+          {
+            "name": "min_ts",
+            "type": "date"
+          },
+          {
+            "name": "max_ts",
+            "type": "date"
+          }
+        ],
+        "row_count": 1,
+        "values": [
+          {
+            "count": 0,
+            "total_dest_bytes": null,
+            "total_src_bytes": null,
+            "max_dest_bytes": null,
+            "max_src_bytes": null,
+            "avg_dest_bytes": null,
+            "avg_src_bytes": null,
+            "min_ts": null,
+            "max_ts": null
+          }
+        ]
+      }
+    }
+  ]
+}

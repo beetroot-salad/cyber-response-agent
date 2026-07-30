@@ -1,0 +1,133 @@
+projections:
+- lead_id: l-002
+  events: []
+- lead_id: l-001
+  events: []
+- lead_id: l-004
+  events: []
+- lead_id: l-006
+  events: []
+- lead_id: l-003
+  events: []
+- lead_id: l-005
+  events:
+  - '@timestamp': '2026-07-28T06:46:42+00:00'
+    loggerName: org.keycloak.events
+    message: type="LOGIN_ERROR", realmId="soc-playground", clientId="admin-cli", userId="<user-id>",
+      username="dev.dana", ipAddress="<office-ws-1-ip>", error="invalid_user_credentials"
+  - '@timestamp': '2026-07-28T06:46:42+00:00'
+    loggerName: org.keycloak.events
+    message: type="LOGIN_ERROR", realmId="soc-playground", clientId="admin-cli", userId="<user-id>",
+      username="admin", ipAddress="<office-ws-1-ip>", error="invalid_user_credentials"
+  - '@timestamp': '2026-07-28T06:46:42+00:00'
+    loggerName: org.keycloak.events
+    message: type="LOGIN_ERROR", realmId="soc-playground", clientId="admin-cli", userId="<user-id>",
+      username="sre.alice", ipAddress="<office-ws-1-ip>", error="invalid_user_credentials"
+  - '@timestamp': '2026-07-28T06:46:42+00:00'
+    loggerName: org.keycloak.events
+    message: type="LOGIN_ERROR", realmId="soc-playground", clientId="admin-cli", userId="<user-id>",
+      username="svc.backups", ipAddress="<office-ws-1-ip>", error="invalid_user_credentials"
+  - '@timestamp': '2026-07-28T06:46:42+00:00'
+    loggerName: org.keycloak.events
+    message: type="LOGIN_ERROR", realmId="soc-playground", clientId="admin-cli", userId="<user-id>",
+      username="operator", ipAddress="<office-ws-1-ip>", error="invalid_user_credentials"
+  - '@timestamp': '2026-07-28T06:46:49+00:00'
+    loggerName: org.keycloak.events
+    message: type="LOGIN_ERROR", realmId="soc-playground", clientId="admin-cli", userId="<user-id>",
+      username="dev.dana", ipAddress="<office-ws-1-ip>", error="invalid_user_credentials"
+  - '@timestamp': '2026-07-28T06:46:49+00:00'
+    loggerName: org.keycloak.events
+    message: type="LOGIN_ERROR", realmId="soc-playground", clientId="admin-cli", userId="<user-id>",
+      username="admin", ipAddress="<office-ws-1-ip>", error="invalid_user_credentials"
+  - '@timestamp': '2026-07-28T06:46:49+00:00'
+    loggerName: org.keycloak.events
+    message: type="LOGIN_ERROR", realmId="soc-playground", clientId="admin-cli", userId="<user-id>",
+      username="sre.alice", ipAddress="<office-ws-1-ip>", error="invalid_user_credentials"
+  - '@timestamp': '2026-07-28T06:46:49+00:00'
+    loggerName: org.keycloak.events
+    message: type="LOGIN_ERROR", realmId="soc-playground", clientId="admin-cli", userId="<user-id>",
+      username="svc.backups", ipAddress="<office-ws-1-ip>", error="invalid_user_credentials"
+  - '@timestamp': '2026-07-28T06:46:49+00:00'
+    loggerName: org.keycloak.events
+    message: type="LOGIN_ERROR", realmId="soc-playground", clientId="admin-cli", userId="<user-id>",
+      username="operator", ipAddress="<office-ws-1-ip>", error="invalid_user_credentials"
+  - '@timestamp': '2026-07-28T06:46:56+00:00'
+    loggerName: org.keycloak.events
+    message: type="LOGIN_ERROR", realmId="soc-playground", clientId="admin-cli", userId="<user-id>",
+      username="dev.dana", ipAddress="<office-ws-1-ip>", error="invalid_user_credentials"
+  - '@timestamp': '2026-07-28T06:46:56+00:00'
+    loggerName: org.keycloak.events
+    message: type="LOGIN_ERROR", realmId="soc-playground", clientId="admin-cli", userId="<user-id>",
+      username="admin", ipAddress="<office-ws-1-ip>", error="invalid_user_credentials"
+  - '@timestamp': '2026-07-28T06:46:56+00:00'
+    loggerName: org.keycloak.events
+    message: type="LOGIN_ERROR", realmId="soc-playground", clientId="admin-cli", userId="<user-id>",
+      username="sre.alice", ipAddress="<office-ws-1-ip>", error="invalid_user_credentials"
+  - '@timestamp': '2026-07-28T06:46:56+00:00'
+    loggerName: org.keycloak.events
+    message: type="LOGIN_ERROR", realmId="soc-playground", clientId="admin-cli", userId="<user-id>",
+      username="svc.backups", ipAddress="<office-ws-1-ip>", error="invalid_user_credentials"
+  - '@timestamp': '2026-07-28T06:46:56+00:00'
+    loggerName: org.keycloak.events
+    message: type="LOGIN_ERROR", realmId="soc-playground", clientId="admin-cli", userId="<user-id>",
+      username="operator", ipAddress="<office-ws-1-ip>", error="invalid_user_credentials"
+  - '@timestamp': '2026-07-28T06:47:02+00:00'
+    loggerName: org.keycloak.events
+    message: type="LOGIN_ERROR", realmId="soc-playground", clientId="admin-cli", userId="<user-id>",
+      username="dev.dana", ipAddress="<office-ws-1-ip>", error="invalid_user_credentials"
+  - '@timestamp': '2026-07-28T06:47:02+00:00'
+    loggerName: org.keycloak.events
+    message: type="LOGIN_ERROR", realmId="soc-playground", clientId="admin-cli", userId="<user-id>",
+      username="admin", ipAddress="<office-ws-1-ip>", error="invalid_user_credentials"
+  - '@timestamp': '2026-07-28T06:47:02+00:00'
+    loggerName: org.keycloak.events
+    message: type="LOGIN_ERROR", realmId="soc-playground", clientId="admin-cli", userId="<user-id>",
+      username="sre.alice", ipAddress="<office-ws-1-ip>", error="invalid_user_credentials"
+  - '@timestamp': '2026-07-28T06:47:02+00:00'
+    loggerName: org.keycloak.events
+    message: type="LOGIN_ERROR", realmId="soc-playground", clientId="admin-cli", userId="<user-id>",
+      username="svc.backups", ipAddress="<office-ws-1-ip>", error="invalid_user_credentials"
+  - '@timestamp': '2026-07-28T06:47:02+00:00'
+    loggerName: org.keycloak.events
+    message: type="LOGIN_ERROR", realmId="soc-playground", clientId="admin-cli", userId="<user-id>",
+      username="operator", ipAddress="<office-ws-1-ip>", error="invalid_user_credentials"
+  - '@timestamp': '2026-07-28T06:47:09+00:00'
+    loggerName: org.keycloak.events
+    message: type="LOGIN_ERROR", realmId="soc-playground", clientId="admin-cli", userId="<user-id>",
+      username="dev.dana", ipAddress="<office-ws-1-ip>", error="invalid_user_credentials"
+  - '@timestamp': '2026-07-28T06:47:09+00:00'
+    loggerName: org.keycloak.events
+    message: type="LOGIN_ERROR", realmId="soc-playground", clientId="admin-cli", userId="<user-id>",
+      username="admin", ipAddress="<office-ws-1-ip>", error="invalid_user_credentials"
+  - '@timestamp': '2026-07-28T06:47:09+00:00'
+    loggerName: org.keycloak.events
+    message: type="LOGIN_ERROR", realmId="soc-playground", clientId="admin-cli", userId="<user-id>",
+      username="sre.alice", ipAddress="<office-ws-1-ip>", error="invalid_user_credentials"
+  - '@timestamp': '2026-07-28T06:47:09+00:00'
+    loggerName: org.keycloak.events
+    message: type="LOGIN_ERROR", realmId="soc-playground", clientId="admin-cli", userId="<user-id>",
+      username="svc.backups", ipAddress="<office-ws-1-ip>", error="invalid_user_credentials"
+  - '@timestamp': '2026-07-28T06:47:09+00:00'
+    loggerName: org.keycloak.events
+    message: type="LOGIN_ERROR", realmId="soc-playground", clientId="admin-cli", userId="<user-id>",
+      username="operator", ipAddress="<office-ws-1-ip>", error="invalid_user_credentials"
+  - '@timestamp': '2026-07-28T06:47:16+00:00'
+    loggerName: org.keycloak.events
+    message: type="LOGIN_ERROR", realmId="soc-playground", clientId="admin-cli", userId="<user-id>",
+      username="dev.dana", ipAddress="<office-ws-1-ip>", error="invalid_user_credentials"
+  - '@timestamp': '2026-07-28T06:47:16+00:00'
+    loggerName: org.keycloak.events
+    message: type="LOGIN_ERROR", realmId="soc-playground", clientId="admin-cli", userId="<user-id>",
+      username="admin", ipAddress="<office-ws-1-ip>", error="invalid_user_credentials"
+  - '@timestamp': '2026-07-28T06:47:16+00:00'
+    loggerName: org.keycloak.events
+    message: type="LOGIN_ERROR", realmId="soc-playground", clientId="admin-cli", userId="<user-id>",
+      username="sre.alice", ipAddress="<office-ws-1-ip>", error="invalid_user_credentials"
+  - '@timestamp': '2026-07-28T06:47:16+00:00'
+    loggerName: org.keycloak.events
+    message: type="LOGIN_ERROR", realmId="soc-playground", clientId="admin-cli", userId="<user-id>",
+      username="svc.backups", ipAddress="<office-ws-1-ip>", error="invalid_user_credentials"
+  - '@timestamp': '2026-07-28T06:47:16+00:00'
+    loggerName: org.keycloak.events
+    message: type="LOGIN_ERROR", realmId="soc-playground", clientId="admin-cli", userId="<user-id>",
+      username="operator", ipAddress="<office-ws-1-ip>", error="invalid_user_credentials"

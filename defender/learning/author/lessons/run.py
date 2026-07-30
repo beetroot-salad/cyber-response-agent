@@ -12,12 +12,11 @@ import yaml
 if (_root := str(Path(__file__).resolve().parents[4])) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender.learning.author import curator as _curator
+from defender.learning.author import drain
 from defender.learning.author import shared as _shared
-from defender.learning.author._config import CorpusAuthorConfig
+from defender.learning.author._config import BucketSpec, CorpusAuthorConfig
 from defender._yaml import safe_load
 from defender._corpus import iter_lessons
-from defender._io import read_jsonl_rows
 from defender.learning.core.config import (
     DEFAULT_PATHS,
     LoopPaths,
@@ -27,13 +26,10 @@ from defender.learning.core.config import (
     author_model as _author_model,
     author_request_limit,
     repo_lock_wait_seconds,
+    author_max_attempts,
     author_timeout as _author_timeout,
     make_logger,
     now_iso,
-)
-from defender.learning.core.persist import (
-    _flock,
-    rotate_queue_locked,
 )
 
 
@@ -53,11 +49,12 @@ class AuthorConfig(CorpusAuthorConfig):
     """The lessons curator's drain config: the shared corpus-author core (#713) plus the
     three fields only this drain has.
 
-    `findings_lock_file` is NOT `channel.lock` — it is the read-side lock `read_batch` holds
-    while slurping the queue, where `channel.lock` is the drain-wide queue lock the batch
-    envelope takes. Two locks, two jobs."""
+    REVERSED BY #719, which is why this docstring no longer names two locks as a reason
+    NOT to fold: the read-side lock and the drain-wide lock are now `channel.append_lock`
+    and `channel.drain_lock`, declared on the channel and taken by the shared drain body.
+    What is left here is genuinely findings-only — the held report, and the manifest seed
+    the lessons prompt takes."""
 
-    findings_lock_file: Path
     held_report: Path
     manifest_seed: str | None = None
     # default_factory, not a plain default: these are env-backed knobs and a plain
@@ -77,25 +74,26 @@ def build_author_config(
         runs_dir=paths.runs_dir,
         pending_dir=paths.pending_dir,
         channel=paths.findings,
-        findings_lock_file=paths.findings_lock_file,
         repo_lock_file=paths.author_lock_file,
         repo_lock_wait_seconds=repo_lock_wait_seconds(),
-        held_report=paths.pending_dir / "held_report.log",
+        # Channel-scoped, like the graveyard and the stuck-row record beside it: D7
+        # keeps this report lessons-local, so it must not sit on a name an
+        # observation channel would look like it shares (#719).
+        held_report=paths.pending_dir / "findings.held_report.log",
         log_prefix=_LOG_PREFIX,
         author_prompt=paths.learning_dir / "author" / "lessons" / "prompt.md",
         invoke_agent=invoke_agent,
+        gate=_gate_findings,
+        buckets=FINDINGS_BUCKETS,
+        commit_fn=commit_lessons,
+        noun="findings",
+        max_attempts=author_max_attempts(),
+        post_rotate=_write_held_report_after_rotate,
         manifest_seed=manifest_seed,
         box=box,
     )
 
 
-
-
-def read_batch(cfg: AuthorConfig) -> list[dict]:
-    if not cfg.channel.file.is_file():
-        return []
-    with _flock(cfg.findings_lock_file):
-        return read_jsonl_rows(cfg.channel.file)
 
 
 def disposition_for(cfg: AuthorConfig, run_id: str) -> str | None:
@@ -170,38 +168,30 @@ def invoke_agent(findings: list[dict], batch_id: str, cfg: AuthorConfig) -> dict
 
 
 
-def changes_outside_lessons(cfg: AuthorConfig) -> list[str]:
-    return _shared.changes_outside(cfg.repo_root, cfg.corpus_dir_rel)
+def _forward_bad_reason(reason: str) -> str:
+    """The held-reason prefix the forward-check bucket writes. A named function rather
+    than an inline lambda so no module-level assignment carries an interpolated string."""
+    return f"forward_bad: {reason}"
 
 
-def commit_lessons(cfg: AuthorConfig, message: str) -> str | None:
+FINDINGS_BUCKETS: tuple[BucketSpec, ...] = (
+    BucketSpec(name="committed", disposition="committed", reason_field=None, formatter=str),
+    BucketSpec(
+        name="consumed_skip", disposition="consumed", reason_field="skip_reason",
+        formatter=str,
+    ),
+    # The one genuinely direction-specific bucket: a lesson the forward check says would
+    # flip a correctly-resolved case is HELD, not consumed, and its reason is prefixed so
+    # an operator can tell it from an ordinary hold.
+    BucketSpec(
+        name="held_forward_bad", disposition="held", reason_field="held_reason",
+        formatter=_forward_bad_reason,
+    ),
+)
+
+
+def commit_lessons(message: str, cfg: AuthorConfig) -> str | None:
     return _shared.commit_corpus(cfg.repo_root, cfg.corpus_dir, message)
-
-
-def _result_list(result: dict, key: str) -> list[Any]:
-    return _shared._result_list(result, key)
-
-
-def _commit_message(result: dict) -> str:
-    return _shared._commit_message(result, "findings")
-
-
-def rotate_queue(
-    cfg: AuthorConfig,
-    *,
-    held: list[dict],
-    consumed: list[dict],
-    commit_sha: str | None,
-) -> None:
-    rotate_queue_locked(
-        pending_file=cfg.channel.file,
-        consumed_file=cfg.channel.consumed,
-        lock_file=cfg.findings_lock_file,
-        id_key="finding_id",
-        held=held,
-        consumed=consumed,
-        commit_sha=commit_sha,
-    )
 
 
 def write_held_report(
@@ -227,6 +217,22 @@ def write_held_report(
 _log = make_logger(_LOG_PREFIX)
 
 
+def _write_held_report_after_rotate(outcome, cfg: AuthorConfig) -> None:
+    """D7's hook, run after BOTH the corpus commit and the queue rotation.
+
+    It is the only seam that observes the tick's closing edge, which is what makes it
+    shared config rather than lessons-local decoration — even though only this direction
+    populates it."""
+    if outcome.commit_sha is not None:
+        return
+    write_held_report(
+        cfg,
+        batch_id=outcome.batch_id,
+        held_forward_bad=outcome.held.get("held_forward_bad", []),
+        skipped=outcome.consumed.get("consumed_skip", []),
+    )
+
+
 def run_batch(
     *,
     hold_committed: bool = False,
@@ -234,79 +240,10 @@ def run_batch(
     cfg: AuthorConfig | None = None,
     box: Any = None,
 ) -> int:
+    """The findings direction's entry point. The batch body is `drain.run_batch` (#719)."""
     if cfg is None:
         cfg = build_author_config(paths, box=box)
-    return _shared.run_batch_envelope(
-        queue_lock_file=cfg.channel.lock,
-        repo_lock_file=cfg.repo_lock_file,
-        repo_lock_wait_seconds=cfg.repo_lock_wait_seconds,
-        repo_root=cfg.repo_root,
-        corpus_dir=cfg.corpus_dir,
-        corpus_dir_rel=cfg.corpus_dir_rel,
-        log=_log,
-        inner=lambda: _run_batch_inner(cfg, hold_committed=hold_committed),
-    )
-
-
-def _run_batch_inner(cfg: AuthorConfig, *, hold_committed: bool = False) -> int:
-    batch = read_batch(cfg)
-    if not batch:
-        _log("queue empty — nothing to author")
-        return 0
-    all_findings = _shared.by_id(batch, "finding_id")
-    held, consumed_idempotent = _partition_pre_author(cfg, batch)
-    gated_ids = {h["finding_id"] for h in held} | {
-        c["finding_id"] for c in consumed_idempotent
-    }
-    to_author = [f for f in batch if f["finding_id"] not in gated_ids]
-
-    batch_id = uuid.uuid4().hex[:12]
-    _log(
-        f"batch={batch_id} total={len(batch)} "
-        f"to_author={len(to_author)} held={len(held)} "
-        f"idempotent={len(consumed_idempotent)}"
-    )
-
-    commit_sha: str | None = None
-    committed: list[dict] = []
-    held_forward_bad: list[dict] = []
-    consumed_skip: list[dict] = []
-    if to_author:
-        rc, commit_sha, committed, held_forward_bad, consumed_skip = (
-            _author_to_author(cfg, to_author, all_findings, batch_id)
-        )
-        if rc != 0:
-            return rc
-
-    held_committed, rotated_committed = _shared.partition_committed(
-        committed, hold_committed=hold_committed
-    )
-    try:
-        rotate_queue(
-            cfg,
-            held=held + held_forward_bad + held_committed,
-            consumed=consumed_idempotent + rotated_committed + consumed_skip,
-            commit_sha=commit_sha,
-        )
-    except AuthorError as e:
-        _log(f"FATAL during rotate: {e}")
-        return 2
-    if commit_sha is None:
-        write_held_report(
-            cfg,
-            batch_id=batch_id,
-            held_forward_bad=held_forward_bad,
-            skipped=consumed_skip,
-        )
-    _log(
-        f"done batch={batch_id} committed={len(committed)} "
-        f"held_forward_bad={len(held_forward_bad)} "
-        f"consumed_skip={len(consumed_skip)} "
-        f"idempotent={len(consumed_idempotent)} "
-        f"held_no_ground_truth={len(held)} "
-        f"commit_sha={commit_sha}"
-    )
-    return 0
+    return drain.run_batch(cfg=cfg, hold_committed=hold_committed, box=box)
 
 
 def _has_confident_ground_truth(direction: str, disposition: str | None) -> bool:
@@ -315,7 +252,15 @@ def _has_confident_ground_truth(direction: str, disposition: str | None) -> bool
     return disposition == "benign"
 
 
-def _partition_pre_author(cfg: AuthorConfig, batch: list[dict]) -> tuple[list[dict], list[dict]]:
+def _gate_findings(
+    batch: list[dict], cfg: AuthorConfig,
+) -> tuple[list[dict], list[dict], list[dict]]:
+    """The findings direction's pre-author policy: idempotency against the corpus, then
+    the `source_refs.yaml` ground truth a finding needs before it can become a lesson.
+
+    `to_author` is derived HERE, by subtraction, rather than by the caller (#719) — the
+    shape is now the same 3-tuple both directions return, even though the policies are
+    not the same policy parameterised."""
     existing_ids = existing_finding_ids(cfg)
     held: list[dict] = []
     consumed_idempotent: list[dict] = []
@@ -334,66 +279,8 @@ def _partition_pre_author(cfg: AuthorConfig, batch: list[dict]) -> tuple[list[di
                 f"no_ground_truth(direction={direction!r}, disposition={disp!r})"
             )
             held.append(rec)
-    return held, consumed_idempotent
-
-
-def _author_to_author(
-    cfg: AuthorConfig, to_author: list[dict], all_findings: dict[str, dict], batch_id: str,
-) -> tuple[int, str | None, list[dict], list[dict], list[dict]]:
-    baseline_stray = changes_outside_lessons(cfg)
-    try:
-        result = cfg.invoke_agent(to_author, batch_id, cfg)
-    except AuthorError as e:
-        _log(f"FATAL: {e}")
-        _curator._dead_letter_or_bump(
-            to_author, queue_file=cfg.channel.file, pending_dir=cfg.pending_dir,
-            id_key="finding_id", reason=str(e),
-        )
-        return 2, None, [], [], []
-    try:
-        _shared.verify_agent_state(
-            cfg.repo_root, result, cfg.corpus_dir, cfg.corpus_dir_rel,
-            "findings", baseline_stray,
-        )
-        _shared.validate_agent_result_partition(
-            result, to_author, id_key="finding_id",
-            buckets=("committed", "held_forward_bad", "consumed_skip"),
-            noun="findings",
-        )
-        commit_sha: str | None = None
-        if _result_list(result, "committed"):
-            commit_sha = commit_lessons(cfg, _commit_message(result))
-    except AuthorError as e:
-        _log(f"FATAL: {e}")
-        return 2, None, [], [], []
-    committed: list[dict] = []
-    held_forward_bad: list[dict] = []
-    consumed_skip: list[dict] = []
-    for fid in _result_list(result, "committed"):
-        src = all_findings.get(fid)
-        if src is None:
-            raise AuthorError(f"author committed unknown finding_id={fid!r}")
-        rec = dict(src)
-        rec["consumed_category"] = "consumed_committed"
-        committed.append(rec)
-    for entry in _result_list(result, "held_forward_bad"):
-        fid = entry.get("finding_id")
-        src = all_findings.get(fid)
-        if src is None:
-            raise AuthorError(f"author held unknown finding_id={fid!r}")
-        rec = dict(src)
-        rec["held_reason"] = f"forward_bad: {entry.get('reason', '')}"
-        held_forward_bad.append(rec)
-    for entry in _result_list(result, "consumed_skip"):
-        fid = entry.get("finding_id")
-        src = all_findings.get(fid)
-        if src is None:
-            raise AuthorError(f"author skipped unknown finding_id={fid!r}")
-        rec = dict(src)
-        rec["consumed_category"] = "consumed_skip"
-        rec["skip_reason"] = entry.get("reason", "")
-        consumed_skip.append(rec)
-    return 0, commit_sha, committed, held_forward_bad, consumed_skip
+    gated = {h["finding_id"] for h in held} | {c["finding_id"] for c in consumed_idempotent}
+    return held, consumed_idempotent, [f for f in batch if f["finding_id"] not in gated]
 
 
 def main(argv: list[str]) -> int:

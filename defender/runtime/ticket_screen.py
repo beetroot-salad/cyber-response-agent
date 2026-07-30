@@ -9,9 +9,12 @@ breaker) and a malformed envelope (an INFRA fault, which does). Only the *predic
 
   - gather excludes its own case by RECORD IDENTITY and keeps every other lifecycle state —
     open and in-progress siblings are correlation evidence it is entitled to read;
-  - the judge additionally keeps only genuinely-closed records, and on ``get`` withholds a
-    payload that merely NAMES the case under judgment (Fork H) — for the judge, the case's own
-    ticket is the answer key it is scoring against.
+  - the judge additionally keeps only genuinely-closed records, withholds a record that merely
+    NAMES the case under judgment (Fork H, on both its surfaces since #683), and withholds any
+    record not provably written BEFORE the case opened (Fork J) — for the judge, the case's own
+    ticket is the answer key it is scoring against, and so is anything written about the case
+    while it was live. Gather has no recency arm and must not grow one: it reads in-flight
+    siblings deliberately.
 
 Holding the protocol here means an envelope change — a renamed ``tickets``/``key``, a different
 malformed classification — is made ONCE, rather than in two places that must be kept in step.

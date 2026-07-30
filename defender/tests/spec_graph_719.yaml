@@ -1,0 +1,2192 @@
+schema_version: 1
+design: >-
+  issue 719 — one shared drain body, the append/drain lock split, and one retire seam
+  (body + comments A1-A5 + D9); extracted in .spec-flow/frontiers/20-demands.md
+base: 1cecad37
+
+# ---------------------------------------------------------------------------------------
+# Name reconciliation (phase D, before the join). Three passes coined ids independently:
+# the grounding brief (code), demand extraction (design), and the dispositions' address
+# derivations. Unified here by role+origin:
+#   appender            -> SPLIT into `run_direction` (run_cycle.py:129, the concurrent
+#                          findings/observation appender) and `lead_author_drain`
+#                          (lead_author.py:404, the pitfalls channel's ONLY appender, F12).
+#                          One id hid two actors with opposite concurrency stories.
+#   author_drain -> run_or_dead_letter  ->  lead_author_drain -> run_or_dead_letter.
+#                          C32: the two production call sites are drains.py:167 and :211,
+#                          both inside the lead-author tick, not the corpus author drain.
+#   graveyard           == the prior graph's `dlq` == the code's `<queue>.deadletter.jsonl`.
+#                          D9 creates the unified sink, so the design's name wins; the file
+#                          spelling is carried in the identity evidence.
+#   queue_row           == prior graph's `queue_row`, RE-KEYED. The prior pass keyed it on
+#                          [batch_id]; batch_id is not a field on a queue row. Rows key on
+#                          the channel's id_key (persist.py:66-68 merge filter, :314-316
+#                          dedup) — the axis is `queue_row_id` (G26).
+#   channel             == the prior graph's 4-member `curator` axis, widened to 5 members.
+#   state_root_env, envelope, curator_modules, forward_check -> the last is the ACTOR
+#                          `load_observation` (verify_forward/shared.py::load_observation),
+#                          named for the code symbol rather than reused as a boundary id.
+# ---------------------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------------------
+# THE SUITE (phase E). Every `discharged_by` below resolves to one of five modules beside
+# this file, plus one uncollected helper:
+#   defender/tests/_drain719.py             the substrate: repo/paths/config builders, the
+#                                           declarative fault fakes, the lock/thread helpers,
+#                                           and the seam contract this spec pins, written out
+#                                           in its module docstring for the implementer.
+#   defender/tests/test_drain719_retire.py  D9's retire seam + decisions 2 and 3 (20 tests)
+#   defender/tests/test_drain719_guard.py   decision 8's ENUMERATED retire set: membership,
+#                                           parity, extent, decision 1's four paths, decision
+#                                           9's reconciling tick and decision 10's signal (14)
+#   defender/tests/test_drain719_locks.py   D1/D2 and O1/O2/O7 (18)
+#   defender/tests/test_drain719_fold.py    O3/O4/O5, D4/D6/D7, F1/F2 (15)
+#   defender/tests/test_drain719_config.py  new-path placement, the ceiling's binding time,
+#                                           and the pitfalls channel (9)
+# 76 tests, 76 `form: test` demands, no test without a demand and no demand without a test.
+# REWRITTEN AT §7 ROUND 2 — 16 of them. Decision 8 reversed A12, so the twelve tests named in
+# 70-resolutions.md red flag 10 were re-authored against an enumerated retire set rather than
+# edited (two are outright reversals: a green run on their previous bodies would be evidence
+# AGAINST the resolved design). Four more were re-authored for fix shapes F1, F2, F3 and F7.
+# `retire_write_failure_is_systemic` was on that list and was deliberately NOT rewritten — A11
+# is carried by non-membership and its body already induces the real OSError; §7 round 3
+# ratified the divergence, so 11 of 12 bodies changed, not 12.
+# ADDED AT §7 ROUND 3 — decision 10's test, the only demand whose pointer did not resolve.
+# Decision 9 re-minted the previously-undemanded post-commit test for the reconciling-tick
+# coverage it actually provides, closing B77.
+# REPAIRED AT PHASE F ROUND 2 — two defects, both in the decision-8 module.
+#   F1: `test_only_a_named_fault_class_reaches_the_retire_seam` built its fault instances
+#   lazily as `cls(message)`. GitError's constructor is (args, returncode, stderr), so it
+#   raised TypeError in the test's own setup and the "and from NOTHING ELSE" half — the single
+#   assertion decision 8 exists to enforce — never executed against any implementation. Both
+#   lists are now built up front through a factory that constructs each class the way
+#   production raises it, and the fix was verified BY EXECUTION, not by reading: a null-stub
+#   pass cannot see this, because the test still collects and still fails like every other red.
+#   F3: `retirement_guard_extent_is_pinned`'s four probes were two members and two OSErrors,
+#   and the OSError outcomes follow from non-membership alone — so an implementation with the
+#   clauses at any other extent passed. All four probes now raise MEMBERS at the four edges
+#   (gate / agent / commit / post-rotate), holding membership constant so placement is the only
+#   variable. The post-rotate edge is the one decision 9 leans on and is observable only
+#   through D7's `post_rotate` hook, which is why that seam is load-bearing for this demand.
+# State: 74 red / 2 green over 76. The two green are labelled PARITY-WITH-TODAY in their own
+# docstrings and are meant to pass at this base —
+# test_two_concurrent_directions_both_land_every_finding (PJ2b, a conservation guard) and
+# test_second_author_drain_invocation_returns_without_blocking (P61, an unchanged outer gate).
+# `_drain719.py` guards the `from defender.learning.author import drain` import with a shim
+# that raises on every attribute access: NOT a skip and NOT a soften — each test still fails
+# on its own — but a missing target then does not abort pytest's whole collection and take
+# the rest of the tree's suite down with it.
+# ---------------------------------------------------------------------------------------
+
+demands:
+  # ---- Demand #0: the return-value contract — RESOLVED AT §7, AND THE READING FLIPPED ----
+  # 70-resolutions.md, red flag 1. The provisional reading pinned "today's int rc alphabet,
+  # unchanged". Decision 1 converts the pitfalls leg's rc=2 into a retire-triggering,
+  # NON-systemic fault, so the `2` branch of that alphabet is REJECTED: run_pitfalls signals
+  # an authoring failure by raising, not by returning 2, and _drain_pitfalls observes a fault
+  # where it observed a return value. The `0` branch (queue-empty / drain-lock held by another
+  # process / repo-lock unavailable) is unchanged on every leg. Phase C's classification must
+  # re-run against this shape before phase E is dispatched.
+  - id: return_contract_run_batch_rc
+    kind: behavior
+    form: test
+    binds: ["drain", "interacts(drain->findings)", "interacts(drain->actor_observations)",
+            "run_pitfalls"]
+    discharged_by: test_folded_drain_rc_alphabet_after_the_pitfalls_fault_conversion
+
+  # ---- O1: no row with an unprocessed id is lost ----
+  - {id: no_unprocessed_row_lost_rotate, kind: behavior, form: test,
+     binds: ["interacts(drain->findings)", "interacts(drain->actor_observations)", "append_lock"],
+     discharged_by: test_rotation_retains_row_appended_mid_batch}
+  - {id: no_unprocessed_row_lost_retire, kind: behavior, form: test,
+     binds: ["retire", "interacts(retire->actor_observations)", "interacts(retire->findings)",
+             "append_lock"],
+     discharged_by: test_retirement_retains_row_appended_mid_window}
+  - {id: finding_id_collision_dropped, kind: domain-outcome, form: test,
+     binds: ["findings.identity", "interacts(run_direction->findings)"],
+     discharged_by: test_relearn_colliding_finding_id_is_dropped_by_merge_filter}
+
+  # ---- O2: appending does not block on an author batch ----
+  # §7 / C7 (P60), re-scoped: O2 is "an append never waits on the AGENT CALL". The oracle is
+  # pinned to the LLM phase specifically; the rotate/retire window is an explicit exception
+  # (O7 holds append_lock there). Copy 3's "small bound in all three phases" reading is
+  # rejected — as written the demand could be failed by a correct implementation.
+  - {id: append_does_not_block_on_batch, kind: behavior, form: test,
+     binds: ["append_lock", "drain_lock", "interacts(run_direction->actor_observations)",
+             "interacts(run_direction->environment_observations)",
+             "interacts(run_direction->actor_environment_observations)"],
+     discharged_by: test_append_completes_while_drain_batch_in_flight}
+
+  # ---- O7: rotation and retirement are mutually exclusive with appends ----
+  - {id: rotate_excluded_by_append_lock, kind: behavior, form: test,
+     binds: ["append_lock.access[flock-blocking]", "interacts(drain->actor_observations)"],
+     discharged_by: test_rotate_blocks_while_append_lock_held}
+  - {id: retire_excluded_by_append_lock, kind: behavior, form: test,
+     binds: ["append_lock.access[flock-blocking]", "interacts(retire->actor_observations)"],
+     discharged_by: test_retire_blocks_while_append_lock_held}
+
+  # ---- D1: QueueChannel carries its own lock topology ----
+  - {id: queue_channel_lock_topology, kind: seam, form: test,
+     binds: ["actor_observations", "environment_observations", "actor_environment_observations",
+             "findings", "pitfalls", "append_lock", "drain_lock",
+             "drain_lock.domain.distinguished[None]"],
+     discharged_by: test_every_channel_declares_its_lock_topology}
+  - {id: append_lock_identity_unchanged, kind: uniqueness, form: test,
+     binds: ["append_lock", "actor_observations.identity"],
+     discharged_by: test_append_lock_paths_are_byte_identical_to_today}
+
+  # ---- D2: merge_concurrent deleted, rotation always merges ----
+  - {id: rotate_always_merges, kind: behavior, form: test,
+     binds: ["rotate_queue_locked", "interacts(drain->actor_observations)"],
+     discharged_by: test_rotation_has_no_merge_knob_and_always_merges}
+
+  # ---- D3: the channel's id_key becomes a config field (minted at phase D — see gate note) ----
+  - {id: id_key_is_a_channel_config_field, kind: seam, form: test,
+     binds: ["id_key", "id_key.domain.distinguished[observation_id]",
+             "id_key.domain.distinguished[finding_id]", "id_key.domain.distinguished[pitfall_id]",
+             "queue_row.identity"],
+     discharged_by: test_every_channel_declares_its_id_key}
+
+  # ---- O3: one drain body (strengthened oracle: lint is necessary, not sufficient) ----
+  - {id: baseline_shrinks_to_13, kind: shape, form: test,
+     binds: ["lint_duplicate_helpers_baseline"],
+     discharged_by: test_duplicate_helper_baseline_drops_the_five_pair_exclusive_names}
+  - {id: no_batch_driver_body_in_direction_modules, kind: shape, form: test,
+     binds: ["drain", "curator", "lessons_run", "drives(curator->drain)",
+             "drives(lessons_run->drain)"],
+     discharged_by: test_direction_modules_carry_no_batch_driver_body}
+  - {id: gates_renamed_per_direction, kind: shape, form: test,
+     binds: ["gate", "curator", "lessons_run"],
+     discharged_by: test_gates_carry_direction_specific_names}
+
+  # ---- O4: no private cross-module reach ----
+  # §7 / Fork 4 (C26), re-scoped: the oracle is restricted to `<mod>._name` ATTRIBUTE access.
+  # The nine `from defender._io / defender._yaml / … import` lines are a repo-wide convention,
+  # not the defect; an unscoped oracle fails on convention instead of on the reach.
+  - {id: no_private_cross_module_reference, kind: shape, form: test,
+     binds: ["curator", "lessons_run", "retire"],
+     discharged_by: test_no_underscore_attribute_reference_across_drain_modules}
+
+  # ---- O5: per-direction gating semantics unchanged ----
+  - {id: gating_semantics_preserved, kind: parity, form: test,
+     binds: ["gate", "interacts(drain->actor_observations)", "interacts(drain->findings)"],
+     discharged_by: test_each_direction_gate_keeps_its_policy_through_the_shared_drain}
+  - {id: held_forward_bad_bucket_and_report, kind: domain-outcome, form: test,
+     binds: ["bucket_spec.domain.distinguished[held_forward_bad]", "held_report"],
+     discharged_by: test_forward_bad_bucket_and_held_report_stay_lessons_only}
+  - {id: gate_returns_three_tuple, kind: seam, form: test,
+     binds: ["gate"],
+     discharged_by: test_gate_seam_returns_held_consumed_pre_to_author}
+  - {id: bucket_spec_carries_formatter, kind: shape, form: test,
+     binds: ["bucket_spec", "validate_agent_result_partition"],
+     discharged_by: test_one_bucket_list_drives_validation_and_projection}
+
+  # ---- O6 + O8: uniform, bounded retirement into one graveyard ----
+  - {id: retire_uniform_across_drains, kind: parity, form: test,
+     binds: ["retire", "graveyard", "author_max_attempts"],
+     discharged_by: test_retirement_is_identical_for_observations_and_findings}
+  - {id: pitfalls_retires_at_ceiling, kind: behavior, form: test,
+     binds: ["retire", "pitfalls", "graveyard", "author_max_attempts.domain.distinguished[3]"],
+     discharged_by: test_pitfalls_batch_retires_at_the_ceiling}
+  # §7 / decision 2, re-scoped: "batch-granular" now describes THE BUMP, which is uniform —
+  # every row in a faulted batch bumps by one, and only rows now at or over the ceiling
+  # retire. The uniform-entry case (all rows entering together, retiring together) is what
+  # keeps test_dlq_quarantine_is_batch_granular's meaning intact.
+  - {id: retire_is_batch_granular, kind: behavior, form: test,
+     binds: ["retire", "graveyard"],
+     discharged_by: test_retirement_is_batch_granular}
+  # NO SINGLE SYMBOL governs the systemic-fault exemption across the five channels (C32),
+  # so it is two demands, each bound to the guard that actually sits on its path.
+  #
+  # RE-DERIVED AT §7 ROUND 2 FROM THE RESOLVED SHAPE — not patched onto the previous version.
+  # This demand has now been written three times under opposite pressures, so its content is
+  # stated from scratch: on the author channels, StageAbort / FatalConfigError / BoxFault are
+  # exempt from retirement because they are NOT MEMBERS OF THE RETIRE SET. That observable
+  # coincides with the pre-fold "the except clause never named them", but the reason is now
+  # stated rather than accidental, and it survives a refactor that moves a line.
+  # ONE MEMBER DID NOT COME BACK: GitError is permanently OUT of the exempt set (decision 1
+  # path 3). The original demand asserted all four were exempt; decision 1 refuted that;
+  # decision 6 held it up by placement; decision 8 holds it up by non-membership for three of
+  # the four and leaves GitError retiring. Placement is no longer what carries this.
+  - {id: systemic_faults_exempt_on_author_channels, kind: domain-outcome, form: test,
+     binds: ["author_error_guard.domain.distinguished[AuthorError]",
+             "author_error_guard.domain.distinguished[StageAbort]",
+             "author_error_guard.domain.distinguished[FatalConfigError]",
+             "author_error_guard.domain.distinguished[GitError]",
+             "author_error_guard.domain.distinguished[BoxFault]",
+             "interacts(drain->author_error_guard)", "retire"],
+     discharged_by: test_non_member_systemic_faults_skip_retirement_and_git_error_does_not}
+  # §7 note: decision 1 path 1 converts run_pitfalls' rc=2 into a raised fault. That fault
+  # must be NON-systemic (it retires), so it must not be enrolled in fault_map's four — this
+  # demand's positive control is that the four named types still propagate without a bump.
+  - {id: systemic_faults_exempt_on_marker_channels, kind: domain-outcome, form: test,
+     binds: ["run_or_dead_letter", "fault_map.domain.distinguished[StageAbort]",
+             "fault_map.domain.distinguished[FatalConfigError]",
+             "fault_map.domain.distinguished[GitError]",
+             "fault_map.domain.distinguished[BoxFault]",
+             "interacts(run_pitfalls->run_or_dead_letter)"],
+     discharged_by: test_systemic_faults_propagate_without_bumping_attempts}
+  # §7 / decision 4: the `rejected:` note that argued against testing ceiling=1 is STRUCK —
+  # the human rejected its reasoning (C33 drove ceiling=1 through the real retirement code
+  # with no caller at all), and the test is written as
+  # `fail_fast_ceiling_of_one_retires_on_first_failure` below. No waiver is recorded.
+  - id: retire_ceiling_is_a_parameter
+    kind: domain-outcome
+    form: clause
+    binds: ["author_max_attempts.domain.distinguished[1]"]
+    outcome:
+      nl: >-
+        The retire seam takes the attempt ceiling as a parameter rather than baking one in,
+        so fail-fast is expressible as that ceiling at 1 and the marker-queue absorption
+        stays additive.
+  - {id: one_queue_rewrite_function, kind: uniqueness, form: test,
+     binds: ["rotate_queue_locked", "retire", "append_lock"],
+     discharged_by: test_exactly_one_function_rewrites_a_pending_file}
+
+  # ---- D6 + A4: the cleanups the fold makes normative ----
+  - {id: curator_delegators_deleted, kind: shape, form: test,
+     binds: ["curator"],
+     discharged_by: test_curator_no_longer_re_exports_the_shared_git_helpers}
+  # F7: the config.py:102 site carries BOTH halves of the overturned sentence and only the
+  # tail was banned, so deleting the tail and leaving "Two locks, two jobs" standing passed.
+  # One extra banned substring per site, not a redesign.
+  - {id: overturned_comments_rewritten, kind: shape, form: test,
+     binds: ["append_lock", "drain_lock"],
+     discharged_by: test_the_three_do_not_fold_comments_record_their_reversal}
+  - {id: baseline_rationales_rewritten, kind: shape, form: test,
+     binds: ["lint_duplicate_helpers_baseline"],
+     discharged_by: test_surviving_baseline_reasons_no_longer_cite_the_curator_lessons_split}
+
+  # ---- non-obligation minted as its own demand (independently observable) ----
+  - {id: repo_lock_still_serializes, kind: behavior, form: test,
+     binds: ["repo_lock_file"],
+     discharged_by: test_author_lock_still_serializes_committers_across_drains}
+
+  # ---------------------------------------------------------------------------------------
+  # Minted at phase D from the settled dispositions (45-dispositions.md, "Consensus entries
+  # that bind an expected value") and from the two re-ground probes. These are the only
+  # consensus rows the judge cleared to carry into the suite as a stated outcome.
+  # ---------------------------------------------------------------------------------------
+  - {id: new_state_paths_inside_the_ignored_prefix, kind: behavior, form: test,   # P03 (3/3)
+     binds: ["drain_lock", "graveyard", "stuck_row_record", "corpus_clean_gate",
+             "state_root_env.domain.distinguished[<unset>]"],
+     discharged_by: test_new_lock_and_graveyard_paths_do_not_abort_the_next_batch}
+  - {id: new_paths_root_at_state_root, kind: behavior, form: test,                # P16 (3/3)
+     binds: ["append_lock", "drain_lock", "graveyard", "state_root_env"],
+     discharged_by: test_new_queue_paths_resolve_under_state_root_not_the_worktree}
+  - {id: attempts_persist_on_the_row, kind: behavior, form: test,                 # P38 (3/3)
+     binds: ["queue_row", "queue_row.identity", "author_max_attempts"],
+     discharged_by: test_attempt_count_survives_a_fresh_process}
+  - {id: retire_takes_append_lock_on_pitfalls, kind: parity, form: test,          # P56 (3/3)
+     binds: ["interacts(retire->pitfalls)", "append_lock.access[flock-blocking]", "pitfalls"],
+     discharged_by: test_pitfalls_retire_goes_through_the_locked_rotation}
+  - {id: outer_author_drain_gate_still_skips, kind: behavior, form: test,         # P61 (3/3)
+     binds: ["author_drain_lock", "drives(author_drain->drain)"],
+     discharged_by: test_second_author_drain_invocation_returns_without_blocking}
+  - {id: mid_batch_timeout_is_per_item, kind: domain-outcome, form: test,         # P43 / PJ1b
+     binds: ["author_error_guard.domain.distinguished[TimeoutError]", "author_timeout_seconds",
+             "retire"],
+     discharged_by: test_mid_batch_author_timeout_bumps_the_row_and_is_ceiling_eligible}
+  - {id: concurrent_directions_lose_no_finding, kind: behavior, form: test,       # P47 / PJ2b
+     binds: ["interacts(run_direction->findings)", "append_lock",
+             "drives(learn_drain->run_direction)"],
+     discharged_by: test_two_concurrent_directions_both_land_every_finding}
+
+  # ---------------------------------------------------------------------------------------
+  # Minted at the gate (phase D residue, gate.obligations) — R2/R4 fired with no discharging
+  # demand. §7 / decision 4 ACCEPTED all four option groups, so all six lose `provisional`.
+  # ---------------------------------------------------------------------------------------
+  - {id: consumed_ledger_append_is_atomic, kind: uniqueness, form: test,
+     binds: ["consumed_ledger.identity", "interacts(drain->consumed_ledger)"],
+     discharged_by: test_consumed_ledger_append_survives_a_concurrent_interleaving}
+  - {id: author_max_attempts_negative_retires_like_zero, kind: domain-outcome, form: test,
+     binds: ["author_max_attempts.domain.distinguished[-1]"],
+     discharged_by: test_negative_ceiling_retires_like_zero}
+  - {id: author_max_attempts_zero_retires_on_arrival, kind: domain-outcome, form: test,
+     binds: ["author_max_attempts.domain.distinguished[0]"],
+     discharged_by: test_zero_ceiling_retires_on_first_failure}
+  - {id: author_timeout_seconds_zero_is_pinned, kind: domain-outcome, form: test,
+     binds: ["author_timeout_seconds.domain.distinguished[0]"],
+     discharged_by: test_author_timeout_seconds_zero_behavior_is_pinned}
+  - {id: committed_bucket_is_exercised, kind: domain-outcome, form: test,
+     binds: ["bucket_spec.domain.distinguished[committed]"],
+     discharged_by: test_committed_bucket_routes_to_author_and_projects}
+  - {id: consumed_skip_bucket_is_exercised, kind: domain-outcome, form: test,
+     binds: ["bucket_spec.domain.distinguished[consumed_skip]"],
+     discharged_by: test_consumed_skip_bucket_is_idempotent_and_projects}
+
+  # =======================================================================================
+  # Minted at §7 (.spec-flow/frontiers/70-resolutions.md). Every entry names the routed item
+  # it resolves and whether the human decided it (decision 1-4) or the judge's own recorded
+  # recommendation was applied (`resolved_by: judge-recommendation`).
+  # =======================================================================================
+
+  # ---- Decision 1: O8 scope — all four unbounded-retry paths, each with a DISCRIMINATING
+  # oracle. NOT the recommended option (the recommendation was to cover the first two and
+  # file the rest). Path 2's oracle must fault the POST-agent step: O8's existing oracle
+  # faults the agent and therefore passes over that hole.
+  - {id: pitfalls_rc_fault_reaches_the_retire_seam, kind: behavior, form: test,   # C9/P58, Fork 2
+     resolved_by: human-decision-1,
+     binds: ["run_pitfalls", "pitfalls", "retire", "drives(run_pitfalls->retire)",
+             "author_max_attempts", "interacts(retire->pitfalls)"],
+     discharged_by: test_pitfalls_agent_failure_bumps_attempts_and_retires_at_the_ceiling}
+  # Decision 7 narrows the boundary: this covers post-agent faults BEFORE the commit lands
+  # (verify_agent_state, validate_agent_result_partition). A fault after a SUCCESSFUL commit is
+  # `post_commit_failure_does_not_bump`, not this. The discrimination note still governs — an
+  # oracle that faults the AGENT passes vacuously and does not discharge this demand.
+  - {id: post_agent_failure_bumps_and_retires, kind: behavior, form: test,        # A16/P62
+     resolved_by: human-decision-1,
+     binds: ["retire", "validate_agent_result_partition", "corpus_clean_gate",
+             "interacts(drain->validate_agent_result_partition)", "author_max_attempts"],
+     discharged_by: test_post_agent_failure_with_a_succeeding_agent_bumps_and_retires}
+  - {id: corpus_commit_git_error_retires_and_unwedges_the_corpus, kind: behavior, form: test,
+     resolved_by: human-decision-1,                                               # D1/P01
+     binds: ["author_error_guard.domain.distinguished[GitError]", "retire",
+             "corpus_clean_gate", "graveyard"],
+     discharged_by: test_corpus_commit_git_error_bumps_the_row_and_leaves_the_corpus_dir_usable}
+  - {id: externally_killed_box_command_bumps_and_retires, kind: behavior, form: test,
+     resolved_by: human-decision-1,                                               # PJ1c, hole 3
+     binds: ["author_error_guard.domain.distinguished[ModelRetry]", "retire",
+             "author_max_attempts", "interacts(drain->author_error_guard)"],
+     discharged_by: test_externally_killed_box_command_is_not_reported_as_a_successful_batch}
+  # ===== DECISION 8 (§7 round 2, from 92-reconciliation.md F4) — THE CEILING IS NARROWED TO
+  # AN ENUMERATED FAULT SET. This REVERSES judge recommendation A12/P76 ("the ceiling is
+  # total: anything not explicitly systemic retires"), which was applied `resolved_by:
+  # judge-recommendation` and never human-reviewed until F4 surfaced what it composed into.
+  #
+  # THE MECHANISM CHANGED, NOT ONLY THE SCOPE. There is no bare `except Exception` with a
+  # re-raise carve-out any more. Retirement is reachable only from an explicitly enumerated
+  # RETIRE SET; a fault class outside it is not caught, escapes, and leaves the row queued —
+  # stuck but recoverable and loud, which is today's behaviour. The four paths decisions 1
+  # and 5 cover are preserved ONLY because each is named in that set:
+  #   AuthorError  — the agent call; the mid-batch wall-clock timeout (arrives AS AuthorError
+  #                  via the RunUnprocessable chain, PJ1b); the post-agent steps, since
+  #                  verify_agent_state and validate_agent_result_partition both raise
+  #                  AuthorError (shared.py:246-270, :195-238); and the pitfalls converted
+  #                  fault, which decision 1 path 1 raises as a non-systemic AuthorError.
+  #   GitError     — decision 1 path 3, the commit-time failure.
+  #   ModelRetry   — decision 1 path 4, the externally killed boxed command (PJ1c).
+  # StageAbort, FatalConfigError, BoxFault, OSError and every novel class are ABSENT and
+  # therefore exempt by non-membership.
+  #
+  # ACCEPTED TRADE, recorded as the reasoning: a novel exception class goes back to unbounded
+  # retry rather than to silent permanent loss. O8's own sentence narrows with it — "every
+  # QueueChannel drain retires a persistently failing item" becomes "...whose failure is in
+  # the retire set". Nothing decision 1 named is re-opened; what is re-opened is O8's general
+  # claim, and it is now readable off one tuple instead of by exception archaeology.
+  - {id: retirement_trigger_is_an_enumerated_fault_set, kind: domain-outcome, form: test,
+     resolved_by: human-decision-8,                   # supersedes retirement_trigger_widens_to_bare_exception
+     binds: ["author_error_guard", "interacts(drain->author_error_guard)", "retire"],
+     discharged_by: test_only_a_named_fault_class_reaches_the_retire_seam}
+  # A12/P76 REVERSED. The judge's recommendation was that an unclassified failure retires;
+  # decision 8 says it does not. The demand is renamed rather than inverted in place, because
+  # a demand id whose content is the opposite of what it says is a trap for a later reader.
+  - {id: unnamed_fault_classes_do_not_retire, kind: domain-outcome, form: test,
+     resolved_by: human-decision-8,                   # supersedes unclassified_failures_count_against_the_ceiling
+     binds: ["author_error_guard", "retire", "author_max_attempts", "queue_row"],
+     discharged_by: test_a_failure_in_no_named_class_leaves_the_row_queued_with_its_count_untouched}
+  # Decision 5 SURVIVES as stated — the scope is all four channels — but it is now a property
+  # of the retire SET, not of a widened guard. Restated, not patched.
+  - {id: retire_set_is_identical_on_all_four_channels, kind: parity, form: test,
+     resolved_by: human-decision-5,                   # supersedes widened_guard_covers_all_four_channels
+     binds: ["author_error_guard", "interacts(drain->author_error_guard)", "findings",
+             "actor_observations", "environment_observations",
+             "actor_environment_observations"],
+     discharged_by: test_the_retire_set_is_the_same_on_findings_as_on_the_observation_channels}
+  # Decision 6's EXTENT half survives and is restated: which calls sit inside the try whose
+  # except clauses name the retire set. Its RE-RAISE half is gone — an allow-list has no
+  # re-raise. Consequence recorded rather than buried: the extent demand was load-bearing for
+  # R2's three dependents (A11, B5, D4) under decision 6 and is now only CONFIRMATORY, because
+  # those three are carried by non-membership instead (a lock OSError, a retire-write OSError
+  # and a config-build FatalConfigError are none of them in the set). Kept anyway: a call that
+  # raises AuthorError moved inside the try would still retire, so the extent is still a real
+  # property, just no longer the only thing holding those three up.
+  # ROUND 6: the four extent probes now raise RETIRE-SET MEMBERS at all four edges. Two of them
+  # previously raised OSError, whose outcome non-membership already explains — so extent was
+  # never actually observed and this demand was passing for the wrong reason. The CLOSING edge
+  # is observable only through D7's `post_rotate` hook on the SHARED config; see the deviations
+  # block, which records that as a constraint on the implementer.
+  - {id: retirement_guard_extent_is_pinned, kind: seam, form: test,
+     resolved_by: human-decision-6,
+     binds: ["author_error_guard", "interacts(drain->author_error_guard)",
+             "validate_agent_result_partition", "corpus_clean_gate", "retire"],
+     discharged_by: test_the_retire_set_clauses_span_the_agent_call_through_the_corpus_commit_and_no_further}
+  # THE CARVE-OUT INVERTS. Under decision 6 the hazard was re-raising GitError (spelling the
+  # set `faults.SYSTEMIC_FAULTS` would have reverted decision 1 path 3). Under an allow-list
+  # the hazard is the mirror image: an implementer who writes the obvious `except AuthorError`
+  # silently drops GitError and ModelRetry and reverts decision 1 paths 3 AND 4. The oracle
+  # must therefore fault commit_corpus with a GitError and kill a box command from outside,
+  # and assert BOTH retire — membership is not observable from the AuthorError case alone.
+  - {id: retire_set_membership_is_explicit, kind: domain-outcome, form: test,
+     resolved_by: human-decision-8,                   # supersedes retirement_guard_re_raises_the_named_systemic_set
+     binds: ["author_error_guard.domain.distinguished[AuthorError]",
+             "author_error_guard.domain.distinguished[GitError]",
+             "author_error_guard.domain.distinguished[ModelRetry]",
+             "author_error_guard.domain.distinguished[StageAbort]",
+             "author_error_guard.domain.distinguished[FatalConfigError]",
+             "author_error_guard.domain.distinguished[BoxFault]",
+             "interacts(drain->author_error_guard)", "retire"],
+     discharged_by: test_the_retire_set_names_author_error_git_error_and_model_retry_and_nothing_else}
+
+  # ===== DECISION 9 (§7 round 3) — DECISION 7 IS SUBSUMED, AND THE DROP IS RATIFIED. =====
+  # Decision 8 already delivers the post-commit no-bump behaviour: the queue rewrite that fails
+  # after a landed commit raises OSError, which is not a member of the retire set, so it escapes
+  # with no bump. There is no separate suppression step to pin, and the claim that there was one
+  # is dropped.
+  # HONEST PROVENANCE: `post_commit_failure_does_not_bump` did not survive §7 round 2 by
+  # judgement — my decision-8 edit replaced a contiguous block and removed it as a side effect,
+  # which phase E then caught as a collected test carrying no demand. Decision 9 ratifies the
+  # removal on its merits; it was not a deliberate subsumption at the time. Recorded because a
+  # cold reader would otherwise read a clean design decision where there was an accident that
+  # happened to be right.
+  # WHAT THE TEST STILL EARNS: it drives the tick AFTER a landed commit whose rotation never
+  # followed, and shows the idempotency gate reconciles the split state without re-authoring.
+  # That is the half B77 (91-blind.md) recorded as uncovered, so the demand is re-minted around
+  # the coverage that is real rather than around the claim that is now redundant.
+  # RESIDUAL RISK, ACCEPTED NOT OVERLOOKED: nothing now pins the post-commit path free of
+  # retire-set members. If a future change raises AuthorError, GitError or ModelRetry from a
+  # post-commit step, the bump returns and no test in this suite fails. That is the price of
+  # subsumption — a property carried by non-membership is only as stable as the set.
+  - {id: post_commit_tick_reconciles_without_re_authoring, kind: behavior, form: test,
+     resolved_by: human-decision-9,                    # supersedes post_commit_failure_does_not_bump
+     binds: ["retire", "corpus_clean_gate", "consumed_ledger", "queue_row",
+             "interacts(drain->consumed_ledger)"],
+     discharged_by: test_a_fault_after_a_successful_corpus_commit_leaves_the_attempt_count_alone}
+
+  # ===== DECISION 10 (§7 round 3) — PIN THE "LOUD" HALF. =====
+  # The argument that justified reversing A12 was "stuck but recoverable AND LOUD". The suite
+  # pins recoverable; loud has been an assumption living in the rationale. Without this, the
+  # failure mode deliberately chosen over permanent loss is one nobody notices — which is the
+  # worse of the two, not the better, if it is silent.
+  # ORACLE CONSTRAINT, LOAD-BEARING: the assertion must FAIL when the signal is absent. An
+  # assertion satisfiable by the drain's existing generic logging does not discriminate and does
+  # not discharge this demand — it is exactly the shape that passes while proving nothing. The
+  # signal must name the fault class, or count the stuck rows, or surface a stuck-row marker;
+  # a bare "batch failed" line is not it.
+  # SURFACE RATIFIED BY DECISION 11: a per-channel stuck-row record beside the graveyard, under
+  # the same ignored prefix. A log line was rejected as the surface because it is not assertable
+  # without log-capture plumbing — so this is a written artifact a test can read.
+  # DELIBERATE CONSTRAINT ON THE IMPLEMENTER, not an accident of how the test was written: an
+  # implementer who prefers structured logging must CHANGE THIS TEST rather than satisfy it.
+  # That is the accepted price of an assertable signal; it is stated so nobody reads the test
+  # as over-specified and quietly loosens it.
+  - {id: non_retiring_failure_is_observable, kind: behavior, form: test,
+     resolved_by: human-decision-10,
+     binds: ["stuck_row_record", "stuck_row_record.identity",
+             "interacts(drain->stuck_row_record)", "author_error_guard", "queue_row",
+             "interacts(drain->author_error_guard)"],
+     discharged_by: test_a_repeatedly_failing_row_that_never_retires_surfaces_a_named_operator_signal}
+
+  # ---- Decision 2: bump all, retire crossers; lifetime count; ceiling checked only after
+  # an observed failure (resolves A4/P39, A5/P30, A6/P32, A7/P73, A10/P74).
+  - {id: every_row_in_a_faulted_batch_bumps_by_one, kind: behavior, form: test,   # A4/P39
+     resolved_by: human-decision-2,
+     binds: ["retire", "queue_row", "interacts(retire->queue_row)", "author_max_attempts",
+             "graveyard"],
+     discharged_by: test_a_faulted_batch_bumps_every_row_and_retires_only_the_ceiling_crossers}
+  - {id: attempts_are_lifetime_with_no_reset, kind: behavior, form: test,         # A7/P73, A10/P74
+     resolved_by: human-decision-2,
+     binds: ["queue_row.identity", "author_max_attempts", "retire"],
+     discharged_by: test_an_intervening_success_does_not_reset_the_attempt_count}
+  - {id: ceiling_is_checked_only_after_an_observed_failure, kind: behavior, form: test,
+     resolved_by: human-decision-2,                                               # A5/P30, A6/P32
+     binds: ["author_max_attempts", "interacts(retire->author_max_attempts)", "retire",
+             "queue_row"],
+     discharged_by: test_a_row_at_or_over_the_ceiling_on_arrival_does_not_retire_until_it_fails}
+
+  # ---- Decision 3: consumed ledger, graveyard first (resolves A1/P14, A2/P69, A3/P40).
+  - {id: retired_row_lands_in_the_consumed_ledger, kind: behavior, form: test,    # A2/P69, A3/P40
+     resolved_by: human-decision-3,
+     binds: ["interacts(retire->consumed_ledger)", "consumed_ledger.identity", "retire",
+             "graveyard"],
+     discharged_by: test_a_retired_id_is_deduped_out_of_a_later_append_on_the_dedup_channels}
+  - {id: graveyard_append_precedes_the_queue_rewrite, kind: behavior, form: test, # A1/P14
+     resolved_by: human-decision-3,
+     binds: ["interacts(retire->graveyard)", "graveyard.identity", "retire",
+             "rotate_queue_locked"],
+     discharged_by: test_the_graveyard_append_lands_before_the_pending_rewrite_and_is_advisory}
+
+  # ---- Decision 4: the ceiling=1 test is WRITTEN, not waived; the clause's argument is
+  # rejected. Binds both addresses the two waiver candidates named.
+  - {id: fail_fast_ceiling_of_one_retires_on_first_failure, kind: domain-outcome, form: test,
+     resolved_by: human-decision-4,
+     binds: ["author_max_attempts.domain.distinguished[1]",
+             "author_max_attempts.domain.alternatives[1]", "retire"],
+     discharged_by: test_ceiling_of_one_retires_on_the_first_failure}
+
+  # ---- Design hole 1 + its dependent parity half. THE WEAKEST-SUPPORTED RESOLUTION IN THE
+  # SET (70-resolutions.md red flag 4): P54's own recommendation applied, resting on an
+  # analogy rather than on a probe, a claim or a design sentence. Flagged for override.
+  - {id: drain_wait_on_append_lock_is_bounded, kind: behavior, form: test,        # C5/P54, C11/P52
+     resolved_by: judge-recommendation,
+     binds: ["append_lock.access[flock-nonblocking]", "interacts(drain->append_lock)",
+             "repo_lock_file"],
+     discharged_by: test_the_drains_append_lock_wait_ends_at_the_configured_repo_lock_deadline}
+  - {id: append_lock_parity_across_acquisition_disciplines, kind: parity, form: test,
+     resolved_by: judge-recommendation,                                           # hole 2 (R3)
+     binds: ["append_lock.access[flock-nonblocking]", "append_lock.access[flock-blocking]"],
+     discharged_by: test_the_drains_nonblocking_acquisition_excludes_a_real_blocking_appender_through_run_batch}
+
+  # ---- The judge's own recommendations, applied verbatim. ----
+  - {id: faulted_tick_commits_only_the_retirement, kind: behavior, form: test,    # A8/P71
+     resolved_by: judge-recommendation,
+     binds: ["retire", "rotate_queue_locked", "bucket_spec"],
+     discharged_by: test_a_faulted_tick_defers_its_held_and_pre_consumed_classifications}
+  - {id: rows_outside_the_batch_are_untouched, kind: behavior, form: test,        # A9/P70
+     resolved_by: judge-recommendation,
+     binds: ["retire", "queue_row", "interacts(retire->queue_row)"],
+     discharged_by: test_retire_leaves_every_row_outside_the_batch_byte_identical}
+  # Decision 8: also carried by non-membership — the retire write raises OSError, which is
+  # not in the retire set. The placement constraint 47-reclassification.md R2 raised is no
+  # longer what holds this up.
+  - {id: retire_write_failure_is_systemic, kind: behavior, form: test,            # A11/P77
+     resolved_by: judge-recommendation,
+     binds: ["retire", "graveyard", "interacts(retire->graveyard)"],
+     discharged_by: test_a_failing_retirement_write_stops_the_drain_and_leaves_the_queue_intact}
+  # A12/P76's demand was DELETED at §7 round 2, not edited: decision 8 reverses it outright, and
+  # its replacement `unnamed_fault_classes_do_not_retire` asserts the opposite. Leaving both
+  # would have shipped two demands with contradictory content bound to the same addresses.
+  # 47-reclassification.md item 4 had already found copy 1's "by construction" false when
+  # written; decision 8 means it never becomes true.
+  - {id: pitfalls_batch_is_the_ids_fixed_at_the_read, kind: behavior, form: test, # A15/P75
+     resolved_by: judge-recommendation,
+     binds: ["pitfalls", "interacts(retire->pitfalls)", "run_pitfalls"],
+     discharged_by: test_pitfalls_retirement_removes_batch_ids_not_the_whole_queue}
+  - {id: malformed_ceiling_aborts_the_tick_at_config_build, kind: behavior, form: test,
+     resolved_by: judge-recommendation,                                           # B3/P31, B4/P26
+     binds: ["author_max_attempts", "author_max_attempts.domain", "envelope"],
+     discharged_by: test_a_non_integer_ceiling_aborts_the_tick_before_any_row_is_processed}
+  - {id: ceiling_is_bound_once_at_config_build, kind: seam, form: test,           # B5/P33, B6/P11
+     resolved_by: judge-recommendation,
+     binds: ["author_max_attempts", "interacts(retire->author_max_attempts)", "envelope"],
+     discharged_by: test_the_ceiling_is_read_once_per_batch_at_config_build}
+  - {id: folded_read_batch_takes_the_append_lock, kind: parity, form: test,       # C1/P15, Fork 3
+     resolved_by: judge-recommendation,
+     binds: ["append_lock.access[flock-blocking]", "interacts(drain->append_lock)", "drain"],
+     discharged_by: test_every_channels_read_batch_happens_under_the_append_lock}
+  - {id: lock_acquisition_order_is_pinned_in_one_place, kind: seam, form: test,   # C4 = P66 + P12
+     resolved_by: judge-recommendation,
+     binds: ["drain_lock", "repo_lock_file", "append_lock", "interacts(drain->drain_lock)"],
+     discharged_by: test_the_drain_acquires_its_three_locks_in_one_declared_order}
+  - {id: stuck_appender_does_not_starve_sibling_channels, kind: behavior, form: test,
+     resolved_by: judge-recommendation,                                           # C6/P53
+     binds: ["append_lock", "repo_lock_file", "drain_lock"],
+     discharged_by: test_a_stuck_appender_on_one_channel_does_not_hold_the_repo_lock_forever}
+  - {id: second_bare_module_invocation_skips_its_tick, kind: behavior, form: test, # C8/P51
+     resolved_by: judge-recommendation,
+     binds: ["drain_lock.access[flock-nonblocking]", "drain_lock", "envelope"],
+     discharged_by: test_a_bare_module_invocation_beside_a_live_drain_skips_its_tick}
+  - {id: empty_tick_writes_no_consumed_or_graveyard_row, kind: behavior, form: test,
+     resolved_by: judge-recommendation,                                           # C15/P83
+     binds: ["consumed_ledger", "graveyard", "drain"],
+     discharged_by: test_an_all_empty_tick_writes_no_consumed_row_and_no_graveyard_row}
+  # R1 RESOLVED, and SIMPLIFIED by decision 8: a lock-acquisition OSError is not a member of
+  # the retire set, so it escapes uncaught with no bump — the outcome D5/P13 asked for, now
+  # carried by non-membership rather than by a re-raise clause or by placement. The lock
+  # layer naming its own fault type (my derivation of D5's word "explicitly", 70-resolutions
+  # red flag 7) is no longer load-bearing for this and drops to a readability preference.
+  - {id: lock_acquisition_oserror_is_systemic, kind: domain-outcome, form: test,  # D5/P13
+     resolved_by: judge-recommendation,
+     binds: ["append_lock", "drain_lock", "author_error_guard"],
+     discharged_by: test_a_plain_oserror_from_a_lock_acquisition_is_classified_systemic}
+  - {id: unkeyable_row_retires_as_a_per_item_failure, kind: domain-outcome, form: test,
+     resolved_by: judge-recommendation,                                           # E1/P17
+     binds: ["id_key", "queue_row", "retire", "interacts(retire->id_key)"],
+     discharged_by: test_a_row_with_no_value_under_its_id_key_retires_instead_of_aborting}
+  - {id: design_docs_record_the_new_retirement_mechanism, kind: shape, form: test, # F1/P82
+     resolved_by: judge-recommendation,
+     binds: ["graveyard", "retire", "append_lock"],
+     discharged_by: test_the_error_disposition_design_doc_no_longer_states_the_overturned_base_catch_principle}
+  - {id: stale_symbol_references_rewritten_in_tracked_files, kind: shape, form: test,
+     resolved_by: judge-recommendation,                                           # F2/P79
+     binds: ["curator", "lessons_run", "lint_duplicate_helpers_baseline"],
+     discharged_by: test_no_tracked_non_python_file_still_names_a_deleted_symbol}
+
+  # ---- Waivers — minted at §7 only. Each is an EXAMINED NO kept in the artifact, never a
+  # silence in handoff.drops, and each cites the probed claim its rationale rests on.
+  - id: permanently_held_row_out_of_scope                                          # A13/P42
+    kind: behavior
+    form: waiver
+    resolved_by: judge-recommendation
+    binds: ["queue_row", "gate", "retire"]
+    cites: [G17]
+    outcome:
+      nl: >-
+        A row whose gate condition never arrives is held on every tick and therefore never
+        bumped and never retired; O8 bounds FAILURE, and a permanently-held row is a gating
+        question. Not tested here and not widened into O8 — filed as a separate follow-up.
+  - id: no_reconciliation_for_a_committed_corpus                                   # A14/P46
+    kind: behavior
+    form: waiver
+    resolved_by: judge-recommendation
+    binds: ["corpus_clean_gate", "rotate_queue_locked", "consumed_ledger"]
+    cites: [G15, G23]
+    outcome:
+      nl: >-
+        When the corpus commit lands but the queue is never rotated, re-authoring the same
+        rows on a later tick is the accepted recovery path; no reconciliation mechanism
+        between an already-committed corpus and a queue that does not know it is in scope.
+        R3 CLOSED by decision 7 - a guard that caught everything would otherwise have let such a row
+        accumulate attempts and retire work already in the corpus. The bump is suppressed once
+        the commit has landed, and the loop is bounded by the existing pre-author idempotency
+        gate: the next tick's _partition_pre_author finds the id via existing_finding_ids /
+        existing_observation_ids and marks the row consumed_idempotent without re-invoking the
+        agent. That bound holds only while the corpus dir is left clean enough for the next
+        tick to reach the partition at all - see red flag 8.
+  - id: rollover_window_not_constructible_at_spec_time                             # C10/P63
+    kind: survival
+    form: waiver
+    resolved_by: judge-recommendation
+    binds: ["drain_lock", "append_lock"]
+    cites: [G22]
+    outcome:
+      nl: >-
+        The mixed-version overlap (a drain on old code beside one on new code) carries no
+        suite expected value: the argument depends on the new drain lock's identity, which
+        does not exist until the implementation does. Carried as an obligation to verify at
+        implementation time (write-code-from-spec's actors run), not as a test here.
+  - id: forward_check_spurious_not_found_accepted                                  # C13/P49
+    kind: behavior
+    form: waiver
+    resolved_by: judge-recommendation
+    binds: ["load_observation", "interacts(load_observation->actor_observations)",
+            "interacts(load_observation->findings)"]
+    cites: [G20, G24]
+    outcome:
+      nl: >-
+        The unlocked forward-check read inside the authoring call may see a spurious
+        not-found during the window the append/drain split opens; the consequence is an ERROR
+        verdict the curator model acts on, not a torn read and not data loss. Accepted as a
+        consequence of the split; the unlocked reader is filed separately.
+  - id: git_transient_and_permanent_not_distinguished                              # D2/P02
+    kind: domain-outcome
+    form: waiver
+    resolved_by: judge-recommendation
+    binds: ["fault_map.domain.distinguished[GitError]", "author_error_guard"]
+    cites: [C32]
+    outcome:
+      nl: >-
+        A transient git failure and a permanent misconfiguration arrive as the same
+        exception, and the fold adds no distinction between them. Recorded as intended so the
+        absence is a decision rather than an oversight. Re-grounded after decision 1 path 3:
+        the copies justified this on 'a GitError always kills the drain', which is false at the
+        commit site now. The waiver's CONTENT is stronger, not weaker - a git failure inside
+        the guard retires after N attempts whether it was transient or permanent, so a
+        permanent misconfiguration burns the ceiling and retires real work. Recorded against
+        the retire path, not against a drain-death path that no longer exists there.
+  - id: box_fault_kills_sibling_corpus_authors_out_of_scope                        # D3/P09
+    kind: behavior
+    form: waiver
+    resolved_by: judge-recommendation
+    binds: ["author_error_guard.domain.distinguished[BoxFault]", "author_drain"]
+    cites: [G22]
+    outcome:
+      nl: >-
+        The four corpus authors run serially in one process against one box, so the first
+        one's box fault ends the rest of the tick. Out of scope — this change touches queue
+        locks, not box lifetime — and filed, because it is the same "one channel's trouble
+        costs an unrelated channel its tick" shape as the stuck-appender case.
+  - id: transient_verifier_failure_out_of_scope                                    # D6/P06
+    kind: behavior
+    form: waiver
+    resolved_by: judge-recommendation
+    binds: ["load_observation", "gate"]
+    cites: [G20]
+    outcome:
+      nl: >-
+        A transient verifier-model failure during the forward check reaches the curator model
+        as an ERROR line. The forward check is an explicit non-obligation of this change;
+        confirmed out of scope and recorded so the ERROR-line contract is a choice.
+  - id: pitfalls_no_system_silent_consume_filed_separately                         # E2/P34, Fork 6
+    kind: behavior
+    form: waiver
+    resolved_by: judge-recommendation
+    binds: ["pitfalls", "run_pitfalls", "rotate_queue_locked"]
+    cites: [G7]
+    outcome:
+      nl: >-
+        A pitfalls batch in which no queued row carries the field the batch is keyed on is
+        marked wholly consumed with no author run. A gating bug, not a retirement bug, and
+        the pitfalls ceiling is already this change's one deliberate behavior change — filed
+        as a separate follow-up. Citation note - the direct claim (C31) is `unprobed`, so the
+        rationale rests on G7's reading of rotate_pitfalls instead.
+  - id: all_unparseable_pending_file_reads_as_empty                                # E3/P21
+    kind: behavior
+    form: waiver
+    resolved_by: judge-recommendation
+    binds: ["queue_row", "interacts(drain->queue_row)"]
+    cites: [G24]
+    outcome:
+      nl: >-
+        A pending file whose every line fails to parse is observably identical to a genuinely
+        empty queue, and this change adds no distinguishing signal. Accepted as an exclusion
+        beside the findings id-collision exclusion the design already records.
+    rejected:
+      - nl: >-
+          count the discarded lines and surface the count — the judge's own better
+          alternative, not taken here because it adds a signal the design never asked for
+  # ---- F6 and F8: implicit decisions made explicit at §7 round 2. Both were coherent and
+  # traceable but had no sentence; a decision nobody wrote down is indistinguishable from an
+  # oversight to the next reader, which is the whole reason a declined obligation is a waiver.
+  - id: stuck_row_record_has_no_operator_surface                    # decision 11 cost 1, decision 12
+    kind: survival
+    form: waiver
+    resolved_by: human-decision-12
+    binds: ["stuck_row_record", "interacts(drain->stuck_row_record)"]
+    cites: [G16]
+    outcome:
+      nl: >-
+        DECISION 12 - "WRITTEN DOWN" IS THE ACCEPTED END STATE. The durable per-channel record is
+        the deliverable; NO OPERATOR-FACING SURFACE EXISTS and none is built here. No alert, no
+        dashboard, no CLI, no report reads it. Building one is an explicit NON-OBLIGATION of this
+        change, not a forgotten step.
+        THE DESIGN'S OWN LANGUAGE IS CORRECTED RATHER THAN DEFENDED. The argument that justified
+        reversing A12 was "stuck but recoverable AND LOUD". Loud was delivered as WRITTEN-DOWN.
+        Anything in this artifact still claiming the failure mode is loud should be read against
+        this sentence: the suite proves the record is written, and proves nothing surfaces it.
+        A round-5 correction is folded in here too, because the cost was first recorded wrongly:
+        this was minted as "a fifth WRITE-ONLY sink with no reader", carrying C20/G16's "nothing
+        reads it, so a duplicate costs nothing" - D9's argument for collapsing two graveyards and
+        decision 3's for making the graveyard advisory. That premise is FALSE of what was built.
+        Decision 10's oracle asserts a count rising across ticks, decision 8 forbids storing it on
+        the row, and each tick is a separate process, so the drain necessarily reads its own last
+        record back. The borrowed argument is withdrawn, not restated.
+  - id: stuck_count_has_no_lifetime_equivalent                                     # decision 11
+    kind: uniqueness
+    form: waiver
+    resolved_by: human-decision-11
+    binds: ["stuck_row_record.identity", "queue_row.identity", "author_max_attempts"]
+    cites: [G17]
+    outcome:
+      nl: >-
+        The stuck count is PER TICK, not per row, and this asymmetry appears nowhere in the
+        design - it is written down here because it would otherwise be discovered. Decision 8
+        requires a non-retiring row to stay byte-identical, so the counter cannot live on the
+        row the way `attempts` does; it lives on the stuck-row record instead. Consequence a
+        reader would otherwise assume away: a row that sticks, succeeds in a later batch, then
+        sticks again has NO lifetime stuck count, whereas decision 2 made `attempts` explicitly
+        lifetime with no reset on an intervening success. The two counters on the same row
+        therefore have opposite reset semantics by construction. Declining to give the stuck
+        count lifetime semantics is the accepted cost of keeping the row byte-identical.
+
+  - id: out_of_tree_fixture_invalidation_is_not_covered                             # F6 / F11
+    kind: shape
+    form: waiver
+    resolved_by: phase-f-fix-shape
+    binds: ["eval_harness", "interacts(eval_harness->findings)",
+            "interacts(eval_harness->actor_observations)", "queue_row"]
+    cites: [G20]
+    outcome:
+      nl: >-
+        F11 named two consequences of the two out-of-tree fixture writers; only the race half
+        reached a premise (P59, dropped 3/3 doc-silent). The other half - that a changed
+        queue-row shape invalidates their copied fixtures - is declined here rather than left
+        silent. Neither harness is named in the project profile's writer list, so a future
+        call-graph census still misses them; the profile's grep list does carry the two queue
+        filenames, which is the recovery path this waiver rests on. Recorded, not fixed.
+  - id: retirement_classification_differs_across_the_pitfalls_boundary              # F8
+    kind: parity
+    form: waiver
+    resolved_by: phase-f-fix-shape
+    binds: ["run_or_dead_letter", "fault_map.domain.distinguished[GitError]",
+            "author_error_guard.domain.distinguished[GitError]", "graveyard"]
+    cites: [C32]
+    outcome:
+      nl: >-
+        O6/O8 say dead-lettering is identical for every drain and lands in one graveyard. After
+        decision 1 path 3 and decision 8 that is true of the MECHANISM and the STORE but false
+        of the CLASSIFICATION that reaches them - a commit-time GitError retires on the four
+        author channels and kills the drain on pitfalls, because run_or_dead_letter's re-raise
+        set still contains GitError and this change does not touch it. Both halves are
+        deliberately pinned by tests; what was missing was the sentence saying the asymmetry is
+        intended. Declining to unify the two classifiers is in scope for a follow-up, not here.
+        SETTLED AT §7 ROUND 6 - PHASE E CONFIRMS THE ASYMMETRY IS DELIBERATE, and this waiver was
+        right as minted. Why the blind reader found it anyway, which is the part worth keeping:
+        it was stated ONLY inside the pitfalls test, so a reader arriving at the enumeration
+        would reasonably conclude the retire set is global. It is now also in the module
+        docstring and beside the set itself. A fact stated in exactly one test is a fact the
+        next reader infers the negation of.
+        The pending note below is retained as history: the blind reader reached the same
+        asymmetry independently from the tests alone (B89: one fault class, two classifications
+        by channel), and the coordinator has asked phase E whether its suite asserts this
+        DELIBERATELY or merely PERMITS it. That answer has not landed. This waiver was minted at
+        round 2 on a phase-F fix shape and already asserts deliberateness, which is exactly the
+        resolution-by-assertion the round-5 instruction forbids. If phase E answers 'deliberate'
+        the waiver stands as written; if it answers 'merely permitted', this is not a waiver at
+        all but an OPEN GAP in decision 8's enumeration - GitError would be a member on four
+        channels and a non-member on the fifth with nothing stating why - and it must be
+        re-routed to the human rather than closed here. -- That branch did not occur; phase E
+        answered 'deliberate'.
+
+  - id: findings_channel_has_no_resurrection_guard                                 # decision 3
+    kind: uniqueness
+    form: waiver
+    resolved_by: human-decision-3
+    binds: ["interacts(run_direction->findings)", "findings.identity"]
+    cites: [G15]
+    outcome:
+      nl: >-
+        Decision 3 makes retirement terminal by writing retired rows to the consumed ledger,
+        which the append path reads to dedup on three of five channels. append_findings does
+        no such read, so the findings channel gains no resurrection protection from it. The
+        asymmetry is recorded as an examined no rather than closed with a new guard D9 does
+        not provide.
+
+structure:
+  # `attempt` and `direction` are carried from demand extraction's registry: they name row
+  # state and the run_cycle fan, not path interpolation, and are registered so no later pass
+  # re-coins them. `state_root` is the brief's second path axis (every queue, lock and
+  # graveyard relocates under it; two processes with different values share no lock, P68).
+  axes: [channel, queue_row_id, attempt, direction, state_root]
+
+  actors:
+    - {id: drain,              frame: leg,         provenance: design}  # the folded body, author/drain.py
+    - {id: retire,             frame: leg,         provenance: design}  # D9's retire seam
+    - {id: curator,            frame: leg,         provenance: code}    # observations config builder + gate
+    - {id: lessons_run,        frame: leg,         provenance: code}    # findings config builder + gate
+    - {id: run_pitfalls,       frame: leg,         provenance: code}    # leads/pitfalls_curator.py:110
+    - {id: author_drain,       frame: composition, provenance: code}    # id reused from spec_graph_curator-glm-port
+    - {id: lead_author_drain,  frame: composition, provenance: code}    # markers + pitfalls in one tick
+    - {id: learn_drain,        frame: composition, provenance: code}    # run_cycle.run_one, the live run
+    - {id: run_direction,      frame: leg,         provenance: code}    # run_cycle.py:129, one per direction
+    - {id: load_observation,   frame: leg,         provenance: code}    # verify_forward/shared.py:22-29 (F2)
+    - {id: eval_harness,       frame: leg,         provenance: code}    # out-of-tree fixture copiers (F11)
+
+  boundaries:
+    # --- the five pending queues -------------------------------------------------------
+    - id: findings
+      provenance: code
+      facets:
+        identity:
+          key_axes: [queue_row_id]
+          evidence:
+            nl: >-
+              finding_id = <run_id>/<namespace><n>, built at persist.py:248 and read by the
+              merge filter at persist.py:66-68; deterministic, and append_findings does no
+              dedup of its own (G15/C18). Path <state_root>/_pending/findings.jsonl.
+          sharing: serialized-append
+    - id: actor_observations
+      provenance: code
+      facets:
+        identity:
+          key_axes: [queue_row_id]
+          evidence:
+            nl: >-
+              observation_id = <run_id>/<prefix><i>, read off _append_observations
+              (persist.py:303-323), which loads pending-union-consumed ids to skip
+              duplicates. Path <state_root>/_pending/actor_observations.jsonl.
+          sharing: serialized-append
+    - id: environment_observations
+      provenance: code
+      facets:
+        identity:
+          key_axes: [queue_row_id]
+          evidence: {nl: "same builder, environment channel; _pending/environment_observations.jsonl"}
+          sharing: serialized-append
+    - id: actor_environment_observations
+      provenance: code
+      facets:
+        identity:
+          key_axes: [queue_row_id]
+          evidence:
+            nl: "same builder, actor-environment channel; _pending/actor_environment_observations.jsonl"
+          sharing: serialized-append
+    - id: pitfalls
+      provenance: code
+      facets:
+        identity:
+          key_axes: [queue_row_id]
+          evidence:
+            nl: >-
+              pitfall_id, read off rotate_pitfalls' id_key (persist.py:293). Path
+              <state_root>/_pending_pitfalls/pitfalls.jsonl. One lock (.pitfalls.lock) serves
+              both the append and the rotate role — not a split (C24).
+          sharing: serialized-append
+
+    # --- the row and the field D3 promotes to config -----------------------------------
+    - id: queue_row
+      provenance: code
+      # RE-KEYED at phase D. spec_graph_curator-glm-port.yaml keys this on [batch_id];
+      # batch_id is not a field on a queue row (G26).
+      facets:
+        identity:
+          key_axes: [queue_row_id]
+          evidence:
+            nl: >-
+              The row's key is the value under the channel's id_key field — exactly what the
+              merge filter reads (persist.py:66-68) and what _append_observations' dedup reads
+              (persist.py:314-316). `attempts` also lives on the row and carries across
+              separate process invocations (P38, G17).
+          sharing: serialized-append
+    - id: id_key
+      provenance: design
+      facets:
+        domain:
+          type: str
+          refinement:
+            nl: >-
+              The row field a channel keys on. D3 promotes it from a hard-coded literal at each
+              read site to a QueueChannel config field; the design names no default for the new
+              field, and three of five channels use observation_id.
+          default: unknown
+          distinguished: [observation_id, finding_id, pitfall_id]
+          falsy_valid: false
+          documented_alternatives: []
+
+    # --- the sinks the drain and the retire seam write ---------------------------------
+    - id: consumed_ledger
+      provenance: code
+      facets:
+        identity:
+          key_axes: [channel, queue_row_id]
+          evidence:
+            nl: >-
+              <channel>.consumed.jsonl, one per channel, appended by _rewrite_queue
+              (persist.py:81). NOT write-only: on the three observation channels
+              _append_observations reads it via _load_jsonl_ids(consumed_file,
+              'observation_id') at persist.py:314-316 to dedup (G23/F4), so it is a genuine
+              read/write shared path.
+          sharing: serialized-append
+    - id: graveyard
+      provenance: design
+      facets:
+        identity:
+          key_axes: [channel]
+          evidence:
+            nl: >-
+              One <queue>.deadletter.jsonl per channel — _deadletter_file at curator.py:179-180,
+              written at :203. The prior graph's `dlq`. Rows are appended, not keyed within the
+              file; no production reader exists (G16/C20). The file path varies on channel only.
+          sharing: serialized-append
+
+    - id: stuck_row_record
+      provenance: design
+      facets:
+        identity:
+          key_axes: [channel]
+          evidence:
+            nl: >-
+              DECISION 11. One per-channel stuck-row record beside the graveyard, under the same
+              ignored prefix (P03/F5 — a path outside it aborts every later batch). The surface
+              decision 10's operator signal takes: the author chose a written record over a log
+              line because a log line is not assertable without log-capture plumbing, and the
+              human ratified the shape. Rows are appended, not keyed within the file; the path
+              varies on channel only — the same shape as `graveyard`, deliberately.
+          sharing: serialized-append
+
+    # --- locks -------------------------------------------------------------------------
+    - id: append_lock
+      provenance: design
+      facets:
+        access:
+          constraints_by_via:
+            flock-blocking:
+              trust: operator
+              constraints: [mutual-exclusion, unbounded-wait]
+              # persist._flock (:32-43): fcntl.flock(fd, LOCK_EX), blocking, no timeout, no
+              # LOCK_NB (G11/C13). Excludes two OS threads of one process too (PJ2a).
+            flock-nonblocking:
+              trust: operator
+              constraints: [mutual-exclusion, bounded-wait]
+              # DECIDED at §7 (design hole 1). Was `unknown`: shared.acquire_flock (:64-75)
+              # is LOCK_EX|LOCK_NB and returns None -> the envelope skips the tick
+              # (:289-292), and nothing bounded D1's NEW drain-side wait on the APPEND lock
+              # (F13, P54/C5, P53/C6). Resolved by applying P54's own recommendation — the
+              # drain's wait inherits the repo lock's existing LEARNING_REPO_LOCK_WAIT_SECONDS
+              # deadline, so the wait is bounded and C6's sibling-starvation window closes.
+              # THIS IS THE WEAKEST-SUPPORTED RESOLUTION IN THE SET (70-resolutions.md red
+              # flag 4): one premise-level recommendation resting on an analogy, not on a
+              # probe, a claim or a design sentence. Flagged for override.
+    - id: drain_lock
+      provenance: design
+      facets:
+        domain:
+          type: "Path | None"
+          refinement:
+            nl: >-
+              Optional — a channel no drain holds exclusively (pitfalls) carries None. The
+              design states no default for the new field, and whether the drain body branches
+              on None or aliases append_lock in its place is fork C2/P64.
+          default: unknown
+          distinguished: ["None"]
+          falsy_valid: true
+          documented_alternatives: []
+        access:
+          constraints_by_via:
+            flock-nonblocking:
+              trust: operator
+              constraints: [skip-on-contention]
+              # run_batch_envelope:289-292 turns acquire_flock's None into "skipping this tick"
+              # rather than a wait — the property that makes the shared <pending>.tmp name safe
+              # against a second bare module invocation (P51/C8).
+    - id: repo_lock_file
+      provenance: code
+      facets: {}
+      # _author.lock (config.py:75), acquire_repo_lock with a LEARNING_REPO_LOCK_WAIT_SECONDS
+      # (1800s) bounded spin, held across every corpus batch (run_batch_envelope:294) — all
+      # four corpus drains are already globally serialized (F14).
+    - id: author_drain_lock
+      provenance: code
+      facets: {}
+      # .author-drain.lock (config.py:87), taken with flock_or_skip at drains.py:397 — one
+      # drainer per role, and the gate the fold must not change (P61).
+
+    # --- knobs -------------------------------------------------------------------------
+    - id: author_max_attempts
+      provenance: code
+      facets:
+        domain:
+          type: int
+          refinement:
+            nl: >-
+              Attempts before an item retires. env_int applies NO floor and
+              author_max_attempts() adds none (unlike verify_batch_workers, which raises for
+              < 1), so 0 and negative values are reachable operator inputs; only a
+              non-integer is rejected, as FatalConfigError — which is a SYSTEMIC_FAULT, so a
+              malformed ceiling kills the drain rather than retiring the item (G25/C33).
+          default: 3
+          distinguished: [-1, 0, 1, 3]
+          falsy_valid: true
+          documented_alternatives:
+            - value: 1
+              crosses_validation: false
+              # D9 advertises ceiling=1 as the fail-fast expression of the same mechanism.
+              # C33 executed it: 1, 0 and -1 all retire on the first failure, identically, and
+              # nothing validates the value — there is no validation layer for it to cross.
+    - id: author_timeout_seconds
+      provenance: code
+      facets:
+        domain:
+          type: int
+          refinement:
+            nl: >-
+              LEARNING_AUTHOR_TIMEOUT_SECONDS (config.py:362-363), the bound on the O2 stall.
+              Enforced SOLELY by asyncio.wait_for around the whole agent.run() in
+              _pydantic_stage._drive; it cannot preempt a currently-executing boxed bash call,
+              so the deadline is soft and is noticed only once the box call returns (PJ1a).
+              env_int applies no floor, so 0 is an accepted operator input (G25).
+          default: 1800
+          distinguished: [0]
+          falsy_valid: true
+          documented_alternatives: []
+    - id: state_root_env
+      provenance: code
+      facets:
+        domain:
+          type: str
+          refinement:
+            nl: >-
+              DEFENDER_LEARNING_STATE_DIR (config.py:138-146). Relocates every queue, lock and
+              graveyard; two processes with different values share no lock and coordinate not
+              at all (P68). DEFAULT_PATHS is frozen at import (F7), so setting it in-process
+              does not reach code that already imported the defaults.
+          default: "defender/learning/"
+          distinguished: ["<unset>"]
+          falsy_valid: true
+          documented_alternatives: []
+
+    # --- the drain's own seams ----------------------------------------------------------
+    - id: bucket_spec
+      provenance: design
+      facets:
+        domain:
+          type: enum
+          refinement: {nl: "(name, held|consumed, reason_field, formatter) per bucket"}
+          default: committed
+          distinguished: [committed, consumed_skip, held_forward_bad]
+          falsy_valid: false
+          documented_alternatives: []
+    - {id: gate,                           provenance: design, facets: {}}
+    - {id: rotate_queue_locked,            provenance: code,   facets: {}}
+    - {id: validate_agent_result_partition, provenance: code,  facets: {}}
+    - {id: run_or_dead_letter,             provenance: code,   facets: {}}
+      # On the pitfalls + lead-author marker paths ONLY — 2 production call sites,
+      # drains.py:167 and :211 (C32). The observation and findings channels never reach it.
+    - id: fault_map
+      provenance: code
+      facets:
+        domain:
+          type: enum
+          refinement:
+            nl: >-
+              faults.SYSTEMIC_FAULTS — re-raised rather than dead-lettered — for the two paths
+              that reach run_or_dead_letter. Anything else is treated as a per-item failure and
+              routed to the on_dead_letter callback (faults.py:15-29).
+          default: per-item
+          distinguished: [StageAbort, FatalConfigError, GitError, BoxFault]
+          falsy_valid: false
+          documented_alternatives: []
+    - id: author_error_guard
+      provenance: code
+      # The retirement trigger on the observation + findings channels: the narrow
+      # `except AuthorError` around cfg.invoke_agent (curator.py:317, lessons/run.py:346) that
+      # calls the retire helper. It exempts systemic faults by NOT CATCHING them, where
+      # run_or_dead_letter exempts by RE-RAISING. Two mechanisms, one property (C32).
+      facets:
+        domain:
+          type: enum
+          refinement:
+            nl: >-
+              Which failure shapes reach the retire helper on the author channels, and as what.
+              AuthorError is caught and retires; StageAbort / FatalConfigError / GitError /
+              BoxFault fall through an except clause that never names them; a whole-batch
+              wall-clock TimeoutError arrives here AS an AuthorError via the
+              RunUnprocessable chain (PJ1b); and a boxed bash command killed from OUTSIDE the
+              process is absorbed by runtime/tools.py::_tool_bash into pydantic_ai ModelRetry
+              and reaches NEITHER path — the batch completes with no error and no attempts
+              bump (PJ1c). The AuthorError-vs-SYSTEMIC_FAULT dichotomy is incomplete.
+          default: AuthorError
+          distinguished: [AuthorError, TimeoutError, StageAbort, FatalConfigError, GitError,
+                          BoxFault, ModelRetry]
+          falsy_valid: false
+          documented_alternatives: []
+
+    # --- grounded neighborhood the change attaches to ------------------------------------
+    - {id: held_report,                    provenance: code, facets: {}}
+      # _pending/held_report.log, written lessons/run.py:207-221. A third write-only graveyard
+      # with no production reader (G16 extension, F15). D7 keeps it lessons-local.
+    - {id: quarantine_dir,                 provenance: code, facets: {}}
+      # <queue_dir>/failed/, written markers.py:38 (quarantine_marker). No reader at all (C20).
+      # A5's explicit non-obligation; recorded because D9's seam must stay additive over it.
+    - {id: lint_duplicate_helpers_baseline, provenance: code, facets: {}}
+      # 18 findings, 18 baselined, 0 new at 1cecad37; name-based (G1/G2/G14/C30).
+    - {id: corpus_clean_gate,              provenance: code, facets: {}}
+      # assert_clean_corpus_dir (:146-154) + verify_agent_state (:246-273) over
+      # shared.changes_outside(repo_root, corpus_dir_rel) (:134-139): any untracked path that
+      # is not <corpus>/*.md aborts the batch. A new lock or graveyard file outside an ignored
+      # prefix aborts EVERY batch (F5, P03).
+    - {id: curator_modules,                provenance: code, facets: {}}
+      # _CURATOR_MODULES (drains.py:68-75) -> importlib.import_module -> mod.run_batch. String-
+      # keyed dynamic dispatch; no static walk resolves it (G22b). Prior graph's id.
+    - {id: envelope,                       provenance: code, facets: {}}
+      # shared.run_batch_envelope:275-305 — the non-blocking drain-lock acquisition, the repo
+      # lock hold across the whole batch, and today's 0/2 rc alphabet. Prior graph's id.
+
+  interacts:
+    # --- the folded drain writes the four drained channels ------------------------------
+    - {from: drain, to: findings,                       mode: write, via: fs, provenance: design, interpolates: [queue_row_id]}
+    - {from: drain, to: actor_observations,             mode: write, via: fs, provenance: design, interpolates: [queue_row_id]}
+    - {from: drain, to: environment_observations,       mode: write, via: fs, provenance: design, interpolates: [queue_row_id]}
+    - {from: drain, to: actor_environment_observations, mode: write, via: fs, provenance: design, interpolates: [queue_row_id]}
+    # --- the retire seam removes from all five and appends the one graveyard -------------
+    - {from: retire, to: findings,                       mode: remove, via: fs, provenance: design}
+    - {from: retire, to: actor_observations,             mode: remove, via: fs, provenance: design}
+    - {from: retire, to: environment_observations,       mode: remove, via: fs, provenance: design}
+    - {from: retire, to: actor_environment_observations, mode: remove, via: fs, provenance: design}
+    - {from: retire, to: pitfalls,                       mode: remove, via: fs, provenance: design}
+    - {from: retire, to: graveyard,                      mode: write,  via: fs, provenance: design, interpolates: [channel]}
+    # --- the live run appends, per direction, concurrently -------------------------------
+    - {from: run_direction, to: findings,                       mode: write, via: fs, provenance: code, interpolates: [queue_row_id]}
+    - {from: run_direction, to: actor_observations,             mode: write, via: fs, provenance: code, interpolates: [queue_row_id]}
+    - {from: run_direction, to: environment_observations,       mode: write, via: fs, provenance: code, interpolates: [queue_row_id]}
+    - {from: run_direction, to: actor_environment_observations, mode: write, via: fs, provenance: code, interpolates: [queue_row_id]}
+    - {from: run_direction, to: consumed_ledger,                mode: read,  via: fs, provenance: code}
+    - {from: run_direction, to: append_lock,                    mode: invoke, via: fs, provenance: code}
+    - {from: run_direction, to: state_root_env,                 mode: read,  via: env, provenance: code}
+    # --- the pitfalls channel: one appender, one rotator, same tick, same process (F12) ---
+    - {from: lead_author_drain, to: pitfalls,          mode: write,  via: fs,  provenance: code, interpolates: [queue_row_id]}
+    - {from: lead_author_drain, to: append_lock,       mode: invoke, via: fs,  provenance: code}
+    - {from: lead_author_drain, to: run_or_dead_letter, mode: invoke, via: api, provenance: code}
+    - {from: lead_author_drain, to: fault_map,         mode: read,   via: api, provenance: code}
+    - {from: lead_author_drain, to: quarantine_dir,    mode: write,  via: fs,  provenance: code}
+    - {from: lead_author_drain, to: repo_lock_file,    mode: invoke, via: fs,  provenance: code}
+    - {from: run_pitfalls, to: pitfalls,               mode: write,  via: fs,  provenance: code, interpolates: [queue_row_id]}
+    - {from: run_pitfalls, to: append_lock,            mode: invoke, via: fs,  provenance: code}
+    - {from: run_pitfalls, to: run_or_dead_letter,     mode: invoke, via: api, provenance: code}
+    # --- the out-of-tree fixture writers no call graph sees (F11/G22d) --------------------
+    - {from: eval_harness, to: findings,           mode: write, via: fs, provenance: code}
+    - {from: eval_harness, to: actor_observations, mode: write, via: fs, provenance: code}
+    # --- the unlocked reader inside the authoring call (F2) ------------------------------
+    - {from: load_observation, to: actor_observations, mode: read, via: fs, provenance: code}
+    - {from: load_observation, to: findings,           mode: read, via: fs, provenance: code}
+    # --- the drain's own seams -----------------------------------------------------------
+    - {from: drain, to: consumed_ledger,      mode: write,  via: fs,  provenance: design, interpolates: [channel, queue_row_id]}
+    - {from: drain, to: queue_row,            mode: read,   via: fs,  provenance: design}
+    - {from: drain, to: id_key,               mode: read,   via: api, provenance: design}
+    - {from: drain, to: append_lock,          mode: invoke, via: fs,  provenance: design}
+    - {from: drain, to: drain_lock,           mode: invoke, via: fs,  provenance: design}
+    - {from: drain, to: gate,                 mode: invoke, via: api, provenance: design}
+    - {from: drain, to: bucket_spec,          mode: read,   via: api, provenance: design}
+    - {from: drain, to: rotate_queue_locked,  mode: invoke, via: api, provenance: design}
+    - {from: drain, to: validate_agent_result_partition, mode: invoke, via: api, provenance: design}
+    - {from: drain, to: author_error_guard,   mode: invoke, via: api, provenance: design}
+    - {from: drain, to: author_timeout_seconds, mode: read, via: env, provenance: design}
+    - {from: drain, to: state_root_env,       mode: read,   via: env, provenance: design}
+    - {from: drain, to: corpus_clean_gate,    mode: invoke, via: api, provenance: design}
+    - {from: drain, to: stuck_row_record,     mode: write,  via: fs,  provenance: design, interpolates: [channel]}
+    # ADDED at §7 round 5. Decision 10's oracle asserts a count that RISES ACROSS TICKS, decision 8
+    # forbids putting it on the row, and each tick is a separate process — so the drain reads its
+    # own last record back before appending. The read is forced by the design, not optional.
+    - {from: drain, to: stuck_row_record,     mode: read,   via: fs,  provenance: design}
+    - {from: retire, to: append_lock,         mode: invoke, via: fs,  provenance: design}
+    - {from: retire, to: rotate_queue_locked, mode: invoke, via: api, provenance: design}
+    - {from: retire, to: queue_row,           mode: read,   via: fs,  provenance: design}
+    - {from: retire, to: id_key,              mode: read,   via: api, provenance: design}
+    - {from: retire, to: author_max_attempts, mode: read,   via: env, provenance: design}
+    # §7 / decision 3 ("consumed ledger, graveyard first"). This edge was DELIBERATELY ABSENT
+    # at phase D pending the terminality decision (P69/A2). Retired rows are written to the
+    # consumed ledger, which the append path reads to dedup on three of five channels (G23) —
+    # that read is what makes retirement terminal, so no graveyard read is added to the hot
+    # append path. `retire` is now a second writer here; consumed_ledger_append_is_atomic
+    # (accepted at decision 4) is the R2 discharge.
+    - {from: retire, to: consumed_ledger,     mode: write,  via: fs,  provenance: design, interpolates: [channel, queue_row_id]}
+    # --- the composition frames -----------------------------------------------------------
+    - {from: author_drain, to: author_drain_lock,  mode: invoke, via: fs,  provenance: code}
+    - {from: author_drain, to: drain_lock,         mode: invoke, via: fs,  provenance: design}
+    - {from: author_drain, to: repo_lock_file,     mode: invoke, via: fs,  provenance: code}
+    - {from: author_drain, to: envelope,           mode: invoke, via: api, provenance: code}
+    - {from: author_drain, to: curator_modules,    mode: read,   via: api, provenance: code}
+    - {from: author_drain, to: corpus_clean_gate,  mode: invoke, via: api, provenance: code}
+    - {from: lessons_run,  to: held_report,        mode: write,  via: fs,  provenance: code}
+
+  drives:
+    - {from: curator,           to: drain,         provenance: design, multiplicity: serial}
+    - {from: lessons_run,       to: drain,         provenance: design, multiplicity: serial}
+    - {from: drain,             to: retire,        provenance: design, multiplicity: serial}
+    - {from: run_pitfalls,      to: retire,        provenance: design, multiplicity: serial}
+    - {from: author_drain,      to: drain,         provenance: design, multiplicity: serial}
+    - {from: author_drain,      to: curator,       provenance: code,   multiplicity: serial}
+    - {from: author_drain,      to: lessons_run,   provenance: code,   multiplicity: serial}
+    - {from: lead_author_drain, to: run_pitfalls,  provenance: code,   multiplicity: serial}
+    # run_cycle._dispatch_directions runs two directions on ThreadPoolExecutor(max_workers=2)
+    # and BOTH call append_findings on one channel (PJ2b, 200 trials).
+    - {from: learn_drain,       to: run_direction, provenance: code,   multiplicity: concurrent}
+
+# ===========================================================================================
+# The ledger. 43 claims: 27 from the grounding brief (G1-G27, themselves re-verifying the
+# discuss doc's C1-C22), 11 raised at demand extraction (C23-C33), 3 from re-ground PJ1 and
+# 2 from re-ground PJ2. Ids are kept verbatim so a citation from any frontier still resolves.
+# Verdicts are normalized here to the closed vocabulary (holds | refuted | unrefuted |
+# unprobed | deferred); the brief's compound verdicts ("holds-with-correction",
+# "holds-and-extends", "holds-and-strengthens", "refutes-prior-structure") keep their nuance
+# in `observed`. C31's downgrade is noted on the claim itself.
+# ===========================================================================================
+claims:
+  - id: G1
+    inherits: C1
+    kind: census
+    claim: >-
+      lint_duplicate_helpers reports exactly 18 divergent-duplicate names at this base, all
+      baselined, and exactly 5 of them are pair-exclusive to curator.py/lessons/run.py.
+    probe: "python3 scripts/lint/lint_duplicate_helpers.py (re-run at 1cecad37)"
+    probe_kind: search
+    observed: >-
+      18 divergent-duplicate names, 18 baselined, 0 new; the 5 pair-exclusive x2 names are
+      _author_to_author, _partition_pre_author, _run_batch_inner, read_batch, rotate_queue.
+      run_batch x4 = benign_actor/env.py:14, benign_actor/run.py:111, curator.py:209,
+      lessons/run.py:230. invoke_agent x4 = benign_actor/run.py:31, lessons/run.py:139,
+      malicious_actor/run.py:29, lead_author.py:218.
+    verdict: holds
+  - id: G2
+    inherits: C2
+    kind: referential
+    claim: >-
+      lint_duplicate_helpers._is_delegator drops any single-statement
+      `return <mod>.<same_name>(...)` body, which is why the git-helper forwarders never
+      entered the baseline.
+    probe: "read scripts/lint/lint_duplicate_helpers.py:40-55, 130-147"
+    probe_kind: read
+    observed: >-
+      HOLDS WITH CORRECTION. _is_delegator is defined at :130 (the amendment's 130-147 is
+      correct; the issue body's 135-152 is stale). The limitation note is at :47-50. The
+      forwarders were never baseline entries.
+    verdict: holds
+  - id: G3
+    inherits: C3
+    kind: census
+    claim: "QueueChannel is constructed at exactly 5 sites, all in config.py."
+    probe: "grep -rn 'QueueChannel(' + pyrefly-refs defender/learning/core/config.py:22"
+    probe_kind: search
+    observed: >-
+      5 construction sites, all config.py (:67, :107, :115, :123, :131). pyrefly: 17 refs /
+      4 files — config.py, _config.py:8,39, benign_actor/run.py:16,48, persist.py:24,377.
+      Those are the sites a new append_lock / optional-drain-lock field must thread through.
+    verdict: holds
+  - id: G4
+    inherits: C4
+    kind: census
+    claim: "QueueChannel.lock is read at 7 production sites and 4 test sites."
+    probe: "grep -rn '\\.lock\\b' --include=*.py defender, then classifying each hit"
+    probe_kind: search
+    observed: >-
+      7 production reads: curator.py:168,211; lessons/run.py:240; persist.py:272,292,358,424.
+      4 test reads: test_author_atomic.py:27, test_author_preflight.py:17,
+      test_author_actor_env.py:50, learning/test_loop.py:496.
+    verdict: holds
+  - id: G5
+    inherits: "C5+C6"
+    kind: behavior
+    claim: >-
+      Three of the five channels use ONE lock file for both the append and the drain role;
+      findings is already split, and pitfalls has no drain lock at all.
+    probe: >-
+      probe_719.py P1 — build LoopPaths and compare each channel's drain lock against its
+      append lock by path identity
+    probe_kind: executed
+    observed: >-
+      findings drain=.lock append=.findings.lock SAME=False; actor_observations,
+      environment_observations, actor_environment_observations all SAME=True; pitfalls
+      drain=(none) append=.pitfalls.lock.
+    verdict: holds
+  - id: G6
+    inherits: "C7+C8"
+    kind: behavior
+    claim: "rotate_queue_locked with merge_concurrent=False drops a concurrently appended row."
+    probe: >-
+      probe_719.py P3 — wrap persist._rewrite_queue, append a row between the read and the
+      rewrite, run rotate_queue_locked both ways over the real implementation
+    probe_kind: executed
+    observed: >-
+      merge=True pending -> ['a/0','concurrent/0']; merge=False pending -> ['a/0'].
+      merge=False drops the concurrently-appended row.
+    verdict: holds
+  - id: G7
+    inherits: C9
+    kind: referential
+    claim: "run_pitfalls takes no queue lock; read_pitfalls is unlocked; rotate_pitfalls merges."
+    probe: "read leads/pitfalls_curator.py:110-155 and persist.py:269-298"
+    probe_kind: read
+    observed: >-
+      run_pitfalls takes NO queue lock; read_pitfalls (:117) is unlocked; rotate_pitfalls
+      takes pitfalls.lock briefly with merge_concurrent=True.
+    verdict: holds
+  - id: G8
+    inherits: C10
+    kind: referential
+    claim: "CorpusAuthorConfig carries neither an id_key nor a max_attempts field today."
+    probe: "read author/_config.py:34-50"
+    probe_kind: read
+    observed: >-
+      Fields are repo_root, runs_dir, pending_dir, corpus_dir, corpus_dir_rel, channel,
+      repo_lock_file, repo_lock_wait_seconds, log_prefix, author_prompt, author_model,
+      author_timeout, author_effort, invoke_agent, box. No id_key, and no max_attempts —
+      the ceiling is read from module config at curator.py:187.
+    verdict: holds
+  - id: G9
+    inherits: C11
+    kind: referential
+    claim: "The two pre-author gates differ in both policy and arity."
+    probe: "read curator.py:270-306 and lessons/run.py:318-337"
+    probe_kind: read
+    observed: >-
+      curator returns (held, consumed_pre, to_author) over idempotency + outcome_skip +
+      source-bundle existence + outcome_author; lessons returns (held, consumed_idempotent)
+      over idempotency + source_refs.yaml ground truth, with to_author derived by
+      subtraction at :258-261. Policy and arity both differ.
+    verdict: holds
+  - id: G10
+    inherits: C12
+    kind: census
+    claim: "The cross-module private reach into _dead_letter_or_bump is exactly one call site."
+    probe: "pyrefly-refs defender/learning/author/curator.py:183 _dead_letter_or_bump"
+    probe_kind: search
+    observed: >-
+      3 references in 2 files (resolved): curator.py:183,319 and lessons/run.py:348. grep
+      floor 2 files, pyrefly resolved 2. The cross-module reach is exactly :348 (the issue
+      body's :346 is stale; the amendment's :348 is right).
+    verdict: holds
+  - id: G11
+    inherits: C13
+    kind: referential
+    claim: >-
+      The two lock primitives differ: persist._flock is blocking LOCK_EX, shared.acquire_flock
+      is LOCK_EX|LOCK_NB and turns contention into a skipped tick.
+    probe: "read persist.py:32-43 and shared.py:64-75, 289-292"
+    probe_kind: read
+    observed: >-
+      persist._flock -> fcntl.flock(fd, LOCK_EX), blocking, no LOCK_NB. shared.acquire_flock
+      -> LOCK_EX | LOCK_NB, returns None on BlockingIOError, and run_batch_envelope:290-292
+      turns that None into 'skipping this tick'.
+    verdict: holds
+  - id: G12
+    inherits: C15
+    kind: census
+    claim: "14 test-surface files name the symbols this fold moves."
+    probe: >-
+      grep -rlnE 'read_batch|rotate_queue|_run_batch_inner|_partition_pre_author|_author_to_author|run_batch'
+      defender/tests
+    probe_kind: search
+    observed: "14 files — 11 .py and 3 spec_graph_*.yaml, enumerated in the brief."
+    verdict: holds
+  - id: G13
+    inherits: C16
+    kind: behavior
+    claim: "_dead_letter_or_bump's unlocked read-modify-write loses a concurrently appended row."
+    probe: >-
+      probe_719.py P2 — rebind curator.write_atomic to append a row just before the real
+      os.replace, then call the real _dead_letter_or_bump
+    probe_kind: executed
+    observed: >-
+      queue after bump -> ['r/0','r/1']; concurrent/0 survived: False. The unlocked
+      read-modify-write loses the row. Reproduced at 1cecad37.
+    verdict: holds
+  - id: G14
+    inherits: C17
+    kind: census
+    claim: >-
+      The fold takes the duplicate-helper baseline from 18 to 13 names, and neither run_batch
+      nor invoke_agent produces a NEW finding.
+    probe: >-
+      the G1 search's 18-name hit list, read against lint_duplicate_helpers._is_delegator's
+      name-based rule (:130-147) and the fold's symbol deletions
+    probe_kind: search
+    observed: >-
+      _author_to_author, _run_batch_inner, read_batch, rotate_queue are deleted by a shared
+      drain body -> 4 names leave. _partition_pre_author leaves the baseline only if renamed
+      per-direction, since the lint keys on the bare name. 18 - 5 = 13 with the rename, 14
+      without. run_batch and invoke_agent stay dups (>=2 sites remain) so they stay baselined.
+    verdict: holds
+  - id: G15
+    inherits: C18
+    kind: referential
+    claim: >-
+      append_findings does no existing-id read; _append_observations dedups against
+      pending-union-consumed ids. finding_id is deterministic.
+    probe: "read persist.py:228-264 (append_findings) and :303-323 (_append_observations)"
+    probe_kind: read
+    observed: >-
+      append_findings builds rows from judge_doc and appends with no existing-id read;
+      _append_observations loads pending-union-consumed ids via _load_jsonl_ids and skips
+      duplicates. finding_id is f'{run_id}/{namespace}{n}' (:248), deterministic.
+    verdict: holds
+  - id: G16
+    inherits: C20
+    kind: census
+    claim: "The graveyard files have no production reader — and there are three of them, not two."
+    probe: >-
+      grep -rn 'deadletter' / 'failed/' / 'held_report' across *.py, *.md, *.yaml, classifying
+      each hit as writer, test, doc or spec-graph
+    probe_kind: search
+    observed: >-
+      HOLDS AND EXTENDS. deadletter written curator.py:203; every other hit is
+      defender/tests/* or a spec_graph YAML. failed/ written markers.py:38; no reader at all.
+      EXTENSION: the doc missed a third — held_report.log (lessons/run.py:220) also has no
+      production reader; its only non-writer hits are docs and test_author_postflight.py.
+    verdict: holds
+  - id: G17
+    inherits: C21
+    kind: referential
+    claim: >-
+      LEARNING_AUTHOR_MAX_ATTEMPTS and LEAD_AUTHOR_MAX_RETRIES both default to 3 and both
+      compare `attempts >= ceiling` with attempts starting at 1.
+    probe: "read config.py:406-407 and drains.py:154, plus the comparison operators"
+    probe_kind: read
+    observed: >-
+      author_max_attempts -> env_int('LEARNING_AUTHOR_MAX_ATTEMPTS', 3); max_retries ->
+      env_int('LEAD_AUTHOR_MAX_RETRIES', 3). Both 3, same off-by-nothing semantics, so D9's
+      collapse is behavior-preserving on the ceiling.
+    verdict: holds
+  - id: G18
+    inherits: C22
+    kind: referential
+    claim: >-
+      The pitfalls retire callback fires only on a raised Exception, and run_pitfalls signals
+      agent failure by RETURNING 2 — so today's dominant pitfalls failure is not even
+      dead-lettered.
+    probe: "read drains.py:196-216, pitfalls_curator.py:111-155, faults.py:15-29"
+    probe_kind: read
+    observed: >-
+      HOLDS AND STRENGTHENS. _drain_pitfalls passes `lambda e: _log(...discarding edits)` —
+      logs only, no attempts field written or read on the pitfalls path. The callback is
+      reached only via run_or_dead_letter's `except Exception` (faults.py:26), and
+      run_pitfalls returns 2 (pitfalls_curator.py:138-139), a value _drain_pitfalls never
+      inspects. Today's dominant pitfalls failure is discarded silently.
+    verdict: holds
+  - id: G19
+    inherits: C14
+    kind: reachability
+    claim: >-
+      A mixed-version overlap (a drain running old code beside one running new code) degrades
+      to today's behavior and loses no row.
+    probe: >-
+      NOT re-probed — no mixed-version interleaving is constructible before the implementation
+      exists. The rollover argument depends on the new drain lock's identity, which D1 has not
+      fixed to a path yet and F5 constrains.
+    observed: "Inherited from the discuss doc unchanged; nothing executed at this base."
+    verdict: deferred
+  - id: G20
+    kind: census
+    claim: >-
+      The complete set of writers and readers of learning_queue, including the three the
+      design doc never names.
+    probe: >-
+      spec-graph trace resource learning_queue (entry added to specGraph.resources), plus
+      grep -rn 'write_atomic(\\|append_jsonl(' over defender/ excluding tests, plus
+      pyrefly-refs on rotate_queue_locked
+    probe_kind: search
+    observed: >-
+      5 writer symbols / 8 production call sites and 6 reader symbols. Three not in the doc:
+      run_cycle.py:129 append_findings (the concurrent appender itself), lead_author.py:404
+      append_pitfalls (the pitfalls channel's ONLY writer), and
+      verify_forward/shared.py::load_observation (an unlocked reader of the live pending file
+      from inside the authoring call, via curator.py:114 / lessons/run.py:163).
+    verdict: holds
+  - id: G21
+    kind: census
+    claim: >-
+      Exactly two code paths rewrite a pending file wholesale today, and one of them
+      (_dead_letter_or_bump) is unlocked.
+    probe: >-
+      grep -rn 'write_atomic(' --include=*.py defender, excluding tests, then classifying each
+      of the 6 hits by target
+    probe_kind: search
+    observed: >-
+      persist.py:71 (_rewrite_queue, locked only when merge_concurrent=True) and
+      curator.py:204 (_dead_letter_or_bump, never locked). The other 4 are
+      hooks/budget_enforcer.py:90,157 (budget.json) and markers.py:14,30 (marker files) — not
+      queue paths.
+    verdict: holds
+  - id: G22
+    kind: census
+    claim: >-
+      The execution contexts that reach a drain body, including the ones no import walk
+      resolves.
+    probe: >-
+      read core/cli.py:88-150 and core/drains.py:61-84,116-130,196-227; grep for __main__
+      blocks under learning/author; grep -rn for the drain flags across .github/, infra/,
+      scripts/, docs/
+    probe_kind: search
+    observed: >-
+      (a) loop.py --author-drain / --lead-author-drain / --learn-drain, three mutually
+      exclusive CLI flags (cli.py:125-147); loop.py re-execs into .venv (:8-10). (b) String
+      keyed dynamic dispatch: _CURATOR_MODULES (drains.py:68-75) -> importlib.import_module
+      -> mod.run_batch — six module names, invisible to any static walk. (c) Four direct
+      module __main__ entrypoints (lessons/run.py:399, malicious_actor/run.py:76,
+      benign_actor/run.py:123, benign_actor/env.py:19). (d) Out-of-tree fixture writers:
+      evals/harness.py:43 and experiments/actor-author-discipline/harness.py:86-87 copy queue
+      files in with shutil.copy; evals/harness_lead.py:74 sets DEFENDER_LEARNING_STATE_DIR for
+      a subprocess. NO cron, systemd unit or CI workflow drives any drain.
+    verdict: holds
+  - id: G23
+    kind: referential
+    claim: >-
+      consumed.jsonl is a production READ on the observation channels, not a write-only sink.
+    probe: "read persist.py:303-323 and trace _load_jsonl_ids"
+    probe_kind: read
+    observed: >-
+      _append_observations reads _load_jsonl_ids(consumed_file, 'observation_id') at :314-316
+      to dedup. The findings channel does not (G15). So on 3 of 5 channels the consumed file
+      is on the append path's read side, while rotation writes it at persist.py:81 — outside
+      any lock whenever merge=False.
+    verdict: holds
+  - id: G24
+    kind: primitive
+    claim: "read_jsonl_rows silently discards a malformed/torn line rather than raising."
+    probe: "probe_719.py P4 over defender/_io.py:46-59 with a file ending mid-object"
+    probe_kind: executed
+    observed: >-
+      rows from a torn file -> [{'id':'a'}] — the partial row vanished, no error, no log. The
+      behavior is deliberate (lint_unsafe_jsonl_io.py:12-19 documents it as the fix for #446),
+      which is exactly why it is dangerous on the merge path: a torn READ inside _rewrite_queue
+      drops the row from `survivors` permanently.
+    verdict: holds
+  - id: G25
+    kind: census
+    claim: "The config knobs on this path, their types, defaults and distinguished members."
+    probe: >-
+      grep -rn for each env var name across defender/, then reading each definition site:
+      config.py:362-363,394-395,406-407,426-427,445-446,138-146; drains.py:55,154;
+      _env.py:11-18; directions.py:132,140,163
+    probe_kind: search
+    observed: >-
+      Distinguished members worth exercising: max_attempts = 0 (falsy, valid, means
+      retire-on-arrival) and 1 (fail-fast). Negative behaves as 0. env_int returns any int
+      unvalidated and raises FatalConfigError on a non-integer; FatalConfigError is a
+      SYSTEMIC_FAULT (faults.py:10-12), so a malformed ceiling kills the drain rather than
+      retiring an item. No knob here has documented alternatives beyond its default.
+    verdict: holds
+  - id: G26
+    kind: referential
+    claim: "The prior spec-graph pass keys the queue row on an axis that is not a row field."
+    probe: >-
+      read defender/tests/spec_graph_curator-glm-port.yaml's queue_row boundary against
+      persist.py:66-68 and :314-316
+    probe_kind: read
+    observed: >-
+      queue_row.identity.key_axes is [batch_id], sharing serialized-append. batch_id appears
+      on no queue row; the merge filter and the append dedup both key on id_key
+      (observation_id / finding_id / pitfall_id). RE-KEYED in this artifact rather than
+      inherited. Reusable prior ids for boundary-identity continuity: queue_row, dlq,
+      envelope, curator_modules, forward_check, state_root_env; actor id author_drain; axes
+      curator, corpus, batch_id, pid, lesson_stem. ONE new axis: `channel` (5 members), which
+      subsumes the prior 4-member `curator`.
+    verdict: holds
+  - id: G27
+    kind: census
+    claim: "The CI gates a new write path must clear."
+    probe: >-
+      read .github/workflows/ci.yml against scripts/lint/lint_unsafe_jsonl_io.py:1-45 and
+      scripts/lint/lint_duplicate_helpers.py:40-55
+    probe_kind: search
+    observed: >-
+      lint_unsafe_jsonl_io explicitly names _pending/findings.jsonl and actor_observations.jsonl
+      as the queues it protects, and flags both hand-rolled per-line json.loads reads and the
+      inlined json.dumps+newline append, resolving `json` and the opener by ORIGIN not
+      spelling. A new retire/rotate path must go through defender._io. lint_duplicate_helpers
+      is name-based, so the shared drain module's public function names decide whether the fold
+      produces a NEW dup finding.
+    verdict: holds
+
+  - id: C23
+    kind: behavior
+    claim: >-
+      A pitfalls agent failure is signalled by a return code, not an exception, so
+      _drain_pitfalls' run_or_dead_letter callback is never invoked at all.
+    probe: >-
+      scratchpad/probe_pitfalls_retire.py — 6 queued rows, run_pitfalls(invoke=lambda…: 7)
+      driven through drains._drain_pitfalls for 4 consecutive ticks
+    probe_kind: executed
+    observed: >-
+      each tick logged `FATAL: pitfalls curator exited rc=7; leaving queue intact` and
+      returned; the callback's `discarding edits` line never appeared. pending=6 on every tick,
+      attempts=[None]*6 throughout, no .deadletter.jsonl, no consumed file. D9 cannot reach
+      pitfalls through run_or_dead_letter without an rc->fault conversion.
+    verdict: holds
+  - id: C24
+    kind: referential
+    claim: >-
+      The pitfalls channel has ONE lock serving both the append and the rotate role, not the
+      two-lock split C9 implies by grouping it with findings.
+    probe: "read core/persist.py:268-298 (append_pitfalls, rotate_pitfalls)"
+    probe_kind: read
+    observed: >-
+      append_pitfalls takes _flock(paths.pitfalls.lock); rotate_pitfalls passes that same
+      paths.pitfalls.lock as rotate_queue_locked's lock_file. Safe today only because
+      run_pitfalls never holds it across the batch. A4's decision (drain_lock optional,
+      dropped for pitfalls) is the correct reading.
+    verdict: holds
+  - id: C25
+    kind: referential
+    claim: >-
+      The two read_batch bodies differ in lock discipline, which the single folded body must
+      resolve and the doc never states.
+    probe: "read author/curator.py:44-45 and author/lessons/run.py:94-98"
+    probe_kind: read
+    observed: >-
+      curator.read_batch is a bare read_jsonl_rows with no lock; lessons.read_batch wraps the
+      read in _flock(cfg.findings_lock_file) — the append lock. Folding to the curator shape
+      regresses findings; folding to the lessons shape adds a new lock acquisition on the
+      observation read path.
+    verdict: holds
+  - id: C26
+    kind: census
+    claim: >-
+      O4's restated oracle ("no `_`-prefixed cross-module reference from a drain module") is
+      violated today by private-MODULE imports that nothing intends to change.
+    probe: 'grep -nE "\b[A-Za-z_][A-Za-z0-9_]*\._[a-zA-Z]" over the five drain modules'
+    probe_kind: search
+    observed: >-
+      attribute reaches (the intended target): curator.py:149,153; lessons/run.py:182,186,348
+      — exactly 5. ALSO matched: 9 module imports of the form `from
+      defender._io/_yaml/_corpus/_run_paths import …` and `from …author._config import …`. The
+      oracle must key on <mod>._name attribute access, not on the literal wording.
+    verdict: holds
+  - id: C27
+    kind: referential
+    claim: >-
+      The `if merge_concurrent:` branch is the only lock acquisition in the rotation path, so
+      deleting the knob is what keeps the lock.
+    probe: "read core/persist.py:84-105"
+    probe_kind: read
+    observed: >-
+      rotate_queue_locked: `if merge_concurrent: with _flock(lock_file): _rewrite_queue(...,
+      merge=True)` else `_rewrite_queue(..., merge=False)` with no lock. lock_file is
+      otherwise unused. An implementation that deletes the branch and keeps merge=True must
+      re-add the lock deliberately.
+    verdict: holds
+  - id: C28
+    kind: behavior
+    claim: "O5's and O6's regression oracles have a green baseline to regress from at 1cecad37."
+    probe: >-
+      PYTHONPATH=<worktree> pytest tests/test_author_{atomic,preflight,postflight,shared}.py
+      tests/test_curator_glm_{dispatch_dlq,survival}.py tests/test_pitfalls_curator.py
+      tests/test_orchestrate_thresholds.py -m "not llm and not live"
+    probe_kind: executed
+    observed: >-
+      124 passed, 1 warning in 5.03s. test_dlq_quarantine_is_batch_granular exists at
+      test_curator_glm_dispatch_dlq.py:316 and test_author_atomic.py:35-56 is the findings DLQ
+      case. NOTE: the shared .venv is at /workspace/defender/.venv and `uv run` inside the
+      worktree resolves a different, incomplete env — PYTHONPATH + the main venv's python is
+      required.
+    verdict: holds
+  - id: C29
+    kind: census
+    claim: "Exactly three families rewrite or extend a pending file pre-D9."
+    probe: >-
+      grep -rn "write_atomic(|append_jsonl(" over defender/learning excluding tests, plus grep
+      for _rewrite_queue / rotate_queue_locked call sites
+    probe_kind: search
+    observed: >-
+      rewriters: persist.py:71 (_rewrite_queue, reached only via rotate_queue_locked at
+      curator.py:165, lessons/run.py:196, persist.py:289) and curator.py:204
+      (_dead_letter_or_bump, unlocked). appenders: persist.py:264 (append_findings, locked),
+      :273 (append_pitfalls, locked), :323 (_append_observations, locked). No fourth writer.
+    verdict: holds
+  - id: C30
+    kind: census
+    claim: "The 18 -> 13 arithmetic holds under either disposition of run_batch in the direction modules."
+    probe: "python3 scripts/lint/lint_duplicate_helpers.py, read against _is_delegator (lint:130-147)"
+    probe_kind: search
+    observed: >-
+      18 divergent-duplicate names today, exactly the 5 pair-exclusive ones named in C1. If the
+      direction modules keep a same-named `return drain.run_batch(...)`, _is_delegator drops
+      both and run_batch falls x4->x2 — still one entry. If they delete it, same. Either way 5
+      names leave: 13. Also corrects the doc's 'Baseline effect' aside: run_batch's other two
+      sites are benign_actor/run.py:111 and benign_actor/env.py:14 — lead_author defines
+      invoke_agent, not run_batch.
+    verdict: holds
+  - id: C31
+    kind: behavior
+    claim: "run_pitfalls consumes an entire batch without authoring it when no queued row carries a system."
+    probe: "read leads/pitfalls_curator.py:124-129 with persist.rotate_pitfalls:280-298"
+    probe_kind: read
+    observed: >-
+      `if not handoffs:` logs 'none carried a system — dropping' and calls
+      rotate_pitfalls(batch_ids, None), which marks every matching row
+      consumed_category=consumed_committed. DOWNGRADED at phase D from `unrefuted` to
+      `unprobed`: this is a behavior claim closed on a READ, and a read cannot falsify it.
+      Routed as fork E2/P34 (separate follow-up); nothing in this graph cites it.
+    verdict: unprobed
+  - id: C32
+    kind: census
+    claim: >-
+      No single symbol governs the systemic-fault exemption across the five channels. The
+      observation and findings channels never reach run_or_dead_letter at all.
+    probe: >-
+      grep -rn "run_or_dead_letter" over defender excluding .venv, then read the retirement
+      trigger on each channel (curator.py:313-322, lessons/run.py:342-351, faults.py:15-30)
+    probe_kind: search
+    observed: >-
+      run_or_dead_letter production call sites: exactly 2, both in learning/core/drains.py —
+      :167 (_drain_lead_author_markers) and :211 (_drain_pitfalls). On the observation +
+      findings channels the retirement trigger is instead the narrow `except AuthorError`
+      (curator.py:317 -> _dead_letter_or_bump:319; lessons/run.py:346 -> :348). AuthorError is
+      shared.py:24 Exception; StageAbort is config.py:437 Exception and FatalConfigError is
+      _env.py:7 ValueError — neither is a subclass, so those channels exempt systemic faults by
+      NOT CATCHING, where run_or_dead_letter exempts by RE-RAISING.
+    verdict: holds
+  - id: C33
+    kind: behavior
+    claim: >-
+      The retirement ceiling has no floor — 0 and negative values are accepted and both retire
+      the item on its first failure, observably identical to a ceiling of 1.
+    probe: >-
+      scratchpad/probe_ceiling_zero.py — LEARNING_AUTHOR_MAX_ATTEMPTS at 3/1/0/-1/"abc" driven
+      through the real curator._dead_letter_or_bump with one queued failure
+    probe_kind: executed
+    observed: >-
+      3 -> pending ['a/0','a/1'], attempts [1, None], graveyard []. 1, 0 and -1 -> identical:
+      pending ['a/1'], graveyard ['a/0'] after a single failure. 'abc' -> FatalConfigError.
+      env_int returns any int unvalidated and author_max_attempts adds no floor, unlike
+      verify_batch_workers which raises for < 1. So 0 is a reachable falsy member that a
+      `ceiling or default` idiom would silently promote to 3, and -1 is the boundary of an
+      unvalidated region.
+    verdict: holds
+
+  - id: PJ1a
+    kind: behavior
+    claim: >-
+      LEARNING_AUTHOR_TIMEOUT_SECONDS (ctx.wall_clock_timeout) is enforced solely via
+      asyncio.wait_for wrapping the WHOLE agent.run() call in _pydantic_stage._drive; it cannot
+      preempt a currently-executing boxed bash call, because the box transport
+      (_DockerTransport.__call__ -> subprocess.run) is a synchronous, non-awaited blocking call
+      inside an async tool fn — the event loop is blocked for the call's full duration and
+      wait_for's deadline is only noticed once it returns.
+    probe: >-
+      Ran the REAL curator_engine.run_curator_stage -> _pydantic_stage.run_stage -> _drive with
+      a real pydantic_ai Agent (FunctionModel injected via the make_model seam) and the REAL
+      runtime/tools.py bash tool, whose box transport (injected via
+      box_mod.BoxExecutor(transport=...)) blocked synchronously for 5s via a real subprocess.run
+      child. wall_clock_timeout=1s. `PYTHONPATH=<worktree> python3 probe_pj1_e2e.py`, Scenario A.
+    probe_kind: executed
+    observed: >-
+      Isolated _drive probe: TimeoutError raised at 5.01s elapsed (not 1s) against a 1s
+      configured timeout and a 5s blocking tool. Full-stack probe: batch completed (raised)
+      after 5.11s wall time, not ~1s; CALL_LOG showed box-call-start/box-call-end 5.03s apart,
+      spanning past the configured deadline before the TimeoutError surfaced.
+    verdict: holds
+  - id: PJ1b
+    kind: behavior
+    claim: >-
+      When the whole-batch wall-clock TimeoutError DOES eventually fire (however late), it
+      lands as a per-item AuthorError via curator_engine.py's in-process (TimeoutError,
+      UsageLimitExceeded) -> RunUnprocessable -> AuthorError chain, which _author_to_author
+      catches specifically and routes to _dead_letter_or_bump — attempts bumped,
+      ceiling-eligible, NOT a SYSTEMIC_FAULT that would kill the drain.
+    probe: >-
+      Same full-stack run as PJ1a Scenario A; observed the exact exception object and type that
+      run_curator_stage raised out of the real call chain (not fabricated).
+    probe_kind: executed
+    observed: >-
+      AuthorError after 5.11s: 'curator (batch1) did not complete: curator (curator:batch1) did
+      not complete: TimeoutError()' — confirms the chain fires for real, exactly as both copies
+      described, once the deadline is finally noticed.
+    verdict: holds
+  - id: PJ1c
+    kind: behavior
+    claim: >-
+      A boxed authoring call's bash command stopped genuinely FROM OUTSIDE the process at
+      per-command granularity (an OS-level kill surfacing as subprocess.TimeoutExpired, or a
+      BoxFault from a dead container) is absorbed by runtime/tools.py::_tool_bash into
+      pydantic_ai ModelRetry and therefore reaches NEITHER the AuthorError path (PJ1b) NOR the
+      SYSTEMIC_FAULT path — the batch proceeds as if nothing failed, no attempts bump, no drain
+      death. The premise's AuthorError-vs-SYSTEMIC_FAULT dichotomy is incomplete.
+    probe: >-
+      Full-stack run (Scenario B): box transport raised subprocess.TimeoutExpired (mirroring
+      run_parsed's own `except subprocess.TimeoutExpired: raise` passthrough, verified by
+      reading box.py:109-110) on the curator's one bash call, wall_clock_timeout=30s so only the
+      per-command fault is exercised. NOT a full container-kill integration test; the BoxFault
+      variant takes the identical _tool_bash absorption path and was not independently re-run.
+    probe_kind: executed
+    observed: >-
+      model_fn's second call received tool-result text 'command timed out after 120s: cat
+      <path>' (the ModelRetry message _tool_bash raises), and the batch SUCCEEDED (result={}) in
+      0.02s — no AuthorError, no SYSTEMIC_FAULT, no exception escaped run_curator_stage at all.
+    verdict: holds
+  - id: PJ2a
+    kind: behavior
+    claim: >-
+      persist._flock's fcntl.flock(fd, LOCK_EX) excludes two OS threads of the SAME process
+      from each other, even though each thread's _flock call opens a distinct fd (distinct open
+      file description) via lock_path.open('a+').
+    probe: >-
+      Two threading.Thread workers call the real _flock() on one lock_path. Thread A acquires
+      and holds for 1.5s; thread B attempts acquisition 50ms after A acquires. Verified
+      separately that concurrent opens of the same path from two threads do yield distinct fd
+      numbers (3 vs 4). Ran 4 times.
+    probe_kind: executed
+    observed: >-
+      In all 4 runs, B's flock(LOCK_EX) call did not return (and B did not enter the critical
+      section) until at or after the timestamp A released the lock (delta <0.001s); B blocked
+      for ~1.45s waiting on A. No run showed B acquiring while A still held it.
+    verdict: holds
+  - id: PJ2b
+    kind: behavior
+    claim: >-
+      The real append_findings path (persist._flock + append_jsonl under it), invoked by two
+      threads exactly as run_cycle._dispatch_directions invokes run_direction via
+      ThreadPoolExecutor(max_workers=2), preserves every row from both concurrently-appending
+      directions on one channel with no loss, no interleaving/corruption, and no duplication.
+    probe: >-
+      200 independent trials, each: fresh tmp LoopPaths(repo_root, state_dir), one
+      ThreadPoolExecutor(max_workers=2) submitting append_findings(direction='adversarial', 25
+      findings) and append_findings(direction='benign', 25 findings) to the same
+      pending_file/findings_lock_file, gathered via as_completed. Checked per trial: line count,
+      that every line parses as JSON, per-direction row counts, unique finding_id count.
+    probe_kind: executed
+    observed: >-
+      200/200 trials: exactly 50 lines, all 50 valid JSON, 25 adversarial + 25 benign rows, 50
+      unique finding_ids. 0 failures across 10,000 appended findings. On a platform lacking
+      Linux's cross-fd same-process flock semantics this would need re-probing.
+    verdict: holds
+
+  # ---------------------------------------------------------------------------------------
+  # Raised at the gate (phase D) — R6's rendered-sink trust walk demanded a claim to close on.
+  # ---------------------------------------------------------------------------------------
+  - id: RG1
+    kind: behavior
+    claim: >-
+      write_held_report's one rendered line (lessons/run.py:207-221) embeds batch_id and
+      finding_id lists via an f-string over a Python list; str() of that list applies
+      repr()-style per-element escaping, so an embedded newline in finding_id survives as the
+      two literal characters `\n`, never a real line break, and batch_id is a fresh
+      uuid.uuid4().hex[:12] (curator.py:231 / lessons/run.py:263) — not attacker/model text.
+    probe: >-
+      read lessons/run.py:207-221,263; executed `python3 -c "print(str(['a\nb']).encode())"`
+      against a string built with a real embedded newline
+    probe_kind: executed
+    observed: >-
+      b"['a\\nb']" — the newline in the source string is rendered as the two escaped
+      characters, not a raw line break, confirming str()-of-list sanitizes the frame's only
+      variable text. batch_id is system-generated (uuid4), not derived from alert or model
+      content. No unsanitized model/attacker chooser reaches this sink's frame or slots.
+    verdict: holds
+
+gate:
+  evaluated:
+    - {rule: R0, fired: true}
+    - {rule: R1, fired: false}
+    - {rule: R2, fired: true}
+    - {rule: R3, fired: true}
+    - {rule: R4, fired: true}
+    - {rule: R5, fired: true}
+    - {rule: R6, fired: false, cites: [RG1]}
+  obligations:
+    # ALL SIX ACCEPTED at §7 (decision 4, all four option groups). Each discharging
+    # demand has lost `provisional: true`; none was declined, so no waiver is minted here.
+    - {rule: R2, element: consumed_ledger.identity,
+       witness: "drain's write into consumed_ledger interpolates [channel, queue_row_id] over many batch-to-batch invocations, and G23 shows the same file is read back for dedup on 3 channels — no demand pins that the append survives a genuine interleaving without a torn line or lost update, so a corrupted/partial write here is a silent dedup bug (an id wrongly treated as consumed, or not), not just a lost write.",
+       discharged_by: consumed_ledger_append_is_atomic}
+    - {rule: R4, element: "author_max_attempts.domain.distinguished[-1]",
+       witness: "-1 is a reachable operator input (env_int applies no floor); C33's executed probe shows it retires identically to 0/1, but no executable demand exercises it directly.",
+       discharged_by: author_max_attempts_negative_retires_like_zero}
+    - {rule: R4, element: "author_max_attempts.domain.distinguished[0]",
+       witness: "0 is falsy with falsy_valid: true — the canonical x-or-DEFAULT swallow shape R4 exists to catch. C33's executed probe confirms 0 retires on first failure like -1/1, but nothing pins it as a test; a later `ceiling or DEFAULT` idiom would silently promote 0 to 3 with no test to fail.",
+       discharged_by: author_max_attempts_zero_retires_on_arrival}
+    - {rule: R4, element: "author_timeout_seconds.domain.distinguished[0]",
+       witness: "0 is a reachable, falsy_valid operator input with no design-stated semantics (unlike the worked example's SUMM_TIMEOUT, whose doc says '0 = no limit'); asyncio.wait_for(coro, timeout=0) times out almost immediately rather than disabling the bound — plausibly the opposite of what an operator setting 0 expects — and PJ1a already shows the timeout is soft/late even at nonzero values. No demand exercises 0.",
+       discharged_by: author_timeout_seconds_zero_is_pinned}
+    - {rule: R4, element: "bucket_spec.domain.distinguished[committed]",
+       witness: "the default/mainline bucket is not bound at its own address by any demand; gating_semantics_preserved and bucket_spec_carries_formatter exercise gating generally but neither names this member, so per-entry discharge is unverifiable from the graph.",
+       discharged_by: committed_bucket_is_exercised}
+    - {rule: R4, element: "bucket_spec.domain.distinguished[consumed_skip]",
+       witness: "same gap as `committed` for the consumed-idempotent-skip bucket — no demand names this address.",
+       discharged_by: consumed_skip_bucket_is_exercised}
+  holes:
+    # RESOLVED at §7 (.spec-flow/frontiers/70-resolutions.md). Every hole spawned a demand,
+    # so each closes through `resolved_to` rather than through a "no test needed" citation.
+    # The two `author_max_attempts…[1]` entries were the residue's WAIVER CANDIDATES: the
+    # human declined the waiver and had the test written instead, so no `form: waiver` demand
+    # exists for them and the clause's argument is rejected on the record.
+    - {rule: R0, element: "append_lock.access[flock-nonblocking]",
+       witness: "constraints: unknown for D1's NEW drain-side non-blocking append-lock acquisition (the boundary's own comment: 'R0 fires here on purpose'). Decide whether it inherits shared.acquire_flock's skip-on-contention discipline with no deadline, or needs one bound (P54 recommends the repo-lock deadline).",
+       resolution: "NOT human-decided — P54's own recommendation applied: the drain's wait on the append lock inherits the repo lock's existing LEARNING_REPO_LOCK_WAIT_SECONDS deadline. The cell's constraints are now [mutual-exclusion, bounded-wait]. THE WEAKEST-SUPPORTED RESOLUTION IN THE SET — an analogy, not a probe — and flagged for override at 70-resolutions.md red flag 4. Also retires C5/P54, C6/P53 and C11/P52.",
+       resolved_by: judge-recommendation,
+       resolved_to: drain_wait_on_append_lock_is_bounded}
+    - {rule: R3, element: "append_lock.access[flock-nonblocking]",
+       witness: "blocked on the R0 hole above: R3's parity question (does flock-nonblocking enforce what flock-blocking enforces) can't be evaluated until the policy is decided. Resolving R0 likely spawns a parity demand here — route together.",
+       resolution: "unblocked by the R0 resolution above; the parity demand it predicted is minted. Inherits that resolution's weak support.",
+       resolved_by: judge-recommendation,
+       resolved_to: append_lock_parity_across_acquisition_disciplines}
+    - {rule: R4, element: "author_error_guard.domain.distinguished[ModelRetry]",
+       witness: "the deliberately-left fork (PJ1c, executed, holds): a boxed bash command killed from outside the process is absorbed by runtime/tools.py::_tool_bash into pydantic_ai ModelRetry, reaching neither the AuthorError retry path nor the SYSTEMIC_FAULT exemption — no attempts bump, no drain death, the item never retires. The design's AuthorError-vs-SYSTEMIC_FAULT dichotomy is incomplete; decide the third branch (route ModelRetry through AuthorError, through SYSTEMIC_FAULT, or add a new explicit path) before a test can be written.",
+       resolution: "DECIDED BY THE HUMAN (decision 1, path 4): the third branch is chosen — an externally killed boxed command is routed through the retire seam, counting as an author error that bumps and is ceiling-eligible, rather than being exempted as systemic or given a fourth handling shape. Under decision 8 this is expressed as membership: ModelRetry is a NAMED MEMBER of the enumerated retire set, not a consequence of a guard that catches everything.",
+       resolved_by: human-decision-1,
+       resolved_to: externally_killed_box_command_bumps_and_retires}
+    - {rule: R4, element: "author_max_attempts.domain.distinguished[1]",
+       witness: "bound only by the clause `retire_ceiling_is_a_parameter` (form: clause) — per rules.md's own worked example, a clause-only binding does not pre-discharge R4; the obligation stays open. The clause's `rejected` note argues against testing now ('the only fail-fast caller, quarantine_marker, is out of scope per D9, so an in-suite exercise of ceiling=1 would have no production driver behind it') — waiver-shaped reasoning never promoted to a formal waiver, and weaker than it looks: C33 already probed ceiling=1 behavior, and the retire seam can be driven directly in a test with no caller at all, so 'no production driver' doesn't actually block an in-suite exercise. Decide: waive (formalize the clause's rationale) or test (cheap, given C33).",
+       resolution: "DECIDED BY THE HUMAN (decision 4): the test is WRITTEN, not waived. The clause's argument — that ceiling=1 has no in-scope production driver — is REJECTED on the record: C33 already drove ceiling=1 through the real retirement code with no caller at all. No `form: waiver` demand is minted, and the clause's `rejected:` note is struck.",
+       resolved_by: human-decision-4,
+       resolved_to: fail_fast_ceiling_of_one_retires_on_first_failure}
+    - {rule: R4, element: "author_max_attempts.domain.alternatives[1]",
+       witness: "the documented fail-fast override (same value, 1, crosses_validation: false) is entirely unbound by any demand — not even the clause above names this address. Same underlying decision as distinguished[1] above; route together.",
+       resolution: "DECIDED BY THE HUMAN (decision 4): same decision as distinguished[1] above — tested, not waived. Both addresses are bound by the one new demand.",
+       resolved_by: human-decision-4,
+       resolved_to: fail_fast_ceiling_of_one_retires_on_first_failure}
+  pre_discharged:
+    - {rule: R2, element: findings.identity, by: concurrent_directions_lose_no_finding, edge: "drives(learn_drain->run_direction)", cites: [PJ2b]}
+    - {rule: R2, element: actor_observations.identity, by: append_lock_identity_unchanged, edge: "interacts(run_direction->actor_observations)", cites: [G11]}
+    - {rule: R2, element: environment_observations.identity, by: queue_channel_lock_topology, edge: "interacts(run_direction->environment_observations)", cites: [G5]}
+    - {rule: R2, element: actor_environment_observations.identity, by: queue_channel_lock_topology, edge: "interacts(run_direction->actor_environment_observations)", cites: [G5]}
+    - {rule: R2, element: graveyard.identity, by: retire_uniform_across_drains, edge: "interacts(retire->graveyard)", cites: [G11]}
+    - {rule: R3, element: "append_lock.access[flock-blocking]", by: rotate_excluded_by_append_lock, edge: "interacts(drain->append_lock)", cites: [G11]}
+    - {rule: R4, element: "id_key.domain.distinguished[observation_id]", by: id_key_is_a_channel_config_field, edge: "interacts(drain->id_key)", cites: [G26]}
+    - {rule: R4, element: "id_key.domain.distinguished[finding_id]", by: id_key_is_a_channel_config_field, edge: "interacts(drain->id_key)", cites: [G26]}
+    - {rule: R4, element: "id_key.domain.distinguished[pitfall_id]", by: id_key_is_a_channel_config_field, edge: "interacts(drain->id_key)", cites: [G26]}
+    - {rule: R4, element: "drain_lock.domain.distinguished[None]", by: queue_channel_lock_topology, edge: "interacts(drain->drain_lock)", cites: [G7]}
+    - {rule: R4, element: "author_max_attempts.domain.distinguished[3]", by: pitfalls_retires_at_ceiling, edge: "interacts(retire->author_max_attempts)", cites: [G17]}
+    - {rule: R4, element: "state_root_env.domain.distinguished[<unset>]", by: new_state_paths_inside_the_ignored_prefix, edge: "interacts(drain->state_root_env)", cites: [G25]}
+    - {rule: R4, element: "bucket_spec.domain.distinguished[held_forward_bad]", by: held_forward_bad_bucket_and_report, edge: "interacts(lessons_run->held_report)", cites: [G16]}
+    - {rule: R4, element: "author_error_guard.domain.distinguished[AuthorError]", by: systemic_faults_exempt_on_author_channels, edge: "interacts(drain->author_error_guard)", cites: [C32]}
+    - {rule: R4, element: "author_error_guard.domain.distinguished[TimeoutError]", by: mid_batch_timeout_is_per_item, edge: "interacts(drain->author_error_guard)", cites: [PJ1b]}
+    - {rule: R4, element: "author_error_guard.domain.distinguished[StageAbort]", by: systemic_faults_exempt_on_author_channels, edge: "interacts(drain->author_error_guard)", cites: [C32]}
+    - {rule: R4, element: "author_error_guard.domain.distinguished[FatalConfigError]", by: systemic_faults_exempt_on_author_channels, edge: "interacts(drain->author_error_guard)", cites: [C32]}
+    - {rule: R4, element: "author_error_guard.domain.distinguished[GitError]", by: systemic_faults_exempt_on_author_channels, edge: "interacts(drain->author_error_guard)", cites: [C32]}
+    - {rule: R4, element: "author_error_guard.domain.distinguished[BoxFault]", by: systemic_faults_exempt_on_author_channels, edge: "interacts(drain->author_error_guard)", cites: [C32]}
+    - {rule: R5, element: findings, by: no_unprocessed_row_lost_retire, edge: "interacts(retire->findings)", cites: [G15]}
+    - {rule: R5, element: actor_observations, by: no_unprocessed_row_lost_retire, edge: "interacts(retire->actor_observations)", cites: [G23]}
+    - {rule: R5, element: environment_observations, by: retire_uniform_across_drains, edge: "interacts(retire->environment_observations)", cites: [G17]}
+    - {rule: R5, element: actor_environment_observations, by: retire_uniform_across_drains, edge: "interacts(retire->actor_environment_observations)", cites: [G17]}
+    - {rule: R5, element: pitfalls, by: pitfalls_retires_at_ceiling, edge: "interacts(retire->pitfalls)", cites: [C24]}
+
+handoff:
+  forks:
+    # RESOLVED AT §7 — .spec-flow/frontiers/70-resolutions.md is the record; each line names the
+    # resolution and whether the HUMAN decided it or the judge's own recommendation was applied.
+    # The 8 design-record forks (20-demands.md).
+    - "Fork 1 / demand #0 — RESOLVED (human, decision 1). FLIPPED: the pitfalls leg's rc=2 becomes a retire-triggering NON-systemic fault, so the pinned 'today's int rc alphabet unchanged' contract is rejected on its `2` branch; the `0` branch is unchanged. `provisional` struck. PHASE C MUST RE-CLASSIFY BEFORE PHASE E."
+    - "Fork 2 / C23 (= P58) — RESOLVED (human, decision 1). The judge's recommendation (call retire directly, keep the rc) is NOT applied: the rc is converted into a fault. -> pitfalls_rc_fault_reaches_the_retire_seam."
+    - "Fork 3 / C25 (= P15) — RESOLVED (judge-recommendation). The folded read takes append_lock on every channel. -> folded_read_batch_takes_the_append_lock."
+    - "Fork 4 / C26 — RESOLVED (judge-recommendation). O4's oracle is scoped to <mod>._name attribute access. -> no_private_cross_module_reference, re-scoped."
+    - "Fork 5 — RESOLVED (judge-recommendation). The findings id-collision drop stays pinned as accepted behavior. -> finding_id_collision_dropped."
+    - "Fork 6 / C31 (= P34) — RESOLVED (judge-recommendation). Separate follow-up. -> waiver pitfalls_no_system_silent_consume_filed_separately."
+    - "Fork 7 / C32 — ACCEPTED (human, decision 1), THEN REVERSED IN SHAPE (human, decision 8). Decision 1 accepted that the author channels get one widened guard; decision 8 replaced the widening with the enumerated retire set (AuthorError, GitError, ModelRetry); anything outside it is not caught, escapes, and leaves the row queued. The bare `except Exception` spelling this entry used to record as the human's accepted decision is now the ONE SPELLING THE SUITE EXISTS TO FORBID — an implementer who writes it can no longer cite this record for it. What survives from fork 7 is that the four author channels share ONE retirement classifier, not that it catches everything. D9's 'classify layer — unchanged' text contradicts the design either way. -> retirement_trigger_is_an_enumerated_fault_set, retire_set_membership_is_explicit."
+    - "Fork 8 / C33 (= P28) — RESOLVED (judge-recommendation). Pin negative-behaves-as-0 rather than add a rejection. -> author_max_attempts_negative_retires_like_zero."
+    # The 34 phase-C forks.
+    - "P01 — RESOLVED (human, decision 1). The judge's 'systemic, no bump' is NOT applied: a GitError from commit_corpus is wired through the retire seam and the corpus dir is left usable. -> corpus_commit_git_error_retires_and_unwedges_the_corpus."
+    - "P06 — RESOLVED (judge-recommendation). Out of scope, recorded. -> waiver transient_verifier_failure_out_of_scope."
+    - "P09 — RESOLVED (judge-recommendation). Out of scope, filed. -> waiver box_fault_kills_sibling_corpus_authors_out_of_scope."
+    - "P11 — RESOLVED (judge-recommendation) via P33's config-build binding; no in-handler env read remains to fail. -> ceiling_is_bound_once_at_config_build."
+    - "P14 — RESOLVED (human, decision 3). Graveyard-first, graveyard advisory, queue authoritative. -> graveyard_append_precedes_the_queue_rewrite."
+    - "P15 — RESOLVED (judge-recommendation). See Fork 3."
+    - "P17 — RESOLVED (judge-recommendation). An unkeyable row is a per-item failure that retires. -> unkeyable_row_retires_as_a_per_item_failure."
+    - "P26 — RESOLVED (judge-recommendation) via P33: a malformed ceiling aborts the tick at config build, before any row is processed. -> malformed_ceiling_aborts_the_tick_at_config_build."
+    - "P27 — RESOLVED (judge-recommendation + decision 4). Ceiling 0 is supported and retires on the first failure. -> author_max_attempts_zero_retires_on_arrival."
+    - "P28 — RESOLVED (judge-recommendation). See Fork 8."
+    - "P30 — RESOLVED (human, decision 2). The ceiling is checked only after an observed failure, never on entry. -> ceiling_is_checked_only_after_an_observed_failure."
+    - "P31 — RESOLVED (judge-recommendation). Value errors are loop-level; in-range values including 0 are queue-level. -> malformed_ceiling_aborts_the_tick_at_config_build."
+    - "P32 — RESOLVED (human, decision 2). A lowered ceiling applies at the next failure, not on sight. -> ceiling_is_checked_only_after_an_observed_failure."
+    - "P33 — RESOLVED (judge-recommendation). Bind at config build, once per batch; closes P11, P26 and the mechanism half of P32. -> ceiling_is_bound_once_at_config_build."
+    - "P34 — RESOLVED (judge-recommendation). See Fork 6."
+    - "P39 — RESOLVED (human, decision 2). Bump every row by one; retire only those now at or over the ceiling. -> every_row_in_a_faulted_batch_bumps_by_one."
+    - "P40 — RESOLVED (human, decision 3). Resurrection is blocked by the consumed-ledger write, not by a graveyard read on the append path. -> retired_row_lands_in_the_consumed_ledger."
+    - "P42 — RESOLVED (judge-recommendation). Out of scope: retirement is bounded FAILURE. -> waiver permanently_held_row_out_of_scope."
+    - "P43 — SETTLED at phase D by PJ1b and minted as mid_batch_timeout_is_per_item; §7 confirms the judge's reading."
+    - "P46 — RESOLVED (judge-recommendation). Re-authoring is the accepted recovery path. -> waiver no_reconciliation_for_a_committed_corpus."
+    - "P51 — RESOLVED (judge-recommendation). The second invocation skips its tick — the property that makes the shared <pending>.tmp name safe. -> second_bare_module_invocation_skips_its_tick."
+    - "P58 — RESOLVED (human, decision 1). See Fork 2."
+    - "P60 — RESOLVED (judge-recommendation). O2 is 'an append never waits on the agent call'; the oracle is pinned to the LLM phase and the rotate window is an explicit exception; copy 3's reading rejected. -> append_does_not_block_on_batch, re-scoped."
+    - "P63 — RESOLVED (judge-recommendation). Carried as an implementation-time obligation, not a suite expected value. -> waiver rollover_window_not_constructible_at_spec_time."
+    - "P64 — RESOLVED (judge-recommendation). Branch on None; take no exclusive lock. -> queue_channel_lock_topology."
+    - "P66 — RESOLVED (judge-recommendation). Pin the acquisition order by construction in one place and enumerate acquisitions in a test. -> lock_acquisition_order_is_pinned_in_one_place."
+    - "P67 — RESOLVED (judge-recommendation). Two touches after D9, not three; re-read under the final acquisition, which 'always merges' already requires. -> rotate_always_merges."
+    - "P69 — RESOLVED (human, decision 3). Retired rows are written to the consumed ledger; the interacts(retire->consumed_ledger) edge is ADDED to this graph. -> retired_row_lands_in_the_consumed_ledger."
+    - "P71 — RESOLVED (judge-recommendation). A faulted tick commits only the retirement; held and pre-consumed rows are deferred. -> faulted_tick_commits_only_the_retirement."
+    - "P73 — RESOLVED (human, decision 2). Lifetime count, no reset on an intervening success. -> attempts_are_lifetime_with_no_reset."
+    - "P75 — RESOLVED (judge-recommendation). 'The batch' on pitfalls is batch_ids, the set fixed at the drain's own read. -> pitfalls_batch_is_the_ids_fixed_at_the_read."
+    - "P76 — RE-RESOLVED (human, decision 8), REVERSING the judge recommendation applied at §7 round 1. The ceiling is NOT total: retirement is reachable only from an enumerated retire set, and an unnamed fault class escapes uncaught leaving the row queued. -> unnamed_fault_classes_do_not_retire (the A12 demand is deleted, not edited)."
+    - "P77 — RESOLVED (judge-recommendation). A failed retirement write is systemic. -> retire_write_failure_is_systemic."
+    - "P79 — RESOLVED (judge-recommendation). Rewrite the tracked non-Python files in the same change. -> stale_symbol_references_rewritten_in_tracked_files."
+    - "P82 — RESOLVED (judge-recommendation). The in-code comments are already demanded; ADD the design docs describing the old retirement mechanism. -> design_docs_record_the_new_retirement_mechanism."
+    # The 15 silent branches, resolved with the same standing as a fork.
+    - "P02 (silent) — RESOLVED (judge-recommendation). 'No distinction' accepted as intended and recorded. -> waiver git_transient_and_permanent_not_distinguished."
+    - "P12 (silent) — RESOLVED (judge-recommendation) with P66: the order is pinned by construction and enumerated by a test rather than trusted from the census. -> lock_acquisition_order_is_pinned_in_one_place."
+    - "P13 (silent) — RESOLVED (judge-recommendation). A plain OSError from a lock acquisition is classified systemic, explicitly. -> lock_acquisition_oserror_is_systemic."
+    - "P21 (silent) — RESOLVED (judge-recommendation). Indistinguishable from an empty queue, by design; the 'count discarded lines' alternative is the branch not taken. -> waiver all_unparseable_pending_file_reads_as_empty."
+    - "P44 (silent) — RESOLVED (judge-recommendation) as a PHASE-E CONSTRAINT, not a demand: DEFAULT_PATHS is frozen at import (F7), so a genuinely second actor needs a subprocess or its own path set."
+    - "P47 (silent) — MOVED consensus -> silent branch at §7 on PJ2's outcome, applying the judge's own recorded commitment in 45-dispositions.md. The reinstated answer is confirmatory (200 trials, 10,000 rows, zero loss) and names no hazard; the exit is unchanged. -> concurrent_directions_lose_no_finding."
+    - "P49 (silent) — RESOLVED (judge-recommendation). A spurious not-found becomes an ERROR verdict, not data loss; accepted as a consequence of the split. -> waiver forward_check_spurious_not_found_accepted."
+    - "P52 (silent) — RESOLVED (judge-recommendation) via P54's deadline, which makes the dead-holder question moot on the drain side. -> drain_wait_on_append_lock_is_bounded."
+    - "P53 (silent) — RESOLVED (judge-recommendation). Copy 2's reading is the thing to test; closed by P54's deadline. -> stuck_appender_does_not_starve_sibling_channels."
+    - "P54 (silent) — RESOLVED (judge-recommendation). THE WEAKEST-SUPPORTED RESOLUTION IN THE SET: P54's own recommendation applied — the drain's append-lock wait inherits the repo lock's deadline. Flagged for override. -> drain_wait_on_append_lock_is_bounded."
+    - "P57 (silent) — RESOLVED (judge-recommendation). The outcome is pinned (the new row survives); either structural route satisfies it. -> no_unprocessed_row_lost_retire."
+    - "P62 (silent) — RESOLVED (human, decision 1, path 2). Routed through the retire seam with an oracle that faults the POST-agent step, because O8's existing oracle faults the agent and passes over this hole. -> post_agent_failure_bumps_and_retires."
+    - "P70 (silent) — RESOLVED (judge-recommendation). Rows outside the batch are untouched in every field. -> rows_outside_the_batch_are_untouched."
+    - "P74 (silent) — RESOLVED (human, decision 2). No exemption for an authored-then-requeued row; it keeps its lifetime count. -> attempts_are_lifetime_with_no_reset."
+    - "P78 (silent) — RESOLVED (judge-recommendation), narrowed by decision 1 and then RE-GROUNDED by decision 8: the no-bump half survives for StageAbort / FatalConfigError / BoxFault because they are NOT MEMBERS of the retire set — a stated reason, not a placement accident. GitError does NOT survive it. -> systemic_faults_exempt_on_author_channels, re-derived."
+    - "P83 (silent) — RESOLVED (judge-recommendation). The negative half is pinned; the identity-rewrite question is left to the implementation. -> empty_tick_writes_no_consumed_or_graveyard_row."
+    # Opened at phase D by the re-ground probes.
+    - "PJ1c — RESOLVED (human, decision 1, path 4). The third branch: an externally killed boxed command is routed through the retire seam and counts as an author error. -> externally_killed_box_command_bumps_and_retires."
+    - "R1 (47-reclassification.md) — RESOLVED (human, decision 6), then RE-CLOSED by decision 8. The contradiction was between a guard that caught everything and a lock OSError that had to stay systemic. Decision 8 dissolves it: an OSError is simply not a member of %s, so nothing catches it. The re-raise set is gone. -> retirement_guard_extent_is_pinned (surviving, now confirmatory) + retire_set_membership_is_explicit."
+    - "R2 (47-reclassification.md) — RESOLVED (human, decision 6), then RE-CLOSED by decision 8. A11, B5 and the surviving half of D4 no longer depend on an unstated placement rule, but the mechanism changed: they are carried by NON-MEMBERSHIP of the retire set, not by a re-raise clause. There is no re-raise set to exclude GitError from — GitError is a MEMBER of the retire set and retires. The hazard inverted with it: the reverting spelling is now `except AuthorError`, which silently drops GitError and ModelRetry."
+    - "R3 (47-reclassification.md) — RESOLVED (human, decision 7), then SUBSUMED (human, decision 9). Decision 7 said a fault after a successful corpus commit does not bump; decision 8 delivers that by non-membership (the rewrite raises OSError, which is not in the retire set), so there is no separate suppression to pin and post_commit_failure_does_not_bump is gone. R3 stays closed, by a different mechanism than the one that closed it. The retained test is re-minted as post_commit_tick_reconciles_without_re_authoring for the reconciling-tick coverage it genuinely provides. Residual risk in the deviations block."
+    - "70-resolutions.md red flag 5 (three channels vs four) — RESOLVED (human, decision 5): all four. The scope survives decision 8 unchanged; what changed is that the thing shared across the four channels is the retire SET, not a widened guard. -> retire_set_is_identical_on_all_four_channels."
+    - "PJ1a — CARRIED to phase E as a constraint, not a fork: the whole-batch timeout is SOFT (asyncio.wait_for cannot preempt a synchronous blocking box call), so no O2 oracle may treat LEARNING_AUTHOR_TIMEOUT_SECONDS as the bound on the stall."
+  refuted:
+    # Added at §7 (.spec-flow/frontiers/70-resolutions.md).
+    - "Demand #0's provisional reading — 'the folded run_batch keeps today's int rc alphabet, 0 = nothing-to-do/lock-held/repo-lock-unavailable, 2 = fault'. Decision 1 converts the pitfalls leg's rc=2 into a retire-triggering NON-systemic fault, so the `2` branch is rejected: run_pitfalls signals an authoring failure by raising, not by returning 2. The `0` branch stands. PHASE C's CLASSIFICATION MUST RE-RUN AGAINST THE RESOLVED SHAPE BEFORE PHASE E IS DISPATCHED."
+    - "D9's 'classify layer — unchanged' as a description of the RESOLVED design. Decision 1 gives the four author channels one shared retirement classifier and converts the pitfalls leg's rc into a raised fault; decision 8 makes that classifier an ENUMERATED RETIRE SET (AuthorError, GitError, ModelRetry). Either way the classify layer changes on both legs, so the doc text contradicts the design and needs the human's amendment. Re-derived at §7 round 5 — the previous wording argued from a bare `except Exception`, which decision 8 forbids."
+    - "`systemic_faults_exempt_on_author_channels` AS ORIGINALLY WRITTEN — that StageAbort / FatalConfigError / GitError / BoxFault are all four exempt from retirement on the author channels. Decision 1 path 3 refutes it for GitError, which retires. THREE of the four survive under decision 8, but for a stated reason rather than the original accident: they are NOT MEMBERS of the enumerated retire set. Re-derived at §7 round 5; the intermediate wording (exempt because raised OUTSIDE a widened guard) belonged to decision 6's shape and is itself superseded — placement is no longer what carries this."
+    - "The clause `retire_ceiling_is_a_parameter`'s argument against testing ceiling=1 ('the only fail-fast caller is out of scope, so an in-suite exercise would have no production driver behind it'). Rejected at §7 (decision 4): C33 already drove ceiling=1 through the real retirement code with no caller at all. The `rejected:` note is struck, the test is written, and NO waiver is recorded for either waiver-candidate address."
+    - "O8 ITSELF, AS THE ISSUE WORDS IT — 'every QueueChannel drain retires a persistently failing item after a bounded number of attempts'. Decision 8 makes that true only of failures in the enumerated retire set: a channel whose agent fails with any other class retries forever and never retires. The human accepted that trade in exchange for removing the permanent-loss path the cold reconciler found. Recorded because D9's weaker sentence collected two refutation entries while O8's own narrowing had none — and O8 is the obligation this change exists to make structural."
+    - "The judge's own recommendations on two routed items, overridden by the human: Fork 2 / C9 / P58 ('have the pitfalls drain call retire directly and keep its return code, so the classify layer really is unchanged') and D1 / P01 ('systemic, no bump, paired with a corpus cleanup'). Both are superseded by decision 1's 'cover all four now'."
+    - "The prior spec-graph pass's queue_row.identity.key_axes: [batch_id] (G26). batch_id is not a field on a queue row; rows key on the channel's id_key, which is what persist.py:66-68 and :314-316 read and what D3 promotes to a config field. RE-KEYED here to [queue_row_id] rather than inherited."
+    - "C22's reading that the pitfalls retire callback merely lacks an attempts field (G18). It is never reached at all on today's dominant failure path: run_pitfalls returns 2 and _drain_pitfalls never inspects the return value."
+    - "D9's 'classify layer — unchanged' as a statement about all five channels (C32). It is true only of the pitfalls and lead-author paths; the observation and findings channels never call run_or_dead_letter."
+    - "The demand-extraction pass's single systemic_faults_exempt_from_retirement demand bound to run_or_dead_letter/fault_map (dispositions red flag 2). Split into two demands, each bound to the guard actually on its path. Fixed upstream in 20-demands.md and carried here."
+    - "The demand-extraction pass's author_max_attempts facet omitting 0 from distinguished (dispositions red flag 1). Fixed upstream; the facet here carries [-1, 0, 1, 3] with falsy_valid: true."
+    - "P31 copy 3's 'only ceiling >= 0 is valid' — refuted by G25 ('negative behaves as 0'); the answer was discounted at phase C and the correction is pinned in the author_max_attempts refinement."
+    - "P43's premise dichotomy (PJ1c) — a mid-batch fault is not exhaustively 'per-item AuthorError or SYSTEMIC_FAULT'; a third outcome (silent absorption) exists and is invisible to both."
+    - "P47's discount (PJ2a/PJ2b) — flock(LOCK_EX) DOES exclude two OS threads of one process, and the real append_findings path is race-safe for _dispatch_directions' two-direction case over 200 trials. Copy 1's answer is reinstated and minted as concurrent_directions_lose_no_finding."
+  deferred:
+    - "G19 / C14 — the mixed-version rollover window. Not constructible before the implementation exists; the argument depends on the new drain lock's identity, which D1 has not fixed to a path and F5 constrains. Transfers to write-code-from-spec's actors run (P63)."
+    - "C31 — run_pitfalls' no-system silent consume. Downgraded from unrefuted to unprobed at phase D (a behavior claim closed on a read). Nothing in this graph cites it; it is filed as Fork 6."
+  nullstub_passes:
+    # Phase F, `spec-graph nullstub`. Both are the PARITY-WITH-TODAY tests named in the suite
+    # header comment above; the null-stub run confirms the labelling is honest rather than a
+    # cover for a non-discriminating test — each drives code this design does not touch at all,
+    # so it stays green whether `defender.learning.author.drain` is real or a do-nothing stub.
+    - "test_two_concurrent_directions_both_land_every_finding — parity: drives persist.append_findings directly (unmodified by this design); a conservation guard on today's concurrent-append exclusion, not a demand on the new drain body."
+    - "test_second_author_drain_invocation_returns_without_blocking — parity: drives drains.author_drain, the unmodified outer gate; P61 pins it unchanged by the split below it."
+    # PHASE F, ROUND 2 RE-VERIFICATION (this run). The two entries §7 round 2 added here
+    # (92-reconciliation.md F2, against the pre-decision-8..11 suite) are STALE against the
+    # current suite and are removed rather than carried forward silently-wrong:
+    # `test_rotate_blocks_while_append_lock_held` now drives `ch.append_lock`, a QueueChannel
+    # field this design still has to add, so it genuinely discriminates under the current
+    # null-stub run (AttributeError, not a pass) — it no longer belongs in this list.
+    # `test_both_append_lock_acquisition_disciplines_enforce_mutual_exclusion` was replaced by
+    # `test_the_drains_nonblocking_acquisition_excludes_a_real_blocking_appender_through_run_batch`
+    # (design hole 2's new discharge), which itself discriminates (also AttributeError, not a
+    # pass) — the old name is a dangling reference, not a live record. Net: only the original
+    # two entries above hold at this base.
+  drops:
+    # 26 phase-C consensus premises whose recorded outcome is "the doc does not answer this".
+    # Per the judge: they bind nothing, and phase D must not invent an expected value.
+    - "P04 the_pitfalls_worktree_discard_silently_swallows_a_git_failure — 3/3 doc-silent."
+    - "P05 a_rate_limited_or_timed_out_curator_call_retires_indistinguishably — 3/3; O8 pins reason + attempt count, granularity doc-silent."
+    - "P07 the_verifiers_own_wall_clock_budget_nests_uncoordinated — 3/3 doc-silent."
+    - "P08 a_hung_verifier_call_outlives_the_curators_cancelled_timeout — 3/3 doc-silent."
+    - "P10 the_box_degrades_without_raising_a_clean_boxfault — 3/3 doc-silent."
+    - "P18 queue_row_valid_json_but_not_an_object — 3/3 doc-silent."
+    - "P19 batch_contains_duplicate_id_key_value — 3/3 doc-silent."
+    - "P20 queue_row_carries_fields_the_schema_does_not_define — 3/3 doc-silent."
+    - "P22 consumed_file_has_a_torn_line_under_the_dedup_read — 3/3 doc-silent; bindable as parity-with-today via F1/G24 once that probe obligation lands."
+    - "P23 agent_result_omits_a_bucket_the_spec_declares — 3/3 doc-silent."
+    - "P24 agent_result_places_an_id_in_a_bucket_outside_the_spec — 3/3 doc-silent."
+    - "P25 folded_gate_returns_an_id_in_more_than_one_tuple_set — 3/3 doc-silent."
+    - "P29 queue_row_attempts_field_is_not_an_integer — 3/3 doc-silent."
+    - "P35 source_refs_yaml_is_valid_yaml_but_not_a_mapping — 3/3 doc-silent; bindable as O5 parity once PO09 lands."
+    - "P36 queue_row_judge_outcome_neither_policy_recognizes — 3/3 doc-silent; same O5-parity shape."
+    - "P37 channel_constructed_with_drain_lock_none_where_one_expected — 3/3 doc-silent; the None member is registered on drain_lock.domain but carries no stated outcome."
+    - "P41 write_atomic_encounters_a_leftover_tmp_file — 3/3 doc-silent."
+    - "P45 repeated_drain_invocations_with_no_new_work — 3/3 doc-silent."
+    - "P50 two_forward_check_threads_looking_up_the_same_id_disagree — 3/3 doc-silent."
+    - "P55 reader_without_the_lock_observes_a_row_in_neither_file — 3/3 doc-silent."
+    - "P59 out_of_tree_harness_fixture_copy_races_a_live_drain — 3/3 doc-silent; the eval_harness actor and its unlocked write edges are in the graph (F11), but no demand."
+    - "P65 the_lock_file_is_removed_between_two_acquisitions — 3/3 doc-silent."
+    - "P68 two_workers_disagree_about_where_the_state_root_is — 3/3 doc-silent; recorded in state_root_env's refinement, not demanded."
+    - "P72 row_order_after_a_retirement — 3/3 doc-silent."
+    - "P80 a_pre_populated_queue_predates_the_new_row_fields — 3/3 doc-silent; bindable as parity-with-today once its probe obligation lands."
+    - "P81 the_shared_gate_carries_state_between_two_directions — 3/3 doc-silent."
+  deviations:
+    - "IMPLEMENTATION CONSTRAINT, FIRST-CLASS: D7's `post_rotate` hook MUST live on the SHARED CorpusAuthorConfig, not on the lessons config. D7 describes it as lessons-local decoration; the resolved spec makes it load-bearing. It is the only seam that runs after BOTH the corpus commit and the queue rotation, which makes it the only place the retirement guard's CLOSING edge is observable. An implementer who narrows it back to lessons removes that seam, the closing-edge probe becomes unwritable, and decision 9's subsumption of decision 7 loses its oracle — post-commit no-bump would then rest on nothing at all. This is a load the hook was never designed to carry, and it is recorded here because nothing about D7's own text would tell an implementer that narrowing it breaks a different decision two rounds away."
+    - "A RED TEST IS NOT EVIDENCE THE ASSERTION RAN — caution for finalize and for anyone reading a red suite. Phase F found that `GitError(\"member\")` died in the test's own setup (the real signature is `(args, returncode, stderr)`), so decision 8's `and from nothing else` half NEVER EXECUTED while the test sat red like every other test in a spec written before its target exists. This generalises and is the reason it survived every prior check: a test that dies in SETUP is exactly the same colour as one that dies at its MISSING TARGET, so the red count cannot distinguish them, and null-stub cannot either — both are pass/fail on a suite whose expected state is failure. Only EXECUTING the assertion distinguishes them. Repaired; recorded because the next spec-phase suite has the same blind spot by construction."
+    - "SINGLE POINT OF FAILURE IN THE SUITE'S OWN STRUCTURE - read this before loosening any assertion. `test_the_retire_set_names_author_error_git_error_and_model_retry_and_nothing_else` is now the SOLE assertion holding up three separate demands: post-commit no-bump (post_commit_tick_reconciles_without_re_authoring, decision 9), the non-retiring exemption (unnamed_fault_classes_do_not_retire, decision 8) and the systemic exemption (systemic_faults_exempt_on_author_channels). All three are carried by NON-MEMBERSHIP after decisions 8 and 9, so relaxing that one test silently removes the oracle for all three at once - and each would still read as covered from the demand list. This is not a defect to fix: it is the genuine consequence of resolving three questions by membership in one set rather than by three mechanisms. It is recorded here, where a cold reader meets it, precisely because the fork record is not where anyone tempted to loosen an over-strict-looking assertion would look."
+    - "STILL ASSERTED BY CLASS, NOT PER PATH (carried forward, deliberately not half-addressed). `AuthorError`'s four arrivals - the agent call, the mid-batch timeout via the RunUnprocessable chain, the post-agent steps, and the pitfalls converted fault - are covered by assertions on the CLASS. Decision 10's test drives a NON-member and so offered no cheap way to narrow this; the author left it as a recorded limit rather than half-addressing it, which is the right call - a partial per-path assertion would have read as coverage while leaving the same hole. A change that stopped any one path arriving as AuthorError leaves every membership test green while that path silently stops retiring. The timeout chain remains the weakest, covered only by a level-2 fake."
+    - "PHASE-E REPORT, 11 OF 12 BODIES CHANGED - NOT 12. `retire_write_failure_is_systemic` was on §7 round 2's rewrite list and its body was correctly LEFT STANDING. A11 is carried by non-membership under decision 8, and the existing test already induces a real OSError on the retire write and asserts propagation with a byte-identical queue - which is exactly the resolved contract. The rewrite list over-reached by one; the author was right not to follow it. Counting it as rewritten would misreport what changed to anyone diffing the suite."
+    - "THE `faults.LockAcquisitionError` REQUIREMENT IS DROPPED, not silently omitted. §7 round 1 derived from D5/P13's word 'explicitly' that the lock layer should name its own fault type; §7 round 2 red flag 7 recorded that decision 8 demotes this to a readability preference, because an OSError is simply not a member of the retire set. Phase E dropped it accordingly. The contract is now: a plain OSError from a lock acquisition escapes uncaught. No new exception class is required by this change, and an implementer who adds one is not violating anything - they are also not discharging anything."
+    - "KNOWN LIMIT OF THE SUITE'S DISCRIMINATION: the retire set's `AuthorError` member carries FOUR distinct paths - the agent call, the mid-batch wall-clock timeout (via the RunUnprocessable chain, PJ1b), the post-agent steps (verify_agent_state / validate_agent_result_partition), and the pitfalls converted fault. The membership assertions check the CLASS, not that each of the four paths still raises it. A change that stopped one path from arriving as AuthorError - say the timeout chain no longer wrapping - would leave every membership test green while that path silently stopped retiring. The timeout chain in particular is covered only by a level-2 fake, not by a real deadline. This is the sharpest remaining hole in a suite that is otherwise discriminating, and it is a coverage limit rather than a design gap."
+    - "BEHAVIOUR-CHANGE INVENTORY (92-reconciliation.md F5) — READ THIS BEFORE THE ISSUE TEXT. The design's comment 3 says the pitfalls ceiling is 'the one place where the fold alters what the loop does'. That sentence predates §7 and is now wrong; it still propagates through 45-dispositions.md (A15's impact line) and a test module docstring. The resolved design changes behaviour in FOUR places: (1) the pitfalls ceiling itself — a repeatedly failing pitfalls batch now retires, where its rc=2 previously never reached the retire callback at all; (2) a post-agent failure with a succeeding agent now bumps and retires, where it previously returned without touching the queue; (3) a commit-time GitError now retires and leaves the corpus dir usable, where it previously escaped and wedged the channel on the next cleanliness check; (4) an externally killed boxed command now retires, where it was absorbed into ModelRetry and the batch reported success. Decision 8 deliberately does NOT add a fifth: an unnamed fault class keeps today's escape-and-stay-queued behaviour. finalize and the adversarial implementer both read this entry first."
+    - "DECISION 8 REVERSED A JUDGE RECOMMENDATION THAT HAD ALREADY SHIPPED INTO THE SUITE. A12/P76 ('the ceiling is total') was applied resolved_by: judge-recommendation and never human-reviewed until the cold reconciler showed what it composed with fork 7 and decision 3: any unnamed fault class would bump every row in the batch and permanently delete a batch of real work every three ticks, into a graveyard with no production reader. The general cost statement already existed in the run but stayed local to one git-specific waiver. The composition, not either half, was the finding."
+    - "§7 chose the NON-RECOMMENDED option on O8 scope. The recommendation was to cover the first two unbounded-retry paths and file the rest; the human chose all four (pitfalls rc=2, the post-agent failure, GitError from commit_corpus, the externally killed box command), each with its own demand and a discriminating oracle. Path 2's oracle must fault the POST-agent step — O8's existing oracle faults the agent and passes over that hole."
+    - "PHASE ORDER DEVIATION: phase E must NOT be dispatched until phase C's classification re-runs against the resolved shape. Demand #0's reading flipped and the author channels' classify layer widened, and 22 of the 50 routed premises sat on D9's retire seam with 7 more on the ceiling's domain — all classified against a drain that returned rc=2 from the pitfalls leg and retired out of a narrow `except AuthorError`."
+    - "Design hole 1 (the new non-blocking append-lock's timeout policy) was NOT decided by the human. It is resolved by applying premise P54's recommendation — reuse the repo lock's LEARNING_REPO_LOCK_WAIT_SECONDS deadline — which rests on an analogy rather than on a probe, a claim or a design sentence. Recorded as the weakest-supported resolution in the set and flagged for override; three demands hang off it."
+    - "Scope ambiguity carried at §7 and CLOSED by decision 5: the retirement classifier is the same on all four channels — the three observation channels (curator.py:317) AND findings (lessons/run.py:346). Under decision 8 what they share is the enumerated retire set, not a widened guard."
+    - "DECISION 5 HAS NO LEGACY ORACLE. Every existing findings-channel drain test faults with an explicit AuthorError (test_agent_exception_leaves_queue_intact, test_dlq_quarantines_poison_findings_batch, test_survival_partial_write_rollback), so all three still pass under a NARROW guard and under a WIDE one — none of them can tell the two apart. What moves is their intent, not their assertions: each becomes a non-discriminating positive. test_curator_glm_engine.py::test_systemic_faults_propagate_uncaught and that module's `Fault split` docstring clause state the AuthorError-vs-systemic split as a whole-system property; after decisions 5+6 they are true only of the ENGINE layer, not of the drain, so their scope narrows even though the assertions survive. Phase E must not read their green as evidence the guard widened, and `finalize` must not meet this cold."
+    - "PHASE E — EXISTING ASSERTIONS THIS SPEC INVALIDATES. `finalize` meets this code cold, so
+      the list is explicit rather than left to be discovered as a broken test. (a) SYMBOL
+      DELETION, forced by test_direction_modules_carry_no_batch_driver_body and
+      test_gates_carry_direction_specific_names: test_author_actor.py:485 calls
+      curator.rotate_queue, :663/:672 call curator.read_batch, and test_author_actor_env.py:30,38
+      call curator._partition_pre_author. All four symbols cease to exist; those assertions must be
+      re-pointed at the shared drain body and at the renamed per-direction gate, not deleted — the
+      behavior they pin is unchanged. (b) RE-EXPORT DELETION, forced by
+      test_curator_no_longer_re_exports_the_shared_git_helpers (D6): test_author_actor.py:313,316,
+      322,358,373,388 and test_author_actor_env.py:81,88 reach the shared git helpers through
+      `curator.`; they must reach them through `shared.`. (c) NARRATIVE, not assertions:
+      test_curator_glm_dispatch_dlq.py's module docstring states as fact that a per-run authoring
+      fault leaves the queue untouched with no attempts field and no sidecar, and
+      test_author_atomic.py:35-56's docstring describes the DLQ as the retirement mechanism. Both
+      descriptions stop being true; the assertions under them survive."
+    - "PHASE E — MEANING MOVED, ASSERTIONS UNCHANGED. Re-verified against the REWRITTEN suite at
+      §7 round 2. No existing findings-channel test discriminates anything decision 5 or decision 8
+      settled: all of them fault with an explicit AuthorError, which is a retire-set member under
+      every spelling an implementer might reach for, including the wrong one. The oracles that can
+      see the resolved design are retire_set_is_identical_on_all_four_channels and
+      retire_set_membership_is_explicit, and they discriminate because they drive ModelRetry and a
+      real commit-time GitError - the two members an `except AuthorError` silently drops - plus
+      StageAbort and FileNotFoundError as non-members. A green legacy run is not evidence either
+      decision landed."
+    - "PHASE E — DEVIATIONS IN THE WRITTEN SUITE (re-stated after the §7 round 2 rewrite).
+      (1) The profile names defender/tests/e2e/_replay_harness.py as `tests.harness`; it drives the
+      runtime investigation loop and touches no queue, config or drain, so this suite builds on the
+      author-drain machinery instead - conftest.py's tmp_repo shape and the
+      `dataclasses.replace(cfg, invoke_agent=...)` seam. No parallel plumbing was invented.
+      (2) externally_killed_box_command_bumps_and_retires stays scoped to the DRAIN's seam: PJ1c's
+      absorption happens in runtime/tools.py::_tool_bash, below cfg.invoke_agent, so the test raises
+      the ModelRetry class PJ1c observed at the injection seam above it (fault hierarchy level 2).
+      What the tool layer must stop absorbing is covered by no demand and by no test here.
+      (3) test_attempt_count_survives_a_fresh_process is the only test that spawns a subprocess, per
+      the C14/P44 phase-E constraint; every other concurrency oracle uses threads, which PJ2a
+      established are excluded from each other by the real flock.
+      (4) DECISION 7 HAS NO DEMAND AND ITS DISCRIMINATING FORM IS NOT WRITABLE. §7 round 2 dropped
+      post_commit_failure_does_not_bump from `demands:` while handoff.forks still resolved R3 to it.
+      Both are reconciled: decision 9 re-mints the test and the R3 entry names the surviving demand.
+      The test is retained undemanded. Under decision 8 the no-bump half now holds by
+      non-membership, so it would also pass on an implementation that never suppressed anything -
+      and there is no injection seam between commit_corpus and the rotation through which a MEMBER
+      could be raised, so the version that separates suppression from non-membership cannot be
+      written at this seam. What the test does close is B77's named gap: it drives the tick
+      FOLLOWING a landed commit with no rotation and asserts the pre-author idempotency gate
+      reconciles the row without re-invoking the agent."
+    - "Decision 7's safety argument is CONDITIONAL, and the condition is not itself pinned. Suppressing the post-commit bump is safe because the next tick's _partition_pre_author marks the already-authored row consumed_idempotent via existing_finding_ids / existing_observation_ids and never re-invokes the agent — verified in-tree against test_survival_idempotent_redrain and test_hold_committed_keeps_findings_queued_until_corpus_covers_them, which both drive a second tick with a must-not-author agent. The bound holds only if the failing post-commit path leaves the corpus dir clean enough for the next tick to REACH that partition: assert_clean_corpus_dir runs first, and a stray file aborts the tick before any gate call (F5/P03). Not assumed — recorded as the precondition the corpus-cleanup half of decision 1 path 3 must also satisfy here."

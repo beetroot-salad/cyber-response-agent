@@ -50,7 +50,7 @@ until the PR merges so a rejected/edited PR can't corrupt the next batch.
   silently dropped.
 - **Consumed-ledger already existed** — lessons record `source_finding_ids` in
   frontmatter and the author filters the queue against them
-  (`author._partition_pre_author`), so recovery after a crash between merge and
+  (the findings direction's pre-author gate), so recovery after a crash between merge and
   queue-cleanup is idempotent (re-run = already-covered → skip). The finding state
   machine (`held` / `consumed_idempotent` / `consumed_skip` / `held_forward_bad`)
   also already existed; Phase 1 reused both rather than rebuilding them.

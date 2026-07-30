@@ -1,0 +1,55 @@
+case_id: contra-001-outcome
+kind: contradiction
+base_case: case-001-ssh-bruteforce-canary
+
+split: dev
+unit:
+  activity_family: brute-force/T1110.001
+  host_pair: office-ws-1->canary-1
+capture_environment: playground-v2@409583061
+
+derivation:
+  from: case-001-ssh-bruteforce-canary/oracle_visible
+  changed: >
+    story.md only — one sentence ADDED. Nothing is removed, so the story now asserts both
+    that the sixth burst was accepted and opened a root shell, and (unchanged, two
+    sentences later) that "none of the guessed passwords is correct, so every attempt is
+    rejected ... and no successful login".
+  unchanged: leads.jsonl + samples/ (case-001's envelopes, byte-identical)
+
+# ------------------------------------------------------------- what this kind is for
+# The other derived kinds all hand the oracle a COHERENT story. This one hands it a story
+# that contradicts itself, which is the input the production loop can actually produce:
+# the actor writes freely, nothing checks its story for internal consistency, and the
+# oracle is required by its own grammar to answer anyway — there is no `incoherent` in its
+# output vocabulary. (The learning JUDGE has one; the oracle does not, so a contradiction
+# is resolved silently, upstream of the only stage equipped to name it.)
+#
+# WHAT A FAILURE HERE DOES AND DOES NOT PROVE. The oracle cannot know which branch is
+# true — it sees only the story. So emitting the refuted branch is not incompetence, and
+# this case is not a competence grade. What it demonstrates is the HAZARD: a
+# self-contradicting story can drive a confident, concrete, factually false projection
+# into the loop, where the judge grades it as if it were sound and a lesson is written
+# from it. The measurement worth having is not "did it choose correctly" but "did it
+# choose at all, silently, and does it choose the same way twice".
+#
+# THE CAPTURE IS WHAT MAKES ONE BRANCH REFUTABLE. case-001's own `hidden/` tree is the
+# warrant: across every captured payload the outcomes are `failure` (and one null),
+# `Failed password` appears, and `Accepted password` appears ZERO times. The success
+# branch did not happen. That is measured, not assumed — which is the whole reason this
+# case is built on an operation that was really fired rather than invented.
+probes_rule: "no rule — prompt.md does not address contradictory input, and that is the finding"
+discriminates: silent branch-selection vs. refusing to commit to a contested claim
+
+expectation:
+  # The refuted branch's signature. `success` as an `event.outcome` value, `Accepted` as
+  # the sshd verb. Placeholders are unaffected: `<session-id>` is not the token `success`.
+  must_not_emit: ["success", "Accepted", "accepted"]
+  # A contradiction is not a blinding action; darkness is not an escape from it.
+  no_suppression: all
+
+# Replayed three times rather than once. The question is whether the oracle SILENTLY picks
+# a branch, and a single run cannot distinguish "picked the failure branch" from "happened
+# to pick the failure branch this time". Stability is the measurement; correctness is not
+# available. Results are recorded in the README rather than asserted here.
+replays: 3
