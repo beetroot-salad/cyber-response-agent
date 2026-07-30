@@ -126,7 +126,10 @@ def test_a_registry_shaped_object_is_rejected_at_the_seam_the_build_path_reaches
     run = _drive(tmp_path / "typed-judge", [_list(label=None), JUDGE_DONE],
                  registry=scoped_ticket_registry(typed_rec, BENIGN_JUDGE_PAIRS))
     assert TOOL_LIST in run.tool_names(), "the judge control never registered its tool"
-    assert [c.verb for c in typed_rec.calls] == ["list-tickets"]
+    # #683 (landed on main after this spec was written) added the case-opened recency
+    # boundary lookup ahead of list-tickets; the intent this assertion pins — no extraneous
+    # verb call reached the store — still holds, widened to admit that lookup.
+    assert [c.verb for c in typed_rec.calls] == ["case-opened-at", "list-tickets"]
 
 
 def test_two_roles_in_one_process_never_share_a_scoped_registry():
@@ -339,7 +342,10 @@ def test_a_grant_and_a_switched_off_tool_disagree_in_either_direction_at_build(t
     run = _drive(tmp_path / "stage-agrees", [_list(label=None), JUDGE_DONE],
                  registry=scoped_ticket_registry(agreeing, BENIGN_JUDGE_PAIRS))
     assert TOOL_LIST in run.tool_names(), "the agreeing stage build registered no closed-ticket tool"
-    assert [c.verb for c in agreeing.calls] == ["list-tickets"]
+    # #683 (landed on main after this spec was written) added the case-opened recency
+    # boundary lookup ahead of list-tickets; the intent this assertion pins — no extraneous
+    # verb call reached the store — still holds, widened to admit that lookup.
+    assert [c.verb for c in agreeing.calls] == ["case-opened-at", "list-tickets"]
 
 
 def test_the_adversarial_judge_stage_builds_with_its_grant_scoped_off_beside_the_bit(
@@ -381,7 +387,10 @@ def test_the_adversarial_judge_stage_builds_with_its_grant_scoped_off_beside_the
 
     assert TOOL_LIST in benign.tool_names(), \
         "the grant was scoped off for the capability-ON stage too — the bit is not read"
-    assert [c.verb for c in on.calls] == ["list-tickets"]
+    # #683 (landed on main after this spec was written) added the case-opened recency
+    # boundary lookup ahead of list-tickets; the intent this assertion pins — no extraneous
+    # verb call reached the store — still holds, widened to admit that lookup.
+    assert [c.verb for c in on.calls] == ["case-opened-at", "list-tickets"]
 
 
 def test_the_shipped_grants_name_exactly_the_censused_verbs():
