@@ -52,10 +52,31 @@ def run_retrieval(rule_ids: str, entities: str, corpus: Path) -> list[str]:
     return paths
 
 
-def lesson_returned(lesson_path: Path, returned: list[str], *, repo_root: Path) -> bool:
-    try:
-        rel = str(lesson_path.relative_to(repo_root))
-    except ValueError:
-        rel = str(lesson_path)
-    target_names = {rel, lesson_path.name}
-    return any(p in target_names or Path(p).name == lesson_path.name for p in returned)
+def lesson_returned(
+    lesson_path: Path, returned: list[str], *, repo_root: Path, corpus_dir: Path
+) -> bool:
+    """Did the retrieval that grounds this lesson's forward-check actually return THIS file?
+
+    Answered on RESOLVED IDENTITY, never on the basename. A basename match certified a
+    lesson as retrievability-verified whenever some unrelated top-level file happened to
+    share its name — and the case that made that unsound is a lesson written one directory
+    down: the curator's write allow admitted nested paths while the corpus walk is flat
+    (`glob('*.md')`), so `<corpus>/sub/x.md` was invisible to retrieval, to the corpus
+    manifest and to the idempotency scan forever, and a pre-existing `<corpus>/x.md` still
+    voted it GOOD. The write allow is now one level deep to match the walk; this rejects
+    the same shape independently, because a check must never pass a file the walk cannot
+    see.
+
+    Returned lines are repo-relative when the retrieval script and this corpus share a
+    repo root and absolute when they do not (the worktree case) — both are resolved
+    against `repo_root` before comparison, so neither spelling depends on which."""
+    target = lesson_path.resolve()
+    if target.parent != corpus_dir.resolve():
+        return False
+    for p in returned:
+        candidate = Path(p)
+        if not candidate.is_absolute():
+            candidate = repo_root / candidate
+        if candidate.resolve() == target:
+            return True
+    return False

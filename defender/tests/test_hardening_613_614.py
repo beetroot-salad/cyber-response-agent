@@ -137,7 +137,11 @@ def test_d_t2_sibling_emitters_flatten_every_breaker(tmp_path, capsys, stem, fm,
     """d: t2 — the three sibling TSV emitters (previously on the 2-char replace)
     hold the same property as trace_lesson: a hostile LLM-authored value forges
     no extra row and no extra column."""
-    corpus = tmp_path / "lessons"
+    # The other two emitters take their corpus by rebound module constant, so the fixture's
+    # directory NAME is arbitrary for them. lessons_env_retrieve takes it through --corpus,
+    # which since #776 refuses any leaf but `lessons-environment` — that flag is a pinned
+    # grant for the actor, so it relocates the environment corpus and never selects another.
+    corpus = tmp_path / ("lessons-environment" if stem == "lessons_env_retrieve" else "lessons")
     corpus.mkdir()
     (corpus / "L.md").write_text(f"---\n{fm}\n---\nbody\n", encoding="utf-8")
 

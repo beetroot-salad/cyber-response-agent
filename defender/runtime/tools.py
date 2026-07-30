@@ -4,6 +4,7 @@ from __future__ import annotations
 import subprocess
 import time
 import uuid
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, ClassVar, Self
@@ -163,7 +164,7 @@ def _tool_bash(deps: AgentDeps, command: str) -> str:
     formatted = _format_bash_result(
         result.rc, result.out.decode("utf-8", "replace"), result.err.decode("utf-8", "replace"),
     )
-    if _is_learning_role(deps):
+    if _is_learning_role(deps) or _opens_untrusted_read(deps, decision):
         return _wrap(formatted, "untrusted", deps.salt)
     return formatted
 
@@ -193,16 +194,41 @@ def _deny_authored_read(deps: AgentDeps, path: Path) -> None:
         )
 
 
+def _opened_operands(deps: AgentDeps, decision: permission.BashDecision) -> Iterator[Path]:
+    stages = permission.command_shape.flat_stages(list(decision.pipelines or ()))
+    for argv, grant in zip(stages, decision.grants, strict=True):
+        opened = permission.PROGRAMS[grant.program](argv)
+        for operand in opened or ():
+            yield _resolve_operand(deps, operand)
+
+
+def _opens_untrusted_read(deps: AgentDeps, decision: permission.BashDecision) -> bool:
+    """Does this command open a file the read tool would have salt-tag wrapped?
+
+    The trust boundary is a property of the DATA, not of who is reading it — but until
+    #776 the bash lane keyed its frame on the ROLE instead, and the two roles it excluded
+    (main and gather) were the two that read attacker-influenced payloads through it.
+
+    Gather was the whole exposure: the reduce step its own prompt tells it to use
+    (`cat <payload> | defender-sql`) is the single channel delivering full attacker-chosen
+    field values, and it arrived bare while the same bytes read through `read_file`, or
+    returned by the `query` tool, arrived framed. Main's exposure is narrower — bound
+    `raw=False` it cannot reach a payload at all — but not empty: `cat alert.json` was
+    unframed on this lane while `read_file('alert.json')` was framed, for the same bytes.
+
+    Keying on `is_untrusted_read` — the one predicate that already decides this for every
+    other read surface — makes the frame a property of the channel rather than of the
+    caller, so the three routes to the same file now agree."""
+    return any(permission.is_untrusted_read(p) for p in _opened_operands(deps, decision))
+
+
 def _deny_authored_bash_read(
     deps: AgentDeps, decision: permission.BashDecision
 ) -> None:
     if not _is_learning_role(deps):
         return
-    stages = permission.command_shape.flat_stages(list(decision.pipelines or ()))
-    for argv, grant in zip(stages, decision.grants, strict=True):
-        opened = permission.PROGRAMS[grant.program](argv)
-        for operand in opened or ():
-            _deny_authored_read(deps, _resolve_operand(deps, operand))
+    for operand in _opened_operands(deps, decision):
+        _deny_authored_read(deps, operand)
 
 
 def _under(path: Path, root: Path) -> bool:

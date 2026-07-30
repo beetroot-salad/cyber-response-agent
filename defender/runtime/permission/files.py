@@ -80,17 +80,25 @@ def build_write_allow(root: Path, *, suffix: str = "") -> re.Pattern[str]:
 
 
 def build_scoped_write_allow(root: Path, *, suffix: str = "") -> re.Pattern[str]:
-    """Build one `AgentPolicy.write_allow` pattern admitting `root` and everything under it,
+    """Build one `AgentPolicy.write_allow` pattern admitting DIRECT CHILDREN of `root`,
     narrowed to the SAME filename segment class the read side's `Grant.scope` shapes use
-    (`grant.SEG`, `[\\w.@=+-]+`, one-or-more nested segments) rather than `build_write_allow`'s
-    `[^\\x00]*` — so a write and its matching read-back admit EXACTLY the same names (#691 MD-7),
-    foreclosing a space/newline write-only name from the frame-injection channel a wide tail would
+    (`grant.SEG`, `[\\w.@=+-]+`) rather than `build_write_allow`'s `[^\\x00]*` — so a write and
+    its matching read-back admit EXACTLY the same names (#691 MD-7), foreclosing a
+    space/newline write-only name from the frame-injection channel a wide tail would
     otherwise open. `root` is `resolve()`d to align with the RESOLVED operand `decide_write`
-    matches against, same as `build_write_allow`."""
+    matches against, same as `build_write_allow`.
+
+    ONE level, not a subtree (#776): its only caller is the curator's lesson-corpus write
+    allow, and every corpus reader — retrieval, the manifest, the idempotency scan, the
+    frontend — walks `glob('*.md')`, flat. A nested write therefore produced a file that no
+    reader could ever see, which the environment forward-check then certified as
+    retrievability-verified off a basename collision with a top-level sibling. Admitting
+    only what the walk can see removes the shape at the source; `verify_forward/env.py`
+    rejects it independently."""
     from .grant import SEG
 
     base = re.escape(str(root.resolve()))
-    tail = rf"/{SEG}(?:/{SEG})*"
+    tail = rf"/{SEG}"
     if suffix:
         tail += re.escape(suffix)
     return re.compile(base + tail)

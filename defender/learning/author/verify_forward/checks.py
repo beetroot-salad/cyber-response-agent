@@ -112,7 +112,9 @@ def _run_env(ctx: CheckContext) -> str:
     rule_ids = env.rule_ids_arg(row.get("alert_rule_key"))
     entities = env.case_entities_arg(row, ctx.runs_dir)
     returned = env.run_retrieval(rule_ids, entities, ctx.corpus_dir)
-    hit = env.lesson_returned(ctx.lesson_path, returned, repo_root=ctx.repo_root)
+    hit = env.lesson_returned(
+        ctx.lesson_path, returned, repo_root=ctx.repo_root, corpus_dir=ctx.corpus_dir
+    )
     return "GOOD" if hit else "BAD"
 
 
