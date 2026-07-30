@@ -453,6 +453,32 @@ def test_the_judge_has_its_own_generated_roster_scored_against_its_own_grant(tmp
     )
 
 
+def test_gathers_committed_roster_regenerates_from_its_own_shipped_grant():
+    """The same pin `test_the_judge_has_its_own_generated_roster_scored_against_its_own_grant`
+    holds the judge to, held for gather: `load_roster` only refuses a HAND-EDIT (its digest
+    is over its own body, not over `GATHER_DEF.verb_grant`), and the audit's "no withheld verb
+    is advertised" direction only catches a roster naming MORE than the grant now allows, never
+    one naming LESS. A `GATHER_DEF.verb_grant` widened without re-running `generate_roster`
+    would load clean and audit clean — a widened grant with a stale, narrower roster is a
+    silent gap in what the model believes it may call, undetected by either mechanism until
+    this pin existed only for the judge's side of the two shipped rosters."""
+    committed = roster_path(DEFENDER, GATHER_ROLE)
+    assert committed.is_file(), \
+        "gather ships no generated roster — its model-facing verb prose is still authored"
+
+    granted = {(s, v) for s, v, _ in GATHER_DEF.verb_grant.entries}
+    advertised = roster_pairs(committed.read_text(encoding="utf-8"))
+    assert advertised == granted, (
+        "gather's roster and gather's grant disagree: "
+        f"advertised-not-granted={sorted(advertised - granted)} "
+        f"granted-not-advertised={sorted(granted - advertised)}"
+    )
+
+    assert generate_roster(GATHER_DEF.verb_grant, defender_dir=DEFENDER) == \
+        committed.read_text(encoding="utf-8"), \
+        "the committed gather roster is not what its own grant generates — regenerate it"
+
+
 def test_the_committed_model_read_surfaces_are_the_enumerated_set():
     """The enumerated set §7 R8 scopes the correspondence demand to is read off the tree on
     every run, never recalled: the per-system skill and execution prose, the committed
