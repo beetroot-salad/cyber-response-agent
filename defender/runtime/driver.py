@@ -467,12 +467,13 @@ def build_agent(  # noqa: PLR0913 — composition root: config + DI seams + the 
             extra_capabilities=gather_extra, session_id=gather_session_id,
         )
 
-    from .verbs import VerbRegistry
-
-    effective_gather_grant = (
-        verbs.grant if isinstance(verbs, VerbRegistry) else GATHER_DEF.verb_grant
-    )
-    register_gather_tool(agent, _build_gather, GATHER_REQUEST_LIMIT, effective_gather_grant)
+    # ALWAYS the role's own committed grant (#632) — never the per-call `verbs=` registry's
+    # own grant. The dispatch catalog/template index is a ROLE-LEVEL surface (the same one
+    # the generated roster and its audit are scored against, verb_roster.py), not a per-run
+    # one; a test injecting a registry scoped narrower (or differently) than GATHER_DEF's
+    # real grant, for reasons that have nothing to do with catalog content, must not narrow
+    # what the catalog advertises.
+    register_gather_tool(agent, _build_gather, GATHER_REQUEST_LIMIT, GATHER_DEF.verb_grant)
     return agent
 
 

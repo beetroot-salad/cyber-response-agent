@@ -157,6 +157,15 @@ def test_a_refusal_lists_only_the_roles_granted_subset(tmp_path: Path):
     the catalog is handed to the model in full; R-A2 narrowed exactly that catalog, so the
     reject path's listing would otherwise be the wider channel.
 
+    Checked on the DENIAL'S OWN DELTA, not the whole ambient prompt. The dispatch
+    catalog/template index is a ROLE-LEVEL surface scoped to GATHER_DEF's real committed
+    grant (matching what the generated roster and its audit are scored against, not
+    whatever narrower ad-hoc registry a particular test injects for query execution) — so
+    gather's REAL grant, which really does hold `elastic.alerts`, legitimately advertises it
+    ambiently regardless of this test's own registry. What this demand pins is that the
+    REFUSAL ITSELF adds nothing wider than what it refused, which `gather_delta` (the text
+    this exact tool call contributed, past the ambient dispatch prompt) isolates.
+
     Recorded and NOT built (RS4): cumulative probing across every pair still reconstructs
     the grant, accepted under the design's stated non-objective on surface hiding.
 
@@ -170,8 +179,9 @@ def test_a_refusal_lists_only_the_roles_granted_subset(tmp_path: Path):
 
     partial_ = run_gather(tmp_path / "a", verbs=reg, turns=[q(*DENIED_PAIR), DONE],
                           run_id="d65-partial")
-    assert "query" in partial_.gather_saw
-    assert "alerts" not in partial_.gather_saw, "the refusal listed a verb the grant withholds"
+    assert "esql" in partial_.gather_delta, "the refusal did not name the verb it refused"
+    assert "alerts" not in partial_.gather_delta, \
+        "the refusal itself listed a verb the grant withholds"
 
     whole = run_gather(tmp_path / "b", verbs=reg, system="ticket",
                        turns=[q("ticket", "query"), DONE], run_id="d65-whole")
