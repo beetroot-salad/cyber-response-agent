@@ -1,0 +1,46 @@
+projections:
+- lead_id: l-003
+  events: []
+- lead_id: l-002
+  events: []
+- lead_id: l-001
+  events:
+  - '@timestamp': <alert-time>
+    host.name: canary-1
+    event.outcome: failure
+    source.ip: 172.18.0.15
+    user.name: root
+    message: Failed password for root from 172.18.0.15 port <port> ssh2
+    _note: Dense run of sshd Failed password events, all from off-baseline source
+      172.18.0.15 targeting root, rapid-fire across eight bursts in the window; no
+      successful login. Source IP distinguishes from routine service-account auth
+      (svc.monitoring, svc.config-mgmt) and is off-baseline per inventory.
+- lead_id: l-005
+  events: []
+- lead_id: l-006
+  events:
+  - <standard environment noise>
+- lead_id: l-004
+  events:
+  - '@timestamp': <alert-time>
+    source.ip: 172.18.0.15
+    destination.ip: 172.18.0.9
+    destination.port: 22
+    zeek.ssh.client: <ssh-client-version>
+    zeek.ssh.server: <ssh-server-version>
+    host.name: <host.name>
+    data_stream.dataset: zeek.ssh
+  - '@timestamp': <alert-time>
+    source.ip: 172.18.0.15
+    destination.ip: 172.18.0.9
+    destination.port: 22
+    source.bytes: <bytes-out>
+    destination.bytes: <bytes-in>
+    host.name: <host.name>
+    data_stream.dataset: zeek.connection
+- lead_id: l-007
+  events: []
+- lead_id: l-008
+  events: []
+- lead_id: l-009
+  events: []

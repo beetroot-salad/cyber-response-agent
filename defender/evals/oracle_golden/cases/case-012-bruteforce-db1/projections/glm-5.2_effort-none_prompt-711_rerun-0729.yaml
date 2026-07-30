@@ -1,0 +1,433 @@
+projections:
+- lead_id: l-001
+  events: []
+- lead_id: l-002
+  events:
+  - '@timestamp': '2026-07-27T09:56:05+00:00'
+    host.name: db-1
+    user.name: root
+    source.ip: <office-ws-1-ip>
+    event.outcome: failure
+    auth_method: password
+    message: Failed password for root from <office-ws-1-ip> port <ssh-client-port>
+      ssh2
+  - '@timestamp': '2026-07-27T09:56:08+00:00'
+    host.name: db-1
+    user.name: root
+    source.ip: <office-ws-1-ip>
+    event.outcome: failure
+    auth_method: password
+    message: Failed password for root from <office-ws-1-ip> port <ssh-client-port>
+      ssh2
+  - '@timestamp': '2026-07-27T09:56:11+00:00'
+    host.name: db-1
+    user.name: root
+    source.ip: <office-ws-1-ip>
+    event.outcome: failure
+    auth_method: password
+    message: Failed password for root from <office-ws-1-ip> port <ssh-client-port>
+      ssh2
+  - '@timestamp': '2026-07-27T09:56:14+00:00'
+    host.name: db-1
+    user.name: root
+    source.ip: <office-ws-1-ip>
+    event.outcome: failure
+    auth_method: password
+    message: Failed password for root from <office-ws-1-ip> port <ssh-client-port>
+      ssh2
+  - '@timestamp': '2026-07-27T09:56:17+00:00'
+    host.name: db-1
+    user.name: root
+    source.ip: <office-ws-1-ip>
+    event.outcome: failure
+    auth_method: password
+    message: Failed password for root from <office-ws-1-ip> port <ssh-client-port>
+      ssh2
+  - '@timestamp': '2026-07-27T09:56:20+00:00'
+    host.name: db-1
+    user.name: root
+    source.ip: <office-ws-1-ip>
+    event.outcome: failure
+    auth_method: password
+    message: Failed password for root from <office-ws-1-ip> port <ssh-client-port>
+      ssh2
+  - '@timestamp': '2026-07-27T09:56:28+00:00'
+    host.name: db-1
+    user.name: root
+    source.ip: <office-ws-1-ip>
+    event.outcome: failure
+    auth_method: password
+    message: Failed password for root from <office-ws-1-ip> port <ssh-client-port>
+      ssh2
+  - '@timestamp': '2026-07-27T09:56:31+00:00'
+    host.name: db-1
+    user.name: root
+    source.ip: <office-ws-1-ip>
+    event.outcome: failure
+    auth_method: password
+    message: Failed password for root from <office-ws-1-ip> port <ssh-client-port>
+      ssh2
+  - '@timestamp': '2026-07-27T09:56:34+00:00'
+    host.name: db-1
+    user.name: root
+    source.ip: <office-ws-1-ip>
+    event.outcome: failure
+    auth_method: password
+    message: Failed password for root from <office-ws-1-ip> port <ssh-client-port>
+      ssh2
+  - '@timestamp': '2026-07-27T09:56:37+00:00'
+    host.name: db-1
+    user.name: root
+    source.ip: <office-ws-1-ip>
+    event.outcome: failure
+    auth_method: password
+    message: Failed password for root from <office-ws-1-ip> port <ssh-client-port>
+      ssh2
+  - '@timestamp': '2026-07-27T09:56:40+00:00'
+    host.name: db-1
+    user.name: root
+    source.ip: <office-ws-1-ip>
+    event.outcome: failure
+    auth_method: password
+    message: Failed password for root from <office-ws-1-ip> port <ssh-client-port>
+      ssh2
+  - '@timestamp': '2026-07-27T09:56:43+00:00'
+    host.name: db-1
+    user.name: root
+    source.ip: <office-ws-1-ip>
+    event.outcome: failure
+    auth_method: password
+    message: Failed password for root from <office-ws-1-ip> port <ssh-client-port>
+      ssh2
+  - '@timestamp': '2026-07-27T09:56:52+00:00'
+    host.name: db-1
+    user.name: root
+    source.ip: <office-ws-1-ip>
+    event.outcome: failure
+    auth_method: password
+    message: Failed password for root from <office-ws-1-ip> port <ssh-client-port>
+      ssh2
+  - '@timestamp': '2026-07-27T09:56:55+00:00'
+    host.name: db-1
+    user.name: root
+    source.ip: <office-ws-1-ip>
+    event.outcome: failure
+    auth_method: password
+    message: Failed password for root from <office-ws-1-ip> port <ssh-client-port>
+      ssh2
+  - '@timestamp': '2026-07-27T09:56:58+00:00'
+    host.name: db-1
+    user.name: root
+    source.ip: <office-ws-1-ip>
+    event.outcome: failure
+    auth_method: password
+    message: Failed password for root from <office-ws-1-ip> port <ssh-client-port>
+      ssh2
+  - '@timestamp': '2026-07-27T09:57:01+00:00'
+    host.name: db-1
+    user.name: root
+    source.ip: <office-ws-1-ip>
+    event.outcome: failure
+    auth_method: password
+    message: Failed password for root from <office-ws-1-ip> port <ssh-client-port>
+      ssh2
+  - '@timestamp': '2026-07-27T09:57:04+00:00'
+    host.name: db-1
+    user.name: root
+    source.ip: <office-ws-1-ip>
+    event.outcome: failure
+    auth_method: password
+    message: Failed password for root from <office-ws-1-ip> port <ssh-client-port>
+      ssh2
+  - '@timestamp': '2026-07-27T09:57:07+00:00'
+    host.name: db-1
+    user.name: root
+    source.ip: <office-ws-1-ip>
+    event.outcome: failure
+    auth_method: password
+    message: Failed password for root from <office-ws-1-ip> port <ssh-client-port>
+      ssh2
+  - '@timestamp': '2026-07-27T09:57:16+00:00'
+    host.name: db-1
+    user.name: root
+    source.ip: <office-ws-1-ip>
+    event.outcome: failure
+    auth_method: password
+    message: Failed password for root from <office-ws-1-ip> port <ssh-client-port>
+      ssh2
+  - '@timestamp': '2026-07-27T09:57:19+00:00'
+    host.name: db-1
+    user.name: root
+    source.ip: <office-ws-1-ip>
+    event.outcome: failure
+    auth_method: password
+    message: Failed password for root from <office-ws-1-ip> port <ssh-client-port>
+      ssh2
+  - '@timestamp': '2026-07-27T09:57:22+00:00'
+    host.name: db-1
+    user.name: root
+    source.ip: <office-ws-1-ip>
+    event.outcome: failure
+    auth_method: password
+    message: Failed password for root from <office-ws-1-ip> port <ssh-client-port>
+      ssh2
+  - '@timestamp': '2026-07-27T09:57:25+00:00'
+    host.name: db-1
+    user.name: root
+    source.ip: <office-ws-1-ip>
+    event.outcome: failure
+    auth_method: password
+    message: Failed password for root from <office-ws-1-ip> port <ssh-client-port>
+      ssh2
+  - '@timestamp': '2026-07-27T09:57:28+00:00'
+    host.name: db-1
+    user.name: root
+    source.ip: <office-ws-1-ip>
+    event.outcome: failure
+    auth_method: password
+    message: Failed password for root from <office-ws-1-ip> port <ssh-client-port>
+      ssh2
+  - '@timestamp': '2026-07-27T09:57:31+00:00'
+    host.name: db-1
+    user.name: root
+    source.ip: <office-ws-1-ip>
+    event.outcome: failure
+    auth_method: password
+    message: Failed password for root from <office-ws-1-ip> port <ssh-client-port>
+      ssh2
+  - '@timestamp': '2026-07-27T09:57:39+00:00'
+    host.name: db-1
+    user.name: root
+    source.ip: <office-ws-1-ip>
+    event.outcome: failure
+    auth_method: password
+    message: Failed password for root from <office-ws-1-ip> port <ssh-client-port>
+      ssh2
+  - '@timestamp': '2026-07-27T09:57:42+00:00'
+    host.name: db-1
+    user.name: root
+    source.ip: <office-ws-1-ip>
+    event.outcome: failure
+    auth_method: password
+    message: Failed password for root from <office-ws-1-ip> port <ssh-client-port>
+      ssh2
+  - '@timestamp': '2026-07-27T09:57:45+00:00'
+    host.name: db-1
+    user.name: root
+    source.ip: <office-ws-1-ip>
+    event.outcome: failure
+    auth_method: password
+    message: Failed password for root from <office-ws-1-ip> port <ssh-client-port>
+      ssh2
+  - '@timestamp': '2026-07-27T09:57:48+00:00'
+    host.name: db-1
+    user.name: root
+    source.ip: <office-ws-1-ip>
+    event.outcome: failure
+    auth_method: password
+    message: Failed password for root from <office-ws-1-ip> port <ssh-client-port>
+      ssh2
+  - '@timestamp': '2026-07-27T09:57:51+00:00'
+    host.name: db-1
+    user.name: root
+    source.ip: <office-ws-1-ip>
+    event.outcome: failure
+    auth_method: password
+    message: Failed password for root from <office-ws-1-ip> port <ssh-client-port>
+      ssh2
+  - '@timestamp': '2026-07-27T09:57:54+00:00'
+    host.name: db-1
+    user.name: root
+    source.ip: <office-ws-1-ip>
+    event.outcome: failure
+    auth_method: password
+    message: Failed password for root from <office-ws-1-ip> port <ssh-client-port>
+      ssh2
+  - '@timestamp': '2026-07-27T09:58:03+00:00'
+    host.name: db-1
+    user.name: root
+    source.ip: <office-ws-1-ip>
+    event.outcome: failure
+    auth_method: password
+    message: Failed password for root from <office-ws-1-ip> port <ssh-client-port>
+      ssh2
+  - '@timestamp': '2026-07-27T09:58:06+00:00'
+    host.name: db-1
+    user.name: root
+    source.ip: <office-ws-1-ip>
+    event.outcome: failure
+    auth_method: password
+    message: Failed password for root from <office-ws-1-ip> port <ssh-client-port>
+      ssh2
+  - '@timestamp': '2026-07-27T09:58:09+00:00'
+    host.name: db-1
+    user.name: root
+    source.ip: <office-ws-1-ip>
+    event.outcome: failure
+    auth_method: password
+    message: Failed password for root from <office-ws-1-ip> port <ssh-client-port>
+      ssh2
+  - '@timestamp': '2026-07-27T09:58:12+00:00'
+    host.name: db-1
+    user.name: root
+    source.ip: <office-ws-1-ip>
+    event.outcome: failure
+    auth_method: password
+    message: Failed password for root from <office-ws-1-ip> port <ssh-client-port>
+      ssh2
+  - '@timestamp': '2026-07-27T09:58:15+00:00'
+    host.name: db-1
+    user.name: root
+    source.ip: <office-ws-1-ip>
+    event.outcome: failure
+    auth_method: password
+    message: Failed password for root from <office-ws-1-ip> port <ssh-client-port>
+      ssh2
+  - '@timestamp': '2026-07-27T09:58:18+00:00'
+    host.name: db-1
+    user.name: root
+    source.ip: <office-ws-1-ip>
+    event.outcome: failure
+    auth_method: password
+    message: Failed password for root from <office-ws-1-ip> port <ssh-client-port>
+      ssh2
+  - '@timestamp': '2026-07-27T09:58:27+00:00'
+    host.name: db-1
+    user.name: root
+    source.ip: <office-ws-1-ip>
+    event.outcome: failure
+    auth_method: password
+    message: Failed password for root from <office-ws-1-ip> port <ssh-client-port>
+      ssh2
+  - '@timestamp': '2026-07-27T09:58:30+00:00'
+    host.name: db-1
+    user.name: root
+    source.ip: <office-ws-1-ip>
+    event.outcome: failure
+    auth_method: password
+    message: Failed password for root from <office-ws-1-ip> port <ssh-client-port>
+      ssh2
+  - '@timestamp': '2026-07-27T09:58:33+00:00'
+    host.name: db-1
+    user.name: root
+    source.ip: <office-ws-1-ip>
+    event.outcome: failure
+    auth_method: password
+    message: Failed password for root from <office-ws-1-ip> port <ssh-client-port>
+      ssh2
+  - '@timestamp': '2026-07-27T09:58:36+00:00'
+    host.name: db-1
+    user.name: root
+    source.ip: <office-ws-1-ip>
+    event.outcome: failure
+    auth_method: password
+    message: Failed password for root from <office-ws-1-ip> port <ssh-client-port>
+      ssh2
+  - '@timestamp': '2026-07-27T09:58:39+00:00'
+    host.name: db-1
+    user.name: root
+    source.ip: <office-ws-1-ip>
+    event.outcome: failure
+    auth_method: password
+    message: Failed password for root from <office-ws-1-ip> port <ssh-client-port>
+      ssh2
+  - '@timestamp': '2026-07-27T09:58:42+00:00'
+    host.name: db-1
+    user.name: root
+    source.ip: <office-ws-1-ip>
+    event.outcome: failure
+    auth_method: password
+    message: Failed password for root from <office-ws-1-ip> port <ssh-client-port>
+      ssh2
+  - '@timestamp': '2026-07-27T09:58:53+00:00'
+    host.name: db-1
+    user.name: root
+    source.ip: <office-ws-1-ip>
+    event.outcome: failure
+    auth_method: password
+    message: Failed password for root from <office-ws-1-ip> port <ssh-client-port>
+      ssh2
+  - '@timestamp': '2026-07-27T09:58:56+00:00'
+    host.name: db-1
+    user.name: root
+    source.ip: <office-ws-1-ip>
+    event.outcome: failure
+    auth_method: password
+    message: Failed password for root from <office-ws-1-ip> port <ssh-client-port>
+      ssh2
+  - '@timestamp': '2026-07-27T09:58:59+00:00'
+    host.name: db-1
+    user.name: root
+    source.ip: <office-ws-1-ip>
+    event.outcome: failure
+    auth_method: password
+    message: Failed password for root from <office-ws-1-ip> port <ssh-client-port>
+      ssh2
+  - '@timestamp': '2026-07-27T09:59:02+00:00'
+    host.name: db-1
+    user.name: root
+    source.ip: <office-ws-1-ip>
+    event.outcome: failure
+    auth_method: password
+    message: Failed password for root from <office-ws-1-ip> port <ssh-client-port>
+      ssh2
+  - '@timestamp': '2026-07-27T09:59:05+00:00'
+    host.name: db-1
+    user.name: root
+    source.ip: <office-ws-1-ip>
+    event.outcome: failure
+    auth_method: password
+    message: Failed password for root from <office-ws-1-ip> port <ssh-client-port>
+      ssh2
+  - '@timestamp': '2026-07-27T09:59:08+00:00'
+    host.name: db-1
+    user.name: root
+    source.ip: <office-ws-1-ip>
+    event.outcome: failure
+    auth_method: password
+    message: Failed password for root from <office-ws-1-ip> port <ssh-client-port>
+      ssh2
+- lead_id: l-006
+  events: []
+- lead_id: l-005
+  events: []
+- lead_id: l-008
+  events: []
+- lead_id: l-007
+  events:
+  - '@timestamp': <first-ssh-spray-attempt>
+    host.name: db-1
+    source.ip: 172.18.0.16
+    user.name: root
+    event.outcome: failure
+    message: <sshd-failed-password-line>
+  - '@timestamp': <second-ssh-spray-attempt>
+    host.name: db-1
+    source.ip: 172.18.0.16
+    user.name: root
+    event.outcome: failure
+    message: <sshd-failed-password-line>
+  - '@timestamp': <third-ssh-spray-attempt>
+    host.name: db-1
+    source.ip: 172.18.0.16
+    user.name: root
+    event.outcome: failure
+    message: <sshd-failed-password-line>
+  - '@timestamp': <fourth-ssh-spray-attempt>
+    host.name: db-1
+    source.ip: 172.18.0.16
+    user.name: root
+    event.outcome: failure
+    message: <sshd-failed-password-line>
+  - '@timestamp': <fifth-ssh-spray-attempt>
+    host.name: db-1
+    source.ip: 172.18.0.16
+    user.name: root
+    event.outcome: failure
+    message: <sshd-failed-password-line>
+  - '@timestamp': <sixth-ssh-spray-attempt>
+    host.name: db-1
+    source.ip: 172.18.0.16
+    user.name: root
+    event.outcome: failure
+    message: <sshd-failed-password-line>

@@ -1,0 +1,78 @@
+projections:
+- lead_id: l-003
+  events: []
+- lead_id: l-002
+  events: []
+- lead_id: l-001
+  events:
+  - '@timestamp': <alert-time>
+    host.name: canary-1
+    source.ip: 172.18.0.15
+    user.name: root
+    event.outcome: failure
+    message: Failed password for root from 172.18.0.15 port <port> ssh2
+  - '@timestamp': <alert-time+15s>
+    host.name: canary-1
+    source.ip: 172.18.0.15
+    user.name: root
+    event.outcome: failure
+    message: Failed password for root from 172.18.0.15 port <port> ssh2
+  - '@timestamp': <alert-time+30s>
+    host.name: canary-1
+    source.ip: 172.18.0.15
+    user.name: root
+    event.outcome: failure
+    message: Failed password for root from 172.18.0.15 port <port> ssh2
+  - '@timestamp': <alert-time+45s>
+    host.name: canary-1
+    source.ip: 172.18.0.15
+    user.name: root
+    event.outcome: failure
+    message: Failed password for root from 172.18.0.15 port <port> ssh2
+  - '@timestamp': <alert-time+60s>
+    host.name: canary-1
+    source.ip: 172.18.0.15
+    user.name: root
+    event.outcome: failure
+    message: Failed password for root from 172.18.0.15 port <port> ssh2
+  - '@timestamp': <alert-time+75s>
+    host.name: canary-1
+    source.ip: 172.18.0.15
+    user.name: root
+    event.outcome: failure
+    message: Failed password for root from 172.18.0.15 port <port> ssh2
+  - '@timestamp': <alert-time+90s>
+    host.name: canary-1
+    source.ip: 172.18.0.15
+    user.name: root
+    event.outcome: failure
+    message: Failed password for root from 172.18.0.15 port <port> ssh2
+  - '@timestamp': <alert-time+105s>
+    host.name: canary-1
+    source.ip: 172.18.0.15
+    user.name: root
+    event.outcome: failure
+    message: Failed password for root from 172.18.0.15 port <port> ssh2
+- lead_id: l-005
+  events: []
+- lead_id: l-006
+  events:
+  - validation_token: CANARY-7F3A2E
+- lead_id: l-004
+  events:
+  - '@timestamp': <alert-time>
+    source.ip: 172.18.0.15
+    destination.ip: 172.18.0.9
+    destination.port: 22
+    zeek.ssh.client: <ssh-client>
+    zeek.ssh.server: <ssh-server>
+    host.name: canary-1
+    data_stream.dataset: zeek.ssh
+    events_count: 48
+    auth_result: failed
+- lead_id: l-007
+  events: []
+- lead_id: l-008
+  events: []
+- lead_id: l-009
+  events: []

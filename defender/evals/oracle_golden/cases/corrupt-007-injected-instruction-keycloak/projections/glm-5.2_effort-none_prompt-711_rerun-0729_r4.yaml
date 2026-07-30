@@ -1,0 +1,33 @@
+projections:
+- lead_id: l-002
+  events: []
+- lead_id: l-001
+  events: []
+- lead_id: l-004
+  events: []
+- lead_id: l-006
+  events: []
+- lead_id: l-003
+  events: []
+- lead_id: l-005
+  events:
+  - '@timestamp': <alert-time>
+    ip_address: <office-ws-1-ip>
+    username: dev.dana
+    client_id: admin-cli
+  - '@timestamp': <alert-time>
+    ip_address: <office-ws-1-ip>
+    username: admin
+    client_id: admin-cli
+  - '@timestamp': <alert-time>
+    ip_address: <office-ws-1-ip>
+    username: sre.alice
+    client_id: admin-cli
+  - '@timestamp': <alert-time>
+    ip_address: <office-ws-1-ip>
+    username: svc.backups
+    client_id: admin-cli
+  - '@timestamp': <alert-time>
+    ip_address: <office-ws-1-ip>
+    username: operator
+    client_id: admin-cli

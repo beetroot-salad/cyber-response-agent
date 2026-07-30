@@ -1,0 +1,81 @@
+projections:
+- lead_id: l-002
+  events: []
+- lead_id: l-001
+  events:
+  - '@timestamp': '2026-07-27T10:39:52Z'
+    message: Failed password for dev.dana from 172.18.0.16 port <source-port> ssh2
+    source.ip: 172.18.0.16
+    user.name: dev.dana
+    event.outcome: failure
+    event_type: auth_failed
+    auth_method: password
+    host.name: web-1
+  - '@timestamp': '2026-07-27T10:39:52Z'
+    message: Failed password for invalid user dev.dana from 172.18.0.16 port <source-port>
+      ssh2
+    source.ip: 172.18.0.16
+    user.name: dev.dana
+    event.outcome: failure
+    event_type: auth_failed
+    auth_method: password
+    host.name: web-1
+  - '@timestamp': '2026-07-27T10:40:03Z'
+    message: Failed password for dev.dana from 172.18.0.16 port <source-port> ssh2
+    source.ip: 172.18.0.16
+    user.name: dev.dana
+    event.outcome: failure
+    event_type: auth_failed
+    auth_method: password
+    host.name: web-1
+  - '@timestamp': '2026-07-27T10:40:03Z'
+    message: Failed password for invalid user dev.dana from 172.18.0.16 port <source-port>
+      ssh2
+    source.ip: 172.18.0.16
+    user.name: dev.dana
+    event.outcome: failure
+    event_type: auth_failed
+    auth_method: password
+    host.name: web-1
+  - '@timestamp': '2026-07-27T10:40:14Z'
+    message: Failed password for dev.dana from 172.18.0.16 port <source-port> ssh2
+    source.ip: 172.18.0.16
+    user.name: dev.dana
+    event.outcome: failure
+    event_type: auth_failed
+    auth_method: password
+    host.name: web-1
+  - '@timestamp': '2026-07-27T10:40:14Z'
+    message: Failed password for invalid user dev.dana from 172.18.0.16 port <source-port>
+      ssh2
+    source.ip: 172.18.0.16
+    user.name: dev.dana
+    event.outcome: failure
+    event_type: auth_failed
+    auth_method: password
+    host.name: web-1
+  - '@timestamp': '2026-07-27T10:40:25Z'
+    message: Failed password for dev.dana from 172.18.0.16 port <source-port> ssh2
+    source.ip: 172.18.0.16
+    user.name: dev.dana
+    event.outcome: failure
+    event_type: auth_failed
+    auth_method: password
+    host.name: web-1
+  - '@timestamp': '2026-07-27T10:40:25Z'
+    message: Failed password for invalid user dev.dana from 172.18.0.16 port <source-port>
+      ssh2
+    source.ip: 172.18.0.16
+    user.name: dev.dana
+    event.outcome: failure
+    event_type: auth_failed
+    auth_method: password
+    host.name: web-1
+- lead_id: l-006
+  events: []
+- lead_id: l-003
+  events: []
+- lead_id: l-004
+  events: []
+- lead_id: l-005
+  events: []

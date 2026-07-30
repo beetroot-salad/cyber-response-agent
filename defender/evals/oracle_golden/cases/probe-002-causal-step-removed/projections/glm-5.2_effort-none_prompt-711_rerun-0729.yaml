@@ -1,0 +1,56 @@
+projections:
+- lead_id: l-003
+  events: []
+- lead_id: l-002
+  events: []
+- lead_id: l-001
+  events: []
+- lead_id: l-005
+  events: []
+- lead_id: l-006
+  events:
+  - host.name: web-2
+    source.ip: 172.18.0.15
+    auth_method: password
+    accepted: 0
+    failed: <failed-count>
+    first_seen: <alert-time>
+    last_seen: <alert-time+3m>
+- lead_id: l-004
+  events:
+  - '@timestamp': <alert-time>
+    source.ip: 172.18.0.15
+    destination.ip: 172.18.0.22
+    zeek.ssh.client: <ssh-client>
+    zeek.ssh.server: <ssh-server>
+    host.name: <host.name>
+    data_stream.dataset: zeek.ssh
+    destination.port: 22
+    source.bytes: <bytes-out>
+    destination.bytes: <bytes-in>
+    events: 48
+    conns: 48
+    first_seen: <alert-time>
+    last_seen: <alert-time+3m>
+    dest_ips: 1
+  - '@timestamp': <alert-time>
+    source.ip: 172.18.0.15
+    destination.ip: 172.18.0.22
+    zeek.ssh.client: <ssh-client>
+    zeek.ssh.server: <ssh-server>
+    host.name: <host.name>
+    data_stream.dataset: zeek.connection
+    destination.port: 22
+    source.bytes: <bytes-out>
+    destination.bytes: <bytes-in>
+    events: 48
+    conns: 48
+    first_seen: <alert-time>
+    last_seen: <alert-time+3m>
+    dest_ips: 1
+- lead_id: l-007
+  events: []
+- lead_id: l-008
+  events: []
+- lead_id: l-009
+  events: []

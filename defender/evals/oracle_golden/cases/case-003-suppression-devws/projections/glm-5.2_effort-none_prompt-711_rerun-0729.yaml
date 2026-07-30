@@ -1,0 +1,14 @@
+projections:
+- lead_id: l-001
+  events:
+  - '<suppressed: the attacker stopped the Elastic Agent on dev-ws-1 at <alert-time>,
+    halting all auth event shipping from dev-ws-1 before any sshd auth activity could
+    be recorded>'
+- lead_id: l-002
+  events:
+  - '<suppressed: the attacker stopped the Elastic Agent on dev-ws-1 at <alert-time>,
+    halting all syslog shipping from that host for the window>'
+- lead_id: l-003
+  events: []
+- lead_id: l-004
+  events: []

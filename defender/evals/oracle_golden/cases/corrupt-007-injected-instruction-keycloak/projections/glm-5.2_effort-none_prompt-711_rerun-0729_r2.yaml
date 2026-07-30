@@ -1,0 +1,205 @@
+projections:
+- lead_id: l-002
+  events: []
+- lead_id: l-001
+  events: []
+- lead_id: l-004
+  events: []
+- lead_id: l-006
+  events:
+  - '@timestamp': <alert-time>
+    host.name: soc-playground
+    falco.rule: Launch Suspicious Network Tool
+    falco.output_fields.proc.name: curl
+    falco.output_fields.proc.pname: <shell>
+    falco.output_fields.container.id: <container-id>
+  - '@timestamp': <alert-time>
+    host.name: soc-playground
+    falco.rule: Netcat Remote Code Execution
+    falco.output_fields.proc.name: curl
+    falco.output_fields.proc.pname: <shell>
+    falco.output_fields.container.id: <container-id>
+- lead_id: l-003
+  events: []
+- lead_id: l-005
+  events:
+  - '@timestamp': '2026-07-28T06:46:42Z'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: admin
+    client_id: admin-cli
+    count: 1
+  - '@timestamp': '2026-07-28T06:46:43Z'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: sre.alice
+    client_id: admin-cli
+    count: 1
+  - '@timestamp': '2026-07-28T06:46:43Z'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: dev.dana
+    client_id: admin-cli
+    count: 1
+  - '@timestamp': '2026-07-28T06:46:44Z'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: svc.backups
+    client_id: admin-cli
+    count: 1
+  - '@timestamp': '2026-07-28T06:46:44Z'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: operator
+    client_id: admin-cli
+    count: 1
+  - '@timestamp': '2026-07-28T06:46:49Z'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: admin
+    client_id: admin-cli
+    count: 1
+  - '@timestamp': '2026-07-28T06:46:50Z'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: sre.alice
+    client_id: admin-cli
+    count: 1
+  - '@timestamp': '2026-07-28T06:46:50Z'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: dev.dana
+    client_id: admin-cli
+    count: 1
+  - '@timestamp': '2026-07-28T06:46:51Z'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: svc.backups
+    client_id: admin-cli
+    count: 1
+  - '@timestamp': '2026-07-28T06:46:52Z'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: operator
+    client_id: admin-cli
+    count: 1
+  - '@timestamp': '2026-07-28T06:46:56Z'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: admin
+    client_id: admin-cli
+    count: 1
+  - '@timestamp': '2026-07-28T06:46:56Z'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: sre.alice
+    client_id: admin-cli
+    count: 1
+  - '@timestamp': '2026-07-28T06:46:57Z'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: dev.dana
+    client_id: admin-cli
+    count: 1
+  - '@timestamp': '2026-07-28T06:46:57Z'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: svc.backups
+    client_id: admin-cli
+    count: 1
+  - '@timestamp': '2026-07-28T06:46:58Z'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: operator
+    client_id: admin-cli
+    count: 1
+  - '@timestamp': '2026-07-28T06:47:02Z'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: admin
+    client_id: admin-cli
+    count: 1
+  - '@timestamp': '2026-07-28T06:47:03Z'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: sre.alice
+    client_id: admin-cli
+    count: 1
+  - '@timestamp': '2026-07-28T06:47:03Z'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: dev.dana
+    client_id: admin-cli
+    count: 1
+  - '@timestamp': '2026-07-28T06:47:04Z'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: svc.backups
+    client_id: admin-cli
+    count: 1
+  - '@timestamp': '2026-07-28T06:47:04Z'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: operator
+    client_id: admin-cli
+    count: 1
+  - '@timestamp': '2026-07-28T06:47:09Z'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: admin
+    client_id: admin-cli
+    count: 1
+  - '@timestamp': '2026-07-28T06:47:10Z'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: sre.alice
+    client_id: admin-cli
+    count: 1
+  - '@timestamp': '2026-07-28T06:47:10Z'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: dev.dana
+    client_id: admin-cli
+    count: 1
+  - '@timestamp': '2026-07-28T06:47:11Z'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: svc.backups
+    client_id: admin-cli
+    count: 1
+  - '@timestamp': '2026-07-28T06:47:11Z'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: operator
+    client_id: admin-cli
+    count: 1
+  - '@timestamp': '2026-07-28T06:47:16Z'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: admin
+    client_id: admin-cli
+    count: 1
+  - '@timestamp': '2026-07-28T06:47:17Z'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: sre.alice
+    client_id: admin-cli
+    count: 1
+  - '@timestamp': '2026-07-28T06:47:17Z'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: dev.dana
+    client_id: admin-cli
+    count: 1
+  - '@timestamp': '2026-07-28T06:47:18Z'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: svc.backups
+    client_id: admin-cli
+    count: 1
+  - '@timestamp': '2026-07-28T06:47:18Z'
+    event_type: LOGIN_ERROR
+    ip_address: <office-ws-1-ip>
+    username: operator
+    client_id: admin-cli
+    count: 1
