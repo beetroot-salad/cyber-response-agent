@@ -1,0 +1,79 @@
+requires:
+- assertion: 79.177.137.245 is not classified as a known-benign or corporate IP in
+    any reputation source
+  settled_by: l-007
+  if_false: If any source classified this IP as legitimate corporate infrastructure,
+    the SSH logins would be attributable to authorized administration and the account
+    would collapse
+- assertion: Container ID ffbff1299702 is the container the account calls dev-ws-1
+  settled_by: unsettled
+  if_false: The account describes the wrong container; all process, network, and CMDB
+    claims are misattributed
+- assertion: scheduler.py (PID 77) is the parent process that spawns bash, which runs
+    nc — the full process tree at 06:24:43 shows this chain
+  settled_by: unsettled
+  if_false: The orchestrator of the nc probes is not scheduler.py; the account's claim
+    that a compromised scheduler automates reconnaissance is wrong
+- assertion: /opt/soc-playground/baseline/scheduler.py has been modified from its
+    original container-image version by the adversary to launch nc probes, and the
+    host-plain:24.04 image does not ship with this probe behavior by default
+  settled_by: unsettled
+  if_false: The scheduler is a legitimate baseline component that has always run these
+    probes, the nc activity is authorized monitoring, and the reconnaissance narrative
+    collapses
+- assertion: The 48 "Contact cloud metadata service from container" events from elastic-otel-co
+    are benign Elastic-agent telemetry, not adversary IMDS credential collection
+  settled_by: unsettled
+  if_false: The adversary is also stealing cloud credentials via the metadata endpoint,
+    expanding the scope beyond what the account describes
+- assertion: SSH logins in the alert window came from 79.177.137.245 — the Falco sshd
+    process events do not themselves contain source-IP data
+  settled_by: unsettled
+  if_false: The Falco sshd process events may correspond to logins from a different
+    source IP, breaking the correlation between external SSH entry and nc probe activity
+- assertion: 79.177.137.245 is attacker-controlled infrastructure, not a legitimate
+    admin/automation IP belonging to the organization
+  settled_by: unsettled
+  if_false: The 1,660 root SSH logins from this IP are legitimate administrative access,
+    the initial-access and C2 narrative collapses, and the remaining observations
+    reduce to a dev container running authorized connectivity checks
+- assertion: 79.177.137.245 is the sole SSH source for the soc-playground host across
+    the entire 24-hour period
+  settled_by: unsettled
+  if_false: Other IPs logged in to soc-playground during the 24h window, providing
+    an independent legitimate baseline that undermines the claim that all SSH activity
+    is adversary-originated
+- assertion: 172.18.0.9 is an unauthorized lateral movement destination from jump-box-1,
+    not a known authorized management target
+  settled_by: unsettled
+  if_false: jump-box-1's SSH connections to 172.18.0.9 are legitimate bastion administration,
+    and the observation does not indicate further adversary lateral movement through
+    the bastion
+- assertion: dev-ws-1 is the only container (or the relevant container) on the soc-playground
+    Docker host
+  settled_by: unsettled
+  if_false: Other containers on soc-playground may be the actual source of the observed
+    activity, and the account's attribution to dev-ws-1 is unconfirmed
+- assertion: The absence of Falco events before 16:33:57 means the container was created
+    at approximately 16:33, not that Falco collection started later
+  settled_by: unsettled
+  if_false: A pre-intrusion baseline of nc and curl activity may exist that was not
+    captured, undermining the claim that these behaviors are adversary-introduced
+- assertion: The curl -sf -o /dev/null http://127.0.0.1/ events actually executed
+    on dev-ws-1
+  settled_by: unsettled
+  if_false: The curl events may not have run on dev-ws-1 at all; the account's claim
+    that they are local health checks preserved by the adversary is unsupported
+- assertion: All 1,660 accepted SSH logins used the root account
+  settled_by: unsettled
+  if_false: If logins used non-root accounts, the adversary's privilege profile and
+    the authorized_keys-to-root persistence mechanism may not apply to all sessions
+- assertion: All accepted SSH logins used publickey authentication
+  settled_by: unsettled
+  if_false: If some logins used password or keyboard-interactive auth, the forged-key
+    persistence mechanism is not the sole access method
+- assertion: 141 of the 204 post-restart logins fell within the first 10 minutes of
+    the 16-minute burst
+  settled_by: unsettled
+  if_false: The "141 in 10 minutes" figure is not a real 10-minute subset; the specific
+    count and timing claim is inaccurate

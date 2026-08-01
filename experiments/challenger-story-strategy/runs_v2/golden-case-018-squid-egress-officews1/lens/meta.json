@@ -1,0 +1,85 @@
+{
+  "arm": "lens",
+  "model": "glm-5.2",
+  "effort": "low",
+  "calls": 12,
+  "n_claims": 13,
+  "malformed_items": 0,
+  "story_chars": 12200,
+  "prompt_chars_total": 230574,
+  "calls_detail": [
+    {
+      "label": "lens-l-007",
+      "prompt_chars": 7014,
+      "output_chars": 435,
+      "seconds": 7.4
+    },
+    {
+      "label": "lens-l-004",
+      "prompt_chars": 9728,
+      "output_chars": 1027,
+      "seconds": 13.6
+    },
+    {
+      "label": "lens-l-003",
+      "prompt_chars": 10680,
+      "output_chars": 2207,
+      "seconds": 26.0
+    },
+    {
+      "label": "lens-l-001",
+      "prompt_chars": 11651,
+      "output_chars": 2578,
+      "seconds": 29.3
+    },
+    {
+      "label": "lens-l-011",
+      "prompt_chars": 8708,
+      "output_chars": 2721,
+      "seconds": 32.7
+    },
+    {
+      "label": "lens-l-006",
+      "prompt_chars": 12188,
+      "output_chars": 2006,
+      "seconds": 32.9
+    },
+    {
+      "label": "lens-l-010",
+      "prompt_chars": 10663,
+      "output_chars": 2610,
+      "seconds": 42.0
+    },
+    {
+      "label": "lens-l-008",
+      "prompt_chars": 16434,
+      "output_chars": 2665,
+      "seconds": 51.6
+    },
+    {
+      "label": "lens-l-009",
+      "prompt_chars": 44159,
+      "output_chars": 2495,
+      "seconds": 58.7
+    },
+    {
+      "label": "lens-l-002",
+      "prompt_chars": 9560,
+      "output_chars": 3629,
+      "seconds": 65.9
+    },
+    {
+      "label": "lens-l-005",
+      "prompt_chars": 45072,
+      "output_chars": 2400,
+      "seconds": 96.3
+    },
+    {
+      "label": "lens-fold",
+      "prompt_chars": 44717,
+      "output_chars": 12200,
+      "seconds": 146.3
+    }
+  ],
+  "seeded_from": "seed"
+}

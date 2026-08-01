@@ -1,0 +1,20 @@
+requires:
+- assertion: 79.177.137.245 is attacker-controlled infrastructure, not a legitimate
+    admin/automation IP belonging to the organization
+  settled_by: unsettled
+  if_false: The 1,660 root SSH logins from this IP are legitimate administrative access,
+    the initial-access and C2 narrative collapses, and the remaining observations
+    reduce to a dev container running authorized connectivity checks
+- assertion: /opt/soc-playground/baseline/scheduler.py has been modified from its
+    original container-image version by the adversary to launch nc probes against
+    jump-box-1
+  settled_by: unsettled
+  if_false: The scheduler is a legitimate baseline component that has always run these
+    probes, the nc activity is authorized monitoring, and the reconnaissance narrative
+    collapses
+- assertion: 79.177.137.245 is not classified as a known-benign or corporate IP in
+    any reputation source
+  settled_by: l-007
+  if_false: If any source classified this IP as legitimate corporate infrastructure,
+    the SSH logins would be attributable to authorized administration and the account
+    would collapse
