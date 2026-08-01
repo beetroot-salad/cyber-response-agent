@@ -1,0 +1,31 @@
+{
+  "arm": "loose",
+  "model": "glm-5.2",
+  "effort": "low",
+  "calls": 3,
+  "n_claims": 0,
+  "malformed_items": 0,
+  "story_chars": 130747,
+  "prompt_chars_total": 415427,
+  "calls_detail": [
+    {
+      "label": "loose-1",
+      "prompt_chars": 137511,
+      "output_chars": 6522,
+      "seconds": 110.9
+    },
+    {
+      "label": "loose-2",
+      "prompt_chars": 138013,
+      "output_chars": 8412,
+      "seconds": 265.0
+    },
+    {
+      "label": "loose-3",
+      "prompt_chars": 139903,
+      "output_chars": 130747,
+      "seconds": 285.3
+    }
+  ],
+  "seeded_from": "seed"
+}

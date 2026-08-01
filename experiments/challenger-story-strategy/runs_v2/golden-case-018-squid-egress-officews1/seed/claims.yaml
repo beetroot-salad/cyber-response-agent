@@ -1,0 +1,25 @@
+claims:
+- entity: 79.177.137.245
+  field: threat_intel_verdict
+  asserted_value: unknown (not classified as benign or known-infrastructure)
+  would_show_in: l-007
+- entity: 79.177.137.245
+  field: sole_ssh_source_to_soc_playground
+  asserted_value: true (no other source IPs in 24h Accepted SSH events)
+  would_show_in: l-010
+- entity: scheduler.py (PID 77 in dev-ws-1)
+  field: parent_process
+  asserted_value: sshd (PID 7), not tini/init (PID 1)
+  would_show_in: l-011
+- entity: dev-ws-1
+  field: ssh_key_added_to_authorized_keys
+  asserted_value: true (bash appended key to authorized_keys at 2026-07-27T16:35:02Z)
+  would_show_in: l-008
+- entity: jump-box-1
+  field: role_and_criticality
+  asserted_value: jump-box / prod
+  would_show_in: l-006
+- entity: nc process in dev-ws-1
+  field: cmdline
+  asserted_value: nc -z -w1 jump-box-1 22
+  would_show_in: l-001

@@ -1,0 +1,19 @@
+{
+  "arm": "seed",
+  "model": "glm-5.2",
+  "effort": "low",
+  "calls": 1,
+  "n_claims": 3,
+  "malformed_items": 0,
+  "story_chars": 7860,
+  "prompt_chars_total": 132039,
+  "calls_detail": [
+    {
+      "label": "seed",
+      "prompt_chars": 132039,
+      "output_chars": 7860,
+      "seconds": 212.6
+    }
+  ],
+  "shared_seed": true
+}

@@ -1,0 +1,44 @@
+[
+  {
+    "arm": "iterative",
+    "claims": 36,
+    "bound": 34,
+    "hedged": 2,
+    "malformed_items": 6,
+    "unqueried": 0,
+    "calls": 4,
+    "prompt_chars_total": 560961,
+    "wall_seconds": 473.8,
+    "story_chars": 21837,
+    "bound_per_call": 8.5,
+    "fixture": "golden-case-018-squid-egress-officews1"
+  },
+  {
+    "arm": "lens",
+    "claims": 9,
+    "bound": 5,
+    "hedged": 4,
+    "malformed_items": 0,
+    "unqueried": 0,
+    "calls": 13,
+    "prompt_chars_total": 328664,
+    "wall_seconds": 187.7,
+    "story_chars": 10826,
+    "bound_per_call": 0.38,
+    "fixture": "golden-case-018-squid-egress-officews1"
+  },
+  {
+    "arm": "one-shot",
+    "claims": 6,
+    "bound": 4,
+    "hedged": 2,
+    "malformed_items": 0,
+    "unqueried": 2,
+    "calls": 1,
+    "prompt_chars_total": 134363,
+    "wall_seconds": 158.5,
+    "story_chars": 7186,
+    "bound_per_call": 4.0,
+    "fixture": "golden-case-018-squid-egress-officews1"
+  }
+]

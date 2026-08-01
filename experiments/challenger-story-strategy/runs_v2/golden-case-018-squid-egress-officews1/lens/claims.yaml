@@ -1,0 +1,55 @@
+claims:
+- entity: 79.177.137.245
+  field: threat_intel_verdict
+  asserted_value: unknown (verdict=unknown, score=0, no sources, no tags)
+  would_show_in: l-007
+- entity: 79.177.137.245
+  field: sole_ssh_source_to_soc_playground
+  asserted_value: true (no other source IPs in 24h Accepted SSH events)
+  would_show_in: l-010
+- entity: 79.177.137.245
+  field: total_accepted_ssh_logins_24h
+  asserted_value: '1660'
+  would_show_in: l-010
+- entity: scheduler.py (PID 77 in dev-ws-1)
+  field: parent_process
+  asserted_value: sshd (PID 7), not tini/init (PID 1)
+  would_show_in: l-002
+- entity: scheduler.py (PID 77 in dev-ws-1)
+  field: cmdline
+  asserted_value: python3 /opt/soc-playground/baseline/scheduler.py
+  would_show_in: l-011
+- entity: dev-ws-1
+  field: ssh_key_added_to_authorized_keys
+  asserted_value: true (bash appended key with comment svc.config-mgmt@rotation at
+    2026-07-27T16:35:02Z)
+  would_show_in: l-008
+- entity: dev-ws-1
+  field: container_name_and_image
+  asserted_value: name=dev-ws-1, image=soc-playground/host-plain:24.04
+  would_show_in: l-002
+- entity: jump-box-1
+  field: role_and_criticality
+  asserted_value: jump-box / prod, owner=team.sre
+  would_show_in: l-006
+- entity: nc process in dev-ws-1
+  field: cmdline
+  asserted_value: nc -z -w1 jump-box-1 22
+  would_show_in: l-001
+- entity: nc probes from dev-ws-1 to jump-box-1
+  field: count_and_duration
+  asserted_value: 106 events from 2026-07-27T16:34:56Z through 2026-07-28T06:24:44Z
+  would_show_in: l-008
+- entity: Zeek connection dev-ws-1 to jump-box-1
+  field: connection_at_alert_time
+  asserted_value: TCP null-protocol connection at 2026-07-28T06:24:43.574Z from 172.18.0.25
+    to 172.18.0.14 port 22
+  would_show_in: l-005
+- entity: Falco alert event
+  field: alert_time
+  asserted_value: 2026-07-28 06:24:43+00:00
+  would_show_in: l-001
+- entity: SSH auth logins in ±10m alert window
+  field: accepted_count
+  asserted_value: 141 (all root, all publickey, zero failures, source 79.177.137.245)
+  would_show_in: l-004
