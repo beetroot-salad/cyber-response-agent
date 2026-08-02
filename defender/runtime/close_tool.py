@@ -195,7 +195,10 @@ async def _close_investigation_async(
             f"disposition must be exactly one of {sorted(DISPOSITION_ENUM)} (got "
             f"{disposition!r}) — a typed enum, not free text"
         )
-    bounds = bounds if bounds is not None else challenge_gate.default_bounds()
+    # lint-default: ok — DI/test-seam shape (challenge_gate.Bounds is injected for tests,
+    # defaulting to production bounds); resolved once here, the sole call site that needs a
+    # concrete value, into a fresh name rather than re-defaulting the parameter itself.
+    resolved_bounds = bounds if bounds is not None else challenge_gate.default_bounds()
 
     if disposition == "inconclusive":
         record = {
@@ -209,7 +212,9 @@ async def _close_investigation_async(
         )
         return _commit(deps, disposition, fields, record, evidence=evidence)
 
-    verdict = await challenge_gate.challenge_gate(deps, disposition, stages=stages, bounds=bounds)
+    verdict = await challenge_gate.challenge_gate(
+        deps, disposition, stages=stages, bounds=resolved_bounds,
+    )
     material = tuple(
         RecommendedLead(lead_id=lid, requirement=req, origin="review")
         for lid, req in verdict.material
