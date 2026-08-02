@@ -13,3 +13,5 @@ class AgentRole(Enum):
     VERIFIER = "verifier"
     LEAD_AUTHOR = "lead_author"
     CORPUS_AUTHOR = "corpus_author"
+    CHALLENGER = "challenger"
+    COHERENCE_CHECKER = "coherence_checker"

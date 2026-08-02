@@ -9,15 +9,18 @@ from defender.learning.pipeline.oracle_engine import ORACLE_DEF
 from defender.runtime.agent_definition import AgentDefinition, build_registry
 from defender.runtime.agent_role import AgentRole
 from defender.runtime.driver import GATHER_DEF, MAIN_DEF
+from defender.runtime.review_roles import CHALLENGER_DEF, COHERENCE_CHECKER_DEF
 
 AGENTS: dict[AgentRole, AgentDefinition] = build_registry(
     (MAIN_DEF, GATHER_DEF, JUDGE_DEF, ACTOR_DEF, ORACLE_DEF, VERIFY_DEF, LEAD_AUTHOR_DEF,
-     CORPUS_AUTHOR_DEF)
+     CORPUS_AUTHOR_DEF, CHALLENGER_DEF, COHERENCE_CHECKER_DEF)
 )
 
 __all__ = [
     "ACTOR_DEF",
     "AGENTS",
+    "CHALLENGER_DEF",
+    "COHERENCE_CHECKER_DEF",
     "CORPUS_AUTHOR_DEF",
     "GATHER_DEF",
     "JUDGE_DEF",

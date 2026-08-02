@@ -5,8 +5,10 @@ The bound on spend is only a bound if the RECORD of spend is not forgeable, so t
 carve-out is scoped to the WHOLE run integrity surface — budget.json,
 circuit_breaker.json, llm_requests.jsonl, tool_trace.jsonl, the queries table,
 gather_summaries/ and alert.json — and the mechanism is a POSITIVE ALLOW-LIST of
-exactly {investigation.md, report.md}, deliberately tighter than the `.md` suffix
-filter the two sibling curators take.
+exactly {investigation.md}, deliberately tighter than the `.md` suffix
+filter the two sibling curators take. (#774/R1: report.md left this allow-list
+entirely — the close tool is now its only writer — so the allow-list narrowed
+further still, from the two-name set this suite originally pinned to one.)
 
 RED AGAINST HEAD IS THE EXPECTED STATE, and here the refutations are the point:
 PO51 (executed) established MAIN's compiled `write_allow` is the single unrestricted
@@ -159,7 +161,11 @@ def test_model_cannot_author_its_own_budget_state(tmp_path):
     anyway, probed CLOSED by PO53, because an unbound closed surface is one refactor
     away from being an unbound open one.
 
-    The positive control is test_report_write_succeeds_under_the_narrowing."""
+    The positive control is
+    test_report_write_is_refused_and_investigation_write_still_succeeds (#774/R1: report.md
+    itself left the tail's allow-list, so the tail-tier mechanism's own positive control here
+    now drives investigation.md — still model-writable, still tail-tier — rather than
+    report.md)."""
     run_dir = _run_dir(tmp_path)
     policy = _main_policy(run_dir)
 
@@ -184,8 +190,7 @@ def test_model_cannot_author_its_own_budget_state(tmp_path):
     result, _ = drive_agent(
         MAIN_DEF, run_dir,
         [[("write_file", {"path": str(run_dir / "budget.json"), "content": forged})],
-         [("write_file", {"path": str(run_dir / "report.md"),
-                          "content": _report_text()})]],
+         [("write_file", {"path": str(run_dir / "investigation.md"), "content": ""})]],
         limits=limits, enforce=True,
     )
     on_disk = json.loads((run_dir / "budget.json").read_text())
@@ -194,22 +199,29 @@ def test_model_cannot_author_its_own_budget_state(tmp_path):
     assert "write allowlist" in str(result.all_messages()), (
         "the refusal was not observable to the model"
     )
-    assert (run_dir / "report.md").is_file(), "the tail's own artifact was lost"
+    assert (run_dir / "investigation.md").is_file(), "the tail's own artifact was lost"
 
 
-def test_report_write_succeeds_under_the_narrowing(tmp_path):
-    """Under whatever narrowing refuses the budget-state write, MAIN still writes
-    report.md and appends to investigation.md successfully — the run's actual
-    artifacts are unaffected, on the same address and under the complementary
-    condition."""
+def test_report_write_is_refused_and_investigation_write_still_succeeds(tmp_path):
+    """#774/R1 UPDATE. `report.md` left MAIN's write allow-list entirely (the close tool is
+    now its only writer), so under whatever narrowing refuses the budget-state write,
+    `investigation.md` still commits successfully while `report.md` is refused just like the
+    rest of the integrity surface — the run's actual (still model-writable) artifact is
+    unaffected, on the same address and under the complementary condition.
+
+    This test used to assert the OPPOSITE (report.md succeeding) before R1; the narrowing
+    that closes the budget-state hole and the one that removes report.md are two different
+    narrowings on the same allow-list, and both now hold at once."""
     run_dir = _run_dir(tmp_path)
     policy = _main_policy(run_dir)
 
     inv_text = (GOLDEN / "investigation.md").read_text()
-    for name, text in (("report.md", _report_text()), ("investigation.md", inv_text)):
-        decision = permission.decide_write(run_dir / name, text, run_dir=run_dir,
-                                           defender_dir=DEFENDER, policy=policy)
-        assert decision.allow, f"{name} was refused: {decision.reason}"
+    decision = permission.decide_write(run_dir / "investigation.md", inv_text, run_dir=run_dir,
+                                       defender_dir=DEFENDER, policy=policy)
+    assert decision.allow, f"investigation.md was refused: {decision.reason}"
+    decision = permission.decide_write(run_dir / "report.md", _report_text(), run_dir=run_dir,
+                                       defender_dir=DEFENDER, policy=policy)
+    assert not decision.allow, "report.md is no longer model-writable after R1"
 
     open_budget(run_dir, "r")
     drive_agent(MAIN_DEF, run_dir,
@@ -219,12 +231,13 @@ def test_report_write_succeeds_under_the_narrowing(tmp_path):
                                   "content": _report_text()})]],
                 limits=DEFAULT_LIMITS, enforce=True)
     assert (run_dir / "investigation.md").read_text() == inv_text
-    assert "disposition: benign" in (run_dir / "report.md").read_text()
+    assert not (run_dir / "report.md").exists(), "report.md must not commit through write_file"
 
 
 def test_main_write_scope_is_an_explicit_allow_list(tmp_path):
     """MAIN's compiled write scope is a POSITIVE ALLOW-LIST of exactly
-    investigation.md and report.md: every other path under the run dir is refused,
+    investigation.md (#774/R1 narrowed this off report.md too — the close tool is
+    now report.md's only writer): every other path under the run dir is refused,
     including the ones a `.md` suffix filter would have admitted —
     gather_summaries/{lead_id}.md and an arbitrary .md at arbitrary depth such as
     gather_raw/evil.md, which is a write into the one subtree MAIN is positively
@@ -269,7 +282,7 @@ def test_main_write_scope_is_an_explicit_allow_list(tmp_path):
         if permission.decide_write(target, text, run_dir=run_dir,
                                    defender_dir=DEFENDER, policy=policy).allow:
             admitted.add(rel)
-    assert admitted == {"investigation.md", "report.md"}, (
+    assert admitted == {"investigation.md"}, (
         f"the write scope is not the positive allow-list: {sorted(admitted)}"
     )
 

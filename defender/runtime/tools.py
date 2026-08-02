@@ -90,6 +90,14 @@ class AgentDeps:
     authored_paths: set[Path] = field(
         kw_only=True, default_factory=set, compare=False, repr=False
     )
+    #: #774 K9. The gate's per-run mutable state (turn count, raised-lead ids, the
+    #: terminal-close flag) — ONE mutable container, following the `authored_paths`
+    #: precedent, since `AgentDeps` is frozen and cannot carry a plain int counter.
+    #: `defender.runtime.challenge_gate.ReviewState.of(deps)` owns what lives inside it;
+    #: this field is just the box.
+    review_state: dict = field(
+        kw_only=True, default_factory=dict, compare=False, repr=False
+    )
     roots: ResolvedRoots | None = field(kw_only=True, default=None)
     tool_config: Any = field(kw_only=True, default=None)
 
@@ -296,8 +304,26 @@ def _tool_read_file(deps: AgentDeps, path: str, pattern: str | None = None) -> s
     return _bound_and_wrap(deps, p, path, text, read_tool="read_file")
 
 
+def _closed_for_investigation_write(deps: AgentDeps, p: Path) -> bool:
+    """RS15. `investigation.md` becomes review-state-aware AFTER a close commits — no
+    post-close write can silently move the recorded disposition. The working document
+    itself stays otherwise model-writable throughout the investigation (untouched by
+    this change up to the close); this is the ONE new gate on it."""
+    if p.resolve() != (deps.run_dir / "investigation.md").resolve():
+        return False
+    from .challenge_gate import ReviewState
+
+    return ReviewState.of(deps).closed
+
+
 def _tool_write_file(deps: AgentDeps, path: str, content: str) -> str:
     p = _resolve_operand(deps, path)
+    if _closed_for_investigation_write(deps, p):
+        raise ModelRetry(
+            "investigation.md is no longer writable: the close already committed a "
+            "recorded disposition for this run, and a further write could silently "
+            "move it. The case is closed."
+        )
     decision = permission.decide_write(
         p, content, run_dir=deps.run_dir, defender_dir=deps.defender_dir, policy=deps.policy,
     )
@@ -311,6 +337,12 @@ def _tool_write_file(deps: AgentDeps, path: str, content: str) -> str:
 
 def _tool_edit_file(deps: AgentDeps, path: str, old_string: str, new_string: str) -> str:
     p = _resolve_operand(deps, path)
+    if _closed_for_investigation_write(deps, p):
+        raise ModelRetry(
+            "investigation.md is no longer writable: the close already committed a "
+            "recorded disposition for this run, and a further edit could silently "
+            "move it. The case is closed."
+        )
     read_decision = permission.decide_read(
         p, run_dir=deps.run_dir, defender_dir=deps.defender_dir, policy=deps.policy
     )
@@ -369,8 +401,9 @@ def register_tools(agent, tools: ToolSet, verbs: Any = None) -> None:
     if tools.write:
         @agent.tool
         async def write_file(ctx: RunContext[AgentDeps], path: str, content: str) -> str:
-            """Write a file in the run dir (investigation.md, report.md). Writes of
-            investigation.md are validated against the invlang schema."""
+            """Write a file in the run dir (investigation.md — the invlang work log).
+            Writes are validated against the invlang schema. To record a disposition,
+            use the close_investigation tool — it is the only writer of the report."""
             return _tool_write_file(ctx.deps, path, content)
 
         @agent.tool
@@ -378,7 +411,7 @@ def register_tools(agent, tools: ToolSet, verbs: Any = None) -> None:
             ctx: RunContext[AgentDeps], path: str, old_string: str, new_string: str
         ) -> str:
             """Replace the first occurrence of old_string with new_string in a run-dir
-            file. The resulting full text is validated (invlang for investigation.md)."""
+            file (investigation.md). The resulting full text is validated (invlang)."""
             return _tool_edit_file(ctx.deps, path, old_string, new_string)
 
     _register_deferred_tools(agent, tools, verbs)

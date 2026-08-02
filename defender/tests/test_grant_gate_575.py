@@ -408,7 +408,7 @@ def test_b3_every_registered_agents_policy_passes_the_table_check(env):
     #691). It is the one denylist-free lane, so an untabled (=ungated) program there is the worst
     place for the fail-open to hide."""
     pols = _all_policies(env)
-    assert len(AGENTS) == 8
+    assert len(AGENTS) == 10
     assert CORPUS_AUTHOR_DEF in AGENTS.values()
     assert "corpus_author" in pols
     for name, pol in pols.items():

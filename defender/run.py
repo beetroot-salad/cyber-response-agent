@@ -95,6 +95,40 @@ def _source_one_provider_key(prov: providers.Provider) -> int:
     return 2
 
 
+def preflight_role_models() -> int:
+    """PR9-12 (#774). Iterate EVERY registered role's model config at investigation STARTUP
+    and fail fast if a role's provider key is unusable — build-time failure is
+    provider-dependent (one provider raises immediately on a missing key, another defers to
+    first live call), and the agent for each review stage is built fresh on every call, so a
+    misconfigured review role would otherwise silently downgrade confident investigations to
+    unresolved ones, one at a time, deep into paid-for runs, instead of failing loud before
+    any run starts."""
+    from defender.agents import AGENTS
+
+    seen_provider_ids: set[str] = set()
+    for defn in AGENTS.values():
+        try:
+            name = defn.model()
+        except Exception as e:  # noqa: BLE001 — a broken model accessor is a preflight failure
+            print(f"[run.py] preflight: {defn.role.name} model config raised: {e!r}",
+                  file=sys.stderr)
+            return 2
+        try:
+            prov = providers.provider_for(name)
+        except ValueError as e:
+            print(f"[run.py] preflight: {defn.role.name}: {e}", file=sys.stderr)
+            return 2
+        if prov.id in seen_provider_ids:
+            continue
+        seen_provider_ids.add(prov.id)
+        rc = _source_one_provider_key(prov)
+        if rc:
+            print(f"[run.py] preflight: {defn.role.name} ({name}) has no usable model config",
+                  file=sys.stderr)
+            return rc
+    return 0
+
+
 def _source_provider_keys(main_model: str, gather_model: str) -> int:
     try:
         used = {providers.provider_for(main_model), providers.provider_for(gather_model)}
@@ -199,6 +233,9 @@ def main(argv: list[str]) -> int:
 
     model = driver.resolve_main_model(ns.model)
     rc = _source_provider_keys(model, driver.gather_model())
+    if rc:
+        return rc
+    rc = preflight_role_models()
     if rc:
         return rc
 

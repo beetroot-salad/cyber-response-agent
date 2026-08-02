@@ -14,7 +14,7 @@ from typing import Any
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.capabilities import ProcessHistory
 from pydantic_ai.capabilities.hooks import Hooks
-from pydantic_ai.exceptions import UsageLimitExceeded
+from pydantic_ai.exceptions import UnexpectedModelBehavior, UsageLimitExceeded
 from pydantic_ai.messages import ModelResponse
 from pydantic_ai.usage import UsageLimits
 
@@ -27,6 +27,9 @@ from . import selection
 from . import session_store
 from .agent_definition import AgentDefinition, ResolvedRoots, ToolSet, bind
 from .agent_role import AgentRole
+from . import challenge_gate
+from . import review_roles
+from .close_tool import register_close_tool
 from .circuit_breaker import RunAborted
 from .permission.policies import _common
 from .providers import BuiltModel
@@ -244,14 +247,17 @@ def _gather_bash_shapes(roots: ResolvedRoots) -> tuple[Any, ...]:
 
 
 def _main_write_shape(roots: ResolvedRoots) -> tuple[Any, ...]:
-    return permission.build_named_write_allow(roots.run_dir, ("investigation.md", "report.md"))
+    # R1 (#774): report.md leaves the model's own write allow-list entirely — the close
+    # tool is now its ONLY writer, rendering it host-side through validate_artifact rather
+    # than accepting a model-supplied write/edit of it.
+    return permission.build_named_write_allow(roots.run_dir, ("investigation.md",))
 
 
 MAIN_DEF = AgentDefinition(
     role=AgentRole.MAIN,
     model=resolve_main_model,
     effort="low",
-    tools=ToolSet(read=True, bash=True, write=True),
+    tools=ToolSet(read=True, bash=True, write=True, close=True),
     corpus_dirs=_CORPUS_DIRS,
     bash_shapes=(_main_bash_shapes,),
     write_shapes=(_main_write_shape,),
@@ -430,7 +436,7 @@ def build_agent(  # noqa: PLR0913 — composition root: config + DI seams + the 
     defender_dir: Path, logger: observe.RequestLogger,
     make_model: MakeModel = providers.build_for_effort,
     *, main_model: str | None = None, verbs: Any = None, limits: dict = DEFAULT_LIMITS,
-    store: Any = None, session_id: str | None = None,
+    store: Any = None, session_id: str | None = None, review_stages: Any = None,
 ) -> Agent[AgentDeps, str]:
     extra: list[ProcessHistory[Any]] = []
     if store is not None:
@@ -474,6 +480,16 @@ def build_agent(  # noqa: PLR0913 — composition root: config + DI seams + the 
     # real grant, for reasons that have nothing to do with catalog content, must not narrow
     # what the catalog advertises.
     register_gather_tool(agent, _build_gather, GATHER_REQUEST_LIMIT, GATHER_DEF.verb_grant)
+    stages = (
+        review_stages if review_stages is not None
+        # `build_agent` has no `run_dir` of its own — the close tool's real run dir is
+        # `ctx.deps.run_dir` at call time, not something this composition root sees. The
+        # live default below is a best-effort placeholder (never exercised by the hermetic
+        # suite, which always injects `review_stages`); it is deliberately weak rather than
+        # silently wrong about which run dir it acts on.
+        else review_roles.default_review_stages(run_dir=defender_dir, defender_dir=defender_dir)
+    )
+    register_close_tool(agent, stages=stages)
     return agent
 
 
@@ -554,7 +570,13 @@ async def _drive_agent(
     try:
         async with agent.iter(
             prompt, deps=deps,
-            usage_limits=UsageLimits(request_limit=DEFAULT_REQUEST_LIMIT),
+            # RS7 (#774): the ceiling that terminates a run is raised by the gate's own
+            # forced-turn cap, read FROM the bound rather than restated as a literal —
+            # every run pays it whether or not the gate ever fires (a property of the
+            # run, not of a review that happened).
+            usage_limits=UsageLimits(
+                request_limit=challenge_gate.raised_request_limit(challenge_gate.default_bounds()),
+            ),
         ) as run:
             async for node in run:
                 _log_node(node)
@@ -563,6 +585,24 @@ async def _drive_agent(
               file=sys.stderr)
         truncated_by = "request-limit"
         exit_reason = "UsageLimitExceeded"
+    except UnexpectedModelBehavior as e:
+        # RS6 (#774): a stubborn model that keeps retrying a call the gate refuses (e.g. a
+        # write of report.md, narrowed off the allow-list by R1) exhausts the framework's
+        # shared tool-retry budget (`DEFAULT_TOOL_RETRIES`) and pydantic_ai raises this —
+        # none of the OTHER handlers here catch it, so uncaught it takes the whole process
+        # down. Force the unresolved close directly (bypassing the model, which is exactly
+        # what got stuck) rather than let the run end with no disposition at all.
+        print(f"[run.py] {e}; forcing an unresolved close (retry budget exhausted)",
+              file=sys.stderr)
+        truncated_by = "retry-exhausted"
+        exit_reason = "UnexpectedModelBehavior"
+        try:
+            from .close_tool import _close_investigation_async
+
+            await _close_investigation_async(deps, "inconclusive", stages=None)
+        except Exception as close_err:  # noqa: BLE001 — this exit must not itself raise
+            print(f"[run.py] forced close after retry exhaustion also failed "
+                  f"({close_err!r})", file=sys.stderr)
     except RunAborted as e:
         print(f"[run.py] {e}; writing partial trace", file=sys.stderr)
         truncated_by = "aborted"
@@ -597,6 +637,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     limits: dict | None = None,
     box: Any = None,
     store_factory: StoreFactory | None = None,
+    review_stages: Any = None,
 ) -> dict:
     model_name = resolve_main_model(model_name)
     make_model = make_model or providers.build_for_effort
@@ -639,7 +680,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
 
     agent = build_agent(
         defender_dir, logger, make_model, main_model=model_name, verbs=verbs, limits=limits,
-        store=store, session_id=session_id,
+        store=store, session_id=session_id, review_stages=review_stages,
     )
     deps = replace(
         bind(MAIN_DEF, run_dir, salt=salt, defender_dir=defender_dir, box=box),

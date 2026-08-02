@@ -457,13 +457,14 @@ def test_run_dir_still_carries_every_investigation_artifact_after_the_removal(
         "the builder did not materialize the raw-payload subdir it owns"
     )
     inv_text = (GOLDEN / "investigation.md").read_text(encoding="utf-8")
-    rep_text = (GOLDEN / "report.md").read_text(encoding="utf-8")
 
+    # #774/R1: report.md left the model's write allow-list — the golden's own disposition
+    # (inconclusive) commits straight through the close tool with no gate work, so no
+    # review_stages injection is needed here either.
     replay = ReplayFn([
         Turn(tool_calls=[("write_file", {"path": str(run_dir / "investigation.md"),
                                          "content": inv_text})]),
-        Turn(tool_calls=[("write_file", {"path": str(run_dir / "report.md"),
-                                         "content": rep_text})]),
+        Turn(tool_calls=[("close_investigation", {"disposition": "inconclusive"})]),
         Turn(text="Done."),
     ])
     drive(run_dir, run_id=run_dir.name, salt=salt, main=replay)

@@ -125,6 +125,8 @@ from defender.runtime.agent_definition import (  # noqa: E402
 )
 from defender.agents import (  # noqa: E402
     ACTOR_DEF,
+    CHALLENGER_DEF,
+    COHERENCE_CHECKER_DEF,
     CORPUS_AUTHOR_DEF,
     GATHER_DEF,
     JUDGE_DEF,
@@ -133,6 +135,7 @@ from defender.agents import (  # noqa: E402
     ORACLE_DEF,
     VERIFY_DEF,
 )
+from defender.runtime.review_roles import ChallengerDeps, CoherenceCheckerDeps  # noqa: E402
 
 _DEFENDER = PATHS.defender_dir
 
@@ -419,18 +422,22 @@ def test_d2_write_shapes_field(tmp_path):
 
 def test_d2_main_write_shape_anchors_run_dir(tmp_path):
     """d2_main_write_shape_anchors_run_dir (domain-outcome): MAIN's write shape anchors run_dir —
-    decide_write admits run_dir/report.md and DENIES defender_dir/skills/report.md (a
-    defender_dir-anchored shape would let MAIN author the corpus)."""
+    decide_write admits run_dir/investigation.md and DENIES defender_dir/skills/investigation.md
+    (a defender_dir-anchored shape would let MAIN author the corpus)."""
     # GREEN@HEAD: MAIN's run-dir write scope must survive the read_shapes→write_shapes migration.
-    # #631 (S2) narrowed MAIN's scope to exactly {investigation.md, report.md}; report.md is the
-    # run-dir positive control (run/x.md is no longer admitted — see test_main_write_scope_631).
+    # #631 (S2) narrowed MAIN's scope to exactly {investigation.md, report.md}; #774 (R1) narrowed
+    # it once more to exactly {investigation.md} — the close tool is report.md's only writer now,
+    # so investigation.md is the run-dir positive control (run/x.md is no longer admitted — see
+    # test_main_write_scope_631).
     run = tmp_path / "run"
     pol = bind(MAIN_DEF, run).policy
     assert permission.decide_write(                                                   # positive control
-        run / "report.md", _VALID_REPORT, run_dir=run, defender_dir=_DEFENDER, policy=pol).allow
+        run / "investigation.md", "", run_dir=run, defender_dir=_DEFENDER, policy=pol).allow
     assert not permission.decide_write(
-        _DEFENDER / "skills" / "report.md", _VALID_REPORT,
+        _DEFENDER / "skills" / "investigation.md", "",
         run_dir=run, defender_dir=_DEFENDER, policy=pol).allow
+    assert not permission.decide_write(                                    # R1: report.md is refused too
+        run / "report.md", _VALID_REPORT, run_dir=run, defender_dir=_DEFENDER, policy=pol).allow
 
 
 def test_d2_lead_author_write_shape_anchors_skills(tmp_path):
@@ -460,17 +467,19 @@ def test_d2_write_shape_resolves_symlinked_root(tmp_path):
     link = tmp_path / "linkrun"
     os.symlink(real, link)
     pol = bind(MAIN_DEF, link).policy
-    # report.md is MAIN's writable artifact post-#631 (S2); link/report.md resolves to
-    # real/report.md, so admitting it proves the write shape anchors on the RESOLVED root.
+    # investigation.md is MAIN's writable artifact (#774/R1 narrowed this off report.md, whose
+    # only writer is now the close tool); link/investigation.md resolves to real/investigation.md,
+    # so admitting it proves the write shape anchors on the RESOLVED root.
     assert permission.decide_write(
-        link / "report.md", _VALID_REPORT, run_dir=link, defender_dir=_DEFENDER, policy=pol).allow
+        link / "investigation.md", "", run_dir=link, defender_dir=_DEFENDER, policy=pol).allow
 
 
 def test_d2_main_lead_shapes_no_cross_contamination(tmp_path):
     """d2_main_lead_shapes_no_cross_contamination (negative): MAIN's run-dir shape admits its
-    sanctioned run-dir artifacts (post-#631 S2: exactly {investigation.md, report.md}); LEAD's .md
-    skills shape admits only skills/**.md — neither def's shape widens into the other's root/suffix
-    (positive control: each admits its own sanctioned write)."""
+    sanctioned run-dir artifact (post-#774/R1: exactly {investigation.md} — report.md's only
+    writer is now the close tool); LEAD's .md skills shape admits only skills/**.md — neither
+    def's shape widens into the other's root/suffix (positive control: each admits its own
+    sanctioned write)."""
     # RED@HEAD: the LEAD half needs bind(LEAD_AUTHOR_DEF, defender_dir=) → TypeError.
     run = tmp_path / "run"
     wtd = tmp_path / "wt" / "defender"
@@ -479,9 +488,11 @@ def test_d2_main_lead_shapes_no_cross_contamination(tmp_path):
     lead_pol = bind(LEAD_AUTHOR_DEF, run, defender_dir=wtd).policy
 
     assert permission.decide_write(                                                     # MAIN: sanctioned run-dir artifact
-        run / "report.md", _VALID_REPORT, run_dir=run, defender_dir=_DEFENDER, policy=main_pol).allow
+        run / "investigation.md", "", run_dir=run, defender_dir=_DEFENDER, policy=main_pol).allow
     assert not permission.decide_write(                                                 # MAIN doesn't widen into skills
-        skills / "report.md", _VALID_REPORT, run_dir=run, defender_dir=wtd, policy=main_pol).allow
+        skills / "investigation.md", "", run_dir=run, defender_dir=wtd, policy=main_pol).allow
+    assert not permission.decide_write(                                                 # R1: report.md refused too
+        run / "report.md", _VALID_REPORT, run_dir=run, defender_dir=_DEFENDER, policy=main_pol).allow
     assert permission.decide_write(                                                     # LEAD: sanctioned .md
         skills / "gather" / "x.md", "c", run_dir=run, defender_dir=wtd, policy=lead_pol).allow
     assert not permission.decide_write(                                                 # LEAD doesn't widen into run_dir
@@ -525,7 +536,11 @@ def test_d2_deps_class_maps_every_bindable_role(tmp_path):
     CORPUS_AUTHOR (the #556 curator port): like the lead author it is a per-spawn writer, but its
     policy needs the worktree `corpus_dir` that bind's RunScope cannot carry
     (compiling it here would root its write_allow at run_dir), so it is constructed only via
-    `CuratorDeps.for_run` and bind(CORPUS_AUTHOR_DEF) FAILS LOUD rather than mint a wrong policy."""
+    `CuratorDeps.for_run` and bind(CORPUS_AUTHOR_DEF) FAILS LOUD rather than mint a wrong policy.
+
+    #774 added two further ordinarily-bindable roles (CHALLENGER/COHERENCE_CHECKER — no read/bash
+    grant, no corpus, so a bare `bind()` works exactly like MAIN/GATHER/ORACLE, not like the
+    CORPUS_AUTHOR carve-out)."""
     cases = [
         (bind(MAIN_DEF, tmp_path), AgentDeps),
         (bind(GATHER_DEF, tmp_path), GatherDeps),
@@ -535,9 +550,11 @@ def test_d2_deps_class_maps_every_bindable_role(tmp_path):
         (bind(VERIFY_DEF, tmp_path, defender_dir=tmp_path / "vwt" / "defender"), VerifierDeps),
         (bind(LEAD_AUTHOR_DEF, tmp_path / "run", defender_dir=tmp_path / "wt" / "defender"),
          LeadAuthorDeps),
+        (bind(CHALLENGER_DEF, tmp_path), ChallengerDeps),
+        (bind(COHERENCE_CHECKER_DEF, tmp_path), CoherenceCheckerDeps),
     ]
-    # 8 roles total: the 7 bindable ones above + CORPUS_AUTHOR (for_run-only, asserted below).
-    assert len({role for role in AgentRole}) == 8
+    # 10 roles total: the 9 bindable ones above + CORPUS_AUTHOR (for_run-only, asserted below).
+    assert len({role for role in AgentRole}) == 10
     for deps, expected in cases:
         assert type(deps) is expected, f"{deps.role} → {type(deps).__name__}, want {expected.__name__}"
     with pytest.raises((ValueError, TypeError)):
@@ -890,12 +907,14 @@ def test_d6_guard_noop_for_real_writers(tmp_path):
     wtd = tmp_path / "wt" / "defender"
     skills = wtd / "skills"
     main_pol = bind(MAIN_DEF, run).policy
-    # #629 reconciliation: run_dir/report.md now carries an output-structure gate (frontmatter +
-    # size), so the D6 CONTAINMENT no-op must be shown with content that clears that orthogonal
-    # gate — a valid in-bounds report (the module's one `_VALID_REPORT`, so a change to what that
-    # gate accepts lands in one place). The assertion is unchanged: the write⊆read guard admits a
-    # real main write at the run-dir root.
-    assert permission.decide_write(run / "report.md", _VALID_REPORT, run_dir=run, defender_dir=_DEFENDER, policy=main_pol).allow
+    # #629 reconciliation: run_dir/investigation.md carries an output-structure gate too (byte
+    # bound + invlang), so the D6 CONTAINMENT no-op must be shown with content that clears that
+    # orthogonal gate — empty text passes invlang trivially. The assertion is unchanged: the
+    # write⊆read guard admits a real main write at the run-dir root. (#774/R1 moved this off
+    # report.md, whose only writer is now the close tool — that refusal is checked separately,
+    # below, as the negative half of the same D6 address.)
+    assert permission.decide_write(run / "investigation.md", "", run_dir=run, defender_dir=_DEFENDER, policy=main_pol).allow
+    assert not permission.decide_write(run / "report.md", _VALID_REPORT, run_dir=run, defender_dir=_DEFENDER, policy=main_pol).allow
     lead_pol = AgentPolicy(write_allow=(permission.build_write_allow(skills, suffix=".md"),), deny_reason="d")
     assert permission.decide_write(skills / "gather" / "x.md", "c", run_dir=run, defender_dir=wtd, policy=lead_pol).allow
 
