@@ -21,15 +21,20 @@ it). Drive a run with `drive(run_dir, run_id=…, salt=…, main=<callable>)`, w
 the callable is a `ReplayFn` / `DenyProbe` / `NeverEndsModel` — `drive` wraps it
 in `FunctionModel`, so scripts never touch the pydantic plumbing.
 
-Below the model there are exactly FIVE injected seams, and every one is a VALUE the run
+Below the model there are exactly SIX injected seams, and every one is a VALUE the run
 is handed (never a monkeypatched module attribute): the model itself (`make_model`), the
 data-source verb registry (`verbs=` → `run_investigation(verbs=…)`, #611), the budget cap
 table (`limits=` → `run_investigation(limits=…)`, #631), the box executor (`box=` →
-`run_investigation(box=…)`, #540), and the per-case session store (`store_factory=` →
-`run_investigation(store_factory=…)`, #705). The fifth exists because environment steering
+`run_investigation(box=…)`, #540), the per-case session store (`store_factory=` →
+`run_investigation(store_factory=…)`, #705), and the review-stage bundle (`review_stages=`
+→ `run_investigation(review_stages=…)`, #774) the close tool's live write-time gate drives
+its three model-backed stages through. The fifth exists because environment steering
 cannot express contention or corruption — it can only express "the store is missing", one
 third of O19's stated domain, while reading as covered — and the project profile forbids
-the `monkeypatch.setattr` that would express the rest (R12). A scenario hands `drive` a
+the `monkeypatch.setattr` that would express the rest (R12). The sixth exists because the
+gate's three review-stage calls have no injection point in the design at all — without a
+value the run is handed they are live provider calls, and no hermetic scenario could drive
+a single arm of the gate. A scenario hands `drive` a
 `FakeVerbs` table of plain
 annotated functions; the real query tool validates against their real signatures, the real
 capture capability writes the real rows. A scenario hands `drive` a `limits` dict; the real
@@ -275,7 +280,7 @@ def normalize(text: str, *, run_dir: Path, salt: str, run_id: str) -> str:
 
 def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJECTION SEAM
         run_dir: Path, *, run_id: str, salt: str, main, gather=None, verbs=None,
-        limits=None, box=None, store_factory=None):
+        limits=None, box=None, store_factory=None, review_stages=None):
     """Run the real driver with injected fake models — no monkeypatching of the
     model symbol. `main`/`gather` are plain replay callables (ReplayFn / DenyProbe
     / NeverEndsModel); this wraps each in `FunctionModel`, so scripts stay
@@ -306,7 +311,13 @@ def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJEC
     than exercising the lane the scenario is about. It does not weaken the boundary claim,
     which is pinned directly in the #540 suite — `test_no_box_failure_path_executes_in_process`
     and `test_tool_bash_executes_through_the_injected_box_seam` assert that production has no
-    unboxed path, and this default is reachable only from a test."""
+    unboxed path, and this default is reachable only from a test.
+
+    `review_stages` is the SIXTH injection seam (#774), demanded rather than described: the
+    live write-time gate drives three model-backed review stages from inside the close tool,
+    and without a value the run is handed they are real provider calls that no hermetic
+    scenario can drive. Passed through only when supplied, so every pre-#774 scenario is
+    untouched. RED until `run_investigation` accepts it — that is the demand."""
     main_built = BuiltModel(FunctionModel(main), None)
     gather_built = BuiltModel(FunctionModel(gather), None) if gather is not None else None
 
@@ -329,6 +340,8 @@ def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJEC
         seams["limits"] = limits
     if store_factory is not None:
         seams["store_factory"] = store_factory
+    if review_stages is not None:
+        seams["review_stages"] = review_stages
     seams["box"] = box if box is not None else box_mod.unboxed_executor(
         env=run_common.run_env(DEFENDER, run_dir),
     )

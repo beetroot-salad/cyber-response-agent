@@ -1,0 +1,2240 @@
+schema_version: 1
+design: "#774 — the input set at .spec-flow/input/: 01-final-design.md is the design doc,
+  02-cold-review.md AMENDS it and wins on conflict, 03-experiment-findings.md (merged as
+  PR #780) fixes the challenger's output contract, and README-scope.md retargets the run."
+base: a83c3347
+
+# ===========================================================================
+# SCOPE: PR 2 ONLY — THE LIVE WRITE-TIME GATE.
+#
+# This artifact REPLACES a same-named one assembled under the previous scope. That
+# earlier graph declared this run's whole subject matter (the write interception, the
+# per-run counters, the forced-turn cap, R1's write-allow narrowing, R3's ceiling) as
+# carried by NO demand. It was overwritten, not amended.
+#
+# In scope: `write_file("report.md")` intercepted before the write commits; the per-run
+# turn/grace counters on the frozen deps object; the forced-`inconclusive` cap; R1 —
+# report.md leaves the model's own write allow so the close path is the only writer;
+# R3 — the request limit, not budget enforcement, is the ceiling that terminates a run;
+# O7/C12 — attacker-influenced payload text reaching the live session through the
+# review's return.
+#
+# OUT of scope, and carried by no demand here: the offline sweep over completed run
+# dirs, its corpus/denominator question, the "curators unwired, time-boxed" interim
+# guarantee, and the offline measurement entirely. The consequence is accepted and
+# recorded: the gate's survival rate is observed in production rather than measured
+# beforehand.
+#
+# NINE HUMAN RESOLUTIONS ARE FOLDED IN AND ARE NOT RE-OPENED (.spec-flow/frontiers/
+# 70-resolutions.md). Four of them had no demand binding them when the demand set was
+# extracted; they are minted here — `retry_exhaustion_does_not_escape_the_driver`,
+# `ceiling_is_bound_to_the_turn_cap`, `fail_closed_covers_every_review_stage`, and
+# `report_629_contracts_retired_deliberately`.
+#
+# THE EXECUTED PROBES OUTRANK THE DESIGN PROSE. Where a probe overturned a design
+# sentence the artifact carries the probed reality and `handoff.refuted` names the
+# superseded reading:
+#   * "reject the write and force another turn" HAS NO MECHANISM. A tool refusal is a
+#     raw retry, the budget is 10, and the 11th raises an error the driver does not
+#     catch. Corrected per RS6: the gate's own cap sits below the retry budget and a
+#     driver handler catches exhaustion.
+#   * The blinding decision cannot be delivered by narrowing inputs — at write time the
+#     challenger's run dir IS the investigation's dir and both grant surfaces admit it
+#     unconditionally. Enforcement is NO file-read grant at all.
+#   * A refused write returns to the model RAW AND UNWRAPPED. The only precedent for a
+#     refusal carrying payload-sourced text inside containment lives on a different tool
+#     family, so the gate's return is a new channel shape.
+#
+# NAME RECONCILIATION (grounding, demand extraction and the dispositions' address
+# derivations coined ids independently; unified here by role+origin). Every entry is a
+# RENAME OF THE GRAPH, never an alias — an alias disables check_binds for the concept it
+# papers over:
+#   `agent_deps.review_state` (21-demands) -> boundary `review_state`. The old spelling
+#       is not a facet address and resolved to nothing; the counters are their own seam,
+#       which is exactly what the frozen-deps precedent forces (one mutable container).
+#   `interacts(challenge_gate->challenger)` / `(challenger->challenge_gate).response`
+#       -> ONE invoke edge with a response limb, `interacts(challenge_gate->challenger)`
+#       and `.response`. The demand set addressed the stage call as two opposing edges;
+#       the schema's own idiom is one edge, two limbs.
+#   `interacts(oracle->challenge_gate).response` -> `interacts(challenge_gate->oracle).response`.
+#   `interacts(challenge_gate->main_session).payload` — DROPPED as a dangling address.
+#       The gate does not return to the session; the tool does. The reach surfaces the
+#       negative had to grow are named on `counter_story_absent_from_session` instead.
+#   The three review stages are BOTH actors (they run, they write traces, they are
+#       driven) and boundaries (their tool grant is an access facet — 70-resolutions'
+#       carried-open item 6 says that missing element is where two rounds of unowned
+#       faults traced to). Same for the close tool: an actor that writes report.md, and
+#       a boundary whose access facet is who may call it.
+#
+# THE RE-GROUNDING PROBE LANDED AND ALL FOUR SLOTS ARE SETTLED. Two of its results are
+# refutations that change what gets built:
+#   * Salt inheritance is NOT a general property of subagent binds. The live main-to-gather
+#     pair is the ONLY shared-salt case; every learning stage mints its own, and two stage
+#     entrypoints cannot even accept a threaded one. This NARROWS the delimiter-escape
+#     exposure — a role built on the learning-stage precedent never sees the main session's
+#     delimiter — and makes the precedent choice itself load-bearing, which is why
+#     `review_roles_mint_their_own_salt` now exists.
+#   * The fail-fast model preflight is unreachable from any live entrypoint; the live
+#     preflight is hardcoded to the two existing roles and cannot enumerate the roles a run
+#     will invoke. A new role's bad config surfaces only at first use, and whether it raises
+#     at all is provider-dependent. Combined with the fail-closed resolution, a misconfigured
+#     gate silently downgrades live investigations to unresolved one at a time instead of
+#     failing at startup — hence
+#     `misconfigured_review_role_fails_before_the_investigation_pays`.
+# The other two hold: every non-main role builds fresh per call (so an unregistered role's
+# loud failure lands at first gate fire, deep into a paid-for investigation), and a faulted
+# stage always closes its trace logger — but writes no incompleteness marker, so a truncated
+# trace and a complete one are indistinguishable by any recorded flag.
+#
+# SEVEN FURTHER HUMAN RESOLUTIONS LANDED AT THE PHASE-D SEAM (.spec-flow/frontiers/
+# 71-resolutions-gate.md, RS10–RS16) AND CLOSE ALL TWELVE `gate.holes`. They arrived after
+# assembly, so — exactly as the dispositions frontier's red flag said of the first nine — four
+# of the twelve holes had no demand binding them. Nine demands are minted here for them, and
+# `bounds_reject_zero` moves from `clause` to `test` because the only reason it was prose (both
+# bounds' shipped values undecided) is gone:
+#   RS10 role input contracts   -> `coherence_checker_input_is_the_counter_story_only`,
+#                                  `projection_input_is_live_shaped`. CONSEQUENCE STATED, NOT
+#                                  ASSUMED: the projection stage is no longer "reused
+#                                  unchanged"; the design's claim that it is free is withdrawn.
+#   RS11 the record's sink      -> `review_record_lives_beside_the_run`; `review_record.identity`
+#                                  finally has evidence to point at.
+#   RS12 host-rendered close    -> `close_tool_host_renders_from_typed_arguments`,
+#                                  `close_write_reenters_artifact_validation`. The report's
+#                                  `reason` becomes a TYPED value, which is what closes R6's
+#                                  rendered-sink finding — the raw-render exposure never opens.
+#   RS13 the ninth arm          -> `degenerate_evidence_is_its_own_arm`; the arm moves out of
+#                                  `documented_alternatives` into `distinguished`.
+#   RS14 the two bounds         -> extra_turn_bound default 2, grace_bound default 1, reset per
+#                                  gate attempt (`grace_budget_resets_per_gate_attempt`).
+#   RS15 close is terminal      -> already carried by `close_is_terminal_for_the_disposition`;
+#                                  the three answerers' converged "the working document's grant
+#                                  is untouched" is OVERRULED, and the two access cells now say
+#                                  so instead of reading `unknown`.
+#   RS16 the budget exemption   -> `close_tool_budget_exemption_is_explicit`.
+# A STAGE-HANG PROBE WAS COMMISSIONED MID-AUTHORING and landed; its five claims are PS1-PS5.
+# It closed the one assertion in the suite resting on an unclaimed fault class, and minted two
+# demands: `review_stages_are_wall_clock_bounded` (the adjacent live precedent bounds itself
+# with a request-COUNT cap that cannot fire on a pending call, so a hang there hangs forever)
+# and `timeout_and_failure_are_distinguishable` (where a bound does exist, its expiry and a
+# crash raise the same type and no caller in the tree tells them apart). The second is PS4's
+# refutation turned into a demand rather than a note.
+#
+# One further demand is minted by the SUITE rather than by a resolution:
+# `review_stages_enter_through_an_injection_seam`. The design gives the three stage calls no
+# seam, and the author charge is explicit that a dependency with no seam makes the seam part of
+# the contract — without it not one arm of this gate is drivable by any hermetic test.
+
+demands:
+
+  # ---- the return-value contract, and the close tool's own surface -------------------
+
+  - id: close_result_contract
+    kind: behavior
+    form: test
+    provisional: true
+    binds: ["interacts(main_agent->tool_close_investigation).response",
+            "close_outcome.domain.distinguished[closed-unchallenged]",
+            "close_outcome.domain.distinguished[closed-refuted]",
+            "close_outcome.domain.distinguished[closed-incoherent]",
+            "close_outcome.domain.distinguished[closed-declined]",
+            "close_outcome.domain.distinguished[forced-inconclusive-review-failed]",
+            "close_outcome.domain.distinguished[closed-malformed]",
+            "close_outcome.domain.distinguished[challenged]",
+            "close_outcome.domain.distinguished[forced-inconclusive-nondiscriminating]",
+            "close_outcome.domain.distinguished[forced-inconclusive-cap]"]
+    discharged_by: test_close_result_contract_is_one_typed_arm_per_outcome
+
+  - id: tool_close_investigation_seam
+    kind: seam
+    form: test
+    binds: ["tool_close_investigation",
+            "tool_close_investigation.access[main]",
+            "interacts(main_agent->tool_close_investigation).payload"]
+    discharged_by: test_close_tool_is_registered_to_main_with_a_typed_disposition
+    # POSITIVE CONTROL for `close_tool_is_main_only` on the complementary cell: `access[main]`
+    # must actually admit a call that commits, or the main-only negative passes on a tool no
+    # role can reach.
+
+  - id: disposition_outside_vocabulary_rejected
+    kind: domain-outcome
+    form: test
+    binds: ["interacts(main_agent->tool_close_investigation).payload", "disposition.domain"]
+    discharged_by: test_a_disposition_outside_the_enum_or_a_case_variant_is_rejected_before_any_gate_work
+
+  - id: close_tool_is_main_only
+    kind: negative
+    form: test
+    binds: ["tool_close_investigation.access[gather]",
+            "tool_close_investigation.access[main]"]
+    discharged_by: test_close_tool_is_unreachable_from_every_role_but_main
+    rejected: [{nl: "Per-role verb authorization was considered and refuted as the mechanism — a verb is a data-source operation and a non-empty grant on the investigator role fails at policy compile, so main-only reachability is expressed by registering only at main's composition root."}]
+
+  - id: close_tool_survives_budget_pressure
+    kind: behavior
+    form: test
+    binds: ["tool_close_investigation.access[budget_tier]", "budget.domain.distinguished[on]"]
+    discharged_by: test_a_budget_pressed_run_can_still_close
+    rejected: [{nl: "Demoting the write tool out of the budget tail tier to make room for the close tool is the wrong repair — two existing test modules carry explicit comments recording that."}]
+
+  - id: close_tool_budget_exemption_is_explicit
+    kind: seam
+    form: test
+    binds: ["tool_close_investigation.access[budget_tier]"]
+    discharged_by: test_the_close_tools_budget_exemption_is_registered_and_named
+    rejected: [{nl: "Leaving the exemption implicit in whichever tier the tool happens to land in was rejected (RS16): a newly registered tool falls to the refusable core tier by default, so the exemption is a registration that can be silently removed rather than a property anything fails without. The close is the one call that must always be available — refusing it strands an investigation with findings it cannot record, and the gate's own forced turns are what push the run into that pressure."}]
+
+  - id: close_tool_host_renders_from_typed_arguments
+    kind: shape
+    form: test
+    binds: ["interacts(main_agent->tool_close_investigation).payload",
+            "report_md.access[close_investigation]"]
+    discharged_by: test_the_close_tool_composes_the_report_from_typed_arguments_and_accepts_no_body
+    rejected: [{nl: "Accepting a model-supplied report body as a close argument was rejected (RS12): that argument is a new, unvalidated write surface, which is precisely the bypass removing report.md from the model's write allow exists to close."}]
+
+  - id: close_write_reenters_artifact_validation
+    kind: behavior
+    form: test
+    binds: ["report_md.access[close_investigation]", "report_md.payload"]
+    discharged_by: test_the_close_write_reenters_the_validation_the_retired_path_enforced
+    rejected: [{nl: "Letting the host write bypass the artifact schema was rejected: the report gained its schema, duplicate-key and legacy-delimiter breakout checks BECAUSE the model's write reached it through the write tool's validation path, and a host write triggered by a typed argument does not pass that gate by construction."}]
+
+  # ---- R1: report.md leaves the model's write allow ----------------------------------
+
+  - id: report_md_single_writer
+    kind: behavior
+    form: test
+    binds: ["report_md.access[write_file]", "report_md.access[close_investigation]",
+            "budget.domain.distinguished[off]"]
+    discharged_by: test_report_md_leaves_the_model_write_allow_and_the_close_tool_writes_it
+    rejected: [{nl: "Leaving the model's write open and instructing it not to use the path was rejected: the gate's structural argument is that exactly one writer exists, and an open bypass makes the boundary instructed rather than structural."}]
+
+  - id: report_md_write_parity
+    kind: parity
+    form: test
+    binds: ["report_md.access[write_file]", "report_md.access[edit_file]"]
+    discharged_by: test_both_write_and_edit_are_refused_on_report_md
+
+  - id: close_path_survives_the_write_allow_change
+    kind: survival
+    form: test
+    binds: ["report_md", "tool_close_investigation", "skill_md"]
+    discharged_by: test_a_run_still_reaches_a_recorded_disposition_without_write_access_to_report_md
+
+  - id: close_instruction_surfaces_agree
+    kind: behavior
+    form: test
+    binds: ["skill_md", "budget_refusal_message", "write_file_docstring"]
+    discharged_by: test_no_model_facing_surface_still_says_report_md_is_writable
+
+  - id: replay_trace_rerecorded_not_allow_weakened
+    kind: survival
+    form: test
+    binds: ["replay_trace", "report_md.access[write_file]"]
+    discharged_by: test_the_recorded_replay_whose_write_the_narrowed_allow_refuses_is_re_recorded
+
+  - id: report_629_contracts_retired_deliberately
+    kind: survival
+    form: clause
+    outcome: {nl: "The two contracts committed under the earlier report-output work — that a valid report is reachable with zero working-document content on disk, and that no ordering requirement exists between the two write gates — are retired deliberately as part of removing report.md from the model's write allow, and the retirement is recorded with its reason rather than discovered as a broken test."}
+    binds: ["report_md.access[write_file]", "investigation_md"]
+    rejected: [{nl: "Weakening the narrowed allow-list so the two committed contracts keep passing was rejected — that is the bypass this change exists to close. Letting them break silently as collateral damage was also rejected."}]
+
+  - id: report_ordering_independence_retired
+    kind: survival
+    form: test
+    binds: ["report_md", "investigation_md"]
+    discharged_by: test_the_629_ordering_independence_contract_is_re_expressed_on_the_close_tool
+
+  # ---- when the gate fires, and what it does -----------------------------------------
+
+  - id: gate_skips_inconclusive
+    kind: domain-outcome
+    form: test
+    binds: ["disposition.domain.distinguished[inconclusive]",
+            "close_outcome.domain.distinguished[closed-unchallenged]"]
+    discharged_by: test_a_draft_inconclusive_close_commits_without_invoking_the_gate
+
+  - id: unresolved_runs_are_reviewed_by_nothing
+    kind: domain-outcome
+    form: waiver
+    outcome: {nl: "Unresolved investigations are reviewed by nothing, and that is accepted at this scope rather than overlooked. The gate skips the unresolved disposition deliberately, and the offline pipeline that used to service exactly those cases left the plan when the measurement PR was skipped — so the ground the original non-obligation was granted on is gone. This change also ENLARGES the unreviewed population: the gate manufactures an unresolved outcome on three of its own arms — the forced-turn cap, any review that cannot complete under the fail-closed policy, and the arm where the evidence cannot speak to the story. A challenger's deliberate DECLINE is not among them: it leaves the confident close standing, and counting it here (as this waiver did before the arm split) overstated the waived population by an arm. The recorded disposition is what every downstream consumer routes on, and the five production sites that read it disagree about how to handle it, so the cost of this waiver is paid by real consumers and grows with how often the gate fires. A human examined this at the authoring seam and accepted it for this scope."}
+    binds: ["disposition.domain.distinguished[inconclusive]",
+            "close_outcome.domain.distinguished[forced-inconclusive-cap]",
+            "close_outcome.domain.distinguished[forced-inconclusive-review-failed]",
+            "close_outcome.domain.distinguished[closed-evidence-cannot-speak]",
+            "directions_for"]
+    cites: [C19, K12, K15, K21, K22, PS4]
+    rejected:
+      - {nl: "Firing the gate on unresolved dispositions was considered and declined: the existing disposition-to-direction map returns BOTH directions for the unresolved value, and nothing states how two counter-stories are argued, compared, or combined into one verdict. That is new design, not a decision this spec can take — and it would double the review cost on exactly the population the gate is least confident about."}
+      - {nl: "Reviewing only the unresolved runs the gate itself manufactured was considered and declined: it needs re-entry semantics nothing specifies — whether a forced-inconclusive close can be re-opened, what the turn and grace counters mean on a second pass, and whether the record of the first review is an input to the second. Cheaper-looking than the general case, and no better specified."}
+      - {nl: "Leaving this as an open fork for the next phase was declined. It is the one item on this run's list that no further reading could settle, and carrying it forward would have read as an oversight in the finished spec rather than as a cost someone accepted."}
+
+  - id: counter_direction_from_directions_for
+    kind: behavior
+    form: test
+    binds: ["interacts(challenge_gate->directions_for)",
+            "disposition.domain.distinguished[malicious]",
+            "disposition.domain.distinguished[benign]"]
+    discharged_by: test_counter_direction_comes_from_the_existing_map_against_the_live_disposition
+
+  - id: gate_absent_on_truncated_run
+    kind: negative
+    form: test
+    binds: ["interacts(main_agent->tool_close_investigation)",
+            "request_limit.domain.distinguished[60]"]
+    discharged_by: test_a_request_limited_run_never_reaches_the_gate
+
+  - id: challenged_arm_forces_a_turn
+    kind: behavior
+    form: test
+    binds: ["close_outcome.domain.distinguished[challenged]", "review_state",
+            "interacts(main_agent->tool_close_investigation)"]
+    discharged_by: test_a_surviving_story_with_silent_rows_refuses_the_close_and_counts_a_turn
+    # POSITIVE CONTROL for `gate_absent_on_truncated_run` on the same edge: a run that DOES
+    # reach the close fires the gate and spends a turn, so the truncated-run negative is not
+    # green because the review is unreachable in every case.
+    rejected: [{nl: "The design's mechanism — refuse the write so the framework hands the model another turn — is refuted and is not what this demand pins. A refusal is a raw retry against a shared budget of 10 whose overflow escapes every driver handler, and nothing in the tree structurally compels a further turn. What forces the turn is that the disposition is simply not committed until the gate is satisfied or the cap fires."}]
+
+  - id: challenger_decline_leaves_the_close_standing
+    kind: domain-outcome
+    form: test
+    binds: ["close_outcome.domain.distinguished[closed-declined]",
+            "close_outcome.domain.distinguished[forced-inconclusive-review-failed]"]
+    discharged_by: test_a_challenger_that_declines_to_argue_leaves_the_confident_close_standing
+    rejected: [{nl: "Letting the challenger's decline share the fail-closed outcome's arm was rejected (RS17). The two mean opposite things — a decline is the challenger having nothing to say about a case it understood, a review failure is the machinery breaking — so one value gave them one downstream handling, and the design's own decline output lost its address: no arm, no demand, no test, and the suite's nearest neighbour scored a non-verdict reply as infrastructure noise. This is the same collapse the malformed arm exists to prevent in the mirror direction."}]
+
+  - id: nondiscriminating_forces_inconclusive
+    kind: behavior
+    form: test
+    binds: ["close_outcome.domain.distinguished[forced-inconclusive-nondiscriminating]"]
+    discharged_by: test_a_surviving_story_with_no_silent_rows_forces_inconclusive_immediately
+
+  - id: turn_cap_forces_inconclusive
+    kind: behavior
+    form: test
+    binds: ["close_outcome.domain.distinguished[forced-inconclusive-cap]",
+            "extra_turn_bound.domain"]
+    discharged_by: test_the_attempt_past_the_bound_forces_inconclusive_instead_of_gating
+
+  - id: degenerate_evidence_is_its_own_arm
+    kind: domain-outcome
+    form: test
+    binds: ["close_outcome.domain.distinguished[closed-evidence-cannot-speak]",
+            "close_outcome.domain.distinguished[challenged]",
+            "close_outcome.domain.distinguished[forced-inconclusive-nondiscriminating]"]
+    discharged_by: test_a_story_no_executed_lead_can_touch_takes_its_own_arm
+    rejected: [{nl: "Reading every-lead-silent and no-lead-executed as opposite evidence — the two-branch split's behaviour — was rejected (RS13). Both mean the evidence cannot speak to the story; one says the investigation was under-determined, the other that the story was untestable. Under the split the gate spends a forced turn exactly where another turn cannot help, and burns the raised ceiling doing it. Promoted from a silent convergence three independent readers made without noticing they had decided anything."}]
+
+  - id: forced_turn_raises_a_new_gap
+    kind: negative
+    form: test
+    provisional: true
+    binds: ["interacts(tool_close_investigation->main_session).payload", "review_state"]
+    discharged_by: test_a_second_forced_turn_does_not_re_raise_a_gap_already_raised
+
+  # ---- the corrected forced-turn mechanism (RS6) and the raised ceiling (RS7) ---------
+
+  - id: forced_turn_cap_below_retry_budget
+    kind: behavior
+    form: test
+    binds: ["retry_budget.domain.distinguished[10]", "extra_turn_bound.domain"]
+    discharged_by: test_the_forced_turn_cap_is_rejected_when_it_reaches_the_shared_retry_budget
+
+  - id: retry_exhaustion_does_not_escape_the_driver
+    kind: behavior
+    form: test
+    binds: ["retry_budget.domain", "run_investigation",
+            "close_outcome.domain.distinguished[forced-inconclusive-cap]"]
+    discharged_by: test_a_stubborn_model_exhausting_the_retry_budget_closes_unresolved_instead_of_crashing
+
+  - id: ceiling_is_bound_to_the_turn_cap
+    kind: behavior
+    form: test
+    binds: ["request_limit.domain.alternatives[60 + extra_turn_bound]", "extra_turn_bound.domain"]
+    discharged_by: test_the_raised_request_ceiling_is_read_from_the_forced_turn_cap_not_a_literal
+    rejected: [{nl: "Separating the review's request allowance from the investigation's was recommended and not taken; one budget is kept and the ceiling raised, so the interaction returns the moment the cap changes and the two must be unable to move independently."}]
+
+  - id: every_run_pays_the_raised_ceiling
+    kind: domain-outcome
+    form: test
+    binds: ["request_limit.domain.alternatives[60 + extra_turn_bound]", "run_investigation"]
+    discharged_by: test_a_run_the_gate_never_fires_on_still_gets_the_raised_ceiling
+
+  - id: review_does_not_starve_the_run
+    kind: behavior
+    form: test
+    binds: ["request_limit.domain", "drives(challenge_gate->challenger)"]
+    discharged_by: test_the_reviews_own_calls_cannot_push_the_investigation_into_the_request_limit
+    rejected: [{nl: "The pre-existing gap where the run's cost sum omits every gather subagent call is not fixed here; that failure clause is already true today, independent of this change."}]
+
+  # ---- the two bounds, and the per-run counters ---------------------------------------
+
+  - id: extra_turn_bound_is_a_knob
+    kind: seam
+    form: test
+    binds: ["extra_turn_bound.domain"]
+    discharged_by: test_the_extra_turn_bound_is_injected_not_literal
+
+  - id: grace_bound_is_a_knob
+    kind: seam
+    form: test
+    binds: ["grace_bound.domain"]
+    discharged_by: test_the_grace_bound_is_injected_not_literal
+
+  - id: bounds_reject_zero
+    kind: domain-outcome
+    form: test
+    binds: ["extra_turn_bound.domain.distinguished[0]", "grace_bound.domain.distinguished[0]"]
+    discharged_by: test_zero_is_refused_for_either_bound
+    rejected: [{nl: "Accepting zero and treating the resulting indistinguishability as a cost was one of the two readings the answering copies split on, and it is not taken. This demand was prose SOLELY because both bounds' shipped values were an open human decision; RS14 set them (two forced turns, one refinement round), so it is executable and the two R4 zero-cell obligations it left open are closed."}]
+
+  - id: grace_budget_resets_per_gate_attempt
+    kind: behavior
+    form: test
+    binds: ["grace_bound.domain", "review_state"]
+    discharged_by: test_a_second_gate_attempt_starts_with_a_full_grace_budget
+    rejected: [{nl: "Resetting grace per RUN was rejected (RS14): a second challenge would inherit an exhausted budget and could never refine at all, which silently turns every later attempt into a cold pass while the rounds-consumed signal still reports zero."}]
+
+  - id: review_state_on_frozen_deps
+    kind: seam
+    form: test
+    binds: ["review_state", "agent_deps"]
+    discharged_by: test_review_counters_live_in_a_mutable_container_and_are_per_run
+
+  # ---- what the investigator gets back ------------------------------------------------
+
+  - id: counter_story_absent_from_session
+    kind: negative
+    form: test
+    binds: ["interacts(tool_close_investigation->main_session).payload",
+            "report_md.payload", "review_record", "review_trace"]
+    discharged_by: test_no_counter_story_prose_reaches_the_main_session
+    rejected: [{nl: "Binding this negative to the tool return alone was rejected: payload-derived text also reaches the report's frontmatter reason on the forced-unresolved arms, the review record, and the review stages' own execution traces — and the last two sit inside grants the investigator already holds, so a negative naming one address passes vacuously on the other three."}]
+
+  - id: discriminating_material_reaches_session
+    kind: behavior
+    form: test
+    binds: ["interacts(tool_close_investigation->main_session).payload"]
+    discharged_by: test_the_challenged_arm_does_hand_back_the_discriminating_material
+
+  - id: review_return_is_contained
+    kind: shape
+    form: test
+    binds: ["interacts(tool_close_investigation->main_session).payload"]
+    discharged_by: test_payload_derived_text_returns_only_inside_the_run_salted_untrusted_frame
+
+  - id: review_return_is_typed_not_prose
+    kind: shape
+    form: test
+    binds: ["interacts(tool_close_investigation->main_session).payload"]
+    discharged_by: test_the_recommended_lead_structure_admits_no_free_text_limb
+
+  - id: recommended_lead_provenance
+    kind: shape
+    form: test
+    binds: ["interacts(tool_close_investigation->main_session).payload"]
+    discharged_by: test_a_reviewer_originated_lead_carries_its_provenance_stamp
+
+  # ---- the challenger's input, grant and output ----------------------------------------
+
+  - id: challenger_input_is_observation_layer
+    kind: shape
+    form: test
+    binds: ["interacts(challenge_gate->challenger).payload"]
+    discharged_by: test_the_challengers_input_carries_observations_and_no_inference_layer
+    rejected: [{nl: "Dropping only the concluding block was rejected: in three of three real completed working documents the resolution and authorization rows already name the settled interpretation in plain English, so the cut has to be at the observation/inference boundary, not the inference/conclusion one."}]
+
+  - id: challenger_sees_lead_identity_not_belief_structure
+    kind: shape
+    form: test
+    binds: ["interacts(challenge_gate->challenger).payload"]
+    discharged_by: test_the_challenger_sees_lead_identity_but_not_the_hypotheses_each_lead_tests
+    rejected:
+      - {nl: "Admitting the lead block whole was rejected (RS18). A lead row carries the ids of the hypotheses the lead was run to test, which is belief structure and sits on the inference side of the line the human drew — the same line the ledger claim states in the document's own vocabulary. Withholding the block entirely was rejected too: the challenger's output contract requires a lead id per settled assertion, so identity must arrive or that contract is unsatisfiable."}
+      - {nl: "Expressing this by asserting a block tag's presence was rejected, and is how the whole block came to be admitted in the first place. The resolution constrains which COLUMNS of a row arrive; a tag assertion cannot see a column, so the demand is written at row-content altitude instead."}
+
+  - id: challenger_holds_no_run_dir_read
+    kind: negative
+    form: test
+    binds: ["challenger.access[read_file]", "challenger.access[bash]",
+            "coherence_checker.access[read_file]", "coherence_checker.access[bash]"]
+    discharged_by: test_the_new_roles_cannot_reach_the_live_working_document
+    rejected: [{nl: "Narrowing the roles' extra read roots was rejected as the enforcement mechanism — the working document is reachable through the run directory itself, which both grant surfaces admit first and unconditionally, ahead of any read-roots widening."}]
+
+  - id: challenger_reads_its_inlined_input
+    kind: behavior
+    form: test
+    binds: ["interacts(challenge_gate->challenger).payload",
+            "challenger.access[read_file]"]
+    discharged_by: test_the_challenger_still_receives_its_observation_layer_input
+    # POSITIVE CONTROL for `challenger_holds_no_run_dir_read`, on the same cell under the
+    # complementary condition: with NO read grant the same observation-layer bytes still reach
+    # the role through the sanctioned inlined path. A bare no-grant negative is also green
+    # against a role that receives nothing at all.
+
+  - id: coherence_checker_input_is_the_counter_story_only
+    kind: shape
+    form: test
+    binds: ["interacts(challenge_gate->coherence_checker).payload"]
+    discharged_by: test_the_coherence_checker_receives_the_counter_story_and_nothing_else
+    rejected: [{nl: "Giving the coherence checker payload access was rejected (RS10). Internal consistency is the only job it can do without payload access, and that constraint is what keeps it honest — a critic that can see the evidence stops checking coherence and starts re-litigating the case."}]
+
+  - id: projection_input_is_live_shaped
+    kind: shape
+    form: test
+    binds: ["interacts(challenge_gate->oracle).payload"]
+    discharged_by: test_the_projection_stage_input_is_built_from_the_live_run_not_a_learning_run_dir
+    rejected: [{nl: "Reusing the projection stage unchanged was rejected (RS10), and the design's claim that this reuse is free is WITHDRAWN. Its existing invocation threads a learning run directory and a story-derived trace prefix; a live investigation supplies neither, and it is the stage two of the verdict vocabulary's arms are defined over."}]
+
+  - id: review_stages_enter_through_an_injection_seam
+    kind: seam
+    form: test
+    binds: ["drives(challenge_gate->challenger)",
+            "drives(challenge_gate->coherence_checker)",
+            "drives(challenge_gate->oracle)",
+            "run_investigation"]
+    discharged_by: test_the_review_stages_are_driven_through_an_injection_seam_on_the_entry_point
+    rejected: [{nl: "Leaving the three stage calls seamless was rejected: the design names no injection point for them, and without a value the run is handed they are live provider calls that no hermetic scenario can drive — so not one arm of this gate would be testable. The seam sits on the entry point beside the five that already exist there, following the same value-not-monkeypatch discipline."}]
+
+  - id: challenger_output_contract
+    kind: shape
+    form: test
+    binds: ["interacts(challenge_gate->challenger).response"]
+    discharged_by: test_the_challenger_tail_declares_unsettled_requirements_with_settled_by_and_if_false
+
+  - id: discriminator_rule
+    kind: behavior
+    form: test
+    provisional: true
+    binds: ["interacts(challenge_gate->oracle).response",
+            "interacts(challenge_gate->challenger).response"]
+    discharged_by: test_the_discriminating_set_is_silence_measured_against_declared_unsettled_requirements
+
+  - id: direction_conditional_affordances
+    kind: domain-outcome
+    form: test
+    binds: ["mitre_menu", "past_tickets",
+            "direction.domain.distinguished[malicious]",
+            "direction.domain.distinguished[benign]"]
+    discharged_by: test_the_challengers_exploration_menu_follows_the_direction_it_argues
+
+  - id: cold_start_affordance_omitted_not_empty
+    kind: domain-outcome
+    form: test
+    binds: ["past_tickets.domain.distinguished[cold-start-no-eligible-tickets]",
+            "direction.domain.distinguished[benign]"]
+    discharged_by: test_an_empty_affordance_sample_omits_the_section_rather_than_sending_it_empty
+
+  - id: menu_compliance_stays_unvalidated
+    kind: behavior
+    form: clause
+    outcome: {nl: "The challenger's citations against its exploration menu are not validated, matching the actor precedent this role inherits: no check anywhere reads a cited technique table back against the menu the role was given, and neither judge direction receives a menu at all."}
+    binds: ["mitre_menu"]
+    rejected: [{nl: "Adding output-side menu-compliance validation was considered and not taken — the human's settled decision fixed the affordances, not their enforcement."}]
+
+  # ---- the verdict arms and the record -------------------------------------------------
+
+  - id: malformed_output_is_its_own_arm
+    kind: domain-outcome
+    form: test
+    binds: ["close_outcome.domain.distinguished[closed-malformed]",
+            "close_outcome.domain.distinguished[closed-incoherent]"]
+    discharged_by: test_unparseable_output_never_scores_as_challenger_incoherence
+
+  - id: refuted_and_incoherent_stay_distinct
+    kind: uniqueness
+    form: test
+    binds: ["review_record.identity", "close_outcome.domain.distinguished[closed-refuted]"]
+    discharged_by: test_a_refuted_story_and_an_incoherent_one_are_distinguishable_on_disk
+
+  - id: review_record_on_every_arm
+    kind: behavior
+    form: test
+    binds: ["review_record", "close_outcome.domain"]
+    discharged_by: test_every_gate_arm_including_the_surviving_story_leaves_a_typed_record
+
+  - id: review_record_is_not_half_written
+    kind: uniqueness
+    form: test
+    binds: ["review_record.identity", "review_trace.access[logger_construct]"]
+    discharged_by: test_a_fault_mid_review_leaves_nothing_readable_as_a_completed_review
+    rejected:
+      - {nl: "Inheriting the nearest existing precedent for this class of write was rejected: it opens and writes in place, uses no atomic rename, and no exception path anywhere removes what a fault leaves behind, while an atomic-write primitive sits in the same module used by a sibling function."}
+      - {nl: "Scoping this to the record alone was rejected. A faulted stage always closes its trace logger but writes no incompleteness marker, so a truncated trace and a complete one differ only by having fewer lines — the same mistakable-for-finished shape, on the sibling surface."}
+
+  - id: review_record_lives_beside_the_run
+    kind: uniqueness
+    form: test
+    binds: ["review_record.identity"]
+    discharged_by: test_the_review_record_lives_beside_the_run_and_is_written_temp_plus_rename
+    rejected: [{nl: "Leaving the sink unnamed was the state this run inherited — the offline sink left with the offline PR, and until one existed the obligation quantifying over the review's outputs had no address at all. RS11 names it: a per-run file alongside the investigation's own artifacts, keyed by run and turn, written temp-plus-rename."}]
+
+  - id: close_write_ordering_holds_the_fault
+    kind: uniqueness
+    form: test
+    binds: ["review_record.identity", "report_md.identity", "review_state"]
+    discharged_by: test_the_close_writes_the_record_before_the_report_and_holds_the_fault
+    rejected:
+      - {nl: "Leaving the close's two writes and its counter mutation unordered was rejected (RS19). Report-first means a crash between them leaves a committed disposition nobody reviewed and no record saying so — on disk, indistinguishable from a close the gate passed. Record-first leaves a record with no report: visibly incomplete, and recoverable."}
+      - {nl: "Letting the first fault abort the second write was rejected: the fault is HELD until both writes have been attempted, following the discipline this codebase already applies where a side effect must not be silently dropped by an earlier failure."}
+      - {nl: "Treating this as covered by the record's own atomicity demand was rejected — that demand pins that a single write is all-or-nothing, and its test injects the fault before any write happens, so it says nothing about what survives a fault BETWEEN the two."}
+
+  - id: every_review_stage_leaves_a_trace
+    kind: behavior
+    form: test
+    binds: ["review_trace", "review_trace.identity"]
+    discharged_by: test_every_review_stage_leaves_a_trace
+    rejected: [{nl: "Leaving trace existence unasserted was the state phase F found, and it hollowed out three demands at once. The containment negative, the round-attributability demand and the truncated-trace marker demand all iterate the traces on disk, so an implementation writing none satisfies all three by iterating an empty list — and the trace is one of the four surfaces that negative binds precisely because it sits inside a grant the investigator already holds."}]
+
+  - id: grace_rounds_are_attributable
+    kind: behavior
+    form: test
+    binds: ["review_record.identity", "review_trace.identity", "grace_bound.domain"]
+    discharged_by: test_rounds_consumed_per_pass_is_recorded_and_each_rounds_trace_is_attributable
+
+  - id: all_settled_reads_differently_from_nondiscriminating
+    kind: uniqueness
+    form: test
+    binds: ["review_record.identity"]
+    discharged_by: test_an_all_settled_requirement_list_is_readable_as_distinct_from_a_genuinely_nondiscriminating_case
+
+  - id: attacked_disposition_preserved
+    kind: behavior
+    form: test
+    binds: ["review_record.payload", "report_md.payload"]
+    discharged_by: test_the_disposition_the_challenger_attacked_survives_beside_the_one_recorded
+
+  - id: report_reason_key
+    kind: shape
+    form: test
+    binds: ["report_md.payload"]
+    discharged_by: test_report_frontmatter_carries_the_close_reason_within_the_byte_cap
+
+  - id: three_close_shapes_distinguishable
+    kind: domain-outcome
+    form: test
+    binds: ["report_md.payload", "close_outcome.domain"]
+    discharged_by: test_first_time_close_after_n_challenges_and_forced_inconclusive_are_distinguishable
+
+  - id: close_is_terminal_for_the_disposition
+    kind: behavior
+    form: test
+    binds: ["investigation_md.access[write_file]", "investigation_md.access[edit_file]",
+            "report_md.identity"]
+    discharged_by: test_no_post_close_write_can_silently_move_the_recorded_disposition
+
+  # ---- failing closed (RS9), extended past the challenger call ------------------------
+
+  - id: gate_failure_policy
+    kind: behavior
+    form: test
+    provisional: true
+    binds: ["interacts(challenge_gate->challenger).response",
+            "close_outcome.domain.distinguished[forced-inconclusive-review-failed]"]
+    discharged_by: test_a_review_that_cannot_complete_does_not_silently_commit_the_close
+
+  - id: fail_closed_covers_every_review_stage
+    kind: behavior
+    form: test
+    binds: ["interacts(challenge_gate->challenger).response",
+            "interacts(challenge_gate->coherence_checker).response",
+            "interacts(challenge_gate->oracle).response",
+            "close_outcome.domain"]
+    discharged_by: test_any_review_stage_that_cannot_complete_closes_the_case_unresolved_with_its_reason
+    rejected: [{nl: "Writing the policy over the challenger call alone was rejected — three calls run per attempt, two of them concurrently, and a critic-only or oracle-only fault in the same window would be uncovered."}]
+
+  - id: review_roles_mint_their_own_salt
+    kind: seam
+    form: test
+    binds: ["run_salt.access[stage_bind]", "run_salt.access[main_gather_bind]"]
+    discharged_by: test_a_review_roles_bind_mints_a_fresh_salt_and_never_receives_the_sessions
+    rejected: [{nl: "Precedenting the review roles on the gather bind, which explicitly threads the investigation's own salt, was rejected. Salt inheritance is not a general property: the gather bind is the sole shared-salt case in the tree and every learning stage mints its own. Inheriting the session salt would hand a role that reads attacker-influenced payloads the delimiter of the frame its own output returns inside."}]
+
+  - id: misconfigured_review_role_fails_before_the_investigation_pays
+    kind: behavior
+    form: test
+    binds: ["role_registry.domain.distinguished[built-fresh-per-stage-invocation]",
+            "model_preflight.domain.distinguished[hardcoded-to-main-and-gather]",
+            "model_preflight.domain.alternatives[raises at agent build]",
+            "close_outcome.domain"]
+    discharged_by: test_a_review_role_with_no_usable_model_config_fails_at_startup_not_once_per_investigation
+    rejected:
+      - {nl: "Relying on the agent build to raise was rejected as provider-dependent: one provider family raises immediately on a missing key, another performs no key check at all and defers to the first live API call. A demand written against `fails at build` would be silently true for one provider and silently false for the other."}
+      - {nl: "Leaving the failure to first use was rejected because of what it composes with: the agent is built fresh on every stage call and the gate fails closed, so a misconfigured role does not stop the fleet — it downgrades confident investigations to unresolved one at a time, after each has already paid its full budget."}
+
+  - id: review_stage_timeout_is_explicit
+    kind: seam
+    form: test
+    binds: ["interacts(challenge_gate->challenger).response",
+            "interacts(challenge_gate->oracle).response"]
+    discharged_by: test_each_review_stage_call_carries_an_explicit_timeout_a_test_can_drive
+    rejected: [{nl: "Assuming a timeout already wraps a stage call was rejected, and the stage-hang probe settled it in both directions: the live tool-body-awaits-a-subagent path carries no wall-clock bound at all (PS1), while the offline stage runner wraps every call in a per-role env-backed one (PS2). No seam wires either to the review stages, so which one they take is a design choice rather than an inheritance — which is why the deadline is threaded as a value a scenario can set."}]
+
+  - id: review_stages_are_wall_clock_bounded
+    kind: behavior
+    form: test
+    binds: ["interacts(challenge_gate->challenger).response",
+            "interacts(challenge_gate->oracle).response",
+            "interacts(challenge_gate->coherence_checker).response"]
+    discharged_by: test_a_stage_that_never_returns_is_bounded_by_wall_clock_not_a_request_count_cap
+    rejected:
+      - {nl: "Inheriting the precedent nearest to the review stages was rejected. The live path that already awaits a subagent from a tool body — structurally the same shape the close tool's review runs in — bounds itself with a request-COUNT cap and two structured-failure catches, none of which can fire while a single call is simply still pending (PS1). A hang there hangs forever."}
+      - {nl: "Pinning `a limit exists` rather than `a wall clock ends a pending call` was rejected for the same reason: the count cap satisfies the weaker sentence and still hangs. The bound to copy is the offline stage runner's per-call wall clock (PS2), which is real and working but sits on a structurally distant call path, so citing it as `a deadline already exists` would overstate the case."}
+      - {nl: "Relying on a client- or SDK-level timeout was rejected: this tree configures none on either provider path (PS5), so whatever bound would eventually apply is an unexamined library default rather than a property this codebase guarantees."}
+
+  - id: stage_deadline_default_is_exercised
+    kind: domain-outcome
+    form: test
+    binds: ["stage_timeout.domain.distinguished[450]"]
+    discharged_by: test_the_review_stage_deadline_defaults_to_450_seconds_and_is_env_overridable
+    rejected:
+      - {nl: "Minting a fifth per-role number was rejected: 450 already exists as this tree's generic subagent default, and the merged pilot measured a gate firing at roughly three to five minutes on an eleven-lead case — so 450 is about 1.5x the observed worst case. Ordinary slowness will not trip it, which is what keeps the timeout-versus-failure distinction a signal rather than noise; the tree's 1800-second authoring values would sit outside an analyst's tolerance for a blocked live investigation."}
+      - {nl: "Recording the number in prose was rejected. This run has already established that a prose bound does not discharge the obligation to exercise a real value — that is exactly why bounds_reject_zero could not stay a clause — so the default is driven, not stated."}
+      - {nl: "A literal at the call site was rejected in favour of an env-backed accessor with the value as its default, matching how every sibling per-role deadline in this tree is expressed, so the number stays operator-changeable without a code change."}
+
+  - id: stage_deadline_is_not_the_subagent_knob
+    kind: negative
+    form: test
+    binds: ["stage_timeout.domain", "subagent_timeout.domain"]
+    discharged_by: test_moving_the_generic_subagent_deadline_does_not_move_the_reviews
+    rejected: [{nl: "Reading the review deadline off the existing generic subagent knob was rejected. The reuse is a coincidence of VALUE, not a shared setting: the two hold the same number today, so a later change to the offline knob would move the live gate's deadline invisibly — the agreement is precisely what would hide the coupling until it mattered. Same number today, independent controls."}]
+    # Its positive control is `stage_deadline_default_is_exercised`, on the same root under the
+    # complementary condition: the review's OWN knob does move the review's deadline. Without
+    # that pairing this negative is also green against an accessor that ignores its environment.
+
+  - id: timeout_and_failure_are_distinguishable
+    kind: uniqueness
+    form: test
+    binds: ["review_record.identity",
+            "close_outcome.domain.distinguished[forced-inconclusive-review-failed]"]
+    discharged_by: test_a_timed_out_review_is_observably_distinct_from_one_that_failed
+    rejected:
+      - {nl: "Inheriting the existing bound's observability was rejected: where a deadline does fire, its branch and the generic-exception branch raise the identical exception type, separated only by a message substring and a `__cause__` no caller reads, and every catch site in the tree treats it as one blanket type (PS4). The gate would be unable to tell a slow model from a broken one — a capacity problem from a defect."}
+      - {nl: "A tenth arm for the timeout case was rejected. RS9 is settled: any review that cannot complete fails closed on the declined arm with its reason, and minting a new arm here would re-open a human decision to solve an observability problem. The distinction is carried as a typed field on the recorded reason and on the review record — which is what RS5 pins the record for — rather than as a new outcome."}
+      - {nl: "Folding this into `review_stages_are_wall_clock_bounded` was rejected, and the two are deliberately separate demands: a bound can exist and still be indistinguishable from a crash, which is exactly the state the probe found on the one path that has a bound. One demand asserts the bound fires; the other asserts the fleet can read which of the two things happened. Satisfying the first tells you nothing about the second."}
+
+structure:
+
+  axes: [run_id, direction, lead_id, turn, round, stage]
+
+  actors:
+    - {id: run_investigation, frame: leg, provenance: code}
+    - {id: main_agent, frame: leg, provenance: code}
+    - {id: tool_write_file, frame: leg, provenance: code}
+    - {id: tool_edit_file, frame: leg, provenance: code}
+    - {id: tool_close_investigation, frame: leg, provenance: design}
+    - {id: challenge_gate, frame: composition, provenance: design}
+    - {id: challenger, frame: leg, provenance: design}
+    - {id: coherence_checker, frame: leg, provenance: design}
+    - {id: oracle, frame: leg, provenance: code}
+
+  boundaries:
+
+    - id: report_md
+      provenance: code
+      note: "The run's durable disposition. Exactly one production writer today (the
+             model's write and edit tools); seven production consumers hard-fail on its
+             absence. R1 replaces the writer, which is why the access facet is keyed by
+             all three vias that can reach it."
+      facets:
+        payload:
+          parts:
+            - {role: system, source: const:REPORT_FRONTMATTER_SCHEMA}
+            - {role: user, source: template:REPORT_BODY,
+               slots: {disposition: disposition.domain, reason: close_outcome.domain}}
+          invariants: [roles-disjoint-sources, all-slots-bound]
+          nl: "The report is a host-validated frontmatter block over a body. The `role`
+               column is the chooser: `system` is host-composed and `user` is
+               model-supplied, which is the distinction the rendered-sink walk needs —
+               the reason value on the forced-unresolved arms is composed from
+               challenger- or oracle-derived text."
+        identity:
+          key_axes: [run_id]
+          evidence: {nl: "Read off the run-paths accessor: the report is `<run_dir>/report.md`,
+                     one per investigation, and the repo-wide sweep for the artifact name
+                     found no second writer."}
+          sharing: unique-key
+        access:
+          constraints_by_via:
+            write_file:
+              trust: attacker-influenced
+              constraints: [allow-list-denial, artifact-schema, duplicate-key-detection,
+                            legacy-delimiter-ban]
+            edit_file:
+              trust: attacker-influenced
+              constraints: [allow-list-denial, artifact-schema, duplicate-key-detection,
+                            legacy-delimiter-ban]
+            close_investigation:
+              trust: derived
+              constraints: [host-rendered-from-typed-arguments, artifact-schema,
+                            duplicate-key-detection, legacy-delimiter-ban]
+              # RS12 closes what was this artifact's R0/R3/R6 hole in one move: the body is
+              # composed host-side from typed arguments and routed through exactly the
+              # validation the retired model-write path enforced, and the `reason` slot becomes
+              # a typed value rather than free text derived from the review's output — so the
+              # rendered-sink exposure the trust walk found never opens.
+
+    - id: investigation_md
+      provenance: code
+      note: "The working document. Stays model-writable through the investigation; append-only
+             is enforced by fence count alone and a scalar concluding block has no row-identity
+             check, so a second contradicting conclusion would otherwise be accepted silently.
+             RS15 constrains the grant AFTER the close: three answering copies converged on
+             'untouched by this change' and were overruled, because that agreement was an
+             assumption inherited from the design's silence rather than a reading of it."
+      facets:
+        access:
+          constraints_by_via:
+            write_file: {trust: attacker-influenced, constraints: [review-state-aware-after-close]}
+            edit_file: {trust: attacker-influenced, constraints: [review-state-aware-after-close]}
+
+    - id: main_session
+      provenance: code
+      note: "The investigator's message history — the reach surface every negative demand
+             is written against."
+      facets:
+        payload:
+          parts:
+            - {role: system, source: const:UNTRUSTED_FRAME}
+            - {role: user, source: template:CLOSE_RETURN,
+               slots: {outcome: close_outcome.domain,
+                       discriminating_material: review_record.payload}}
+          invariants: [roles-disjoint-sources, all-slots-bound]
+          nl: "What the close tool hands back. On every arm but the challenged one this
+               carries no challenger-derived text at all; on the challenged arm it carries
+               a typed list of the discriminating material inside the run-salted untrusted
+               frame, never challenger prose."
+
+    - id: disposition
+      provenance: code
+      facets:
+        domain:
+          type: enum
+          refinement: {nl: "the existing three-member investigation disposition"}
+          default: inconclusive
+          distinguished: ["inconclusive", "malicious", "benign"]
+          falsy_valid: false
+          documented_alternatives: []
+
+    - id: direction
+      provenance: code
+      facets:
+        domain:
+          type: enum
+          refinement: {nl: "the counter-story direction the challenger argues; the existing
+                       disposition-to-direction map selects it"}
+          default: malicious
+          distinguished: ["malicious", "benign"]
+          falsy_valid: false
+          documented_alternatives: []
+
+    - id: close_outcome
+      provenance: design
+      note: "The close tool's typed result. TEN arms: RS13 promoted the degenerate discriminator
+             case out of `documented_alternatives` (every executed lead silent and no lead
+             executed at all are one outcome, not two readings of opposite evidence), and RS17
+             split a value that was carrying two meanings. `closed-declined` is the CHALLENGER's
+             own decline — it read the case and had no counter-story, the decline is recorded and
+             judged, and the investigator's confident close STANDS. The fail-closed outcome for a
+             review that could not complete is `forced-inconclusive-review-failed`, which
+             overrides the disposition. Sharing one value shared the downstream handling too."
+      facets:
+        domain:
+          type: enum
+          refinement: {nl: "one closed-vocabulary outcome per gate condition; only the
+                       challenged arm's return carries discriminating material"}
+          default: closed-unchallenged
+          distinguished: ["closed-unchallenged", "closed-refuted", "closed-incoherent",
+                          "closed-declined", "forced-inconclusive-review-failed",
+                          "closed-malformed", "challenged",
+                          "forced-inconclusive-nondiscriminating", "forced-inconclusive-cap",
+                          "closed-evidence-cannot-speak"]
+          falsy_valid: false
+          documented_alternatives: []
+
+    - id: review_record
+      provenance: design
+      note: "RS11 names the sink: a per-run file beside the investigation's own artifacts,
+             written temp-plus-rename. Before that this facet claimed a key with no evidence —
+             the schema's `unknown` — because the offline sink left with the offline PR and the
+             obligation quantifying over the review's outputs had nowhere to point."
+      facets:
+        payload:
+          parts:
+            - {role: system, source: const:REVIEW_RECORD_SCHEMA}
+            - {role: user, source: template:REVIEW_RECORD,
+               slots: {verdict: close_outcome.domain,
+                       direction: direction.domain,
+                       attacked_disposition: disposition.domain,
+                       requirement_list: "interacts(challenge_gate->challenger).response",
+                       projection_response: "interacts(challenge_gate->oracle).response"}}
+          invariants: [roles-disjoint-sources, all-slots-bound]
+          nl: "Pinned for observability, not for the discriminator rule: enough to
+               reconstruct why a verdict came out as it did, without pinning which of those
+               the gate keys on. One distinction is required — an all-settled requirement
+               list must read as different from a genuinely non-discriminating case."
+        identity:
+          key_axes: [run_id, turn]
+          evidence: {nl: "Read off RS11's named sink: one record per gate attempt inside the
+                     closing run's own directory, keyed by the run and the turn so a second
+                     forced turn cannot land on the first's path — and written temp-plus-rename
+                     because the nearest existing precedent for this class of write opens in
+                     place, has no exception path that removes a partial file, and leaves a
+                     crashed write indistinguishable from a review that never ran."}
+          sharing: unique-key
+
+    - id: review_trace
+      provenance: code
+      note: "Each review stage writes its own trace under the run's trace sink. Within one
+             process a reused trace name appends rather than truncating — the design's
+             stated overwrite hazard is refuted — but the per-agent sequence counter resets
+             on every construction, so a second round's record ids collide with the first's
+             and no field in the schema marks the round boundary."
+      facets:
+        identity:
+          key_axes: [run_id, stage, round]
+          evidence: {nl: "Read off the stage harness, which joins the run directory with the
+                     wiring's trace name unchanged; the only stage that varies its name
+                     within a run keys on story stem and lead id, and the one stage that
+                     threads a per-invocation index proves the harness supports a round axis
+                     when a wiring passes one."}
+          derivations:
+            - {value: trace_name, fn_of: stage, injective: true}
+          sharing: serialized-append
+        access:
+          constraints_by_via:
+            logger_construct:
+              trust: operator
+              constraints: [always-closed-on-fault, no-incompleteness-marker]
+
+    - id: review_state
+      provenance: design
+      note: "The per-run turn and grace counters. The deps object is frozen and carries
+             exactly one mutable container, with no integer counter anywhere on it, so a
+             per-run counter needs a container or a small holder object — an int field
+             cannot follow that precedent."
+      facets:
+        identity:
+          key_axes: [run_id]
+          evidence: {nl: "Read off the deps definition and a census of every mutation site:
+                     one mutable set, added to at two write sites and read at one, with no
+                     in-place field assignment anywhere in the runtime."}
+          sharing: unique-key
+
+    - id: agent_deps
+      provenance: code
+      facets: {}
+
+    - id: request_limit
+      provenance: code
+      note: "What actually terminates a run. Exceeding it is caught and the run ends cleanly
+             as truncated; the design's own non-obligation says a truncated run never reaches
+             a close, which is why the gate raising it matters."
+      facets:
+        domain:
+          type: int
+          refinement: {nl: "requests per agent run; 60 for the main agent, 40 for gather"}
+          default: 60
+          distinguished: [60]
+          falsy_valid: false
+          documented_alternatives:
+            - value: "60 + extra_turn_bound"
+              crosses_validation: unknown
+
+    - id: retry_budget
+      provenance: code
+      note: "The framework's shared tool-retry budget. The eleventh retry raises an error
+             none of the driver's four handlers catches, so a stubborn model turns a
+             refusal-based gate into an uncaught crash."
+      facets:
+        domain:
+          type: int
+          refinement: {nl: "tool retries before the overflow exception"}
+          default: 10
+          distinguished: [10]
+          falsy_valid: false
+          documented_alternatives: []
+
+    - id: budget
+      provenance: code
+      note: "Enforcement is opt-in and off by default; accounting always runs but its
+             warnings reach stderr only, never model context. Three enforced limbs, no cost
+             limb anywhere."
+      facets:
+        domain:
+          type: enum
+          refinement: {nl: "the budget enforcement flag"}
+          default: "off"
+          distinguished: ["off", "on"]
+          falsy_valid: false
+          documented_alternatives: []
+
+    - id: extra_turn_bound
+      provenance: design
+      note: "SET TO 2 BY RS14 — it matches the issue's stated intent and leaves headroom under
+             the framework's shared retry budget of 10. Load-bearing three times over: it caps
+             the forced turns, it sets every run's raised request ceiling, and it must sit below
+             that retry budget."
+      facets:
+        domain:
+          type: int
+          refinement: {nl: "how many extra turns the gate may force before it records
+                       inconclusive instead"}
+          default: 2
+          distinguished: [0]
+          falsy_valid: false
+          documented_alternatives: []
+
+    - id: grace_bound
+      provenance: design
+      note: "SET TO 1 BY RS14, reset PER GATE ATTEMPT rather than per run — per-run means a
+             second challenge inherits an exhausted budget and can never refine at all, which
+             turns every later attempt into a cold pass while the rounds-consumed signal still
+             reads zero."
+      facets:
+        domain:
+          type: int
+          refinement: {nl: "how many refinement rounds a story gets, per gate attempt, before it
+                       scores as incoherent"}
+          default: 1
+          distinguished: [0]
+          falsy_valid: false
+          documented_alternatives: []
+
+    - id: stage_timeout
+      provenance: design
+      note: "The wall clock a single review-stage call runs under. SET TO 450 SECONDS BY THE
+             HUMAN — the tree's existing generic-subagent default rather than a fifth number,
+             at roughly 1.5x the worst case the merged pilot measured, so ordinary slowness
+             does not trip it and a stage that exceeds it is stuck rather than slow. Expressed
+             as an env-backed accessor with that default, the way every sibling per-role
+             deadline here is expressed."
+      facets:
+        domain:
+          type: int
+          refinement: {nl: "seconds one review-stage call may run before the gate abandons it"}
+          default: 450
+          distinguished: [450]
+          falsy_valid: false
+          documented_alternatives: []
+
+    - id: subagent_timeout
+      provenance: code
+      note: "The tree's existing generic per-role subagent deadline, modelled ONLY so the
+             review's deadline has an address to be independent of. Same number today; a
+             separate control. It is not a documented alternative for stage_timeout — treating
+             it as one is the coupling the negative demand exists to forbid."
+      facets:
+        domain:
+          type: int
+          refinement: {nl: "seconds an offline stage call may run; env-backed, 450 today"}
+          default: 450
+          distinguished: []
+          falsy_valid: false
+          documented_alternatives: []
+
+    - id: past_tickets
+      provenance: code
+      note: "The benign direction's exploration affordance: prior closed cases on the same
+             alert signature, sampled from a filtered window."
+      facets:
+        domain:
+          type: enum
+          refinement: {nl: "the sampled prior-close menu, or the cold-start case where the
+                       sampler returns nothing eligible"}
+          default: sampled
+          distinguished: ["cold-start-no-eligible-tickets"]
+          falsy_valid: false
+          documented_alternatives: []
+
+    - id: mitre_menu
+      provenance: code
+      note: "The malicious direction's exploration affordance. Enforcement is by input
+             construction only — the menu is pre-selected host-side — and nothing anywhere
+             reads a cited technique table back against the menu the role was given."
+      facets: {}
+
+    - id: directions_for
+      provenance: code
+      note: "The existing disposition-to-direction map. Unmodified by this change; it
+             returns both directions for the unresolved disposition and exactly one for
+             each confident one."
+      facets: {}
+
+    - id: run_salt
+      provenance: code
+      note: "The wrap performs no content inspection and no escaping, so a reader that has
+             seen a salt can close that frame. The two bind precedents DISAGREE about
+             freshness and the disagreement is the whole point: the live main-to-gather
+             bind explicitly threads the session's own salt, while every learning stage
+             mints its own and two stage entrypoints have no salt parameter at all. A
+             review role precedented on the stage pattern never sees the main session's
+             delimiter; one precedented on the gather pattern does."
+      facets:
+        access:
+          constraints_by_via:
+            main_gather_bind:
+              trust: attacker-influenced
+              constraints: [shared-run-salt, fixed-before-any-payload-byte]
+            stage_bind:
+              trust: operator
+              constraints: [fresh-salt-per-stage, no-caller-threaded-value]
+
+    - id: role_registry
+      provenance: code
+      note: "Adding a role is a five-part registration and every part is mechanically
+             enforced; an unregistered role is a loud failure at agent build, not a silent
+             no-grant. But the registry is static data and the agent is built FRESH ON
+             EVERY STAGE CALL — the one live non-main role via a closure fired only when its
+             tool runs. So the loud failure lands at first gate fire, deep into an
+             investigation whose budget is already spent, never at driver construction."
+      facets:
+        domain:
+          type: enum
+          refinement: {nl: "when a stage's agent build resolves its role"}
+          default: "built-fresh-per-stage-invocation"
+          distinguished: ["built-fresh-per-stage-invocation"]
+          falsy_valid: false
+          documented_alternatives: []
+
+    - id: model_preflight
+      provenance: code
+      note: "The offline cycle's fail-fast preflight is unreachable from either live
+             entrypoint. Live has its own, narrower one: hardcoded to exactly the two
+             existing roles' resolved models, with no mechanism to enumerate the roles a run
+             will invoke, and no all-roles scan exists anywhere. So a new role's bad model
+             config surfaces only at first use — and even that is provider-dependent."
+      facets:
+        domain:
+          type: enum
+          refinement: {nl: "what checks a role's model credentials before an investigation
+                       pays for a review it cannot complete"}
+          default: "hardcoded-to-main-and-gather"
+          distinguished: ["hardcoded-to-main-and-gather"]
+          falsy_valid: false
+          documented_alternatives:
+            - value: "raises at agent build"
+              crosses_validation: false
+
+    - id: skill_md
+      provenance: code
+      facets: {}
+
+    - id: budget_refusal_message
+      provenance: code
+      note: "Tells the model its report write is still available — goes stale under R1."
+      facets: {}
+
+    - id: write_file_docstring
+      provenance: code
+      note: "Lists report.md as a valid target — goes stale under R1."
+      facets: {}
+
+    - id: replay_trace
+      provenance: code
+      note: "A golden replay recording carrying a write of report.md that a narrowed
+             allow-list refuses. Re-recorded rather than weakening the allow."
+      facets: {}
+
+    - id: tool_close_investigation
+      provenance: design
+      note: "The tool surface, as distinct from the actor that writes through it. A newly
+             registered tool lands in the refusable core tier by default, which was in tension
+             with the demand that a budget-pressed run can still close; RS16 resolves it with an
+             explicit, recorded exemption rather than a tier the tool happens to fall into."
+      facets:
+        payload:
+          parts:
+            - {role: user, source: template:CLOSE_ARGS,
+               slots: {disposition: disposition.domain}}
+          invariants: [all-slots-bound]
+          nl: "The close call's argument set: a draft disposition typed from the single
+               existing enum, rejected before any gate work runs if it falls outside it."
+        access:
+          constraints_by_via:
+            main: {trust: attacker-influenced, constraints: [typed-disposition-validation]}
+            gather: {trust: attacker-influenced, constraints: [not-registered-on-this-role]}
+            budget_tier: {trust: operator, constraints: [explicit-budget-exemption]}
+
+    - id: challenger
+      provenance: design
+      note: "The role's tool grant, as distinct from the actor that runs. Enforcement of the
+             observation-layer cut is a GRANT decision: no file-read grant at all, following
+             the inlined-input pattern both existing pipeline stages already use."
+      facets:
+        payload:
+          parts:
+            - {role: system, source: const:CHALLENGER_PROMPT}
+            - {role: user, source: template:CHALLENGER_INVOCATION,
+               slots: {observations: investigation_md,
+                       alert: report_md,
+                       affordance: mitre_menu,
+                       direction: direction.domain}}
+          invariants: [roles-disjoint-sources, all-slots-bound]
+          nl: "The graph facts and what was learned about them, plus the real payloads —
+               and no hypothesis weight, resolution, authorization verdict or conclusion.
+               The residual is accepted: filtering is by block type, so a kept block's prose
+               can still imply the reached disposition; what is withheld is the reached
+               disposition, not the direction of reasoning."
+        access:
+          constraints_by_via:
+            read_file: {trust: attacker-influenced, constraints: [no-grant]}
+            bash: {trust: attacker-influenced, constraints: [no-grant]}
+
+    - id: coherence_checker
+      provenance: design
+      note: "NAME RESOLVED BY THE HUMAN AT AUTHORING TIME — `coherence_checker`, not a default.
+             It has to make the role's limit legible: RS10 gives it the counter-story and
+             nothing else, so with no payload access it can establish that a story contradicts
+             itself but never that it is false. `incoherent` and `false` are verdicts this
+             design deliberately separates, and the placeholder invited conflating them."
+      facets:
+        payload:
+          parts:
+            - {role: system, source: const:COHERENCE_CHECKER_PROMPT}
+            - {role: user, source: template:COHERENCE_CHECKER_INVOCATION,
+               slots: {counter_story: "interacts(challenge_gate->challenger).response"}}
+          invariants: [roles-disjoint-sources, all-slots-bound]
+          nl: "The counter-story and nothing else. Internal consistency is the only job this
+               role can do without payload access, and that constraint is what keeps it honest:
+               a critic that can see the evidence stops checking coherence and starts
+               re-litigating the case."
+        access:
+          constraints_by_via:
+            read_file: {trust: attacker-influenced, constraints: [no-grant]}
+            bash: {trust: attacker-influenced, constraints: [no-grant]}
+
+    - id: oracle
+      provenance: code
+      note: "NO LONGER `reused unchanged` — RS10 withdraws that claim, which the design counted
+             as free. Its blindness is enforced mechanically by a redacting exemplar, not by
+             prompt discipline, and its grant is already an empty tool set, so no access facet
+             is modelled. Its EXISTING invocation threads a learning run directory and a
+             story-derived trace prefix that a live investigation supplies neither of; the
+             payload facet below is the live-shaped replacement."
+      facets:
+        payload:
+          parts:
+            - {role: system, source: const:PROJECTION_PROMPT}
+            - {role: user, source: template:PROJECTION_INVOCATION,
+               slots: {counter_story: "interacts(challenge_gate->challenger).response",
+                       leads: "interacts(challenge_gate->challenger).payload"}}
+          invariants: [roles-disjoint-sources, all-slots-bound]
+          nl: "A live-shaped input contract built from the run's OWN directory and its executed
+               leads — not the learning-run geography the stage needs today. Its per-lead fanout
+               still has no stated failure policy of its own; the fail-closed demand covers it
+               at the stage level."
+
+  interacts:
+
+    # the close tool's own surface
+    - {from: main_agent, to: tool_close_investigation, mode: invoke, via: api,
+       provenance: design, sends: payload}
+
+    # R1 — report.md leaves the model's write allow; the close path becomes the writer
+    - {from: tool_write_file, to: report_md, mode: remove, via: write_file, provenance: design}
+    - {from: tool_edit_file, to: report_md, mode: remove, via: edit_file, provenance: design}
+    - {from: tool_close_investigation, to: report_md, mode: write, via: close_investigation,
+       provenance: design, sends: payload, interpolates: [run_id]}
+    - {from: run_investigation, to: report_md, mode: read, via: fs, provenance: code}
+
+    # the working document stays model-writable
+    - {from: tool_write_file, to: investigation_md, mode: write, via: write_file, provenance: code}
+    - {from: tool_edit_file, to: investigation_md, mode: write, via: edit_file, provenance: code}
+
+    # what comes back into the live session, and the two surfaces that bypass it
+    - {from: tool_close_investigation, to: main_session, mode: write, via: api,
+       provenance: design, sends: payload}
+    - {from: main_agent, to: review_record, mode: read, via: read_file, provenance: code}
+    - {from: main_agent, to: review_trace, mode: read, via: read_file, provenance: code}
+
+    # the per-run counters
+    - {from: tool_close_investigation, to: review_state, mode: write, via: api,
+       provenance: design, interpolates: [run_id]}
+    - {from: challenge_gate, to: review_state, mode: write, via: api,
+       provenance: design, interpolates: [run_id]}
+
+    # the three review stage calls
+    - {from: challenge_gate, to: challenger, mode: invoke, via: api, provenance: design,
+       sends: payload, transport: llm}
+    - {from: challenge_gate, to: coherence_checker, mode: invoke, via: api, provenance: design,
+       sends: payload, transport: llm}
+    - {from: challenge_gate, to: oracle, mode: invoke, via: api, provenance: design,
+       sends: payload, transport: llm}
+
+    # the review's own sinks
+    - {from: challenge_gate, to: review_record, mode: write, via: fs, provenance: design,
+       sends: payload, interpolates: [run_id]}
+    - {from: challenger, to: review_trace, mode: write, via: fs, provenance: design,
+       interpolates: [run_id, trace_name]}
+    - {from: coherence_checker, to: review_trace, mode: write, via: fs, provenance: design,
+       interpolates: [run_id, trace_name]}
+    - {from: oracle, to: review_trace, mode: write, via: fs, provenance: design,
+       interpolates: [run_id, trace_name, lead_id]}
+
+    # what the gate reads
+    - {from: challenge_gate, to: directions_for, mode: read, via: api, provenance: design}
+    - {from: challenge_gate, to: disposition, mode: read, via: api, provenance: design}
+    - {from: challenge_gate, to: direction, mode: read, via: api, provenance: design}
+    - {from: challenge_gate, to: mitre_menu, mode: read, via: fs, provenance: design}
+    - {from: challenge_gate, to: past_tickets, mode: read, via: fs, provenance: design}
+    - {from: challenge_gate, to: extra_turn_bound, mode: read, via: env, provenance: design}
+    - {from: challenge_gate, to: grace_bound, mode: read, via: env, provenance: design}
+    - {from: challenge_gate, to: stage_timeout, mode: read, via: env, provenance: design}
+    - {from: challenge_gate, to: budget, mode: read, via: env, provenance: design}
+    - {from: challenge_gate, to: run_salt, mode: read, via: api, provenance: design}
+
+    # the ceilings the driver owns
+    - {from: run_investigation, to: request_limit, mode: read, via: api, provenance: design}
+    - {from: run_investigation, to: retry_budget, mode: read, via: api, provenance: design}
+    - {from: run_investigation, to: run_salt, mode: read, via: api, provenance: code}
+    - {from: run_investigation, to: role_registry, mode: read, via: api, provenance: design}
+    - {from: run_investigation, to: model_preflight, mode: read, via: api, provenance: design}
+    - {from: run_investigation, to: replay_trace, mode: read, via: fs, provenance: code}
+
+    # the model-facing surfaces that go stale under R1
+    - {from: main_agent, to: skill_md, mode: read, via: api, provenance: code}
+    - {from: main_agent, to: budget_refusal_message, mode: read, via: api, provenance: code}
+    - {from: main_agent, to: write_file_docstring, mode: read, via: api, provenance: code}
+
+  drives:
+    - {from: run_investigation, to: main_agent, provenance: code, multiplicity: serial}
+    - {from: main_agent, to: tool_close_investigation, provenance: design, multiplicity: serial}
+    - {from: tool_close_investigation, to: challenge_gate, provenance: design, multiplicity: serial}
+    - {from: challenge_gate, to: challenger, provenance: design, multiplicity: serial}
+    - {from: challenge_gate, to: coherence_checker, provenance: design, multiplicity: concurrent}
+    - {from: challenge_gate, to: oracle, provenance: design, multiplicity: concurrent}
+
+claims:
+
+  # ---- inherited from the design doc's own claims block, carried by the grounding brief.
+  # The brief carried these by reference with a verdict only; the kind and instrument here
+  # are those of the entry that re-probed each in this run, named in `note`.
+
+  - {id: C1, source: discuss, kind: behavior, probe_kind: executed, verdict: holds,
+     claim: "Append-only on the working document is enforced by fence count; a scalar
+             concluding block can be rewritten in place undetected.",
+     probe: "re-probed in this run as K20.", observed: "see K20."}
+  - {id: C2, source: discuss, kind: referential, probe_kind: read, verdict: holds,
+     claim: "The write-discipline fold rule is stated in four places and the one the design
+             proposes to drop cites a pre-write cost that does not exist.",
+     probe: "re-probed as K23.", observed: "see K23."}
+  - {id: C3, source: discuss, kind: referential, probe_kind: read, verdict: holds,
+     claim: "The judge's outcome vocabulary spans two direction-specific enums.",
+     probe: "re-probed as C24.", observed: "six values across the two enums.",
+     note: "Recorded in the brief as holds-as-corrected; the correction is C24's count."}
+  - {id: C4, source: discuss, kind: referential, probe_kind: read, verdict: holds,
+     claim: "The three-way projection tag the discriminator needs already exists as
+             computed, host-rendered structure.",
+     probe: "re-probed as C19/C20.", observed: "see C19.",
+     note: "Holds as corrected in BOTH directions: the review said extracting silent rows
+            means new work; the structure already exists. What is missing is only the
+            semantics of `silent`."}
+  - {id: C5, source: discuss, kind: referential, probe_kind: read, verdict: holds,
+     claim: "The design's stated stage wiring for the existing pipeline is as described.",
+     probe: "inherited from the design doc's sweep; not re-probed.", observed: "n/a"}
+  - {id: C6, source: discuss, kind: referential, probe_kind: read, verdict: holds,
+     claim: "The design's stated per-lead comparison assembly is as described.",
+     probe: "inherited from the design doc's sweep; not re-probed.", observed: "n/a"}
+  - {id: C7, source: discuss, kind: behavior, probe_kind: executed, verdict: holds,
+     claim: "The deps object is frozen and carries exactly one mutable container.",
+     probe: "re-probed and refined as K9.", observed: "see K9.",
+     note: "LIVE-GATE claim. K9 refines it: no integer counter exists on the object and an
+            int field cannot follow the mutable-container precedent."}
+  - {id: C8, source: discuss, kind: referential, probe_kind: read, verdict: holds,
+     claim: "The runtime box is built from the run dir.",
+     probe: "inherited; the consequence the design drew from it was withdrawn by the cold
+             review's Rejected section.", observed: "n/a"}
+  - {id: C9, source: discuss, kind: census, probe_kind: search, verdict: holds,
+     claim: "The authoring enqueue fires unconditionally at the tail of the run wrapper,
+             outside every guard.",
+     probe: "re-probed as C15.", observed: "see C15.",
+     note: "Corrected by C15: the wrapper has two execution contexts, not one."}
+  - {id: C10, source: discuss, kind: referential, probe_kind: read, verdict: holds,
+     claim: "The secondary-evaluation harness grades frozen stories through the current
+             projection and judge.",
+     probe: "inherited; its fate is an open item this run does not settle.", observed: "n/a"}
+  - {id: C11, source: discuss, kind: census, probe_kind: search, verdict: refuted,
+     claim: "The test census over the affected tree is 71 files, 13 of them spec-coverage
+             graphs.",
+     probe: "re-run verbatim as C23.", observed: "72 files, 14 graphs.",
+     note: "Substance holds — the issue body's file list is a sample. The COUNT is refuted,
+            which is why it was re-run rather than inherited."}
+  - {id: C12, source: discuss, kind: reachability, verdict: unprobed,
+     claim: "Attacker-influenced payload text cannot reach the investigator's instruction
+             context through the review's return.",
+     probe: "not attempted — the gate's own return path does not exist.", observed: "n/a",
+     note: "THE run's sharpest open question, and in scope now. Carried forward as K31."}
+
+  # ---- raised at grounding (10-brief.md)
+
+  - {id: C13, kind: census, probe_kind: search, verdict: holds,
+     claim: "The learning run dir's writers are the nine listed in the brief; none writes
+             from inside the run-cycle box, which mounts the dir read-only.",
+     probe: "declared the resource in the project profile, then the resource trace, plus
+             reads of the module-private writers and the mount list.",
+     observed: "13 resolved writer call sites (5 production), 5 readers, 332 floor lines.",
+     note: "Offline-scope neighborhood; carried because the profile entry it produced stays."}
+  - {id: C14, kind: census, probe_kind: search, verdict: holds,
+     claim: "Everything a direction leg leaves in the learning run dir is enumerated in one
+             place and the transcript view is its only production reader.",
+     probe: "reference lookup on the manifest accessor; read the transcript renderer.",
+     observed: "4 resolved references in 3 files; the view's rule is present-beats-selected."}
+  - {id: C15, kind: census, probe_kind: search, verdict: holds,
+     claim: "The leg driver has exactly one caller; the run wrapper has two execution
+             contexts, not one — the drain worker and the single-run CLI.",
+     probe: "reference lookup on the leg driver; read the CLI end to end; grep for the drain
+             flag across .py/.sh/.yml/.md outside the test tree.",
+     observed: "Both reach the same process; no cron, no workflow, no subprocess re-exec."}
+  - {id: C16, kind: census, probe_kind: read, verdict: holds,
+     claim: "Adding a role is a five-part registration and every part is mechanically
+             enforced.",
+     probe: "read the registry, the role enum, the registry builder, the stage-agent builder,
+             and both the judge's and the oracle's definition modules.",
+     observed: "8 roles registered; the builder raises on a duplicate; an unregistered role
+                is a loud lookup failure at agent build, not a silent no-grant.",
+     note: "LIVE-GATE relevance: the two new roles' grant shapes are precedented, but WHEN
+            the build runs is what RG-1 was commissioned to settle and did not."}
+  - {id: C17, kind: census, probe_kind: search, verdict: holds,
+     claim: "No test drives the leg driver; the one manifest test asserts a superset and
+             fails open for a name nobody declared.",
+     probe: "a thorough repo sweep over the test tree, cross-checked against a grep.",
+     observed: "Three hand-written subagent fakes, no shared factory; injection is by keyword
+                argument throughout, never monkeypatch."}
+  - {id: C18, kind: referential, probe_kind: read, verdict: holds,
+     claim: "The conclusion reaches the judge through the per-ROLE invocation builder, not
+             through the shared per-lead comparison assembly.",
+     probe: "read the invocation builder and the comparison module in full; reference lookup
+             on the synthesis renderer; grep the walkers for the concluding tag.",
+     observed: "The synthesis renderer has one production consumer — that builder — and the
+                per-lead renderer never reads the concluding block at all.",
+     note: "Refutes the cold review's REASON for retracting the design's shared-and-untouched
+            claim. The review's FIX still stands."}
+  - {id: C19, kind: behavior, probe_kind: read, verdict: holds,
+     claim: "The three-way projection tag already exists as computed, host-rendered
+             structure, but both of its silence values mean the story does not touch this
+             lead.",
+     probe: "read the comparison builder, the per-lead renderer and the manifest renderer.",
+     observed: "Every lead is already tagged has-projection / empty-projection /
+                no-projection; the cost lands on the prompt and tail spec, not on a schema."}
+  - {id: C20, kind: referential, probe_kind: read, verdict: holds,
+     claim: "The judge's emitted schema carries no per-lead comparison field.",
+     probe: "read both judge validators and the optional-key registry.",
+     observed: "Two required keys; three direction-conditional optional keys; nothing per-lead."}
+  - {id: C21, kind: behavior, probe_kind: executed, verdict: holds,
+     claim: "A skip short-circuits before the oracle and the judge and persists with no judge
+             document, so the skip-passthrough outcome is unreachable through the leg driver.",
+     probe: "read the leg driver; grep the outcome name across the tree; read both
+             append-observation guards.",
+     observed: "It survives only where a judge is invoked outside the leg — the eval replay
+                harnesses.",
+     note: "Holds and strengthens: the design's early-exit item is a real behavior change,
+            not a re-labelling."}
+  - {id: C22, kind: referential, probe_kind: read, verdict: holds,
+     claim: "The oracle's blindness is enforced mechanically by redaction, not by prompt
+             discipline, and it runs outside the box.",
+     probe: "read the oracle's per-lead prompt assembly, the two exemplar functions, and the
+             subagent protocol signatures.",
+     observed: "The oracle's protocol method is the only one of four with no box parameter,
+                and its definition grants an empty tool set."}
+  - {id: C23, kind: census, probe_kind: search, verdict: holds,
+     claim: "The inherited test census has drifted under the base: 72 files, 14 spec-coverage
+             graphs.",
+     probe: "re-ran the inherited grep verbatim, then filtered and counted.",
+     observed: "72 files; 14 graphs in the census, 26 in the tree overall."}
+  - {id: C24, kind: referential, probe_kind: read, verdict: holds,
+     claim: "Six outcome values across two direction-specific enums.",
+     probe: "read the two enum constants and the two validators that consume them.",
+     observed: "Union of six; the enums are selected per direction by which validator the
+                direction points at."}
+  - {id: C25, kind: behavior, probe_kind: read, verdict: holds,
+     claim: "Two direction legs run concurrently into one learning run dir and stay distinct
+             only because every filename is declared per-direction.",
+     probe: "read the dispatcher, the persist function, and the two direction constants.",
+     observed: "A two-worker pool; shared copies take a module lock; everything else is
+                disjoint by name.",
+     note: "Does NOT transfer to the live gate: at write time exactly one counter-direction
+            is selected, so the concurrent-leg collision hazard is absent."}
+  - {id: C26, kind: behavior, probe_kind: read, verdict: holds,
+     claim: "The merged pilot fixed the challenger's output contract to a typed
+             unsettled-requirement list, and that list is a generated discriminator artifact.",
+     probe: "read the winning variant's tail spec and the emitted requirement file; read the
+             merge commit; confirmed no production code shipped with it.",
+     observed: "The tail spec demands per-assertion settled-by and if-false limbs, with the
+                fold forbidden from dropping any unsettled item.",
+     note: "THE fork: the design says the discriminator is the oracle's silence and
+            explicitly NOT a generated artifact."}
+
+  # ---- raised at demand extraction against the live gate (21-demands-gate.md)
+
+  - {id: K1, kind: referential, probe_kind: read, verdict: holds,
+     claim: "The investigator's entire write scope is two exact-path patterns built at
+             policy-compile time; removing the report leaves the definition buildable.",
+     probe: "read the write-shape builder, the named-write-allow constructor, and the write
+             co-constraint check.",
+     observed: "Two anchored regexes over the run dir; write=True with empty shapes is
+                unbuildable, and one name remains."}
+  - {id: K2, kind: behavior, probe_kind: read, verdict: holds,
+     claim: "The edit tool is separately registered but reaches the same write decision on
+             the full post-splice text, and both tools are governed by one tool-set bit.",
+     probe: "read both tool bodies and their registration branch.",
+     observed: "Identical decide-write call; edit runs the read gate first, so a report that
+                stays readable fails at the write gate with the allow-list reason."}
+  - {id: K3, kind: behavior, probe_kind: executed, verdict: holds,
+     claim: "Writes are the tail tier on the main role and the refusal predicate returns
+             False for tail unconditionally — but the tail is bounded by a kill and the whole
+             path is off by default.",
+     probe: "read the tier table, the refusal predicate, the tail-exhaustion check and its
+             raise site, and the enforcement flag's default.",
+     observed: "Past the allowance a budget kill ends the run before the write; enforcement
+                is env-gated and off by default, set only in CI.",
+     note: "Corrects the cold review's incentive premise: the asymmetry it names is real in
+            CI, not in a default run. The fix is still right."}
+  - {id: K4, kind: behavior, probe_kind: read, verdict: holds,
+     claim: "A newly registered tool lands in the refusable core tier by default.",
+     probe: "read the tier function's fallthrough and the roster of tail names.",
+     observed: "Unknown names return core, fail-closed. Two test modules carry explicit
+                comments that demoting the write tool out of the tail is the wrong repair."}
+  - {id: K5, kind: behavior, probe_kind: read, verdict: holds,
+     claim: "Budget enforcement is opt-in and off by default; accounting always runs but its
+             warnings reach stderr only, never model context.",
+     probe: "read the enforcement flag, the two build sites that AND against it, and the
+             warning emitter.",
+     observed: "Flag defaults false; counters tick regardless; warnings print to stderr."}
+  - {id: K6, kind: behavior, probe_kind: read, verdict: holds,
+     claim: "The budget has exactly three enforced limbs — tool calls, wall clock, subagent
+             spawns — and no cost limb anywhere.",
+     probe: "read the limits table, the check function, the refusal predicate and the
+             tripped-limb namer; read the persisted state shape.",
+     observed: "Three limbs; persisted state carries no tokens and no dollars."}
+  - {id: K7, kind: behavior, probe_kind: read, verdict: holds,
+     claim: "What terminates a run is the request limit of 60; exceeding it is caught and the
+             run ends cleanly as truncated.",
+     probe: "read the limit constant, the loop that applies it, and the exception handler.",
+     observed: "60 for main, 40 for gather; the overflow is caught, flushed and reported as
+                truncated-by-request-limit. No process-level timeout exists, so the
+                wall-clock cap is inert by default too."}
+  - {id: K8, kind: behavior, probe_kind: read, verdict: holds,
+     claim: "Run cost sums one hydrated main session, so every gather subagent call is
+             structurally outside it — and the turn count has the same blind spot.",
+     probe: "read the cost summation and the session each agent is given.",
+     observed: "Gather gets its own session; the sum walks main's only."}
+  - {id: K9, kind: behavior, probe_kind: executed, verdict: holds,
+     claim: "The deps object is frozen and carries exactly one mutable container; no integer
+             counter exists on it and an int field cannot follow that precedent.",
+     probe: "read the deps definition; census every mutation site; grep for in-place field
+             assignment and frozen-dataclass escapes across the runtime.",
+     observed: "One mutable set, two write sites, one read site. No in-place field assignment
+                anywhere. A per-run counter needs a container or a small holder object."}
+  - {id: K10, kind: behavior, probe_kind: executed, verdict: holds,
+     claim: "Nothing counts turns or loops for control purposes, and the two candidate turn
+             boundaries are not equivalent.",
+     probe: "read the iteration loop and its node logger; read the per-request hook; grep
+             every running tally in the runtime.",
+     observed: "The node loop sees turn boundaries but has no deps handle and never sees the
+                subagent's inner loop; the per-request hook has the deps handle and fires for
+                both main and subagent."}
+  - {id: K11, kind: behavior, probe_kind: read, verdict: holds,
+     claim: "Report frontmatter requires only the disposition; the key set is open with no
+             unknown-key rejection; the 512-byte cap measures the YAML between the fences in
+             UTF-8, and disposition validity is checked before the cap.",
+     probe: "read the report validator end to end, the frontmatter splitter, and the
+             byte-length helper.",
+     observed: "One required key; two further gates a new key must survive — duplicate-key
+                detection through merge expansion, and a literal delimiter ban; the file is
+                capped separately at 8192 bytes."}
+  - {id: K12, kind: behavior, probe_kind: executed, verdict: holds,
+     claim: "A write refusal reaches the model as the raw reason string with a fixed retry
+             suffix; retries are capped at 10 and the eleventh raises an error the driver
+             does not catch.",
+     probe: "read the refusal raise, the retry configuration, and the driver's exception
+             handlers.",
+     observed: "Ten tool retries configured; the overflow exception is not among the four the
+                driver handles, so it escapes the entry point.",
+     note: "The sharpest constraint on the design's stated forced-turn mechanism."}
+  - {id: K13, kind: behavior, probe_kind: executed, verdict: holds,
+     claim: "Nothing forces the model to continue: every tool returns a string, there is no
+             output validator, no end strategy and no after-run hook in use.",
+     probe: "read every tool return type; grep the runtime for output validators, end
+             strategies and run hooks; read the two existing continuation messages.",
+     observed: "Two continuation messages exist, both prose. The framework's terminal-failure
+                return shape is available and unused in this tree."}
+  - {id: K14, kind: referential, probe_kind: read, verdict: holds,
+     claim: "Per-role verb authorization cannot gate a new tool: a verb is a data-source
+             operation and a non-empty grant on the investigator role fails at policy compile.",
+     probe: "read the grant type, both shipped grant tables, the registry's construction
+             check, and the grant-agreement assertion.",
+     observed: "Three hard build-time blocks. Main-only reachability is expressed by leaving
+                the tool-set bit false elsewhere, or by registering only at main's
+                composition root."}
+  - {id: K15, kind: behavior, probe_kind: read, verdict: holds,
+     claim: "A tool body can await a subagent synchronously; the gather tool is the precedent
+             and it degrades three failure classes into ordinary result text.",
+     probe: "read the gather tool body and its registration.",
+     observed: "The subagent re-uses the parent's salt, box and budget clock."}
+  - {id: K16, kind: behavior, probe_kind: read, verdict: holds,
+     claim: "Nothing records a normal run ending; the run summary is consumed in-process and
+             discarded, and only truncation is durable.",
+     probe: "read the run summary constructor, both exits, and the only durable end-of-run
+             column.",
+     observed: "A clean end leaves both truncation fields empty. The only durable disposition
+                is the model-authored report frontmatter.",
+     note: "So the close tool would be the first place the runtime holds a typed disposition,
+            and no existing per-run record exists to write it into."}
+  - {id: K17, kind: census, probe_kind: search, verdict: holds,
+     claim: "Exactly one production writer of the run's report exists — the model's write and
+             edit tools. Seven production consumers hard-fail when it is missing.",
+     probe: "repo-wide grep for the artifact name, narrowed to direct filesystem writes and
+             to tool-path writes; then a consumer sweep.",
+     observed: "No hook, script or harness creates it; the learning path only copies an
+                existing one."}
+  - {id: K18, kind: census, probe_kind: search, verdict: holds,
+     claim: "Roughly ten test modules drive the report through the tool path and would break
+             on a narrowed write allow, plus one golden replay trace carrying a recorded
+             write of it; a further fourteen write it directly as a fixture and are
+             unaffected.",
+     probe: "the same sweep as K17, split by whether the write goes through the tool path or
+             straight to disk.",
+     observed: "One tool-path module asserts the allow-list census equals exactly the two
+                artifact names."}
+  - {id: K19, kind: referential, probe_kind: read, verdict: holds,
+     claim: "Two committed spec-graph members pin that the report is valid with zero working
+             document content and that there is no ordering requirement between the two write
+             gates, each with a named discharging test.",
+     probe: "read the committed coverage graph for the report-output-structure work.",
+     observed: "Both members present with their discharging test names.",
+     note: "R1 contradicts them by construction; they are retired here, deliberately."}
+  - {id: K20, kind: behavior, probe_kind: executed, verdict: holds,
+     claim: "Append-only on the working document is enforced by fence count alone; row
+             identity is checked only for two id-bearing record types, so a scalar concluding
+             block can be rewritten in place undetected. Nothing requires a conclusion before
+             a report and there is no end-of-run completeness check.",
+     probe: "read the validator's append-only check and its row-identity loop; read both
+             artifact gates and grep the entry points for a completeness check.",
+     observed: "The two artifacts are validated independently with no ordering; the
+                benign-gating check is itself conditional on the concluding block's own
+                value, so a run with no conclusion skips it."}
+  - {id: K21, kind: behavior, probe_kind: executed, verdict: holds,
+     claim: "The report's disposition is the authoritative one for every downstream consumer;
+             the working document's concluding value has no production consumer that routes
+             off it.",
+     probe: "read the normalizer and its caller, then census every reader of the concluding
+             disposition.",
+     observed: "The loop freezes a report-derived normalized disposition into its source
+                references."}
+  - {id: K22, kind: census, probe_kind: search, verdict: holds,
+     claim: "Five production sites read the disposition out of the report and they disagree
+             on failure handling; two lack a type guard ahead of the membership test.",
+     probe: "the K17 sweep, cross-checked against a disposition grep.",
+     observed: "Failure modes span raise-and-quarantine, leave-the-ticket-open,
+                count-as-unparseable, warn-and-return-a-placeholder, and select-all-views.",
+     note: "A new conditionally-required key multiplies this surface, so the demand pins the
+            guard shape, not just the key."}
+  - {id: K23, kind: referential, probe_kind: read, verdict: holds,
+     claim: "The fold rule is stated in four places, and the one the design proposes to drop
+             cites a pre-write cost that does not exist.",
+     probe: "read the write-discipline rule, the two neighbouring fold instructions, and the
+             skill's own copy.",
+     observed: "The canonical rule names a retired hook path as its reason."}
+  - {id: K24, kind: behavior, probe_kind: read, verdict: holds,
+     claim: "Two model-facing surfaces would silently go stale under R1 — the budget refusal
+             message and the write tool's own description both name the report as writable.",
+     probe: "read the refusal template and the tool description.",
+     observed: "The refusal message tells the model its report write is still available; the
+                tool description lists the report as a valid target."}
+  - {id: K25, kind: behavior, probe_kind: read, verdict: holds,
+     claim: "The run salt is generated once per investigation before the model runs and is
+             threaded unchanged into every subagent bind; the wrap does no content inspection,
+             and the only proven property is that a payload authored before the run cannot
+             name the frame.",
+     probe: "read the salt's origin and its threading; read the wrap; read the forgery
+             regression test.",
+     observed: "One salt per run, inherited rather than regenerated per call. The regression
+                test shows a prior run's closing tag passing through inert inside the current
+                frame.",
+     note: "The re-grounding probe's sixth claim re-confirms this thread without re-deriving
+            it, and is folded here rather than carried twice. PR7 and PR8 then establish that
+            this shared-salt case is the ONLY one in the tree."}
+  - {id: K26, kind: behavior, probe_kind: read, verdict: holds,
+     claim: "Containment is not uniform across a tool's return and its rejection. Permission
+             and schema refusals are raw and unframed; the query and closed-ticket family
+             frames its denials and its faults identically to a success.",
+     probe: "read all three return channels and their framing call sites.",
+     observed: "The write tool's refusal is always raw. The query family's fault detail —
+                which can carry upstream record text — is wrapped by the same call a success
+                view uses.",
+     note: "This is the containment precedent the gate must be built on; the write tool's own
+            refusal path has none."}
+  - {id: K27, kind: behavior, probe_kind: read, verdict: holds,
+     claim: "The literal-delimiter breakout check guards the writer's own content at write
+             time; it has never been a channel carrying a downstream rejection back into a
+             session.",
+     probe: "read the check and its call site.",
+     observed: "It fires only when the write target resolves to the run's report, against a
+                fixed legacy delimiter."}
+  - {id: K28, kind: behavior, probe_kind: read, verdict: holds,
+     claim: "At write time the challenger's run dir is the live investigation's directory,
+             and both grant surfaces admit it unconditionally ahead of any read-roots
+             widening — so a judge-precedented bind reads the unfiltered working document.",
+     probe: "the four claims of the grant probe, re-read against the live geography rather
+             than the copied one.",
+     observed: "The read tool's root check and the confined-cat scope each list the run dir
+                first and unconditionally; narrowing the extra read roots does not remove it.",
+     note: "This is what makes the human's observation-layer decision a GRANT decision."}
+  - {id: K29, kind: behavior, probe_kind: read, verdict: holds,
+     claim: "Dropping the conclusion block alone does not hide the reached disposition —
+             three of three real working documents restate it in kept blocks — and the
+             observation layer is clean of verdict language in all three.",
+     probe: "the extraction probe's fifth claim, inherited.",
+     observed: "Resolution and authorization rows name the settled interpretation in plain
+                English."}
+  - {id: K30, kind: behavior, probe_kind: read, verdict: holds,
+     claim: "A role receiving host-pre-rendered input needs no file-read grant; that is the
+             dominant pattern, and no re-serialiser exists, so a filtered rendering is a small
+             additive variant of the one existing select-and-render precedent.",
+     probe: "the extraction probe's second, fourth and sixth claims, inherited.",
+     observed: "Every stage's primary input is rendered host-side and inlined; the one
+                select-and-render function always includes the conclusion."}
+  - {id: K31, kind: reachability, verdict: unprobed,
+     claim: "Attacker-influenced payload text cannot reach the investigator's instruction
+             context through the review return.",
+     probe: "not attempted against the gate's own return path, which does not exist. The
+             live-channel probe establishes the precedent and the containment shape; the
+             census over the new path is a write-code-from-spec obligation.",
+     observed: "n/a",
+     note: "`review_return_is_contained` is its positive control and
+            `counter_story_absent_from_session` its negative."}
+
+  # ---- the executed probes' claims that no C or K entry already carries
+
+  - {id: PA5, kind: behavior, probe_kind: read, verdict: holds,
+     claim: "The confined-shell route and the file-read route apply the untrusted-content
+             wrap by different predicates over the same bytes: a learning role's shell output
+             is wrapped unconditionally, while the read tool wraps only shape-matched paths or
+             a narrower cross-agent check that excludes the run dir.",
+     probe: "read the two tool bodies, the cross-agent read predicate, and the untrusted-read
+             path matcher.",
+     observed: "`cat investigation.md` is wrapped untrusted; `read_file('investigation.md')`
+                on the same bytes is not."}
+
+  - {id: PB1, kind: referential, probe_kind: read, verdict: holds,
+     claim: "Every artifact write on the nearest existing precedent for a per-run record is
+             open-and-write-in-place — direct text writes and a streaming copy, never
+             temp-file-plus-rename.",
+     probe: "read the persist function, the source-refs writer, and the shared-input copier.",
+     observed: "Three direct-write call sites; the shared-input copy has no atomic
+                alternative available in this codebase at all.",
+     note: "The probe's separate claims for the source-refs writer and the shared-input copier
+            are folded into this entry rather than carried twice."}
+  - {id: PB4, kind: referential, probe_kind: search, verdict: holds,
+     claim: "An atomic-write primitive exists, is imported into that exact module, and is used
+             by a sibling function about a hundred lines above the writers that bypass it.",
+     probe: "grep for the primitive's definition and every use in the module.",
+     observed: "The queue rewriter calls it; the artifact writers do not.",
+     note: "So the gap is a bypass of an established pattern, not an absent capability — which
+            is why the review-record demand requires the atomic write explicitly."}
+  - {id: PB5, kind: census, probe_kind: search, verdict: holds,
+     claim: "No exception path anywhere from the artifact writers up through the run wrapper
+             removes or truncates a partially written artifact.",
+     probe: "read the persist module in full for try/except around the write calls; read the
+             leg driver and the dispatcher; grep the package for tree removal.",
+     observed: "The dispatcher catches and records faults without touching the filesystem;
+                the wrapper logs and re-raises."}
+  - {id: PB6, kind: census, probe_kind: search, verdict: holds,
+     claim: "The top-level marker wrapper quarantines the queue marker on a failure but leaves
+             the partially written artifact tree untouched, and no removal call exists
+             anywhere in the package.",
+     probe: "read the marker processor and the quarantine function; grep the package for
+             tree removal.",
+     observed: "Zero matches. A partial artifact survives a fault and is indistinguishable, by
+                presence alone, from a leg that never reached a verdict."}
+
+  - {id: PC1, kind: referential, probe_kind: read, verdict: holds,
+     claim: "Every non-oracle once-per-run stage wiring carries a literal,
+             invocation-invariant trace name; the judge's two are frozen module-level objects
+             built at import.",
+     probe: "read both actor wirings and the two judge wirings.",
+     observed: "Bare string literals, identical on every call.",
+     note: "The probe's per-stage claims are folded here rather than carried three times."}
+  - {id: PC4, kind: referential, probe_kind: read, verdict: holds,
+     claim: "The shared stage harness builds the trace path by joining the run directory with
+             the wiring's trace name unchanged, adding no per-invocation component of its own.",
+     probe: "read the harness's logger construction.",
+     observed: "A second call with the same wiring against the same directory resolves to the
+                identical path."}
+  - {id: PC5, kind: referential, probe_kind: read, verdict: holds,
+     claim: "The oracle already varies its trace name within a run, but keyed on story stem
+             and lead id — neither of which is a round or attempt index.",
+     probe: "read the oracle's wiring construction.",
+     observed: "Re-submitting the same story and lead set on a second round would repeat the
+                name."}
+  - {id: PC6, kind: referential, probe_kind: read, verdict: holds,
+     claim: "One existing stage already threads a per-invocation index into its trace name,
+             proving the harness imposes no constraint against a round axis — the actor and
+             judge callers simply never pass one.",
+     probe: "read the forward-check stage's wiring construction.",
+     observed: "An explicit iteration counter folded directly into the name."}
+  - {id: PC7, kind: behavior, probe_kind: read, verdict: holds,
+     claim: "A constant trace name reused across two constructions in one process APPENDS
+             rather than overwriting, guarded by a module-level path set and an existing
+             regression test.",
+     probe: "read the logger's constructor and the two module-level path sets; read the
+             regression test.",
+     observed: "Mode is append when the process has ever opened that path before.",
+     note: "REFUTES the disposition doc's stated failure mode. A demand written against
+            `prevent overwrite` would leave the real hazard — round-boundary
+            disambiguation — unaddressed even when satisfied."}
+  - {id: PC8, kind: reachability, verdict: unprobed,
+     claim: "Whether a grace-round loop executes within one process, inheriting the append
+             guard, or as repeated separate invocations that would genuinely truncate.",
+     probe: "no grace-round implementation exists to read; the guard is in-memory only and
+             does not survive a process boundary.",
+     observed: "n/a",
+     note: "Every current stage call is in-process, which makes in-process the likely shape —
+            inference from precedent, not observation."}
+  - {id: PC9, kind: referential, probe_kind: read, verdict: holds,
+     claim: "Even where lines are preserved by append, the per-agent sequence counter resets
+             on each construction, so a second round's records collide in id with the first
+             round's, and no field in the record schema marks the round.",
+     probe: "read the logger's constructor and its emit path.",
+     observed: "The sequence dict is fresh on every construction and is not loaded from the
+                file being appended to."}
+
+  - {id: PI1, kind: referential, probe_kind: read, verdict: holds,
+     claim: "The two existing actors' assembled prompts are disjoint: the malicious side gets
+             the alert, the rule key, a redacted query list, an archetype and a technique
+             menu; the benign side gets the alert, the rule key, a class-token entity list and
+             optionally a prior-close menu.",
+     probe: "read both actor prompts and both assembly functions.",
+     observed: "The benign actor never receives the defender's queries or leads in any form."}
+  - {id: PI2, kind: referential, probe_kind: read, verdict: holds,
+     claim: "The technique menu is a hardcoded in-repo corpus sampled to twelve entries with
+             one Initial Access technique forced in, seeded off the run id, and it is
+             malicious-only.",
+     probe: "read the corpus module in full and its call site.",
+     observed: "53 tuples across all 14 tactics; the benign actor has no menu at all."}
+  - {id: PI3, kind: referential, probe_kind: read, verdict: holds,
+     claim: "The prior-close menu filters closed tickets on the same signature to benign,
+             seed-eligible entries inside a bounded window, samples three to five, and OMITS
+             the section entirely when the sampler returns nothing.",
+     probe: "read the seed sampler in full and its call site.",
+     observed: "A cold start yields an empty list and the section is gated out of the prompt."}
+  - {id: PI4, kind: census, probe_kind: search, verdict: holds,
+     claim: "Nothing validates menu compliance on either actor: no structured-output schema,
+             no required field, no retry-on-omission, and the sole programmatic check on the
+             whole actor output is a literal skip-prefix scan.",
+     probe: "grep both stage modules for output schemas; grep the judge prompts for the menu
+             and the section name; read the only output check.",
+     observed: "Zero hits for a schema; zero hits for the menu anywhere in the judge."}
+  - {id: PI5, kind: census, probe_kind: search, verdict: holds,
+     claim: "The working document's lead list is schema-separable from its reasoning trace but
+             no renderer emits a leads-only view; the nearest existing thing is a hand-rolled
+             line scanner over one block type that never touches leads.",
+     probe: "read the language skill, the schema module, the walkers, and the entity extractor;
+             grep the tree for renderers.",
+     observed: "No leads-only walker exists; building one would be new construction."}
+  - {id: PI6, kind: census, probe_kind: search, verdict: holds,
+     claim: "The judge is whitebox relative to both actors but inherits their menu asymmetry
+             rather than closing it: only the benign direction gets ticket-store confirmation
+             tools, and neither direction gets a technique menu.",
+     probe: "read the judge invocation builder, the ticket tool, and both direction wirings;
+             grep the judge files for the menu.",
+     observed: "The malicious actor's technique citations are re-checked by nobody."}
+
+  - {id: PX1, kind: referential, probe_kind: read, verdict: holds,
+     claim: "A real grammar-driven parser for the working document exists and returns a typed,
+             semantically projected nested structure — not raw strings and not a
+             block-by-block tree.",
+     probe: "read the parser in full, plus its schema and block types.",
+     observed: "The projector re-groups rows by meaning regardless of where in the file they
+                appeared."}
+  - {id: PX3, kind: referential, probe_kind: read, verdict: holds,
+     claim: "The observation layer is the observed-graph rows plus the learned-fact updates;
+             every other recognized block type carries a hypothesis weight, a resolved verdict
+             or the final conclusion.",
+     probe: "enumerated every branch of the projector against the schema types; read the
+             language skill's own vocabulary section.",
+     observed: "The design's own text draws the same line, and ties the authorization verdicts
+                directly to disposition gating."}
+
+  # ---- the re-grounding probe (51-probe-reground.md), settling RG-1 to RG-4
+
+  - {id: PR1, kind: referential, probe_kind: read, verdict: holds,
+     claim: "The role registry is static definition data built once at import; the real
+             per-role agent construction is a separate function the registry build never
+             calls.",
+     probe: "read the registry module in full and the agent-core builder.",
+     observed: "The registry builder only checks for duplicate roles and returns the dict."}
+  - {id: PR2, kind: referential, probe_kind: read, verdict: holds,
+     claim: "Every non-main role's agent is built fresh inside the stage runner, once per
+             stage invocation — nothing caches or reuses a built agent across calls, and the
+             registry lookup happens fresh each time too.",
+     probe: "read the stage-agent builder and the stage runner.",
+     observed: "The build call sits inside the function invoked once per stage call.",
+     note: "Settles RG-1: lazy, at first and every use, never eager at driver construction."}
+  - {id: PR3, kind: referential, probe_kind: read, verdict: holds,
+     claim: "The one live-runtime role beyond the main agent is also built lazily — through a
+             closure defined at driver-build time but invoked only when its tool executes.",
+     probe: "read the driver's gather-build closure and its registration.",
+     observed: "The registration hands the callable itself, not its result.",
+     note: "Settles RG-1 for the live path: an unregistered or unconfigured review role's
+            loud failure lands at first gate fire, not at driver construction."}
+  - {id: PR4, kind: referential, probe_kind: read, verdict: holds,
+     claim: "A fault during either agent construction or the drive call still closes the
+             stage's trace logger — the path leaves the open-set and the handle closes — and
+             no incompleteness marker is written into the file's content.",
+     probe: "read the stage runner's try/finally shape and the logger's close method.",
+     observed: "The logger opens before the try, the finally always closes it, and close
+                swallows any close-time error. The only readable signal of an incomplete run
+                is that the file has fewer lines than a completed stage would.",
+     note: "Settles RG-2: closed, not left open — but a truncated trace and a complete one
+            are indistinguishable by any recorded flag."}
+  - {id: PR5, kind: census, probe_kind: search, verdict: holds,
+     claim: "Every bind call site across the tree threads a salt argument; the bind body
+             never mints one itself.",
+     probe: "grep every non-test bind call site, then read each one's arguments.",
+     observed: "Eight call sites, every one passing a salt in.",
+     note: "General as far as it goes — it does NOT establish whether the threaded value is
+            shared or fresh, which is what PR7 and PR8 settle."}
+  - {id: PR7, kind: behavior, probe_kind: read, verdict: refuted,
+     claim: "Salt inheritance is a general property of every subagent bind path.",
+     probe: "read the real offline orchestration path and the concrete stage calls, then
+             cross-check each callee's salt fallback.",
+     observed: "The orchestrator never passes a salt, so every stage defaults to None and
+                mints its own — three independent salts inside one case's run cycle.",
+     note: "REFUTES RG-3's general framing. The live main-to-gather pair is the sole
+            confirmed shared-salt case. This NARROWS the delimiter-escape exposure and makes
+            the precedent choice load-bearing, which `review_roles_mint_their_own_salt`
+            pins."}
+  - {id: PR8, kind: referential, probe_kind: read, verdict: holds,
+     claim: "Two stage entrypoints have no salt parameter in their signature at all and mint
+             unconditionally on every call, structurally unable to inherit any value.",
+     probe: "grep both modules for the salt symbol; read each function's signature.",
+     observed: "Neither carries the optional-salt fallback idiom the other six stages use.",
+     note: "A stronger form of not-general: some bind sites cannot inherit even in
+            principle."}
+  - {id: PR9, kind: census, probe_kind: search, verdict: holds,
+     claim: "The fail-fast key-sourcing preflight is called only from the offline learning
+             cycle and from eval/ops tooling — never from either live investigation
+             entrypoint.",
+     probe: "grep every non-test call site of the preflight symbol.",
+     observed: "Three call sites, none in the live entrypoint or the driver.",
+     note: "Settles RG-4's first half."}
+  - {id: PR10, kind: referential, probe_kind: read, verdict: holds,
+     claim: "The live entrypoint's own preflight is a narrower mechanism: hardcoded to
+             exactly the main and gather models, with no way to enumerate the roles a run
+             will invoke, and it never raises the fatal config error.",
+     probe: "read the live key-sourcing functions and their call site.",
+     observed: "It runs before any model is built, but its parameter list is fixed to two
+                models; a missing key is a printed error and an exit code."}
+  - {id: PR11, kind: census, probe_kind: search, verdict: holds,
+     claim: "Nothing anywhere iterates the full role registry to preflight every registered
+             role's model config.",
+     probe: "grep the non-test tree for every registry iteration form.",
+     observed: "No output from any of them — no generic all-roles preflight exists, live or
+                offline."}
+  - {id: PR12, kind: behavior, probe_kind: read, verdict: refuted,
+     claim: "A newly-registered live role's missing model config fails loudly at agent build.",
+     probe: "read both providers' model builders.",
+     observed: "The OpenAI-compatible provider raises immediately on a missing key
+                environment variable; the Anthropic provider performs no key check at all and
+                constructs the model object unconditionally, deferring failure to the first
+                live API request.",
+     note: "REFUTES RG-4's remaining half AND the plausible repair. `First use` is not one
+            fixed failure point across providers, so a demand asserting a build-time raise
+            would be silently false for one of them — which is why the minted demand asserts
+            a startup failure instead."}
+
+  # ---- the stage-hang probe (53-probe-stage-hang.md), commissioned by the author leaf to
+  # close the one assertion in the suite that rested on an unclaimed fault class
+
+  - {id: PS1, kind: referential, probe_kind: read, verdict: holds,
+     claim: "The live path's own precedent for awaiting a subagent from a tool body carries no
+             wall-clock bound: no wait_for, no timeout argument, and its three catches are a
+             request-count cap and two structured-failure classes.",
+     probe: "read the gather tool's full try/except around the awaited subagent run.",
+     observed: "A count cap fires only once N requests have been attempted and counted, so it
+                cannot fire while one call is still pending; the other two catches are abnormal
+                model behaviour and a store write failure, not stall detection.",
+     note: "This is what grounds the suite's `hangs` fault-spec: the fault this tree really
+            produces is a coroutine that never completes, not an exception."}
+  - {id: PS2, kind: census, probe_kind: search, verdict: holds,
+     claim: "A different stage-call path in the same tree wraps every call in a real per-role,
+             env-backed wall-clock deadline.",
+     probe: "searched every non-test call site of the offline stage runner; read its drive
+             helper in full.",
+     observed: "Six non-test call sites, each supplying a per-role timeout from an env-backed
+                function; the bound is task-level cancellation, not an HTTP-client deadline.",
+     note: "The SAFE precedent, and it is not the review stages' by inheritance — it sits on a
+            batch-driven per-case path structurally distant from a tool body at gate time."}
+  - {id: PS3, kind: behavior, probe_kind: executed, verdict: holds,
+     claim: "The expiry exception the wall-clock bound raises is the same class its handler
+             catches, on this repo's own interpreter.",
+     probe: "ran the identity check against the repo's Python.",
+     observed: "True on 3.11 — the asyncio alias and the builtin are one class.",
+     note: "Rules out a coincidental type match; the existing mechanism is coherent."}
+  - {id: PS4, kind: census, probe_kind: search, verdict: refuted,
+     claim: "A timed-out stage call is observably distinct from one that raised.",
+     probe: "read both except branches of the stage runner; searched every non-test catch site
+             of the exception they share.",
+     observed: "Both branches raise the identical type, differing only in a message substring
+                and a chained cause; nine catch sites, none inspecting the cause or parsing the
+                message to branch on timeout-versus-raised.",
+     note: "REFUTES an observable type-level distinction. A design that needs the two cases to
+            read differently gets no help from the existing mechanism and must build it —
+            which is what `timeout_and_failure_are_distinguishable` demands."}
+  - {id: PS5, kind: referential, probe_kind: read, verdict: holds,
+     claim: "No client- or SDK-level timeout is configured on either provider path.",
+     probe: "read both providers' model builders in full.",
+     observed: "Both construct the model object with defaults only — no client, no timeout, no
+                custom transport.",
+     note: "So the only bound this tree controls is the driver-level one. Whatever eventually
+            interrupts a genuinely stuck request is an unexamined library default."}
+
+  - {id: PL1, kind: referential, probe_kind: read, verdict: holds,
+     claim: "The gather subagent's return is the model's output string handed untouched to one
+             untrusted-wrap call — no schema, no truncation, no bounding step anywhere on the
+             path.",
+     probe: "read the gather tool body and the wrap primitive in full.",
+     observed: "Unlike the read tool, which bounds before wrapping, the gather summary has no
+                size cap at this step."}
+
+gate:
+  evaluated:
+    - {rule: R0, fired: true, note: "First pass: 2 formal findings from `spec-graph gate` (review_record.identity's missing evidence; the ninth-arm's unrecorded crosses_validation) plus 4 unknown-via-constraints cells the mechanical check read as answered because a form:test demand's binds happened to name the cell. AUTHOR PASS: all six are closed by RS10-RS16 and moved into pre_discharged — the record's sink now has evidence to point at (RS11), the ninth arm is a distinguished member rather than a documented alternative (RS13), the report's close via and the tool's budget tier both carry real constraint vocabularies (RS12/RS16), and the working document's two write cells state the review-state condition instead of `unknown` (RS15). Bidirectional prose reconciliation re-ran by hand over the seven new resolutions: each binds at least one element, and no element added this pass traces to no resolution sentence."}
+    - {rule: R1, fired: true, note: "7 firings. Both former holes are closed: RS10 states the coherence checker's input contract (the counter-story and nothing else) and the projection stage's live-shaped one, and each now carries a payload facet and a kind:shape demand. The projection's closure costs the design a claim — `reused unchanged` is withdrawn."}
+    - {rule: R2, fired: true, note: "4 firings, all pre-discharged. review_record.identity's key is no longer provisional: RS11 supplies the evidence the schema demanded, and review_record_lives_beside_the_run drives the (run_id, turn) key rather than asserting its shape."}
+    - {rule: R3, fired: true, note: "12 firings, all pre-discharged outright. The two cells that carried an R0 hole on unknown constraints now name them: the close via re-enters the retired path's validation over a host-rendered body (RS12), and the budget tier carries an explicit recorded exemption rather than whichever tier a new tool falls into (RS16)."}
+    - {rule: R4, fired: true, note: "28 firings (the ninth arm joined `distinguished`, the review deadline's shipped value is a distinguished member because the human set it, and RS17 split a tenth arm out of a value that was carrying two meanings), all pre-discharged. The three former holes close together: RS13 gives the degenerate case its own arm and its own driving test, and RS14 sets both bounds — which is what lets bounds_reject_zero become form:test and actually exercise the two zero cells instead of recording prose about them."}
+    - {rule: R5, fired: true, note: "2 mechanical firings (report_md's write_file/edit_file edge removal), both pre-discharged by survival demands. Judgment extension considered: yes — the tightening is the write-allow narrowing itself; the security-critical caller left constructible in a newly-unsafe state is a review role with no usable model config, and misconfigured_review_role_fails_before_the_investigation_pays is the safe-by-construction demand minted for it.", cites: [PR9, PR10, PR11, PR12]}
+    - {rule: R6, fired: true, note: "Rendered-sink walk over every payload/reason/frame slot. The one gap the first pass found — report_md's `reason` slot composed from challenger- or projection-derived text with an undetermined sanitizer — is CLOSED BY CONSTRUCTION rather than by a sanitizer: RS12 makes `reason` a typed value drawn from the close outcome vocabulary, so no attacker-influenced chooser reaches that slot at all. report_reason_key drives a poisoned counter-story and observes the frontmatter, so the closure is exercised, not asserted."}
+
+  obligations: []  # zero test obligations remain unminted this pass — every mechanically-fillable gap was
+                   # already absorbed by the assembler's 13 minted demands; what's left below is design
+                   # decisions for §7, not test content an agent could write today.
+
+  pre_discharged:
+    - {rule: R1, element: "interacts(main_agent->tool_close_investigation).payload", by: tool_close_investigation_seam, cites: [K14], witness: "main_agent's close call sends a typed disposition into the new tool; tool_close_investigation_seam pins the registration and disposition_outside_vocabulary_rejected pins the all-slots-bound rejection of an out-of-vocabulary value."}
+    - {rule: R1, element: "interacts(tool_close_investigation->report_md).payload", by: report_reason_key, cites: [K11], witness: "The close tool's write to report.md is report_md's payload facet; report_reason_key pins the reason slot within the byte cap and three_close_shapes_distinguishable pins its three outcome shapes."}
+    - {rule: R1, element: "interacts(tool_close_investigation->main_session).payload", by: review_return_is_contained, cites: [K25, K26], witness: "What the close tool hands back to the investigator is pinned as a typed, salted-frame structure by three shape demands, not a prose channel."}
+    - {rule: R1, element: "interacts(challenge_gate->challenger).payload", by: challenger_input_is_observation_layer, cites: [K29, PX3], witness: "The challenger's assembled input is pinned to the observation layer only — no hypothesis, resolution, authorization verdict, or conclusion text."}
+    - {rule: R1, element: "interacts(challenge_gate->review_record).payload", by: attacked_disposition_preserved, cites: [C26], witness: "The review record's payload — verdict, direction, attacked disposition, the challenger's requirement list, the oracle's projection — is pinned by two demands even though no sink is named yet for where it lands (see the R0 hole on review_record.identity)."}
+    - {rule: R2, element: "report_md.identity", by: close_is_terminal_for_the_disposition, cites: [K17], witness: "report_md's key is run_id alone because close_investigation is its sole, single-invocation writer per run; close_is_terminal_for_the_disposition pins that no write after commit can move it."}
+    - {rule: R2, element: "review_record.identity", by: refuted_and_incoherent_stay_distinct, cites: [PB1, PB4], witness: "Four uniqueness/behavior demands already pin distinctness and atomicity properties on the review record, though the key (run_id, turn) itself is claimed with no evidence because no sink exists yet — see the R0 hole on this same element."}
+    - {rule: R2, element: "review_trace.identity", by: grace_rounds_are_attributable, cites: [PC7, PC9], witness: "Trace identity (run_id, stage, round) is pinned by the one demand asserting each round's trace is attributable and recorded, on top of the probed append-not-overwrite and id-collision facts."}
+    - {rule: R2, element: "review_state.identity", by: review_state_on_frozen_deps, cites: [K9], witness: "The per-run turn/grace counters share one key (run_id) inside the frozen deps object's single mutable container; review_state_on_frozen_deps pins that shape."}
+    - {rule: R3, element: "report_md.access[write_file]", by: report_md_single_writer, cites: [K1, K17], witness: "write_file's denial on report.md is pinned directly, matched against edit_file by report_md_write_parity, and the two retired contracts it breaks are retired on the record."}
+    - {rule: R3, element: "report_md.access[edit_file]", by: report_md_write_parity, cites: [K2], witness: "edit_file must refuse report.md the same way write_file does; report_md_write_parity is the cross-via parity demand."}
+    - {rule: R3, element: "report_md.access[close_investigation]", by: report_md_single_writer, cites: [K17, K19], witness: "report_md_single_writer names close_investigation as the sole writer, but WHAT constraints that via enforces is unknown — whether a host-composed write re-enters the artifact-schema/duplicate-key/legacy-delimiter checks the retired model-write path enforced is F8, undecided. R6's rendered-sink walk traces the same gap to the attacker-influenced `reason` slot — see the R0 and R6 holes on this element."}
+    - {rule: R3, element: "run_salt.access[main_gather_bind]", by: review_roles_mint_their_own_salt, cites: [K25, PR7], witness: "The live main-to-gather bind's shared-salt precedent is exactly what the new roles must NOT follow; review_roles_mint_their_own_salt pins the rejection."}
+    - {rule: R3, element: "run_salt.access[stage_bind]", by: review_roles_mint_their_own_salt, cites: [PR7, PR8], witness: "The offline stage-bind's fresh-salt-per-stage precedent is what the new review roles DO follow; the same demand pins both cells in parity."}
+    - {rule: R3, element: "tool_close_investigation.access[main]", by: close_tool_is_main_only, cites: [K14], witness: "Main's typed-disposition access is pinned reachable; close_tool_is_main_only pins this cell alongside gather's non-reachability."}
+    - {rule: R3, element: "tool_close_investigation.access[gather]", by: close_tool_is_main_only, cites: [K14], witness: "Gather must not reach the close tool at all; close_tool_is_main_only is the negative pinning this cell."}
+    - {rule: R3, element: "tool_close_investigation.access[budget_tier]", by: close_tool_survives_budget_pressure, cites: [K4, K5], witness: "close_tool_survives_budget_pressure pins the OUTCOME — a budget-pressed run can still close — but the mechanism is undecided and the cell's own constraints are unknown; see the R0 hole on this element."}
+    - {rule: R3, element: "challenger.access[read_file]", by: challenger_holds_no_run_dir_read, cites: [K28, PA5], witness: "All four of the new roles' read/bash cells carry the same no-grant answer; challenger_holds_no_run_dir_read pins them together, per parity."}
+    - {rule: R3, element: "challenger.access[bash]", by: challenger_holds_no_run_dir_read, cites: [K28, PA5], witness: "Same negative as the read_file cell, covering the confined-bash route."}
+    - {rule: R3, element: "coherence_checker.access[read_file]", by: challenger_holds_no_run_dir_read, cites: [K28], witness: "The same no-grant negative is written to cover both new roles, not just the challenger, so the coherence checker inherits the parity too."}
+    - {rule: R3, element: "coherence_checker.access[bash]", by: challenger_holds_no_run_dir_read, cites: [K28], witness: "Same negative, confined-bash route, second new role."}
+    - {rule: R4, element: "disposition.domain.distinguished[inconclusive]", by: gate_skips_inconclusive, cites: [K7], witness: "A draft-inconclusive close is the one disposition value that must NOT invoke the gate; gate_skips_inconclusive pins that."}
+    - {rule: R4, element: "disposition.domain.distinguished[malicious]", by: counter_direction_from_directions_for, cites: [C3], witness: "The malicious disposition selects the benign counter-direction via the existing map; counter_direction_from_directions_for exercises this value."}
+    - {rule: R4, element: "disposition.domain.distinguished[benign]", by: counter_direction_from_directions_for, cites: [C3], witness: "The benign disposition selects the malicious counter-direction via the existing map; same demand, other value."}
+    - {rule: R4, element: "direction.domain.distinguished[malicious]", by: direction_conditional_affordances, cites: [PI2], witness: "The malicious direction gets the MITRE menu, not the ticket menu; direction_conditional_affordances pins the split."}
+    - {rule: R4, element: "direction.domain.distinguished[benign]", by: direction_conditional_affordances, cites: [PI3], witness: "The benign direction gets the prior-ticket menu (or omits it on cold start); both demands exercise this value."}
+    - {rule: R4, element: "close_outcome.domain.distinguished[closed-unchallenged]", by: close_result_contract, cites: [K7], witness: "close_result_contract pins this as one typed arm of the eight-arm result; gate_skips_inconclusive exercises it specifically."}
+    - {rule: R4, element: "close_outcome.domain.distinguished[closed-refuted]", by: close_result_contract, cites: [C26], witness: "close_result_contract pins this as one typed arm of the eight-arm result; refuted_and_incoherent_stay_distinct exercises it specifically."}
+    - {rule: R4, element: "close_outcome.domain.distinguished[closed-incoherent]", by: close_result_contract, cites: [C26], witness: "close_result_contract pins this as one typed arm of the eight-arm result; malformed_output_is_its_own_arm exercises it specifically."}
+    - {rule: R4, element: "close_outcome.domain.distinguished[closed-declined]", by: challenger_decline_leaves_the_close_standing, cites: [C26], witness: "The CHALLENGER's own decline, which RS17 separated from the review-failure outcome that had taken this cell over. Its demand drives a challenger that deliberately declines and observes the confident disposition surviving onto disk."}
+    - {rule: R4, element: "close_outcome.domain.distinguished[forced-inconclusive-review-failed]", by: gate_failure_policy, cites: [K12, K15], witness: "RS9's fail-closed outcome, on its own arm since RS17. gate_failure_policy and fail_closed_covers_every_review_stage drive it; timeout_and_failure_are_distinguishable pins that the two ways of reaching it stay legible."}
+    - {rule: R4, element: "close_outcome.domain.distinguished[closed-malformed]", by: close_result_contract, cites: [C26], witness: "close_result_contract pins this as one typed arm of the eight-arm result; malformed_output_is_its_own_arm exercises it specifically."}
+    - {rule: R4, element: "close_outcome.domain.distinguished[challenged]", by: close_result_contract, cites: [C26], witness: "close_result_contract pins this as one typed arm of the eight-arm result; challenged_arm_forces_a_turn exercises it specifically."}
+    - {rule: R4, element: "close_outcome.domain.distinguished[forced-inconclusive-nondiscriminating]", by: close_result_contract, cites: [C26], witness: "close_result_contract pins this as one typed arm of the eight-arm result; nondiscriminating_forces_inconclusive exercises it specifically."}
+    - {rule: R4, element: "close_outcome.domain.distinguished[forced-inconclusive-cap]", by: close_result_contract, cites: [K12], witness: "close_result_contract pins this as one typed arm of the eight-arm result; turn_cap_forces_inconclusive exercises it specifically."}
+    - {rule: R4, element: "request_limit.domain.distinguished[60]", by: gate_absent_on_truncated_run, cites: [K7], witness: "60 is what actually terminates an un-reviewed run; gate_absent_on_truncated_run pins that a truncated run never reaches the gate."}
+    - {rule: R4, element: "request_limit.domain.alternatives[60 + extra_turn_bound]", by: ceiling_is_bound_to_the_turn_cap, cites: [K7], witness: "The raised ceiling is read from the forced-turn cap, not restated as a literal, and every run pays it whether or not the gate fires; two demands pin both halves of RS7."}
+    - {rule: R4, element: "retry_budget.domain.distinguished[10]", by: forced_turn_cap_below_retry_budget, cites: [K12], witness: "The forced-turn cap must sit below the shared retry budget of 10 or a stubborn model crashes the driver; this demand pins the ceiling."}
+    - {rule: R4, element: "budget.domain.distinguished[off]", by: report_md_single_writer, cites: [K5], witness: "The single-writer demand runs under the default (enforcement off) budget state."}
+    - {rule: R4, element: "budget.domain.distinguished[on]", by: close_tool_survives_budget_pressure, cites: [K3, K4], witness: "close_tool_survives_budget_pressure specifically exercises the enforcement-on state."}
+    - {rule: R4, element: "past_tickets.domain.distinguished[cold-start-no-eligible-tickets]", by: cold_start_affordance_omitted_not_empty, cites: [PI3], witness: "The sampler-returns-nothing case is pinned to omit the section rather than send it empty."}
+    - {rule: R4, element: "role_registry.domain.distinguished[built-fresh-per-stage-invocation]", by: misconfigured_review_role_fails_before_the_investigation_pays, cites: [PR1, PR2, PR3], witness: "RG-1 settled that every non-main role (and the new review roles) builds fresh per call; the minted demand turns that into a startup-failure requirement rather than a first-use one."}
+    - {rule: R4, element: "model_preflight.domain.distinguished[hardcoded-to-main-and-gather]", by: misconfigured_review_role_fails_before_the_investigation_pays, cites: [PR9, PR10, PR11], witness: "RG-4 settled that no preflight reaches the new roles today; the same minted demand is the fix."}
+    - {rule: R4, element: "model_preflight.domain.alternatives[raises at agent build]", by: misconfigured_review_role_fails_before_the_investigation_pays, cites: [PR12], witness: "'Raises at build' is refuted as a general property (one provider never checks the key); the minted demand asserts a startup check instead, deliberately not build-time."}
+    - {rule: R5, element: "report_md", by: close_path_survives_the_write_allow_change, cites: [K17, K18, K19], witness: "run_investigation still reads report_md and tool_close_investigation still writes it after write_file's edge is removed; close_path_survives_the_write_allow_change is the survival demand and the two retired committed contracts are recorded, not silently broken."}
+    - {rule: R5, element: "report_md", by: close_path_survives_the_write_allow_change, cites: [K17, K19], witness: "Same dependents survive edit_file's removal; report_ordering_independence_retired re-expresses the retired ordering-independence contract on the close tool."}
+
+    # --- the twelve entries RS10-RS16 closed; each was a hole at assembly, none is one now.
+    - {rule: R1, element: "interacts(challenge_gate->coherence_checker).payload", by: coherence_checker_input_is_the_counter_story_only, cites: [C26], witness: "RS10 states the contract the design never did: the counter-story and nothing else. The demand drives a close and asserts on the prompt the stage fake RECORDED — the counter-story present, the observation layer and the lead ids absent."}
+    - {rule: R1, element: "interacts(challenge_gate->oracle).payload", by: projection_input_is_live_shaped, cites: [C19, C22], witness: "RS10 gives the projection stage a live-shaped input built from the run's own directory, and withdraws the design's `reused unchanged` claim. The demand drives a live run and asserts the recorded prompt names the live run dir and its executed leads, and names no learning run dir and no story-derived trace prefix."}
+    - {rule: R4, element: "close_outcome.domain.distinguished[closed-evidence-cannot-speak]", by: degenerate_evidence_is_its_own_arm, cites: [C19], witness: "RS13's ninth arm, promoted out of documented_alternatives. Both degenerate shapes — every executed lead silent, and no lead executed at all — are driven, and both must reach this arm and spend no turn."}
+    - {rule: R0, element: "close_outcome.domain.alternatives[a ninth arm for the degenerate discriminator case — every executed lead silent, or no lead executed at all]", by: degenerate_evidence_is_its_own_arm, cites: [C19], witness: "The alternatives list is now empty: the arm is a distinguished member, so there is no crosses_validation question left to record as unknown."}
+    - {rule: R4, element: "extra_turn_bound.domain.distinguished[0]", by: bounds_reject_zero, cites: [K12], witness: "RS14 set the bound to 2, which is the only reason bounds_reject_zero could stop being prose. The demand now drives a zero configuration and requires it refused — at zero the cap collapses the first challenged arm into the cap arm, leaving no room for the turn the gate exists to force."}
+    - {rule: R4, element: "grace_bound.domain.distinguished[0]", by: bounds_reject_zero, cites: [PC9], witness: "Same closure, plus RS14's reset scope: at zero the grace bound disables the only stated evidence-strength signal, since rounds-consumed is the sole place a cold pass reads differently from a refined one. grace_budget_resets_per_gate_attempt pins the scope the value alone would leave undecided."}
+    - {rule: R0, element: "review_record.identity", by: review_record_lives_beside_the_run, cites: [PB1, PB4, PB5], witness: "RS11 names the sink, so the identity facet finally has evidence to cite. The demand drives two turns of one run and observes two distinct records, plus the absence of any surviving temporary file — the atomic write is exercised, not asserted."}
+    - {rule: R0, element: "report_md.access[close_investigation]", by: close_write_reenters_artifact_validation, cites: [K11, K19], witness: "RS12 answers WHAT validates, which report_md_single_writer never did (it answers WHO writes). The demand drives content the retired path would have refused through the close and requires the same refusal, with nothing left on disk."}
+    - {rule: R6, element: "report_md.access[close_investigation]", by: report_reason_key, cites: [K11], witness: "The rendered-sink gap closes by construction rather than by a sanitizer: the reason slot is a typed arm, so the attacker-influenced chooser never reaches it. Driven with a poisoned counter-story and observed in the frontmatter, inside the byte cap."}
+    - {rule: R0, element: "tool_close_investigation.access[budget_tier]", by: close_tool_budget_exemption_is_explicit, cites: [K3, K4], witness: "RS16 replaces `whatever tier a new tool lands in` with a registered, named exemption. The demand drives the real refusal predicate against an exhausted budget state, and pins that the write tools are NOT on the roster — demoting them was the repair two existing modules already record as wrong."}
+    - {rule: R0, element: "investigation_md.access[write_file]", by: close_is_terminal_for_the_disposition, cites: [K20, C1], witness: "RS15 overrules the three answering copies that converged on `untouched by this change`: their agreement was an assumption inherited from the design's silence. The demand drives a post-close write and an edit that would restate a different conclusion, and requires both refused with the recorded disposition unmoved."}
+    - {rule: R0, element: "investigation_md.access[edit_file]", by: close_is_terminal_for_the_disposition, cites: [K2, K20], witness: "Same resolution mirrored on the edit path, which reaches the same write decision on the full post-splice text — a terminality that covered only write_file would leave the bypass open through edit."}
+    # --- the seam the suite itself demanded, which no resolution names.
+    - {rule: R1, element: "drives(challenge_gate->challenger)", by: review_stages_enter_through_an_injection_seam, cites: [K15, C17], witness: "The design names no injection point for the three stage calls, so no hermetic scenario could drive a single arm. The seam sits on the entry point beside the five that already exist, and the demand drives a full replayed investigation through it — injection is by value, never monkeypatch, which is what the tree's existing fakes already do."}
+
+  holes: []  # All twelve entries recorded at assembly are closed above by RS10-RS16. What
+             # remains open is carried in `handoff.forks` and is decision content, not a
+             # computed trigger anyone can answer from the code.
+
+handoff:
+
+  forks:
+    - "The gate's return CHANNEL and its framing. A refused write returns raw and unwrapped
+       today; the only precedent for a refusal carrying payload-sourced text inside
+       containment lives on a different tool family. Recommended: frame the return with a
+       FRESH per-invocation salt, which costs nothing new — the bind path already falls back
+       to a fresh value and three offline stages already mint their own."
+    - "The delimiter escape, now NARROWED. The wrap still does no content inspection, so a
+       reader that has seen a salt can close that frame — but salt inheritance turned out not
+       to be general: only the live gather bind shares the session's salt, and every learning
+       stage mints its own. The remaining decision is which precedent the review roles are
+       built on, and `review_roles_mint_their_own_salt` makes the wrong answer fail a demand
+       rather than stay a fork. Do not dispatch a probe leaf for what is left; it is a
+       construction choice."
+    - "The discriminator rule. The design says the oracle's silent rows and explicitly NOT a
+       generated artifact; the merged pilot's load-bearing result is a generated
+       unsettled-requirement list. Provisionally pinned as the JOIN — silence measured against
+       declared-unsettled requirements — which is a decision, not a reading. All three
+       answering copies converged on one side of it without noticing. NARROWED, not closed, by
+       RS13: the degenerate arm is settled, but which half of the join the gate KEYS on is still
+       a design call the spec pins provisionally."
+    - "A model told why its close was refused can downgrade its own finding to unresolved and
+       skip the gate entirely. The coverage question this sits inside is now WAIVED, examined
+       and accepted (`unresolved_runs_are_reviewed_by_nothing`); the downgrade path is the half
+       of it that is a behaviour rather than a coverage policy, and it stays here."
+    - "Stage tool grants are still not modelled as a boundary with an access facet. With no way
+       to express a stage's grant as a boundary, no rule can ask whether framing is applied
+       uniformly across a stage's read routes — which is how the same bytes come back wrapped on
+       one route and bare on another. Out of scope for this issue; the fix belongs in the
+       coverage graph's own vocabulary, and it should land before a fourth `faults no lens
+       owned` pass is commissioned against this pipeline."
+    - "The 'pass' convention is pinned challenger-side throughout; one obligation's sentence
+       uses it investigation-side and reads inverted under this pin."
+    - "The old offline legs' retirement was scheduled for this PR because the offline PR
+       replaced them in the drain. That PR is gone; retiring them now leaves nothing doing
+       offline learning."
+    - "No A/B or kill switch at runtime. That non-obligation was accepted on the ground that
+       the offline PR recovered attribution; the gate now goes live on every confident close,
+       unmeasured, with no runtime off-ramp."
+    - "The secondary-evaluation harness's fate, due by this PR."
+    - "Whether the absence of the offline leg changes the unresolved-coverage question the cold
+       review raised."
+
+  refuted:
+    - "The design's central mechanism. `Reject the write, force another turn` has no framework
+       support: a tool refusal is a raw retry, the budget is 10, and the eleventh raises an
+       error no driver handler catches. Correction folded in: the gate's own cap sits below
+       the retry budget and a driver handler catches exhaustion, forcing the unresolved close
+       rather than killing the run."
+    - "The blinding decision as an INPUT decision. At write time the challenger's run dir is
+       the investigation's dir and both grant surfaces admit it unconditionally, so narrowing
+       read roots discharges nothing. Correction: no file-read grant at all."
+    - "Dropping only the concluding block as the observation-layer cut. Three of three real
+       completed documents restate the reached verdict in kept blocks."
+    - "The grace-round trace hazard as stated. Rounds APPEND rather than overwrite in-process;
+       the real hazard is colliding record ids across rounds with no field marking the
+       boundary."
+    - "The cold review's REASON for retracting `shared and untouched` — the conclusion reaches
+       the judge through the per-role invocation builder, not the shared per-lead assembly.
+       Its fix still stands."
+    - "The containment argument that made payload-derived counter-story prose acceptable
+       — `nothing consumes the record` — does not survive going live."
+    - "The inherited test census count: 72 files and 14 coverage graphs, not 71 and 13."
+    - "Salt inheritance as a general property of subagent binds. The live gather bind is the
+       sole shared-salt case; every learning stage mints its own and two stage entrypoints
+       cannot accept a threaded one. A design assuming the stages already share one salt
+       within a case cycle is assuming something that is not true today."
+    - "The fail-fast model preflight as a live safeguard. It is unreachable from either live
+       entrypoint, the live preflight is hardcoded to two roles, and no all-roles scan exists
+       anywhere. A new role's bad config surfaces at first use — and even `first use` is not
+       one failure point: one provider raises at agent build, another performs no key check
+       at all and defers to the first API request."
+
+  deferred:
+    - "The path census over the gate's own return (K31) — it cannot run until the return path
+       exists; write-code-from-spec probes it."
+    - "Whether a grace-round loop stays inside one process (PC8) — no implementation exists to
+       read."
+    - "Whether a payload can steer the challenger into suppressing a genuine challenge — needs
+       an adversarial eval against a built challenger, not a code read."
+    - "Whether a split delimiter can form at a seam between two assembled sections — cannot be
+       read against a render step that does not exist; it is a specification obligation on
+       that step."
+
+  drops:
+    - "The grounding brief's per-direction filename collision hazard — at write time exactly
+       one counter-direction is selected, so the concurrent-leg collision is absent."
+    - "The grounding brief's declared-manifest fail-open finding — the transcript manifest is
+       not the live gate's observable."
+    - "21 forks from the offline pass — the corpus, the sweep mechanism, re-invocation over a
+       finished run dir, the curators-unwired interim guarantee and its time-box, per-direction
+       record collision, and the offline leg's fault isolation. Superseded by the scope change,
+       not answered; the offline dispositions frontier holds them intact if it is ever revived."
+
+  deviations:
+    - "The re-grounding probe landed after the first assembly pass and was folded in as a
+       second pass: four `unknown` slots became settled values, two of its results were
+       refutations, and each refutation minted a demand."
+    - "Claim verdicts were normalized to the artifact's closed vocabulary; the nuance the input
+       frontiers carried in non-vocabulary verdicts (`holds-as-corrected`,
+       `holds-and-strengthens`, `refutes-r5-reason`, `drifted`) moved into each claim's `note`."
+    - "Census claims recorded as `probe_kind: executed` by the input frontiers were recorded
+       here as `search`: the instrument that established each was a grep, a reference lookup or
+       a resource trace."
+    - "AUTHOR PASS. Seven human resolutions (RS10-RS16) landed after assembly and closed all 12
+       `gate.holes`. Nine demands were MINTED at authoring time rather than at assembly —
+       against the phase's usual shape, because the resolutions arrived between the two and four
+       of the twelve holes had no demand binding them. `bounds_reject_zero` moved from clause to
+       test on the same basis. Everything minted is traced to its RS number in the header."
+    - "One of the nine is minted by the SUITE, not by a resolution:
+       `review_stages_enter_through_an_injection_seam`. The design gives the three review-stage
+       calls no injection point, and the author charge makes a seamless dependency's seam part
+       of the contract. Recorded as a deviation because it is spec content no human asked for."
+    - "The suite's imports of the not-yet-built surface are DEFERRED to call time rather than
+       made at module scope (the #632 spec's shape). The suite therefore COLLECTS clean and
+       every test reports as a failing contract; a collection error would hide 62 contracts
+       behind one traceback. The cost is paid to `check_calls`: ten tests that reach the target
+       only through production wiring or through a deferred import now read as `never references
+       the target`. They are the documented false-positive shape, not undischarged demands.
+       [F-mechanical: corrected from the authored 'nine' — `spec-graph calls` against this
+       artifact's three targets reports 10 NO-CALL findings among the #774 files, matching
+       80-author-digest.md's own later count; the artifact's number had drifted stale.]"
+    - "The coherence checker's name was RESOLVED BY THE HUMAN AT AUTHORING TIME, mid-phase,
+       after the suite had already committed a placeholder. `coherence_checker` is the chosen
+       identifier and the rename was applied across the artifact, the suite and the digest in
+       one pass. Recorded because the id looks like a default and is not one: it was chosen to
+       make the role's limit legible — no payload access, so it can find a contradiction but
+       never a falsehood, and the design separates those two verdicts on purpose."
+    - "A PROBE WAS COMMISSIONED AND CONSUMED MID-PHASE. The author leaf red-flagged one
+       assertion resting on an author-imagined fault class rather than stopping on that test;
+       the probe was run, and the assertion is now grounded on PS1 with the synthetic exception
+       the fake used to raise replaced by a call that really stays pending. Recorded because
+       authoring is not supposed to be where a probe is requested."
+    - "THREE downstream frontiers echo this leaf's inventory and this leaf's inventory then
+       changed, because each of them caused the change: the stage-hang probe minted two demands,
+       and the two phase-F readers between them minted four more. All three `inventory_echo`
+       blocks were refreshed to the post-repair counts, each carrying a note saying why, rather
+       than left to report a false break in the chain. The disagreement is a parent revising
+       after a child read it — never a miscount on either side, which is the case the
+       conservation rule is written for."
+    - "A `form: waiver` demand was minted at the AUTHORING seam. The schema says a waiver is
+       minted only at the human seam in §7; this one was taken by the human mid-authoring,
+       after the phase-D seam had already closed. Recorded rather than filed as an ordinary
+       demand, because a waiver is an examined no and the examination happened where the
+       schema does not expect it."
+    - "PHASE F SENT FOUR ITEMS BACK AND ALL FOUR ARE APPLIED HERE (RS17-RS20): the decline arm
+       was separated from the fail-closed outcome, the challenger's lead-block input was
+       re-expressed from tag altitude to row altitude, the close's two writes were ordered with
+       a held fault, and the record-on-every-arm demand was widened from four driven arms to
+       all ten. Four demands and four tests were minted at this seam; the coverage waiver's
+       population was corrected by an arm, because it had counted a decline as an unresolvable
+       case."
+    - "The suite pins module and symbol NAMES for the unbuilt surface (`runtime/close_tool.py`,
+       `runtime/challenge_gate.py`, `runtime/review_roles.py`, `run.preflight_role_models`).
+       The graph joins to code by name, so a spec that named nothing would join to nothing —
+       but the implementer inherits a layout nobody chose deliberately."
