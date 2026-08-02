@@ -174,6 +174,18 @@ def enqueue_learning(run_dir: Path, alert: Path, *, truncated_by: str | None = N
             file=sys.stderr,
         )
         return False
+    from defender.runtime import scrub as _scrub
+
+    if not _scrub.tree_verified(run_dir):
+        # §7 D2/D9: a tree carrying no scan verdict, or one recording that the walk never ran,
+        # is not fed to the learning loop — the crash path this marker exists to describe is
+        # exactly the one most likely to hold what a box planted.
+        print(
+            f"[run.py] {run_dir} carries no completed reap-scan verdict — NOT enqueuing for "
+            "learning (an unverified tree must not feed the corpus)",
+            file=sys.stderr,
+        )
+        return False
     from defender.learning import loop as _loop
     from defender.learning.core.config import REPO_ROOT as _LEARN_REPO_ROOT
     from defender.learning.core.config import LoopPaths, _env_state_dir

@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import ClassVar, Protocol
 
-from defender._io import read_text_soft
+from defender._io import read_text_soft, write_guarded
 from defender._run_id import RUN_ID_ALLOWED, is_valid_run_id
 from defender.runtime import bash_exec
 from defender.runtime.box_codec import (
@@ -29,6 +29,7 @@ from defender.runtime.scrub import (  # noqa: F401 — re-exported: run.py/drain
     Finding,
     RunTainted,
     scrub,
+    write_did_not_run,
 )
 
 
@@ -141,6 +142,126 @@ BOX_ENV_ALLOWLIST: tuple[str, ...] = (
 )
 
 DEFAULT_SPEC = BoxSpec()
+
+#: M1 — the alias-ban seccomp profile, resolved ONCE so every box lane (the investigation
+#: builder and the generic request builder alike, C8-new) attaches the identical value. Denies
+#: exactly the six shapes `BANNED_SHAPES` in _spec771.py names; ships under `runtime/` so it
+#: sits outside every box's writable mount, including the drain lane's repo-relative checkout
+#: (the same reason the CI workflow and the write lint's baseline live outside a triggered
+#: corpus — a box that could rewrite the file it is banned by would leave the NEXT box unbanned).
+ALIAS_PROFILE_PATH: Path = Path(__file__).resolve().parent / "seccomp" / "alias-deny.json"
+
+BANNED_SHAPES: tuple[str, ...] = ("symlink", "symlinkat", "link", "linkat", "mknod", "mknodat")
+
+_OCI_SECCOMP_FLAG = "--oci-seccomp"
+_RUNSC_INSTALL_CMD = "runsc install -- --oci-seccomp"
+
+
+class AliasBanNotInForce(Exception):
+    """§7 D5 — the ban-not-in-force fault, its OWN exception type rather than `BoxFault`.
+
+    F4's not-opt-out-able decision is only enforceable if this fault cannot be caught by the
+    broad `except BoxFault: degrade` handler every other startup fault survives through — so
+    this deliberately does NOT subclass `BoxFault`, and `BoxFault` does not subclass this."""
+
+
+def _alias_ban_fault_message(runtime: str, detail: str) -> str:
+    detail = (detail or "").strip()
+    if runtime == "runsc":
+        remedy = (
+            f"register the runsc runtime with {_OCI_SECCOMP_FLAG} — run "
+            f"`{_RUNSC_INSTALL_CMD}` (writes runtimeArgs: [\"{_OCI_SECCOMP_FLAG}\"] into the "
+            "daemon's runsc entry) and restart the docker daemon"
+        )
+    else:
+        remedy = (
+            f"the {runtime} runtime is not enforcing the alias-deny seccomp profile attached "
+            f"at container creation — check that docker is actually invoking {runtime}"
+        )
+    message = f"the alias ban is not in force under the {runtime} box runtime: {remedy}."
+    if detail:
+        message += f" probe reported: {detail}"
+    return message
+
+
+def _alias_probe_script(name_prefix: str) -> str:
+    """One probe body, attempting each of the six banned shapes plus one ordinary create, all
+    under a name no later write will ever collide with (`{name_prefix}` carries a random
+    suffix — the probe's own leavings are swept regardless of which arm it takes). Reports
+    success/failure the way `AliasProbeDocker.ProbeVerdict.as_completed` fakes it: rc 0 and a
+    stdout line on total denial + a working control, rc 1 and a stderr line naming what was
+    allowed (or that the control itself failed) otherwise — so the SAME reader classifies both
+    the fake and a real box's output."""
+    return f'''
+import os, stat, sys
+
+prefix = {name_prefix!r}
+allowed = []
+
+def attempt(shape, fn):
+    try:
+        fn()
+        allowed.append(shape)
+    except OSError:
+        pass
+
+dfd = os.open(".", os.O_RDONLY)
+try:
+    attempt("symlink", lambda: os.symlink("t", prefix + "-symlink"))
+    attempt("symlinkat", lambda: os.symlink("t", prefix + "-symlinkat", dir_fd=dfd))
+    with open(prefix + "-src", "w") as fh:
+        fh.write("x")
+    attempt("link", lambda: os.link(prefix + "-src", prefix + "-link"))
+    attempt("linkat", lambda: os.link(prefix + "-src", prefix + "-linkat", dst_dir_fd=dfd))
+    attempt("mknod", lambda: os.mknod(prefix + "-mknod", mode=stat.S_IFIFO | 0o600))
+    attempt("mknodat", lambda: os.mknod(prefix + "-mknodat", mode=stat.S_IFIFO | 0o600, dir_fd=dfd))
+finally:
+    os.close(dfd)
+
+create_ok = True
+try:
+    with open(prefix + "-create", "w") as fh:
+        fh.write("x")
+except OSError:
+    create_ok = False
+
+for suffix in ("-symlink", "-symlinkat", "-link", "-linkat", "-mknod", "-mknodat", "-src", "-create"):
+    try:
+        os.remove(prefix + suffix)
+    except OSError:
+        pass
+
+if not create_ok:
+    sys.stderr.write("alias-probe: ordinary create did not succeed\\n")
+    sys.exit(1)
+if allowed:
+    sys.stderr.write("alias-probe: " + " ".join(s + " was ALLOWED" for s in allowed) + "\\n")
+    sys.exit(1)
+sys.stdout.write("alias-probe: all banned shapes denied; ordinary create ok\\n")
+sys.exit(0)
+'''
+
+
+def _alias_probe_argv(name: str, cwd: Path) -> list[str]:
+    prefix = f".alias-probe-{uuid.uuid4().hex}"
+    return [
+        "docker", "exec", "-w", str(cwd), name, "python3", "-c", _alias_probe_script(prefix),
+    ]
+
+
+def _probe_alias_ban(docker: DockerFn, name: str, cwd: Path, runtime: str) -> None:
+    """M2 — the startup positive control (O2, O3). Observes the ban's EFFECT at every box
+    start rather than trusting the runtime's configuration (C1-fix): runs exactly once per
+    start, attempts each of the six banned shapes plus one ordinary create inside `cwd` (the
+    box's own writable mount, or `/tmp` when it has none), and faults unless every banned shape
+    was refused AND the ordinary create succeeded. Any non-zero exit — including one the exec
+    itself never completed — reads as failed, never as a pass."""
+    proc = _call(docker, _alias_probe_argv(name, cwd))
+    if proc.returncode != 0:
+        raise AliasBanNotInForce(
+            _alias_ban_fault_message(runtime, (proc.stderr or proc.stdout or ""))
+        )
+
 
 _ALLOW_UNSANDBOXED = "DEFENDER_ALLOW_UNSANDBOXED"
 # The full container id as docker writes it into every container's own mount table.
@@ -382,6 +503,7 @@ def _create_argv(
         "--runtime", spec.runtime,
         "--network", "none",
         "--read-only",
+        "--security-opt", f"seccomp={ALIAS_PROFILE_PATH}",
         "--mount", f"type=bind,source={run_src},target={run_dir}",
         "--mount", f"type=bind,source={defender_src},target={defender_dir},readonly",
         "--tmpfs", f"/tmp:rw,noexec,nosuid,mode=1777,size={spec.tmpfs_size}",
@@ -398,7 +520,7 @@ def _plant(sentinel: Path, token: str) -> None:
     like any other (BoxFault), not a bare OSError that would escape start_box's classification
     and the loud DEFENDER_ALLOW_UNSANDBOXED fallback."""
     try:
-        sentinel.write_text(token, encoding="utf-8")
+        write_guarded(sentinel, token)
     except OSError as e:
         raise BoxFault(
             f"could not plant the startup sentinel at {sentinel} — the bind source is not "
@@ -461,13 +583,21 @@ def _start_boxed(
         _create_argv(name, run_dir, defender_dir, spec, shared_mounts(docker)),
     )
     if created.returncode != 0:
+        write_did_not_run(
+            run_dir, f"box create faulted before any container existed: "
+                     f"{(created.stderr or '').strip()}"
+        )
         raise BoxFault(
             f"could not create the box {name}: {(created.stderr or '').strip()}"
         )
     try:
         _plant_sentinel(run_dir, docker, name)
-    except BaseException:
+        _probe_alias_ban(docker, name, run_dir, spec.runtime)
+    except BaseException as e:
         _call(docker, ["docker", "rm", "-f", name])
+        write_did_not_run(
+            run_dir, f"box startup faulted before the reap scan could run: {e}"
+        )
         raise
     return BoxExecutor(spec=spec, transport=_DockerTransport(name, spec), name=name)
 
@@ -480,6 +610,7 @@ def _render_argv(
         "--runtime", request.spec.runtime,
         "--network", "none",
         "--read-only",
+        "--security-opt", f"seccomp={ALIAS_PROFILE_PATH}",
     ]
     for m in request.mounts:
         if mounts and not _covered(Path(m.source), mounts):
@@ -523,6 +654,7 @@ def _start_boxed_request(
     try:
         for m in request.mounts:
             _check_mount_sentinel(m, docker, request.name)
+        _probe_alias_ban(docker, request.name, _probe_cwd_for_request(request), request.spec.runtime)
     except BaseException:
         _call(docker, ["docker", "rm", "-f", request.name])
         raise
@@ -530,6 +662,17 @@ def _start_boxed_request(
         spec=request.spec, transport=_DockerTransport(request.name, request.spec),
         name=request.name,
     )
+
+
+def _probe_cwd_for_request(request: BoxRequest) -> Path:
+    """Where M2's probe acts inside this lane's box: the first WRITABLE mount's target, or the
+    box's own `/tmp` tmpfs when the lane has none (the learning run-cycle box, X16 — every
+    mount rendered read-only). The ban is a syscall filter, not a path policy, so the
+    observation is equally valid in either (§7 H10, pinned provisionally)."""
+    for m in request.mounts:
+        if m.writable:
+            return Path(m.target)
+    return Path("/tmp")
 
 
 def _opt_out_or_raise(fault: BoxFault) -> None:
@@ -676,6 +819,10 @@ def stop_and_scrub(
         stop_box(box)
         box_down = True
     except BoxFault as e:
+        # §7 D2: the scan cannot run (the box is not provably dead), on BOTH teardown-fault
+        # arms — with nothing in flight the fault still propagates, but the tree is just as
+        # unscanned, so the marker is written before the branch below decides what to do next.
+        write_did_not_run(tree, f"teardown faulted before the reap scan could run: {e}")
         if not in_flight:
             raise
         print(

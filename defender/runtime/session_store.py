@@ -26,6 +26,8 @@ from pydantic_ai.messages import (
     ToolReturnPart,
 )
 
+from defender._io import guarded_mkdir, write_guarded
+
 SCHEMA_VERSION = 2
 PAYLOAD_ENSURE_ASCII = True
 ROLES = ("send", "analysis", "actor")
@@ -680,7 +682,7 @@ def _refuse_stale_version(conn: sqlite3.Connection) -> None:
 
 def open_store(*, case_id: str, runs_base: Path) -> StoreHandle:
     path = store_path_for(case_id, runs_base=runs_base)
-    path.parent.mkdir(parents=True, exist_ok=True)
+    guarded_mkdir(path.parent)
     fresh = not path.exists()
     conn = _bare_connect(path)
     try:
@@ -727,7 +729,7 @@ def open_store_for_read(store_path: Path) -> StoreHandle:
 def write_case_pointer(run_dir: Path, *, case_id: str, store_path: Path) -> None:
     run_dir = Path(run_dir)
     body = {"case_id": case_id, "store_path": str(store_path)}
-    (run_dir / POINTER_FILENAME).write_text(json.dumps(body), encoding="utf-8")
+    write_guarded(run_dir / POINTER_FILENAME, json.dumps(body))
 
 
 def resolve_store_path(run_dir: Path) -> Path:

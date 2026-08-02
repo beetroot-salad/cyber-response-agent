@@ -404,7 +404,16 @@ def test_startup_probe_refuses_each_banned_shape(tmp_path):
         f"the probe attempted {sorted(rec.shapes_attempted())} rather than each banned shape, "
         f"so 'observed each one refused' is a claim about shapes it never tried"
     )
-    leftovers = [p for p in run.rglob("*") if os.path.islink(p) or os.lstat(p).st_nlink > 1]
+    # WRITE-CODE-FROM-SPEC FIX: the nlink check is scoped to REGULAR files. An ordinary
+    # directory carries nlink >= 2 on Linux (its own "." entry plus its parent's reference to
+    # it) — `run_tree` always creates some, so the unscoped check flagged every ordinary
+    # directory as if it were a planted hard link, on every run regardless of the probe's
+    # actual behavior. `scrub._check_entry` already gets this right by restricting the nlink
+    # test to `stat.S_ISREG`; this oracle now matches it.
+    leftovers = [
+        p for p in run.rglob("*")
+        if os.path.islink(p) or (p.is_file() and os.lstat(p).st_nlink > 1)
+    ]
     assert not leftovers, (
         f"the probe reported refusal while leaving an entry of a banned shape behind: {leftovers}"
     )

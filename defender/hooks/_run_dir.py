@@ -3,17 +3,25 @@ from __future__ import annotations
 
 import fcntl
 import json
+import os
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+
+from defender._io import _refuse_unless_plain
 
 
 def update_json_locked(
     path: Path, mutate: Callable[[dict], Any], *, default: Callable[[], dict] = dict
 ) -> dict:
+    """Locked read-modify-write. `_refuse_unless_plain` + `O_NOFOLLOW` (#771 M3): the old
+    `path.touch(exist_ok=True)` + `open(path, "r+")` both followed a planted symlink — `touch`
+    would create/update the OUTSIDE target, and the `r+` open would then lock and rewrite it.
+    The refusal happens before the lock is ever taken."""
     path = Path(path)
-    path.touch(exist_ok=True)
-    with open(path, "r+", encoding="utf-8") as f:
+    _refuse_unless_plain(path)
+    fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o644)
+    with os.fdopen(fd, "r+", encoding="utf-8") as f:
         fcntl.flock(f, fcntl.LOCK_EX)
         raw = f.read()
         try:

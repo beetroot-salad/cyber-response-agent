@@ -1233,10 +1233,16 @@ def test_the_gated_model_writers_refuse_a_planted_hard_link(tool, name, seed, dr
     # what refuses: a deny for a schema reason would make this negative pass for the wrong
     # cause, which is exactly how a plant-shaped oracle certifies a gate that never looked.
     target.write_text(seed, encoding="utf-8")
-    before = snapshot_outside(elsewhere)
 
     deps = bind(MAIN_DEF, run, salt="0" * 16, defender_dir=Path(__file__).resolve().parents[2])
     plant_hardlink(run / name, target)
+    # WRITE-CODE-FROM-SPEC FIX: `before` moves to AFTER the plant, not before it. Planting a
+    # hard link unconditionally raises the target's own st_nlink 1->2 (plant_hardlink's own
+    # postcondition, asserted a few lines up its stack) — a `before` snapshot taken earlier
+    # captures nlink=1 and NO write can ever match it again, so the assertion below failed on
+    # every arm regardless of whether the write was refused. The oracle's intent is "the write
+    # did not change anything past the plant", so the baseline has to include the plant.
+    before = snapshot_outside(elsewhere)
 
     refused = False
     try:

@@ -741,13 +741,28 @@ def test_a_fault_after_a_successful_corpus_commit_leaves_the_attempt_count_alone
 
     Standing cost, recorded rather than discovered: nothing here pins the post-commit path free
     of retire-set members. If a future change raises one of the three from a post-commit step,
-    the bump returns and no test in this suite fails."""
+    the bump returns and no test in this suite fails.
+
+    #771 §7 D1 retired the old technique (pre-occupying the rotation-rewrite's deterministic
+    `.tmp` sibling with a directory) — the rewrite now stages under an unpredictable name, so
+    nothing can be pre-planted at it. This is the primitive's OWN refusal instead:
+    `channel.file` is swapped for a symlink aliasing a sibling copy of the same bytes, so both
+    reads that need it (`run_batch`'s row selection and `_rewrite_queue`'s re-read, both via
+    `read_jsonl_rows`, which follows symlinks) still find `b/0`, and the commit (which writes
+    into the git worktree, not the queue directory) is unaffected — but `write_guarded`'s
+    `_refuse_unless_plain` lstat's `channel.file` itself and refuses on the symlink before ever
+    computing a staged name. The exact planted-alias shape #771 exists to catch, and — an lstat
+    type check rather than a permission bit — it fails the same way whether or not the process
+    holds root."""
     paths = h.make_paths(tmp_path)
     ch = h.channel_of(paths, "environment_observations")
     h.seed(ch, [h.row_for("environment_observations", "b/0")])
 
-    tmp_blocker = ch.file.with_name(ch.file.name + ".tmp")
-    tmp_blocker.mkdir(parents=True)
+    before = ch.file.read_bytes()
+    aliased_target = ch.file.with_name(ch.file.name + ".aliased")
+    aliased_target.write_bytes(before)
+    ch.file.unlink()
+    ch.file.symlink_to(aliased_target)
     cfg = h.cfg_for(
         paths, "environment_observations", max_attempts=1, invoke_agent=h.committing("landed")
     )
@@ -758,7 +773,9 @@ def test_a_fault_after_a_successful_corpus_commit_leaves_the_attempt_count_alone
     assert h.attempts_of(ch, "b/0") is None, "no bump once the commit has landed"
     assert h.graveyard(ch) == []
 
-    tmp_blocker.rmdir()
+    ch.file.unlink()
+    aliased_target.unlink()
+    ch.file.write_bytes(before)
     must_not_author = h.recording(h.raising(AssertionError("re-authored already-corpus work")))
     nxt = h.cfg_for(
         paths, "environment_observations", max_attempts=1, invoke_agent=must_not_author

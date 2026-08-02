@@ -20,6 +20,7 @@ from pydantic_ai.messages import (
 
 from defender._clock import now_iso
 from defender._env import env_int
+from defender._io import open_guarded, write_guarded
 
 from defender.scripts.pricing import usage_cost
 
@@ -120,7 +121,7 @@ class RequestLogger:
             _ACTIVE_PATHS.add(key)
             _EVER_LOGGER_PATHS.add(key)
         self._key = key
-        self._fh = path.open(mode, encoding="utf-8")
+        self._fh = open_guarded(path, mode)
         self._cap = _max_chars()
         self.messages: list[dict] = []
         self._seq: dict[str, int] = {}
@@ -316,4 +317,4 @@ def write_trace(run_dir: Path, *, store: Any, session_id: str, wall_ms: float) -
         "num_turns": len(responses),
         "usage": totals,
     })
-    (run_dir / "tool_trace.jsonl").write_text("".join(json.dumps(e) + "\n" for e in events), encoding="utf-8")
+    write_guarded(run_dir / "tool_trace.jsonl", "".join(json.dumps(e) + "\n" for e in events))

@@ -9,6 +9,7 @@ import re
 import sys
 from pathlib import Path
 
+from defender._io import guarded_mkdir
 from defender._run_paths import RunPaths
 
 LEAD_ID_RE = re.compile(r"^l-[A-Za-z0-9]+$")
@@ -29,7 +30,7 @@ def claim_lead(dispatch: dict) -> int:
 
     sidecar_dir = RunPaths(Path(run_dir)).gather_raw
     try:
-        sidecar_dir.mkdir(parents=True, exist_ok=True)
+        guarded_mkdir(sidecar_dir)
     except OSError:
         return 0
 

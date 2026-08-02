@@ -1,6 +1,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 import time
 import uuid
@@ -15,7 +16,7 @@ from defender._paths import PATHS
 from pydantic_ai import RunContext
 from pydantic_ai.exceptions import ModelRetry
 
-from defender._io import append_jsonl, read_text_utf8
+from defender._io import guarded_mkdir, read_text_utf8, write_guarded
 from . import box as box_mod
 from . import permission
 from .agent_definition import ResolvedRoots, ToolSet
@@ -131,7 +132,7 @@ def _record_lesson_load(
         return
     try:
         row = {"lesson_name": name, "ts": now_iso()}
-        append_jsonl(deps.run_dir / "lessons_loaded.jsonl", [row])
+        write_guarded(deps.run_dir / "lessons_loaded.jsonl", json.dumps(row) + "\n", mode="append")
     except Exception:  # noqa: BLE001 — best-effort observability
         pass
 
@@ -303,8 +304,8 @@ def _tool_write_file(deps: AgentDeps, path: str, content: str) -> str:
     )
     if not decision.allow:
         raise ModelRetry(decision.reason)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(content, encoding="utf-8")
+    guarded_mkdir(p.parent)
+    write_guarded(p, content)
     deps.authored_paths.add(_resolved(p))
     return f"wrote {path} ({len(content)} bytes)"
 
@@ -339,8 +340,8 @@ def _tool_edit_file(deps: AgentDeps, path: str, old_string: str, new_string: str
     )
     if not decision.allow:
         raise ModelRetry(decision.reason)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(new_text, encoding="utf-8")
+    guarded_mkdir(p.parent)
+    write_guarded(p, new_text)
     deps.authored_paths.add(_resolved(p))
     return f"edited {path} ({len(new_text)} bytes)"
 

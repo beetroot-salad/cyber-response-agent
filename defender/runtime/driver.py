@@ -18,6 +18,8 @@ from pydantic_ai.exceptions import UsageLimitExceeded
 from pydantic_ai.messages import ModelResponse
 from pydantic_ai.usage import UsageLimits
 
+from defender._io import write_guarded
+
 from . import compaction
 from . import observe
 from . import orient
@@ -657,7 +659,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
         observe.write_trace(run_dir, store=store, session_id=session_id, wall_ms=wall_ms)
     except Exception as e:  # noqa: BLE001 — a broken store must not swallow the artifact entirely
         print(f"[run.py] write_trace failed ({e!r}); writing an empty trace", file=sys.stderr)
-        (run_dir / "tool_trace.jsonl").write_text("", encoding="utf-8")
+        write_guarded(run_dir / "tool_trace.jsonl", "")
     logger.close()
     output = result.output if result is not None else None
     return _run_summary(

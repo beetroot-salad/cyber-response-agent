@@ -294,25 +294,39 @@ def test_a_retired_id_is_deduped_out_of_a_later_append_on_the_dedup_channels(tmp
 
 def test_the_graveyard_append_lands_before_the_pending_rewrite_and_is_advisory(tmp_path: Path):
     """Decision 3 pins the ORDER: the graveyard append happens first, and the pending file
-    stays authoritative. Observed by making the rewrite fail for real — the tmp path
-    `write_atomic` needs is occupied by a directory — and seeing the graveyard row already
-    on disk while the queue is untouched. Recovering the tmp path and retiring again leaves
+    stays authoritative. Observed by making the rewrite fail for real — the queue file is
+    swapped for a symlink aliasing its own content — and seeing the graveyard row already
+    on disk while the queue is untouched. Recovering the real file and retiring again leaves
     the queue authoritative; the duplicate graveyard row a crash between the two writes
-    leaves costs nothing, because the graveyard has no production reader (G16/C20)."""
+    leaves costs nothing, because the graveyard has no production reader (G16/C20).
+
+    #771 §7 D1 retired the old technique (pre-occupying the rewrite's deterministic `.tmp`
+    sibling with a directory) — the rewrite now stages under an unpredictable name, so nothing
+    can be pre-planted at it. This is the primitive's OWN refusal instead: `channel.file` is
+    swapped for a symlink pointing at a sibling copy of the same bytes, so the read half
+    (`read_jsonl_rows`, which follows symlinks) still finds `a/0` and `a/1` exactly as before,
+    but `write_guarded`'s `_refuse_unless_plain` lstat's `channel.file` itself and refuses on
+    the symlink before ever computing a staged name — the exact planted-alias shape #771
+    exists to catch, which also makes this fail the same way whether or not the process
+    holds root (an lstat type check, not a permission bit)."""
     paths = h.make_paths(tmp_path)
     ch = h.channel_of(paths, "actor_observations")
     h.seed(ch, [h.row_for("actor_observations", "a/0"), h.row_for("actor_observations", "a/1")])
     before = ch.file.read_bytes()
 
-    blocker = ch.file.with_name(ch.file.name + ".tmp")
-    blocker.mkdir(parents=True)
-    with pytest.raises(OSError):  # noqa: PT011 - the OS-level rename failure's exact subclass is platform-dependent; the point is that the write does not silently succeed
+    aliased_target = ch.file.with_name(ch.file.name + ".aliased")
+    aliased_target.write_bytes(before)
+    ch.file.unlink()
+    ch.file.symlink_to(aliased_target)
+    with pytest.raises(OSError):  # noqa: PT011 - the OS-level refusal's exact subclass is platform-dependent; the point is that the write does not silently succeed
         drain.retire(channel=ch, batch_ids=["a/0"], reason="advisory probe", max_attempts=1)
 
     assert [r["observation_id"] for r in h.graveyard(ch)] == ["a/0"], "graveyard first"
     assert ch.file.read_bytes() == before, "the queue is authoritative and untouched"
 
-    blocker.rmdir()
+    ch.file.unlink()
+    aliased_target.unlink()
+    ch.file.write_bytes(before)
     outcome = drain.retire(
         channel=ch, batch_ids=["a/0"], reason="advisory probe", max_attempts=1
     )

@@ -46,7 +46,7 @@ from pydantic_ai.exceptions import ModelRetry
 
 from defender import _git
 from defender._git import GitError
-from defender._io import append_jsonl, read_jsonl_rows
+from defender._io import append_jsonl, guarded_mkdir, read_jsonl_rows, write_guarded
 from defender.learning.author import shared as author_shared
 from defender.learning.author._config import BucketSpec, CorpusAuthorConfig
 from defender.learning.core import persist
@@ -169,7 +169,7 @@ def retire(
             rec["attempts"] = attempts
             (retired if attempts >= max_attempts else survivors).append(rec)
         if retired:
-            append_jsonl(
+            append_jsonl(  # lint-unguarded-tree-write: ok — learning_queue sidecar, host-side, outside every box mount
                 graveyard_file(channel),
                 [
                     {
@@ -459,7 +459,7 @@ def _retire_unkeyable(
         return
     reason = f"row carries no value under {channel.id_key!r}"
     log(f"{len(rows)} unkeyable row(s) retired: {reason}")
-    append_jsonl(
+    append_jsonl(  # lint-unguarded-tree-write: ok — learning_queue sidecar, host-side, outside every box mount
         graveyard_file(channel),
         [{**row, "attempts": int(row.get("attempts") or 0) + 1,
           "deadletter_reason": reason} for row in rows],
@@ -490,7 +490,7 @@ def _record_stuck(channel: QueueChannel, exc: BaseException, rows: list[dict]) -
         same_ids = sorted(str(i) for i in (last.get("row_ids") or [])) == ids
         if last.get("fault_class") == fault_class and same_ids:
             consecutive = int(last.get("consecutive_ticks") or 0) + 1
-    append_jsonl(
+    append_jsonl(  # lint-unguarded-tree-write: ok — learning_queue sidecar, host-side, outside every box mount
         path,
         [{
             "fault_class": fault_class,
@@ -585,5 +585,5 @@ def _restore_corpus(
     for rel, blob in snapshot.items():
         target = corpus_dir / rel
         if not target.is_file() or target.read_bytes() != blob:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(blob)
+            guarded_mkdir(target.parent)
+            write_guarded(target, blob)
