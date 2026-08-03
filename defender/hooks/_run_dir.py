@@ -8,7 +8,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from defender._io import _refuse_unless_plain
+from defender._io import _refuse_unless_plain, open_nofollow_fd
 
 
 def update_json_locked(
@@ -20,7 +20,7 @@ def update_json_locked(
     The refusal happens before the lock is ever taken."""
     path = Path(path)
     _refuse_unless_plain(path)
-    fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o644)
+    fd = open_nofollow_fd(path, os.O_RDWR | os.O_CREAT)
     with os.fdopen(fd, "r+", encoding="utf-8") as f:
         fcntl.flock(f, fcntl.LOCK_EX)
         raw = f.read()

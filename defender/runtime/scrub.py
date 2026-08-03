@@ -9,6 +9,8 @@ from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from defender._io import write_guarded
+
 
 @dataclass(frozen=True)
 class Finding:
@@ -133,26 +135,28 @@ def verdict_path(tree: Path) -> Path:
 
 
 def _write_verdict(tree: Path, doc: dict) -> None:
-    from defender._io import write_guarded
+    """Write the verdict sidecar, BEST-EFFORT on every arm.
 
-    write_guarded(verdict_path(tree), json.dumps(doc))
+    The marker is a fail-closed signal, never a carrier of one: an unwritten verdict leaves the
+    tree with no verdict at all, and `tree_verified` already reads absence as unverified. What
+    must not happen is the marker's own write failure REPLACING the signal its caller is
+    holding — the `RunTainted` a completed walk collected (which `scrub` raises immediately
+    after this call, and which is the whole reason the scan exists), or the fault
+    `write_did_not_run`'s call site is already unwinding through. Both would be swapped for a
+    write-side `OSError` from a sidecar nobody has read yet."""
+    try:
+        write_guarded(verdict_path(tree), json.dumps(doc))
+    except OSError as e:
+        print(f"[scrub] could not write the scan verdict for {tree}: {e!r}", file=sys.stderr)
 
 
 def write_did_not_run(tree: Path, reason: str) -> None:
     """§7 D2 — a caller that SKIPPED the walk (the box was not provably dead) records that
     explicitly, rather than leaving the tree indistinguishable from one nobody has judged yet.
     Called by `box.stop_and_scrub` on a teardown fault and by `start_box` on a startup fault
-    that leaves a host-touched tree behind.
-
-    Best-effort: the call site is already unwinding through a fault it must re-raise (a
-    `BoxFault`, a teardown error), and this marker's own write failing must never replace that
-    with a write-side `OSError` instead. Safe to swallow — an unwritten `ran: false` marker
-    leaves the tree with NO verdict at all, and `tree_verified` already reads absence as
-    unverified, so the fail-closed property this exists for holds either way."""
-    try:
-        _write_verdict(tree, {"ran": False, "reason": reason})
-    except OSError as e:
-        print(f"[scrub] could not write the did-not-run verdict for {tree}: {e!r}", file=sys.stderr)
+    that leaves a host-touched tree behind. Best-effort, for the reason `_write_verdict`
+    carries."""
+    _write_verdict(tree, {"ran": False, "reason": reason})
 
 
 def tree_verified(tree: Path) -> bool:

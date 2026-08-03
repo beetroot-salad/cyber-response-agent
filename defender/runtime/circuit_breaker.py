@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 from defender._clock import now_iso
@@ -47,10 +48,18 @@ def _load(run_dir: Path) -> dict:
     """§7 D3's second rider: an unreadable state must NOT read as a healthy, freshly
     initialised breaker (`is_tripped`/`down_message` below both fail closed on `_unreadable`).
     Absence is the ordinary "no breaker file yet" case and stays healthy; existing-but-unreadable
-    (a directory squatting the name, a corrupted file) is a distinct, observable state."""
+    (a directory squatting the name, a corrupted file, a symlink aliasing state this run does
+    not own) is a distinct, observable state.
+
+    Existence is `lexists`, not `exists`: `exists()` DEREFERENCES, so a planted DANGLING symlink
+    at the breaker's name reads as "no file yet" and the rider fails open on the one shape the
+    write side spends the whole of M3 refusing. A live symlink is refused for the mirror reason
+    — following it reads whatever the planter aimed it at as this run's breaker state."""
     p = _path(run_dir)
-    if not p.exists():
+    if not os.path.lexists(p):
         return _blank()
+    if p.is_symlink():
+        return {**_blank(), "_unreadable": True}
     try:
         text = p.read_text(encoding="utf-8")
     except OSError:

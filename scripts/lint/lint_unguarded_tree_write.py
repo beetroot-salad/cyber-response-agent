@@ -23,11 +23,11 @@ themselves (the sanctioned primitives), and anything inside ``defender/_io.py`` 
 by necessity).
 
 Ratcheted like every other lint here (``lint_unguarded_tree_write_baseline.json``), EXCEPT for
-the modules #771's writer census names (``LINT_HARD_GATED_MODULES``, derived from
-``defender/tests/e2e/_spec771.py``'s ``CENSUS`` rather than typed out by hand — see that
-module's own comment on why a hand-typed list is how the driver's fault-exit write went
-missing from this gate once already): those are HARD-gated, never ratcheted, so a converted
-writer that regresses fails CI rather than joining the baseline silently.
+the modules #771's writer census names (``LINT_HARD_GATED_MODULES``, a copy of
+``defender/tests/e2e/_spec771.py``'s ``CENSUS`` module set that the spec suite compares
+set-for-set — see that constant's own comment on why the copy exists and what holds it in
+step): those are HARD-gated, never ratcheted, so a converted writer that regresses fails CI
+rather than joining the baseline silently.
 
 Run from repo root:  python scripts/lint/lint_unguarded_tree_write.py
 Regenerate the baseline:  python scripts/lint/lint_unguarded_tree_write.py --update-baseline
@@ -67,9 +67,14 @@ _UNSAFE_CALLEES = frozenset({"defender._io.write_atomic", "defender._io.append_j
 #: way `_astlib.opener_slot` matches `<p>.open(...)`.
 _UNSAFE_METHODS = frozenset({"write_text", "write_bytes", "mkdir"})
 
-#: #771's writer census, derived rather than typed beside it (fork R25) — a hand-typed list is
-#: what dropped the driver's fault-exit trace write from this gate while the demand still bound
-#: its edge. Mirrors `defender/tests/e2e/_spec771.py`'s `CENSUS_MODULES | DRAIN_MODULES`.
+#: #771's writer census (fork R25). This is a COPY of
+#: `defender/tests/e2e/_spec771.py`'s `CENSUS_MODULES | DRAIN_MODULES`, not a derivation: a
+#: repo-root lint may not import the test package (it drags in pydantic_ai and the whole
+#: `defender` runtime), so the two lists are kept in step by
+#: `test_the_write_lint_hard_gates_the_census_rows_and_ratchets_only_new_ones`, which compares
+#: them set-for-set. Nothing else does — a census row added there and not here is a module the
+#: gate stops covering, which is exactly how the driver's fault-exit trace write went missing
+#: from this gate once already.
 LINT_HARD_GATED_MODULES: frozenset[str] = frozenset({
     "runtime/observe.py",
     "runtime/driver.py",
@@ -203,10 +208,11 @@ def main(
 
     hard_gated = [
         f for f in findings
-        if any(f.fingerprint.split(":")[0] == m or f.fingerprint.startswith(m + ":")
-               for m in LINT_HARD_GATED_MODULES)
+        if f.fingerprint.split(":")[0] in LINT_HARD_GATED_MODULES
     ]
     if hard_gated:
+        # A census module's finding ends the run: the ratchet below never sees one, so there is
+        # nothing left to filter out of `findings` on the way to it.
         for f in hard_gated:
             print(f"HARD-GATED (never ratcheted): {f.display}", file=sys.stderr)
         return 1
@@ -216,10 +222,7 @@ def main(
         "(#771 M3) rather than write_atomic/append_jsonl/write_text/write_bytes/mkdir directly."
     )
     print("Mark a sanctioned exception with `# lint-unguarded-tree-write: ok — <reason>`.")
-    return gate(
-        [f for f in findings if f not in hard_gated], baseline, args,
-        label="lint_unguarded_tree_write", header=HEADER,
-    )
+    return gate(findings, baseline, args, label="lint_unguarded_tree_write", header=HEADER)
 
 
 if __name__ == "__main__":
