@@ -5,7 +5,6 @@ import errno
 import fcntl
 import json
 import os
-import re
 import secrets
 import stat
 import sys
