@@ -948,14 +948,24 @@ def _invoke_sentinel_plant(run_dir: Path) -> None:
     box_mod._plant(run_dir / ".box-sentinel", "token-771")
 
 
-def _invoke_fault_exit_trace(run_dir: Path) -> Any:
+def _invoke_fault_exit_trace(run_dir: Path) -> None:
     """The DRIVER's fault-exit trace write — `write_text("")` onto the same fixed
     `tool_trace.jsonl` name `observe.write_trace` owns.
 
     C1's row 2, and one of the two sites the issue itself reported. It went missing from the
     census, from the lint's gate list and from the profile's writer list at once, because all
-    three were re-derived by hand from an instrument that only sees the happy-path writer."""
-    return drive_fault_exit_trace(run_dir)
+    three were re-derived by hand from an instrument that only sees the happy-path writer.
+
+    RETURNS NOTHING, like every other census driver whose site has no meaningful return value —
+    and that is a fix to the INSTRUMENT, not a relaxation of the demand it feeds. This used to
+    hand back the `ReplayFn` the drive built, whose `repr` carries its address; `posture_class`
+    keys a return BY VALUE, so two arms of the parity demand could never compare equal on it,
+    and no caller ever read it. The row was therefore able to pass on one posture only — a
+    RAISE — silently pinning "this site must raise", which is not what the demand states and
+    not a claim F1 ever made about this site. `None` in both arms restores the comparison the
+    demand asks for; the anti-vacuity guard above (a missing symbol reads as
+    `raised:AttributeError`) is what still keeps `None` from meaning "nothing happened"."""
+    drive_fault_exit_trace(run_dir)
 
 
 def _invoke_write_atomic(run_dir: Path) -> None:

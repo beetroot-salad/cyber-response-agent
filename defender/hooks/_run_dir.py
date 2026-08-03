@@ -3,26 +3,23 @@ from __future__ import annotations
 
 import fcntl
 import json
-import os
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from defender._io import _refuse_unless_plain, open_nofollow_fd
+from defender._io import locked_for_rewrite
 
 
 def update_json_locked(
     path: Path, mutate: Callable[[dict], Any], *, default: Callable[[], dict] = dict
 ) -> dict:
-    """Locked read-modify-write. `_refuse_unless_plain` + `O_NOFOLLOW` (#771 M3): the old
+    """Locked read-modify-write. The refuse-then-`O_NOFOLLOW`-then-lock prefix is
+    `_io.locked_for_rewrite`'s, not a second copy of it (#771 M3): the old
     `path.touch(exist_ok=True)` + `open(path, "r+")` both followed a planted symlink — `touch`
     would create/update the OUTSIDE target, and the `r+` open would then lock and rewrite it.
     The refusal happens before the lock is ever taken."""
     path = Path(path)
-    _refuse_unless_plain(path)
-    fd = open_nofollow_fd(path, os.O_RDWR | os.O_CREAT)
-    with os.fdopen(fd, "r+", encoding="utf-8") as f:
-        fcntl.flock(f, fcntl.LOCK_EX)
+    with locked_for_rewrite(path) as f:
         raw = f.read()
         try:
             state = json.loads(raw) if raw else default()

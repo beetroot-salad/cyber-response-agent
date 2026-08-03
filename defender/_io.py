@@ -5,11 +5,13 @@ import errno
 import fcntl
 import json
 import os
+import re
 import secrets
 import stat
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
+from typing import Any
 
 TEXT_READ_ERRORS: tuple[type[Exception], ...] = (OSError, UnicodeDecodeError)
 """What reading a text file can raise: unreadable (``OSError``) or undecodable
@@ -75,7 +77,7 @@ def read_jsonl_rows(path: Path) -> list[dict]:
 def append_jsonl(path: Path, rows: list[dict]) -> int:
     if not rows:
         return 0
-    path.parent.mkdir(parents=True, exist_ok=True)
+    path.parent.mkdir(parents=True, exist_ok=True)  # lint-unguarded-tree-write: ok — the pre-#771 primitive itself; its own callers are what the gate flags  # noqa: E501
     with path.open("a", encoding="utf-8") as fh:
         for row in rows:
             fh.write(json.dumps(row) + "\n")  # lint-jsonl-io: ok — the canonical JSONL appender
@@ -164,6 +166,26 @@ def open_nofollow_fd(path: Path, flags: int) -> int:
         raise _mark_alias(e, is_alias=e.errno == errno.ELOOP) from None
 
 
+@contextlib.contextmanager
+def locked_for_rewrite(path: Path, *, binary: bool = False) -> Iterator[Any]:
+    """The locked read-modify-write lane's dangerous prefix, in ONE place: refuse a non-plain
+    or aliased target, open the survivor with `O_NOFOLLOW`, then take the exclusive lock —
+    strictly in that order, so the refusal happens before anything is locked or written.
+
+    Yields the open, locked handle positioned at 0; the caller reads, decides, seeks and
+    truncates. Two callers hold that sequence — `write_guarded(mode="update")` and
+    `hooks/_run_dir.update_json_locked` — and before this they each carried their own copy of
+    it, only one of which ran in production. A change to the refusal contract then had to be
+    made twice, with the dead copy the one the spec covered."""
+    path = Path(path)
+    _refuse_unless_plain(path)
+    fd = open_nofollow_fd(path, os.O_RDWR | os.O_CREAT)
+    opener = os.fdopen(fd, "r+b") if binary else os.fdopen(fd, "r+", encoding="utf-8")
+    with opener as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        yield f
+
+
 def write_guarded(
     path: Path, text: str | bytes, *, mode: str = "replace",
     stage_name: Callable[[Path], Path] = stage_name, **kw: object,
@@ -177,7 +199,16 @@ def write_guarded(
     `O_NOFOLLOW` at open, before the lock is taken). `text` may be `bytes` (the drain lane's
     corpus restore); the fd is opened binary or text to match. `stage_name` is the name-source
     seam (pinned by `test_atomic_write_refuses_a_planted_temp_name`); `**kw` is unused and
-    absorbs a caller supplying a mode-irrelevant keyword rather than raising `TypeError` on it."""
+    absorbs a caller supplying a mode-irrelevant keyword (`encoding`, which every mode already
+    pins to utf-8) rather than raising `TypeError` on it. It absorbs NOTHING ELSE: a swallowed
+    unknown keyword is how a misspelt `mode=` (`moode="append"`) silently falls back to
+    `replace` and TRUNCATES the file the caller meant to append to."""
+    unexpected = set(kw) - {"encoding"}
+    if unexpected:
+        raise TypeError(
+            f"write_guarded() got unexpected keyword argument(s) {sorted(unexpected)} — "
+            f"did you mean mode={mode!r}?"
+        )
     path = Path(path)
     if mode == "replace":
         _refuse_unless_plain(path)
@@ -208,20 +239,10 @@ def write_guarded(
             with os.fdopen(fd, "a", encoding="utf-8") as f:
                 f.write(text)
     elif mode == "update":
-        _refuse_unless_plain(path)
-        fd = open_nofollow_fd(path, os.O_RDWR | os.O_CREAT)
-        if isinstance(text, (bytes, bytearray)):
-            with os.fdopen(fd, "r+b") as fb:
-                fcntl.flock(fb, fcntl.LOCK_EX)
-                fb.seek(0)
-                fb.truncate()
-                fb.write(text)
-        else:
-            with os.fdopen(fd, "r+", encoding="utf-8") as f:
-                fcntl.flock(f, fcntl.LOCK_EX)
-                f.seek(0)
-                f.truncate()
-                f.write(text)
+        with locked_for_rewrite(path, binary=isinstance(text, (bytes, bytearray))) as f:
+            f.seek(0)
+            f.truncate()
+            f.write(text)
     else:
         raise ValueError(f"unknown write_guarded mode: {mode!r}")
 
@@ -246,7 +267,7 @@ def _ensure_dir_component(component: Path) -> None:
         st = os.lstat(component)
     except FileNotFoundError:
         try:
-            os.mkdir(component)
+            os.mkdir(component)  # lint-unguarded-tree-write: ok — THIS is the guarded mkdir the gate points every other caller at
             return
         except FileExistsError:
             # Something appeared between the lstat and the mkdir. Re-judge what is ACTUALLY
@@ -300,11 +321,40 @@ def guarded_mkdir(path: Path, *, base: Path) -> None:
             f"guarded_mkdir: {str(path)!r} is not inside the tree root {str(base)!r} — the "
             f"anchor names the wrong tree, or the target reaches outside it"
         ) from None
-    os.makedirs(base, exist_ok=True)
+    # `relative_to` is a PREFIX match over path parts, so it happily accepts a target that
+    # climbs back out with `..` (`<base>/x/../../escaped` is "inside" `<base>` by that test).
+    # The walk below would then `lstat`/`mkdir` components the kernel resolves OUTSIDE the
+    # trust root — the containment claim inverted. Normalising is purely lexical (it collapses
+    # no symlink), and a `..` that stays inside — `<base>/x/../y` — normalises to `y` and is
+    # still accepted, so only the escaping shape is refused.
+    if rest.parts and os.path.normpath(str(rest)).split(os.sep)[0] == os.pardir:
+        raise ValueError(
+            f"guarded_mkdir: {str(path)!r} climbs out of the tree root {str(base)!r} through "
+            f"'..' — the target reaches outside the tree the anchor names"
+        )
+    # Short-circuited, not unconditional: this runs on the per-tool-call hot path (every
+    # model-facing write/edit, every captured query payload), and the tree root is created
+    # before any box starts — so the syscall is pure overhead in every case but the first.
+    # `is_dir()` follows symlinks deliberately: `base` and everything above it are
+    # host-controlled (see above), and a host-chosen symlinked runs base is the configuration
+    # the anchor exists to keep working.
+    if not base.is_dir():
+        os.makedirs(base, exist_ok=True)
     accum = base
     for part in rest.parts:
         accum = accum / part
         _ensure_dir_component(accum)
+
+
+#: The staged NAME CLASS, matched loosely on purpose — deliberately NOT the exact
+#: `<name>.staged-<16 hex>` shape `stage_name` mints. The sweep's obligation is not only to
+#: collect our own crash-orphans: it also has to remove an entry an attacker planted at a
+#: staged-looking name (`test_orphaned_staged_files_are_swept_through_the_same_primitive` plants
+#: `report.md.staged-hostile` as a symlink and requires it gone), and a plant by construction
+#: carries no hex of ours. The cost is that a legitimate artifact whose name contains this
+#: literal would be swept — accepted, because `.staged-` is a suffix namespace this module owns
+#: and nothing else in any tree writes into it.
+_STAGED_MARKER = ".staged-"
 
 
 def sweep_staged(tree: Path) -> list[Path]:
@@ -312,12 +362,17 @@ def sweep_staged(tree: Path) -> list[Path]:
     staged names mean no later write ever replaces a crash-orphaned one by name, so orphans
     accumulate and need a sweep). `os.walk(..., followlinks=False)` never descends into a
     symlinked directory, and removing a symlink entry never touches what it points at — so a
-    staged NAME planted as an alias is removed as an entry, never followed."""
+    staged NAME planted as an alias is removed as an entry, never followed.
+
+    Called from `box.stop_and_scrub` — AFTER the reap scan has judged the tree, never before.
+    Sweeping first would delete entries the scan exists to report, which is the sanitizing move
+    the design refuses everywhere else; sweeping after costs nothing, because the scan permits
+    any regular file and an orphaned staged file is one."""
     tree = Path(tree)
     removed: list[Path] = []
     for dirpath, _dirs, files in os.walk(tree, followlinks=False):
         for name in files:
-            if ".staged-" in name:
+            if _STAGED_MARKER in name:
                 p = Path(dirpath) / name
                 with contextlib.suppress(OSError):
                     os.remove(p)

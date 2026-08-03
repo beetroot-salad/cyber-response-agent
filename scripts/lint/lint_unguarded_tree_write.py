@@ -18,9 +18,11 @@ own artifacts ARE inside the tree), and the duck-typed ``<x>.write_text(...)`` /
 matched the same way ``opener_slot`` matches ``<p>.open(...)``).
 
 What it does NOT flag: a call to ``write_guarded`` / ``guarded_mkdir`` / ``open_guarded``
-themselves (the sanctioned primitives), and anything inside ``defender/_io.py`` or
-``defender/hooks/_run_dir.py`` (where the primitives are implemented — they call the raw idioms
-by necessity).
+themselves (the sanctioned primitives). The modules where the primitives are IMPLEMENTED get no
+blanket exemption — ``_io.py`` is itself a hard-gated census module, and a module-wide bypass
+would have silently cancelled that gate — so the handful of raw idioms they call by necessity
+carry per-line ``# lint-unguarded-tree-write: ok`` markers instead, each naming why that one
+call may stay raw. A NEW unguarded write in the primitive's own module is then still a finding.
 
 Ratcheted like every other lint here (``lint_unguarded_tree_write_baseline.json``), EXCEPT for
 the modules #771's writer census names (``LINT_HARD_GATED_MODULES``, a copy of
@@ -47,9 +49,6 @@ SCOPE = REPO_ROOT / "defender"
 BASELINE_PATH = Path(__file__).with_name("lint_unguarded_tree_write_baseline.json")
 
 EXCLUDED_DIRS = (".venv", "__pycache__", "run-visualizations", "run-transcripts")
-
-#: The primitive's own implementation — calls the raw idioms by necessity, never a finding.
-_PRIMITIVE_MODULES = frozenset({"_io.py", "hooks/_run_dir.py"})
 
 #: The pre-#771 whole-file idioms. `write_atomic` now DELEGATES to `write_guarded` (safe to
 #: call), but stays flagged: `write_guarded` is the one canonical seam #771's M3 gives every
@@ -131,7 +130,7 @@ def _unsafe_reason(call: ast.Call, env: ModuleEnv) -> str | None:
 
 
 def _scan_file(rel: str, tree: ast.AST, lines: list[str]) -> list[Finding]:
-    if rel in _PRIMITIVE_MODULES or _is_test_module(rel):
+    if _is_test_module(rel):
         return []
     findings: list[Finding] = []
     seen: set[str] = set()

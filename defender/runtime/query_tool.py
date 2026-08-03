@@ -408,7 +408,10 @@ def _persist_payload(run_dir, lead_id: str, seq: int, text: str) -> str | None:
     try:
         guarded_mkdir(lead_dir, base=run_dir)
         write_guarded(payload_path, text)
-    except OSError:
+    except (OSError, ValueError):
+        # ValueError as well as OSError: `guarded_mkdir` raises it for a target that is not
+        # inside the tree the anchor names, which a `lead_id` carrying path separators or `..`
+        # produces here. Best-effort persistence must not become the run's crash.
         return None
     return str(payload_path.relative_to(run_dir))
 

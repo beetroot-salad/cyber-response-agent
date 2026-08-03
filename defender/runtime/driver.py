@@ -659,7 +659,16 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
         observe.write_trace(run_dir, store=store, session_id=session_id, wall_ms=wall_ms)
     except Exception as e:  # noqa: BLE001 — a broken store must not swallow the artifact entirely
         print(f"[run.py] write_trace failed ({e!r}); writing an empty trace", file=sys.stderr)
-        write_guarded(run_dir / "tool_trace.jsonl", "")
+        try:
+            write_guarded(run_dir / "tool_trace.jsonl", "")
+        except OSError as fallback_err:
+            # The fallback runs while an exception is already being handled, and its target is
+            # a name the box can plant an alias at — so an unguarded call here lets one planted
+            # entry convert "the trace could not be built" into an uncaught OSError that ends
+            # the run at its last step, discarding the summary and every artifact already
+            # written. The trace is observability; the run's result is not.
+            print(f"[run.py] the empty-trace fallback also failed ({fallback_err!r}); "
+                  f"{run_dir} has no tool_trace.jsonl", file=sys.stderr)
     logger.close()
     output = result.output if result is not None else None
     return _run_summary(

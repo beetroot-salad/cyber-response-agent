@@ -153,9 +153,11 @@ def _write_verdict(tree: Path, doc: dict) -> None:
 def write_did_not_run(tree: Path, reason: str) -> None:
     """§7 D2 — a caller that SKIPPED the walk (the box was not provably dead) records that
     explicitly, rather than leaving the tree indistinguishable from one nobody has judged yet.
-    Called by `box.stop_and_scrub` on a teardown fault and by `start_box` on a startup fault
-    that leaves a host-touched tree behind. Best-effort, for the reason `_write_verdict`
-    carries."""
+    Called by `box.stop_and_scrub` on a teardown fault, and by both of `start_box`'s lanes on a
+    startup fault that leaves a host-touched tree behind — the investigation lane keyed on its
+    run dir, the request lane on each of its WRITABLE mount sources (a lane with none, the
+    read-only run-cycle box, has no tree to judge and writes no marker). Best-effort, for the
+    reason `_write_verdict` carries."""
     _write_verdict(tree, {"ran": False, "reason": reason})
 
 

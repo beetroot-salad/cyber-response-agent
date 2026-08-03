@@ -386,10 +386,13 @@ class RecordingBranch:
         self.events.append("cleanup")
         if self.destroy_on_cleanup:
             shutil.rmtree(wt, ignore_errors=True)
-            # Mirrors the real `AuthorBranch.cleanup` (#771 §7 D8): the verdict sidecar sits
-            # BESIDE `wt`, outside the tree the rmtree above just destroyed, so it survives on
-            # its own unless cleanup removes it explicitly too.
-            verdict_path(wt).unlink(missing_ok=True)
+        # OUTSIDE the destroy_on_cleanup arm, because the real `AuthorBranch.cleanup` unlinks
+        # unconditionally: the verdict sidecar sits BESIDE `wt` (#771 §7 D8), outside the tree
+        # the rmtree destroys, so removing it is not part of destroying the tree and does not
+        # belong under the flag that controls whether the tree is destroyed. Gated, this double
+        # left a sidecar behind that production removes — so a suite asserting the post-cleanup
+        # state of the worktree base saw a file the real lane does not leave.
+        verdict_path(wt).unlink(missing_ok=True)
 
 
 # --------------------------------------------------------------------------- #

@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import ClassVar, Protocol
 
-from defender._io import read_text_soft, write_guarded
+from defender._io import read_text_soft, sweep_staged, write_guarded
 from defender._run_id import RUN_ID_ALLOWED, is_valid_run_id
 from defender.runtime import bash_exec
 from defender.runtime.box_codec import (
@@ -29,6 +29,7 @@ from defender.runtime.scrub import (  # noqa: F401 — re-exported: run.py/drain
     Finding,
     RunTainted,
     scrub,
+    verdict_path,
     write_did_not_run,
 )
 
@@ -184,19 +185,48 @@ def _alias_ban_fault_message(runtime: str, detail: str) -> str:
     return message
 
 
+#: The probe's own I/O failed, so nothing it observed about the ban means anything. Distinct
+#: from "a banned shape was allowed" because the two demand OPPOSITE operator actions, and the
+#: probe is the only thing that can tell them apart — by the time the host reads an exit code
+#: they look identical. Both still fail closed (see `_probe_alias_ban`).
+_CONTROL_FAILED_MARKER = "alias-probe: CONTROL-FAILED: "
+
+
+def _alias_probe_inconclusive_message(cwd: Path, detail: str) -> str:
+    detail = (detail or "").strip()
+    message = (
+        f"the alias ban could not be OBSERVED inside the box: the probe's own control "
+        f"operations failed under {cwd}, so nothing it saw about the six banned shapes is "
+        f"evidence either way. This is the box's writable mount — full, read-only, or not "
+        f"there — and not the seccomp registration; check {cwd} inside the container."
+    )
+    if detail:
+        message += f" probe reported: {detail}"
+    return message
+
+
 def _alias_probe_script(name_prefix: str) -> str:
     """One probe body, attempting each of the six banned shapes plus one ordinary create, all
     under a name no later write will ever collide with (`{name_prefix}` carries a random
     suffix — the probe's own leavings are swept regardless of which arm it takes). Reports
     success/failure the way `AliasProbeDocker.ProbeVerdict.as_completed` fakes it: rc 0 and a
     stdout line on total denial + a working control, rc 1 and a stderr line naming what was
-    allowed (or that the control itself failed) otherwise — so the SAME reader classifies both
-    the fake and a real box's output."""
+    allowed (or that a control operation itself failed) otherwise — so the SAME reader
+    classifies both the fake and a real box's output.
+
+    EVERY file operation the probe performs on its own behalf is guarded, and a failure in one
+    ABANDONS the observation rather than folding into it. Two reasons, and the second is the
+    load-bearing one: an unguarded `open` for the hard-link source turned a full or read-only
+    mount into a traceback the host could only read as "the ban is not in force" (an
+    un-opt-out-able fault whose remedy text sent the operator at the seccomp registration) —
+    and worse, had the link attempts run anyway, a MISSING source would have made `os.link`
+    fail with `ENOENT` and be counted as DENIED, reporting a clean ban that was never tested."""
     return f'''
 import os, stat, sys
 
 prefix = {name_prefix!r}
 allowed = []
+control_error = None
 
 def attempt(shape, fn):
     try:
@@ -205,25 +235,40 @@ def attempt(shape, fn):
     except OSError:
         pass
 
-dfd = os.open(".", os.O_RDONLY)
-try:
-    attempt("symlink", lambda: os.symlink("t", prefix + "-symlink"))
-    attempt("symlinkat", lambda: os.symlink("t", prefix + "-symlinkat", dir_fd=dfd))
+def control(what, fn):
+    global control_error
+    if control_error is not None:
+        return False
+    try:
+        fn()
+        return True
+    except OSError as e:
+        control_error = what + ": " + repr(e)
+        return False
+
+def probe():
+    dfd = os.open(".", os.O_RDONLY)
+    try:
+        attempt("symlink", lambda: os.symlink("t", prefix + "-symlink"))
+        attempt("symlinkat", lambda: os.symlink("t", prefix + "-symlinkat", dir_fd=dfd))
+        if control("the hard-link probe's source file could not be created", write_src):
+            attempt("link", lambda: os.link(prefix + "-src", prefix + "-link"))
+            attempt("linkat", lambda: os.link(prefix + "-src", prefix + "-linkat", dst_dir_fd=dfd))
+        attempt("mknod", lambda: os.mknod(prefix + "-mknod", mode=stat.S_IFIFO | 0o600))
+        attempt("mknodat", lambda: os.mknod(prefix + "-mknodat", mode=stat.S_IFIFO | 0o600, dir_fd=dfd))
+    finally:
+        os.close(dfd)
+
+def write_src():
     with open(prefix + "-src", "w") as fh:
         fh.write("x")
-    attempt("link", lambda: os.link(prefix + "-src", prefix + "-link"))
-    attempt("linkat", lambda: os.link(prefix + "-src", prefix + "-linkat", dst_dir_fd=dfd))
-    attempt("mknod", lambda: os.mknod(prefix + "-mknod", mode=stat.S_IFIFO | 0o600))
-    attempt("mknodat", lambda: os.mknod(prefix + "-mknodat", mode=stat.S_IFIFO | 0o600, dir_fd=dfd))
-finally:
-    os.close(dfd)
 
-create_ok = True
-try:
+def write_create():
     with open(prefix + "-create", "w") as fh:
         fh.write("x")
-except OSError:
-    create_ok = False
+
+control("the probe could not open its working directory", probe)
+control("an ordinary create did not succeed", write_create)
 
 for suffix in ("-symlink", "-symlinkat", "-link", "-linkat", "-mknod", "-mknodat", "-src", "-create"):
     try:
@@ -231,8 +276,8 @@ for suffix in ("-symlink", "-symlinkat", "-link", "-linkat", "-mknod", "-mknodat
     except OSError:
         pass
 
-if not create_ok:
-    sys.stderr.write("alias-probe: ordinary create did not succeed\\n")
+if control_error is not None:
+    sys.stderr.write({_CONTROL_FAILED_MARKER!r} + control_error + "\\n")
     sys.exit(1)
 if allowed:
     sys.stderr.write("alias-probe: " + " ".join(s + " was ALLOWED" for s in allowed) + "\\n")
@@ -255,12 +300,21 @@ def _probe_alias_ban(docker: DockerFn, name: str, cwd: Path, runtime: str) -> No
     start, attempts each of the six banned shapes plus one ordinary create inside `cwd` (the
     box's own writable mount, or `/tmp` when it has none), and faults unless every banned shape
     was refused AND the ordinary create succeeded. Any non-zero exit — including one the exec
-    itself never completed — reads as failed, never as a pass."""
+    itself never completed — reads as failed, never as a pass.
+
+    A probe that could not run its own controls still raises `AliasBanNotInForce`, and still
+    is not opt-out-able: "the ban could not be observed" and "the ban is not in force" carry
+    the same obligation to refuse, and softening the first into a `BoxFault` would hand the
+    box a way to buy a degraded start by breaking the probe's writable mount. Only the MESSAGE
+    differs — pointing at the mount rather than at the seccomp registration, so a disk-full
+    box stops telling the operator to re-register the runtime."""
     proc = _call(docker, _alias_probe_argv(name, cwd))
-    if proc.returncode != 0:
-        raise AliasBanNotInForce(
-            _alias_ban_fault_message(runtime, (proc.stderr or proc.stdout or ""))
-        )
+    if proc.returncode == 0:
+        return
+    detail = proc.stderr or proc.stdout or ""
+    if _CONTROL_FAILED_MARKER in detail:
+        raise AliasBanNotInForce(_alias_probe_inconclusive_message(cwd, detail))
+    raise AliasBanNotInForce(_alias_ban_fault_message(runtime, detail))
 
 
 _ALLOW_UNSANDBOXED = "DEFENDER_ALLOW_UNSANDBOXED"
@@ -632,6 +686,25 @@ def _render_argv(
     return argv
 
 
+def _did_not_run_for_request(request: BoxRequest, reason: str) -> None:
+    """§7 D2's marker for the request lane — one per WRITABLE mount source, and none at all for
+    a lane that has no writable mount.
+
+    The investigation lane's marker keys off its single run dir; a request composes its own
+    geography, so "which tree does this box's verdict belong to" has to be answered explicitly.
+    The writable mounts are the answer, and the rule falls straight out of the one
+    `stop_and_scrub` already follows: a tree is worth a verdict exactly when the box could
+    write it. That makes the read-only run-cycle lane (every mount rendered readonly, X16) mint
+    no sidecar — it has no tree to judge, which is the same reason it is the one boxed lane
+    that never scrubs — rather than orphaning one beside a tree nothing cleans up.
+
+    Best-effort per tree, for the reason `scrub._write_verdict` carries: these calls sit on a
+    path that is already unwinding a startup fault, and the marker must never replace it."""
+    for m in request.mounts:
+        if m.writable:
+            write_did_not_run(Path(m.source), reason)
+
+
 def _start_boxed_request(
     request: BoxRequest, docker: DockerFn, shared_mounts: SharedMountsFn = _shared_mounts,
 ) -> BoxExecutor:
@@ -648,6 +721,10 @@ def _start_boxed_request(
     _call(docker, ["docker", "rm", "-f", request.name])
     created = _call(docker, _render_argv(request, shared_mounts(docker)))
     if created.returncode != 0:
+        _did_not_run_for_request(
+            request, f"box create faulted before any container existed: "
+                     f"{(created.stderr or '').strip()}"
+        )
         raise BoxFault(
             f"could not create the box {request.name}: {(created.stderr or '').strip()}"
         )
@@ -655,8 +732,16 @@ def _start_boxed_request(
         for m in request.mounts:
             _check_mount_sentinel(m, docker, request.name)
         _probe_alias_ban(docker, request.name, _probe_cwd_for_request(request), request.spec.runtime)
-    except BaseException:
+    except BaseException as e:
         _call(docker, ["docker", "rm", "-f", request.name])
+        # Both fault arms mark, exactly as the investigation lane's `_start_boxed` does. The
+        # host has already planted sentinels into these trees by the time a mount probe or the
+        # alias probe fails; without the marker the tree is left with no verdict at all, which
+        # `tree_verified` cannot tell apart from a tree nobody has judged yet, and which
+        # quarantine records as an empty verdict in its manifest.
+        _did_not_run_for_request(
+            request, f"box startup faulted before the reap scan could run: {e}"
+        )
         raise
     return BoxExecutor(
         spec=request.spec, transport=_DockerTransport(request.name, request.spec),
@@ -832,6 +917,21 @@ def stop_and_scrub(
         )
     if box_down:
         scrub_tree(tree)
+        # §7 D1's accepted cost, finally paid — and paid HERE because this is the only point
+        # where it can be. Unpredictable staged names mean no later write ever replaces a
+        # crash-orphaned one by name, so without a sweep they accumulate in every run dir and
+        # drain worktree forever. It runs strictly AFTER the walk: sweeping first would delete
+        # entries the scan exists to report, the sanitizing move the design refuses everywhere
+        # else, and it costs nothing to wait — the scan permits any regular file, and an
+        # orphaned staged file is one. A tainted tree never reaches this line at all
+        # (`RunTainted` propagates out of `scrub_tree`), so quarantine still gets the tree
+        # exactly as the box left it.
+        swept = sweep_staged(tree)
+        if swept:
+            print(
+                f"[box] swept {len(swept)} orphaned staged file(s) under {tree}",
+                file=sys.stderr,
+            )
 
 
 @dataclass(frozen=True)

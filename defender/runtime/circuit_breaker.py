@@ -65,9 +65,17 @@ def _load(run_dir: Path) -> dict:
     except OSError:
         return {**_blank(), "_unreadable": True}
     try:
-        return json.loads(text or "{}") or _blank()
+        doc = json.loads(text or "{}")
     except json.JSONDecodeError:
         return {**_blank(), "_unreadable": True}
+    # `3`, `"x"` and `[…]` are all valid JSON and none of them is a breaker state. Without
+    # this they came back as the state itself and every reader's `.get(...)` raised
+    # AttributeError — the rider above fails CLOSED on a corrupted file only if "corrupted"
+    # includes "parsed fine, wrong shape", which is the shape a box writing into its own run
+    # dir can produce for free.
+    if not isinstance(doc, dict):
+        return {**_blank(), "_unreadable": True}
+    return doc or _blank()
 
 
 def record_outcome(run_dir: Path, system: str, exit_code: int) -> dict:

@@ -31,7 +31,9 @@ def claim_lead(dispatch: dict) -> int:
     sidecar_dir = RunPaths(Path(run_dir)).gather_raw
     try:
         guarded_mkdir(sidecar_dir, base=Path(run_dir))
-    except OSError:
+    except (OSError, ValueError):
+        # ValueError as well as OSError: `guarded_mkdir` raises it for a target outside the
+        # tree the anchor names. This hook's whole contract is "return a code, never raise".
         return 0
 
     sidecar_path = sidecar_dir / f"{lead_id}.lead.json"
