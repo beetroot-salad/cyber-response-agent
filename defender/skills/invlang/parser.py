@@ -32,6 +32,7 @@ from .schema import (
     ProposedEdge,
     RefutationRecord,
     ResolutionRecord,
+    ResolutionRow,
     VertexRecord,
 )
 
@@ -394,7 +395,10 @@ _RESOLUTION_KEY_CANONICAL = {
 _RESOLUTION_LIST_KEYS = {"conditioning", "concerns"}
 
 
-def _canonicalize_resolution_row(rec: dict[str, str]) -> dict[str, Any]:
+def _canonicalize_resolution_row(rec: dict[str, str]) -> ResolutionRow:
+    # Built as a plain dict and cast: the header names the keys at runtime, so
+    # there is no literal-key form for mypy to check the writes against. The
+    # return type is the read contract — see the `:R` note in schema.py.
     out: dict[str, Any] = {}
     for k, v in rec.items():
         if not v:
@@ -404,7 +408,7 @@ def _canonicalize_resolution_row(rec: dict[str, str]) -> dict[str, Any]:
             out[canonical] = _split_csv_or_semi(v)
         else:
             out[canonical] = v
-    return out
+    return cast(ResolutionRow, out)
 
 
 def _project_conclude_scalars(conclude: dict[str, Any], rows: list[str]) -> None:

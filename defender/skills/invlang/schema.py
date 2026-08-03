@@ -1,7 +1,7 @@
 
 from __future__ import annotations
 
-from typing import Any, TypedDict
+from typing import TypedDict
 
 AttributesMap = dict[str, str]
 
@@ -154,14 +154,62 @@ class Observations(TypedDict, total=False):
     edges: list[EdgeRecord]
 
 
+
+
+# The `:R` resolution buckets. Their rows are column-header driven — the author's
+# `[a|b|c]` header names the keys, and `_canonicalize_resolution_row` renames the
+# ones it knows and passes the rest through. So EVERY key is optional twice over:
+# the header decides whether a column exists at all, and an empty cell is dropped
+# rather than stored as "". These types name the keys the canonicalizer emits;
+# they do not close the grammar.
+
+
+class ResolutionRow(TypedDict, total=False):
+
+    resolved_by_lead: str
+    verdict: str
+    anchor_kind: str
+    prediction_ref: str
+    matched_prediction: str
+
+
+class AuthzResolution(ResolutionRow, total=False):
+
+    edge: str
+    fulfills_contract: str
+    reasoning: str
+    grounding_kind: str
+    authority_for_question: str
+    anchor_id: str
+    conditioning_context: list[str]
+    concerns: list[str]
+
+
+# A consultation row carries nothing beyond the shared keys.
+AnchorConsultation = ResolutionRow
+
+
+class ImpactResolution(ResolutionRow, total=False):
+
+    dimension: str
+
+
+# Unlike the buckets above, this one is not header-driven: the parser folds every
+# `:R attr_updates` row for a target into one entry, so both keys always exist.
+class AttributeUpdate(TypedDict):
+
+    target: str
+    updates: dict[str, str]
+
+
 class LeadOutcome(TypedDict, total=False):
 
     failure_reason: str
     observations: Observations
-    authorization_resolutions: list[dict[str, Any]]
-    anchor_consultations: list[dict[str, Any]]
-    impact_resolutions: list[dict[str, Any]]
-    attribute_updates: list[dict[str, Any]]
+    authorization_resolutions: list[AuthzResolution]
+    anchor_consultations: list[AnchorConsultation]
+    impact_resolutions: list[ImpactResolution]
+    attribute_updates: list[AttributeUpdate]
 
 
 class _FindingRequired(TypedDict):

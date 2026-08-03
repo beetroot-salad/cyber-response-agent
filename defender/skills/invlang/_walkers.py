@@ -2,13 +2,16 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from typing import Any, cast
+from typing import Any
 
 from . import vocab
 from .schema import (
+    AttributeUpdate,
+    AuthzResolution,
     CompanionBody,
     EdgeRecord,
     HypothesisRecord,
+    LeadOutcome,
     ResolutionRecord,
     VertexRecord,
 )
@@ -67,24 +70,24 @@ def iter_resolutions(
                 yield lid, res
 
 
-def _iter_outcome_rows(
-    companion: CompanionBody, field: str,
-) -> Iterator[dict[str, Any]]:
+def _iter_lead_outcomes(companion: CompanionBody) -> Iterator[LeadOutcome]:
     for lead in companion.get("findings") or []:
-        if not isinstance(lead, dict):
-            continue
-        outcome = cast("dict[str, Any]", lead.get("outcome") or {})
-        for row in outcome.get(field) or []:
+        if isinstance(lead, dict):
+            yield lead.get("outcome") or LeadOutcome()
+
+
+def iter_authz_resolutions(companion: CompanionBody) -> Iterator[AuthzResolution]:
+    for outcome in _iter_lead_outcomes(companion):
+        for row in outcome.get("authorization_resolutions") or []:
             if isinstance(row, dict):
                 yield row
 
 
-def iter_authz_resolutions(companion: CompanionBody) -> Iterator[dict[str, Any]]:
-    return _iter_outcome_rows(companion, "authorization_resolutions")
-
-
-def iter_attr_updates(companion: CompanionBody) -> Iterator[dict[str, Any]]:
-    return _iter_outcome_rows(companion, "attribute_updates")
+def iter_attr_updates(companion: CompanionBody) -> Iterator[AttributeUpdate]:
+    for outcome in _iter_lead_outcomes(companion):
+        for row in outcome.get("attribute_updates") or []:
+            if isinstance(row, dict):
+                yield row
 
 
 def final_weights(companion: CompanionBody) -> dict[str, Any]:
