@@ -78,6 +78,52 @@ CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 #: The write lint's ratchet baseline. Named once and shared, because two demands read it and a
 #: second spelling of the same path is how one of them silently stops looking at anything.
 LINT_BASELINE = REPO_ROOT / "scripts" / "lint" / "lint_unguarded_tree_write_baseline.json"
+LINT_MODULE_PATH = REPO_ROOT / "scripts" / "lint" / "lint_unguarded_tree_write.py"
+#: The generator that DERIVES the shipped profile from the vendored platform default, and the
+#: vendored default it derives from. Both are named here rather than inline because three
+#: demands read them (the profile's shape, the escape-surface non-regression, and the
+#: dependency sweep) and a second spelling of either path is how one demand ends up asserting
+#: about a file nothing produces.
+SECCOMP_GEN_PATH = REPO_ROOT / "scripts" / "gen_seccomp_profile.py"
+
+
+def load_seccomp_generator():
+    """Import the profile generator as a module, by path.
+
+    Same reason as `load_write_lint`: it lives under `scripts/`, outside every importable
+    package. The demands that use it need `build()` — the pure function from vendored bytes to
+    shipped profile — so that "the shipped profile is the platform default minus the ban" is
+    asserted by RE-DERIVING it, not by re-listing its contents in a second place that can drift
+    from the first."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("gen_seccomp_profile", SECCOMP_GEN_PATH)
+    assert spec is not None, f"the profile generator does not exist at {SECCOMP_GEN_PATH}"
+    assert spec.loader is not None, f"the generator at {SECCOMP_GEN_PATH} is not importable"
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_write_lint():
+    """Import the write lint as a module, by path.
+
+    It lives at the repo root, outside every importable package, so `import` cannot reach it —
+    and two demands need it (the wrapper-detection one and the hard-gate one). Loaded once
+    here rather than twice inline: a second copy of the loader is a second chance for one
+    demand to end up pointed at a file that no longer exists while still reporting green."""
+    import importlib.util
+    import sys
+
+    lint_dir = LINT_MODULE_PATH.parent
+    if str(lint_dir) not in sys.path:
+        sys.path.insert(0, str(lint_dir))
+    spec = importlib.util.spec_from_file_location("lint_unguarded_tree_write", LINT_MODULE_PATH)
+    assert spec is not None, f"the lint does not exist at {LINT_MODULE_PATH}"
+    assert spec.loader is not None, f"the lint at {LINT_MODULE_PATH} is not importable"
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def ban_dependency_files() -> dict[str, Path]:
@@ -87,19 +133,29 @@ def ban_dependency_files() -> dict[str, Path]:
     drain box writes into a checkout of this repo, and that lane's job is opening a PR from it,
     so a file the box can rewrite is a file it can get MERGED — and the weakened version then
     reaches every later box through main. That is true of the seccomp profile, and it is just
-    as true of every other file the ban leans on. Three qualify and all three are out of reach
+    as true of every other file the ban leans on. Five qualify and all five are out of reach
     today for the same reason the profile was: an accident of where they sit, not a rule.
 
       * the profile itself — the syscall set the ban IS;
+      * the vendored platform default it is DERIVED from — rewrite that and the next
+        regeneration ships a weakened profile the generator will call correct;
+      * the generator that performs the subtraction — it decides what "derived" MEANS, so it
+        can define the ban away as surely as editing the output can;
       * the write lint's ratchet baseline — ratchet a census row into it and the backstop
         stops gating that writer, with no test turning red;
       * the CI workflow — it is what registers the runtime with `--oci-seccomp`, without which
         the shipped default runtime enforces nothing at all (C1-fix, executed).
 
+    THE SECOND AND THIRD ENTRIES ARE THE SWEEP'S OWN RULE APPLIED TO THIS PR'S CHANGE. Deriving
+    the profile rather than hand-writing it replaced ONE file the ban rests on with THREE, and
+    a sweep still naming only the output would have shrunk its coverage while looking untouched.
+
     The profile is a future symbol, so this raises `AttributeError` at HEAD like every other
-    reference to one."""
+    reference to one — `alias_profile_path()` is evaluated first for exactly that reason."""
     return {
         "the seccomp profile the ban is": alias_profile_path(),
+        "the vendored platform default it derives from": load_seccomp_generator().MOBY_DEFAULT_PATH,
+        "the generator that derives it": SECCOMP_GEN_PATH,
         "the write lint's ratchet baseline": LINT_BASELINE,
         "the CI workflow that registers the runtime": CI_WORKFLOW,
     }
@@ -190,6 +246,149 @@ _REAL_BOX_SKIP = _real_box_skip_reason()
 #: runs these against a real box under the shipped runtime. Selected, not enforced: nothing
 #: mechanically blocks a merge on that job's result (see the note above).
 requires_real_box = pytest.mark.skipif(_REAL_BOX_SKIP is not None, reason=str(_REAL_BOX_SKIP))
+
+#: A WEAKER guard than `requires_real_box`, and the difference is the point. The two demands
+#: that compare our profile against the daemon's OWN default do not start a box: they run the
+#: rootfs directly with the probe on stdin, so they need neither the levered runtime registered
+#: nor a bind source that resolves under docker-outside-of-Docker. Gating them on
+#: `requires_real_box` would skip them on every host where only the runtime is missing — which
+#: includes the ordinary developer machine, and which is exactly where a stale vendored default
+#: wants to be caught early.
+requires_daemon = pytest.mark.skipif(
+    not _daemon_reachable(), reason="no reachable Docker daemon"
+)
+
+
+def daemon_engine_version() -> tuple[int, ...]:
+    """The version of the daemon actually serving this host, as a comparable tuple."""
+    probe = subprocess.run(
+        ["docker", "version", "--format", "{{.Server.Version}}"],
+        capture_output=True, text=True, encoding="utf-8", timeout=30,
+    )
+    assert probe.returncode == 0, f"could not read the daemon version: {probe.stderr.strip()}"
+    raw = probe.stdout.strip().split("-")[0].split("+")[0]
+    return tuple(int(part) for part in raw.split(".") if part.isdigit())
+
+
+#: The witness set for the platform-default comparison, and every member is chosen for one
+#: reason: an unprivileged process on a stock kernel can reach it, so a denial is attributable
+#: to SECCOMP and to nothing else.
+#:
+#: THAT CONSTRAINT IS WHAT MAKES THE COMPARISON READABLE, and it is easy to get wrong. `mount`
+#: looks like the obvious escape witness and is useless as one — it is EPERM from the missing
+#: CAP_SYS_ADMIN whether seccomp denied it or not, so it reports the same value under every
+#: profile and discriminates nothing. `unshare(CLONE_NEWUSER)` and `keyctl` need no capability
+#: at all: executed against Docker 29.6.1, the first SUCCEEDS and the second returns ENOKEY —
+#: the errno of a syscall that reached the kernel — under an allow-all profile, while both are
+#: EPERM under the daemon's own default. They are the members that would turn red if the shipped
+#: profile ever stopped being a subtraction from that default.
+#:
+#: The comparison is a SAMPLE and cannot be anything else: there is no way to attempt every
+#: syscall, and most of the ones worth attempting destroy the container or need privilege. What
+#: it buys over a digest check is that it reads the daemon in front of it rather than the
+#: document we vendored, so a daemon upgrade that moves the default is visible here and nowhere
+#: else.
+PLATFORM_COMPARISON_PROBE = r"""
+import ctypes, ctypes.util, errno, json, os, socket, stat, sys, tempfile
+
+libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
+CLONE_NEWUSER = 0x10000000
+NRS = {"x86_64": {"keyctl": 250, "userfaultfd": 323, "pivot_root": 155, "add_key": 248},
+       "aarch64": {"keyctl": 219, "userfaultfd": 282, "pivot_root": 41, "add_key": 217}}
+nr = NRS.get(os.uname().machine)
+if nr is None:
+    print(json.dumps({"unsupported_arch": os.uname().machine}))
+    sys.exit(0)
+
+out = {}
+
+def attempt(name, fn):
+    try:
+        fn()
+        out[name] = "ok"
+    except OSError as e:
+        out[name] = errno.errorcode.get(e.errno, str(e.errno))
+
+def raw(name, *args):
+    ctypes.set_errno(0)
+    rc = libc.syscall(*[ctypes.c_long(a) for a in args])
+    if rc == -1:
+        out[name] = errno.errorcode.get(ctypes.get_errno(), str(ctypes.get_errno()))
+    else:
+        out[name] = "ok"
+    return rc
+
+d = tempfile.mkdtemp()
+os.chdir(d)
+dfd = os.open(".", os.O_RDONLY)
+with open("src", "w") as fh:
+    fh.write("x")
+
+# the ban's six — the ONLY members expected to differ between the two profiles
+attempt("symlink", lambda: os.symlink("t", "a-symlink"))
+attempt("symlinkat", lambda: os.symlink("t", "a-symlinkat", dir_fd=dfd))
+attempt("link", lambda: os.link("src", "a-link"))
+attempt("linkat", lambda: os.link("src", "a-linkat", dst_dir_fd=dfd))
+attempt("mknod", lambda: os.mknod("a-mknod", mode=stat.S_IFIFO | 0o600))
+attempt("mknodat", lambda: os.mknod("a-mknodat", mode=stat.S_IFIFO | 0o600, dir_fd=dfd))
+
+# escape witnesses — unprivileged-reachable, so their denial is seccomp's doing
+if libc.unshare(CLONE_NEWUSER) == -1:
+    out["unshare_newuser"] = errno.errorcode.get(ctypes.get_errno(), "?")
+else:
+    out["unshare_newuser"] = "ok"
+raw("keyctl", nr["keyctl"], 0, -1, 0, 0, 0)
+fd = raw("userfaultfd", nr["userfaultfd"], 0)
+if fd not in (-1, None) and out["userfaultfd"] == "ok":
+    os.close(fd)
+raw("add_key", nr["add_key"], 0, 0, 0, 0, 0)
+raw("pivot_root", nr["pivot_root"], 0, 0)
+
+# ordinary controls — a subtraction that took these would fault every box at startup
+attempt("create", lambda: open("a-create", "w").close())
+attempt("mkdir", lambda: os.mkdir("a-dir"))
+attempt("rename", lambda: os.rename("a-create", "a-renamed"))
+attempt("unlink", lambda: os.unlink("a-renamed"))
+
+def af_unix_bind():
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        s.bind(os.path.join(d, "a.sock"))
+        s.listen(1)
+    finally:
+        s.close()
+
+attempt("af_unix_bind", af_unix_bind)
+os.close(dfd)
+print(json.dumps(out))
+"""
+
+
+def run_probe_under_profile(script: str, profile: Path | None) -> dict[str, str]:
+    """Run `script` in the box rootfs and return its verdict map, under `profile` or — when
+    `profile` is None — under whatever the daemon applies by ITSELF.
+
+    The `None` arm is the whole mechanism: there is no way to ask a daemon what its default
+    profile contains, but there is a way to ask what it DOES, which is to run a container
+    without `--security-opt` and observe. That turns "our profile does not widen the platform
+    default" from a claim about two documents into a claim about two containers on the daemon
+    in front of us — and it stays true across a daemon upgrade that moves the default out from
+    under the vendored copy, which no digest check can see.
+
+    The script arrives on STDIN rather than through a bind mount so the comparison also runs
+    under docker-outside-of-Docker, where a host path need not exist on the daemon's side."""
+    argv = ["docker", "run", "--rm", "-i"]
+    if profile is not None:
+        argv += ["--security-opt", f"seccomp={profile}"]
+    argv += [box_mod.BoxSpec.from_env(os.environ).rootfs, "python3", "-"]
+    probe = subprocess.run(
+        argv, input=script, capture_output=True, text=True, encoding="utf-8", timeout=300,
+    )
+    assert probe.returncode == 0, (
+        f"the probe container failed under "
+        f"{'the daemon default' if profile is None else profile}: {probe.stderr.strip()}"
+    )
+    return json.loads(probe.stdout)
 
 #: The six shapes `alias_profile.domain.distinguished` names. Each must be individually
 #: demonstrated denied — five denied and one admitted is exactly the partial enforcement O2
@@ -402,13 +601,22 @@ def write_guarded(path: Path, text: str, *, mode: str = "replace", **kw: Any) ->
     return _io.write_guarded(path, text, mode=mode, **kw)  # type: ignore[attr-defined]
 
 
-def guarded_mkdir(path: Path) -> None:
+def guarded_mkdir(path: Path, *, base: Path) -> None:
     """`defender._io.guarded_mkdir` — the parents-creating half of M3. Separate from
     `write_guarded` because B8 shows the leaf's own `O_NOFOLLOW` cannot protect a component:
-    the rule is stated over the whole call and is DEPTH-AGNOSTIC (firm consensus #13)."""
+    the rule is stated over the whole call and is DEPTH-AGNOSTIC (firm consensus #13).
+
+    `base` ANCHORS the walk at the shared tree's root, and #13's depth-agnosticism is stated
+    BELOW it rather than below `/`. The box's writable mounts start at the tree, so a component
+    it can plant is a component under `base`; a symlinked ANCESTOR is a host configuration the
+    box cannot influence, and refusing on one refuses everything — `/tmp` is a symlink on
+    macOS, which is where the default runs base lives, so an unanchored walk means no run opens
+    its session store and every sidecar write degrades to a permanent silent no-op. Required
+    keyword-only, so a new call site must NAME the tree it trusts instead of inheriting an
+    anchor by default."""
     from defender import _io
 
-    return _io.guarded_mkdir(path)  # type: ignore[attr-defined]
+    return _io.guarded_mkdir(path, base=base)  # type: ignore[attr-defined]
 
 
 def sweep_staged(tree: Path) -> list[Path]:
@@ -420,6 +628,25 @@ def sweep_staged(tree: Path) -> list[Path]:
     from defender import _io
 
     return _io.sweep_staged(tree)  # type: ignore[attr-defined]
+
+
+def allowed_syscalls(profile: dict) -> set[str]:
+    """Every syscall name the profile can let through — the names under an `SCMP_ACT_ALLOW`
+    rule, whatever that rule's conditions are.
+
+    CONDITIONS ARE DELIBERATELY IGNORED, and the direction of that choice is the point. A
+    capability-gated allow (`includes: {caps: [CAP_SYS_ADMIN]}`) counts here as allowed even
+    though a box without the capability can never reach it. That OVER-counts the shipped
+    profile's surface and equally over-counts the platform default's, so a widening comparison
+    built on it can only ever be too strict — it cannot miss a widening, which is the failure
+    that matters. A predicate that tried to model the conditions would be a second, unverified
+    implementation of dockerd's profile loader sitting inside the assertion."""
+    return {
+        name
+        for rule in profile.get("syscalls", [])
+        if rule.get("action") == "SCMP_ACT_ALLOW"
+        for name in rule.get("names", [])
+    }
 
 
 def alias_profile_path() -> Path:

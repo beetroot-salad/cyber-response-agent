@@ -150,6 +150,20 @@ def _refuse_unless_plain(path: Path) -> None:
         )
 
 
+def open_nofollow_fd(path: Path, flags: int) -> int:
+    """`O_NOFOLLOW` open whose `ELOOP` is MARKED as an alias refusal.
+
+    Every caller runs `_refuse_unless_plain` first, so an `ELOOP` out of the open itself means
+    a symlink appeared in the window between the two checks — the same attack, one race later.
+    Without the mark that refusal reaches D3's accounting exemption as an ordinary write
+    failure and counts toward the very kill circuit the exemption exists to keep an alias out
+    of."""
+    try:
+        return os.open(path, flags | os.O_NOFOLLOW, 0o644)
+    except OSError as e:
+        raise _mark_alias(e, is_alias=e.errno == errno.ELOOP) from None
+
+
 def write_guarded(
     path: Path, text: str | bytes, *, mode: str = "replace",
     stage_name: Callable[[Path], Path] = stage_name, **kw: object,
@@ -186,7 +200,7 @@ def write_guarded(
             raise
     elif mode == "append":
         _refuse_unless_plain(path)
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW, 0o644)
+        fd = open_nofollow_fd(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND)
         if isinstance(text, (bytes, bytearray)):
             with os.fdopen(fd, "ab") as fb:
                 fb.write(text)
@@ -195,7 +209,7 @@ def write_guarded(
                 f.write(text)
     elif mode == "update":
         _refuse_unless_plain(path)
-        fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o644)
+        fd = open_nofollow_fd(path, os.O_RDWR | os.O_CREAT)
         if isinstance(text, (bytes, bytearray)):
             with os.fdopen(fd, "r+b") as fb:
                 fcntl.flock(fb, fcntl.LOCK_EX)
@@ -222,8 +236,8 @@ def open_guarded(path: Path, mode: str = "a"):
     path = Path(path)
     if str(path) != os.devnull:
         _refuse_unless_plain(path)
-    flags = os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | (os.O_APPEND if mode == "a" else os.O_TRUNC)
-    fd = os.open(path, flags, 0o644)
+    flags = os.O_WRONLY | os.O_CREAT | (os.O_APPEND if mode == "a" else os.O_TRUNC)
+    fd = open_nofollow_fd(path, flags)
     return os.fdopen(fd, mode, encoding="utf-8")
 
 
@@ -231,9 +245,16 @@ def _ensure_dir_component(component: Path) -> None:
     try:
         st = os.lstat(component)
     except FileNotFoundError:
-        with contextlib.suppress(FileExistsError):
+        try:
             os.mkdir(component)
-        return
+            return
+        except FileExistsError:
+            # Something appeared between the lstat and the mkdir. Re-judge what is ACTUALLY
+            # there rather than assuming it is the directory we meant to create: a symlink
+            # planted in exactly that window is the hole this function exists to close (B8),
+            # and swallowing the EEXIST would traverse it. A second FileNotFoundError (it
+            # raced away again) propagates, which is the fail-closed side.
+            st = os.lstat(component)
     if stat.S_ISLNK(st.st_mode):
         raise OSError(
             errno.ELOOP, "refusing to create through a symlinked path component", str(component)
@@ -244,18 +265,44 @@ def _ensure_dir_component(component: Path) -> None:
         )
 
 
-def guarded_mkdir(path: Path) -> None:
-    """`mkdir(parents=True, exist_ok=True)`, refusing a symlinked component at ANY depth (B8:
-    `O_NOFOLLOW` on the leaf alone does not protect a swapped component; B10:
-    `mkdir(parents=True, exist_ok=True)` over one succeeds silently). Depth-agnostic: every
-    component from the root down is checked, not only the last one created."""
+def guarded_mkdir(path: Path, *, base: Path) -> None:
+    """`mkdir(parents=True, exist_ok=True)`, refusing a symlinked component at any depth
+    BELOW `base` (B8: `O_NOFOLLOW` on the leaf alone does not protect a swapped component;
+    B10: `mkdir(parents=True, exist_ok=True)` over one succeeds silently).
+
+    `base` IS THE TRUST ROOT — the shared tree's own root, not the filesystem's. It and
+    everything above it are host-controlled: the box's writable mounts start at the tree, so
+    the box can plant a component INSIDE `base` and nowhere above it. `base` is therefore
+    created with a plain `parents=True` mkdir that follows symlinks, and only the components
+    strictly below it are judged.
+
+    WHY THE ANCHOR IS REQUIRED, AND NOT A CONVENIENCE. Walking to the filesystem root instead
+    refuses on any symlinked ANCESTOR, which is a configuration the host chose and the box
+    cannot influence — and those are common: `/tmp` is itself a symlink on macOS, which is
+    where the default runs base lives, and a symlinked `/data` or `/var/run` does the same on
+    Linux. The refusal then lands on every mkdir in the process: the session store cannot be
+    created, so no run starts at all, and the three sidecar persistence paths degrade to
+    permanent silent no-ops. Anchoring costs no coverage, because the region it stops checking
+    is the region the box cannot reach.
+
+    Depth-agnosticism (firm consensus #13) is preserved WITHIN the tree: every component from
+    `base` down is checked, at any depth, not only the last one created. `base` is required
+    keyword-only rather than defaulted so that a new call site has to name the tree it trusts —
+    a default would silently re-adopt whichever anchor happened to be convenient, which is how
+    the walk reached `/` to begin with. Containment is judged LEXICALLY: `resolve()` here would
+    collapse the very symlink the walk exists to refuse."""
     path = Path(path)
-    parts = path.parts
-    if not parts:
-        return
-    accum = Path(parts[0])
-    _ensure_dir_component(accum)
-    for part in parts[1:]:
+    base = Path(base)
+    try:
+        rest = path.relative_to(base)
+    except ValueError:
+        raise ValueError(
+            f"guarded_mkdir: {str(path)!r} is not inside the tree root {str(base)!r} — the "
+            f"anchor names the wrong tree, or the target reaches outside it"
+        ) from None
+    os.makedirs(base, exist_ok=True)
+    accum = base
+    for part in rest.parts:
         accum = accum / part
         _ensure_dir_component(accum)
 

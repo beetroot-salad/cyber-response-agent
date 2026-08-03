@@ -682,7 +682,12 @@ def _refuse_stale_version(conn: sqlite3.Connection) -> None:
 
 def open_store(*, case_id: str, runs_base: Path) -> StoreHandle:
     path = store_path_for(case_id, runs_base=runs_base)
-    guarded_mkdir(path.parent)
+    # The store sits in a `sessions/` dir BESIDE the runs base, so the trust root is their
+    # shared parent — the host-chosen location both hang off, and the highest point no box
+    # ever gets a writable mount on. Anchoring any higher would refuse on a symlinked runs
+    # base (`/tmp` is one on macOS, and the default runs base lives there) and no run could
+    # open its store at all.
+    guarded_mkdir(path.parent, base=Path(runs_base).parent)
     fresh = not path.exists()
     conn = _bare_connect(path)
     try:

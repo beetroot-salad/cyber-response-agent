@@ -30,7 +30,7 @@ def claim_lead(dispatch: dict) -> int:
 
     sidecar_dir = RunPaths(Path(run_dir)).gather_raw
     try:
-        guarded_mkdir(sidecar_dir)
+        guarded_mkdir(sidecar_dir, base=Path(run_dir))
     except OSError:
         return 0
 

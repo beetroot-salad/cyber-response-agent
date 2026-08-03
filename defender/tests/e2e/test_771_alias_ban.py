@@ -60,6 +60,7 @@ from defender.tests.e2e._spec771 import (
     CI_WORKFLOW,
     DAEMON_RUNTIME_ARGS_KEY,
     OCI_SECCOMP_FLAG,
+    PLATFORM_COMPARISON_PROBE,
     REPO_ROOT,
     RUNSC_INSTALL_CMD,
     SCAN_ONLY_SHAPES,
@@ -67,9 +68,14 @@ from defender.tests.e2e._spec771 import (
     DockerFault,
     ProbeVerdict,
     alias_profile_path,
+    allowed_syscalls,
     ban_dependency_files,
     ban_not_in_force_error,
+    daemon_engine_version,
+    load_seccomp_generator,
+    requires_daemon,
     requires_real_box,
+    run_probe_under_profile,
     run_tree,
     shapes_named_in,
 )
@@ -171,42 +177,190 @@ def test_the_read_only_run_cycle_lane_still_starts_under_the_ban(tmp_path):
 
 
 def test_alias_profile_denies_the_six_syscalls_and_allows_everything_else(tmp_path):
-    """profile_denies_exactly_six — the shipped profile's body is a default-ALLOW action with
-    exactly six `SCMP_ACT_ERRNO` rules, one per banned shape, and it names no seventh syscall.
+    """profile_denies_exactly_six — the shipped profile denies each of the six banned shapes
+    and nothing the platform default allowed, by being the platform default with the six
+    SUBTRACTED from its allowlist.
 
-    Vendoring the platform default and appending the denials was WITHDRAWN (C2-fix): X7 refuted
-    it, the daemon's default is compiled in and undumpable (G9), and `--security-opt
-    seccomp=<file>` REPLACES with no merge. So the shipped profile is hand-written and is
-    therefore WIDER than the platform default on the runc lane — recorded as an accepted cost,
-    not asserted away. Fork R6 takes that reading: assert the six denials, do NOT assert that
-    nothing else changed. NO5 survives as intent, not as effect. On the runsc default lane
-    there is no platform seccomp profile in force today at all, so the profile is a strict
-    addition there."""
+    C2-FIX'S WITHDRAWAL RESTED ON A FALSE PREMISE, AND THIS DEMAND IS THE REPAIR. Deriving the
+    profile from the platform default was withdrawn on two grounds. The first is right and is
+    the argument FOR deriving: `--security-opt seccomp=<file>` REPLACES with no merge. The
+    second — G9, "the daemon's default is compiled in and undumpable" — is FALSE, and it is
+    what made the resulting cost look unavoidable. The default is a JSON document versioned as
+    its own Go module and vendored verbatim into moby; it never has to be dumped from a running
+    daemon, it has to be PINNED. The generator names the exact bytes and their digest.
+
+    WHAT THE WITHDRAWAL COST, MEASURED RATHER THAN ARGUED. Under the hand-written allow-all
+    profile, executed against a real daemon (Docker 29.6.1, runc lane): `unshare(CLONE_NEWUSER)`
+    SUCCEEDS, and `keyctl` returns ENOKEY — the errno of a syscall that reached the kernel and
+    looked up a keyring. Both are denied with EPERM under the platform default and under this
+    derived profile. That is a container-escape surface the ban was paying for six filesystem
+    syscalls, on the lane (`DEFENDER_BOX_RUNTIME=runc`) where no sandbox absorbs it.
+
+    NO5 IS SATISFIED, NOT OVERTURNED. NO5 declines GENERAL syscall hardening — a profile that
+    denies things for reasons this ledger never probed. Restoring the platform default's own
+    denials is not that: it is the posture every box already ran under before M1, so the
+    derived profile hardens nothing relative to the pre-ban box. The default-ERRNO action below
+    is the platform default's, not a new policy."""
     profile = json.loads(alias_profile_path().read_text(encoding="utf-8"))
 
-    assert profile["defaultAction"] == "SCMP_ACT_ALLOW", (
-        "the profile is not default-allow, so it is general syscall hardening — which NO5 "
-        "declines and which no probe in this ledger covers"
+    assert profile["defaultAction"] == "SCMP_ACT_ERRNO", (
+        "the profile is not default-deny, so it is not the platform default with the ban "
+        "subtracted — and a default-ALLOW profile hands the box back every syscall the "
+        "platform denies, which is what attaching it REPLACES"
     )
-    denied = {
-        name
-        for rule in profile.get("syscalls", [])
-        if rule.get("action") == "SCMP_ACT_ERRNO"
-        for name in rule.get("names", [])
-    }
-    assert denied == set(BANNED_SHAPES), f"the deny set is not the six shapes: {sorted(denied)}"
-    # "names no seventh syscall" is about the whole profile, not about the ERRNO rules: a
-    # seventh name under SCMP_ACT_KILL or SCMP_ACT_TRACE is general hardening by another
-    # spelling, and the set comparison above cannot see it.
-    named = {name for rule in profile.get("syscalls", []) for name in rule.get("names", [])}
-    assert named == set(BANNED_SHAPES), (
-        f"the profile names a syscall outside the ban under some other action: "
-        f"{sorted(named - set(BANNED_SHAPES))} — that is the general hardening NO5 declines "
-        f"and no probe in this ledger covers"
+    # Under a default-ERRNO allowlist a syscall is banned by ABSENCE, not by an explicit deny
+    # rule: naming it nowhere is what makes `defaultErrnoRet` answer for it. So the deny
+    # assertion is about what the profile does NOT name.
+    allowed = allowed_syscalls(profile)
+    assert not (allowed & set(BANNED_SHAPES)), (
+        f"a banned shape is still reachable: {sorted(allowed & set(BANNED_SHAPES))}"
     )
-    assert not any(s in denied for s in SCAN_ONLY_SHAPES), (
-        "a scan-only shape entered the ban's set — under this exact deny set AF_UNIX bind "
-        "SUCCEEDS (X2/G5, executed twice), and denying it would fault every box at startup"
+    assert profile.get("defaultErrnoRet") == 1, (
+        "the default action does not answer EPERM, so the six no longer fail with the errno "
+        "the startup probe and every guarded writer classify a refusal by"
+    )
+
+    # SCAN_ONLY_SHAPES stays out of the ban, and under a subtractive profile "stays out" means
+    # the syscalls behind it are still ALLOWED rather than merely un-denied. Executed: AF_UNIX
+    # bind succeeds under this exact profile (X2/G5, and re-executed against Docker 29.6.1).
+    scan_only_syscalls = {"bind", "socket"}
+    assert scan_only_syscalls <= allowed, (
+        f"the scan-only shape {SCAN_ONLY_SHAPES[0]} lost "
+        f"{sorted(scan_only_syscalls - allowed)} to the subtraction — AF_UNIX bind must "
+        f"SUCCEED, and denying it faults every box at startup (C5-fix/F3)"
+    )
+
+
+def test_the_alias_profile_does_not_widen_the_platform_syscall_surface(tmp_path):
+    """profile_does_not_widen_the_platform_syscall_surface — the shipped profile allows nothing
+    the vendored platform default did not, and is byte-exactly what the generator derives from
+    that default, so the two cannot drift apart unobserved.
+
+    THIS IS THE DEMAND THE OLD SHAPE COULD NOT STATE. Fork R6 chose "assert the six denials, do
+    NOT assert that nothing else changed", because against a hand-written profile there was no
+    baseline to compare with — the platform default was believed unobtainable (G9). With the
+    default vendored and pinned, "nothing else changed" becomes a set equation over two files,
+    and the accepted cost R6 recorded is not accepted any more: it is asserted away.
+
+    THE RESIDUAL THIS LEAVES, NAMED RATHER THAN HIDDEN. A vendored allowlist denies every
+    syscall NEWER than the copy pinned — the `clone3`/`faccessat2` breakage class, where a box
+    image on a newer libc gets EPERM from a profile nobody edited. That residual is a PIN
+    staleness problem, not a widening one, and it is why the generator records the upstream
+    tag, the module version and the digest instead of just the bytes."""
+    gen = load_seccomp_generator()
+    shipped_text = alias_profile_path().read_text(encoding="utf-8")
+
+    assert shipped_text == gen.build(), (
+        "the shipped profile is not what the generator derives from the vendored platform "
+        "default — it has been hand-edited, or the vendored default moved under it. Run "
+        "`python3 scripts/gen_seccomp_profile.py` and review the diff; a hand-edit here is "
+        "exactly the drift that reintroduces a profile nobody derived."
+    )
+
+    default_profile = json.loads(gen.MOBY_DEFAULT_PATH.read_text(encoding="utf-8"))
+    platform_allows = allowed_syscalls(default_profile)
+    shipped_allows = allowed_syscalls(json.loads(shipped_text))
+
+    assert not (shipped_allows - platform_allows), (
+        f"the profile allows syscalls the platform default does not: "
+        f"{sorted(shipped_allows - platform_allows)} — attaching it WIDENS every box's syscall "
+        f"surface, which is the failure mode a replacing profile has and a merging one cannot"
+    )
+    assert platform_allows - shipped_allows == set(BANNED_SHAPES), (
+        f"the subtraction is not exactly the ban: "
+        f"{sorted(platform_allows - shipped_allows - set(BANNED_SHAPES))} were also removed"
+    )
+
+
+@requires_daemon
+def test_the_profile_differs_from_the_live_daemon_default_by_exactly_the_ban(tmp_path):
+    """profile_matches_the_live_daemon_default_but_for_the_ban — the same syscall witness set,
+    attempted once under whatever the daemon applies BY ITSELF and once under the shipped
+    profile, differs on exactly the six banned shapes and on nothing else.
+
+    THIS IS THE ONE CHECK A DIGEST CANNOT MAKE. Every other guard on the derivation compares
+    two documents we control: the shipped profile against the vendored default, the vendored
+    default against its recorded digest. All of them stay green when the DAEMON moves and the
+    vendored copy stops describing it — which is the residual the derivation actually carries,
+    since a pinned allowlist ages against the host it runs on. There is no way to ask a daemon
+    what its default profile contains, so this asks what it DOES.
+
+    WHY THE WITNESS SET IS SHAPED THE WAY IT IS. Every member is unprivileged-reachable, so a
+    denial is attributable to seccomp rather than to a missing capability — `mount` is the
+    instructive non-member, EPERM from the absent CAP_SYS_ADMIN under every profile and
+    therefore mute. Four members carry the discrimination, MEASURED by running this exact probe
+    against the hand-written allow-all profile this PR replaced (Docker 29.6.1): `unshare`
+    succeeds outright, and `keyctl`/`add_key`/`pivot_root` return ENOKEY and EFAULT — errnos
+    only a syscall that REACHED the kernel can produce. All four are EPERM under the daemon's
+    own default. That profile differs from the default on ten members here; the derived one
+    differs on exactly six, so a future profile that stops being a subtraction turns red with
+    the extra members named in the failure text.
+
+    One member is knowingly mute on this host: `userfaultfd` is EPERM everywhere because
+    `vm.unprivileged_userfaultfd` is 0, so it discriminates only where that sysctl is 1. Kept
+    rather than dropped — a mute witness costs one syscall and stops being mute on a host
+    configured differently, which is the direction a witness set should fail in.
+
+    It is a SAMPLE and says so: no test can attempt every syscall, and the ones worth
+    attempting mostly need privilege or destroy the container. What it buys is that it reads
+    the daemon in front of it rather than the document we vendored."""
+    default_seen = run_probe_under_profile(PLATFORM_COMPARISON_PROBE, None)
+    shipped_seen = run_probe_under_profile(PLATFORM_COMPARISON_PROBE, alias_profile_path())
+
+    if "unsupported_arch" in default_seen:
+        pytest.skip(f"no syscall table for {default_seen['unsupported_arch']}")
+
+    assert set(default_seen) == set(shipped_seen), (
+        "the two probe runs attempted different witness sets, so the comparison below would "
+        "be over a subset neither run agreed on"
+    )
+    differing = {op for op in default_seen if default_seen[op] != shipped_seen[op]}
+    assert differing == set(BANNED_SHAPES), (
+        f"the shipped profile does not differ from the live daemon default by exactly the "
+        f"ban.\n  unexpectedly different: "
+        f"{ {op: (default_seen[op], shipped_seen[op]) for op in differing - set(BANNED_SHAPES)} }"
+        f"\n  banned but identical: "
+        f"{ {op: default_seen[op] for op in set(BANNED_SHAPES) - differing} }\n"
+        f"An unexpected difference in the ALLOW direction means the profile widens the box's "
+        f"syscall surface; in the DENY direction it means the vendored default no longer "
+        f"describes this daemon and the pin needs refreshing."
+    )
+    assert all(shipped_seen[op] != "ok" for op in BANNED_SHAPES), (
+        f"a banned shape succeeded under the shipped profile on the live daemon: "
+        f"{ {op: shipped_seen[op] for op in BANNED_SHAPES if shipped_seen[op] == 'ok'} }"
+    )
+
+
+@requires_daemon
+def test_the_vendored_default_pin_is_not_older_than_the_daemon(tmp_path):
+    """vendored_default_pin_tracks_the_daemon — the daemon serving this host is not NEWER than
+    the moby release the vendored platform default was taken from.
+
+    THE MAINTENANCE SIGNAL FOR THE DERIVATION'S ONE RESIDUAL. A vendored allowlist denies every
+    syscall newer than the copy pinned — the `clone3`/`faccessat2` breakage class, where a box
+    image on a newer libc gets EPERM from a profile nobody edited. That failure is silent at
+    the point it matters and shows up as an unrelated crash inside a box, so it needs a signal
+    somewhere it will be read.
+
+    DIRECTIONAL, NOT AN EQUALITY. An OLDER daemon is fine: our profile then denies nothing it
+    would have allowed, and dockerd ignores allowlist names its libseccomp does not know. A
+    NEWER daemon is the staleness case, and the fix is a re-pin rather than a code change.
+    Expect this to go red when the runner's Docker is upgraded — that is the check working,
+    and the job it lands in is advisory, so it reports rather than blocks."""
+    gen = load_seccomp_generator()
+    pinned = tuple(
+        int(part) for part in gen.MOBY_TAG.removeprefix("docker-v").split(".") if part.isdigit()
+    )
+    assert pinned, f"the generator's MOBY_TAG is not a parseable release: {gen.MOBY_TAG!r}"
+
+    running = daemon_engine_version()
+    assert running <= pinned, (
+        f"this daemon ({'.'.join(map(str, running))}) is newer than the moby release the "
+        f"vendored platform default was taken from ({gen.MOBY_TAG}, "
+        f"{gen.MOBY_PROFILE_MODULE}). The pinned allowlist may be missing syscalls this "
+        f"daemon's default permits, which surfaces inside a box as an unexplained EPERM. "
+        f"Re-fetch {gen.MOBY_PROFILE_URL} at the matching tag, update MOBY_TAG / "
+        f"MOBY_PROFILE_MODULE / MOBY_PROFILE_SHA256, and regenerate."
     )
 
 

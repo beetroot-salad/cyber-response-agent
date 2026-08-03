@@ -179,6 +179,29 @@ def _resolve_operand(deps: AgentDeps, path: str) -> Path:
     return p if p.is_absolute() else deps.cwd_anchor / p
 
 
+def _tree_root_for(deps: AgentDeps, p: Path) -> Path:
+    """Which shared tree `p` sits in — the anchor `guarded_mkdir` walks down from.
+
+    The write gate has already confined `p` to the run dir or the defender dir (its `write ⊆
+    read roots` invariant), so one of the two contains it; this only has to say WHICH, because
+    the component guard needs to know where the box's reach begins. The run dir is tried first:
+    it is the narrower of the two and, in the drain lane, sits inside a checkout of the
+    defender dir, so root order is what keeps the anchor at the tighter tree.
+
+    Failing to classify means the gate admitted a path that is not LEXICALLY under either root
+    — the gate matches on `resolve()`d paths, so that is a path reached THROUGH a symlink,
+    which is the hazard the guard exists for. `ModelRetry` rather than a bare raise: the
+    operand is model-supplied, so a refusal it can read and correct beats an exception that
+    ends the run."""
+    for root in (deps.run_dir, deps.defender_dir):
+        if p == root or root in p.parents:
+            return root
+    raise ModelRetry(
+        f"{p} is not inside a writable tree; name a path under the run directory or the "
+        f"defender directory (a path that only reaches one through a symlink is refused)"
+    )
+
+
 def _is_learning_role(deps: AgentDeps) -> bool:
     return deps.role not in {AgentRole.MAIN, AgentRole.GATHER}
 
@@ -304,7 +327,7 @@ def _tool_write_file(deps: AgentDeps, path: str, content: str) -> str:
     )
     if not decision.allow:
         raise ModelRetry(decision.reason)
-    guarded_mkdir(p.parent)
+    guarded_mkdir(p.parent, base=_tree_root_for(deps, p))
     write_guarded(p, content)
     deps.authored_paths.add(_resolved(p))
     return f"wrote {path} ({len(content)} bytes)"
@@ -340,7 +363,7 @@ def _tool_edit_file(deps: AgentDeps, path: str, old_string: str, new_string: str
     )
     if not decision.allow:
         raise ModelRetry(decision.reason)
-    guarded_mkdir(p.parent)
+    guarded_mkdir(p.parent, base=_tree_root_for(deps, p))
     write_guarded(p, new_text)
     deps.authored_paths.add(_resolved(p))
     return f"edited {path} ({len(new_text)} bytes)"

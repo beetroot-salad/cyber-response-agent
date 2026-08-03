@@ -585,5 +585,5 @@ def _restore_corpus(
     for rel, blob in snapshot.items():
         target = corpus_dir / rel
         if not target.is_file() or target.read_bytes() != blob:
-            guarded_mkdir(target.parent)
+            guarded_mkdir(target.parent, base=corpus_dir)
             write_guarded(target, blob)

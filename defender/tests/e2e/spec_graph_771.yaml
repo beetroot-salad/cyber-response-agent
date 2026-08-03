@@ -272,6 +272,21 @@ demands:
              "interacts(gather_dispatch->run_dir)"]}
      # the POSITIVE CONTROL for no_write_through_planted_dir_component.
 
+  - {id: component_guard_is_anchored_at_the_tree_root, kind: behavior, form: test,
+     discharged_by: test_a_symlinked_ancestor_above_the_tree_does_not_refuse,
+     binds: ["interacts(query_tool->gather_raw)", "interacts(claim_lead->gather_raw)",
+             "interacts(gather_dispatch->run_dir)"]}
+     # minted: firm #13 said the component rule is DEPTH-AGNOSTIC, and the first reading of
+     # that judged every component down from `/`. Depth-agnostic is right; the ROOT it counts
+     # depth from was not. A symlinked ANCESTOR is host configuration the box cannot influence
+     # — `/tmp` is a symlink on macOS and that is where the default runs base lives — and
+     # refusing on one refuses everything: open_store does not catch it, so no run starts, and
+     # the three OSError-swallowing sidecar writers become permanent silent no-ops.
+     # The anchor is free ONLY because the box's writable mounts start AT the tree, so the
+     # region the walk stops judging is the region the box cannot reach. The third arm holds
+     # that premise: a component planted INSIDE the tree is still refused under a symlinked
+     # ancestor, so the anchor sits at the box's reach and not above it.
+
   - {id: write_atomic_temp_not_followed, kind: behavior, form: test,
      discharged_by: test_atomic_write_refuses_a_planted_temp_name,
      binds: ["write_atomic", "interacts(write_atomic->run_dir)",
@@ -428,15 +443,62 @@ demands:
   - {id: profile_denies_exactly_six, kind: shape, form: test,
      discharged_by: test_alias_profile_denies_the_six_syscalls_and_allows_everything_else,
      binds: ["interacts(start_box->alias_profile).payload", "alias_profile"]}
-     # rejected -> vendoring the platform default and appending the denials was WITHDRAWN
-     # (C2-fix): X7 refuted, G9 confirms it is compiled in and undumpable, and
-     # --security-opt seccomp=<file> REPLACES with no merge. The shipped profile is
-     # hand-written and therefore wider than the platform default on the runc lane; on
-     # the runsc lane (the default) no platform seccomp profile is in force today, so it
-     # is a strict addition there.
-     # Fork R6 (judge takes copy3): assert the six denials and RECORD the runc-lane
-     # widening as an accepted cost — do NOT assert that nothing else changed. NO5
-     # survives as intent, not as effect.
+     # REOPENED AND REVERSED. C2-fix withdrew "vendor the platform default and subtract the
+     # denials" on two grounds. The first stands and is the argument FOR deriving:
+     # --security-opt seccomp=<file> REPLACES with no merge. The second — G9, "the daemon's
+     # default is compiled in and undumpable" — is FALSE. The default profile is a JSON
+     # document versioned as its own Go module (github.com/moby/profiles/seccomp) and vendored
+     # verbatim into moby; it is pinnable by tag + digest and never needs dumping from a
+     # running daemon. G9 confused "not dumpable from the daemon" with "not obtainable".
+     # WHAT THE WITHDRAWAL COST, MEASURED: under the hand-written allow-all profile against a
+     # real daemon (Docker 29.6.1, runc lane), unshare(CLONE_NEWUSER) SUCCEEDS and keyctl
+     # returns ENOKEY — the errno of a syscall that reached the kernel. Both are EPERM under
+     # the platform default. Fork R6's "accepted cost" was a container-escape surface, on the
+     # lane where no sandbox absorbs it.
+     # The shipped profile is now the platform default MINUS the six. NO5 is satisfied rather
+     # than overturned: restoring the platform's own denials is the posture every box already
+     # ran under before M1, not new general hardening.
+
+  - {id: profile_does_not_widen_the_platform_syscall_surface, kind: shape, form: test,
+     discharged_by: test_the_alias_profile_does_not_widen_the_platform_syscall_surface,
+     binds: ["alias_profile"]}
+     # minted: the demand fork R6 could not state. With no obtainable baseline it chose "assert
+     # the six denials, do NOT assert that nothing else changed"; with the default vendored and
+     # pinned, "nothing else changed" is a set equation over two files. Also carries the
+     # derivation's drift gate — the shipped profile must be byte-exactly what the generator
+     # produces, so a hand-edit cannot reintroduce an underived profile silently.
+     # residual: a vendored allowlist denies every syscall NEWER than the pinned copy (the
+     # clone3/faccessat2 breakage class). That is pin staleness, not widening, and it is why
+     # the generator records the upstream tag, module version and digest rather than only bytes.
+     # The two demands below close that residual against the LIVE daemon; this one closes the
+     # widening question against the vendored document.
+
+  - {id: profile_matches_the_live_daemon_default_but_for_the_ban, kind: behavior, form: test,
+     discharged_by: test_the_profile_differs_from_the_live_daemon_default_by_exactly_the_ban,
+     binds: ["alias_profile", "interacts(start_box->alias_profile).payload"]}
+     # minted: every other guard on the derivation compares two documents WE control, so all of
+     # them stay green when the daemon moves and the vendored copy stops describing it. No API
+     # dumps a daemon's default profile, so this asks what the daemon DOES: the same witness set
+     # attempted once with no --security-opt and once under the shipped profile, differing on
+     # exactly the six. Same doctrine as M2's startup probe — enforcement OBSERVED, not trusted.
+     # Witness members are unprivileged-reachable so a denial is attributable to seccomp and not
+     # to a missing capability; `mount` is the instructive non-member (EPERM from the absent
+     # CAP_SYS_ADMIN under every profile, so mute). MEASURED: the hand-written allow-all profile
+     # differs from the daemon default on TEN members here (unshare succeeds; keyctl/add_key/
+     # pivot_root return ENOKEY/EFAULT — errnos only a syscall that reached the kernel produces),
+     # the derived profile on exactly six. Guarded on a reachable daemon only, NOT on
+     # requires_real_box: it starts no box, so the levered runtime need not be registered.
+     # residual: a sample, not a proof — no test can attempt every syscall.
+
+  - {id: vendored_default_pin_tracks_the_daemon, kind: shape, form: test,
+     discharged_by: test_the_vendored_default_pin_is_not_older_than_the_daemon,
+     binds: ["alias_profile"]}
+     # minted: the maintenance signal for the staleness residual, which is otherwise silent at
+     # the point it matters and surfaces as an unexplained EPERM inside a box. DIRECTIONAL: an
+     # older daemon is fine (dockerd ignores allowlist names its libseccomp does not know), a
+     # newer one is the staleness case and the fix is a re-pin, not a code change.
+     # Expected to go red when the runner's Docker is upgraded. That is the check working; the
+     # job is advisory, so it reports rather than blocks.
 
   - {id: alias_profile_is_outside_every_box_writable_mount, kind: behavior, form: test,
      discharged_by: test_the_shipped_profile_sits_outside_every_box_writable_mount,

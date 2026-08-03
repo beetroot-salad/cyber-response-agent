@@ -72,6 +72,7 @@ from defender.tests.e2e._spec771 import (  # noqa: E402
     drive_writer_at,
     guarded_mkdir,
     is_eexist,
+    load_write_lint,
     outside,
     plant_component_for,
     plant_dir_symlink,
@@ -323,7 +324,7 @@ def test_no_writer_mkdirs_through_a_planted_directory_component(tmp_path):
     plant_dir_symlink(component, outside_dir)
 
     with pytest.raises(OSError):  # noqa: PT011 — the component check's errno is the idiom's
-        guarded_mkdir(component / "deep" / "deeper")
+        guarded_mkdir(component / "deep" / "deeper", base=run)
 
     assert snapshot_outside(elsewhere) == before, (
         "the primitive created through the planted component and landed outside the tree"
@@ -352,7 +353,7 @@ def test_directory_component_writers_land_when_nothing_is_planted(tmp_path):
     guard that refused everything would pass the negative and silently break every gather
     payload, every lead sidecar and every gather summary."""
     run = run_tree(tmp_path)
-    guarded_mkdir(run / "gather_raw" / "l-003" / "deep")
+    guarded_mkdir(run / "gather_raw" / "l-003" / "deep", base=run)
     assert (run / "gather_raw" / "l-003" / "deep").is_dir()
 
     for writer in CENSUS:
@@ -365,6 +366,60 @@ def test_directory_component_writers_land_when_nothing_is_planted(tmp_path):
         assert (fresh / writer.artifact).is_file(), (
             f"{writer.id} did not land its artifact under an unplanted component"
         )
+
+
+def test_a_symlinked_ancestor_above_the_tree_does_not_refuse(tmp_path):
+    """component_guard_is_anchored_at_the_tree_root — a symlinked component ABOVE the shared
+    tree does not refuse the write, and a run whose runs base sits under one still opens its
+    session store; a component planted INSIDE the tree is still refused in that same layout.
+
+    THE NEGATIVE CONTROL FOR THE ANCHOR, AND IT IS A REAL CONFIGURATION. Judging every
+    component down from `/` reads a symlinked ancestor as the hazard, but an ancestor is host
+    configuration the box cannot influence — and the layout is ordinary rather than exotic:
+    `/tmp` is a symlink on macOS and that is where the default runs base lives, and a symlinked
+    `/data` or `/var/run` does the same on Linux. The blast radius is total rather than
+    partial: `open_store` does not catch the refusal, so NO RUN STARTS, and the three sidecar
+    writers that swallow `OSError` degrade to permanent silent no-ops — a run that appears
+    healthy while persisting nothing.
+
+    The third arm is what keeps the anchor from being a hole. Anchoring is only free because
+    the box's writable mounts start AT the tree, so the region the walk stops judging is the
+    region the box cannot reach; if the plant-inside-the-tree arm ever passed under a symlinked
+    ancestor, the anchor would have moved above the box's reach instead of to it."""
+    from defender.runtime import session_store
+
+    # The whole shared tree sits under a symlinked ancestor — the macOS `/tmp` shape.
+    real_base = tmp_path / "real"
+    real_base.mkdir()
+    linked = tmp_path / "linked"
+    os.symlink(real_base, linked, target_is_directory=True)
+
+    run = run_tree(linked)
+    guarded_mkdir(run / "gather_raw" / "l-010" / "deep", base=run)
+    assert (run / "gather_raw" / "l-010" / "deep").is_dir(), (
+        "the guard refused a component under a symlinked ANCESTOR — the host's own layout "
+        "read as the box's plant"
+    )
+
+    # The consequence that is not recoverable by any caller: a run cannot start at all.
+    handle = session_store.open_store(case_id="c-771-anchor", runs_base=linked / "runs")
+    try:
+        assert handle.path.is_file(), "the session store did not land under a symlinked base"
+    finally:
+        handle.connection.close()
+
+    # …and the anchor did not buy that by ceasing to look inside the tree.
+    outside_dir = tmp_path / "elsewhere" / "loot"
+    outside_dir.mkdir(parents=True)
+    before = snapshot_outside(tmp_path / "elsewhere")
+    component = run / "gather_raw" / "l-011"
+    plant_dir_symlink(component, outside_dir)
+    with pytest.raises(OSError):  # noqa: PT011 — the component check's errno is the idiom's
+        guarded_mkdir(component / "deep", base=run)
+    assert snapshot_outside(tmp_path / "elsewhere") == before, (
+        "under a symlinked ancestor the guard stopped judging components INSIDE the tree — "
+        "the anchor moved above the box's reach rather than to it"
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -913,18 +968,7 @@ def test_a_new_shared_tree_writer_is_a_lint_finding(tmp_path):
     NOT claimed: that the lint proves a link cannot arrive in the tree by some other route. A
     host-side bug or a restored corpus is backstopped by the primitive, not disproved by the
     lint (NO7)."""
-    import importlib.util
-    import sys
-
-    lint_dir = Path(__file__).resolve().parents[3] / "scripts" / "lint"
-    lint_path = lint_dir / "lint_unguarded_tree_write.py"
-    if str(lint_dir) not in sys.path:
-        sys.path.insert(0, str(lint_dir))
-    spec = importlib.util.spec_from_file_location("lint_unguarded_tree_write", lint_path)
-    assert spec is not None, f"the lint does not exist at {lint_path}"
-    assert spec.loader is not None, f"the lint at {lint_path} is not importable"
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    module = load_write_lint()
 
     tree = tmp_path / "src"
     (tree / "pkg").mkdir(parents=True)
@@ -970,6 +1014,16 @@ def test_the_write_lint_hard_gates_the_census_rows_and_ratchets_only_new_ones(tm
     is the backstop for the lane's own writers."""
     assert LINT_BASELINE.is_file(), f"the lint ships no baseline at {LINT_BASELINE}"
     entries = json.loads(LINT_BASELINE.read_text(encoding="utf-8")).get("entries", {})
+
+    # The gate list the LINT actually runs on is a copy: a repo-root lint cannot import this
+    # package. Comparing the two set-for-set is the only thing that makes "derived from the
+    # census" true of the shipped gate rather than only of this module — without it a census
+    # row added here and not there is a module the gate silently stops covering, which is the
+    # exact way `runtime/driver.py` went missing from it once already.
+    assert load_write_lint().LINT_HARD_GATED_MODULES == LINT_HARD_GATED_MODULES, (
+        "the lint's hard-gate list has drifted from the census it mirrors — a census module "
+        "missing there is a writer CI stops gating"
+    )
 
     assert "runtime/driver.py" in LINT_HARD_GATED_MODULES, (
         "the derived gate list lost the driver's fault-exit trace write — one of the two sites "

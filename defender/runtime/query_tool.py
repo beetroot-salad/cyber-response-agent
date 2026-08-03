@@ -406,7 +406,7 @@ def _persist_payload(run_dir, lead_id: str, seq: int, text: str) -> str | None:
     lead_dir = RunPaths(run_dir).gather_raw / lead_id
     payload_path = lead_dir / f"{seq}.json"
     try:
-        guarded_mkdir(lead_dir)
+        guarded_mkdir(lead_dir, base=run_dir)
         write_guarded(payload_path, text)
     except OSError:
         return None
