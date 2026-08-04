@@ -25,13 +25,14 @@ from pathlib import Path
 
 import pytest
 
-from defender._artifact_schema import normalized_disposition, validate_report
+from defender._artifact_schema import validate_report
 from defender._report import (
     UNKNOWN_DISPOSITION,
     ReportUnreadable,
     read_report,
     require_report,
 )
+from defender._vocab import normalized_disposition
 from defender.evals.held_out import predicted_disposition
 from defender.learning.core.directions import directions_for
 from defender.learning.core.validate import normalize_disposition

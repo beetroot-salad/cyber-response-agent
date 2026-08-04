@@ -17,9 +17,19 @@ call, so the vocabulary is not watched and a plain membership test elsewhere is 
 makes the gate self-arming: the next fold that adds a normalizer starts guarding its own
 vocabulary the moment it lands, with no edit here.
 
-What this flags: ``x in NAME`` / ``x not in NAME`` where ``NAME`` is an ALL-CAPS module-level
-constant IMPORTED from another module, and that module has an armed normalizer for it. Import
-aliases are resolved, so ``from m import NAME as N`` then ``x in N`` still flags.
+What this flags: ``x in NAME`` / ``x not in NAME`` where ``NAME`` resolves to an ALL-CAPS
+module-level constant defined in ANOTHER module that has an armed normalizer for it. How the
+borrow is *spelled* does not matter — the three ways to reach someone else's constant all
+resolve to the same vocabulary (the #602 rule the other AST gates already follow):
+
+  - ``from m import NAME`` / ``from m import NAME as N``  then ``x in NAME`` / ``x in N``
+  - ``import m``                                          then ``x in m.NAME``
+  - ``LOCAL = NAME`` / ``LOCAL = m.NAME`` at module level  then ``x in LOCAL``
+
+That last one is why a module-level ALL-CAPS assignment counts as OWNING a vocabulary only
+when its right-hand side actually *defines* one. Re-binding an import to a module-level name
+is the ordinary way to shorten a long import, and treating it as ownership would let the
+cheapest possible refactor disarm the gate.
 
 What it does NOT flag:
   - a module testing membership on a vocabulary it defines itself — that IS the owner's
@@ -82,9 +92,9 @@ def _is_vocabulary_name(name: str) -> bool:
     return len(name) >= _MIN_NAME_LEN and name.isupper()
 
 
-def _module_level_names(tree: ast.Module) -> set[str]:
-    """The ALL-CAPS constants this module DEFINES at module level — the vocabularies it owns."""
-    names: set[str] = set()
+def _module_level_assignments(tree: ast.Module) -> list[tuple[str, ast.expr | None]]:
+    """Every ALL-CAPS module-level binding, as (name, right-hand side)."""
+    out: list[tuple[str, ast.expr | None]] = []
     for node in tree.body:
         targets: list[ast.expr] = []
         if isinstance(node, ast.Assign):
@@ -93,8 +103,25 @@ def _module_level_names(tree: ast.Module) -> set[str]:
             targets = [node.target]
         for t in targets:
             if isinstance(t, ast.Name) and _is_vocabulary_name(t.id):
-                names.add(t.id)
-    return names
+                out.append((t.id, node.value))
+    return out
+
+
+def _is_reference(value: ast.expr | None) -> bool:
+    """Whether this right-hand side merely POINTS at something else (``NAME``, ``m.NAME``)
+    rather than constructing a vocabulary. A pure reference is an alias, not a definition —
+    see the module docstring on why aliasing must not count as ownership."""
+    return isinstance(value, (ast.Name, ast.Attribute))
+
+
+def _module_level_names(tree: ast.Module) -> set[str]:
+    """The ALL-CAPS constants this module DEFINES at module level — the vocabularies it owns.
+    A name bound to a bare reference is excluded: it is someone else's vocabulary wearing a
+    local name, and counting it as owned would let a one-line alias disarm the gate."""
+    return {
+        name for name, value in _module_level_assignments(tree)
+        if value is not None and not _is_reference(value)
+    }
 
 
 def _membership_targets(tree: ast.AST) -> set[str]:
@@ -120,15 +147,57 @@ def _armed_vocabularies(tree: ast.Module) -> set[str]:
     return answered
 
 
-def _import_aliases(tree: ast.Module) -> dict[str, str]:
-    """local name -> original name, for every ``from m import NAME`` in the module."""
-    aliases: dict[str, str] = {}
+def _imported_names(tree: ast.Module) -> set[str]:
+    """Every local name bound by an import — including the module bindings (``import m``,
+    ``from pkg import m``) that a ``m.NAME`` borrow is reached through."""
+    bound: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            for a in node.names:
+                if a.name != "*":
+                    bound.add(a.asname or a.name.split(".", 1)[0])
+    return bound
+
+
+def _vocabulary_refs(tree: ast.Module) -> dict[str, str]:
+    """local name -> the vocabulary it ultimately names, for every way of reaching another
+    module's constant: a from-import (with or without ``as``), and a module-level re-bind of
+    either a from-imported name or a ``m.NAME`` attribute path."""
+    refs: dict[str, str] = {}
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
             for a in node.names:
                 if _is_vocabulary_name(a.name):
-                    aliases[a.asname or a.name] = a.name
-    return aliases
+                    refs[a.asname or a.name] = a.name
+    imported = _imported_names(tree)
+    # Alias chains resolve by repetition (`A = IMPORTED; B = A`); two passes settle every
+    # chain the tree actually contains, and a third would be a fixpoint loop over nothing.
+    for _ in range(2):
+        for name, value in _module_level_assignments(tree):
+            if not _is_reference(value):
+                continue
+            target = _referenced_vocabulary(value, refs, imported)
+            if target is not None and name != target:
+                refs[name] = target
+    return refs
+
+
+def _referenced_vocabulary(
+    value: ast.expr, refs: dict[str, str], imported: set[str]
+) -> str | None:
+    """The vocabulary a reference expression points at, or `None` when it points at something
+    local. ``m.NAME`` counts only when ``m`` is an imported name, so an attribute read off a
+    local object cannot fabricate a vocabulary out of a same-named field."""
+    if isinstance(value, ast.Name):
+        return refs.get(value.id)
+    if (
+        isinstance(value, ast.Attribute)
+        and _is_vocabulary_name(value.attr)
+        and isinstance(value.value, ast.Name)
+        and value.value.id in imported
+    ):
+        return value.attr
+    return None
 
 
 def _suppressed(node: ast.AST, lines: list[str]) -> bool:
@@ -153,9 +222,15 @@ def _scan_file(
 ) -> list[Finding]:
     """Flag membership tests on an armed vocabulary this module does not own."""
     owned = _module_level_names(tree)
-    aliases = _import_aliases(tree)
+    refs = _vocabulary_refs(tree)
+    imported = _imported_names(tree)
     findings: list[Finding] = []
     seen: set[str] = set()
+
+    def vocabulary_of(comparator: ast.expr) -> str | None:
+        if isinstance(comparator, ast.Name):
+            return refs.get(comparator.id, comparator.id)
+        return _referenced_vocabulary(comparator, refs, imported)
 
     def visit(node: ast.AST, scope: tuple[str, ...]) -> None:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
@@ -164,10 +239,8 @@ def _scan_file(
             for op, comparator in zip(node.ops, node.comparators):
                 if not isinstance(op, (ast.In, ast.NotIn)):
                     continue
-                if not isinstance(comparator, ast.Name):
-                    continue
-                original = aliases.get(comparator.id, comparator.id)
-                if original in owned or original not in armed:
+                original = vocabulary_of(comparator)
+                if original is None or original in owned or original not in armed:
                     continue
                 if _suppressed(node, lines):
                     continue

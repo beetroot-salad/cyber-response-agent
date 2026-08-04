@@ -8,7 +8,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from defender._artifact_schema import DISPOSITION_ENUM  # noqa: F401 — re-export; the ticket lane's vocabulary is the project's  # noqa: E501
 from defender._vocab import normalized_disposition
 from defender._report import ReportUnreadable, require_report
 from defender._run_paths import RunPaths

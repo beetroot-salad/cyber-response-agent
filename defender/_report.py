@@ -31,14 +31,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from defender._artifact_schema import DISPOSITION_ENUM, REPORT_NAME, normalized_disposition
+from defender._artifact_schema import REPORT_NAME
 from defender._frontmatter import FrontmatterError, parse_frontmatter
 from defender._io import read_text_soft
-
-# What a view shows where a disposition should be. One definition, because the transcript
-# pages and the lesson tracer both render it and a reader comparing two screens must not have
-# to wonder whether `?` and `?` mean the same thing.
-UNKNOWN_DISPOSITION = "?"
+# The vocabulary, its normalizer and the placeholder a degrading view shows all come straight
+# from the owner. They used to arrive via `_artifact_schema` — the report's SCHEMA is not the
+# report's VOCABULARY, and routing through it meant a reader of one had to know about the
+# other. The placeholder in particular cannot live here: the invlang corpus surfaces need the
+# same one and cannot import this module (`_artifact_schema` imports invlang's validator, so
+# the edge back would close a cycle).
+from defender._vocab import DISPOSITION_ENUM, UNKNOWN_DISPOSITION, normalized_disposition
 
 
 class ReportUnreadable(ValueError):

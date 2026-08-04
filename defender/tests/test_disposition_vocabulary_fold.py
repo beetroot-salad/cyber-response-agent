@@ -20,8 +20,9 @@ from __future__ import annotations
 
 import pytest
 
-from defender._artifact_schema import DISPOSITION_ENUM, validate_artifact, validate_report
+from defender._artifact_schema import validate_artifact, validate_report
 from defender._vocab import (
+    DISPOSITION_ENUM,
     DISPOSITION_VALUES,
     normalized_disposition,
 )
@@ -51,6 +52,29 @@ def test_invlang_carries_the_project_vocabulary_not_a_copy():
     reaches the invlang grammar catalog with no second edit, and neither schema can drift."""
     assert vocab.get_enum("disposition") is DISPOSITION_VALUES
     assert set(DISPOSITION_VALUES) == DISPOSITION_ENUM
+
+
+def test_no_module_stands_between_the_vocabulary_and_its_readers():
+    """One owner has to mean one HOP. #714 moved the enum to the report schema and left the
+    loop's config re-exporting it; #785 moved it again to `_vocab` and left the report schema
+    re-exporting it to the config and the ticket lane. Each hop was cheap on its own and the
+    stack was four modules deep — a reader chasing where a disposition is decided had three
+    forwarding addresses to walk before reaching an answer.
+
+    A module that USES the vocabulary imports it; a module that only PASSED IT ON no longer
+    names it at all. Asserted as absence of the attribute, because that is what a re-export is
+    — an importable name a module does not use.
+    """
+    import defender._artifact_schema as schema
+    import defender.learning.core.config as loop_config
+    from defender.scripts.case_history import case_ticket as ticket
+
+    assert not hasattr(loop_config, "DISPOSITION_ENUM")
+    assert not hasattr(ticket, "DISPOSITION_ENUM")
+    # The report SCHEMA still holds the enum — its write gate tests membership on it exactly.
+    # What it must not hold is the normalizer, which it never called and only forwarded.
+    assert schema.DISPOSITION_ENUM is DISPOSITION_ENUM
+    assert not hasattr(schema, "normalized_disposition")
 
 
 def test_the_slot_order_is_stable():

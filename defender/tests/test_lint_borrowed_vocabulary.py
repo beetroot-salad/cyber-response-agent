@@ -104,16 +104,43 @@ def test_the_owner_testing_its_own_vocabulary_is_the_answer_not_the_smell(gate, 
 # what must not slip past, and what must not be caught
 # ═══════════════════════════════════════════════════════════════════════════
 
-def test_an_import_alias_does_not_hide_the_borrow(gate, tmp_path):
-    """Renaming on import is the cheapest possible evasion, deliberate or not."""
-    aliased = (
-        "from owner import COLOURS as PALETTE\n"
-        "\n"
-        "def check(v):\n"
-        "    return v in PALETTE\n"
-    )
-    root = _tree(tmp_path, {"owner.py": _OWNER_ARMED, "borrower.py": aliased})
+@pytest.mark.parametrize(
+    ("spelling", "borrower"),
+    [
+        ("import-alias",
+         "from owner import COLOURS as PALETTE\n\ndef check(v):\n    return v in PALETTE\n"),
+        ("module-attribute",
+         "import owner\n\ndef check(v):\n    return v in owner.COLOURS\n"),
+        ("module-attribute-from-package",
+         "from pkg import owner\n\ndef check(v):\n    return v in owner.COLOURS\n"),
+        ("module-level-rebind",
+         "from owner import COLOURS\nLOCAL = COLOURS\n\ndef check(v):\n    return v in LOCAL\n"),
+        ("module-level-rebind-of-attribute",
+         "import owner\nLOCAL = owner.COLOURS\n\ndef check(v):\n    return v in LOCAL\n"),
+    ],
+)
+def test_no_spelling_of_the_borrow_hides_it(gate, tmp_path, spelling, borrower):
+    """How the borrow is SPELLED must not decide whether the gate sees it — the #602 rule the
+    other AST gates already follow. The rebinding pair matters most: a module-level
+    `LOCAL = COLOURS` is the ordinary way to shorten a long import, and a gate that reads it as
+    "this module owns COLOURS" is disarmed by the cheapest possible refactor rather than
+    evaded by a deliberate one."""
+    root = _tree(tmp_path / spelling, {"owner.py": _OWNER_ARMED, "borrower.py": borrower})
     assert _names(gate._scan(root)) == ["defender/borrower.py:check:COLOURS"]
+
+
+def test_an_attribute_off_a_local_object_is_not_a_vocabulary(gate, tmp_path):
+    """The control for the attribute form: `v in obj.LONGFIELD` reads a field off a value, not
+    a constant off a module, and a same-named field must not fabricate a finding."""
+    local = (
+        "class C:\n"
+        "    COLOURS = ()\n"
+        "\n"
+        "def check(v, obj):\n"
+        "    return v in obj.COLOURS\n"
+    )
+    root = _tree(tmp_path, {"owner.py": _OWNER_ARMED, "borrower.py": local})
+    assert gate._scan(root) == []
 
 
 def test_negated_membership_is_the_same_smell(gate, tmp_path):
@@ -190,7 +217,15 @@ def test_an_unparseable_file_fails_the_gate_rather_than_passing_it(gate, tmp_pat
     assert gate.main([], scope=broken_root, baseline_path=tmp_path / "none.json") == 2
 
 
-def test_the_real_tree_is_clean(gate):
-    """The gate ships with an empty baseline: every site #785 left is folded, and the one
-    deliberate exemption states its reason inline rather than being baselined into silence."""
-    assert gate._scan() == []
+def test_the_real_tree_passes_the_ratchet(gate):
+    """The gate is green on the tree it ships with, through its own baseline."""
+    assert gate.main([]) == 0
+
+
+def test_no_disposition_site_is_baselined(gate):
+    """#785's own claim, stated as the property rather than as "the baseline is empty": every
+    borrow of the run vocabulary is folded, and the one deliberate exemption — the write gate,
+    exact where every reader normalizes — states its reason at the site instead of being
+    baselined into silence. The two entries the baseline does carry are older debt in other
+    vocabularies, so asserting an EMPTY baseline would conflate the two claims."""
+    assert [f for f in gate._scan() if "DISPOSITION" in f.fingerprint] == []

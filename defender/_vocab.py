@@ -24,12 +24,20 @@ from defender._text import strip_zero_width
 # The canonical run-disposition vocabulary. It reached here from the report schema, which
 # reached it from the learning loop's config (#714) — each move was the same correction, the
 # vocabulary sitting inside one of its consumers instead of underneath all of them.
-DISPOSITION_ENUM = {"benign", "inconclusive", "malicious"}
+#
+# The AUTHORED form is the ordered tuple, because the surfaces that must RENDER the vocabulary
+# — deny reasons, the invlang slot catalog the runtime prompt inlines — need a stable order,
+# and a set's iteration order is not stable across processes. The membership set is derived
+# from it and FROZEN: one owner for the vocabulary means one owner for its contents too, and a
+# plain `set` exported to a dozen modules is one `.add()` away from not being closed at all.
+DISPOSITION_VALUES: tuple[str, ...] = ("benign", "inconclusive", "malicious")
+DISPOSITION_ENUM = frozenset(DISPOSITION_VALUES)
 
-# The same vocabulary in a stable order, for the surfaces that must RENDER it: deny reasons,
-# the invlang slot catalog the runtime prompt inlines. A set's iteration order is not stable
-# across processes, and a prompt that reshuffles between runs is a diff with no meaning.
-DISPOSITION_VALUES: tuple[str, ...] = tuple(sorted(DISPOSITION_ENUM))
+# What a surface shows where a disposition should be and none could be read. It lives HERE,
+# beside the vocabulary, for the same reason the normalizer does: every reader that degrades
+# rather than refusing needs one, and each one that invents its own is a reader a human has to
+# translate. invlang carried three of them (`?`, `unknown`, `-`) across its corpus surfaces.
+UNKNOWN_DISPOSITION = "?"
 
 
 def normalized_disposition(value: object) -> str | None:

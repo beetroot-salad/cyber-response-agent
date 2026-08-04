@@ -4,7 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from defender._artifact_schema import normalized_disposition
+from defender._vocab import normalized_disposition
 from defender.learning.core.directions import (
     ADVERSARIAL,
     BENIGN,

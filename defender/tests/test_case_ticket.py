@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from defender._vocab import DISPOSITION_ENUM
 from defender.scripts.case_history import case_ticket
 
 
@@ -34,17 +35,6 @@ def _write_run(tmp_path: Path, *, disposition: str = "benign", reason: str = "Ro
     return run_dir
 
 
-
-
-def test_disposition_enum_matches_loop_config():
-    """One definition, not two copies that agree (#714). The enum lives in the report.md
-    content schema; both the loop's config surface and this module re-export it, so `is`
-    holds — an equality assert would pass again the moment someone restates the literal."""
-    from defender._artifact_schema import DISPOSITION_ENUM as canonical
-    from defender.learning.core.config import DISPOSITION_ENUM as via_loop_config
-
-    assert case_ticket.DISPOSITION_ENUM is canonical
-    assert via_loop_config is canonical
 
 
 def test_seed_eligible_outcomes_subset_of_outcome_enum():
@@ -204,7 +194,7 @@ def test_alert_to_open_payload_falls_back_on_empty_strings():
 
 
 
-@pytest.mark.parametrize("disposition", sorted(case_ticket.DISPOSITION_ENUM))
+@pytest.mark.parametrize("disposition", sorted(DISPOSITION_ENUM))
 def test_close_roundtrip_recovers_disposition(disposition: str):
     rec = case_ticket.CaseRecord(
         case_id="c", signature_id="5710", disposition=disposition,

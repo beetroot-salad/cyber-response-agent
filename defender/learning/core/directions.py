@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from collections.abc import Callable
 from pathlib import Path
 
-from defender._artifact_schema import normalized_disposition
+from defender._vocab import normalized_disposition
 from defender.learning.core.config import (
     JUDGE_BENIGN_PROMPT,
     JUDGE_PROMPT,

@@ -10,6 +10,7 @@ from pathlib import Path
 
 from defender._io import read_text_soft, use_utf8_stdio
 from defender._run_paths import RunPaths
+from defender._vocab import UNKNOWN_DISPOSITION, normalized_disposition
 
 from .parser import ParseWarning, parse_dense_companion
 from .schema import (
@@ -174,7 +175,7 @@ def _main(argv: list[str]) -> int:
         print(f"\nLoaded {len(companions)} cases (showing first 20):")
         for c in companions[:20]:
             sig = c.signature_id or "-"
-            disp = c.conclude.get("disposition") or "-"
+            disp = normalized_disposition(c.conclude.get("disposition")) or UNKNOWN_DISPOSITION
             arche = c.conclude.get("matched_archetype") or "-"
             print(f"  {c.case_id:50s}  sig={sig:18s}  disp={disp:12s}  arche={arche}")
     return 0

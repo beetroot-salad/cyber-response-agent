@@ -103,7 +103,12 @@ def _report_disposition(run_dir: Path) -> str:
         return UNKNOWN_DISPOSITION
     read = read_report(report)
     if read.reason is not None:
-        print(f"warn: {run_dir.name}/{read.reason} — disposition unknown", file=sys.stderr)
+        # Flattened like every other value this module prints (#596/#609). The reason quotes
+        # model-authored bytes back — a YAML fence error carries the offending frontmatter
+        # line verbatim — so unflattened it is one more LLM-authored value forging rows on a
+        # line-oriented stream, which is the bug class this tool was hardened against.
+        print(f"warn: {_flatten(run_dir.name)}/{_flatten(read.reason)} — disposition unknown",
+              file=sys.stderr)
     return read.disposition_or_unknown
 
 

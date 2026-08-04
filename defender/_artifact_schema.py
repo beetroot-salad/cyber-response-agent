@@ -24,13 +24,15 @@ from __future__ import annotations
 import yaml
 
 from defender._frontmatter import FrontmatterError, split_frontmatter
-# Re-exported, not owned. The disposition vocabulary reached this module from the learning
-# loop's config (#714, to break a `runtime/` → `learning/` import inside a security boundary)
-# and left it for `_vocab.py` once invlang's `conclude` block turned out to carry the same
-# headline: this module imports invlang's validator, so the enum living here put invlang one
-# edge from a cycle. The re-export stays because this IS the report's schema, and its readers
-# — the loop's config, the ticket builder — reach the vocabulary through it.
-from defender._vocab import DISPOSITION_ENUM, normalized_disposition  # noqa: F401 — re-export
+# Imported to be USED, not to be passed on. The vocabulary reached this module from the
+# learning loop's config (#714, to break a `runtime/` → `learning/` import inside a security
+# boundary) and left it for `_vocab.py` once invlang's `conclude` block turned out to carry the
+# same headline. It briefly stayed re-exported so the loop's config and the ticket builder
+# could keep importing it from here; that put a schema module in the path between a vocabulary
+# and its readers for no reason other than history, so those two now import the owner directly.
+# The normalizer is deliberately NOT imported here: this module holds the WRITE gate, and on
+# write the value is tested exactly — see the disposition check in `validate_report` below.
+from defender._vocab import DISPOSITION_ENUM
 from defender.skills.invlang.validate import validate_companion
 
 # #629 — output-structure bounds for the run's two model-authored artifacts, all in
