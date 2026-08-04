@@ -351,6 +351,17 @@ jobs:
       - name: Hand-rolled-frontmatter gate (one fence grammar, #591 — baseline-ratcheted)
         run: defender/.venv/bin/python scripts/lint/lint_hand_rolled_frontmatter.py
 
+      # A module importing another module's closed vocabulary and re-deriving the membership
+      # test itself instead of calling the normalizer that ships beside it (#785). The six
+      # interpreters of report.md's disposition each looked fine alone; they disagreed only
+      # BETWEEN themselves, and five had silently dropped the #722 zero-width strip on a field
+      # attacker-influenced by construction. A vocabulary is watched only once its owner
+      # defines an answer for it, so the gate arms itself as later folds land. The baseline
+      # ships EMPTY: the one deliberate site (the write gate, exact where readers normalize)
+      # states its reason inline instead.
+      - name: Borrowed-vocabulary gate (one owner per vocabulary, #785 — baseline-ratcheted)
+        run: defender/.venv/bin/python scripts/lint/lint_borrowed_vocabulary.py
+
       # A data-source verb dispatch `registry.verbs(system)[verb]` resolved OUTSIDE its fault
       # `try` (#672/#678). The dispatch lazily imports the adapter and can raise, so out of the
       # seam a broken adapter unwinds the stage with no queries-table row and no breaker outcome

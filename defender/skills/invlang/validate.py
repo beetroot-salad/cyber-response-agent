@@ -4,6 +4,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from defender._vocab import normalized_disposition
 from . import _walkers, vocab
 from .parser import INVLANG_FENCE_RE, parse_dense_companion
 from .schema import CompanionBody, EdgeRecord, VertexRecord
@@ -286,6 +287,7 @@ def _check_closed_vocab(companion: CompanionBody) -> list[str]:
     errors += _check_vocab_vertices(companion)
     errors += _check_vocab_edges(companion)
     errors += _check_vocab_hypotheses(companion)
+    errors += _check_conclude_vocab(companion)
     errors += _check_vocab_anchor_kinds(companion)
     errors += _check_attr_update_keys(companion)
     return errors
@@ -401,9 +403,25 @@ def _check_benign_authz(companion: CompanionBody) -> list[str]:
     return errors
 
 
+def _check_conclude_vocab(companion: CompanionBody) -> list[str]:
+    """`conclude`'s disposition is the run's headline, and until now invlang accepted any
+    string there — the one conclude field carrying a project-general vocabulary was the one
+    field with no vocabulary check. An out-of-enum value silently skipped the benign gating
+    below, so a typo bought a document past the checks a `benign` conclusion has to pass."""
+    disposition = (companion.get("conclude") or {}).get("disposition")
+    return _check_vocab(
+        disposition, vocab.DISPOSITION,
+        f"conclude: disposition {disposition!r} is not a known disposition "
+        f"(`enum disposition`)",
+    )
+
+
 def _check_benign_gating(companion: CompanionBody) -> list[str]:
     conclude = companion.get("conclude") or {}
-    if conclude.get("disposition") != "benign":
+    # Matched on what the value RENDERS as (#722). This branch decides whether the benign
+    # structural checks run at all, so a zero-width character clinging to the keyword used to
+    # turn them all off — a gate failing open on an invisible character in model-authored text.
+    if normalized_disposition(conclude.get("disposition")) != "benign":
         return []
 
     errors: list[str] = []

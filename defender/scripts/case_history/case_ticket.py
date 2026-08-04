@@ -8,7 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from defender._artifact_schema import DISPOSITION_ENUM
+from defender._artifact_schema import DISPOSITION_ENUM  # noqa: F401 — re-export; the ticket lane's vocabulary is the project's  # noqa: E501
+from defender._vocab import normalized_disposition
 from defender._report import ReportUnreadable, require_report
 from defender._run_paths import RunPaths
 
@@ -227,7 +228,11 @@ def parse_disposition_from_resolution(resolution: str | None) -> str | None:
     if not sep:
         return None
     head = resolution.split(sep, 1)[0].strip()
-    return head if head in DISPOSITION_ENUM else None
+    # The eighth interpreter of the same vocabulary, one container over: this reads a
+    # disposition back out of a ticket's resolution line, which an analyst can edit and the
+    # benign judge reads back in. Same question, same answer as the report and the
+    # investigation now give.
+    return normalized_disposition(head)
 
 
 
