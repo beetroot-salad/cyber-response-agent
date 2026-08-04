@@ -8,7 +8,7 @@ hand-mirrored blocks (the #330 class) but cannot see the *scattered small
 helper* class — a 1-5 line utility (`_now_iso`, `_log`, `_subscription_env`)
 copied into many modules is far under 60 tokens, and a dozen tiny copies barely
 move a percentage. It is also blind to *divergent* copies (same concept, drifted
-body/return type — the #359 `_parse_frontmatter` class), since there is no long
+body/return type — the #359 frontmatter-parser class), since there is no long
 identical token run to match. Issues #357/#358/#359/#360 are exactly these.
 
 This lint works on a different, cheap signal: the same module-level function
@@ -22,7 +22,8 @@ body (docstrings stripped) and classifies:
 
   - divergent-duplicate   same name, bodies have drifted → unify the contract
                           or rename. The higher-value flag: divergent copies
-                          silently diverge in behavior. (#359 `_parse_frontmatter`.)
+                          silently diverge in behavior. (#359, the per-module
+                          frontmatter parsers, since folded into one.)
 
 Ratchet model (mirrors the jscpd gate): the duplicate names that exist *today*
 are recorded in `lint_duplicate_helpers_baseline.json`. The lint fails (exit 1)
