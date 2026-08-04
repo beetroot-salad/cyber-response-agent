@@ -162,36 +162,54 @@ class Observations(TypedDict, total=False):
 # the header decides whether a column exists at all, and an empty cell is dropped
 # rather than stored as "". These types name the keys the canonicalizer emits;
 # they do not close the grammar.
+#
+# Key sets are derived from the `:R` headers in docs/dense-investigation-format.md
+# §`:R`, defender/skills/invlang/SKILL.md, and the provenance tuple rules #11 and
+# #30 of docs/investigation-language.md make required. `ResolutionRow` holds the
+# grounding/provenance keys all three anchor-resolving buckets carry; each subtype
+# adds only what its own header adds.
 
 
 class ResolutionRow(TypedDict, total=False):
 
+    # Ownership and grounding are separate fields on purpose. `resolved_by_lead`
+    # names the one lead whose work closed the row out — it is the projection
+    # target, so it cannot be plural without the row landing on two outcomes and
+    # double-counting. `cites_leads` names sibling leads the verdict rests on,
+    # for the case where no single lead answers the question alone.
     resolved_by_lead: str
+    cites_leads: list[str]
     verdict: str
     anchor_kind: str
-    prediction_ref: str
-    matched_prediction: str
+    anchor_id: str
+    grounding_kind: str
+    authority_for_question: str
+    as_of: str
+    effective_window: str
+    reasoning: str
+    conditioning_context: list[str]
+    concerns: list[str]
 
 
 class AuthzResolution(ResolutionRow, total=False):
 
     edge: str
     fulfills_contract: str
-    reasoning: str
-    grounding_kind: str
-    authority_for_question: str
-    anchor_id: str
-    conditioning_context: list[str]
-    concerns: list[str]
+    cites_past_case: str
 
 
-# A consultation row carries nothing beyond the shared keys.
-AnchorConsultation = ResolutionRow
+class AnchorConsultation(ResolutionRow, total=False):
+
+    result: str
+    anchor_query: str
 
 
 class ImpactResolution(ResolutionRow, total=False):
 
+    prediction_ref: str
     dimension: str
+    observed: str
+    matched_prediction: str
 
 
 # Unlike the buckets above, this one is not header-driven: the parser folds every

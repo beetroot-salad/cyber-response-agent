@@ -1,22 +1,27 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from typing import Any
+from collections.abc import Callable, Iterator, Mapping
+from typing import Any, TypeVar
 
 from . import vocab
 from .schema import (
+    AnchorConsultation,
     AttributeUpdate,
     AuthzResolution,
     CompanionBody,
     EdgeRecord,
     HypothesisRecord,
+    ImpactResolution,
     LeadOutcome,
     ResolutionRecord,
+    ResolutionRow,
     VertexRecord,
 )
 
 REFUTED_WEIGHT = vocab.REFUTED_WEIGHT
+
+_Row = TypeVar("_Row", bound=Mapping[str, object])
 
 
 def all_vertices(companion: CompanionBody) -> list[VertexRecord]:
@@ -70,24 +75,47 @@ def iter_resolutions(
                 yield lid, res
 
 
-def _iter_lead_outcomes(companion: CompanionBody) -> Iterator[LeadOutcome]:
+def _iter_outcome_rows(
+    companion: CompanionBody,
+    select: Callable[[LeadOutcome], list[_Row] | None],
+) -> Iterator[_Row]:
+    # `select` rather than a field name: a TypedDict lookup needs a literal key,
+    # so the bucket has to be picked at the call site to stay typed.
     for lead in companion.get("findings") or []:
-        if isinstance(lead, dict):
-            yield lead.get("outcome") or LeadOutcome()
+        if not isinstance(lead, dict):
+            continue
+        for row in select(lead.get("outcome") or LeadOutcome()) or []:
+            if isinstance(row, dict):
+                yield row
 
 
 def iter_authz_resolutions(companion: CompanionBody) -> Iterator[AuthzResolution]:
-    for outcome in _iter_lead_outcomes(companion):
-        for row in outcome.get("authorization_resolutions") or []:
-            if isinstance(row, dict):
-                yield row
+    return _iter_outcome_rows(
+        companion, lambda o: o.get("authorization_resolutions")
+    )
 
 
 def iter_attr_updates(companion: CompanionBody) -> Iterator[AttributeUpdate]:
-    for outcome in _iter_lead_outcomes(companion):
-        for row in outcome.get("attribute_updates") or []:
-            if isinstance(row, dict):
-                yield row
+    return _iter_outcome_rows(companion, lambda o: o.get("attribute_updates"))
+
+
+def iter_anchor_consultations(
+    companion: CompanionBody,
+) -> Iterator[AnchorConsultation]:
+    return _iter_outcome_rows(companion, lambda o: o.get("anchor_consultations"))
+
+
+def iter_impact_resolutions(companion: CompanionBody) -> Iterator[ImpactResolution]:
+    return _iter_outcome_rows(companion, lambda o: o.get("impact_resolutions"))
+
+
+def iter_grounded_resolutions(companion: CompanionBody) -> Iterator[ResolutionRow]:
+    """Every row that resolves grounding against an anchor, across all three
+    buckets — the rows that carry the shared provenance and citation keys.
+    `:R attr_updates` is excluded: it records a fact, not a verdict."""
+    yield from iter_authz_resolutions(companion)
+    yield from iter_anchor_consultations(companion)
+    yield from iter_impact_resolutions(companion)
 
 
 def final_weights(companion: CompanionBody) -> dict[str, Any]:

@@ -304,7 +304,7 @@ shift the bar after seeing the observation.
 
 One observable per `claim` (rule #29): split compound AND/OR predicates into multiple `ip*` rows so partial evidence can pivot each side independently.
 
-**Outcome-level `:R impact`.** ANALYZE emits one row per fulfilled `ip*`. Column shape `[pred_ref|dim|observed|verdict|matched_pred|grounding|anchor_id|anchor_kind|authority|as_of|effective_window?|conditioning?|reasoning]` and per-cell enums: see schema.md §Resolutions → `:R impact`. Past-case is not admissible as `grounding` — impact reasoning is per-instance, not category-of-event.
+**Outcome-level `:R impact`.** ANALYZE emits one row per fulfilled `ip*`. Column shape `[resolved_by|cites_leads?|pred_ref|dim|observed|verdict|matched_pred|grounding|anchor_id|anchor_kind|authority|as_of|effective_window?|conditioning?|reasoning]` and per-cell enums: see schema.md §Resolutions → `:R impact`. Past-case is not admissible as `grounding` — impact reasoning is per-instance, not category-of-event.
 
 Rule #14 (partial authority caps weight) applies — a baseline that
 covers magnitude but not intent is `partial` and cannot alone force
