@@ -39,18 +39,38 @@ from defender.skills.invlang.validate import validate_companion
 pytestmark = pytest.mark.e2e
 
 
+class _StubStage:
+    """#774: the minimal review-stage callable shape (`request -> str`, awaited) — a local
+    stub rather than importing `_gate774.FakeReviewStages` into a non-#774 test module."""
+
+    def __init__(self, reply: str) -> None:
+        self._reply = reply
+
+    async def __call__(self, request):  # noqa: ANN001 — StageRequest, untyped to avoid the import
+        return self._reply
+
+
+class _RefutingStages:
+    """A confident close's counter-story arrives fully settled — REFUTED, no live call."""
+
+    def __init__(self) -> None:
+        self.challenger = _StubStage('{"counter_story": "x", "requirements": []}')
+        self.coherence_checker = _StubStage("COHERENT")
+        self.projection = _StubStage('{"leads": []}')
+
+
 def test_replay_golden_v2sshd(tmp_path):
     run_id, salt = "replay-v2sshd", "deadbeefcafe0000"
     run_dir = materialize(tmp_path, GOLDEN)
 
     inv_text = (GOLDEN / "investigation.md").read_text()
-    rep_text = (GOLDEN / "report.md").read_text()
 
+    # #774/R1: report.md is no longer model-writable — re-recorded against the close tool
+    # (disposition inconclusive, so it commits immediately with no gate work at all).
     replay = ReplayFn([
         Turn(tool_calls=[("write_file",
                           {"path": str(run_dir / "investigation.md"), "content": inv_text})]),
-        Turn(tool_calls=[("write_file",
-                          {"path": str(run_dir / "report.md"), "content": rep_text})]),
+        Turn(tool_calls=[("close_investigation", {"disposition": "inconclusive"})]),
         Turn(text="Investigation complete."),
     ])
     drive(run_dir, run_id=run_id, salt=salt, main=replay)
@@ -99,7 +119,11 @@ def test_replay_full_run_ab3(tmp_path, monkeypatch):
         runtime_tools, "_run_gather", _fake_run_gather,
     )
 
-    drive(run_dir, run_id=run_id, salt=salt, main=replay)
+    # #774/R1: the golden trace's report.md write is re-recorded as a close_investigation
+    # call. It reaches a confident (malicious) disposition, which the gate now reviews — a
+    # stub bundle answering "fully settled" (no unsettled requirement) takes the REFUTED arm
+    # and commits the drafted disposition unchanged, with no live provider call.
+    drive(run_dir, run_id=run_id, salt=salt, main=replay, review_stages=_RefutingStages())
 
     assert replay.calls == len(turns), \
         f"replayed {replay.calls}/{len(turns)} turns (early stop = an unexpected gate deny)"
@@ -187,14 +211,11 @@ def test_nested_gather_capture(tmp_path):
     run_id, salt = "nested-gather", "1122334455667788"
     run_dir = materialize(tmp_path, GOLDEN_AB3)
 
-    report_md = ("---\ncase_id: nested-gather\ndisposition: malicious\n"
-                 "confidence: low\n---\nSynthetic nested-gather capture test.\n")
-
     main_replay = ReplayFn([
         Turn(tool_calls=[("gather", {
             "lead_id": "l-001", "system": "elastic",
             "goal": "check sshd auth history", "what_to_summarize": ["auth events"]})]),
-        Turn(tool_calls=[("write_file", {"path": str(run_dir / "report.md"), "content": report_md})]),
+        Turn(tool_calls=[("close_investigation", {"disposition": "malicious"})]),
         Turn(text="Investigation complete."),
     ])
     gather_replay = ReplayFn([
@@ -207,7 +228,7 @@ def test_nested_gather_capture(tmp_path):
     ])
 
     drive(run_dir, run_id=run_id, salt=salt, main=main_replay, gather=gather_replay,
-          verbs=_elastic_verbs())
+          verbs=_elastic_verbs(), review_stages=_RefutingStages())
 
     assert main_replay.calls == 3
     assert gather_replay.calls == 2

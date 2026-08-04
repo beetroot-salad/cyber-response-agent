@@ -552,14 +552,16 @@ def test_replay_run_crosses_budget_and_still_reports(tmp_path, enforced):
     silently, so a harness that injected 0 and observed "no report tail needed" would
     go green having driven no enforcement at all. The assertions below therefore
     require the refusal to be OBSERVED, not merely for the run to finish."""
+    # #774/R1: report.md left MAIN's write allow-list entirely (the close tool is now its
+    # only writer), so the tail-tier artifact this scenario funds is investigation.md.
     run_dir = materialize(tmp_path, GOLDEN)
-    report = run_dir / "report.md"
+    inv = run_dir / "investigation.md"
+    inv_text = (GOLDEN / "investigation.md").read_text()
     replay = ReplayFn([
         Turn(tool_calls=[("bash", {"command": "echo one"})]),
         Turn(tool_calls=[("bash", {"command": "echo two"})]),
         Turn(tool_calls=[("bash", {"command": "echo three"})]),
-        Turn(tool_calls=[("write_file", {"path": str(report),
-                                         "content": report_text()})]),
+        Turn(tool_calls=[("write_file", {"path": str(inv), "content": inv_text})]),
         Turn(text="Investigation complete."),
     ])
     summary = drive(run_dir, run_id="e2e", salt=SALT, main=replay,
@@ -567,8 +569,8 @@ def test_replay_run_crosses_budget_and_still_reports(tmp_path, enforced):
                                 grace_seconds=600))
 
     assert refusal_stem() in "\n".join(replay.seen), "no refusal was ever observed"
-    assert report.is_file(), "the tail did not fund the report"
-    assert "disposition: benign" in report.read_text()
+    assert inv.is_file(), "the tail did not fund the write"
+    assert inv.read_text() == inv_text
     assert (run_dir / "tool_trace.jsonl").is_file()
     assert summary["requests"] >= 4
 
@@ -585,13 +587,16 @@ def test_each_trip_limb_opens_the_same_bounded_report_tail(tmp_path, enforced):
     ONLY — the retired Task/Agent names increment tool_calls but not subagent_spawns —
     so the spawn arm below is written against a live counter."""
     verbs = FakeVerbs({"elastic": {"esql": lambda ctx, *, index: {"rows": []}}})
+    inv_text = (GOLDEN / "investigation.md").read_text()
 
     def one_limb(name: str, limits: dict, script: list[Turn]) -> tuple[str, Path]:
+        # #774/R1: report.md left MAIN's write allow-list — the tail-tier artifact this
+        # scenario funds is investigation.md, whichever limb trips.
         rd = materialize(tmp_path / name, GOLDEN)
-        rep = rd / "report.md"
+        rep = rd / "investigation.md"
         replay = ReplayFn([*script,
                            Turn(tool_calls=[("write_file", {
-                               "path": str(rep), "content": report_text()})]),
+                               "path": str(rep), "content": inv_text})]),
                            Turn(text="done")])
         drive(rd, run_id=name, salt=SALT, main=replay,
               gather=ReplayFn([Turn(text="summary")]), verbs=verbs, limits=limits)
@@ -623,20 +628,27 @@ def test_each_trip_limb_opens_the_same_bounded_report_tail(tmp_path, enforced):
 
 
 def test_kill_lands_between_two_report_writes(tmp_path, enforced):
-    """The report is written across more than one call and the tail is exhausted
-    partway through: content from COMPLETED prior writes persists on disk, and the
-    run's summary and trace still land — "whatever is on disk survives" is the whole
-    contract, and no further granularity is specified for a write interrupted
-    mid-flight."""
+    """The run's tail-tier artifact is written across more than one call and the tail is
+    exhausted partway through: content from COMPLETED prior writes persists on disk, and
+    the run's summary and trace still land — "whatever is on disk survives" is the whole
+    contract, and no further granularity is specified for a write interrupted mid-flight.
+
+    #774/R1: report.md left MAIN's write allow-list entirely, so both writes this scenario
+    is about now target investigation.md (still tail-tier, still model-writable across more
+    than one call) — a `write_file` establishing it, then an `edit_file` splicing an
+    addendum in a SECOND call, which is what "more than one call" needs regardless of which
+    artifact carries it."""
     run_dir = materialize(tmp_path, GOLDEN)
-    part_one = run_dir / "report.md"
     inv = run_dir / "investigation.md"
     inv_text = (GOLDEN / "investigation.md").read_text()
+    anchor = "## REPORT"
+    addendum = inv_text.replace(anchor, "## ADDENDUM\n\nnoted.\n\n" + anchor, 1)
+    assert addendum != inv_text, "the probe's anchor text is not in the golden document"
 
     replay = ReplayFn([
         Turn(tool_calls=[("write_file", {"path": str(inv), "content": inv_text})]),
-        Turn(tool_calls=[("write_file", {"path": str(part_one),
-                                         "content": report_text()})]),
+        Turn(tool_calls=[("edit_file", {"path": str(inv), "old_string": anchor,
+                                        "new_string": "## ADDENDUM\n\nnoted.\n\n" + anchor})]),
         *tail_turns(run_dir, 15),
         Turn(text="never reached"),
     ])
@@ -644,8 +656,7 @@ def test_kill_lands_between_two_report_writes(tmp_path, enforced):
                     limits=caps(max_tool_calls=1, wall_clock_timeout=3600,
                                 grace_seconds=600))
 
-    assert inv.read_text() == inv_text, "a completed prior write was lost by the kill"
-    assert part_one.read_text() == report_text()
+    assert inv.read_text() == addendum, "a completed prior write was lost by the kill"
     assert summary["truncated_by"] == "budget"
     assert (run_dir / "tool_trace.jsonl").is_file()
 

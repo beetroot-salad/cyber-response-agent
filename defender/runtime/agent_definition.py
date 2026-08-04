@@ -33,6 +33,7 @@ class ToolSet:
     template_search: bool = False
     query: bool = False
     closed_tickets: bool = False
+    close: bool = False
 
 
 @dataclass(frozen=True)

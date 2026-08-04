@@ -119,6 +119,28 @@
         ],
         "grep": ["session_store", "sessions/", "session_store_pointer.json", "path_row_ids", "open_store"]
       },
+      "learning_run_dir": {
+        "writers": [
+          "defender/learning/core/persist.py::persist_run",
+          "defender/learning/core/persist.py::_copy_shared_inputs",
+          "defender/learning/core/persist.py::_write_source_refs",
+          "defender/learning/core/run_cycle.py::_write_oracle_telemetry",
+          "defender/learning/pipeline/malicious_actor/run.py::invoke_actor",
+          "defender/learning/pipeline/judge/compare.py::write_comparison_files"
+        ],
+        "readers": [
+          "defender/learning/core/directions.py::artifact_names",
+          "defender/scripts/visualize/visualize_judge.py::active_views",
+          "defender/learning/pipeline/judge/run.py::_cited_policy_read_body",
+          "defender/learning/core/persist.py::_source_run_dir"
+        ],
+        "grep": [
+          "learning_run_dir",
+          "source_refs.yaml",
+          "artifact_names",
+          "paths.runs_dir"
+        ]
+      },
       "runs_base": {
         "writers": [
           "defender/run_common.py::materialize_run_dir"

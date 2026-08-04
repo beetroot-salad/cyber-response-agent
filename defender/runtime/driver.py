@@ -14,7 +14,7 @@ from typing import Any
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.capabilities import ProcessHistory
 from pydantic_ai.capabilities.hooks import Hooks
-from pydantic_ai.exceptions import UsageLimitExceeded
+from pydantic_ai.exceptions import UnexpectedModelBehavior, UsageLimitExceeded
 from pydantic_ai.messages import ModelResponse
 from pydantic_ai.usage import UsageLimits
 
@@ -29,6 +29,9 @@ from . import selection
 from . import session_store
 from .agent_definition import AgentDefinition, ResolvedRoots, ToolSet, bind
 from .agent_role import AgentRole
+from . import challenge_gate
+from . import review_roles
+from .close_tool import register_close_tool
 from .circuit_breaker import RunAborted
 from .permission.policies import _common
 from .providers import BuiltModel
@@ -44,6 +47,7 @@ from .verbs import ModuleVerbRegistry
 from defender._env import env_bool
 from defender._run_paths import RunPaths
 from defender.hooks.budget_enforcer import (
+    BUDGET_EXEMPT_TOOLS,
     DEFAULT_LIMITS,
     BudgetKill,
     account_call,
@@ -93,6 +97,14 @@ def _budget_short_circuit(
     deps: AgentDeps, tool_name: str, limits: dict,
     logger: observe.RequestLogger, agent_id: str,
 ) -> str | None:
+    # RS16: the exemption has to sit AHEAD of the tail kill, not only inside `should_refuse`.
+    # The tail kill is unconditional, so an exemption expressed only in the refusal check
+    # still ends the run at the close — and the gate's own forced turns (extra tool calls,
+    # up to four stage deadlines of wall clock inside ONE close) are what push a run past the
+    # tail to begin with. Closing must remain possible under exactly the pressure the gate
+    # creates, which is also what the budget refusal message now tells the model to do.
+    if tool_name in BUDGET_EXEMPT_TOOLS:
+        return None
     state = _budget_state_for_enforcement(read_budget(deps.run_dir), deps)
     if tail_exhausted(state, limits):
         raise BudgetKill(f"budget tail exhausted at {tool_name}")
@@ -246,14 +258,17 @@ def _gather_bash_shapes(roots: ResolvedRoots) -> tuple[Any, ...]:
 
 
 def _main_write_shape(roots: ResolvedRoots) -> tuple[Any, ...]:
-    return permission.build_named_write_allow(roots.run_dir, ("investigation.md", "report.md"))
+    # R1 (#774): report.md leaves the model's own write allow-list entirely — the close
+    # tool is now its ONLY writer, rendering it host-side through validate_artifact rather
+    # than accepting a model-supplied write/edit of it.
+    return permission.build_named_write_allow(roots.run_dir, ("investigation.md",))
 
 
 MAIN_DEF = AgentDefinition(
     role=AgentRole.MAIN,
     model=resolve_main_model,
     effort="low",
-    tools=ToolSet(read=True, bash=True, write=True),
+    tools=ToolSet(read=True, bash=True, write=True, close=True),
     corpus_dirs=_CORPUS_DIRS,
     bash_shapes=(_main_bash_shapes,),
     write_shapes=(_main_write_shape,),
@@ -371,7 +386,7 @@ def _fold_decision(run_dir: Path) -> tuple[int, str] | None:
     return fold_through, compaction.frontier_text(inv_text, fold_through)
 
 
-def _make_store_render_processor(store: Any, session_id: str, *, fold: bool):
+def _make_store_render_processor(store: Any, session_id: str, *, fold: bool, request_limit: int):
     async def process(ctx: RunContext[AgentDeps], messages: list) -> list:
         # The framework appends this round's own request to state history and only
         # THEN checks the request limit (pydantic_ai's `_prepare_request`), so by the
@@ -379,9 +394,14 @@ def _make_store_render_processor(store: Any, session_id: str, *, fold: bool):
         # `messages`. Mirror the same check here and withhold it from the store —
         # otherwise a round that never actually happens gets committed anyway, and the
         # run-end flush can never recover the true terminal response.
+        #
+        # RS7: the ceiling is the one the RUN was handed, not the un-raised base. Pinned to
+        # the base, this mirror withheld the extra rounds the raise exists to buy — rounds
+        # that genuinely execute — so they skipped the history-compaction path entirely and
+        # the model was handed raw, unrendered history for them.
         usage = getattr(ctx, "usage", None)
         requests = int(getattr(usage, "requests", 0) or 0)
-        if requests >= DEFAULT_REQUEST_LIMIT:
+        if requests >= request_limit:
             selection.ingest(store, session_id, messages[:-1], agent_id="main")
             return messages
         selection.ingest(store, session_id, messages, agent_id="main")
@@ -419,9 +439,27 @@ def _make_gather_recorder(store: Any, session_id: str, agent_id: str):
     return process
 
 
-def _main_extra_capabilities(store: Any, session_id: str) -> list[ProcessHistory[Any]]:
-    return [ProcessHistory(
-        _make_store_render_processor(store, session_id, fold=_compaction_enabled()))]
+def _main_extra_capabilities(
+    store: Any, session_id: str, *, request_limit: int | None = None,
+) -> list[ProcessHistory[Any]]:
+    """`request_limit` is the ceiling the RUN was handed — base plus the gate's forced-turn
+    bound — and the default is the RAISED ceiling of the shipped bounds, never the un-raised
+    base.
+
+    The base was the default here, mirroring at one call frame's remove the exact staleness
+    RS7 exists to prevent: the composition root honoured the raised ceiling while an omitted
+    argument would have had this reader withhold from the compaction path the very rounds the
+    raise buys. Sole production caller passes the run's own value; the default exists because
+    the assembly seam is constructed directly by tests that pin the capability COUNT and have
+    no ceiling to hand it."""
+    # lint-default: ok — resolved once into a fresh name; the honest default is derived from
+    # the bounds object and cannot be a signature default without an import-time read of it.
+    limit = (
+        request_limit if request_limit is not None
+        else challenge_gate.raised_request_limit(challenge_gate.default_bounds())
+    )
+    return [ProcessHistory(_make_store_render_processor(
+        store, session_id, fold=_compaction_enabled(), request_limit=limit))]
 
 
 def _gather_extra_capabilities(store: Any, session_id: str, agent_id: str) -> list[ProcessHistory[Any]]:
@@ -432,21 +470,33 @@ def build_agent(  # noqa: PLR0913 — composition root: config + DI seams + the 
     defender_dir: Path, logger: observe.RequestLogger,
     make_model: MakeModel = providers.build_for_effort,
     *, main_model: str | None = None, verbs: Any = None, limits: dict = DEFAULT_LIMITS,
-    store: Any = None, session_id: str | None = None,
+    store: Any = None, session_id: str | None = None, review_stages: Any = None,
+    bounds: challenge_gate.Bounds,
 ) -> Agent[AgentDeps, str]:
+    # The bounds arrive RESOLVED, non-`Optional`, and are used under their own name. They
+    # used to be re-coalesced here, which gave the gate's ONE bounds object a default at four
+    # depths — against the anchor-a-default-in-one-place convention, and with that
+    # convention's usual cost: the entry point could resolve one value while a direct build
+    # resolved another from its own environment read.
     extra: list[ProcessHistory[Any]] = []
     if store is not None:
         assert session_id is not None, "a store requires its session_id (build_agent's own contract)"
-        extra = _main_extra_capabilities(store, session_id)
+        extra = _main_extra_capabilities(
+            store, session_id, request_limit=challenge_gate.raised_request_limit(bounds),
+        )
     _override = " (DEFENDER_GATHER_MODEL override)" if os.environ.get("DEFENDER_GATHER_MODEL") else ""
     print(f"[run.py] gather model: {gather_model()}{_override}", file=sys.stderr)
     name = resolve_main_model(main_model)
+    # Named rather than inlined into the build call because the EFFECTIVE definition — not
+    # `MAIN_DEF` — is what decides below whether this root registers the close tool, the same
+    # way `register_tools` reads the effective ToolSet for every other capability bit.
+    main_defn = replace(
+        MAIN_DEF, model=lambda: name,
+        effort=providers.effort_for_role(name, AgentRole.MAIN),
+        budget_enforced=MAIN_DEF.budget_enforced and enforcement_enabled(),
+    )
     agent = build_agent_core(
-        replace(
-            MAIN_DEF, model=lambda: name,
-            effort=providers.effort_for_role(name, AgentRole.MAIN),
-            budget_enforced=MAIN_DEF.budget_enforced and enforcement_enabled(),
-        ),
+        main_defn,
         deps_type=AgentDeps,
         instructions=_main_instructions(defender_dir),
         logger=logger,
@@ -476,6 +526,22 @@ def build_agent(  # noqa: PLR0913 — composition root: config + DI seams + the 
     # real grant, for reasons that have nothing to do with catalog content, must not narrow
     # what the catalog advertises.
     register_gather_tool(agent, _build_gather, GATHER_REQUEST_LIMIT, GATHER_DEF.verb_grant)
+    # `build_agent` has no `run_dir` of its own, so it cannot BUILD the live bundle — the
+    # live default is now assembled by `run_investigation`, the entry point that holds the
+    # real run dir, and arrives here already bound to it. The fallback below no longer
+    # substitutes the SOURCE TREE for the missing run dir: doing that anchored each review
+    # role's compiled policy on the repo checkout and had every stage call append its trace
+    # to a file inside it. Unbound stages fail the review closed at call time, through the
+    # gate's own stage-fault arm, instead of quietly acting on the wrong tree.
+    stages = (
+        review_stages if review_stages is not None
+        else review_roles.unbound_review_stages(
+            "no run dir reached this composition root — pass review_stages= (run_investigation "
+            "builds the live bundle against the run's own dir)"
+        )
+    )
+    if main_defn.tools.close:
+        register_close_tool(agent, stages=stages, bounds=bounds)
     return agent
 
 
@@ -544,8 +610,9 @@ def _flush_run_end(run: Any, store: Any, session_id: str, truncated_by: str | No
             print(f"[run.py] truncated_by write skipped: {e!r}", file=sys.stderr)
 
 
-async def _drive_agent(
+async def _drive_agent(  # noqa: PLR0913 — the loop's own inputs: agent, prompt, deps, store, bounds
     agent: Agent[AgentDeps, str], prompt: str, deps: AgentDeps, store: Any, session_id: str,
+    bounds: challenge_gate.Bounds,
 ) -> tuple[Any, str | None, str | None]:
     """Runs the bare `async for node in run` loop and classifies the four caught exits
     into `(truncated_by, exit_reason)`; returns the (possibly unfinished) `run` alongside
@@ -556,7 +623,11 @@ async def _drive_agent(
     try:
         async with agent.iter(
             prompt, deps=deps,
-            usage_limits=UsageLimits(request_limit=DEFAULT_REQUEST_LIMIT),
+            # RS7 (#774): the ceiling that terminates a run is raised by the gate's own
+            # forced-turn cap, read FROM the bound rather than restated as a literal —
+            # every run pays it whether or not the gate ever fires (a property of the
+            # run, not of a review that happened).
+            usage_limits=UsageLimits(request_limit=challenge_gate.raised_request_limit(bounds)),
         ) as run:
             async for node in run:
                 _log_node(node)
@@ -565,6 +636,41 @@ async def _drive_agent(
               file=sys.stderr)
         truncated_by = "request-limit"
         exit_reason = "UsageLimitExceeded"
+    except UnexpectedModelBehavior as e:
+        # RS6 (#774): a stubborn model that keeps retrying a call the gate refuses (e.g. a
+        # write of report.md, narrowed off the allow-list by R1) exhausts the framework's
+        # shared tool-retry budget (`DEFAULT_TOOL_RETRIES`) and pydantic_ai raises this —
+        # none of the OTHER handlers here catch it, so uncaught it takes the whole process
+        # down. Force the unresolved close directly (bypassing the model, which is exactly
+        # what got stuck) rather than let the run end with no disposition at all.
+        print(f"[run.py] {e}; forcing an unresolved close (retry budget exhausted)",
+              file=sys.stderr)
+        truncated_by = "retry-exhausted"
+        exit_reason = "UnexpectedModelBehavior"
+        # R4, the limb terminality has to answer separately: this handler bypasses the gate
+        # and commits through the same path, so on a run whose disposition ALREADY committed
+        # it silently replaced a confident finding with the unresolved one it forces — and
+        # destroyed that close's review record with it. The handler is not withdrawn (it is
+        # the only thing between a stuck model and no disposition at all); it is made aware
+        # of the close it is about to overwrite. A run that errors AFTER closing keeps what
+        # it decided, and the error survives in the logs above rather than in the case record.
+        if challenge_gate.ReviewState.of(deps).closed:
+            print("[run.py] the investigation already closed; keeping its disposition",
+                  file=sys.stderr)
+        else:
+            try:
+                from .close_tool import _close_investigation_async
+
+                # `inconclusive` short-circuits ahead of the gate, so no stage and no bound
+                # is ever consumed here; the run's own bounds are threaded anyway rather
+                # than re-resolved, so this limb cannot end up acting on a different value
+                # from the one the rest of the run was built with.
+                await _close_investigation_async(
+                    deps, "inconclusive", stages=None, bounds=bounds,
+                )
+            except Exception as close_err:  # noqa: BLE001 — this exit must not itself raise
+                print(f"[run.py] forced close after retry exhaustion also failed "
+                      f"({close_err!r})", file=sys.stderr)
     except RunAborted as e:
         print(f"[run.py] {e}; writing partial trace", file=sys.stderr)
         truncated_by = "aborted"
@@ -599,8 +705,24 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     limits: dict | None = None,
     box: Any = None,
     store_factory: StoreFactory | None = None,
+    review_stages: Any = None,
+    bounds: challenge_gate.Bounds | None = None,
 ) -> dict:
     model_name = resolve_main_model(model_name)
+    # lint-default: ok — DI seam owning its default (the #774 repair's seventh seam: the
+    # gate's bounds, carrying the request ceiling's own BASE), resolved once at the entry
+    # point and threaded inward as a concrete value.
+    gate_bounds = bounds if bounds is not None else challenge_gate.default_bounds()
+    # THE one place the live review bundle can honestly be built: the entry point is the only
+    # frame that holds both the run dir the stages must write their traces into and anchor
+    # their policies on, and the operator's model choice. `build_agent` — which sees neither —
+    # used to substitute the source tree for the run dir here.
+    stages = (
+        review_stages if review_stages is not None
+        else review_roles.default_review_stages(  # lint-default: ok — DI seam owning its default (the live bundle, buildable only where the run dir is)
+            run_dir=run_dir, defender_dir=defender_dir, model=model_name,
+        )
+    )
     make_model = make_model or providers.build_for_effort
     adapters = defender_dir / "scripts" / "adapters"
     verbs = verbs if verbs is not None else ModuleVerbRegistry(adapters, GATHER_DEF.verb_grant)  # lint-default: ok — DI seam owning its default (tree-derived; no signature default possible)
@@ -641,7 +763,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
 
     agent = build_agent(
         defender_dir, logger, make_model, main_model=model_name, verbs=verbs, limits=limits,
-        store=store, session_id=session_id,
+        store=store, session_id=session_id, review_stages=stages, bounds=gate_bounds,
     )
     deps = replace(
         bind(MAIN_DEF, run_dir, salt=salt, defender_dir=defender_dir, box=box),
@@ -651,7 +773,9 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     prompt = _user_prompt(run_dir, alert_path, defender_dir, salt)
 
     t0 = time.time()
-    run, truncated_by, exit_reason = await _drive_agent(agent, prompt, deps, store, session_id)
+    run, truncated_by, exit_reason = await _drive_agent(
+        agent, prompt, deps, store, session_id, gate_bounds,
+    )
     wall_ms = (time.time() - t0) * 1000.0
 
     result = run.result if run is not None else None

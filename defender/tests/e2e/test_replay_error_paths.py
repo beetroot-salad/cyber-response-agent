@@ -27,7 +27,7 @@ from defender.tests.e2e._replay_harness import (
     drive,
     materialize,
 )
-from defender.runtime import circuit_breaker, driver
+from defender.runtime import circuit_breaker
 from defender.scripts.adapters.faults import TransportFault
 from defender.skills.invlang.validate import validate_companion
 
@@ -56,9 +56,12 @@ def test_request_limit_writes_partial_trace(tmp_path):
     model = NeverEndsModel(run_dir)
     result = drive(run_dir, run_id=run_id, salt=salt, main=model)
 
-    assert model.calls == driver.DEFAULT_REQUEST_LIMIT
+    from defender.runtime import challenge_gate
+
+    raised_limit = challenge_gate.raised_request_limit(challenge_gate.default_bounds())
+    assert model.calls == raised_limit  # #774/RS7: the ceiling is raised by the gate's cap
     assert result["output"] is None
-    assert result["requests"] == driver.DEFAULT_REQUEST_LIMIT
+    assert result["requests"] == raised_limit
     assert (run_dir / "tool_trace.jsonl").is_file()
     assert (run_dir / "llm_requests.jsonl").is_file()
 
@@ -198,14 +201,18 @@ def test_gather_lead_guards_bounce_then_recover(tmp_path):
 def test_edit_file_guards_bounce_then_recover(tmp_path):
     """edit_file's create-only / not-found / non-unique guards as retry feedback,
     end-to-end: each bad edit bounces the model (ModelRetry); a unique edit then
-    commits. Mirrors Claude Code's Edit semantics through the real tool + gate."""
+    commits. Mirrors Claude Code's Edit semantics through the real tool + gate.
+
+    #774/R1: report.md left MAIN's write allow-list entirely (the close tool is now its
+    only writer), so this generic edit_file-guard probe — which never cared about the
+    artifact's schema, only about the create-only/not-found/non-unique mechanics — now
+    drives investigation.md, still model-writable throughout the investigation."""
     run_id, salt = "edit-guards", "abcdabcdabcdabcd"
     run_dir = materialize(tmp_path, GOLDEN_AB3)
-    notes = str(run_dir / "report.md")
-    fm = "---\ndisposition: benign\n---\n"
+    notes = str(run_dir / "investigation.md")
 
     main = ReplayFn([
-        Turn(tool_calls=[("write_file", {"path": notes, "content": fm + "alpha\nbeta\nalpha\n"})]),
+        Turn(tool_calls=[("write_file", {"path": notes, "content": "alpha\nbeta\nalpha\n"})]),
         Turn(tool_calls=[("edit_file", {"path": notes, "old_string": "", "new_string": "x"})]),
         Turn(tool_calls=[("edit_file", {"path": notes, "old_string": "zzz", "new_string": "x"})]),
         Turn(tool_calls=[("edit_file", {"path": notes, "old_string": "alpha", "new_string": "A"})]),
@@ -215,7 +222,7 @@ def test_edit_file_guards_bounce_then_recover(tmp_path):
     drive(run_dir, run_id=run_id, salt=salt, main=main)
 
     assert main.calls == 6
-    assert (run_dir / "report.md").read_text() == fm + "alpha\nBETA\nalpha\n"
+    assert (run_dir / "investigation.md").read_text() == "alpha\nBETA\nalpha\n"
     seen = "\n".join(main.seen)
     assert "would overwrite it" in seen
     assert "old_string not found" in seen

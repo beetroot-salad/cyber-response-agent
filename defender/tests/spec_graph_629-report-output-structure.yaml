@@ -61,15 +61,15 @@ demands:
   - {id: D3, kind: behavior, form: test, discharged_by: test_investigation_size_bound,
      binds: ["decide_write", "investigation_md", "investigation_size", "interacts(write_file->investigation_md)"]}
      # seed: an investigation.md whose resulting total (exactly len(proposed_text), no append arithmetic) exceeds 65,536 B is denied; existing invlang validation still runs. (basis UNRESOLVED — F1.)
-  - {id: D4, kind: behavior, form: test, discharged_by: test_report_deny_bounces_then_recovers,
-     binds: ["decide_write", "interacts(write_file->report_md)", "interacts(edit_file->report_md)"]}
-     # seed: an over-bound/malformed report.md write is denied and the reason reaches the model as ModelRetry; a corrected rewrite within bounds then commits. Pins bounce-and-recover THROUGH the driver (mirrors test_invlang_deny_bounces_then_recovers). NOTE (phase-F): discharged_by names a test in tests/e2e/test_report_gate_629.py — a different directory than this artifact's (tests/); spec-graph binds's same-directory scan cannot see it (routed to §7, manually verified: the function exists, non-empty docstring, matching prose).
-  - {id: D5, kind: survival, form: test, discharged_by: test_golden_ab_run_still_commits,
-     binds: ["decide_write", "report_md", "investigation_md", "interacts(renderer->report_md)"]}
-     # seed: a current-shape golden report.md/investigation.md still commits with the SAME disposition and the HTML still renders the analyst's reasoning — bounds clear every current-shape artifact. Positive control for D1-D3. Concretely discharged by lc6. NOTE (phase-F): cross-directory discharged_by, see D4's note.
-  - {id: D6, kind: parity, form: test, discharged_by: test_both_write_paths_gate,
-     binds: ["interacts(write_file->report_md)", "interacts(edit_file->report_md)", "interacts(write_file->investigation_md)", "interacts(edit_file->investigation_md)"]}
-     # seed: BOTH write paths (write_file, edit_file) route their full resulting text through decide_write; neither commits a report.md/investigation.md the gate denies. No second write path bypasses the gate. NOTE (phase-F): cross-directory discharged_by, see D4's note.
+  - {id: D4, kind: behavior, form: clause,
+     binds: ["decide_write", "interacts(write_file->report_md)", "interacts(edit_file->report_md)"],
+     outcome: {nl: "#774-RETIRED. This demand pinned content-dependent bounce-and-recover: an over-bound/malformed report.md write denied via ModelRetry, a corrected in-bound rewrite then committing through the SAME tool. #774 (R1) removes report.md from write_file/edit_file's write allow entirely, so denial is now unconditional on that lane regardless of content — there is no content-dependent decision left to bounce on, and recovery happens through the close tool instead. Retired deliberately, recorded with its reason rather than discovered as a broken test; its former discharging test (test_report_deny_bounces_then_recovers) is deleted."}}
+  - {id: D5, kind: survival, form: clause,
+     binds: ["decide_write", "report_md", "investigation_md", "interacts(renderer->report_md)"],
+     outcome: {nl: "#774-RETIRED. This demand pinned a current-shape golden report.md/investigation.md still committing through write_file with the SAME disposition. #774 (R1) removes report.md from write_file's write allow, so this specific tool-lane path no longer exists; the survival property is re-expressed on the close tool by #774's test_a_run_still_reaches_a_recorded_disposition_without_write_access_to_report_md. Its former discharging test (test_golden_ab_run_still_commits) is deleted."}}
+  - {id: D6, kind: parity, form: clause,
+     binds: ["interacts(write_file->report_md)", "interacts(edit_file->report_md)", "interacts(write_file->investigation_md)", "interacts(edit_file->investigation_md)"],
+     outcome: {nl: "#774-RETIRED, for the report.md half only (the investigation.md half is untouched and still holds). This demand pinned that both write_file and edit_file route report.md's full resulting text through decide_write's CONTENT-dependent check, with parity between the two lanes. #774 (R1) makes both lanes refuse report.md UNCONDITIONALLY regardless of content, which is a coarser but still-parity-holding property; re-expressed by #774's report_md_write_parity demand. Its former discharging test (test_both_write_paths_gate) is deleted."}}
 
   # --- section A: path / branch keying (3) ---
   - {id: pa1, kind: behavior, form: test, discharged_by: test_report_md_at_run_dir_root,
@@ -169,21 +169,21 @@ demands:
      # could reach; the deny closes it at the write boundary.
 
   # --- section E: write mode & report revision (5) ---
-  - {id: wm1, kind: domain-outcome, form: test, discharged_by: test_report_over_bound_via_write_file,
-     binds: ["decide_write", "report_body_size.domain.distinguished[over-bound]", "interacts(write_file->report_md)"]}
-     # discharges D2/D6. seed: an over-bound report.md via write_file -> Decision(False, reason). NOTE (phase-F): cross-directory discharged_by, see D4's note.
-  - {id: wm2, kind: behavior, form: test, discharged_by: test_report_over_bound_via_edit_file,
-     binds: ["decide_write", "report_body_size.domain.distinguished[over-bound]", "interacts(edit_file->report_md)"]}
-     # discharges D2/D6. seed: an over-bound report.md via edit_file -> Decision(False, reason); same checks as write_file, over the full resulting text. NOTE (phase-F): cross-directory discharged_by, see D4's note.
-  - {id: wm3, kind: behavior, form: test, discharged_by: test_report_edit_leaves_preexisting_malformed_frontmatter_untouched_by_the_edit,
-     binds: ["decide_write", "report_frontmatter.domain", "interacts(edit_file->report_md)"]}
-     # discharges D1/D2. seed: edit_file hands the FULL resulting document; a still-malformed untouched frontmatter is re-validated and fails -> Decision(False, reason). NOTE (phase-F): cross-directory discharged_by, see D4's note.
-  - {id: wm4, kind: behavior, form: test, discharged_by: test_edit_file_turns_a_committed_valid_report_into_a_malformed_one,
-     binds: ["decide_write", "report_frontmatter.domain", "interacts(edit_file->report_md)"]}
-     # discharges D1/D2. seed: prior validity confers no exemption; an edit that introduces a fault fails the same demand a first write would -> Decision(False, reason). NOTE (phase-F): cross-directory discharged_by, see D4's note.
-  - {id: wm5, kind: behavior, form: test, discharged_by: test_identical_content_rewrite_of_already_valid_report,
-     binds: ["decide_write", "report_md", "interacts(write_file->report_md)"]}
-     # discharges D1/D2. seed: no memoization; a byte-identical rewrite of an already-valid report is evaluated fresh -> Decision(True) again. NOTE (phase-F): cross-directory discharged_by, see D4's note.
+  - {id: wm1, kind: domain-outcome, form: clause,
+     binds: ["decide_write", "report_body_size.domain.distinguished[over-bound]", "interacts(write_file->report_md)"],
+     outcome: {nl: "#774-RETIRED. Pinned a CONTENT-dependent (over-bound) denial of report.md via write_file. #774 (R1) refuses report.md via write_file unconditionally, so the over-bound distinction no longer has a live branch to occupy on this lane; the underlying size-bound check survives unchanged and is re-entered through the close tool (#774's close_write_reenters_artifact_validation). Its former discharging test (test_report_over_bound_via_write_file) is deleted."}}
+  - {id: wm2, kind: behavior, form: clause,
+     binds: ["decide_write", "report_body_size.domain.distinguished[over-bound]", "interacts(edit_file->report_md)"],
+     outcome: {nl: "#774-RETIRED, same reason as wm1, for the edit_file lane. Its former discharging test (test_report_over_bound_via_edit_file) is deleted."}}
+  - {id: wm3, kind: behavior, form: clause,
+     binds: ["decide_write", "report_frontmatter.domain", "interacts(edit_file->report_md)"],
+     outcome: {nl: "#774-RETIRED. Pinned edit_file re-validating a still-malformed, untouched frontmatter on report.md. #774 (R1) refuses edit_file on report.md unconditionally, before any content re-validation happens. Its former discharging test (test_report_edit_leaves_preexisting_malformed_frontmatter_untouched_by_the_edit) is deleted."}}
+  - {id: wm4, kind: behavior, form: clause,
+     binds: ["decide_write", "report_frontmatter.domain", "interacts(edit_file->report_md)"],
+     outcome: {nl: "#774-RETIRED, same reason as wm3: prior validity conferring no exemption is moot once the lane refuses unconditionally. Its former discharging test (test_edit_file_turns_a_committed_valid_report_into_a_malformed_one) is deleted."}}
+  - {id: wm5, kind: behavior, form: clause,
+     binds: ["decide_write", "report_md", "interacts(write_file->report_md)"],
+     outcome: {nl: "#774-RETIRED. Pinned no-memoization (a byte-identical rewrite re-evaluated fresh) on report.md via write_file. #774 (R1) refuses write_file on report.md unconditionally, so there is no re-evaluation left to observe on this lane. Its former discharging test (test_identical_content_rewrite_of_already_valid_report) is deleted."}}
 
   # --- section F: investigation.md interaction of checks (3) ---
   - {id: ii1, kind: behavior, form: test, discharged_by: test_report_disposition_precedes_supporting_investigation_content,
@@ -192,9 +192,9 @@ demands:
   - {id: ii2, kind: behavior, form: test, discharged_by: test_investigation_write_after_report_already_committed,
      binds: ["decide_write", "investigation_md", "interacts(write_file->investigation_md)"]}
      # discharges D3 (independence). seed: investigation.md's write is judged purely on its own merits; report.md's committed state has no bearing.
-  - {id: ii3, kind: behavior, form: test, discharged_by: test_denied_write_preserves_prior_disk_content,
-     binds: ["decide_write", "interacts(write_file->report_md)", "interacts(edit_file->report_md)"]}
-     # discharges D4. seed: Decision computed/returned strictly before p.write_text() in both callers; on denial, prior on-disk content (or absence) is byte-for-byte unchanged. (P4 open: code-level no-other-write-path.) NOTE (phase-F): cross-directory discharged_by, see D4's note.
+  - {id: ii3, kind: behavior, form: clause,
+     binds: ["decide_write", "interacts(write_file->report_md)", "interacts(edit_file->report_md)"],
+     outcome: {nl: "#774-RETIRED. Pinned that a DENIED report.md write (content-dependent) leaves prior on-disk content untouched. #774 (R1) makes every write_file/edit_file call on report.md a denial regardless of content, so the property trivially holds but no longer exercises the decision-before-write ordering it existed to pin; the equivalent atomicity concern is now owned by the close tool's own record-then-report ordering (#774's close_write_ordering_holds_the_fault). Its former discharging test (test_denied_write_preserves_prior_disk_content) is deleted."}}
 
   # --- section G: lifecycle / state (6; lc6 == D5's concrete golden test) ---
   - {id: lc1, kind: behavior, form: test, discharged_by: test_investigation_crosses_bound_mid_run,
@@ -212,9 +212,9 @@ demands:
   - {id: lc5, kind: behavior, form: test, discharged_by: test_report_committed_before_investigation_finished,
      binds: ["decide_write", "report_md", "investigation_md"]}
      # discharges D1/D2 vs D3 independence. seed: report.md is acceptable while investigation.md is mid-lifecycle; no ordering requirement between the two gates.
-  - {id: lc6, kind: survival, form: test, discharged_by: test_golden_ab_run_lifecycle_preserves_disposition,
-     binds: ["decide_write", "report_md", "investigation_md", "interacts(renderer->report_md)"]}
-     # discharges D5 (concrete). seed: every write in a legit golden sequence returns Decision(True); the run commits with the SAME disposition as baseline; the HTML still renders the analyst's reasoning. NOTE (phase-F): cross-directory discharged_by, see D4's note.
+  - {id: lc6, kind: survival, form: clause,
+     binds: ["decide_write", "report_md", "investigation_md", "interacts(renderer->report_md)"],
+     outcome: {nl: "#774-RETIRED. This was D5's concrete golden test: a legit sequence ending in a write_file report.md commit, disposition preserved. #774 (R1) removes that write_file lane for report.md; the ordering-independence property this and D5 stood for is explicitly retired per #774's report_629_contracts_retired_deliberately clause and re-expressed on the close tool by #774's report_ordering_independence_retired demand (test_the_629_ordering_independence_contract_is_re_expressed_on_the_close_tool). Its former discharging test (test_golden_ab_run_lifecycle_preserves_disposition) is deleted."}}
 
   # --- section H: adversarial probing / retry-budget (1) ---
   - {id: ap1, kind: behavior, form: test, discharged_by: test_repeated_boundary_probing_denies_across_retry_budget,

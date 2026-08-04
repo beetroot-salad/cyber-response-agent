@@ -52,7 +52,7 @@ from pydantic_ai.models.function import FunctionModel  # noqa: E402
 from defender.learning.core.config import StageWiring  # noqa: E402
 from defender._env import FatalConfigError  # noqa: E402
 from defender.learning.pipeline.judge import engine_pydantic  # noqa: E402
-from defender.runtime import driver, observe, providers  # noqa: E402
+from defender.runtime import challenge_gate, driver, observe, providers  # noqa: E402
 from defender.tests.e2e._replay_harness import FakeVerbs  # noqa: E402
 from defender.runtime.agent_definition import (  # noqa: E402
     AgentDefinition,
@@ -288,7 +288,10 @@ def test_build_agent_main_has_gather_dispatch_and_writers(monkeypatch, logger):
     monkeypatch.delenv("DEFENDER_MAIN_REASONING_EFFORT", raising=False)
     fake, _ = _capture_make_model()
     with override_allow_model_requests(False):
-        agent = driver.build_agent(_DEFENDER, logger, make_model=fake)
+        agent = driver.build_agent(
+            _DEFENDER, logger, make_model=fake,
+            bounds=challenge_gate.default_bounds(),
+        )
     tools = set(agent._function_toolset.tools)
     assert {"bash", "read_file", "write_file", "edit_file"} <= tools
     assert "gather" in tools
