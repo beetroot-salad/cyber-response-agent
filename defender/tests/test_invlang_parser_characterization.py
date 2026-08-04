@@ -353,6 +353,107 @@ def test_attr_updates_merge_into_one_target_entry():
     ]
 
 
+_LEAD_HEADER = ":L findings [id|loop|name|target|tests|system|window]"
+_LEAD_HEADER_FAIL = (
+    ":L findings [id|loop|name|target|tests|system|window|fail_reason]"
+)
+
+
+@pytest.mark.parametrize(
+    ("label", "block"),
+    [
+        ("consultations", ":R consultations [anchor_id|anchor_kind|result]\n"
+                          "backup-30d|session-baseline|confirmed"),
+        ("impact", ":R impact [dim|verdict]\nconfidentiality|exceeds"),
+        ("attr_updates", ":R attr_updates [target|key|value]\nv-001|class|host"),
+        ("shelved", ":T shelved [hyp_id|rationale]\nh-002|\"weak signal\""),
+    ],
+)
+def test_a_row_without_its_own_lead_is_refused_however_obvious_the_lead_looks(
+    label, block
+):
+    """There is no positional fallback. Even with exactly one lead in the
+    document — the case where guessing would have been right — a row that does
+    not name its lead is dropped with a warning, because the rule that made the
+    guess wrong with several leads open is the same rule here."""
+    body, warnings = parse_dense_companion(
+        _fence(
+            _LEAD_HEADER + "\n"
+            "l-001|1|probe|v-001|h-001|cmdb|24h\n"
+            "\n" + block
+        )
+    )
+    assert [f["outcome"] for f in body["findings"]] == [{}], label
+    assert len(warnings) == 1, label
+    assert "no lead attribution" in warnings[0].reason
+
+
+def test_naming_the_lead_projects_the_row_onto_that_lead_only():
+    body, warnings = parse_dense_companion(
+        _fence(
+            _LEAD_HEADER + "\n"
+            "l-001|1|probe|v-001|h-001|cmdb|24h\n"
+            "l-002|1|other|v-002|h-001|cmdb|24h\n"
+            "\n"
+            ":R impact [resolved_by|dim|verdict]\n"
+            "l-001|confidentiality|high"
+        )
+    )
+    assert warnings == []
+    by_id = {f["id"]: f for f in body["findings"]}
+    assert by_id["l-001"]["outcome"]["impact_resolutions"] == [
+        {"resolved_by_lead": "l-001", "dimension": "confidentiality", "verdict": "high"}
+    ]
+    assert by_id["l-002"]["outcome"] == {}
+
+
+def test_a_lead_subblock_does_not_make_later_rows_inherit_its_lead():
+    """`:V l-002.…` scopes its own rows and nothing else. It used to leave l-002
+    as the ambient lead, so an unattributed `:R` row anywhere below it landed
+    there."""
+    body, warnings = parse_dense_companion(
+        _fence(
+            _LEAD_HEADER + "\n"
+            "l-001|1|probe|v-001|h-001|cmdb|24h\n"
+            "l-002|1|other|v-002|h-001|cmdb|24h\n"
+            "\n"
+            ":V l-002.observations.vertices [id|type|class|ident|attrs?]\n"
+            "v-009|endpoint|endpoint:linux|host|\n"
+            "\n"
+            ":R consultations [anchor_id|anchor_kind|result]\n"
+            "backup-30d|session-baseline|confirmed"
+        )
+    )
+    assert len(warnings) == 1
+    assert warnings[0].block == ":R consultations"
+    by_id = {f["id"]: f for f in body["findings"]}
+    assert "anchor_consultations" not in by_id["l-002"]["outcome"]
+    assert by_id["l-002"]["outcome"]["observations"]["vertices"][0]["id"] == "v-009"
+
+
+def test_relisting_a_lead_with_fail_reason_keeps_its_projected_buckets():
+    """A second `:L findings` row for a lead used to replace its whole outcome
+    dict, discarding resolution buckets an earlier `:R` block had projected."""
+    body, warnings = parse_dense_companion(
+        _fence(
+            _LEAD_HEADER_FAIL + "\n"
+            "l-001|1|probe|v-001|h-001|cmdb|24h|\n"
+            "\n"
+            ":R attr_updates [resolved_by|target|key|value]\n"
+            "l-001|v-001|class|host\n"
+            "\n"
+            + _LEAD_HEADER_FAIL + "\n"
+            "l-001|1|probe|v-001|h-001|cmdb|24h|timeout"
+        )
+    )
+    assert warnings == []
+    lead = next(f for f in body["findings"] if f["id"] == "l-001")
+    assert lead["outcome"] == {
+        "attribute_updates": [{"target": "v-001", "updates": {"class": "host"}}],
+        "failure_reason": "timeout",
+    }
+
+
 def test_t_shelved_records_hyp_and_rationale_on_lead():
     body, warnings = parse_dense_companion(
         _fence(':T shelved [hyp_id|by_lead|rationale]\nh-002|l-001|"weak signal"')

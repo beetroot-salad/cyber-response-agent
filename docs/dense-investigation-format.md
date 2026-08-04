@@ -57,7 +57,7 @@ Sub-cell grammar:
 
 ### `:L` — leads (header + lead-scoped sub-blocks)
 
-A lead's structured rows belong under that lead's phase block (convention: appear lexically below the `:L findings` row in the same `## GATHER` / `## ANALYZE` block; or carry an explicit `lead=l-{id}` column for cross-references). Block tags valid under a lead: `:V l-{id}.observations.vertices`, `:E l-{id}.observations.edges`, `:R authz`, `:R consultations`, `:R impact`, `:R attr_updates`, `:L l-{id}.lead_preds`, `:L l-{id}.impact_preds`, `:L l-{id}.substitutions`, `:H l-{id}.new_hypotheses`, `:T shelved`, `:T resolutions`.
+A lead's structured rows say which lead they belong to, never where they sit. Sub-blocks name it in the block tag (`:V l-{id}.…`); row-shaped blocks name it in a column — `resolved_by` on every `:R`, `by_lead` on `:T shelved`, the leading id on a `:T resolutions` row. Keeping a lead's rows lexically under its `:L findings` row stays good practice, but it carries no meaning to the parser: an unattributed row is rejected, not inherited. Block tags valid under a lead: `:V l-{id}.observations.vertices`, `:E l-{id}.observations.edges`, `:R authz`, `:R consultations`, `:R impact`, `:R attr_updates`, `:L l-{id}.lead_preds`, `:L l-{id}.impact_preds`, `:L l-{id}.substitutions`, `:H l-{id}.new_hypotheses`, `:T shelved`, `:T resolutions`.
 
 Lead header (one row per lead — only scalar/list fields):
 
@@ -108,20 +108,24 @@ h-003|l-002|"monitoring-window does not overlap; mechanism cannot fire"
 
 Four sub-types. The first three resolve grounding against an anchor; the fourth records vertex/edge enrichment. The `conditioning?` column carries per-resolution then-true premises (canonical, not narrative — see Surface §).
 
+Every `:R` row lands on a lead's outcome, so every header carries `resolved_by` and every row fills it. There is no positional fallback: a row that does not name its lead is rejected, even when only one lead is open and the guess would have been right. Lexical position used to carry attribution implicitly, which filed one lead's grounding evidence under whichever lead a preceding block mentioned last.
+
+**Ownership is singular; correlation is grounding.** `resolved_by` is the projection target — the one lead whose work closed the row out — so it never carries a list. When a verdict only holds because two leads' results combine, attribute it to the lead that closed it and name the others in `cites_leads?`, alongside the anchor and past-case grounding the row already carries. A lead id in either column must be declared by some `:L findings` row.
+
 ```
-:R authz [edge|verdict|anchor_kind|anchor_id|grounding|authority|as_of|effective_window?|fulfills|resolved_by|cites_past_case?|conditioning?]
-e-010|authorized|approved-monitoring-sources|ams-registry-2026-01|org-authority|full|2026-04-23T14:00Z|2026-01-01..2026-06-30|h-001.ac1|l-001||
+:R authz [edge|verdict|anchor_kind|anchor_id|grounding|authority|as_of|effective_window?|fulfills|resolved_by|cites_leads?|cites_past_case?|conditioning?]
+e-010|authorized|approved-monitoring-sources|ams-registry-2026-01|org-authority|full|2026-04-23T14:00Z|2026-01-01..2026-06-30|h-001.ac1|l-001|||
 
-:R consultations [anchor_id|anchor_kind|grounding|result|as_of|authority|effective_window?|anchor_query?|conditioning?|concerns?]
-backup-30d-baseline|session-volume-baseline|telemetry-baseline|confirmed|2026-04-23T14:32Z|partial||30d session_total_bytes|30d window excludes quarter-end|
+:R consultations [resolved_by|cites_leads?|anchor_id|anchor_kind|grounding|result|as_of|authority|effective_window?|anchor_query?|conditioning?|concerns?]
+l-002||backup-30d-baseline|session-volume-baseline|telemetry-baseline|confirmed|2026-04-23T14:32Z|partial||30d session_total_bytes|30d window excludes quarter-end|
 
-:R impact [pred_ref|dim|observed|verdict|matched_pred|grounding|anchor_id|anchor_kind|authority|as_of|effective_window?|conditioning?|reasoning]
-l-002.ip1|confidentiality|180GB (3σ above 60GB μ ±40σ)|exceeds|"session_total_bytes within 30d baseline ± 2σ"|telemetry-baseline|backup-30d-baseline|session-volume-baseline|partial|2026-04-23T14:32Z||30d window excludes quarter-end|"observed 3σ; threshold 2σ; partial caps moderate"
+:R impact [resolved_by|cites_leads?|pred_ref|dim|observed|verdict|matched_pred|grounding|anchor_id|anchor_kind|authority|as_of|effective_window?|conditioning?|reasoning]
+l-002||l-002.ip1|confidentiality|180GB (3σ above 60GB μ ±40σ)|exceeds|"session_total_bytes within 30d baseline ± 2σ"|telemetry-baseline|backup-30d-baseline|session-volume-baseline|partial|2026-04-23T14:32Z||30d window excludes quarter-end|"observed 3σ; threshold 2σ; partial caps moderate"
 
-:R attr_updates [target|key|value]
-v-003|cadence_72h_mean_interval_s|576
-v-003|cadence_72h_stddev_s|102
-e-001|authorization_resolutions|<append :R authz row referencing this edge>
+:R attr_updates [resolved_by|target|key|value]
+l-001|v-003|cadence_72h_mean_interval_s|576
+l-001|v-003|cadence_72h_stddev_s|102
+l-001|e-001|authorization_resolutions|<append :R authz row referencing this edge>
 ```
 
 When `attr_updates` targets an edge to add a new authorization resolution (per §Edge authorization in the spec), emit a separate `:R authz` row whose `edge` column points to the targeted edge; the `:R attr_updates` row carries `value=<see :R authz row>` as a pointer.

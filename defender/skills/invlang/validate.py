@@ -33,6 +33,52 @@ def _check_surface(proposed_text: str) -> list[str]:
 
 
 
+def _check_lead_refs(companion: CompanionBody) -> list[str]:
+    """`:L findings` is the sole site that declares a lead; every other mention
+    must resolve to one.
+
+    The projector opens a bucket for any lead id it meets, so a typo, a forward
+    reference, and a comma-joined pair of real ids are all indistinguishable
+    from a declaration at projection time — which is how a phantom lead named
+    `l-004,l-005` reached the corpus. Only a declared lead carries a name, so
+    that is what separates the two here.
+    """
+    findings = [f for f in (companion.get("findings") or []) if isinstance(f, dict)]
+    declared = {
+        f["id"] for f in findings
+        if isinstance(f.get("id"), str) and f.get("name")
+    }
+    errors: list[str] = []
+    for f in findings:
+        fid = f.get("id")
+        if not isinstance(fid, str) or fid in declared:
+            continue
+        hint = (
+            " — a resolution is owned by exactly one lead; attribute it to one "
+            "and name the others in `cites_leads`"
+            if "," in fid else ""
+        )
+        errors.append(
+            f"undeclared lead {fid!r}: referenced by a `:R` / `:T` row or a "
+            f"lead sub-block, but no `:L findings` row declares it{hint}"
+        )
+    for row in _walkers.iter_grounded_resolutions(companion):
+        owner = row.get("resolved_by_lead")
+        for cited in row.get("cites_leads") or []:
+            if cited not in declared:
+                errors.append(
+                    f"`cites_leads` on the resolution owned by "
+                    f"{owner or '<unattributed>'} names {cited!r}, which no "
+                    f"`:L findings` row declares"
+                )
+            elif cited == owner:
+                errors.append(
+                    f"`cites_leads` on {owner}'s resolution cites {owner} "
+                    f"itself — it names the other leads the verdict rests on"
+                )
+    return errors
+
+
 def _vertex_core(v: VertexRecord) -> tuple:
     return (v.get("type"), v.get("classification"), v.get("identifier"))
 
@@ -419,6 +465,7 @@ def validate_companion(
     if not companion:
         return errors
 
+    errors.extend(_check_lead_refs(companion))
     errors.extend(_check_edge_authority(companion))
     errors.extend(_check_closed_vocab(companion))
     errors.extend(_check_benign_gating(companion))
