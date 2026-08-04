@@ -11,6 +11,7 @@ from defender._git import REPO_ROOT, GitError
 from defender._paths import DefenderPaths
 from defender.learning.author.forge import Forge, ForgeError, GhForge
 from defender.learning.core.config import make_logger
+from defender.runtime.scrub import verdict_path
 
 _log = make_logger("branch")
 
@@ -142,6 +143,13 @@ class AuthorBranch:
             _git.git_worktree_remove(self.repo_root, wt, force=True)
         except GitError as e:
             _log(f"worktree cleanup failed: {e} — {wt} leaked")
+        # §7 D8's verdict sidecar sits BESIDE `wt`, deliberately outside the tree the git
+        # remove above just destroyed — so removing the tree never removes it. By now
+        # anything that needed the verdict (`preserve_tainted_tree`'s manifest, on the taint
+        # path) has already read it; left behind it is orphaned, host-side, disk that
+        # accumulates one sidecar per drain tick forever.
+        with contextlib.suppress(OSError):
+            verdict_path(wt).unlink()
 
 
     def revert_lesson_pr(self, lesson_rel_path: str, lesson_name: str) -> str | None:

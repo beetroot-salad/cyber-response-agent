@@ -96,7 +96,7 @@ _ACCOUNT_LOCK = threading.Lock()
 
 
 def _write_budget_atomic(run_dir: Path, state: dict) -> None:
-    write_atomic(run_dir / "budget.json", json.dumps(state, indent=2))
+    write_atomic(run_dir / "budget.json", json.dumps(state, indent=2))  # lint-unguarded-tree-write: ok — delegates to write_guarded
 
 
 def account_call(
@@ -115,7 +115,14 @@ def account_call(
             state["subagent_spawns"] = (_valid_count(state.get("subagent_spawns")) or 0) + 1
         try:
             _write_budget_atomic(run_dir, state)
-        except OSError:
+        except OSError as e:
+            # §7 D3: a write refused because an alias was planted counts toward nothing — it
+            # can never end a run (F1's rationale, "do not hand the box a DoS lever", would
+            # otherwise be false HERE, three times over). An ORDINARY write failure (no alias
+            # anywhere — a squatted directory, a full disk) still escalates exactly as before.
+            if getattr(e, "write_guarded_alias", False):
+                _record_alias_refusal(run_dir, run_dir / "budget.json")
+                return read_budget(run_dir) or state
             _record_accounting_failure(run_dir, limits)
             return read_budget(run_dir) or state
     _reset_accounting_failure(run_dir)
@@ -163,7 +170,20 @@ def _reset_accounting_failure(run_dir: Path) -> None:
 
 
 def _write_accounting_failure(run_dir: Path, state: dict) -> None:
-    write_atomic(_accounting_failure_path(run_dir), json.dumps(state))
+    write_atomic(_accounting_failure_path(run_dir), json.dumps(state))  # lint-unguarded-tree-write: ok — outside every box mount (X6)
+
+
+def _record_alias_refusal(run_dir: Path, path: Path) -> None:
+    """§7 D7: the alias-refusal record lives in the accounting-failure sidecar — a SIBLING of
+    the run dir, outside every box mount — not as a new artifact inside the shared tree. An
+    in-tree sink would be a sixteenth writer the box could itself plant an alias at, making the
+    record suppressible by the exact attack it exists to observe."""
+    p = _accounting_failure_path(run_dir)
+    state = read_json_locked(p)
+    refusals = list(state.get("alias_refusals", []))
+    refusals.append({"path": str(path), "ts": datetime.now(UTC).isoformat()})
+    state["alias_refusals"] = refusals
+    write_atomic(p, json.dumps(state))  # lint-unguarded-tree-write: ok — outside every box mount (X6/D7)
 
 
 

@@ -155,6 +155,72 @@
           "runs_dir.iterdir",
           "runs_base"
         ]
+      },
+      "run_dir": {
+        "writers": [
+          "defender/runtime/box.py::_plant",
+          "defender/runtime/observe.py::write_trace",
+          "defender/runtime/driver.py::run_investigation",
+          "defender/runtime/observe.py::RequestLogger",
+          "defender/runtime/observe.py::denial_logger",
+          "defender/runtime/session_store.py::write_case_pointer",
+          "defender/hooks/budget_enforcer.py::open_budget",
+          "defender/hooks/budget_enforcer.py::update_budget_locked",
+          "defender/hooks/budget_enforcer.py::account_call",
+          "defender/runtime/circuit_breaker.py::record_outcome",
+          "defender/runtime/query_tool.py::_persist_payload",
+          "defender/runtime/query_tool.py::QueryCapture._record",
+          "defender/hooks/record_lead.py::claim_lead",
+          "defender/_io.py::write_atomic",
+          "defender/runtime/tools_gather.py::_persist_gather_summary",
+          "defender/runtime/tools.py::_record_lesson_load",
+          "defender/runtime/tools.py::_tool_write_file",
+          "defender/runtime/tools.py::_tool_edit_file",
+          "defender/scripts/case_history/ticket_writer.py::_write_receipt",
+          "defender/scripts/visualize/visualize_run.py::render_and_mirror"
+        ],
+        "readers": [
+          "defender/runtime/scrub.py::scrub",
+          "defender/run_common.py::cross_check_tables",
+          "defender/run_common.py::enqueue_learning",
+          "defender/learning/lead_repository.py::joined",
+          "defender/_run_paths.py::contained_payload"
+        ],
+        "grep": [
+          "tool_trace.jsonl",
+          "llm_requests.jsonl",
+          "executed_queries.jsonl",
+          "lessons_loaded.jsonl",
+          "gather_raw",
+          "gather_summaries",
+          "budget.json",
+          "circuit_breaker.json",
+          "box-sentinel",
+          "tool_trace.jsonl",
+          "DEFENDER_RUN_DIR"
+        ],
+        "note": "Four writers were added after #771's phase-F reconciliation found the same hole in three instruments at once. The driver's fault-exit trace write (`write_text(\"\")` onto the fixed tool_trace.jsonl name observe.write_trace also owns) is one of the two sites that issue reported and was missing from the test census, the write lint's gate list AND this list. The queries-table append is the query tool's SECOND artifact — the payload write was censused, the table was not. The lead-claim hook and the atomic helper are the two the original grep could not see. EVERY ENTRY MUST NAME A SYMBOL THAT RESOLVES: three of the four added here did not (a leading underscore the driver's entry point does not have, an actor id where the code symbol was `_revert_strays`, and a render-lane function renamed at some point), and a resolver following a name that resolves to nothing gets the same answer as one following a row that was never written. This list seeds the next run's census, so a gap here becomes a gap in every downstream instrument. `scrub` stays under readers deliberately: #771's scan verdict is written OUTSIDE the tree it judges (§7 D8), so the walk remains a pure reader of the run dir and the marker belongs to no run-dir writer census."
+      },
+      "drain_worktree": {
+        "writers": [
+          "defender/runtime/box.py::_plant",
+          "defender/learning/author/drain.py::_restore_corpus",
+          "defender/learning/author/drain.py::_revert_strays",
+          "defender/runtime/tools.py::_tool_write_file",
+          "defender/runtime/tools.py::_tool_edit_file"
+        ],
+        "readers": [
+          "defender/runtime/scrub.py::scrub",
+          "defender/learning/author/drain.py::_snapshot_corpus",
+          "defender/learning/author/branch.py::AuthorBranch"
+        ],
+        "grep": [
+          "corpus_dir",
+          "with_repo_root",
+          "start_batch",
+          "finish_batch",
+          "changes_outside"
+        ]
       }
     }
   },

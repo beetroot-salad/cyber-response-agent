@@ -232,12 +232,24 @@ is **class 2, not class 1**. Through the sanctioned bash lane a symlink is
 *unexpressible* — the grant list has no `ln`, and `write_file` / the `query` tool
 create regular files, never call `symlink()` — so a merely-injected model cannot
 plant one; it takes an in-box RCE (a jq/parser bug, an executor escape) to reach
-`symlink()`. Creation-prevention is therefore not the boundary: the grant list
-already covers class 1, and **runsc ignores the OCI seccomp profile**, so there is
-no structural `symlink`-deny on the default runtime. The control is **reader-side**,
-and the two identities are the point — the box *writes* the string (confined; its
-own kernel resolves the target to ENOENT), a trusted host consumer *derefs* it with
-the authority to read the secret. The scrub above is the cheap form (`lstat` per
+`symlink()`. **Updated by #771 (2026-08-02):** the earlier reading here — that
+runsc ignores the OCI seccomp profile, so no structural `symlink`-deny exists on
+the default runtime — was wrong. It measured only the runtime's *shipped default*
+(`--oci-seccomp` unregistered with the daemon); with `runsc install --
+--oci-seccomp` registered, the identical profile denies `symlink`/`symlinkat`/
+`link`/`linkat`/`mknod`/`mknodat` on runsc exactly as it does on runc. #771 ships
+that registration plus a deny profile attached at every box's creation
+(`runtime/box.py::ALIAS_PROFILE_PATH`) and a startup probe that OBSERVES the ban's
+effect rather than trusting the daemon's configuration
+(`box._probe_alias_ban`) — because the configuration is host-side state this repo
+does not own and can silently regress. Creation-prevention *is* now the boundary
+for the write-side residual this section originally scoped to reader-side
+mitigation alone; the reap-time scrub below stays as the backstop for a link that
+reaches the tree by some route other than the box (a host-side bug, a restored
+corpus) rather than as the sole control. The control is now **both**: the box
+cannot create the alias in the first place, and a host-side consumer that opens an
+artifact still resolves through `lstat`-checked reads for whatever the ban does
+not reach. The scrub above is the cheap form (`lstat` per
 entry, run *after* teardown when the tree is frozen → TOCTOU-free); the structural
 form opens every artifact under `openat2(RESOLVE_BENEATH|RESOLVE_NO_SYMLINKS)`.
 **Ownership:** #547 (the scrub) was closed NOT_PLANNED, so this is currently
@@ -254,10 +266,14 @@ the OS level.
 
 **Default: no network.** The isolate runs with runsc `--network=none`: the
 sandbox gets gVisor's netstack with **loopback only** — no route, no DNS, nothing
-to allowlist, because the isolate physically cannot `connect()` off-box. (Note:
-runsc does **not** honor the OCI `linux.seccomp` profile — Sentry services
-syscalls itself — so a `socket(AF_INET)`-deny belt exists only on the `runc`
-fallback; on runsc the equivalent is the absent network itself.)
+to allowlist, because the isolate physically cannot `connect()` off-box. (Note,
+corrected by #771: the earlier claim that runsc does not honor the OCI
+`linux.seccomp` profile at all was measuring an *unregistered* daemon — gVisor
+does apply a registered profile, see `## Filesystem isolation` above. Nothing
+here demands a `socket(AF_INET)`-deny belt on runsc regardless, since
+`--network=none` already removes the route entirely; a seccomp-based socket-deny
+belt for the `runc` fallback specifically remains #540's territory and is not
+part of this change.)
 
 **The only off-box path** is the broker's unix socket, bind-mounted in (runsc
 needs `--host-uds=open` for this), plus an in-isolate **loopback bridge**: real

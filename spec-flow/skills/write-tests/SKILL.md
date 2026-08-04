@@ -79,7 +79,9 @@ Scale the ceremony to the delta. Small delta (no shared sink, nothing removed, a
 
 ## 7. Resolve with the human
 
-Surface together, highest implementation-impact first (AskUserQuestion, your recommendation first): the forks and silent branches (C), the design holes and obligation-minted demands (D), the **refuted claims** (design corrections), any load-bearing claim no available probe can settle, and F's findings when this seam re-opens. Relay each fork from its frontier's fork section — written there for a cold relay; a thin spine cannot reconstruct what the file omits. This is where human attention earns its keep: a handful of genuine decisions that dictate what the code must do — the is-questions were reality's to answer and are already in the ledger.
+Surface together, highest implementation-impact first (AskUserQuestion, your recommendation first): the forks and silent branches (C), the design holes and obligation-minted demands (D), the **refuted claims** (design corrections), any load-bearing claim no available probe can settle, and F's findings when this seam re-opens. Relay each fork from its frontier's fork section — written there for a cold relay; a thin spine cannot reconstruct what the file omits.
+
+**Every option states its trade-off** — what that reading buys and what it costs: demands minted or dropped, what it forecloses, what the code must then carry. Bare labels make the human pick on wording; the seam exists so they pick on consequence. This is where human attention earns its keep: a handful of genuine decisions that dictate what the code must do — the is-questions were reality's to answer and are already in the ledger.
 
 Record every outcome in `70-resolutions.md`, conservation-counted against the incoming forks and residue. A declined obligation is `Demand {form: waiver}`. If the #0 provisional reading flipped, re-run C's classification against the resolved shape before dispatching E — the author must never receive answers written against a rejected contract. The resolved demand list — design-extracted, enumeration-derived, and obligation-minted alike — is the spec.
 

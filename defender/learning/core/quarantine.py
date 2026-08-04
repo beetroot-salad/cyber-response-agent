@@ -7,7 +7,7 @@ from pathlib import Path
 from defender._clock import now_iso
 from defender._env import env_int
 from defender.learning.core.config import _log
-from defender.runtime.scrub import RunTainted
+from defender.runtime.scrub import RunTainted, verdict_path
 
 
 # How many tainted trees may accumulate before the lane stops preserving them (#747, M4).
@@ -33,6 +33,21 @@ def _archive_tree(wt: Path, dest: Path) -> None:
         tar.add(wt, arcname=wt.name)
 
 
+def _tree_verdict(wt: Path) -> dict:
+    """§7 D8's accepted cost, made mechanism: the verdict lives OUTSIDE the tree, so an archive
+    (or any other move/copy) carries nothing about it unless the mover reads it explicitly and
+    writes it down separately. `{}` for a tree with no verdict — an absent key here would be
+    indistinguishable from a manifest written before this field existed, which is how a skipped
+    scan reads as a clean one to a human triaging the quarantine directory."""
+    p = verdict_path(wt)
+    if not p.is_file():
+        return {}
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
 def _manifest(
     wt: Path, archive: Path, *, batch_id: str, branch: str, label: str, taint: RunTainted,
 ) -> dict:
@@ -50,6 +65,7 @@ def _manifest(
         "quarantined_at": now_iso(),
         "taint": str(taint),
         "cause": repr(cause) if cause is not None else None,
+        "verdict": _tree_verdict(wt),
         "findings": [
             {
                 "path": str(f.path), "kind": f.kind, "filemode": f.filemode,

@@ -1,11 +1,15 @@
 
 from __future__ import annotations
 
+import json
 import os
 import stat
-from collections.abc import Sequence
+import sys
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+
+from defender._io import write_guarded
 
 
 @dataclass(frozen=True)
@@ -117,13 +121,83 @@ def _render_findings(run_dir: Path, findings: Sequence[Finding]) -> str:
     return "\n".join(lines)
 
 
-def scrub(run_dir: Path) -> None:
+#: §7 D8 — the scan's verdict lives BESIDE the tree it judges, keyed by the tree's own name,
+#: exactly where D7 sites the alias-refusal record and for the identical reason: in-tree it is
+#: a host-side write into an attacker-owned tree — no census row, no lint gate, and it is both
+#: PLANTABLE (an alias at the verdict's own name) and FORGEABLE (the box is root on that mount,
+#: and the consumer rule below fails closed on absence and on nothing else).
+_VERDICT_SUFFIX = ".scrub-verdict.json"
+
+
+def verdict_path(tree: Path) -> Path:
+    tree = Path(tree)
+    return tree.parent / f"{tree.name}{_VERDICT_SUFFIX}"
+
+
+def _write_verdict(tree: Path, doc: dict) -> None:
+    """Write the verdict sidecar, BEST-EFFORT on every arm.
+
+    The marker is a fail-closed signal, never a carrier of one: an unwritten verdict leaves the
+    tree with no verdict at all, and `tree_verified` already reads absence as unverified. What
+    must not happen is the marker's own write failure REPLACING the signal its caller is
+    holding — the `RunTainted` a completed walk collected (which `scrub` raises immediately
+    after this call, and which is the whole reason the scan exists), or the fault
+    `write_did_not_run`'s call site is already unwinding through. Both would be swapped for a
+    write-side `OSError` from a sidecar nobody has read yet."""
+    try:
+        write_guarded(verdict_path(tree), json.dumps(doc))
+    except OSError as e:
+        print(f"[scrub] could not write the scan verdict for {tree}: {e!r}", file=sys.stderr)
+
+
+def write_did_not_run(tree: Path, reason: str) -> None:
+    """§7 D2 — a caller that SKIPPED the walk (the box was not provably dead) records that
+    explicitly, rather than leaving the tree indistinguishable from one nobody has judged yet.
+    Called by `box.stop_and_scrub` on a teardown fault, and by both of `start_box`'s lanes on a
+    startup fault that leaves a host-touched tree behind — the investigation lane keyed on its
+    run dir, the request lane on each of its WRITABLE mount sources (a lane with none, the
+    read-only run-cycle box, has no tree to judge and writes no marker). Best-effort, for the
+    reason `_write_verdict` carries."""
+    _write_verdict(tree, {"ran": False, "reason": reason})
+
+
+def tree_verified(tree: Path) -> bool:
+    """§7 D2/D6 — a tree whose verdict is absent, or does not record `ran: true`, reads as
+    UNVERIFIED. `ran: true` says only that the walk COMPLETED: the scan permits any regular
+    file, so an artifact the box emptied, rewrote or removed is indistinguishable from an
+    untouched one and is not what this predicate claims (§7 D6 — the audit obligation is
+    discharged against redirection only, deliberately, and a consumer must not read this as a
+    contents-intact claim)."""
+    p = verdict_path(tree)
+    if not p.is_file():
+        return False
+    try:
+        doc = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    return doc.get("ran") is True
+
+
+Lister = Callable[..., Iterator[tuple[str, list[str], list[str]]]]
+
+
+def scrub(run_dir: Path, *, lister: Lister = os.walk) -> None:
+    """Walk `run_dir` and refuse anything that is not a plain regular file or directory.
+
+    `lister` is the walk seam (§7 H10.3/H10.4's provisional pins are driven through it — a
+    partial or malformed walk cannot be produced deterministically any other way). Every
+    completed walk writes a verdict OUTSIDE the tree (§7 D8) before returning or raising:
+    `ran: true` when every entry the walk reached was fully classified (findings may still be
+    non-empty — the walk COMPLETED and found taint, which is not the same as not completing at
+    all); `ran: false` when the walk itself could not finish reliably (an entry vanished or
+    became unreadable between listing and inspection — §7 H10.3's fail-closed pin: a
+    partially-walked tree is an unverified tree, whatever it found)."""
     findings: list[Finding] = []
 
     def refuse_unwalkable(err: OSError) -> None:
         findings.append(_unreadable(Path(err.filename or run_dir), err))
 
-    for parent, dirs, files in os.walk(run_dir, onerror=refuse_unwalkable):
+    for parent, dirs, files in lister(run_dir, onerror=refuse_unwalkable):
         for name in (*dirs, *files):
             entry = Path(parent) / name
             try:
@@ -132,6 +206,16 @@ def scrub(run_dir: Path) -> None:
                 finding = _unreadable(entry, e)
             if finding is not None:
                 findings.append(finding)
+
+    partial = any(f.kind == "unreadable" for f in findings)
+    if partial:
+        _write_verdict(run_dir, {
+            "ran": False,
+            "reason": "the walk could not finish reliably: an entry became unreadable",
+        })
+    else:
+        _write_verdict(run_dir, {"ran": True, "reason": "walk completed"})
+
     if not findings:
         return
     # os.walk yields in the filesystem's order, so sort: the same tainted tree has to produce

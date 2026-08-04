@@ -1,7 +1,7 @@
 
 from __future__ import annotations
 
-from typing import Any, TypedDict
+from typing import TypedDict
 
 AttributesMap = dict[str, str]
 
@@ -154,14 +154,80 @@ class Observations(TypedDict, total=False):
     edges: list[EdgeRecord]
 
 
+
+
+# The `:R` resolution buckets. Their rows are column-header driven — the author's
+# `[a|b|c]` header names the keys, and `_canonicalize_resolution_row` renames the
+# ones it knows and passes the rest through. So EVERY key is optional twice over:
+# the header decides whether a column exists at all, and an empty cell is dropped
+# rather than stored as "". These types name the keys the canonicalizer emits;
+# they do not close the grammar.
+#
+# Key sets are derived from the `:R` headers in docs/dense-investigation-format.md
+# §`:R`, defender/skills/invlang/SKILL.md, and the provenance tuple rules #11 and
+# #30 of docs/investigation-language.md make required. `ResolutionRow` holds the
+# grounding/provenance keys all three anchor-resolving buckets carry; each subtype
+# adds only what its own header adds.
+
+
+class ResolutionRow(TypedDict, total=False):
+
+    # Ownership and grounding are separate fields on purpose. `resolved_by_lead`
+    # names the one lead whose work closed the row out — it is the projection
+    # target, so it cannot be plural without the row landing on two outcomes and
+    # double-counting. `cites_leads` names sibling leads the verdict rests on,
+    # for the case where no single lead answers the question alone.
+    resolved_by_lead: str
+    cites_leads: list[str]
+    verdict: str
+    anchor_kind: str
+    anchor_id: str
+    grounding_kind: str
+    authority_for_question: str
+    as_of: str
+    effective_window: str
+    reasoning: str
+    conditioning_context: list[str]
+    concerns: list[str]
+
+
+class AuthzResolution(ResolutionRow, total=False):
+
+    edge: str
+    fulfills_contract: str
+    cites_past_case: str
+
+
+class AnchorConsultation(ResolutionRow, total=False):
+
+    result: str
+    anchor_query: str
+
+
+class ImpactResolution(ResolutionRow, total=False):
+
+    prediction_ref: str
+    dimension: str
+    observed: str
+    matched_prediction: str
+
+
+# Unlike the buckets above, this one is not header-driven: the parser folds every
+# `:R attr_updates` row for a target into one entry, so both keys always exist.
+class AttributeUpdate(TypedDict):
+
+    target: str
+    updates: dict[str, str]
+
+
 class LeadOutcome(TypedDict, total=False):
 
     failure_reason: str
     observations: Observations
-    authorization_resolutions: list[dict[str, Any]]
-    anchor_consultations: list[dict[str, Any]]
-    impact_resolutions: list[dict[str, Any]]
-    attribute_updates: list[dict[str, Any]]
+    authorization_resolutions: list[AuthzResolution]
+    anchor_consultations: list[AnchorConsultation]
+    impact_resolutions: list[ImpactResolution]
+    attribute_updates: list[AttributeUpdate]
 
 
 class _FindingRequired(TypedDict):

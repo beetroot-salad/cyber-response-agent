@@ -1,6 +1,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 import time
 import uuid
@@ -15,7 +16,7 @@ from defender._paths import PATHS
 from pydantic_ai import RunContext
 from pydantic_ai.exceptions import ModelRetry
 
-from defender._io import append_jsonl, read_text_utf8
+from defender._io import guarded_mkdir, read_text_utf8, write_guarded
 from . import box as box_mod
 from . import permission
 from .agent_definition import ResolvedRoots, ToolSet
@@ -139,7 +140,7 @@ def _record_lesson_load(
         return
     try:
         row = {"lesson_name": name, "ts": now_iso()}
-        append_jsonl(deps.run_dir / "lessons_loaded.jsonl", [row])
+        write_guarded(deps.run_dir / "lessons_loaded.jsonl", json.dumps(row) + "\n", mode="append")
     except Exception:  # noqa: BLE001 — best-effort observability
         pass
 
@@ -184,6 +185,51 @@ def _grep_lines(text: str, pattern: str) -> str:
 def _resolve_operand(deps: AgentDeps, path: str) -> Path:
     p = Path(path)
     return p if p.is_absolute() else deps.cwd_anchor / p
+
+
+def _tree_root_for(deps: AgentDeps, p: Path) -> Path:
+    """Which shared tree `p` sits in — the anchor `guarded_mkdir` walks down from.
+
+    The write gate has already confined `p` to the run dir or the defender dir (its `write ⊆
+    read roots` invariant), so one of the two contains it; this only has to say WHICH, because
+    the component guard needs to know where the box's reach begins. The run dir is tried first:
+    it is the narrower of the two and, in the drain lane, sits inside a checkout of the
+    defender dir, so root order is what keeps the anchor at the tighter tree.
+
+    Each root is tried in BOTH its raw and its resolved spelling, because the gate above
+    matched on `resolve()`d paths and this check does not: with a symlinked runs base (the
+    macOS `/tmp` case the anchor decision was made for) the model can legitimately name the
+    already-resolved spelling, `decide_write` resolves both sides and allows it, and a
+    raw-spelling-only comparison here would then refuse what the gate just admitted. `p`
+    itself is never resolved — `resolve()` would collapse the very component symlink the
+    guard exists to refuse — and the spelling RETURNED is whichever one actually prefixes
+    `p`, since `guarded_mkdir` needs the anchor to be a lexical prefix of the target.
+
+    Failing to classify means the gate admitted a path that is not lexically under either
+    root under either spelling — a path reached THROUGH a symlink, which is the hazard the
+    guard exists for. `ModelRetry` rather than a bare raise: the operand is model-supplied,
+    so a refusal it can read and correct beats an exception that ends the run."""
+    for root in (deps.run_dir, deps.defender_dir):
+        for spelling in (root, _resolved(root)):
+            if p == spelling or spelling in p.parents:
+                return spelling
+    raise ModelRetry(
+        f"{p} is not inside a writable tree; name a path under the run directory or the "
+        f"defender directory (a path that only reaches one through a symlink is refused)"
+    )
+
+
+def _guarded_parents(deps: AgentDeps, p: Path) -> None:
+    """`guarded_mkdir` at the model-facing altitude: its containment refusal is a `ValueError`,
+    and the operand it judges is model-supplied, so it reaches the model as a correctable
+    refusal rather than an exception that ends the run — the same posture `_tree_root_for`
+    already takes one line above."""
+    try:
+        guarded_mkdir(p.parent, base=_tree_root_for(deps, p))
+    except ValueError as e:
+        raise ModelRetry(
+            f"{p} does not stay inside the writable tree it names: {e}"
+        ) from None
 
 
 def _is_learning_role(deps: AgentDeps) -> bool:
@@ -329,8 +375,8 @@ def _tool_write_file(deps: AgentDeps, path: str, content: str) -> str:
     )
     if not decision.allow:
         raise ModelRetry(decision.reason)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(content, encoding="utf-8")
+    _guarded_parents(deps, p)
+    write_guarded(p, content)
     deps.authored_paths.add(_resolved(p))
     return f"wrote {path} ({len(content)} bytes)"
 
@@ -371,8 +417,8 @@ def _tool_edit_file(deps: AgentDeps, path: str, old_string: str, new_string: str
     )
     if not decision.allow:
         raise ModelRetry(decision.reason)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(new_text, encoding="utf-8")
+    _guarded_parents(deps, p)
+    write_guarded(p, new_text)
     deps.authored_paths.add(_resolved(p))
     return f"edited {path} ({len(new_text)} bytes)"
 

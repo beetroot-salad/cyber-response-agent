@@ -283,6 +283,19 @@ def main(argv: list[str]) -> int:
     print("[run.py] artifacts:", file=sys.stderr)
     for entry in sorted(run_dir.iterdir()):
         sys.stderr.write(f"  {entry.name}\n")
+    # The reap scan's verdict is deliberately sited OUTSIDE the tree it judges (§7 D8: in-tree
+    # it would be both plantable and forgeable by the box that is root on that mount), which
+    # means the listing above — an iteration of the run dir — can never show it. Named
+    # explicitly rather than deleted: unlike the drain lane, whose worktree is destroyed and
+    # whose sidecar cleanup therefore has nothing left to describe, this run dir SURVIVES as
+    # the artifact an operator opens, and the record of whether the tree was ever walked is
+    # part of what they are opening it to find out.
+    verdict = box_mod.verdict_path(run_dir)
+    sys.stderr.write(
+        f"  ../{verdict.name}   (the reap scan's verdict — sits beside the run dir, not in it)\n"
+        if verdict.is_file() else
+        f"  ../{verdict.name}   MISSING — this tree was never scrubbed\n"
+    )
 
     _run.cross_check_tables(run_dir)
 

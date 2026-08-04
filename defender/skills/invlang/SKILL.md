@@ -239,7 +239,15 @@ When a lead resolves an authz contract declared under `:H h-NNN.authz`,
 write the outcome as a `:R authz` row — **not** as `:R attr_updates`
 keyed on the contract id. Columns:
 
-- `resolved_by` — lead id(s) that produced the outcome (comma-separated if more than one).
+- `resolved_by` — the single lead that closed this contract out. Required on
+  every row: there is no fallback to "the lead we were just talking about", so
+  an empty cell drops the row. Never a list either — this is where the row is
+  filed, so a comma files it under a lead that does not exist.
+- `cites_leads?` — other leads whose results the verdict rests on, comma-separated.
+  Use this when no one lead answers the question alone — e.g. a CMDB lookup
+  identifies the source host and a change-management lead finds no authorizing
+  window, and only together do they refute the contract. Attribute the row to
+  the lead that closed it; cite the rest here.
 - `edge` — the edge the contract attaches to (must match the declaring `ac<n>` row's `edge_ref`).
 - `fulfills` — the `ac<n>` contract id from `:H h-NNN.authz` being closed.
 - `verdict` — `authorized | unauthorized | indeterminate`.

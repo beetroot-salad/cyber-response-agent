@@ -176,7 +176,16 @@ class FakeDocker:
         been asserting the failure path instead.
 
         So an `exec` that ends in a path echoes that file's bytes, the way a real `cat`
-        would. Everything else still succeeds silently."""
+        would. Everything else still succeeds silently.
+
+        #771 M2's alias-ban probe (`docker exec -w <cwd> <name> python3 -c <script>`) is
+        answered as the healthy verdict rather than falling into the path-echo branch below:
+        its last argv token is a python script body, not a path, and `Path(...).is_file()` on
+        an arbitrarily long script raises `OSError` (`File name too long`) on a real
+        filesystem — an artifact of this fake's own path-echo trick, not a claim about the
+        probe's outcome."""
+        if call.verb == "exec" and "python3" in call.argv and "-c" in call.argv:
+            return (0, "alias-probe: all banned shapes denied; ordinary create ok\n", "")
         if call.verb == "exec" and len(call.argv) > 1:
             target = Path(call.argv[-1])
             if target.is_file():
@@ -1037,6 +1046,12 @@ def test_path_identity_sentinel_fails_closed(tmp_path):
         if verb != "exec":
             return (0, "", "")
         planted = sorted(p for p in run.iterdir() if p.name not in before)
+        if not planted:
+            # #771 M2's alias-ban probe execs right after the sentinel readback succeeds — by
+            # which point `_probe_sentinel` has already unlinked `.box-sentinel`, so this
+            # second `exec` (keyed only on `verb`, indistinguishable from the first at this
+            # fake's granularity) has nothing new to echo. Answer with the healthy verdict.
+            return (0, "alias-probe: all banned shapes denied; ordinary create ok\n", "")
         return (0, planted[-1].read_text(encoding="utf-8"), "")
 
     assert start_box(run, DEFENDER, docker=FakeDocker(echo)) is not None

@@ -6,6 +6,7 @@ import hashlib
 import json
 import math
 import os
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,7 @@ from pydantic_ai.messages import (
 
 from defender._clock import now_iso
 from defender._env import env_int
+from defender._io import open_guarded, write_guarded
 
 from defender.scripts.pricing import usage_cost
 
@@ -116,11 +118,17 @@ class RequestLogger:
         if key is not None and key in _ACTIVE_PATHS:
             raise FileExistsError(f"a RequestLogger has already opened {path}")
         mode = "a" if key is not None and key in _EVER_LOGGER_PATHS else "w"
+        # The open happens BEFORE the registration, not after: `open_guarded` now refuses a
+        # planted alias (#771 M3), and a registration made ahead of a failed open is never
+        # undone — the path stays permanently in `_ACTIVE_PATHS` and every later attempt,
+        # including one made after the alias is cleared, reports "already opened" instead of
+        # opening. One refused open would otherwise disable that log for the whole process.
+        fh = open_guarded(path, mode)
         if key is not None:
             _ACTIVE_PATHS.add(key)
             _EVER_LOGGER_PATHS.add(key)
         self._key = key
-        self._fh = path.open(mode, encoding="utf-8")
+        self._fh = fh
         self._cap = _max_chars()
         self.messages: list[dict] = []
         self._seq: dict[str, int] = {}
@@ -219,12 +227,41 @@ class RequestLogger:
 _DENIAL_LOGGERS: dict[str, RequestLogger] = {}
 
 
+def _denial_logger_or_null(path: Path) -> RequestLogger:
+    """Open the denial stream, degrading to a null sink rather than letting one refused open
+    end the run (§7 D3, extended from the accounting exemption to the streaming lane).
+
+    This logger is opened LAZILY, on the first denial — which is to say mid-run, after the box
+    has had every opportunity to plant a symlink at its name. `open_guarded` refuses that plant
+    (correctly), and before this the refusal escaped through the query tool and killed the run:
+    exactly the denial-of-service lever the exemption exists to take away, reachable with one
+    planted entry. The refusal it audits has ALREADY taken effect by the time we get here, so
+    the run survives and the model still sees its denial.
+
+    What is lost is the RECORD, and only the record. That is announced on stderr, and the plant
+    itself stays on disk — `write_guarded` deliberately never removes a refused entry — so the
+    reap scan reports it as taint, which is a louder signal than the denial row would have been.
+    `log_policy_denial`'s own write stays non-swallowing (§7 R2): a refused OPEN and a failed
+    WRITE are different events, and only the first is a lever the box can pull at will."""
+    try:
+        return RequestLogger(path)
+    except OSError as e:
+        print(
+            f"[observe] the policy-denial log at {path} could not be opened ({e!r}); denials "
+            f"for this run will be REFUSED AS NORMAL but not recorded",
+            file=sys.stderr,
+        )
+        return RequestLogger(Path(os.devnull))
+
+
 def denial_logger(run_dir: Path) -> RequestLogger:
     path = Path(run_dir) / POLICY_DENIALS
     key = str(path.resolve())
     logger = _DENIAL_LOGGERS.get(key)
     if logger is None:
-        logger = RequestLogger(path)
+        # The null fallback is cached like any other: without that, every later denial re-probes
+        # the planted name and re-prints, turning one plant into per-call stderr noise.
+        logger = _denial_logger_or_null(path)
         _DENIAL_LOGGERS[key] = logger
     return logger
 
@@ -316,4 +353,4 @@ def write_trace(run_dir: Path, *, store: Any, session_id: str, wall_ms: float) -
         "num_turns": len(responses),
         "usage": totals,
     })
-    (run_dir / "tool_trace.jsonl").write_text("".join(json.dumps(e) + "\n" for e in events), encoding="utf-8")
+    write_guarded(run_dir / "tool_trace.jsonl", "".join(json.dumps(e) + "\n" for e in events))

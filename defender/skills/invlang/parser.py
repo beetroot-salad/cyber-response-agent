@@ -21,6 +21,7 @@ from ._cells import (
 )
 from ._types import Block, RowError
 from .schema import (
+    AttributeUpdate,
     AttrPredictionRecord,
     AuthorityRef,
     AuthorizationContract,
@@ -32,6 +33,7 @@ from .schema import (
     ProposedEdge,
     RefutationRecord,
     ResolutionRecord,
+    ResolutionRow,
     VertexRecord,
 )
 
@@ -271,7 +273,14 @@ _HYP_SUB_DISPATCH = {
 
 def _lead_header_record(
     rec: dict[str, str]
-) -> tuple[dict[str, Any], dict[str, Any]]:
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """Split a `:L findings` row into (identity, outcome, query_details).
+
+    The outcome fields are returned separately rather than nested inside
+    `identity` so the caller cannot merge them with a plain `dict.update` —
+    that overwrote the lead's whole outcome, discarding resolution buckets
+    already projected onto it by an earlier `:R` block.
+    """
     identity: dict[str, Any] = {
         "id": rec["id"], "name": rec["name"], "target": rec.get("target", ""),
     }
@@ -290,8 +299,9 @@ def _lead_header_record(
             identity[k_out] = v
     if rec.get("tests"):
         identity["tests_hypotheses"] = _split_csv(rec["tests"])
+    outcome: dict[str, Any] = {}
     if rec.get("fail_reason"):
-        identity.setdefault("outcome", {})["failure_reason"] = rec["fail_reason"]
+        outcome["failure_reason"] = rec["fail_reason"]
     query_details: dict[str, Any] = {}
     for k_in, k_out in (
         ("system", "system"),
@@ -301,7 +311,7 @@ def _lead_header_record(
     ):
         if rec.get(k_in):
             query_details[k_out] = rec[k_in]
-    return identity, query_details
+    return identity, outcome, query_details
 
 
 _RESOLUTION_LINE_RE = re.compile(
@@ -391,20 +401,26 @@ _RESOLUTION_KEY_CANONICAL = {
     "dim": "dimension",
     "matched_pred": "matched_prediction",
 }
-_RESOLUTION_LIST_KEYS = {"conditioning", "concerns"}
+# Canonical names, so a header that already spells the canonical key
+# (`conditioning_context`) splits the same way its alias (`conditioning`) does.
+_RESOLUTION_LIST_KEYS = {"conditioning_context", "concerns", "cites_leads"}
 
 
-def _canonicalize_resolution_row(rec: dict[str, str]) -> dict[str, Any]:
+def _canonicalize_resolution_row(rec: dict[str, str]) -> ResolutionRow:
+    # Built as a plain dict and cast: the header names the keys at runtime, so
+    # there is no literal-key form for mypy to check the writes against. The
+    # return type is the shared base — each bucket narrows it on the read side;
+    # see the `:R` note in schema.py.
     out: dict[str, Any] = {}
     for k, v in rec.items():
         if not v:
             continue
         canonical = _RESOLUTION_KEY_CANONICAL.get(k, k)
-        if k in _RESOLUTION_LIST_KEYS:
+        if canonical in _RESOLUTION_LIST_KEYS:
             out[canonical] = _split_csv_or_semi(v)
         else:
             out[canonical] = v
-    return out
+    return cast(ResolutionRow, out)
 
 
 def _project_conclude_scalars(conclude: dict[str, Any], rows: list[str]) -> None:
@@ -457,8 +473,11 @@ class _Projector:
     warnings: list[ParseWarning] = field(default_factory=list)
     hypotheses_by_id: dict[str, dict[str, Any]] = field(default_factory=dict)
     findings: dict[str, dict[str, Any]] = field(default_factory=dict)
-    current_lead: str | None = None
 
+    # No "current lead" state, deliberately. Attribution used to fall back to
+    # whichever lead a preceding block happened to mention last, which silently
+    # filed one lead's grounding evidence under another. Every row that lands on
+    # a lead now names it.
 
     def lead_bucket(self, lead_id: str) -> dict[str, Any]:
         lead = self.findings.setdefault(lead_id, {"id": lead_id})
@@ -529,7 +548,6 @@ class _Projector:
             lead_id = "l-" + m.group("id")
             sub = m.group("sub")
             self._project_lead_subblock(tag, sub, block, self.lead_bucket(lead_id))
-            self.current_lead = lead_id
             return
 
         if tag == "R" and name in _RESOLUTION_BUCKET_KEY:
@@ -631,24 +649,23 @@ class _Projector:
             return
 
     def _project_findings_block(self, block: Block) -> None:
-        last_lead_id: str | None = None
         for idx, row, rec in self._for_each_row(block):
             if not rec.get("id") or not rec.get("name"):
                 self._warn(block, idx, row, "findings row missing id/name")
                 continue
-            identity, query_details = _lead_header_record(rec)
+            identity, outcome, query_details = _lead_header_record(rec)
             lead = self.lead_bucket(identity["id"])
             lead.update(identity)
+            if outcome:
+                lead.setdefault("outcome", {}).update(outcome)
             if query_details:
                 lead.setdefault("query_details", {}).update(query_details)
-            last_lead_id = identity["id"]
-        self.current_lead = last_lead_id or self.current_lead
 
     def _project_resolution_block(self, block: Block) -> None:
         name = block.name
         bucket_key = _RESOLUTION_BUCKET_KEY[name]
         for idx, row, rec in self._for_each_row(block):
-            lead_id = rec.get("resolved_by") or rec.get("lead") or self.current_lead
+            lead_id = rec.get("resolved_by") or rec.get("lead")
             if not lead_id:
                 self._warn(block, idx, row, "row has no lead attribution")
                 continue
@@ -661,7 +678,8 @@ class _Projector:
                 )
 
     def _apply_attr_update(
-        self, lead: dict[str, Any], rec: dict, block: Block, idx: int, row: str
+        self, lead: dict[str, Any], rec: dict[str, str], block: Block,
+        idx: int, row: str,
     ) -> None:
         tgt = rec.get("target")
         key = rec.get("key")
@@ -674,7 +692,11 @@ class _Projector:
             if entry.get("target") == tgt and isinstance(entry.get("updates"), dict):
                 entry["updates"][key] = val
                 return
-        au.append({"target": tgt, "updates": {key: val}})
+        # Literally constructed so the type gate actually checks both keys —
+        # this is the only writer, and `AttributeUpdate` is total on the strength
+        # of it.
+        entry_new: AttributeUpdate = {"target": tgt, "updates": {key: val}}
+        au.append(entry_new)
 
     def _project_resolutions_block(self, block: Block) -> None:
         for idx, row in enumerate(block.rows):
@@ -683,20 +705,19 @@ class _Projector:
             except RowError as e:
                 self._warn(block, idx, row, str(e))
                 continue
-            lid = lead_id or self.current_lead
-            if not lid:
+            if not lead_id:
                 self._warn(block, idx, row, "resolution has no lead attribution")
                 continue
-            self.lead_bucket(lid).setdefault("resolutions", []).append(record)
-            self.current_lead = lid
+            self.lead_bucket(lead_id).setdefault("resolutions", []).append(record)
 
     def _project_shelved_block(self, block: Block) -> None:
-        for _idx, _row, rec in self._for_each_row(block):
+        for idx, row, rec in self._for_each_row(block):
             hyp = rec.get("hyp_id")
             if not hyp:
                 continue
-            lid = rec.get("by_lead") or self.current_lead
+            lid = rec.get("by_lead")
             if not lid:
+                self._warn(block, idx, row, "shelved row has no lead attribution")
                 continue
             lead = self.lead_bucket(lid)
             lead.setdefault("shelved", []).append(hyp)
