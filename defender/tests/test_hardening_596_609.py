@@ -493,7 +493,13 @@ def test_d_a12_every_discovered_lesson_appears_exactly_once(tmp_path, capsys):
 def test_d_a13_named_rows_flatten_disposition_and_ts(tmp_path, capsys):
     """d: a13 — the named path's other two columns are LLM/hook-authored too: a tab or
     newline in report.md's disposition or a lessons_loaded ts must not forge a column
-    or a row (the created_at bug class, one field over)."""
+    or a row (the created_at bug class, one field over).
+
+    The disposition column got STRONGER since #785 and the assertion moved with it: the
+    tracer now reads the disposition through the shared accessor, whose vocabulary is closed,
+    so a value carrying a tab is not flattened into the row — it never reaches the row at all
+    and the case degrades to the unknown placeholder. The ts column, which has no vocabulary
+    to close, still carries the flatten this test was written for and still proves it."""
     tl = _load_tl()
     lessons = tmp_path / "lessons"
     _mk_lesson(lessons, "L", body_frontmatter="name: L\ndescription: d")
@@ -508,7 +514,13 @@ def test_d_a13_named_rows_flatten_disposition_and_ts(tmp_path, capsys):
     assert len(lines) == 2
     row = lines[1]
     assert row.count("\t") == 2
-    assert row.split("\t") == ["caseA", "ben ign X", "2026-06-05 00:00:00+00:00"]
+    assert row.split("\t") == ["caseA", "?", "2026-06-05 00:00:00+00:00"]
+    # Positive control on the SAME column: a well-formed disposition still renders, so the
+    # `?` above is the hostile value being refused, not the column having gone dead.
+    _mk_run(runs, "caseB", disposition="benign",
+            loads=[{"lesson_name": "L", "ts": "2026-06-06T00:00:00+00:00"}])
+    assert tl.main(["L", "--lessons-dir", str(lessons), "--runs-dir", str(runs)]) == 0
+    assert "caseB\tbenign\t" in capsys.readouterr().out
 
 
 def test_d_a14_all_description_survives_every_line_breaker(tmp_path, capsys):

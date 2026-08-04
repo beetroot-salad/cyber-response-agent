@@ -4,12 +4,12 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from defender._artifact_schema import normalized_disposition
 from defender.learning.core.directions import (
     ADVERSARIAL,
     BENIGN,
     Direction,
     directions_for,
-    normalized_disposition,
     raw_fallback_name,
 )
 from defender.scripts.visualize.visualize_primitives import (
@@ -123,7 +123,7 @@ def active_views(run_id: str, disposition: str) -> tuple[DirectionView, ...]:
     An unreadable or unrecognized disposition (no `report.md`, bad frontmatter) selects
     ALL directions: with nothing to gate on, showing every section with its
     missing-artifact placeholder is the honest fallback."""
-    if not normalized_disposition(disposition):
+    if normalized_disposition(disposition) is None:
         return VIEWS
     selected = {d.name for d in directions_for(disposition)}
     return tuple(
