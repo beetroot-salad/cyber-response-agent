@@ -24,16 +24,16 @@ from __future__ import annotations
 import yaml
 
 from defender._frontmatter import FrontmatterError, split_frontmatter
-from defender._text import strip_zero_width
+# Imported to be USED, not to be passed on. The vocabulary reached this module from the
+# learning loop's config (#714, to break a `runtime/` → `learning/` import inside a security
+# boundary) and left it for `_vocab.py` once invlang's `conclude` block turned out to carry the
+# same headline. It briefly stayed re-exported so the loop's config and the ticket builder
+# could keep importing it from here; that put a schema module in the path between a vocabulary
+# and its readers for no reason other than history, so those two now import the owner directly.
+# The normalizer is deliberately NOT imported here: this module holds the WRITE gate, and on
+# write the value is tested exactly — see the disposition check in `validate_report` below.
+from defender._vocab import DISPOSITION_ENUM
 from defender.skills.invlang.validate import validate_companion
-
-# The canonical `report.md` disposition vocabulary — the SINGLE definition (#714). The
-# learning loop re-exports it (`learning/core/config.py`) so `core.config` stays the loop's
-# import surface, and the case-history ticket builder imports it rather than restating it.
-# It lives HERE, not in the loop's config, because the write gate is its earliest consumer
-# and a `runtime/` → `learning/` import inside a security boundary was the coupling #714
-# set out to remove.
-DISPOSITION_ENUM = {"benign", "inconclusive", "malicious"}
 
 # #629 — output-structure bounds for the run's two model-authored artifacts, all in
 # UTF-8 BYTES. These are a VOLUME + STRUCTURE control on bytes that leave the system
@@ -65,30 +65,6 @@ ARTIFACT_NAMES = (REPORT_NAME, INVESTIGATION_NAME)
 # it must read for THESE names only: an unconditional read would put a `read_text` that can
 # raise on the report.md path, where none ran before.
 NEEDS_BASELINE = frozenset({INVESTIGATION_NAME})
-
-
-def normalized_disposition(value: object) -> str | None:
-    """A `disposition` frontmatter value as it RENDERS — a `DISPOSITION_ENUM` member — or
-    `None` when it is not one of the three. THE single disposition decision on the READ side
-    (#785): every consumer of a completed `report.md` reaches it through `_report.py`, and the
-    loop's direction dispatch through `directions_for`, so no two readers can disagree about
-    what a given value means.
-
-    The #722 zero-width strip lives HERE and nowhere else. A non-`str` value (a YAML list,
-    an int) is rejected before the enum test rather than fed to it: `DISPOSITION_ENUM` is a
-    set, so an unhashable value would raise `TypeError` out of a bare membership check — the
-    same trap `validate_report` guards against on the write side.
-
-    NOT applied by `validate_report`, deliberately. On WRITE there is an author to ask: the
-    gate denies a zero-width-laced disposition with actionable retry text and the model fixes
-    it. A report already on disk has no author to ask — it may have arrived from an imported
-    run dir, a replayed fixture or a hand edit — and #722's rule is that what a disposition
-    renders as is what it means. Strict at the boundary, forgiving about what got past it.
-    """
-    if not isinstance(value, str):
-        return None
-    disposition = strip_zero_width(value).strip()
-    return disposition if disposition in DISPOSITION_ENUM else None
 
 
 def _utf8_len(text: str) -> int:
@@ -183,6 +159,11 @@ def validate_report(proposed_text: str) -> str | None:
     disposition = fm.get("disposition")
     # `isinstance(str)` FIRST: a non-string value (a list / mapping) is unhashable, so a bare
     # `value in DISPOSITION_ENUM` (a set) would raise TypeError out of the gate instead of denying.
+    #
+    # lint-vocabulary: ok — the WRITE gate is exact where every reader normalizes, and the
+    # asymmetry is the point. Here there is still an author to ask: an exact test denies a
+    # zero-width-laced disposition with retry text the model can act on. `normalized_disposition`
+    # would silently ACCEPT it and write a document no reader can tell from a clean one.
     if not (isinstance(disposition, str) and disposition in DISPOSITION_ENUM):
         return (
             "report.md frontmatter must carry a top-level `disposition` in "

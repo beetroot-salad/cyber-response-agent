@@ -28,7 +28,7 @@ from pathlib import Path
 
 from defender._frontmatter import parse_frontmatter_or_none
 from defender.evals.held_out import predicted_disposition
-from defender.learning.core.config import DISPOSITION_ENUM
+from defender._vocab import DISPOSITION_ENUM
 from defender.runtime import orient
 from defender.runtime.verb_grant import VerbGrant
 from defender.scripts.visualize import visualize_primitives as vp

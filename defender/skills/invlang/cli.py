@@ -32,13 +32,13 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p5 = sub.add_parser("sequence", help="Class 5: lead sequence pattern")
     p5.add_argument("--contains")
-    p5.add_argument("--disposition")
+    p5.add_argument("--disposition", choices=list(vocab.DISPOSITION))
     p5.add_argument("--signature")
 
     p6 = sub.add_parser("hypotheses", help="Class 6: hypothesis name wildcard")
     p6.add_argument("pattern")
     p6.add_argument("--final-weight", choices=list(vocab.WEIGHT_BUCKETS))
-    p6.add_argument("--disposition")
+    p6.add_argument("--disposition", choices=list(vocab.DISPOSITION))
     p6.add_argument("--signature")
 
     p8 = sub.add_parser("branch-effects", help="Class 8: per-lead per-hypothesis effect")

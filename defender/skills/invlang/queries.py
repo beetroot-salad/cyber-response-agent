@@ -5,10 +5,21 @@ import fnmatch
 from typing import Any
 from collections.abc import Iterable
 
+from defender._vocab import UNKNOWN_DISPOSITION, normalized_disposition
+
 from . import _walkers, vocab
 from .corpus import Companion
 from .schema import Conclude, FindingRecord, HypothesisRecord
 
+
+def _disposition(c: Companion) -> str | None:
+    """This case's conclude disposition as it RENDERS, or `None`.
+
+    Every corpus surface below reads the headline through here (#785/#790). It is
+    model-authored text: read raw, a zero-width character clinging to the keyword silently
+    drops the case out of a `--disposition benign` precedent lookup, which is the same
+    fail-open the benign gate in `validate.py` used to have — one function over."""
+    return normalized_disposition(c.conclude.get("disposition"))
 
 
 def _hypothesis_name(h: HypothesisRecord) -> str:
@@ -46,8 +57,7 @@ def _lead_trace(c: Companion) -> str:
         else:
             parts.append(name)
     terminal = _conclude_field(c.conclude, "termination", "category") or "?"
-    disposition = c.conclude.get("disposition", "?")
-    parts.append(f"{terminal}:{disposition}")
+    parts.append(f"{terminal}:{_disposition(c) or UNKNOWN_DISPOSITION}")
     return "→".join(parts)
 
 
@@ -60,7 +70,7 @@ def lead_sequence_pattern(
 ) -> dict[str, Any]:
     hits: list[dict[str, Any]] = []
     for c in corpus:
-        if disposition is not None and c.conclude.get("disposition") != disposition:
+        if disposition is not None and _disposition(c) != disposition:
             continue
         if signature_id is not None and c.signature_id != signature_id:
             continue
@@ -73,7 +83,7 @@ def lead_sequence_pattern(
             "trace": trace,
             "lead_count": len(c.leads),
             "termination": _conclude_field(c.conclude, "termination", "category"),
-            "disposition": c.conclude.get("disposition"),
+            "disposition": _disposition(c),
         })
     hits.sort(key=lambda r: r["lead_count"], reverse=True)
     return {"hits": hits, "count": len(hits)}
@@ -90,7 +100,7 @@ def hypothesis_name_wildcard(
 ) -> dict[str, Any]:
     hits: list[dict[str, Any]] = []
     for c in corpus:
-        if disposition is not None and c.conclude.get("disposition") != disposition:
+        if disposition is not None and _disposition(c) != disposition:
             continue
         if signature_id is not None and c.signature_id != signature_id:
             continue
@@ -107,7 +117,7 @@ def hypothesis_name_wildcard(
                 "signature_id": c.signature_id,
                 "name": name,
                 "final_weight": weight,
-                "disposition": c.conclude.get("disposition"),
+                "disposition": _disposition(c),
                 "status": h.get("status", "active"),
             })
     hits.sort(key=lambda r: (vocab.WEIGHT_ORDER.get(r["final_weight"], 2), r["case_id"]), reverse=True)
@@ -285,7 +295,7 @@ def hypothesis_shape_match(
                 v_type[v["id"]] = v.get("type", "")
 
         final = _compute_final_weights(c)
-        disp = c.conclude.get("disposition") or "unknown"
+        disp = _disposition(c) or UNKNOWN_DISPOSITION
 
         for h in _all_hypotheses(c):
             if not _hypothesis_matches_shape(

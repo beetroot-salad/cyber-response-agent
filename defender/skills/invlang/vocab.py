@@ -1,6 +1,15 @@
 
 from __future__ import annotations
 
+from defender._vocab import DISPOSITION_VALUES
+
+# The one vocabulary in this module that invlang does NOT define. Every other slot below is
+# invlang's own domain — its entity types, its relations, its notions of observational
+# authority. `disposition` is the run's headline, carried by `report.md` too and validated
+# there by a different schema, so it is imported from the project-general vocabulary rather
+# than restated: two schemas that each spell out the same three keywords are two schemas that
+# eventually disagree, which is exactly what #785 found on the reading side.
+DISPOSITION: tuple[str, ...] = DISPOSITION_VALUES
 
 WEIGHT_BUCKETS: tuple[str, ...] = ("++", "+", "-", "--")
 WEIGHT_ORDER: dict[str | None, int] = {"--": 0, "-": 1, None: 2, "+": 3, "++": 4}
@@ -131,6 +140,7 @@ CREDENTIAL_KIND: tuple[str, ...] = (
 
 
 SLOTS: dict[str, tuple[str, ...]] = {
+    "disposition": DISPOSITION,
     "types": TYPES,
     "relations": RELATIONS,
     "anchor-kinds": ANCHOR_KINDS,
