@@ -135,9 +135,9 @@ def review_record_path(run_dir, turn: int = 1):
 
 
 def write_review_record(run_dir, turn: int, record: dict) -> None:
-    from defender._io import write_atomic
+    from defender._io import write_guarded
 
-    write_atomic(review_record_path(run_dir, turn), json.dumps(record, indent=2))
+    write_guarded(review_record_path(run_dir, turn), json.dumps(record, indent=2), mode="replace")
 
 
 # --------------------------------------------------------------------------------------
@@ -204,15 +204,12 @@ def _write_trace_row(
     on disk. `read_jsonl_rows` (every other trace consumer) tolerates it fine — a raw line
     that is not valid JSON is simply skipped, so the metadata rows (round/incomplete) stay
     exactly as parseable as before."""
-    from defender._io import append_jsonl
+    from defender._io import write_guarded
 
-    append_jsonl(_trace_path(run_dir, role), [{"round": round_no, **row}])
+    path = _trace_path(run_dir, role)
+    write_guarded(path, json.dumps({"round": round_no, **row}) + "\n", mode="append")
     if raw_reply is not None:
-        path = _trace_path(run_dir, role)
-        with path.open("a", encoding="utf-8") as fh:
-            fh.write(raw_reply)
-            if not raw_reply.endswith("\n"):
-                fh.write("\n")
+        write_guarded(path, raw_reply if raw_reply.endswith("\n") else raw_reply + "\n", mode="append")
 
 
 def _mark_traces_incomplete(run_dir, round_no: int, reason: str) -> None:

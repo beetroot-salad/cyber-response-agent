@@ -316,8 +316,10 @@ def _commit(  # noqa: PLR0913 — the commit's full inputs; the scalars are alre
     else:
         report_path = deps.run_dir / "report.md"
         try:
-            report_path.parent.mkdir(parents=True, exist_ok=True)
-            report_path.write_text(body, encoding="utf-8")
+            from defender._io import guarded_mkdir, write_guarded
+
+            guarded_mkdir(report_path.parent, base=Path(deps.run_dir))
+            write_guarded(report_path, body, mode="replace")
         except OSError as e:
             report_error = e
 
