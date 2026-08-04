@@ -157,7 +157,7 @@ class StageOutcome:
     text: str | None
     #: `None` when the call completed, otherwise a member of `close_tool.FAILURE_KINDS`.
     #: Deliberately NOT re-listed here: `_call_stage` produces two of the members and
-    #: `_unreadable` a third, so a comment enumerating a subset would go stale the next time
+    #: `_settle_round` a third, so a comment enumerating a subset would go stale the next time
     #: one of them moves — which is the shape that already produced three bugs in this delta.
     failure_kind: str | None
     detail: str | None = None
@@ -206,10 +206,13 @@ def _write_trace_row(
     exactly as parseable as before."""
     from defender._io import write_guarded
 
-    path = _trace_path(run_dir, role)
-    write_guarded(path, json.dumps({"round": round_no, **row}) + "\n", mode="append")
+    line = json.dumps({"round": round_no, **row}) + "\n"
     if raw_reply is not None:
-        write_guarded(path, raw_reply if raw_reply.endswith("\n") else raw_reply + "\n", mode="append")
+        line += raw_reply if raw_reply.endswith("\n") else raw_reply + "\n"
+    # ONE guarded append per row, not one per physical line: the two lines are a single trace
+    # record, and splitting them across two `write_guarded` calls both doubled the syscalls and
+    # left a window in which the metadata row was on disk without the reply it describes.
+    write_guarded(_trace_path(run_dir, role), line, mode="append")
 
 
 def _mark_traces_incomplete(run_dir, round_no: int, reason: str) -> None:
@@ -254,6 +257,14 @@ class UnreadableProjection(Exception):
     """The projection replied with something the classifier cannot read."""
 
 
+#: The projection's closed tag vocabulary — the ONE home for the three values
+#: `_classify_projection` dispatches on, so the parser's refusal and the classifier's buckets
+#: cannot drift apart.
+PROJECTION_TAGS: frozenset[str] = frozenset(
+    {"has-projection", "empty-projection", "no-projection"}
+)
+
+
 def _parse_projection_reply(text: str | None) -> list[tuple[str, str]]:
     """The projection's `(lead_id, tag)` rows, or `UnreadableProjection`.
 
@@ -280,8 +291,35 @@ def _parse_projection_reply(text: str | None) -> list[tuple[str, str]]:
     for item in leads:
         if not isinstance(item, dict) or "lead_id" not in item or "tag" not in item:
             raise UnreadableProjection(f"a row lacks lead_id/tag: {item!r}")
-        rows.append((str(item["lead_id"]), str(item["tag"])))
+        tag = str(item["tag"])
+        # The TAG is as much a field the classifier reads as the key it arrives under. Left
+        # unchecked, an unknown or misspelt tag is invisible to all three of
+        # `_classify_projection`'s buckets, so a whole reply of them falls through to
+        # `all_confirmed` and commits FORCED_INCONCLUSIVE with NO failure kind — the review's
+        # own breakage recorded as a finding about the evidence, which is exactly the
+        # inflation the `unreadable`/`incoherent` split exists to prevent.
+        if tag not in PROJECTION_TAGS:
+            raise UnreadableProjection(
+                f"a row carries a tag outside {sorted(PROJECTION_TAGS)}: {tag!r}"
+            )
+        rows.append((str(item["lead_id"]), tag))
     return rows
+
+
+def _read_coherence(text: str | None) -> bool | None:
+    """`True`/`False` for a coherence reply that answered, `None` for one that did not.
+
+    The bare `"INCOHERENT" not in text.upper()` this replaces was the gate's one fail-OPEN:
+    every reply that failed to contain the word — an empty string, a refusal, a stray JSON
+    blob, a timeout's leftover detail — read as COHERENT, and a confident disposition then
+    committed on a counter-story nothing had judged. `INCOHERENT` is tested FIRST because
+    `COHERENT` is its own suffix."""
+    upper = (text or "").upper()
+    if "INCOHERENT" in upper:
+        return False
+    if "COHERENT" in upper:
+        return True
+    return None
 
 
 def _direction_for(disposition: str) -> tuple[Any, str]:
@@ -394,6 +432,11 @@ async def _run_challenger_once(
             deps.run_dir, "challenger", round_no, {"ok": True, "malformed": True},
             raw_reply=_wrap(outcome.text or "", "untrusted", deps.salt),
         )
+        # The round ends here for the other two stages as well, so their traces carry the
+        # marker the stage-fault arm already writes. Without it a malformed challenger reply —
+        # a review the gate records as `unreadable` — left the coherence and oracle traces
+        # reading as if their round had completed.
+        _mark_traces_incomplete(deps.run_dir, round_no, f"challenger reply unreadable: {e}")
         return None, None, str(e)
 
     # Log only the counter-story/decline-reason TEXT, wrapped — never the raw JSON reply
@@ -636,8 +679,84 @@ def _finalize_verdict(  # noqa: PLR0913 — one classification's full inputs, na
     )
 
 
-async def challenge_gate(deps: Any, disposition: str, *, stages: Any, bounds: Bounds) -> GateVerdict:
+#: What the coherence checker's unusable reply is called, at the ONE place that names it —
+#: the fault detail and the trace marker are the same sentence by construction rather than by
+#: two authors happening to agree.
+_COHERENCE_UNUSABLE = "the coherence checker answered neither COHERENT nor INCOHERENT"
+
+
+@dataclass(frozen=True)
+class _RoundOutcome:
+    """Exactly one of the three ways a round that reached both stages can end.
+
+    Split out of `challenge_gate` so the loop reads as its five decisions and nothing else:
+    the settlement rules below are where the gate's ORDER lives (coherence acted on before the
+    projection is read), and burying them in the loop is what let that order be wrong without
+    anyone seeing it."""
+
+    verdict: GateVerdict | None = None
+    #: The refined prompt for the next ask — never the identical prompt again.
+    refinement: str | None = None
+    #: `(role, outcome)` for a stage that answered unusably; the caller turns it into the
+    #: same failure every other unusable input takes.
+    fault: tuple[str, StageOutcome] | None = None
+
+
+def _settle_round(  # noqa: PLR0913 — one round's full state, named once
+    state: ReviewState, bounds: Bounds, disposition: str, direction_name: str,
+    reply: dict, coherence_outcome: StageOutcome, projection_outcome: StageOutcome,
+    base_prompt: str, round_no: int, deps: Any, executed_lead_ids: Any,
+) -> _RoundOutcome:
     from .close_tool import CAUSE_REVIEW_INCOMPLETE, FORCED_INCONCLUSIVE, INCOHERENT, UNREADABLE
+
+    # R5 applies to THIS stage too: a coherence reply that answers neither way has not
+    # completed, and reading it as "coherent" was the one fail-OPEN left in the gate — an
+    # empty reply, a refusal or a stray JSON blob let a confident disposition through on a
+    # counter-story nothing ever judged.
+    coherent = _read_coherence(coherence_outcome.text)
+    if coherent is None:
+        _mark_traces_incomplete(deps.run_dir, round_no, _COHERENCE_UNUSABLE)
+        return _RoundOutcome(fault=("coherence_checker", StageOutcome(
+            text=None, failure_kind=UNREADABLE, detail=_COHERENCE_UNUSABLE,
+        )))
+
+    # THE COHERENCE VERDICT IS ACTED ON BEFORE THE PROJECTION IS READ. Only a coherent round
+    # ever consumes the rows, so requiring them first turned a round the grace budget exists
+    # to RETRY into a terminal `unreadable`, and made the terminal incoherence arm — a
+    # challenger-quality finding — reachable only when a DIFFERENT stage answered cleanly.
+    if not coherent:
+        if round_no < bounds.grace_rounds:
+            return _RoundOutcome(refinement=review_roles.build_refinement_input(
+                base_prompt, str(reply["counter_story"]), coherence_outcome.text or "",
+            ))
+        # The challenger answered INSIDE its output contract every round and the content
+        # still could not be used. That is the challenger-quality signal and it is a
+        # different kind from `unreadable` — a reply the gate never parsed says nothing
+        # about the reasoning, and counting the two together is the inflated incoherence
+        # rate this whole field exists to prevent.
+        return _RoundOutcome(verdict=GateVerdict(
+            outcome=FORCED_INCONCLUSIVE, disposition="inconclusive",
+            cause=CAUSE_REVIEW_INCOMPLETE,
+            detail="the counter-story did not settle into internal consistency",
+            material=(), turns_used=0, rounds_used=round_no,
+            failure_kind=INCOHERENT, counter_story=None, direction=direction_name,
+            requirement_list=reply.get("requirements", []), projection_rows=[],
+        ))
+
+    # R5: a stage that ANSWERED unusably has not completed either, and the fix is made at
+    # the point both readable-empty and unreadable share, so genuine silence keeps its arm.
+    rows, unusable = _read_projection(deps, projection_outcome, executed_lead_ids, round_no)
+    if rows is None:
+        return _RoundOutcome(fault=("oracle", StageOutcome(
+            text=None, failure_kind=UNREADABLE, detail=unusable,
+        )))
+    return _RoundOutcome(verdict=_finalize_verdict(
+        state, bounds, disposition, direction_name, reply, rows, round_no,
+    ))
+
+
+async def challenge_gate(deps: Any, disposition: str, *, stages: Any, bounds: Bounds) -> GateVerdict:
+    from .close_tool import CAUSE_REVIEW_INCOMPLETE, FORCED_INCONCLUSIVE, STAGE_ERROR
 
     state = ReviewState.of(deps)
     direction, direction_name = _direction_for(disposition)
@@ -665,9 +784,20 @@ async def challenge_gate(deps: Any, disposition: str, *, stages: Any, bounds: Bo
             requirement_list=[], projection_rows=[],
         )
 
-    def _unreadable(detail: str, round_no: int) -> GateVerdict:
+    if direction is None:
+        # `_direction_for` already tolerates this for the NAME ("unknown"), so the tolerance
+        # has to reach the prompt builder too — it dereferences `direction.name` to pick the
+        # counter-direction's affordance, and an AttributeError there escapes the tool
+        # uncaught rather than failing the review closed the way every other unusable input
+        # does. Unreachable while the enum's two confident members both map; the point is
+        # that adding a third cannot make it a crash.
         return _fail(
-            "oracle", StageOutcome(text=None, failure_kind=UNREADABLE, detail=detail), round_no,
+            "challenger",
+            StageOutcome(
+                text=None, failure_kind=STAGE_ERROR,
+                detail=f"no counter-direction is defined for disposition {disposition!r}",
+            ),
+            0,
         )
 
     base_prompt = review_roles.build_challenger_input(deps, disposition, direction)
@@ -699,39 +829,17 @@ async def challenge_gate(deps: Any, disposition: str, *, stages: Any, bounds: Bo
             faulting_role, fault_outcome = fault
             return _fail(faulting_role, fault_outcome, round_no)
 
-        # R5: a stage that ANSWERED unusably has not completed either, and the fix is made at
-        # the point both readable-empty and unreadable share, so genuine silence keeps its arm.
-        rows, unusable = _read_projection(
-            deps, projection_outcome, executed_lead_ids, round_no,
+        settled = _settle_round(
+            state, bounds, disposition, direction_name, reply, coherence_outcome,
+            projection_outcome, base_prompt, round_no, deps, executed_lead_ids,
         )
-        if rows is None:
-            return _unreadable(unusable, round_no)
-
-        coherent = "INCOHERENT" not in (coherence_outcome.text or "").upper()
-        if coherent:
-            return _finalize_verdict(
-                state, bounds, disposition, direction_name, reply, rows, round_no,
-            )
-        if round_no >= bounds.grace_rounds:
-            # The challenger answered INSIDE its output contract every round and the content
-            # still could not be used. That is the challenger-quality signal and it is a
-            # different kind from `unreadable` — a reply the gate never parsed says nothing
-            # about the reasoning, and counting the two together is the inflated incoherence
-            # rate this whole field exists to prevent.
-            return GateVerdict(
-                outcome=FORCED_INCONCLUSIVE, disposition="inconclusive",
-                cause=CAUSE_REVIEW_INCOMPLETE,
-                detail="the counter-story did not settle into internal consistency",
-                material=(), turns_used=0, rounds_used=round_no,
-                failure_kind=INCOHERENT, counter_story=None, direction=direction_name,
-                requirement_list=reply.get("requirements", []), projection_rows=[],
-            )
+        if settled.fault is not None:
+            return _fail(settled.fault[0], settled.fault[1], round_no)
+        if settled.verdict is not None:
+            return settled.verdict
+        assert settled.refinement is not None  # the only remaining arm
         round_no += 1
-        # Refine: a SECOND ASK, carrying the story that failed and the gap the coherence
-        # checker named — never the identical prompt again.
-        challenger_prompt = review_roles.build_refinement_input(
-            base_prompt, str(reply["counter_story"]), coherence_outcome.text or "",
-        )
+        challenger_prompt = settled.refinement
 
 
 __all__ = [

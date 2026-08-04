@@ -318,7 +318,9 @@ def test_close_tool_is_registered_to_main_with_a_typed_disposition(tmp_path):
         "the close tool must be part of MAIN's effective tool set"
     )
     agent = _RecordingAgent()
-    register_close_tool(agent, stages=FakeReviewStages())
+    register_close_tool(agent, stages=FakeReviewStages(),
+                        bounds=spec_import("defender.runtime.challenge_gate",
+                                           "default_bounds")())
     assert "close_investigation" in agent.registered, (
         f"the registrar attached no close tool: {sorted(agent.registered)}"
     )
@@ -696,7 +698,9 @@ def test_the_close_tool_composes_the_report_from_typed_arguments_and_accepts_no_
         f"the close tool accepts a model-supplied body: {list(sig.parameters)}"
     )
     agent = _RecordingAgent()
-    register_close_tool(agent, stages=FakeReviewStages())
+    register_close_tool(agent, stages=FakeReviewStages(),
+                        bounds=spec_import("defender.runtime.challenge_gate",
+                                           "default_bounds")())
     tool_params = list(inspect.signature(agent.registered["close_investigation"]).parameters)
     assert tool_params[1:] == ["disposition"], (
         f"the registered tool takes {tool_params[1:]} beyond its context — every extra "

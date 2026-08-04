@@ -323,11 +323,17 @@ def _commit(  # noqa: PLR0913 — the commit's full inputs; the scalars are alre
         except OSError as e:
             report_error = e
 
+    # R4's terminality follows THE REPORT, not both writes. `report_error is None` means a
+    # disposition is committed on disk; leaving `closed` False because the RECORD write failed
+    # let the model's retry sail past the already-closed refusal and re-run the whole gate on
+    # top of a committed report — the exact overwrite R4 exists to prevent, reachable through
+    # a fault RS19 already says must not silently drop the other write.
+    if report_error is None:
+        state.closed = True
+        state.disposition = disposition
+
     if record_error is not None or report_error is not None:
         raise record_error if record_error is not None else report_error  # type: ignore[misc]
-
-    state.closed = True
-    state.disposition = disposition
     return CloseResult(
         outcome=fields.outcome, message=f"closed: {fields.outcome} (disposition={disposition})",
         material=fields.material, record_path=record_path, cause=fields.cause,
@@ -337,7 +343,7 @@ def _commit(  # noqa: PLR0913 — the commit's full inputs; the scalars are alre
 
 
 async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams, all injected
-    deps: AgentDeps, disposition: str, *, stages: Any, bounds: challenge_gate.Bounds | None = None,
+    deps: AgentDeps, disposition: str, *, stages: Any, bounds: challenge_gate.Bounds,
     evidence: str | None = None, validator: ArtifactValidator = validate_artifact,
 ) -> CloseResult:
     if deps.role is not AgentRole.MAIN:
@@ -363,11 +369,6 @@ async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams
             "the close is terminal. Re-closing would re-run the whole review and overwrite "
             "both the recorded disposition and the first close's own review record."
         )
-    # lint-default: ok — DI/test-seam shape (challenge_gate.Bounds is injected for tests,
-    # defaulting to production bounds); resolved once here, the sole call site that needs a
-    # concrete value, into a fresh name rather than re-defaulting the parameter itself.
-    resolved_bounds = bounds if bounds is not None else challenge_gate.default_bounds()
-
     if disposition == "inconclusive":
         # The gate reviews CONFIDENT closes only, so nothing was reviewed and there is no
         # stage output to diagnose — the empty detail here is the honest value, not a gap.
@@ -383,7 +384,7 @@ async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams
         return _commit(deps, disposition, fields, record, validator=validator, evidence=evidence)
 
     verdict = await challenge_gate.challenge_gate(
-        deps, disposition, stages=stages, bounds=resolved_bounds,
+        deps, disposition, stages=stages, bounds=bounds,
     )
     material = tuple(
         RecommendedLead(lead_id=lid, requirement=req, origin="review")
@@ -415,22 +416,29 @@ def close_investigation(  # noqa: PLR0913 — the close's own seams, all injecte
     deps: AgentDeps, disposition: str, *, stages: Any, bounds: challenge_gate.Bounds | None = None,
     evidence: str | None = None, validator: ArtifactValidator = validate_artifact,
 ) -> CloseResult:
-    """The SYNC host-level close. Never call this from inside a running event loop."""
+    """The SYNC host-level close, and one of the TWO boundaries where the gate's bounds are
+    resolved (`run_investigation` is the other). Everything inward of these two takes a
+    concrete `Bounds`. Never call this from inside a running event loop."""
+    # lint-default: ok — DI seam owning its default at a boundary: this entry point is
+    # reached directly (not through run_investigation), so it has no resolved value threaded
+    # to it and must resolve one. Resolved ONCE, into a fresh name, and threaded inward.
+    resolved = bounds if bounds is not None else challenge_gate.default_bounds()
     return asyncio.run(_close_investigation_async(
-        deps, disposition, stages=stages, bounds=bounds, evidence=evidence,
+        deps, disposition, stages=stages, bounds=resolved, evidence=evidence,
         validator=validator,
     ))
 
 
 async def _tool_close_investigation(
-    deps: AgentDeps, disposition: str, *, stages: Any, bounds: challenge_gate.Bounds | None = None,
+    deps: AgentDeps, disposition: str, *, stages: Any, bounds: challenge_gate.Bounds,
 ) -> str:
     result = await _close_investigation_async(deps, disposition, stages=stages, bounds=bounds)
     return result.message
 
 
-def register_close_tool(agent, *, stages: Any, bounds: challenge_gate.Bounds | None = None) -> None:
-    """MAIN's composition root ONLY — never called for any other role's agent build."""
+def register_close_tool(agent, *, stages: Any, bounds: challenge_gate.Bounds) -> None:
+    """MAIN's composition root ONLY — never called for any other role's agent build, and
+    only when that root's effective `ToolSet.close` is on."""
 
     @agent.tool
     async def close_investigation(ctx: RunContext[AgentDeps], disposition: str) -> str:

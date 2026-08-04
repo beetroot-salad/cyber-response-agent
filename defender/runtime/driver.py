@@ -47,6 +47,7 @@ from .verbs import ModuleVerbRegistry
 from defender._env import env_bool
 from defender._run_paths import RunPaths
 from defender.hooks.budget_enforcer import (
+    BUDGET_EXEMPT_TOOLS,
     DEFAULT_LIMITS,
     BudgetKill,
     account_call,
@@ -96,6 +97,14 @@ def _budget_short_circuit(
     deps: AgentDeps, tool_name: str, limits: dict,
     logger: observe.RequestLogger, agent_id: str,
 ) -> str | None:
+    # RS16: the exemption has to sit AHEAD of the tail kill, not only inside `should_refuse`.
+    # The tail kill is unconditional, so an exemption expressed only in the refusal check
+    # still ends the run at the close — and the gate's own forced turns (extra tool calls,
+    # up to four stage deadlines of wall clock inside ONE close) are what push a run past the
+    # tail to begin with. Closing must remain possible under exactly the pressure the gate
+    # creates, which is also what the budget refusal message now tells the model to do.
+    if tool_name in BUDGET_EXEMPT_TOOLS:
+        return None
     state = _budget_state_for_enforcement(read_budget(deps.run_dir), deps)
     if tail_exhausted(state, limits):
         raise BudgetKill(f"budget tail exhausted at {tool_name}")
@@ -462,26 +471,32 @@ def build_agent(  # noqa: PLR0913 — composition root: config + DI seams + the 
     make_model: MakeModel = providers.build_for_effort,
     *, main_model: str | None = None, verbs: Any = None, limits: dict = DEFAULT_LIMITS,
     store: Any = None, session_id: str | None = None, review_stages: Any = None,
-    bounds: challenge_gate.Bounds | None = None,
+    bounds: challenge_gate.Bounds,
 ) -> Agent[AgentDeps, str]:
-    # lint-default: ok — DI seam owning its default, resolved once into a fresh name at the
-    # composition root and threaded inward as a concrete value.
-    gate_bounds = bounds if bounds is not None else challenge_gate.default_bounds()
+    # The bounds arrive RESOLVED, non-`Optional`, and are used under their own name. They
+    # used to be re-coalesced here, which gave the gate's ONE bounds object a default at four
+    # depths — against the anchor-a-default-in-one-place convention, and with that
+    # convention's usual cost: the entry point could resolve one value while a direct build
+    # resolved another from its own environment read.
     extra: list[ProcessHistory[Any]] = []
     if store is not None:
         assert session_id is not None, "a store requires its session_id (build_agent's own contract)"
         extra = _main_extra_capabilities(
-            store, session_id, request_limit=challenge_gate.raised_request_limit(gate_bounds),
+            store, session_id, request_limit=challenge_gate.raised_request_limit(bounds),
         )
     _override = " (DEFENDER_GATHER_MODEL override)" if os.environ.get("DEFENDER_GATHER_MODEL") else ""
     print(f"[run.py] gather model: {gather_model()}{_override}", file=sys.stderr)
     name = resolve_main_model(main_model)
+    # Named rather than inlined into the build call because the EFFECTIVE definition — not
+    # `MAIN_DEF` — is what decides below whether this root registers the close tool, the same
+    # way `register_tools` reads the effective ToolSet for every other capability bit.
+    main_defn = replace(
+        MAIN_DEF, model=lambda: name,
+        effort=providers.effort_for_role(name, AgentRole.MAIN),
+        budget_enforced=MAIN_DEF.budget_enforced and enforcement_enabled(),
+    )
     agent = build_agent_core(
-        replace(
-            MAIN_DEF, model=lambda: name,
-            effort=providers.effort_for_role(name, AgentRole.MAIN),
-            budget_enforced=MAIN_DEF.budget_enforced and enforcement_enabled(),
-        ),
+        main_defn,
         deps_type=AgentDeps,
         instructions=_main_instructions(defender_dir),
         logger=logger,
@@ -511,19 +526,22 @@ def build_agent(  # noqa: PLR0913 — composition root: config + DI seams + the 
     # real grant, for reasons that have nothing to do with catalog content, must not narrow
     # what the catalog advertises.
     register_gather_tool(agent, _build_gather, GATHER_REQUEST_LIMIT, GATHER_DEF.verb_grant)
+    # `build_agent` has no `run_dir` of its own, so it cannot BUILD the live bundle — the
+    # live default is now assembled by `run_investigation`, the entry point that holds the
+    # real run dir, and arrives here already bound to it. The fallback below no longer
+    # substitutes the SOURCE TREE for the missing run dir: doing that anchored each review
+    # role's compiled policy on the repo checkout and had every stage call append its trace
+    # to a file inside it. Unbound stages fail the review closed at call time, through the
+    # gate's own stage-fault arm, instead of quietly acting on the wrong tree.
     stages = (
         review_stages if review_stages is not None
-        # `build_agent` has no `run_dir` of its own — the close tool's real run dir is
-        # `ctx.deps.run_dir` at call time, not something this composition root sees. The
-        # live default below is a best-effort placeholder (never exercised by the hermetic
-        # suite, which always injects `review_stages`); it is deliberately weak rather than
-        # silently wrong about which run dir it acts on. The operator's model choice DOES
-        # reach it — that part is not best-effort.
-        else review_roles.default_review_stages(
-            run_dir=defender_dir, defender_dir=defender_dir, model=name,
+        else review_roles.unbound_review_stages(
+            "no run dir reached this composition root — pass review_stages= (run_investigation "
+            "builds the live bundle against the run's own dir)"
         )
     )
-    register_close_tool(agent, stages=stages, bounds=gate_bounds)
+    if main_defn.tools.close:
+        register_close_tool(agent, stages=stages, bounds=bounds)
     return agent
 
 
@@ -643,7 +661,13 @@ async def _drive_agent(  # noqa: PLR0913 — the loop's own inputs: agent, promp
             try:
                 from .close_tool import _close_investigation_async
 
-                await _close_investigation_async(deps, "inconclusive", stages=None)
+                # `inconclusive` short-circuits ahead of the gate, so no stage and no bound
+                # is ever consumed here; the run's own bounds are threaded anyway rather
+                # than re-resolved, so this limb cannot end up acting on a different value
+                # from the one the rest of the run was built with.
+                await _close_investigation_async(
+                    deps, "inconclusive", stages=None, bounds=bounds,
+                )
             except Exception as close_err:  # noqa: BLE001 — this exit must not itself raise
                 print(f"[run.py] forced close after retry exhaustion also failed "
                       f"({close_err!r})", file=sys.stderr)
@@ -689,6 +713,16 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     # gate's bounds, carrying the request ceiling's own BASE), resolved once at the entry
     # point and threaded inward as a concrete value.
     gate_bounds = bounds if bounds is not None else challenge_gate.default_bounds()
+    # THE one place the live review bundle can honestly be built: the entry point is the only
+    # frame that holds both the run dir the stages must write their traces into and anchor
+    # their policies on, and the operator's model choice. `build_agent` — which sees neither —
+    # used to substitute the source tree for the run dir here.
+    stages = (
+        review_stages if review_stages is not None
+        else review_roles.default_review_stages(  # lint-default: ok — DI seam owning its default (the live bundle, buildable only where the run dir is)
+            run_dir=run_dir, defender_dir=defender_dir, model=model_name,
+        )
+    )
     make_model = make_model or providers.build_for_effort
     adapters = defender_dir / "scripts" / "adapters"
     verbs = verbs if verbs is not None else ModuleVerbRegistry(adapters, GATHER_DEF.verb_grant)  # lint-default: ok — DI seam owning its default (tree-derived; no signature default possible)
@@ -729,7 +763,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
 
     agent = build_agent(
         defender_dir, logger, make_model, main_model=model_name, verbs=verbs, limits=limits,
-        store=store, session_id=session_id, review_stages=review_stages, bounds=gate_bounds,
+        store=store, session_id=session_id, review_stages=stages, bounds=gate_bounds,
     )
     deps = replace(
         bind(MAIN_DEF, run_dir, salt=salt, defender_dir=defender_dir, box=box),

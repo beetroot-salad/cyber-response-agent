@@ -114,7 +114,14 @@ def bind_review_role(
 #: (the test file imports the SAME tag tuples out of `_gate774`, which are transcribed from
 #: here at authoring time).
 OBSERVATION_TAGS: tuple[str, ...] = (":V ", ":E ", ":R attr_updates")
-LEAD_TAG = ":L "
+#: `:L findings` and NOT the bare `:L ` prefix. invlang gives every lead its own `:L`
+#: SUB-blocks (`:L l-001.lead_preds`, the routing rules), and `:L findings` is the sole site
+#: that declares a lead at all (`skills/invlang/validate.py`). Matching the prefix harvested
+#: those sub-block rows too and read them through the findings table's column POSITIONS, so
+#: the challenger was handed fabricated id/name/target triples — and the ids it then cited
+#: back as `settled_by` are precisely what `_unexecuted_leads` refuses as hallucinated,
+#: failing the whole review closed on the gate's own parsing.
+LEAD_TAG = ":L findings"
 
 #: RS18. The lead columns that survive the observation-layer cut. `tests` (the hypotheses the
 #: lead was run to test) and `loop` (scheduling state) are belief structure and are withheld.
@@ -369,6 +376,33 @@ def _make_live_stage(defn: AgentDefinition, run_dir: Path, defender_dir: Path, t
     return call
 
 
+class UnboundReviewStage(RuntimeError):
+    """A review stage was called from a composition root that never held a run dir."""
+
+
+def unbound_review_stages(reason: str) -> ReviewStages:
+    """The bundle for a build that has NO run dir to bind the stages to.
+
+    The alternative this replaces was to bind them to the defender source tree — which put
+    each stage's live trace file inside the repo checkout and anchored the review roles'
+    compiled policies on the source tree instead of on the run they were judging. Raising is
+    the safer failure: the gate catches a stage's exception into its own stage-fault arm, so
+    an unbound bundle fails the review CLOSED and names why, rather than acting confidently
+    on the wrong tree."""
+
+    def stage(role_name: str):
+        async def call(request):
+            raise UnboundReviewStage(f"{role_name}: {reason}")
+
+        return call
+
+    return ReviewStages(
+        challenger=stage("challenger"),
+        coherence_checker=stage("coherence_checker"),
+        projection=stage("projection"),
+    )
+
+
 def default_review_stages(
     run_dir: Path, defender_dir: Path, *, model: str | None = None,
 ) -> ReviewStages:
@@ -404,6 +438,7 @@ __all__ = [
     "CoherenceCheckerDeps",
     "ProjectionDeps",
     "ReviewStages",
+    "UnboundReviewStage",
     "bind_review_role",
     "build_challenger_input",
     "build_coherence_checker_input",
@@ -411,4 +446,5 @@ __all__ = [
     "build_refinement_input",
     "default_review_stages",
     "resolve_review_model",
+    "unbound_review_stages",
 ]
