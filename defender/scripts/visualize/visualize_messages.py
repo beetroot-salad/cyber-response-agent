@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 
 from defender._io import read_jsonl_rows
+from defender._report import ReportRead
 from defender.scripts.pricing import usage_cost
 from defender.scripts.visualize.visualize_data import phase_verb
 from defender.scripts.visualize.visualize_primitives import parse_report
@@ -250,13 +251,18 @@ def run_health(
     messages: list[dict],
     phase_order: list[str],
     leads: list | None = None,
-    report: dict | None = None,
+    report: ReportRead | None = None,
 ) -> dict:
     retries = _count_retries(messages)
     dead_ends = _dead_end_count(_safe_joined(run_dir) if leads is None else leads)
     loops = sum(1 for p in phase_order if phase_verb(p) == "PLAN")
     turns = _turn_count(events)
-    completed = bool((parse_report(run_dir) if report is None else report).get("disposition"))
+    # "Completed" asks whether the run reached REPORT at all, so it keys off the frontmatter
+    # having a `disposition` key — NOT off that value being a valid one. A run that closed on
+    # a disposition the enum rejects still ran to the end; the health badge saying otherwise
+    # would send an operator hunting a truncated run instead of a malformed headline.
+    read = parse_report(run_dir) if report is None else report
+    completed = bool(read.frontmatter.get("disposition"))
 
     if not completed:
         level, label = "bad", "incomplete"

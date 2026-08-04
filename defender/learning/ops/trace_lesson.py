@@ -39,6 +39,7 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
 from defender._corpus import iter_lessons
 from defender._io import read_jsonl_rows, read_text_soft, use_utf8_stdio
 from defender._frontmatter import parse_frontmatter_or_none
+from defender._report import UNKNOWN_DISPOSITION, read_report
 from defender._tsv import flatten_cell as _flatten
 from defender._run_paths import RunPaths
 from defender.learning.core.config import DEFAULT_PATHS
@@ -89,16 +90,21 @@ class CaseHit:
 
 @functools.cache
 def _report_disposition(run_dir: Path) -> str:
+    """This case's disposition for the trace table, or the unknown placeholder.
+
+    Degrades rather than raises: one unreadable historical report must cost its own row, not
+    the whole walk. It now reports the row it dropped for ANY unreadable headline, not only an
+    undecodable file — a report present but malformed is exactly the case where a silent `?`
+    reads as "this case never resolved". A report that was never written stays silent; that is
+    an ordinary in-progress run, not a defect.
+    """
     report = RunPaths(run_dir).report
     if not report.is_file():
-        return "?"
-    text, reason = read_text_soft(report)
-    if text is None:
-        print(f"warn: cannot read {report.parent.name}/report.md ({reason}) — disposition unknown",
-              file=sys.stderr)
-        return "?"
-    fm = parse_frontmatter_or_none(text) or {}
-    return str(fm.get("disposition") or "?")
+        return UNKNOWN_DISPOSITION
+    read = read_report(report)
+    if read.reason is not None:
+        print(f"warn: {run_dir.name}/{read.reason} — disposition unknown", file=sys.stderr)
+    return read.disposition_or_unknown
 
 
 def _earliest_load(

@@ -11,8 +11,7 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 from defender._yaml import safe_load  # noqa: E402
-from defender._frontmatter import FrontmatterError, parse_frontmatter  # noqa: E402
-from defender._io import TEXT_READ_ERRORS, read_text_utf8  # noqa: E402
+from defender._report import ReportRead, read_report  # noqa: E402
 from defender._run_paths import RunPaths  # noqa: E402
 from defender.learning import lead_repository  # noqa: E402
 from defender.learning.core import config as _loop_config  # noqa: E402
@@ -124,19 +123,12 @@ def fmt_duration(ms: float | int) -> str:
 
 
 
-def parse_report(run_dir: Path) -> dict:
-    p = RunPaths(run_dir).report
-    if not p.is_file():
-        return {}
-    try:
-        text = read_text_utf8(p)
-    except TEXT_READ_ERRORS:
-        return {}
-    try:
-        fm, body = parse_frontmatter(text)
-    except FrontmatterError:
-        return {"body": text}
-    return {**fm, "body": body}
+def parse_report(run_dir: Path) -> ReportRead:
+    """This run's report, read through the one accessor every consumer shares (#785). Typed
+    rather than a merged `{**frontmatter, "body": ...}` dict: that shape let the model's own
+    frontmatter keys collide with the view's, and left each page free to invent its own
+    reading of a disposition it could not validate."""
+    return read_report(RunPaths(run_dir).report)
 
 
 def _learning_run_dir(run_id: str) -> Path:
@@ -189,9 +181,9 @@ def render_lead_sequence_compact(run_dir: Path) -> str:
 
 def render_report_card(run_dir: Path) -> str:
     report = parse_report(run_dir)
-    disposition = str(report.get("disposition", "?"))
-    confidence = str(report.get("confidence", "?"))
-    body = report.get("body", "").strip() or "(no report body)"
+    disposition = report.disposition_or_unknown
+    confidence = str(report.frontmatter.get("confidence", "?"))
+    body = report.body.strip() or "(no report body)"
     return (
         f'<div class="report-card">'
         f'<div class="report-meta">'

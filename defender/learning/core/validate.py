@@ -7,14 +7,13 @@ from typing import Any
 import yaml
 
 from defender._yaml import safe_load
-from defender._frontmatter import FrontmatterError, parse_frontmatter
+from defender._report import ReportRead, read_report
 from defender._text import is_content_less, strip_zero_width
 from defender.learning.core.config import (
     ACTOR_OBSERVATION_TYPES,
     ALL_FINDING_TYPES,
     BENIGN_ALL_FINDING_TYPES,
     BENIGN_OUTCOME_ENUM,
-    DISPOSITION_ENUM,
     RunUnprocessable,
     OUTCOME_ENUM,
 )
@@ -23,25 +22,27 @@ from defender.learning.core.config import (
 
 
 def normalize_disposition(report_path: Path) -> str:
-    if not report_path.is_file():
-        raise RunUnprocessable(f"report.md not found: {report_path}")
-    text = report_path.read_text(encoding="utf-8")
-    try:
-        fm, _ = parse_frontmatter(text)
-    except FrontmatterError as e:
-        head = "\n".join(text.splitlines()[:30])
-        raise RunUnprocessable(f"report.md {e}\n--- {report_path} (head) ---\n{head}") from e
-    disp = fm.get("disposition")
-    if isinstance(disp, str):
-        # The report is written by a model reading attacker-influenced alert data;
-        # a zero-width character clinging to the keyword must not decide whether the
-        # case is processable at all (#722). Match on what the value renders as.
-        disp = strip_zero_width(disp).strip()
-    if disp not in DISPOSITION_ENUM:
-        raise RunUnprocessable(
-            f"report.md disposition={disp!r} not in {sorted(DISPOSITION_ENUM)}"
-        )
-    return disp
+    """The run's disposition, or `RunUnprocessable`.
+
+    What the value MEANS — including #722's zero-width strip — is `_report.read_report`'s
+    single decision (#785). What stays here is the loop's REACTION: a case whose headline it
+    cannot read is refused with a typed error the drain can dead-letter, never guessed at.
+
+    The head-of-file dump is the operator's only view of what the model actually wrote, and it
+    now accompanies every refusal rather than only the unparseable ones — the diagnostic a
+    human needs is the same whichever way the headline failed.
+    """
+    read = read_report(report_path)
+    if read.disposition is None:
+        raise RunUnprocessable(_unprocessable_reason(read, report_path))
+    return read.disposition
+
+
+def _unprocessable_reason(read: ReportRead, report_path: Path) -> str:
+    if not read.text:
+        return str(read.reason)
+    head = "\n".join(read.text.splitlines()[:30])
+    return f"{read.reason}\n--- {report_path} (head) ---\n{head}"
 
 
 

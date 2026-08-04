@@ -24,6 +24,7 @@ from __future__ import annotations
 import yaml
 
 from defender._frontmatter import FrontmatterError, split_frontmatter
+from defender._text import strip_zero_width
 from defender.skills.invlang.validate import validate_companion
 
 # The canonical `report.md` disposition vocabulary — the SINGLE definition (#714). The
@@ -64,6 +65,30 @@ ARTIFACT_NAMES = (REPORT_NAME, INVESTIGATION_NAME)
 # it must read for THESE names only: an unconditional read would put a `read_text` that can
 # raise on the report.md path, where none ran before.
 NEEDS_BASELINE = frozenset({INVESTIGATION_NAME})
+
+
+def normalized_disposition(value: object) -> str | None:
+    """A `disposition` frontmatter value as it RENDERS — a `DISPOSITION_ENUM` member — or
+    `None` when it is not one of the three. THE single disposition decision on the READ side
+    (#785): every consumer of a completed `report.md` reaches it through `_report.py`, and the
+    loop's direction dispatch through `directions_for`, so no two readers can disagree about
+    what a given value means.
+
+    The #722 zero-width strip lives HERE and nowhere else. A non-`str` value (a YAML list,
+    an int) is rejected before the enum test rather than fed to it: `DISPOSITION_ENUM` is a
+    set, so an unhashable value would raise `TypeError` out of a bare membership check — the
+    same trap `validate_report` guards against on the write side.
+
+    NOT applied by `validate_report`, deliberately. On WRITE there is an author to ask: the
+    gate denies a zero-width-laced disposition with actionable retry text and the model fixes
+    it. A report already on disk has no author to ask — it may have arrived from an imported
+    run dir, a replayed fixture or a hand edit — and #722's rule is that what a disposition
+    renders as is what it means. Strict at the boundary, forgiving about what got past it.
+    """
+    if not isinstance(value, str):
+        return None
+    disposition = strip_zero_width(value).strip()
+    return disposition if disposition in DISPOSITION_ENUM else None
 
 
 def _utf8_len(text: str) -> int:

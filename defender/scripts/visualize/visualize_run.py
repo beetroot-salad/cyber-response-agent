@@ -11,6 +11,7 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender._io import read_jsonl_rows
+from defender._report import ReportRead
 from defender.learning import lead_repository
 from defender.scripts.visualize.visualize_data import (
     build_transcript,
@@ -112,10 +113,10 @@ def _byline(parts: list[str]) -> str:
 
 
 def render_judge_headline(
-    report: dict, docs: list[tuple[DirectionView, dict | None]],
+    report: ReportRead, docs: list[tuple[DirectionView, dict | None]],
 ) -> str:
-    disposition = str(report.get("disposition", "?"))
-    confidence = str(report.get("confidence", "?"))
+    disposition = report.disposition_or_unknown
+    confidence = str(report.frontmatter.get("confidence", "?"))
     # First rendered direction that produced a doc supplies the outcome tile — the page
     # order, so adversarial still wins when both ran. The tile names its direction either
     # way; it used to say so for the benign direction only.
@@ -151,13 +152,13 @@ _HEALTH_ICON = {"good": "✓", "warn": "⚠", "bad": "✗"}
 
 def render_runtime_headline(
     run_dir: Path,
-    report: dict,
+    report: ReportRead,
     health: dict,
     leads: list,
 ) -> str:
-    disposition = str(report.get("disposition", "?"))
-    confidence = str(report.get("confidence", "?"))
-    body = report.get("body", "").strip() or "(no report body)"
+    disposition = report.disposition_or_unknown
+    confidence = str(report.frontmatter.get("confidence", "?"))
+    body = report.body.strip() or "(no report body)"
 
     icon = _HEALTH_ICON.get(health["level"], "•")
     detail = (
@@ -363,7 +364,7 @@ def render_judge_page(run_dir: Path) -> str:
     report = parse_report(run_dir)
     docs = [
         (v, load_judge_doc(case_id, v.direction))
-        for v in active_views(case_id, str(report.get("disposition", "?")))
+        for v in active_views(case_id, report.disposition_or_unknown)
     ]
     toc_sections = [(v, judge_finding_count(d) if d else None) for v, d in docs]
     # Rendered once and handed to both the TOC and the page body: the bundle is empty when the
