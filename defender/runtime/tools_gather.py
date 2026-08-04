@@ -10,6 +10,8 @@ from pydantic_ai import RunContext
 from pydantic_ai.exceptions import ModelRetry, UnexpectedModelBehavior, UsageLimitExceeded
 from pydantic_ai.usage import UsageLimits
 
+from defender._io import guarded_mkdir, write_guarded
+
 from . import circuit_breaker
 from . import permission
 from . import session_store
@@ -244,8 +246,8 @@ _LEAD_REUSE_RETRY = (
 def _persist_gather_summary(run_dir: Path, lead_id: str, wrapped: str) -> None:
     try:
         d = run_dir / "gather_summaries"
-        d.mkdir(parents=True, exist_ok=True)
-        (d / f"{lead_id}.md").write_text(wrapped, encoding="utf-8")
+        guarded_mkdir(d, base=run_dir)
+        write_guarded(d / f"{lead_id}.md", wrapped)
     except Exception as e:  # noqa: BLE001 — persistence must never break the run
         print(f"[run.py] gather-summary persist skipped for {lead_id}: {e!r}",
               file=sys.stderr)

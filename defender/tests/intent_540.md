@@ -70,7 +70,7 @@ The constraint research behind the resolution, recorded because it is the reason
 
 **NO7. microVM (Firecracker / Kata) now.** *Why:* deferred, not rejected — unchanged by the 2026-07-18 resolution, and now with a costed reason: Hetzner Cloud cannot do nested virt at all (documented policy, all lines), so the tier needs Server Auction bare metal at ~€39/mo with ~1 business day per lever-up and different hardware each cycle, in exchange for closing no class the threat model does not already concede. It becomes table stakes at platform scale where the wall is a *tenant* boundary. The obligation it leaves behind is O14 (keep the runtime a real knob, and keep the lifecycle *behind* the interface, because a microVM is not a pure `--runtime` flip at the fs layer). — `issue-body` 2026-07-17 update; `issue-comment §4`; constraint research 2026-07-18.
 
-**NO8. Preventing symlink *creation* inside the box.** *Why:* on runsc there is no structural way to deny it. **This is now evidence, not assertion (C19, probe 13):** the same OCI bundle with a seccomp profile denying `symlink` via `SCMP_ACT_ERRNO` yields `SYMLINK_DENIED` / `Seccomp: 2` / 1 filter under runc, and `SYMLINK_ALLOWED` / `Seccomp: 0` / no filters under runsc. runsc silently ignores the profile. Creation-prevention therefore cannot be the boundary on the default runtime, and the control must be reader-side. — `issue-comment §2`; `RSD §Filesystem isolation`; probe 2026-07-18.
+**NO8. SUPERSEDED by #771 — retracted, not merely corrected.** *Why it was believed:* the same OCI bundle with a seccomp profile denying `symlink` via `SCMP_ACT_ERRNO` yielded `SYMLINK_DENIED` / `Seccomp: 2` / 1 filter under runc, and `SYMLINK_ALLOWED` / `Seccomp: 0` / no filters under runsc (C19, probe 13) — read at the time as runsc lacking the capability. **#771's C1-fix executed the missing arm:** that probe measured only the runtime's SHIPPED DEFAULT (`--oci-seccomp` unregistered); with `runsc install -- --oci-seccomp` registered, the identical profile yields `SYMLINK_DENIED` / `Seccomp: 2` on runsc too. gVisor does not ignore the OCI seccomp profile — the daemon simply was not configured to load it. Creation-prevention IS now the boundary (#771's alias ban, `runtime/box.py::ALIAS_PROFILE_PATH`), with M2's startup probe as the belt observing the runtime registration rather than trusting it. — `issue-comment §2`; #771 `00-design-doc-v2.md` C1-fix.
 
 **NO9. Per-call `docker run --rm` as the shipped lifecycle.** *Why:* per-run is chosen; `docker exec` at 57 ms median beats `docker run` at 201 ms (C35), and `run_dir` is a durable bind either way so the security delta is small. Per-call stays *available behind the same interface* — not deleted, not the default. — `issue-comment §3`; probe C35.
 
@@ -375,12 +375,12 @@ claims:
   # --- The symlink residual ---
   - id: C19
     kind: primitive
-    claim: "runsc silently ignores the OCI `linux.seccomp` profile — the Sentry services syscalls itself — so no syscall-deny can be enforced through the OCI spec on runsc; such a belt exists only on the runc fallback."
-    source: "RSG §Caveats; RSD §Network isolation; issue-comment §2; EXECUTED probe 13, 2026-07-18"
-    status: probed-2026-07-18
+    claim: "on the runtime's SHIPPED DEFAULT (no `--oci-seccomp` registration), the same OCI bundle's seccomp profile is not applied inside the sandbox — a MISCONFIGURATION, not a capability limit of the runtime itself (superseded reading below)."
+    source: "RSG §Caveats; RSD §Network isolation; issue-comment §2; EXECUTED probe 13, 2026-07-18; #771 C1-fix, EXECUTED, 2026-08-01"
+    status: superseded-2026-08-01
     probe_kind: executed
-    verdict: holds
-    note: "Same bundle, profile denying `symlink` with SCMP_ACT_ERRNO: runc -> SYMLINK_DENIED, Seccomp: 2, 1 filter. runsc -> SYMLINK_ALLOWED, Seccomp: 0, no filters. Reproduced via `--security-opt seccomp=`. Revision 1 flagged this as LOAD-BEARING-and-never-probed; it is now the evidenced justification for NO8 and M10."
+    verdict: refuted
+    note: "Same bundle, profile denying `symlink` with SCMP_ACT_ERRNO: runc -> SYMLINK_DENIED, Seccomp: 2, 1 filter. runsc (default, unregistered) -> SYMLINK_ALLOWED, Seccomp: 0, no filters. THIS PROBE NEVER RAN THE OTHER ARM. #771's C1-fix did: with `runsc install -- --oci-seccomp` registered, the identical profile yields SYMLINK_DENIED, Seccomp: 2 on runsc too (release-20260727.0). The capability-limit reading this claim was cited for (NO8, M10) does not survive; gVisor honours the OCI seccomp profile once the daemon is told to load it — see #771's alias ban (`box.ALIAS_PROFILE_PATH`, `box._probe_alias_ban`)."
   - id: C20
     kind: primitive
     claim: "A hardlink cannot be created across the box boundary — cross-device link returns EXDEV."

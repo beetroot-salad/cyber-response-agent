@@ -17,7 +17,7 @@ from pydantic_ai.exceptions import (
     ToolRetryError,
 )
 
-from defender._io import append_jsonl
+from defender._io import guarded_mkdir, write_guarded
 from defender._run_paths import RunPaths
 from defender.hooks.budget_enforcer import BudgetKill
 from defender._untrusted import wrap as _wrap
@@ -344,7 +344,7 @@ class QueryCapture(AbstractCapability[Any]):
                     else f"exit={exit_code}; {detail.strip()[:160]}"
                 ),
             }
-            append_jsonl(RunPaths(run_dir).executed_queries, [row])
+            write_guarded(RunPaths(run_dir).executed_queries, json.dumps(row) + "\n", mode="append")
 
         circuit_breaker.record_outcome(run_dir, system, exit_code)
         return row, text
@@ -406,9 +406,12 @@ def _persist_payload(run_dir, lead_id: str, seq: int, text: str) -> str | None:
     lead_dir = RunPaths(run_dir).gather_raw / lead_id
     payload_path = lead_dir / f"{seq}.json"
     try:
-        lead_dir.mkdir(parents=True, exist_ok=True)
-        payload_path.write_text(text, encoding="utf-8")
-    except OSError:
+        guarded_mkdir(lead_dir, base=run_dir)
+        write_guarded(payload_path, text)
+    except (OSError, ValueError):
+        # ValueError as well as OSError: `guarded_mkdir` raises it for a target that is not
+        # inside the tree the anchor names, which a `lead_id` carrying path separators or `..`
+        # produces here. Best-effort persistence must not become the run's crash.
         return None
     return str(payload_path.relative_to(run_dir))
 

@@ -65,6 +65,10 @@ UNRELATED_TREES = (
     "defender/tests/evals/test_generate_case.py",
     "defender/tests/evals/_run_records/",
     "defender/docs/oracle-calibration.md",
+    # #771's write-lint baseline fingerprints census sites as `<file>:<function>` — one row is
+    # the legitimate `run_common.py:materialize_run_dir` writer, which coincidentally spells
+    # both `run_common` and `materialize_run_dir` in a JSON string. Data, not an import.
+    "scripts/lint/lint_unguarded_tree_write_baseline.json",
 )
 HISTORICAL_RECORD = UNRELATED_TREES
 

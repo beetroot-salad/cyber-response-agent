@@ -28,6 +28,7 @@ from typing import Any
 import pytest
 
 from defender.runtime import box as box_mod
+from defender.runtime.scrub import verdict_path
 
 DEFENDER = Path(__file__).resolve().parents[2]
 REPO_ROOT = DEFENDER.parent
@@ -155,6 +156,18 @@ class RecordingDocker:
             f = self.create
             return _cp(f.rc, f.stdout, f.stderr) if f else _cp(0, "container-id\n")
         if sub == "exec":
+            if "python3" in argv and "-c" in argv:
+                # #771 M2's alias-ban probe (`docker exec -w <cwd> <name> python3 -c <script>`).
+                # A caller that cares about the probe's own verdict uses `AliasProbeDocker`
+                # (`_spec771.py`), which intercepts this shape before it ever reaches here — so
+                # a bare `RecordingDocker` (the pre-#771 fake every test_540/665/747/box_dood
+                # case is built on) has no reason to see this branch except the probe M2 added
+                # to EVERY box start. Defaulting to the healthy verdict keeps those cases
+                # observing what they always observed (mount/env/argv geography) without
+                # needing to know the probe exists.
+                if self._exec_replies:
+                    return self._exec_replies.pop(0)
+                return _cp(0, "alias-probe: all banned shapes denied; ordinary create ok\n", "")
             if self.sentinel is not None:
                 return _cp(self.sentinel.rc, self.sentinel.stdout, self.sentinel.stderr)
             if self._exec_replies:
@@ -373,6 +386,13 @@ class RecordingBranch:
         self.events.append("cleanup")
         if self.destroy_on_cleanup:
             shutil.rmtree(wt, ignore_errors=True)
+        # OUTSIDE the destroy_on_cleanup arm, because the real `AuthorBranch.cleanup` unlinks
+        # unconditionally: the verdict sidecar sits BESIDE `wt` (#771 §7 D8), outside the tree
+        # the rmtree destroys, so removing it is not part of destroying the tree and does not
+        # belong under the flag that controls whether the tree is destroyed. Gated, this double
+        # left a sidecar behind that production removes — so a suite asserting the post-cleanup
+        # state of the worktree base saw a file the real lane does not leave.
+        verdict_path(wt).unlink(missing_ok=True)
 
 
 # --------------------------------------------------------------------------- #
