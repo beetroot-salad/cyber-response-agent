@@ -95,7 +95,23 @@ def _source_one_provider_key(prov: providers.Provider) -> int:
     return 2
 
 
-def preflight_role_models() -> int:
+def _role_model_name(defn: Any, model_override: str | None) -> str:
+    """The model name this role will ACTUALLY run on.
+
+    The operator's per-run `--model` reaches every role that resolves through the shared
+    main-model resolver — the investigator and the three review stages — and no role that
+    owns a knob of its own. Checking `defn.model()` alone validated the ambient default while
+    the run was about to execute on the override, so a broken override passed the preflight
+    clean."""
+    from defender.runtime import review_roles
+
+    shared = (driver.resolve_main_model, review_roles.resolve_review_model)
+    if model_override is not None and defn.model in shared:
+        return str(defn.model(model_override))
+    return str(defn.model())
+
+
+def preflight_role_models(model_override: str | None = None) -> int:
     """PR9-12 (#774). Iterate EVERY registered role's model config at investigation STARTUP
     and fail fast if a role's provider key is unusable — build-time failure is
     provider-dependent (one provider raises immediately on a missing key, another defers to
@@ -108,7 +124,7 @@ def preflight_role_models() -> int:
     seen_provider_ids: set[str] = set()
     for defn in AGENTS.values():
         try:
-            name = defn.model()
+            name = _role_model_name(defn, model_override)
         except Exception as e:  # noqa: BLE001 — a broken model accessor is a preflight failure
             print(f"[run.py] preflight: {defn.role.name} model config raised: {e!r}",
                   file=sys.stderr)
@@ -235,7 +251,7 @@ def main(argv: list[str]) -> int:
     rc = _source_provider_keys(model, driver.gather_model())
     if rc:
         return rc
-    rc = preflight_role_models()
+    rc = preflight_role_models(ns.model)
     if rc:
         return rc
 

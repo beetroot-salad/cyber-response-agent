@@ -133,9 +133,14 @@ from defender.agents import (  # noqa: E402
     LEAD_AUTHOR_DEF,
     MAIN_DEF,
     ORACLE_DEF,
+    PROJECTION_DEF,
     VERIFY_DEF,
 )
-from defender.runtime.review_roles import ChallengerDeps, CoherenceCheckerDeps  # noqa: E402
+from defender.runtime.review_roles import (  # noqa: E402
+    ChallengerDeps,
+    CoherenceCheckerDeps,
+    ProjectionDeps,
+)
 
 _DEFENDER = PATHS.defender_dir
 
@@ -538,9 +543,14 @@ def test_d2_deps_class_maps_every_bindable_role(tmp_path):
     (compiling it here would root its write_allow at run_dir), so it is constructed only via
     `CuratorDeps.for_run` and bind(CORPUS_AUTHOR_DEF) FAILS LOUD rather than mint a wrong policy.
 
-    #774 added two further ordinarily-bindable roles (CHALLENGER/COHERENCE_CHECKER — no read/bash
-    grant, no corpus, so a bare `bind()` works exactly like MAIN/GATHER/ORACLE, not like the
-    CORPUS_AUTHOR carve-out)."""
+    #774 added three further ordinarily-bindable roles (CHALLENGER/COHERENCE_CHECKER, and
+    PROJECTION once R6 gave the projection stage a role of its own — none holds a read or bash
+    grant and none needs a corpus, so a bare `bind()` works exactly like MAIN/GATHER/ORACLE,
+    not like the CORPUS_AUTHOR carve-out).
+
+    The enumeration below is what makes the count assertion mean anything: a role added to the
+    enum but left out of `cases` would move the count and still never be bound, so every
+    bindable role is listed here rather than sampled."""
     cases = [
         (bind(MAIN_DEF, tmp_path), AgentDeps),
         (bind(GATHER_DEF, tmp_path), GatherDeps),
@@ -552,9 +562,10 @@ def test_d2_deps_class_maps_every_bindable_role(tmp_path):
          LeadAuthorDeps),
         (bind(CHALLENGER_DEF, tmp_path), ChallengerDeps),
         (bind(COHERENCE_CHECKER_DEF, tmp_path), CoherenceCheckerDeps),
+        (bind(PROJECTION_DEF, tmp_path), ProjectionDeps),
     ]
-    # 10 roles total: the 9 bindable ones above + CORPUS_AUTHOR (for_run-only, asserted below).
-    assert len({role for role in AgentRole}) == 10
+    # 11 roles total: the 10 bindable ones above + CORPUS_AUTHOR (for_run-only, asserted below).
+    assert len({role for role in AgentRole}) == 11
     for deps, expected in cases:
         assert type(deps) is expected, f"{deps.role} → {type(deps).__name__}, want {expected.__name__}"
     with pytest.raises((ValueError, TypeError)):

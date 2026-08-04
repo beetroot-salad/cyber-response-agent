@@ -375,7 +375,7 @@ def _fold_decision(run_dir: Path) -> tuple[int, str] | None:
     return fold_through, compaction.frontier_text(inv_text, fold_through)
 
 
-def _make_store_render_processor(store: Any, session_id: str, *, fold: bool):
+def _make_store_render_processor(store: Any, session_id: str, *, fold: bool, request_limit: int):
     async def process(ctx: RunContext[AgentDeps], messages: list) -> list:
         # The framework appends this round's own request to state history and only
         # THEN checks the request limit (pydantic_ai's `_prepare_request`), so by the
@@ -383,9 +383,14 @@ def _make_store_render_processor(store: Any, session_id: str, *, fold: bool):
         # `messages`. Mirror the same check here and withhold it from the store —
         # otherwise a round that never actually happens gets committed anyway, and the
         # run-end flush can never recover the true terminal response.
+        #
+        # RS7: the ceiling is the one the RUN was handed, not the un-raised base. Pinned to
+        # the base, this mirror withheld the extra rounds the raise exists to buy — rounds
+        # that genuinely execute — so they skipped the history-compaction path entirely and
+        # the model was handed raw, unrendered history for them.
         usage = getattr(ctx, "usage", None)
         requests = int(getattr(usage, "requests", 0) or 0)
-        if requests >= DEFAULT_REQUEST_LIMIT:
+        if requests >= request_limit:
             selection.ingest(store, session_id, messages[:-1], agent_id="main")
             return messages
         selection.ingest(store, session_id, messages, agent_id="main")
@@ -423,9 +428,27 @@ def _make_gather_recorder(store: Any, session_id: str, agent_id: str):
     return process
 
 
-def _main_extra_capabilities(store: Any, session_id: str) -> list[ProcessHistory[Any]]:
-    return [ProcessHistory(
-        _make_store_render_processor(store, session_id, fold=_compaction_enabled()))]
+def _main_extra_capabilities(
+    store: Any, session_id: str, *, request_limit: int | None = None,
+) -> list[ProcessHistory[Any]]:
+    """`request_limit` is the ceiling the RUN was handed — base plus the gate's forced-turn
+    bound — and the default is the RAISED ceiling of the shipped bounds, never the un-raised
+    base.
+
+    The base was the default here, mirroring at one call frame's remove the exact staleness
+    RS7 exists to prevent: the composition root honoured the raised ceiling while an omitted
+    argument would have had this reader withhold from the compaction path the very rounds the
+    raise buys. Sole production caller passes the run's own value; the default exists because
+    the assembly seam is constructed directly by tests that pin the capability COUNT and have
+    no ceiling to hand it."""
+    # lint-default: ok — resolved once into a fresh name; the honest default is derived from
+    # the bounds object and cannot be a signature default without an import-time read of it.
+    limit = (
+        request_limit if request_limit is not None
+        else challenge_gate.raised_request_limit(challenge_gate.default_bounds())
+    )
+    return [ProcessHistory(_make_store_render_processor(
+        store, session_id, fold=_compaction_enabled(), request_limit=limit))]
 
 
 def _gather_extra_capabilities(store: Any, session_id: str, agent_id: str) -> list[ProcessHistory[Any]]:
@@ -437,11 +460,17 @@ def build_agent(  # noqa: PLR0913 — composition root: config + DI seams + the 
     make_model: MakeModel = providers.build_for_effort,
     *, main_model: str | None = None, verbs: Any = None, limits: dict = DEFAULT_LIMITS,
     store: Any = None, session_id: str | None = None, review_stages: Any = None,
+    bounds: challenge_gate.Bounds | None = None,
 ) -> Agent[AgentDeps, str]:
+    # lint-default: ok — DI seam owning its default, resolved once into a fresh name at the
+    # composition root and threaded inward as a concrete value.
+    gate_bounds = bounds if bounds is not None else challenge_gate.default_bounds()
     extra: list[ProcessHistory[Any]] = []
     if store is not None:
         assert session_id is not None, "a store requires its session_id (build_agent's own contract)"
-        extra = _main_extra_capabilities(store, session_id)
+        extra = _main_extra_capabilities(
+            store, session_id, request_limit=challenge_gate.raised_request_limit(gate_bounds),
+        )
     _override = " (DEFENDER_GATHER_MODEL override)" if os.environ.get("DEFENDER_GATHER_MODEL") else ""
     print(f"[run.py] gather model: {gather_model()}{_override}", file=sys.stderr)
     name = resolve_main_model(main_model)
@@ -486,10 +515,13 @@ def build_agent(  # noqa: PLR0913 — composition root: config + DI seams + the 
         # `ctx.deps.run_dir` at call time, not something this composition root sees. The
         # live default below is a best-effort placeholder (never exercised by the hermetic
         # suite, which always injects `review_stages`); it is deliberately weak rather than
-        # silently wrong about which run dir it acts on.
-        else review_roles.default_review_stages(run_dir=defender_dir, defender_dir=defender_dir)
+        # silently wrong about which run dir it acts on. The operator's model choice DOES
+        # reach it — that part is not best-effort.
+        else review_roles.default_review_stages(
+            run_dir=defender_dir, defender_dir=defender_dir, model=name,
+        )
     )
-    register_close_tool(agent, stages=stages)
+    register_close_tool(agent, stages=stages, bounds=gate_bounds)
     return agent
 
 
@@ -558,8 +590,9 @@ def _flush_run_end(run: Any, store: Any, session_id: str, truncated_by: str | No
             print(f"[run.py] truncated_by write skipped: {e!r}", file=sys.stderr)
 
 
-async def _drive_agent(
+async def _drive_agent(  # noqa: PLR0913 — the loop's own inputs: agent, prompt, deps, store, bounds
     agent: Agent[AgentDeps, str], prompt: str, deps: AgentDeps, store: Any, session_id: str,
+    bounds: challenge_gate.Bounds,
 ) -> tuple[Any, str | None, str | None]:
     """Runs the bare `async for node in run` loop and classifies the four caught exits
     into `(truncated_by, exit_reason)`; returns the (possibly unfinished) `run` alongside
@@ -574,9 +607,7 @@ async def _drive_agent(
             # forced-turn cap, read FROM the bound rather than restated as a literal —
             # every run pays it whether or not the gate ever fires (a property of the
             # run, not of a review that happened).
-            usage_limits=UsageLimits(
-                request_limit=challenge_gate.raised_request_limit(challenge_gate.default_bounds()),
-            ),
+            usage_limits=UsageLimits(request_limit=challenge_gate.raised_request_limit(bounds)),
         ) as run:
             async for node in run:
                 _log_node(node)
@@ -596,13 +627,24 @@ async def _drive_agent(
               file=sys.stderr)
         truncated_by = "retry-exhausted"
         exit_reason = "UnexpectedModelBehavior"
-        try:
-            from .close_tool import _close_investigation_async
+        # R4, the limb terminality has to answer separately: this handler bypasses the gate
+        # and commits through the same path, so on a run whose disposition ALREADY committed
+        # it silently replaced a confident finding with the unresolved one it forces — and
+        # destroyed that close's review record with it. The handler is not withdrawn (it is
+        # the only thing between a stuck model and no disposition at all); it is made aware
+        # of the close it is about to overwrite. A run that errors AFTER closing keeps what
+        # it decided, and the error survives in the logs above rather than in the case record.
+        if challenge_gate.ReviewState.of(deps).closed:
+            print("[run.py] the investigation already closed; keeping its disposition",
+                  file=sys.stderr)
+        else:
+            try:
+                from .close_tool import _close_investigation_async
 
-            await _close_investigation_async(deps, "inconclusive", stages=None)
-        except Exception as close_err:  # noqa: BLE001 — this exit must not itself raise
-            print(f"[run.py] forced close after retry exhaustion also failed "
-                  f"({close_err!r})", file=sys.stderr)
+                await _close_investigation_async(deps, "inconclusive", stages=None)
+            except Exception as close_err:  # noqa: BLE001 — this exit must not itself raise
+                print(f"[run.py] forced close after retry exhaustion also failed "
+                      f"({close_err!r})", file=sys.stderr)
     except RunAborted as e:
         print(f"[run.py] {e}; writing partial trace", file=sys.stderr)
         truncated_by = "aborted"
@@ -638,8 +680,13 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     box: Any = None,
     store_factory: StoreFactory | None = None,
     review_stages: Any = None,
+    bounds: challenge_gate.Bounds | None = None,
 ) -> dict:
     model_name = resolve_main_model(model_name)
+    # lint-default: ok — DI seam owning its default (the #774 repair's seventh seam: the
+    # gate's bounds, carrying the request ceiling's own BASE), resolved once at the entry
+    # point and threaded inward as a concrete value.
+    gate_bounds = bounds if bounds is not None else challenge_gate.default_bounds()
     make_model = make_model or providers.build_for_effort
     adapters = defender_dir / "scripts" / "adapters"
     verbs = verbs if verbs is not None else ModuleVerbRegistry(adapters, GATHER_DEF.verb_grant)  # lint-default: ok — DI seam owning its default (tree-derived; no signature default possible)
@@ -680,7 +727,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
 
     agent = build_agent(
         defender_dir, logger, make_model, main_model=model_name, verbs=verbs, limits=limits,
-        store=store, session_id=session_id, review_stages=review_stages,
+        store=store, session_id=session_id, review_stages=review_stages, bounds=gate_bounds,
     )
     deps = replace(
         bind(MAIN_DEF, run_dir, salt=salt, defender_dir=defender_dir, box=box),
@@ -690,7 +737,9 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     prompt = _user_prompt(run_dir, alert_path, defender_dir, salt)
 
     t0 = time.time()
-    run, truncated_by, exit_reason = await _drive_agent(agent, prompt, deps, store, session_id)
+    run, truncated_by, exit_reason = await _drive_agent(
+        agent, prompt, deps, store, session_id, gate_bounds,
+    )
     wall_ms = (time.time() - t0) * 1000.0
 
     result = run.result if run is not None else None

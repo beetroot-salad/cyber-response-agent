@@ -21,14 +21,15 @@ it). Drive a run with `drive(run_dir, run_id=…, salt=…, main=<callable>)`, w
 the callable is a `ReplayFn` / `DenyProbe` / `NeverEndsModel` — `drive` wraps it
 in `FunctionModel`, so scripts never touch the pydantic plumbing.
 
-Below the model there are exactly SIX injected seams, and every one is a VALUE the run
+Below the model there are exactly SEVEN injected seams, and every one is a VALUE the run
 is handed (never a monkeypatched module attribute): the model itself (`make_model`), the
 data-source verb registry (`verbs=` → `run_investigation(verbs=…)`, #611), the budget cap
 table (`limits=` → `run_investigation(limits=…)`, #631), the box executor (`box=` →
 `run_investigation(box=…)`, #540), the per-case session store (`store_factory=` →
 `run_investigation(store_factory=…)`, #705), and the review-stage bundle (`review_stages=`
 → `run_investigation(review_stages=…)`, #774) the close tool's live write-time gate drives
-its three model-backed stages through. The fifth exists because environment steering
+its three model-backed stages through, and the gate's bounds object (`bounds=` →
+`run_investigation(bounds=…)`, the #774 repair) carrying the request ceiling's own base. The fifth exists because environment steering
 cannot express contention or corruption — it can only express "the store is missing", one
 third of O19's stated domain, while reading as covered — and the project profile forbids
 the `monkeypatch.setattr` that would express the rest (R12). The sixth exists because the
@@ -280,7 +281,7 @@ def normalize(text: str, *, run_dir: Path, salt: str, run_id: str) -> str:
 
 def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJECTION SEAM
         run_dir: Path, *, run_id: str, salt: str, main, gather=None, verbs=None,
-        limits=None, box=None, store_factory=None, review_stages=None):
+        limits=None, box=None, store_factory=None, review_stages=None, bounds=None):
     """Run the real driver with injected fake models — no monkeypatching of the
     model symbol. `main`/`gather` are plain replay callables (ReplayFn / DenyProbe
     / NeverEndsModel); this wraps each in `FunctionModel`, so scripts stay
@@ -317,7 +318,16 @@ def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJEC
     live write-time gate drives three model-backed review stages from inside the close tool,
     and without a value the run is handed they are real provider calls that no hermetic
     scenario can drive. Passed through only when supplied, so every pre-#774 scenario is
-    untouched. RED until `run_investigation` accepts it — that is the demand."""
+    untouched. RED until `run_investigation` accepts it — that is the demand.
+
+    `bounds` is the SEVENTH injection seam (#774 repair): the gate's bounds object, carrying
+    the request ceiling's own BASE alongside the forced-turn cap. Without it the base is a
+    module constant with no environment backing and no path through the entry point, so
+    "the raised ceiling is READ FROM the cap rather than restated as a literal" cannot be
+    discriminated at all — the shipped base and a hardcoded copy of it are the same number.
+    Reaching it any other way means the technique this project ratchets in CI, which is why
+    the seam is the demand. Passed through only when supplied. RED until
+    `run_investigation` accepts it."""
     main_built = BuiltModel(FunctionModel(main), None)
     gather_built = BuiltModel(FunctionModel(gather), None) if gather is not None else None
 
@@ -342,6 +352,8 @@ def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJEC
         seams["store_factory"] = store_factory
     if review_stages is not None:
         seams["review_stages"] = review_stages
+    if bounds is not None:
+        seams["bounds"] = bounds
     seams["box"] = box if box is not None else box_mod.unboxed_executor(
         env=run_common.run_env(DEFENDER, run_dir),
     )

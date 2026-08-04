@@ -1,7 +1,8 @@
-"""#774 — the two new review roles the live write-time gate drives from inside the close
-tool: `CHALLENGER_DEF` and `COHERENCE_CHECKER_DEF`, their bind, and their input builders.
+"""#774 — the three review roles the live write-time gate drives from inside the close tool:
+`CHALLENGER_DEF`, `COHERENCE_CHECKER_DEF` and `PROJECTION_DEF`, their bind, and their input
+builders.
 
-Both roles hold NO file-read grant and NO bash grant at all — not narrowed roots, zero. At
+All three hold NO file-read grant and NO bash grant at all — not narrowed roots, zero. At
 write time a review role's run dir IS the live investigation's own dir, and both grant
 surfaces (`decide_read`'s root check, the bash lane's operand scope) admit it unconditionally
 ahead of any narrowing, so a role that could read or run bash could always reach the live
@@ -18,8 +19,8 @@ returns inside (a role that reads attacker-influenced payloads must never hold t
 from __future__ import annotations
 
 import json
-import os
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -33,11 +34,20 @@ _DENY_REASON = (
     "no bash grant of any kind."
 )
 
-#: Deliberately NOT `driver.resolve_main_model` — importing `driver` here would close a
-#: module cycle (`driver` → `close_tool`/`challenge_gate` → `review_roles` → `driver`). Same
-#: env var and default, read independently.
-def _review_model() -> str:
-    return os.environ.get("DEFENDER_MODEL") or "glm-5.2"
+
+def resolve_review_model(explicit: str | None = None) -> str:
+    """The model every review stage runs on — the INVESTIGATOR's own resolver, so an
+    operator's per-run `--model` reaches the review as well as the investigation, and the
+    shipped default has exactly ONE home.
+
+    A private copy of the env var and the default id was the shipped shape, on the stated
+    grounds of an import cycle. It bought a review that could not receive the override at all
+    (the accessor took no parameter) and a second copy of the default that drifts the first
+    time the default moves. The cycle is real but it is an IMPORT-TIME one only: `driver`
+    imports this module, so the import lives in the body rather than at module scope."""
+    from defender.runtime.driver import resolve_main_model
+
+    return resolve_main_model(explicit)
 
 
 @dataclass(frozen=True)
@@ -50,9 +60,14 @@ class CoherenceCheckerDeps(AgentDeps):
     role: ClassVar[AgentRole] = AgentRole.COHERENCE_CHECKER
 
 
+@dataclass(frozen=True)
+class ProjectionDeps(AgentDeps):
+    role: ClassVar[AgentRole] = AgentRole.PROJECTION
+
+
 CHALLENGER_DEF = AgentDefinition(
     role=AgentRole.CHALLENGER,
-    model=_review_model,
+    model=resolve_review_model,
     effort="low",
     tools=ToolSet(),
     deps_cls=ChallengerDeps,
@@ -61,10 +76,25 @@ CHALLENGER_DEF = AgentDefinition(
 
 COHERENCE_CHECKER_DEF = AgentDefinition(
     role=AgentRole.COHERENCE_CHECKER,
-    model=_review_model,
+    model=resolve_review_model,
     effort="low",
     tools=ToolSet(),
     deps_cls=CoherenceCheckerDeps,
+    deny_reason=_DENY_REASON,
+)
+
+#: R6. The projection stage's OWN role. Its blindness — one story, never told which side is
+#: being challenged — is the design's whole argument for keeping it unleadable, and while it
+#: was the challenger's definition re-bound at one call site that blindness lived in prompt
+#: text: the challenger's direction-conditional affordance names the side being argued by
+#: construction, so the next edit to the challenger's role would have leaked the direction
+#: into the stage built not to know it.
+PROJECTION_DEF = AgentDefinition(
+    role=AgentRole.PROJECTION,
+    model=resolve_review_model,
+    effort="low",
+    tools=ToolSet(),
+    deps_cls=ProjectionDeps,
     deny_reason=_DENY_REASON,
 )
 
@@ -85,6 +115,10 @@ def bind_review_role(
 #: here at authoring time).
 OBSERVATION_TAGS: tuple[str, ...] = (":V ", ":E ", ":R attr_updates")
 LEAD_TAG = ":L "
+
+#: RS18. The lead columns that survive the observation-layer cut. `tests` (the hypotheses the
+#: lead was run to test) and `loop` (scheduling state) are belief structure and are withheld.
+LEAD_IDENTITY_COLUMNS: tuple[str, ...] = ("id", "name", "target")
 
 
 def _extract_observation_layer(investigation_text: str) -> str:
@@ -123,37 +157,72 @@ def _lead_data_rows(investigation_text: str) -> list[list[str]]:
     return out
 
 
+def _declared_lead_columns(investigation_text: str) -> list[str]:
+    """The lead block's column names, in the order the DOCUMENT declares them.
+
+    The investigator authors this table itself and nothing validates the column order it
+    chooses, so reading the cut by fixed position makes the guarantee a convention the
+    document's own author controls: reorder two columns and the wrong values go through
+    silently, with no exception and no mismatch signal."""
+    for line in investigation_text.splitlines():
+        if line.startswith(LEAD_TAG) and "[" in line and "]" in line:
+            inner = line[line.index("[") + 1: line.rindex("]")]
+            return [c.strip().rstrip("?") for c in inner.split("|")]
+    return []
+
+
 def _projected_lead_block(investigation_text: str) -> str:
     """RS18. The lead block PROJECTED to identity columns only (`id`/`name`/`target`) — the
     hypothesis pointers (`tests`) and the scheduling state (`loop`) are belief structure, on
     the inference side of the cut, and are withheld. Lead identity has to arrive at all: the
-    challenger's own output contract requires a lead id per settled assertion."""
+    challenger's own output contract requires a lead id per settled assertion.
+
+    Selection is by the DECLARED header, never by column position — see
+    `_declared_lead_columns`. A document declaring none of the identity columns projects no
+    block at all rather than a block of blanks attributed to names it never carried."""
     rows = _lead_data_rows(investigation_text)
     if not rows:
         return ""
-    lines = ["\n:L leads [id|name|target]"]
+    declared = _declared_lead_columns(investigation_text)
+    at = {name: i for i, name in enumerate(declared)}
+    if not any(column in at for column in LEAD_IDENTITY_COLUMNS):
+        return ""
+    lines = ["\n:L leads [" + "|".join(LEAD_IDENTITY_COLUMNS) + "]"]
     for row in rows:
-        lead_id = row[0] if len(row) > 0 else ""
-        name = row[2] if len(row) > 2 else ""
-        target = row[3] if len(row) > 3 else ""
-        lines.append(f"{lead_id}|{name}|{target}")
+        cells = []
+        for column in LEAD_IDENTITY_COLUMNS:
+            i = at.get(column)
+            cells.append(row[i] if i is not None and i < len(row) else "")
+        lines.append("|".join(cells))
     return "\n".join(lines) + "\n"
 
 
-def _closed_ticket_note(deps: AgentDeps) -> str:
+#: The lister the closed-ticket affordance is handed. The REAL one shells out to a ticket CLI
+#: subprocess — fine for the offline actor's once-per-run cost, wildly wrong for a prompt
+#: builder invoked (and re-invoked on every refinement round) inside the live gate's own
+#: stage-deadline budget. So production hands in a lister that reaches nothing.
+ClosedTicketLister = Callable[[str], list]
+
+
+def _no_closed_tickets(_label: str) -> list:
+    """The production lister: no ticket pool, and no subprocess to get one.
+
+    It is a NAMED seam rather than an inline lambda because the branch that renders a history
+    section is otherwise unreachable — nothing could establish that the section a cold start
+    omits can exist at all, so the omission was satisfied by a fixed sentence that is present
+    and empty in substance."""
+    return []
+
+
+def _closed_ticket_note(deps: AgentDeps, list_closed_fn: ClosedTicketLister) -> str:
     """The benign-counter-direction affordance: prior closed-ticket precedent, when any is
     eligible. The instructional sentence is unconditional (the model always knows this
     affordance class exists); the SAMPLE itself is only appended when non-empty — an empty
-    sample is omitted entirely rather than sent as an empty list, inheriting the existing
-    actor's cold-start behaviour.
+    sample is omitted entirely rather than sent as an empty list, because an empty menu reads
+    to a model as "there are no prior closes", which is a claim the sampler never made.
 
-    The sampler (`ticket_seeds.sample_seeds`) shells out to a real ticket CLI subprocess —
-    fine for the offline actor's own once-per-run cost, wildly wrong for a per-review-call
-    prompt builder invoked (and re-invoked, on every refinement round) from inside the live
-    write-time gate's own stage-deadline budget. `list_closed_fn=lambda _label: []` skips the
-    subprocess entirely; a genuinely wired ticket-history affordance is a follow-up, not
-    required by this suite (every scenario here runs against a repo with no closed-ticket
-    fixtures for its alert's signature anyway)."""
+    "Nobody asked" and "we asked and there were none" therefore render identically, and
+    neither renders as a claim."""
     from defender.learning.tickets import ticket_seeds
 
     note = (
@@ -166,7 +235,7 @@ def _closed_ticket_note(deps: AgentDeps) -> str:
         alert = {}
     try:
         seeds = ticket_seeds.sample_seeds(
-            alert, deps.run_id, deps.run_id, list_closed_fn=lambda _label: [],
+            alert, deps.run_id, deps.run_id, list_closed_fn=list_closed_fn,
         )
     except Exception:  # noqa: BLE001
         seeds = []
@@ -187,15 +256,25 @@ def _technique_menu() -> str:
     return "\n## Technique menu\n" + "\n".join(lines) + "\n"
 
 
-def build_challenger_input(deps: AgentDeps, disposition: str, direction) -> str:
+def build_challenger_input(
+    deps: AgentDeps, disposition: str, direction, *,
+    list_closed_fn: ClosedTicketLister = _no_closed_tickets,
+) -> str:
     """The challenger's whole input: the observation layer, the projected lead block, and the
     direction-conditional exploration affordance — never the hypothesis/resolution/conclusion
-    blocks, and never a file-read or bash grant."""
+    blocks, and never a file-read or bash grant.
+
+    `list_closed_fn` is DEFAULTED to the production lister: a mandatory parameter would force
+    every call site that reaches this builder indirectly to name a value only a scenario ever
+    supplies."""
     inv_path = deps.run_dir / "investigation.md"
     investigation_text = inv_path.read_text(encoding="utf-8") if inv_path.is_file() else ""
     observation = _extract_observation_layer(investigation_text)
     leads = _projected_lead_block(investigation_text)
-    affordance = _technique_menu() if direction.name == "adversarial" else _closed_ticket_note(deps)
+    affordance = (
+        _technique_menu() if direction.name == "adversarial"
+        else _closed_ticket_note(deps, list_closed_fn)
+    )
     return (
         f"The investigation reached a confident disposition: {disposition}.\n"
         f"Argue the counter-disposition: {direction.name}.\n\n"
@@ -206,6 +285,27 @@ def build_challenger_input(deps: AgentDeps, disposition: str, direction) -> str:
         "Output ONE JSON object: either {\"counter_story\": <str>, \"requirements\": "
         "[{\"assertion\": <str>, \"settled_by\": <lead_id or null>, \"if_false\": <str>}, ...]} "
         "or a deliberate decline {\"counter_story\": null, \"declined\": true, \"reason\": <str>}."
+    )
+
+
+def build_refinement_input(base_prompt: str, prior_story: str, coherence_gap: str) -> str:
+    """The SECOND ASK, not a retry. A refinement round exists because the coherence checker
+    found the counter-story internally inconsistent, so the round carries the story that
+    failed and the inconsistency that was named. Re-sending the identical prompt makes the
+    grace budget a coin flip and makes the rounds-consumed count — the design's only stated
+    evidence-strength signal — mean nothing.
+
+    The gap is inlined raw rather than framed on the investigation's own salt: a review role
+    must never hold the delimiter of the frame its own output returns inside (PR7/PR8)."""
+    return (
+        f"{base_prompt}\n\n"
+        "## Refinement round\n"
+        "The counter-story below was judged INTERNALLY INCONSISTENT. Rewrite it so the "
+        "inconsistency named is resolved, or decline. Same output contract as above.\n\n"
+        "### The counter-story that failed\n"
+        f"{prior_story}\n\n"
+        "### The inconsistency the coherence checker named\n"
+        f"{coherence_gap}\n"
     )
 
 
@@ -269,29 +369,46 @@ def _make_live_stage(defn: AgentDefinition, run_dir: Path, defender_dir: Path, t
     return call
 
 
-def default_review_stages(run_dir: Path, defender_dir: Path) -> ReviewStages:
+def default_review_stages(
+    run_dir: Path, defender_dir: Path, *, model: str | None = None,
+) -> ReviewStages:
     """The default bundle when `run_investigation`/`close_investigation` is not handed one —
-    live agent calls, one per stage. Oracle projection reuses the challenger's own role
-    shape (no read/bash grant either) since #774 scopes only the two named roles; a
-    dedicated projection role is a follow-up, not required by this suite."""
+    live agent calls, one per stage, each under its OWN role.
+
+    `model` is the operator's per-run override. It is resolved ONCE here, at the boundary,
+    and threaded into all three definitions as a concrete name: the stages used to resolve
+    their own model through a zero-parameter accessor, which is structurally incapable of
+    receiving an override, so the operator's choice bought the review nothing and the startup
+    check validated a model the run would not use."""
+    name = resolve_review_model(model)
+
+    def staged(defn: AgentDefinition, trace_name: str):
+        return _make_live_stage(
+            replace(defn, model=lambda: name), run_dir, defender_dir, trace_name,
+        )
+
     return ReviewStages(
-        challenger=_make_live_stage(CHALLENGER_DEF, run_dir, defender_dir, "review_challenger_live_trace.jsonl"),
-        coherence_checker=_make_live_stage(
-            COHERENCE_CHECKER_DEF, run_dir, defender_dir, "review_coherence_checker_live_trace.jsonl",
+        challenger=staged(CHALLENGER_DEF, "review_challenger_live_trace.jsonl"),
+        coherence_checker=staged(
+            COHERENCE_CHECKER_DEF, "review_coherence_checker_live_trace.jsonl",
         ),
-        projection=_make_live_stage(CHALLENGER_DEF, run_dir, defender_dir, "review_oracle_live_trace.jsonl"),
+        projection=staged(PROJECTION_DEF, "review_oracle_live_trace.jsonl"),
     )
 
 
 __all__ = [
     "CHALLENGER_DEF",
     "COHERENCE_CHECKER_DEF",
+    "PROJECTION_DEF",
     "ChallengerDeps",
     "CoherenceCheckerDeps",
+    "ProjectionDeps",
     "ReviewStages",
     "bind_review_role",
     "build_challenger_input",
     "build_coherence_checker_input",
     "build_projection_input",
+    "build_refinement_input",
     "default_review_stages",
+    "resolve_review_model",
 ]
