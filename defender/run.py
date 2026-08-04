@@ -95,6 +95,56 @@ def _source_one_provider_key(prov: providers.Provider) -> int:
     return 2
 
 
+def _role_model_name(defn: Any, model_override: str | None) -> str:
+    """The model name this role will ACTUALLY run on.
+
+    The operator's per-run `--model` reaches every role that resolves through the shared
+    main-model resolver — the investigator and the three review stages — and no role that
+    owns a knob of its own. Checking `defn.model()` alone validated the ambient default while
+    the run was about to execute on the override, so a broken override passed the preflight
+    clean."""
+    from defender.runtime import review_roles
+
+    shared = (driver.resolve_main_model, review_roles.resolve_review_model)
+    if model_override is not None and defn.model in shared:
+        return str(defn.model(model_override))
+    return str(defn.model())
+
+
+def preflight_role_models(model_override: str | None = None) -> int:
+    """PR9-12 (#774). Iterate EVERY registered role's model config at investigation STARTUP
+    and fail fast if a role's provider key is unusable — build-time failure is
+    provider-dependent (one provider raises immediately on a missing key, another defers to
+    first live call), and the agent for each review stage is built fresh on every call, so a
+    misconfigured review role would otherwise silently downgrade confident investigations to
+    unresolved ones, one at a time, deep into paid-for runs, instead of failing loud before
+    any run starts."""
+    from defender.agents import AGENTS
+
+    seen_provider_ids: set[str] = set()
+    for defn in AGENTS.values():
+        try:
+            name = _role_model_name(defn, model_override)
+        except Exception as e:  # noqa: BLE001 — a broken model accessor is a preflight failure
+            print(f"[run.py] preflight: {defn.role.name} model config raised: {e!r}",
+                  file=sys.stderr)
+            return 2
+        try:
+            prov = providers.provider_for(name)
+        except ValueError as e:
+            print(f"[run.py] preflight: {defn.role.name}: {e}", file=sys.stderr)
+            return 2
+        if prov.id in seen_provider_ids:
+            continue
+        seen_provider_ids.add(prov.id)
+        rc = _source_one_provider_key(prov)
+        if rc:
+            print(f"[run.py] preflight: {defn.role.name} ({name}) has no usable model config",
+                  file=sys.stderr)
+            return rc
+    return 0
+
+
 def _source_provider_keys(main_model: str, gather_model: str) -> int:
     try:
         used = {providers.provider_for(main_model), providers.provider_for(gather_model)}
@@ -199,6 +249,9 @@ def main(argv: list[str]) -> int:
 
     model = driver.resolve_main_model(ns.model)
     rc = _source_provider_keys(model, driver.gather_model())
+    if rc:
+        return rc
+    rc = preflight_role_models(ns.model)
     if rc:
         return rc
 

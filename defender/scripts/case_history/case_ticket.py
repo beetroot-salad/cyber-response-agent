@@ -118,6 +118,21 @@ def read_case_record(run_dir: Path) -> CaseRecord:
     fm, body, disposition = report.frontmatter, report.body, report.disposition
     case_id = run_dir.name
     confidence = str(fm.get("confidence") or "")
+    # THE REASON IS THE CAUSE WHEN THE REPORT CARRIES ONE, AND THE BODY OTHERWISE.
+    #
+    # Since the close gate became report.md's only writer, the body is host-rendered from a
+    # closed vocabulary and is the SAME sentence on every close ("Disposition recorded by the
+    # close gate. outcome=…"). Reading it as the reason left three consumers with a constant:
+    # the judge's prompt, the ticket bridge's outbound comment, and — the one that bites — the
+    # closed-ticket pool the challenge gate itself samples for base-rate context, which is now
+    # this same close's own output fed back as evidence about prior closes.
+    #
+    # `cause` is the host's own typed sentence explaining the disposition and already has
+    # exactly ONE home in the frontmatter; this reads that home rather than writing the
+    # sentence a second time into the body. A report with no `cause` key — anything not
+    # written by the close gate — keeps the body verbatim, which is also what leaves #629's
+    # body-to-ticket egress path intact for every artifact that still takes it.
+    cause = str(fm.get("cause") or "")
 
     mapping = _load_mapping()
     signature_id = _SIGNATURE_FALLBACK
@@ -131,7 +146,7 @@ def read_case_record(run_dir: Path) -> CaseRecord:
         signature_id=signature_id,
         disposition=disposition,
         confidence=confidence,
-        reason=body,
+        reason=cause or body,
     )
 
 

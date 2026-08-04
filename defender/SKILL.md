@@ -397,37 +397,31 @@ is the symptom of an under-specified dispatch upstream; fix the dispatch.
 
 ### REPORT
 
-Author `report.md` with this shape — YAML frontmatter carrying the
-disposition signal, then one paragraph citing the leads that resolved
-it:
+Record the disposition through the `close_investigation` tool — never
+through `write_file`/`edit_file`. Both file tools refuse `report.md`
+unconditionally; the close tool is the only writer.
 
-```
----
-case_id: <run id — the run-dir basename>
-disposition: benign | inconclusive | malicious
-confidence: high | medium | low
----
-
-<one paragraph reason>
-```
-
-`disposition` is a closed enum:
+Call `close_investigation(disposition=...)` once ANALYZE has reached a
+confident finding. `disposition` is the closed enum:
 
 - `benign` — confident clear.
-- `inconclusive` — ran out of data, escalate. The learning loop runs
-  the adversarial actor on these.
-- `malicious` — confident escalate, story confirmed. The learning loop
-  skips these at MVP.
+- `inconclusive` — ran out of data, escalate. Commits immediately, no
+  review — the learning loop runs the adversarial actor on these.
+- `malicious` — confident escalate, story confirmed.
 
-**Write discipline — fold ANALYZE and REPORT into one Edit.** Every
-Edit/Write on `investigation.md` re-runs the pre-write hooks
-(invlang validator + parallel Haiku judges); splitting "first add
-`:R`/`:T resolutions`, then add `:T conclude`" into two Edits doubles
-that cost for no information gain. Compose the full ANALYZE + REPORT
-text in context, then land it in a single Edit on `investigation.md`
-followed by one Write of `report.md`. Earlier loops (ANALYZE that
-loops back to PLAN) are the exception — those are genuine separate
-turns.
+A confident disposition (`benign`/`malicious`) passes a live challenge
+gate before it commits. Most of the time the call commits and you are
+done. If the gate is not satisfied yet, the call returns without
+committing, names what to investigate further, and you get another
+ANALYZE/GATHER turn before calling `close_investigation` again — this
+is a normal part of the loop, not an error.
+
+**Write discipline.** ANALYZE (the `:R`/`:T resolutions` Edit on
+`investigation.md`) and the `close_investigation` call are separate
+turns — the close tool renders the report body itself from the typed
+disposition, so there is nothing left to compose or land in the same
+Edit. Earlier loops (ANALYZE that loops back to PLAN) were always
+separate turns too.
 
 Stop after that — the lead/query tables are written live as you dispatch
 gather (the `gather` tool claims the lead; the subagent's queries are

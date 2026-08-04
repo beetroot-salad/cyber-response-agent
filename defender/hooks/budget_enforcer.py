@@ -23,11 +23,20 @@ WARNING_THRESHOLD = 0.75
 
 TAIL_ALLOWANCE = 10
 
+#: RS16. The close tool's budget exemption — an explicit, recorded roster rather than a side
+#: effect of which tier a tool happens to land in. `close_tool.py` imports and re-exports this
+#: name (`from defender.hooks.budget_enforcer import BUDGET_EXEMPT_TOOLS`) so `#774`'s spec
+#: surface (`defender.runtime.close_tool.BUDGET_EXEMPT_TOOLS`) resolves to the SAME object —
+#: one roster, not two that could drift. Closing must always be possible even under budget
+#: pressure, since the gate's own forced turns are what push a run into that pressure.
+BUDGET_EXEMPT_TOOLS = frozenset({"close_investigation"})
+
 BUDGET_REFUSAL_MESSAGE = (
     "Budget stop: the {tool} tool is now PERMANENTLY withdrawn for the rest of this "
-    "run (the {limb} cap is reached and will not reset). Writing your report — "
-    "write_file / edit_file to report.md and investigation.md — is still available. "
-    "Do not retry this tool; write your report now from the evidence you already have."
+    "run (the {limb} cap is reached and will not reset). Writing to investigation.md — "
+    "write_file / edit_file — and closing the investigation are still available. "
+    "Do not retry this tool; close the investigation now and record your report from "
+    "the evidence you already have."
 )
 
 
@@ -215,6 +224,8 @@ def tier(tool_name: str, role: AgentRole) -> str:
 
 
 def should_refuse(state: dict, tool_name: str, call_tier: str, limits: dict) -> bool:
+    if tool_name in BUDGET_EXEMPT_TOOLS:
+        return False
     if call_tier == "tail":
         return False
     count = _valid_count(state.get("tool_calls", 0))

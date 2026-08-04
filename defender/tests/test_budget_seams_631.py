@@ -456,15 +456,16 @@ def test_tier_table_over_the_real_census(tmp_path):
     open_budget(run_dir, "r")
     limits = {**DEFAULT_LIMITS, "max_tool_calls": 1}
     update_budget_locked(run_dir, "r", "bash", limits=limits)
-    report = run_dir / "report.md"
+    # #774/R1: report.md left the tail entirely (it left MAIN's write allow-list, full stop —
+    # the close tool is its only writer now); investigation.md is the tail-tier artifact still
+    # standing, and it makes the identical point (a tail-tier write survives a tripped pool).
+    inv = run_dir / "investigation.md"
     script = [[("bash", {"command": "echo hi"})],
-              [("write_file", {"path": str(report),
-                               "content": "---\ncase_id: c\ndisposition: benign\n"
-                                          "confidence: low\n---\n\nDone.\n"})]]
+              [("write_file", {"path": str(inv), "content": ""})]]
     result, _ = drive_agent(MAIN_DEF, run_dir, script, limits=limits, enforce=True)
     text = str(result.all_messages())
     assert "BUDGET" in text.upper(), "the core-tier bash was not refused on a tripped pool"
-    assert report.is_file(), "the tail-tier write_file was refused inside the tail band"
+    assert inv.is_file(), "the tail-tier write_file was refused inside the tail band"
 
 
 def test_same_tool_name_on_two_agents(tmp_path):

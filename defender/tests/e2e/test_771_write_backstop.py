@@ -1248,6 +1248,13 @@ GATED_WRITE_ARMS = (
      lambda deps, p: runtime_tools._tool_edit_file(deps, p, "spec", "PWNED")),
 )
 
+#: (#774/R1: report.md left the model's write_file/edit_file allow entirely — both tools now
+#: refuse it unconditionally, planted alias or not — so it is no longer a positive-control arm.
+#: The hard-link negative above still drives all four GATED_WRITE_ARMS: refusal is refusal
+#: regardless of cause, and report.md refusing a hard-linked plant is still true. Only the
+#: "lands when nothing is planted" control below narrows, to the one name that still lands.)
+LANDING_ARMS = tuple(arm for arm in GATED_WRITE_ARMS if arm[1] != "report.md")
+
 
 @pytest.mark.parametrize(
     ("tool", "name", "seed", "drive"), GATED_WRITE_ARMS,
@@ -1312,18 +1319,20 @@ def test_the_gated_model_writers_refuse_a_planted_hard_link(tool, name, seed, dr
 
 
 @pytest.mark.parametrize(
-    ("tool", "name", "seed", "drive"), GATED_WRITE_ARMS,
-    ids=[f"{t}-{n}" for t, n, _s, _d in GATED_WRITE_ARMS],
+    ("tool", "name", "seed", "drive"), LANDING_ARMS,
+    ids=[f"{t}-{n}" for t, n, _s, _d in LANDING_ARMS],
 )
 def test_the_gated_model_write_lands_when_nothing_is_planted(tool, name, seed, drive, tmp_path):
     """gated_model_write_lands_when_nothing_is_planted — with no alias planted, each gated write
-    tool still writes each allowlisted artifact and reports it, on all four arms.
+    tool still writes each allowlisted artifact and reports it.
 
     The positive control for the hard-link negative, and it takes the negative's shape: the
-    same bytes ARE written through the sanctioned path, on the same four arms. Without it, a
-    gate that refused every write would pass the negative while silently ending the model's
-    ability to author a report — and a control driven on one arm would leave that possible on
-    the other three."""
+    same bytes ARE written through the sanctioned path. (#774/R1 narrowed this from four arms
+    to two: report.md left the model's write allow entirely, so it no longer has a "lands"
+    case — see test_report_md_refuses_the_gated_model_writers_even_when_nothing_is_planted for
+    its own positive-shaped control.) Without this, a gate that refused every write would pass
+    the negative while silently ending the model's ability to author investigation.md — and a
+    control driven on one arm would leave that possible on the other."""
     run = run_tree(tmp_path)
     deps = bind(MAIN_DEF, run, salt="0" * 16, defender_dir=Path(__file__).resolve().parents[2])
     artifact = run / name
@@ -1334,3 +1343,30 @@ def test_the_gated_model_write_lands_when_nothing_is_planted(tool, name, seed, d
     assert name in result, f"{tool} did not report the artifact it wrote: {result!r}"
     assert artifact.read_text(encoding="utf-8"), f"{tool} left {name} empty"
     assert os.lstat(artifact).st_nlink == 1, "the sanctioned write left a second name"
+
+
+@pytest.mark.parametrize(
+    ("tool", "name", "seed", "drive"),
+    [arm for arm in GATED_WRITE_ARMS if arm[1] == "report.md"],
+    ids=[f"{t}-{n}" for t, n, _s, _d in GATED_WRITE_ARMS if n == "report.md"],
+)
+def test_report_md_refuses_the_gated_model_writers_even_when_nothing_is_planted(
+    tool, name, seed, drive, tmp_path,
+):
+    """report_md_refuses_the_gated_model_writers_even_when_nothing_is_planted (#774/R1) — the
+    positive control LANDING_ARMS lost when report.md left the model's write_file/edit_file
+    allow entirely: unlike the other allowlisted name, there is no "lands" case for report.md
+    to be missing a control for. Both tools refuse it unconditionally now, plant or no plant —
+    the close tool (runtime/close_tool.py) is its sole writer."""
+    run = run_tree(tmp_path)
+    deps = bind(MAIN_DEF, run, salt="0" * 16, defender_dir=Path(__file__).resolve().parents[2])
+    artifact = run / name
+    artifact.write_text(seed, encoding="utf-8")   # `edit_file` needs a baseline to edit
+
+    refused = False
+    try:
+        drive(deps, str(artifact))
+    except Exception:  # noqa: BLE001 — ModelRetry today; the demand is that it refuses at all
+        refused = True
+
+    assert refused, f"{tool} reported success writing report.md directly"
