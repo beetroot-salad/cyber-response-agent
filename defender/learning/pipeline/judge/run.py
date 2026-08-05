@@ -42,7 +42,6 @@ def _cited_policy_read_body(learning_run_dir: Path) -> str:
 def build_judge_invocation(
     run_dir: Path,
     actor_story_path: Path,
-    projected_telemetry_path: Path,
     learning_run_dir: Path,
     *,
     comparison_dirname: str = "comparison",
@@ -55,7 +54,7 @@ def build_judge_invocation(
     comparison_dir = learning_run_dir / comparison_dirname
 
     companion = parse_investigation_companion(run_dir)
-    comparisons = build_comparison(run_dir, projected_telemetry_path, companion=companion)
+    comparisons = build_comparison(run_dir, companion=companion)
     comparison_paths = write_comparison_files(comparisons, comparison_dir, gather_raw)
 
     add_dirs = [d for d in (gather_raw, comparison_dir) if d.is_dir()]
@@ -93,11 +92,11 @@ def build_judge_invocation(
 
 
 def invoke_judge(wiring: JudgeWiring, run_dir: Path, actor_story_path: Path,
-                 projected_telemetry_path: Path, learning_run_dir: Path,
+                 learning_run_dir: Path,
                  *, box, judge_fn: Callable[..., str], salt: str | None = None) -> str:
     stage_salt = salt if salt is not None else uuid4().hex
     inv = build_judge_invocation(
-        run_dir, actor_story_path, projected_telemetry_path, learning_run_dir,
+        run_dir, actor_story_path, learning_run_dir,
         comparison_dirname=wiring.comparison_dirname,
         closed_ticket_read=wiring.closed_ticket_read,
         salt=stage_salt,

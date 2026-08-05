@@ -107,6 +107,13 @@ class LoopPaths(DefenderPaths):
         return self.state_root / ".lead-author-drain.lock"
 
     @property
+    def learn_drain_lock_file(self) -> Path:
+        """The learn drain's own single-drainer lease. Load-bearing since the drain began
+        RECLAIMING markers left in `inflight/`: without it, a second concurrent drainer reads
+        a live drainer's claim as an orphan and learns the same run twice."""
+        return self.state_root / ".learn-drain.lock"
+
+    @property
     def pending_file(self) -> Path:
         return self.pending_dir / "findings.jsonl"
 

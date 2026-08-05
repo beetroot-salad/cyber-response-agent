@@ -598,7 +598,7 @@ def test_coverage_manifest_and_compare_surface_verb(tmp_path):
         params={"native_query": "x"}, raw_command="", exit_code=0, error_class=None,
         payload_status="ok", payload_digest="d", raw_ref=None)
     c = compare.LeadComparison(
-        lead_id=LEAD, goal="g", orphan=False, queries=[qr], projected_events=None,
+        lead_id=LEAD, goal="g", orphan=False, queries=[qr],
         real_sample="{}")
     rendered = compare._render_lead_file(c, gather_raw=tmp_path / "gather_raw")
     assert "alerts" in rendered, "compare.py's per-query line does not surface verb"

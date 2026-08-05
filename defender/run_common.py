@@ -158,33 +158,54 @@ def is_held_out_alert_copy(alert: Path, fixtures_dir: Path = HELD_OUT_FIXTURES) 
     return digest in held_out_alert_digests(fixtures_dir)
 
 
-def enqueue_learning(run_dir: Path, alert: Path, *, truncated_by: str | None = None) -> bool:
+def learning_refusal_gate(
+    run_dir: Path,
+    alert: Path,
+    *,
+    fixtures_dir: Path = HELD_OUT_FIXTURES,
+    truncated_by: str | None = None,
+) -> str | None:
+    """The ONE refusal predicate both the learning enqueue and the curation enqueue consult
+    (#791 R3): a copied guard drifts from the thing it documents, a shared one cannot. Returns
+    the reason a run must be refused, or `None` if it clears every net.
+
+    Held out is checked by CONTENT DIGEST *and* by path containment, because neither net alone
+    is the whole set: the digest catches a copy of a fixture taken outside `fixtures_dir`
+    (containment misses it by construction), and containment catches anything inside the
+    fixture tree that the digest walk never reads — it only digests `<slug>/alert.json`."""
     if truncated_by is not None:
-        print(
-            f"[run.py] run was truncated (truncated_by={truncated_by!r}) — NOT enqueuing "
-            "for learning (a truncated investigation must not train the corpus)",
-            file=sys.stderr,
-        )
-        return False
-    if is_held_out_fixture(alert):
-        print(
-            f"[run.py] {alert.parent.name}/{alert.name} is a held-out eval fixture — NOT "
-            "enqueuing for learning (its findings must never feed a corpus it is scored "
-            "against)",
-            file=sys.stderr,
-        )
-        return False
+        return f"run was truncated (truncated_by={truncated_by!r}) — a truncated " \
+            "investigation must not train the corpus"
+    # BOTH nets, not the digest alone. The digest catches a copy taken outside `fixtures_dir`,
+    # which path containment misses by construction — but containment catches a fixture whose
+    # alert the digest walk never reads (it only reads `<fixtures>/<slug>/alert.json`), which
+    # the digest misses by construction. Dropping either one narrows the guard.
+    if is_held_out_fixture(alert, fixtures_dir) or is_held_out_alert_copy(alert, fixtures_dir):
+        return f"{alert} is a held-out eval fixture (or a copy of one) — its findings must " \
+            "never feed a corpus it is scored against"
     from defender.runtime import scrub as _scrub
 
     if not _scrub.tree_verified(run_dir):
         # §7 D2/D9: a tree carrying no scan verdict, or one recording that the walk never ran,
         # is not fed to the learning loop — the crash path this marker exists to describe is
         # exactly the one most likely to hold what a box planted.
-        print(
-            f"[run.py] {run_dir} carries no completed reap-scan verdict — NOT enqueuing for "
-            "learning (an unverified tree must not feed the corpus)",
-            file=sys.stderr,
-        )
+        return f"{run_dir} carries no completed reap-scan verdict — an unverified tree " \
+            "must not feed the corpus"
+    return None
+
+
+def enqueue_learning(
+    run_dir: Path,
+    alert: Path,
+    *,
+    truncated_by: str | None = None,
+    fixtures_dir: Path = HELD_OUT_FIXTURES,
+) -> bool:
+    reason = learning_refusal_gate(
+        run_dir, alert, fixtures_dir=fixtures_dir, truncated_by=truncated_by
+    )
+    if reason is not None:
+        print(f"[run.py] NOT enqueuing for learning: {reason}", file=sys.stderr)
         return False
     from defender.learning import loop as _loop
     from defender.learning.core.config import REPO_ROOT as _LEARN_REPO_ROOT
@@ -192,4 +213,42 @@ def enqueue_learning(run_dir: Path, alert: Path, *, truncated_by: str | None = N
 
     paths = LoopPaths(repo_root=_LEARN_REPO_ROOT, state_dir=_env_state_dir())
     _loop.enqueue_for_learning(run_dir, paths)
+    return True
+
+
+def enqueue_curation(
+    run_dir: Path,
+    alert: Path,
+    *,
+    truncated_by: str | None = None,
+    fixtures_dir: Path = HELD_OUT_FIXTURES,
+) -> bool:
+    """Catalog curation's own trigger, at the investigation boundary (#791) — welded to the
+    shared refusal predicate rather than left to caller discipline (PR5): this is the one new
+    caller in the change that hands attacker-influenced content (the investigation's goal
+    text, bound parameters, rendered queries) to the lead-author curator, and the predicate is
+    what makes misuse constructible at all now that it is no longer inline in the enqueue that
+    "not refused" used to mean "already enqueued"."""
+    reason = learning_refusal_gate(
+        run_dir, alert, fixtures_dir=fixtures_dir, truncated_by=truncated_by
+    )
+    if reason is not None:
+        print(f"[run.py] NOT enqueuing for curation: {reason}", file=sys.stderr)
+        return False
+    from defender.learning.core import markers as _markers
+    from defender.learning.core.config import REPO_ROOT as _LEARN_REPO_ROOT
+    from defender.learning.core.config import LoopPaths, _env_state_dir
+
+    paths = LoopPaths(repo_root=_LEARN_REPO_ROOT, state_dir=_env_state_dir())
+    # The case-key derivation is inside the guard with the write it feeds: it reads the alert
+    # off disk, and an alert the operator moved mid-run would otherwise take the investigation's
+    # exit status and its remaining human-facing steps down with it — for a corpus optimisation
+    # this call site has already declared cheap to lose.
+    try:
+        case_id = f"case-{hashlib.sha256(alert.read_bytes()).hexdigest()[:16]}"
+        _markers.enqueue_case_for_curation(case_id, run_dir, paths)
+    except OSError as e:
+        print(f"[run.py] NOT enqueuing for curation: could not write the request: {e!r}",
+              file=sys.stderr)
+        return False
     return True

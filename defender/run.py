@@ -40,6 +40,7 @@ from defender._run_paths import RunPaths  # noqa: E402
 from defender.runtime import box as box_mod  # noqa: E402
 from defender.runtime import driver  # noqa: E402
 from defender.runtime import providers  # noqa: E402
+from defender.scripts.case_history import ticket_writer as _default_ticket_writer  # noqa: E402
 
 DEFENDER_DIR = _DEFENDER_DIR
 
@@ -57,7 +58,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
                    help="Pin the run id for a named A/B or live run (learning-loop "
                         "commits reference it) instead of the auto timestamp id; a "
                         "collision with an existing run dir is rejected by materialize_run_dir")
-    p.add_argument("--no-learn", action="store_true", help="Skip enqueuing for learning")
+    p.add_argument("--no-learn", action="store_true",
+                   help="Skip enqueuing for learning (also skips catalog curation — the "
+                        "flag now governs both lanes)")
     p.add_argument("--update-ticket", action="store_true",
                    help="Write/close a case-history ticket for this alert (default off)")
     p.add_argument("--model", default=None,
@@ -244,7 +247,18 @@ def _run_investigation_lifecycle(
     return summary
 
 
-def main(argv: list[str]) -> int:
+def main(
+    argv: list[str],
+    *,
+    lifecycle: Callable[..., dict[str, Any]] = _run_investigation_lifecycle,
+    visualize: Callable[[Path], None] = _run.visualize,
+    ticket_writer: Any = _default_ticket_writer,
+) -> int:
+    # R22: the tail's three UNDRIVABLE dependencies — the credentialed investigation
+    # lifecycle, the HTML render, the case-ticket endpoint — take an injection seam, each
+    # defaulting to production, so what the tail DOES is observable rather than read off this
+    # function's statement sequence. The curation trigger below is deliberately NOT part of
+    # this seam: it is what those demands are about, so it runs for real against a real queue.
     ns = parse_args(argv)
 
     model = driver.resolve_main_model(ns.model)
@@ -258,15 +272,12 @@ def main(argv: list[str]) -> int:
     alert = ns.alert.resolve()
     run_dir, salt = _run.materialize_run_dir(alert, ns.run_id)
 
-    ticket_writer = None
     if ns.update_ticket:
-        from defender.scripts.case_history import ticket_writer as _tw
-        _tw.open_case_ticket(run_dir)
-        ticket_writer = _tw
+        ticket_writer.open_case_ticket(run_dir)
 
     print(f"[run.py] run_dir={run_dir} model={model}", file=sys.stderr)
 
-    summary = _run_investigation_lifecycle(
+    summary = lifecycle(
         run_dir=run_dir,
         salt=salt,
         model=model,
@@ -299,16 +310,28 @@ def main(argv: list[str]) -> int:
 
     _run.cross_check_tables(run_dir)
 
-    if ticket_writer is not None:
+    # #791 bullet 1: the automatic feed into the offline learning pipeline is unhooked at
+    # this call site — the surviving path onto the learn queue is the operator's own hand
+    # invocation of the learning entrypoint over a run dir (H1 refuted: no automatic call
+    # ever created that queue's only other feed). Catalog curation gets its own trigger here
+    # instead, sited above the render step and behind the tree certification the lifecycle
+    # above already performed: a corpus optimisation, cheap to lose, so its own failure is
+    # reported and swallowed rather than costing the investigation its exit status or its
+    # human-facing steps below.
+    # The case ticket is settled BEFORE the request is published, the order the learning
+    # enqueue it replaced already had: a curation drainer can start the moment the marker
+    # lands, and it must never read this case while its ticket is still open.
+    if ns.update_ticket:
         ticket_writer.close_case_ticket(run_dir)
 
     if ns.no_learn:
-        print("[run.py] --no-learn set; not enqueuing for learning", file=sys.stderr)
-    elif _run.enqueue_learning(run_dir, alert, truncated_by=summary.get("truncated_by")):
-        print("[run.py] enqueued for off-process learning", file=sys.stderr)
+        # R14: fail-closed — the flag governs catalog curation, the one automatic lane left.
+        print("[run.py] --no-learn set; not enqueuing for curation", file=sys.stderr)
+    elif _run.enqueue_curation(run_dir, alert, truncated_by=summary.get("truncated_by")):
+        print("[run.py] enqueued for catalog curation", file=sys.stderr)
 
     try:
-        _run.visualize(run_dir)
+        visualize(run_dir)
     except _run.VisualizeFailed as e:
         print(f"[run.py] {e}", file=sys.stderr)
     return 0

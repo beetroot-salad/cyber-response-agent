@@ -58,7 +58,7 @@ def load_visible_leads(case_dir: Path) -> list[_Lead]:
     ]
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *, oracle_fn=_run_oracle_pydantic) -> int:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("case_dir", type=Path, help="golden case directory")
@@ -85,7 +85,7 @@ def main(argv: list[str] | None = None) -> int:
         # `salt` is left to invoke_oracle_lead's own per-stage default — one anchor.
         events = invoke_oracle_lead(
             lead, story, sample, learning_dir,
-            trace_prefix=tag, oracle_fn=_run_oracle_pydantic)
+            trace_prefix=tag, oracle_fn=oracle_fn)
         projections.append((lead.lead_id, events))
         print(f"  {lead.lead_id}: {len(events)} event(s)")
 

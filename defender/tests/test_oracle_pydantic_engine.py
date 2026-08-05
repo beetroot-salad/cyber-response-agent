@@ -156,7 +156,10 @@ def test_subagents_oracle_runs_pydantic_engine(monkeypatch, tmp_path):
         captured["learning_run_dir"] = learning_run_dir
         return "projections: []\n"
 
-    monkeypatch.setattr(subagents, "invoke_oracle", _spy_oracle)  # lint-monkeypatch: ok — spy the oracle_fn routing decision
+    # #791: `InProcessSubagents.oracle` imports `invoke_oracle` lazily, inside the method
+    # body — importing `subagents` must not pull in the retired oracle package — so the spy
+    # patches the ORIGIN the lazy import resolves against, not a module-level rebinding.
+    monkeypatch.setattr(oracle_run, "invoke_oracle", _spy_oracle)  # lint-monkeypatch: ok — spy the oracle_fn routing decision
 
     sub = subagents.InProcessSubagents()
     out = sub.oracle(tmp_path / "run", tmp_path / "story.md", tmp_path / "lrd")

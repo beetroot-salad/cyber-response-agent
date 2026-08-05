@@ -8,8 +8,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import yaml
-
 _EVALS_DIR = Path(__file__).resolve().parent
 if str(_EVALS_DIR) not in sys.path:
     sys.path.insert(0, str(_EVALS_DIR))
@@ -21,7 +19,6 @@ from _secondary_config import (  # noqa: E402
 )
 from _generation import GenerationPin, replay_script_path  # noqa: E402
 
-from defender._yaml import safe_load
 from defender._run_paths import RunPaths  # noqa: E402
 
 
@@ -149,22 +146,15 @@ def run_head_oracle_and_judge(
     projected_path = staging_dir / "projected_telemetry.yaml"
     projected_path.write_text(loop_mod.strip_yaml_fence(oracle_yaml), encoding="utf-8")
 
-    try:
-        judge_yaml = loop_mod.InProcessSubagents().judge(
-            loop_mod.ADVERSARIAL_WIRING,
-            head_run_dir,
-            actor_story_path,
-            projected_path,
-            staging_dir,
-        )
-    except (loop_mod.RunUnprocessable, subprocess.TimeoutExpired) as e:
-        raise SecondaryError(f"judge invocation failed: {e}") from e
-    judge_stripped = loop_mod.normalize_judge_yaml(judge_yaml)
-    (staging_dir / "judge_findings.yaml").write_text(judge_stripped, encoding="utf-8")
-    try:
-        judge_doc = safe_load(judge_stripped)
-        loop_mod.validate_judge_doc(judge_doc)
-    except (yaml.YAMLError, loop_mod.RunUnprocessable) as e:
-        raise SecondaryError(f"judge YAML invalid: {e}") from e
-    outcome = loop_mod._outcome_keyword(judge_doc["outcome"])
-    return outcome
+    # #791: the judge prompts were rewritten off the two-column comparison the live gate
+    # builds, which this measurement path never assembles — judging here would report a
+    # number that means nothing. The oracle call above still runs (it measures its own
+    # question, unaffected), but judging stops, loudly, with a stated reason.
+    (staging_dir / "judge_skip_791.txt").write_text(
+        "judge skipped (#791): the offline judge prompts no longer define a verdict this "
+        "measurement path's inputs can satisfy (they were rewritten for the two-column "
+        "comparison the live gate builds); running the judge here would report a number "
+        "nobody can interpret.\n",
+        encoding="utf-8",
+    )
+    return SKIP_OUTCOME

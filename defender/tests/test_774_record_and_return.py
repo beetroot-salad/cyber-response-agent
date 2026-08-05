@@ -534,9 +534,11 @@ def test_every_review_stage_leaves_a_trace(tmp_path):
     _close(deps, "malicious", stages)
     traces = _traces(run_dir)
     assert traces, "no review-stage trace was written at all"
+    # #791: the live projection stage's trace is named for its own role, never the retired
+    # offline oracle's.
     named = {role for tr in traces
-             for role in ("challenger", "coherence_checker", "oracle") if role in tr.name}
-    assert named == {"challenger", "coherence_checker", "oracle"}, (
+             for role in ("challenger", "coherence_checker", "projection") if role in tr.name}
+    assert named == {"challenger", "coherence_checker", "projection"}, (
         f"only these stages left a trace: {sorted(named)}"
     )
 
@@ -830,13 +832,13 @@ def test_every_review_stages_own_trace_reply_is_framed_not_only_the_challengers(
     Observable: with a distinct marker forced into each of the three stages' replies, every
     marker that reaches its trace file reaches it inside the frame, never bare."""
     marks = {"challenger": "PROSE-CHALLENGER-4a1", "coherence_checker": "PROSE-CRITIC-9b2",
-             "oracle": "PROSE-PROJECTION-7c3"}
+             "projection": "PROSE-PROJECTION-7c3"}
     deps, run_dir = main_deps(tmp_path)
     stages = FakeReviewStages(
         challenger=[tail(UNSETTLED, story=f"the pivot was routine {marks['challenger']}")],
         coherence_checker=[f"COHERENT -- {marks['coherence_checker']}"],
         projection=[json.dumps({"leads": [{"lead_id": "l-001", "tag": "empty-projection"}],
-                                "aside": marks["oracle"]})],
+                                "aside": marks["projection"]})],
     )
     _close(deps, "malicious", stages)
     traces = {tr.name: tr.read_text(encoding="utf-8") for tr in _traces(run_dir)}

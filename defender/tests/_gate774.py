@@ -397,7 +397,9 @@ class FakeReviewStages:
         self.coherence_checker = FakeStage(
             "coherence_checker", coherence_checker or ["COHERENT"], coherence_checker_fault,
         )
-        self.projection = FakeStage("oracle", projection or [projection_of(())], projection_fault)
+        self.projection = FakeStage(
+            "projection", projection or [projection_of(())], projection_fault,
+        )
 
     @property
     def calls(self) -> list[StageCall]:

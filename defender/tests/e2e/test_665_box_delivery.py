@@ -203,10 +203,9 @@ def test_box_threaded_as_percall_param_through_subagents(tmp_path):
     lrd.mkdir()
     (tmp_path / "alert.json").write_text("{}", encoding="utf-8")
     (tmp_path / "ai.yaml").write_text("x: 1\n", encoding="utf-8")
-    # invoke_judge builds its prompt from the story and telemetry on disk before it ever
-    # reaches judge_fn — both are inputs the real seam reads (judge/run.py:74, :58).
+    # invoke_judge builds its prompt from the story on disk before it ever reaches judge_fn
+    # — an input the real seam reads (judge/run.py:74).
     (tmp_path / "story.md").write_text("1. Routine story\n", encoding="utf-8")
-    (tmp_path / "telemetry.yaml").write_text("projections: []\n", encoding="utf-8")
 
     invoke_actor(tmp_path / "alert.json", tmp_path / "ai.yaml", lrd,
                  box=delivered, actor_fn=rec)
@@ -214,7 +213,7 @@ def test_box_threaded_as_percall_param_through_subagents(tmp_path):
 
     seen.clear()
     invoke_judge(ADVERSARIAL_WIRING, tmp_path, tmp_path / "story.md",
-                 tmp_path / "telemetry.yaml", lrd, box=delivered, judge_fn=rec)
+                 lrd, box=delivered, judge_fn=rec)
     assert seen["box"] is delivered, "invoke_judge did not thread the per-call box"
 
 

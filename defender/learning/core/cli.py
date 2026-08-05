@@ -30,8 +30,6 @@ Outputs:
   defender/learning/runs/<run_id>/
     actor_input.yaml               adversarial actor-facing projection (queries only)
     actor_story.md / *_benign.md   per-direction story (or "SKIP: ...")
-    projected_telemetry[_benign].yaml  per-lead oracle output: projections (one per lead)
-    projected_telemetry[_benign].raw.txt  assembled oracle doc, pre-strip (only on mutation)
     judge_findings[_benign].yaml   judge classification + queueable findings
   defender/learning/_pending/findings.jsonl
     appended queueable defender findings (both directions, tagged `direction`);

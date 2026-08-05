@@ -64,7 +64,6 @@ class Direction:
     validate: Callable
     append_observations: Callable
     story_name: str
-    telemetry_name: str
     judge_name: str
     # The dispositions that select this direction — the ONE home for the mapping
     # `directions_for` dispatches on and the judge view reads to tell "this direction was
@@ -84,16 +83,28 @@ class Direction:
     append_env_observations: Callable | None = None
     extra_obs_triggers: tuple[ObsTrigger, ...] = ()
 
+    @property
+    def status_name(self) -> str:
+        """The leg's own terminal-status file (#791). Derived HERE, like every other name on
+        this class, so the run cycle that writes it and the transcript view that reads it
+        cannot disagree about what it is called."""
+        return f"{self.name}.status"
+
     def artifact_names(self) -> tuple[str, ...]:
         """Every file this direction's legs leave in the learning run dir. Derived from the
         names declared above so presence and rendering read the same list: the transcript asks
-        this to tell "this leg ran" from "it was never selected" (#716)."""
+        this to tell "this leg ran" from "it was never selected" (#716).
+
+        The status file leads: it is written BEFORE the actor call, so it is the only trace a
+        leg that died in that call leaves at all. Retiring the projected-telemetry names
+        without putting it on this list would have made such a leg indistinguishable from one
+        that was never selected — the exact confusion the status file was added to end."""
         declared = (
-            self.story_name, self.telemetry_name, self.judge_name,
+            self.status_name, self.story_name, self.judge_name,
             self.archetype_name, self.menu_name,
         )
         return tuple(n for n in declared if n is not None) + (
-            raw_fallback_name(self.telemetry_name), raw_fallback_name(self.judge_name),
+            raw_fallback_name(self.judge_name),
         )
 
 
@@ -111,7 +122,6 @@ ADVERSARIAL = Direction(
     validate=validate_judge_doc,
     append_observations=append_actor_observations,
     story_name="actor_story.md",
-    telemetry_name="projected_telemetry.yaml",
     judge_name="judge_findings.yaml",
     dispositions=frozenset({"benign", "inconclusive"}),
     judge_optional_keys=ADVERSARIAL_JUDGE_OPTIONAL_KEYS,
@@ -144,7 +154,6 @@ BENIGN = Direction(
     validate=validate_judge_benign_doc,
     append_observations=append_environment_observations,
     story_name="actor_benign_story.md",
-    telemetry_name="projected_telemetry_benign.yaml",
     judge_name="judge_benign_findings.yaml",
     dispositions=frozenset({"malicious", "inconclusive"}),
     judge_optional_keys=BENIGN_JUDGE_OPTIONAL_KEYS,

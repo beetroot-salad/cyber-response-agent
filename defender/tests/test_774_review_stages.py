@@ -590,7 +590,10 @@ def test_any_review_stage_that_cannot_complete_closes_the_case_unresolved_with_i
     faults = {
         "challenger": {"challenger_fault": StageFault(raises=RuntimeError("down"))},
         "coherence_checker": {"coherence_checker_fault": StageFault(raises=RuntimeError("down"))},
-        "oracle": {"projection_fault": StageFault(raises=RuntimeError("down"))},
+        # #791: the live projection stage's dispatch key is re-keyed off its own role name
+        # (never the retired offline oracle's) — the detail a fault reports now names it
+        # "projection", not "oracle".
+        "projection": {"projection_fault": StageFault(raises=RuntimeError("down"))},
     }
     for stage, kw in faults.items():
         deps, run_dir = main_deps(tmp_path / stage)

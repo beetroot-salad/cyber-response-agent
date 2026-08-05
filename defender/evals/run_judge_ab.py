@@ -46,7 +46,6 @@ from defender.evals.judge_equivalence import (  # noqa: E402
     render_report,
     run_config,
 )
-from defender.learning.core import config  # noqa: E402
 from defender.learning.core.directions import BY_NAME  # noqa: E402
 
 
@@ -101,8 +100,9 @@ def main(argv: list[str]) -> int:  # pragma: no cover — operator harness over 
 
     from defender.learning.pipeline.judge.engine_pydantic import _run_judge_pydantic
 
-    for model in {args.ref_model, args.cand_model}:
-        config.source_first_party_key(model)
+    # #791: `run_config` no longer judges (the shared prompts were rewritten off the
+    # two-column comparison this frozen snapshot layout predates) — it stops before ever
+    # calling `judge_fn`, so no provider key is sourced or needed to reach that point.
 
     ref_a = EngineConfig("ref-a", _run_judge_pydantic, args.ref_model, args.ref_effort)
     ref_b = EngineConfig("ref-b", _run_judge_pydantic, args.ref_model, args.ref_effort)

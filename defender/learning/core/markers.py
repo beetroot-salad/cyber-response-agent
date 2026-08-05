@@ -22,6 +22,21 @@ def enqueue_for_authoring(run_dir: Path, paths: LoopPaths) -> None:
     _enqueue_marker(run_dir, paths.author_queue_dir, "authoring")
 
 
+def enqueue_case_for_curation(case_id: str, run_dir: Path, paths: LoopPaths) -> None:
+    """The curation trigger's own marker (#791) — keyed on the CASE rather than the run id,
+    so two investigations of the same case coalesce onto one request (an atomic replace of
+    the same path) instead of leaving one per retry. The later run always wins: whichever
+    call lands last is the one the curator serves."""
+    queue_dir = paths.author_queue_dir
+    queue_dir.mkdir(parents=True, exist_ok=True)
+    marker = queue_dir / f"{case_id}.json"
+    write_atomic(
+        marker,
+        json.dumps({"case_id": case_id, "run_dir": str(run_dir.resolve())}) + "\n",
+    )
+    _log(f"enqueued for curation: {marker}")
+
+
 def enqueue_for_learning(run_dir: Path, paths: LoopPaths = DEFAULT_PATHS) -> None:
     _enqueue_marker(run_dir, paths.learn_queue_dir, "learning")
 

@@ -351,7 +351,11 @@ def test_run_head_oracle_and_judge_converts_oracle_timeout(tmp_path: Path):
         sec.run_head_oracle_and_judge(head_run, staging, FakeLoop)
 
 
-def test_run_head_oracle_and_judge_converts_judge_timeout(tmp_path: Path):
+def test_run_head_oracle_and_judge_skips_judging_with_a_stated_791_reason(tmp_path: Path):
+    """#791: the shared judge prompts were rewritten off the two-column comparison this
+    secondary pipeline's staging copy never builds, so it stops judging (and never reaches
+    ``judge``/``FakeLoop.judge`` at all — no timeout to convert) while the oracle call above
+    it keeps running for its own measurement. The stop is loud and recorded, not silent."""
     head_run = tmp_path
     (head_run / "alert.json").write_text("{}")
     (head_run / "investigation.md").write_text("")
@@ -360,6 +364,7 @@ def test_run_head_oracle_and_judge_converts_judge_timeout(tmp_path: Path):
     (staging / "actor_story.md").write_text("not a SKIP\n")
 
     valid_oracle = "projections: []\n"
+    judge_calls = []
 
     class _FakeLR:
         @staticmethod
@@ -371,6 +376,7 @@ def test_run_head_oracle_and_judge_converts_judge_timeout(tmp_path: Path):
             return valid_oracle
 
         def judge(self, *_a, **_kw):
+            judge_calls.append(True)
             raise subprocess.TimeoutExpired(cmd=["claude"], timeout=300)
 
     class FakeLoop:
@@ -393,8 +399,13 @@ def test_run_head_oracle_and_judge_converts_judge_timeout(tmp_path: Path):
         def _prepare_engines_for(_directions, **_kw):
             pass
 
-    with pytest.raises(sec.SecondaryError, match="judge invocation failed"):
-        sec.run_head_oracle_and_judge(head_run, staging, FakeLoop)
+    outcome = sec.run_head_oracle_and_judge(head_run, staging, FakeLoop)
+    assert judge_calls == [], "the judge was called despite #791 stopping this path from judging"
+    assert outcome == "skip-passthrough"
+    skip_files = [p for p in staging.iterdir() if p.is_file() and "skip" in p.name.lower()]
+    assert skip_files, "no stated skip was recorded in the staging dir"
+    text = skip_files[0].read_text(encoding="utf-8").lower()
+    assert "791" in text
 
 
 def test_write_summary_appends_to_existing_index(tmp_path: Path):

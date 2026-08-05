@@ -305,14 +305,14 @@ _SENTINEL = object()
 def test_subagents_judge_runs_pydantic_engine(monkeypatch, tmp_path):
     captured = {}
 
-    def _spy(wiring, run_dir, actor_story_path, projected_telemetry_path, learning_run_dir,
+    def _spy(wiring, run_dir, actor_story_path, learning_run_dir,
              *, judge_fn=_SENTINEL, box=None):
         captured["judge_fn"] = judge_fn
         return _YAML
 
     monkeypatch.setattr(subagents, "invoke_judge", _spy)  # lint-monkeypatch: ok — spy the judge_fn routing decision
     sub = subagents.InProcessSubagents()
-    tail = (tmp_path, tmp_path / "story.md", tmp_path / "tel.yaml", tmp_path)
+    tail = (tmp_path, tmp_path / "story.md", tmp_path)
 
     sub.judge(ADVERSARIAL_WIRING, *tail)
     assert captured["judge_fn"] is _run_judge_pydantic

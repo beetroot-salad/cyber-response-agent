@@ -252,7 +252,7 @@ def _drive(tmp_path, turns, *, registry, benign=True, case=None, wiring=None) ->
     with override_allow_model_requests(False):
         out = invoke_judge(
             wiring if wiring is not None else _wiring(tmp_path, benign=benign),
-            run_dir, story, telem, lrd, judge_fn=judge_fn, box=None,
+            run_dir, story, lrd, judge_fn=judge_fn, box=None,
         )
     return _Driven(out, script, run_dir, lrd)
 

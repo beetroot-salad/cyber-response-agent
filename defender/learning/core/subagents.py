@@ -10,7 +10,6 @@ from defender.learning.core.prologue import extract_case_entities
 from defender.learning.pipeline.benign_actor.run import invoke_actor_benign
 from defender.learning.pipeline.judge.run import invoke_judge
 from defender.learning.pipeline.malicious_actor.run import invoke_actor, is_skip_story
-from defender.learning.pipeline.oracle.run import invoke_oracle
 
 __all__ = ["InProcessSubagents", "Subagents", "is_skip_story"]
 
@@ -22,7 +21,7 @@ class Subagents(Protocol):
     def oracle(self, run_dir: Path, actor_story_path: Path,
                learning_run_dir: Path) -> str: ...
     def judge(self, wiring: JudgeWiring, run_dir: Path, actor_story_path: Path,
-              projected_telemetry_path: Path, learning_run_dir: Path, *, box=None) -> str: ...
+              learning_run_dir: Path, *, box=None) -> str: ...
 
 
 class InProcessSubagents:
@@ -45,14 +44,17 @@ class InProcessSubagents:
 
     def oracle(self, run_dir: Path, actor_story_path: Path,
                learning_run_dir: Path) -> str:
+        # #791: a learning run must never reach the retired stage, so this import stays lazy
+        # — importing this module (as run_cycle.py does) must not pull in the oracle package.
         from defender.learning.pipeline.oracle_engine import _run_oracle_pydantic
+        from defender.learning.pipeline.oracle.run import invoke_oracle
         return invoke_oracle(run_dir, actor_story_path, learning_run_dir,
                              oracle_fn=_run_oracle_pydantic)
 
     def judge(self, wiring: JudgeWiring, run_dir: Path, actor_story_path: Path,
-              projected_telemetry_path: Path, learning_run_dir: Path, *, box=None) -> str:
+              learning_run_dir: Path, *, box=None) -> str:
         from defender.learning.pipeline.judge.engine_pydantic import _run_judge_pydantic
         return invoke_judge(
-            wiring, run_dir, actor_story_path, projected_telemetry_path,
+            wiring, run_dir, actor_story_path,
             learning_run_dir, judge_fn=_run_judge_pydantic, box=box,
         )

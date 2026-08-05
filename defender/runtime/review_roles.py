@@ -426,7 +426,7 @@ def default_review_stages(
         coherence_checker=staged(
             COHERENCE_CHECKER_DEF, "review_coherence_checker_live_trace.jsonl",
         ),
-        projection=staged(PROJECTION_DEF, "review_oracle_live_trace.jsonl"),
+        projection=staged(PROJECTION_DEF, "review_projection_live_trace.jsonl"),
     )
 
 

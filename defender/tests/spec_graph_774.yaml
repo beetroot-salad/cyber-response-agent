@@ -628,7 +628,7 @@ demands:
     binds: ["budget.domain",
             "interacts(challenge_gate->challenger)",
             "interacts(challenge_gate->coherence_checker)",
-            "interacts(challenge_gate->oracle)"]
+            "interacts(challenge_gate->projection)"]
     cites: [PO6, K3, K4]
     rejected:
       - {nl: "Summing the three review loggers into the run's figure inside this PR was declined by R7 as out of scope. It is not hard — the per-stage traces already hold the numbers — but the aggregation crosses the observability layer this delta does not otherwise touch, and doing it here would put a fifth production behaviour change into a scope the human bounded at four."}
@@ -1037,7 +1037,7 @@ demands:
     # .spec-flow/frontiers-repair/70-resolutions-repair.md.
     #   fork-F: R6 — the projection stage gets a role of its own; the two demands binding
     #     `oracle` resolve to it.
-    binds: ["interacts(challenge_gate->oracle).payload"]
+    binds: ["interacts(challenge_gate->projection).payload"]
     discharged_by: test_the_projection_stage_input_is_built_from_the_live_run_not_a_learning_run_dir
     # [REPAIR-CORRECTION] THIS IS ONE OF THE TWO DEMANDS WHOSE `oracle` ADDRESS NAMES NOTHING
     # IN CODE (PM6, driven). The live projection STAGE exists; the live projection ROLE does
@@ -1060,7 +1060,7 @@ demands:
     form: test
     binds: ["drives(challenge_gate->challenger)",
             "drives(challenge_gate->coherence_checker)",
-            "drives(challenge_gate->oracle)",
+            "drives(challenge_gate->projection)",
             "run_investigation"]
     discharged_by: test_the_review_stages_are_driven_through_an_injection_seam_on_the_entry_point
     rejected: [{nl: "Leaving the three stage calls seamless was rejected: the design names no injection point for them, and without a value the run is handed they are live provider calls that no hermetic scenario can drive — so not one arm of this gate would be testable. The seam sits on the entry point beside the five that already exist there, following the same value-not-monkeypatch discipline."}]
@@ -1090,7 +1090,7 @@ demands:
     #     new key and the output contract does not widen.
     #   fork-F: R6 — the projection stage gets a role of its own; the two demands binding
     #     `oracle` resolve to it.
-    binds: ["interacts(challenge_gate->oracle).response",
+    binds: ["interacts(challenge_gate->projection).response",
             "interacts(challenge_gate->challenger).response"]
     discharged_by: test_the_discriminating_set_is_silence_measured_against_declared_unsettled_requirements
     # [REPAIR-CORRECTION] The SECOND demand binding an `oracle` address that names no role in
@@ -1526,7 +1526,7 @@ demands:
     #     keeps its own arm.
     binds: ["interacts(challenge_gate->challenger).response",
             "interacts(challenge_gate->coherence_checker).response",
-            "interacts(challenge_gate->oracle).response",
+            "interacts(challenge_gate->projection).response",
             "close_outcome.domain"]
     discharged_by: test_any_review_stage_that_cannot_complete_closes_the_case_unresolved_with_its_reason
     repair:
@@ -1613,7 +1613,7 @@ demands:
     kind: seam
     form: test
     binds: ["interacts(challenge_gate->challenger).response",
-            "interacts(challenge_gate->oracle).response"]
+            "interacts(challenge_gate->projection).response"]
     discharged_by: test_each_review_stage_call_carries_an_explicit_timeout_a_test_can_drive
     rejected: [{nl: "Assuming a timeout already wraps a stage call was rejected, and the stage-hang probe settled it in both directions: the live tool-body-awaits-a-subagent path carries no wall-clock bound at all (PS1), while the offline stage runner wraps every call in a per-role env-backed one (PS2). No seam wires either to the review stages, so which one they take is a design choice rather than an inheritance — which is why the deadline is threaded as a value a scenario can set."}]
 
@@ -1621,7 +1621,7 @@ demands:
     kind: behavior
     form: test
     binds: ["interacts(challenge_gate->challenger).response",
-            "interacts(challenge_gate->oracle).response",
+            "interacts(challenge_gate->projection).response",
             "interacts(challenge_gate->coherence_checker).response"]
     discharged_by: test_a_stage_that_never_returns_is_bounded_by_wall_clock_not_a_request_count_cap
     rejected:
@@ -1749,7 +1749,7 @@ demands:
   - id: projection_leads_are_a_subset_of_the_executed_list
     kind: negative
     form: test
-    binds: ["interacts(challenge_gate->oracle).response",
+    binds: ["interacts(challenge_gate->projection).response",
             "close_outcome.domain.distinguished[forced-inconclusive]"]
     discharged_by: test_a_projection_naming_a_lead_the_investigation_never_executed_fails_the_review
     was_red_because: {nl: "Nothing checks the identifiers coming back against the executed-lead
@@ -1763,7 +1763,7 @@ demands:
   - id: projection_stage_has_its_own_role
     kind: seam
     form: test
-    binds: ["oracle", "drives(challenge_gate->oracle)"]
+    binds: ["projection", "drives(challenge_gate->projection)"]
     discharged_by: test_the_projection_stage_runs_under_a_role_of_its_own
     was_red_because: {nl: "The live projection stage is the challenger's own role definition
       re-bound at one call site. The role enum, the registry, the policy-compile surface and
@@ -1795,7 +1795,7 @@ demands:
     kind: negative
     form: test
     binds: ["review_trace", "interacts(challenge_gate->coherence_checker).response",
-            "interacts(challenge_gate->oracle).response"]
+            "interacts(challenge_gate->projection).response"]
     discharged_by: test_every_review_stages_own_trace_reply_is_framed_not_only_the_challengers
     was_red_because: {nl: "The coherence checker's and the projection's replies are logged as
       ordinary JSON fields on the stated premise that neither is payload-derived prose. That
@@ -1828,7 +1828,7 @@ structure:
     # site, and the role enum, registry, policy-compile surface and startup preflight each
     # count two review roles. `code` routed the fix to an existing module that has nothing to
     # do with it; `design` routes it where fork-F will decide it.
-    - {id: oracle, frame: leg, provenance: design}
+    - {id: projection, frame: leg, provenance: design}
 
     # ================= THE FOUR EXECUTION CONTEXTS THE CENSUS FOUND =================
     # [REPAIR-CLOSEOUT] `spec-graph actors` fired for the first time in this delta, because
@@ -2163,7 +2163,7 @@ structure:
                        failure_kind: failure_kind.domain,
                        detail: "interacts(challenge_gate->challenger).response",
                        requirement_list: "interacts(challenge_gate->challenger).response",
-                       projection_response: "interacts(challenge_gate->oracle).response"}}
+                       projection_response: "interacts(challenge_gate->projection).response"}}
           invariants: [roles-disjoint-sources, all-slots-bound]
           nl: "Pinned for observability, not for the discriminator rule: enough to
                reconstruct why a verdict came out as it did, without pinning which of those
@@ -2566,7 +2566,7 @@ structure:
             read_file: {trust: attacker-influenced, constraints: [no-grant]}
             bash: {trust: attacker-influenced, constraints: [no-grant]}
 
-    - id: oracle
+    - id: projection
       provenance: design
       note: "NO LONGER `reused unchanged` — RS10 withdraws that claim, which the design counted
              as free. Its EXISTING offline invocation threads a learning run directory and a
@@ -2640,7 +2640,7 @@ structure:
        sends: payload, transport: llm}
     - {from: challenge_gate, to: coherence_checker, mode: invoke, via: api, provenance: design,
        sends: payload, transport: llm}
-    - {from: challenge_gate, to: oracle, mode: invoke, via: api, provenance: design,
+    - {from: challenge_gate, to: projection, mode: invoke, via: api, provenance: design,
        sends: payload, transport: llm}
 
     # the review's own sinks
@@ -2650,7 +2650,7 @@ structure:
        interpolates: [run_id, trace_name]}
     - {from: coherence_checker, to: review_trace, mode: write, via: fs, provenance: design,
        interpolates: [run_id, trace_name]}
-    - {from: oracle, to: review_trace, mode: write, via: fs, provenance: design,
+    - {from: projection, to: review_trace, mode: write, via: fs, provenance: design,
        interpolates: [run_id, trace_name, lead_id]}
 
     # what the gate reads
@@ -2684,7 +2684,7 @@ structure:
     - {from: tool_close_investigation, to: challenge_gate, provenance: design, multiplicity: serial}
     - {from: challenge_gate, to: challenger, provenance: design, multiplicity: serial}
     - {from: challenge_gate, to: coherence_checker, provenance: design, multiplicity: concurrent}
-    - {from: challenge_gate, to: oracle, provenance: design, multiplicity: concurrent}
+    - {from: challenge_gate, to: projection, provenance: design, multiplicity: concurrent}
 
 claims:
 
@@ -3882,7 +3882,7 @@ gate:
 
     # --- the twelve entries RS10-RS16 closed; each was a hole at assembly, none is one now.
     - {rule: R1, element: "interacts(challenge_gate->coherence_checker).payload", by: coherence_checker_input_is_the_counter_story_only, cites: [C26], witness: "RS10 states the contract the design never did: the counter-story and nothing else. The demand drives a close and asserts on the prompt the stage fake RECORDED — the counter-story present, the observation layer and the lead ids absent."}
-    - {rule: R1, element: "interacts(challenge_gate->oracle).payload", by: projection_input_is_live_shaped, cites: [C19, C22], witness: "RS10 gives the projection stage a live-shaped input built from the run's own directory, and withdraws the design's `reused unchanged` claim. The demand drives a live run and asserts the recorded prompt names the live run dir and its executed leads, and names no learning run dir and no story-derived trace prefix."}
+    - {rule: R1, element: "interacts(challenge_gate->projection).payload", by: projection_input_is_live_shaped, cites: [C19, C22], witness: "RS10 gives the projection stage a live-shaped input built from the run's own directory, and withdraws the design's `reused unchanged` claim. The demand drives a live run and asserts the recorded prompt names the live run dir and its executed leads, and names no learning run dir and no story-derived trace prefix."}
     - {rule: R4, element: "extra_turn_bound.domain.distinguished[0]", by: bounds_reject_zero, cites: [K12], witness: "RS14 set the bound to 2, which is the only reason bounds_reject_zero could stop being prose. The demand now drives a zero configuration and requires it refused — at zero the cap collapses the first challenged arm into the cap arm, leaving no room for the turn the gate exists to force."}
     - {rule: R4, element: "grace_bound.domain.distinguished[0]", by: bounds_reject_zero, cites: [PC9], witness: "Same closure, plus RS14's reset scope: at zero the grace bound disables the only stated evidence-strength signal, since rounds-consumed is the sole place a cold pass reads differently from a refined one. grace_budget_resets_per_gate_attempt pins the scope the value alone would leave undecided."}
     - {rule: R0, element: "review_record.identity", by: review_record_lives_beside_the_run, cites: [PB1, PB4, PB5], witness: "RS11 names the sink, so the identity facet finally has evidence to cite. The demand drives two turns of one run and observes two distinct records, plus the absence of any surviving temporary file — the atomic write is exercised, not asserted."}
@@ -3915,7 +3915,7 @@ gate:
     #     the hole closes on a decision rather than on silence. Nothing in this block is a
     #     live item any more.
 
-    - {rule: R0, element: "oracle", cites: [PM6],
+    - {rule: R0, element: "projection", cites: [PM6],
        witness: "THE ADDRESS NAMES NO ROLE IN CODE. Six demands and four credits address
                  `oracle`; the live projection stage is the challenger's role definition
                  re-bound at one call site, and the role enum, registry, policy-compile
@@ -3952,7 +3952,7 @@ gate:
                  `commit` axis is fork-B reading (c); refusing the second commit removes the
                  need for one. Not decided here, which is why the axis is not registered."}
 
-    - {rule: R0, element: "interacts(challenge_gate->oracle).response", cites: [C26],
+    - {rule: R0, element: "interacts(challenge_gate->projection).response", cites: [C26],
        witness: "THE DISCRIMINATOR JOIN HAS NO KEY, by construction: an unsettled requirement
                  is one no lead settled, so the field that would name the lead is absent by
                  definition. The shipped code sorts and pairs by position; the committed test

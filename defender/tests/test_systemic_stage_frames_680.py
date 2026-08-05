@@ -613,8 +613,6 @@ def test_d7_one_stage_salt_reaches_frames_and_tool_wraps(tmp_path):
     (run / "alert.json").write_text('{"rule":{"id":"5710"}}')
     story = run / "story.md"
     story.write_text("story")
-    telemetry = run / "projected.yaml"
-    telemetry.write_text("projections: []\n")
     seen = {}
 
     def judge_fn(*args, **kwargs):
@@ -654,7 +652,6 @@ def test_d7_one_stage_salt_reaches_frames_and_tool_wraps(tmp_path):
         ),
         run,
         story,
-        telemetry,
         learning,
         judge_fn=judge_fn,
         salt=expected,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -9,9 +10,55 @@ import yaml
 from defender._io import read_text_utf8
 from defender._run_paths import RunPaths
 from defender.learning import lead_repository
-from defender.learning.pipeline.oracle.sample import real_sample_text
 
 
+_RAW_SAMPLE_HEADER_RE = re.compile(r"^### Raw Sample Events\b.*$", re.MULTILINE)
+_JSON_BLOCK_RE = re.compile(r"```json\s*\n(.*?)\n```", re.DOTALL)
+
+
+def unredacted_exemplar(text: str) -> str:
+    header_m = _RAW_SAMPLE_HEADER_RE.search(text)
+    if not header_m:
+        return "(no sample available for this lead)"
+    block = text[header_m.start():]
+    header_line = block.split("\n", 1)[0]
+    json_m = _JSON_BLOCK_RE.search(block)
+    if not json_m:
+        return f"{header_line}\n(sample not in JSON form)"
+    try:
+        sample = json.loads(json_m.group(1))
+    except json.JSONDecodeError:
+        return f"{header_line}\n(could not parse sample as JSON)"
+    if not sample:
+        return "(sample block is empty; none for this lead)"
+    return (
+        f"{header_line} (real values — orientation only)\n\n"
+        f"```json\n{json.dumps(sample, indent=2)}\n```"
+    )
+
+
+def real_sample_text(lead) -> str:
+    """The judge's own evidence column. Moved out of the retired oracle package (#791): a
+    learning run must import nothing from `defender.learning.pipeline.oracle`, and this is
+    the one producer the surviving three-to-two cut still calls on every executed lead."""
+    unreadable: Exception | None = None
+    for q in lead.queries:
+        if q.raw_ref is None or not q.raw_ref.is_file():
+            continue
+        try:
+            raw = q.raw_ref.read_bytes().decode("utf-8")
+        except (UnicodeDecodeError, OSError) as e:
+            # One unreadable payload does not blind the lead: the loop goes on to the lead's
+            # OTHER payloads, exactly as it does for one that parses but carries no sample.
+            # Returning here reported "no evidence" for a lead whose second payload was fine.
+            unreadable = e
+            continue
+        body = unredacted_exemplar(raw)
+        if not body.startswith("("):
+            return body
+    if unreadable is not None:
+        return f"(payload unreadable — {unreadable}; the sample cannot be shown)"
+    return "(no sample available for this lead)"
 
 
 def _invlang():
@@ -41,25 +88,10 @@ class LeadComparison:
     goal: str | None
     orphan: bool
     queries: list
-    projected_events: list | None
     real_sample: str
     resolutions: list = field(default_factory=list)
     authz: list = field(default_factory=list)
     note: str = ""
-
-
-def _projection_index(projected_telemetry_path: Path) -> dict:
-    try:
-        doc = yaml.safe_load(read_text_utf8(Path(projected_telemetry_path)))
-    except Exception:  # noqa: BLE001
-        return {}
-    if not isinstance(doc, dict):
-        return {}
-    out: dict = {}
-    for p in doc.get("projections") or []:
-        if isinstance(p, dict) and "lead_id" in p:
-            out[p["lead_id"]] = p.get("events", [])
-    return out
 
 
 def _resolutions_by_lead(companion: dict) -> dict:
@@ -92,46 +124,33 @@ def _authz_by_lead(companion: dict) -> dict:
 
 def build_comparison(
     run_dir: Path,
-    projected_telemetry_path: Path,
     *,
     companion: dict | None = None,
 ) -> list[LeadComparison]:
+    """The judge's input set — the two surviving columns, exactly the leads the defender
+    EXECUTED (#791: a lead the retired oracle merely projected no longer gets a row)."""
     run_dir = Path(run_dir)
     if companion is None:
         companion = parse_investigation_companion(run_dir)
-    proj = _projection_index(projected_telemetry_path)
     res_by_lead = _resolutions_by_lead(companion)
     authz_by_lead = _authz_by_lead(companion)
 
     out: list[LeadComparison] = []
-    seen: set = set()
     for jl in lead_repository.joined(run_dir):
-        seen.add(jl.lead_id)
+        sample = real_sample_text(jl)
+        note = "unreadable payload" if sample.startswith("(payload unreadable") else ""
         out.append(
             LeadComparison(
                 lead_id=jl.lead_id,
                 goal=jl.goal,
                 orphan=jl.orphan,
                 queries=list(jl.queries),
-                projected_events=proj.get(jl.lead_id),
-                real_sample=real_sample_text(jl),
+                real_sample=sample,
                 resolutions=res_by_lead.get(jl.lead_id, []),
                 authz=authz_by_lead.get(jl.lead_id, []),
+                note=note,
             )
         )
-    for lid in proj:
-        if lid not in seen:
-            out.append(
-                LeadComparison(
-                    lead_id=lid,
-                    goal=None,
-                    orphan=False,
-                    queries=[],
-                    projected_events=proj[lid],
-                    real_sample="(no payload — lead absent from the executed tables)",
-                    note="projection-only: lead absent from the executed tables",
-                )
-            )
     return out
 
 
@@ -143,31 +162,76 @@ def _yaml_or(obj, placeholder: str) -> str:
     return yaml.safe_dump(obj, sort_keys=False, allow_unicode=True).rstrip()
 
 
+_LEAD_FS_UNSAFE = re.compile(r"[^A-Za-z0-9_-]")
+
+
+def _safe_lead_filename(lead_id: str) -> str:
+    """The comparison file's own name, chosen by the run's executed-queries table rather
+    than by the actor or an author (#791) — the canonical raw-frame-escape chooser. Every
+    character outside a plain filename alphabet is neutralized, so a `../`-shaped lead id
+    cannot walk the write out of the comparison directory."""
+    slug = _LEAD_FS_UNSAFE.sub("_", lead_id).strip("_.")
+    return f"{slug or 'lead'}.md"
+
+
+class _LeadFilenamer:
+    """The ONE owner of the per-lead file names: the writer names the files through this and
+    the manifest that tells the judge what to open names them through this too, so the two
+    cannot disagree. Two independent spellings could — neutralizing `l-002.a` to `l-002_a.md`
+    on disk while the manifest still advertised `l-002.a.md` pointed the judge at a file that
+    does not exist, and two ids that neutralize alike silently overwrote one another.
+
+    Stateful and consumed ONE lead at a time, never over a materialized list: the writer
+    publishes each comparison file as it is produced, and pre-walking the sequence to
+    allocate names would drain a lazily-produced one before the first file was written."""
+
+    def __init__(self) -> None:
+        self._used: set[str] = set()
+
+    def name(self, lead_id: str) -> str:
+        candidate = _safe_lead_filename(lead_id)
+        if candidate in self._used:
+            stem = candidate[: -len(".md")]
+            n = 2
+            while f"{stem}-{n}.md" in self._used:
+                n += 1
+            candidate = f"{stem}-{n}.md"
+        self._used.add(candidate)
+        return candidate
+
+
+def _md_safe(text: str) -> str:
+    """A run-chosen value, neutralized before it is interpolated into a raw markdown frame:
+    no embedded heading marker, no embedded newline can reopen the frame with a heading of
+    the injector's choosing.
+
+    Applies to EVERY interpolated span, not just the lead id — the lead's `goal` is the
+    more attacker-reachable of the two (the investigation writes it from the alert's own
+    surface), so leaving it raw would have left the frame open through the same door."""
+    return text.replace("\n", " ").replace("#", "")
+
+
 def _payload_paths(c: LeadComparison, gather_raw: Path) -> list[str]:
     paths = [str(q.raw_ref) for q in c.queries if q.raw_ref is not None]
     return paths or [str(gather_raw / c.lead_id / "0.json")]
 
 
 def _render_lead_file(c: LeadComparison, gather_raw: Path) -> str:
+    safe_id = _md_safe(c.lead_id)
     if c.note:
-        head = f"# Lead {c.lead_id}  [{c.note}]"
+        head = f"# Lead {safe_id}  [{c.note}]"
     elif c.orphan:
-        head = f"# Lead {c.lead_id}  [orphan — query with no lead sidecar]"
+        head = f"# Lead {safe_id}  [orphan — query with no lead sidecar]"
     elif c.goal:
-        head = f"# Lead {c.lead_id} — {c.goal}"
+        head = f"# Lead {safe_id} — {_md_safe(c.goal)}"
     else:
-        head = f"# Lead {c.lead_id}"
+        head = f"# Lead {safe_id}"
 
     q_lines = "\n".join(
         f"- {q.query_id}  verb={q.verb}  params={json.dumps(q.params or {})}  status={q.payload_status}"
         for q in c.queries
     ) or "(no queries executed for this lead)"
 
-    proj = (
-        _yaml_or(c.projected_events, "(empty projection — the story does not touch this lead)")
-        if c.projected_events is not None
-        else "(no projection emitted for this lead)"
-    )
     res = _yaml_or(c.resolutions, "(no belief-movement resolutions attributed to this lead)")
     authz = _yaml_or(c.authz, "(no authorization resolutions for this lead)")
 
@@ -179,19 +243,17 @@ def _render_lead_file(c: LeadComparison, gather_raw: Path) -> str:
         f"{head}\n\n"
         "## Queries executed\n"
         f"{q_lines}\n\n"
-        "## [1] Oracle projection — what the story would have produced if it were true\n"
-        f"{proj}\n\n"
-        "## [2] Actual evidence — sample event (orientation only)\n"
+        "## Evidence — sample event (orientation only)\n"
         f"{c.real_sample}\n\n"
-        "> The sample is ONE event, for shape orientation. To assert that a projected\n"
-        "> entity is ABSENT (the refute primitive), query the FULL payload — never infer\n"
-        "> absence from the sample. `DESCRIBE data` first; defender-sql names the columns\n"
-        "> and the right idiom for this payload's shape.\n"
+        "> The sample is ONE event, for shape orientation. To assert that an entity is\n"
+        "> ABSENT (the refute primitive), query the FULL payload — never infer absence\n"
+        "> from the sample. `DESCRIBE data` first; defender-sql names the columns and the\n"
+        "> right idiom for this payload's shape.\n"
         f"> This lead's payloads ({len(payloads)}); an absence claim must cover ALL of them:\n"
         f"{payload_lines}"
         f">   cat {example} | defender-sql \"DESCRIBE data\"\n"
         f">   cat {example} | defender-sql \"SELECT count(*) FROM (SELECT unnest(hits) h FROM data) WHERE h.<field> = '<value>'\"\n\n"
-        "## [3] What the defender concluded about this lead (invlang — the \"why\")\n"
+        "## Defender reasoning (invlang — the \"why\")\n"
         "### Belief movement (:T resolutions)\n"
         f"{res}\n\n"
         "### Authorization (:R authz)\n"
@@ -204,9 +266,18 @@ def write_comparison_files(
 ) -> list[Path]:
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    if not comparisons:
+        # #791 R5: the empty comparison set is itself an observable state — an absence is
+        # indistinguishable from a comparison step that never ran, so it is RECORDED rather
+        # than left as a directory with nothing in it.
+        (out_dir / "_empty.md").write_text(
+            "(no leads were executed — the comparison set is empty)\n", encoding="utf-8"
+        )
+        return []
     paths: list[Path] = []
+    namer = _LeadFilenamer()
     for c in comparisons:
-        p = out_dir / f"{c.lead_id}.md"
+        p = out_dir / namer.name(c.lead_id)
         p.write_text(_render_lead_file(c, Path(gather_raw)), encoding="utf-8")
         paths.append(p)
     return paths
@@ -216,16 +287,12 @@ def render_manifest(comparisons: list[LeadComparison]) -> str:
     if not comparisons:
         return "(no leads were executed — monitor case; nothing to compare)"
     lines = ["Read each per-lead comparison file at its turn:"]
+    namer = _LeadFilenamer()
     for c in comparisons:
-        if c.projected_events:
-            tag = "has-projection"
-        elif c.projected_events == []:
-            tag = "empty-projection"
-        else:
-            tag = "no-projection"
-        flags = tag + (", anomaly" if (c.orphan or c.note) else "")
+        name = namer.name(c.lead_id)
+        flags = "anomaly" if (c.orphan or c.note) else "ok"
         label = (c.goal or "").strip().splitlines()[0] if c.goal else (c.note or ("orphan" if c.orphan else ""))
-        lines.append(f"- {c.lead_id}.md  [{flags}]  {label}")
+        lines.append(f"- {name}  [{flags}]  {_md_safe(label)}")
     return "\n".join(lines)
 
 

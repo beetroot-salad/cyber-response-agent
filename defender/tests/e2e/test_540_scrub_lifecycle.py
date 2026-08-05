@@ -708,7 +708,14 @@ def test_scrub_runs_before_the_first_run_dir_consumer(tmp_path):
     `for entry in sorted(run_dir.iterdir())` reads the tree directly, not `summary`, so
     nothing but its POSITION keeps it behind the reap. Hoist it and it reads a tree the scrub
     never certified, with every leg of the sibling still green. This demand owns that premise;
-    the sibling owns 'nobody catches it'."""
+    the sibling owns 'nobody catches it'.
+
+    DEPARTED MEMBER, RECORDED (#791): `enqueue_learning` leaves this property with #791 —
+    the automatic feed into the offline learning pipeline is unhooked at its call site, so
+    `main` no longer calls it at all, and a departed name with no stated reason is exactly the
+    unfalsifiable shrink `test_removing_a_consumer...` exists to catch. `enqueue_curation` and
+    `close_case_ticket` join in its place: the new curation trigger and the ticket-close step,
+    both newly pre-certification consumers of the tree (R6/R17)."""
     log: list[str] = []
     rec = BoxLifecycleRecorder(events=log)
     summary = _drive_lifecycle(tmp_path, rec)
@@ -724,10 +731,17 @@ def test_scrub_runs_before_the_first_run_dir_consumer(tmp_path):
         "the tree walked is not the run dir the box was given"
 
     order = _call_order(_fn_node(RUN_PY, "main"))
-    assert "_run_investigation_lifecycle" in order, \
-        "main no longer drives the lifecycle; re-site this demand"
-    reap = order.index("_run_investigation_lifecycle")
-    for consumer in ("iterdir", "cross_check_tables", "enqueue_learning", "visualize"):
+    # #791 R22: `main` now takes the lifecycle through an injection seam (defaulting to
+    # `_run_investigation_lifecycle`) rather than naming it directly, so the reap boundary in
+    # `main`'s own composition is the seam parameter's call, not the function's name.
+    assert "lifecycle" in order, \
+        "main no longer drives the lifecycle through its injection seam; re-site this demand"
+    reap = order.index("lifecycle")
+    # `enqueue_learning` left this list under #791 (bullet 1: the automatic feed is unhooked
+    # at this call site — the surviving path is the operator's own hand invocation of the
+    # learning entrypoint, never a call inside `main`). `enqueue_curation` and
+    # `close_case_ticket` are the two new pre-certification consumers R6/R17 add.
+    for consumer in ("iterdir", "cross_check_tables", "enqueue_curation", "close_case_ticket", "visualize"):
         assert consumer in order, f"{consumer} left the entrypoint; re-site this demand"
         assert reap < order.index(consumer), \
             f"{consumer} reads the run dir BEFORE the lifecycle scrubbed it — an escaping " \

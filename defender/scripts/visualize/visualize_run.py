@@ -38,7 +38,6 @@ from defender.scripts.visualize.visualize_judge import (
     render_judge_actor_section,
     render_judge_defender_summary,
     render_judge_judge_section,
-    render_judge_oracle_section,
     render_judge_raw_bundle,
     render_judge_toc,
 )
@@ -391,7 +390,6 @@ def render_judge_page(run_dir: Path) -> str:
     {"".join(
         render_judge_actor_section(case_id, v)
         + render_judge_judge_section(d, v)
-        + render_judge_oracle_section(case_id, v)
         for v, d in docs
     )}
     {raw_bundle}

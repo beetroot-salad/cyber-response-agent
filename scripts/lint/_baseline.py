@@ -72,6 +72,7 @@ def gate(
     *,
     label: str,
     header: str,
+    require_reasons: bool = False,
 ) -> int:
     """Drive the ratchet for one lint.
 
@@ -80,6 +81,15 @@ def gate(
 
     Otherwise: print the NEW findings prominently plus a baselined/new summary,
     and return 1 iff any finding's fingerprint is absent from the baseline.
+
+    `require_reasons` closes the ratchet's own escape hatch. Without it, ANY change can
+    bury a finding by running `--update-baseline` and leaving the reason "" — the module
+    docstring calls "" un-triaged debt, but nothing ever refused it, so "annotate the new
+    entry" was advice rather than a gate. With it, an un-triaged entry fails the lint with
+    the same force as a new finding: burying a smell costs a sentence saying why.
+
+    Opt-in per lint rather than global because lint_unguarded_tree_write's baseline is 70
+    entries un-triaged wholesale, and triaging that is its own change.
     """
     current = {f.fingerprint for f in findings}
     baseline = _load_entries(baseline_path)
@@ -108,8 +118,23 @@ def gate(
             f"`python scripts/lint/{label}.py --update-baseline` and annotate the "
             f"new entry in {baseline_path.name}."
         )
+
+    untriaged = sorted(fp for fp in current if not baseline.get(fp, "").strip()) \
+        if require_reasons else []
+    if untriaged:
+        print(f"\n[{label}] UN-TRIAGED baseline entr{'y' if len(untriaged) == 1 else 'ies'} "
+              f"({len(untriaged)}) — each needs a reason in {baseline_path.name}:")
+        for fp in untriaged:
+            print(f"  {fp}")
+        print(
+            "\nSay why the finding is acceptable (false positive and what vulture cannot "
+            "see, test-only and which tests, or deliberately dead and which issue retired "
+            'it). "" means nobody looked.'
+        )
+
     print(
         f"\n[{label}] {len(findings)} finding(s): "
-        f"{baselined_count} baselined, {len(new)} new."
+        f"{baselined_count} baselined, {len(new)} new"
+        + (f", {len(untriaged)} un-triaged." if require_reasons else ".")
     )
-    return 1 if new else 0
+    return 1 if (new or untriaged) else 0

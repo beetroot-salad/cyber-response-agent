@@ -219,7 +219,11 @@ def test_lead_author_marker_drain_reraises_fatal_lift_threshold(tmp_path, monkey
 
     failed_dir = paths.author_queue_dir / "failed"
     assert not (failed_dir / f"{run_dir.name}.json").exists()
-    assert (paths.author_queue_dir / f"{run_dir.name}.json").exists()
+    # #791: claim-and-serve is atomic (the marker moves into `inflight/` before it is
+    # served, so a re-ask landing on the same path mid-serve is never destroyed) — a
+    # systemic re-raise leaves it there, claimed but not quarantined, rather than at the
+    # top-level path it started at.
+    assert (paths.author_queue_dir / "inflight" / f"{run_dir.name}.json").exists()
 
 
 def test_drain_pitfalls_reraises_fatal_config_error(tmp_path):

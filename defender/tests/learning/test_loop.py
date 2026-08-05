@@ -1012,7 +1012,11 @@ def test_learn_drain_quarantines_run_one_error(tmp_path: Path):
     assert json.loads(failed.read_text())["failed"].startswith("run-one-error")
 
 
-def test_learn_drain_skips_already_claimed_marker(tmp_path: Path):
+def test_learn_drain_reclaims_a_marker_already_in_inflight(tmp_path: Path):
+    """#791 P1: a marker sitting in `inflight/` is reclaimed rather than left forever — the
+    prior behaviour (never touching it again) is exactly the orphaned-claim bug #791 closes,
+    since nothing here distinguishes a crashed drain's leftover from one still being served
+    (no lock, no age-out) and the queue's own count line must not read zero while it exists."""
     paths, _ = _isolate(tmp_path)
     run_dir = tmp_path / "tmprun" / "case-claimed"
     run_dir.mkdir(parents=True)
@@ -1026,7 +1030,8 @@ def test_learn_drain_skips_already_claimed_marker(tmp_path: Path):
         run_one_fn=lambda rd: learned.append(rd) or 0,
         render=lambda rd: None,
     )
-    assert learned == []
+    assert learned == [run_dir]
+    assert not (inflight / "case-claimed.json").exists()
 
 
 def test_learn_drain_skips_marker_lost_to_claim_race(tmp_path: Path, monkeypatch):
@@ -1462,14 +1467,6 @@ def _make_run_dir(tmp_path: Path, *, disposition="benign", with_payload=True) ->
     return run
 
 
-def _make_projection(tmp_path: Path, projections=None) -> Path:
-    p = tmp_path / "projected_telemetry.yaml"
-    if projections is None:
-        projections = [{"lead_id": "l-001", "events": [{"user": "attacker", "outcome": "success"}]}]
-    p.write_text(__import__("yaml").safe_dump({"projections": projections}))
-    return p
-
-
 _COMPANION = {
     "hypothesize": {"hypotheses": [{"id": "h-mal", "name": "malicious-cred-validation", "weight": "+"}]},
     "findings": [{
@@ -1486,14 +1483,13 @@ _COMPANION = {
 }
 
 
-def test_build_comparison_joins_projection_sample_and_invlang(tmp_path: Path):
+def test_build_comparison_joins_sample_and_invlang(tmp_path: Path):
     run = _make_run_dir(tmp_path)
-    proj = _make_projection(tmp_path)
-    comps = comparison.build_comparison(run, proj, companion=_COMPANION)
+    comps = comparison.build_comparison(run, companion=_COMPANION)
     assert len(comps) == 1
     c = comps[0]
     assert c.lead_id == "l-001"
-    assert c.projected_events == [{"user": "attacker", "outcome": "success"}]
+    assert not hasattr(c, "projected_events")
     assert "dev.dana" in c.real_sample
     assert c.resolutions
     assert c.resolutions[0]["after"] == "--"
@@ -1504,7 +1500,7 @@ def test_build_comparison_joins_projection_sample_and_invlang(tmp_path: Path):
 def test_real_sample_text_keeps_values_where_lead_sample_text_scrubs(tmp_path: Path):
     run = _make_run_dir(tmp_path)
     lead = lr.joined(run)[0]
-    real = oracle_mod.real_sample_text(lead)
+    real = comparison.real_sample_text(lead)
     redacted = oracle_mod.lead_sample_text(lead)
     assert "dev.dana" in real
     assert "dev.dana" not in redacted
@@ -1515,37 +1511,15 @@ def test_build_comparison_monitor_run_is_empty(tmp_path: Path):
     run = tmp_path / "run"
     run.mkdir()
     (run / "alert.json").write_text("{}")
-    proj = _make_projection(tmp_path, projections=[])
-    comps = comparison.build_comparison(run, proj)
+    comps = comparison.build_comparison(run)
     assert comps == []
     assert "monitor" in comparison.render_manifest(comps)
 
 
 def test_build_comparison_missing_payload_degrades_sample(tmp_path: Path):
     run = _make_run_dir(tmp_path, with_payload=False)
-    proj = _make_projection(tmp_path)
-    comps = comparison.build_comparison(run, proj)
+    comps = comparison.build_comparison(run)
     assert comps[0].real_sample.startswith("(")
-
-
-def test_build_comparison_lead_without_projection(tmp_path: Path):
-    run = _make_run_dir(tmp_path)
-    proj = _make_projection(tmp_path, projections=[])
-    comps = comparison.build_comparison(run, proj)
-    assert comps[0].projected_events is None
-
-
-def test_build_comparison_orphan_projection_surfaced(tmp_path: Path):
-    run = _make_run_dir(tmp_path)
-    proj = _make_projection(tmp_path, projections=[
-        {"lead_id": "l-001", "events": []},
-        {"lead_id": "l-999", "events": [{"x": 1}]},
-    ])
-    comps = comparison.build_comparison(run, proj)
-    by_id = {c.lead_id: c for c in comps}
-    assert "l-999" in by_id
-    assert by_id["l-999"].note
-    assert "anomaly" in comparison.render_manifest(comps)
 
 
 def test_parse_investigation_companion_degrades_on_garbage(tmp_path: Path):
@@ -1558,14 +1532,13 @@ def test_parse_investigation_companion_degrades_on_garbage(tmp_path: Path):
 
 def test_write_comparison_files_one_per_lead(tmp_path: Path):
     run = _make_run_dir(tmp_path)
-    proj = _make_projection(tmp_path)
-    comps = comparison.build_comparison(run, proj, companion=_COMPANION)
+    comps = comparison.build_comparison(run, companion=_COMPANION)
     out = tmp_path / "cmp"
     paths = comparison.write_comparison_files(comps, out, run / "gather_raw")
     assert [p.name for p in paths] == ["l-001.md"]
     txt = paths[0].read_text()
-    assert "[1] Oracle projection" in txt
-    assert "[3] What the defender" in txt
+    assert "## Evidence" in txt
+    assert "## Defender reasoning" in txt
     assert "gather_raw/l-001/0.json" in txt
     assert "scripted automation" in txt
     for line in txt.splitlines():
@@ -1584,7 +1557,7 @@ def test_comparison_file_names_every_payload_seq(tmp_path: Path):
         rows.append({**rows[0], "seq": seq, "payload_path": f"gather_raw/l-001/{seq}.json"})
     (run / "executed_queries.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
 
-    comps = comparison.build_comparison(run, _make_projection(tmp_path), companion=_COMPANION)
+    comps = comparison.build_comparison(run, companion=_COMPANION)
     txt = comparison.write_comparison_files(comps, tmp_path / "cmp", run / "gather_raw")[0].read_text()
     for seq in (0, 1, 2):
         assert str(run / "gather_raw" / "l-001" / f"{seq}.json") in txt, f"seq {seq} unnamed"
@@ -1600,13 +1573,12 @@ def test_render_synthesis_includes_reasoning_and_conclude():
 
 def test_build_judge_invocation_assembles_grounded_call(tmp_path: Path):
     run = _make_run_dir(tmp_path)
-    proj = _make_projection(tmp_path)
     story = tmp_path / "actor_story.md"
     story.write_text("Attack story\nGoal\nBypass\n")
     lrd = tmp_path / "lrd"
     lrd.mkdir()
 
-    inv = subagents.build_judge_invocation(run, story, proj, lrd)
+    inv = subagents.build_judge_invocation(run, story, lrd)
 
     assert (lrd / "comparison" / "l-001.md") in inv.comparison_paths
     assert set(inv.add_dirs) == {run / "gather_raw", lrd / "comparison"}
@@ -1619,7 +1591,6 @@ def test_build_judge_invocation_assembles_grounded_call(tmp_path: Path):
 
 def test_invoke_judge_benign_is_grounded(tmp_path: Path):
     run = _make_run_dir(tmp_path, disposition="malicious")
-    proj = _make_projection(tmp_path)
     story = tmp_path / "actor_benign_story.md"
     story.write_text("1. Routine-activity story\n2. Benign grounding\n")
     lrd = tmp_path / "lrd"
@@ -1635,7 +1606,7 @@ def test_invoke_judge_benign_is_grounded(tmp_path: Path):
         return "outcome: survived\ndefender_findings: []\n"
 
     out = subagents.invoke_judge(
-        directions.BENIGN_WIRING, run, story, proj, lrd,
+        directions.BENIGN_WIRING, run, story, lrd,
         judge_fn=_fake_judge_fn, box=None,
     )
 

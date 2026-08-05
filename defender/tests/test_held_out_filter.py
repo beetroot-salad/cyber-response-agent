@@ -66,7 +66,7 @@ class FakeSubagents:
         self._bump("oracle")
         return self._oracle
 
-    def judge(self, wiring, run_dir, actor_story_path, projected_telemetry_path,
+    def judge(self, wiring, run_dir, actor_story_path,
               learning_run_dir, *, box=None):
         benign = wiring is loop.BENIGN_WIRING
         self._bump("judge_benign" if benign else "judge")
@@ -130,10 +130,20 @@ def test_symlink_cannot_walk_out_of_the_held_out_set(tmp_path: Path) -> None:
 
 def test_enqueue_refuses_held_out_fixture(tmp_path: Path, capsys) -> None:
     """The boundary: a held-out fixture run is never handed to the learn worker, so no
-    stage downstream has to know what ground truth is."""
+    stage downstream has to know what ground truth is.
+
+    #791 R3 sharpened the guard from a path check to a CONTENT digest (`enqueue_learning`
+    now calls the shared `learning_refusal_gate`, which never re-derives path containment)
+    — the shipped held-out corpus holds only a README (its digest set is empty), so a real
+    member is planted here rather than read from the committed set."""
     run_dir = _complete_run_dir(tmp_path, "benign")
-    alert = run_common.HELD_OUT_FIXTURES / "m05-lsass-access" / "alert.json"
-    assert run_common.enqueue_learning(run_dir, alert) is False
+    fixtures = tmp_path / "held-out"
+    member_alert = fixtures / "m05-lsass-access" / "alert.json"
+    member_alert.parent.mkdir(parents=True)
+    member_alert.write_bytes(b'{"rule": {"id": "5710"}}')
+    alert = tmp_path / "copy-of-alert.json"
+    alert.write_bytes(member_alert.read_bytes())
+    assert run_common.enqueue_learning(run_dir, alert, fixtures_dir=fixtures) is False
     assert "held-out eval fixture" in capsys.readouterr().err
 
 
@@ -156,8 +166,9 @@ def test_net_is_narrow(tmp_path: Path) -> None:
 
 def test_malicious_dispatches_benign_not_adversarial(tmp_path: Path, monkeypatch) -> None:
     """Disposition routing: ``malicious`` runs the benign (FP) actor, never the
-    adversarial one; the run is enqueued for authoring regardless of disposition
-    (lead-author itself now fires later, in the serial author_drain)."""
+    adversarial one. #791 moved the curation trigger to the investigation boundary (out of
+    the run cycle entirely), so the run cycle's own author queue stays untouched regardless
+    of disposition — asserted alongside the routing so the leg's completion isn't vacuous."""
     monkeypatch.setenv("FIREWORKS_API_KEY", "test-not-used")
     run_dir = _complete_run_dir(tmp_path, "malicious")
     agents = FakeSubagents(story_benign="SKIP: not ours\n")
@@ -169,16 +180,17 @@ def test_malicious_dispatches_benign_not_adversarial(tmp_path: Path, monkeypatch
     )
     assert rc == 0
     marker = paths.author_queue_dir / f"{run_dir.name}.json"
-    assert marker.exists(), "run must be enqueued for authoring regardless of disposition"
+    assert not marker.exists(), "the run cycle enqueued for authoring — #791 moved that trigger"
     assert agents.calls.get("actor", 0) == 0, "adversarial actor must not run on malicious"
     assert agents.calls.get("actor_benign") == 1, "benign actor must run on malicious"
 
 
-def test_run_one_enqueues_for_authoring_even_when_a_leg_fails(tmp_path: Path, monkeypatch) -> None:
-    """A failed direction leg must still enqueue the run for the serial
-    author-drainer — lead-author (catalog refinement) is leg-independent — and
-    then fail loud. Enqueue happens before the re-raise, so the run isn't
-    stranded with no author-work marker."""
+def test_run_cycle_leaves_the_author_queue_untouched_even_when_a_leg_fails(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """#791: catalog curation's trigger moved to the investigation boundary, so the run
+    cycle's own tail no longer enqueues for authoring on ANY outcome — including a leg
+    that raises. It still fails loud."""
     monkeypatch.setenv("FIREWORKS_API_KEY", "test-not-used")
     run_dir = _complete_run_dir(tmp_path, "benign")
     agents = FakeSubagents(judge="outcome: [unterminated\n")
@@ -190,7 +202,7 @@ def test_run_one_enqueues_for_authoring_even_when_a_leg_fails(tmp_path: Path, mo
             start_box=_noop_start_box, stop_box=_noop_stop_box,
         )
     marker = paths.author_queue_dir / f"{run_dir.name}.json"
-    assert marker.exists(), "a failed leg must still enqueue the run for authoring"
+    assert not marker.exists(), "a failed leg still enqueued the run for authoring"
 
 
 def test_direct_learn_refuses_a_held_out_run_dir(tmp_path: Path) -> None:
@@ -224,7 +236,8 @@ def test_direct_learn_refuses_a_held_out_run_dir(tmp_path: Path) -> None:
 
 def test_direct_learn_still_learns_an_ordinary_run(tmp_path: Path, monkeypatch) -> None:
     """Control for the digest net: an ordinary alert is untouched by it, so the refusal
-    cannot quietly starve the learning loop."""
+    cannot quietly starve the learning loop. The leg's own completion is the witness now
+    that #791 moved the author-queue trigger out of the run cycle."""
     monkeypatch.setenv("FIREWORKS_API_KEY", "test-not-used")
     run_dir = _complete_run_dir(tmp_path, "malicious")
     agents = FakeSubagents(story_benign="SKIP: not ours\n")
@@ -234,8 +247,9 @@ def test_direct_learn_still_learns_an_ordinary_run(tmp_path: Path, monkeypatch) 
         run_dir, paths=paths, agents=agents,
         start_box=_noop_start_box, stop_box=_noop_stop_box,
     ) == 0
-    marker = paths.author_queue_dir / f"{run_dir.name}.json"
-    assert marker.exists(), "an ordinary run must still reach the author queue"
+    learn_dir = paths.runs_dir / run_dir.name
+    assert (learn_dir / "actor_benign_story.md").is_file(), \
+        "an ordinary run must still complete the benign leg"
 
 
 def test_directions_for_dispatch() -> None:
