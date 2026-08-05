@@ -28,6 +28,7 @@
     "defender/tests/spec_graph_719.yaml": "5 — post-checker era; residual instrument/typing debt",
     "defender/tests/spec_graph_754.yaml": "3 — post-checker era; residual instrument/typing debt",
     "defender/tests/spec_graph_774.yaml": "42 — 24 instrument + 16 mis-typed claims + R7 on the request ceiling — the escape trail behind #786/#788; the claims half is the debt to pay first",
+    "defender/tests/spec_graph_791-retire-offline-oracle.yaml": "8 — AUTHORED JUST BEFORE THIS GATE LANDED, so it is grandfathered on timing alone and is the first entry to clear: R7 fires on JUDGE_BENIGN_PROMPT (read by run_direction and run_judge_ab; the delta moves only the first — a real stale mirror, not noise), 3 claims closed on a read that owe an executed probe, and 3 more mis-typed into referential. Nothing here is schema drift.",
     "defender/tests/spec_graph_curator-glm-port.yaml": "117 — pre-#674: the checkers postdate this graph and its slots were never written to their vocabulary"
   }
 }
