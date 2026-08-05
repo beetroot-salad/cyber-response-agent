@@ -372,12 +372,18 @@ def _called_names(tree: ast.AST) -> set[str]:
 
 
 def test_closed_ticket_registration_reaches_every_benign_call_site():
-    """[d22_registration_reaches_every_call_site] Static census (§7 gate obligation): every
-    benign-leg driver — learning_loop, run_judge_ab, judge_equivalence — funnels through the
+    """[d22_registration_reaches_every_call_site] Static census (§7 gate obligation): the
+    live benign-leg driver — learning_loop via its subagents carrier — funnels through the
     identical invoke_judge → judge_fn → stage-build call, with NO bypass build, so the
     closed_tickets registration wired from JudgeWiring.closed_ticket_read reaches every
     call site the moment it reaches one. Paired with d1/d2's per-leg behavior checks — the
-    census picks the subjects; the drive tests observe the effect."""
+    census picks the subjects; the drive tests observe the effect.
+
+    #791: `run_judge_ab` and `judge_equivalence` are no longer among the funnel's members —
+    the shared judge prompts were rewritten off the two-column comparison these frozen-case
+    harnesses' inputs predate, so they stop judging (and therefore stop calling
+    `invoke_judge`) rather than reporting a number nobody can interpret. Only the funnel that
+    actually reaches the live judge is asserted here now."""
     files = {
         "learning_loop": DEFENDER / "learning" / "loop.py",
         "subagents": DEFENDER / "learning" / "core" / "subagents.py",
@@ -389,20 +395,17 @@ def test_closed_ticket_registration_reaches_every_benign_call_site():
         assert p.is_file(), f"census subject vanished: {p}"
         trees[name] = ast.parse(p.read_text(encoding="utf-8"))
 
-    # The funnel exists: the loop's judge carrier (subagents) and the equivalence harness
-    # (run_judge_ab's runner) both CALL invoke_judge.
+    # The funnel exists: the loop's judge carrier (subagents) CALLS invoke_judge.
     assert "invoke_judge" in _called_names(trees["subagents"])
-    assert "invoke_judge" in _called_names(trees["judge_equivalence"])
     # learning_loop reaches it via its re-export/import (the subagents carrier).
     assert "invoke_judge" in files["learning_loop"].read_text(encoding="utf-8")
-    # run_judge_ab reuses judge_equivalence's runner rather than minting its own drive.
-    ab_imports = {
-        alias.name
-        for node in ast.walk(trees["run_judge_ab"]) if isinstance(node, ast.ImportFrom)
-        for alias in node.names
-        if node.module and "judge_equivalence" in node.module
-    }
-    assert ab_imports, "run_judge_ab no longer sources its runner from judge_equivalence"
+    # #791: neither eval driver calls invoke_judge anymore — they stopped judging.
+    assert "invoke_judge" not in _called_names(trees["judge_equivalence"]), (
+        "judge_equivalence still calls invoke_judge — #791 said it stops judging"
+    )
+    assert "invoke_judge" not in _called_names(trees["run_judge_ab"]), (
+        "run_judge_ab still calls invoke_judge — #791 said it stops judging"
+    )
 
     banned = {"build_stage_agent", "build_judge_agent", "build_agent_core", "Agent"}
     for name, tree in trees.items():

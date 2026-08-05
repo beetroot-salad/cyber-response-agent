@@ -79,37 +79,9 @@ def lead_sample_text(lead) -> str:
     return "(no schema sample available for this lead)"
 
 
-def unredacted_exemplar(text: str) -> str:
-    header_m = _RAW_SAMPLE_HEADER_RE.search(text)
-    if not header_m:
-        return "(no sample available for this lead)"
-    block = text[header_m.start():]
-    header_line = block.split("\n", 1)[0]
-    json_m = _JSON_BLOCK_RE.search(block)
-    if not json_m:
-        return f"{header_line}\n(sample not in JSON form)"
-    try:
-        sample = json.loads(json_m.group(1))
-    except json.JSONDecodeError:
-        return f"{header_line}\n(could not parse sample as JSON)"
-    if not sample:
-        return "(sample block is empty; none for this lead)"
-    return (
-        f"{header_line} (real values — orientation only)\n\n"
-        f"```json\n{json.dumps(sample, indent=2)}\n```"
-    )
-
-
-def real_sample_text(lead) -> str:
-    for q in lead.queries:
-        if q.raw_ref is None or not q.raw_ref.is_file():
-            continue
-        body = unredacted_exemplar(q.raw_ref.read_text(encoding="utf-8"))
-        if not body.startswith("("):
-            return body
-    return "(no sample available for this lead)"
-
-
+# #791: `unredacted_exemplar` / `real_sample_text` MOVED to
+# `defender/learning/pipeline/judge/compare.py` — the judge's surviving evidence column is
+# the one caller left, and it must import nothing from this retired package.
 
 
 def _query_lines(lead) -> str:

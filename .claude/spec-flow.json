@@ -124,7 +124,7 @@
           "defender/learning/core/persist.py::persist_run",
           "defender/learning/core/persist.py::_copy_shared_inputs",
           "defender/learning/core/persist.py::_write_source_refs",
-          "defender/learning/core/run_cycle.py::_write_oracle_telemetry",
+          "defender/learning/core/run_cycle.py::_write_leg_status",
           "defender/learning/pipeline/malicious_actor/run.py::invoke_actor",
           "defender/learning/pipeline/judge/compare.py::write_comparison_files"
         ],

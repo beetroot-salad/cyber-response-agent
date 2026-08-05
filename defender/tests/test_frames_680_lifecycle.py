@@ -394,7 +394,6 @@ def test_producer_artifact_is_read_while_producer_has_not_finished_its_stage(tmp
         goal="published",
         orphan=False,
         queries=[],
-        projected_events=[],
         real_sample="sample",
     )
     second = LeadComparison(
@@ -402,7 +401,6 @@ def test_producer_artifact_is_read_while_producer_has_not_finished_its_stage(tmp
         goal="later",
         orphan=False,
         queries=[],
-        projected_events=[],
         real_sample="sample",
     )
     first_published, release = Event(), Event()

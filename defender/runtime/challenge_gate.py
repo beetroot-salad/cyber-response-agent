@@ -216,7 +216,7 @@ def _write_trace_row(
 
 
 def _mark_traces_incomplete(run_dir, round_no: int, reason: str) -> None:
-    for role in ("challenger", "coherence_checker", "oracle"):
+    for role in ("challenger", "coherence_checker", "projection"):
         _write_trace_row(run_dir, role, round_no, {"incomplete": True, "reason": reason})
 
 
@@ -463,7 +463,7 @@ async def _run_coherence_and_projection_once(  # noqa: PLR0913 — one stage pai
         review_roles.build_projection_input(deps, counter_story, executed_lead_ids), bounds,
     )
     coherence_task = _call_stage("coherence_checker", stages.coherence_checker, coherence_req)
-    projection_task = _call_stage("oracle", stages.projection, projection_req)
+    projection_task = _call_stage("projection", stages.projection, projection_req)
     coherence_outcome, projection_outcome = await asyncio.gather(coherence_task, projection_task)
 
     # BOTH replies are framed, not only the challenger's. The argument that neither of these
@@ -477,7 +477,7 @@ async def _run_coherence_and_projection_once(  # noqa: PLR0913 — one stage pai
     # trace's row structure. `json.dumps` escapes the frame's newlines but not its delimiters,
     # so "the marker is inside the frame" stays checkable on the bytes.
     for role, outcome in (
-        ("coherence_checker", coherence_outcome), ("oracle", projection_outcome),
+        ("coherence_checker", coherence_outcome), ("projection", projection_outcome),
     ):
         _write_trace_row(
             deps.run_dir, role, round_no,
@@ -747,7 +747,7 @@ def _settle_round(  # noqa: PLR0913 — one round's full state, named once
     # the point both readable-empty and unreadable share, so genuine silence keeps its arm.
     rows, unusable = _read_projection(deps, projection_outcome, executed_lead_ids, round_no)
     if rows is None:
-        return _RoundOutcome(fault=("oracle", StageOutcome(
+        return _RoundOutcome(fault=("projection", StageOutcome(
             text=None, failure_kind=UNREADABLE, detail=unusable,
         )))
     return _RoundOutcome(verdict=_finalize_verdict(
@@ -823,7 +823,7 @@ async def challenge_gate(deps: Any, disposition: str, *, stages: Any, bounds: Bo
             deps, stages, bounds, reply["counter_story"], round_no, executed_lead_ids,
         )
         fault = _first_stage_fault(deps, round_no, (
-            ("coherence_checker", coherence_outcome), ("oracle", projection_outcome),
+            ("coherence_checker", coherence_outcome), ("projection", projection_outcome),
         ))
         if fault is not None:
             faulting_role, fault_outcome = fault

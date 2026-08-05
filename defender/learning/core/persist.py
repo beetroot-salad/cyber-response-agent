@@ -252,8 +252,6 @@ class DirectionArtifacts:
     story_name: str
     judge_yaml: str | None
     judge_name: str
-    telemetry_yaml: str | None
-    telemetry_name: str
 
 
 def persist_run(
@@ -267,11 +265,8 @@ def persist_run(
     assert learning_run_dir is not None, "persist_run requires a learning leg dir"
     actor_story, story_name = artifacts.actor_story, artifacts.story_name
     judge_yaml, judge_name = artifacts.judge_yaml, artifacts.judge_name
-    telemetry_yaml, telemetry_name = artifacts.telemetry_yaml, artifacts.telemetry_name
     _copy_shared_inputs(run_dir, learning_run_dir)
     (learning_run_dir / story_name).write_text(actor_story, encoding="utf-8")
-    if telemetry_yaml is not None:
-        (learning_run_dir / telemetry_name).write_text(telemetry_yaml, encoding="utf-8")
     if judge_yaml is not None:
         (learning_run_dir / judge_name).write_text(judge_yaml, encoding="utf-8")
     _write_source_refs(run_dir, learning_run_dir, disposition, alert_rule_key)

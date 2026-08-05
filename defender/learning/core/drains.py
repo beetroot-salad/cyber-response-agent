@@ -4,6 +4,7 @@ import contextlib
 import functools
 import importlib
 import json
+import os
 import subprocess
 import uuid
 from pathlib import Path
@@ -152,25 +153,37 @@ def _drain_lead_author_markers(
     *,
     box: Any = None,
 ) -> None:
+    # #791: claim-and-serve is atomic — a request is moved OUT of the queue before it is
+    # served, exactly like the learn queue's own claim. Unlinking by PATH after reading would
+    # destroy a re-ask that lands on that same path (case-keyed identity, P2) while this pass
+    # is still serving it; the claim makes that path free for the re-ask's OWN marker instead.
     qdir = paths.author_queue_dir
     markers = sorted(qdir.glob("*.json")) if qdir.is_dir() else []
+    inflight_dir = qdir / "inflight"
     max_retries = env_int("LEAD_AUTHOR_MAX_RETRIES", 3)
     _log(f"lead_author_drain: {len(markers)} run(s) queued for lead-author")
+    if markers:
+        inflight_dir.mkdir(parents=True, exist_ok=True)
     for marker in markers:
+        claimed = inflight_dir / marker.name
         try:
-            spec = json.loads(marker.read_text(encoding="utf-8"))
+            os.replace(marker, claimed)
+        except FileNotFoundError:
+            continue
+        try:
+            spec = json.loads(claimed.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as e:
-            _log(f"lead_author_drain: unreadable marker {marker.name}: {e!r}; skipping")
+            _log(f"lead_author_drain: unreadable marker {claimed.name}: {e!r}; skipping")
             continue
         run_dir = Path(spec.get("run_dir", ""))
         if not run_dir.is_dir():
-            quarantine_marker(spec, marker, paths.author_queue_dir, "artifact-missing")
+            quarantine_marker(spec, claimed, paths.author_queue_dir, "artifact-missing")
             continue
         try:
             drained = run_or_dead_letter(
                 functools.partial(run_lead_author, paths, run_dir, box=box),
                 functools.partial(
-                    _quarantine_lead_author_failure, spec, marker, paths.author_queue_dir
+                    _quarantine_lead_author_failure, spec, claimed, paths.author_queue_dir
                 ),
                 propagate=(_LeadAuthorRetry,),
             )
@@ -178,12 +191,14 @@ def _drain_lead_author_markers(
             attempts = int(spec.get("attempts", 0)) + 1
             if attempts >= max_retries:
                 quarantine_marker(
-                    spec, marker, paths.author_queue_dir,
+                    spec, claimed, paths.author_queue_dir,
                     f"transient-exhausted after {attempts} attempt(s): {e!r}",
                 )
             else:
                 spec["attempts"] = attempts
                 rewrite_marker(marker, spec)
+                with contextlib.suppress(OSError):
+                    claimed.unlink()
                 _log(
                     f"lead_author_drain: transient on {spec.get('run_id')} "
                     f"(attempt {attempts}/{max_retries}) — left queued for retry"
@@ -193,7 +208,7 @@ def _drain_lead_author_markers(
             _discard_worktree_changes(paths.repo_root)
         if drained:
             with contextlib.suppress(OSError):
-                marker.unlink()
+                claimed.unlink()
 
 
 def _invoke_pitfalls(paths: LoopPaths, *, box: Any = None) -> int:

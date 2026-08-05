@@ -227,9 +227,9 @@ def _cited_section(user_text: str) -> str:
 
 
 def _benign_invocation_text(tmp_path: Path) -> str:
-    run_dir, story, telem, lrd = _case(tmp_path)
+    run_dir, story, _telem, lrd = _case(tmp_path)
     inv = build_judge_invocation(
-        run_dir, story, telem, lrd,
+        run_dir, story, lrd,
         comparison_dirname="comparison_benign", closed_ticket_read=True,
     )
     return inv.user_text
@@ -262,8 +262,8 @@ def test_teaching_surfaces_teach_tool_not_bash(tmp_path):
 
     # No surface teaches the tool to a leg that lacks it: the adversarial invocation
     # carries neither the section nor the tool names.
-    run_dir, story, telem, lrd = _case(tmp_path, name=CASE + "-advteach")
-    adv = build_judge_invocation(run_dir, story, telem, lrd)
+    run_dir, story, _telem, lrd = _case(tmp_path, name=CASE + "-advteach")
+    adv = build_judge_invocation(run_dir, story, lrd)
     assert "cited_policy_read" not in adv.user_text
     assert TOOL_GET not in adv.user_text
     assert TOOL_LIST not in adv.user_text

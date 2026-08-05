@@ -37,7 +37,6 @@ the downstream metrics (forward-check + held_out).
 from __future__ import annotations
 
 import argparse
-import dataclasses
 import sys
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -205,20 +204,24 @@ class FrozenCase:
 def run_config(
     cases: Sequence[FrozenCase], config: EngineConfig, out_root: Path,
 ) -> list[Verdict]:
-    from defender.learning.pipeline.judge.run import invoke_judge
-
     verdicts: list[Verdict] = []
     for case in cases:
         if case.wiring is None:
             raise ValueError(f"FrozenCase {case.case_id!r} has no wiring to run")
-        wiring = dataclasses.replace(case.wiring, model=config.model, effort=config.effort)
         lrd = out_root / config.label / case.case_id
         lrd.mkdir(parents=True, exist_ok=True)
-        raw = invoke_judge(
-            wiring, case.run_dir, case.actor_story_path, case.projected_telemetry_path,
-            lrd, judge_fn=config.judge_fn, box=None,
+        # #791: the shared judge prompts were rewritten off the two-column comparison the
+        # live gate builds; this harness's frozen case snapshots predate that comparison
+        # (they still name a projected-telemetry path), so judging them would report a
+        # number nobody can interpret. Stop judging, keep the harness runnable, record why.
+        (lrd / "judge_skip_791.txt").write_text(
+            "judge skipped (#791): the shared judge prompts no longer define a verdict "
+            "this frozen snapshot's inputs can satisfy (rewritten for the two-column "
+            "comparison); running the judge here would report a number nobody can "
+            "interpret.\n",
+            encoding="utf-8",
         )
-        verdicts.append(parse_judge_verdict(raw, case_id=case.case_id, direction=case.direction))
+        verdicts.append(Verdict(case.case_id, case.direction, None, frozenset(), False))
     return verdicts
 
 

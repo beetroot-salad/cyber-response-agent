@@ -18,6 +18,8 @@ class AgentRole(Enum):
     #: #774 R6 — the LIVE write-time projection stage. Deliberately NOT spelled `oracle`:
     #: `ORACLE` above is the OFFLINE learning oracle, a different agent with a different
     #: prompt, grants and geography, and binding the live stage to it resolves — which is
-    #: the worst kind of wrong join. The stage's own trace files keep the `oracle` name they
-    #: already carry; only the ROLE is new.
+    #: the worst kind of wrong join. #791 retired the offline oracle, which is what makes
+    #: that join consequential rather than merely confusing (it deletes the other referent);
+    #: the stage's dispatch key, its fault detail, and both its trace files (live + hermetic)
+    #: are re-keyed off this role's own name rather than the retired stage's.
     PROJECTION = "projection"

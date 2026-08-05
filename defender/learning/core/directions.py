@@ -65,7 +65,6 @@ class Direction:
     validate: Callable
     append_observations: Callable
     story_name: str
-    telemetry_name: str
     judge_name: str
     # The dispositions that select this direction — the ONE home for the mapping
     # `directions_for` dispatches on and the judge view reads to tell "this direction was
@@ -90,11 +89,11 @@ class Direction:
         names declared above so presence and rendering read the same list: the transcript asks
         this to tell "this leg ran" from "it was never selected" (#716)."""
         declared = (
-            self.story_name, self.telemetry_name, self.judge_name,
+            self.story_name, self.judge_name,
             self.archetype_name, self.menu_name,
         )
         return tuple(n for n in declared if n is not None) + (
-            raw_fallback_name(self.telemetry_name), raw_fallback_name(self.judge_name),
+            raw_fallback_name(self.judge_name),
         )
 
 
@@ -122,7 +121,6 @@ ADVERSARIAL = Direction(
     validate=validate_judge_doc,
     append_observations=append_actor_observations,
     story_name="actor_story.md",
-    telemetry_name="projected_telemetry.yaml",
     judge_name="judge_findings.yaml",
     dispositions=frozenset({"benign", "inconclusive"}),
     judge_optional_keys=ADVERSARIAL_JUDGE_OPTIONAL_KEYS,
@@ -155,7 +153,6 @@ BENIGN = Direction(
     validate=validate_judge_benign_doc,
     append_observations=append_environment_observations,
     story_name="actor_benign_story.md",
-    telemetry_name="projected_telemetry_benign.yaml",
     judge_name="judge_benign_findings.yaml",
     dispositions=frozenset({"malicious", "inconclusive"}),
     judge_optional_keys=BENIGN_JUDGE_OPTIONAL_KEYS,

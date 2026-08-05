@@ -10,7 +10,6 @@ from defender.learning.core.directions import (
     Direction,
     directions_for,
     normalized_disposition,
-    raw_fallback_name,
 )
 from defender.scripts.visualize.visualize_primitives import (
     _learning_run_dir,
@@ -22,6 +21,31 @@ from defender.scripts.visualize.visualize_primitives import (
     render_report_card,
     section,
 )
+
+# The leg's own terminal status (#791 R2/R15) — the one place a run dir written before the
+# field existed reads as its stated default rather than as a leg that never ran.
+LEG_COMPLETED = "completed"
+LEG_NEVER_SELECTED = "never-selected"
+LEG_STARTED_AND_DIED = "started-and-died"
+LEG_UNRECORDED = "unrecorded"
+
+
+def leg_status(run_id: str, direction: Direction) -> str:
+    """The status FILE is authoritative when it exists — it is written before the leg's
+    first call, so a leg that dies before its own story write still reads as
+    started-and-died rather than never-selected. Only a run dir with no status file at all
+    falls back to story presence: never-selected (no story either) or unrecorded (a story
+    from before the field existed, R15's stated default)."""
+    learn_dir = _learning_run_dir(run_id)
+    status_file = learn_dir / f"{direction.name}.status"
+    if status_file.is_file():
+        return (
+            LEG_COMPLETED
+            if status_file.read_text(encoding="utf-8").strip() == "completed"
+            else LEG_STARTED_AND_DIED
+        )
+    story = learn_dir / direction.story_name
+    return LEG_UNRECORDED if story.is_file() else LEG_NEVER_SELECTED
 
 
 # The direction that owns the page's unsuffixed ids — `#sec-judge`, `#finding-0`. It is the
@@ -41,7 +65,6 @@ class DirectionView:
     direction: Direction
     actor_subtitle: str
     judge_subtitle: str
-    oracle_subtitle: str
     actor_toc_label: str
 
     @property
@@ -84,7 +107,6 @@ ADVERSARIAL_VIEW = DirectionView(
     direction=ADVERSARIAL,
     actor_subtitle="— adversarial counterfactual",
     judge_subtitle="— outcome + findings",
-    oracle_subtitle="— projected telemetry (collapsed by default)",
     actor_toc_label="archetype + story",
 )
 
@@ -92,7 +114,6 @@ BENIGN_VIEW = DirectionView(
     direction=BENIGN,
     actor_subtitle="— routine-operation counterfactual",
     judge_subtitle="— FP-direction outcome + findings",
-    oracle_subtitle="— projected telemetry, FP direction (collapsed by default)",
     actor_toc_label="routine-op story",
 )
 
@@ -334,26 +355,6 @@ def _render_resolution_method(judge: dict, view: DirectionView) -> str:
 """
 
 
-def render_judge_oracle_section(run_id: str, view: DirectionView) -> str:
-    learn_dir = _learning_run_dir(run_id)
-    proj_name = view.direction.telemetry_name
-    raw_name = raw_fallback_name(proj_name)
-    proj = learn_dir / proj_name
-    proj_raw = learn_dir / raw_name
-    inner = ""
-    if proj.is_file():
-        inner += block("oracle-yaml", proj_name, pre_text(proj.read_text(encoding="utf-8")))
-    if proj_raw.is_file():
-        inner += block("oracle-raw", f"{raw_name} (raw fallback)", pre_text(proj_raw.read_text(encoding="utf-8")))
-    if not inner:
-        inner = '<div class="empty">no oracle artifacts</div>'
-    return section(
-        view.anchor("sec-oracle"), "oracle", f"Oracle{view.label}", view.oracle_subtitle, inner,
-    )
-
-
-
-
 def render_env_observation(idx: int, o: dict, anchor_prefix: str) -> str:
     fact = str(o.get("fact", "")).strip()
     criteria = str(o.get("relevance_criteria", "")).strip()
@@ -485,9 +486,6 @@ def _toc_direction_block(view: DirectionView, n_findings: int | None) -> str:
 
     <li class="section">Judge{view.label}</li>
     {_toc_judge_links(view, n_findings)}
-
-    <li class="section">Oracle{view.label}</li>
-    <li class="item"><a href="#{view.anchor("sec-oracle")}">projected telemetry</a></li>
 """
 
 

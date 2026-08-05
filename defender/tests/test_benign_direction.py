@@ -540,14 +540,12 @@ def test_build_judge_invocation_benign_injects_scoped_read(tmp_path: Path) -> No
     )
     story = run_dir / "actor_benign_story.md"
     story.write_text("1. Routine story\nciting case-OLD as covering policy\n")
-    telem = run_dir / "projected_telemetry_benign.yaml"
-    telem.write_text("projections: []\n")
     lrd = tmp_path / "learn" / run_dir.name
     lrd.mkdir(parents=True)
     (lrd / "past_tickets.txt").write_text("- case-OLD: benign — nightly scan\n")
 
     inv = su.build_judge_invocation(
-        run_dir, story, telem, lrd,
+        run_dir, story, lrd,
         comparison_dirname="comparison_benign",
         closed_ticket_read=True,
     )
@@ -566,12 +564,10 @@ def test_build_judge_invocation_adversarial_has_no_ticket_read(tmp_path: Path) -
     (run_dir / "alert.json").write_text(json.dumps({"rule": {"id": "5710"}}))
     story = run_dir / "actor_story.md"
     story.write_text("Attack story\n")
-    telem = run_dir / "projected_telemetry.yaml"
-    telem.write_text("projections: []\n")
     lrd = tmp_path / "learn2" / run_dir.name
     lrd.mkdir(parents=True)
 
-    inv = su.build_judge_invocation(run_dir, story, telem, lrd)
+    inv = su.build_judge_invocation(run_dir, story, lrd)
     assert "cited_policy_read" not in inv.user_text
     assert "get_closed_ticket" not in inv.user_text
     assert "list_closed_tickets" not in inv.user_text

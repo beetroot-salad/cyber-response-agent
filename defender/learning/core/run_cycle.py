@@ -29,7 +29,7 @@ from defender.learning.core.directions import (
     directions_for,
     raw_fallback_name,
 )
-from defender.learning.core.markers import enqueue_for_authoring, quarantine_marker
+from defender.learning.core.markers import quarantine_marker
 from defender.learning.core.persist import (
     DirectionArtifacts,
     append_findings,
@@ -41,19 +41,22 @@ from defender.learning.core.subagents import InProcessSubagents, Subagents, is_s
 from defender.learning.core.validate import (
     normalize_disposition,
     normalize_judge_yaml,
-    strip_yaml_fence,
 )
 
 
-def _write_oracle_telemetry(
-    oracle_raw: str, learning_run_dir: Path, out_name: str
-) -> Path:
-    stripped = strip_yaml_fence(oracle_raw)
-    out_path = learning_run_dir / out_name
-    out_path.write_text(stripped, encoding="utf-8")
-    if stripped != oracle_raw:
-        (learning_run_dir / raw_fallback_name(out_name)).write_text(oracle_raw, encoding="utf-8")
-    return out_path
+LEG_STATUS_STARTED = "started"
+LEG_STATUS_COMPLETED = "completed"
+
+
+def _leg_status_path(learning_run_dir: Path, spec: Direction) -> Path:
+    return learning_run_dir / f"{spec.name}.status"
+
+
+def _write_leg_status(learning_run_dir: Path, spec: Direction, status: str) -> None:
+    """The leg's own terminal status (#791 R2/R15) — the ONE place `visualize_judge.leg_status`
+    reads to tell a leg that never ran from one that started and died, now that the retired
+    stage's declared-but-unwritten artifact can no longer stand in for that signal."""
+    _leg_status_path(learning_run_dir, spec).write_text(status, encoding="utf-8")
 
 
 def _validate_judge_yaml(
@@ -83,6 +86,10 @@ def run_direction(
 ) -> bool:
     run_dir, learning_run_dir = dirs.run_dir, dirs.learning_run_dir
     assert learning_run_dir is not None, "run_direction requires a learning leg dir"
+    # The leg is marked STARTED before the actor call, not after: a leg the actor call itself
+    # raises out of (never reaching the story write) must still read as started-and-died, not
+    # as never-selected — the same confusion the status field exists to remove.
+    _write_leg_status(learning_run_dir, spec, LEG_STATUS_STARTED)
     _log(f"step=actor ({spec.name})")
     actor_story = spec.invoke_actor(agents, run_dir, learning_run_dir, alert_rule_key, box=box)
     actor_story_path = learning_run_dir / spec.story_name
@@ -95,20 +102,16 @@ def run_direction(
             artifacts=DirectionArtifacts(
                 actor_story=actor_story, story_name=spec.story_name,
                 judge_yaml=None, judge_name=spec.judge_name,
-                telemetry_yaml=None, telemetry_name=spec.telemetry_name,
             ),
             disposition=disposition, alert_rule_key=alert_rule_key,
         )
+        _write_leg_status(learning_run_dir, spec, LEG_STATUS_COMPLETED)
         return False
 
-    _log(f"step=oracle ({spec.name})")
-    oracle_raw = agents.oracle(run_dir, actor_story_path, learning_run_dir)
-    telemetry_path = _write_oracle_telemetry(
-        oracle_raw, learning_run_dir, spec.telemetry_name
-    )
-
+    # #791: the retired oracle stage leaves the leg's own call chain entirely — the judge is
+    # driven straight off the actor's story and the run's own executed evidence.
     judge_raw = agents.judge(
-        spec.judge_wiring, run_dir, actor_story_path, telemetry_path, learning_run_dir,
+        spec.judge_wiring, run_dir, actor_story_path, learning_run_dir,
         box=box,
     )
     judge_doc, judge_stripped = _validate_judge_yaml(
@@ -121,7 +124,6 @@ def run_direction(
         artifacts=DirectionArtifacts(
             actor_story=actor_story, story_name=spec.story_name,
             judge_yaml=judge_stripped, judge_name=spec.judge_name,
-            telemetry_yaml=telemetry_path.read_text(encoding="utf-8"), telemetry_name=spec.telemetry_name,
         ),
         disposition=disposition, alert_rule_key=alert_rule_key,
     )
@@ -142,6 +144,7 @@ def run_direction(
         f"appended {n_f} finding(s), {n_o} observation(s), "
         f"{n_env} env-observation(s) ({spec.name})"
     )
+    _write_leg_status(learning_run_dir, spec, LEG_STATUS_COMPLETED)
     return True
 
 
@@ -149,8 +152,14 @@ def _directions_for(disposition: str) -> list[str]:
     return [d.name for d in directions_for(disposition)]
 
 
-def _prepare_engines_for(directions: list[str], *, include_actor: bool = True) -> None:
-    models: set[str] = {oracle_model()} if directions else set()
+def _prepare_engines_for(
+    directions: list[str], *, include_actor: bool = True, include_oracle: bool = True,
+) -> None:
+    # #791 FK4/R13: `include_oracle` scopes the exclusion to the RUN CYCLE's own call site —
+    # this helper is shared with the surviving eval (`evals/_pipeline.py`'s own key-sourcing
+    # call), which still drives the retired stage for its own staging copy and still needs its
+    # key; the default therefore stays `True` and only run_one's own call opts out.
+    models: set[str] = ({oracle_model()} if include_oracle else set()) if directions else set()
     for name in directions:
         d = BY_NAME[name]
         models.add(d.judge_wiring.model)
@@ -250,7 +259,7 @@ def run_one(
     _log(f"run_id={run_id} step=normalize")
     disposition = normalize_disposition(src.report)
     directions = _directions_for(disposition)
-    _prepare_engines_for(directions)
+    _prepare_engines_for(directions, include_oracle=False)
 
     alert = json.loads(src.alert.read_text(encoding="utf-8"))
     alert_rule_key = derive_alert_rule_key(alert)
@@ -286,7 +295,9 @@ def run_one(
     if disposition == "benign" and adversarial_ok:
         enrich_case_ticket(run_dir, learning_run_dir)
 
-    enqueue_for_authoring(run_dir, paths)
+    # #791: the run cycle no longer enqueues for authoring — catalog curation gets its own
+    # trigger at the investigation boundary (run.py's tail), so this leaves the author queue
+    # untouched regardless of how the legs came out.
 
     if teardown_fault is not None:
         _log(f"run-cycle box teardown failed: {teardown_fault!r}")
@@ -314,12 +325,20 @@ def _process_marker(
     qdir: Path,
     run_one_fn: Callable[[Path], int],
     render: Callable[[Path], None],
+    *,
+    already_claimed: bool = False,
 ) -> bool:
-    claimed = inflight_dir / marker.name
-    try:
-        os.replace(marker, claimed)
-    except FileNotFoundError:
-        return False
+    if already_claimed:
+        # A marker RECLAIMED from `inflight/` (#791 P1): a prior drain died mid-claim and left
+        # it there, outside the top-level glob a plain count is computed from — it is served
+        # exactly like a freshly claimed one, just not moved again.
+        claimed = marker
+    else:
+        claimed = inflight_dir / marker.name
+        try:
+            os.replace(marker, claimed)
+        except FileNotFoundError:
+            return False
     try:
         spec = json.loads(claimed.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as e:
@@ -340,6 +359,11 @@ def _process_marker(
         _log(f"learn_drain: render failed for {run_dir.name}: {e!r} (continuing)")
     with contextlib.suppress(OSError):
         claimed.unlink()
+    # #791 P2: the claim moved this identity OUT of the top level, which frees the slot for a
+    # retry to land unobstructed while the claim was held. That retry is a re-request of the
+    # run just learned, under the same name — absorb it here rather than relearn it.
+    with contextlib.suppress(OSError):
+        (qdir / claimed.name).unlink()
     return True
 
 
@@ -356,12 +380,28 @@ def learn_drain(
         render = _render_transcript
 
     qdir = paths.learn_queue_dir
-    markers = sorted(qdir.glob("*.json")) if qdir.is_dir() else []
-    _log(f"learn_drain: {len(markers)} run(s) queued for learning")
+    if not qdir.is_dir():
+        # #791 H1c: the learn queue has no writer at all anymore, hand or automatic — the
+        # absent/empty distinction is the one instrument left, so it says which this is.
+        _log(
+            f"learn_drain: queue root {qdir} does not exist — no automatic feed writes it "
+            "anymore (#791 removed the investigation's own enqueue); nothing queued"
+        )
+        return 0
+
     inflight_dir = qdir / "inflight"
-    if markers:
+    orphans = sorted(inflight_dir.glob("*.json")) if inflight_dir.is_dir() else []
+    markers = sorted(qdir.glob("*.json"))
+    _log(
+        f"learn_drain: {len(markers)} run(s) queued for learning, {len(orphans)} reclaimed "
+        "from a prior claim — no automatic feed writes this queue anymore (#791)"
+    )
+    if markers or orphans:
         inflight_dir.mkdir(parents=True, exist_ok=True)
     drained = 0
+    for marker in orphans:
+        if _process_marker(marker, inflight_dir, qdir, run_one_fn, render, already_claimed=True):
+            drained += 1
     for marker in markers:
         if _process_marker(marker, inflight_dir, qdir, run_one_fn, render):
             drained += 1

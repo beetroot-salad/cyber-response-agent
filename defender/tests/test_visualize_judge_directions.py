@@ -172,26 +172,19 @@ def test_sections_render_the_artifact_names_direction_declares(tmp_path):
     for view in vj.VIEWS:
         d = view.direction
         (learn / d.story_name).write_text(f"story for {d.name}")
-        (learn / d.telemetry_name).write_text(f"telemetry for {d.name}")
 
     for view in vj.VIEWS:
         d = view.direction
         actor = vj.render_judge_actor_section("case-1", view)
         assert d.story_name in actor
         assert f"story for {d.name}" in actor
-        oracle = vj.render_judge_oracle_section("case-1", view)
-        assert d.telemetry_name in oracle
-        assert f"telemetry for {d.name}" in oracle
         assert d.judge_name in vj.render_judge_judge_section(None, view)
 
 
-def test_oracle_section_finds_the_raw_fallback(tmp_path):
-    learn = _learn_dir(tmp_path, "case-1")
-    raw_name = vj.raw_fallback_name(_BENIGN.direction.telemetry_name)
-    (learn / raw_name).write_text("unstripped fence")
-    html = vj.render_judge_oracle_section("case-1", _BENIGN)
-    assert "raw fallback" in html
-    assert "unstripped fence" in html
+def test_no_oracle_section_survives_the_retired_stage():
+    """#791: the retired stage's artifact is gone, and so is the section that rendered
+    it — nothing in the module still names it."""
+    assert not hasattr(vj, "render_judge_oracle_section")
 
 
 # --- disposition decides which directions appear ---------------------------------
@@ -267,9 +260,7 @@ def test_artifact_names_are_the_ones_the_direction_declares():
         names = direction.artifact_names()
         assert set(names) >= {
             direction.story_name,
-            direction.telemetry_name,
             direction.judge_name,
-            raw_fallback_name(direction.telemetry_name),
             raw_fallback_name(direction.judge_name),
         }
         for optional in (direction.archetype_name, direction.menu_name):

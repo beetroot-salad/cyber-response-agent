@@ -49,6 +49,10 @@ UNRELATED_TREES = (
     "playground-v2/",
     "defender/evals/run_judge_ab",
     "defender/tests/evals/test_run_judge_ab",
+    # #791's spec suite plants a `run_judge_ab.load_cases`-shaped fixture (`meta.json` +
+    # `{"direction": ...}`) to drive the judge-equivalence/A-B skip demand — the same judge
+    # A/B snapshot vocabulary as the two exclusions above, just from a newer caller.
+    "defender/tests/test_791_queues_evals_artifacts.py",
     "docs/archive/",
     "defender/docs/runtime-per-loop-compaction-design.md",
     ".claude/",

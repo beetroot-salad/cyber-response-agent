@@ -142,13 +142,10 @@ def _judge_fixture(
     (run / "alert.json").write_text(alert_text)
     story = run / "actor_story.md"
     story.write_text(hostile)
-    telemetry = run / "projected.yaml"
-    telemetry.write_text("projections: []\n")
     invocation = _with_salt(
         build_judge_invocation,
         run,
         story,
-        telemetry,
         learning,
         closed_ticket_read=closed,
         salt=salt,
