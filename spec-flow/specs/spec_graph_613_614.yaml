@@ -1,3 +1,4 @@
+tests: defender/tests   # the suite this graph is the derivation of
 schema_version: 1
 design: "issues #613 + #614 — the two seams the #596/#609 review extracted, landed in the same PR (#610)"
 base: fbc72810  # review commit on spec/596-609-trace-lesson-hardening

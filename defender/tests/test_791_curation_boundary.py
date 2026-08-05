@@ -1,6 +1,6 @@
 """#791 part 3 — catalog curation gets its own trigger at the investigation boundary.
 
-Every test here is one demand of `defender/tests/spec_graph_791-retire-offline-oracle.yaml`,
+Every test here is one demand of `spec-flow/specs/spec_graph_791-retire-offline-oracle.yaml`,
 named by that demand's `discharged_by`. RED against HEAD is the expected state: the shared
 refusal predicate and the curation enqueue are COINED — neither symbol exists, because R3
 makes the extraction a prerequisite for the trigger. If the implementation spells them

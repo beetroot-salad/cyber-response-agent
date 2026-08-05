@@ -1,3 +1,4 @@
+tests: defender/tests   # the suite this graph is the derivation of
 schema_version: 1
 design: "#629 — decide_write gains a report.md frontmatter+size branch and an investigation.md size bound (intent+design posted as issue comments: https://github.com/beetroot-salad/cyber-response-agent/issues/629)"
 base: 07596adf   # spec branch forked from main == 10-brief/20-demands base_commit; tree has not moved

@@ -1,6 +1,6 @@
 """#540 — the isolation boundary, as an executable spec.
 
-The demands this file discharges (see `defender/tests/spec_graph_540.yaml`):
+The demands this file discharges (see `spec-flow/specs/spec_graph_540.yaml`):
 
 * **O1 / O5 / O6 — filesystem.** Every host path that is not `run_dir` or
   `defender_dir` is *absent* from inside the box, not denied; `defender_dir` is

@@ -1,3 +1,4 @@
+tests: defender/tests   # the suite this graph is the derivation of
 schema_version: 1
 design: '#575 (issue body plus its Resolved-forks addendum)'
 base: 09e0a93cd6e43939d89182e97e5a9c567e654f7c

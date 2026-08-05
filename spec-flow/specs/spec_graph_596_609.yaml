@@ -1,3 +1,4 @@
+tests: defender/tests   # the suite this graph is the derivation of
 schema_version: 1
 design: "issues #596 (remainder — scope-update comment 2026-07-13) + #609, one combined spec (the #608 mold)"
 base: bbbac225278429f1708605868624d7fca6028dd3

@@ -1,3 +1,4 @@
+tests: defender/tests   # the suite this graph is the derivation of
 # spec-coverage graph — issue #585
 # "restore gather's query-template discovery: the injected index + a gated template_search"
 #

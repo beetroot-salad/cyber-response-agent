@@ -2,7 +2,7 @@
 keeps pytest from collecting it).
 
 #791 retires the OFFLINE oracle from the learning cycle. Every test in the four
-`test_791_*.py` modules is one demand of `defender/tests/spec_graph_791-retire-offline-oracle.yaml`,
+`test_791_*.py` modules is one demand of `spec-flow/specs/spec_graph_791-retire-offline-oracle.yaml`,
 named by that demand's `discharged_by`; this module holds only what more than one of them
 needs.
 
@@ -53,7 +53,8 @@ CLI_PY = DEFENDER / "learning" / "core" / "cli.py"
 SCRUB_PROPERTY_TEST = DEFENDER / "tests" / "e2e" / "test_540_scrub_lifecycle.py"
 VULTURE_BASELINE = REPO_ROOT / "scripts" / "lint" / "lint_vulture_baseline.json"
 PROJECT_PROFILE = REPO_ROOT / ".claude" / "spec-flow.json"
-OLDER_SPEC_GRAPH = DEFENDER / "tests" / "spec_graph_774.yaml"
+SPEC_CORPUS = REPO_ROOT / "spec-flow" / "specs"
+OLDER_SPEC_GRAPH = SPEC_CORPUS / "spec_graph_774.yaml"
 
 RETIRED_PACKAGE = "defender.learning.pipeline.oracle"
 # What the retirement actually orphans. NOT the retired package: `pipeline/oracle/` keeps

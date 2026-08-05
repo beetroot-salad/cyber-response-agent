@@ -1,6 +1,6 @@
 """#774 part 2 — when the gate fires, what each condition does, and the two bounds it runs on.
 
-Every test here is one demand of `defender/tests/spec_graph_774.yaml`, named by that demand's
+Every test here is one demand of `spec-flow/specs/spec_graph_774.yaml`, named by that demand's
 `discharged_by`.
 
 THE DESIGN'S CENTRAL MECHANISM IS REFUTED AND IS NOT PINNED HERE. "Reject the write and force

@@ -1,3 +1,4 @@
+tests: defender/tests   # the suite this graph is the derivation of
 # Spec-coverage graph — #632: per-role authorization for the verb surface.
 # Assembled (phase D, assembler leaf) from 10-brief.md + 20-demands.md + 45-dispositions.md,
 # with 05-early-resolutions.md (BINDING human decisions) and 47-reground.md (g21-g24) folded in.

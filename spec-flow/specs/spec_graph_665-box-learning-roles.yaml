@@ -1,3 +1,4 @@
+tests: defender/tests/e2e   # the suite this graph is the derivation of
 schema_version: 1
 design: '#665 (issue body + design doc; phase-C dispositions 47-dispositions-final.md)'
 base: bc1db8eb

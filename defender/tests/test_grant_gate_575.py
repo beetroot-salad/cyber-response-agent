@@ -1,6 +1,6 @@
 """Executable spec (written BEFORE the code) for #575 — one containment model: `Grant`.
 
-The spec is `.spec/resolved-demands.md` (post-human-resolution); every demand there is
+The spec is `spec-flow/specs/archive/575-pre-graph/resolved-demands.md` (post-human-resolution); every demand there is
 exactly one test here, and each test's docstring carries its demand id (a1, b7, …) so the
 spec-coverage graph can join to it.
 

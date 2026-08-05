@@ -446,10 +446,10 @@ def test_a_RENAMED_module_keeps_its_name_and_is_not_condemned(tmp_path):
 @pytest.mark.parametrize(
     "rel",
     [
-        ".spec/brief.md",
+        "spec-flow/specs/archive/575-pre-graph/brief.md",
         "defender/fixtures-e2e/golden-x/investigation.md",
         "defender/lessons-environment/l-01.md",
-        "defender/tests/spec_graph_551.yaml",
+        "spec-flow/specs/spec_graph_551.yaml",
         "docs/design.md",
     ],
 )

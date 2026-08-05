@@ -18,7 +18,7 @@
     "idioms": "Fakes enter through the entry point's injection seams (a `deps` parameter, a constructor argument), never `monkeypatch.setattr` — CI ratchets new setattr sites (`scripts/lint/lint_monkeypatch.py`)."
   },
   "specGraph": {
-    "artifacts": "defender/tests/**/spec_graph_*.yaml",
+    "artifacts": "spec-flow/specs/spec_graph_*.yaml",
     "codeRoots": [
       "defender/runtime",
       "defender/learning",
@@ -117,7 +117,13 @@
           "defender/runtime/observe.py::write_trace",
           "defender/scripts/visualize/visualize_run.py::_main_session_analysis"
         ],
-        "grep": ["session_store", "sessions/", "session_store_pointer.json", "path_row_ids", "open_store"]
+        "grep": [
+          "session_store",
+          "sessions/",
+          "session_store_pointer.json",
+          "path_row_ids",
+          "open_store"
+        ]
       },
       "learning_run_dir": {
         "writers": [

@@ -15,7 +15,7 @@ one (`ls`). This spec pins the replacement:
     no model-supplied path, case-insensitive, and a `_draft/` hit comes back untrusted-wrapped.
   - **the prose** — gather's SKILL.md / queries/SCHEMA.md stop teaching `ls`/`find`/`Grep`.
 
-Spec graph: `defender/tests/spec_graph_585.yaml`. Demand ids (dNN) are cited per test.
+Spec graph: `spec-flow/specs/spec_graph_585.yaml`. Demand ids (dNN) are cited per test.
 
 None of the target symbols exist at HEAD — `_corpus.iter_query_templates`,
 `tools_gather._template_index`, `tools_gather._tool_template_search`,

@@ -30,8 +30,8 @@ import _cli
 import _config
 import _schema
 
-_TOP = {"schema_version", "design", "base", "demands", "structure", "claims", "gate",
-        "handoff", "binds_waivers", "exercise_waivers", "actor_waivers"}
+_TOP = {"schema_version", "design", "base", "tests", "demands", "structure", "claims",
+        "gate", "handoff", "binds_waivers", "exercise_waivers", "actor_waivers"}
 _STRUCTURE = {"axes", "actors", "boundaries", "interacts", "drives"}
 _KINDS = {"behavior", "seam", "shape", "uniqueness", "parity", "domain-outcome",
           "survival", "negative", "coherence"}

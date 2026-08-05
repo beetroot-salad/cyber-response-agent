@@ -1,3 +1,4 @@
+tests: defender/tests/e2e   # the suite this graph is the derivation of
 schema_version: 1
 design: "issue #771 + .spec-flow/frontiers/00-design-doc-v2.md (revision 2 — supersedes 00-design-doc.md wherever they disagree; revision 1 carries O1-O4, NO1-NO7, M1-M4, C1 and the inherited 21-claim block)"
 base: c98bc86c1c5ceb7ea5f15a96eaa5ff9ef8c2016b

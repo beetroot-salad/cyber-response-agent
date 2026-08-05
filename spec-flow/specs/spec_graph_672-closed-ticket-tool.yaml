@@ -1,3 +1,4 @@
+tests: defender/tests   # the suite this graph is the derivation of
 # Spec-coverage graph — #672: the benign judge's closed-ticket read as two typed tools.
 # Assembled (phase D) from 10-brief.md + 20-demands.md + 45-dispositions.md; UPDATED at
 # phase E against 70-resolutions.md (the human's 13 decisions) — the suite is

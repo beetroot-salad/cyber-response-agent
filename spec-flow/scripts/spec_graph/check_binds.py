@@ -225,7 +225,8 @@ class _Scan:
         self.demands: list[dict] = graph.get("demands", []) or []
         self.waivers: dict = graph.get("binds_waivers", {}) or {}
         self.exercise_waivers: dict = graph.get("exercise_waivers", {}) or {}
-        self.test_fns = _test_functions(path.parent)
+        self.suite_dir = _suite.suite_dir_for(path, graph)
+        self.test_fns = _test_functions(self.suite_dir)
         # Code kwarg name → graph concept name, when the two disagree: the graph may model
         # the anchor tree as `anchor_tree` while the code threads it as the `anchor_dir=`
         # kwarg.
@@ -249,7 +250,7 @@ class _Scan:
         }
         # A form:test demand carries its prose in the docstring of the test it names
         # (`discharged_by`); clause/waiver keep `outcome.nl`. Scan whichever holds the prose.
-        self.docstrings = _test_docstrings(path.parent)
+        self.docstrings = _test_docstrings(self.suite_dir)
 
 
 def _pointer_prose(
@@ -262,7 +263,7 @@ def _pointer_prose(
     with no docstring still has a body worth checking.
     """
     path = scan.path
-    suite_dir = path.resolve().parent.name
+    suite_dir = scan.suite_dir.name
     if test_name not in scan.docstrings:
         findings.append(
             f"ORPHAN {path.name}:{did}: `discharged_by: {test_name}` names no test function "

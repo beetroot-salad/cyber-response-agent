@@ -1,3 +1,4 @@
+tests: defender/tests   # the suite this graph is the derivation of
 schema_version: 1
 design: "https://github.com/beetroot-salad/cyber-response-agent/issues/558 (+ comment-4928624243, the authoritative revision)"
 base: 8197a36d

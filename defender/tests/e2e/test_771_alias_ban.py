@@ -2,7 +2,7 @@
 (O2), M2's startup probe that observes the ban's effect rather than trusting configuration
 (O3), and the not-opt-out-able fault F4 resolved.
 
-Every test here is exactly one demand of `defender/tests/e2e/spec_graph_771.yaml`, named by
+Every test here is exactly one demand of `spec-flow/specs/spec_graph_771.yaml`, named by
 that demand's `discharged_by`; the docstring carries the demand's observable-outcome prose.
 
 RED BY CONSTRUCTION: `box.ALIAS_PROFILE_PATH`, `box._probe_alias_ban` and

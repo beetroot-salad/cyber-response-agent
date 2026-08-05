@@ -1,6 +1,6 @@
 """Executable spec for #620 — the AUTHORING CONTRACT half (slice 3).
 
-Spec graph: ``defender/tests/spec_graph_620-consumers-connect.yaml``. Each test realizes one
+Spec graph: ``spec-flow/specs/spec_graph_620-consumers-connect.yaml``. Each test realizes one
 demand of that graph and is named after the demand id (the id is repeated in the docstring).
 
 These tests assert over STATIC file/corpus CONTENT — the query-template corpus, ``SCHEMA.md``,

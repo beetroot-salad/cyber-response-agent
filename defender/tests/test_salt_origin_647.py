@@ -1,6 +1,6 @@
 """Executable spec (written BEFORE the code) for design #647 — the DRIVEN-RUN half.
 
-The demand list, structure, claims and gate live in `defender/tests/spec_graph_647.yaml`;
+The demand list, structure, claims and gate live in `spec-flow/specs/spec_graph_647.yaml`;
 the sweep/relocation half lives in `test_meta_json_retirement_647.py` beside it. One
 test per `form: test` demand, named by its `discharged_by`, with the demand's
 observable-outcome prose in the test's docstring.

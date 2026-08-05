@@ -1,3 +1,4 @@
+tests: defender/tests   # the suite this graph is the derivation of
 schema_version: 1
 design: "#551 (defender/docs/agent-definition-consolidation-step-three.md)"
 base: e0993ae   # SHA the spec branch forked from — write-code-from-spec diffs against it

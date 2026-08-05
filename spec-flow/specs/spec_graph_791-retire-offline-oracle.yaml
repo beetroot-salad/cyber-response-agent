@@ -1,3 +1,4 @@
+tests: defender/tests   # the suite this graph is the derivation of
 schema_version: 1
 design: "791"   # retire the offline oracle from the learning cycle — #774's second half
 base: 86e148e8  # the fork commit write-code-from-spec's gate diffs against

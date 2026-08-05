@@ -1,3 +1,4 @@
+tests: defender/tests   # the suite this graph is the derivation of
 schema_version: 1
 design: "754"   # defender/docs/session-head-pointer-design.md — amends the store shipped in #705 / #744
 base: 1cecad37   # the fork commit write-code-from-spec's gate diffs against

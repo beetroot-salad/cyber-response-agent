@@ -1,6 +1,6 @@
 """#632 part 1 — the grant, the scoped registry seam, and the one compiled policy.
 
-Every test here is one demand of `defender/tests/spec_graph_632-verb-authorization.yaml`,
+Every test here is one demand of `spec-flow/specs/spec_graph_632-verb-authorization.yaml`,
 named by that demand's `discharged_by`. The suite is RED against `d01001e6` by
 construction: the imports name the surface the implementation must build.
 

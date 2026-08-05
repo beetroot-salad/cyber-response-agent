@@ -1,6 +1,6 @@
 """#791 part 2 — the judge's comparison drops from three columns to two.
 
-Every test here is one demand of `defender/tests/spec_graph_791-retire-offline-oracle.yaml`,
+Every test here is one demand of `spec-flow/specs/spec_graph_791-retire-offline-oracle.yaml`,
 named by that demand's `discharged_by`. RED against HEAD is the expected state.
 
 WHAT THE THIRD COLUMN WAS: not only evidence — SLACK. Three failure shapes it absorbed have

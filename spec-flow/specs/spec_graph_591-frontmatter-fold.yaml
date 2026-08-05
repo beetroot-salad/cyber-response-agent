@@ -1,3 +1,4 @@
+tests: defender/tests   # the suite this graph is the derivation of
 schema_version: 1
 design: "issue #591 + decisions comment (2026-07-12) + fork resolutions (2026-07-13, recorded in handoff.forks)"
 base: 995f58e3

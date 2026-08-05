@@ -1,3 +1,4 @@
+tests: defender/tests   # the suite this graph is the derivation of
 # Spec-coverage graph — #620: slices 2+3 of the #611 migration.
 # Slice 2 = the consumers of the frozen executed_queries.jsonl row; slice 3 = connect +
 # validate_scaffold + the corpus/SCHEMA/docs that teach authoring against it.

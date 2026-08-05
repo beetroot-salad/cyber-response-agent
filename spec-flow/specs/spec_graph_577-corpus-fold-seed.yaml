@@ -1,3 +1,4 @@
+tests: defender/tests   # the suite this graph is the derivation of
 schema_version: 1
 design: "#577 (issue body + the settled-design comment: issues/577#issuecomment-4947100220)"
 base: 6581fe282fbaa9fe6b54fc662eb2d0bfed6100dd

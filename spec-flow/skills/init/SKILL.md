@@ -39,7 +39,7 @@ Write `.claude/spec-flow.json` in the shape below, then **run what you wrote** â
     "idioms": "<how fakes enter; what CI forbids>"
   },
   "specGraph": {
-    "artifacts": "<glob for the committed spec_graph_*.yaml>",
+    "artifacts": "<glob for the spec corpus â€” ONE directory holding every spec_graph_*.yaml; each graph names its own suite via `tests:`>",
     "codeRoots": ["<the project's own source trees>"],
     "entrypointStems": [],
     "contextAliases": {},

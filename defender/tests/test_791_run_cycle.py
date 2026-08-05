@@ -1,6 +1,6 @@
 """#791 part 1 — the learning cycle after the offline oracle leaves it.
 
-Every test here is one demand of `defender/tests/spec_graph_791-retire-offline-oracle.yaml`,
+Every test here is one demand of `spec-flow/specs/spec_graph_791-retire-offline-oracle.yaml`,
 named by that demand's `discharged_by`. RED against HEAD is the expected state: no
 implementation exists, and these pin the demanded correction rather than today's behaviour.
 

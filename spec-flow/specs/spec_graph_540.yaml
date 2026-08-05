@@ -1,3 +1,4 @@
+tests: defender/tests/e2e   # the suite this graph is the derivation of
 schema_version: 1
 design: "issue #540 + defender/tests/intent_540.md (revision 2, 2026-07-18) + fork resolutions recorded in handoff.forks"
 base: 7956aa950a5cd5e5d58a241e89449ba1b6c9ef01

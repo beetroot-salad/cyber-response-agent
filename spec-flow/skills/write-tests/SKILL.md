@@ -92,6 +92,6 @@ Record every outcome in `70-resolutions.md`, conservation-counted against the in
 
 ## 10. Hand off
 
-**The diff** is **tests + spec_graph only** — the suite with `spec_graph_<issue-or-slug>.yaml` beside it (demands, structure, gate record, claims ledger, `handoff:` block); its `base:` field is the fork commit. The frontiers directory stays untracked. Commit and push the spec branch **before the implementation exists** — verify the remote branch contains the commit before posting the handoff. Write-code-from-spec refuses to start otherwise, and a spec phase that never ran discretely can't bite.
+**The diff** is **tests + spec_graph only** — the suite, plus `spec_graph_<issue-or-slug>.yaml` in the profile's spec corpus (demands, structure, gate record, claims ledger, `handoff:` block); its `tests:` field names the suite it derives and its `base:` field is the fork commit. The frontiers directory stays untracked. Commit and push the spec branch **before the implementation exists** — verify the remote branch contains the commit before posting the handoff. Write-code-from-spec refuses to start otherwise, and a spec phase that never ran discretely can't bite.
 
 **The note** is the baton to a *cold* write-code-from-spec, reachable only through the issue thread — post it there with the `handoff` skill: branch and base commit, the forks the human resolved and which reading they picked, anything that ran degraded, the single next action. Write it **for the implementer, not the reviewer** — `finalize` deliberately meets the code cold.

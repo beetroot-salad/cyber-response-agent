@@ -2,7 +2,7 @@
 retired machinery alive, and everything left over that still SPELLS what this change retires:
 the live stage the word also names, and the two artifacts outside the product that carry it.
 
-Every test here is one demand of `defender/tests/spec_graph_791-retire-offline-oracle.yaml`,
+Every test here is one demand of `spec-flow/specs/spec_graph_791-retire-offline-oracle.yaml`,
 named by that demand's `discharged_by`. RED against HEAD is the expected state.
 
 TWO INHERITED DEFECTS ARE FIXED IN SCOPE, and both are wider than "a wiring change":

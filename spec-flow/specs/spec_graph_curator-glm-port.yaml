@@ -1,3 +1,4 @@
+tests: defender/tests   # the suite this graph is the derivation of
 schema_version: 1
 design: >-
   Port the four learning-loop lesson curators (A findings/lessons, B actor-tradecraft,

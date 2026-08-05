@@ -3,7 +3,7 @@
 repository projections, the pitfalls lane, the visualizers + workspace map) and the
 `validate_scaffold` authoring gate.
 
-Every test here is one demand of `defender/tests/spec_graph_620-consumers-connect.yaml`,
+Every test here is one demand of `spec-flow/specs/spec_graph_620-consumers-connect.yaml`,
 named after it and carrying its id in the docstring.
 
 RED BY CONSTRUCTION. The import block below names a surface the implementation must still

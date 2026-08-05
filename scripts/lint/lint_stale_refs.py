@@ -114,7 +114,7 @@ GENERIC_NAMES = {
 # surviving only here is not evidence it survives in the live tree, so `_path_named` does
 # not let them vouch for one. Distinct from EXCLUDED_GREP_DIRS below, which answers a
 # different question ("is this dir a reference SOURCE") and includes live dirs.
-_ARCHIVAL_DIRS = ("experiments/", ".claude/worktrees/", "docs/archive/", ".spec/")
+_ARCHIVAL_DIRS = ("experiments/", ".claude/worktrees/", "docs/archive/", "spec-flow/specs/archive/")
 
 EXCLUDED_GREP_DIRS = (
     ".git", ".venv", "__pycache__", "node_modules",
@@ -126,9 +126,11 @@ EXCLUDED_GREP_DIRS = (
     "tasks", "docs",
     # POC design notes — same rationale.
     "defender/docs",
-    # Spec artifacts (brief/demands/resolved-demands/gen_graph): they QUOTE the
-    # pre-change code by construction — naming the old symbol is the job.
-    ".spec",
+    # The spec corpus: every graph, and the pre-graph #575 artifacts archived beside
+    # them, QUOTE the pre-change code by construction — naming the old symbol is the job.
+    # One directory covers the whole corpus now that the graphs live together, which is
+    # what retires the two per-test-tree globs this used to need below.
+    "spec-flow/specs",
     # An entry matches `rel == d` or `rel` under `d + "/"`, so it does NOT cover a
     # same-prefixed SIBLING directory. These two are the same historical-prose class
     # as `defender/fixtures` and `defender/lessons` above, and slipped through on that
@@ -147,10 +149,12 @@ EXCLUDED_GREP_DIRS = (
 # technicality (#667): spec_graph_540.yaml's frozen prose names `resolve_run_dir`, which
 # #667 deletes. Kept as a second explicit glob rather than a `**` relaxation, which would
 # silently swallow any future spec graph parked anywhere under defender/.
-EXCLUDED_GREP_GLOBS = (
-    "defender/tests/spec_graph_*.yaml",
-    "defender/tests/e2e/spec_graph_*.yaml",
-)
+# Empty by design: the spec corpus is one directory (`spec-flow/specs`, in
+# EXCLUDED_GREP_DIRS above), so the per-test-tree globs this held — one that missed the
+# e2e sibling because `*` does not cross a `/`, and the explicit second glob added to
+# patch that (#667) — no longer have anything to cover. Kept as a seam for a future
+# artifact that is inert-by-construction but cannot live under a single root.
+EXCLUDED_GREP_GLOBS: tuple[str, ...] = ()
 
 # On the REFERENCING line: this reference names a dead symbol deliberately.
 SUPPRESS = "lint-stale-ref: ok"

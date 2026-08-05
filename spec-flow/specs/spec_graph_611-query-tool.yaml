@@ -1,3 +1,4 @@
+tests: defender/tests   # the suite this graph is the derivation of
 # Spec-coverage graph — #611 slice 1: the query tool, the VERBS registry, capture-as-capability.
 # Slice 1 FREEZES the two-table row contract; consumers migrate in slice 2 (see handoff).
 base: f6fbd06fd3a8dec181716e8d62ec294399adf822

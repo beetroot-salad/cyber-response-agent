@@ -1,3 +1,4 @@
+tests: defender/tests   # the suite this graph is the derivation of
 schema_version: 1
 design: "#631 — flip the per-run budget from warning-only accounting to an enforced posture"
 base: 483b5809

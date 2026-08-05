@@ -1,3 +1,4 @@
+tests: defender/tests   # the suite this graph is the derivation of
 schema_version: 1
 design: "#680 — systemic salted framing for learning-stage prompts and cross-agent tool returns"
 base: a748165986bc153fd215219383dea0237bc3867f

@@ -1,3 +1,4 @@
+tests: defender/tests   # the suite this graph is the derivation of
 schema_version: 1
 design: "#647 — delete the inert run-dir meta.json; mint the per-run salt in-process"
 base: be8d2c27

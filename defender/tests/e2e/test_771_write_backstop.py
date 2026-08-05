@@ -1,7 +1,7 @@
 """#771 — the executable spec for the WRITE BACKSTOP half: M3's alias-refusing primitive and
 its lint (O1), M4's atomic-write rewrite, and the four call-site postures F1 preserved.
 
-Every test here is exactly one demand of `defender/tests/e2e/spec_graph_771.yaml`, named by
+Every test here is exactly one demand of `spec-flow/specs/spec_graph_771.yaml`, named by
 that demand's `discharged_by`, and its docstring carries the demand's observable-outcome prose
 (that docstring is what `spec-graph binds` scans in place of an `outcome`).
 

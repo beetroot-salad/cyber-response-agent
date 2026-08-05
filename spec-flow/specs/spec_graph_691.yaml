@@ -1,3 +1,4 @@
+tests: defender/tests   # the suite this graph is the derivation of
 schema_version: 1
 design: "691"
 base: a7481659   # the fork commit write-code-from-spec's gate diffs against

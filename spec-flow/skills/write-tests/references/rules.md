@@ -127,11 +127,12 @@ Suite-verification checks that prove properties of the *suite itself* that no pe
 
 ## The artifact — spec_graph_<issue-or-slug>.yaml
 
-One file per spec, committed **beside the suite** (same directory as the new tests, named `spec_graph_<issue-or-slug>.yaml`), as the tests' machine-checked derivation:
+One file per spec, committed into the **spec corpus** — the profile's `specGraph.artifacts` directory, named `spec_graph_<issue-or-slug>.yaml` — as the tests' machine-checked derivation. It used to live beside its suite, which made adjacency load-bearing in code rather than convention and scattered the corpus across whichever test tree each spec happened to touch; now the graph **names** its suite (`tests:`, repo-relative) and the graphs live together, so the checkers can gate them as one body with one baseline. A graph naming the wrong suite loses its docstrings and every demand reports as a prose orphan — the mis-declaration is loud, not silent.
 
 ```yaml
 schema_version: 1
 design: <issue # or doc path>
+tests: <repo-relative dir of the suite this graph derives — check_binds scans its docstrings>
 base: <SHA the spec branch forked from — write-code-from-spec's gate diffs against it>
 demands:   [...]      # the resolved demand list, waivers included — the spec proper
                       # a form:test demand is a pointer {id,kind,form,binds,discharged_by}; its prose
