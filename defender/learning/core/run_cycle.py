@@ -49,7 +49,7 @@ LEG_STATUS_COMPLETED = "completed"
 
 
 def _leg_status_path(learning_run_dir: Path, spec: Direction) -> Path:
-    return learning_run_dir / f"{spec.name}.status"
+    return learning_run_dir / spec.status_name
 
 
 def _write_leg_status(learning_run_dir: Path, spec: Direction, status: str) -> None:
@@ -369,6 +369,25 @@ def _process_marker(
 
 def learn_drain(
     paths: LoopPaths = DEFAULT_PATHS,
+    *,
+    run_one_fn: Callable[[Path], int] | None = None,
+    render: Callable[[Path], None] | None = None,
+) -> int:
+    # The single-drainer lease its two sibling drains already hold. It became load-bearing
+    # when this drain started RECLAIMING `inflight/`: a claim is only evidence of a DEAD pass
+    # if no live pass can be holding one, and without the lease a second drainer reads a live
+    # drainer's claim as an orphan and learns the same run a second time.
+    from defender.learning.author import shared as _author_shared
+
+    with _author_shared.flock_or_skip(paths.learn_drain_lock_file) as locked:
+        if not locked:
+            _log("learn_drain: another drainer holds the lock — exiting")
+            return 0
+        return _learn_drain_locked(paths, run_one_fn=run_one_fn, render=render)
+
+
+def _learn_drain_locked(
+    paths: LoopPaths,
     *,
     run_one_fn: Callable[[Path], int] | None = None,
     render: Callable[[Path], None] | None = None,

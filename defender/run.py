@@ -318,14 +318,17 @@ def main(
     # above already performed: a corpus optimisation, cheap to lose, so its own failure is
     # reported and swallowed rather than costing the investigation its exit status or its
     # human-facing steps below.
+    # The case ticket is settled BEFORE the request is published, the order the learning
+    # enqueue it replaced already had: a curation drainer can start the moment the marker
+    # lands, and it must never read this case while its ticket is still open.
+    if ns.update_ticket:
+        ticket_writer.close_case_ticket(run_dir)
+
     if ns.no_learn:
         # R14: fail-closed — the flag governs catalog curation, the one automatic lane left.
         print("[run.py] --no-learn set; not enqueuing for curation", file=sys.stderr)
     elif _run.enqueue_curation(run_dir, alert, truncated_by=summary.get("truncated_by")):
         print("[run.py] enqueued for catalog curation", file=sys.stderr)
-
-    if ns.update_ticket:
-        ticket_writer.close_case_ticket(run_dir)
 
     try:
         visualize(run_dir)

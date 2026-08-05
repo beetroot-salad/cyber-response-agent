@@ -41,16 +41,23 @@ def real_sample_text(lead) -> str:
     """The judge's own evidence column. Moved out of the retired oracle package (#791): a
     learning run must import nothing from `defender.learning.pipeline.oracle`, and this is
     the one producer the surviving three-to-two cut still calls on every executed lead."""
+    unreadable: Exception | None = None
     for q in lead.queries:
         if q.raw_ref is None or not q.raw_ref.is_file():
             continue
         try:
             raw = q.raw_ref.read_bytes().decode("utf-8")
         except (UnicodeDecodeError, OSError) as e:
-            return f"(payload unreadable — {e}; the sample cannot be shown)"
+            # One unreadable payload does not blind the lead: the loop goes on to the lead's
+            # OTHER payloads, exactly as it does for one that parses but carries no sample.
+            # Returning here reported "no evidence" for a lead whose second payload was fine.
+            unreadable = e
+            continue
         body = unredacted_exemplar(raw)
         if not body.startswith("("):
             return body
+    if unreadable is not None:
+        return f"(payload unreadable — {unreadable}; the sample cannot be shown)"
     return "(no sample available for this lead)"
 
 
@@ -167,10 +174,40 @@ def _safe_lead_filename(lead_id: str) -> str:
     return f"{slug or 'lead'}.md"
 
 
+class _LeadFilenamer:
+    """The ONE owner of the per-lead file names: the writer names the files through this and
+    the manifest that tells the judge what to open names them through this too, so the two
+    cannot disagree. Two independent spellings could — neutralizing `l-002.a` to `l-002_a.md`
+    on disk while the manifest still advertised `l-002.a.md` pointed the judge at a file that
+    does not exist, and two ids that neutralize alike silently overwrote one another.
+
+    Stateful and consumed ONE lead at a time, never over a materialized list: the writer
+    publishes each comparison file as it is produced, and pre-walking the sequence to
+    allocate names would drain a lazily-produced one before the first file was written."""
+
+    def __init__(self) -> None:
+        self._used: set[str] = set()
+
+    def name(self, lead_id: str) -> str:
+        candidate = _safe_lead_filename(lead_id)
+        if candidate in self._used:
+            stem = candidate[: -len(".md")]
+            n = 2
+            while f"{stem}-{n}.md" in self._used:
+                n += 1
+            candidate = f"{stem}-{n}.md"
+        self._used.add(candidate)
+        return candidate
+
+
 def _md_safe(text: str) -> str:
     """A run-chosen value, neutralized before it is interpolated into a raw markdown frame:
     no embedded heading marker, no embedded newline can reopen the frame with a heading of
-    the injector's choosing."""
+    the injector's choosing.
+
+    Applies to EVERY interpolated span, not just the lead id — the lead's `goal` is the
+    more attacker-reachable of the two (the investigation writes it from the alert's own
+    surface), so leaving it raw would have left the frame open through the same door."""
     return text.replace("\n", " ").replace("#", "")
 
 
@@ -186,7 +223,7 @@ def _render_lead_file(c: LeadComparison, gather_raw: Path) -> str:
     elif c.orphan:
         head = f"# Lead {safe_id}  [orphan — query with no lead sidecar]"
     elif c.goal:
-        head = f"# Lead {safe_id} — {c.goal}"
+        head = f"# Lead {safe_id} — {_md_safe(c.goal)}"
     else:
         head = f"# Lead {safe_id}"
 
@@ -238,8 +275,9 @@ def write_comparison_files(
         )
         return []
     paths: list[Path] = []
+    namer = _LeadFilenamer()
     for c in comparisons:
-        p = out_dir / _safe_lead_filename(c.lead_id)
+        p = out_dir / namer.name(c.lead_id)
         p.write_text(_render_lead_file(c, Path(gather_raw)), encoding="utf-8")
         paths.append(p)
     return paths
@@ -249,10 +287,12 @@ def render_manifest(comparisons: list[LeadComparison]) -> str:
     if not comparisons:
         return "(no leads were executed — monitor case; nothing to compare)"
     lines = ["Read each per-lead comparison file at its turn:"]
+    namer = _LeadFilenamer()
     for c in comparisons:
+        name = namer.name(c.lead_id)
         flags = "anomaly" if (c.orphan or c.note) else "ok"
         label = (c.goal or "").strip().splitlines()[0] if c.goal else (c.note or ("orphan" if c.orphan else ""))
-        lines.append(f"- {_md_safe(c.lead_id)}.md  [{flags}]  {label}")
+        lines.append(f"- {name}  [{flags}]  {_md_safe(label)}")
     return "\n".join(lines)
 
 

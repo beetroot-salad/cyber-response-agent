@@ -169,16 +169,20 @@ def learning_refusal_gate(
     (#791 R3): a copied guard drifts from the thing it documents, a shared one cannot. Returns
     the reason a run must be refused, or `None` if it clears every net.
 
-    Held out is checked by CONTENT DIGEST, not by where the operator's argv path happened to
-    point — a copy of a held-out fixture taken outside `fixtures_dir` still must not reach
-    either queue, and only the digest catches that (`is_held_out_fixture`'s path containment
-    misses it by construction)."""
+    Held out is checked by CONTENT DIGEST *and* by path containment, because neither net alone
+    is the whole set: the digest catches a copy of a fixture taken outside `fixtures_dir`
+    (containment misses it by construction), and containment catches anything inside the
+    fixture tree that the digest walk never reads — it only digests `<slug>/alert.json`."""
     if truncated_by is not None:
         return f"run was truncated (truncated_by={truncated_by!r}) — a truncated " \
             "investigation must not train the corpus"
-    if is_held_out_alert_copy(alert, fixtures_dir):
-        return f"{alert} is a copy of a held-out eval fixture — its findings must never " \
-            "feed a corpus it is scored against"
+    # BOTH nets, not the digest alone. The digest catches a copy taken outside `fixtures_dir`,
+    # which path containment misses by construction — but containment catches a fixture whose
+    # alert the digest walk never reads (it only reads `<fixtures>/<slug>/alert.json`), which
+    # the digest misses by construction. Dropping either one narrows the guard.
+    if is_held_out_fixture(alert, fixtures_dir) or is_held_out_alert_copy(alert, fixtures_dir):
+        return f"{alert} is a held-out eval fixture (or a copy of one) — its findings must " \
+            "never feed a corpus it is scored against"
     from defender.runtime import scrub as _scrub
 
     if not _scrub.tree_verified(run_dir):
@@ -236,8 +240,12 @@ def enqueue_curation(
     from defender.learning.core.config import LoopPaths, _env_state_dir
 
     paths = LoopPaths(repo_root=_LEARN_REPO_ROOT, state_dir=_env_state_dir())
-    case_id = f"case-{hashlib.sha256(alert.read_bytes()).hexdigest()[:16]}"
+    # The case-key derivation is inside the guard with the write it feeds: it reads the alert
+    # off disk, and an alert the operator moved mid-run would otherwise take the investigation's
+    # exit status and its remaining human-facing steps down with it — for a corpus optimisation
+    # this call site has already declared cheap to lose.
     try:
+        case_id = f"case-{hashlib.sha256(alert.read_bytes()).hexdigest()[:16]}"
         _markers.enqueue_case_for_curation(case_id, run_dir, paths)
     except OSError as e:
         print(f"[run.py] NOT enqueuing for curation: could not write the request: {e!r}",

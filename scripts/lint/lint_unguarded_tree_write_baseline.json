@@ -51,7 +51,7 @@
     "learning/core/quarantine.py:preserve_tainted_tree": "",
     "learning/core/run_cycle.py:_validate_judge_yaml": "",
     "learning/core/run_cycle.py:_write_leg_status": "",
-    "learning/core/run_cycle.py:learn_drain": "",
+    "learning/core/run_cycle.py:_learn_drain_locked": "",
     "learning/core/run_cycle.py:run_direction": "",
     "learning/core/run_cycle.py:run_one": "",
     "learning/core/subagents.py:actor": "",

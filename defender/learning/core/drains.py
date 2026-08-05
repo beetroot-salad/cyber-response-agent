@@ -114,6 +114,11 @@ def _has_lead_author_work(paths: LoopPaths) -> bool:
     qdir = paths.author_queue_dir
     if qdir.is_dir() and any(qdir.glob("*.json")):
         return True
+    # A marker stranded in `inflight/` by a drain that died mid-serve is still work: the
+    # drainer reclaims it, so this gate has to wake for it or it never runs again.
+    inflight = qdir / "inflight"
+    if inflight.is_dir() and any(inflight.glob("*.json")):
+        return True
     return len(read_pitfalls(paths)) >= threshold
 
 
@@ -160,16 +165,30 @@ def _drain_lead_author_markers(
     qdir = paths.author_queue_dir
     markers = sorted(qdir.glob("*.json")) if qdir.is_dir() else []
     inflight_dir = qdir / "inflight"
+    # A claim that is never reclaimed is a request LOST, not deferred: a drain that dies
+    # mid-serve leaves the marker in `inflight/`, which neither this pass's top-level glob nor
+    # `_has_lead_author_work`'s can see, so nothing would ever ask for that case again. Safe to
+    # reclaim unconditionally here and only here: `lead_author_drain` holds the drainer flock,
+    # so anything still sitting in `inflight/` belongs to a pass that is already dead.
+    orphans = sorted(inflight_dir.glob("*.json")) if inflight_dir.is_dir() else []
     max_retries = env_int("LEAD_AUTHOR_MAX_RETRIES", 3)
-    _log(f"lead_author_drain: {len(markers)} run(s) queued for lead-author")
+    _log(
+        f"lead_author_drain: {len(markers)} run(s) queued for lead-author, "
+        f"{len(orphans)} reclaimed from a prior claim"
+    )
     if markers:
         inflight_dir.mkdir(parents=True, exist_ok=True)
-    for marker in markers:
-        claimed = inflight_dir / marker.name
-        try:
-            os.replace(marker, claimed)
-        except FileNotFoundError:
-            continue
+    for marker in [*orphans, *markers]:
+        already_claimed = marker.parent == inflight_dir
+        claimed = marker if already_claimed else inflight_dir / marker.name
+        # Where a transient retry is re-queued, always the TOP level — never the claim slot a
+        # reclaimed orphan was read from, which this pass is about to unlink.
+        queued_path = qdir / marker.name
+        if not already_claimed:
+            try:
+                os.replace(marker, claimed)
+            except FileNotFoundError:
+                continue
         try:
             spec = json.loads(claimed.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as e:
@@ -196,7 +215,7 @@ def _drain_lead_author_markers(
                 )
             else:
                 spec["attempts"] = attempts
-                rewrite_marker(marker, spec)
+                rewrite_marker(queued_path, spec)
                 with contextlib.suppress(OSError):
                     claimed.unlink()
                 _log(

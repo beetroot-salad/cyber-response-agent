@@ -168,14 +168,26 @@ def render_report(title: str, cmp: Comparison, *, self_consistency: float | None
         f"candidate parse-failure rate: {cmp.cand_parse_failure_rate:.1%}",
     ]
     if self_consistency is not None:
-        verdict = "WITHIN" if cmp.outcome_match >= self_consistency else "BELOW"
-        lines += [
-            "",
-            f"same-config self-consistency floor: {self_consistency:.1%}",
-            f"→ candidate outcome-match is {verdict} the noise floor"
-            + (" AND zero flips → EQUIVALENT" if verdict == "WITHIN" and not cmp.flips
-               else " — NOT yet equivalent"),
-        ]
+        if cmp.cand_parse_failure_rate >= 1.0:
+            # No candidate verdict was ever produced, so every outcome on that side is `None`
+            # and outcome-match reads 100% by comparing nothing to nothing. Emitting the
+            # equivalence line here would print a confident EQUIVALENT off zero measurements —
+            # the one failure mode this report exists to prevent.
+            lines += [
+                "",
+                f"same-config self-consistency floor: {self_consistency:.1%}",
+                "→ NOT MEASURED: no candidate verdict parsed, so outcome-match compares "
+                "nothing to nothing. This report cannot say whether the engines agree.",
+            ]
+        else:
+            verdict = "WITHIN" if cmp.outcome_match >= self_consistency else "BELOW"
+            lines += [
+                "",
+                f"same-config self-consistency floor: {self_consistency:.1%}",
+                f"→ candidate outcome-match is {verdict} the noise floor"
+                + (" AND zero flips → EQUIVALENT" if verdict == "WITHIN" and not cmp.flips
+                   else " — NOT yet equivalent"),
+            ]
     return "\n".join(lines)
 
 

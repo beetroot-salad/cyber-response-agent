@@ -83,12 +83,24 @@ class Direction:
     append_env_observations: Callable | None = None
     extra_obs_triggers: tuple[ObsTrigger, ...] = ()
 
+    @property
+    def status_name(self) -> str:
+        """The leg's own terminal-status file (#791). Derived HERE, like every other name on
+        this class, so the run cycle that writes it and the transcript view that reads it
+        cannot disagree about what it is called."""
+        return f"{self.name}.status"
+
     def artifact_names(self) -> tuple[str, ...]:
         """Every file this direction's legs leave in the learning run dir. Derived from the
         names declared above so presence and rendering read the same list: the transcript asks
-        this to tell "this leg ran" from "it was never selected" (#716)."""
+        this to tell "this leg ran" from "it was never selected" (#716).
+
+        The status file leads: it is written BEFORE the actor call, so it is the only trace a
+        leg that died in that call leaves at all. Retiring the projected-telemetry names
+        without putting it on this list would have made such a leg indistinguishable from one
+        that was never selected — the exact confusion the status file was added to end."""
         declared = (
-            self.story_name, self.judge_name,
+            self.status_name, self.story_name, self.judge_name,
             self.archetype_name, self.menu_name,
         )
         return tuple(n for n in declared if n is not None) + (

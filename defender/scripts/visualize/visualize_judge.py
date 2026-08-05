@@ -37,7 +37,7 @@ def leg_status(run_id: str, direction: Direction) -> str:
     falls back to story presence: never-selected (no story either) or unrecorded (a story
     from before the field existed, R15's stated default)."""
     learn_dir = _learning_run_dir(run_id)
-    status_file = learn_dir / f"{direction.name}.status"
+    status_file = learn_dir / direction.status_name
     if status_file.is_file():
         return (
             LEG_COMPLETED
@@ -253,18 +253,26 @@ def render_judge_actor_section(run_id: str, view: DirectionView) -> str:
     story_name = view.direction.story_name
     story = learn_dir / story_name
     anchor, title = view.anchor("sec-actor"), f"Actor{view.label}"
+    # The leg's status is RENDERED, not merely computable: "no story" is the one state a
+    # reader cannot resolve on their own — a leg that was never selected and one that died
+    # inside the actor call look identical on disk without it.
+    status = leg_status(run_id, view.direction)
+    status_html = (
+        f'<div class="actor-meta"><span class="key">leg:</span> '
+        f'<span class="val">{esc(status)}</span></div>'
+    )
 
     if not story.is_file():
         return section(
             anchor, "actor", title, view.actor_subtitle,
-            f'<div class="empty">no {esc(story_name)}</div>',
+            f'{status_html}<div class="empty">no {esc(story_name)}</div>',
         )
 
-    meta_html = ""
+    meta_html = status_html
     if view.direction.archetype_name is not None:
         archetype = learn_dir / view.direction.archetype_name
         arch = archetype.read_text(encoding="utf-8").strip() if archetype.is_file() else "?"
-        meta_html = (
+        meta_html += (
             f'<div class="actor-meta"><span class="key">archetype:</span> '
             f'<span class="val">{esc(arch)}</span></div>'
         )
