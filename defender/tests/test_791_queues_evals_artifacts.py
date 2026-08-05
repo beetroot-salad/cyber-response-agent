@@ -49,7 +49,7 @@ from defender.tests._spec791 import (  # noqa: E402
     LIVE_STAGE_WORD,
     OLDER_SPEC_GRAPH,
     PROJECT_PROFILE,
-    RETIRED_PACKAGE,
+    RETIRED_DEAD_SYMBOLS,
     RETIRED_STAGE_WORD,
     RETIRED_TELEMETRY_WRITER,
     VULTURE_BASELINE,
@@ -393,31 +393,70 @@ def test_791_the_oracle_knobs_are_dead_for_learning_and_live_for_the_replay(tmp_
 
 def test_791_every_new_dead_code_baseline_entry_names_this_issue(tmp_path):
     """dead_code_baseline_names_the_issue — every dead-code finding this change baselines
-    carries a stated reason naming the issue that made it dead.
+    carries a stated reason naming the issue that made it dead, and the gate REFUSES one that
+    does not.
 
-    Leaving the retired modules uncalled trips a gate that blocks on newly-unreachable code,
-    and deletion is out of scope by an explicit sentence. The baseline maps a finding
-    fingerprint to a REASON STRING with the empty string meaning UN-TRIAGED (H5), so "with a
-    stated reason pointing at #791" is a real assertion rather than prose. The gate keeps
-    blocking on genuinely new dead code; this change's deliberate dead code is on record.
+    The demand was written expecting the corpses to fall inside the retired package. They do
+    not: `pipeline/oracle/` keeps every symbol live, because the secondary eval still projects
+    (deliberately — its sibling demand says so in as many words) and the golden replay binds
+    the per-lead seam. What this change actually orphans is the queue API the curation request
+    replaced, and the A/B harness's verdict parser. Locating the demand by SYMBOL rather than
+    by package is what makes it true of the shipped design; naming them is also stricter than
+    the path scan, which any one entry anywhere under the package would have satisfied.
 
-    Moving the surviving evidence producer out of the retired package is what makes the entry
-    honest — without it the findings sit inside a file that is PARTLY live, the one shape a
-    file-level accept cannot describe."""
+    The enforcement arm is the load-bearing one. "" meaning un-triaged was documented by the
+    ratchet and enforced by nothing, so `--update-baseline` could bury any corpse silently —
+    which is the shape that let the whole gate go blind for a month. A per-issue test cannot
+    hold that; the gate has to, for every change, so it is asserted here against the gate."""
     baseline = json.loads(VULTURE_BASELINE.read_text(encoding="utf-8"))
     entries = baseline["entries"]
-    retired_path = RETIRED_PACKAGE.replace(".", "/")
 
-    ours = {fp: reason for fp, reason in entries.items() if retired_path in fp}
-    assert ours, (
-        "no dead-code finding names the retired package — either the gate was satisfied by "
-        "shrinking its own scope, or this change never left the modules uncalled"
-    )
-    untriaged = sorted(fp for fp, reason in ours.items() if not reason.strip())
-    assert untriaged == [], f"un-triaged dead-code entries: {untriaged}"
-    unattributed = sorted(fp for fp, reason in ours.items() if ISSUE not in reason)
-    assert unattributed == [], \
-        f"dead-code entries with a reason that does not name #{ISSUE}: {unattributed}"
+    for symbol in RETIRED_DEAD_SYMBOLS:
+        ours = {fp: reason for fp, reason in entries.items() if f"'{symbol}'" in fp}
+        assert ours, (
+            f"{symbol!r} is not on the dead-code record — either it regained a caller (then "
+            f"drop it from RETIRED_DEAD_SYMBOLS) or the baseline was never regenerated"
+        )
+        untriaged = sorted(fp for fp, reason in ours.items() if not reason.strip())
+        assert untriaged == [], f"un-triaged dead-code entries: {untriaged}"
+        unattributed = sorted(fp for fp, reason in ours.items() if ISSUE not in reason)
+        assert unattributed == [], \
+            f"dead-code entries with a reason that does not name #{ISSUE}: {unattributed}"
+
+    # The gate itself refuses an un-triaged entry — otherwise every assertion above is one
+    # `--update-baseline` away from being vacuous.
+    ratchet = _load_lint_ratchet()
+    finding = ratchet.Finding("f/x.py: unused function 'z'", "f/x.py:1: unused function 'z'")
+    buried = tmp_path / "baseline.json"
+
+    def _rc(reason: str) -> int:
+        buried.write_text(
+            json.dumps({"//": "h", "entries": {finding.fingerprint: reason}}), encoding="utf-8"
+        )
+        return ratchet.gate([finding], buried, [], label="l", header="h", require_reasons=True)
+
+    assert _rc("") == 1, "the ratchet accepts a baseline entry nobody triaged"
+    assert _rc("intentional: because") == 0, \
+        "the ratchet rejects an entry that IS triaged, so the arm above proves nothing"
+
+
+def _load_lint_ratchet():
+    """`scripts/lint/` is a directory of standalone scripts, not an importable package — the
+    gate is reached by path, the way CI reaches it."""
+    import importlib.util
+    import sys
+
+    name = "_spec791_baseline"
+    path = DEFENDER.parent / "scripts" / "lint" / "_baseline.py"
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec is not None, f"the shared lint ratchet is not at {path}"
+    assert spec.loader is not None, f"the shared lint ratchet at {path} is not loadable"
+    mod = importlib.util.module_from_spec(spec)
+    # Registered BEFORE exec: the module's dataclasses resolve their own postponed
+    # annotations through sys.modules, and a path-loaded module is not there by default.
+    sys.modules[name] = mod
+    spec.loader.exec_module(mod)
+    return mod
 
 
 def test_791_the_live_projection_stage_sheds_the_retired_stages_name(tmp_path):

@@ -27,11 +27,29 @@ from _baseline import Finding, gate
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BASELINE_PATH = Path(__file__).with_name("lint_vulture_baseline.json")
 
-# Mirror the invocation the soft code-smells step used.
+# Confidence 60, NOT 80. Vulture scores unused *functions/classes/methods* at 60 and only
+# unused imports (90) / unreachable code (100) at 80 — so `--min-confidence 80` makes this
+# gate structurally incapable of reporting the category it is named for. It ran clean with an
+# empty baseline while a 9-function dead subtree sat in
+# scripts/visualize/visualize_primitives.py (the retired Claude-Code stream-JSON renderer,
+# orphaned by the move to the in-process PydanticAI driver). 60 is vulture's own default.
+#
+# The cost is that 60 also reports names reached by a mechanism vulture cannot see —
+# @agent.tool decorator registration, Protocol methods, PyYAML representer hooks. Those are
+# real false positives, and they live in the baseline ANNOTATED with why, so a genuine new
+# corpse still trips the gate.
+# invlang/schema.py is excluded wholesale: it is a declarative TypedDict schema, and vulture
+# cannot see a TypedDict field being read through `rec["source_vertex"]`. It alone produced ~90
+# of the 96 findings at confidence 60 — baselining that is not triage, it is a second empty
+# baseline wearing a disguise. Excluding it keeps the gate's signal readable.
+#
+# This block was set by #721 and then silently reverted to 80 by #744's squash merge, which
+# restored the pre-#721 file wholesale. The gate was blind to dead functions for the whole
+# window between. If you find yourself raising this back to 80, you are re-opening that hole.
 VULTURE_ARGS = [
     "defender",
-    "--min-confidence", "80",
-    "--exclude", "defender/.venv,defender/tests",
+    "--min-confidence", "60",
+    "--exclude", "defender/.venv,defender/tests,defender/skills/invlang/schema.py",
     "--ignore-names", "key_field,key_value",
 ]
 
@@ -96,6 +114,9 @@ def main(argv: list[str]) -> int:
     return gate(
         findings, BASELINE_PATH, argv,
         label="lint_vulture", header=HEADER,
+        # A dead-code gate whose baseline accepts "" is a gate you can walk past by running
+        # --update-baseline. Every entry here states why the corpse is acceptable.
+        require_reasons=True,
     )
 
 

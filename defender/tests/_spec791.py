@@ -56,6 +56,15 @@ PROJECT_PROFILE = REPO_ROOT / ".claude" / "spec-flow.json"
 OLDER_SPEC_GRAPH = DEFENDER / "tests" / "spec_graph_774.yaml"
 
 RETIRED_PACKAGE = "defender.learning.pipeline.oracle"
+# What the retirement actually orphans. NOT the retired package: `pipeline/oracle/` keeps
+# every symbol live, because the secondary eval still projects (its own measurement, kept
+# deliberately) and the golden replay binds the per-lead seam. The design demand — this
+# change's deliberate dead code is ON RECORD — is about the corpses, wherever they fall.
+RETIRED_DEAD_SYMBOLS = (
+    "enqueue_learning",       # the learning-queue write the curation request replaced
+    "enqueue_for_authoring",  # its authoring-queue sibling
+    "parse_judge_verdict",    # the A/B harness's verdict parser, orphaned when it stopped judging
+)
 # The word the retirement takes out of circulation, and the role the LIVE stage shipped
 # under (`AgentRole.PROJECTION`). After this change the first names one thing only — the
 # offline stage that is gone — which is the whole point of re-keying the second.

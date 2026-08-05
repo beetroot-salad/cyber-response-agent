@@ -599,13 +599,26 @@ demands:
   - {id: dead_code_baseline_names_the_issue, kind: behavior, form: test,
      discharged_by: test_791_every_new_dead_code_baseline_entry_names_this_issue,
      binds: ["dead_code_baseline"]}
-     # R9. Leaving the retired modules uncalled trips a CI gate that blocks on
-     # newly-unreachable code, and deletion is out of scope by an explicit sentence. The
-     # baseline maps a finding fingerprint to a REASON STRING with "" meaning un-triaged
-     # (H5), so "with a stated reason pointing at #791" is a real assertion, not prose. The
-     # gate keeps blocking on genuinely new dead code; this change's deliberate dead code
-     # is on record. R1 is what makes the entry honest — without the producer move the
-     # findings sit inside a file that is PARTLY live.
+     # R9. Leaving code uncalled trips a CI gate that blocks on newly-unreachable code, and
+     # deletion is out of scope by an explicit sentence. The baseline maps a finding
+     # fingerprint to a REASON STRING with "" meaning un-triaged (H5), so "with a stated
+     # reason pointing at #791" is a real assertion, not prose. The gate keeps blocking on
+     # genuinely new dead code; this change's deliberate dead code is on record.
+     #
+     # AMENDED at implementation (see the test's own docstring). The demand was written
+     # expecting the corpses inside `pipeline/oracle/`, and predicted a producer move (R1)
+     # to make that honest. Neither survived: the package keeps EVERY symbol live, because
+     # the secondary eval goes on projecting — its own sibling demand says so in as many
+     # words — and the golden replay binds the per-lead seam. The corpses are the queue API
+     # the curation request replaced and the A/B harness's verdict parser, so the demand is
+     # located by SYMBOL now, which is also stricter than the package scan it replaces.
+     #
+     # The second arm is new and is the load-bearing one: "" meaning un-triaged was
+     # DOCUMENTED by the shared ratchet and enforced by nothing, so --update-baseline could
+     # bury any corpse in silence. That is the same shape that let the gate run blind for a
+     # month after #744's squash merge reverted #721's confidence threshold. A per-issue
+     # demand cannot hold it; the ratchet now refuses an un-triaged entry for every change,
+     # and this node pins that refusal.
 
   - {id: live_projection_stage_sheds_the_retired_name, kind: behavior, form: test,
      discharged_by: test_791_the_live_projection_stage_sheds_the_retired_stages_name,

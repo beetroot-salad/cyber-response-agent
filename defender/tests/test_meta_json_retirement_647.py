@@ -69,11 +69,15 @@ UNRELATED_TREES = (
     "defender/tests/evals/test_generate_case.py",
     "defender/tests/evals/_run_records/",
     "defender/docs/oracle-calibration.md",
-    # #771's write-lint baseline fingerprints census sites as `<file>:<function>` — one row is
-    # the legitimate `run_common.py:materialize_run_dir` writer, which coincidentally spells
-    # both `run_common` and `materialize_run_dir` in a JSON string. Data, not an import.
-    "scripts/lint/lint_unguarded_tree_write_baseline.json",
 )
+# A lint baseline fingerprints its findings BY FILE AND SYMBOL, so it spells the names of
+# whatever the lint found there — #771's write-lint carries the legitimate
+# `run_common.py:materialize_run_dir` writer, and the vulture baseline carries
+# `defender/run_common.py: unused function 'enqueue_learning'`. Every such row is a record OF a
+# site, never a caller of one, and that holds for any baseline the suite grows, so it is a rule
+# rather than the growing list of one-offs it replaces. The lint SCRIPTS beside them stay in
+# scope — they are code and could import for real.
+LINT_BASELINE_SUFFIX = "_baseline.json"
 HISTORICAL_RECORD = UNRELATED_TREES
 
 SUITE_FILES = (
@@ -101,9 +105,14 @@ def repo_grep(pattern: str, *pathspecs: str) -> list[str]:
 
 
 def live_hits(hits: list[str], *, extra_excludes: tuple[str, ...] = ()) -> list[str]:
-    """`hits` minus the historical-record and unrelated trees, minus this suite's own files."""
+    """`hits` minus the historical-record and unrelated trees, minus this suite's own files,
+    minus the lint baselines that merely RECORD a site by name."""
     excluded = HISTORICAL_RECORD + SUITE_FILES + extra_excludes
-    return [h for h in hits if not any(h.startswith(p) for p in excluded)]
+    return [
+        h for h in hits
+        if not any(h.startswith(p) for p in excluded)
+        and LINT_BASELINE_SUFFIX not in h.split(":", 1)[0]
+    ]
 
 
 def module_level_names_at_base(repo_path: str) -> set[str]:
