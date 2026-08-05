@@ -31,6 +31,7 @@ from __future__ import annotations
 import json
 import re
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -138,13 +139,18 @@ def main(
     *,
     results: dict[str, list[str]] | None = None,
     baseline_path: Path | None = None,
+    scan: Callable[[], dict[str, list[str]]] | None = None,
 ) -> int:
     # DI seams, the house idiom: the ratchet's arms are decided by (findings, baseline) and
-    # a test must be able to hand it both without a repo full of fixture graphs.
+    # a test must be able to hand it both without a repo full of fixture graphs. `scan` is
+    # the seam for the blindness arm specifically — the alternative is monkeypatching the
+    # module's own function out from under it, which this repo gates against for the reason
+    # it always does: a test that reaches inside stops describing the contract.
     args = sys.argv[1:] if argv is None else argv
     baseline_file = BASELINE_PATH if baseline_path is None else baseline_path
+    scanner = _scan if scan is None else scan
     try:
-        results = _scan() if results is None else results
+        results = scanner() if results is None else results
     except GateBlind as exc:
         print(f"{LABEL}: {exc}", file=sys.stderr)
         return 2

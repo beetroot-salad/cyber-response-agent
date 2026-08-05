@@ -87,14 +87,16 @@ def test_an_unparseable_ceiling_tightens_rather_than_loosens(lint, tmp_path):
     assert rc == 1
 
 
-def test_a_gate_that_cannot_look_exits_2(lint, tmp_path, monkeypatch):
+def test_a_gate_that_cannot_look_exits_2(lint, tmp_path):
     """#652's rule, applied to this gate: blindness is never clean. A checker that cannot
-    load, or a graph that cannot be read, must not certify the corpus."""
+    load, or a graph that cannot be read, must not certify the corpus.
+
+    Blindness arrives through the `scan` seam rather than by replacing the module's own
+    function: the fake injects the fault, it does not reach inside the target."""
     def _blind():
         raise lint.GateBlind("checkers unavailable")
 
-    monkeypatch.setattr(lint, "_scan", _blind)
-    assert lint.main([], baseline_path=_baseline(tmp_path, {})) == 2
+    assert lint.main([], scan=_blind, baseline_path=_baseline(tmp_path, {})) == 2
 
 
 def test_the_committed_corpus_is_at_or_under_its_recorded_ceilings(lint):
