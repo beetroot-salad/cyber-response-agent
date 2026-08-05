@@ -1,6 +1,8 @@
 # Gate rules and the spec_graph artifact
 
-The gate computes the join of the behavior layer against the structure layer and emits **typed residue**. The rules are *guaranteed question-generators*: an enumeration lens might ask the two-writer collision question; a rule makes sure it is asked, every run — and its answer is routed to a real oracle (a probe or the human), never left as the author's prose. It runs after the address space is materialized (phase D's assembler — SKILL.md, phase map) and before human resolution (§7). Rules R1–R5 trigger on predicates over formal slots (schema.md, slot discipline), and **`spec-graph gate` evaluates those predicates mechanically** — `--residue` prints the firings for the gate leaf to annotate, the bare command verifies the recorded `gate:` block against the slots (a computed firing with no recorded answer, or a `fired: false` the slots contradict, fails). Three flagged parts read judgment instead — R0's reconciliation half, R5's restriction extension, and R6's trust walk — and each records in the artifact that it ran; the tool demands their entries but cannot derive them. Every hit carries a **witness** — the concrete element and the missing demand — so the output is actionable, never a score.
+The gate computes the join of the behavior layer against the structure layer and emits **typed residue**. The rules are *guaranteed question-generators*: an enumeration lens might ask the two-writer collision question; a rule makes sure it is asked, every run — and its answer is routed to a real oracle (a probe or the human), never left as the author's prose. It runs after the address space is materialized (phase D's assembler — SKILL.md, phase map) and before human resolution (§7). Rules R1–R5 and R7 trigger on predicates over formal slots (schema.md, slot discipline), and **`spec-graph gate` evaluates those predicates mechanically** — `--residue` prints the firings for the gate leaf to annotate, the bare command verifies the recorded `gate:` block against the slots (a computed firing with no recorded answer, or a `fired: false` the slots contradict, fails). Three flagged parts read judgment instead — R0's reconciliation half, R5's restriction extension, and R6's trust walk — and each records in the artifact that it ran; the tool demands their entries but cannot derive them. Every hit carries a **witness** — the concrete element and the missing demand — so the output is actionable, never a score.
+
+**The checkers bind after authoring, not only during it.** They used to run only inside this flow, so a graph merged carrying its findings and the mechanical no evaporated at the moment it became durable. A CI ratchet now runs all four over the committed corpus: a graph absent from its baseline must be clean, a baselined graph may not gain findings, and paying findings down is never a failure.
 
 ## Procedure
 
@@ -24,10 +26,10 @@ Change kinds are finite: `{add, remove, modify} × {actor, boundary, facet, edge
 | **actor** | no rule alone — an actor with no edges has no contract surface; its edges fire the rules | R5 (live in-edges) | `frame` change → recompute R2 demand placement |
 | **boundary** | facet rules fire per facet (below); R0 on `unknown` fields | R5 (live in-edges); demands bound to it now dangle → R0 | via its facets |
 | **facet** | the facet's rule fires (R1 payload, R2 identity, R3 access, R4 domain) — a facet **materializing on existing structure** counts (e.g. a boundary becoming multi-via) | demands bound to the facet dangle → R0; a dropped contract on a boundary with live in-edges → R5 (its trigger names removed facets; the boundary's in-edges are the dependents) | invariant field change → re-fire the facet's rule (new `key_axes` → R2; new `distinguished` member → R4) |
-| **edge** | R1 (`sends` → payload), R2 (`write` → identity; a new `drives` edge over writers into an identity-facet boundary also fires — its `multiplicity` selects the form), R4 (`read` → domain), R3 (new `via` on a reached boundary), R5 (`mode: remove`) | the edge's dependents orphaned → R5 | `mode`/`via` change → R3; `interpolates` change → R2 |
-| **property** | subsumed by modify | subsumed by modify | `drives.multiplicity` flip → R2 form re-selection; `trust` change → R3 + R0 |
+| **edge** | R1 (`sends` → payload), R2 (`write` → identity; a new `drives` edge over writers into an identity-facet boundary also fires — its `multiplicity` selects the form), R4 (`read` → domain), R3 (new `via` on a reached boundary), R5 (`mode: remove`), R7 (a new `read` edge onto a source others already read) | the edge's dependents orphaned → R5 | `mode`/`via` change → R3; `interpolates` change → R2; a `read` edge moving while its siblings do not → R7 |
+| **property** | subsumed by modify | subsumed by modify | `drives.multiplicity` flip → R2 form re-selection; `trust` change → R3 + R0; a value/default change on a multi-reader boundary → R7 |
 
-The `modify` column is where add-only thinking goes blind: a property flip with no topology change (serial → concurrent; a via's trust level changing) fires obligations on its own. Within one run, extraction assigns `modify` directly from the design (Procedure 1); across runs, stable element `id`s let the graph diff itself — without stable identity every change degenerates to remove+add.
+The `modify` column is where add-only thinking goes blind: a property flip with no topology change (serial → concurrent; a via's trust level changing) fires obligations on its own. **R7 is the whole column's worst case** — a value changed at one reader and mirrored, stale, at another adds and removes nothing at all, so every cell but this one is silent and the change looks like pure `modify` on a property no rule watched. Within one run, extraction assigns `modify` directly from the design (Procedure 1); across runs, stable element `id`s let the graph diff itself — without stable identity every change degenerates to remove+add.
 
 ## The rules
 
@@ -77,11 +79,19 @@ Each rule: **trigger** (a predicate over formal slots) → **obligation** (the d
 - **Obligation:** walk every value that reaches the rendered output — the **frame** (headings, keys, separators, the template itself) as well as the payload slots — and label each with its **chooser** (who selects this value: the author, a config, a model, an attacker-influenced file or name) and its **sanitizer** (what transformation stands between the chooser and the sink). Every slot whose chooser is model- or attacker-influenced and whose sanitizer column is empty is an obligation: a hostile-value demand at the render site, or a `reachability` break-attempt probe on the *source* — what characters does the gate, the filesystem, the schema actually admit? "It's just a filename / an id / a key" is the chooser question unasked, not answered. Sanitizing the values while rendering the frame raw discharges nothing — the frame slots are the recurring escape.
 - **Canonical:** a manifest rendering `## {path.stem}` raw while only frontmatter *values* pass `yaml.safe_dump` — the write gate's `[^\x00]*` admits newlines, so a gate-approved filename forges a sibling section for a lesson the corpus does not contain — the value channel probed, the frame's chooser never asked about.
 
+### R7 — shared source
+
+- **Trigger:** a boundary read by ≥2 actors where the delta moves *some* readers and leaves others — the boundary itself in the delta (its value, default, or contract changed) or at least one reader in it, and at least one reader not. Computed by `spec-graph gate`.
+- **Obligation:** a coherence demand per unmoved reader, bound at **that reader's own edge** (`interacts(<reader>-><boundary>)`) — drive the change and observe *this* reader. One demand may name several edges; a demand bound at the boundary itself does **not** discharge it, and the checker enforces that: "two of the three moved" is precisely what a boundary-altitude demand reads as green for.
+- **Canonical:** a per-investigation request ceiling raised to pay for a new gate's forced turns while the message store kept its own copy at the old value — silently dropping exactly the rounds the raise existed to buy. Two siblings shipped in the same change: an operator model override that reached one stage and not the preflight validating it, and a fail-closed guard covering the stage call but not the parse after it.
+- **Why the other rules cannot see it:** nothing is added and nothing is removed, so the whole add/remove grid stays quiet, and each reader is correct read alone. R2 is this rule's dual — it asks whether two writers into one sink stay distinguishable; R7 asks whether two readers of one source stay in agreement. The write side had a theory and the read side had none.
+- **Known noise mode:** a boundary in the delta whose existing readers genuinely need no change fires once per reader. That is the intended trade — the rule is a guaranteed question-generator, and "this reader is unaffected because …" is a cheap answer with a claim behind it. What it must never become is a blanket waiver on the boundary: the per-edge address exists so each unmoved reader is dismissed on its own evidence.
+
 ## Probed claims — the ledger
 
 The rules compute the right *questions*; the ledger keeps their *answers* honest. Every statement the spec rests on about reality-as-it-is is a falsifiable prediction, recorded with the probe that tests it and what the probe observed — because the escapes that ship past a green suite are dominated by plausible prose answers one probe would have refuted. Claims enter three ways, none of them "the author noticed": **inherited** from discuss-issue's sweep (the doc's `claims:` block, carried over verbatim — optionally marked `source: discuss`), **raised at extraction and grounding** (steps 1–2), and **demanded by a consumer** — a spend-point's rationale or a fake's fault content that needs a claim to cite. Six kinds, keyed by what the probe is:
 
-- **referential** — the named symbol / path / signature exists as described. Probe: read, import, or stat it (`probe_kind: read`, or `search` for a defs lookup). Mostly arrives pre-probed from the sweep; re-check any the base has moved under.
+- **referential** — the named symbol / path / signature exists as described. Probe: read, import, or stat it (`probe_kind: read`, or `search` for a defs lookup). Mostly arrives pre-probed from the sweep; re-check any the base has moved under. **A claim's kind is the author's to declare and the instrument table's to trust, so mis-typing is how the whole ledger is evaded** — a prediction about what the code *does* filed here closes on a read, legitimately, and the table never notices. `spec-graph claims` now flags runtime grammar (`raises`, `returns`, `coerces`, `defaults to`, `silently`) in a claim typed `referential` or `census`; if the sentence predicts behavior over an input, it is a `behavior`/`primitive`/`reachability` claim however it was filed.
 - **census** — a completeness claim (all writers / readers / copies / consumers of X). Probe: the search plus its full hit list (`probe_kind: search`).
 - **behavior** — a claim about what existing code does (a design's bug story, a stated default, "already handles Y"). Probe: run it and watch (`probe_kind: executed`), over the input types the boundary admits — `primitive`'s value-type discipline below, applied to behavior.
 - **reachability** — who or what can reach a surface, and whether a value or state is constructible ("main cannot read that dir", "the stem is filesystem-constrained"). Probe: a **break-attempt** (`probe_kind: executed`) — try to construct the forbidden value, drive the sealed seam — paired with a positive control showing the channel works at all. The verdict is only ever `unrefuted`, never confirmed: refutation is mechanical (one counterexample), confirmation is a universal over program behavior — a design that needs the universal *confirmed* routes to a safe-by-construction demand instead.
@@ -117,11 +127,12 @@ Suite-verification checks that prove properties of the *suite itself* that no pe
 
 ## The artifact — spec_graph_<issue-or-slug>.yaml
 
-One file per spec, committed **beside the suite** (same directory as the new tests, named `spec_graph_<issue-or-slug>.yaml`), as the tests' machine-checked derivation:
+One file per spec, committed into the **spec corpus** — the profile's `specGraph.artifacts` directory, named `spec_graph_<issue-or-slug>.yaml` — as the tests' machine-checked derivation. It used to live beside its suite, which made adjacency load-bearing in code rather than convention and scattered the corpus across whichever test tree each spec happened to touch; now the graph **names** its suite (`tests:`, repo-relative) and the graphs live together, so the checkers can gate them as one body with one baseline. A graph naming the wrong suite loses its docstrings and every demand reports as a prose orphan — the mis-declaration is loud, not silent.
 
 ```yaml
 schema_version: 1
 design: <issue # or doc path>
+tests: <repo-relative dir of the suite this graph derives — check_binds scans its docstrings>
 base: <SHA the spec branch forked from — write-code-from-spec's gate diffs against it>
 demands:   [...]      # the resolved demand list, waivers included — the spec proper
                       # a form:test demand is a pointer {id,kind,form,binds,discharged_by}; its prose
@@ -136,19 +147,29 @@ claims:              # every load-bearing statement about existing reality, prob
                      # unrefuted: reachability's ceiling — a survived break-attempt, never "confirmed"
                      # entries inherited from the discuss doc keep their ids; source: discuss is optional
 gate:
-  evaluated: [{rule: R0..R6, fired: true | false}]   # every rule, every run — a missing entry reads as skipped
+  evaluated: [{rule: R0..R7, fired: true | false}]   # every rule, every run — a missing entry reads as skipped
                      # a judgment rule's (R0/R5/R6) fired:false adds `cites: [<claim id>]`
   obligations: [{rule: R2, element: <address>, witness: "<one sentence>", discharged_by: <demand id>}]  # obligation→demand (a demand's own discharged_by is demand→test)
   holes:       [{rule: R0, element: <address>, resolution: "<the human's decision>", resolved_to: <demand id>}]
                         # resolved_to: present when the resolution spawned a demand
   pre_discharged: [{rule: R4, element: <address>, by: <demand id>, edge: <interacts/drives address>, cites: [<claim id>]}]
 handoff:
-  forks:      ["<the fork and how it was resolved>", ...]
+  forks:      ["<the fork, how it was resolved, and `resolved_by: human | auto`>", ...]
+                     # auto = §7 judged it non-material and took the recommendation; the entry
+                     # is what lets the merge-gate human see the choice and disagree with it
   refuted:    ["<a design claim the ledger refuted, and the correction>", ...]
   deferred:   ["<a claim only the implementation can settle — write-code-from-spec's probe>", ...]
   drops:      ["<premise name — why no demand was minted>", ...]   # every answered premise not in the suite/forks lands here (phase-F count)
   nullstub_passes: ["<test name — structure | reuse | parity>", ...]  # each recorded legitimate null-stub pass
-  deviations: ["<degraded strong author | collapsed answering tier | manual slot check | reduced small-delta mode>", ...]
+  deviations: ["<what this run could not do, and what it costs the suite>", ...]
+                     # READ BY the implementer (before writing code) and the adversarial
+                     # implementer (as its first hunting ground) — not a bookkeeping slot.
+                     # Two things belong here and they are different: a DEGRADATION (a leaf
+                     # that could not be spawned, a reduced mode) and a KNOWN LIMIT OF THE
+                     # SUITE (a fault arm the fake cannot express, an assertion left at class
+                     # grain, a resolution applied narrower than the human's words). The
+                     # second kind is the valuable one: it is a hole named by the person who
+                     # made it, and it used to be written into a slot nobody opened.
 ```
 
 Downstream consumers, every one an agent or a checker: the mechanical gate (`spec-graph gate`/`lint`/`binds`/`actors`/`claims`) and the cold reconciler check it; `write-code-from-spec` reconciles the implementation's actual structure against it (unrealized addresses and invented scope both flag); the later review *can* diff the implementation against it — wiring the review stage to do so is future work. The human reviews the **tests**, not this file.

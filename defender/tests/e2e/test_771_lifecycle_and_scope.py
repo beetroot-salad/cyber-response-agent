@@ -2,7 +2,7 @@
 marker, the survival demands that say what must NOT move, and the mount-set premise the
 hard-link non-obligation rests on.
 
-Every test here is exactly one demand of `defender/tests/e2e/spec_graph_771.yaml`, named by
+Every test here is exactly one demand of `spec-flow/specs/spec_graph_771.yaml`, named by
 that demand's `discharged_by`; the docstring carries the demand's observable-outcome prose.
 
 WHY THE MARKER EXISTS. Demand #0 pins a refused write's planted entry as LEFT IN PLACE,

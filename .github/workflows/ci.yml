@@ -372,6 +372,17 @@ jobs:
       - name: Unguarded-verb-dispatch gate (fault seam encloses the dispatch — baseline-ratcheted)
         run: defender/.venv/bin/python scripts/lint/lint_unguarded_verb_dispatch.py
 
+      # The spec_graph checkers (lint/gate/binds/claims) ran only INSIDE write-tests, so a
+      # graph merged with its findings intact — the mechanical no evaporated exactly when it
+      # became durable. #774 shipped 24 claim-instrument findings, one of them the claim
+      # whose unexecuted probe produced #788: the checker fires on that graph today, and
+      # nothing was running it. This gate runs them over the committed corpus. Ratcheted per
+      # graph rather than hard-gated: the checkers postdate most of the corpus, so the
+      # pre-#674 graphs are baselined with their counts as ceilings, while any NEW graph must
+      # be clean. Paying findings down is never a failure; a graph that gains one is.
+      - name: spec_graph gate (checkers over the committed corpus — baseline-ratcheted)
+        run: defender/.venv/bin/python scripts/lint/lint_spec_graph.py
+
       # Defender hygiene + discipline gates. Each script is independently
       # inspectable under scripts/lint/lint_*.py; source PRs that prompted each
       # check are cited in the module docstrings.

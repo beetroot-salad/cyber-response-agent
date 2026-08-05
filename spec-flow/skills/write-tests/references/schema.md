@@ -18,7 +18,7 @@ Invariant-bearing formal slots are **mandatory with explicit `unknown`**: the ex
 ```yaml
 Demand:
   id:         <stable slug>
-  kind:       behavior | seam | shape | uniqueness | parity | domain-outcome | survival | negative   # formal
+  kind:       behavior | seam | shape | uniqueness | parity | domain-outcome | survival | negative | coherence   # formal
   form:       clause | test | waiver                                              # formal
   executable: true | false          # derived: form == test — never set independently
   binds:      [<address>, ...]      # ≥1; each must resolve (else R0)
@@ -40,6 +40,7 @@ Kind semantics:
 - **parity** — a constraint enforced on one `via` is enforced on every `via` that reaches the boundary.
 - **domain-outcome** — a specific domain member (or member combination) produces a specific observable result.
 - **survival** — a workflow that depended on a removed element still completes via its substitute.
+- **coherence** — every reader of a changed source agrees with it. `parity`'s sibling one layer over: parity is across the *access surfaces* of one boundary, coherence across its *readers*. Bound per reader edge, never at the boundary — a demand at the source's own altitude is green when two of its three readers moved, which is the bug.
 - **negative** — something must *not* be observable; **requires a paired positive-control demand** on the same address under the complementary condition (checked in the phase-F gate), or it passes vacuously. A negative binds every surface the content could reach — each of the actor's out-edges — or it is silently scoped to only the addresses someone thought to bind.
 
 Form assignment: extraction marks a demand `test` when the suite is to pin it — the default, and a **pointer** whose prose lives in the test it names via `discharged_by`; `clause` records a deliberate deferral to prose, carries its own `outcome`, and a clause-only binding on an obligated element leaves the obligation open (it never pre-discharges a rule). `waiver` is a human's recorded decision not to test something — minted only at §7, an examined no, carrying its `outcome`, kept in the artifact.
@@ -154,6 +155,7 @@ Every field earns its place by naming its consumer; a field nothing consumes is 
 | Field | Consumer | Role |
 |---|---|---|
 | `interacts.mode` / `.sends` / `.interpolates` / `.via` | R1/R2/R3/R5 triggers | rule input |
+| `interacts.mode: read` + edge `provenance`, per boundary | R7's moved/unmoved split over a shared source | rule input |
 | edge `provenance` (`interacts`, `drives`) | delta membership (rules.md, Procedure); R0 routing | rule input |
 | `drives.multiplicity`, `Actor.frame` | R2 form selection + demand placement | rule input |
 | facet invariants (`key_axes`, `derivations`, `sharing`, `distinguished`, `falsy_valid`, `documented_alternatives`, `constraints_by_via`) | R2/R3/R4 predicates | rule input |

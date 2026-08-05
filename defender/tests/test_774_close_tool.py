@@ -1,6 +1,6 @@
 """#774 part 1 — the close tool's own surface, and R1: report.md leaves the model's write allow.
 
-Every test here is one demand of `defender/tests/spec_graph_774.yaml`, named by that demand's
+Every test here is one demand of `spec-flow/specs/spec_graph_774.yaml`, named by that demand's
 `discharged_by`. Scope is the LIVE WRITE-TIME GATE (PR 2); the offline measurement PR is
 skipped and nothing here speaks to it.
 

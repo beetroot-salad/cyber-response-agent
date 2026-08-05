@@ -3,7 +3,7 @@
 
 Imported by `test_771_write_backstop.py`, `test_771_alias_ban.py` and
 `test_771_lifecycle_and_scope.py`. Every demand of
-`defender/tests/e2e/spec_graph_771.yaml` is exactly one test in those three files, named by
+`spec-flow/specs/spec_graph_771.yaml` is exactly one test in those three files, named by
 that demand's `discharged_by`.
 
 THE FAULT-INJECTION HIERARCHY, applied (phases/author.md):

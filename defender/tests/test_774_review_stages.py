@@ -1,7 +1,7 @@
 """#774 part 3 — the three review stages: their inputs, their grants, their outputs, and what
 happens when one of them does not complete.
 
-Every test here is one demand of `defender/tests/spec_graph_774.yaml`, named by that demand's
+Every test here is one demand of `spec-flow/specs/spec_graph_774.yaml`, named by that demand's
 `discharged_by`.
 
 TWO REFUTATIONS SHAPE THIS FILE AND ARE PINNED AS CORRECTIONS, NOT DESCRIBED:

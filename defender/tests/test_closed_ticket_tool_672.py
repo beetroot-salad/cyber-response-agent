@@ -1,6 +1,6 @@
 """#672 — the executable spec for the benign judge's closed-ticket read as two typed tools.
 
-Every ``test_*`` here is one demand of ``defender/tests/spec_graph_672-closed-ticket-tool.yaml``
+Every ``test_*`` here is one demand of ``spec-flow/specs/spec_graph_672-closed-ticket-tool.yaml``
 (or one classified premise of the phase-C dispositions), named after it and carrying its id in
 the docstring. THE CODE DOES NOT EXIST YET: this suite is RED by construction against today's
 tree — the drives below name the surface the implementation must build (the ``verbs=`` injection

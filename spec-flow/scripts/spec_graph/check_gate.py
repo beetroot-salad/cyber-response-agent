@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """spec-graph check #4 — compute the gate's rule triggers from the formal slots.
 
-rules.md defines R1–R5 as predicates over formal slots; this check evaluates those
+rules.md defines R1–R5 and R7 as predicates over formal slots; this check evaluates those
 predicates mechanically, so the gate leaf annotates computed firings instead of
 re-deriving them by prompt. What stays with the agent is exactly what the rules flag
 as judgment: R0's bidirectional prose reconciliation, R5's tightening extension, and
@@ -51,10 +51,17 @@ _FACET = re.compile(r"^([\w.-]+)\.(payload|identity|domain|access)$")
 
 
 class Trigger:
-    """One computed rule hit: the rule, the obligated address, and why it fired."""
+    """One computed rule hit: the rule, the obligated address, and why it fired.
 
-    def __init__(self, rule: str, element: str, reason: str) -> None:
+    `exact` says the obligation is per-address and a demand at a coarser grain does not
+    discharge it. Address syntax carries this for a cell (`b.access[via]`), but not for an
+    edge: `interacts(a->b)` parses to root `b`, so without this flag any demand anywhere on
+    `b` reads as an answer — which is precisely the altitude collapse R7 exists to catch.
+    """
+
+    def __init__(self, rule: str, element: str, reason: str, *, exact: bool = False) -> None:
         self.rule, self.element, self.reason = rule, element, reason
+        self.exact = exact
 
 
 class Graph:
@@ -92,7 +99,7 @@ class Graph:
     def in_delta(self, *elements: dict | None) -> bool:
         return any(e is not None and e.get("provenance") == "design" for e in elements)
 
-    def answered(self, rule: str, element: str) -> bool:
+    def answered(self, rule: str, element: str, *, exact_only: bool = False) -> bool:
         """Whether the graph records an answer for a computed trigger: an executable demand
         binds the obligated address, or a gate entry for the rule names it. Per-cell
         addresses (`b.access[via]`, `b.domain.…[v]`) must match exactly — per-cell discharge
@@ -100,8 +107,10 @@ class Graph:
         `interacts(a->b).payload`) accepts the same facet on the same root, or the bare
         boundary/edge — never a SIBLING facet: matching on the root alone let a demand on
         `sink.payload` silence an R2 trigger on `sink.identity`. Only a bare-root element
-        keeps plain root matching."""
+        keeps plain root matching. `exact_only` forces string equality for a caller whose
+        obligation is per-address but whose address syntax cannot say so (an edge)."""
         root, facet, exact = _parse(element)
+        exact = exact or exact_only
 
         def matches(candidate: str) -> bool:
             if candidate == element:
@@ -524,12 +533,56 @@ def _r5(g: Graph) -> list[Trigger]:
     return triggers
 
 
+def _r7(g: Graph) -> list[Trigger]:
+    """R7 — shared source: a boundary read by ≥2 actors where the delta moves some readers
+    and leaves others behind.
+
+    R2's dual. R2 asks whether two writers into one sink stay distinguishable; R7 asks
+    whether two readers of one source stay in agreement. The escape it computes is the
+    stale mirror: a ceiling raised for the caller that needed it while a second reader kept
+    its own copy of the old value, a preflight validating the default an override replaced,
+    a guard covering the call but not the parse after it. Nothing is added or removed, so
+    the whole add/remove grid is quiet and every reader looks correct read alone.
+
+    The predicate is DIFFERENTIAL, and that is what keeps it from firing on every
+    multi-reader boundary: it needs both a moved side (the boundary itself in the delta, or
+    at least one reader) and an unmoved one. One trigger per unmoved reader, addressed at
+    that reader's edge — a boundary-wide demand is exactly the altitude at which "two of the
+    three moved" reads as discharged.
+
+    Uses `g.in_delta` directly rather than `_delta_scope`'s wrapper: a graph that cannot
+    scope its delta has no unmoved side to name, so this rule stays silent instead of
+    firing on every reader of every shared value.
+    """
+    triggers: list[Trigger] = []
+    for bid in g.boundaries:
+        readers = [e for e in g.interacts if e.get("to") == bid and e.get("mode") == "read"]
+        if len({e.get("from") for e in readers}) < 2:
+            continue
+        moved = [e for e in readers if g.in_delta(e)]
+        unmoved = [e for e in readers if not g.in_delta(e)]
+        if not unmoved or not (g.in_delta(g.boundaries.get(bid)) or moved):
+            continue
+        movers = sorted({str(e.get("from")) for e in moved}) or [f"`{bid}` itself"]
+        for e in unmoved:
+            triggers.append(Trigger(
+                "R7", f"interacts({e.get('from')}->{bid})",
+                f"`{bid}` is read by {sorted({str(r.get('from')) for r in readers})}; the delta "
+                f"moves {movers} and leaves `{e.get('from')}` on the old reading — a coherence "
+                f"demand must drive the change and observe THIS reader, or the mirror goes stale "
+                f"with the suite green.",
+                exact=True,
+            ))
+    return triggers
+
+
 def _triggers(g: Graph) -> tuple[list[Trigger], list[str]]:
-    """R1–R5 over the formal slots. Returns (triggers, key-coverage findings) — a key gap is
-    a direct finding (the slots already contain the answer), not a question to route.
+    """R1–R5 and R7 over the formal slots. Returns (triggers, key-coverage findings) — a key
+    gap is a direct finding (the slots already contain the answer), not a question to route.
 
     Written out rather than looped: the rules do not share a signature (only R2 produces
-    findings, only R5 ignores the delta), and their order is the order `check` reports in.
+    findings, R5 and R7 ignore the delta wrapper), and their order is the order `check`
+    reports in.
     """
     in_delta = _delta_scope(g)
     triggers = _r1(g, in_delta)
@@ -538,6 +591,7 @@ def _triggers(g: Graph) -> tuple[list[Trigger], list[str]]:
     triggers += _r3(g, in_delta)
     triggers += _r4(g, in_delta)
     triggers += _r5(g)
+    triggers += _r7(g)
     return triggers, coverage
 
 
@@ -554,7 +608,7 @@ def check(path: Path) -> tuple[list[str], list[Trigger]]:
                 f"a rule with no entry reads as skipped, not as clean."
             )
     for t in triggers:
-        if g.answered(t.rule, t.element):
+        if g.answered(t.rule, t.element, exact_only=t.exact):
             continue
         if g.evaluated.get(t.rule) is False:
             findings.append(

@@ -16,7 +16,7 @@ Read **references/rules.md**, "Suite verification". Reject or repair any test th
 
 ```
 spec-graph lint <artifact>                      # formal slots vs schema.md's closed vocabularies
-spec-graph gate <artifact>                      # R0 formal half + R1–R5 triggers vs the recorded gate
+spec-graph gate <artifact>                      # R0 formal half + R1–R5/R7 triggers vs the recorded gate
 spec-graph binds <artifact>                     # prose ⊄ binds + unexercised seams + dangling pointers
 spec-graph claims <artifact>                    # probe instruments + spend-point citations
 spec-graph calls <suite-dir>                    # AST: every test reaches the target (or --target)

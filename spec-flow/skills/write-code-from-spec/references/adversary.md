@@ -13,7 +13,9 @@ Inside the code, every move is legal: hardcode expected values, special-case the
 ## Order of attack
 
 1. **Replay the deck.** `.claude/spec-flow-attacks.md` (beside the profile) records every exploit shape that ever carried a real bug past a suite in this repo. Re-attempt each against this suite first — a replay that greens is a loud finding: a known-shipped class is still open. The deck is a floor, not a map — it says where suites here *were* weak, not where this one is — so cap the replay at a third of your budget; if the deck is missing or empty, note that and move on.
-2. **Hunt where the artifact already confesses.** `handoff.nullstub_passes` lists tests green against a do-nothing target; demands with a single discharging test; assertions pinning shape where the demand's prose says substance; `binds_waivers` / `actor_waivers` entries; the profile's danger-lens boundary. This is the thin ice.
+2. **Hunt where the artifact already confesses.** Start with **`handoff.deviations`** — it is the run's own account of where it cut a corner, and until recently nothing downstream read it. Authors write entries there like *known limit of the suite's discrimination*, *asserted by class, not per path*, *this fault arm is not expressible through the fake*: each one is a hole named by the person who made it, in the words of someone who knew exactly why it was a hole. Attack those first; a deviation you can turn into a green exploit is the cheapest strong finding available.
+
+   Then the rest of the thin ice: `handoff.nullstub_passes` (tests green against a do-nothing target), demands with a single discharging test, assertions pinning shape where the demand's prose says substance, `binds_waivers` / `actor_waivers` entries, and the profile's danger-lens boundary.
 3. **Sample fresh.** For each obligation in the design doc: what is the laziest implementation that technically greens its tests?
 
 ## Bound and verdict

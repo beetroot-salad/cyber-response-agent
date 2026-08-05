@@ -1,7 +1,7 @@
 """#611 slice 1 — the executable spec for the `query` tool, the VERBS registry, and
 capture-as-a-capability.
 
-Every test here is one demand of `defender/tests/spec_graph_611-query-tool.yaml`, named
+Every test here is one demand of `spec-flow/specs/spec_graph_611-query-tool.yaml`, named
 after it and carrying its id in the docstring. THE CODE DOES NOT EXIST YET: this suite is
 RED by construction (the imports below name the surface the implementation must build), and
 that is the point — the tests are the spec the code is written against.

@@ -56,8 +56,8 @@ UNRELATED_TREES = (
     "docs/archive/",
     "defender/docs/runtime-per-loop-compaction-design.md",
     ".claude/",
-    "defender/tests/spec_graph_",
-    "defender/tests/e2e/spec_graph_",
+    "spec-flow/specs/spec_graph_",
+    "spec-flow/specs/spec_graph_",
     # The oracle-calibration story renderer reads the ATTACK RUNNER's record,
     # `playground-v2/attacks/runs/<id>/meta.json` — a live file that merely shares
     # a name with the run-dir metadata #647 deleted. `playground-v2/` above excludes

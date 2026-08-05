@@ -26,6 +26,28 @@ from pathlib import Path
 _COPY = re.compile(r"\.copy\d+\.py$")
 
 
+def suite_dir_for(graph_path: Path, graph: dict) -> Path:
+    """The suite a graph is the derivation of.
+
+    This used to be the graph's own directory, which made adjacency load-bearing in code
+    rather than convention — and left the corpus scattered across whichever test tree each
+    spec happened to touch. The graph now names its suite (`tests:`, repo-relative), so the
+    graphs can live together and be gated as one corpus.
+
+    Falls back to the graph's directory when the field is absent, which keeps the plugin's
+    own fixture graphs (and any graph written before the field existed) working. The
+    fallback is safe rather than silent: a graph that names the wrong suite, or none, loses
+    its docstrings and `check_binds` reports every demand as a prose orphan — loudly, not
+    as a clean pass.
+    """
+    declared = graph.get("tests")
+    if not declared:
+        return graph_path.parent
+    import _config  # local: only this path needs the repo-root resolution
+
+    return _config.repo_root() / str(declared)
+
+
 def suite_files(suite_dir: Path) -> list[Path]:
     """The suite's `*.py`, minus `shuffle-premises` copies (`*.copyN.py`): they carry the
     same test names with premise-only docstrings and sort before the real file, so left in

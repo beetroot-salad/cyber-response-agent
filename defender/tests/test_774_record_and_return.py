@@ -1,6 +1,6 @@
 """#774 part 4 — what the review leaves behind, and what comes back into the live session.
 
-Every test here is one demand of `defender/tests/spec_graph_774.yaml`, named by that demand's
+Every test here is one demand of `spec-flow/specs/spec_graph_774.yaml`, named by that demand's
 `discharged_by`.
 
 THIS FILE CARRIES THE RUN'S SHARPEST NEGATIVE, AND IT BINDS FOUR SURFACES. Binding it to the

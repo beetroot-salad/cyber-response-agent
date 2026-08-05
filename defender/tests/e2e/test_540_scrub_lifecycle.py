@@ -2,7 +2,7 @@
 LIFECYCLE and its fail-closed edges (O10/O11/F6/F8), the gate's survival (O15), and the
 R6 hostile-value + R2 uniqueness obligations.
 
-Every test here is exactly one demand of `defender/tests/spec_graph_540.yaml`, named by that
+Every test here is exactly one demand of `spec-flow/specs/spec_graph_540.yaml`, named by that
 demand's `discharged_by`, and its docstring carries the demand's observable-outcome prose.
 
 RED BY CONSTRUCTION. The import block below names surface the implementation must still
