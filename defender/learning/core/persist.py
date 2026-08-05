@@ -206,6 +206,17 @@ def _copy_shared_inputs(run_dir: Path, learning_run_dir: Path) -> None:
                     f"source artifact for persist is missing or is not a regular file: {src}")
             dst = getattr(dst_paths, name)
             if name == "investigation":
+                # DECIDED, not overlooked: closing the disposition vocabulary in invlang's
+                # `conclude` block made this staging check retroactive, and runs enqueued
+                # before it — written while that slot was free text — now dead-letter here
+                # instead of being learned from. No grandfather clause, on purpose.
+                #
+                # The disposition is not decoration on a case, it SELECTS the direction the
+                # loop then spends actor + oracle + judge calls on. A headline outside the
+                # three keywords has no direction, so grandfathering would mean guessing one
+                # and authoring lessons off the guess. Refusing costs a queued run that a
+                # human can hand-edit and re-drive out of `queue/failed/`; guessing costs
+                # lessons nobody can trace back to a case that meant them.
                 from defender.skills.invlang.validate import validate_companion
 
                 errors = validate_companion(src.read_text(encoding="utf-8"), None)

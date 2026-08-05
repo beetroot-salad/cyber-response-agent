@@ -138,7 +138,7 @@ def orientation(run_dir: Path, defender_dir: Path, alert_path: Path, salt: str) 
     try:
         sections.append(
             "## invlang catalog (closed slots — author `:V type` / `:E rel` / "
-            "`class` / `*.kind` from these)\n" + _catalog()
+            "`class` / `*.kind` / `:T conclude disposition` from these)\n" + _catalog()
         )
     except Exception as e:  # noqa: BLE001
         sections.append(f"## invlang catalog\n_(unavailable: {e!r} — run `defender-invlang enum`)_")

@@ -4,9 +4,8 @@ from dataclasses import dataclass
 from collections.abc import Callable
 from pathlib import Path
 
-from defender._text import strip_zero_width
+from defender._vocab import normalized_disposition
 from defender.learning.core.config import (
-    DISPOSITION_ENUM,
     JUDGE_BENIGN_PROMPT,
     JUDGE_PROMPT,
     JudgeWiring,
@@ -103,16 +102,6 @@ def raw_fallback_name(artifact_name: str) -> str:
     return Path(artifact_name).stem + ".raw.txt"
 
 
-def normalized_disposition(disposition: str) -> str:
-    """The disposition as it RENDERS, or `""` when it is not one of the three.
-
-    `validate.normalize_disposition` applies the same strip before deciding whether a run is
-    processable at all (#722) — a zero-width character clinging to the keyword must not make
-    the loop and the transcript disagree about which directions the run selected."""
-    disp = strip_zero_width(disposition).strip()
-    return disp if disp in DISPOSITION_ENUM else ""
-
-
 ADVERSARIAL = Direction(
     name="adversarial",
     invoke_actor=lambda agents, run_dir, lrd, key, *, box: agents.actor(run_dir, lrd, box=box),
@@ -174,6 +163,12 @@ BY_NAME = {ADVERSARIAL.name: ADVERSARIAL, BENIGN.name: BENIGN}
 def directions_for(disposition: str) -> list[Direction]:
     """The directions a disposition selects — the ONE reader of `Direction.dispositions`,
     shared by the loop's dispatch and the transcript view so they cannot disagree (#716).
-    An unrecognized disposition selects nothing; callers decide what that means."""
+    An unrecognized disposition selects nothing; callers decide what that means.
+
+    It reads the disposition through the same `normalized_disposition` every consumer of a
+    completed `report.md` goes through (#785), so the #722 strip cannot be applied on the
+    reading side and skipped on the dispatching one."""
     disp = normalized_disposition(disposition)
-    return [d for d in BY_NAME.values() if disp in d.dispositions] if disp else []
+    if disp is None:
+        return []
+    return [d for d in BY_NAME.values() if disp in d.dispositions]

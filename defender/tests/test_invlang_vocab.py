@@ -21,7 +21,13 @@ def test_list_slots_returns_sorted_strings():
     slots = vocab.list_slots()
     assert slots == sorted(slots)
     assert all(isinstance(s, str) for s in slots)
+    # A closed set on purpose: every slot here is inlined into the runtime's ORIENT prompt, so
+    # adding one is a prompt change and has to be an acknowledged edit rather than a side
+    # effect. `disposition` is the newest and the only slot invlang does not define — it is the
+    # project-general run vocabulary, imported so the two schemas that carry a disposition
+    # cannot drift into disagreeing about which keywords exist.
     expected = {
+        "disposition",
         "types", "relations", "anchor-kinds", "auth-kinds",
         "compute.role", "compute.zone", "compute.provenance", "compute.kind",
         "identity.kind", "identity.provenance",

@@ -351,6 +351,12 @@ async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams
             "close_investigation is reachable only from the investigator (main) role — "
             f"not from {deps.role.value}"
         )
+    # lint-vocabulary: ok — the same WRITE-gate asymmetry `_artifact_schema` states, one layer
+    # earlier: this is the LIVE close, so the author is still on the other end of the call and an
+    # exact test hands it retry text it can act on. `normalized_disposition` would silently ACCEPT
+    # a zero-width-laced value and commit a close no reader can tell from a clean one — and this
+    # gate's value is what the report frontmatter is later written FROM, so normalizing here would
+    # launder the injected character past the very gate that exists to deny it.
     if disposition not in DISPOSITION_ENUM:
         raise ModelRetry(
             f"disposition must be exactly one of {sorted(DISPOSITION_ENUM)} (got "

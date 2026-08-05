@@ -284,6 +284,12 @@ matched_archetype      routine-admin-login
 summary                "Login matched established bastion usage"
 ```
 
+- `disposition` — closed vocab (`enum disposition`), and the SAME three
+  keywords `report.md`'s frontmatter carries. A value outside it is denied on
+  write; there is no `escalate` keyword — an escalation is
+  `termination.category exhaustion-escalation` with `disposition
+  inconclusive`.
+
 ### `:T close` (loop boundary)
 
 When you loop back from ANALYZE to PLAN, close the loop you are leaving:

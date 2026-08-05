@@ -28,7 +28,7 @@ from pathlib import Path
 
 from defender._frontmatter import parse_frontmatter_or_none
 from defender.evals.held_out import predicted_disposition
-from defender.learning.core.config import DISPOSITION_ENUM
+from defender._vocab import DISPOSITION_ENUM
 from defender.runtime import orient
 from defender.runtime.verb_grant import VerbGrant
 from defender.scripts.visualize import visualize_primitives as vp
@@ -177,16 +177,23 @@ def test_d0_descriptor_catalog_seam(tmp_path):
 
 
 def test_d0_parse_report(tmp_path):
-    assert vp.parse_report(tmp_path / "nope") == {}
-    assert vp.parse_report(
+    """#785 typed the viewer's read (a `ReportRead`, not a merged frontmatter dict), so the
+    shape assertions here read fields instead of dict equality. The #591 demand is unchanged:
+    every fallback below is a FALLBACK, not a raise, and the grammar deciding them is the one
+    canonical parser."""
+    missing = vp.parse_report(tmp_path / "nope")
+    assert (missing.disposition, missing.body) == (None, "")
+    undecodable = vp.parse_report(
         _report_run(tmp_path, "nb", b"---\ndisposition: benign\n---\n\xff\xfe\n")
-    ) == {}
+    )
+    assert (undecodable.disposition, undecodable.body) == (None, "")
     whole = b"---\ndisposition: [unterminated\n---\nbody text\n"
-    assert vp.parse_report(_report_run(tmp_path, "mal", whole)) == {"body": whole.decode()}
+    malformed = vp.parse_report(_report_run(tmp_path, "mal", whole))
+    assert (malformed.disposition, malformed.body) == (None, whole.decode())
     got = vp.parse_report(
         _report_run(tmp_path, "ok", b"---\ndisposition: benign\n---\n\n  body middle  \n\n")
     )
-    assert got == {"disposition": "benign", "body": "body middle"}
+    assert (got.disposition, got.body) == ("benign", "body middle")
 
 
 def test_d0_check_skill(tmp_path):
@@ -403,28 +410,28 @@ def test_d_catalog_survival():
 def test_d_malformed_yaml_collapse(tmp_path):
     whole = b"---\ndisposition: [unterminated\n---\nbody text\n"
     got = vp.parse_report(_report_run(tmp_path, "mal", whole))
-    assert got == {"body": whole.decode()}
+    assert (got.disposition, got.body) == (None, whole.decode())
     ok = vp.parse_report(_report_run(tmp_path, "ok", b"---\ndisposition: benign\n---\nbody\n"))
-    assert ok.get("disposition") == "benign"
+    assert ok.disposition == "benign"
 
 
 def test_d_non_mapping_collapse(tmp_path):
     whole = b"---\n- a\n- b\n---\nbody\n"
     got = vp.parse_report(_report_run(tmp_path, "lst", whole))
-    assert got == {"body": whole.decode()}
+    assert (got.disposition, got.body) == (None, whole.decode())
 
 
 def test_d_crlf_viewer_fix(tmp_path):
     got = vp.parse_report(_report_run(tmp_path, "crlf", b"---\r\ndisposition: benign\r\n---\r\nbody\r\n"))
-    assert got.get("disposition") == "benign"
-    assert got.get("body") is not None
+    assert got.disposition == "benign"
+    assert got.body == "body"
 
 
 def test_d_parse_report_body_strip(tmp_path):
     got = vp.parse_report(
         _report_run(tmp_path, "wf", b"---\ndisposition: benign\n---\n\nbody with trailing  \n\n")
     )
-    assert got["body"] == "body with trailing"
+    assert got.body == "body with trailing"
 
 
 def test_d_no_closer_fail(tmp_path):

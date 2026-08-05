@@ -19,7 +19,8 @@ if str(_SCRIPTS) not in sys.path:
 
 import pytest
 
-from defender.learning.core.config import ACTOR_OBSERVATION_TYPES, DISPOSITION_ENUM
+from defender._vocab import DISPOSITION_ENUM
+from defender.learning.core.config import ACTOR_OBSERVATION_TYPES
 from defender.learning.core.directions import BY_NAME, directions_for, raw_fallback_name
 from defender.learning.core.validate import (
     ADVERSARIAL_JUDGE_OPTIONAL_KEYS,

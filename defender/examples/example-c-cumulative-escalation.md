@@ -81,8 +81,14 @@ on the cumulative pattern.
 :T conclude
 termination.category   exhaustion-escalation
 termination.rationale  "?malicious-dependency-c2 cannot be driven to -- with available tooling; circumstantial pattern is decision-relevant"
-disposition            escalate
+disposition            inconclusive
 confidence             medium
 matched_archetype      novel-dependency-with-anomalous-egress
 summary                "build-runner-07.ci is making periodic queries to a recently-registered domain via a post-install daemon in a freshly-published npm package by a single-package maintainer. Legitimate-telemetry path is refuted; malicious-C2 path is supported circumstantially but cannot be confirmed in-loop. Hand off for sandbox detonation + maintainer review."
 ```
+
+`disposition` is the run's closed vocabulary (`enum disposition`), the same
+three keywords `report.md` carries — escalation is not one of them. The
+hand-off is said by `termination.category exhaustion-escalation` plus the
+`summary`; the disposition itself is `inconclusive`, because that is what "the
+malicious path could not be refuted or confirmed" means.

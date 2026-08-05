@@ -42,30 +42,19 @@ if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender._yaml import safe_load
-from defender._frontmatter import parse_frontmatter_or_none
-from defender._io import read_text_soft
+from defender._report import read_report
 from defender._run_paths import RunPaths
-from defender.learning.core.config import DISPOSITION_ENUM
 from defender.run_common import HELD_OUT_FIXTURES as FIXTURES_DIR, resolve_runs_base
 
 
-def _read_frontmatter(report_path: Path) -> dict | None:
-    if not report_path.is_file():
-        return None
-    text, _reason = read_text_soft(report_path)
-    if text is None:
-        return None
-    return parse_frontmatter_or_none(text)
-
-
 def predicted_disposition(run_dir: Path) -> str | None:
-    fm = _read_frontmatter(RunPaths(run_dir).report)
-    if fm is None:
-        return None
-    disp = fm.get("disposition")
-    if disp in DISPOSITION_ENUM:
-        return disp
-    return None
+    """This run's predicted disposition, or `None` when the report yields no usable headline.
+
+    Scoring must survive one broken report — a metric that raises tells you nothing about the
+    other 40 fixtures — so this is the DEGRADE side of the shared accessor (#785), and an
+    unscoreable run lands in the eval's own failure column rather than as an exception.
+    """
+    return read_report(RunPaths(run_dir).report).disposition
 
 
 @dataclass

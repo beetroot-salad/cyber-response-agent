@@ -8,8 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from defender._artifact_schema import DISPOSITION_ENUM
-from defender._frontmatter import FrontmatterError, parse_frontmatter
+from defender._vocab import normalized_disposition
+from defender._report import ReportUnreadable, require_report
 from defender._run_paths import RunPaths
 
 _SEED_ELIGIBLE_OUTCOMES = {"caught", "skip-passthrough"}
@@ -89,13 +89,6 @@ def _ctx(**kw: str) -> dict[str, str]:
 
 
 
-def _parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
-    try:
-        return parse_frontmatter(text)
-    except FrontmatterError as e:
-        raise CaseTicketError(f"report.md {e}") from e
-
-
 def _signature_id(alert: dict[str, Any], mapping: dict[str, Any]) -> str:
     path = _dig(mapping, "source.signature") or "rule.id"
     val = _dig(alert, str(path))
@@ -113,22 +106,16 @@ def alert_event_time(alert: dict[str, Any]) -> str | None:
 
 
 def read_case_record(run_dir: Path) -> CaseRecord:
-    report = RunPaths(run_dir).report
-    if not report.is_file():
-        raise CaseTicketError(f"report.md not found: {report}")
-    fm, body = _parse_frontmatter(report.read_text(encoding="utf-8"))
-
-    # Annotated `Any` deliberately: mypy narrows an `Any` differently across an `in` test
-    # against an IMPORTED set than against a module-local literal (it keeps the `None` arm),
-    # and the enum is imported since #714. The membership test is the real check; the
-    # annotation only keeps the inference where it was. Note this lane, unlike the write gate
-    # (`permission/files.py`), has no `isinstance(str)` guard ahead of the membership test —
-    # tracked as part of the report.md schema-ownership follow-up, not widened here.
-    disposition: Any = fm.get("disposition")
-    if disposition not in DISPOSITION_ENUM:
-        raise CaseTicketError(
-            f"report.md disposition={disposition!r} not in {sorted(DISPOSITION_ENUM)}"
-        )
+    # The bridge opens a real ticket in a real system off this record, so it cannot proceed on
+    # a headline it cannot read: the shared accessor's refusal (#785) becomes this lane's own
+    # error type, unchanged in text. That also closes the missing `isinstance(str)` guard this
+    # lane carried — a YAML list as the disposition used to raise `TypeError` out of the
+    # membership test against a set, where the write gate denied it cleanly.
+    try:
+        report = require_report(RunPaths(run_dir).report)
+    except ReportUnreadable as e:
+        raise CaseTicketError(str(e)) from e
+    fm, body, disposition = report.frontmatter, report.body, report.disposition
     case_id = run_dir.name
     confidence = str(fm.get("confidence") or "")
     # THE REASON IS THE CAUSE WHEN THE REPORT CARRIES ONE, AND THE BODY OTHERWISE.
@@ -255,7 +242,11 @@ def parse_disposition_from_resolution(resolution: str | None) -> str | None:
     if not sep:
         return None
     head = resolution.split(sep, 1)[0].strip()
-    return head if head in DISPOSITION_ENUM else None
+    # The eighth interpreter of the same vocabulary, one container over: this reads a
+    # disposition back out of a ticket's resolution line, which an analyst can edit and the
+    # benign judge reads back in. Same question, same answer as the report and the
+    # investigation now give.
+    return normalized_disposition(head)
 
 
 
