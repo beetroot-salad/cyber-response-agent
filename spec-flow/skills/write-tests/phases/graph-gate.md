@@ -4,7 +4,7 @@
 
 - Two leaves in sequence. The orchestrator routes the residue afterwards; it produces none of this — assembly is a leaf's job, never the spine's.
 - **Assembler leaf** (Opus, xhigh effort): inputs = `10-brief.md`, `20-demands.md`, `45-dispositions.md`. Outputs: `spec_graph_<slug>.yaml` at its final committed path (the profile's `specGraph.artifacts` names the directory — it is a deliverable, not plumbing) plus `50-graph-digest.md`.
-- **Gate leaf** (Sonnet, high effort — the R1–R5 triggers are computed by `spec-graph gate`, so this leaf annotates and judges rather than re-derives; Opus here re-buys what the tool already knows): inputs = the assembled artifact. Outputs: the gate record written into the artifact, plus `60-residue.md`.
+- **Gate leaf** (Sonnet, high effort — the R1–R5 and R7 triggers are computed by `spec-graph gate`, so this leaf annotates and judges rather than re-derives; Opus here re-buys what the tool already knows): inputs = the assembled artifact. Outputs: the gate record written into the artifact, plus `60-residue.md`.
 
 ## Charge — the assembler
 
@@ -14,11 +14,11 @@ Resolve every `binds:` target. Resolution is what pulls boundaries, facets, and 
 
 **Reconcile names before the join:** grounding, demand extraction, and the dispositions' address derivations coin ids and axis names independently — unify boundary ids (key by role+origin) across all three coining passes, and declare every axis once in the artifact's `axes:` list; a `key_axes`/`interpolates` member outside that list is an R0 finding. Seed the `claims:` block with every claim the three input frontiers raised, inherited entries keeping their ids.
 
-Digest-frontier inventory: `{demands: n, claims: n, boundaries: n, unknowns: n}`, `inputs` echoing all three input counts — every demand, claim, and consensus assertion from the inputs is present in the artifact or named as a drop.
+Digest-frontier inventory: `{demands: n, claims: n, boundaries: n, unknowns: n}`, `inputs` echoing all three input counts — every demand, claim, and settled assertion from the inputs is present in the artifact or named as a drop.
 
 ## Charge — the gate leaf
 
-Read **references/rules.md** in full. The rules are **guaranteed question-generators**: a lens *might* ask the two-writer collision question; the rule makes sure it is asked, every run — and for R1–R5 the asking is now mechanical. Start with:
+Read **references/rules.md** in full. The rules are **guaranteed question-generators**: a lens *might* ask the two-writer collision question; the rule makes sure it is asked, every run — and for R1–R5 plus R7 the asking is now mechanical. Start with:
 
 ```
 spec-graph gate <artifact> --residue

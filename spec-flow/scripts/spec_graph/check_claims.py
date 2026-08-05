@@ -15,6 +15,13 @@ THE CHECK (deterministic, no LLM): for every claim whose verdict means it was pr
 step-9's own finding, not this check's). An unknown `kind` or `probe_kind` is flagged too — the
 closed vocabulary is enforced here.
 
+THE TYPING PASS (same run): the table above is keyed on a kind the AUTHOR declares, so
+mis-typing is a free way past it — and that is not hypothetical, it is how the claim behind
+the most recent shipped defect closed on a read while predicting what every persisted record
+holds. A claim whose sentence makes a runtime prediction (`raises`, `returns`, `coerces`,
+`defaults to`, `silently`) may not be typed `referential` or `census`, whatever its author
+believed. Grammar only, never judgment; the escape hatch is a reviewed baseline entry.
+
 THE SPEND-POINT PASS (same run): rules.md's "a spend-point closes only by citation", as a
 field — `cites: [<claim id>, ...]`. Any `cites` anywhere in the gate block or on a demand
 must resolve to a claim that exists and was probed (`holds | refuted | unrefuted`) — a
@@ -33,6 +40,7 @@ missing, dangling, or unprobed.
 """
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -59,6 +67,55 @@ _PROBED = {"holds", "refuted", "unrefuted"}   # an instrument was used — requi
 _UNPROBED = {"unprobed", "deferred"}          # nothing run yet — skip (step-9 handles unprobed)
 #: fired:false here rests on an agent's reading, not a slot predicate — it must cite.
 _JUDGMENT_RULES = set(_schema.JUDGMENT)
+
+#: The kinds a claim may close on WITHOUT running anything. The typing pass below exists
+#: because membership here is what the instrument table trusts, and the author declares it.
+_INSPECTABLE = {"referential", "census"}
+
+#: Runtime-action grammar: verbs that predicate over an INPUT rather than over the tree's
+#: shape. Deliberately narrow — a claim can say "exists", "is defined", "is imported by" and
+#: mean it, but nothing that only exists can also raise, coerce, or default. Each is a whole
+#: word so `returns` does not fire on `returning-path`, and each is a verb a reader cannot
+#: settle: seeing the `raise` statement is not seeing that this input reaches it.
+_RUNTIME_GRAMMAR = re.compile(
+    r"\b(raise[sd]?|throws?|returns?|coerces?|normali[sz]es?|parses?|seriali[sz]es?"
+    r"|rejects?|accepts?|swallows?|truncates?|overwrites?|crashe[sd]?"
+    r"|fails?|succeeds?|skips?|drops?|handles?|silently|defaults? to|falls? back)\b",
+    re.IGNORECASE,
+)
+
+
+def check_typing(path: Path, graph: dict) -> list[str]:
+    """The hole under the instrument table: a claim's `kind` is DECLARED, and the table
+    trusts it, so mis-typing is a free way past the whole ledger.
+
+    The escape this closes is not hypothetical — the claim behind the most recent shipped
+    defect asserted a universal about what every persisted record holds, and it closed on a
+    read, because the read instrument is legitimate for the kind its author wrote down. A
+    read cannot falsify a prediction over an input; only running it can. So a claim whose
+    sentence makes a runtime prediction may not be typed into an inspectable kind, however
+    honestly the typing was meant.
+
+    Deterministic and deliberately narrow: it flags the grammar, never the judgment. The
+    remedy is to retype the claim and run its probe, and the escape hatch is the same one
+    the rest of this repo's gates use — a reviewed baseline entry, not a field an author can
+    write to silence the check on their own claim.
+    """
+    findings: list[str] = []
+    for c in graph.get("claims", []) or []:
+        if c.get("kind") not in _INSPECTABLE or c.get("verdict") in _UNPROBED:
+            continue
+        if c.get("probe_kind") == "executed":
+            continue  # typed inspectable, ran it anyway — the instrument is stronger, not weaker
+        m = _RUNTIME_GRAMMAR.search(str(c.get("claim", "")))
+        if m:
+            findings.append(
+                f"{path.name}:{c.get('id', '<no-id>')}: typed `{c.get('kind')}` and closed on "
+                f"`{c.get('probe_kind')}`, but the claim predicts runtime behavior "
+                f"(`{m.group(0)}`) — a prediction over an input is a `behavior`/`primitive`/"
+                f"`reachability` claim and owes an executed probe. Retype it and run it."
+            )
+    return findings
 
 
 def _cited(entry: dict) -> list[str]:
@@ -159,6 +216,7 @@ def main(argv: list[str]) -> int:
         return 2
     findings: list[str] = []
     spend: list[str] = []
+    typing: list[str] = []
     unreadable: list[Path] = []
     for p in paths:
         # Parsed ONCE and handed to both passes: the two used to load the same graph
@@ -169,6 +227,7 @@ def main(argv: list[str]) -> int:
             graph = _cli.load_graph(p)
             findings.extend(check(p, graph))
             spend.extend(check_spend_points(p, graph))
+            typing.extend(check_typing(p, graph))
         except (OSError, yaml.YAMLError, TypeError, AttributeError) as e:
             # Collected, not returned on: bailing here threw away every finding the
             # already-checked graphs produced.
@@ -177,14 +236,18 @@ def main(argv: list[str]) -> int:
             continue
     for f in findings:
         print(f"  INSTRUMENT {f}")
+    for f in typing:
+        print(f"  MISTYPED {f}")
     for f in spend:
         print(f"  CITATION {f}")
-    # Counted by kind: an instrument mismatch and an uncited spend-point are different slips.
-    print(f"\n[check_claims] {len(findings)} claim-instrument finding(s), {len(spend)} "
-          f"spend-point citation finding(s) over {len(paths)} graph(s).")
+    # Counted by kind: an instrument mismatch, a mis-typed claim, and an uncited spend-point
+    # are three different slips — and the middle one is how the first is evaded.
+    print(f"\n[check_claims] {len(findings)} claim-instrument finding(s), {len(typing)} "
+          f"claim-typing finding(s), {len(spend)} spend-point citation finding(s) over "
+          f"{len(paths)} graph(s).")
     if unreadable:
         return 2
-    return 1 if findings or spend else 0
+    return 1 if findings or typing or spend else 0
 
 
 if __name__ == "__main__":

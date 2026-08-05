@@ -27,6 +27,10 @@ Success criteria, scope, and design come later, as the discussion earns them.
 
 **Narrow.** An issue turns on one or two things that genuinely have to be nailed down; once those are settled the rest follows. Lead with them and your read on each, not five decisions handed back as equals. Skip whatever the codebase or an existing convention already answers.
 
+**Put the shape to the human, here, before the doc compiles.** This is the seam where their judgment is worth most and the only one upstream of everything else — the decomposition (what the pieces are, where the cut falls, what ships in which round) and the **data model** (the types that cross the seams, what each one owns, what is derived and what is stored). Ask with AskUserQuestion, recommendation first, each option stating what it forecloses. Downstream seams argue about the wording of an obligation; this one decides what the obligations are *about*, and a wrong answer here is not repairable by any amount of test rigour.
+
+Keep it to the decisions that carry consequence — two or three, not a survey. A choice the codebase already answers, or one where both readings produce the same types and the same surfaces, is yours to make and record, not theirs to ratify.
+
 ## The issue holds the state
 
 The conversation is where the discussion happens; the issue is where its state lives — for the next agent to pick up cold, and for a human to debug from months later. So what got settled goes in a comment, typed and terse rather than a narrative: the corrected premise, the census, the decisions and what they turned on. Won't-fix and already-resolved are state too — post the disposition and stop there.

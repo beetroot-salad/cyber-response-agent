@@ -13,16 +13,22 @@ agent, from the same assumptions.
 
 ```
 issue ──▶ discuss-issue ──▶ write-tests ──▶ write-code-from-spec ──▶ finalize ──▶ merge
-                                  │                                     │
-                              human seam:                          human gate:
-                             resolve forks                        approve merge
+                 │                │                                     │
+            human seam:      human seam:                           human gate:
+        decomposition +    material forks                         approve merge
+          data model          only
 ```
 
-Human judgment enters twice for different reasons: `write-tests` pauses only for genuine design
-forks, before code exists, and the merge stays human-approved after review. Everything else runs
-unattended. One discipline runs the whole pipe: enumerators interpret the design's language,
-executed probes answer every question about existing reality, and humans decide only genuine forks
-— nothing in between gets to guess.
+Human judgment enters three times, and the **first one is the one that matters**: before any doc
+compiles, `discuss-issue` puts the decomposition and the data model to a person — the decisions
+nothing downstream can repair. `write-tests` then pauses only for *material* forks (readings that
+imply a different data model, a different set of surfaces, or a different observable outcome);
+everything else auto-resolves to the recommendation with the choice recorded. The merge stays
+human-approved after review.
+
+Everything else runs unattended. One discipline runs the whole pipe: enumerators interpret the
+design's language, executed probes answer every question about existing reality, and humans decide
+only what their judgment is uniquely worth — nothing in between gets to guess.
 
 ## The skills
 

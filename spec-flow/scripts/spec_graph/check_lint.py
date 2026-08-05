@@ -34,7 +34,7 @@ _TOP = {"schema_version", "design", "base", "demands", "structure", "claims", "g
         "handoff", "binds_waivers", "exercise_waivers", "actor_waivers"}
 _STRUCTURE = {"axes", "actors", "boundaries", "interacts", "drives"}
 _KINDS = {"behavior", "seam", "shape", "uniqueness", "parity", "domain-outcome",
-          "survival", "negative"}
+          "survival", "negative", "coherence"}
 _FORMS = {"clause", "test", "waiver"}
 _FRAMES = {"leg", "composition"}
 _PROVENANCE = {"design", "code"}
@@ -310,11 +310,18 @@ def _rule_gate_discharges(lint: _Lint) -> None:
                     f"{lint.n}:gate.{section}: entry for `{entry.get('element')}` carries no "
                     f"`{ref_field}` — the shape requires the demand pointer."
                 )
-            elif ref not in lint.demand_ids:
-                lint.add(
-                    f"{lint.n}:gate.{section}: `{ref_field}: {ref}` names no demand in "
-                    f"this graph."
-                )
+            else:
+                # One obligation is legitimately discharged by SEVERAL demands, and authors
+                # write that as a list. Reading it as a scalar raised `unhashable type` out
+                # of the membership test, which the caller turns into exit 2 — so the graph
+                # was never linted at all, and the run still printed "0 finding(s)". A
+                # checker that crashes on a valid shape is the #652 class in its own gate.
+                for one in (ref if isinstance(ref, list) else [ref]):
+                    if one not in lint.demand_ids:
+                        lint.add(
+                            f"{lint.n}:gate.{section}: `{ref_field}: {one}` names no demand "
+                            f"in this graph."
+                        )
 
 
 def _rule_gate_holes(lint: _Lint) -> None:

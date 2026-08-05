@@ -15,7 +15,7 @@ from test_mechanical_checks import run_script
 # test's exit code is decided by the trigger/answer mechanics alone.
 _EVALUATED_TRUE = (
     "gate:\n  evaluated:\n"
-    + "".join(f"    - {{rule: R{i}, fired: true}}\n" for i in range(7))
+    + "".join(f"    - {{rule: R{i}, fired: true}}\n" for i in range(8))
 )
 
 # ---------------------------------------------------------------------------

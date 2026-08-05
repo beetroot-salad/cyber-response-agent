@@ -31,6 +31,7 @@ gate:
     - {rule: R4, fired: true}
     - {rule: R5, fired: true}
     - {rule: R6, fired: true}
+    - {rule: R7, fired: true}
 """
 
 # Same, but R4 recorded `fired: false` — the slot-vs-evaluated conflict case.
@@ -44,6 +45,7 @@ gate:
     - {rule: R4, fired: false}
     - {rule: R5, fired: true}
     - {rule: R6, fired: true}
+    - {rule: R7, fired: true}
 """
 
 # One R4 trigger: a design-provenance domain boundary with a read edge and one

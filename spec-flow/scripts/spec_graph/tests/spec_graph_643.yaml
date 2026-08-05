@@ -260,7 +260,7 @@ claims:
      probe: "deferred — no resolver exists yet; write-code-from-spec probes the chosen mapping. Grounding basis: codeGraph.notes 'defender is a namespace package (no defender/__init__.py)'.",
      observed: "n/a", verdict: deferred}
 
-# ── Gate — R0-R6 over the join, every rule recorded ─────────────────────────
+# ── Gate — R0-R7 over the join, every rule recorded ─────────────────────────
 gate:
   evaluated:
     - {rule: R0, fired: false}   # all binds resolve; no unknown invariant; axes:[] is a valid no-op; bidirectional reconciliation clean
@@ -269,6 +269,7 @@ gate:
     - {rule: R3, fired: false}   # import_reach vs subprocess_reach are SEPARATE boundaries (changed-gated vs not), not two vias of one; rests_on reach-string-if-else
     - {rule: R4, fired: true}    # read edge to a domain-facet boundary that gained 4 distinguished members — each pre-discharged
     - {rule: R5, fired: false}   # nothing removed; the change STRENGTHENS detection (b8/b6); judgment extension CONSIDERED, N/A (no constraint tightened into a newly-unsafe state); rests_on b8-twelve-instances
+    - {rule: R7, fired: false}   # no boundary carries two readers, so no source can drift between them
     - {rule: R6, fired: true}    # the finding renders delta-sourced module stems into stdout — closed by the operator-trust waiver (Q3), grounded by r6-render-operator-trust
   obligations: []   # R4's four members are each pre-discharged by a pre-existing form:test demand
   holes:
