@@ -13,7 +13,7 @@ from types import SimpleNamespace
 import pytest
 
 from defender import run as run_entry
-from defender.runtime import providers, review_roles
+from defender.runtime import providers
 from defender.runtime.review_roles import (
     COMPOSER_DEF,
     DEFAULT_REVIEW_MODEL,
