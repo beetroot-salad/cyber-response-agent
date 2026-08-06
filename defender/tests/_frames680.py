@@ -117,6 +117,65 @@ def _shape(observation: PromptObservation):
     return tags, bodies, salts, tuple(gaps)
 
 
+def _assert_frame_envelope(observation: PromptObservation, tags, salts, gaps) -> None:
+    """The three properties that make a frame set a frame set at all.
+
+    Every one of the thirty-five shape assertions in this suite's two test modules
+    restates these, so they are stated once. Each carries its own message: a helper that
+    hides WHICH invariant broke would trade thirty-four copies for a worse failure.
+    """
+    assert tags == observation.expected_tags, (
+        f"{observation.producer}: framed sections are {tags}, expected "
+        f"{observation.expected_tags}"
+    )
+    assert salts == (observation.salt,) * len(observation.expected_tags), (
+        f"{observation.producer}: a frame carries a salt that is not {observation.salt!r} "
+        f"— got {salts}"
+    )
+    assert all(not gap.strip() for gap in gaps), (
+        f"{observation.producer}: unframed text sits between the frames — "
+        f"{[g for g in gaps if g.strip()]}"
+    )
+
+
+def assert_body_survives(observation: PromptObservation, hostile: str) -> None:
+    """A hostile body reached the model as EXACT body data inside one real frame.
+
+    This is the whole adversarial contract, and its point is negative: whatever the
+    hostile string tried to impersonate — a sibling section, a closing delimiter, the
+    reader contract itself — the frame set the model sees is unchanged, and the string is
+    still sitting inside a body rather than having become structure.
+    """
+    tags, bodies, salts, gaps = _shape(observation)
+    _assert_frame_envelope(observation, tags, salts, gaps)
+    assert any(hostile == body or hostile in body for body in bodies), (
+        f"{observation.producer}: the hostile body did not survive verbatim inside any "
+        f"frame — it was transformed, split, or promoted to structure"
+    )
+
+
+def assert_producer_shape(observation: PromptObservation) -> None:
+    """A real producer emitted its ordered frames with every template slot substituted.
+
+    The two placeholder checks are not decoration. `{salt}` or `{content}` surviving into
+    the prompt means the producer shipped its TEMPLATE to the model — a frame whose salt
+    is the literal four characters `{salt}` matches nothing and confines nothing, while
+    still looking framed to a reader.
+    """
+    tags, bodies, salts, gaps = _shape(observation)
+    _assert_frame_envelope(observation, tags, salts, gaps)
+    for required in observation.required_bodies:
+        assert any(required in body for body in bodies), (
+            f"{observation.producer}: required content {required!r} is in no frame body"
+        )
+    assert "{salt}" not in observation.prompt, (
+        f"{observation.producer}: an unsubstituted {{salt}} reached the model"
+    )
+    assert "{content}" not in observation.prompt, (
+        f"{observation.producer}: an unsubstituted {{content}} reached the model"
+    )
+
+
 def _with_salt(fn, /, *args, salt: str, **kwargs):
     """Call the real producer, threading the target salt when its revised seam exists."""
     if "salt" in inspect.signature(fn).parameters:
