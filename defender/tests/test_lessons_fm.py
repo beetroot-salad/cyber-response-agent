@@ -6,19 +6,16 @@ nor leak into the `<path>\\t<description>` surface.
 """
 from __future__ import annotations
 
-import importlib.util
 from pathlib import Path
+
+from defender.tests._by_path import DEFENDER, load_module
 
 import pytest
 
-_SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "lessons" / "lessons_fm.py"
-
 
 def _load(tmp_lessons: Path):
-    spec = importlib.util.spec_from_file_location("lessons_fm", _SCRIPT)
-    mod = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(mod)
+    """A FRESH module per call — each test rebinds the two corpus constants."""
+    mod = load_module(DEFENDER / "scripts" / "lessons" / "lessons_fm.py")
     mod.REPO_ROOT = tmp_lessons.parent
     mod.LESSONS_DIR = tmp_lessons
     return mod

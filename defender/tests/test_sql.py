@@ -17,20 +17,17 @@ Skipped when duckdb isn't installed (it lives in the `runtime` extra, not
 """
 from __future__ import annotations
 
-import importlib.util
 import io
 import json
 import types
-from pathlib import Path
+
+from defender.tests._by_path import DEFENDER, load_module
 
 import pytest
 
 pytest.importorskip("duckdb")
 
-_SQL_PATH = Path(__file__).resolve().parents[1] / "scripts" / "gather_tools" / "sql.py"
-_spec = importlib.util.spec_from_file_location("defender_sql", _SQL_PATH)
-defender_sql = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(defender_sql)
+defender_sql = load_module(DEFENDER / "scripts" / "gather_tools" / "sql.py", name="defender_sql")
 
 
 def _run(monkeypatch, capsys, payload, query: str) -> tuple[int, str]:

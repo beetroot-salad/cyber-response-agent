@@ -17,27 +17,15 @@ derived from this file, never hardcoded to /workspace.
 """
 from __future__ import annotations
 
-import importlib.util
 import json
-import sys
 from pathlib import Path
 
 import pytest
 
-WORKTREE = Path(__file__).resolve().parents[2]
-LINT_DIR = WORKTREE / "scripts" / "lint"
-LINT_PATH = LINT_DIR / "lint_hand_rolled_frontmatter.py"
+from defender.tests._by_path import import_lint_lib, load_lint_gate
 
-
-def _load_gate():
-    if str(LINT_DIR) not in sys.path:
-        sys.path.insert(0, str(LINT_DIR))
-    spec = importlib.util.spec_from_file_location("lint_hand_rolled_frontmatter", LINT_PATH)
-    assert spec is not None
-    assert spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+_ASTLIB = import_lint_lib("_astlib")
+_GATE = load_lint_gate("lint_hand_rolled_frontmatter")
 
 
 _FIND = 'def f_find(t):\n    return t.find("\\n---", 4)\n'
@@ -70,7 +58,7 @@ def _write_baseline(path: Path, fingerprints: list[str]) -> None:
 
 
 def test_d0_lint_gate(tmp_path):
-    gate = _load_gate()
+    gate = _GATE
     tree = tmp_path / "scope"
     _pyfile(tree, "prod.py", _FIND)
     _pyfile(tree, "test_prod.py", _FIND)
@@ -91,7 +79,7 @@ def test_d0_lint_gate(tmp_path):
 
 
 def test_d_lint_flags_each_idiom(tmp_path):
-    gate = _load_gate()
+    gate = _GATE
     tree = tmp_path / "scope"
     _pyfile(tree, "idioms.py", _FIND + "\n" + _SPLIT + "\n" + _STARTS + "\n" + _REGEX)
 
@@ -104,7 +92,7 @@ def test_d_lint_flags_each_idiom(tmp_path):
 
 
 def test_d_lint_writer_fstrings_clean(tmp_path):
-    gate = _load_gate()
+    gate = _GATE
     tree = tmp_path / "scope"
     clean = (
         '"""A module docstring mentioning --- and \\n--- fences."""\n'
@@ -125,7 +113,7 @@ def test_d_lint_writer_fstrings_clean(tmp_path):
 
 
 def test_d_lint_tests_excluded(tmp_path):
-    gate = _load_gate()
+    gate = _GATE
     tree = tmp_path / "scope"
     _pyfile(tree, "test_reader.py", _FIND)
     assert gate._scan(tree) == []
@@ -134,7 +122,7 @@ def test_d_lint_tests_excluded(tmp_path):
 
 
 def test_d_lint_canonical_exempt(tmp_path):
-    gate = _load_gate()
+    gate = _GATE
     tree = tmp_path / "scope"
     _pyfile(tree, "_frontmatter.py", _FIND)
     assert gate._scan(tree) == []
@@ -143,7 +131,7 @@ def test_d_lint_canonical_exempt(tmp_path):
 
 
 def test_d_lint_suppression(tmp_path):
-    gate = _load_gate()
+    gate = _GATE
     on = tmp_path / "on"
     _pyfile(on, "s.py", 'def f(t):\n    return t.find("\\n---", 4)  # lint-frontmatter: ok — canonical-ish\n')
     assert gate._scan(on) == []
@@ -161,12 +149,12 @@ def test_d_lint_suppression(tmp_path):
 
 
 def test_d_lint_real_tree_clean():
-    gate = _load_gate()
+    gate = _GATE
     assert gate.main([]) == 0
 
 
 def test_d_lint_baseline_lifecycle(tmp_path):
-    gate = _load_gate()
+    gate = _GATE
     tree = tmp_path / "scope"
     _pyfile(tree, "prod.py", _FIND)
     bp = tmp_path / "bp.json"
@@ -182,18 +170,16 @@ def test_d_lint_baseline_lifecycle(tmp_path):
 
 
 def test_d_lint_exit2_scope_missing(tmp_path):
-    gate = _load_gate()
+    gate = _GATE
     assert gate.main([], scope=tmp_path / "not-a-dir") == 2
 
 
 def test_d_lint_syntax_error_is_not_clean(tmp_path):
-    import _astlib
-
-    gate = _load_gate()
+    gate = _GATE
     tree = tmp_path / "scope"
     _pyfile(tree, "broken.py", "def f(:\n    this is not python\n")
     _pyfile(tree, "ok.py", _FIND)
-    with pytest.raises(_astlib.ScanBlind) as exc:
+    with pytest.raises(_ASTLIB.ScanBlind) as exc:
         gate._scan(tree)
     assert "broken.py" in str(exc.value)
 
@@ -202,14 +188,14 @@ def test_d_lint_clean_tree_still_scans(tmp_path):
     """The control: the same tree minus the unparseable file scans normally and finds the
     real site. Without this, the raises-test above would also pass against a gate that
     raised unconditionally."""
-    gate = _load_gate()
+    gate = _GATE
     tree = tmp_path / "scope"
     _pyfile(tree, "ok.py", _FIND)
     assert any("ok.py" in f.fingerprint for f in gate._scan(tree))
 
 
 def test_d_lint_fingerprint_dedup(tmp_path):
-    gate = _load_gate()
+    gate = _GATE
     tree = tmp_path / "scope"
     src = (
         "def same(t):\n"
@@ -229,7 +215,7 @@ def test_d_lint_fingerprint_dedup(tmp_path):
 
 
 def test_aliased_re_import_is_flagged(tmp_path):
-    gate = _load_gate()
+    gate = _GATE
     tree = tmp_path / "scope"
     _pyfile(tree, "prod.py", (
         "import re as regex\n\n"
@@ -239,7 +225,7 @@ def test_aliased_re_import_is_flagged(tmp_path):
 
 
 def test_from_import_re_is_flagged(tmp_path):
-    gate = _load_gate()
+    gate = _GATE
     tree = tmp_path / "scope"
     _pyfile(tree, "prod.py", (
         "from re import search\n\n"

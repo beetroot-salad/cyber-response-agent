@@ -18,10 +18,10 @@ an author to send actionable retry text to.
 """
 from __future__ import annotations
 
-import importlib.util
 import json
-import sys
 from pathlib import Path
+
+from defender.tests._by_path import load_trace_lesson
 
 import pytest
 
@@ -40,20 +40,13 @@ from defender.learning.core.config import RunUnprocessable
 from defender.scripts.case_history.case_ticket import CaseTicketError, read_case_record
 from defender.scripts.visualize.visualize_primitives import parse_report
 
-_TL_PATH = Path(__file__).resolve().parents[1] / "learning" / "ops" / "trace_lesson.py"
-
 # A trailing ZERO WIDTH SPACE — invisible, survives `.strip()`, and reachable from the
 # attacker-influenced alert text the model was asked to analyze.
 ZWSP = "​"
 
 
 def _load_trace_lesson():
-    spec = importlib.util.spec_from_file_location("trace_lesson_785", _TL_PATH)
-    mod = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    sys.modules[spec.name] = mod
-    spec.loader.exec_module(mod)
-    return mod
+    return load_trace_lesson("trace_lesson_785")
 
 
 def _run_dir(tmp_path: Path, name: str, report: str) -> Path:

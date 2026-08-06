@@ -53,7 +53,6 @@ Usage: report.py [<cases_dir>] [--json <out.json>] [--target-lower-bound 0.90]
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import json
 import sys
 from collections import defaultdict
@@ -63,18 +62,11 @@ import yaml
 
 GOLDEN_DIR = Path(__file__).resolve().parent
 
+# Run as a script from anywhere, so the package this module lives in has to be made
+# importable before its own sibling can be — `score.py` establishes the convention.
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
-def _load_module(name: str, path: Path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None
-    assert spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = mod
-    spec.loader.exec_module(mod)
-    return mod
-
-
-STATS = _load_module("oracle_golden_stats", GOLDEN_DIR / "stats.py")
+from defender.evals.oracle_golden import stats as STATS  # noqa: E402 — after the bootstrap
 
 #: Fewest independent units a slice needs before an interval is published at all.
 #: At n=1 Wilson spans [0.21, 1.00] and at n=2 [0.34, 1.00]; printing either

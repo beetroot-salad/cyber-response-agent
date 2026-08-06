@@ -47,6 +47,8 @@ import sys
 import textwrap
 from pathlib import Path
 
+from defender.tests._by_path import load_module, load_trace_lesson
+
 import pytest
 
 import defender.learning.author.shared as _shared  # noqa: E402
@@ -59,7 +61,6 @@ from defender.tests.test_trace_lesson import _mk_run  # noqa: E402
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
 DEFENDER = WORKSPACE_ROOT / "defender"
-TL_PATH = DEFENDER / "learning" / "ops" / "trace_lesson.py"
 ENV_RETRIEVE = DEFENDER / "scripts" / "lessons" / "lessons_env_retrieve.py"
 
 
@@ -125,15 +126,6 @@ def _crlf_lesson(corpus: Path, stem: str = "crlf") -> Path:
     return p
 
 
-def _load_by_path(name: str, path: Path):
-    """Load a CLI script by file path — the project idiom for the scripts that are run, not
-    imported (``test_lessons_fm._load`` / ``test_trace_lesson._load``)."""
-    spec = importlib.util.spec_from_file_location(name, path)
-    mod = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    sys.modules[spec.name] = mod
-    spec.loader.exec_module(mod)
-    return mod
 
 
 def _fixture_defender(tmp_path: Path) -> Path:
@@ -735,7 +727,7 @@ def test_d20_trace_lesson_gains_a_lessons_dir_seam(tmp_path, capsys):
     Rejected: rebinding ``mod.LESSONS_DIR`` after ``spec_from_file_location`` — monkeypatch wearing a
     different hat. It mutates module state a fixture never owns, and nothing forces production to
     re-read the constant, so the test can go green against code that closed over the old value."""
-    tl = _load_by_path("trace_lesson_584", TL_PATH)
+    tl = load_trace_lesson("trace_lesson_584")
     runs = tmp_path / "runs"
     runs.mkdir()
     corpus = _corpus_of(tmp_path, "fixture-lesson")
@@ -766,7 +758,7 @@ def test_d21_trace_all_walks_the_shared_iterator(tmp_path, capsys):
     was a resolved design fork, overturned — the audit index must keep a marker row for a
     discovered-but-skipped lesson (it may still have in-context cases). The rest of the demand
     (underscore-skip, warn to stderr, rc 0, well-formed siblings untouched) is unchanged."""
-    tl = _load_by_path("trace_lesson_584", TL_PATH)
+    tl = load_trace_lesson("trace_lesson_584")
     runs = tmp_path / "runs"
     runs.mkdir()
     corpus = _corpus_of(tmp_path, "alpha", "beta")
@@ -800,7 +792,7 @@ def test_d22_missing_lessons_dir_follows_the_seam(tmp_path, capsys):
 
     Rejected: exit 2 for a bad ``--lessons-dir`` — the CLI's established code for "no corpus" is 1;
     there is no 2 anywhere in trace_lesson."""
-    tl = _load_by_path("trace_lesson_584", TL_PATH)
+    tl = load_trace_lesson("trace_lesson_584")
     missing = tmp_path / "no-such-corpus"
 
     assert tl.main(["--all", "--lessons-dir", str(missing)]) == 1
@@ -824,7 +816,7 @@ def test_d23_lesson_identity_is_the_stem_cross_module(tmp_path, capsys):
     ``.fm.get("name")`` (empty string → every join misses, SILENTLY, and every lesson reports 0
     cases forever). The fixture corpus is rooted at ``<tmp>/defender/lessons`` because
     ``lesson_name`` keys on the grandparent dir — the oracle only speaks for a real corpus path."""
-    tl = _load_by_path("trace_lesson_584", TL_PATH)
+    tl = load_trace_lesson("trace_lesson_584")
     runs = tmp_path / "runs"
     runs.mkdir()
     corpus = _corpus_of(tmp_path / "defender", "foo-bar")
@@ -850,7 +842,7 @@ def test_d23b_stem_wins_when_the_frontmatter_name_disagrees(tmp_path, capsys):
     Rejected: asserting column 1 only — the name can be right while the join key threaded into
     ``in_context_cases`` is the frontmatter one. The NONZERO COUNT is what proves the key that was
     actually joined on."""
-    tl = _load_by_path("trace_lesson_584", TL_PATH)
+    tl = load_trace_lesson("trace_lesson_584")
     corpus = tmp_path / "defender" / "lessons"
     corpus.mkdir(parents=True)
     (corpus / "foo-bar.md").write_text(
@@ -879,7 +871,7 @@ def test_d24_single_lesson_path_keeps_its_own_guarded_read(tmp_path, capsys):
     read, which is worse than an error. Also rejected: rerouting this path through ``iter_lessons``,
     which turns an O(1) read into a whole-corpus parse and converts "no such lesson" from an explicit
     exit-1 into a ``StopIteration`` traceback."""
-    tl = _load_by_path("trace_lesson_584", TL_PATH)
+    tl = load_trace_lesson("trace_lesson_584")
     runs = tmp_path / "runs"
     runs.mkdir()
     corpus = _corpus_of(tmp_path, "good")
@@ -914,7 +906,7 @@ def test_d25_env_retrieve_stdout_shape(tmp_path, capsys):
     DESTRUCTURE at this loop's header, and a swapped field would print the frontmatter DICT into the
     criteria column, which the forward-check would happily ingest as a string — a corrupted signal
     reaching an LLM, with no exception anywhere."""
-    mod = _load_by_path("lessons_env_retrieve_584", ENV_RETRIEVE)
+    mod = load_module(ENV_RETRIEVE, name="lessons_env_retrieve_584")
     corpus = tmp_path / "lessons-environment"
     corpus.mkdir()
     (corpus / "vpn-egress.md").write_text(

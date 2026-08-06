@@ -65,6 +65,7 @@ import pytest
 
 from defender.runtime import box as box_mod
 
+from defender.tests._by_path import load_lint_gate, load_module
 from defender.tests.e2e._box665 import (  # noqa: F401
     DockerFault,
     RecordingDocker,
@@ -94,36 +95,21 @@ def load_seccomp_generator():
     package. The demands that use it need `build()` — the pure function from vendored bytes to
     shipped profile — so that "the shipped profile is the platform default minus the ban" is
     asserted by RE-DERIVING it, not by re-listing its contents in a second place that can drift
-    from the first."""
-    import importlib.util
+    from the first.
 
-    spec = importlib.util.spec_from_file_location("gen_seccomp_profile", SECCOMP_GEN_PATH)
-    assert spec is not None, f"the profile generator does not exist at {SECCOMP_GEN_PATH}"
-    assert spec.loader is not None, f"the generator at {SECCOMP_GEN_PATH} is not importable"
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    `register=False`: the generator is read for one pure function and nothing imports it by
+    name, so the `sys.modules` slot stays free for a caller that means it."""
+    return load_module(SECCOMP_GEN_PATH, register=False)
 
 
 def load_write_lint():
     """Import the write lint as a module, by path.
 
     It lives at the repo root, outside every importable package, so `import` cannot reach it —
-    and two demands need it (the wrapper-detection one and the hard-gate one). Loaded once
-    here rather than twice inline: a second copy of the loader is a second chance for one
+    and two demands need it (the wrapper-detection one and the hard-gate one). Loaded through
+    the shared loader rather than inline: a second copy of the loader is a second chance for one
     demand to end up pointed at a file that no longer exists while still reporting green."""
-    import importlib.util
-    import sys
-
-    lint_dir = LINT_MODULE_PATH.parent
-    if str(lint_dir) not in sys.path:
-        sys.path.insert(0, str(lint_dir))
-    spec = importlib.util.spec_from_file_location("lint_unguarded_tree_write", LINT_MODULE_PATH)
-    assert spec is not None, f"the lint does not exist at {LINT_MODULE_PATH}"
-    assert spec.loader is not None, f"the lint at {LINT_MODULE_PATH} is not importable"
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return load_lint_gate("lint_unguarded_tree_write")
 
 
 def ban_dependency_files() -> dict[str, Path]:

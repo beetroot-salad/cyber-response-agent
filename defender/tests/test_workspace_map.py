@@ -11,13 +11,11 @@ orchestrator-facing map must stay credential-free.
 """
 from __future__ import annotations
 
-import importlib.util
 from pathlib import Path
 
-_WM_PATH = Path(__file__).resolve().parents[1] / "scripts" / "workspace_map.py"
-_spec = importlib.util.spec_from_file_location("workspace_map", _WM_PATH)
-wm = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(wm)
+from defender.tests._by_path import DEFENDER, load_module
+
+wm = load_module(DEFENDER / "scripts" / "workspace_map.py")
 
 
 def test_canonical_sections_present(tmp_path: Path):

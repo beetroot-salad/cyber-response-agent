@@ -13,26 +13,15 @@ contract directly, because two of its properties are load-bearing and silent if 
 from __future__ import annotations
 
 import ast
-import importlib.util
-import sys
-from pathlib import Path
+
+from defender.tests._by_path import import_lint_lib
 
 import pytest
 
-WORKTREE = Path(__file__).resolve().parents[2]
-LINT_DIR = WORKTREE / "scripts" / "lint"
 
 
 def _load():
-    if str(LINT_DIR) not in sys.path:
-        sys.path.insert(0, str(LINT_DIR))
-    spec = importlib.util.spec_from_file_location("_astlib", LINT_DIR / "_astlib.py")
-    assert spec is not None
-    assert spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = mod
-    spec.loader.exec_module(mod)
-    return mod
+    return import_lint_lib("_astlib")
 
 
 def _first_call(src: str):

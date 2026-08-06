@@ -10,27 +10,14 @@ exercised by running the tool against the live stack.
 """
 from __future__ import annotations
 
-import importlib.util
-import sys
 from datetime import datetime, timedelta, UTC
-from pathlib import Path
 
 import pytest
 
-GOLDEN_DIR = Path(__file__).resolve().parents[2] / "evals" / "oracle_golden"
+from defender.evals.oracle_golden import controls as CONTROLS
 
 
-def _load(name: str, path: Path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None
-    assert spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = mod
-    spec.loader.exec_module(mod)
-    return mod
 
-
-CONTROLS = _load("oracle_golden_controls", GOLDEN_DIR / "controls.py")
 
 # Shaped like a real lead: full predicate, two bounds, an aggregation.
 LEAD_Q = (

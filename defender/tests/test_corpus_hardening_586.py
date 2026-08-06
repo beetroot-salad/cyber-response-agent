@@ -24,10 +24,11 @@ as approved.
 """
 from __future__ import annotations
 
-import importlib.util
 import subprocess
 import sys
 from pathlib import Path
+
+from defender.tests._by_path import load_trace_lesson
 
 from defender._corpus import iter_lesson_paths, iter_lessons
 from defender._frontmatter import parse_frontmatter, split_frontmatter
@@ -35,17 +36,10 @@ from defender.learning.author.curator import existing_observation_ids
 from defender.tests.test_trace_lesson import _mk_run  # noqa: E402
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
-TL_PATH = WORKSPACE_ROOT / "defender" / "learning" / "ops" / "trace_lesson.py"
 
 
 def _load_trace_lesson():
-    """Load the CLI by path — the project idiom for scripts that are run, not imported."""
-    spec = importlib.util.spec_from_file_location("trace_lesson_586", TL_PATH)
-    mod = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    sys.modules[spec.name] = mod
-    spec.loader.exec_module(mod)
-    return mod
+    return load_trace_lesson("trace_lesson_586")
 
 _C_LOCALE_ENV = {
     "PATH": "/usr/bin:/bin",

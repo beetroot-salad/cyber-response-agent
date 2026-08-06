@@ -8,12 +8,13 @@ adversarial loop "did not run or aborted" when it was simply never selected.
 """
 from __future__ import annotations
 
-import importlib.util
 import inspect
 import sys
 from pathlib import Path
 
-_SCRIPTS = Path(__file__).resolve().parents[1] / "scripts" / "visualize"
+from defender.tests._by_path import DEFENDER, load_module
+
+_SCRIPTS = DEFENDER / "scripts" / "visualize"
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
@@ -29,13 +30,7 @@ from defender.learning.core.validate import (
 
 
 def _load(name: str):
-    spec = importlib.util.spec_from_file_location(name, _SCRIPTS / f"{name}.py")
-    mod = importlib.util.module_from_spec(spec)
-    # Register before exec: `@dataclass` resolves annotations through
-    # `sys.modules[cls.__module__]`, which is None for an unregistered module.
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)
-    return mod
+    return load_module(_SCRIPTS / f"{name}.py")
 
 
 vj = _load("visualize_judge")

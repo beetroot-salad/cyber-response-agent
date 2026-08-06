@@ -25,11 +25,12 @@ a NEW render path whose HTML escaping is not inherited from the log-derived rend
 from __future__ import annotations
 
 import html
-import importlib.util
 import json
 import subprocess
 import sys
 from pathlib import Path
+
+from defender.tests._by_path import WORKTREE, load_module
 
 import pytest
 
@@ -52,20 +53,13 @@ from defender.tests.e2e._replay_harness import (
 
 pytestmark = pytest.mark.e2e
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
 SALT = "0011223344556677"
 
 
 def _load_run_stats():
     """`scripts/analytics/run_stats.py` — outside `defender/` AND outside
     `specGraph.codeRoots`, so nothing mechanical checks the demand bound to it."""
-    path = REPO_ROOT / "scripts" / "analytics" / "run_stats.py"
-    spec = importlib.util.spec_from_file_location("run_stats_705", path)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    sys.modules["run_stats_705"] = module   # @dataclass resolves through sys.modules
-    spec.loader.exec_module(module)
-    return module
+    return load_module(WORKTREE / "scripts" / "analytics" / "run_stats.py", name="run_stats_705")
 
 
 def _driven_run(tmp_path: Path, *, run_id: str, turns=None, text: str = "done"):

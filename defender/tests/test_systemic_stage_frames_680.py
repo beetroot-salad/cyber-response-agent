@@ -34,6 +34,7 @@ from defender.runtime.tools import (
     _tool_bash,
     _tool_read_file,
 )
+from defender.tests._by_path import load_module, on_sys_path
 from defender.tests._engine_helpers import fake_model, replay_turns
 from defender.tests._frames680 import (
     DEFENDER,
@@ -418,17 +419,11 @@ def test_lead_author_harness_materializes_relocated_frame_dependency(tmp_path):
     import sys
 
     evals_dir = DEFENDER / "evals"
-    spec = importlib.util.spec_from_file_location(
-        "issue_680_harness_lead", evals_dir / "harness_lead.py"
-    )
-    assert spec is not None
-    assert spec.loader is not None
-    harness = importlib.util.module_from_spec(spec)
-    sys.path.insert(0, str(evals_dir))
-    try:
-        spec.loader.exec_module(harness)
-    finally:
-        sys.path.remove(str(evals_dir))
+    # `evals/` on sys.path for the exec ONLY — the harness imports its siblings by bare
+    # name, but leaving the dir importable would shadow `defender.evals.*` for every later
+    # test in the session.
+    with on_sys_path(evals_dir):
+        harness = load_module(evals_dir / "harness_lead.py", name="issue_680_harness_lead")
 
     scenario = evals_dir / "scenarios_lead" / "underfold-sshd-narrowing"
     tree = tmp_path / "relocated"

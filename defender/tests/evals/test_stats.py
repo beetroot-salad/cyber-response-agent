@@ -8,26 +8,13 @@ threshold goes back to being a picked number rather than a derived one.
 """
 from __future__ import annotations
 
-import importlib.util
-import sys
-from pathlib import Path
 
 import pytest
 
-GOLDEN_DIR = Path(__file__).resolve().parents[2] / "evals" / "oracle_golden"
+from defender.evals.oracle_golden import stats as STATS
 
 
-def _load(name: str, path: Path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None
-    assert spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = mod
-    spec.loader.exec_module(mod)
-    return mod
 
-
-STATS = _load("oracle_golden_stats", GOLDEN_DIR / "stats.py")
 
 
 def _rounded(k: int, n: int) -> tuple[float, float]:

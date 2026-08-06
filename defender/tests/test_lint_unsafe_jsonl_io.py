@@ -17,27 +17,15 @@ Driven through the DI seam added in the parent commit:
 """
 from __future__ import annotations
 
-import importlib.util
 import json
-import sys
 from pathlib import Path
 
 import pytest
 
-WORKTREE = Path(__file__).resolve().parents[2]
-LINT_DIR = WORKTREE / "scripts" / "lint"
-LINT_PATH = LINT_DIR / "lint_unsafe_jsonl_io.py"
+from defender.tests._by_path import import_lint_lib, load_lint_gate
 
-
-def _load_gate():
-    if str(LINT_DIR) not in sys.path:
-        sys.path.insert(0, str(LINT_DIR))
-    spec = importlib.util.spec_from_file_location("lint_unsafe_jsonl_io", LINT_PATH)
-    assert spec is not None
-    assert spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+_ASTLIB = import_lint_lib("_astlib")
+_GATE = load_lint_gate("lint_unsafe_jsonl_io")
 
 
 def _pyfile(tree: Path, rel: str, src: str) -> Path:
@@ -57,7 +45,7 @@ def _write_baseline(path: Path, fingerprints: list[str]) -> None:
 def _flags(tmp_path: Path, src: str) -> bool:
     tree = tmp_path / "scope"
     _pyfile(tree, "prod.py", src)
-    return bool(_load_gate()._scan(tree))
+    return bool(_GATE._scan(tree))
 
 
 def _reader(imp: str, call: str) -> str:
@@ -84,7 +72,7 @@ def _appender(imp: str, call: str) -> str:
 
 
 def test_scan_and_ratchet_contract(tmp_path):
-    gate = _load_gate()
+    gate = _GATE
     tree = tmp_path / "scope"
     _pyfile(tree, "prod.py", _reader("import json", "json.loads"))
 
@@ -107,7 +95,7 @@ def test_flags_the_spelled_reader(tmp_path):
 def test_flags_the_spelled_appender(tmp_path):
     tree = tmp_path / "scope"
     _pyfile(tree, "prod.py", _appender("import json", "json.dumps"))
-    assert any(f.fingerprint.endswith(":append") for f in _load_gate()._scan(tree))
+    assert any(f.fingerprint.endswith(":append") for f in _GATE._scan(tree))
 
 
 def test_splitlines_on_a_plain_value_is_clean(tmp_path):
@@ -139,13 +127,11 @@ def test_syntax_error_file_is_not_silently_skipped(tmp_path):
     on, so an unsafe `json.loads(line)` sitting in an unparseable file was reported as clean.
     A gate that cannot look must not report clean (#618/#621), so the gate now raises
     ScanBlind, which `main()` surfaces as exit 2."""
-    import _astlib
-
     tree = tmp_path / "scope"
     _pyfile(tree, "broken.py", "def f(:\n")
     _pyfile(tree, "prod.py", _reader("import json", "json.loads"))
-    with pytest.raises(_astlib.ScanBlind) as exc:
-        _load_gate()._scan(tree)
+    with pytest.raises(_ASTLIB.ScanBlind) as exc:
+        _GATE._scan(tree)
     assert "broken.py" in str(exc.value)
 
 
@@ -154,13 +140,13 @@ def test_clean_tree_still_scans(tmp_path):
     raises-test cannot pass against a gate that raises unconditionally."""
     tree = tmp_path / "scope"
     _pyfile(tree, "prod.py", _reader("import json", "json.loads"))
-    assert all("prod.py" in f.fingerprint for f in _load_gate()._scan(tree))
+    assert all("prod.py" in f.fingerprint for f in _GATE._scan(tree))
 
 
 def test_real_tree_clean():
     """The regression check: the shipped baseline is EMPTY, so the real tree must
     scan clean. Any new finding here is a live site the refactor introduced."""
-    assert _load_gate().main([]) == 0
+    assert _GATE.main([]) == 0
 
 
 def test_aliased_json_reader_is_flagged(tmp_path):
@@ -174,7 +160,7 @@ def test_from_import_json_reader_is_flagged(tmp_path):
 def test_aliased_json_appender_is_flagged(tmp_path):
     tree = tmp_path / "scope"
     _pyfile(tree, "prod.py", _appender("import json as j", "j.dumps"))
-    assert any(f.fingerprint.endswith(":append") for f in _load_gate()._scan(tree))
+    assert any(f.fingerprint.endswith(":append") for f in _GATE._scan(tree))
 
 
 def test_append_handle_from_a_module_opener_is_flagged(tmp_path):
@@ -196,7 +182,7 @@ def test_append_handle_from_a_module_opener_is_flagged(tmp_path):
             '        fh.write(json.dumps(row) + "\\n")\n'
         ))
         assert any(
-            f.fingerprint.endswith(":append") for f in _load_gate()._scan(tree)
+            f.fingerprint.endswith(":append") for f in _GATE._scan(tree)
         ), f"{opener} append handle went unrecognised"
 
 
@@ -211,4 +197,4 @@ def test_a_read_mode_module_opener_is_not_an_append_handle(tmp_path):
         '    with codecs.open(p, "r") as fh:\n'
         '        fh.write(json.dumps(row) + "\\n")\n'
     ))
-    assert not any(f.fingerprint.endswith(":append") for f in _load_gate()._scan(tree))
+    assert not any(f.fingerprint.endswith(":append") for f in _GATE._scan(tree))

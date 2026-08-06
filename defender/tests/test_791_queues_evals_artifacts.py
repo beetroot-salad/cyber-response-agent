@@ -29,6 +29,8 @@ import asyncio
 import contextlib
 import json
 from pathlib import Path
+
+from defender.tests._by_path import load_lint_gate
 from types import SimpleNamespace
 
 import pytest
@@ -351,20 +353,7 @@ def test_791_every_new_dead_code_baseline_entry_names_this_issue(tmp_path):
 def _load_lint_ratchet():
     """`scripts/lint/` is a directory of standalone scripts, not an importable package — the
     gate is reached by path, the way CI reaches it."""
-    import importlib.util
-    import sys
-
-    name = "_spec791_baseline"
-    path = DEFENDER.parent / "scripts" / "lint" / "_baseline.py"
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None, f"the shared lint ratchet is not at {path}"
-    assert spec.loader is not None, f"the shared lint ratchet at {path} is not loadable"
-    mod = importlib.util.module_from_spec(spec)
-    # Registered BEFORE exec: the module's dataclasses resolve their own postponed
-    # annotations through sys.modules, and a path-loaded module is not there by default.
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)
-    return mod
+    return load_lint_gate("_baseline", name="_spec791_baseline")
 
 
 def test_791_the_live_projection_stage_sheds_the_retired_stages_name(tmp_path):

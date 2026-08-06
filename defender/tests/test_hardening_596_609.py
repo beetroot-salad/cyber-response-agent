@@ -23,10 +23,10 @@ by design; every paired control is green there.
 """
 from __future__ import annotations
 
-import importlib.util
 import json
-import sys
 from pathlib import Path
+
+from defender.tests._by_path import load_trace_lesson
 from types import SimpleNamespace
 from typing import cast
 
@@ -48,16 +48,9 @@ from defender.learning.tickets.ticket_enrichment import (
     _read_resolution_method,
 )
 
-TL_PATH = Path(__file__).resolve().parents[1] / "learning" / "ops" / "trace_lesson.py"
-
 
 def _load_tl():
-    spec = importlib.util.spec_from_file_location("trace_lesson_hardening", TL_PATH)
-    mod = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    sys.modules[spec.name] = mod
-    spec.loader.exec_module(mod)
-    return mod
+    return load_trace_lesson("trace_lesson_hardening")
 
 
 def _flow_flood(depth: int = 3000) -> str:
