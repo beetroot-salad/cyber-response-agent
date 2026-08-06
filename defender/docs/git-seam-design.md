@@ -14,7 +14,9 @@ The learning loop shells out to `git` in roughly a dozen places, and the
 "run a git argv, check the return code, return stripped stdout" primitive is
 hand-rolled at each one. On top of that there are **three** `git status
 --porcelain` parsers and **two** worktree managers (`author/branch.py` and
-`evals/_generation.py`). This doc defines one shared git seam:
+`evals/_generation.py` — the latter retired with the frozen-actor metric it
+served, so only the branch manager remains). This doc defines one shared git
+seam:
 
 - **`defender/_git.py`** — a direct-imported, pure-`subprocess`, git-*semantic*
   facade (not a bag of argv), raising one `GitError`. Tested against real tmp
@@ -64,10 +66,11 @@ paths. The three call shapes reduce to it — `changes_outside` filters the
 records, the boolean clean-corpus predicate becomes `bool(git_status(...))`,
 and `path_validation._porcelain_records` *is* it.
 
-The worktree helpers cover both existing managers with one signature:
-`author/branch.py`'s branch worktree (`-B <branch> ... origin/main`) via
-`branch=`, and `evals/_generation.py`'s detached worktree (`--detach <sha>`) via
-`detach=`. `evals/`'s second manager collapses onto them.
+The worktree helpers cover both managers that existed when this was written with
+one signature: `author/branch.py`'s branch worktree (`-B <branch> ... origin/main`)
+via `branch=`, and `evals/_generation.py`'s detached worktree (`--detach <sha>`)
+via `detach=`. `evals/`'s second manager collapsed onto them and has since been
+retired outright; the `detach=` half of the signature outlives it.
 
 ### git is direct-imported; only the forge is injected
 

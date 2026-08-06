@@ -13,10 +13,10 @@ class RunPaths:
     ``run_dir`` is the source root (the finished investigation, read); the five
     artifact accessors (``alert``/``report``/``investigation``/``executed_queries``/
     ``gather_raw``) resolve relative to it. ``learning_run_dir`` is the
-    optional per-case leg-output dir (under ``LoopPaths.runs_dir``); the learning
-    loop copies the artifacts into it, so reads off that root use ``.learning`` (a
-    ``RunPaths`` rooted there). Construct ``RunPaths(some_dir)`` on whichever root
-    you hold — the accessors are root-relative by design.
+    optional per-case leg-output dir (under ``LoopPaths.runs_dir``), carried so the
+    two roots travel together; the learning loop copies the artifacts into it.
+    Construct ``RunPaths(some_dir)`` on whichever root you hold — the accessors are
+    root-relative by design.
     """
 
     run_dir: Path
@@ -41,12 +41,6 @@ class RunPaths:
     @property
     def gather_raw(self) -> Path:
         return self.run_dir / "gather_raw"
-
-    @property
-    def learning(self) -> RunPaths:
-        if self.learning_run_dir is None:
-            raise ValueError("RunPaths has no learning_run_dir")
-        return RunPaths(self.learning_run_dir)
 
 
 # A run bundle is ALWAYS `runs_dir / <run_id>` (`LoopPaths.runs_dir` is the only place the

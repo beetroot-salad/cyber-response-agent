@@ -1103,7 +1103,7 @@ def test_payload_lands_by_ref(tmp_path):
 
 def test_stage_tables_still_round_trips(tmp_path):
     """stage_tables_still_round_trips — lead_repository.stage_tables (copy2 + copytree), the
-    SECOND writer of both sinks (driven by core/persist and evals/_pipeline), still round-trips a
+    SECOND writer of both sinks (driven by core/persist), still round-trips a
     run dir under the new row shape: the replay contract is over the FILES, not the writer."""
     rec = VerbRecorder()
     r = run_gather(tmp_path / "src", verbs=_echo_registry(rec), turns=[

@@ -21,7 +21,6 @@ from pydantic_ai.models import override_allow_model_requests
 
 from defender.learning.author.curator_engine import ForwardCheckConfig  # noqa: E402
 from defender.learning.core.config import StageContext, StageWiring  # noqa: E402
-from defender.agents import ORACLE_DEF
 from defender.learning.author import shared as author_shared
 from defender.learning.core import config
 from defender.learning.core.config import RunUnprocessable, StageAbort
@@ -49,7 +48,6 @@ from defender.tests._frames680 import (
     _capture_actor,
     _corpus_author_deps_scene,
     _deps,
-    _drive_frame,
     _drive_learning_bash,
     _drive_learning_read,
     _expected_frame,
@@ -461,11 +459,6 @@ def test_benign_actor_past_tickets_absent(tmp_path):
     assert "past_tickets" not in tags
     assert salts == (observation.salt,) * len(observation.expected_tags)
     assert all(not gap.strip() for gap in gaps)
-
-
-def _fresh_oracle_frame(run_dir: Path, body: str) -> tuple[str, str]:
-    deps = bind(ORACLE_DEF, run_dir)
-    return (deps.salt, _drive_frame(body, "oracle", deps.salt))
 
 
 def test_concurrent_oracle_body_replays_another_oracles_frame(tmp_path):

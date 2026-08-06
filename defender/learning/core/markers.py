@@ -45,6 +45,21 @@ def rewrite_marker(marker: Path, spec: dict) -> None:
     write_atomic(marker, json.dumps(spec) + "\n")
 
 
+def marker_identity(spec: dict, marker: Path) -> str:
+    """The id an operator greps for when a queued request is dropped or deferred.
+
+    The queue carries TWO row shapes — the run-keyed marker (`run_id`) and #791's case-keyed
+    curation request (`case_id`) — and a log line that names one key reads `None` for every
+    row of the other shape, which is exactly the case a dead-letter line exists to surface.
+    The marker's own filename is the identity under both shapes, so it is the last resort for
+    a row too damaged to carry either key."""
+    for key in ("case_id", "run_id"):
+        value = spec.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return marker.stem
+
+
 def quarantine_marker(spec: dict, marker: Path, queue_dir: Path, reason: str) -> None:
     failed_dir = queue_dir / "failed"
     failed_dir.mkdir(parents=True, exist_ok=True)
@@ -53,4 +68,4 @@ def quarantine_marker(spec: dict, marker: Path, queue_dir: Path, reason: str) ->
     (failed_dir / marker.name).write_text(json.dumps(rec) + "\n", encoding="utf-8")
     with contextlib.suppress(OSError):
         marker.unlink()
-    _log(f"quarantined {spec.get('run_id')} — {reason}")
+    _log(f"quarantined {marker_identity(spec, marker)} — {reason}")

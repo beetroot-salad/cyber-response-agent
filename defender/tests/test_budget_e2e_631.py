@@ -83,16 +83,6 @@ def report_text() -> str:
     return "---\ncase_id: c-1\ndisposition: benign\nconfidence: low\n---\n\nDone.\n"
 
 
-def read_turns(run_dir: Path, n: int) -> list[Turn]:
-    """`n` core-tier bash turns — each ALLOWED and schema-valid, so nothing but the
-    budget can refuse it, and (being core-tier) each is REFUSED once the pool trips
-    without advancing the count. P3 (executed) is why the args must be valid:
-    pydantic-ai validates a ToolCallPart's args BEFORE dispatching to any
-    execute-family hook, so a malformed call is preempted by a RetryPromptPart and
-    never reaches the seam at all."""
-    return [Turn(tool_calls=[("bash", {"command": "echo hi"})]) for _ in range(n)]
-
-
 def tail_turns(run_dir: Path, n: int) -> list[Turn]:
     """`n` TAIL-tier read_file turns — read_file is tail on MAIN, so each EXECUTES and
     advances tool_calls even after the trip, driving the count limb to

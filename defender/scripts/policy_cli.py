@@ -5,6 +5,9 @@ Two subcommands:
     defender-policy show <agent> --run-dir <dir> [--defender-dir <tree>]
     defender-policy explain <agent> '<command>' --run-dir <dir> [--defender-dir <tree>] [--json]
 
+`<agent>` is a role name, except that the actor role is bound by two legs with different
+scopes and is therefore named per leg: `actor` (adversarial) and `actor_benign`.
+
 The reason "how did this resolve?" took effort before is that there was NO tool: everyone
 hand-rolled a `bind(MAIN_DEF, …)` probe in a REPL, which is both tedious and a second model of
 the gate waiting to drift from it.
@@ -41,16 +44,33 @@ from defender.runtime.permission.grant import OPENS_NOTHING, PROGRAMS, Grant
 
 _ROLES = {r.name.lower(): r for r in AgentRole}
 
+# `actor` is ONE role bound by TWO legs with different scopes: the adversarial leg runs both
+# lesson scripts and reads both corpora, the FP-hunting benign leg binds strictly less. A bare
+# `actor` therefore names no single answer — it used to print the adversarial leg's grants
+# under the shared name, so an operator auditing the benign leg was shown a wider scope than it
+# has and the narrower one could not be asked for at all. Each leg gets its own CLI name, and
+# each leg module owns the scope it actually binds (there is no copy here to drift).
+_ACTOR_LEGS = {
+    "actor": "defender.learning.pipeline.malicious_actor.run",
+    "actor_benign": "defender.learning.pipeline.benign_actor.run",
+}
+
+AGENT_NAMES = sorted(set(_ROLES) | set(_ACTOR_LEGS))
+
+
+def _role_for(agent: str) -> AgentRole:
+    return AgentRole.ACTOR if agent in _ACTOR_LEGS else _ROLES[agent]
+
 
 def _scope_for(
     role: AgentRole, defender_dir: Path, corpus_name: str | None = None,
+    *, agent: str = "actor",
 ) -> RunScope:
     if role is AgentRole.ACTOR:
-        from defender.learning.core import config
-        return RunScope(
-            scripts=(config.LESSONS_ENV_RETRIEVE_SCRIPT, config.LESSONS_ACTOR_INDEX_SCRIPT),
-            read_confine=(config.LESSONS_ACTOR_DIR, config.LESSONS_ENVIRONMENT_DIR),
-        )
+        from importlib import import_module
+
+        leg = import_module(_ACTOR_LEGS.get(agent, _ACTOR_LEGS["actor"]))
+        return RunScope(scripts=leg.ACTOR_SCRIPTS, read_confine=leg.ACTOR_READ_CONFINE)
     if role is AgentRole.CORPUS_AUTHOR:
         from defender.learning.author.curator_engine import SHIPPED_LESSON_CORPORA
         return RunScope(
@@ -64,12 +84,13 @@ def _scope_for(
 
 def _policy(
     defn: AgentDefinition, run_dir: Path, defender_dir: Path, corpus_name: str | None = None,
+    *, agent: str = "actor",
 ) -> AgentPolicy:
     # effective_tools_for is the one place that knows any role's typed-capability switching
     # (#632) — this audit tool asks for "the effective tools for this role" and never names a
     # bit itself, so its own source carries no map of typed capabilities to attack (N4).
     return compile_policy_for(
-        defn, run_dir, scope=_scope_for(defn.role, defender_dir, corpus_name),
+        defn, run_dir, scope=_scope_for(defn.role, defender_dir, corpus_name, agent=agent),
         defender_dir=defender_dir, tools=effective_tools_for(defn),
     )
 
@@ -145,7 +166,7 @@ def main(argv: list[str] | None = None) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     for name in ("show", "explain"):
         p = sub.add_parser(name)
-        p.add_argument("agent", choices=sorted(_ROLES))
+        p.add_argument("agent", choices=AGENT_NAMES)
         if name == "explain":
             p.add_argument("command")
             p.add_argument("--json", action="store_true", dest="as_json")
@@ -157,9 +178,9 @@ def main(argv: list[str] | None = None) -> int:
         )
     args = ap.parse_args(argv)
 
-    role = _ROLES[args.agent]
+    role = _role_for(args.agent)
     defn = AGENTS[role]
-    policy = _policy(defn, args.run_dir, args.defender_dir, args.corpus_name)
+    policy = _policy(defn, args.run_dir, args.defender_dir, args.corpus_name, agent=args.agent)
     if args.cmd == "show":
         return _show(policy, args.agent, args.run_dir, args.defender_dir)
     anchor = args.defender_dir.parent if defn.anchors_on_tree else args.run_dir

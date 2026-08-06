@@ -3,14 +3,11 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
-import os
-import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from defender._io import read_text_soft, use_utf8_stdio
+from defender._io import read_text_soft
 from defender._run_paths import RunPaths
-from defender._vocab import UNKNOWN_DISPOSITION, normalized_disposition
 
 from .parser import ParseWarning, parse_dense_companion
 from .schema import (
@@ -18,7 +15,6 @@ from .schema import (
     Conclude,
     FindingRecord,
     HypothesisRecord,
-    Prologue,
 )
 
 
@@ -30,10 +26,6 @@ class Companion:
     signature_id: str | None = None
     created_at: str | None = None
     parse_warnings: list[ParseWarning] = field(default_factory=list)
-
-    @property
-    def prologue(self) -> Prologue:
-        return self.body.get("prologue", {})
 
     @property
     def hypotheses(self) -> list[HypothesisRecord]:
@@ -136,50 +128,3 @@ def load_corpus(root: Path | str) -> tuple[list[Companion], LoadReport]:
         else:
             report.skipped.append((md, err or "unknown"))
     return companions, report
-
-
-
-
-def _main(argv: list[str]) -> int:
-    use_utf8_stdio()
-    verbose = "--verbose" in argv
-    args = [a for a in argv if not a.startswith("--")]
-    root = (
-        args[0] if args
-        else os.environ.get("DEFENDER_INVLANG_CORPUS_ROOT", "")
-    )
-    if not root:
-        print(
-            "usage: python -m defender.skills.invlang.corpus <corpus-root> [--verbose]",
-            file=sys.stderr,
-        )
-        return 2
-    companions, report = load_corpus(root)
-    print(f"corpus_root:    {report.root}")
-    print(f"scanned:        {report.scanned}")
-    print(f"loaded:         {report.loaded}")
-    print(f"skipped (file): {len(report.skipped)}")
-    print(f"partial loads:  {len(report.partial)}  ({report.total_warnings} warnings)")
-    if report.skipped:
-        print("\nSkipped files:")
-        for path, reason in report.skipped:
-            print(f"  - {path.parent.name}: {reason}")
-    if report.partial:
-        print("\nPartial loads (file-level summary):")
-        for path, warnings in report.partial:
-            print(f"  - {path.parent.name}: {len(warnings)} row(s) skipped")
-            if verbose:
-                for w in warnings:
-                    print(f"      [{w.block} row {w.row_index}] {w.reason}")
-    if companions:
-        print(f"\nLoaded {len(companions)} cases (showing first 20):")
-        for c in companions[:20]:
-            sig = c.signature_id or "-"
-            disp = normalized_disposition(c.conclude.get("disposition")) or UNKNOWN_DISPOSITION
-            arche = c.conclude.get("matched_archetype") or "-"
-            print(f"  {c.case_id:50s}  sig={sig:18s}  disp={disp:12s}  arche={arche}")
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(_main(sys.argv[1:]))

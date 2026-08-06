@@ -11,7 +11,8 @@ and the eval harness — call:
         none do. NOT anchored on the literal `outcome:` keyword — general to any schema.
         Composed as `strip_yaml_preamble(strip_yaml_fence(x))`.
   * E2  `run_cycle._validate_judge_yaml`   — the live loop (both engines feed it).
-  * E3  `judge_equivalence.parse_judge_verdict` — the engine-equivalence A/B harness.
+  * E3  `validate.parse_judge_verdict` — the non-raising verdict parser (it lived in the
+        engine-equivalence A/B harness until that harness was retired).
 
 These tests drive the REAL entry points and assert only observable outcomes (return
 value, parsed outcome, `.raw.txt` side effect, raised errors). They are written before
@@ -32,11 +33,11 @@ import pytest
 from defender.learning.core.config import RunUnprocessable
 from defender.learning.core.run_cycle import _validate_judge_yaml
 from defender.learning.core.validate import (
+    parse_judge_verdict,
     strip_yaml_fence,
     strip_yaml_preamble,
     validate_judge_doc,
 )
-from defender.evals.judge_equivalence import parse_judge_verdict
 
 _CLEAN_ADV = "outcome: caught\ndefender_findings: []"
 _CLEAN_BENIGN = "outcome: refuted\ndefender_findings: []"

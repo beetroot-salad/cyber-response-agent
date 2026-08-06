@@ -157,7 +157,7 @@ def test_pydantic_engine_preamble_survives_end_to_end_via_shared_path(tmp_path):
     with no loss of behavior. (Was test_run_judge_pydantic_trims_model_preamble_end_to_end;
     the ENGINE no longer trims, so the name loses 'trims'.)"""
     lrd = _lrd(tmp_path)
-    from defender.evals.judge_equivalence import parse_judge_verdict
+    from defender.learning.core.validate import parse_judge_verdict
     fn = _replay([{"text": "Here is my analysis.\nThe story is refuted.\n\n"
                            "outcome: refuted\ndefender_findings: []\n"}])
     with override_allow_model_requests(False):

@@ -519,19 +519,6 @@ def _drive_frame(body: str, tag: str = "payload", salt: str = STAGE_SALT) -> str
     return _shared_wrap()(body, tag, salt)
 
 
-def _assert_body_cannot_add_current_sections(
-    body: str, *, tag: str = "assigned"
-) -> tuple[str, list[re.Match[str]]]:
-    """Return primitive observations; demand-specific assertions stay in callers."""
-    out = _drive_frame(body, tag)
-    return (out, list(FRAME_RE.finditer(out)))
-
-
-def _assert_stage_message(prompt: str, *expected_bodies: str) -> list[re.Match[str]]:
-    """Parse a real stage message without asserting another demand's policy."""
-    return list(FRAME_RE.finditer(prompt))
-
-
 @dataclass(frozen=True)
 class BashResultSpec:
     rc: int = 0

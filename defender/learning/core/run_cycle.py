@@ -17,7 +17,6 @@ from defender.learning.core.config import (
     LoopPaths,
     RunPaths,
     _log,
-    oracle_model,
     source_first_party_key,
 )
 from defender._paths import PATHS
@@ -152,14 +151,12 @@ def _directions_for(disposition: str) -> list[str]:
     return [d.name for d in directions_for(disposition)]
 
 
-def _prepare_engines_for(
-    directions: list[str], *, include_actor: bool = True, include_oracle: bool = True,
-) -> None:
-    # #791 FK4/R13: `include_oracle` scopes the exclusion to the RUN CYCLE's own call site —
-    # this helper is shared with the surviving eval (`evals/_pipeline.py`'s own key-sourcing
-    # call), which still drives the retired stage for its own staging copy and still needs its
-    # key; the default therefore stays `True` and only run_one's own call opts out.
-    models: set[str] = ({oracle_model()} if include_oracle else set()) if directions else set()
+def _prepare_engines_for(directions: list[str], *, include_actor: bool = True) -> None:
+    # #791 FK4/R13 gave this an `include_oracle` knob so the run cycle could opt OUT of
+    # sourcing the retired stage's key while the secondary-metric eval — the one caller that
+    # still drove that stage — kept opting in. That harness is retired, so every surviving
+    # caller wants the exclusion and the knob selected nothing.
+    models: set[str] = set()
     for name in directions:
         d = BY_NAME[name]
         models.add(d.judge_wiring.model)
@@ -259,7 +256,7 @@ def run_one(
     _log(f"run_id={run_id} step=normalize")
     disposition = normalize_disposition(src.report)
     directions = _directions_for(disposition)
-    _prepare_engines_for(directions, include_oracle=False)
+    _prepare_engines_for(directions)
 
     alert = json.loads(src.alert.read_text(encoding="utf-8"))
     alert_rule_key = derive_alert_rule_key(alert)

@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -28,6 +29,7 @@ from pydantic_ai.models.anthropic import AnthropicModel  # noqa: E402
 from pydantic_ai.models.openai import OpenAIChatModel  # noqa: E402
 
 import run  # noqa: E402
+from defender import agents  # noqa: E402
 from defender._env import FatalConfigError  # noqa: E402
 from defender.runtime import driver, providers  # noqa: E402
 from defender.runtime.agent_role import AgentRole  # noqa: E402
@@ -262,22 +264,45 @@ def test_resolve_key_sources_the_fireworks_var(tmp_path, monkeypatch):
     assert src == repo / ".env"
 
 
-def test_source_provider_keys_all_fireworks_needs_no_anthropic(tmp_path, monkeypatch):
+def _registry(main_model: str, gather_model: str) -> dict:
+    """A stand-in role registry for the startup preflight.
+
+    `preflight_role_models` reads exactly two things off a definition: the role's name (for
+    the diagnostic) and its model accessor. Standing in for the real eleven pins the
+    provider-key property on a KNOWN model pair — the real registry's defaults are env-driven,
+    so asserting "an all-Fireworks configuration needs no Anthropic key" against it would
+    silently stop testing that the day a role's default moved providers."""
+    return {
+        role: SimpleNamespace(role=role, model=(lambda m=name: m))
+        for role, name in (
+            (AgentRole.MAIN, main_model), (AgentRole.GATHER, gather_model),
+        )
+    }
+
+
+def test_preflight_all_fireworks_needs_no_anthropic(tmp_path, monkeypatch):
     env = tmp_path / ".env"
     env.write_text("FIREWORKS_API_KEY=fw-only\n")
     monkeypatch.setenv("DEFENDER_ENV_FILE", str(env))
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("FIREWORKS_API_KEY", raising=False)
-    assert run._source_provider_keys("glm-5.2", "kimi-k2.6") == 0
+    monkeypatch.setattr(agents, "AGENTS", _registry("glm-5.2", "kimi-k2.6"))  # lint-monkeypatch: ok — the preflight's role registry is its input, and it imports AGENTS at call time
+    assert run.preflight_role_models() == 0
     assert "ANTHROPIC_API_KEY" not in os.environ
 
 
-def test_source_provider_keys_missing_required_key_exits_2(monkeypatch):
+def test_preflight_missing_required_key_exits_2(monkeypatch):
     monkeypatch.setattr(run, "resolve_first_party_key", lambda **kw: (None, None))  # lint-monkeypatch: ok — isolate from the real repo .env
     monkeypatch.delenv("FIREWORKS_API_KEY", raising=False)
-    assert run._source_provider_keys("glm-5.2", "kimi-k2.6") == 2
+    monkeypatch.setattr(agents, "AGENTS", _registry("glm-5.2", "kimi-k2.6"))  # lint-monkeypatch: ok — the preflight's role registry is its input, and it imports AGENTS at call time
+    assert run.preflight_role_models() == 2
 
 
-def test_source_provider_keys_unknown_model_exits_2(capsys):
-    assert run._source_provider_keys("glm-5.3", "kimi-k2.6") == 2
-    assert "[run.py] ERROR" in capsys.readouterr().err
+def test_preflight_unknown_model_exits_2(monkeypatch, capsys):
+    monkeypatch.setattr(agents, "AGENTS", _registry("glm-5.3", "kimi-k2.6"))  # lint-monkeypatch: ok — the preflight's role registry is its input, and it imports AGENTS at call time
+    assert run.preflight_role_models() == 2
+    err = capsys.readouterr().err
+    assert "[run.py] preflight" in err
+    # The fault names the ROLE at fault, not just the model — an operator with eleven roles
+    # configured cannot act on "some model is unknown".
+    assert AgentRole.MAIN.name in err

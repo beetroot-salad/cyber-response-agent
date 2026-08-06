@@ -310,15 +310,14 @@ def test_791_a_learning_run_imports_nothing_from_the_retired_package(tmp_path, m
 
 
 def test_791_transcript_renders_a_leg_with_no_projection_section(tmp_path, monkeypatch):
-    """projected_telemetry_consumers_survive — the two live dependents of the artifact being
-    removed both survive it: the transcript renders a leg that left no projection, with no
-    dangling oracle section and no dead link to one, and the surviving eval still writes its
-    OWN projection into its own staging dir.
+    """projected_telemetry_consumers_survive — the live dependent of the artifact being
+    removed survives it: the transcript renders a leg that left no projection, with no
+    dangling oracle section and no dead link to one.
 
     The persist step already tolerates a null projection — the SKIP path drives that shape
-    today (C15) — so what needs a witness is not the write but the READERS. The transcript's
-    oracle section is one; the second eval's staging copy is the other, and it keeps its own
-    geometry rather than the run cycle's."""
+    today (C15) — so what needs a witness is not the write but the READER. The demand's
+    second reader was the secondary metric's staging copy; that harness has since been
+    retired outright, so the transcript is the whole surviving surface."""
     monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
     learn = tmp_path / "state" / "runs" / "case-t"
     learn.mkdir(parents=True)
@@ -334,41 +333,6 @@ def test_791_transcript_renders_a_leg_with_no_projection_section(tmp_path, monke
     toc = vj.render_judge_toc([(view, 0)], raw_bundle=False)
     assert "projected telemetry" not in toc.lower(), \
         "the transcript's contents still link a projected-telemetry section"
-
-    from defender.evals import _pipeline
-
-    staging = tmp_path / "staging"
-    staging.mkdir()
-    (staging / "actor_story.md").write_text("not a SKIP\n", encoding="utf-8")
-    head = make_run_dir(tmp_path, name="head-run", disposition="benign")
-
-    class _Loop:
-        class RunUnprocessable(Exception):
-            pass
-
-        ADVERSARIAL_WIRING = object()
-
-        class InProcessSubagents:
-            def oracle(self, *_a, **_kw):
-                return "projections: []\n"
-
-        @staticmethod
-        def is_skip_story(_text):
-            return False
-
-        @staticmethod
-        def strip_yaml_fence(text):
-            return text
-
-        @staticmethod
-        def _prepare_engines_for(_directions, **_kw):
-            pass
-
-    # The fake declares no `judge`: the judging half of this eval goes dark under R7 (its own
-    # demand owns the stated skip), so reaching for one here is an AttributeError, not a pass.
-    _pipeline.run_head_oracle_and_judge(head, staging, _Loop)
-    assert (staging / "projected_telemetry.yaml").is_file(), \
-        "the surviving eval no longer writes its own projection into its staging dir"
 
 
 def test_791_run_cycle_sources_no_key_for_the_oracle_model(tmp_path, monkeypatch):

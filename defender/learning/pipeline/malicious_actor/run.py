@@ -24,6 +24,16 @@ from defender.learning.pipeline.malicious_actor import mitre_corpus
 
 _SKIP_SCAN_LINES = 8
 
+#: THIS leg's gate scope — the adversarial actor runs both pinned lesson scripts and reads
+#: both lesson corpora. Declared here rather than at the call site because the audit CLI
+#: (`scripts/policy_cli.py`) must report the scope this leg actually binds: the benign leg
+#: below shares `AgentRole.ACTOR` and binds strictly less, so a CLI that transcribed one leg's
+#: grants answered `defender-policy show actor` with the other leg's answer half the time.
+#: Plain tuples, not a `RunScope`: this module is imported eagerly by `core.subagents`, and
+#: reaching for the runtime's scope types here would drag the gate into that import.
+ACTOR_SCRIPTS = (LESSONS_ENV_RETRIEVE_SCRIPT, LESSONS_ACTOR_INDEX_SCRIPT)
+ACTOR_READ_CONFINE = (LESSONS_ACTOR_DIR, LESSONS_ENVIRONMENT_DIR)
+
 
 def _actor_seed(run_id: str) -> int:
     return int(hashlib.sha256(run_id.encode()).hexdigest()[:8], 16)
@@ -69,9 +79,6 @@ def invoke_actor(alert_path: Path, actor_input_path: Path, learning_run_dir: Pat
             trace_name="actor_trace.jsonl", label="actor",
         ),
         user=user, learning_run_dir=learning_run_dir,
-        scope=_ActorScope(
-            (LESSONS_ENV_RETRIEVE_SCRIPT, LESSONS_ACTOR_INDEX_SCRIPT),
-            read_confine=(LESSONS_ACTOR_DIR, LESSONS_ENVIRONMENT_DIR),
-        ),
+        scope=_ActorScope(ACTOR_SCRIPTS, read_confine=ACTOR_READ_CONFINE),
         salt=stage_salt, box=box,
     )

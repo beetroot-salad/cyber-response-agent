@@ -531,22 +531,3 @@ def call_order(path: Path, name: str) -> list[str]:
         if called:
             hits.append(((node.lineno, node.col_offset), called))
     return [n for _, n in sorted(hits)]
-
-
-def keyword_args_of(path: Path, fn_name: str, called: str) -> list[str]:
-    """The keyword names `fn_name` passes to `called` — how a composition claim about WHICH
-    argument a call site is handed is settled without driving a boundary that has no seam."""
-    out: list[str] = []
-    for node in ast.walk(fn_node(path, fn_name)):
-        if not isinstance(node, ast.Call):
-            continue
-        f = node.func
-        name = f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", None)
-        if name != called:
-            continue
-        for kw in node.keywords:
-            if kw.arg:
-                out.append(kw.arg)
-        for arg in node.args:
-            out.append(ast.unparse(arg))
-    return out

@@ -1,12 +1,22 @@
 # `defender/evals/oracle_golden/` — oracle calibration golden set
 
 The versioned evaluation suite for the telemetry **oracle** (issue #693). The
-oracle is a learned simulator: the enterprise loop substitutes *actor story →
-oracle projection* for executing an attack, so oracle error is a first-order
-source of false learning (a mis-projection can manufacture an apparent evasion
-or an apparent catch). This suite calibrates the oracle against operations that
-**actually happened**, where the story, the query envelope, and the complete
-observed telemetry are all known.
+oracle is a learned simulator: it projects the telemetry an actor's story would
+have produced, in place of executing the attack. This suite calibrates it
+against operations that **actually happened**, where the story, the query
+envelope, and the complete observed telemetry are all known.
+
+**Read this first: the premise below is no longer the live one.** The suite was
+built when the learning loop substituted *actor story → oracle projection* for
+execution, which made oracle error a first-order source of false learning (a
+mis-projection can manufacture an apparent evasion or an apparent catch). #791
+and #792 took the oracle out of that loop: `run_cycle.run_direction` now drives
+the judge straight off the actor's story and the run's own executed evidence,
+and the oracle stage has no caller inside the learning cycle at all. What this
+suite measures is real and its discipline (the held-out ledger, the committed
+calibration audits) is intact — but it calibrates a stage the loop no longer
+runs, so nothing downstream consumes the number today. Whether the suite is
+revived, archived, or retired is an open call; it is being kept, not defended.
 
 Motivating probe + method write-up: `experiments/oracle-telemetry-fidelity/`
 (PR #707). This directory is the durable, reusable form of that probe.

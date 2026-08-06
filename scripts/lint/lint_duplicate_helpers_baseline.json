@@ -13,7 +13,6 @@
     "load_config": "distinct-ok: same split as _config_path — elastic_adapter keeps its own loader because its config keys are not the shared template's (#619)",
     "materialize": "distinct-ok: the two eval harnesses build tmp trees from different fixtures (findings/lessons vs query-catalog/run-dir)",
     "render": "distinct-ok: frontend/build.py's render(view) stamps the standalone lessons.html page from a JSON view dict; selection.render(store, ...) is the store's send-role renderer for the runtime loop — unrelated domains, same generic verb (#705)",
-    "render_report": "distinct-ok: evals/judge_equivalence.render_report formats an A/B judge-comparison summary for a human reviewer; runtime/close_tool.render_report is #774's host-side report.md renderer, the sole writer of that artifact's typed frontmatter+body. Unrelated domains, same generic verb — kept as `render_report` rather than renamed because the #774 spec (spec_graph_774.yaml) binds that exact name as the close tool's public surface (tests import it via `spec_import(\"defender.runtime.close_tool\", \"render_report\")`), so a rename would break the pinned contract, not just this lint",
     "run_batch": "distinct-ok: per-direction public entrypoint — each direction module wraps the one shared drain body with its own config, and the actor/benign modules forward to the observation direction's entrypoint (#719)"
   }
 }

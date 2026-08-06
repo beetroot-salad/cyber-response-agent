@@ -70,12 +70,26 @@ def redact_exemplar(text: str) -> str:
 
 
 def lead_sample_text(lead) -> str:
+    unreadable: Exception | None = None
     for q in lead.queries:
         if q.raw_ref is None or not q.raw_ref.is_file():
             continue
-        body = redact_exemplar(q.raw_ref.read_text(encoding="utf-8"))
+        try:
+            raw = q.raw_ref.read_bytes().decode("utf-8")
+        except (UnicodeDecodeError, OSError) as e:
+            # A by-ref payload is bytes an adapter wrote, so neither its encoding nor its
+            # readability is guaranteed. One unreadable payload does not blind the lead: the
+            # loop goes on to its OTHER payloads, exactly as it does for one that decodes but
+            # carries no sample — the same posture the judge's own reader takes
+            # (`judge/compare.real_sample_text`). Raising here took the whole stage down over a
+            # single bad file.
+            unreadable = e
+            continue
+        body = redact_exemplar(raw)
         if not body.startswith("("):
             return body
+    if unreadable is not None:
+        return f"(schema sample unreadable — {unreadable}; skeleton unavailable for this lead)"
     return "(no schema sample available for this lead)"
 
 

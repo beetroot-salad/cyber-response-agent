@@ -16,6 +16,12 @@ from defender.learning.core.config import (
 from defender.learning.pipeline._prompt import stage_user_message
 from defender.learning.tickets import ticket_seeds
 
+#: THIS leg's gate scope — strictly less than the adversarial leg's (one script, one corpus):
+#: the FP hunter has no business in the actor lessons. See the sibling declaration in
+#: `malicious_actor/run.py` for why the audit CLI needs each leg to own its own.
+ACTOR_SCRIPTS = (LESSONS_ENV_RETRIEVE_SCRIPT,)
+ACTOR_READ_CONFINE = (LESSONS_ENVIRONMENT_DIR,)
+
 
 def invoke_actor_benign(
     alert_path: Path,
@@ -50,9 +56,6 @@ def invoke_actor_benign(
             label="actor-benign",
         ),
         user=user, learning_run_dir=learning_run_dir,
-        scope=_ActorScope(
-            (LESSONS_ENV_RETRIEVE_SCRIPT,),
-            read_confine=(LESSONS_ENVIRONMENT_DIR,),
-        ),
+        scope=_ActorScope(ACTOR_SCRIPTS, read_confine=ACTOR_READ_CONFINE),
         salt=stage_salt, box=box,
     )

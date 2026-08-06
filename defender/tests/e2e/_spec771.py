@@ -56,7 +56,7 @@ import re
 import shutil
 import stat
 import subprocess
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from collections.abc import Callable
 from typing import Any
@@ -656,11 +656,6 @@ def alias_profile_path() -> Path:
     return box_mod.ALIAS_PROFILE_PATH  # type: ignore[attr-defined]
 
 
-def probe_alias_ban(*args: Any, **kw: Any) -> Any:
-    """`box._probe_alias_ban` — M2's startup positive control. AttributeError at HEAD."""
-    return box_mod._probe_alias_ban(*args, **kw)  # type: ignore[attr-defined]
-
-
 def ban_not_in_force_error() -> type[BaseException]:
     """`box.AliasBanNotInForce` — §7 D5: the ban fault carries its OWN exception type.
 
@@ -1185,17 +1180,6 @@ def drive_writer(writer: Writer, run_dir: Path) -> object:
         return writer.invoke(run_dir)
     except BaseException as e:  # noqa: BLE001 — the exception IS the observable
         return e
-
-
-@dataclass
-class Recorder:
-    """A shared ordered event log — the recorder pattern `_box665` established. Records only;
-    decides nothing."""
-
-    events: list[str] = field(default_factory=list)
-
-    def note(self, what: str) -> None:
-        self.events.append(what)
 
 
 class _StaleVersionStore:
