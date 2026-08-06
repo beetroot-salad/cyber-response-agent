@@ -157,6 +157,11 @@ def summarize(rows: list[dict], units: set[str], environments: set[str]) -> dict
                       f"an interval here would be uninformative")
         return out
     interval = STATS.wilson_interval(round(rate * n_units), n_units)
+    # `wilson_interval` answers `None` only for `n == 0`, and the floor check above already
+    # returned for anything under MIN_UNITS (3). Asserted rather than assumed: the guard and
+    # the call are twenty lines apart, and lowering MIN_UNITS to 0 would otherwise turn a
+    # never-measured slice into a `TypeError` here rather than the "no interval" it means.
+    assert interval is not None, f"n_units={n_units} cleared the floor but has no interval"
     out["interval"] = [round(interval[0], 3), round(interval[1], 3)]
     return out
 
