@@ -26,6 +26,8 @@ from defender.learning.pipeline.actor_engine import ACTOR_DEF  # noqa: E402
 from defender.learning.pipeline.malicious_actor.run import is_skip_story  # noqa: E402
 from defender.runtime import observe, permission  # noqa: E402
 from defender.runtime.agent_definition import RunScope, compile_policy_for  # noqa: E402
+from defender.tests._engine_helpers import assert_stage_tools  # noqa: E402
+from defender.tests._engine_helpers import learning_run_dir  # noqa: E402
 from defender.tests._engine_helpers import fake_model as _fake_model  # noqa: E402
 from defender.tests._engine_helpers import replay_turns as _replay  # noqa: E402
 
@@ -39,10 +41,6 @@ _MALICIOUS_CONFINE = (_ACTOR_DIR, _ENV_DIR)
 
 
 
-def _lrd(tmp_path):
-    lrd = tmp_path / "learning_run"
-    lrd.mkdir()
-    return lrd
 
 
 def _prompt(tmp_path):
@@ -72,7 +70,7 @@ def _actor_policy(scripts, *, read_confine):
 
 
 def test_run_actor_pydantic_returns_story_and_writes_trace(tmp_path):
-    lrd = _lrd(tmp_path)
+    lrd = learning_run_dir(tmp_path)
     fn = _replay([{"text": _STORY}])
     with override_allow_model_requests(False):
         out = _run_actor_pydantic(
@@ -92,7 +90,7 @@ def test_run_actor_pydantic_returns_story_and_writes_trace(tmp_path):
 
 
 def test_run_actor_pydantic_returns_skip_verbatim(tmp_path):
-    lrd = _lrd(tmp_path)
+    lrd = learning_run_dir(tmp_path)
     fn = _replay([{"text": "Let me consider the menu.\n\nSKIP: no covering initial-access technique"}])
     with override_allow_model_requests(False):
         out = _run_actor_pydantic(
@@ -182,7 +180,7 @@ def test_actor_read_scope_is_confined_to_lessons(tmp_path):
     assert not permission.decide_bash("defender-elastic query x", policy=pol).allow
     assert not permission.decide_bash(
         "defender-elastic query x | defender-sql 'SELECT 1'", policy=pol).allow
-    lrd = _lrd(tmp_path)
+    lrd = learning_run_dir(tmp_path)
     assert permission.decide_read(
         _ACTOR_DIR / "T1078.md", run_dir=lrd, defender_dir=_DEFENDER_DIR, policy=pol
     ).allow
@@ -229,7 +227,7 @@ def test_actor_cannot_read_a_staged_gather_raw_payload(tmp_path):
 
     Driven through the REAL production tool (`tools._tool_read_file` on real `bind`-built deps),
     not a synthetic policy."""
-    lrd = _lrd(tmp_path)
+    lrd = learning_run_dir(tmp_path)
     raw = lrd / "gather_raw" / "l-001" / "0.json"
     raw.parent.mkdir(parents=True)
     raw.write_text('{"payload": "the evidence the gray-box actor must not see"}\n')
@@ -257,20 +255,7 @@ def test_actor_scope_requires_explicit_confine():
 
 
 def test_actor_agent_is_read_only_no_writers():
-    logger = observe.RequestLogger(Path("/tmp/does-not-need-to-exist-actor-tools.jsonl"))
-    try:
-        agent = _pydantic_stage.build_stage_agent(
-            ActorDeps,
-            StageWiring(
-                prompt_path=Path(__file__), model="any-model", effort="low",
-                trace_name="t.jsonl", label="actor",
-            ),
-            logger,
-            make_model=_fake_model(_replay([{"text": ""}])),
-        )
-    finally:
-        logger.close()
-    assert list(agent._function_toolset.tools) == ["bash", "read_file"]
+    assert_stage_tools(ActorDeps, label="actor", effort="low", expected=["bash", "read_file"])
 
 
 def test_build_actor_agent_applies_glm_low_effort(monkeypatch):

@@ -83,3 +83,47 @@ def replay_turns(turns, *, seen=None, capture=flatten_messages):
         return ModelResponse(parts=parts)
 
     return fn
+
+
+def learning_run_dir(tmp_path):
+    """The per-case leg-output dir three engine suites each made by hand."""
+    lrd = tmp_path / "learning_run"
+    lrd.mkdir()
+    return lrd
+
+
+def assert_stage_tools(deps_cls, *, label: str, effort: str, expected: list[str]) -> None:
+    """A built stage agent exposes EXACTLY `expected` tools and nothing that writes.
+
+    Four sibling suites asserted this with only the deps class, the label, the effort and
+    the tool list swapped. The property is the same one in all four and it is a negative:
+    a stage that acquires a writing tool by accident — through a shared toolset, a new
+    default, a copied wiring — is a stage that can edit the tree it was only meant to
+    read, and nothing else in these suites would notice.
+
+    Kept as a helper rather than a `parametrize` table because the four cases live in four
+    modules, one per stage, each importing its own deps class.
+    """
+    from pathlib import Path
+
+    from defender.learning.core.config import StageWiring
+    from defender.learning.pipeline import _pydantic_stage
+    from defender.runtime import observe
+
+    logger = observe.RequestLogger(Path(f"/tmp/does-not-need-to-exist-{label}-tools.jsonl"))
+    try:
+        agent = _pydantic_stage.build_stage_agent(
+            deps_cls,
+            StageWiring(
+                prompt_path=Path(__file__), model="any-model", effort=effort,
+                trace_name="t.jsonl", label=label,
+            ),
+            logger,
+            make_model=fake_model(replay_once("")),
+        )
+    finally:
+        logger.close()
+    assert list(agent._function_toolset.tools) == expected, (
+        f"the {label} stage exposes {list(agent._function_toolset.tools)}, expected "
+        f"{expected} — a stage that gains a tool it was not given can act outside its grant"
+    )

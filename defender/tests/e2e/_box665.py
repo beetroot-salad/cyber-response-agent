@@ -29,6 +29,7 @@ import pytest
 
 from defender.runtime import box as box_mod
 from defender.runtime.scrub import verdict_path
+from defender.tests._docker import daemon_reachable, is_dood, satisfy_engine_keys
 
 DEFENDER = Path(__file__).resolve().parents[2]
 REPO_ROOT = DEFENDER.parent
@@ -41,29 +42,8 @@ REPO_ROOT = DEFENDER.parent
 # docker-outside-of-Docker they skip because bind SOURCES resolve on the daemon
 # host, invisible to this process.
 # --------------------------------------------------------------------------- #
-def _daemon_reachable() -> bool:
-    try:
-        return subprocess.run(
-            ["docker", "version", "--format", "{{.Server.Version}}"],
-            capture_output=True, timeout=30,
-        ).returncode == 0
-    except (OSError, subprocess.SubprocessError):
-        return False
-
-
-def _is_dood() -> bool:
-    if not Path("/.dockerenv").exists():
-        return False
-    probe = subprocess.run(
-        ["docker", "info", "--format", "{{.DockerRootDir}}"],
-        capture_output=True, text=True, encoding="utf-8", timeout=30,
-    )
-    root = probe.stdout.strip()
-    return probe.returncode == 0 and bool(root) and not Path(root).exists()
-
-
-_NO_DAEMON = not _daemon_reachable()
-_DOOD = (not _NO_DAEMON) and _is_dood()
+_NO_DAEMON = not daemon_reachable()
+_DOOD = (not _NO_DAEMON) and is_dood()
 
 requires_live_box = pytest.mark.skipif(
     _NO_DAEMON or _DOOD,
@@ -491,23 +471,3 @@ def mount_for(request, needle: str):
     return None
 
 
-def satisfy_engine_keys(monkeypatch, disposition: str = "inconclusive") -> None:
-    """Give `run_one`'s `_prepare_engines_for` an ambient provider key per direction model
-    so key-sourcing does not FatalConfigError before the box seam is reached (setenv, not
-    setattr — the sanctioned env seam)."""
-    from defender.learning.core.config import oracle_model
-    from defender.learning.core.directions import BY_NAME
-    from defender.learning.core.run_cycle import _directions_for
-    from defender.runtime import providers
-
-    models = {oracle_model()}
-    for name in _directions_for(disposition):
-        d = BY_NAME[name]
-        models.add(d.judge_wiring.model)
-        models.add(d.actor_model)
-    for model in models:
-        try:
-            var = providers.provider_for(model).api_key_var
-        except Exception:  # noqa: BLE001 — best-effort; a red test does not depend on it
-            continue
-        monkeypatch.setenv(var, "spec-test-key")

@@ -30,6 +30,7 @@ from defender.learning.pipeline import _pydantic_stage  # noqa: E402
 from defender.runtime import observe, permission  # noqa: E402
 from defender.runtime.agent_definition import bind  # noqa: E402
 from defender.runtime.agent_role import AgentRole  # noqa: E402
+from defender.tests._engine_helpers import assert_stage_tools  # noqa: E402
 from defender.tests._engine_helpers import fake_model as _fake_model  # noqa: E402
 from defender.tests._engine_helpers import replay_once as _replay  # noqa: E402
 
@@ -105,20 +106,7 @@ def test_verify_deps_role_is_verifier():
 
 
 def test_verify_agent_is_read_only_no_writers():
-    logger = observe.RequestLogger(Path("/tmp/does-not-need-to-exist-verify-tools.jsonl"))
-    try:
-        agent = _pydantic_stage.build_stage_agent(
-            VerifierDeps,
-            StageWiring(
-                prompt_path=Path(__file__), model="any-model", effort="medium",
-                trace_name="t.jsonl", label="verify",
-            ),
-            logger,
-            make_model=_fake_model(_replay("")),
-        )
-    finally:
-        logger.close()
-    assert list(agent._function_toolset.tools) == []
+    assert_stage_tools(VerifierDeps, label="verify", effort="medium", expected=[])
 
 
 def test_build_verify_agent_applies_glm_effort(monkeypatch):

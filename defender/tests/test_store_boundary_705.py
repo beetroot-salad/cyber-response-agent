@@ -48,6 +48,7 @@ from defender.tests._session_store_705 import (
     tool_return_request,
     user_request,
 )
+from defender.tests._docker import daemon_reachable, is_dood
 
 DEFENDER = Path(__file__).resolve().parents[1]
 REPO_ROOT = DEFENDER.parent
@@ -126,25 +127,8 @@ def test_the_resolver_rejects_a_non_conforming_case_id(tmp_path):
 # R1's corollary — the box, and the host-side leg adv:PO5b opened
 # ==========================================================================
 
-def _daemon_reachable() -> bool:
-    try:
-        return subprocess.run(["docker", "version", "--format", "{{.Server.Version}}"],
-                              capture_output=True, timeout=30).returncode == 0
-    except (OSError, subprocess.SubprocessError):
-        return False
-
-
-def _is_dood() -> bool:
-    if not Path("/.dockerenv").exists():
-        return False
-    probe = subprocess.run(["docker", "info", "--format", "{{.DockerRootDir}}"],
-                           capture_output=True, text=True, encoding="utf-8", timeout=30)
-    root = probe.stdout.strip()
-    return probe.returncode == 0 and bool(root) and not Path(root).exists()
-
-
-_NO_DAEMON = not _daemon_reachable()
-_DOOD = (not _NO_DAEMON) and _is_dood()
+_NO_DAEMON = not daemon_reachable()
+_DOOD = (not _NO_DAEMON) and is_dood()
 requires_box = pytest.mark.skipif(
     _NO_DAEMON or _DOOD,
     reason=("no reachable Docker daemon" if _NO_DAEMON else

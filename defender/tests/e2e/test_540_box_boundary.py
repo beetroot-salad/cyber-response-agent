@@ -93,6 +93,7 @@ import uuid
 from pathlib import Path
 
 import pytest
+from defender.tests._docker import daemon_reachable, is_dood
 
 pytest.importorskip("pydantic_ai")
 
@@ -119,29 +120,6 @@ EXEC_TIMEOUT = 60.0
 
 
 
-def _daemon_reachable() -> bool:
-    try:
-        return subprocess.run(
-            ["docker", "version", "--format", "{{.Server.Version}}"],
-            capture_output=True, timeout=30,
-        ).returncode == 0
-    except (OSError, subprocess.SubprocessError):
-        return False
-
-
-def _is_dood() -> bool:
-    """docker-outside-of-Docker: the daemon's root dir is not on OUR filesystem,
-    so bind SOURCES resolve somewhere this process cannot see (ledger E2)."""
-    if not Path("/.dockerenv").exists():
-        return False
-    probe = subprocess.run(
-        ["docker", "info", "--format", "{{.DockerRootDir}}"],
-        capture_output=True, text=True, encoding="utf-8", timeout=30,
-    )
-    root = probe.stdout.strip()
-    return probe.returncode == 0 and bool(root) and not Path(root).exists()
-
-
 def _docker_runtimes() -> frozenset[str]:
     probe = subprocess.run(
         ["docker", "info", "--format", "{{range $k, $v := .Runtimes}}{{$k}} {{end}}"],
@@ -150,8 +128,8 @@ def _docker_runtimes() -> frozenset[str]:
     return frozenset(probe.stdout.split()) if probe.returncode == 0 else frozenset()
 
 
-_NO_DAEMON = not _daemon_reachable()
-_DOOD = (not _NO_DAEMON) and _is_dood()
+_NO_DAEMON = not daemon_reachable()
+_DOOD = (not _NO_DAEMON) and is_dood()
 # What `_box` will actually ask for: `start_box` resolves the F1 lever when no spec is passed.
 _LEVERED_RUNTIME = BoxSpec.from_env(os.environ).runtime
 

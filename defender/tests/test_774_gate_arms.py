@@ -28,7 +28,6 @@ from defender.runtime.agent_definition import bind  # noqa: E402
 from defender.tests._gate774 import (  # noqa: E402
     BASE_REQUEST_LIMIT,
     CHALLENGED,
-    FAST_TIMEOUT,
     FORCED_INCONCLUSIVE,
     RETRY_BUDGET,
     ROUNDS,
@@ -48,6 +47,11 @@ from defender.tests._gate774 import (  # noqa: E402
     spec_import,
     tail,
     worktree_package_guard,  # noqa: F401 — session-scoped autouse guard, see _gate774
+    SETTLED,
+    TWO_UNSETTLED,
+    UNSETTLED,
+    bounds,
+    close,
 )
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     NeverEndsModel,
@@ -58,20 +62,6 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 
-SETTLED = [("the pivot was provisioned", "l-001", "the session was unauthorized")]
-UNSETTLED = [("the pivot was provisioned", None, "the session was unauthorized")]
-TWO_UNSETTLED = UNSETTLED + [("the destination was in scope", None, "it was not")]
-
-
-def _close(deps, disposition, stages=None, **kw):
-    close_investigation = spec_import("defender.runtime.close_tool", "close_investigation")
-    return close_investigation(deps, disposition, stages=stages or FakeReviewStages(), **kw)
-
-
-def _bounds(**kw):
-    Bounds = spec_import("defender.runtime.challenge_gate", "Bounds")
-    return Bounds(**({"extra_turns": TURNS, "grace_rounds": ROUNDS,
-                      "stage_timeout": FAST_TIMEOUT} | kw))
 
 
 def test_a_draft_inconclusive_close_commits_without_invoking_the_gate(tmp_path):
@@ -90,7 +80,7 @@ def test_a_draft_inconclusive_close_commits_without_invoking_the_gate(tmp_path):
     those cases, and this run's scope removes that ground."""
     deps, run_dir = main_deps(tmp_path)
     stages = FakeReviewStages()
-    result = _close(deps, "inconclusive", stages)
+    result = close(deps, "inconclusive", stages)
     assert stages.calls == [], "an inconclusive draft must not spend a review call"
     assert result.outcome == STANDS
     assert frontmatter_of(run_dir / "report.md")["disposition"] == "inconclusive"
@@ -109,7 +99,7 @@ def test_counter_direction_comes_from_the_existing_map_against_the_live_disposit
         assert len(expected) == 1, f"{disposition} must select exactly one counter-direction"
         deps, _run = main_deps(tmp_path / disposition)
         stages = FakeReviewStages(challenger=[tail(SETTLED)])
-        _close(deps, disposition, stages)
+        close(deps, disposition, stages)
         prompt = stages.challenger.only().prompt
         assert expected[0] in prompt, (
             f"the challenger argued something other than {expected[0]} for {disposition}"
@@ -151,7 +141,7 @@ def test_a_surviving_story_with_silent_rows_refuses_the_close_and_counts_a_turn(
         challenger=[tail(UNSETTLED)],
         projection=[projection_of([("l-001", "empty-projection"), ("l-002", "has-projection")])],
     )
-    result = _close(deps, "malicious", stages)
+    result = close(deps, "malicious", stages)
     assert result.outcome == CHALLENGED
     assert not (run_dir / "report.md").exists(), "the challenged arm must not commit"
     assert len(stages.challenger.calls) == 1
@@ -172,7 +162,7 @@ def test_a_surviving_story_with_no_silent_rows_forces_inconclusive_immediately(t
         challenger=[tail(UNSETTLED)],
         projection=[projection_of([("l-001", "has-projection")])],
     )
-    result = _close(deps, "malicious", stages)
+    result = close(deps, "malicious", stages)
     assert result.outcome == FORCED_INCONCLUSIVE
     assert frontmatter_of(run_dir / "report.md")["disposition"] == "inconclusive"
     assert result.turns_used == 0
@@ -207,7 +197,7 @@ def test_the_attempt_past_the_bound_forces_inconclusive_instead_of_gating(tmp_pa
         challenger=[tail(UNSETTLED)],
         projection=one_fresh_lead_per_turn(TURNS + 1),
     )
-    results = [_close(deps, "malicious", stages) for _ in range(TURNS + 1)]
+    results = [close(deps, "malicious", stages) for _ in range(TURNS + 1)]
     outcomes = [r.outcome for r in results]
     assert outcomes[:TURNS] == [CHALLENGED] * TURNS, (
         f"expected {TURNS} forced turns before the bound bit, got {outcomes}"
@@ -245,7 +235,7 @@ def test_a_story_no_executed_lead_can_touch_spends_no_turn(tmp_path):
         deps, run_dir = main_deps(tmp_path / label)
         stages = FakeReviewStages(challenger=[tail(UNSETTLED)],
                                   projection=[projection_of(rows)])
-        result = _close(deps, "malicious", stages)
+        result = close(deps, "malicious", stages)
         assert result.outcome != CHALLENGED, (
             f"{label} gated on a story the evidence cannot speak to — the forced turn's cost "
             f"with no probe it can buy"
@@ -279,7 +269,7 @@ def test_a_challenger_that_declines_to_argue_leaves_the_confident_close_standing
     two write different causes."""
     deps, run_dir = main_deps(tmp_path)
     stages = FakeReviewStages(challenger=[decline()])
-    result = _close(deps, "malicious", stages)
+    result = close(deps, "malicious", stages)
     assert result.outcome == STANDS
     assert frontmatter_of(run_dir / "report.md")["disposition"] == "malicious", (
         "a deliberate decline must leave the investigator's confident close standing"
@@ -289,7 +279,7 @@ def test_a_challenger_that_declines_to_argue_leaves_the_confident_close_standing
         "a deliberate decline is a verdict the challenger reached, not the machinery breaking"
     )
     deps2, run2 = main_deps(tmp_path / "broke")
-    broken = _close(deps2, "malicious",
+    broken = close(deps2, "malicious",
                     FakeReviewStages(challenger_fault=StageFault(raises=RuntimeError("down"))))
     assert broken.outcome == FORCED_INCONCLUSIVE, (
         "control: a broken review must not leave a confident close standing the way a "
@@ -330,8 +320,8 @@ def test_a_second_forced_turn_does_not_re_raise_a_gap_already_raised(tmp_path):
         projection=[projection_of([("l-001", "empty-projection")]),
                     projection_of([("l-001", "empty-projection"), ("l-002", "empty-projection")])],
     )
-    first = _close(deps, "malicious", stages)
-    second = _close(deps, "malicious", stages)
+    first = close(deps, "malicious", stages)
+    second = close(deps, "malicious", stages)
     assert first.outcome == second.outcome == CHALLENGED
     ids = {lead.lead_id for lead in first.material}
     repeat = {lead.lead_id for lead in second.material}
@@ -394,10 +384,10 @@ def test_a_second_attempt_whose_discriminators_were_all_already_raised_spends_no
             projection=[projection_of([("l-001", "empty-projection")]),
                         projection_of(second_rows)],
         )
-        first = _close(deps, "malicious", stages)
+        first = close(deps, "malicious", stages)
         assert first.outcome == CHALLENGED
         assert [x.lead_id for x in first.material] == ["l-001"]
-        second = _close(deps, "malicious", stages)
+        second = close(deps, "malicious", stages)
         assert len(stages.projection.calls) == 2, (
             f"{label}: the second attempt never ran the projection, so the decision was not "
             f"taken on that attempt's own evidence"
@@ -423,7 +413,7 @@ def test_a_second_attempt_whose_discriminators_were_all_already_raised_spends_no
     capped_stages = FakeReviewStages(challenger=[tail(UNSETTLED)],
                                      projection=one_fresh_lead_per_turn(TURNS + 1))
     for _ in range(TURNS + 1):
-        capped = _close(capped_deps, "malicious", capped_stages)
+        capped = close(capped_deps, "malicious", capped_stages)
     assert capped.outcome == FORCED_INCONCLUSIVE, "control: the capped run must commit too"
     capped_cause = frontmatter_of(capped_dir / "report.md")["cause"]
     for label, cause in causes.items():
@@ -441,8 +431,8 @@ def test_a_second_attempt_whose_discriminators_were_all_already_raised_spends_no
                     projection_of([("l-001", "empty-projection"),
                                    ("l-002", "empty-projection")])],
     )
-    first = _close(deps, "malicious", stages)
-    second = _close(deps, "malicious", stages)
+    first = close(deps, "malicious", stages)
+    second = close(deps, "malicious", stages)
     assert second.outcome == CHALLENGED, (
         f"control: an attempt carrying a lead nobody has been asked about took "
         f"{second.outcome} — the rule fires on any repeat rather than on full overlap"
@@ -474,7 +464,7 @@ def test_a_refinement_round_carries_the_prior_story_and_the_gap_the_check_named(
         coherence_checker=[gap, "COHERENT"],
         projection=[projection_of([("l-001", "empty-projection")])],
     )
-    _close(deps, "malicious", stages, bounds=_bounds(grace_rounds=1))
+    close(deps, "malicious", stages, bounds=bounds(grace_rounds=1))
     calls = stages.challenger.calls
     assert len(calls) == 2, f"the refinement round did not run: {len(calls)} challenger calls"
     assert story not in calls[0].prompt, (
@@ -499,8 +489,8 @@ def test_the_forced_turn_cap_is_rejected_when_it_reaches_the_shared_retry_budget
     )
     for bad in (RETRY_BUDGET, RETRY_BUDGET + 1):
         with pytest.raises(ValueError, match="retry"):
-            _bounds(extra_turns=bad)
-    assert _bounds().extra_turns < RETRY_BUDGET
+            bounds(extra_turns=bad)
+    assert bounds().extra_turns < RETRY_BUDGET
 
 
 def test_a_stubborn_model_exhausting_the_retry_budget_closes_unresolved_instead_of_crashing(tmp_path):
@@ -558,7 +548,7 @@ def test_the_raised_request_ceiling_is_read_from_the_forced_turn_cap_not_a_liter
     assert Bounds(extra_turns=TURNS, grace_rounds=ROUNDS).base_request_limit == BASE_REQUEST_LIMIT, (
         "the shipped default bounds do not carry the shipped base"
     )
-    seen = {(base, cap): raised_request_limit(_bounds(base_request_limit=base, extra_turns=cap))
+    seen = {(base, cap): raised_request_limit(bounds(base_request_limit=base, extra_turns=cap))
             for base in (BASE_REQUEST_LIMIT, 7, 41) for cap in (1, TURNS, 4)}
     assert seen == {(base, cap): base + cap for base, cap in seen}, (
         f"the ceiling does not track both terms: {seen}"
@@ -583,7 +573,7 @@ def test_a_run_the_gate_never_fires_on_still_gets_the_raised_ceiling(tmp_path):
     moved_base, moved_cap = 8, 3
     result = drive(run_dir, run_id="r-ceiling", salt="sess-salt", main=model,
                    review_stages=FakeReviewStages(),
-                   bounds=_bounds(base_request_limit=moved_base, extra_turns=moved_cap))
+                   bounds=bounds(base_request_limit=moved_base, extra_turns=moved_cap))
     assert model.calls == moved_base + moved_cap, (
         f"the run did not get the ceiling it was handed: {model.calls} requests"
     )
@@ -614,7 +604,7 @@ def test_the_message_stores_request_limit_mirror_moves_with_the_raised_ceiling(t
     moved_base, moved_cap = 8, 2
     drive(run_dir, run_id="r-mirror", salt="sess-salt", main=model,
           review_stages=FakeReviewStages(), store_factory=factory,
-          bounds=_bounds(base_request_limit=moved_base, extra_turns=moved_cap))
+          bounds=bounds(base_request_limit=moved_base, extra_turns=moved_cap))
     assert model.calls == moved_base + moved_cap, (
         f"the run did not reach the ceiling it was handed: {model.calls}"
     )
@@ -680,7 +670,7 @@ def test_the_extra_turn_bound_is_injected_not_literal(tmp_path):
         challenger=[tail(UNSETTLED)],
         projection=one_fresh_lead_per_turn(2),
     )
-    attempts = [_close(deps, "malicious", stages, bounds=_bounds(extra_turns=1))
+    attempts = [close(deps, "malicious", stages, bounds=bounds(extra_turns=1))
                 for _ in range(2)]
     outcomes = [a.outcome for a in attempts]
     assert outcomes == [CHALLENGED, FORCED_INCONCLUSIVE], (
@@ -706,7 +696,7 @@ def test_the_grace_bound_is_injected_not_literal(tmp_path):
         coherence_checker=["INCOHERENT", "INCOHERENT"],
         projection=[projection_of([("l-001", "empty-projection")])],
     )
-    _close(deps, "malicious", stages, bounds=_bounds(grace_rounds=1))
+    close(deps, "malicious", stages, bounds=bounds(grace_rounds=1))
     assert len(stages.challenger.calls) == 2, (
         f"one refinement round means two challenger calls, got {len(stages.challenger.calls)}"
     )
@@ -725,9 +715,9 @@ def test_zero_is_refused_for_either_bound(tmp_path):
     accepted."""
     for kw in ({"extra_turns": 0}, {"grace_rounds": 0}):
         with pytest.raises(ValueError, match="zero|positive"):
-            _bounds(**kw)
-    assert _bounds().extra_turns == TURNS
-    assert _bounds().grace_rounds == ROUNDS
+            bounds(**kw)
+    assert bounds().extra_turns == TURNS
+    assert bounds().grace_rounds == ROUNDS
 
 
 def test_a_second_gate_attempt_starts_with_a_full_grace_budget(tmp_path):
@@ -752,8 +742,8 @@ def test_a_second_gate_attempt_starts_with_a_full_grace_budget(tmp_path):
         coherence_checker=["INCOHERENT", "COHERENT", "INCOHERENT", "COHERENT"],
         projection=[first_attempt, first_attempt, second_attempt, second_attempt],
     )
-    first = _close(deps, "malicious", stages)
-    second = _close(deps, "malicious", stages)
+    first = close(deps, "malicious", stages)
+    second = close(deps, "malicious", stages)
     assert first.rounds_used == ROUNDS, f"first attempt: {first.rounds_used}"
     assert second.rounds_used == ROUNDS, (
         f"the second attempt inherited an exhausted grace budget: {second.rounds_used}"
@@ -790,9 +780,9 @@ def test_review_counters_live_in_a_mutable_container_and_are_per_run(tmp_path):
         challenger=[tail(UNSETTLED)],
         projection=one_fresh_lead_per_turn(3),
     )
-    a1 = _close(first, "malicious", stages)
-    a2 = _close(first, "malicious", stages)
-    b1 = _close(second, "malicious", stages)
+    a1 = close(first, "malicious", stages)
+    a2 = close(first, "malicious", stages)
+    b1 = close(second, "malicious", stages)
     assert (a1.turns_used, a2.turns_used) == (1, 2), (
         f"one binding's own counter did not advance: {(a1.turns_used, a2.turns_used)}"
     )

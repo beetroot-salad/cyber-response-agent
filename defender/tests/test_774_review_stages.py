@@ -63,6 +63,11 @@ from defender.tests._gate774 import (  # noqa: E402
     spec_import,
     tail,
     worktree_package_guard,  # noqa: F401 — session-scoped autouse guard, see _gate774
+    SETTLED,
+    UNSETTLED,
+    bounds,
+    close,
+    review_record,
 )
 from defender.tests.e2e._replay_harness import ReplayFn, Turn, drive  # noqa: E402
 
@@ -73,24 +78,6 @@ pytestmark = pytest.mark.e2e
 REVIEW_TIMEOUT_ENV = "DEFENDER_REVIEW_STAGE_TIMEOUT_SECONDS"
 SUBAGENT_TIMEOUT_ENV = "LEARNING_SUBAGENT_TIMEOUT_SECONDS"
 
-SETTLED = [("the pivot was provisioned", "l-001", "the session was unauthorized")]
-UNSETTLED = [("the pivot was provisioned", None, "the session was unauthorized")]
-
-
-def _close(deps, disposition, stages=None, **kw):
-    close_investigation = spec_import("defender.runtime.close_tool", "close_investigation")
-    return close_investigation(deps, disposition, stages=stages or FakeReviewStages(), **kw)
-
-
-def _bounds(**kw):
-    Bounds = spec_import("defender.runtime.challenge_gate", "Bounds")
-    return Bounds(**({"extra_turns": TURNS, "grace_rounds": ROUNDS,
-                      "stage_timeout": FAST_TIMEOUT} | kw))
-
-
-def _record_path(run_dir, turn=1):
-    review_record_path = spec_import("defender.runtime.challenge_gate", "review_record_path")
-    return review_record_path(run_dir, turn)
 
 
 def _seeded(deps, run_dir):
@@ -121,7 +108,7 @@ def test_the_challengers_input_carries_observations_and_no_inference_layer(tmp_p
     deps, run_dir = main_deps(tmp_path)
     _seeded(deps, run_dir)
     stages = FakeReviewStages(challenger=[tail(SETTLED)])
-    _close(deps, "malicious", stages)
+    close(deps, "malicious", stages)
     prompt = stages.challenger.only().prompt
     for tag in OBSERVATION_TAGS:
         assert tag in prompt, f"the observation layer is missing {tag!r}"
@@ -148,7 +135,7 @@ def test_the_challenger_sees_lead_identity_but_not_the_hypotheses_each_lead_test
     deps, run_dir = main_deps(tmp_path)
     _seeded(deps, run_dir)
     stages = FakeReviewStages(challenger=[tail(SETTLED)])
-    _close(deps, "malicious", stages)
+    close(deps, "malicious", stages)
     prompt = stages.challenger.only().prompt
     source = lead_rows(golden_document())
     assert source, "the fixture carries no lead rows to project"
@@ -200,7 +187,7 @@ def test_the_challenger_still_receives_its_observation_layer_input(tmp_path):
     deps, run_dir = main_deps(tmp_path)
     _seeded(deps, run_dir)
     stages = FakeReviewStages(challenger=[tail(SETTLED)])
-    _close(deps, "malicious", stages)
+    close(deps, "malicious", stages)
     call = stages.challenger.only()
     for tag in (":V ", ":E "):
         assert tag in call.prompt, (
@@ -230,13 +217,13 @@ def test_the_challenger_tail_declares_unsettled_requirements_with_settled_by_and
     deps, _run = main_deps(tmp_path)
     good = FakeReviewStages(challenger=[tail(UNSETTLED)],
                             projection=[projection_of([("l-001", "empty-projection")])])
-    assert _close(deps, "malicious", good).outcome == CHALLENGED
+    assert close(deps, "malicious", good).outcome == CHALLENGED
     incomplete = ({"assertion": "a"}, {"assertion": "a", "settled_by": None})
     for index, missing in enumerate(incomplete):
         deps2, _r = main_deps(tmp_path / f"incomplete-{index}")
         broken = json.dumps({"counter_story": "s", "requirements": [missing]})
         stages = FakeReviewStages(challenger_fault=StageFault(malformed=broken))
-        outcome = _close(deps2, "malicious", stages).outcome
+        outcome = close(deps2, "malicious", stages).outcome
         assert outcome != STANDS, (
             f"an incomplete requirement {missing} was read as a settled counter-story and left "
             f"the confident close standing"
@@ -264,7 +251,7 @@ def test_the_discriminating_set_is_silence_measured_against_declared_unsettled_r
         projection=[projection_of([("l-001", "empty-projection"),
                                    ("l-009", "empty-projection")])],
     )
-    result = _close(deps, "malicious", stages)
+    result = close(deps, "malicious", stages)
     assert result.outcome == CHALLENGED
     picked = {lead.lead_id for lead in result.material}
     assert picked == {"l-001"}, (
@@ -290,7 +277,7 @@ def test_the_challengers_exploration_menu_follows_the_direction_it_argues(tmp_pa
     for disposition in ("benign", "malicious"):
         deps, _run = main_deps(tmp_path / disposition)
         stages = FakeReviewStages(challenger=[tail(SETTLED)])
-        _close(deps, disposition, stages)
+        close(deps, disposition, stages)
         seen[disposition] = stages.challenger.only().prompt
     malicious_menu = any(tid in seen["benign"] for tid in tactics)
     assert malicious_menu, "a benign close is challenged maliciously and needs the menu"
@@ -392,7 +379,7 @@ def test_an_empty_affordance_sample_omits_the_section_rather_than_sending_it_emp
     ticket = _eligible_closed_ticket()
 
     stages = FakeReviewStages(challenger=[tail(SETTLED)])
-    result = _close(deps, "malicious", stages)
+    result = close(deps, "malicious", stages)
     live_cold = stages.challenger.only().prompt
     invoked_cold = build_challenger_input(deps, "malicious", direction,
                                           list_closed_fn=lambda _label: [])
@@ -454,9 +441,9 @@ def test_unparseable_output_never_scores_as_challenger_incoherence(tmp_path):
                                         coherence_checker=["INCOHERENT"])),
     ):
         deps, run_dir = main_deps(tmp_path / label)
-        result = _close(deps, "malicious", stages)
+        result = close(deps, "malicious", stages)
         seen[label] = (result, len(stages.challenger.calls),
-                       json.loads(_record_path(run_dir).read_text(encoding="utf-8")))
+                       json.loads(review_record(run_dir).read_text(encoding="utf-8")))
     for label in ("truncated", "not-a-verdict"):
         result, calls, record = seen[label]
         assert result.outcome == FORCED_INCONCLUSIVE, f"{label} took {result.outcome}"
@@ -526,7 +513,7 @@ def test_a_review_that_cannot_complete_does_not_silently_commit_the_close(tmp_pa
     stages = FakeReviewStages(
         challenger_fault=StageFault(raises=RuntimeError("provider 503")),
     )
-    result = _close(deps, "malicious", stages)
+    result = close(deps, "malicious", stages)
     assert result.outcome == FORCED_INCONCLUSIVE
     fm = frontmatter_of(run_dir / "report.md")
     assert fm["disposition"] == "inconclusive", "a failed review silently committed the close"
@@ -535,7 +522,7 @@ def test_a_review_that_cannot_complete_does_not_silently_commit_the_close(tmp_pa
     assert "challenger" in result.detail
 
     deps2, run2 = main_deps(tmp_path / "unreadable-projection")
-    unreadable = _close(deps2, "malicious",
+    unreadable = close(deps2, "malicious",
                         FakeReviewStages(challenger=[tail(UNSETTLED)],
                                          projection_fault=StageFault(malformed="not json at all")))
     fm2 = frontmatter_of(run2 / "report.md")
@@ -546,7 +533,7 @@ def test_a_review_that_cannot_complete_does_not_silently_commit_the_close(tmp_pa
     )
 
     deps3, run3 = main_deps(tmp_path / "genuinely-silent")
-    silent = _close(deps3, "malicious",
+    silent = close(deps3, "malicious",
                     FakeReviewStages(challenger=[tail(UNSETTLED)],
                                      projection=[projection_of([])]))
     assert silent.failure_kind is None, (
@@ -598,7 +585,7 @@ def test_any_review_stage_that_cannot_complete_closes_the_case_unresolved_with_i
     for stage, kw in faults.items():
         deps, run_dir = main_deps(tmp_path / stage)
         stages = FakeReviewStages(challenger=[tail(UNSETTLED)], **kw)
-        result = _close(deps, "malicious", stages)
+        result = close(deps, "malicious", stages)
         assert result.outcome == FORCED_INCONCLUSIVE, f"a {stage}-only fault took {result.outcome}"
         assert result.failure_kind is not None, f"a {stage}-only fault named no failure kind"
         assert frontmatter_of(run_dir / "report.md")["disposition"] == "inconclusive"
@@ -612,7 +599,7 @@ def test_any_review_stage_that_cannot_complete_closes_the_case_unresolved_with_i
         deps, run_dir = main_deps(tmp_path / f"projection-{label}")
         stages = FakeReviewStages(challenger=[tail(UNSETTLED)],
                                   projection_fault=StageFault(malformed=reply))
-        result = _close(deps, "malicious", stages)
+        result = close(deps, "malicious", stages)
         assert result.outcome == FORCED_INCONCLUSIVE, (
             f"a projection reply the gate cannot read ({label}) took {result.outcome}"
         )
@@ -623,7 +610,7 @@ def test_any_review_stage_that_cannot_complete_closes_the_case_unresolved_with_i
         assert frontmatter_of(run_dir / "report.md")["disposition"] == "inconclusive"
 
     deps, silent_dir = main_deps(tmp_path / "legitimately-empty")
-    empty = _close(deps, "malicious",
+    empty = close(deps, "malicious",
                    FakeReviewStages(challenger=[tail(UNSETTLED)],
                                     projection=[projection_of([])]))
     assert empty.outcome == FORCED_INCONCLUSIVE
@@ -634,7 +621,7 @@ def test_any_review_stage_that_cannot_complete_closes_the_case_unresolved_with_i
     assert frontmatter_of(silent_dir / "report.md")["outcome"] == FORCED_INCONCLUSIVE
 
     deps, run_dir = main_deps(tmp_path / "control")
-    control = _close(deps, "malicious",
+    control = close(deps, "malicious",
                      FakeReviewStages(challenger=[tail(UNSETTLED)],
                                       projection=[projection_of([("l-001", "has-projection")])]))
     assert control.outcome == FORCED_INCONCLUSIVE, "control: no fault must not decline"
@@ -659,7 +646,7 @@ def test_each_review_stage_call_carries_an_explicit_timeout_a_test_can_drive(tmp
     would ignore it."""
     deps, _run = main_deps(tmp_path)
     stages = FakeReviewStages(challenger=[tail(UNSETTLED)])
-    _close(deps, "malicious", stages, bounds=_bounds(stage_timeout=FAST_TIMEOUT))
+    close(deps, "malicious", stages, bounds=bounds(stage_timeout=FAST_TIMEOUT))
     assert stages.calls, "no stage was driven"
     for call in stages.calls:
         assert call.timeout is not None, f"{call.role} was driven with no deadline"
@@ -686,7 +673,7 @@ def test_a_stage_that_never_returns_is_bounded_by_wall_clock_not_a_request_count
     stages = FakeReviewStages(challenger=[tail(UNSETTLED)],
                               projection_fault=StageFault(hangs=True))
     started = time.monotonic()
-    result = _close(deps, "malicious", stages, bounds=_bounds(stage_timeout=FAST_TIMEOUT))
+    result = close(deps, "malicious", stages, bounds=bounds(stage_timeout=FAST_TIMEOUT))
     elapsed = time.monotonic() - started
     assert result.outcome == FORCED_INCONCLUSIVE, "a stage left pending did not fail closed"
     assert result.failure_kind is not None, "a stage left pending named no failure kind"
@@ -722,12 +709,12 @@ def test_a_timed_out_review_is_observably_distinct_from_one_that_failed(tmp_path
     ):
         deps, run_dir = main_deps(tmp_path / label)
         stages = FakeReviewStages(challenger=[tail(UNSETTLED)], **kw)
-        result = _close(deps, "malicious", stages,
-                        bounds=_bounds(stage_timeout=FAST_TIMEOUT))
+        result = close(deps, "malicious", stages,
+                        bounds=bounds(stage_timeout=FAST_TIMEOUT))
         assert result.outcome == FORCED_INCONCLUSIVE, f"{label} did not fail closed"
         assert frontmatter_of(run_dir / "report.md")["disposition"] == "inconclusive"
         seen[label] = (result.failure_kind,
-                       json.loads(_record_path(run_dir).read_text(encoding="utf-8")))
+                       json.loads(review_record(run_dir).read_text(encoding="utf-8")))
     assert seen["timeout"][0] != seen["failure"][0], (
         f"a timed-out review and a failed one report the same kind: {seen['timeout'][0]!r}"
     )
@@ -790,9 +777,9 @@ def test_a_failed_review_names_a_typed_failure_kind_the_fleet_can_be_counted_by(
     seen = {}
     for expected, kw in conditions:
         deps, run_dir = main_deps(tmp_path / expected)
-        result = _close(deps, "malicious",
+        result = close(deps, "malicious",
                         FakeReviewStages(challenger=[tail(UNSETTLED)], **kw),
-                        bounds=_bounds())
+                        bounds=bounds())
         assert result.outcome == FORCED_INCONCLUSIVE, (
             f"{expected}: a review that could not deliver let the finding stand"
         )
@@ -800,7 +787,7 @@ def test_a_failed_review_names_a_typed_failure_kind_the_fleet_can_be_counted_by(
             f"the condition this vocabulary exists to separate reports "
             f"{result.failure_kind!r}, not {expected!r}"
         )
-        record = json.loads(_record_path(run_dir).read_text(encoding="utf-8"))
+        record = json.loads(review_record(run_dir).read_text(encoding="utf-8"))
         assert record["failure_kind"] == expected, (
             f"{expected}: the review record disagrees with the return: "
             f"{record['failure_kind']!r}"
@@ -818,7 +805,7 @@ def test_a_failed_review_names_a_typed_failure_kind_the_fleet_can_be_counted_by(
     )
 
     deps, control_dir = main_deps(tmp_path / "evidence-override")
-    control = _close(deps, "malicious",
+    control = close(deps, "malicious",
                      FakeReviewStages(challenger=[tail(UNSETTLED)],
                                       projection=[projection_of([("l-001", "has-projection")])]))
     assert control.outcome == FORCED_INCONCLUSIVE, (
@@ -829,7 +816,7 @@ def test_a_failed_review_names_a_typed_failure_kind_the_fleet_can_be_counted_by(
         f"CONTROL: an override the evidence produced names {control.failure_kind!r} — the "
         f"field is set on every close, so counting by it counts everything"
     )
-    control_record = json.loads(_record_path(control_dir).read_text(encoding="utf-8"))
+    control_record = json.loads(review_record(control_dir).read_text(encoding="utf-8"))
     assert control_record["failure_kind"] is None, (
         "CONTROL: the record names a failure kind for a review that did not fail"
     )
@@ -1015,7 +1002,7 @@ def test_the_coherence_checker_receives_the_counter_story_and_nothing_else(tmp_p
     story = "the destination host was reachable by design"
     stages = FakeReviewStages(challenger=[tail(UNSETTLED, story=story)],
                               projection=[projection_of([("l-001", "empty-projection")])])
-    _close(deps, "malicious", stages)
+    close(deps, "malicious", stages)
     prompt = stages.coherence_checker.only().prompt
     assert story in prompt, "the counter-story did not reach the coherence checker"
     for leaked in (":V ", ":E ", "sshd", "l-001"):
@@ -1038,7 +1025,7 @@ def test_the_projection_stage_input_is_built_from_the_live_run_not_a_learning_ru
     )
     stages = FakeReviewStages(challenger=[tail(UNSETTLED)],
                               projection=[projection_of([("l-001", "empty-projection")])])
-    _close(deps, "malicious", stages)
+    close(deps, "malicious", stages)
     call = stages.projection.only()
     assert str(run_dir) in call.prompt or "l-001" in call.prompt, (
         "the projection was not built from the live run's own directory"
@@ -1104,7 +1091,7 @@ def test_the_lead_table_is_read_by_its_declared_header_not_by_column_position(tm
         deps, run_dir = main_deps(tmp_path / label)
         (run_dir / "investigation.md").write_text(document, encoding="utf-8")
         stages = FakeReviewStages(challenger=[tail(SETTLED)])
-        _close(deps, "malicious", stages)
+        close(deps, "malicious", stages)
         prompt = stages.challenger.only().prompt
         projected = lead_rows(prompt)
         assert projected, f"{label}: no lead rows reached the challenger"
@@ -1152,7 +1139,7 @@ def test_a_projection_naming_a_lead_the_investigation_never_executed_fails_the_r
         )
         stages = FakeReviewStages(challenger=[tail(UNSETTLED)],
                                   projection=[projection_of(rows)])
-        result = _close(deps, "malicious", stages)
+        result = close(deps, "malicious", stages)
         if not expect_failure:
             assert result.outcome == CHALLENGED, (
                 f"control: an in-list projection took {result.outcome}"

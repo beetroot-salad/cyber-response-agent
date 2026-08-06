@@ -72,6 +72,7 @@ from defender.tests.e2e._box665 import (  # noqa: F401
     _cp,
     requires_live_box,
 )
+from defender.tests._docker import daemon_reachable, is_dood
 
 DEFENDER = Path(__file__).resolve().parents[2]
 REPO_ROOT = DEFENDER.parent
@@ -183,27 +184,6 @@ def ban_dependency_files() -> dict[str, Path]:
 # There is deliberately NO fourth predicate for "runsc is registered but WITHOUT
 # --oci-seccomp". That state is exactly what the ban fault exists to report, and skipping on
 # it would let the suite go green on a host where the ban is not in force.
-def _daemon_reachable() -> bool:
-    try:
-        return subprocess.run(
-            ["docker", "version", "--format", "{{.Server.Version}}"],
-            capture_output=True, timeout=30,
-        ).returncode == 0
-    except (OSError, subprocess.SubprocessError):
-        return False
-
-
-def _is_dood() -> bool:
-    if not Path("/.dockerenv").exists():
-        return False
-    probe = subprocess.run(
-        ["docker", "info", "--format", "{{.DockerRootDir}}"],
-        capture_output=True, text=True, encoding="utf-8", timeout=30,
-    )
-    root = probe.stdout.strip()
-    return probe.returncode == 0 and bool(root) and not Path(root).exists()
-
-
 def _runtime_registered() -> bool:
     probe = subprocess.run(
         ["docker", "info", "--format", "{{range $k, $v := .Runtimes}}{{$k}} {{end}}"],
@@ -215,9 +195,9 @@ def _runtime_registered() -> bool:
 
 
 def _real_box_skip_reason() -> str | None:
-    if not _daemon_reachable():
+    if not daemon_reachable():
         return "no reachable Docker daemon"
-    if _is_dood() and not box_mod._covered(DEFENDER, box_mod._shared_mounts(box_mod._docker)):
+    if is_dood() and not box_mod._covered(DEFENDER, box_mod._shared_mounts(box_mod._docker)):
         return ("docker-outside-of-Docker with no shared mount covering the repo tree, so no "
                 "bind source resolves (C46)")
     if not _runtime_registered():
@@ -241,7 +221,7 @@ requires_real_box = pytest.mark.skipif(_REAL_BOX_SKIP is not None, reason=str(_R
 #: includes the ordinary developer machine, and which is exactly where a stale vendored default
 #: wants to be caught early.
 requires_daemon = pytest.mark.skipif(
-    not _daemon_reachable(), reason="no reachable Docker daemon"
+    not daemon_reachable(), reason="no reachable Docker daemon"
 )
 
 

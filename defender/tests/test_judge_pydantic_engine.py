@@ -30,6 +30,7 @@ from defender.runtime.agent_definition import (  # noqa: E402
     effective_tools_for,
 )
 from defender.runtime.permission.command_shape import SQL_SHIM  # noqa: E402
+from defender.tests._engine_helpers import learning_run_dir  # noqa: E402
 from defender.tests._engine_helpers import fake_model as _fake_model  # noqa: E402
 from defender.tests._engine_helpers import replay_turns as _replay  # noqa: E402
 
@@ -60,10 +61,6 @@ _YAML = "outcome: skip-passthrough\ndefender_findings: []\n"
 
 
 
-def _lrd(tmp_path):
-    lrd = tmp_path / "learning_run"
-    lrd.mkdir()
-    return lrd
 
 
 def _prompt(tmp_path):
@@ -73,7 +70,7 @@ def _prompt(tmp_path):
 
 
 def test_run_judge_pydantic_returns_yaml_and_writes_trace(tmp_path):
-    lrd = _lrd(tmp_path)
+    lrd = learning_run_dir(tmp_path)
     fn = _replay([{"text": _YAML}])
     with override_allow_model_requests(False):
         out = _run_judge_pydantic(
@@ -93,7 +90,7 @@ def test_run_judge_pydantic_returns_yaml_and_writes_trace(tmp_path):
 
 
 def test_run_judge_pydantic_reads_gather_raw_through_read_roots(tmp_path):
-    lrd = _lrd(tmp_path)
+    lrd = learning_run_dir(tmp_path)
     gather_raw = tmp_path / "run" / "gather_raw"
     (gather_raw / "l-001").mkdir(parents=True)
     raw_file = gather_raw / "l-001" / "0.json"
@@ -133,7 +130,7 @@ def test_run_judge_pydantic_returns_raw_preamble_untrimmed(tmp_path):
     """#492 (E4): after the fix `_run_judge_pydantic` returns the model's RAW final text
     with the prose preamble INTACT — no engine-level trim. The relocation is observable in
     the return value (it still carries the leading prose)."""
-    lrd = _lrd(tmp_path)
+    lrd = learning_run_dir(tmp_path)
     fn = _replay([{"text": "Here is my analysis.\n\noutcome: refuted\ndefender_findings: []\n"}])
     with override_allow_model_requests(False):
         out = _run_judge_pydantic(
@@ -156,7 +153,7 @@ def test_pydantic_engine_preamble_survives_end_to_end_via_shared_path(tmp_path):
     parsed_ok — the shared normalizer picks up exactly what the engine stopped trimming,
     with no loss of behavior. (Was test_run_judge_pydantic_trims_model_preamble_end_to_end;
     the ENGINE no longer trims, so the name loses 'trims'.)"""
-    lrd = _lrd(tmp_path)
+    lrd = learning_run_dir(tmp_path)
     from defender.learning.core.validate import parse_judge_verdict
     fn = _replay([{"text": "Here is my analysis.\nThe story is refuted.\n\n"
                            "outcome: refuted\ndefender_findings: []\n"}])

@@ -931,3 +931,41 @@ class RecordingValidator:
         if self.refuse is not None:
             return self.refuse
         return validate_artifact(name, proposed_text, current)
+
+
+#: The three lead shapes every #774 module drives the close tool with. A "settled" lead has
+#: an anchor; an "unsettled" one does not, which is what makes the gate's confidence question
+#: answerable at all. Four modules had spelled these tuples out; two spelled all three and
+#: two spelled a subset, so a scenario added to one was invisible to the others.
+SETTLED = [("the pivot was provisioned", "l-001", "the session was unauthorized")]
+UNSETTLED = [("the pivot was provisioned", None, "the session was unauthorized")]
+TWO_UNSETTLED = UNSETTLED + [("the destination was in scope", None, "it was not")]
+
+
+def close(deps, disposition, stages=None, **kw):
+    """Drive the real `close_investigation` through the spec's import seam.
+
+    `**kw` matters: three of the four modules had it and the fourth did not, so a test
+    added to `test_774_close_tool` that needed to inject a bound or a deadline had to
+    rewrite the thunk first. Nothing there passes extras today; widening costs nothing and
+    removes the trap.
+    """
+    close_investigation = spec_import("defender.runtime.close_tool", "close_investigation")
+    return close_investigation(deps, disposition, stages=stages or FakeReviewStages(), **kw)
+
+
+def bounds(**kw):
+    """`Bounds` at the suite's fast defaults, overridable per axis.
+
+    Lives here rather than in a test module because the three constants it reads
+    (`TURNS`, `ROUNDS`, `FAST_TIMEOUT`) are already this module's.
+    """
+    Bounds = spec_import("defender.runtime.challenge_gate", "Bounds")
+    return Bounds(**({"extra_turns": TURNS, "grace_rounds": ROUNDS,
+                      "stage_timeout": FAST_TIMEOUT} | kw))
+
+
+def review_record(run_dir, turn=1):
+    """The review record's path for one turn, through the same import seam."""
+    review_record_path = spec_import("defender.runtime.challenge_gate", "review_record_path")
+    return review_record_path(run_dir, turn)

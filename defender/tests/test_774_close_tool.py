@@ -58,6 +58,10 @@ from defender.tests._gate774 import (  # noqa: E402
     spec_import,
     tail,
     worktree_package_guard,  # noqa: F401 — session-scoped autouse guard, see _gate774
+    SETTLED,
+    TWO_UNSETTLED,
+    UNSETTLED,
+    close,
 )
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     ReplayFn,
@@ -67,14 +71,6 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 
-SETTLED = [("the pivot was provisioned", "l-001", "the session was unauthorized")]
-UNSETTLED = [("the pivot was provisioned", None, "the session was unauthorized")]
-TWO_UNSETTLED = UNSETTLED + [("the destination was in scope", None, "it was not")]
-
-
-def _close(deps, disposition, stages=None):
-    close_investigation = spec_import("defender.runtime.close_tool", "close_investigation")
-    return close_investigation(deps, disposition, stages=stages or FakeReviewStages())
 
 
 #: The condition set lives in `_gate774.CLOSE_CONDITIONS` — thirteen conditions, twelve of
@@ -345,7 +341,7 @@ def test_a_disposition_outside_the_enum_or_a_case_variant_is_rejected_before_any
         deps, run_dir = main_deps(tmp_path / f"d{abs(hash(bad))}")
         stages = FakeReviewStages()
         with pytest.raises(ModelRetry, match="disposition"):
-            _close(deps, bad, stages)
+            close(deps, bad, stages)
         assert stages.calls == [], f"{bad!r} reached the review stages before validation"
         assert not (run_dir / "report.md").exists(), f"{bad!r} wrote a report"
 
@@ -419,7 +415,7 @@ def test_a_budget_pressed_run_can_still_close(tmp_path):
         "the close must survive budget pressure"
     )
     deps, run_dir = main_deps(tmp_path)
-    _close(deps, "malicious", FakeReviewStages(challenger=[tail(SETTLED)]))
+    close(deps, "malicious", FakeReviewStages(challenger=[tail(SETTLED)]))
     assert (run_dir / "report.md").exists()
 
 
@@ -518,7 +514,7 @@ def test_report_md_leaves_the_model_write_allow_and_the_close_tool_writes_it(
     assert (run_dir / "investigation.md").read_text(encoding="utf-8").strip(), (
         "control: in the same run the working document's write lands with real content"
     )
-    _close(deps, "benign")
+    close(deps, "benign")
     assert frontmatter_of(run_dir / "report.md")["disposition"] == "benign", (
         "the close path must remain the report's writer"
     )
@@ -658,7 +654,7 @@ def test_the_629_ordering_independence_contract_is_re_expressed_on_the_close_too
         if seed is not None:
             (run_dir / "investigation.md").write_text(seed, encoding="utf-8")
         assert (run_dir / "investigation.md").exists() is (seed is not None)
-        result = _close(deps, "inconclusive")
+        result = close(deps, "inconclusive")
         assert frontmatter_of(run_dir / "report.md")["disposition"] == "inconclusive", (
             f"the close must record a disposition with a {label} working document"
         )
@@ -904,7 +900,7 @@ def test_report_frontmatter_carries_a_typed_outcome_and_a_host_authored_cause(tm
     }
     for label, (poison, build, mark) in conditions.items():
         deps, run_dir = main_deps(tmp_path / label)
-        result = _close(deps, "malicious", build(poison))
+        result = close(deps, "malicious", build(poison))
         text = (run_dir / "report.md").read_text(encoding="utf-8")
         fm, raw, _body = split_frontmatter(text)
         assert fm["outcome"] in COMMITTED_OUTCOMES, (
@@ -1008,7 +1004,7 @@ def test_first_time_close_after_n_challenges_and_forced_inconclusive_are_disting
     ):
         deps, run_dir = main_deps(tmp_path / label)
         for _ in range(attempts):
-            outcome = _close(deps, "malicious", stages).outcome
+            outcome = close(deps, "malicious", stages).outcome
         shapes[label] = (frontmatter_of(run_dir / "report.md"), review_records(run_dir), outcome)
 
     first_fm, first_records, first_arm = shapes["first"]
@@ -1060,7 +1056,7 @@ def test_no_post_close_write_can_silently_move_the_recorded_disposition(tmp_path
     deps, run_dir = main_deps(tmp_path)
     inv = str(run_dir / "investigation.md")
     runtime_tools._tool_write_file(deps, inv, "")
-    _close(deps, "malicious", FakeReviewStages(challenger=[tail(SETTLED)]))
+    close(deps, "malicious", FakeReviewStages(challenger=[tail(SETTLED)]))
     before = Path(run_dir / "report.md").read_text(encoding="utf-8")
     contradiction = "## CONCLUDE\n\ndisposition: benign\n"
     for call in (
@@ -1095,14 +1091,14 @@ def test_a_second_close_after_a_committed_one_does_not_re_commit(tmp_path):
     disposition, the first close's own record is intact, and the second attempt's review
     stages were never driven."""
     deps, run_dir = main_deps(tmp_path)
-    first = _close(deps, "malicious", FakeReviewStages(challenger=[tail(SETTLED)]))
+    first = close(deps, "malicious", FakeReviewStages(challenger=[tail(SETTLED)]))
     assert first.outcome == STANDS
     committed = (run_dir / "report.md").read_text(encoding="utf-8")
     record_before = review_records(run_dir)
 
     second_stages = FakeReviewStages(challenger=[tail(SETTLED)])
     with pytest.raises(ModelRetry, match="closed"):
-        _close(deps, "benign", second_stages)
+        close(deps, "benign", second_stages)
     assert second_stages.calls == [], (
         "a refused second close still spent the whole review — the gate ran again"
     )
@@ -1114,7 +1110,7 @@ def test_a_second_close_after_a_committed_one_does_not_re_commit(tmp_path):
     )
 
     fresh, fresh_dir = main_deps(tmp_path / "never-closed")
-    control = _close(fresh, "benign", FakeReviewStages(challenger=[tail(SETTLED)]))
+    control = close(fresh, "benign", FakeReviewStages(challenger=[tail(SETTLED)]))
     assert control.outcome == STANDS, "control: the same call on an open run must commit"
     assert frontmatter_of(fresh_dir / "report.md")["disposition"] == "benign"
 
