@@ -395,12 +395,9 @@ REQUIREMENT_MAX = 500
 
 
 def _executed_lead_ids(run_dir) -> tuple[str, ...]:
-    from pathlib import Path
+    from defender.learning.lead_repository import lead_ids
 
-    d = Path(run_dir) / "gather_raw"
-    if not d.is_dir():
-        return ()
-    return tuple(sorted(p.name[: -len(".lead.json")] for p in d.glob("*.lead.json")))
+    return lead_ids(run_dir)
 
 
 def _fresh_stage_request(prompt: str, bounds: Bounds) -> StageRequest:

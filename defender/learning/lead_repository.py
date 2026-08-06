@@ -60,6 +60,28 @@ class JoinedLead:
 
 
 
+def lead_ids(run_dir: Path) -> tuple[str, ...]:
+    """Which leads this run executed, by id, sorted — a GLOB, never a parse.
+
+    Deliberately not `sorted(load_leads(run_dir))`, and the difference is not efficiency.
+    `load_leads` json-parses each row and silently skips anything corrupt, so a single torn
+    `.lead.json` would erase a lead from this answer. The write-time challenge gate closes a
+    whole review on it, which means a parse hiccup on one file would quietly change the
+    gate's verdict on the run. Existence is the question here; readability is not.
+
+    The suffix and the directory are this module's and `RunPaths`'s respectively — the gate
+    used to spell both by hand.
+    """
+    gather = RunPaths(Path(run_dir)).gather_raw
+    if not gather.is_dir():
+        return ()
+    return tuple(sorted(
+        p.name[: -len(_LEAD_SUFFIX)]
+        for p in gather.glob(f"*{_LEAD_SUFFIX}")
+        if p.name != _LEAD_SUFFIX
+    ))
+
+
 def load_leads(run_dir: Path) -> dict[str, dict]:
     gather = RunPaths(Path(run_dir)).gather_raw
     if not gather.is_dir():

@@ -21,6 +21,7 @@ from pathlib import Path
 
 import pytest
 
+from defender import _flock
 from defender import _git  # type: ignore[import-not-found]
 from defender.learning.author import shared as shared  # type: ignore[import-not-found]
 from defender.tests._repo import head_files, head_message, seed_repo
@@ -285,7 +286,7 @@ def test_flock_or_skip_propagates_non_contention_oserror(tmp_path: Path, monkeyp
     def _no_locks(_fd, _op):
         raise OSError(errno.ENOLCK, "No locks available")
 
-    monkeypatch.setattr(shared.fcntl, "flock", _no_locks)
+    monkeypatch.setattr(_flock.fcntl, "flock", _no_locks)
     with pytest.raises(OSError, match="No locks available") as excinfo, shared.flock_or_skip(lock):
         pass
     assert excinfo.value.errno == errno.ENOLCK
@@ -311,7 +312,7 @@ def test_acquire_flock_closes_handle_when_error_propagates(tmp_path: Path, monke
         raise OSError(errno.ENOLCK, "No locks available")
 
     monkeypatch.setattr(Path, "open", _tracking_open)
-    monkeypatch.setattr(shared.fcntl, "flock", _no_locks)
+    monkeypatch.setattr(_flock.fcntl, "flock", _no_locks)
     with pytest.raises(OSError, match="No locks available"):
         shared.acquire_flock(lock)
     assert opened, "acquire_flock never opened the lock file"
