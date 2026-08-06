@@ -125,21 +125,13 @@ from defender.runtime.agent_definition import (  # noqa: E402
 )
 from defender.agents import (  # noqa: E402
     ACTOR_DEF,
-    CHALLENGER_DEF,
-    COHERENCE_CHECKER_DEF,
     CORPUS_AUTHOR_DEF,
     GATHER_DEF,
     JUDGE_DEF,
     LEAD_AUTHOR_DEF,
     MAIN_DEF,
     ORACLE_DEF,
-    PROJECTION_DEF,
     VERIFY_DEF,
-)
-from defender.runtime.review_roles import (  # noqa: E402
-    ChallengerDeps,
-    CoherenceCheckerDeps,
-    ProjectionDeps,
 )
 
 _DEFENDER = PATHS.defender_dir
@@ -543,10 +535,10 @@ def test_d2_deps_class_maps_every_bindable_role(tmp_path):
     (compiling it here would root its write_allow at run_dir), so it is constructed only via
     `CuratorDeps.for_run` and bind(CORPUS_AUTHOR_DEF) FAILS LOUD rather than mint a wrong policy.
 
-    #774 added three further ordinarily-bindable roles (CHALLENGER/COHERENCE_CHECKER, and
-    PROJECTION once R6 gave the projection stage a role of its own — none holds a read or bash
-    grant and none needs a corpus, so a bare `bind()` works exactly like MAIN/GATHER/ORACLE,
-    not like the CORPUS_AUTHOR carve-out).
+    #774 added three further ordinarily-bindable roles — CHALLENGER, COHERENCE_CHECKER and
+    PROJECTION — and #797 retired all three with the review stages they ran. Their bind was
+    the ordinary one (no read grant, no bash grant, no corpus), so nothing about the carve-out
+    below turned on them; #796's lenses and composer bind the same ordinary way and land here.
 
     The enumeration below is what makes the count assertion mean anything: a role added to the
     enum but left out of `cases` would move the count and still never be bound, so every
@@ -560,12 +552,9 @@ def test_d2_deps_class_maps_every_bindable_role(tmp_path):
         (bind(VERIFY_DEF, tmp_path, defender_dir=tmp_path / "vwt" / "defender"), VerifierDeps),
         (bind(LEAD_AUTHOR_DEF, tmp_path / "run", defender_dir=tmp_path / "wt" / "defender"),
          LeadAuthorDeps),
-        (bind(CHALLENGER_DEF, tmp_path), ChallengerDeps),
-        (bind(COHERENCE_CHECKER_DEF, tmp_path), CoherenceCheckerDeps),
-        (bind(PROJECTION_DEF, tmp_path), ProjectionDeps),
     ]
-    # 11 roles total: the 10 bindable ones above + CORPUS_AUTHOR (for_run-only, asserted below).
-    assert len({role for role in AgentRole}) == 11
+    # 8 roles total: the 7 bindable ones above + CORPUS_AUTHOR (for_run-only, asserted below).
+    assert len({role for role in AgentRole}) == 8
     for deps, expected in cases:
         assert type(deps) is expected, f"{deps.role} → {type(deps).__name__}, want {expected.__name__}"
     with pytest.raises((ValueError, TypeError)):

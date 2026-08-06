@@ -621,8 +621,16 @@ demands:
      # demand cannot hold it; the ratchet now refuses an un-triaged entry for every change,
      # and this node pins that refusal.
 
-  - {id: live_projection_stage_sheds_the_retired_name, kind: behavior, form: test,
-     discharged_by: test_791_the_live_projection_stage_sheds_the_retired_stages_name,
+  - {id: live_projection_stage_sheds_the_retired_name, kind: behavior, form: waiver,
+     outcome: {nl: "RETIRED BY #797, which deleted the live projection stage itself — the
+       role, its definition, its input builder, its reply contract and both of its trace
+       files. The demand was that the surviving stage stop being spelled with the offline
+       oracle's name; there is no surviving stage to spell. `test_791_the_live_projection_
+       stage_sheds_the_retired_stages_name` went with it rather than being left asserting
+       over a stage that no longer exists. The rule it carried does NOT lapse: no review
+       role may be named for the retired offline oracle, and #796's lenses and composer
+       inherit it. Waived rather than deleted so the graph stays a record of what #791
+       demanded."},
      binds: ["projection", "review_live_trace",
              "interacts(challenge_gate->review_live_trace)"]}
      # R19 (§7 round 4), and the finding that the re-key's own stated goal was false of the
@@ -636,8 +644,13 @@ demands:
      # shipped #774 tests that assert the retired spelling in a trace filename (the
      # blast-radius clause below is what carries them).
 
-  - {id: rekey_live_projection_graph_id, kind: uniqueness, form: test,
-     discharged_by: test_791_the_older_graph_stops_addressing_the_retired_id,
+  - {id: rekey_live_projection_graph_id, kind: uniqueness, form: waiver,
+     outcome: {nl: "RETIRED BY #797, which deleted `spec_graph_774.yaml` — the graph this
+       demand was about — together with the review stages it specified. A demand that the
+       older graph stop addressing the retired stage's id has no older graph left to read;
+       `test_791_the_older_graph_stops_addressing_the_retired_id` would have failed on a
+       missing file, which is not the same fact as the collision being gone. Waived rather
+       than deleted so the graph stays a record of what #791 demanded."},
      binds: ["spec_graph_774", "projection"]}
      # R8, confirming FK5 (folded in as a stated assumption, not inherited on trust). C14:
      # six demands and four pre-discharged entries still address `oracle` in that graph, and

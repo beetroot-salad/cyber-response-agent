@@ -39,24 +39,12 @@ from defender.skills.invlang.validate import validate_companion
 pytestmark = pytest.mark.e2e
 
 
-class _StubStage:
-    """#774: the minimal review-stage callable shape (`request -> str`, awaited) — a local
-    stub rather than importing `_gate774.FakeReviewStages` into a non-#774 test module."""
-
-    def __init__(self, reply: str) -> None:
-        self._reply = reply
-
-    async def __call__(self, request):  # noqa: ANN001 — StageRequest, untyped to avoid the import
-        return self._reply
-
-
-class _RefutingStages:
-    """A confident close's counter-story arrives fully settled — REFUTED, no live call."""
-
-    def __init__(self) -> None:
-        self.challenger = _StubStage('{"counter_story": "x", "requirements": []}')
-        self.coherence_checker = _StubStage("COHERENT")
-        self.projection = _StubStage('{"leads": []}')
+# #797 retired the three review stages, so there is no stub bundle to inject: the review
+# bundle is empty until #796 lands its lenses and composer, and the gate fails every
+# confident close CLOSED. The two replays below drafted `malicious` and used to commit it on
+# a stub counter-story that arrived fully settled; they now commit `inconclusive`, which is
+# the deliberate interim posture and is asserted as such rather than worked around.
+CONFIDENT_CLOSE_IS_FORCED = "inconclusive"
 
 
 def test_replay_golden_v2sshd(tmp_path):
@@ -120,10 +108,10 @@ def test_replay_full_run_ab3(tmp_path, monkeypatch):
     )
 
     # #774/R1: the golden trace's report.md write is re-recorded as a close_investigation
-    # call. It reaches a confident (malicious) disposition, which the gate now reviews — a
-    # stub bundle answering "fully settled" (no unsettled requirement) takes the REFUTED arm
-    # and commits the drafted disposition unchanged, with no live provider call.
-    drive(run_dir, run_id=run_id, salt=salt, main=replay, review_stages=_RefutingStages())
+    # call. It reaches a confident (malicious) disposition, which the gate reviews — and #797
+    # left it with no review role to dispatch, so the review fails closed and the drafted
+    # disposition is overridden. No live provider call either way.
+    drive(run_dir, run_id=run_id, salt=salt, main=replay)
 
     assert replay.calls == len(turns), \
         f"replayed {replay.calls}/{len(turns)} turns (early stop = an unexpected gate deny)"
@@ -135,9 +123,17 @@ def test_replay_full_run_ab3(tmp_path, monkeypatch):
 
     assert validate_companion(produced, None) == []
 
-    m = re.search(r"^disposition:\s*(\w+)", (run_dir / "report.md").read_text(), re.M)
+    report = (run_dir / "report.md").read_text()
+    m = re.search(r"^disposition:\s*(\w+)", report, re.M)
     assert m is not None
-    assert m.group(1) == "malicious"
+    assert m.group(1) == CONFIDENT_CLOSE_IS_FORCED, (
+        "the drafted `malicious` reached disk — with no review role bound, a confident close "
+        "must be overridden, not committed"
+    )
+    assert "failure_kind: error" in report, (
+        "the override is recorded as a finding about the evidence rather than as the review "
+        "machinery failing"
+    )
     assert (run_dir / "tool_trace.jsonl").is_file()
 
 
@@ -228,7 +224,7 @@ def test_nested_gather_capture(tmp_path):
     ])
 
     drive(run_dir, run_id=run_id, salt=salt, main=main_replay, gather=gather_replay,
-          verbs=_elastic_verbs(), review_stages=_RefutingStages())
+          verbs=_elastic_verbs())
 
     assert main_replay.calls == 3
     assert gather_replay.calls == 2

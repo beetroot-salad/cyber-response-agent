@@ -526,19 +526,16 @@ def build_agent(  # noqa: PLR0913 — composition root: config + DI seams + the 
     # real grant, for reasons that have nothing to do with catalog content, must not narrow
     # what the catalog advertises.
     register_gather_tool(agent, _build_gather, GATHER_REQUEST_LIMIT, GATHER_DEF.verb_grant)
-    # `build_agent` has no `run_dir` of its own, so it cannot BUILD the live bundle — the
-    # live default is now assembled by `run_investigation`, the entry point that holds the
-    # real run dir, and arrives here already bound to it. The fallback below no longer
-    # substitutes the SOURCE TREE for the missing run dir: doing that anchored each review
+    # `build_agent` has no `run_dir` of its own, so it cannot BUILD a live bundle — a bundle
+    # carrying live stages is assembled by `run_investigation`, the entry point that holds the
+    # real run dir, and arrives here already bound to it. The fallback below must never
+    # substitute the SOURCE TREE for the missing run dir: doing that anchored each review
     # role's compiled policy on the repo checkout and had every stage call append its trace
-    # to a file inside it. Unbound stages fail the review closed at call time, through the
-    # gate's own stage-fault arm, instead of quietly acting on the wrong tree.
+    # to a file inside it. An empty bundle fails the review closed at call time, through the
+    # gate's own fault arm, instead of quietly acting on the wrong tree.
     stages = (
         review_stages if review_stages is not None
-        else review_roles.unbound_review_stages(
-            "no run dir reached this composition root — pass review_stages= (run_investigation "
-            "builds the live bundle against the run's own dir)"
-        )
+        else review_roles.ReviewStages()  # lint-default: ok — DI seam owning its default (#797: the bundle carries no stages until #796)
     )
     if main_defn.tools.close:
         register_close_tool(agent, stages=stages, bounds=bounds)
@@ -713,15 +710,18 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     # gate's bounds, carrying the request ceiling's own BASE), resolved once at the entry
     # point and threaded inward as a concrete value.
     gate_bounds = bounds if bounds is not None else challenge_gate.default_bounds()
-    # THE one place the live review bundle can honestly be built: the entry point is the only
+    # THE one place a live review bundle can honestly be built: the entry point is the only
     # frame that holds both the run dir the stages must write their traces into and anchor
     # their policies on, and the operator's model choice. `build_agent` — which sees neither —
     # used to substitute the source tree for the run dir here.
+    #
+    # #797: the bundle is EMPTY until #796 lands its lenses and composer, so the live default
+    # is buildable without either input for now. The assembly stays HERE rather than moving up
+    # to `build_agent` — the moment a stage exists again it needs the run dir, and moving the
+    # seam back afterwards is how the source-tree substitution got written the first time.
     stages = (
         review_stages if review_stages is not None
-        else review_roles.default_review_stages(  # lint-default: ok — DI seam owning its default (the live bundle, buildable only where the run dir is)
-            run_dir=run_dir, defender_dir=defender_dir, model=model_name,
-        )
+        else review_roles.ReviewStages()  # lint-default: ok — DI seam owning its default (the live bundle, buildable only where the run dir is)
     )
     make_model = make_model or providers.build_for_effort
     adapters = defender_dir / "scripts" / "adapters"

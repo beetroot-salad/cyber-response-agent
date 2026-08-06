@@ -17,7 +17,6 @@ goes through tool registration at all.
 from __future__ import annotations
 
 import asyncio
-import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -67,28 +66,30 @@ COMMITTED_OUTCOMES: tuple[str, ...] = (STANDS, FORCED_INCONCLUSIVE)
 # finding about the case, not a failure — fold that in and the field is set on every close,
 # which makes counting by it count everything.
 #
-# Four members, each earning its place by a DIFFERENT RESPONSE rather than by naming a
+# Three members, each earning its place by a DIFFERENT RESPONSE rather than by naming a
 # different condition — which is the bar the retired ten-member enum could not clear.
+#
+# #797 retired a fourth, `incoherent`. It was the COHERENCE CHECKER'S quality signal — a
+# counter-story that answered inside its contract and still never settled into internal
+# consistency across the grace budget — and with the challenger, the checker and the grace
+# budget all gone, nothing can produce it. A vocabulary member no producer can reach is a
+# bucket every fleet query counts as empty and every reader has to know is unreachable.
 # --------------------------------------------------------------------------------------
 
 #: A stage was still pending at its deadline. Capacity: move the bound, or chase the
 #: provider's latency. The one member whose right response may be to do nothing.
 TIMEOUT = "timeout"
-#: A stage call raised. A defect, with a traceback to read.
+#: A stage call raised, or no reviewer was bound to call. A defect, with a traceback or a
+#: missing composition root to chase.
 STAGE_ERROR = "error"
 #: A stage ANSWERED, outside its own output contract: a reply that will not parse, rows
-#: missing the fields the classifier reads, or identifiers naming leads the investigation
-#: never executed. Nothing is down — the prompt or the contract is what needs work. An
-#: unreadable reply and a hallucinated lead identifier are ONE member on purpose: they are
+#: missing the fields the reader reads, or identifiers naming something the investigation
+#: never produced. Nothing is down — the prompt or the contract is what needs work. An
+#: unreadable reply and a hallucinated identifier are ONE member on purpose: they are
 #: different conditions with the same response, and separating those is how ten arms grew.
 UNREADABLE = "unreadable"
-#: A stage answered INSIDE its contract and the content still could not be used — the
-#: counter-story never settled into internal consistency across the grace budget. This is the
-#: challenger-quality signal, and folding it into `unreadable` is precisely the inflated
-#: incoherence rate `malformed_output_is_not_scored_as_incoherence` refuses.
-INCOHERENT = "incoherent"
 
-FAILURE_KINDS: tuple[str, ...] = (TIMEOUT, STAGE_ERROR, UNREADABLE, INCOHERENT)
+FAILURE_KINDS: tuple[str, ...] = (TIMEOUT, STAGE_ERROR, UNREADABLE)
 
 # --------------------------------------------------------------------------------------
 # THE CAUSE — the close's OWN sentences, and the only strings the frontmatter's `cause` may
@@ -106,21 +107,28 @@ FAILURE_KINDS: tuple[str, ...] = (TIMEOUT, STAGE_ERROR, UNREADABLE, INCOHERENT)
 # of a key something counts.
 # --------------------------------------------------------------------------------------
 
+# #797 RETIRED `CAUSE_NO_STORY` — "the challenge review ran and no alternative account was
+# offered". It named the challenger's deliberate DECLINE, and a decline is a thing only a
+# party that argues a counter-case can do. With no such party the sentence has no referent,
+# and the three below that borrowed its "alternative account" phrasing are reworded off it:
+# each still names exactly the condition it always named, in words that do not point at a
+# counter-story nothing produces.
+
 CAUSE_NOT_REVIEWED = "the disposition was recorded without a challenge review"
 CAUSE_STORY_SETTLED = (
-    "the challenge review ran and existing evidence settled its alternative account"
+    "the challenge review ran and left nothing about the finding unsettled"
 )
-CAUSE_NO_STORY = "the challenge review ran and no alternative account was offered"
-#: FOUR conditions share this one: an unparseable challenger reply, a stage that raised or
-#: timed out, a projection the classifier cannot read or that named an unexecuted lead, and a
-#: story that never became coherent. They are told apart by `failure_kind`, two lines above it
-#: in the same frontmatter, and by the record's `detail` — never by a second sentence here.
+#: THREE conditions share this one: a stage that raised or timed out, a stage reply the gate
+#: cannot read or that named something the investigation never produced, and — until #796
+#: binds a reviewer — a gate with no review role to dispatch at all. They are told apart by
+#: `failure_kind`, two lines above it in the same frontmatter, and by the record's `detail` —
+#: never by a second sentence here.
 CAUSE_REVIEW_INCOMPLETE = "the challenge review did not complete"
 CAUSE_EVIDENCE_CANNOT_DISCRIMINATE = (
-    "the evidence gathered cannot discriminate between the finding and its alternative account"
+    "the evidence gathered cannot discriminate what the challenge review left unsettled"
 )
 CAUSE_TURN_BUDGET_SPENT = (
-    "the forced-turn budget was spent without settling the alternative account"
+    "the forced-turn budget was spent without settling what the challenge review raised"
 )
 CAUSE_NOTHING_LEFT_TO_ASK = (
     "no discriminating lead remains that the investigation was not already asked for"
@@ -129,7 +137,6 @@ CAUSE_NOTHING_LEFT_TO_ASK = (
 REPORT_CAUSES: tuple[str, ...] = (
     CAUSE_NOT_REVIEWED,
     CAUSE_STORY_SETTLED,
-    CAUSE_NO_STORY,
     CAUSE_REVIEW_INCOMPLETE,
     CAUSE_EVIDENCE_CANNOT_DISCRIMINATE,
     CAUSE_TURN_BUDGET_SPENT,
@@ -154,8 +161,14 @@ ArtifactValidator = Callable[[str, str, str | None], str | None]
 
 @dataclass(frozen=True)
 class RecommendedLead:
+    """One thing the review wants measured before the close can stand.
+
+    `ask` was `requirement` — the challenger's word for an assertion its counter-story
+    needed settled. #797 retired the counter-story; what a review hands back is its ask, and
+    the field is renamed rather than left carrying the retired party's vocabulary."""
+
     lead_id: str
-    requirement: str
+    ask: str
     origin: str
 
 
@@ -174,7 +187,6 @@ class CloseResult:
     cause: str
     detail: str
     turns_used: int = 0
-    rounds_used: int = 0
     failure_kind: str | None = None
 
 
@@ -229,7 +241,7 @@ def _render_challenged_message(material: tuple[RecommendedLead, ...], deps: Agen
     the message would leave production telling the model something the gate can no longer
     mean."""
     assert material, "the challenged arm never returns without discriminating material"
-    lines = [f"- {lead.lead_id}: {lead.requirement}" for lead in material]
+    lines = [f"- {lead.lead_id}: {lead.ask}" for lead in material]
     # O6/O7: the discriminating material is derived from a payload-influenced role's output —
     # it returns inside the SAME run-salted untrusted frame the gather subagent's return
     # already uses (`defender._untrusted.wrap`, keyed on the INVESTIGATION's own salt, never
@@ -243,25 +255,20 @@ def _render_challenged_message(material: tuple[RecommendedLead, ...], deps: Agen
 
 def _record_dict(verdict: challenge_gate.GateVerdict, disposition: str, deps: AgentDeps) -> dict:
     """The numbered review record. `detail` is here and NOT on report.md by decision: the
-    diagnostic quotes the stage's own words on three conditions (the challenger's decline
-    prose, a projected identifier for a lead the run never executed, an unreadable projection
-    row), and this is the one artifact no prompt reads verbatim. It is framed like the
-    record's other stage-derived fields — kept rather than dropped, so the words survive
-    somewhere a human can read them off the run."""
+    diagnostic may quote a stage's own words, and this is the one artifact no prompt reads
+    verbatim. It is framed rather than dropped, so the words survive somewhere a human can
+    read them off the run.
+
+    #797 dropped four keys with the stages that filled them: `direction` and
+    `requirement_list` (the challenger's counter-direction and its assertions),
+    `projection_response` (the projection stage's per-lead tags) and `rounds_consumed` (the
+    refinement loop's counter — there is one review pass now, so the number could only ever
+    be zero). `attacked_disposition` is `reviewed_disposition`: nothing attacks it any more.
+    #796 adds the lens readings and the composer's prose."""
     return {
         "verdict": verdict.outcome,
-        "direction": verdict.direction,
-        "attacked_disposition": disposition,
-        "requirement_list": (
-            _wrap(json.dumps(verdict.requirement_list), "untrusted", deps.salt)
-            if verdict.requirement_list else ""
-        ),
-        "projection_response": (
-            _wrap(json.dumps(verdict.projection_rows), "untrusted", deps.salt)
-            if verdict.projection_rows else ""
-        ),
+        "reviewed_disposition": disposition,
         "detail": _wrap(verdict.detail, "untrusted", deps.salt) if verdict.detail else "",
-        "rounds_consumed": verdict.rounds_used,
         "failure_kind": verdict.failure_kind,
     }
 
@@ -276,7 +283,6 @@ class _CloseFields:
     detail: str
     material: tuple[RecommendedLead, ...]
     turns_used: int
-    rounds_used: int
     failure_kind: str | None
 
 
@@ -337,7 +343,7 @@ def _commit(  # noqa: PLR0913 — the commit's full inputs; the scalars are alre
     return CloseResult(
         outcome=fields.outcome, message=f"closed: {fields.outcome} (disposition={disposition})",
         material=fields.material, record_path=record_path, cause=fields.cause,
-        detail=fields.detail, turns_used=fields.turns_used, rounds_used=fields.rounds_used,
+        detail=fields.detail, turns_used=fields.turns_used,
         failure_kind=fields.failure_kind,
     )
 
@@ -379,13 +385,12 @@ async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams
         # The gate reviews CONFIDENT closes only, so nothing was reviewed and there is no
         # stage output to diagnose — the empty detail here is the honest value, not a gap.
         record = {
-            "verdict": STANDS, "direction": None, "attacked_disposition": disposition,
-            "requirement_list": "", "projection_response": "", "detail": "",
-            "rounds_consumed": 0, "failure_kind": None,
+            "verdict": STANDS, "reviewed_disposition": disposition, "detail": "",
+            "failure_kind": None,
         }
         fields = _CloseFields(
             outcome=STANDS, cause=CAUSE_NOT_REVIEWED, detail="", material=(),
-            turns_used=0, rounds_used=0, failure_kind=None,
+            turns_used=0, failure_kind=None,
         )
         return _commit(deps, disposition, fields, record, validator=validator, evidence=evidence)
 
@@ -393,8 +398,8 @@ async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams
         deps, disposition, stages=stages, bounds=bounds,
     )
     material = tuple(
-        RecommendedLead(lead_id=lid, requirement=req, origin="review")
-        for lid, req in verdict.material
+        RecommendedLead(lead_id=target, ask=ask, origin="review")
+        for target, ask in verdict.material
     )
     record = _record_dict(verdict, disposition, deps)
 
@@ -406,12 +411,12 @@ async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams
             outcome=CHALLENGED, message=_render_challenged_message(material, deps),
             material=material, record_path=record_path, cause=verdict.cause,
             detail=verdict.detail, turns_used=verdict.turns_used,
-            rounds_used=verdict.rounds_used, failure_kind=verdict.failure_kind,
+            failure_kind=verdict.failure_kind,
         )
 
     fields = _CloseFields(
         outcome=verdict.outcome, cause=verdict.cause, detail=verdict.detail,
-        material=material, turns_used=verdict.turns_used, rounds_used=verdict.rounds_used,
+        material=material, turns_used=verdict.turns_used,
         failure_kind=verdict.failure_kind,
     )
     return _commit(deps, verdict.disposition, fields, record, validator=validator,
@@ -462,7 +467,6 @@ __all__ = [
     "CAUSE_EVIDENCE_CANNOT_DISCRIMINATE",
     "CAUSE_NOTHING_LEFT_TO_ASK",
     "CAUSE_NOT_REVIEWED",
-    "CAUSE_NO_STORY",
     "CAUSE_REVIEW_INCOMPLETE",
     "CAUSE_STORY_SETTLED",
     "CAUSE_TURN_BUDGET_SPENT",
@@ -471,7 +475,6 @@ __all__ = [
     "COMMITTED_OUTCOMES",
     "FAILURE_KINDS",
     "FORCED_INCONCLUSIVE",
-    "INCOHERENT",
     "NO_CAUSE",
     "REPORT_CAUSES",
     "STAGE_ERROR",

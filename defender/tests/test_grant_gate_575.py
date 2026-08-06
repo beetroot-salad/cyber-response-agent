@@ -408,10 +408,11 @@ def test_b3_every_registered_agents_policy_passes_the_table_check(env):
     #691). It is the one denylist-free lane, so an untabled (=ungated) program there is the worst
     place for the fail-open to hide."""
     pols = _all_policies(env)
-    # 11 since #774/R6 minted the projection stage's own role (the review's three roles are
-    # CHALLENGER, COHERENCE_CHECKER and PROJECTION). This counts registered roles, so a
-    # deliberately added role moves it; what the test checks is the table property below.
-    assert len(AGENTS) == 11
+    # 8 since #797 retired the review's three roles (CHALLENGER, COHERENCE_CHECKER and
+    # PROJECTION) with the stages that ran under them; #774/R6 had taken it to 11. This
+    # counts registered roles, so a deliberately added or retired role moves it; what the
+    # test checks is the table property below.
+    assert len(AGENTS) == 8
     assert CORPUS_AUTHOR_DEF in AGENTS.values()
     assert "corpus_author" in pols
     for name, pol in pols.items():
