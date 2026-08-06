@@ -161,9 +161,10 @@ def _make_live_stage(  # noqa: PLR0913 — one stage's full wiring, named once
     *, agent_id: str, instructions: str,
 ):
     """One live, agent-backed review stage: built lazily, one Agent per call, mirroring the
-    gather-subagent-from-tool-body pattern. NOT exercised by the hermetic suite (every
-    scenario there injects a fake), so treat a bundle built from it as a best-effort live
-    default.
+    gather-subagent-from-tool-body pattern. NOT exercised by the hermetic suite — the replay
+    harness binds a fake bundle on the `review_stages` seam by DEFAULT, so a replay reaching
+    this function is itself the bug (`test_replay_skeleton` asserts no `*_live_trace.jsonl`
+    is written). Treat a bundle built from it as a best-effort live default.
 
     `trace_name` and `agent_id` are PER LENS and not per role, because one role can be
     dispatched twice. `RequestLogger` refuses a second concurrent open of a path, so a shared

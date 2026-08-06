@@ -26,6 +26,9 @@ from defender.runtime.close_tool import (
     UNREADABLE,
 )
 from defender.runtime.review_roles import ReviewStages
+from defender.tests._review_bundle import bundle as _bundle
+from defender.tests._review_bundle import composer_reply as _composer
+from defender.tests._review_bundle import stage as _stage
 from defender.tests._spec791 import (  # noqa: F401 — session-scoped autouse guard
     worktree_package_guard,
 )
@@ -47,24 +50,6 @@ def _deps(tmp_path: Path):
     return bind(MAIN_DEF, run_dir, defender_dir=dfn, salt="sess-salt"), run_dir
 
 
-def _stage(reply: str):
-    async def call(_request):
-        return reply
-
-    return call
-
-
-def _bundle(*, lens: str = "l-001 separates h-001 from h-002.", composer: str):
-    """Every lens answers with `lens`; only the composer's reply varies per scenario. The
-    routing arms below are about what the COMPOSER found, so the lenses are held constant."""
-    return ReviewStages(
-        discrimination=_stage(lens), support=_stage(lens), ablation=_stage(lens),
-        composer=_stage(composer),
-    )
-
-
-def _composer(finding="holds", review="reads sound", ask=None):
-    return json.dumps({"finding": finding, "review": review, "ask": ask})
 
 
 def _run(deps, bundle, *, disposition="malicious", bounds=None):
