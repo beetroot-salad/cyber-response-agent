@@ -177,3 +177,51 @@ def test_an_unfenced_document_is_refused_rather_than_projected_empty():
 def test_an_empty_document_is_refused():
     with pytest.raises(EmptyInvestigation):
         parse_investigation("")
+
+
+# ---------------------------------------------------------------------------------------
+# Ablation targeting
+# ---------------------------------------------------------------------------------------
+
+
+def test_the_ablation_target_is_a_load_bearing_edge_with_its_footprint(companion):
+    """On the golden, ONE edge supports every strong resolution. The count travels with the
+    target so the composer can tell "this edge was load-bearing" from "this case rests
+    entirely on one edge" — otherwise a reading that collapses reads as fragility when it is
+    really the whole case being removed."""
+    from defender.runtime.review.projector import ablation_target
+
+    target, carried = ablation_target(companion)
+    assert target.startswith("e-")
+    assert carried >= 1
+
+
+def test_targeting_reaches_a_close_carried_by_refutation():
+    """`--` on a refuted sibling is load-bearing exactly as `++` on a surviving hypothesis is.
+    Counting only the survivors leaves a benign close carried by refuting the adversarial
+    sibling with no ablation target at all — the highest-cost error class the gate exists to
+    catch."""
+    from defender.runtime.review.projector import ablation_target
+
+    refuting = {
+        "findings": [{
+            "id": "l-001",
+            "resolutions": [{
+                "hypothesis_id": "h-002", "before": None, "after": "--",
+                "supporting_edges": ["e-009"],
+            }],
+        }],
+    }
+    assert ablation_target(refuting) == ("e-009", 1)
+
+
+def test_a_record_with_no_strong_movement_has_no_target():
+    from defender.runtime.review.projector import ablation_target
+
+    weak = {
+        "findings": [{
+            "id": "l-001",
+            "resolutions": [{"hypothesis_id": "h-001", "after": "+", "supporting_edges": ["e-1"]}],
+        }],
+    }
+    assert ablation_target(weak) is None

@@ -211,6 +211,11 @@ class ReviewStages:
 
     discrimination: Any = None
     support: Any = None
+    #: The SUPPORT role again, as a
+    #: SEPARATE call: its own trace file and its own agent id, because `RequestLogger`
+    #: refuses a second concurrent open of a path and `observe` keys its sequence on the
+    #: agent id. One role, two calls, two records.
+    ablation: Any = None
     composer: Any = None
 
     def stage(self, name: str) -> Any:
@@ -246,5 +251,6 @@ def live_review_stages(
     return ReviewStages(
         discrimination=staged(DISCRIMINATION_DEF, "discrimination"),
         support=staged(SUPPORT_DEF, "support"),
+        ablation=staged(SUPPORT_DEF, "ablation"),
         composer=staged(COMPOSER_DEF, "composer"),
     )

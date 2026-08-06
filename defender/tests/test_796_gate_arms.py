@@ -57,7 +57,8 @@ def _bundle(*, lens: str = "l-001 separates h-001 from h-002.", composer: str):
     """Every lens answers with `lens`; only the composer's reply varies per scenario. The
     routing arms below are about what the COMPOSER found, so the lenses are held constant."""
     return ReviewStages(
-        discrimination=_stage(lens), support=_stage(lens), composer=_stage(composer),
+        discrimination=_stage(lens), support=_stage(lens), ablation=_stage(lens),
+        composer=_stage(composer),
     )
 
 

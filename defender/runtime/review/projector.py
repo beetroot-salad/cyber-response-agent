@@ -33,6 +33,7 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
+from defender.skills.invlang import _walkers, vocab
 from defender.skills.invlang.parser import parse_dense_companion
 from defender.skills.invlang.schema import CompanionBody
 
@@ -42,6 +43,7 @@ __all__ = [
     "INFERENCE_LEAD_KEYS",
     "EmptyInvestigation",
     "Projection",
+    "ablation_target",
     "discrimination_projection",
     "observation_only",
     "parse_investigation",
@@ -148,13 +150,46 @@ _SUPPORT_ASK = (
 )
 
 
+def ablation_target(companion: CompanionBody) -> tuple[str, int] | None:
+    """The edge to withhold from the ablation lens, and how many strong resolutions cite it.
+
+    Chosen HOST-side from the parsed graph, never by a model — a lens that picked what to
+    withhold from itself would be choosing its own difficulty.
+
+    Load-bearing means a STRONG move in either direction. `++` on a surviving hypothesis and
+    `--` on a refuted sibling are both load-bearing, and taking only the first would leave a
+    benign close carried by refuting the adversarial sibling with no ablation target at all —
+    which is the highest-cost error class this gate exists to catch.
+
+    Among those, the edge with the NARROWEST citation footprint. Ablating an edge that carries
+    every resolution removes the whole case, and a lens reading a near-empty world diverges
+    from the support reading for reasons that have nothing to do with fragility. The footprint
+    count travels with the target so the composer can tell "this edge was load-bearing" from
+    "this case rests on one edge" — on the golden document a single edge supports all four
+    resolutions, and that is a finding rather than noise."""
+    footprint: dict[str, int] = {}
+    for _lead_id, res in _walkers.iter_resolutions(companion):
+        if res.get("after") not in vocab.STRONG_WEIGHTS:
+            continue
+        for edge in res.get("supporting_edges") or []:
+            if isinstance(edge, str):
+                footprint[edge] = footprint.get(edge, 0) + 1
+    if not footprint:
+        return None
+    edge = min(sorted(footprint), key=lambda e: footprint[e])
+    return edge, footprint[edge]
+
+
 _COMPOSER_ASK = (
     "Independent lens readings first, then the investigation's own account of how it moved "
     "and what it concluded. Each lens reached its reading without seeing that account."
 )
 
 
-def composer_projection(companion: CompanionBody, readings: dict[str, str]) -> Projection:
+def composer_projection(
+    companion: CompanionBody, readings: dict[str, str],
+    *, ablated: tuple[str, int] | None = None,
+) -> Projection:
     """The composer's input: every lens reading, and then the WHOLE companion.
 
     The one projection that withholds nothing. The composer is allowed to be anchored by the
@@ -165,6 +200,17 @@ def composer_projection(companion: CompanionBody, readings: dict[str, str]) -> P
     lenses = "\n\n".join(
         f"### Lens: {lens}\n{reading}" for lens, reading in sorted(readings.items())
     )
+    if ablated is not None:
+        edge, carried = ablated
+        lenses += (
+            f"\n\nThe `ablation` lens above read the same evidence as `support` with {edge} "
+            f"removed, and was not told anything was missing. {edge} is cited by {carried} "
+            "strong belief movement(s). A reading that survives the removal shows the move "
+            "did not rest on that edge alone; one that collapses shows it did. Where the edge "
+            "carries most of the case, expect the reading to collapse for that reason rather "
+            "than from fragility, and weigh it accordingly. This lens never stands alone as a "
+            "finding — it reconstructs from a deliberately incomplete world."
+        )
     body = json.dumps(companion, indent=2, sort_keys=True, default=str)
     return Projection(
         lens="composer",

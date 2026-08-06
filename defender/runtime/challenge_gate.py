@@ -39,7 +39,7 @@ REVIEW_TIMEOUT_ENV = "DEFENDER_REVIEW_STAGE_TIMEOUT_SECONDS"
 #: role added to the gate cannot arrive with a trace file the incomplete-marker never touches
 #: (the shipped shape restated all three inline, and a stage renamed in one place stayed
 #: spelled the old way in the other).
-REVIEW_ROLES: tuple[str, ...] = ("discrimination", "support", "composer")
+REVIEW_ROLES: tuple[str, ...] = ("discrimination", "support", "ablation", "composer")
 
 
 def stage_timeout() -> int:
@@ -378,6 +378,7 @@ async def challenge_gate(deps: Any, disposition: str, *, stages: Any, bounds: Bo
         EmptyInvestigation,
         composer_projection,
         discrimination_projection,
+        ablation_target,
         parse_investigation,
         support_projection,
     )
@@ -397,6 +398,19 @@ async def challenge_gate(deps: Any, disposition: str, *, stages: Any, bounds: Bo
         "discrimination": discrimination_projection(companion),
         "support": support_projection(companion),
     }
+    # The ablation is the SUPPORT lens again under one withheld edge — same role, same model,
+    # same effort, same prompt — so its reading is a difference against the support reading
+    # and not a difference between two configurations. A record with no strong belief movement
+    # has nothing load-bearing to withhold; that is recorded rather than passed over, so the
+    # trace says the lens did not run and why.
+    ablated = ablation_target(companion)
+    if ablated is not None:
+        lenses["ablation"] = support_projection(companion, without_edge=ablated[0])
+    else:
+        _write_trace_row(
+            deps.run_dir, "ablation", 0,
+            {"ok": True, "skipped": "no strong belief movement cites an edge to withhold"},
+        )
     outcomes = await asyncio.gather(*(
         _dispatch(lens, stages, _fresh_stage_request(projection.text, bounds))
         for lens, projection in lenses.items()
@@ -419,7 +433,9 @@ async def challenge_gate(deps: Any, disposition: str, *, stages: Any, bounds: Bo
 
     composer = await _dispatch(
         "composer", stages,
-        _fresh_stage_request(composer_projection(companion, readings).text, bounds),
+        _fresh_stage_request(
+            composer_projection(companion, readings, ablated=ablated).text, bounds,
+        ),
     )
     _write_trace_row(
         deps.run_dir, "composer", 0, {"ok": composer.ok},
