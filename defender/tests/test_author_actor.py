@@ -24,6 +24,7 @@ from defender.learning.author import shared as shared  # type: ignore[import-not
 from defender.learning.core import persist  # type: ignore[import-not-found]
 from defender.learning.author.malicious_actor import run as aa  # type: ignore[import-not-found]
 from defender.learning.core.config import LoopPaths  # type: ignore[import-not-found]
+from defender.tests._repo import head_files, head_message, seed_repo
 
 
 
@@ -40,13 +41,7 @@ def _isolate(tmp_path: Path):
     lessons.mkdir(parents=True)
     pending.mkdir(parents=True)
 
-    subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
-    subprocess.run(["git", "-C", str(repo), "config", "user.email", "t@t"], check=True)
-    subprocess.run(["git", "-C", str(repo), "config", "user.name", "t"], check=True)
-    seed = repo / "README"
-    seed.write_text("seed\n")
-    subprocess.run(["git", "-C", str(repo), "add", "README"], check=True)
-    subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "seed"], check=True)
+    seed_repo(repo, add="README")
 
     return {
         "repo": repo,
@@ -288,18 +283,8 @@ def test_result_partition_rejects_missing_observation():
         )
 
 
-def _head_files(repo: Path) -> list[str]:
-    return subprocess.run(
-        ["git", "-C", str(repo), "show", "--name-only", "--pretty=format:", "HEAD"],
-        capture_output=True, text=True, check=True,
-    ).stdout.split()
 
 
-def _head_message(repo: Path) -> str:
-    return subprocess.run(
-        ["git", "-C", str(repo), "log", "-1", "--pretty=%B", "HEAD"],
-        capture_output=True, text=True, check=True,
-    ).stdout
 
 
 def test_commit_corpus_appends_provenance(tmp_path: Path):
@@ -315,11 +300,11 @@ def test_commit_corpus_appends_provenance(tmp_path: Path):
         trailers=[("Generation", "3"), ("Actor-Model", "claude-sonnet-4-6")],
     )
     assert new_sha == shared.git_head_sha(ctx["repo"])
-    msg = _head_message(ctx["repo"])
+    msg = head_message(ctx["repo"])
     assert "Generation: 3" in msg
     assert "Actor-Model: claude-sonnet-4-6" in msg
     assert shared.actor_generation_count(ctx["repo"]) == 2
-    assert _head_files(ctx["repo"]) == ["defender/lessons-actor/x.md"]
+    assert head_files(ctx["repo"]) == ["defender/lessons-actor/x.md"]
     assert shared.changes_outside(ctx["repo"], cfg.corpus_dir_rel) == []
 
 
@@ -344,10 +329,10 @@ def test_committed_batch_gets_trailers_stamped_by_loop(tmp_path: Path):
     cfg = _cfg(ctx, committing_invoke)
     rc = curator.run_batch(hold_committed=False, cfg=cfg)
     assert rc == 0
-    msg = _head_message(ctx["repo"])
+    msg = head_message(ctx["repo"])
     assert "Generation: 1" in msg
     assert f"Actor-Model: {cfg.actor_model}" in msg
-    assert _head_files(ctx["repo"]) == ["defender/lessons-actor/lesson.md"]
+    assert head_files(ctx["repo"]) == ["defender/lessons-actor/lesson.md"]
     consumed = [
         json.loads(line)
         for line in (ctx["pending"] / "actor_observations.consumed.jsonl")

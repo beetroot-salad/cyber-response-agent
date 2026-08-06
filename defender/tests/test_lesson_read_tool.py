@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -32,9 +31,8 @@ from pydantic_ai.messages import ModelResponse, TextPart  # noqa: E402
 from pydantic_ai.models.function import FunctionModel  # noqa: E402
 
 import defender.runtime.tools as _rt_tools  # noqa: E402  (the shared read core / char cap)
-from defender.learning.core.config import StageWiring  # noqa: E402
 from defender._io import read_jsonl_rows  # noqa: E402
-from defender.runtime import observe, permission  # noqa: E402
+from defender.runtime import permission  # noqa: E402
 from defender.runtime.agent_role import AgentRole  # noqa: E402
 from defender.agents import AGENTS  # noqa: E402
 from defender.runtime.agent_definition import ToolSet  # noqa: E402
@@ -44,63 +42,34 @@ from defender.runtime.tools import AgentDeps, register_tools  # noqa: E402
 from defender.learning.author.curator_engine import (  # noqa: E402
     CORPUS_AUTHOR_DEF,
     CuratorDeps,
-    ForwardCheckConfig,
 )
-from defender.learning.author.verify_forward.checks import FINDINGS_CHECK  # noqa: E402
-from defender.learning.pipeline._pydantic_stage import build_stage_agent  # noqa: E402
+from defender.tests._curator_scene import (
+    build_curator_agent,
+    curator_deps,
+    curator_scene,
+    write_prompt,
+)
 
 
 
 
 def _scene(tmp_path: Path):
-    repo = tmp_path / "wt"
-    corpus = repo / "defender" / "lessons"
-    corpus.mkdir(parents=True)
-    (repo / "defender" / "lessons-actor").mkdir(parents=True)
-    (repo / "defender" / "lessons-environment").mkdir(parents=True)
-    runs = tmp_path / "state" / "runs"
-    runs.mkdir(parents=True)
-    pending = tmp_path / "state" / "_pending" / "findings.jsonl"
-    pending.parent.mkdir(parents=True)
-    pending.write_text("")
-    curdir = tmp_path / "state" / "_pending"
-    return SimpleNamespace(
-        tmp=tmp_path, repo=repo, corpus=corpus, runs=runs, pending=pending, curdir=curdir,
-    )
+    """All THREE shipped corpora — this suite's subject is the curator's read confinement,
+    which is vacuous if two of the three roots do not exist."""
+    return curator_scene(
+        tmp_path, extra_corpora=("lessons-actor", "lessons-environment"))
 
 
 def _prompt(tmp_path: Path) -> Path:
-    p = tmp_path / "curator.md"
-    p.write_text("Curate. Emit AUTHOR_RESULT when done.\n")
-    return p
+    return write_prompt(tmp_path, "curator.md", "Curate. Emit AUTHOR_RESULT when done.\n")
 
 
 def _build_curator_agent(tmp_path):
-    logger = observe.RequestLogger(tmp_path / "t.jsonl")
-    try:
-        agent = build_stage_agent(
-            CuratorDeps,
-            StageWiring(
-                prompt_path=_prompt(tmp_path), model="m", effort="low",
-                trace_name="t.jsonl", label="curator",
-            ),
-            logger,
-            make_model=_fake_model(_replay("")),
-        )
-        return agent, logger
-    except Exception:
-        logger.close()
-        raise
+    return build_curator_agent(tmp_path, _prompt(tmp_path), _fake_model(_replay("")))
 
 
 def _deps(scene) -> CuratorDeps:
-    return CuratorDeps.for_run(
-        scene.curdir,
-        scene.repo,
-        scene.corpus,
-        cfg=ForwardCheckConfig(check=FINDINGS_CHECK, runs_dir=scene.runs, pending=scene.pending, queued_ids=frozenset(), run_verify=lambda *a, **kw: ""),
-        box=None,
-    )
+    return curator_deps(scene, run_verify=lambda *a, **kw: "")
 
 
 def _tool(agent, name: str):

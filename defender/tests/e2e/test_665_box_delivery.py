@@ -17,7 +17,6 @@ injected `start_box`/`stop_box`/`agents`/`branch`/docker), never a monkeypatch. 
 from __future__ import annotations
 
 import inspect
-from pathlib import Path
 
 import pytest
 
@@ -26,6 +25,8 @@ from _box665 import (  # noqa: E402  (bare import: tests/e2e is on sys.path via 
     BoxLifecycleRecorder,
     RecordingBranch,
     RecordingSubagents,
+    drive_run_one,
+    loop_paths,
     make_run_dir,
     satisfy_engine_keys,
 )
@@ -46,34 +47,12 @@ SALT = "s665"
 # --------------------------------------------------------------------------- #
 # Helpers to drive the two composition frames with the injectable box seams.
 # --------------------------------------------------------------------------- #
-def _paths(tmp_path: Path):
-    from defender.learning.core.config import LoopPaths
-
-    repo = tmp_path / "repo"
-    (repo / "defender").mkdir(parents=True, exist_ok=True)
-    return LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
-
-
-def _run_one(tmp_path, monkeypatch, rec, *, agents=None, disposition="inconclusive", **kw):
-    """Drive the REAL run_one with the future injectable `start_box`/`stop_box` seams.
-    TypeError at HEAD (run_one has no such kwargs) — the red the box-creation site does not
-    yet exist; the recorded assertions define the contract it is built against."""
-    from defender.learning.core.run_cycle import run_one
-
-    satisfy_engine_keys(monkeypatch, disposition)
-    run_dir = make_run_dir(tmp_path, disposition=disposition)
-    return run_one(
-        run_dir, paths=_paths(tmp_path), agents=agents or RecordingSubagents(),
-        start_box=rec.start_box, stop_box=rec.stop_box, **kw,
-    )
-
-
 def _worktree_batch(tmp_path, rec, *, do_work, has_work=None, branch=None,
                     label="author_drain", **kw):
     """Drive the REAL _run_worktree_batch with the future injectable box seams."""
     from defender.learning.core.drains import _run_worktree_batch
 
-    paths = _paths(tmp_path)
+    paths = loop_paths(tmp_path)
     branch = branch or RecordingBranch(tmp_path / "wt", events=rec.events)
     return _run_worktree_batch(
         paths, branch, label=label,
@@ -389,7 +368,7 @@ def test_run_one_creates_run_cycle_box_and_delivers_to_actor_and_judge(tmp_path,
     legs, and stopped."""
     rec = BoxLifecycleRecorder()
     agents = RecordingSubagents()
-    _run_one(tmp_path, monkeypatch, rec, agents=agents, disposition="inconclusive")
+    drive_run_one(tmp_path, monkeypatch, rec, agents=agents, disposition="inconclusive")
 
     box = rec.only_request() and rec.boxes[0]
     assert agents.actor_box is box, "the run-cycle box did not reach the adversarial leg"
@@ -404,7 +383,7 @@ def test_run_cycle_box_self_collides_across_its_own_concurrent_direction_legs(tm
     invocation, actor + judge share it). Asserts exactly one box created for the whole
     invocation."""
     rec = BoxLifecycleRecorder()
-    _run_one(tmp_path, monkeypatch, rec, disposition="inconclusive")
+    drive_run_one(tmp_path, monkeypatch, rec, disposition="inconclusive")
     assert len(rec.boxes) == 1, "each concurrent leg stood up its own box — they collide"
 
 
@@ -418,7 +397,7 @@ def test_sibling_direction_leg_continues_against_a_shared_box_after_the_other_le
     rec = BoxLifecycleRecorder()
     agents = RecordingSubagents(actor_fault=RuntimeError("adversarial leg blew up"))
     with pytest.raises(RuntimeError):  # run_one re-raises the captured leg error, not the seam TypeError
-        _run_one(tmp_path, monkeypatch, rec, agents=agents, disposition="inconclusive")
+        drive_run_one(tmp_path, monkeypatch, rec, agents=agents, disposition="inconclusive")
     assert "actor_benign" in agents.calls, "the sibling leg was cut off by an early teardown"
     assert rec.stopped == rec.boxes, "the shared box was not torn down exactly once at run end"
 
@@ -431,7 +410,7 @@ def test_run_one_leaks_box_on_an_exceptional_exit_not_already_anticipated(tmp_pa
     rec = BoxLifecycleRecorder()
     agents = RecordingSubagents(actor_fault=RuntimeError("boom"))
     with pytest.raises(RuntimeError):
-        _run_one(tmp_path, monkeypatch, rec, agents=agents, disposition="inconclusive")
+        drive_run_one(tmp_path, monkeypatch, rec, agents=agents, disposition="inconclusive")
     assert rec.boxes, "no run-cycle box was created before the exceptional exit"
     assert rec.stopped == rec.boxes, \
         "an exceptional run_one exit leaked the run-cycle box (no teardown ran)"
@@ -452,7 +431,7 @@ def test_run_cycle_box_name_distinct_from_runtime_box_and_grammar_valid(tmp_path
     satisfy_engine_keys(monkeypatch, "inconclusive")
     from defender.learning.core.run_cycle import run_one
 
-    run_one(run_dir, paths=_paths(tmp_path), agents=RecordingSubagents(),
+    run_one(run_dir, paths=loop_paths(tmp_path), agents=RecordingSubagents(),
             start_box=rec.start_box, stop_box=rec.stop_box)
     name = rec.only_request().name
     assert name != runtime_name, "the run-cycle box reused the runtime box's name"
@@ -469,7 +448,7 @@ def test_box_names_distinct_no_runtime_collision(tmp_path, monkeypatch):
     satisfy_engine_keys(monkeypatch, "inconclusive")
     from defender.learning.core.run_cycle import run_one
 
-    run_one(run_dir, paths=_paths(tmp_path), agents=RecordingSubagents(),
+    run_one(run_dir, paths=loop_paths(tmp_path), agents=RecordingSubagents(),
             start_box=rc.start_box, stop_box=rc.stop_box)
     run_cycle_name = rc.only_request().name
     assert run_cycle_name != box_mod.container_name(run_dir.name)
@@ -601,7 +580,7 @@ def test_startup_fault_absorbed_by_an_existing_per_item_continue_idiom(tmp_path)
 def _worktree_batch_start(tmp_path, *, do_work, start_box):
     from defender.learning.core.drains import _run_worktree_batch
 
-    paths = _paths(tmp_path)
+    paths = loop_paths(tmp_path)
     branch = RecordingBranch(tmp_path / "wt")
     return _run_worktree_batch(
         paths, branch, label="author_drain", has_work=lambda p: True, do_work=do_work,
@@ -616,7 +595,7 @@ def test_box_startup_failure_unwinds_the_resources_created_before_it(tmp_path):
     runs even though start_box faulted before any work."""
     from defender.learning.core.drains import _run_worktree_batch
 
-    paths = _paths(tmp_path)
+    paths = loop_paths(tmp_path)
     branch = RecordingBranch(tmp_path / "wt")
 
     def bad_start(request, *_a, **_k):
