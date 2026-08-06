@@ -54,7 +54,11 @@ def _stage(reply: str):
 
 
 def _bundle(*, lens: str = "l-001 separates h-001 from h-002.", composer: str):
-    return ReviewStages(discrimination=_stage(lens), composer=_stage(composer))
+    """Every lens answers with `lens`; only the composer's reply varies per scenario. The
+    routing arms below are about what the COMPOSER found, so the lenses are held constant."""
+    return ReviewStages(
+        discrimination=_stage(lens), support=_stage(lens), composer=_stage(composer),
+    )
 
 
 def _composer(finding="holds", review="reads sound", ask=None):

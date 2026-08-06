@@ -210,6 +210,7 @@ class ReviewStages:
     catches like any other stage fault."""
 
     discrimination: Any = None
+    support: Any = None
     composer: Any = None
 
     def stage(self, name: str) -> Any:
@@ -244,5 +245,6 @@ def live_review_stages(
 
     return ReviewStages(
         discrimination=staged(DISCRIMINATION_DEF, "discrimination"),
+        support=staged(SUPPORT_DEF, "support"),
         composer=staged(COMPOSER_DEF, "composer"),
     )

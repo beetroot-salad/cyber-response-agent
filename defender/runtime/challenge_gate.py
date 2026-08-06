@@ -39,7 +39,7 @@ REVIEW_TIMEOUT_ENV = "DEFENDER_REVIEW_STAGE_TIMEOUT_SECONDS"
 #: role added to the gate cannot arrive with a trace file the incomplete-marker never touches
 #: (the shipped shape restated all three inline, and a stage renamed in one place stayed
 #: spelled the old way in the other).
-REVIEW_ROLES: tuple[str, ...] = ("discrimination", "composer")
+REVIEW_ROLES: tuple[str, ...] = ("discrimination", "support", "composer")
 
 
 def stage_timeout() -> int:
@@ -379,6 +379,7 @@ async def challenge_gate(deps: Any, disposition: str, *, stages: Any, bounds: Bo
         composer_projection,
         discrimination_projection,
         parse_investigation,
+        support_projection,
     )
     from .review.reply import Unreadable, citable_refs, read_composer_reply, read_lens_reading
 
@@ -392,7 +393,10 @@ async def challenge_gate(deps: Any, disposition: str, *, stages: Any, bounds: Bo
         _mark_traces_incomplete(deps.run_dir, 0, str(e))
         return _fail("projector", StageOutcome(None, STAGE_ERROR, str(e)))
 
-    lenses = {"discrimination": discrimination_projection(companion)}
+    lenses = {
+        "discrimination": discrimination_projection(companion),
+        "support": support_projection(companion),
+    }
     outcomes = await asyncio.gather(*(
         _dispatch(lens, stages, _fresh_stage_request(projection.text, bounds))
         for lens, projection in lenses.items()
