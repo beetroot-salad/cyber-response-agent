@@ -25,21 +25,34 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import ClassVar
 
-from defender.runtime.agent_definition import AgentDefinition, RunScope, bind
+from defender.runtime.agent_definition import AgentDefinition, RunScope, ToolSet, bind
+from defender.runtime.agent_role import AgentRole
 from defender.runtime.tools import AgentDeps
 
 __all__ = [
+    "COMPOSER_DEF",
+    "DISCRIMINATION_DEF",
+    "SUPPORT_DEF",
+    "ComposerDeps",
+    "DiscriminationDeps",
     "ReviewStages",
+    "SupportDeps",
     "UnboundReviewStage",
     "bind_review_role",
     "resolve_review_model",
 ]
 
+# The slash construction this used to carry ("a pure text-in/text-out projection") reads to
+# `test_grant_gate_575._named_programs` as a slash-GROUP of program names — the same shape as
+# `jq/ls/cat` — so a role bound to it named two programs its own lane denies. The reason is
+# PROMPT SURFACE: a model reading it would have been taught a command pair that does not
+# exist. It went unseen under #797 because the constant survived with no role attached to it.
 _DENY_REASON = (
-    "Blocked: this review stage is a pure text-in/text-out projection — its entire input is "
-    "inlined in the prompt and its entire output is one document. It holds no read grant and "
-    "no bash grant of any kind."
+    "Blocked: this review stage is a pure projection — it receives text and returns text. Its "
+    "entire input is inlined in the prompt and its entire output is one document. It holds no "
+    "read grant and no bash grant of any kind."
 )
 
 
@@ -63,6 +76,53 @@ def bind_review_role(
 ) -> AgentDeps:
     """Bind a review role's deps with its OWN fresh salt — PR7/PR8: never the session's."""
     return bind(defn, run_dir, scope=RunScope(), salt=None, defender_dir=defender_dir)
+
+
+@dataclass(frozen=True)
+class DiscriminationDeps(AgentDeps):
+    role: ClassVar[AgentRole] = AgentRole.DISCRIMINATION
+
+
+@dataclass(frozen=True)
+class SupportDeps(AgentDeps):
+    role: ClassVar[AgentRole] = AgentRole.SUPPORT
+
+
+@dataclass(frozen=True)
+class ComposerDeps(AgentDeps):
+    role: ClassVar[AgentRole] = AgentRole.COMPOSER
+
+
+# Each deps class exists ONLY to carry its `role` ClassVar. `AgentDeps.role` defaults to
+# `AgentRole.MAIN`, so a review role bound through the base class would hold MAIN's identity —
+# which passes the close tool's `deps.role is not AgentRole.MAIN` gate and flips
+# `_is_learning_role`. The override is the whole class.
+
+# The lenses read; the composer judges. The effort split follows that: a lens reconstructs
+# what a projection supports, the composer weighs three readings against the investigation's
+# own account and decides whether a confident close survives.
+_LENS_EFFORT = "medium"
+_COMPOSER_EFFORT = "high"
+
+
+def _review_def(role: AgentRole, deps_cls: type[AgentDeps], effort: str) -> AgentDefinition:
+    """One review role, built the ordinary zero-grant way: no tools, no bash shapes, no write
+    shapes, no corpus, none of the four `requires_*` preconditions. Everything that makes a
+    review role safe is the ABSENCE of a grant, so the definition says almost nothing — and
+    the one thing it must say (`deps_cls`, carrying the role identity) is the parameter."""
+    return AgentDefinition(
+        role=role,
+        model=resolve_review_model,
+        effort=effort,
+        tools=ToolSet(),
+        deps_cls=deps_cls,
+        deny_reason=_DENY_REASON,
+    )
+
+
+DISCRIMINATION_DEF = _review_def(AgentRole.DISCRIMINATION, DiscriminationDeps, _LENS_EFFORT)
+SUPPORT_DEF = _review_def(AgentRole.SUPPORT, SupportDeps, _LENS_EFFORT)
+COMPOSER_DEF = _review_def(AgentRole.COMPOSER, ComposerDeps, _COMPOSER_EFFORT)
 
 
 class UnboundReviewStage(RuntimeError):
