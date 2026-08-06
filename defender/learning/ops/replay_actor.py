@@ -21,7 +21,7 @@ It was written for the frozen-actor secondary metric
 drives this automatically any more, and it is run by hand.
 
 Usage:
-  python3 defender/learning/replay_actor.py <staging_dir>
+  python3 defender/learning/ops/replay_actor.py <staging_dir> [--case-id ID]
 
 Required inputs in ``<staging_dir>``:
   - alert.json

@@ -341,6 +341,15 @@ def _process_marker(
     except (OSError, json.JSONDecodeError) as e:
         quarantine_marker({"run_id": marker.stem}, claimed, qdir, f"unreadable: {e!r}")
         return False
+    if not isinstance(spec, dict):
+        # A row that PARSES but is not a mapping is unreadable in the same way: `spec.get`
+        # below would raise an AttributeError past every dead-letter path, wedging the worker
+        # on a marker the reclaim hands straight back next tick.
+        quarantine_marker(
+            {"run_id": marker.stem}, claimed, qdir,
+            f"unreadable: not a mapping ({type(spec).__name__})",
+        )
+        return False
     run_dir = Path(spec.get("run_dir", ""))
     if not run_dir.is_dir():
         quarantine_marker(spec, claimed, qdir, "artifact-missing")

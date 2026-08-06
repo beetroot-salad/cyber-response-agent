@@ -5,13 +5,14 @@ from __future__ import annotations
 import json
 import re
 import shutil
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import yaml
 
-from defender._io import read_jsonl_rows, read_text_utf8
+from defender._io import TEXT_READ_ERRORS, read_jsonl_rows, read_text_utf8
 from defender._run_paths import RunPaths, artifact_dir, artifact_file, contained_payload
 from defender.runtime.circuit_breaker import error_class_for_exit
 
@@ -167,6 +168,41 @@ def joined(run_dir: Path) -> list[JoinedLead]:
             )
         )
     return out
+
+
+def first_rendered_payload(
+    lead: JoinedLead, render: Callable[[str], str], *, unreadable: str, missing: str
+) -> str:
+    """The first of `lead`'s by-ref payloads that `render` turns into real content.
+
+    The two stages that show a lead's raw events — the judge's evidence column
+    (`pipeline/judge/compare.real_sample_text`, values kept) and the oracle's schema skeleton
+    (`pipeline/oracle/sample.lead_sample_text`, values scrubbed) — differ ONLY in the renderer
+    and the two fallback strings, so the walk lives here, on the surface that owns
+    `QueryRow.raw_ref` in the first place.
+
+    `render` signals "nothing usable here" by returning a parenthesized string, its own
+    convention for every empty case; the walk therefore keeps going. One unreadable payload
+    likewise does not blind the lead — a by-ref payload is bytes an adapter wrote, so neither
+    its encoding nor its readability is guaranteed, and raising took a whole stage down over a
+    single bad file. `unreadable` is a template taking `{error}`, reported only when NO
+    payload rendered.
+    """
+    failure: Exception | None = None
+    for q in lead.queries:
+        if q.raw_ref is None or not q.raw_ref.is_file():
+            continue
+        try:
+            raw = read_text_utf8(q.raw_ref)
+        except TEXT_READ_ERRORS as e:
+            failure = e
+            continue
+        body = render(raw)
+        if not body.startswith("("):
+            return body
+    if failure is not None:
+        return unreadable.format(error=failure)
+    return missing
 
 
 def actor_view(run_dir: Path) -> dict:

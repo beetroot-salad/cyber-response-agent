@@ -315,7 +315,11 @@ def parse_judge_verdict(text: str, *, case_id: str, direction: str) -> Verdict:
     """
     benign = direction == "benign"
     try:
-        doc = yaml.safe_load(normalize_judge_yaml(text))
+        # `_yaml.safe_load`, not `yaml.safe_load`: the hardened wrapper this module already
+        # parses through one function up (`normalize_judge_yaml`), which turns a recursion
+        # bomb and an unconstructable scalar into `YAMLError` instead of letting them out
+        # under their own types.
+        doc = safe_load(normalize_judge_yaml(text))
         validated = (validate_judge_benign_doc if benign else validate_judge_doc)(doc)
     except Exception:  # noqa: BLE001 — an unparseable/invalid verdict is a data point, not a crash
         return Verdict(case_id, direction, None, frozenset(), False)

@@ -52,6 +52,22 @@ class LoadReport:
     def total_warnings(self) -> int:
         return sum(len(ws) for _, ws in self.partial)
 
+    def detail_lines(self, *, verbose: bool) -> list[str]:
+        """The per-file reasons behind the counts — empty when every scanned file loaded whole.
+
+        The counts alone say a case is missing from the corpus or came in short; only these lines
+        say WHICH case and why, which is the difference between a query that quietly answers off a
+        smaller corpus than the operator thinks they have and one they can fix. `verbose` expands
+        each partial file's per-row parse warnings; without it a partial file reports how many
+        rows it dropped, since a file with a systematically bad block drops many identical ones.
+        """
+        lines = [f"  skipped {path.parent.name}: {reason}" for path, reason in self.skipped]
+        for path, warnings in self.partial:
+            lines.append(f"  partial {path.parent.name}: {len(warnings)} row(s) skipped")
+            if verbose:
+                lines += [f"    [{w.block} row {w.row_index}] {w.reason}" for w in warnings]
+        return lines
+
 
 def _read_signature_id(alert_path: Path) -> str | None:
     text, _err = read_text_soft(alert_path)

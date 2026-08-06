@@ -7,9 +7,9 @@ There is ONE contract for "parse the YAML frontmatter out of a markdown doc":
 #591, five readers re-derived the fence offsets themselves, each with a subtly
 different grammar — a loose leading fence, an unanchored regex, a ``text[3:]``
 slice — so the same document parsed differently depending on who read it. The
-worst of it: the secondary eval metric and the learning loop read the same
-``report.md`` through DIFFERENT grammars (parser differential injected into
-exactly the divergence signal secondary exists to measure), and a scaffold
+worst of it: the frozen-actor eval metric (since retired) and the learning loop
+read the same ``report.md`` through DIFFERENT grammars (parser differential
+injected into exactly the divergence signal it existed to measure), and a scaffold
 linter greenlit a SKILL.md whose real ``name:`` the runtime would reject. This
 gate keeps a sixth copy from growing back.
 

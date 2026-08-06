@@ -64,12 +64,22 @@ def _role_for(agent: str) -> AgentRole:
 
 def _scope_for(
     role: AgentRole, defender_dir: Path, corpus_name: str | None = None,
-    *, agent: str = "actor",
+    *, agent: str | None = None,
 ) -> RunScope:
+    # `agent` is the CLI NAME, and it defaults to nothing anywhere on this path. A default
+    # would have to be one of the two legs, and would then answer every caller that did not
+    # name one with the ADVERSARIAL leg's wider grants under a name covering both — the exact
+    # defect the per-leg split exists to remove. `None` means "no leg was named", which for
+    # the actor role is a question with no answer rather than a question with a default one.
     if role is AgentRole.ACTOR:
         from importlib import import_module
 
-        leg = import_module(_ACTOR_LEGS.get(agent, _ACTOR_LEGS["actor"]))
+        if agent is None:
+            raise ValueError(
+                "the actor role is bound by two legs with different scopes — name one of "
+                f"{sorted(_ACTOR_LEGS)} rather than being answered with either"
+            )
+        leg = import_module(_ACTOR_LEGS[agent])
         return RunScope(scripts=leg.ACTOR_SCRIPTS, read_confine=leg.ACTOR_READ_CONFINE)
     if role is AgentRole.CORPUS_AUTHOR:
         from defender.learning.author.curator_engine import SHIPPED_LESSON_CORPORA
@@ -84,7 +94,7 @@ def _scope_for(
 
 def _policy(
     defn: AgentDefinition, run_dir: Path, defender_dir: Path, corpus_name: str | None = None,
-    *, agent: str = "actor",
+    *, agent: str | None = None,
 ) -> AgentPolicy:
     # effective_tools_for is the one place that knows any role's typed-capability switching
     # (#632) — this audit tool asks for "the effective tools for this role" and never names a
@@ -93,6 +103,21 @@ def _policy(
         defn, run_dir, scope=_scope_for(defn.role, defender_dir, corpus_name, agent=agent),
         defender_dir=defender_dir, tools=effective_tools_for(defn),
     )
+
+
+def _read_roots(policy: AgentPolicy, run_dir: Path, defender_dir: Path) -> list[str]:
+    """The roots a read must land within, straight off the gate's own resolver (N1: this tool
+    is a second CONSUMER of the gate, never a second model of it).
+
+    The resolver may raise on a hostile operand (symlink cycle, embedded NUL) — where the gate
+    fails CLOSED, the audit tool reports the fault, because "this cannot be resolved" is the
+    honest answer to "what may this agent read?" and a traceback is not."""
+    from defender.runtime.permission.files import _resolved_read_roots
+
+    try:
+        return [str(p) for p in _resolved_read_roots(policy, run_dir, defender_dir)]
+    except (OSError, RuntimeError, ValueError) as e:
+        return [f"(unresolvable — the gate refuses every read here: {e})"]
 
 
 def _shapes(g: Grant) -> str:
@@ -128,6 +153,14 @@ def _show(policy: AgentPolicy, name: str, run_dir: Path, defender_dir: Path) -> 
         print(f"  {s.pattern}")
     if not policy.read_allow:
         print("  (no shape filter — reads are bounded by the roots alone)")
+    # The ROOTS are the containment every read is checked against, and for most roles they
+    # are the whole answer (`read_allow` is empty). Printing only the shape filter answered
+    # "what may this agent read?" with nothing at all — and hid the one thing that differs
+    # between the two actor legs, since the adversarial leg confines to both lesson corpora
+    # and the benign leg to one. Read off the gate's OWN resolver, never re-derived here.
+    print("  roots:")
+    for root in _read_roots(policy, run_dir, defender_dir):
+        print(f"    {root}")
     print("\nwrite:")
     for s in policy.write_allow or ():
         print(f"  {s.pattern}")

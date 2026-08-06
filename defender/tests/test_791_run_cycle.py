@@ -345,10 +345,11 @@ def test_791_run_cycle_sources_no_key_for_the_oracle_model(tmp_path, monkeypatch
     it completes. That is the only witness available without a second provider's key, and it is
     exact — it cannot pass because a key happened to be lying around.
 
-    FK4/R13 scopes this to the run cycle's own path: the shared preparation helper's model set
-    is untouched and the surviving eval keeps sourcing its own key, because removing it there
-    breaks that eval in exactly the non-default configuration that makes the end-to-end demand
-    observable at all. Accepted cost, stated: this pins the WIRING, not the outcome."""
+    FK4/R13 originally scoped this to the run cycle's own CALL SITE, leaving the shared
+    preparation helper's model set naming the retired stage for the one eval that still drove
+    it. That eval has since been retired outright, so the helper no longer sources the key for
+    anyone and the `include_oracle` knob is gone. Accepted cost, stated: this pins the WIRING,
+    not the outcome."""
     satisfy_engine_keys(monkeypatch, "benign")
     monkeypatch.setenv("ORACLE_MODEL", "spec791-no-such-provider/model")
     paths = loop_paths(tmp_path)

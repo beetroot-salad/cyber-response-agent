@@ -122,8 +122,8 @@ fast online path does not.
 
 ## Evaluating the loop itself
 
-`defender/evals/` is the eval home. It holds the held-out / secondary metric
-drivers (`held_out.py`, `secondary.py`) plus the harness-on-the-harness
+`defender/evals/` is the eval home. It holds the held-out metric driver
+(`held_out.py`, the north-star) plus the harness-on-the-harness
 (`harness.py` + `scenarios/`) for evaluating the learning loop itself. The
 `judge-alignment/` calibration set lives under `defender/learning/`.
 `defender/tests/` covers
