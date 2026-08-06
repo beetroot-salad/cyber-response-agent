@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+from defender._io import read_jsonl_rows
 from defender.runtime import challenge_gate
 from defender.runtime.close_tool import (
     CAUSE_EVIDENCE_CANNOT_DISCRIMINATE,
@@ -242,6 +243,88 @@ def test_a_lens_reply_reaches_the_trace_framed_and_never_bare(tmp_path):
     trace = (run_dir / "review_discrimination_trace.jsonl").read_text(encoding="utf-8")
     assert poison in trace
     assert f"<run-{deps.salt}-untrusted>" in trace, "the reply landed unframed"
+
+
+def test_the_record_reaches_each_lens_inside_that_calls_own_fresh_salt(tmp_path):
+    """PR7/PR8, on the INBOUND half. The projection is payload-derived, so it rides framed —
+    and the frame is keyed on the salt the stage call mints, never on the investigation's,
+    which is the delimiter the lens's OWN reply returns inside."""
+    deps, _run_dir = _deps(tmp_path)
+    seen: list = []
+
+    def _recording(_reply):
+        async def call(request):
+            seen.append(request)
+            return "l-001 separates h-001 from h-002."
+
+        return call
+
+    stages = ReviewStages(
+        discrimination=_recording(None), support=_recording(None), ablation=_recording(None),
+        composer=_stage(_composer("holds")),
+    )
+    _run(deps, stages)
+
+    assert seen, "no lens was dispatched"
+    salts = {r.salt for r in seen}
+    assert len(salts) == len(seen), "two stage calls shared a salt"
+    for request in seen:
+        assert f"<run-{request.salt}-untrusted>" in request.prompt, "the record arrived unframed"
+        assert deps.salt not in request.prompt, (
+            "the investigation's own salt reached a review role"
+        )
+
+
+def test_every_dispatched_lens_leaves_a_row_even_when_an_earlier_one_faults(tmp_path):
+    """The lenses run CONCURRENTLY, so by the time the first fault is seen the others have
+    already answered. Returning on the fault mid-walk threw those replies away, and the run
+    dir recorded one of three calls that were made."""
+    deps, run_dir = _deps(tmp_path)
+
+    async def _raising(_request):
+        raise RuntimeError("the discrimination lens exploded")
+
+    verdict = _run(deps, ReviewStages(
+        discrimination=_raising, support=_stage("support read this"),
+        ablation=_stage("ablation read that"), composer=_stage(_composer("holds")),
+    ))
+    assert verdict.outcome == FORCED_INCONCLUSIVE
+    for lens, reply in (("support", "support read this"), ("ablation", "ablation read that")):
+        trace = (run_dir / f"review_{lens}_trace.jsonl").read_text(encoding="utf-8")
+        assert reply in trace, f"{lens} answered and its reply reached no trace"
+
+
+def test_a_second_review_pass_is_not_recorded_as_the_first(tmp_path):
+    """A challenged close comes back and reviews again. With the round hardcoded to zero every
+    row of the second pass reads on disk exactly like the first's, so a trace cannot say which
+    pass a fault belongs to."""
+    deps, run_dir = _deps(tmp_path)
+    target = _a_real_target(deps)
+    bundle = _bundle(composer=_composer("gap", ask={"target": target, "prose": "provenance"}))
+
+    assert _run(deps, bundle).outcome == CHALLENGED
+    _run(deps, bundle)
+
+    rows = read_jsonl_rows(run_dir / "review_composer_trace.jsonl")
+    rounds = [row["round"] for row in rows]
+    assert sorted(set(rounds)) == [0, 1], f"both review passes recorded as one: {rounds}"
+
+
+def test_the_composers_json_reply_does_not_stand_as_a_trace_row_of_its_own(tmp_path):
+    """The composer answers with a JSON OBJECT by contract. Framed on its own literal line
+    that object is a round-less row every trace consumer reads as gate metadata — the review's
+    own prose counted as a trace record, on every close."""
+    deps, run_dir = _deps(tmp_path)
+    _run(deps, _bundle(composer=_composer("holds", review="the close reads sound")))
+
+    rows = read_jsonl_rows(run_dir / "review_composer_trace.jsonl")
+    assert rows, "the composer left no trace row"
+    for row in rows:
+        assert "round" in row, f"a round-less row reached the trace: {row}"
+        assert "finding" not in row, "the composer's reply parsed as a trace row of its own"
+    trace = (run_dir / "review_composer_trace.jsonl").read_text(encoding="utf-8")
+    assert f"<run-{deps.salt}-untrusted>" in trace, "the reply landed unframed"
+    assert "the close reads sound" in trace, "the reply did not reach the trace at all"
 
 
 # ---------------------------------------------------------------------------------------

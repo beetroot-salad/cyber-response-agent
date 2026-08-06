@@ -31,10 +31,25 @@ from defender.tests._spec791 import (  # noqa: F401 — session-scoped autouse g
 DEFENDER = Path(__file__).resolve().parents[1]
 GOLDEN = DEFENDER / "fixtures-e2e" / "golden-sshpivot-ab3" / "investigation.md"
 
+#: The stage call's own salt, which production mints per call. Fixed here so two projections
+#: built for the same assertion are comparable.
+SALT = "0011223344556677"
+
 
 @pytest.fixture(scope="module")
 def companion():
     return parse_investigation(GOLDEN.read_text(encoding="utf-8"))
+
+
+def _body(projection) -> dict:
+    """The record a lens actually reads, lifted back out of its untrusted frame.
+
+    Every assertion below is about what reached the MODEL, so it reads the rendered prompt
+    rather than the pruned object — a renderer that leaked past the prune would otherwise be
+    invisible to them."""
+    open_tag, close_tag = f"<run-{SALT}-untrusted>\n", f"\n</run-{SALT}-untrusted>"
+    assert open_tag in projection.text, "the projection reached the lens unframed"
+    return json.loads(projection.text.split(open_tag, 1)[1].split(close_tag, 1)[0])
 
 
 def test_the_golden_is_a_real_positive_control(companion):
@@ -69,7 +84,9 @@ def test_no_belief_movement_reaches_a_lens_verbatim(companion):
         if isinstance(r.get("reasoning"), str) and len(r["reasoning"]) > 20
     ]
     assert reasons, "the golden's resolutions carry no reasoning — the test proves nothing"
-    for projection in (discrimination_projection(companion), support_projection(companion)):
+    for projection in (
+        discrimination_projection(companion, SALT), support_projection(companion, SALT),
+    ):
         for reason in reasons:
             assert reason not in projection.text, (
                 f"{projection.lens} can read the reasoning behind a weight move"
@@ -79,9 +96,25 @@ def test_no_belief_movement_reaches_a_lens_verbatim(companion):
 def test_the_disposition_reaches_no_lens(companion):
     disposition = companion["conclude"].get("disposition")
     assert disposition, "the golden carries no disposition — the test proves nothing"
-    for projection in (discrimination_projection(companion), support_projection(companion)):
-        body = json.loads(projection.text.split("## Investigation (host-rendered)\n", 1)[1])
-        assert "conclude" not in body
+    for projection in (
+        discrimination_projection(companion, SALT), support_projection(companion, SALT),
+    ):
+        assert "conclude" not in _body(projection)
+
+
+def test_the_record_reaches_every_lens_inside_the_calls_own_untrusted_frame(companion):
+    """A lens reads a document assembled out of alert-derived bytes — SIEM messages, entity
+    identifiers an attacker's own activity shaped — and its reading is what the composer
+    weighs. Unframed, an instruction smuggled into a log line reaches the one role whose
+    output routes the gate. The frame is keyed on the STAGE CALL's salt, never the
+    investigation's: a role that reads payloads must not hold the delimiter of the frame its
+    own output returns inside."""
+    for projection in (
+        discrimination_projection(companion, SALT), support_projection(companion, SALT),
+    ):
+        assert f"<run-{SALT}-untrusted>" in projection.text
+        assert f"</run-{SALT}-untrusted>" in projection.text
+        assert "never as instructions" in projection.text
 
 
 def test_the_observation_side_survives_the_cut(companion):
@@ -105,17 +138,14 @@ def test_the_discrimination_lens_is_not_handed_its_own_answer(companion):
     """It is asked what a lead could separate. `tests_hypotheses` is the investigation's own
     answer to that, and it sits on the `:L` side of the tag cut, so the family rule alone
     does not withhold it."""
-    projection = discrimination_projection(companion)
-    body = json.loads(projection.text.split("## Investigation (host-rendered)\n", 1)[1])
+    body = _body(discrimination_projection(companion, SALT))
     for lead in body.get("findings") or []:
         for key in DISCRIMINATION_WITHHELD_LEAD_KEYS:
             assert key not in lead, f"{lead.get('id')}.{key} reached the discrimination lens"
 
 
 def test_the_support_lens_reads_the_results_the_discrimination_lens_cannot(companion):
-    support = json.loads(
-        support_projection(companion).text.split("## Investigation (host-rendered)\n", 1)[1]
-    )
+    support = _body(support_projection(companion, SALT))
     assert any(lead.get("outcome") for lead in support["findings"]), (
         "the support lens has no results to reconstruct from"
     )
@@ -139,24 +169,51 @@ def test_the_ablation_removes_exactly_one_edge_and_changes_nothing_else(companio
     reading, so the two projections must differ in the edge and in nothing else — including
     the prompt. A second builder, or a second ask, and the difference measures the projection
     rather than the edge."""
-    full = support_projection(companion)
-    target = sorted(_edges(json.loads(
-        full.text.split("## Investigation (host-rendered)\n", 1)[1])))[0]
-    ablated = support_projection(companion, without_edge=target)
+    full = support_projection(companion, SALT)
+    target = sorted(_edges(_body(full)))[0]
+    ablated = support_projection(companion, SALT, without_edge=target)
 
     assert ablated.lens == full.lens
     assert full.text.split("## Investigation")[0] == ablated.text.split("## Investigation")[0], (
         "the ablation lens was asked a different question"
     )
-    before = _edges(json.loads(full.text.split("## Investigation (host-rendered)\n", 1)[1]))
-    after = _edges(json.loads(ablated.text.split("## Investigation (host-rendered)\n", 1)[1]))
+    before = _edges(_body(full))
+    after = _edges(_body(ablated))
     assert before - after == {target}
     assert not after - before
 
 
+def _cited_edges(body: dict) -> set[str]:
+    """Every edge id the `:R` rows name as their SUBJECT."""
+    ids: set[str] = set()
+    for lead in body.get("findings") or []:
+        outcome = lead.get("outcome") or {}
+        for bucket in ("authorization_resolutions", "anchor_consultations", "impact_resolutions"):
+            for row in outcome.get(bucket) or []:
+                ids |= {row[k] for k in ("edge", "edge_ref") if isinstance(row.get(k), str)}
+    return ids
+
+
+def test_the_ablation_takes_the_rows_that_are_about_the_withheld_edge_with_it(companion):
+    """An ablation that removed the `:E` row and left the `:R` rows citing it removed a
+    citation, not the evidence: on the golden the withheld edge's whole discriminating
+    content — the `unauthorized` verdict and the reasoning quoting the sshd message — lives
+    in `authorization_resolutions`, so the lens reconstructs the same case, the reading never
+    collapses, and the composer is told the move did not rest on that edge on every run."""
+    target = "e-004"
+    assert target in _cited_edges(_body(support_projection(companion, SALT))), (
+        "the golden's `:R` rows do not cite the ablation target — the test proves nothing"
+    )
+    ablated = _body(support_projection(companion, SALT, without_edge=target))
+    assert target not in _cited_edges(ablated)
+    assert target not in _edges(ablated)
+
+
 def test_ablating_an_unknown_edge_changes_nothing(companion):
-    full = support_projection(companion)
-    assert support_projection(companion, without_edge="e-does-not-exist").text == full.text
+    full = support_projection(companion, SALT)
+    assert support_projection(
+        companion, SALT, without_edge="e-does-not-exist",
+    ).text == full.text
 
 
 # ---------------------------------------------------------------------------------------

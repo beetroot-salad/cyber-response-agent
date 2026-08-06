@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from defender._io import read_text_utf8
+
 __all__ = ["PROMPTS", "role_prompt"]
 
 PROMPTS = Path(__file__).resolve().parent / "prompts"
@@ -31,4 +33,4 @@ def role_prompt(name: str) -> str:
     path = PROMPTS / f"{name}.md"
     if not path.is_file():
         raise FileNotFoundError(f"no role prompt for {name!r} at {path}")
-    return path.read_text(encoding="utf-8")
+    return read_text_utf8(path)

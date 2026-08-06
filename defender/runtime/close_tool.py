@@ -119,10 +119,10 @@ CAUSE_STORY_SETTLED = (
     "the challenge review ran and left nothing about the finding unsettled"
 )
 #: THREE conditions share this one: a stage that raised or timed out, a stage reply the gate
-#: cannot read or that named something the investigation never produced, and — until #796
-#: binds a reviewer — a gate with no review role to dispatch at all. They are told apart by
-#: `failure_kind`, two lines above it in the same frontmatter, and by the record's `detail` —
-#: never by a second sentence here.
+#: cannot read or that named something the investigation never produced, and a bundle whose
+#: stages are not bound (the shape a composition root with no run dir produces). They are told
+#: apart by `failure_kind`, two lines above it in the same frontmatter, and by the record's
+#: `detail` — never by a second sentence here.
 CAUSE_REVIEW_INCOMPLETE = "the challenge review did not complete"
 CAUSE_EVIDENCE_CANNOT_DISCRIMINATE = (
     "the evidence gathered cannot discriminate what the challenge review left unsettled"

@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -190,11 +191,17 @@ async def _call_stage(role: str, stage_fn, request: StageRequest) -> StageOutcom
         return StageOutcome(text=None, failure_kind=STAGE_ERROR, detail=f"{role} failed: {e!r}")
 
 
-def _fresh_stage_request(prompt: str, bounds: Bounds) -> StageRequest:
-    # PR7/PR8: every stage call carries its OWN fresh salt (never the investigation's
-    # session salt) — the review roles never hold the delimiter of the frame their own
-    # output returns inside.
-    return StageRequest(prompt=prompt, salt=uuid.uuid4().hex, timeout=bounds.stage_timeout)
+def _fresh_stage_request(render: Callable[[str], str], bounds: Bounds) -> StageRequest:
+    """One stage call's request: its own fresh salt, and the prompt RENDERED against it.
+
+    PR7/PR8: every stage call carries its OWN fresh salt (never the investigation's session
+    salt) — the review roles never hold the delimiter of the frame their own output returns
+    inside. The salt is minted BEFORE the prompt and handed to the renderer, because the frame
+    the payload-derived record is inlined inside is keyed on it. Minting it after (or beside)
+    the prompt left the salt with no reader at all: the review's inbound half went unframed
+    while the field went on saying what it was for."""
+    salt = uuid.uuid4().hex
+    return StageRequest(prompt=render(salt), salt=salt, timeout=bounds.stage_timeout)
 
 
 def _trace_path(run_dir, role: str):
@@ -203,24 +210,50 @@ def _trace_path(run_dir, role: str):
     return Path(run_dir) / f"review_{role}_trace.jsonl"
 
 
+def _is_row_shaped(raw_reply: str) -> bool:
+    """Would any physical line of this framed reply stand in the file as a trace ROW?
+
+    `read_jsonl_rows` — every other trace consumer — skips a line it cannot parse, which is
+    what makes the raw-line path below safe for a reply of PROSE. The composer's reply is a
+    JSON object by contract, and its framed form puts that object on a line of its own: a
+    round-less row carrying the review's prose that every trace reader counts as gate
+    metadata."""
+    for line in raw_reply.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            parsed = json.loads(stripped)
+        except ValueError:
+            continue
+        if isinstance(parsed, dict):
+            return True
+    return False
+
+
 def _write_trace_row(
     run_dir, role: str, round_no: int, row: dict, *, raw_reply: str | None = None,
 ) -> None:
     """Append one trace row, JSON-metadata-only, PLUS (optionally) the stage's raw wrapped
-    reply as its own literal text line right after — never as a JSON string VALUE.
+    reply — as its own literal text line when it cannot be mistaken for a row, and inside the
+    row's own JSON value when it can.
 
     A `wrap(...)`-framed reply carries real newline characters; folding it into a JSON
     string field would have `json.dumps` escape them to `\\n`, so the exact framed substring
     a containment test looks for would never appear literally in the file, even though the
     payload-derived text inside it would (JSON only escapes the control characters, not the
-    words). Keeping the frame as a separate raw line is what makes "wrapped, never bare" a
-    checkable property of the bytes on disk. `read_jsonl_rows` (every other trace consumer)
-    tolerates it fine — a raw line that is not valid JSON is simply skipped, so the metadata
-    rows stay exactly as parseable as before."""
+    words, so the frame's own tags survive either way). Keeping the frame as a separate raw
+    line is what makes "wrapped, never bare" a checkable property of the bytes on disk — but
+    only for a reply no reader can parse. A reply that IS a JSON object goes inside the value
+    instead; on its own line it would corrupt the trace's row structure."""
     from defender._io import write_guarded
 
-    line = json.dumps({"round": round_no, **row}) + "\n"
-    if raw_reply is not None:
+    payload = {"round": round_no, **row}
+    inline = raw_reply is not None and _is_row_shaped(raw_reply)
+    if inline:
+        payload["raw_reply"] = raw_reply
+    line = json.dumps(payload) + "\n"
+    if raw_reply is not None and not inline:
         line += raw_reply if raw_reply.endswith("\n") else raw_reply + "\n"
     # ONE guarded append per row, not one per physical line: the two lines are a single trace
     # record, and splitting them across two `write_guarded` calls both doubled the syscalls and
@@ -345,8 +378,11 @@ def _route(
         )
 
     target = review.ask.target
+    # Measured ONCE: the check and the watermark it writes must be the same number, and
+    # `_mentions` serialises the whole companion to get it.
+    mentions_now = _mentions(companion, target)
     before = state.raised_asks.get(target)
-    if before is not None and _mentions(companion, target) <= before:
+    if before is not None and mentions_now <= before:
         return _verdict(
             FORCED_INCONCLUSIVE, "inconclusive", CAUSE_NOTHING_LEFT_TO_ASK,
             f"{target} was already asked for and the turn it spent recorded nothing new "
@@ -357,7 +393,7 @@ def _route(
             FORCED_INCONCLUSIVE, "inconclusive", CAUSE_TURN_BUDGET_SPENT, review.review,
         )
 
-    state.raised_asks[target] = _mentions(companion, target)
+    state.raised_asks[target] = mentions_now
     state.turns += 1
     # NO_CAUSE: this attempt commits nothing, so there is no report.md for a cause to land in.
     return _verdict(
@@ -373,81 +409,103 @@ async def challenge_gate(deps: Any, disposition: str, *, stages: Any, bounds: Bo
     is asked to reconstruct, and they run CONCURRENTLY because none of them reads another's
     output. The composer runs after all of them and is the only role that sees both the
     readings and the investigation's own account."""
+    from defender._io import TEXT_READ_ERRORS, read_text_utf8
+
     from .close_tool import STAGE_ERROR, UNREADABLE
     from .review.projector import (
         EmptyInvestigation,
+        ablation_target,
         composer_projection,
         discrimination_projection,
-        ablation_target,
         parse_investigation,
         support_projection,
     )
     from .review.reply import Unreadable, citable_refs, read_composer_reply, read_lens_reading
 
     state = ReviewState.of(deps)
+    # The trace's round is the review PASS this close attempt is, not a hardcoded zero: a
+    # challenged close comes back and reviews again, so every row of the second pass would
+    # otherwise be indistinguishable from the first's on disk.
+    round_no = state.turns
 
+    # A read AND a parse under one `try`, so the guard is the composed tuple `_io` publishes —
+    # a `UnicodeDecodeError` is a `ValueError`, NOT an `OSError` (#589), and an `except OSError`
+    # here let an undecodable investigation.md raise past the gate, past the close tool and
+    # into a driver that classifies five exception kinds and not that one.
+    unreadable_document: tuple[type[BaseException], ...] = (EmptyInvestigation, *TEXT_READ_ERRORS)
     try:
-        companion = parse_investigation(
-            (deps.run_dir / "investigation.md").read_text(encoding="utf-8")
-        )
-    except (OSError, EmptyInvestigation) as e:
-        _mark_traces_incomplete(deps.run_dir, 0, str(e))
+        companion = parse_investigation(read_text_utf8(deps.run_dir / "investigation.md"))
+    except unreadable_document as e:
+        _mark_traces_incomplete(deps.run_dir, round_no, str(e))
         return _fail("projector", StageOutcome(None, STAGE_ERROR, str(e)))
 
-    lenses = {
-        "discrimination": discrimination_projection(companion),
-        "support": support_projection(companion),
-    }
     # The ablation is the SUPPORT lens again under one withheld edge — same role, same model,
     # same effort, same prompt — so its reading is a difference against the support reading
     # and not a difference between two configurations. A record with no strong belief movement
     # has nothing load-bearing to withhold; that is recorded rather than passed over, so the
     # trace says the lens did not run and why.
     ablated = ablation_target(companion)
+    # Each lens is a RENDERER, not a rendered string: `_fresh_stage_request` mints the call's
+    # own salt and the projection is framed on it, so the prompt cannot be built before the
+    # salt exists.
+    lenses: dict[str, Callable[[str], str]] = {
+        "discrimination": lambda salt: discrimination_projection(companion, salt).text,
+        "support": lambda salt: support_projection(companion, salt).text,
+    }
     if ablated is not None:
-        lenses["ablation"] = support_projection(companion, without_edge=ablated[0])
+        ablated_edge = ablated[0]
+        lenses["ablation"] = (
+            lambda salt: support_projection(companion, salt, without_edge=ablated_edge).text
+        )
     else:
         _write_trace_row(
-            deps.run_dir, "ablation", 0,
+            deps.run_dir, "ablation", round_no,
             {"ok": True, "skipped": "no strong belief movement cites an edge to withhold"},
         )
     outcomes = await asyncio.gather(*(
-        _dispatch(lens, stages, _fresh_stage_request(projection.text, bounds))
-        for lens, projection in lenses.items()
+        _dispatch(lens, stages, _fresh_stage_request(render, bounds))
+        for lens, render in lenses.items()
     ))
+
+    # EVERY dispatched lens gets its row before any of them is judged. The calls ran
+    # concurrently and all of them completed; returning on the first fault mid-walk threw away
+    # the replies the other lenses had already produced, so a run dir recorded one of three
+    # calls that were made.
+    for lens, outcome in zip(lenses, outcomes, strict=True):
+        _write_trace_row(
+            deps.run_dir, lens, round_no, {"ok": outcome.ok},
+            raw_reply=_wrap(outcome.text or outcome.detail or "", "untrusted", deps.salt),
+        )
 
     readings: dict[str, str] = {}
     for lens, outcome in zip(lenses, outcomes, strict=True):
-        _write_trace_row(
-            deps.run_dir, lens, 0, {"ok": outcome.ok},
-            raw_reply=_wrap(outcome.text or outcome.detail or "", "untrusted", deps.salt),
-        )
         if not outcome.ok:
-            _mark_traces_incomplete(deps.run_dir, 0, outcome.detail or "stage fault")
+            _mark_traces_incomplete(deps.run_dir, round_no, outcome.detail or "stage fault")
             return _fail(lens, outcome)
         try:
             readings[lens] = read_lens_reading(outcome.text)
         except Unreadable as e:
-            _mark_traces_incomplete(deps.run_dir, 0, str(e))
+            _mark_traces_incomplete(deps.run_dir, round_no, str(e))
             return _fail(lens, StageOutcome(None, UNREADABLE, str(e)))
 
     composer = await _dispatch(
         "composer", stages,
         _fresh_stage_request(
-            composer_projection(companion, readings, ablated=ablated).text, bounds,
+            lambda salt: composer_projection(companion, readings, salt, ablated=ablated).text,
+            bounds,
         ),
     )
     _write_trace_row(
-        deps.run_dir, "composer", 0, {"ok": composer.ok},
+        deps.run_dir, "composer", round_no, {"ok": composer.ok},
         raw_reply=_wrap(composer.text or composer.detail or "", "untrusted", deps.salt),
     )
     if not composer.ok:
-        _mark_traces_incomplete(deps.run_dir, 0, composer.detail or "stage fault")
+        _mark_traces_incomplete(deps.run_dir, round_no, composer.detail or "stage fault")
         return _fail("composer", composer)
     try:
         review = read_composer_reply(composer.text, refs=citable_refs(companion))
     except Unreadable as e:
-        _mark_traces_incomplete(deps.run_dir, 0, str(e))
+        _mark_traces_incomplete(deps.run_dir, round_no, str(e))
         return _fail("composer", StageOutcome(None, UNREADABLE, str(e)))
 
     return _route(state, bounds, disposition, review, companion)

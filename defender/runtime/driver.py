@@ -535,7 +535,7 @@ def build_agent(  # noqa: PLR0913 — composition root: config + DI seams + the 
     # gate's own fault arm, instead of quietly acting on the wrong tree.
     stages = (
         review_stages if review_stages is not None
-        else review_roles.ReviewStages()  # lint-default: ok — DI seam owning its default (#797: the bundle carries no stages until #796)
+        else review_roles.ReviewStages()  # lint-default: ok — DI seam owning its default (the UNBOUND bundle: this root holds no run dir, so `stage()` raises UnboundReviewStage and the gate fails the close closed)
     )
     if main_defn.tools.close:
         register_close_tool(agent, stages=stages, bounds=bounds)

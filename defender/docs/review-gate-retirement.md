@@ -14,6 +14,18 @@
 >
 > The three rules under "code survives but the witness does not" are witnessed again: their
 > vulture-baseline entries are retired now that lenses call them.
+>
+> **Rules 9 and 13 came back with the reviewer, and both fired.** Rule 9's second path did not
+> exist — `_write_trace_row` always wrote the framed reply as its own literal line, which was
+> harmless only while no stage answered; the composer answers with a JSON OBJECT by contract,
+> so every close left a round-less row in the trace. It now rides inside the row's value when
+> any of its lines parses as an object. Rule 13's "exactly one pass" no longer holds either: a
+> challenged close comes back and reviews again, so the round is `ReviewState.turns` rather
+> than a hardcoded zero.
+>
+> The fresh-salt rule under "code survives but the witness does not" was half-held: the salt
+> was minted per call and read by nothing, so the record a lens reads went in UNFRAMED. The
+> projection is now rendered against that salt.
 
 #797 retired the live write-time gate's three review stages — the **challenger**, the
 **coherence checker** and the **projection stage** — and everything that existed only to

@@ -240,12 +240,18 @@ def live_review_stages(
     from defender.runtime.review import role_prompt
 
     name = resolve_review_model(model_override)
+    # One read per ROLE, not per call: SUPPORT is dispatched twice and its asset does not
+    # change between the two.
+    prompts = {
+        defn.role.value: role_prompt(defn.role.value)
+        for defn in (DISCRIMINATION_DEF, SUPPORT_DEF, COMPOSER_DEF)
+    }
 
     def staged(defn: AgentDefinition, lens: str) -> Any:
         return _make_live_stage(
             replace(defn, model=lambda: name), run_dir, defender_dir,
             f"review_{lens}_live_trace.jsonl",
-            agent_id=lens, instructions=role_prompt(defn.role.value),
+            agent_id=lens, instructions=prompts[defn.role.value],
         )
 
     return ReviewStages(

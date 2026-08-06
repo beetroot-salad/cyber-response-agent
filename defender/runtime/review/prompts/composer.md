@@ -44,5 +44,6 @@ When it does not, and nothing measurable would settle the gap:
     {"finding": "gap", "review": "<your prose>", "ask": null}
 
 `finding` is `holds` or `gap`, and nothing else. `holds` never carries an ask — if you want
-a measurement, the finding is `gap`. `target` must be an id that appears in the investigation
-you were given.
+a measurement, the finding is `gap`. `target` must be an entity, edge, lead or hypothesis id
+(`v-` / `e-` / `l-` / `h-`) that appears in the investigation you were given — a prediction,
+refutation or authz-contract id is not a target, and naming one fails the whole review.
