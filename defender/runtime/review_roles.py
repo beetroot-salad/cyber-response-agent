@@ -27,12 +27,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar
 
+from defender._env import env_str
 from defender.runtime.agent_definition import AgentDefinition, RunScope, ToolSet, bind
 from defender.runtime.agent_role import AgentRole
 from defender.runtime.tools import AgentDeps
 
 __all__ = [
     "COMPOSER_DEF",
+    "DEFAULT_REVIEW_MODEL",
+    "REVIEW_MODEL_ENV",
     "DISCRIMINATION_DEF",
     "SUPPORT_DEF",
     "ComposerDeps",
@@ -56,19 +59,35 @@ _DENY_REASON = (
 )
 
 
+REVIEW_MODEL_ENV = "DEFENDER_REVIEW_MODEL"
+
+#: The review's own shipped default, PINNED APART from the investigator's. On the two frozen
+#: judge cases in `experiments/judge-glm52-vs-kimik3`, the investigator's default disagreed
+#: with ITSELF on both — a self-consistency floor of 0% on the label axis — where this model
+#: held 100% across four reps. The learning judge was ported on the same measurement and the
+#: same grounds (`learning/core/config.py:judge_model`), and the review is the same shape of
+#: job: a verdict read off a frozen input. n=2, validation only; enough to pin a default, not
+#: enough to close the question.
+DEFAULT_REVIEW_MODEL = "kimi-k3"
+
+
 def resolve_review_model(explicit: str | None = None) -> str:
-    """The model every review stage runs on — the INVESTIGATOR's own resolver, so an
-    operator's per-run `--model` reaches the review as well as the investigation, and the
-    shipped default has exactly ONE home.
+    """The model every review role runs on: the operator's `--model` if there is one, then
+    this review's OWN env var, then the review default.
 
-    A private copy of the env var and the default id was the shipped shape, on the stated
-    grounds of an import cycle. It bought a review that could not receive the override at all
-    (the accessor took no parameter) and a second copy of the default that drifts the first
-    time the default moves. The cycle is real but it is an IMPORT-TIME one only: `driver`
-    imports this module, so the import lives in the body rather than at module scope."""
-    from defender.runtime.driver import resolve_main_model
+    It deliberately does NOT read `DEFENDER_MODEL`. That is the investigator's knob, and a
+    review that read it would silently un-pin its default on every run that set it — including
+    every hermetic replay, which sets `DEFENDER_MODEL`/`DEFENDER_GATHER_MODEL` precisely to
+    keep its two fakes distinguishable. The stability this default is chosen for would then be
+    absent exactly where a run is cheapest to get wrong.
 
-    return resolve_main_model(explicit)
+    `explicit` is the OPERATOR's raw override and must stay raw to reach here — a caller that
+    resolves it against the main model first passes a non-`None` value on every run, and the
+    review default becomes unreachable in production while still looking correct to a unit
+    test that calls this with `None`."""
+    if explicit is not None:
+        return explicit
+    return env_str(REVIEW_MODEL_ENV, DEFAULT_REVIEW_MODEL)
 
 
 def bind_review_role(

@@ -29,6 +29,7 @@ if __name__ == "__main__" and _VENV_PY.is_file() and Path(sys.executable) != _VE
 
 import argparse  # noqa: E402
 import asyncio  # noqa: E402
+import inspect  # noqa: E402
 from collections.abc import Callable  # noqa: E402
 from typing import Any, Protocol  # noqa: E402
 
@@ -101,17 +102,27 @@ def _source_one_provider_key(prov: providers.Provider) -> int:
 def _role_model_name(defn: Any, model_override: str | None) -> str:
     """The model name this role will ACTUALLY run on.
 
-    The operator's per-run `--model` reaches every role that resolves through the shared
-    main-model resolver — the investigator and the three review stages — and no role that
-    owns a knob of its own. Checking `defn.model()` alone validated the ambient default while
-    the run was about to execute on the override, so a broken override passed the preflight
-    clean."""
-    from defender.runtime import review_roles
+    The operator's per-run `--model` reaches every role whose accessor can TAKE it, and no
+    role that owns a knob of its own. Checking `defn.model()` alone validated the ambient
+    default while the run was about to execute on the override, so a broken override passed
+    the preflight clean.
 
-    shared = (driver.resolve_main_model, review_roles.resolve_review_model)
-    if model_override is not None and defn.model in shared:
-        return str(defn.model(model_override))
-    return str(defn.model())
+    Which roles those are is read off the accessor's ARITY rather than a hand-list of the
+    accessors themselves. The list was a second registry: a role whose accessor accepted the
+    override but that nobody remembered to add validated the ambient default and ran on the
+    override, with no test between the two — and after #797 no surviving test executes this
+    branch at all, so the omission would be silent. Arity cannot be forgotten separately,
+    because accepting the parameter is the whole of what makes a role overridable: the
+    already-resolved accessors (`gather_model`, the bundle builder's `lambda: name`, the
+    learning stages' own knobs) take none by construction."""
+    if model_override is None:
+        return str(defn.model())
+    try:
+        takes_override = bool(inspect.signature(defn.model).parameters)
+    except (TypeError, ValueError):
+        # A callable whose signature cannot be read is not one we can hand an override to.
+        takes_override = False
+    return str(defn.model(model_override)) if takes_override else str(defn.model())
 
 
 def preflight_role_models(model_override: str | None = None) -> int:
