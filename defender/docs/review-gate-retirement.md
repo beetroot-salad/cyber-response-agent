@@ -1,5 +1,20 @@
 # The review gate between #797 and #796
 
+> **Both halves have landed.** The gate dispatches three blind lenses and a composer; the
+> interim posture below — `REVIEW_ROLES` empty, every confident close failing closed on
+> `NO_REVIEWER` — is history, and `NO_REVIEWER` is gone with it. The document is kept because
+> the rules are what outlive both changes, and each row below now names where its rule lives
+> after #796 rather than where it waited.
+>
+> Two entries need updating in place. **Rule 16** is no longer unwitnessed:
+> `test_796_gate_arms.py::test_moving_the_generic_subagent_deadline_does_not_move_the_reviews`
+> re-pins the separation. **Rule 17** has its raiser again — `ReviewStages.stage()` raises
+> `UnboundReviewStage` for a bundle built without a run dir, and the gate takes it through the
+> ordinary stage-fault arm.
+>
+> The three rules under "code survives but the witness does not" are witnessed again: their
+> vulture-baseline entries are retired now that lenses call them.
+
 #797 retired the live write-time gate's three review stages — the **challenger**, the
 **coherence checker** and the **projection stage** — and everything that existed only to
 serve them. #796 lands the blind lenses and the composer that replace them.

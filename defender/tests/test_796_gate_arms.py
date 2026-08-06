@@ -242,3 +242,32 @@ def test_a_lens_reply_reaches_the_trace_framed_and_never_bare(tmp_path):
     trace = (run_dir / "review_discrimination_trace.jsonl").read_text(encoding="utf-8")
     assert poison in trace
     assert f"<run-{deps.salt}-untrusted>" in trace, "the reply landed unframed"
+
+
+# ---------------------------------------------------------------------------------------
+# The review's own deadline
+# ---------------------------------------------------------------------------------------
+
+
+def test_moving_the_generic_subagent_deadline_does_not_move_the_reviews(monkeypatch):
+    """The two default to the same NUMBER and must not move together.
+
+    A reviewer that fans out three lenses and a composer inside one close is exactly when
+    someone reaches for whichever timeout knob they can find. The pin went with the #774
+    suite; #797 flagged the separation as unwitnessed and this is it re-pinned.
+    """
+    from defender.learning.core import config
+
+    monkeypatch.delenv(challenge_gate.REVIEW_TIMEOUT_ENV, raising=False)
+    monkeypatch.setenv("LEARNING_SUBAGENT_TIMEOUT_SECONDS", "7")
+
+    assert config.subagent_timeout() == 7, "the generic knob did not move — wrong lever"
+    assert challenge_gate.stage_timeout() != 7, (
+        "the review deadline followed the offline pipeline's knob; they share a default "
+        "value and nothing else"
+    )
+
+
+def test_the_review_deadline_has_its_own_lever(monkeypatch):
+    monkeypatch.setenv(challenge_gate.REVIEW_TIMEOUT_ENV, "11")
+    assert challenge_gate.stage_timeout() == 11
