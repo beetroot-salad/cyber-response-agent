@@ -148,6 +148,33 @@ _SUPPORT_ASK = (
 )
 
 
+_COMPOSER_ASK = (
+    "Independent lens readings first, then the investigation's own account of how it moved "
+    "and what it concluded. Each lens reached its reading without seeing that account."
+)
+
+
+def composer_projection(companion: CompanionBody, readings: dict[str, str]) -> Projection:
+    """The composer's input: every lens reading, and then the WHOLE companion.
+
+    The one projection that withholds nothing. The composer is allowed to be anchored by the
+    investigation's own account precisely because the independent work is already banked — it
+    reads a completed set of readings rather than producing one. Ordering is deliberate: the
+    readings come first, so the account is what gets weighed against them rather than the
+    frame they are read through."""
+    lenses = "\n\n".join(
+        f"### Lens: {lens}\n{reading}" for lens, reading in sorted(readings.items())
+    )
+    body = json.dumps(companion, indent=2, sort_keys=True, default=str)
+    return Projection(
+        lens="composer",
+        text=(
+            f"{_COMPOSER_ASK}\n\n## Lens readings\n{lenses}\n\n"
+            f"## The investigation's own account (host-rendered)\n{body}\n"
+        ),
+    )
+
+
 def discrimination_projection(companion: CompanionBody) -> Projection:
     return _render_projection(
         "discrimination",

@@ -12,6 +12,8 @@ from defender.runtime.review import role_prompt
 from defender.runtime.review.projector import parse_investigation
 from defender.runtime.review.reply import (
     ASK_PROSE_MAX,
+    GAP,
+    HOLDS,
     Unreadable,
     citable_refs,
     read_composer_reply,
@@ -31,8 +33,10 @@ def refs():
     return citable_refs(parse_investigation(GOLDEN.read_text(encoding="utf-8")))
 
 
-def _reply(review="the close holds", ask=None):
-    return json.dumps({"review": review, "ask": ask})
+def _reply(review="the close holds", ask=None, finding=None):
+    if finding is None:
+        finding = HOLDS if ask is None else GAP
+    return json.dumps({"finding": finding, "review": review, "ask": ask})
 
 
 # ---------------------------------------------------------------------------------------
@@ -109,7 +113,7 @@ def test_a_review_with_no_ask_is_readable(refs):
 def test_an_absent_ask_reads_the_same_as_a_null_one(refs):
     """Readable-and-empty keeps its own arm. "Nothing measurable would settle this" is a
     finding the host routes on, not a reply that failed to arrive."""
-    assert read_composer_reply(json.dumps({"review": "holds"}), refs=refs).ask is None
+    assert read_composer_reply(json.dumps({"finding": HOLDS, "review": "holds"}), refs=refs).ask is None
 
 
 def test_an_ask_naming_a_real_reference_is_readable(refs):
@@ -150,18 +154,41 @@ def test_the_ask_prose_is_bounded(refs):
         "not json at all",
         "[]",
         '"a string"',
-        json.dumps({"ask": None}),
-        json.dumps({"review": "", "ask": None}),
-        json.dumps({"review": "   ", "ask": None}),
-        json.dumps({"review": "r", "ask": "not an object"}),
-        json.dumps({"review": "r", "ask": {"prose": "no target"}}),
-        json.dumps({"review": "r", "ask": {"target": "v-001"}}),
-        json.dumps({"review": "r", "ask": {"target": "v-001", "prose": "  "}}),
+        json.dumps({"finding": HOLDS, "ask": None}),
+        json.dumps({"finding": HOLDS, "review": "", "ask": None}),
+        json.dumps({"finding": HOLDS, "review": "   ", "ask": None}),
+        json.dumps({"finding": GAP, "review": "r", "ask": "not an object"}),
+        json.dumps({"finding": GAP, "review": "r", "ask": {"prose": "no target"}}),
+        json.dumps({"finding": GAP, "review": "r", "ask": {"target": "v-001"}}),
+        json.dumps({"finding": GAP, "review": "r", "ask": {"target": "v-001", "prose": "  "}}),
+        json.dumps({"finding": "maybe", "review": "r", "ask": None}),
     ],
 )
 def test_every_unusable_composer_reply_is_refused(bad, refs):
     with pytest.raises(Unreadable):
         read_composer_reply(bad, refs=refs)
+
+
+def test_a_finding_of_holds_carrying_an_ask_is_refused(refs):
+    """A composer that says the close holds AND asks for a measurement has contradicted
+    itself, and either half could be the one it meant. Dropping the ask and committing would
+    be the gate choosing for it."""
+    target = sorted(refs)[0]
+    with pytest.raises(Unreadable, match="holds"):
+        read_composer_reply(
+            _reply(finding=HOLDS, ask={"target": target, "prose": "provenance"}), refs=refs,
+        )
+
+
+def test_the_finding_decides_the_route_and_not_the_presence_of_an_ask(refs):
+    """`holds` and a gap nothing can settle both carry no ask and route to opposite outcomes,
+    which is the whole reason the finding is a field rather than something the host derives."""
+    holds = read_composer_reply(_reply(finding=HOLDS), refs=refs)
+    gap = read_composer_reply(_reply(finding=GAP, review="a live sibling remains"), refs=refs)
+    assert holds.ask is None
+    assert gap.ask is None
+    assert holds.holds
+    assert not gap.holds
 
 
 # ---------------------------------------------------------------------------------------

@@ -6,11 +6,11 @@ tool drives for a CONFIDENT disposition. It never writes report.md or the review
 itself — the close tool (`close_tool.py`) owns both writes, in the record-first order RS19
 pins, and is the one place a fault is held until both are attempted.
 
-THE GATE HAS NO REVIEWER RIGHT NOW. #797 retired the three stages this harness was built to
-drive — the challenger, the coherence checker and the projection stage — and #796 lands the
-blind lenses and the composer that replace them. Between the two, `REVIEW_ROLES` is empty and
-every confident close takes the fail-closed arm below. That is the deliberate posture, not an
-outage to route around: a gate that cannot review must not let a confident finding through.
+The reviewer is BLIND LENSES plus a COMPOSER. Each lens reads a projection of the
+investigation that withholds the belief movement it is asked to reconstruct, and they run
+concurrently because none reads another's output. The composer runs last and is the only role
+that sees both the readings and the investigation's own account — it may be anchored by that
+account precisely because the independent work is already banked.
 
 FAIL CLOSED (RS9): a stage raising, timing out, or otherwise not completing overrides the
 confident finding to inconclusive — never a silently-committed close. It commits the SAME
@@ -28,28 +28,18 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from defender._env import env_int
+from defender._untrusted import wrap as _wrap
 
 EXTRA_TURN_BOUND = 2
 
 REVIEW_TIMEOUT_ENV = "DEFENDER_REVIEW_STAGE_TIMEOUT_SECONDS"
 
-#: The review roles this gate dispatches, in the order it reports faults for. EMPTY between
-#: #797 and #796 — the three retired stages were its only members, and #796's lenses and
-#: composer are its next ones. It is the ONE home for that list: the trace-marking walk reads
-#: it rather than restating the names, so a role added to the gate cannot arrive with a trace
-#: file the incomplete-marker never touches (the shipped shape restated all three inline, and
-#: a stage renamed in one place stayed spelled the old way in the other).
-REVIEW_ROLES: tuple[str, ...] = ()
-
-#: The fail-closed detail every confident close carries until #796 binds a reviewer. Named,
-#: not inlined, so the gate's own arm and the note in `docs/review-gate-retirement.md` cannot
-#: drift apart, and so a run dir's review record says WHY rather than reporting an anonymous
-#: stage error.
-NO_REVIEWER = (
-    "no review role is bound — #797 retired the challenger, the coherence checker and the "
-    "projection stage, and #796's lenses and composer are not landed yet; a confident close "
-    "cannot be reviewed and therefore cannot stand"
-)
+#: The review roles this gate dispatches, in the order it reports faults for. It is the ONE
+#: home for that list: the trace-marking walk reads it rather than restating the names, so a
+#: role added to the gate cannot arrive with a trace file the incomplete-marker never touches
+#: (the shipped shape restated all three inline, and a stage renamed in one place stayed
+#: spelled the old way in the other).
+REVIEW_ROLES: tuple[str, ...] = ("discrimination", "composer")
 
 
 def stage_timeout() -> int:
@@ -126,7 +116,10 @@ class ReviewState:
     precedent)."""
 
     turns: int = 0
-    raised_leads: set = field(default_factory=set)
+    #: target -> how much of the record mentioned it when the ask was raised.
+    #: A dict rather than a set because the overlap rule asks whether the turn already
+    #: spent on a target BOUGHT anything, not merely whether the target came up before.
+    raised_asks: dict = field(default_factory=dict)
     closed: bool = False
     disposition: str | None = None
 
@@ -281,29 +274,169 @@ def _fail(role: str, outcome: StageOutcome) -> GateVerdict:
     )
 
 
-async def challenge_gate(deps: Any, disposition: str, *, stages: Any, bounds: Bounds) -> GateVerdict:
-    """Review one CONFIDENT disposition. The signature is the seam #796 fills: `stages` is the
-    injected `ReviewStages` bundle and `bounds` carries the deadline every stage call runs
-    under.
+async def _dispatch(role: str, stages: Any, request: StageRequest) -> StageOutcome:
+    """Look the stage up and call it, with the LOOKUP inside the fault arm.
 
-    Both are accepted and unread while `REVIEW_ROLES` is empty. Narrowing the signature to
-    what this body reads would make #796 a change to every caller — the close tool, the
-    driver's two composition roots and the e2e harness's sixth injection seam — rather than a
-    change to this module, which is the seam the injection exists to provide."""
+    The lookup used to sit outside `_call_stage`'s `try`, so a bundle missing an attribute
+    raised past the gate, past the close tool, and into a driver that classifies five
+    exception kinds and not that one. A partial bundle is a review that cannot run, which is
+    the same fact as a stage that raised."""
     from .close_tool import STAGE_ERROR
 
-    _mark_traces_incomplete(deps.run_dir, 0, NO_REVIEWER)
-    return _fail(
-        "reviewer",
-        StageOutcome(text=None, failure_kind=STAGE_ERROR, detail=NO_REVIEWER),
+    try:
+        stage_fn = stages.stage(role)
+    except Exception as e:  # noqa: BLE001 — an unbindable stage fails the review closed
+        return StageOutcome(text=None, failure_kind=STAGE_ERROR, detail=str(e))
+    return await _call_stage(role, stage_fn, request)
+
+
+def _mentions(companion: Any, target: str) -> int:
+    """How much of the record touches `target`, coarsely.
+
+    The overlap rule's measure. Keying purely on "was this target raised before" refuses a
+    second ask on the alert's own subject vertex, which most asks name — a run has three to
+    eight vertices where it has many leads, so the retired lead-keyed rule collided an order
+    of magnitude less often than a target-keyed one would. What the rule actually means is
+    that a repeat is wasteful only when the turn it already spent bought nothing about that
+    target, so that is what is measured: if the investigation recorded anything new naming it,
+    the ask is fresh again.
+
+    Deliberately a count of occurrences rather than a typed walk. A target may be a vertex, an
+    edge, a lead or a hypothesis, and the shapes that can mention each differ; a typed measure
+    would need an arm per kind and would silently return zero for the kind it forgot."""
+    return json.dumps(companion, sort_keys=True, default=str).count(target)
+
+
+def _route(
+    state: ReviewState, bounds: Bounds, disposition: str, review: Any, companion: Any,
+) -> GateVerdict:
+    """The composer's finding, plus host state no review role can see, into one arm.
+
+    The reviewer never picks the outcome. Whether a gap becomes `challenged` or
+    `forced-inconclusive` turns on the turn count, the raised-ask state and the cap — none of
+    which a review role is shown, and all of which decide what the run can still afford."""
+    from .close_tool import (
+        CAUSE_EVIDENCE_CANNOT_DISCRIMINATE,
+        CAUSE_NOTHING_LEFT_TO_ASK,
+        CAUSE_STORY_SETTLED,
+        CAUSE_TURN_BUDGET_SPENT,
+        CHALLENGED,
+        FORCED_INCONCLUSIVE,
+        NO_CAUSE,
+        STANDS,
     )
+
+    def _verdict(outcome, verdict_disposition, cause, detail, *, material=()) -> GateVerdict:
+        return GateVerdict(
+            outcome=outcome, disposition=verdict_disposition, cause=cause, detail=detail,
+            material=material, turns_used=state.turns, failure_kind=None,
+        )
+
+    if review.holds:
+        return _verdict(STANDS, disposition, CAUSE_STORY_SETTLED, review.review)
+
+    if review.ask is None:
+        # A gap with nothing measurable behind it. Forcing inconclusive costs the run
+        # nothing further; spending a turn on an ask the reviewer could not name would tax
+        # the investigation for a question nobody has.
+        return _verdict(
+            FORCED_INCONCLUSIVE, "inconclusive", CAUSE_EVIDENCE_CANNOT_DISCRIMINATE,
+            review.review,
+        )
+
+    target = review.ask.target
+    before = state.raised_asks.get(target)
+    if before is not None and _mentions(companion, target) <= before:
+        return _verdict(
+            FORCED_INCONCLUSIVE, "inconclusive", CAUSE_NOTHING_LEFT_TO_ASK,
+            f"{target} was already asked for and the turn it spent recorded nothing new "
+            f"about it — {review.review}",
+        )
+    if state.turns >= bounds.extra_turns:
+        return _verdict(
+            FORCED_INCONCLUSIVE, "inconclusive", CAUSE_TURN_BUDGET_SPENT, review.review,
+        )
+
+    state.raised_asks[target] = _mentions(companion, target)
+    state.turns += 1
+    # NO_CAUSE: this attempt commits nothing, so there is no report.md for a cause to land in.
+    return _verdict(
+        CHALLENGED, disposition, NO_CAUSE, review.review,
+        material=((target, review.ask.prose),),
+    )
+
+
+async def challenge_gate(deps: Any, disposition: str, *, stages: Any, bounds: Bounds) -> GateVerdict:
+    """Review one CONFIDENT disposition: the blind lenses, then the composer, then routing.
+
+    Each lens reads a projection of the investigation that withholds the belief movement it
+    is asked to reconstruct, and they run CONCURRENTLY because none of them reads another's
+    output. The composer runs after all of them and is the only role that sees both the
+    readings and the investigation's own account."""
+    from .close_tool import STAGE_ERROR, UNREADABLE
+    from .review.projector import (
+        EmptyInvestigation,
+        composer_projection,
+        discrimination_projection,
+        parse_investigation,
+    )
+    from .review.reply import Unreadable, citable_refs, read_composer_reply, read_lens_reading
+
+    state = ReviewState.of(deps)
+
+    try:
+        companion = parse_investigation(
+            (deps.run_dir / "investigation.md").read_text(encoding="utf-8")
+        )
+    except (OSError, EmptyInvestigation) as e:
+        _mark_traces_incomplete(deps.run_dir, 0, str(e))
+        return _fail("projector", StageOutcome(None, STAGE_ERROR, str(e)))
+
+    lenses = {"discrimination": discrimination_projection(companion)}
+    outcomes = await asyncio.gather(*(
+        _dispatch(lens, stages, _fresh_stage_request(projection.text, bounds))
+        for lens, projection in lenses.items()
+    ))
+
+    readings: dict[str, str] = {}
+    for lens, outcome in zip(lenses, outcomes, strict=True):
+        _write_trace_row(
+            deps.run_dir, lens, 0, {"ok": outcome.ok},
+            raw_reply=_wrap(outcome.text or outcome.detail or "", "untrusted", deps.salt),
+        )
+        if not outcome.ok:
+            _mark_traces_incomplete(deps.run_dir, 0, outcome.detail or "stage fault")
+            return _fail(lens, outcome)
+        try:
+            readings[lens] = read_lens_reading(outcome.text)
+        except Unreadable as e:
+            _mark_traces_incomplete(deps.run_dir, 0, str(e))
+            return _fail(lens, StageOutcome(None, UNREADABLE, str(e)))
+
+    composer = await _dispatch(
+        "composer", stages,
+        _fresh_stage_request(composer_projection(companion, readings).text, bounds),
+    )
+    _write_trace_row(
+        deps.run_dir, "composer", 0, {"ok": composer.ok},
+        raw_reply=_wrap(composer.text or composer.detail or "", "untrusted", deps.salt),
+    )
+    if not composer.ok:
+        _mark_traces_incomplete(deps.run_dir, 0, composer.detail or "stage fault")
+        return _fail("composer", composer)
+    try:
+        review = read_composer_reply(composer.text, refs=citable_refs(companion))
+    except Unreadable as e:
+        _mark_traces_incomplete(deps.run_dir, 0, str(e))
+        return _fail("composer", StageOutcome(None, UNREADABLE, str(e)))
+
+    return _route(state, bounds, disposition, review, companion)
 
 
 __all__ = [
     "Bounds",
     "EXTRA_TURN_BOUND",
     "GateVerdict",
-    "NO_REVIEWER",
     "REVIEW_ROLES",
     "ReviewState",
     "StageRequest",

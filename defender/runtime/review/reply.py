@@ -24,6 +24,9 @@ from defender.skills.invlang.schema import CompanionBody
 
 __all__ = [
     "ASK_PROSE_MAX",
+    "FINDINGS",
+    "GAP",
+    "HOLDS",
     "Ask",
     "Review",
     "Unreadable",
@@ -50,12 +53,32 @@ class Ask:
     prose: str
 
 
+#: The composer's finding, as a CLOSED two-member vocabulary the host dispatches on.
+#:
+#: It exists because the host cannot derive it. "The close holds" and "there is a gap, and
+#: nothing measurable would settle it" both carry no ask, and they route to opposite outcomes
+#: — one commits the confident disposition, the other overrides it. One bit, and it is the
+#: only thing in this contract that is not prose.
+#:
+#: Two members, each earning its place by a DIFFERENT consequence rather than by naming a
+#: different condition, which is the bar the retired ten-member outcome vocabulary could not
+#: clear.
+HOLDS = "holds"
+GAP = "gap"
+FINDINGS: frozenset[str] = frozenset({HOLDS, GAP})
+
+
 @dataclass(frozen=True)
 class Review:
-    """The composer's whole output: its prose, and at most one ask."""
+    """The composer's whole output: its finding, its prose, and at most one ask."""
 
+    finding: str
     review: str
     ask: Ask | None
+
+    @property
+    def holds(self) -> bool:
+        return self.finding == HOLDS
 
 
 def citable_refs(companion: CompanionBody) -> frozenset[str]:
@@ -107,12 +130,27 @@ def read_composer_reply(text: str | None, *, refs: frozenset[str]) -> Review:
     if not isinstance(review, str) or not review.strip():
         raise Unreadable("the composer's reply carries no review")
 
+    # A closed vocabulary is CHECKED, not assumed. The retired projection stage dispatched on
+    # an unchecked tag, so a misspelt one was invisible to every classifier bucket, fell
+    # through to the permissive arm and committed an override with no failure kind — the
+    # review's own breakage recorded as a finding about the evidence.
+    finding = obj.get("finding")
+    if finding not in FINDINGS:
+        raise Unreadable(
+            f"the composer's finding is {finding!r}, outside {sorted(FINDINGS)}"
+        )
+
     # ABSENT and NULL are the same answer here, and both are readable: "nothing measurable
     # would settle this" is a real finding the host routes on, not a reply that failed to
     # arrive. Collapsing it into the unreadable arm would lose the finding.
     raw_ask = obj.get("ask")
     if raw_ask is None:
-        return Review(review=review.strip(), ask=None)
+        return Review(finding=finding, review=review.strip(), ask=None)
+    if finding == HOLDS:
+        # Not tolerated by dropping the ask: a composer that says the close holds AND asks
+        # for a measurement has contradicted itself, and either half could be the one it
+        # meant. Silently keeping one is the gate choosing for it.
+        raise Unreadable("the composer's finding is `holds` but it also returned an ask")
     if not isinstance(raw_ask, dict):
         raise Unreadable("the composer's ask is neither an object nor null")
 
@@ -124,4 +162,7 @@ def read_composer_reply(text: str | None, *, refs: frozenset[str]) -> Review:
         raise Unreadable(
             f"the composer's ask names {target!r}, which the investigation never recorded"
         )
-    return Review(review=review.strip(), ask=Ask(target=target, prose=prose.strip()[:ASK_PROSE_MAX]))
+    return Review(
+        finding=finding, review=review.strip(),
+        ask=Ask(target=target, prose=prose.strip()[:ASK_PROSE_MAX]),
+    )

@@ -23,9 +23,9 @@ never hold that key).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from defender._env import env_str
 from defender.runtime.agent_definition import AgentDefinition, RunScope, ToolSet, bind
@@ -41,6 +41,7 @@ __all__ = [
     "ComposerDeps",
     "DiscriminationDeps",
     "ReviewStages",
+    "live_review_stages",
     "SupportDeps",
     "UnboundReviewStage",
     "bind_review_role",
@@ -155,11 +156,21 @@ class UnboundReviewStage(RuntimeError):
     the review CLOSED and names why, rather than acting confidently on the wrong tree."""
 
 
-def _make_live_stage(defn: AgentDefinition, run_dir: Path, defender_dir: Path, trace_name: str):
+def _make_live_stage(  # noqa: PLR0913 — one stage's full wiring, named once
+    defn: AgentDefinition, run_dir: Path, defender_dir: Path, trace_name: str,
+    *, agent_id: str, instructions: str,
+):
     """One live, agent-backed review stage: built lazily, one Agent per call, mirroring the
     gather-subagent-from-tool-body pattern. NOT exercised by the hermetic suite (every
     scenario there injects a fake), so treat a bundle built from it as a best-effort live
-    default."""
+    default.
+
+    `trace_name` and `agent_id` are PER LENS and not per role, because one role can be
+    dispatched twice. `RequestLogger` refuses a second concurrent open of a path, so a shared
+    trace file makes whichever call loses the race raise — caught as a stage error, failing
+    the whole review closed, non-deterministically. And `observe` keys its sequence and id on
+    `agent_id`, so a shared one collapses two readings into one in `llm_requests.jsonl` and in
+    the visualizer. The first fails loudly and at random; the second never fails at all."""
 
     async def call(request):
         from defender.runtime import observe
@@ -169,12 +180,8 @@ def _make_live_stage(defn: AgentDefinition, run_dir: Path, defender_dir: Path, t
         assert defn.deps_cls is not None, f"{defn.role.name}_DEF declares no deps_cls"
         try:
             agent = build_agent_core(
-                defn, deps_type=defn.deps_cls,
-                instructions=(
-                    "You are a review stage. Respond to exactly what the prompt asks; you "
-                    "hold no tools, no file-read grant, and no bash grant."
-                ),
-                logger=logger, agent_id=defn.role.value,
+                defn, deps_type=defn.deps_cls, instructions=instructions,
+                logger=logger, agent_id=agent_id,
             )
             deps = bind_review_role(defn, run_dir, defender_dir=defender_dir)
             result = await agent.run(request.prompt, deps=deps)
@@ -188,14 +195,54 @@ def _make_live_stage(defn: AgentDefinition, run_dir: Path, defender_dir: Path, t
 @dataclass
 class ReviewStages:
     """The injection bundle `run_investigation(review_stages=…)`/`close_investigation(stages=…)`
-    take — the seam, held open across #797/#796.
+    take.
 
-    IT CARRIES NO STAGES. #797 retired the three it was written around
-    (`challenger`/`coherence_checker`/`projection`) and #796 fills it with the lens and
-    composer roles that replace them. It is rewritten to an empty shape rather than kept with
-    the three dead attribute names, because a bundle whose attributes name roles that no
-    longer exist reads to every caller — and to the e2e harness's sixth injection seam — as if
-    those roles were still there to inject.
+    Every field DEFAULTS TO NONE rather than being required, because one composition root
+    genuinely has no run dir to bind a stage against (`driver.build_agent`) and must still
+    produce a bundle. An unfilled field is therefore not a programming error to raise on at
+    construction — it is a stage that is not bound, and `stage()` is where that becomes a
+    fault.
 
-    Between the two changes the gate has no reviewer at all and fails every confident close
-    closed; see `challenge_gate.NO_REVIEWER`."""
+    Read every stage through `stage()`, never off the attribute. The lookup used to sit
+    OUTSIDE the gate's `try`, so an `AttributeError` from a partial bundle escaped the
+    fail-closed arm entirely — past the gate, past the close tool, and into a driver that does
+    not classify it. Through `stage()` a missing lens is `UnboundReviewStage`, which the gate
+    catches like any other stage fault."""
+
+    discrimination: Any = None
+    composer: Any = None
+
+    def stage(self, name: str) -> Any:
+        fn = getattr(self, name, None)
+        if fn is None:
+            raise UnboundReviewStage(
+                f"the {name} stage is not bound — this bundle was built by a composition root "
+                "that never held a run dir"
+            )
+        return fn
+
+
+def live_review_stages(
+    run_dir: Path, defender_dir: Path, *, model_override: str | None = None,
+) -> ReviewStages:
+    """The production bundle, buildable only where the run dir is.
+
+    `model_override` is the OPERATOR's raw `--model`, threaded here unresolved. Resolving it
+    against the investigator's model on the way would hand `resolve_review_model` a non-`None`
+    value on every run, and the review's own default would be unreachable in production while
+    a unit test calling it with `None` still proved it was the default."""
+    from defender.runtime.review import role_prompt
+
+    name = resolve_review_model(model_override)
+
+    def staged(defn: AgentDefinition, lens: str) -> Any:
+        return _make_live_stage(
+            replace(defn, model=lambda: name), run_dir, defender_dir,
+            f"review_{lens}_live_trace.jsonl",
+            agent_id=lens, instructions=role_prompt(defn.role.value),
+        )
+
+    return ReviewStages(
+        discrimination=staged(DISCRIMINATION_DEF, "discrimination"),
+        composer=staged(COMPOSER_DEF, "composer"),
+    )

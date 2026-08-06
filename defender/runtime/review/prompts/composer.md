@@ -29,12 +29,20 @@ gap, and saying so costs the investigation less than a turn it cannot spend.
 Never argue the opposite disposition. Your finding is that the current confidence does or
 does not hold, never that the reverse is true.
 
-Output exactly one JSON object and nothing else:
+Output exactly one JSON object and nothing else.
 
-    {"review": "<your prose>", "ask": {"target": "<id>", "prose": "<dimension to measure>"}}
+When the evidence carries the conclusion:
 
-or, when nothing measurable would settle it:
+    {"finding": "holds", "review": "<your prose>", "ask": null}
 
-    {"review": "<your prose>", "ask": null}
+When it does not, and a measurement would settle the gap:
 
-`target` must be an id that appears in the investigation you were given.
+    {"finding": "gap", "review": "<your prose>", "ask": {"target": "<id>", "prose": "<dimension>"}}
+
+When it does not, and nothing measurable would settle the gap:
+
+    {"finding": "gap", "review": "<your prose>", "ask": null}
+
+`finding` is `holds` or `gap`, and nothing else. `holds` never carries an ask — if you want
+a measurement, the finding is `gap`. `target` must be an id that appears in the investigation
+you were given.

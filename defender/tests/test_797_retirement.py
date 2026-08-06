@@ -236,14 +236,19 @@ def test_797_the_two_vocabularies_carry_no_member_without_a_producer():
     )
 
 
-def test_797_a_confident_close_fails_closed_with_no_reviewer(tmp_path):
-    """The interim posture, driven end to end: a confident disposition handed to the real
-    close tool commits `inconclusive`, and says on disk that the MACHINERY is what failed.
+def test_797_a_confident_close_fails_closed_when_no_stage_is_bound(tmp_path):
+    """A confident disposition reviewed through an UNBOUND bundle commits `inconclusive`, and
+    says on disk that the MACHINERY is what failed.
 
-    This is the arm that makes the deletion honest. With no review role bound, the gate has
-    two options — let the confident finding through unreviewed, or override it — and RS9's
-    fail-closed rule picks the second. Silently committing would look identical to a review
-    that ran and found nothing.
+    #797 asserted this of a gate with no reviewer at all. #796 bound one, and the property it
+    was really about survives the binding: a bundle whose stages are not bound — the shape
+    `driver.build_agent` produces, having no run dir to bind against — must fail a confident
+    close closed rather than let it through. RS9 gives the gate two options and picks the
+    override; silently committing would look identical to a review that ran and found nothing.
+
+    The run dir carries a real investigation.md so the fault is provably the unbound stage
+    rather than a document the projector could not read — both fail closed, and only one is
+    what this test names.
 
     `failure_kind` is what separates this from an override the EVIDENCE produced: both commit
     `forced-inconclusive`, and only a machinery failure names a kind. Asserting the
@@ -266,6 +271,7 @@ def test_797_a_confident_close_fails_closed_with_no_reviewer(tmp_path):
     from defender.runtime.review_roles import ReviewStages
 
     deps, run_dir = _main_deps(tmp_path)
+    (run_dir / "investigation.md").write_bytes((GOLDEN / "investigation.md").read_bytes())
     result = close_investigation(deps, "malicious", stages=ReviewStages())
 
     assert result.outcome == FORCED_INCONCLUSIVE, (
@@ -287,9 +293,9 @@ def test_797_a_confident_close_fails_closed_with_no_reviewer(tmp_path):
 
     record = json.loads(Path(result.record_path).read_text(encoding="utf-8"))
     assert record["failure_kind"] == STAGE_ERROR
-    assert "#796" in record["detail"], (
-        "the review record does not say WHY there is no reviewer — an operator reading the "
-        f"run gets an anonymous stage error: {record['detail']!r}"
+    assert "not bound" in record["detail"], (
+        "the review record does not say WHY the review could not run — an operator reading "
+        f"the run gets an anonymous stage error: {record['detail']!r}"
     )
 
     # Positive control: the gate reviews CONFIDENT closes only.

@@ -184,7 +184,7 @@ class _Investigate(Protocol):
 
     def __call__(
         self, *, alert_path: Path, run_dir: Path, run_id: str, defender_dir: Path,
-        salt: str, model_name: str, box: Any,
+        salt: str, model_name: str, model_override: str | None, box: Any,
     ) -> dict[str, Any]: ...
 
 
@@ -196,6 +196,7 @@ def _drive_investigation(
     defender_dir: Path,
     salt: str,
     model_name: str,
+    model_override: str | None,
     box: Any,
 ) -> dict[str, Any]:
     """The production investigation call, as a SYNCHRONOUS callable.
@@ -212,15 +213,21 @@ def _drive_investigation(
         defender_dir=defender_dir,
         salt=salt,
         model_name=model_name,
+        model_override=model_override,
         box=box,
     ))
 
 
-def _run_investigation_lifecycle(
+def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs plus its four injection seams
     *,
     run_dir: Path,
     salt: str,
     model: str,
+    #: The operator's RAW `--model`, carried alongside the resolved `model` rather than
+    #: derived from it. The review roles pin their own default, and a caller that resolved
+    #: this against the investigator's would hand them a non-`None` model on every run,
+    #: making that default unreachable in production while a unit test still proved it.
+    model_override: str | None,
     defender_dir: Path,
     investigate: _Investigate = _drive_investigation,
     start_box: Callable[..., Any] = box_mod.start_box,
@@ -247,6 +254,7 @@ def _run_investigation_lifecycle(
             defender_dir=defender_dir,
             salt=salt,
             model_name=model,
+            model_override=model_override,
             box=box,
         )
         investigation_ok = True
@@ -292,6 +300,7 @@ def main(
         run_dir=run_dir,
         salt=salt,
         model=model,
+        model_override=ns.model,
         defender_dir=DEFENDER_DIR,
     )
 
