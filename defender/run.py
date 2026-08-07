@@ -22,6 +22,9 @@ import os
 import sys
 from pathlib import Path
 
+# Hand-rolled rather than `scripts/_venv.reexec_into_venv`, and irreducibly so: this must
+# run BEFORE any `defender.*` import resolves, and reaching that helper is itself such an
+# import. Its docstring records the same constraint from the other side.
 _DEFENDER_DIR = Path(__file__).resolve().parent
 _VENV_PY = _DEFENDER_DIR / ".venv" / "bin" / "python3"
 if __name__ == "__main__" and _VENV_PY.is_file() and Path(sys.executable) != _VENV_PY:

@@ -22,6 +22,7 @@ from pydantic_ai.messages import (
 from defender._clock import now_iso
 from defender._env import env_int
 from defender._io import open_guarded, write_guarded
+from defender.runtime._wire import wire_digest
 
 from defender.scripts.pricing import usage_cost
 
@@ -92,12 +93,6 @@ def _usage_dict(usage: Any) -> dict[str, int]:
 
 def encode_wire_record(record: dict) -> str:
     return json.dumps(record, ensure_ascii=WIRE_LOG_ENSURE_ASCII)
-
-
-def _wire_digest(messages: list[Any]) -> str:
-    dumped = ModelMessagesTypeAdapter.dump_python(messages, mode="json")
-    text = json.dumps(dumped, sort_keys=True, ensure_ascii=True)
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 _ACTIVE_PATHS: set[str] = set()
@@ -175,7 +170,7 @@ class RequestLogger:
             duration_ms=round(duration_ms, 1),
             run_step=run_step,
             session_id=session_id,
-            wire_sha=_wire_digest(request_messages),
+            wire_sha=wire_digest(request_messages),
         )
         self.n_requests += 1
 

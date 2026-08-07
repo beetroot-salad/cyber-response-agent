@@ -120,6 +120,7 @@ from defender.scripts.gather_tools.record_query import (
     _passthrough_max_bytes,
     build_truncated_view,
 )
+from defender._clock import parse_iso_utc
 
 SYSTEM = "ticket"
 TOOL_GET = "get_closed_ticket"
@@ -144,24 +145,6 @@ _KEY_PATTERN_VERB = "key-pattern"
 _CASE_OPENED_VERB = "case-opened-at"
 
 
-def _parse_instant(raw: Any) -> _dt.datetime | None:
-    """One store timestamp → an aware UTC datetime, or ``None`` if it is not one.
-
-    A naive value is READ AS UTC rather than rejected: the store mints ``datetime.now(utc)``,
-    but a hand-written seed file may omit the offset, and treating that as unparseable would
-    drop legitimate precedent for a formatting detail. A naive value in some other zone would
-    be misread — the error is bounded by that zone's offset, which cannot approach the gap
-    between seeded precedent and a live case.
-    """
-    if not isinstance(raw, str) or not raw:
-        return None
-    try:
-        parsed = _dt.datetime.fromisoformat(raw.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=_dt.UTC)
-
-
 def _predates_case(record: Any, opened_at: _dt.datetime) -> bool:
     """Fork J's predicate: is EVERY word of this record provably older than the case?
 
@@ -184,7 +167,7 @@ def _predates_case(record: Any, opened_at: _dt.datetime) -> bool:
     if not isinstance(record, dict):
         return False
     stamped = record.get("updated")
-    instant = _parse_instant(stamped if stamped is not None else record.get("created"))
+    instant = parse_iso_utc(stamped if stamped is not None else record.get("created"))
     return instant is not None and instant < opened_at
 
 
@@ -215,7 +198,7 @@ async def _case_opened_at(
         return None, 0, ""
     if exit_code != 0:
         return None, exit_code, f"case-opened boundary unavailable: {detail}"
-    instant = _parse_instant(opened)
+    instant = parse_iso_utc(opened)
     if instant is None:
         return None, DEFAULT_FAULT_EXIT, (
             f"case-opened boundary unusable: {_CASE_OPENED_VERB} returned "

@@ -113,3 +113,51 @@ def test_now_iso_is_utc_seconds_precision():
     """The loop's canonical clock string: UTC, seconds precision, no microseconds."""
     ts = _clock.now_iso()
     assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+00:00", ts), ts
+
+
+def test_parse_iso_utc_accepts_the_trailing_z():
+    """`Z` is the form these readers meet on the wire — a store row or a seeded ticket
+    written by something that is not `now_iso`. Every caller had been rewriting it by hand
+    before calling `fromisoformat`, and that rewrite is the reason the reader existed three
+    times over."""
+    assert _clock.parse_iso_utc("2026-01-01T12:00:00Z") == _clock.parse_iso_utc(
+        "2026-01-01T12:00:00+00:00")
+
+
+def test_parse_iso_utc_reads_a_naive_value_as_utc_rather_than_rejecting_it():
+    """The judge's recency screen rests on this. `closed_ticket_tool._predates_case` asks
+    "is every word of this record provably older than the case?", and the stores mint
+    `datetime.now(utc)` — but a hand-written seed file may omit the offset. Treating that as
+    unparseable would drop legitimate precedent over a formatting detail.
+
+    A naive value in some other zone IS misread; the error is bounded by that zone's offset,
+    which cannot approach the gap between seeded precedent and a live case."""
+    naive = _clock.parse_iso_utc("2026-01-01T12:00:00")
+    assert naive is not None
+    assert naive.tzinfo is not None
+    assert naive == _clock.parse_iso_utc("2026-01-01T12:00:00+00:00")
+
+
+def test_parse_iso_utc_returns_aware_always_so_a_mixed_batch_sorts():
+    """Aware-always is not tidiness — comparing a naive datetime with an aware one raises
+    `TypeError`, and `visualize_data._tile_phase_boundaries` sorts whatever it parsed. A
+    reader that passed naive values through would crash the phase tiling on one
+    offset-less row rather than skipping it."""
+    raw = ("2026-01-01T12:00:00", "2026-01-01T09:00:00Z", "2026-01-01T15:00:00+02:00")
+    batch = [_clock.parse_iso_utc(s) for s in raw]
+    assert all(dt is not None for dt in batch)
+    # 15:00+02:00 is 13:00Z, so it sorts last — the offset is honoured, not stripped.
+    assert [dt.isoformat() for dt in sorted(batch)] == [
+        "2026-01-01T09:00:00+00:00",
+        "2026-01-01T12:00:00+00:00",
+        "2026-01-01T15:00:00+02:00",
+    ]
+
+
+def test_parse_iso_utc_returns_none_for_anything_that_is_not_a_timestamp():
+    """Never raises — every caller treats `None` as "no usable instant" and carries on.
+    A non-`str` is the case worth naming: `visualize_data`'s copy caught `TypeError` and
+    `ValueError` but reached `.replace` on the raw value first, so an integer timestamp
+    raised `AttributeError` straight through the guard."""
+    for raw in (None, 17, b"2026-01-01T12:00:00Z", "", "not a date", {"t": 1}):
+        assert _clock.parse_iso_utc(raw) is None, raw

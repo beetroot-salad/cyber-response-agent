@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, UTC
 
 from defender.learning.core.config import REPO_ROOT, make_logger
 from defender.scripts.case_history import case_ticket
+from defender._clock import parse_iso_utc
 
 _TICKET_CLI = REPO_ROOT / "defender" / "scripts" / "adapters" / "ticket_adapter.py"
 _LIST_TIMEOUT_SEC = 15
@@ -62,16 +63,6 @@ def _list_closed(label: str) -> list:
     return tickets if isinstance(tickets, list) else []
 
 
-def _parse_iso(value) -> datetime | None:
-    if not isinstance(value, str):
-        return None
-    try:
-        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
-
-
 def _is_eligible(ticket, self_case_id: str, lo: datetime, hi: datetime) -> bool:
     key = case_ticket.ticket_key(ticket)
     if not key or key == self_case_id:
@@ -80,7 +71,7 @@ def _is_eligible(ticket, self_case_id: str, lo: datetime, hi: datetime) -> bool:
         return False
     if case_ticket.ticket_seed_eligible(ticket) is not True:
         return False
-    event_time = _parse_iso(case_ticket.ticket_event_time(ticket))
+    event_time = parse_iso_utc(case_ticket.ticket_event_time(ticket))
     return event_time is not None and lo <= event_time <= hi
 
 
@@ -100,7 +91,7 @@ def sample_seeds(
         if not label:
             return []
         if now is None:
-            now = _parse_iso(case_ticket.alert_event_time(alert)) or datetime.now(UTC)
+            now = parse_iso_utc(case_ticket.alert_event_time(alert)) or datetime.now(UTC)
         lo, hi = now - WINDOW_MAX, now - WINDOW_RECENT
         eligible = [
             t for t in list_closed_fn(label) if _is_eligible(t, self_case_id, lo, hi)

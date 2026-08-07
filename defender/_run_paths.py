@@ -12,15 +12,17 @@ class RunPaths:
 
     ``run_dir`` is the source root (the finished investigation, read); the five
     artifact accessors (``alert``/``report``/``investigation``/``executed_queries``/
-    ``gather_raw``) resolve relative to it. ``learning_run_dir`` is the
-    optional per-case leg-output dir (under ``LoopPaths.runs_dir``), carried so the
-    two roots travel together; the learning loop copies the artifacts into it.
-    Construct ``RunPaths(some_dir)`` on whichever root you hold — the accessors are
-    root-relative by design.
+    ``gather_raw``) resolve relative to it. Construct ``RunPaths(some_dir)`` on
+    whichever root you hold — the accessors are root-relative by design.
+
+    ONE root, deliberately. This used to carry an optional second (the per-case leg-output
+    dir) so that "the two roots travel together", but exactly one consumer ever read the
+    pair and it destructured and asserted on it immediately — a 2-tuple wearing a
+    dataclass's clothes, which made all ~48 single-root constructions carry an `Optional`
+    that was always `None`. That consumer takes its two roots as two arguments now.
     """
 
     run_dir: Path
-    learning_run_dir: Path | None = None
 
     @property
     def alert(self) -> Path:

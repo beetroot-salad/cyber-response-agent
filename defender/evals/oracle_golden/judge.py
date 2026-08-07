@@ -26,7 +26,7 @@ import json
 import os
 import subprocess
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -478,6 +478,35 @@ def _pass(prompt_path: Path, user: str, parse, *, model: str, effort: str,
     # committed artifact can be checked against the tag it was filed under.
     return {**parsed, "judge_model": result.model, "judge_effort": result.effort,
             "cost_usd": result.cost_usd}
+
+
+def sole_judge(answers: Iterable[dict], *, what: str) -> str:
+    """The one judge that answered all of `answers`, or a `RuntimeError` naming the set.
+
+    The counterpart to the provenance `_pass` stamps: reading `judge_model` back off every
+    reply is what catches a run that silently fell back mid-sweep and filed two judges'
+    answers under one tag. Three callers wrote this out by hand — the label cache and both
+    audit sweeps — and the check is only worth anything if it is applied everywhere a batch
+    of replies gets summarized under one name, which is exactly the property a hand-copied
+    guard does not have.
+
+    `what` names the batch in the message, because "more than one judge" is not actionable
+    without knowing which sweep produced it.
+    """
+    resolved = {answer["judge_model"] for answer in answers}
+    if len(resolved) != 1:
+        raise RuntimeError(f"{what} ran on more than one judge: {sorted(resolved)}")
+    return resolved.pop()
+
+
+def total_cost(answers: Iterable[dict]) -> float | None:
+    """What a batch of replies cost, or `None` if no reply priced itself.
+
+    `None` is not zero and must not round to it: a call seam that reports no price (a stub,
+    or a provider whose response carried no usage) means the figure is unknown, and a
+    summary printing `$0.0` for it would read as free."""
+    priced = [answer["cost_usd"] for answer in answers if answer.get("cost_usd") is not None]
+    return round(sum(priced), 4) if priced else None
 
 
 def label_lead(inputs: LeadInputs, *, model: str | None = None, effort: str | None = None,

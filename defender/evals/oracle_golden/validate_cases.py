@@ -45,22 +45,23 @@ from pathlib import Path
 
 import yaml
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+
+from defender.evals.oracle_golden.score import DERIVED_KINDS, is_derived  # noqa: E402
+from defender.evals.oracle_golden.story_from_run import eval_tells_in  # noqa: E402
+
 GOLDEN_DIR = Path(__file__).resolve().parent
 LEDGER = GOLDEN_DIR / "held_out_ledger.yaml"
 
 REQUIRED_FILES = ("manifest.yaml", "environment.yaml",
                   "oracle_visible/story.md", "oracle_visible/leads.jsonl")
 
-#: Kinds that carry no capture of their own: they reuse a base case's envelopes and
-#: change only the story, so `hidden/` is absent BY DESIGN and its absence is not a gap.
-DERIVED_KINDS = ("mutation", "negative-control", "spec-probe", "contradiction",
-                 "corrupted")
-
-#: Vocabulary only an eval author writes — the scoring frame, not the operation.
-#: Mirrored in `story_from_run.py`, which lints its own rendered output.
-EVAL_TELLS = ("oracle", "negative control", "golden", "projection", "every lead",
-              "each lead", "expected result", "+event", "+noise", "-noise",
-              "result class", "standard environment noise", "suppressed:")
+# Both read from their owners rather than restated here. `DERIVED_KINDS` was declared twice
+# with two different readings of one fact — "no capture of its own, so `hidden/` is absent by
+# design" here, "story never fired, so nothing was measured" in `score.py` — which is exactly
+# the shape that lets a sixth kind be added to one list and not the other. `audit_judge`
+# already reached for `score`'s copy. The eval-tells list was the same story, under a
+# keep-in-sync note naming a symbol that lives in neither file.
 
 
 def _leads_of(case_dir: Path) -> dict[str, dict]:
@@ -90,8 +91,8 @@ def check_case(case_dir: Path, by_id: dict[str, dict]) -> list[str]:
     problems += check_identity(case_dir, manifest)
     problems += check_environment(case_dir)
 
-    story = (case_dir / "oracle_visible" / "story.md").read_text(encoding="utf-8").lower()
-    tells = [t for t in EVAL_TELLS if t in story]
+    story = (case_dir / "oracle_visible" / "story.md").read_text(encoding="utf-8")
+    tells = eval_tells_in(story)
     if tells:
         problems.append(f"{name}: story.md leaks the evaluation frame: {tells}")
 
@@ -110,7 +111,7 @@ def check_expectation(name: str, manifest: dict) -> list[str]:
     burst into all nine leads — the exact window-copying the negative control exists to
     catch — scored clean and exited 0.
     """
-    if manifest.get("kind") not in DERIVED_KINDS:
+    if not is_derived(manifest.get("kind")):
         return []
     expectation = manifest.get("expectation") or {}
     if not any(expectation.get(k) for k in
@@ -134,7 +135,7 @@ def check_identity(case_dir: Path, manifest: dict) -> list[str]:
         observed = case_dir / "hidden" / "observed"
         if not observed.is_dir() or not list(observed.iterdir()):
             problems.append(f"{name}: observed case has no hidden/observed payloads")
-    elif kind not in DERIVED_KINDS:
+    elif not is_derived(kind):
         problems.append(f"{name}: kind {kind!r} is not observed|{'|'.join(DERIVED_KINDS)}")
     return problems
 

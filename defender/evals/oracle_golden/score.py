@@ -51,6 +51,7 @@ import re
 import sys
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
@@ -67,8 +68,26 @@ _NOISE_MARKER = "<standard environment noise>"
 
 #: Kinds whose story was never fired, so nothing was ever measured for it. They are
 #: graded against `expectation:` in the manifest instead — see `expectation_failures`.
+#:
+#: THE owner. `validate_cases` reads the same fact from the other side — no capture of its
+#: own, so a missing `hidden/` is by design, not a gap — and used to say so with its own
+#: copy of the tuple.
 DERIVED_KINDS = ("mutation", "negative-control", "spec-probe", "contradiction",
                  "corrupted")
+
+
+def is_derived(kind: object) -> bool:
+    """Was this case's story never fired, so nothing was ever measured for it?
+
+    The question, beside the vocabulary — for the reason `defender/_vocab.py` states: a
+    vocabulary and the answer to "is this value in it" drift apart the moment they live in
+    different files. Four sites spelled `kind in DERIVED_KINDS` themselves, and importing a
+    closed vocabulary only to re-derive what belonging to it MEANS is what
+    `lint_borrowed_vocabulary` exists to stop. It is also how a later kind that is
+    derived-but-graded-differently gets the old answer at three sites out of four.
+    """
+    return kind in DERIVED_KINDS
+
 
 #: Causes decided in code, never by the judge. They are disjoint from `judge.CAUSES` on
 #: purpose: a mechanical failure is a property of the document, needs no measurement to
@@ -318,12 +337,10 @@ def measure_case(case_dir: Path, lead_ids: list[str], *, model: str, effort: str
         cached.update(dict(zip(todo, fresh, strict=True)))
         # Read the judge back from the calls rather than echoing the request: a run that
         # silently fell back must not be filed under the tag we asked for.
-        resolved = {x["judge_model"] for x in fresh}
-        if len(resolved) != 1:
-            raise RuntimeError(f"the label pass ran on more than one judge: {sorted(resolved)}")
+        resolved = judge.sole_judge(fresh, what="the label pass")
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps({
-            "judge": {"model": resolved.pop(), "effort": effort,
+            "judge": {"model": resolved, "effort": effort,
                       "prompts_sha8": judge.prompts_sha8()},
             "leads": {k: cached[k] for k in sorted(cached)},
         }, indent=2) + "\n", encoding="utf-8")
@@ -351,9 +368,27 @@ def _mechanical_row(lead_id: str, system: str, label: dict, cause: str, note: st
     }
 
 
-def score_case(case_dir: Path, proj_path: Path, *, model: str, effort: str, jobs: int = 4,
-               relabel: bool = False, call: judge.CallFn = judge.call_model) -> dict:
-    """The whole measurement, as the dict written to `scores/<tag>.json`."""
+@dataclass(frozen=True)
+class _Mechanical:
+    """`_measured` output: the score as far as it goes with no model in the loop, plus the
+    three inputs the judged half then reads again."""
+
+    summary: dict
+    manifest: dict
+    leads: dict
+    preds: dict
+
+
+def _measured(case_dir: Path, proj_path: Path, *, model: str, effort: str) -> _Mechanical:
+    """Load one case-and-projection pair and run every check that needs no model.
+
+    THE definition of the mechanical half. `--dry-run` is exactly this and stops here;
+    `score_case` is exactly this and then decides whether to pay for judging. Both used to
+    derive it separately, which had already produced two orderings of one dict and gave the
+    dry run its own opportunity to disagree with the thing it exists to preview — a
+    `--dry-run` that reports clean for a projection the real score refuses is worse than no
+    dry run, because it is consulted precisely when a model call is expensive.
+    """
     manifest = yaml.safe_load((case_dir / "manifest.yaml").read_text(encoding="utf-8")) or {}
     proj = yaml.safe_load(proj_path.read_text(encoding="utf-8")) or {}
     leads = {row["lead_id"]: row for row in judge.load_case_leads(case_dir)}
@@ -366,25 +401,28 @@ def score_case(case_dir: Path, proj_path: Path, *, model: str, effort: str, jobs
         "kind": manifest.get("kind"),
         "judge": {"model": model, "effort": effort, "prompts_sha8": judge.prompts_sha8()},
         "n_leads": len(leads),
+        "mechanical": {
+            **integrity(list(leads), preds, duplicates),
+            "malformed_leads": {
+                lead_id: problem for lead_id, events in preds.items()
+                if (problem := grammar_problem(events)) is not None
+            },
+            "forbidden_emitted": leaks(_forbidden_values(case_dir, manifest), preds),
+            "expectation_failures": expectation_failures(
+                manifest.get("expectation") or {}, preds, list(leads)),
+            "concrete_value_leads": sorted(
+                lead_id for lead_id, events in preds.items()
+                if isinstance(events, list) and has_concrete_value(events)),
+        },
     }
-    summary["mechanical"] = {
-        **integrity(list(leads), preds, duplicates),
-        "malformed_leads": {}, "forbidden_emitted": [], "concrete_value_leads": [],
-        "expectation_failures": [],
-    }
+    return _Mechanical(summary=summary, manifest=manifest, leads=leads, preds=preds)
 
-    forbidden = _forbidden_values(case_dir, manifest)
-    summary["mechanical"]["forbidden_emitted"] = leaks(forbidden, preds)
-    summary["mechanical"]["expectation_failures"] = expectation_failures(
-        manifest.get("expectation") or {}, preds, list(leads))
-    summary["mechanical"]["malformed_leads"] = {
-        lead_id: problem
-        for lead_id, events in preds.items()
-        if (problem := grammar_problem(events)) is not None
-    }
-    summary["mechanical"]["concrete_value_leads"] = sorted(
-        lead_id for lead_id, events in preds.items()
-        if isinstance(events, list) and has_concrete_value(events))
+
+def score_case(case_dir: Path, proj_path: Path, *, model: str, effort: str, jobs: int = 4,
+               relabel: bool = False, call: judge.CallFn = judge.call_model) -> dict:
+    """The whole measurement, as the dict written to `scores/<tag>.json`."""
+    mech = _measured(case_dir, proj_path, model=model, effort=effort)
+    summary, manifest, leads, preds = mech.summary, mech.manifest, mech.leads, mech.preds
 
     # A lead set that does not match is not a result. Report it and stop before paying
     # for a single judge call — grading a truncated document produces a number that
@@ -405,7 +443,7 @@ def score_case(case_dir: Path, proj_path: Path, *, model: str, effort: str, jobs
         })
         return summary
 
-    if manifest.get("kind") in DERIVED_KINDS:
+    if is_derived(manifest.get("kind")):
         summary.update({
             "judged": False, "rows": [],
             "why_unjudged": (
@@ -429,7 +467,7 @@ def score_case(case_dir: Path, proj_path: Path, *, model: str, effort: str, jobs
         verdicts = dict(zip(to_judge, pool.map(
             lambda lead_id: judge.verdict_lead(
                 judge.load_lead_inputs(case_dir, lead_id), preds[lead_id],
-                _measurement(measured[lead_id]),
+                measurement(measured[lead_id]),
                 model=model, effort=effort, call=call),
             to_judge), strict=True))
 
@@ -466,23 +504,25 @@ def score_case(case_dir: Path, proj_path: Path, *, model: str, effort: str, jobs
 
     decided = [r for r in rows if r["faithful"] is not None]
     faithful = sum(1 for r in decided if r["faithful"] is True)
-    costs = [x.get("cost_usd") for x in list(measured.values()) + list(verdicts.values())
-             if x.get("cost_usd") is not None]
     summary.update({
         "judged": True,
         "faithful": f"{faithful}/{len(decided)}",
         "abstentions": len(rows) - len(decided),
         "by_system": _by_system(rows),
-        "cost_usd": round(sum(costs), 4) if costs else None,
+        "cost_usd": judge.total_cost([*measured.values(), *verdicts.values()]),
         "rows": rows,
     })
     return summary
 
 
-def _measurement(label: dict) -> dict:
+def measurement(label: dict) -> dict:
     """The label pass's reading, as the verdict pass is shown it. Provenance and cost are
     ours, not the judge's business, and feeding them back would put the label pass's
-    price tag inside the grading prompt."""
+    price tag inside the grading prompt.
+
+    Public because `audit_judge.verdict_set` must show the verdict pass the SAME reading a
+    real score would — it had spelled the key list out again, so an audit's answer to "how
+    stable is the verdict pass" was only as good as two lists staying equal."""
     return {k: label[k] for k in ("delta_kind", "heterogeneous", "evidence") if k in label}
 
 
@@ -608,29 +648,14 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _dry_run(case_dir: Path, proj_path: Path, *, model: str, effort: str) -> dict:
-    """The mechanical half, with no model in the loop — what `--dry-run` reports."""
-    manifest = yaml.safe_load((case_dir / "manifest.yaml").read_text(encoding="utf-8")) or {}
-    proj = yaml.safe_load(proj_path.read_text(encoding="utf-8")) or {}
-    leads = {row["lead_id"]: row for row in judge.load_case_leads(case_dir)}
-    preds, duplicates = load_predictions(proj)
-    return {
-        "tag": score_tag(proj_path.stem, model, effort),
-        "projection": proj_path.name, "case": case_dir.name, "kind": manifest.get("kind"),
-        "judge": {"model": model, "effort": effort, "prompts_sha8": judge.prompts_sha8()},
-        "n_leads": len(leads),
-        "mechanical": {
-            **integrity(list(leads), preds, duplicates),
-            "malformed_leads": {lead_id: problem for lead_id, events in preds.items()
-                                if (problem := grammar_problem(events)) is not None},
-            "forbidden_emitted": leaks(_forbidden_values(case_dir, manifest), preds),
-            "expectation_failures": expectation_failures(
-                manifest.get("expectation") or {}, preds, list(leads)),
-            "concrete_value_leads": sorted(lead_id for lead_id, events in preds.items()
-                                           if isinstance(events, list)
-                                           and has_concrete_value(events)),
-        },
-        "judged": False, "rows": [], "why_unjudged": "--dry-run: no model was called",
-    }
+    """The mechanical half, with no model in the loop — what `--dry-run` reports.
+
+    Nothing here but the stop: the checks themselves are `_measured`, so the dry run cannot
+    drift from the score it previews."""
+    summary = _measured(case_dir, proj_path, model=model, effort=effort).summary
+    summary.update({"judged": False, "rows": [],
+                    "why_unjudged": "--dry-run: no model was called"})
+    return summary
 
 
 if __name__ == "__main__":

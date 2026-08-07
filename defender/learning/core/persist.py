@@ -251,14 +251,13 @@ class DirectionArtifacts:
 
 
 def persist_run(
-    dirs: RunPaths,
+    run_dir: Path,
+    learning_run_dir: Path,
     *,
     artifacts: DirectionArtifacts,
     disposition: str,
     alert_rule_key: str,
 ) -> None:
-    run_dir, learning_run_dir = dirs.run_dir, dirs.learning_run_dir
-    assert learning_run_dir is not None, "persist_run requires a learning leg dir"
     actor_story, story_name = artifacts.actor_story, artifacts.story_name
     judge_yaml, judge_name = artifacts.judge_yaml, artifacts.judge_name
     _copy_shared_inputs(run_dir, learning_run_dir)

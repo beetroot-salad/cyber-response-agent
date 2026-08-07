@@ -26,7 +26,14 @@ def _hypothesis_name(h: HypothesisRecord) -> str:
     return h.get("name", "") or ""
 
 
-def _all_hypotheses(c: Companion) -> Iterable[HypothesisRecord]:
+def case_hypotheses(c: Companion) -> Iterable[HypothesisRecord]:
+    """Every hypothesis in the case — the prologue's AND each lead's `new_hypotheses`.
+
+    Public because `cli._hypothesis_vocabulary` needs it too: an investigation declares
+    hypotheses at two sites, and anything that reads only `Companion.hypotheses` sees the
+    opening set and none of what the run went on to raise. This is the Companion-level
+    spelling of `_walkers.all_hypotheses`, which is the one owner of the walk itself.
+    """
     return _walkers.all_hypotheses(c.body).values()
 
 
@@ -35,7 +42,7 @@ def _vertex_types(c: Companion) -> dict[str, str]:
 
     An investigation declares vertices in two places: the prologue's opening graph, and each
     lead's own `outcome.observations`. Indexing the prologue alone while filtering against the
-    full hypothesis set (`_all_hypotheses`, which walks both) silently drops any hypothesis
+    full hypothesis set (`case_hypotheses`, which walks both) silently drops any hypothesis
     anchored to a vertex the run discovered mid-investigation: the anchor resolves to no type,
     so an `attached_to_type` filter refuses it as a non-match rather than as a missing id.
 
@@ -125,7 +132,7 @@ def hypothesis_name_wildcard(
         if signature_id is not None and c.signature_id != signature_id:
             continue
         final = _compute_final_weights(c)
-        for h in _all_hypotheses(c):
+        for h in case_hypotheses(c):
             name = _hypothesis_name(h)
             if not fnmatch.fnmatchcase(name, pattern):
                 continue
@@ -162,7 +169,7 @@ def lead_branch_effects(
     patterns_active = bool(hypothesis_patterns)
 
     for c in corpus:
-        h_names = {h["id"]: _hypothesis_name(h) for h in _all_hypotheses(c) if "id" in h}
+        h_names = {h["id"]: _hypothesis_name(h) for h in case_hypotheses(c) if "id" in h}
         for lead in c.leads:
             _accumulate_lead_effects(
                 lead, h_names, hypothesis_patterns, patterns_active,
@@ -314,7 +321,7 @@ def hypothesis_shape_match(
         final = _compute_final_weights(c)
         disp = _disposition(c) or UNKNOWN_DISPOSITION
 
-        for h in _all_hypotheses(c):
+        for h in case_hypotheses(c):
             if not _hypothesis_matches_shape(
                 h, v_type,
                 parent_type=parent_type, parent_class=parent_class,

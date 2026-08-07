@@ -215,6 +215,36 @@ def test_c1_lessons_common_reexports_the_same_object():
     assert "iter_lessons" in common.__all__
 
 
+def test_c1b_the_venv_reexec_anchors_on_its_own_location_not_the_callers_depth():
+    """``reexec_into_venv`` finds ``defender/.venv`` from ITS OWN path, so a caller may sit at
+    any depth in the tree. The ``script`` argument names what to re-run — it does not locate
+    the interpreter.
+
+    It used to walk ``Path(script).resolve().parents[3]``, which is ``defender/``'s parent only
+    for a caller exactly three levels down. All five callers happen to sit there, so the lock
+    was invisible — but for a caller one level up it silently pointed at the wrong tree, and
+    for one near the filesystem root it raised ``IndexError`` before it could re-exec anything.
+
+    Asserted statically rather than by calling it: the function's success path IS an
+    ``os.execv``, so a test that reached it would replace the pytest process. ``test_c3``
+    below is the live positive control, in a subprocess that can afford to be re-exec'd."""
+    venv = importlib.import_module("defender.scripts._venv")
+    assert venv._DEFENDER_DIR == DEFENDER, (
+        "the anchor must be defender/ itself — the interpreter lives at defender/.venv")
+
+    tree = ast.parse((DEFENDER / "scripts" / "_venv.py").read_text())
+    fn = next(n for n in tree.body
+              if isinstance(n, ast.FunctionDef) and n.name == "reexec_into_venv")
+    execv = next(n for n in ast.walk(fn)
+                 if isinstance(n, ast.Call) and ast.unparse(n.func) == "os.execv")
+    handed_on = {id(n) for n in ast.walk(execv) if isinstance(n, ast.Name)}
+    uses = [n for n in ast.walk(fn) if isinstance(n, ast.Name) and n.id == "script"]
+    assert uses, "the parameter is unused — the fixture is reading the wrong function"
+    assert all(id(n) in handed_on for n in uses), (
+        "`script` is being read outside the execv argv — the interpreter must not be "
+        "derived from the caller's own path (that is the depth lock)")
+
+
 def test_c2c_corpus_module_top_level_imports_are_import_safe():
     """demand: c2, static half — walk ``defender/_corpus.py``'s MODULE-LEVEL import statements and
     assert none of them names a module that requires the venv (``yaml``, or any ``defender._*`` module

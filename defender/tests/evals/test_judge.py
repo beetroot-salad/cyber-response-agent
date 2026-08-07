@@ -592,6 +592,27 @@ def test_the_verdict_audit_grades_the_leads_a_real_score_graded():
         assert "cost_usd" not in measurement
 
 
+def test_the_audit_shows_the_verdict_pass_the_same_reading_a_real_score_does():
+    """The audit's whole claim is "this is how stable the verdict pass is ON A REAL SCORE".
+    That only holds if it hands the pass the same measurement block `score_case` would.
+
+    It had spelled the projection out again — its own `{k: label[k] for k in (...)}` over
+    its own key list — so the audit could have been measuring a differently-briefed judge
+    and reporting the number as the scorer's. Both go through `score.measurement` now, and
+    this compares the audit's block against that function on the same committed label
+    rather than against a third copy of the key list."""
+    entries = audit_judge.verdict_set(audit_judge.AUDIT_CASES,
+                                      audit_judge.DEFAULT_ORACLE_TAG)
+    assert entries, "no committed labels/projections — the check would pass vacuously"
+    model, effort = judge.judge_model(), judge.judge_effort()
+    for case_dir, lead_id, _events, measurement in entries:
+        labels = json.loads(score.labels_path(case_dir, model, effort)
+                            .read_text(encoding="utf-8"))["leads"]
+        assert measurement == score.measurement(labels[lead_id]), (
+            f"{case_dir.name}/{lead_id}: the audit briefs the judge differently from the "
+            f"scorer, so its stability figure is not the scorer's")
+
+
 def test_a_defective_case_is_not_in_the_verdict_audit_set():
     names = {c.name for c, _, _, _ in
              audit_judge.verdict_set(("case-006-authorized-keys-db1",), "any-tag")}

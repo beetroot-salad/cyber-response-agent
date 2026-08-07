@@ -101,7 +101,15 @@ class Bounds:
 
 
 def default_bounds() -> Bounds:
-    return Bounds(extra_turns=EXTRA_TURN_BOUND, stage_timeout=stage_timeout())
+    """The shipped bounds. Kept as a FUNCTION though its body is now empty of arguments:
+    both call sites are DI boundaries that carry `# lint-default: ok`, and a named
+    zero-argument constructor is what makes "the caller passed nothing, so use the shipped
+    default" a readable line there rather than a bare `Bounds()` that looks like a literal.
+
+    It used to restate `extra_turns` and `stage_timeout`, which are exactly the dataclass's
+    own defaults — so the shipped value lived in two places and only the dataclass's was
+    reachable by anything else."""
+    return Bounds()
 
 
 def raised_request_limit(bounds: Bounds) -> int:
