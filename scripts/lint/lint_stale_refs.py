@@ -393,12 +393,29 @@ def _is_excluded_path(rel: str) -> bool:
 
 def _grep_lines(repo_root: Path, idents: Sequence[str]) -> list[str]:
     """The single `git grep` site. rc 1 means "no match" — a legitimate empty answer;
-    rc >= 2 is a real failure and raises."""
+    rc >= 2 is a real failure and raises.
+
+    `EXCLUDED_GREP_DIRS` is pushed down into the grep as `:(exclude)` pathspecs rather than
+    only filtered out of the results. This is a pure COST change and not a semantic one:
+    every consumer of these hits already drops an excluded path — `_batch_grep` before it
+    attributes a line, `_still_defined` before it reads one as a binding — so a hit from
+    those trees can reach no verdict either way. The Python-side `_is_excluded_path` stays
+    the authority (it also carries `EXCLUDED_GREP_GLOBS`, which has no pathspec here).
+
+    It is what keeps the deadline reachable on a large retirement. The cost scales with the
+    removed-identifier count, and #797 removes 247 of them: unbounded, that grep measured 85s
+    against 13s with the exclusions — the `defender/run-transcripts`, `defender/lessons*`,
+    `defender/fixtures*` and `experiments/` trees are most of the repo's bytes and none of
+    them is a reference source. The 60s budget is left where it is deliberately: it is a real
+    ceiling, and raising it to fit a grep that reads trees this gate ignores would hide the
+    next regression instead of failing on it."""
     if not idents:
         return []
     cmd = ["grep", "-n", "-w", "-F"]
     for ident in idents:
         cmd.extend(["-e", ident])
+    cmd.append("--")
+    cmd.extend(f":(exclude){d}" for d in EXCLUDED_GREP_DIRS)
     out = _git(cmd, cwd=repo_root, timeout=60, ok_codes=(0, 1))
     return out.splitlines()
 

@@ -9,28 +9,24 @@ from defender.learning.pipeline.oracle_engine import ORACLE_DEF
 from defender.runtime.agent_definition import AgentDefinition, build_registry
 from defender.runtime.agent_role import AgentRole
 from defender.runtime.driver import GATHER_DEF, MAIN_DEF
-from defender.runtime.review_roles import (
-    CHALLENGER_DEF,
-    COHERENCE_CHECKER_DEF,
-    PROJECTION_DEF,
-)
 
+# #797 retired CHALLENGER_DEF, COHERENCE_CHECKER_DEF and PROJECTION_DEF here with the three
+# review stages themselves — a definition in this registry is what compiles a role's policy,
+# so a registered role with no caller is a compiled grant nothing claims. #796's lenses and
+# composer register their own.
 AGENTS: dict[AgentRole, AgentDefinition] = build_registry(
     (MAIN_DEF, GATHER_DEF, JUDGE_DEF, ACTOR_DEF, ORACLE_DEF, VERIFY_DEF, LEAD_AUTHOR_DEF,
-     CORPUS_AUTHOR_DEF, CHALLENGER_DEF, COHERENCE_CHECKER_DEF, PROJECTION_DEF)
+     CORPUS_AUTHOR_DEF)
 )
 
 __all__ = [
     "ACTOR_DEF",
     "AGENTS",
-    "CHALLENGER_DEF",
-    "COHERENCE_CHECKER_DEF",
     "CORPUS_AUTHOR_DEF",
     "GATHER_DEF",
     "JUDGE_DEF",
     "LEAD_AUTHOR_DEF",
     "MAIN_DEF",
     "ORACLE_DEF",
-    "PROJECTION_DEF",
     "VERIFY_DEF",
 ]
