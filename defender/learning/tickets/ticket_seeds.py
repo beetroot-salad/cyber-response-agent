@@ -91,7 +91,10 @@ def sample_seeds(
         if not label:
             return []
         if now is None:
-            now = parse_iso_utc(case_ticket.alert_event_time(alert)) or datetime.now(UTC)
+            # `is not None`, not `or` (defender/CLAUDE.md): the fallback fires only when the
+            # alert carried no readable instant, never because a parsed one looked falsy.
+            parsed = parse_iso_utc(case_ticket.alert_event_time(alert))
+            now = parsed if parsed is not None else datetime.now(UTC)
         lo, hi = now - WINDOW_MAX, now - WINDOW_RECENT
         eligible = [
             t for t in list_closed_fn(label) if _is_eligible(t, self_case_id, lo, hi)

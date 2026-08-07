@@ -32,11 +32,11 @@ import sys
 from dataclasses import dataclass
 from datetime import date, datetime, UTC
 from pathlib import Path
-from defender._clock import parse_iso_utc
 
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
+from defender._clock import parse_iso_utc
 from defender._corpus import iter_lessons
 from defender._io import read_jsonl_rows, read_text_soft, use_utf8_stdio
 from defender._frontmatter import parse_frontmatter_or_none

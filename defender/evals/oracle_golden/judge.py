@@ -492,8 +492,14 @@ def sole_judge(answers: Iterable[dict], *, what: str) -> str:
 
     `what` names the batch in the message, because "more than one judge" is not actionable
     without knowing which sweep produced it.
+
+    An EMPTY batch is its own message. It is reachable — a sweep whose entry set came out
+    empty (every case defective or derived) asks this of nothing — and "ran on more than one
+    judge: []" is the one reading of that state a reader cannot act on.
     """
     resolved = {answer["judge_model"] for answer in answers}
+    if not resolved:
+        raise RuntimeError(f"{what} has no replies to read a judge off")
     if len(resolved) != 1:
         raise RuntimeError(f"{what} ran on more than one judge: {sorted(resolved)}")
     return resolved.pop()

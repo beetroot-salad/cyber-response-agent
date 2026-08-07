@@ -156,12 +156,12 @@ def _sweep(entries: list[tuple], repeats: int, jobs: int, ask) -> dict[tuple[str
     Every entry is a tuple whose first two elements are `(case_dir, lead_id)`; the rest is
     the caller's, and reaches `ask` untouched.
     """
-    work = [(entry, rep) for entry in entries for rep in range(repeats)]
+    work = [entry for entry in entries for _rep in range(repeats)]
     with ThreadPoolExecutor(max_workers=max(1, min(jobs, len(work) or 1))) as pool:
-        answers = list(pool.map(lambda item: ask(item[0]), work))
+        answers = list(pool.map(ask, work))
 
     by_lead: dict[tuple[str, str], list[dict]] = {}
-    for (entry, _rep), answer in zip(work, answers, strict=True):
+    for entry, answer in zip(work, answers, strict=True):
         case_dir, lead_id = entry[0], entry[1]
         by_lead.setdefault((case_dir.name, lead_id), []).append(answer)
     return by_lead

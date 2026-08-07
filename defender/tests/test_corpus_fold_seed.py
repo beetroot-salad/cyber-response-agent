@@ -221,9 +221,10 @@ def test_c1b_the_venv_reexec_anchors_on_its_own_location_not_the_callers_depth()
     the interpreter.
 
     It used to walk ``Path(script).resolve().parents[3]``, which is ``defender/``'s parent only
-    for a caller exactly three levels down. All five callers happen to sit there, so the lock
-    was invisible — but for a caller one level up it silently pointed at the wrong tree, and
-    for one near the filesystem root it raised ``IndexError`` before it could re-exec anything.
+    for a caller exactly three levels down. Both callers (``learning/frontend/build.py`` and
+    ``serialize.py``) happen to sit there, so the lock was invisible — but for a caller one
+    level up it silently pointed at the wrong tree, and for one near the filesystem root it
+    raised ``IndexError`` before it could re-exec anything.
 
     Asserted statically rather than by calling it: the function's success path IS an
     ``os.execv``, so a test that reached it would replace the pytest process. ``test_c3``
