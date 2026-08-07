@@ -372,7 +372,7 @@ SCAN_ONLY_SHAPES = ("af_unix_bind",)
 KNOWN_SHAPES: frozenset[str] = frozenset((*BANNED_SHAPES, *SCAN_ONLY_SHAPES))
 
 #: An identifier-shaped token. THE READER BELOW MATCHES WHOLE TOKENS, AND THAT IS THE REPAIR OF
-#: THIS SUITE'S SHARPEST DISCRIMINATION HOLE. Three of the six banned names are substrings of
+#: THIS SUITE'S SHARPEST DISCRIMINATION HOLE. Three of the six banned names are substrings of  # lint-stale-ref: ok — the English word, about this suite's discriminating power; unrelated to the retired AgentRole.DISCRIMINATION lens whose name it happens to spell
 #: others — `symlinkat` contains `symlink`, `linkat` and `link`; `mknodat` contains `mknod` —
 #: so a substring reader answers "all six attempted" for a probe whose argv names only
 #: `symlinkat` and `mknodat`. A probe narrowed to two read as full coverage, in the one demand
