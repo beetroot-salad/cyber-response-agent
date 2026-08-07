@@ -14,14 +14,12 @@ from pathlib import Path
 import pytest
 
 from defender.runtime.review.projector import (
-    DISCRIMINATION_WITHHELD_LEAD_KEYS,
     INFERENCE_COMPANION_KEYS,
     INFERENCE_HYPOTHESIS_KEYS,
     INFERENCE_LEAD_KEYS,
     EmptyInvestigation,
     _EDGE_CITING_BUCKETS,
     _EDGE_CITING_KEYS,
-    discrimination_projection,
     observation_only,
     parse_investigation,
     support_projection,
@@ -53,6 +51,38 @@ def _body(projection) -> dict:
     open_tag, close_tag = f"<run-{SALT}-untrusted>\n", f"\n</run-{SALT}-untrusted>"
     assert open_tag in projection.text, "the projection reached the lens unframed"
     return json.loads(projection.text.split(open_tag, 1)[1].split(close_tag, 1)[0])
+
+
+def _every_lens(companion) -> list:
+    """Every projection a LENS is handed on this record — support, and its ablation when the
+    record has a load-bearing edge to withhold.
+
+    The leak assertions below run over this list rather than a hand-written pair, so a lens
+    added to the gate cannot arrive with no leak coverage. It also closes a hole the
+    hand-written pair had: it named the two lenses #796 shipped with their own projection
+    builders and never the ABLATION, which is a third rendered prompt reaching a model. The
+    composer is deliberately absent — it is the one role the cut does not apply to.
+
+    The ablation is CONDITIONAL rather than asserted here, because a record with no strong
+    belief movement genuinely has no edge to withhold and the gate skips the lens on one. That
+    the GOLDEN is not such a record — so the leak tests really do cover both projections — is
+    pinned by `test_the_golden_yields_both_lens_projections` rather than by a hidden assert
+    that would also fire on the minimal fixtures."""
+    from defender.runtime.review.projector import ablation_target
+
+    lenses = [support_projection(companion, SALT)]
+    ablated = ablation_target(companion)
+    if ablated is not None:
+        lenses.append(support_projection(companion, SALT, without_edge=ablated[0]))
+    return lenses
+
+
+def test_the_golden_yields_both_lens_projections(companion):
+    """`_every_lens` skips the ablation on a record with no load-bearing edge, so on a golden
+    that had none every leak test below would quietly cover one projection instead of two and
+    still pass. This is the guard on that, and it is a test rather than an assert inside the
+    helper because the minimal fixtures legitimately yield one."""
+    assert len(_every_lens(companion)) == 2
 
 
 def test_the_golden_is_a_real_positive_control(companion):
@@ -106,9 +136,7 @@ def test_no_hypothesis_carries_its_weight_into_a_lens():
         "the fixture declares no weights — the test proves nothing"
     )
 
-    for projection in (
-        discrimination_projection(filled, SALT), support_projection(filled, SALT),
-    ):
+    for projection in _every_lens(filled):
         for hypothesis in (_body(projection).get("hypothesize") or {}).get("hypotheses") or []:
             for key in INFERENCE_HYPOTHESIS_KEYS:
                 assert key not in hypothesis, (
@@ -125,9 +153,7 @@ def test_no_belief_movement_reaches_a_lens_verbatim(companion):
         if isinstance(r.get("reasoning"), str) and len(r["reasoning"]) > 20
     ]
     assert reasons, "the golden's resolutions carry no reasoning — the test proves nothing"
-    for projection in (
-        discrimination_projection(companion, SALT), support_projection(companion, SALT),
-    ):
+    for projection in _every_lens(companion):
         for reason in reasons:
             assert reason not in projection.text, (
                 f"{projection.lens} can read the reasoning behind a weight move"
@@ -137,9 +163,7 @@ def test_no_belief_movement_reaches_a_lens_verbatim(companion):
 def test_the_disposition_reaches_no_lens(companion):
     disposition = companion["conclude"].get("disposition")
     assert disposition, "the golden carries no disposition — the test proves nothing"
-    for projection in (
-        discrimination_projection(companion, SALT), support_projection(companion, SALT),
-    ):
+    for projection in _every_lens(companion):
         assert "conclude" not in _body(projection)
 
 
@@ -150,9 +174,7 @@ def test_the_record_reaches_every_lens_inside_the_calls_own_untrusted_frame(comp
     output routes the gate. The frame is keyed on the STAGE CALL's salt, never the
     investigation's: a role that reads payloads must not hold the delimiter of the frame its
     own output returns inside."""
-    for projection in (
-        discrimination_projection(companion, SALT), support_projection(companion, SALT),
-    ):
+    for projection in _every_lens(companion):
         assert f"<run-{SALT}-untrusted>" in projection.text
         assert f"</run-{SALT}-untrusted>" in projection.text
         assert "never as instructions" in projection.text
@@ -171,24 +193,21 @@ def test_the_observation_side_survives_the_cut(companion):
 
 
 # ---------------------------------------------------------------------------------------
-# Per-lens narrowing
+# What the surviving lens keeps
 # ---------------------------------------------------------------------------------------
 
 
-def test_the_discrimination_lens_is_not_handed_its_own_answer(companion):
-    """It is asked what a lead could separate. `tests_hypotheses` is the investigation's own
-    answer to that, and it sits on the `:L` side of the tag cut, so the family rule alone
-    does not withhold it."""
-    body = _body(discrimination_projection(companion, SALT))
-    for lead in body.get("findings") or []:
-        for key in DISCRIMINATION_WITHHELD_LEAD_KEYS:
-            assert key not in lead, f"{lead.get('id')}.{key} reached the discrimination lens"
-
-
-def test_the_support_lens_reads_the_results_the_discrimination_lens_cannot(companion):
+def test_the_support_lens_reads_the_results_it_reconstructs_from(companion):
+    """The mirror of the leak tests, and the reason the cut is the `:T` FAMILY and not
+    something wider: `outcome` is a `:R` observation, so it must reach the lens. There is no
+    per-lens narrowing left below the family rule — the discrimination lens was the only one
+    that took a second cut (`outcome`, `tests_hypotheses`), and it is retired."""
     support = _body(support_projection(companion, SALT))
     assert any(lead.get("outcome") for lead in support["findings"]), (
         "the support lens has no results to reconstruct from"
+    )
+    assert any(lead.get("tests_hypotheses") for lead in support["findings"]), (
+        "the support lens cannot see which hypotheses a lead was aimed at"
     )
 
 

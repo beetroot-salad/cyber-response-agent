@@ -210,7 +210,22 @@ def build_agent_core(  # noqa: PLR0913 — the single build site's config + 3 DI
     session_id: str | None = None,
     store: Any = None,
 ) -> Agent[Any, str]:
-    built = make_model(defn.model(), defn.effort)
+    model_name = defn.model()
+    built = make_model(model_name, defn.effort)
+    # The prompt-cache affinity key, applied HERE and not inside `make_model`: the seam is a
+    # two-positional-argument callable every engine in the tree (and a dozen test doubles)
+    # passes by that shape, and the key is not a property of the model anyway.
+    #
+    # WITH a session the key is that conversation's — one growing prefix, and every turn of it
+    # wants the replica that already holds the previous turn. WITHOUT one the agent is a
+    # one-shot (the review lenses are the whole of this class), so there is no within-run
+    # prefix to keep warm and the bare `agent_id` is the better key: it is stable ACROSS runs,
+    # which is the only reuse a single-call role can have — its role instructions, identical
+    # on every run, sitting warm on the replica that key routes to.
+    settings = providers.cache_affinity(
+        model_name, built.settings,
+        f"{session_id}:{agent_id}" if session_id is not None else agent_id,
+    )
     capabilities: list[Any] = [
         _make_hooks(logger, agent_id, enforce=defn.budget_enforced, limits=limits,
                     session_id=session_id, store=store),
@@ -235,7 +250,7 @@ def build_agent_core(  # noqa: PLR0913 — the single build site's config + 3 DI
         deps_type=deps_type,
         instructions=instructions,
         capabilities=capabilities,
-        model_settings=built.settings,
+        model_settings=settings,
         retries={"tools": DEFAULT_TOOL_RETRIES, "output": 0},
     )
     register_tools(agent, defn.tools, verbs)

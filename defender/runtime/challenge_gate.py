@@ -12,6 +12,16 @@ concurrently because none reads another's output. The composer runs last and is 
 that sees both the readings and the investigation's own account — it may be anchored by that
 account precisely because the independent work is already banked.
 
+The lens set is SUPPORT and its ABLATION: one reading of what the observed evidence carries,
+and the same reading again with one load-bearing edge withheld. #796 shipped a third,
+DISCRIMINATION, which asked instead what each lead's possible outcomes could have separated —
+a question about lead DESIGN. It is retired: the gate routes on whether the disposition
+holds, and a lead that discriminated nothing is a fact about a measurement already taken, so
+the finding has nowhere to go. The first measured live run showed exactly that — the composer
+discarded both of its findings, one of them in as many words, for 52% of the review's cost and
+90% of its wall clock. What is left is a soundness check plus a sensitivity check, which is
+what the two-member `holds`/`gap` finding can actually carry.
+
 FAIL CLOSED (RS9): a stage raising, timing out, or otherwise not completing overrides the
 confident finding to inconclusive — never a silently-committed close. It commits the SAME
 outcome as an override the evidence produced; what separates the two is the typed
@@ -40,7 +50,7 @@ REVIEW_TIMEOUT_ENV = "DEFENDER_REVIEW_STAGE_TIMEOUT_SECONDS"
 #: role added to the gate cannot arrive with a trace file the incomplete-marker never touches
 #: (the shipped shape restated all three inline, and a stage renamed in one place stayed
 #: spelled the old way in the other).
-REVIEW_ROLES: tuple[str, ...] = ("discrimination", "support", "ablation", "composer")
+REVIEW_ROLES: tuple[str, ...] = ("support", "ablation", "composer")
 
 
 def stage_timeout() -> int:
@@ -437,7 +447,6 @@ async def challenge_gate(deps: Any, disposition: str, *, stages: Any, bounds: Bo
         EmptyInvestigation,
         ablation_target,
         composer_projection,
-        discrimination_projection,
         parse_investigation,
         support_projection,
     )
@@ -476,7 +485,6 @@ async def challenge_gate(deps: Any, disposition: str, *, stages: Any, bounds: Bo
     # own salt and the projection is framed on it, so the prompt cannot be built before the
     # salt exists.
     lenses: dict[str, Callable[[str], str]] = {
-        "discrimination": lambda salt: discrimination_projection(companion, salt).text,
         "support": lambda salt: support_projection(companion, salt).text,
     }
     if ablated is not None:
@@ -499,7 +507,7 @@ async def challenge_gate(deps: Any, disposition: str, *, stages: Any, bounds: Bo
 
     # EVERY dispatched lens gets its row before any of them is judged. The calls ran
     # concurrently and all of them completed; returning on the first fault mid-walk threw away
-    # the replies the other lenses had already produced, so a run dir recorded one of three
+    # the replies the other lenses had already produced, so a run dir recorded a subset of the
     # calls that were made.
     for lens, outcome in zip(lenses, outcomes, strict=True):
         _write_trace_row(

@@ -53,10 +53,10 @@ def composer_reply(finding: str = "holds", review: str = "reads sound", ask: Any
 def bundle(*, composer: str, lens: str = LENS_READING) -> ReviewStages:
     """All four stages bound. Every lens answers with `lens`; only the composer varies.
 
-    The three lens calls are held constant because the routing arms turn on what the COMPOSER
+    The lens calls are held constant because the routing arms turn on what the COMPOSER
     found — the host is shown a lens reading only through the composer — so a scenario that
     varied them would be varying something the outcome does not read."""
     return ReviewStages(
-        discrimination=stage(lens), support=stage(lens), ablation=stage(lens),
+        support=stage(lens), ablation=stage(lens),
         composer=stage(composer),
     )

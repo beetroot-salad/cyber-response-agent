@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from ..agent_role import AgentRole
 from .anthropic import AnthropicProvider
 from .base import BuiltModel, Provider
 from .openai_compat import OpenAICompatProvider
+
+if TYPE_CHECKING:
+    from pydantic_ai.settings import ModelSettings
 
 ANTHROPIC = AnthropicProvider()
 FIREWORKS = OpenAICompatProvider(
@@ -68,6 +73,24 @@ def build_for_effort(name: str, effort: str | None) -> BuiltModel:
     return BuiltModel(p.build_model(name), p.settings_for_effort(effort))
 
 
+def cache_affinity(
+    name: str, settings: ModelSettings | None, key: str
+) -> ModelSettings | None:
+    """`settings` plus `name`'s provider's prompt-cache affinity hint for `key`.
+
+    An UNROUTABLE name returns `settings` untouched instead of raising. The hint is an
+    optimization — refusing to build an agent because a routing nicety could not be attached
+    would turn a cache miss into a dead run — and every name a real run reaches has already
+    been through `provider_for` in `run.py`'s all-roles preflight, which is where an unknown
+    model is supposed to fail and does.
+    """
+    try:
+        provider = provider_for(name)
+    except ValueError:
+        return settings
+    return provider.cache_affinity(settings, key)
+
+
 def api_key_vars() -> set[str]:
     return {p.api_key_var for p in PROVIDERS}
 
@@ -80,6 +103,7 @@ __all__ = [
     "Provider",
     "api_key_vars",
     "build_for_effort",
+    "cache_affinity",
     "effort_for_role",
     "provider_for",
     "provider_id_for",

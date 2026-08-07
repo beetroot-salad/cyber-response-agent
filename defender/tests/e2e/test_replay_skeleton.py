@@ -135,7 +135,7 @@ def test_replay_full_run_ab3(tmp_path, monkeypatch):
 
     # The reviewer really ran, rather than the close committing past a gate that never
     # dispatched: four stages, four traces, each carrying its round.
-    for role in ("discrimination", "support", "ablation", "composer"):
+    for role in ("support", "ablation", "composer"):
         rows = read_jsonl_rows(run_dir / f"review_{role}_trace.jsonl")
         assert rows, f"the {role} stage left no trace row"
         assert rows[0].get("ok") is True, f"the {role} stage did not answer"

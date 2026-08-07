@@ -39,7 +39,6 @@ from defender.skills.invlang.parser import parse_dense_companion
 from defender.skills.invlang.schema import CompanionBody
 
 __all__ = [
-    "DISCRIMINATION_WITHHELD_LEAD_KEYS",
     "INFERENCE_COMPANION_KEYS",
     "INFERENCE_HYPOTHESIS_KEYS",
     "INFERENCE_LEAD_KEYS",
@@ -47,7 +46,6 @@ __all__ = [
     "EmptyInvestigation",
     "Projection",
     "ablation_target",
-    "discrimination_projection",
     "observation_only",
     "parse_investigation",
     "support_projection",
@@ -84,15 +82,6 @@ INFERENCE_LEAD_KEYS: tuple[str, ...] = ("resolutions", "shelved", "shelved_ratio
 #: movement. The leak test cannot see this one either: it asserts on the reasoning prose
 #: attached to a `:T resolutions` row, and a weight is two characters that appear everywhere.
 INFERENCE_HYPOTHESIS_KEYS: tuple[str, ...] = ("weight", "status")
-
-#: What the DISCRIMINATION lens gives up beyond the `:T` family. It is asked what a lead's
-#: possible outcomes could separate, so it must not see the outcomes (`outcome`) — and it
-#: must not see `tests_hypotheses`, which is the investigator's own answer to exactly the
-#: question being asked. Handing a lens the answer is the failure mode blindness exists to
-#: prevent, and `tests_hypotheses` is on the `:L` side of the tag cut rather than the `:T`
-#: side, so nothing above would have caught it.
-DISCRIMINATION_WITHHELD_LEAD_KEYS: tuple[str, ...] = ("outcome", "tests_hypotheses")
-
 
 class EmptyInvestigation(RuntimeError):
     """The document carried no parseable invlang at all.
@@ -139,16 +128,15 @@ def _hypotheses_without_belief(records: Any) -> list:
     ]
 
 
-def observation_only(
-    companion: CompanionBody, *, also_drop_per_lead: tuple[str, ...] = (),
-) -> dict:
+def observation_only(companion: CompanionBody) -> dict:
     """THE cut: the companion with every `:T`-derived key removed, at both levels, plus the
     belief-state columns a `:H` row carries.
 
-    `also_drop_per_lead` is the per-lens narrowing on top of the family rule. It is a
-    parameter rather than a second function so that every projection in this module provably
-    passes through the `:T` prune — a lens with its own builder is a lens that can be given
-    its own idea of what inference is."""
+    It once took an `also_drop_per_lead` narrowing, for the discrimination lens's extra
+    `outcome`/`tests_hypotheses` cut. That lens is retired and no other projection narrows
+    further, so the parameter went with it rather than staying as a widening every caller
+    passes empty — the point it was defending (one prune, so no lens can acquire its own idea
+    of what inference is) is better served by there being nothing to pass."""
     pruned = _without(companion, INFERENCE_COMPANION_KEYS)
     hypothesize = companion.get("hypothesize")
     if isinstance(hypothesize, dict) and "hypotheses" in hypothesize:
@@ -156,12 +144,11 @@ def observation_only(
             **hypothesize,
             "hypotheses": _hypotheses_without_belief(hypothesize.get("hypotheses")),
         }
-    drop = INFERENCE_LEAD_KEYS + also_drop_per_lead
     leads = []
     for raw_lead in (companion.get("findings") or []):
         if not isinstance(raw_lead, dict):
             continue
-        lead = _without(raw_lead, drop)
+        lead = _without(raw_lead, INFERENCE_LEAD_KEYS)
         if "new_hypotheses" in lead:
             lead["new_hypotheses"] = _hypotheses_without_belief(lead.get("new_hypotheses"))
         leads.append(lead)
@@ -187,13 +174,6 @@ def _render_projection(lens: str, companion: dict, ask: str, salt: str) -> Proje
         ),
     )
 
-
-_DISCRIMINATION_ASK = (
-    "Each lead below was run to separate competing explanations. For each one, say which of "
-    "the hypotheses its possible outcomes could have told apart, and which it could not — "
-    "an outcome both explanations predict separates nothing. You are not told what any lead "
-    "returned, and you are not told which hypotheses the investigation aimed each lead at."
-)
 
 _SUPPORT_ASK = (
     "Below is what this investigation observed. For each hypothesis, say what the observed "
@@ -279,15 +259,6 @@ def composer_projection(
             f"## The investigation's own account (host-rendered)\n{UNTRUSTED_NOTE}\n"
             f"{_wrap(body, 'untrusted', salt)}\n"
         ),
-    )
-
-
-def discrimination_projection(companion: CompanionBody, salt: str) -> Projection:
-    return _render_projection(
-        "discrimination",
-        observation_only(companion, also_drop_per_lead=DISCRIMINATION_WITHHELD_LEAD_KEYS),
-        _DISCRIMINATION_ASK,
-        salt,
     )
 
 

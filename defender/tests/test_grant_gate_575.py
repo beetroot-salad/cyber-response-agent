@@ -57,7 +57,6 @@ from defender.agents import (  # noqa: E402
     AGENTS,
     COMPOSER_DEF,
     CORPUS_AUTHOR_DEF,
-    DISCRIMINATION_DEF,
     GATHER_DEF,
     JUDGE_DEF,
     LEAD_AUTHOR_DEF,
@@ -193,9 +192,6 @@ def _all_policies(env) -> dict[str, permission.AgentPolicy]:
         # policy the audit never looks at. Their expected shape is the empty one — no bash
         # grant, no read grant, no write grant — which is precisely what makes an untabled
         # program in one of them worth catching.
-        "discrimination": compile_policy_for(
-            DISCRIMINATION_DEF, run_dir=env.run, defender_dir=env.dfn,
-        ),
         "support": compile_policy_for(SUPPORT_DEF, run_dir=env.run, defender_dir=env.dfn),
         "composer": compile_policy_for(COMPOSER_DEF, run_dir=env.run, defender_dir=env.dfn),
     }
@@ -421,13 +417,14 @@ def test_b3_every_registered_agents_policy_passes_the_table_check(env):
     #691). It is the one denylist-free lane, so an untabled (=ungated) program there is the worst
     place for the fail-open to hide."""
     pols = _all_policies(env)
-    # 11: #797 took it to 8 by retiring the review's three roles (CHALLENGER,
-    # COHERENCE_CHECKER, PROJECTION) with the stages that ran under them, and #796 restores
-    # three of its own (DISCRIMINATION, SUPPORT, COMPOSER). That the number returns to where
-    # #774/R6 left it is a coincidence of arithmetic, not a restoration — SUPPORT is claimed
-    # by two calls. This counts registered roles, so a deliberately added or retired role
-    # moves it; what the test checks is the table property below.
-    assert len(AGENTS) == 11
+    # 10: #797 took it to 8 by retiring the review's three roles (CHALLENGER,
+    # COHERENCE_CHECKER, PROJECTION) with the stages that ran under them; #796 added three of
+    # its own (DISCRIMINATION, SUPPORT, COMPOSER); and DISCRIMINATION was then retired for
+    # producing nothing the composer could route, leaving two. SUPPORT is claimed by two
+    # calls, so roles and calls have not matched here since #796. This counts registered
+    # roles, so a deliberately added or retired role moves it; what the test checks is the
+    # table property below.
+    assert len(AGENTS) == 10
     assert CORPUS_AUTHOR_DEF in AGENTS.values()
     assert "corpus_author" in pols
     for name, pol in pols.items():

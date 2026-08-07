@@ -25,7 +25,7 @@ from defender.tests._spec791 import (  # noqa: F401 — session-scoped autouse g
 
 DEFENDER = Path(__file__).resolve().parents[1]
 GOLDEN = DEFENDER / "fixtures-e2e" / "golden-sshpivot-ab3" / "investigation.md"
-ROLES = ("discrimination", "support", "composer")
+ROLES = ("support", "composer")
 
 
 @pytest.fixture(scope="module")
@@ -71,8 +71,7 @@ def _flat(name: str) -> str:
 def test_each_lens_prompt_states_what_it_cannot_see():
     """The blindness is the mechanism. A lens that does not know it is blind asks for the
     missing half instead of reaching a reading without it."""
-    for name in ("discrimination", "support"):
-        assert "do not see" in _flat(name)
+    assert "do not see" in _flat("support")
 
 
 def test_the_composer_is_told_it_cannot_argue_the_opposite_disposition():

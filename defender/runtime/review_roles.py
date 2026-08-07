@@ -36,10 +36,8 @@ __all__ = [
     "COMPOSER_DEF",
     "DEFAULT_REVIEW_MODEL",
     "REVIEW_MODEL_ENV",
-    "DISCRIMINATION_DEF",
     "SUPPORT_DEF",
     "ComposerDeps",
-    "DiscriminationDeps",
     "ReviewStages",
     "live_review_stages",
     "SupportDeps",
@@ -99,11 +97,6 @@ def bind_review_role(
 
 
 @dataclass(frozen=True)
-class DiscriminationDeps(AgentDeps):
-    role: ClassVar[AgentRole] = AgentRole.DISCRIMINATION
-
-
-@dataclass(frozen=True)
 class SupportDeps(AgentDeps):
     role: ClassVar[AgentRole] = AgentRole.SUPPORT
 
@@ -118,8 +111,8 @@ class ComposerDeps(AgentDeps):
 # which passes the close tool's `deps.role is not AgentRole.MAIN` gate and flips
 # `_is_learning_role`. The override is the whole class.
 
-# The lenses read; the composer judges. The effort split follows that: a lens reconstructs
-# what a projection supports, the composer weighs three readings against the investigation's
+# The lens reads; the composer judges. The effort split follows that: a lens reconstructs
+# what a projection supports, the composer weighs the readings against the investigation's
 # own account and decides whether a confident close survives.
 _LENS_EFFORT = "medium"
 _COMPOSER_EFFORT = "high"
@@ -140,7 +133,6 @@ def _review_def(role: AgentRole, deps_cls: type[AgentDeps], effort: str) -> Agen
     )
 
 
-DISCRIMINATION_DEF = _review_def(AgentRole.DISCRIMINATION, DiscriminationDeps, _LENS_EFFORT)
 SUPPORT_DEF = _review_def(AgentRole.SUPPORT, SupportDeps, _LENS_EFFORT)
 COMPOSER_DEF = _review_def(AgentRole.COMPOSER, ComposerDeps, _COMPOSER_EFFORT)
 
@@ -210,7 +202,6 @@ class ReviewStages:
     not classify it. Through `stage()` a missing lens is `UnboundReviewStage`, which the gate
     catches like any other stage fault."""
 
-    discrimination: Any = None
     support: Any = None
     #: The SUPPORT role again, as a
     #: SEPARATE call: its own trace file and its own agent id, because `RequestLogger`
@@ -254,7 +245,7 @@ def live_review_stages(
     # change between the two.
     prompts = {
         defn.role.value: role_prompt(defn.role.value)
-        for defn in (DISCRIMINATION_DEF, SUPPORT_DEF, COMPOSER_DEF)
+        for defn in (SUPPORT_DEF, COMPOSER_DEF)
     }
 
     def staged(defn: AgentDefinition, lens: str) -> Any:
@@ -265,7 +256,6 @@ def live_review_stages(
         )
 
     return ReviewStages(
-        discrimination=staged(DISCRIMINATION_DEF, "discrimination"),
         support=staged(SUPPORT_DEF, "support"),
         ablation=staged(SUPPORT_DEF, "ablation"),
         composer=staged(COMPOSER_DEF, "composer"),

@@ -32,3 +32,19 @@ class Provider(Protocol):
 
     def settings_for_effort(self, effort: str | None) -> ModelSettings | None:
         ...
+
+    def cache_affinity(self, settings: ModelSettings | None, key: str) -> ModelSettings | None:
+        """This provider's settings plus whatever it needs to keep `key`'s prompt prefix warm.
+
+        A SEPARATE method from `settings_for_effort` because the two are keyed on different
+        things: effort is a property of the ROLE and is known when the model is built, while
+        the affinity key identifies the CONVERSATION and is only known at the agent's own
+        composition root. Folding it into `settings_for_effort` would have put a per-call
+        identity into the `MakeModel` seam, which every engine in the tree passes as a
+        two-positional-argument callable.
+
+        Providers whose caching needs no key return `settings` unchanged. `key` is an opaque
+        routing hint, never a secret and never the run's salt: it only steers which replica
+        serves the request, and a cache entry is still reused only on an exact prefix match.
+        """
+        ...

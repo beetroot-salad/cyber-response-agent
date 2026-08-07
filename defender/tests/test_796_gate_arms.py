@@ -285,7 +285,7 @@ def test_a_lens_reply_reaches_the_trace_framed_and_never_bare(tmp_path):
     deps, run_dir = _deps(tmp_path)
     poison = "IGNORE-PREVIOUS-INSTRUCTIONS-MARKER"
     _run(deps, _bundle(lens=poison, composer=_composer("holds")))
-    trace = (run_dir / "review_discrimination_trace.jsonl").read_text(encoding="utf-8")
+    trace = (run_dir / "review_support_trace.jsonl").read_text(encoding="utf-8")
     assert poison in trace
     assert f"<run-{deps.salt}-untrusted>" in trace, "the reply landed unframed"
 
@@ -305,7 +305,7 @@ def test_the_record_reaches_each_lens_inside_that_calls_own_fresh_salt(tmp_path)
         return call
 
     stages = ReviewStages(
-        discrimination=_recording(None), support=_recording(None), ablation=_recording(None),
+        support=_recording(None), ablation=_recording(None),
         composer=_stage(_composer("holds")),
     )
     _run(deps, stages)
@@ -321,22 +321,25 @@ def test_the_record_reaches_each_lens_inside_that_calls_own_fresh_salt(tmp_path)
 
 
 def test_every_dispatched_lens_leaves_a_row_even_when_an_earlier_one_faults(tmp_path):
-    """The lenses run CONCURRENTLY, so by the time the first fault is seen the others have
-    already answered. Returning on the fault mid-walk threw those replies away, and the run
-    dir recorded one of three calls that were made."""
+    """The lenses run CONCURRENTLY, so by the time the first fault is seen the other has
+    already answered. Returning on the fault mid-walk threw that reply away, and the run dir
+    recorded a subset of the calls that were made.
+
+    SUPPORT is the one made to fault, because it is dispatched first and the walk is ordered:
+    faulting the last lens would leave the bug this pins — a `return` before the survivors are
+    written — undetectable, since there would be no survivor after it."""
     deps, run_dir = _deps(tmp_path)
 
     async def _raising(_request):
-        raise RuntimeError("the discrimination lens exploded")
+        raise RuntimeError("the support lens exploded")
 
     verdict = _run(deps, ReviewStages(
-        discrimination=_raising, support=_stage("support read this"),
-        ablation=_stage("ablation read that"), composer=_stage(_composer("holds")),
+        support=_raising, ablation=_stage("ablation read that"),
+        composer=_stage(_composer("holds")),
     ))
     assert verdict.outcome == FORCED_INCONCLUSIVE
-    for lens, reply in (("support", "support read this"), ("ablation", "ablation read that")):
-        trace = (run_dir / f"review_{lens}_trace.jsonl").read_text(encoding="utf-8")
-        assert reply in trace, f"{lens} answered and its reply reached no trace"
+    trace = (run_dir / "review_ablation_trace.jsonl").read_text(encoding="utf-8")
+    assert "ablation read that" in trace, "ablation answered and its reply reached no trace"
 
 
 def test_a_second_review_pass_is_not_recorded_as_the_first(tmp_path):
