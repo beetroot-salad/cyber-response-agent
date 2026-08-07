@@ -69,6 +69,7 @@ from defender.runtime import driver  # noqa: E402
 from defender.runtime.providers import BuiltModel  # noqa: E402
 from defender.runtime.verb_grant import VerbGrant  # noqa: E402
 from defender.runtime.verbs import VerbRegistry  # noqa: E402
+from defender.tests import _review_bundle  # noqa: E402
 
 DEFENDER = Path(__file__).resolve().parents[2]
 GOLDEN = DEFENDER / "fixtures-e2e" / "golden-v2sshd"
@@ -315,10 +316,22 @@ def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJEC
     unboxed path, and this default is reachable only from a test.
 
     `review_stages` is the SIXTH injection seam (#774), demanded rather than described: the
-    live write-time gate drives three model-backed review stages from inside the close tool,
-    and without a value the run is handed they are real provider calls that no hermetic
-    scenario can drive. Passed through only when supplied, so every pre-#774 scenario is
-    untouched. RED until `run_investigation` accepts it — that is the demand.
+    live write-time gate drives three lenses and a composer from inside the close tool, and
+    without a value the run is handed they are real provider calls that no hermetic scenario
+    can drive.
+
+    Omitted, it defaults to a bundle whose four stages answer without a provider and whose
+    composer finds `holds` — the same reasoning as the `box` default above, one layer up.
+    It was passed through ONLY when supplied while #797 left the bundle empty, which was
+    harmless exactly as long as there was no reviewer to build: once #796 bound one,
+    `run_investigation`'s own default became `live_review_stages`, and every replay that
+    drafted a confident disposition built three live provider clients, wrote their empty
+    `review_*_live_trace.jsonl` files into the run dir, and had the review fail on the
+    unreachable provider. The scripts still passed — `override_allow_model_requests(False)`
+    keeps that hermetic — but they were asserting the SHAPE OF A FAULT while believing they
+    asserted the interim posture, and #796's reviewer had no end-to-end coverage at all. A
+    scenario about a gate arm still hands in its own bundle; `holds` is the default because
+    a replay of a real run is a happy-path script.
 
     `bounds` is the SEVENTH injection seam (#774 repair): the gate's bounds object, carrying
     the request ceiling's own BASE alongside the forced-turn cap. Without it the base is a
@@ -350,8 +363,9 @@ def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJEC
         seams["limits"] = limits
     if store_factory is not None:
         seams["store_factory"] = store_factory
-    if review_stages is not None:
-        seams["review_stages"] = review_stages
+    seams["review_stages"] = review_stages if review_stages is not None else (
+        _review_bundle.bundle(composer=_review_bundle.composer_reply("holds"))
+    )
     if bounds is not None:
         seams["bounds"] = bounds
     seams["box"] = box if box is not None else box_mod.unboxed_executor(

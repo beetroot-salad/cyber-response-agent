@@ -410,11 +410,25 @@ confident finding. `disposition` is the closed enum:
 - `malicious` — confident escalate, story confirmed.
 
 A confident disposition (`benign`/`malicious`) passes a live challenge
-gate before it commits. Most of the time the call commits and you are
-done. If the gate is not satisfied yet, the call returns without
-committing, names what to investigate further, and you get another
-ANALYZE/GATHER turn before calling `close_investigation` again — this
-is a normal part of the loop, not an error.
+gate before it commits. When the gate is not satisfied yet, the call
+returns without committing, names what to investigate further, and you
+get another ANALYZE/GATHER turn before calling `close_investigation`
+again — this is a normal part of the loop, not an error.
+
+The reviewer reads your record, not your reasoning about it. It
+reconstructs what your evidence supports without seeing which way you
+moved anything, and asks whether your conclusion follows. So the thing
+that makes a close survive is a record whose belief movements cite the
+observations that actually carry them — not a more confident write-up.
+Write `:T resolutions` rows that name the edges and resolutions they
+rest on, and the review has something to agree with.
+
+A review that cannot run fails closed: the confident disposition is
+recorded as `inconclusive`, with the reason on the report. Draft the
+disposition your evidence actually supports and close on it — do not
+pre-emptively call `inconclusive` to route around a challenge, and do
+not re-close to try for a different answer. A committed close is
+terminal either way.
 
 **Write discipline.** ANALYZE (the `:R`/`:T resolutions` Edit on
 `investigation.md`) and the `close_investigation` call are separate
