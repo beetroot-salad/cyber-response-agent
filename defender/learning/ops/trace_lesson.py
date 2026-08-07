@@ -36,6 +36,7 @@ from pathlib import Path
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
+from defender._clock import parse_iso_utc
 from defender._corpus import iter_lessons
 from defender._io import read_jsonl_rows, read_text_soft, use_utf8_stdio
 from defender._frontmatter import parse_frontmatter_or_none
@@ -68,17 +69,13 @@ def _default_runs_dir() -> Path:
 
 
 def _parse_dt(raw) -> datetime | None:
+    """`parse_iso_utc` plus the two already-typed shapes only this caller meets — a lesson's
+    frontmatter is YAML, so a bare date or datetime arrives parsed rather than as a string."""
     if isinstance(raw, datetime):
         return raw if raw.tzinfo else raw.replace(tzinfo=UTC)
     if isinstance(raw, date):
         return datetime(raw.year, raw.month, raw.day, tzinfo=UTC)
-    if not isinstance(raw, str):
-        return None
-    try:
-        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
+    return parse_iso_utc(raw)
 
 
 @dataclass

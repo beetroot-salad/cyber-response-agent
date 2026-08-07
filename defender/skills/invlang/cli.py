@@ -11,6 +11,7 @@ from defender._io import use_utf8_stdio
 from .advisory import VALID_CLASSES, advisory_recall
 from .corpus import load_corpus
 from .queries import (
+    case_hypotheses,
     hypothesis_name_wildcard,
     hypothesis_shape_match,
     lead_branch_effects,
@@ -245,6 +246,17 @@ def _handle_hypothesis_shape_cmd(args, corpus) -> int:
 
 
 def _hypothesis_vocabulary(corpus, signature_id: str, top_k: int) -> dict:
+    """Name → how many cases raised it, over BOTH declaration sites.
+
+    The two-site walk is `queries.case_hypotheses`, not a third hand-rolled copy of it. This
+    used to iterate `c.hypotheses` and then each lead's `new_hypotheses` itself — the same
+    traversal `_walkers.all_hypotheses` owns, and the same one whose prologue-only sibling
+    was a live defect in `queries._vertex_types`.
+
+    The per-case name dedup stays here: it is this command's question (how many CASES raised
+    a name, not how many rows), and it strips, because a vocabulary key with trailing space
+    is a second entry for one word.
+    """
     from collections import Counter
 
     counts: Counter[str] = Counter()
@@ -255,23 +267,13 @@ def _hypothesis_vocabulary(corpus, signature_id: str, top_k: int) -> dict:
             continue
         n_cases += 1
         seen_in_case: set[str] = set()
-        for h in c.hypotheses:
+        for h in case_hypotheses(c):
             name = (h.get("name") or "").strip()
             if not name or name in seen_in_case:
                 continue
             seen_in_case.add(name)
             counts[name] += 1
             examples.setdefault(name, c.case_id)
-        for lead in c.leads:
-            for h in lead.get("new_hypotheses", []) or []:
-                if not isinstance(h, dict):
-                    continue
-                name = (h.get("name") or "").strip()
-                if not name or name in seen_in_case:
-                    continue
-                seen_in_case.add(name)
-                counts[name] += 1
-                examples.setdefault(name, c.case_id)
     ranked = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:top_k]
     return {
         "signature": signature_id,

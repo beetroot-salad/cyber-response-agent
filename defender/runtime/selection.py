@@ -7,12 +7,12 @@ boundary, keyed by a store query rather than an in-process cache.
 """
 from __future__ import annotations
 
-import hashlib
-import json
 from datetime import UTC, datetime
 from typing import Any
 
-from pydantic_ai.messages import ModelMessagesTypeAdapter, ModelRequest, UserPromptPart
+from pydantic_ai.messages import ModelRequest, UserPromptPart
+
+from defender.runtime._wire import wire_digest
 
 from .session_store import (  # noqa: F401 — re-exported, identity checked by the suite
     IngestTailUnderflow,
@@ -23,12 +23,6 @@ from .session_store import (  # noqa: F401 — re-exported, identity checked by 
     path_row_ids,
     synthesized_flags,
 )
-
-
-def _digest_wire(messages: list) -> str:
-    dumped = ModelMessagesTypeAdapter.dump_python(messages, mode="json")
-    text = json.dumps(dumped, sort_keys=True, ensure_ascii=True)
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def _default_boundary(store: Any, session_id: str) -> int:
@@ -149,5 +143,5 @@ def render(  # noqa: PLR0913 — the renderer's full parameter set
     if run_step is not None:
         pending = getattr(store, "pending_stamps", None)
         if pending is not None:
-            pending[session_id] = (run_step, duration_ms, _digest_wire(rendered))
+            pending[session_id] = (run_step, duration_ms, wire_digest(rendered))
     return rendered

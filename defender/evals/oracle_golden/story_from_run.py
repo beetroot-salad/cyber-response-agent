@@ -34,8 +34,16 @@ import json
 import sys
 from pathlib import Path
 
-#: Kept in sync with `_EVAL_TELLS` in the golden-set case linter. Vocabulary only
-#: an eval author writes — the scoring frame, never the operation.
+#: Vocabulary only an eval author writes — the scoring frame, never the operation.
+#:
+#: THE owner. `validate_cases.check_case` reads it from here through `eval_tells_in`; it used
+#: to declare its own copy, under a keep-in-sync note that named `_EVAL_TELLS` — a symbol that
+#: exists in neither module, being the *test's* private name for its own third restatement.
+#: A note pointing at a symbol nobody can grep is how the copies stayed in step by luck.
+#:
+#: `tests/test_oracle_golden_693.py` keeps its restatement deliberately: it sweeps the
+#: COMMITTED corpus, so a leak that arrived by hand-editing a case is a thing it can catch
+#: and this list cannot.
 EVAL_TELLS = (
     "oracle", "negative control", "golden", "projection", "every lead",
     "each lead", "expected result", "+event", "+noise", "-noise",

@@ -38,6 +38,22 @@ class QueueChannel:
 
 
 @dataclass(frozen=True)
+class LegDirs:
+    """The two roots one direction leg writes across: the finished investigation it READS,
+    and the per-case leg-output dir it WRITES.
+
+    Both required. This pair used to ride on `RunPaths` as an optional second field, which
+    put an `Optional[Path]` that is always `None` on all ~48 single-root constructions of a
+    type whose job is resolving artifact names — and every consumer of the pair destructured
+    and asserted it non-`None` on the first line anyway. The pair is real and does travel
+    together; it just needed its own name rather than a lodger's.
+    """
+
+    run_dir: Path
+    learning_run_dir: Path
+
+
+@dataclass(frozen=True)
 class LoopPaths(DefenderPaths):
     """The loop's paths: every checked-in tree `DefenderPaths` locates, PLUS the mutable
     learning state (queues, locks, run artifacts) rooted at `state_root`.
@@ -187,8 +203,7 @@ def learning_state_root() -> Path:
 
 
 def learning_run_paths(run_id: str) -> RunPaths:
-    learning_run_dir = learning_state_root() / "runs" / run_id
-    return RunPaths(run_dir=learning_run_dir, learning_run_dir=learning_run_dir)
+    return RunPaths(learning_state_root() / "runs" / run_id)
 
 
 DEFAULT_PATHS = LoopPaths(repo_root=REPO_ROOT, state_dir=_env_state_dir())

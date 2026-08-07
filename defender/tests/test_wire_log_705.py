@@ -218,6 +218,48 @@ def test_wire_sha_joins_a_store_row_to_its_wire_log_line(tmp_path):
     assert ss.SCHEMA_VERSION is not None  # the join is a store contract, not a log one
 
 
+def test_both_capture_points_digest_through_one_canonicalizer():
+    """The two digests joined above are only *comparable* because both sides canonicalize
+    identically — same key order, same non-ASCII escaping, same hash.
+
+    This is the property the pair had nothing enforcing. The bodies were byte-identical by
+    hand under names spelled in opposite orders (`observe._wire_digest` /
+    `selection._digest_wire`) in modules that do not import each other, and the join above
+    deliberately asserts no equality — so a drift in either canonicalizer would not have
+    turned anything red. It would have started reporting a difference on every request,
+    which is indistinguishable from the mid-flight transform the join exists to record.
+
+    Identity, not equal output: both modules bind the name at import, so a same-behaviour
+    second copy would pass an output comparison and still be the thing this forbids."""
+    from defender.runtime import _wire, selection
+
+    assert observe.wire_digest is _wire.wire_digest
+    assert selection.wire_digest is _wire.wire_digest
+
+
+def test_the_digest_is_stable_per_message_set_and_moves_with_it():
+    """What the join reads the digest FOR: the same messages digest the same, a different
+    message set digests differently. Non-ASCII is in the fixture because `ensure_ascii` is
+    one of the two canonicalization choices the shared body makes.
+
+    The comparison is over ONE message list read twice, not two lists built alike: every
+    part carries its own `timestamp`, so two constructions of the "same" conversation never
+    digest equal. That is correct for a per-request join key and worth pinning here, since
+    it is the first thing a reader assumes otherwise.
+
+    Deliberately not a restatement of the body — asserting sha256-over-a-sorted-dump would
+    mirror the implementation and go green on any change made in both places at once, which
+    is the failure this whole finding is about."""
+    from defender.runtime._wire import wire_digest
+
+    messages = [user_request("é"), text_response("ü")]
+    same = wire_digest(messages)
+    assert same == wire_digest(messages)
+    assert same != wire_digest(messages[:1])
+    assert len(same) == 64
+    assert set(same) <= set("0123456789abcdef")
+
+
 # ==========================================================================
 # the consumers the census missed — survival
 # ==========================================================================

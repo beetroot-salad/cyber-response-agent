@@ -14,7 +14,6 @@ from .schema import (
     CompanionBody,
     Conclude,
     FindingRecord,
-    HypothesisRecord,
 )
 
 
@@ -26,10 +25,6 @@ class Companion:
     signature_id: str | None = None
     created_at: str | None = None
     parse_warnings: list[ParseWarning] = field(default_factory=list)
-
-    @property
-    def hypotheses(self) -> list[HypothesisRecord]:
-        return self.body.get("hypothesize", {}).get("hypotheses", [])
 
     @property
     def leads(self) -> list[FindingRecord]:

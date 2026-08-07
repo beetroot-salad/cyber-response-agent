@@ -391,6 +391,35 @@ def test_the_dry_run_reports_the_mechanical_half_and_calls_nothing(tmp_path, cap
     assert not (d / "scores").exists(), "--dry-run must not write a score"
 
 
+def test_the_dry_run_and_the_real_score_report_the_same_mechanical_half(tmp_path):
+    """A dry run is a preview of the score, so its mechanical section must be the score's
+    — key for key, value for value.
+
+    The two derived it separately: the same four loads, the same five checks, written out
+    twice. They had already drifted in one visible way (the two dicts were built in
+    different key orders), and the failure the duplication invites is worse than cosmetic —
+    a `--dry-run` that reports clean for a projection the paid run then refuses is consulted
+    at exactly the moment a model call is expensive, which is why it exists.
+
+    The projection is deliberately dirty in three of the five checks at once: a malformed
+    lead, a concrete value, and a lead the case does not have."""
+    d = _case(tmp_path, leads=("l-001", "l-002"))
+    proj = _projection(d, {"l-001": ["prose, not a marker"],
+                           "l-002": ["+event: sshd failed password for root from 10.0.0.9"],
+                           "l-999": ["<standard environment noise>"]})
+
+    dry = score._dry_run(d, proj, model="test-judge", effort="high")
+    real = _score(d, proj, _scripted())
+
+    assert dry["mechanical"] == real["mechanical"]
+    assert list(dry["mechanical"]) == list(real["mechanical"]), (
+        "same keys in the same order — two hand-built dicts is how that stopped being true")
+    assert dry["mechanical"]["unscored_leads"], "the fixture must actually trip a check"
+    assert dry["mechanical"]["malformed_leads"]
+    assert {k: dry[k] for k in ("tag", "case", "kind", "n_leads")} == {
+        k: real[k] for k in ("tag", "case", "kind", "n_leads")}
+
+
 # ------------------------------------------------------------- the sibling entrypoints
 
 @pytest.mark.parametrize("module", ["replay", "build_case", "controls", "report",

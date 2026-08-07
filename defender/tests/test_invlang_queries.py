@@ -516,7 +516,7 @@ def test_hypothesis_shape_resolves_attached_to_type_from_a_mid_run_vertex():
 
     An investigation declares vertices in two places, and a run that discovers one
     mid-investigation declares it in that lead's `outcome.observations` — then raises the
-    hypothesis anchored to it right there. `_all_hypotheses` walks BOTH sites, so an index
+    hypothesis anchored to it right there. `case_hypotheses` walks BOTH sites, so an index
     built from the prologue alone resolved that anchor to no type at all, and the
     `attached_to_type` filter refused the hypothesis as a NON-match rather than as a missing
     id: the case dropped out of every precedent lookup, silently.
@@ -613,3 +613,36 @@ def test_hypothesis_shape_filters_compose_with_and():
     ]
     out = hypothesis_shape_match(corpus, parent_type="identity", rel="modified")
     assert {h["name"] for h in out["hits"]} == {"?matches"}
+
+
+def test_hypothesis_vocabulary_counts_hypotheses_the_run_raised_mid_investigation():
+    """`cli`'s vocabulary command counts BOTH declaration sites — the prologue's opening
+    hypotheses and the ones a lead raised as it went.
+
+    It hand-walked the two sites itself, a third spelling of the traversal
+    `_walkers.all_hypotheses` owns and the same one whose prologue-only sibling was a live
+    defect in `_vertex_types`. Nothing covered the command at all, so the copy could have
+    lost the lead half — the half that only exists once a run has actually learned
+    something — with no test to say so.
+
+    The per-case dedup is the other half of the contract: a name raised twice in one case is
+    one case, because the figure is "how many cases reached for this word"."""
+    from defender.skills.invlang.cli import _hypothesis_vocabulary
+
+    corpus = [
+        _case("case-a",
+              hypotheses=[{"id": "h-001", "name": "?lateral-movement"}],
+              leads=[{"name": "auth", "outcome": {},
+                      "new_hypotheses": [{"id": "h-002", "name": "?stolen-token"}]}]),
+        _case("case-b",
+              hypotheses=[],
+              leads=[{"name": "auth", "outcome": {},
+                      "new_hypotheses": [{"id": "h-003", "name": "?stolen-token"},
+                                         {"id": "h-004", "name": "?stolen-token"}]}]),
+    ]
+    out = _hypothesis_vocabulary(corpus, signature_id="", top_k=10)
+
+    assert out["n_cases"] == 2
+    counts = {row["name"]: row["count"] for row in out["vocabulary"]}
+    assert counts == {"?stolen-token": 2, "?lateral-movement": 1}, (
+        "a lead-raised hypothesis must count, and twice in one case is still one case")

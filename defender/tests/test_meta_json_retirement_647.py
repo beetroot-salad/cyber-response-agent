@@ -30,6 +30,7 @@ import ast
 import os
 import re
 import subprocess
+from dataclasses import MISSING, fields
 from pathlib import Path
 
 import pytest
@@ -433,12 +434,11 @@ def test_update_json_locked_survives_the_sibling_removal(tmp_path):
 def test_run_paths_accessor_set_is_five_after_the_meta_accessor_is_removed(tmp_path):
     """`RunPaths` exposes five artifact accessors once the one pointing at the removed file is
     gone — the alert, the report, the investigation log, the queries table and the raw-payload
-    dir — plus the learning-leg re-root. No accessor may survive naming a file no consumer
-    reads, and the class docstring's own count must agree with the accessors it enumerates."""
+    dir. No accessor may survive naming a file no consumer reads, and the class docstring's own
+    count must agree with the accessors it enumerates."""
     accessors = {n for n, v in vars(RunPaths).items() if isinstance(v, property)}
-    artifacts = accessors - {"learning"}
-    assert artifacts == {"alert", "report", "investigation", "executed_queries", "gather_raw"}, (
-        f"the artifact accessor set drifted: {sorted(artifacts)}"
+    assert accessors == {"alert", "report", "investigation", "executed_queries", "gather_raw"}, (
+        f"the artifact accessor set drifted: {sorted(accessors)}"
     )
     assert not hasattr(RunPaths(tmp_path), "meta"), "RunPaths still resolves a meta.json path"
 
@@ -447,6 +447,26 @@ def test_run_paths_accessor_set_is_five_after_the_meta_accessor_is_removed(tmp_p
         "the class docstring still counts the accessors it no longer has"
     )
     assert "meta" not in doc, "the docstring still enumerates the removed accessor"
+
+
+def test_run_paths_resolves_artifacts_under_exactly_one_root():
+    """`RunPaths` is a name resolver over ONE root, and takes no second one.
+
+    It used to carry `learning_run_dir: Path | None = None` so the source root and the
+    per-case leg-output root "travel together". Nothing that resolves an artifact name ever
+    read it: the two consumers destructured the pair and asserted it non-`None` on their
+    first line, while every one of the ~48 other constructions carried an always-`None`
+    Optional. The pair is real — it is `config.LegDirs` now, with both halves required — and
+    keeping it here made the second root look optional at 48 sites where it was not a
+    question at all.
+
+    Field-count, not name-absence: re-adding it under any spelling is the regression."""
+    from defender.learning.core.config import LegDirs
+
+    assert [f.name for f in fields(RunPaths)] == ["run_dir"]
+    assert [f.name for f in fields(LegDirs)] == ["run_dir", "learning_run_dir"]
+    assert all(f.default is MISSING for f in fields(LegDirs)), (
+        "both roots are required — an optional half is the shape this moved away from")
 
 
 def test_no_call_site_anywhere_still_reaches_run_paths_meta_or_the_literal_meta_json():

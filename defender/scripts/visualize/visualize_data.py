@@ -4,6 +4,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 
+from defender._clock import parse_iso_utc
 from defender._run_paths import RunPaths
 from defender.scripts.pricing import PRICING, usage_cost  # noqa: F401  (re-exported for this module's consumers)
 from defender.scripts.visualize.visualize_primitives import slugify
@@ -309,12 +310,6 @@ def _parse_timestamped_user_events(
     events: list[dict], tags: list[str | None]
 ) -> list[tuple]:
 
-    def _parse(ts: str):
-        try:
-            return datetime.fromisoformat(ts.replace("Z", "+00:00"))
-        except (TypeError, ValueError):
-            return None
-
     parsed: list[tuple] = []
     for ev, ph in zip(events, tags, strict=False):
         if ev.get("type") != "user":
@@ -322,7 +317,7 @@ def _parse_timestamped_user_events(
         ts = ev.get("timestamp")
         if not ts or ph is None:
             continue
-        dt = _parse(ts)
+        dt = parse_iso_utc(ts)
         if dt is None:
             continue
         parsed.append((dt, ph))

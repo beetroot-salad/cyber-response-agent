@@ -36,6 +36,7 @@ import json
 import sys
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
@@ -112,73 +113,113 @@ def audit_set(case_names: tuple[str, ...]) -> list[tuple[Path, str, str, dict]]:
     return out
 
 
-def _label_once(case_dir: Path, lead_id: str, model: str, effort: str,
-                call: judge.CallFn) -> dict:
-    inputs = judge.load_lead_inputs(case_dir, lead_id)
-    return judge.label_lead(inputs, model=model, effort=effort, call=call)
+@dataclass(frozen=True)
+class _Agreement:
+    """What one lead answered most often, over `n` repeats of the same question."""
+
+    modal: object
+    modal_n: int
+    n: int
+
+    @property
+    def fraction(self) -> float:
+        return self.modal_n / self.n
+
+    @property
+    def stable(self) -> bool:
+        return self.modal_n == self.n
+
+
+def _modal(answers: list) -> _Agreement:
+    """The modal answer and how dominant it was. `Counter.most_common(1)` breaks ties by
+    first-seen, which is arbitrary but consistent — and a tie is already reported as such,
+    because `fraction` shows it."""
+    modal, modal_n = Counter(answers).most_common(1)[0]
+    return _Agreement(modal=modal, modal_n=modal_n, n=len(answers))
+
+
+def _mean_agreement(rounds: list[_Agreement]) -> float | None:
+    """`None`, not zero, for an empty sweep: nothing was asked, so nothing agreed."""
+    return round(sum(r.fraction for r in rounds) / len(rounds), 3) if rounds else None
+
+
+def _sweep(entries: list[tuple], repeats: int, jobs: int, ask) -> dict[tuple[str, str], list[dict]]:
+    """Ask `ask` about every entry `repeats` times, grouped back by (case, lead).
+
+    THE sweep. Both audits are the same experiment on different questions — fan one
+    question across a thread pool, then collapse the repeats per lead to a modal answer and
+    a self-agreement — and both wrote that fan-out and regroup by hand. The stakes are that
+    the two numbers are compared to each other: the label pass's self-agreement and the
+    verdict pass's are read side by side to say which pass a prompt change moved, and that
+    reading assumes both were measured the same way.
+
+    Every entry is a tuple whose first two elements are `(case_dir, lead_id)`; the rest is
+    the caller's, and reaches `ask` untouched.
+    """
+    work = [entry for entry in entries for _rep in range(repeats)]
+    with ThreadPoolExecutor(max_workers=max(1, min(jobs, len(work) or 1))) as pool:
+        answers = list(pool.map(ask, work))
+
+    by_lead: dict[tuple[str, str], list[dict]] = {}
+    for entry, answer in zip(work, answers, strict=True):
+        case_dir, lead_id = entry[0], entry[1]
+        by_lead.setdefault((case_dir.name, lead_id), []).append(answer)
+    return by_lead
 
 
 def run_audit(case_names: tuple[str, ...], repeats: int, jobs: int, *,
               model: str, effort: str, call: judge.CallFn = judge.call_model) -> dict:
     entries = audit_set(case_names)
-    work = [(case_dir, lead_id, hand, lead, rep)
-            for (case_dir, lead_id, hand, lead) in entries
-            for rep in range(repeats)]
-    with ThreadPoolExecutor(max_workers=max(1, min(jobs, len(work) or 1))) as pool:
-        results = list(pool.map(
-            lambda item: _label_once(item[0], item[1], model, effort, call), work
-        ))
 
-    by_lead: dict[tuple[str, str], list[dict]] = {}
-    for (case_dir, lead_id, _hand, _lead, _rep), label in zip(work, results, strict=True):
-        by_lead.setdefault((case_dir.name, lead_id), []).append(label)
+    def ask(entry: tuple) -> dict:
+        case_dir, lead_id = entry[0], entry[1]
+        return judge.label_lead(judge.load_lead_inputs(case_dir, lead_id),
+                                model=model, effort=effort, call=call)
 
-    rows, agreements = [], []
+    by_lead = _sweep(entries, repeats, jobs, ask)
+
+    rows, rounds = [], []
     for case_dir, lead_id, hand, lead in entries:
         labels = by_lead[(case_dir.name, lead_id)]
         kinds = [x["delta_kind"] for x in labels]
-        modal, modal_n = Counter(kinds).most_common(1)[0]
+        agreement = _modal(kinds)
         accepted = expected_delta_kinds(hand, lead)
         # An ABSTENTION is not a divergence, and conflating them charges the judge for
         # its own honesty. A divergence is the judge asserting a class the hand label
         # rules out; `undecidable` asserts nothing, and the design excludes it from
         # every denominator and tallies it separately.
-        abstained = modal == "undecidable"
-        agrees = modal in accepted
-        agreements.append(modal_n / len(kinds))
+        abstained = agreement.modal == "undecidable"
+        agrees = agreement.modal in accepted
+        rounds.append(agreement)
         rows.append({
             "case": case_dir.name, "lead": lead_id,
             "hand_class": hand, "accepted_delta_kinds": list(accepted),
-            "modal_delta_kind": modal, "agrees": agrees, "abstained": abstained,
+            "modal_delta_kind": agreement.modal, "agrees": agrees, "abstained": abstained,
             "diverges": not agrees and not abstained,
-            "self_agreement": round(modal_n / len(kinds), 3),
+            "self_agreement": round(agreement.fraction, 3),
             "labels": kinds,
             "undecidable_reasons": [x["undecidable_reason"] for x in labels
                                     if x["undecidable_reason"]],
             "evidence": labels[0]["evidence"],
         })
 
-    # The resolved judge, read back from every call rather than echoed from the request.
-    # A run that fell back mid-sweep produced two judges' answers under one tag.
-    resolved = {label["judge_model"] for labels in by_lead.values() for label in labels}
-    if len(resolved) != 1:
-        raise RuntimeError(f"the sweep ran on more than one judge: {sorted(resolved)}")
-    costs = [label["cost_usd"] for labels in by_lead.values() for label in labels
-             if label.get("cost_usd") is not None]
-
+    replies = [label for labels in by_lead.values() for label in labels]
     decided = [r for r in rows if not r["abstained"]]
     return {
         "pass": "label",
-        "judge_model": resolved.pop(), "judge_effort": effort,
+        # The resolved judge, read back from every call rather than echoed from the request.
+        # A run that fell back mid-sweep produced two judges' answers under one tag.
+        "judge_model": judge.sole_judge(replies, what="the label sweep"),
+        "judge_effort": effort,
         "tag_suffix": judge.tag_suffix(model, effort),
-        "cost_usd": round(sum(costs), 4) if costs else None,
+        "cost_usd": judge.total_cost(replies),
         "prompts_sha8": judge.prompts_sha8(), "repeats": repeats,
         "leads": len(rows),
         "decided": len(decided),
         "agreeing": sum(1 for r in rows if r["agrees"]),
         "divergences": sum(1 for r in rows if r["diverges"]),
         "abstentions": len(rows) - len(decided),
-        "mean_self_agreement": round(sum(agreements) / len(agreements), 3) if agreements else None,
+        "mean_self_agreement": _mean_agreement(rounds),
         "rows": rows,
     }
 
@@ -207,7 +248,7 @@ def verdict_set(case_names: tuple[str, ...],
         if not (proj_path.is_file() and labels_path.is_file()):
             continue
         manifest = yaml.safe_load((case_dir / "manifest.yaml").read_text(encoding="utf-8")) or {}
-        if manifest.get("defective") or manifest.get("kind") in score.DERIVED_KINDS:
+        if manifest.get("defective") or score.is_derived(manifest.get("kind")):
             continue
         proj = yaml.safe_load(proj_path.read_text(encoding="utf-8")) or {}
         preds, _ = score.load_predictions(proj)
@@ -220,47 +261,34 @@ def verdict_set(case_names: tuple[str, ...],
                 continue
             if score.grammar_problem(preds[lead_id]) is not None:
                 continue
-            out.append((case_dir, lead_id, preds[lead_id],
-                        {k: label[k] for k in ("delta_kind", "heterogeneous", "evidence")
-                         if k in label}))
+            out.append((case_dir, lead_id, preds[lead_id], score.measurement(label)))
     return out
-
-
-def _verdict_once(case_dir: Path, lead_id: str, events, measurement: dict,
-                  model: str, effort: str, call: judge.CallFn) -> dict:
-    return judge.verdict_lead(judge.load_lead_inputs(case_dir, lead_id), events,
-                              measurement, model=model, effort=effort, call=call)
 
 
 def run_verdict_audit(case_names: tuple[str, ...], oracle_tag: str, repeats: int,  # noqa: PLR0913 — every argument is an axis of the sweep; a config object would hide which one a caller varied
                       jobs: int, *, model: str, effort: str,
                       call: judge.CallFn = judge.call_model) -> dict:
     entries = verdict_set(case_names, oracle_tag)
-    work = [(entry, rep) for entry in entries for rep in range(repeats)]
 
-    def _one(item: tuple[tuple[Path, str, object, dict], int]) -> dict:
-        (case_dir, lead_id, events, measurement), _rep = item
-        return _verdict_once(case_dir, lead_id, events, measurement, model, effort, call)
+    def ask(entry: tuple) -> dict:
+        case_dir, lead_id, events, measurement = entry
+        return judge.verdict_lead(judge.load_lead_inputs(case_dir, lead_id), events,
+                                  measurement, model=model, effort=effort, call=call)
 
-    with ThreadPoolExecutor(max_workers=max(1, min(jobs, len(work) or 1))) as pool:
-        results = list(pool.map(_one, work))
+    by_lead = _sweep(entries, repeats, jobs, ask)
 
-    by_lead: dict[tuple[str, str], list[dict]] = {}
-    for ((case_dir, lead_id, _e, _m), _rep), verdict in zip(work, results, strict=True):
-        by_lead.setdefault((case_dir.name, lead_id), []).append(verdict)
-
-    rows, agreements = [], []
+    rows, rounds = [], []
     for case_dir, lead_id, _events, measurement in entries:
         verdicts = by_lead[(case_dir.name, lead_id)]
         answers = [v["faithful"] for v in verdicts]
-        modal, modal_n = Counter(answers).most_common(1)[0]
-        agreements.append(modal_n / len(answers))
+        agreement = _modal(answers)
+        rounds.append(agreement)
         rows.append({
             "case": case_dir.name, "lead": lead_id,
             "delta_kind": measurement.get("delta_kind"),
-            "modal_faithful": modal,
-            "self_agreement": round(modal_n / len(answers), 3),
-            "stable": modal_n == len(answers),
+            "modal_faithful": agreement.modal,
+            "self_agreement": round(agreement.fraction, 3),
+            "stable": agreement.stable,
             "faithful": answers,
             "causes": sorted({v["cause"] for v in verdicts if v["cause"]}),
             "undecidable_reasons": sorted({v["undecidable_reason"] for v in verdicts
@@ -268,19 +296,16 @@ def run_verdict_audit(case_names: tuple[str, ...], oracle_tag: str, repeats: int
             "rationale": verdicts[0]["rationale"],
         })
 
-    resolved = {v["judge_model"] for vs in by_lead.values() for v in vs}
-    if len(resolved) != 1:
-        raise RuntimeError(f"the sweep ran on more than one judge: {sorted(resolved)}")
-    costs = [v["cost_usd"] for vs in by_lead.values() for v in vs
-             if v.get("cost_usd") is not None]
+    replies = [v for vs in by_lead.values() for v in vs]
     unstable = [r for r in rows if not r["stable"]]
     contradicts = [r for r in rows if "contradicts-measurement" in r["undecidable_reasons"]]
     return {
         "pass": "verdict",
         "oracle_tag": oracle_tag,
-        "judge_model": resolved.pop(), "judge_effort": effort,
+        "judge_model": judge.sole_judge(replies, what="the verdict sweep"),
+        "judge_effort": effort,
         "tag_suffix": judge.tag_suffix(model, effort),
-        "cost_usd": round(sum(costs), 4) if costs else None,
+        "cost_usd": judge.total_cost(replies),
         "prompts_sha8": judge.prompts_sha8(), "repeats": repeats,
         "leads": len(rows),
         "unstable_leads": len(unstable),
@@ -288,7 +313,7 @@ def run_verdict_audit(case_names: tuple[str, ...], oracle_tag: str, repeats: int
         # between runs cannot resolve a one-lead improvement.
         "noise_floor_leads": len(unstable),
         "contradicts_measurement": len(contradicts),
-        "mean_self_agreement": round(sum(agreements) / len(agreements), 3) if agreements else None,
+        "mean_self_agreement": _mean_agreement(rounds),
         "rows": rows,
     }
 

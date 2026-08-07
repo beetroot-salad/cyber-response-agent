@@ -12,6 +12,7 @@ import yaml
 from defender._yaml import safe_load
 from defender.learning.core.config import (
     DEFAULT_PATHS,
+    LegDirs,
     RunUnprocessable,
     LoopPaths,
     RunPaths,
@@ -77,7 +78,7 @@ def _validate_judge_yaml(
 
 def run_direction(
     spec: Direction,
-    dirs: RunPaths,
+    dirs: LegDirs,
     disposition: str,
     alert_rule_key: str,
     run_id: str,
@@ -87,7 +88,6 @@ def run_direction(
     box: Any,
 ) -> bool:
     run_dir, learning_run_dir = dirs.run_dir, dirs.learning_run_dir
-    assert learning_run_dir is not None, "run_direction requires a learning leg dir"
     # The leg is marked STARTED before the actor call, not after: a leg the actor call itself
     # raises out of (never reaching the story write) must still read as started-and-died, not
     # as never-selected — the same confusion the status field exists to remove.
@@ -100,7 +100,7 @@ def run_direction(
     if is_skip_story(actor_story):
         _log(f"actor emitted SKIP ({spec.name}) — persisting, no findings")
         persist_run(
-            dirs,
+            run_dir, learning_run_dir,
             artifacts=DirectionArtifacts(
                 actor_story=actor_story, story_name=spec.story_name,
                 judge_yaml=None, judge_name=spec.judge_name,
@@ -122,7 +122,7 @@ def run_direction(
 
     _log(f"step=persist ({spec.name})")
     persist_run(
-        dirs,
+        run_dir, learning_run_dir,
         artifacts=DirectionArtifacts(
             actor_story=actor_story, story_name=spec.story_name,
             judge_yaml=judge_stripped, judge_name=spec.judge_name,
@@ -199,7 +199,7 @@ def _run_cycle_box_request(
 
 def _dispatch_directions(
     directions: list[str],
-    dirs: RunPaths,
+    dirs: LegDirs,
     disposition: str,
     alert_rule_key: str,
     run_id: str,
@@ -270,7 +270,7 @@ def run_one(
         f"alert_rule_key={alert_rule_key}"
     )
 
-    dirs = RunPaths(run_dir, learning_run_dir)
+    dirs = LegDirs(run_dir, learning_run_dir)
 
     box: Any = None
     if directions:

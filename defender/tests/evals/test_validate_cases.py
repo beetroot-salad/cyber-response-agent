@@ -255,3 +255,38 @@ def test_a_defective_case_is_excluded_from_the_totals_and_named(tmp_path):
     assert "dev: 1 cases" in rendered, "the defective case must not be counted"
     assert "case-bad is EXCLUDED" in rendered
     assert "wrong host" in rendered, "the reason travels with the exclusion"
+
+
+def test_the_case_vocabulary_is_read_from_its_owners_not_restated():
+    """The two vocabularies this linter checks against are read from the modules that own
+    them: the derived-kind set from `score`, the eval-tells list from `story_from_run`.
+
+    Both used to be declared here as well. `DERIVED_KINDS` carried two *different*
+    justifications for one set — "no capture of its own, so `hidden/` is absent by design"
+    here, "story never fired, so nothing was measured" in `score` — which is how a sixth kind
+    gets added to one list and not the other and the linter starts calling a legitimate case
+    malformed. `EVAL_TELLS` carried a keep-in-sync note naming `_EVAL_TELLS`, a symbol in
+    neither file (it is the *test's* private name), so the note pointed nowhere.
+
+    Identity, not equality: a re-declared tuple with the same contents compares equal and is
+    exactly the drift this closes."""
+    from defender.evals.oracle_golden import score, story_from_run
+
+    assert validate_cases.DERIVED_KINDS is score.DERIVED_KINDS
+    assert validate_cases.eval_tells_in is story_from_run.eval_tells_in
+    assert not hasattr(validate_cases, "EVAL_TELLS"), (
+        "the tells list is back as a second declaration")
+
+
+def test_a_story_that_leaks_the_evaluation_frame_is_caught_case_insensitively(tmp_path):
+    """The leak check is what the shared list is FOR, and it must survive the story being
+    read in its own case: the owner lowercases internally, so the caller hands it the raw
+    text. Passing an already-lowered string worked too — which is why this could have been
+    broken by the move without a test noticing."""
+    _case(tmp_path, "case-leaky", story="This is the NEGATIVE CONTROL for the burst.")
+    problems = validate_cases.check_case(tmp_path / "case-leaky", {})
+    assert any("leaks the evaluation frame" in p for p in problems), problems
+
+    _case(tmp_path, "case-clean", story="An operator ran a routine backup.")
+    assert not any("leaks the evaluation frame" in p
+                   for p in validate_cases.check_case(tmp_path / "case-clean", {}))

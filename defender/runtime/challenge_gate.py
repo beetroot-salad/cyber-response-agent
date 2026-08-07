@@ -111,7 +111,18 @@ class Bounds:
 
 
 def default_bounds() -> Bounds:
-    return Bounds(extra_turns=EXTRA_TURN_BOUND, stage_timeout=stage_timeout())
+    """The shipped bounds. Kept as a FUNCTION though its body is now empty of arguments:
+    every call site is a `# lint-default: ok` default-resolution site, and a named
+    zero-argument constructor is what makes "the caller passed nothing, so use the shipped
+    default" a readable line there rather than a bare `Bounds()` that looks like a literal.
+    (Two are the gate's own DI boundaries — `close_investigation` and `run_investigation`;
+    the third, `driver._main_extra_capabilities`, resolves the request ceiling FROM the
+    shipped bounds because the honest default is derived from them.)
+
+    It used to restate `extra_turns` and `stage_timeout`, which are exactly the dataclass's
+    own defaults — so the shipped value lived in two places and only the dataclass's was
+    reachable by anything else."""
+    return Bounds()
 
 
 def raised_request_limit(bounds: Bounds) -> int:
