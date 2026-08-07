@@ -100,9 +100,11 @@ def test_duplicate_helper_baseline_drops_the_five_pair_exclusive_names(tmp_path:
     entries = baseline["entries"]
     assert [n for n in PAIR_EXCLUSIVE if n in entries] == []
     # #774 added one further accepted entry (`render_report`: close_tool.py's report.md
-    # renderer collides in NAME ONLY with evals/judge_equivalence.py's, and the name is
-    # pinned by the #774 spec's own import surface, so it is baselined rather than renamed).
-    assert len(entries) == 14, f"baseline is {len(entries)} entries, expected 14"
+    # renderer collided in NAME ONLY with evals/judge_equivalence.py's), which took the
+    # arithmetic to 14. Retiring the judge A/B harness removed the other half of that
+    # collision, so `render_report` is no longer a duplicate name at all and the entry left
+    # the baseline — back to the 13 this demand's own fold arrived at.
+    assert len(entries) == 13, f"baseline is {len(entries)} entries, expected 13"
 
     proc = subprocess.run(
         ["python3", "scripts/lint/lint_duplicate_helpers.py"],

@@ -28,6 +28,11 @@ def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="defender.skills.invlang.cli")
     p.add_argument("corpus_root", type=Path)
     p.add_argument("--quiet", action="store_true", help="Suppress LoadReport summary on stderr.")
+    p.add_argument(
+        "--verbose", action="store_true",
+        help="With the LoadReport summary, expand each partially-loaded case's "
+             "per-row parse warnings instead of just counting them.",
+    )
     sub = p.add_subparsers(dest="cmd", required=True)
 
     p5 = sub.add_parser("sequence", help="Class 5: lead sequence pattern")
@@ -168,6 +173,8 @@ def main(argv: list[str] | None = None) -> int:
             f"warnings={report.total_warnings})",
             file=sys.stderr,
         )
+        for line in report.detail_lines(verbose=args.verbose):
+            print(line, file=sys.stderr)
 
     if args.cmd == "sequence":
         out = lead_sequence_pattern(

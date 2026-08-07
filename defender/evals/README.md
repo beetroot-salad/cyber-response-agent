@@ -6,12 +6,10 @@ invariants; evals run on a researcher's cadence, make LLM calls, and emit
 *scores/trends* rather than pass/fail. Nothing here is collected by CI.
 
 The split is by *what a file is*, not by what it covers: the unit tests of this
-tooling (`secondary.py`, `run_judge_ab.py`, `judge_equivalence.py`) ARE
-deterministic CI gates, so #720 moved them to `defender/tests/evals/` with the
-rest of the suite. They had been sitting here uncollected — this README used to
-claim `test_secondary.py` ran in CI, and it never did, because `evals/` was
-missing from the workflow's collection roots. A test in the source tree is a
-test nobody is running.
+tooling ARE deterministic CI gates, so #720 moved them to `defender/tests/evals/`
+with the rest of the suite. They had been sitting here uncollected, because
+`evals/` was missing from the workflow's collection roots. A test in the source
+tree is a test nobody is running.
 
 Everything here measures the defender or its learning loop. The dependency
 direction is one-way: `evals/` imports/invokes `learning/` and `runtime/`,
@@ -22,30 +20,27 @@ never the reverse.
 | File | Metric | Question it answers |
 |---|---|---|
 | `held_out.py` | **Primary** — disposition accuracy | Does the *current* defender's disposition match ground truth on the labeled held-out alerts? This is the loop's north-star metric. |
-| `secondary.py` | **Secondary** — frozen-actor replay catch rate | Would the current defender's lead sequence refute stories an *older* (gen N−K) actor writes? |
 
-Run them by hand:
+Run it by hand:
 
 ```bash
 # Primary: score against ground truth (runs dir defaults to $DEFENDER_RUNS_BASE).
 # It walks fixtures/held-out/ and finds each fixture's run by run-id, so launch
 # scored runs as: run.py <fixture>/alert.json --run-id <slug> --no-learn
 python3 defender/evals/held_out.py "$DEFENDER_RUNS_BASE"
-
-# Secondary: frozen-actor replay, pinned K generations back (default 3)
-python3 defender/evals/secondary.py [--k 3] [--out <dir>]
 ```
 
-**Read them together.** The primary plateauing *while* the secondary climbs
-across consecutive checkpoints is the divergence signal — the defender is
-gaining curriculum-distribution fit (beating the actor it co-trains against)
-without target-distribution fit (real ground truth). Neither number means much
-alone. Design rationale: `defender/docs/learning-loop.md` §Secondary.
-
-`secondary.py` writes its summary + per-alert detail under
-`defender/evals/results/secondary/` (gitignored). It shells out to
-`defender/learning/ops/replay_actor.py` inside a worktree pinned to gen-(N−K); that
-script stays in `learning/` because the live loop uses it too.
+**There used to be a second metric here.** `secondary.py` scored a *frozen-actor
+replay* catch rate — would the current defender's lead sequence refute stories a
+gen-(N−K) actor writes? — and it was read against the primary as a divergence
+signal. #791 took the offline oracle out of the loop, which left that harness
+structurally unable to produce a number: its catch-rate denominator was always
+zero and it printed `n/a (0 executed)` while still paying for a full HEAD
+investigation, a pinned worktree and a replay per fixture. It has been retired,
+along with the judge A/B comparison harness (`judge_equivalence.py` /
+`run_judge_ab.py`), which could no longer reach any branch but "NOT MEASURED".
+`learning/ops/replay_actor.py` stays, but it lost its only automatic driver with
+that harness: nothing invokes it on a schedule now, and it is run by hand.
 
 ## The harness-on-the-harness
 

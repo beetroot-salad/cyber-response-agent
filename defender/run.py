@@ -186,19 +186,6 @@ def preflight_role_models(model_override: str | None = None) -> int:
     return 0
 
 
-def _source_provider_keys(main_model: str, gather_model: str) -> int:
-    try:
-        used = {providers.provider_for(main_model), providers.provider_for(gather_model)}
-    except ValueError as e:
-        print(f"[run.py] ERROR: {e}", file=sys.stderr)
-        return 2
-    for prov in sorted(used, key=lambda p: p.id):
-        rc = _source_one_provider_key(prov)
-        if rc:
-            return rc
-    return 0
-
-
 class _Investigate(Protocol):
     """The investigation seam's exact shape.
 
@@ -308,9 +295,11 @@ def main(
     ns = parse_args(argv)
 
     model = driver.resolve_main_model(ns.model)
-    rc = _source_provider_keys(model, driver.gather_model())
-    if rc:
-        return rc
+    # ONE provider-key pass. #774's all-roles preflight is a strict superset of the
+    # investigator+gather pair that used to run ahead of it — same two resolvers, same
+    # per-provider key sourcing, and MAIN/GATHER are two of the eleven registered roles it
+    # walks — so the older pass could only ever re-source a key this one already sourced, or
+    # report the same fault first under a different message.
     rc = preflight_role_models(ns.model)
     if rc:
         return rc

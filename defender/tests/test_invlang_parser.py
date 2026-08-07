@@ -11,6 +11,10 @@ Covers:
 
 from __future__ import annotations
 
+import subprocess
+import sys
+from pathlib import Path
+
 from defender.skills.invlang.parser import (
     RowError,
     _resolution_record,
@@ -654,9 +658,8 @@ def test_attrs_value_admits_curly_enum():
     assert v["attributes"]["signing"] == "{signed:microsoft, unsigned}"
 
 
-def test_load_report_separates_skipped_files_from_partial_loads(tmp_path):
-    from defender.skills.invlang.corpus import load_corpus
-
+def _mixed_corpus(tmp_path):
+    """One clean case, one that loses a row to a parse warning, one that loads no rows at all."""
     case_a = tmp_path / "case-a"
     case_a.mkdir()
     (case_a / "investigation.md").write_text(_CONFORMANT)
@@ -671,8 +674,13 @@ def test_load_report_separates_skipped_files_from_partial_loads(tmp_path):
     case_c.mkdir()
     (case_c / "investigation.md").write_text("# no fences here\n")
     (case_c / "alert.json").write_text('{"rule": {"id": "5710"}}')
+    return tmp_path
 
-    companions, report = load_corpus(tmp_path)
+
+def test_load_report_separates_skipped_files_from_partial_loads(tmp_path):
+    from defender.skills.invlang.corpus import load_corpus
+
+    companions, report = load_corpus(_mixed_corpus(tmp_path))
     assert report.scanned == 3
     assert report.loaded == 2
     assert [p.parent.name for p, _ in report.skipped] == ["case-c"]
@@ -681,3 +689,63 @@ def test_load_report_separates_skipped_files_from_partial_loads(tmp_path):
     assert report.total_warnings == 1
     _, warnings = report.partial[0]
     assert "case-b" in warnings[0].file_path
+
+
+def test_load_report_detail_names_the_case_behind_each_count(tmp_path):
+    """The counts say a case is missing; only the detail says which one and why.
+
+    `skipped`'s reason and `partial`'s per-row warnings had no reader outside the tests once the
+    second corpus CLI was retired, so a short corpus answered queries silently. Both levels are
+    reachable from the surviving CLI now, and this pins what each one carries."""
+    from defender.skills.invlang.corpus import load_corpus
+
+    _, report = load_corpus(_mixed_corpus(tmp_path))
+
+    terse = report.detail_lines(verbose=False)
+    assert terse == [
+        "  skipped case-c: no ```invlang fences found",
+        "  partial case-b: 1 row(s) skipped",
+    ]
+
+    verbose = report.detail_lines(verbose=True)
+    assert verbose[:2] == terse
+    # The extra line is the row-level warning itself: which block, which row, why it was dropped.
+    ((_, warnings),) = report.partial
+    assert verbose[2:] == [f"    [{warnings[0].block} row {warnings[0].row_index}] "
+                           f"{warnings[0].reason}"]
+
+
+def test_load_report_detail_is_empty_for_a_clean_corpus(tmp_path):
+    """A healthy corpus stays silent — the detail is a fault report, not a per-run inventory."""
+    from defender.skills.invlang.corpus import load_corpus
+
+    case = tmp_path / "case-a"
+    case.mkdir()
+    (case / "investigation.md").write_text(_CONFORMANT)
+    (case / "alert.json").write_text('{"rule": {"id": "100001"}}')
+
+    _, report = load_corpus(tmp_path)
+
+    assert report.loaded == 1
+    assert report.detail_lines(verbose=True) == []
+
+
+def test_cli_prints_the_load_detail_to_stderr_and_quiet_suppresses_it(tmp_path):
+    """The CLI is the surface that gives the detail a reader — assert it through the real process.
+
+    `--quiet` covers the whole load report, detail included; without it the operator sees the bad
+    cases named alongside the summary they qualify."""
+    _mixed_corpus(tmp_path)
+    argv = [sys.executable, "-m", "defender.skills.invlang.cli", str(tmp_path)]
+    repo_root = str(Path(__file__).resolve().parents[2])
+
+    loud = subprocess.run([*argv, "--verbose", "sequence"], capture_output=True, text=True,
+                          check=False, cwd=repo_root)
+    assert loud.returncode == 0, loud.stderr
+    assert "skipped case-c: no ```invlang fences found" in loud.stderr
+    assert "partial case-b: 1 row(s) skipped" in loud.stderr
+
+    quiet = subprocess.run([*argv, "--quiet", "sequence"], capture_output=True, text=True,
+                           check=False, cwd=repo_root)
+    assert quiet.returncode == 0, quiet.stderr
+    assert "case-c" not in quiet.stderr

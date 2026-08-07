@@ -27,7 +27,7 @@ from defender.learning.author import shared as _author_shared
 from defender.learning.core.directions import BY_NAME
 from defender.learning.author.branch import AuthorBranch, BranchError
 from defender.learning.core.faults import run_or_dead_letter
-from defender.learning.core.markers import quarantine_marker, rewrite_marker
+from defender.learning.core.markers import marker_identity, quarantine_marker, rewrite_marker
 from defender.learning.core.persist import read_pitfalls
 from defender.learning.core.quarantine import preserve_tainted_tree
 
@@ -152,6 +152,24 @@ def _quarantine_lead_author_failure(
     quarantine_marker(spec, marker, queue_dir, f"lead-author-error: {e!r}")
 
 
+def _read_marker_spec(claimed: Path) -> tuple[dict | None, str]:
+    """The claimed marker's spec row, or ``(None, reason)`` for one that cannot be served.
+
+    A row that PARSES but is not a mapping is unreadable in exactly the same way a torn one
+    is: the caller goes on to ask it for ``run_dir``, and a list/scalar/``null`` answers with
+    an ``AttributeError`` that unwinds the whole drain past every dead-letter path — leaving
+    the marker in ``inflight/`` for the reclaim to hand back next tick, fail on again, and
+    unwind on again, forever. Both shapes therefore report the same way.
+    """
+    try:
+        spec = json.loads(claimed.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as e:
+        return None, f"unreadable: {e!r}"
+    if not isinstance(spec, dict):
+        return None, f"unreadable: not a mapping ({type(spec).__name__})"
+    return spec, ""
+
+
 def _drain_lead_author_markers(
     paths: LoopPaths,
     run_lead_author: Callable[..., None],
@@ -189,10 +207,17 @@ def _drain_lead_author_markers(
                 os.replace(marker, claimed)
             except FileNotFoundError:
                 continue
-        try:
-            spec = json.loads(claimed.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as e:
-            _log(f"lead_author_drain: unreadable marker {claimed.name}: {e!r}; skipping")
+        spec, reason = _read_marker_spec(claimed)
+        if spec is None:
+            # QUARANTINED, not skipped: a marker this pass cannot read is one no later pass can
+            # read either, and it has already been claimed — skipping leaves it in `inflight/`,
+            # where the reclaim above picks it up again next tick, fails again, and logs again,
+            # while `_has_lead_author_work` stays true on its presence forever. The learn
+            # queue's own claim-and-serve dead-letters the same shape (`run_cycle`, #791).
+            # The row's own keys are exactly what could not be read, so the dead letter is
+            # keyed off the marker's FILENAME — which is the case id this queue's live writer
+            # (`enqueue_case_for_curation`) mints it from.
+            quarantine_marker({"case_id": claimed.stem}, claimed, paths.author_queue_dir, reason)
             continue
         run_dir = Path(spec.get("run_dir", ""))
         if not run_dir.is_dir():
@@ -219,7 +244,7 @@ def _drain_lead_author_markers(
                 with contextlib.suppress(OSError):
                     claimed.unlink()
                 _log(
-                    f"lead_author_drain: transient on {spec.get('run_id')} "
+                    f"lead_author_drain: transient on {marker_identity(spec, claimed)} "
                     f"(attempt {attempts}/{max_retries}) — left queued for retry"
                 )
             continue

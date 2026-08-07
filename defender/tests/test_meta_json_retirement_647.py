@@ -47,12 +47,10 @@ NEW_HOME = "defender/runtime/untrusted.py"
 UNRELATED_TREES = (
     "experiments/",
     "playground-v2/",
-    "defender/evals/run_judge_ab",
-    "defender/tests/evals/test_run_judge_ab",
-    # #791's spec suite plants a `run_judge_ab.load_cases`-shaped fixture (`meta.json` +
-    # `{"direction": ...}`) to drive the judge-equivalence/A-B skip demand — the same judge
-    # A/B snapshot vocabulary as the two exclusions above, just from a newer caller.
-    "defender/tests/test_791_queues_evals_artifacts.py",
+    # (The judge A/B harness `defender/evals/run_judge_ab.py` read its OWN `meta.json` —
+    # judge snapshots keyed `{"direction": ...}`, a different root and a different schema
+    # from the run-dir metadata #647 deleted. It was excluded here until it and its tests
+    # were retired outright, which is why this list no longer names it.)
     "docs/archive/",
     "defender/docs/runtime-per-loop-compaction-design.md",
     ".claude/",

@@ -1,26 +1,27 @@
 #!/usr/bin/env python3
-"""Thin one-shot actor-stage entrypoint for the secondary-metric replay.
+"""Thin one-shot actor-stage entrypoint for a frozen-generation replay.
 
-The secondary harness (``defender/evals/secondary.py``) needs
-to invoke the actor stage *inside a worktree pinned to gen-{N-K}* —
+Invokes the actor stage *inside a worktree pinned to an older generation* —
 where the worktree's ``loop.py`` ships the actor.md / mitre_corpus /
-lessons-actor / model-pin state of that older generation. The full
-``loop.run_one`` runs oracle + judge + persist + queue, which the
-harness explicitly does *not* want from the frozen worktree (those
-stages must run at HEAD). This script exposes just the actor stage:
-project the HEAD-produced two tables (executed_queries.jsonl +
-gather_raw/) to an actor-facing view via ``lead_repository``, invoke
-the actor, write ``actor_story.md``.
+lessons-actor / model-pin state of that generation. The full
+``loop.run_one`` runs the downstream stages too, which a frozen-worktree
+replay explicitly does *not* want from the old tree (those must run at
+HEAD). This script exposes just the actor stage: project the
+HEAD-produced two tables (executed_queries.jsonl + gather_raw/) to an
+actor-facing view via ``lead_repository``, invoke the actor, write
+``actor_story.md``.
 
-This script is the **replay compatibility boundary**. Generations
-whose worktree does not ship ``replay_actor.py`` (or ``lead_repository.py``)
-are reported by the secondary harness as ``replay-incompatible``;
-pre-migration archives carrying ``lead_sequence.yaml`` (not the tables)
-are likewise incompatible. The metric is meaningful starting at the
-first generation that ships both.
+This script is the **replay compatibility boundary**. A generation whose
+worktree does not ship ``replay_actor.py`` (or ``lead_repository.py``)
+cannot be replayed at all; pre-migration archives carrying
+``lead_sequence.yaml`` (not the tables) are likewise incompatible.
+
+It was written for the frozen-actor secondary metric
+(``defender/evals/secondary.py``), which has since been retired — nothing
+drives this automatically any more, and it is run by hand.
 
 Usage:
-  python3 defender/learning/replay_actor.py <staging_dir>
+  python3 defender/learning/ops/replay_actor.py <staging_dir> [--case-id ID]
 
 Required inputs in ``<staging_dir>``:
   - alert.json

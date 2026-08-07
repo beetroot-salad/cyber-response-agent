@@ -15,14 +15,10 @@ Import conventions mirror the collected neighbors:
     (as tests/test_inject_system_skill_description.py loads the hook);
   - orient / held_out / visualize resolve through the ``defender.*`` namespace
     (as tests/test_orient.py and tests/test_visualize_runtime.py do);
-  - evals/_pipeline + evals/secondary have no package __init__ and rely on a
-    sys.path insert of evals/ -> importlib (as tests/evals/test_secondary.py loads
-    them).
 """
 from __future__ import annotations
 
 import importlib.util
-import inspect
 import sys
 from pathlib import Path
 
@@ -35,7 +31,6 @@ from defender.scripts.visualize import visualize_primitives as vp
 
 DEFENDER = Path(__file__).resolve().parents[1]
 WORKTREE = Path(__file__).resolve().parents[2]
-_EVALS = DEFENDER / "evals"
 
 
 def _load(name: str, path: Path):
@@ -55,18 +50,6 @@ def _hook():
 
 def _scaffold():
     return _load("vscaffold591", DEFENDER / "skills" / "connect" / "validate_scaffold.py")
-
-
-def _load_pipeline():
-    if str(_EVALS) not in sys.path:
-        sys.path.insert(0, str(_EVALS))
-    return _load("pipeline591", _EVALS / "_pipeline.py")
-
-
-def _load_secondary():
-    if str(_EVALS) not in sys.path:
-        sys.path.insert(0, str(_EVALS))
-    return _load("secondary591", _EVALS / "secondary.py")
 
 
 def _report_run(tmp: Path, name: str, content: bytes) -> Path:
@@ -258,14 +241,6 @@ def test_d_parity_grammar(tmp_path):
             assert pred == ref_disp, label
 
 
-def test_d_read_head_removed():
-    pipeline = _load_pipeline()
-    assert not hasattr(pipeline, "read_head_disposition")
-    sec = _load_secondary()
-    assert hasattr(sec, "predicted_disposition")
-    assert Path(inspect.getfile(sec.predicted_disposition)).name == "held_out.py"
-
-
 def test_d_junk_opener_none(tmp_path):
     run = _report_run(tmp_path, "junk", b"---disposition: benign\n...\n---\nbody\n")
     assert predicted_disposition(run) is None
@@ -292,10 +267,6 @@ def test_d_wellformed_report_unflipped(tmp_path):
     assert predicted_disposition(run) == "benign"
 
 
-def test_d_secondary_import_safe():
-    sec = _load_secondary()
-    assert sec.__name__ == "secondary591"
-    assert callable(sec.main)
 
 
 def test_d_unfenced_skill_none(tmp_path):

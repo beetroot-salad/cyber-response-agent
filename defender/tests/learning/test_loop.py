@@ -770,6 +770,43 @@ def test_lead_author_drain_marks_artifact_missing(tmp_path: Path):
     assert json.loads(failed.read_text())["failed"] == "artifact-missing"
 
 
+@pytest.mark.parametrize(
+    "body", ["{not valid json", "null", '["case-broken"]'], ids=["torn", "null", "list"],
+)
+def test_lead_author_drain_dead_letters_an_unservable_marker(tmp_path: Path, body: str):
+    """A marker this pass cannot READ is dead-lettered, never left in the queue.
+
+    Both shapes are unservable: bytes that do not parse, and bytes that parse to something
+    that is not a mapping (`null`, a list) — the second still answers `spec.get("run_dir")`
+    with an AttributeError that unwinds the whole drain. Either way, leaving the marker where
+    it was means the reclaim hands it straight back next tick, it fails again, and
+    `_has_lead_author_work` stays true on its presence forever, so the drain wakes every tick
+    to re-fail on the same file. The healthy sibling in the same pass must still be served."""
+    paths, _ = _isolate(tmp_path)
+    run_dir = tmp_path / "tmprun" / "case-real"
+    run_dir.mkdir(parents=True)
+    markers.enqueue_for_authoring(run_dir, paths)
+    paths.author_queue_dir.mkdir(parents=True, exist_ok=True)
+    (paths.author_queue_dir / "case-broken.json").write_text(body, encoding="utf-8")
+
+    seen: list[Path] = []
+    drains.lead_author_drain(
+        paths,
+        run_lead_author=lambda wt_paths, rd, **_kw: seen.append(rd),
+        branch=_FakeBranch(prefix="lead-author/"),
+        start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub,
+    )
+
+    assert seen == [run_dir.resolve()], "the healthy request in the same pass was not served"
+    assert not (paths.author_queue_dir / "case-broken.json").exists()
+    assert not (paths.author_queue_dir / "inflight" / "case-broken.json").exists(), \
+        "the unservable marker was left claimed — the next tick reclaims and re-fails on it"
+    failed = paths.author_queue_dir / "failed" / "case-broken.json"
+    assert json.loads(failed.read_text())["failed"].startswith("unreadable")
+    assert drains._has_lead_author_work(paths) is False, \
+        "the queue still reports work on a request nothing can ever serve"
+
+
 def test_lead_author_drain_skips_when_lease_held(tmp_path: Path):
     paths, _ = _isolate(tmp_path)
     run_dir = tmp_path / "tmprun" / "case-lease"

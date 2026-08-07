@@ -25,7 +25,6 @@ from __future__ import annotations
 import ast
 import os
 import subprocess
-import sys
 from dataclasses import replace
 from pathlib import Path
 
@@ -36,8 +35,6 @@ from defender._io import read_jsonl_rows
 from defender.learning.author import curator, shared
 from defender.learning.author.benign_actor import run as benign_run
 from defender.learning.core.config import LoopPaths
-
-_WS_ROOT = Path(__file__).resolve().parents[2]
 
 
 
@@ -495,20 +492,5 @@ def test_trace_persistent_not_worktree(tmp_path: Path):
         trace_path.relative_to(worktree)
 
 
-
-
-def _run_forward_snippet(snippet: str, *, state_dir: Path | None, cwd: Path):
-    """Run a forward-check snippet in a fresh subprocess (the verifiers freeze their paths
-    from DEFAULT_PATHS at import, so the state root must be an ENV var). Mirrors
-    test_verify_forward.py's ``_run_with_state``; ``state_dir=None`` leaves the var UNSET."""
-    env = dict(os.environ)
-    env.pop("DEFENDER_LEARNING_STATE_DIR", None)
-    if state_dir is not None:
-        env["DEFENDER_LEARNING_STATE_DIR"] = str(state_dir)
-    env["PYTHONPATH"] = str(_WS_ROOT)
-    return subprocess.run(
-        [sys.executable, "-c", snippet],
-        env=env, cwd=str(cwd), capture_output=True, text=True,
-    )
 
 

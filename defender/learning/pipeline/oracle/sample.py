@@ -8,6 +8,7 @@ import yaml
 
 from defender._untrusted import wrap
 from defender._yaml import safe_load
+from defender.learning import lead_repository
 from defender.learning.core.config import RunUnprocessable
 from defender.learning.core.validate import strip_yaml_fence
 from defender.learning.pipeline._prompt import stage_user_message
@@ -70,13 +71,13 @@ def redact_exemplar(text: str) -> str:
 
 
 def lead_sample_text(lead) -> str:
-    for q in lead.queries:
-        if q.raw_ref is None or not q.raw_ref.is_file():
-            continue
-        body = redact_exemplar(q.raw_ref.read_text(encoding="utf-8"))
-        if not body.startswith("("):
-            return body
-    return "(no schema sample available for this lead)"
+    """The oracle's schema skeleton for a lead — the payload walk is `lead_repository`'s
+    (shared with the judge's evidence column, which differs only in the renderer)."""
+    return lead_repository.first_rendered_payload(
+        lead, redact_exemplar,
+        unreadable="(schema sample unreadable — {error}; skeleton unavailable for this lead)",
+        missing="(no schema sample available for this lead)",
+    )
 
 
 # #791: `unredacted_exemplar` / `real_sample_text` MOVED to

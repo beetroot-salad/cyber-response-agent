@@ -2,8 +2,8 @@
 
 The run dir carries no provenance back to its fixture (no label, no pointer), so the eval
 matches by NAME. That makes the matching rule load-bearing: it is the only thing standing
-between a fixture and the wrong run dir, and the runs base is shared with the secondary
-harness, which mints run ids containing the very same fixture slugs.
+between a fixture and the wrong run dir, and the runs base is shared with every other
+harness that mints run ids containing the very same fixture slugs.
 """
 from __future__ import annotations
 
@@ -30,10 +30,15 @@ def _runs(tmp_path: Path, *names: str) -> Path:
 
 
 def test_secondary_harness_run_dirs_are_not_claimed_by_the_primary_metric(tmp_path: Path):
-    """The regression this rule exists for. `secondary.py` mints
+    """The regression this rule exists for. The frozen-actor secondary metric minted
     `sec-eval-gen{N}-{slug}-{attempt}` plus a `-replay` staging twin, under the SAME runs
     base the primary metric defaults to. A substring match claims both — and the replay
     dir has no report.md, so the fixture scores WRONG off a dir that was never its run.
+
+    That harness is retired, so nothing mints these names today; the rule it forced —
+    match only on a `-` boundary, anchored at either end — is still the live one, and any
+    future harness sharing the runs base falls under it. Kept as the negative for the
+    rule, with its original producer named as history rather than as a live caller.
     """
     runs = _runs(
         tmp_path,

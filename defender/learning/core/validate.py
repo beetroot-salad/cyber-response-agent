@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -284,3 +285,47 @@ def _validate_environment_observation(i: int, o: Any) -> None:
                 f"environment_observations[{i}].entities selectors must be "
                 "{type, class} mappings"
             )
+
+
+@dataclass(frozen=True)
+class Verdict:
+    """One judge verdict, reduced to the fields a comparison can be made on.
+
+    Kept here rather than in an eval harness: the two production-judge suites
+    (`test_judge_pydantic_engine.py`, `test_judge_yaml_preamble.py`) assert on it as the
+    end-to-end shape a raw model return normalizes into, and #492's E3 demand is stated
+    against this parser. The A/B harness it was originally written for is retired.
+    """
+
+    case_id: str
+    direction: str
+    outcome: str | None
+    finding_keys: frozenset
+    parsed_ok: bool
+
+
+def parse_judge_verdict(text: str, *, case_id: str, direction: str) -> Verdict:
+    """A raw judge return parsed into a `Verdict`, never raising.
+
+    An unparseable or schema-invalid verdict is a DATA POINT — `parsed_ok=False` — rather
+    than a crash: this is the one judge-YAML entry point whose caller is measuring how often
+    the model produces something unusable, so a refusal here would destroy the measurement.
+    The live loop's own path (`run_cycle._validate_judge_yaml`) makes the opposite choice on
+    purpose.
+    """
+    benign = direction == "benign"
+    try:
+        # `_yaml.safe_load`, not `yaml.safe_load`: the hardened wrapper this module already
+        # parses through one function up (`normalize_judge_yaml`), which turns a recursion
+        # bomb and an unconstructable scalar into `YAMLError` instead of letting them out
+        # under their own types.
+        doc = safe_load(normalize_judge_yaml(text))
+        validated = (validate_judge_benign_doc if benign else validate_judge_doc)(doc)
+    except Exception:  # noqa: BLE001 — an unparseable/invalid verdict is a data point, not a crash
+        return Verdict(case_id, direction, None, frozenset(), False)
+    keys = frozenset(
+        (f.get("type"), f.get("subject_anchor"))
+        for f in validated.get("defender_findings", [])
+        if isinstance(f, dict)
+    )
+    return Verdict(case_id, direction, validated.get("outcome"), keys, True)

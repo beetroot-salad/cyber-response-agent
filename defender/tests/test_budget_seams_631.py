@@ -564,18 +564,20 @@ def test_enforce_flag_unrecognized_token(monkeypatch):
 
 def test_enforcement_flag_diverges_across_a_process_boundary(monkeypatch, tmp_path):
     """The enforcement flag set once near the top of a run's process chain is read
-    identically by every later hop: it is inherited WHOLESALE across all three known
-    process boundaries — run.py's execv re-exec and the two os.environ.copy() hops in
-    evals/_pipeline.py — so a later hop that reads the environment on its own does not
-    diverge from the hop that set it.
+    identically by every later hop: it is inherited WHOLESALE across every known
+    process boundary — run.py's execv re-exec, plus (when SC25 ran) the two
+    os.environ.copy() hops in evals/_pipeline.py, since retired with the frozen-actor
+    metric — so a later hop that reads the environment on its own does not diverge
+    from the hop that set it.
 
     NAME NOTE (blind reader R16): the function name reads "diverges" but the asserted —
     and correct, per the 3/3 consensus — property is the OPPOSITE, wholesale
     inheritance with NO divergence. The name is the demand's original framing (the
     question "can it diverge?"), and the answer this pins is "no". SC25 (search)
     established the three specific hops (execv, two os.environ.copy()); this arm drives
-    a real child to exercise the environment-inheritance mechanism ALL THREE rely on,
-    rather than re-reading the source. The bash-lane child is included because FF21
+    a real child to exercise the environment-inheritance mechanism they all rely on,
+    rather than re-reading the source — which is why retiring two of the three hops
+    leaves the demand and this witness untouched. The bash-lane child is included because FF21
     records the bash child env is dict(os.environ) minus provider keys — the flag is
     VISIBLE there and unwritable by the model."""
     monkeypatch.setenv(FLAG, "true")

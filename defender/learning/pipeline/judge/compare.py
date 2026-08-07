@@ -40,25 +40,15 @@ def unredacted_exemplar(text: str) -> str:
 def real_sample_text(lead) -> str:
     """The judge's own evidence column. Moved out of the retired oracle package (#791): a
     learning run must import nothing from `defender.learning.pipeline.oracle`, and this is
-    the one producer the surviving three-to-two cut still calls on every executed lead."""
-    unreadable: Exception | None = None
-    for q in lead.queries:
-        if q.raw_ref is None or not q.raw_ref.is_file():
-            continue
-        try:
-            raw = q.raw_ref.read_bytes().decode("utf-8")
-        except (UnicodeDecodeError, OSError) as e:
-            # One unreadable payload does not blind the lead: the loop goes on to the lead's
-            # OTHER payloads, exactly as it does for one that parses but carries no sample.
-            # Returning here reported "no evidence" for a lead whose second payload was fine.
-            unreadable = e
-            continue
-        body = unredacted_exemplar(raw)
-        if not body.startswith("("):
-            return body
-    if unreadable is not None:
-        return f"(payload unreadable — {unreadable}; the sample cannot be shown)"
-    return "(no sample available for this lead)"
+    the one producer the surviving three-to-two cut still calls on every executed lead.
+
+    The payload walk itself is `lead_repository`'s, shared with the oracle's scrubbed
+    skeleton — the two differ only in the renderer and the two fallback strings."""
+    return lead_repository.first_rendered_payload(
+        lead, unredacted_exemplar,
+        unreadable="(payload unreadable — {error}; the sample cannot be shown)",
+        missing="(no sample available for this lead)",
+    )
 
 
 def _invlang():

@@ -511,6 +511,45 @@ def test_hypothesis_shape_resolves_attached_to_type_through_prologue():
     assert {h["name"] for h in out["hits"]} == {"?config-changed"}
 
 
+def test_hypothesis_shape_resolves_attached_to_type_from_a_mid_run_vertex():
+    """The anchor index spans the WHOLE document, not just the prologue.
+
+    An investigation declares vertices in two places, and a run that discovers one
+    mid-investigation declares it in that lead's `outcome.observations` — then raises the
+    hypothesis anchored to it right there. `_all_hypotheses` walks BOTH sites, so an index
+    built from the prologue alone resolved that anchor to no type at all, and the
+    `attached_to_type` filter refused the hypothesis as a NON-match rather than as a missing
+    id: the case dropped out of every precedent lookup, silently.
+    """
+    body = {
+        "prologue": {"vertices": [{"id": "v-001", "type": "compute"}], "edges": []},
+        "hypothesize": {"hypotheses": []},
+        "findings": [{
+            "name": "L1",
+            "outcome": {
+                "observations": {
+                    "vertices": [{"id": "v-002", "type": "configuration"}], "edges": [],
+                }
+            },
+            "new_hypotheses": [
+                _hyp("h-002", "?late-config-changed", attached_to="v-002",
+                     parent_type="identity", rel="modified"),
+            ],
+        }],
+        "conclude": {"disposition": "benign"},
+    }
+    corpus = [Companion(
+        case_id="case-late",
+        source_path=Path("/tmp/fake/case-late/investigation.md"),
+        body=body,
+        signature_id="5710",
+    )]
+    out = hypothesis_shape_match(
+        corpus, parent_type="identity", attached_to_type="configuration"
+    )
+    assert {h["name"] for h in out["hits"]} == {"?late-config-changed"}
+
+
 def test_hypothesis_shape_uses_final_weight_from_resolutions():
     corpus = [
         _shape_case(

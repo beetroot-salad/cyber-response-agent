@@ -379,16 +379,13 @@ def test_closed_ticket_registration_reaches_every_benign_call_site():
     call site the moment it reaches one. Paired with d1/d2's per-leg behavior checks — the
     census picks the subjects; the drive tests observe the effect.
 
-    #791: `run_judge_ab` and `judge_equivalence` are no longer among the funnel's members —
-    the shared judge prompts were rewritten off the two-column comparison these frozen-case
-    harnesses' inputs predate, so they stop judging (and therefore stop calling
-    `invoke_judge`) rather than reporting a number nobody can interpret. Only the funnel that
-    actually reaches the live judge is asserted here now."""
+    #791 stopped the two frozen-case eval drivers (`run_judge_ab`, `judge_equivalence`)
+    judging, because the shared judge prompts were rewritten off a two-column comparison
+    their inputs predate; both have since been retired outright, so the census subjects are
+    exactly the funnel that reaches the live judge."""
     files = {
         "learning_loop": DEFENDER / "learning" / "loop.py",
         "subagents": DEFENDER / "learning" / "core" / "subagents.py",
-        "run_judge_ab": DEFENDER / "evals" / "run_judge_ab.py",
-        "judge_equivalence": DEFENDER / "evals" / "judge_equivalence.py",
     }
     trees = {}
     for name, p in files.items():
@@ -399,13 +396,6 @@ def test_closed_ticket_registration_reaches_every_benign_call_site():
     assert "invoke_judge" in _called_names(trees["subagents"])
     # learning_loop reaches it via its re-export/import (the subagents carrier).
     assert "invoke_judge" in files["learning_loop"].read_text(encoding="utf-8")
-    # #791: neither eval driver calls invoke_judge anymore — they stopped judging.
-    assert "invoke_judge" not in _called_names(trees["judge_equivalence"]), (
-        "judge_equivalence still calls invoke_judge — #791 said it stops judging"
-    )
-    assert "invoke_judge" not in _called_names(trees["run_judge_ab"]), (
-        "run_judge_ab still calls invoke_judge — #791 said it stops judging"
-    )
 
     banned = {"build_stage_agent", "build_judge_agent", "build_agent_core", "Agent"}
     for name, tree in trees.items():

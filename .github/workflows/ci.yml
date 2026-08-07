@@ -346,7 +346,7 @@ jobs:
       # canonical grammar in defender/_frontmatter.py (#591): find/split/startswith/
       # regex fence-parse call sites. Five readers each re-derived the fence offsets
       # with a subtly different grammar — a parser differential injected into exactly
-      # the primary-vs-secondary divergence signal the eval exists to measure. The
+      # the primary-vs-frozen-actor divergence signal the evals existed to measure. The
       # baseline ships EMPTY: the five sites were folded when the gate landed.
       - name: Hand-rolled-frontmatter gate (one fence grammar, #591 — baseline-ratcheted)
         run: defender/.venv/bin/python scripts/lint/lint_hand_rolled_frontmatter.py

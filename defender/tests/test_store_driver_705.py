@@ -114,13 +114,6 @@ def _down(*systems: str) -> FakeVerbs:
     return FakeVerbs({s: {"probe": probe} for s in systems})
 
 
-def _finished(text: str = "Investigation complete.") -> ReplayFn:
-    return ReplayFn([
-        Turn(tool_calls=[("read_file", {"path": "ALERT"})]),
-        Turn(text=text),
-    ])
-
-
 def _read_alert_turns(run_dir: Path, n: int) -> list[Turn]:
     return [Turn(tool_calls=[("read_file", {"path": str(run_dir / "alert.json")})])
             for _ in range(n)]
