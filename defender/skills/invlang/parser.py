@@ -20,6 +20,7 @@ from ._cells import (
     _unquote,
 )
 from ._types import Block, RowError
+from .vocab import UNOBSERVED_EDGE_REF
 from .schema import (
     AttributeUpdate,
     AttrPredictionRecord,
@@ -255,7 +256,7 @@ def _hyp_sub_authz_row(block: Block, row: str) -> AuthorizationContract:
     _require(rec, "id", "anchor_kind", msg="authz row missing id/anchor_kind")
     return {
         "id": rec["id"],
-        "edge_ref": rec.get("edge_ref", "proposed") or "proposed",
+        "edge_ref": rec.get("edge_ref", UNOBSERVED_EDGE_REF) or UNOBSERVED_EDGE_REF,
         "anchor_kind": rec["anchor_kind"],
         "predicate": _unquote(rec.get("predicate", "")),
         "on_unauthorized": rec.get("on_unauth", "escalate") or "escalate",

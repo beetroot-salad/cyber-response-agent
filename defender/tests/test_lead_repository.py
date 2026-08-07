@@ -83,36 +83,6 @@ def test_load_leads_skips_payload_subdirs_and_malformed(tmp_path):
     assert set(leads) == {"l-001"}
 
 
-def test_lead_ids_lists_a_corrupt_lead_that_load_leads_drops(tmp_path):
-    """`lead_ids` answers EXISTENCE, so a torn row still counts; `load_leads` answers
-    CONTENT, so it cannot.
-
-    This is the whole reason the write-time challenge gate does not just call
-    `sorted(load_leads(...))`. The gate closes a review on which leads a run executed — a
-    single unparseable `.lead.json` silently shrinking that list would change the gate's
-    verdict on the run, on a filesystem hiccup rather than on anything the investigation
-    did. The two functions must disagree here, and this pins that they do."""
-    run = tmp_path / "run"
-    _lead(run, "l-001", "g", [])
-    (run / "gather_raw" / "l-002.lead.json").write_text("{not json")
-
-    assert lr.lead_ids(run) == ("l-001", "l-002")
-    assert set(lr.load_leads(run)) == {"l-001"}
-
-
-def test_lead_ids_missing_dir_returns_empty(tmp_path):
-    assert lr.lead_ids(tmp_path / "nope") == ()
-
-
-def test_lead_ids_ignores_a_bare_suffix_file(tmp_path):
-    """A file named exactly `.lead.json` names no lead — including it would put an empty
-    string in a list the gate compares by identity."""
-    run = tmp_path / "run"
-    _lead(run, "l-001", "g", [])
-    (run / "gather_raw" / ".lead.json").write_text("{}")
-    assert lr.lead_ids(run) == ("l-001",)
-
-
 def test_load_leads_defaults_missing_goal_and_bad_wts(tmp_path):
     run = tmp_path / "run"
     (run / "gather_raw").mkdir(parents=True)

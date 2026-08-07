@@ -46,6 +46,8 @@ from types import SimpleNamespace
 from typing import Any
 from defender.tests._docker import satisfy_engine_keys  # noqa: F401 — re-exported: the four #791 suites reach it through their own harness
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFENDER = REPO_ROOT / "defender"
 RUN_PY = DEFENDER / "run.py"
@@ -54,8 +56,13 @@ CLI_PY = DEFENDER / "learning" / "core" / "cli.py"
 SCRUB_PROPERTY_TEST = DEFENDER / "tests" / "e2e" / "test_540_scrub_lifecycle.py"
 VULTURE_BASELINE = REPO_ROOT / "scripts" / "lint" / "lint_vulture_baseline.json"
 PROJECT_PROFILE = REPO_ROOT / ".claude" / "spec-flow.json"
-SPEC_CORPUS = REPO_ROOT / "spec-flow" / "specs"
-OLDER_SPEC_GRAPH = SPEC_CORPUS / "spec_graph_774.yaml"
+
+# `OLDER_SPEC_GRAPH` (spec_graph_774.yaml) and `LIVE_STAGE_WORD` ("projection") left with
+# #797: the graph is deleted and the live projection stage is retired, so the two demands
+# that read them — `rekey_live_projection_graph_id` and
+# `live_projection_stage_sheds_the_retired_name` — have no subject left to assert about.
+# `RETIRED_STAGE_WORD` went with them; the offline oracle's own vocabulary lives on in
+# `PROJECTION_WORDS` below, which the judge-prompt demands still read.
 
 RETIRED_PACKAGE = "defender.learning.pipeline.oracle"
 # What the retirement actually orphans. NOT the retired package: `pipeline/oracle/` keeps
@@ -67,11 +74,6 @@ RETIRED_DEAD_SYMBOLS = (
     "enqueue_for_authoring",  # its authoring-queue sibling
     "parse_judge_verdict",    # the A/B harness's verdict parser, orphaned when it stopped judging
 )
-# The word the retirement takes out of circulation, and the role the LIVE stage shipped
-# under (`AgentRole.PROJECTION`). After this change the first names one thing only — the
-# offline stage that is gone — which is the whole point of re-keying the second.
-RETIRED_STAGE_WORD = "oracle"
-LIVE_STAGE_WORD = "projection"
 # The projected-telemetry writer bullet 3 deletes, as the project profile's shared-root
 # census spells it. A census row naming a symbol that resolves to nothing reads exactly
 # like a row nobody wrote, and this file seeds the next change's grounding pass.
@@ -100,6 +102,36 @@ PROJECTION_WORDS = (
     "oracle's projected",
     "projection",
 )
+
+
+@pytest.fixture(scope="session", autouse=True)
+def worktree_package_guard():
+    """Fail the whole module loudly, naming the ENVIRONMENT cause, when the suite has
+    imported a different checkout's copy of the package than the one holding these tests.
+
+    The main checkout carries its own installed copy, so any invocation whose working
+    directory is the main checkout silently loads THAT copy instead — probed, and it
+    answered a registry query with eight roles where this tree has eleven. Every "every role"
+    claim in this suite is then made against the wrong tree and passes or fails for a reason
+    that has nothing to do with the change.
+
+    The guard is keyed on the MODULE PATH, never on a role count — which is why it still
+    guards after the resolutions that took the count to eleven, and after #797 took it back
+    down; a guard written on the count would have needed editing to keep passing and would
+    have stopped meaning anything.
+
+    It moved here from `_gate774` when #797 deleted that module: this suite is its one
+    surviving consumer, and a session-scoped autouse fixture only guards the modules that
+    import it."""
+    import defender.agents as agents_mod
+
+    here = Path(__file__).resolve().parents[2]
+    loaded = Path(agents_mod.__file__).resolve()
+    assert here in loaded.parents, (
+        f"ENVIRONMENT: this suite lives under {here} but imported the package from "
+        f"{loaded} — a different checkout's installed copy. Run from a neutral directory "
+        f"with PYTHONPATH={here}; every all-roles claim below is meaningless otherwise."
+    )
 
 
 def noop_start_box(request, **_kw):
