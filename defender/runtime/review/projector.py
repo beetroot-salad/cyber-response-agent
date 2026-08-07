@@ -41,6 +41,7 @@ from defender.skills.invlang.schema import CompanionBody
 __all__ = [
     "DISCRIMINATION_WITHHELD_LEAD_KEYS",
     "INFERENCE_COMPANION_KEYS",
+    "INFERENCE_HYPOTHESIS_KEYS",
     "INFERENCE_LEAD_KEYS",
     "UNTRUSTED_NOTE",
     "EmptyInvestigation",
@@ -73,6 +74,16 @@ INFERENCE_COMPANION_KEYS: tuple[str, ...] = ("conclude", "closed_loops")
 #: The `:T`-derived keys the parser nests under each `:L findings` lead. `:T resolutions`
 #: lands in `resolutions`; `:T shelved` lands in `shelved` and `shelved_rationales`.
 INFERENCE_LEAD_KEYS: tuple[str, ...] = ("resolutions", "shelved", "shelved_rationales")
+
+#: The BELIEF-STATE keys on a hypothesis record — wherever one is declared: the `:H
+#: hypothesize.hypotheses` table and any lead's `new_hypotheses`. `weight` is the hypothesis's
+#: own `++/+/-/--` column (`_walkers.final_weights` seeds the run's final weights from it) and
+#: `status` is `active`/`refuted`. Both sit on the `:H` side of the tag cut, exactly as
+#: `tests_hypotheses` sits on the `:L` side, so the `:T` family rule alone does not withhold
+#: them — and a lens asked to reconstruct the movement must not be handed a column that IS the
+#: movement. The leak test cannot see this one either: it asserts on the reasoning prose
+#: attached to a `:T resolutions` row, and a weight is two characters that appear everywhere.
+INFERENCE_HYPOTHESIS_KEYS: tuple[str, ...] = ("weight", "status")
 
 #: What the DISCRIMINATION lens gives up beyond the `:T` family. It is asked what a lead's
 #: possible outcomes could separate, so it must not see the outcomes (`outcome`) — and it
@@ -119,21 +130,41 @@ def _without(record: Any, keys: tuple[str, ...]) -> dict:
     return {k: v for k, v in record.items() if k not in keys}
 
 
+def _hypotheses_without_belief(records: Any) -> list:
+    """Hypothesis records with their weight column stripped. ONE function for both sites a
+    hypothesis can be declared, so the two cannot acquire different ideas of the cut."""
+    return [
+        _without(h, INFERENCE_HYPOTHESIS_KEYS) for h in (records or [])
+        if isinstance(h, dict)
+    ]
+
+
 def observation_only(
     companion: CompanionBody, *, also_drop_per_lead: tuple[str, ...] = (),
 ) -> dict:
-    """THE cut: the companion with every `:T`-derived key removed, at both levels.
+    """THE cut: the companion with every `:T`-derived key removed, at both levels, plus the
+    belief-state columns a `:H` row carries.
 
     `also_drop_per_lead` is the per-lens narrowing on top of the family rule. It is a
     parameter rather than a second function so that every projection in this module provably
     passes through the `:T` prune — a lens with its own builder is a lens that can be given
     its own idea of what inference is."""
     pruned = _without(companion, INFERENCE_COMPANION_KEYS)
+    hypothesize = companion.get("hypothesize")
+    if isinstance(hypothesize, dict) and "hypotheses" in hypothesize:
+        pruned["hypothesize"] = {
+            **hypothesize,
+            "hypotheses": _hypotheses_without_belief(hypothesize.get("hypotheses")),
+        }
     drop = INFERENCE_LEAD_KEYS + also_drop_per_lead
-    leads = [
-        _without(lead, drop) for lead in (companion.get("findings") or [])
-        if isinstance(lead, dict)
-    ]
+    leads = []
+    for raw_lead in (companion.get("findings") or []):
+        if not isinstance(raw_lead, dict):
+            continue
+        lead = _without(raw_lead, drop)
+        if "new_hypotheses" in lead:
+            lead["new_hypotheses"] = _hypotheses_without_belief(lead.get("new_hypotheses"))
+        leads.append(lead)
     if "findings" in pruned:
         pruned["findings"] = leads
     return pruned
@@ -293,39 +324,92 @@ def _cites_edge(row: Any, edge_id: str) -> bool:
     return isinstance(row, dict) and any(row.get(k) == edge_id for k in _EDGE_CITING_KEYS)
 
 
+def _edges_without(edges: Any, edge_id: str) -> list:
+    """One edge list minus one id. A non-dict element is KEPT rather than read through:
+    `_walkers.all_edges` isinstance-checks the same lists, so a junk element is something the
+    support projection renders without complaint — and an ablation that raised on a document
+    its own support lens reads fine would fail the whole review closed for a fault the
+    ablation introduced."""
+    return [e for e in edges if not (isinstance(e, dict) and e.get("id") == edge_id)]
+
+
+def _contract_without_edge(contract: Any, edge_id: str) -> Any:
+    """One `:H <h>.authz` row with its citation of the withheld edge degraded to the spelling
+    a contract carries when no observed edge stands behind it."""
+    if not _cites_edge(contract, edge_id):
+        return contract
+    return {
+        k: (vocab.UNOBSERVED_EDGE_REF if k in _EDGE_CITING_KEYS and v == edge_id else v)
+        for k, v in contract.items()
+    }
+
+
+def _hypotheses_without_edge(records: Any, edge_id: str) -> list:
+    """Hypothesis records whose authorization contracts no longer NAME the withheld edge. ONE
+    function for both sites a hypothesis can be declared, exactly as the belief-state prune
+    has, so the two cannot acquire different ideas of the ablation."""
+    out = []
+    for record in records or []:
+        contracts = record.get("authorization_contract") if isinstance(record, dict) else None
+        if isinstance(contracts, list):
+            record = {
+                **record,
+                "authorization_contract": [
+                    _contract_without_edge(c, edge_id) for c in contracts
+                ],
+            }
+        out.append(record)
+    return out
+
+
+def _outcome_without_edge(outcome: Any, edge_id: str) -> dict:
+    """One lead's outcome with the withheld edge's own observation row, and every `:R` row
+    whose subject IS that edge, removed."""
+    out = dict(outcome)
+    obs = dict(out.get("observations") or {})
+    if obs.get("edges"):
+        obs["edges"] = _edges_without(obs["edges"], edge_id)
+        out["observations"] = obs
+    for bucket in _EDGE_CITING_BUCKETS:
+        rows = out.get(bucket)
+        if rows:
+            out[bucket] = [r for r in rows if not _cites_edge(r, edge_id)]
+    return out
+
+
 def _drop_edge(companion: dict, edge_id: str) -> dict:
     """Remove one observed edge wherever it was recorded — the prologue's `:E` block, any
-    lead's own observations, and any `:R` row whose subject IS that edge.
+    lead's own observations, and any `:R` row whose subject IS that edge — and leave no
+    surviving row CITING it.
 
     Nothing else is touched: an ablation that differs from the support projection in more
-    than the edge measures the projection rather than the edge."""
+    than the edge measures the projection rather than the edge. A dangling citation is that
+    same defect from the other side, and the more expensive one: a `:H <h>.authz` row still
+    naming an id that appears nowhere else in the projection TELLS the lens an edge was
+    removed, and a lens hunting for a gap is not reconstructing. Those rows survive — a
+    contract is the hypothesis's question side, not an observation, and deleting it would be
+    a second difference — with their `edge_ref` degraded to `vocab.UNOBSERVED_EDGE_REF`,
+    which is exactly what the parser writes for a contract with no observed edge behind it.
+    The ablated world is then the one the investigation would have recorded had that edge
+    never been observed, rather than one with a hole in it."""
     out = dict(companion)
     pro = dict(out.get("prologue") or {})
     if pro.get("edges"):
-        pro["edges"] = [e for e in pro["edges"] if e.get("id") != edge_id]
+        pro["edges"] = _edges_without(pro["edges"], edge_id)
         out["prologue"] = pro
+    hypothesize = out.get("hypothesize")
+    if isinstance(hypothesize, dict) and hypothesize.get("hypotheses"):
+        out["hypothesize"] = {
+            **hypothesize,
+            "hypotheses": _hypotheses_without_edge(hypothesize["hypotheses"], edge_id),
+        }
     leads = []
-    for lead in out.get("findings") or []:
-        lead = dict(lead)
-        outcome = dict(lead.get("outcome") or {})
-        changed = False
-        obs = dict(outcome.get("observations") or {})
-        if obs.get("edges"):
-            kept = [e for e in obs["edges"] if e.get("id") != edge_id]
-            if len(kept) != len(obs["edges"]):
-                obs["edges"] = kept
-                outcome["observations"] = obs
-                changed = True
-        for bucket in _EDGE_CITING_BUCKETS:
-            rows = outcome.get(bucket)
-            if not rows:
-                continue
-            kept_rows = [r for r in rows if not _cites_edge(r, edge_id)]
-            if len(kept_rows) != len(rows):
-                outcome[bucket] = kept_rows
-                changed = True
-        if changed:
-            lead["outcome"] = outcome
+    for raw_lead in out.get("findings") or []:
+        lead = dict(raw_lead)
+        if lead.get("new_hypotheses"):
+            lead["new_hypotheses"] = _hypotheses_without_edge(lead["new_hypotheses"], edge_id)
+        if lead.get("outcome"):
+            lead["outcome"] = _outcome_without_edge(lead["outcome"], edge_id)
         leads.append(lead)
     if "findings" in out:
         out["findings"] = leads

@@ -17,6 +17,7 @@ exactly as it applied there.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 
 from defender.skills.invlang import _walkers
@@ -113,6 +114,21 @@ def read_lens_reading(text: str | None) -> str:
     return reading
 
 
+#: A whole reply that is one markdown code fence and nothing else. Models emit this under
+#: "output JSON and nothing else" often enough that refusing it would fail a confident close
+#: closed on PACKAGING rather than on content — and unlike normalising a value, unwrapping a
+#: fence changes nothing the reader then validates: the object inside goes through the same
+#: `finding`/`review`/`ask`/`refs` checks, character for character. Deliberately anchored at
+#: both ends: a fence that is merely PRESENT somewhere in a reply of prose means the composer
+#: answered outside its contract, and that is still unreadable.
+_WHOLE_FENCE_RE = re.compile(r"\A```[A-Za-z0-9_+-]*[ \t]*\r?\n(?P<body>.*)\r?\n?```\Z", re.S)
+
+
+def _unfenced(text: str) -> str:
+    match = _WHOLE_FENCE_RE.match(text.strip())
+    return match.group("body") if match else text
+
+
 def read_composer_reply(text: str | None, *, refs: frozenset[str]) -> Review:
     """The composer's `Review`, or `Unreadable`.
 
@@ -120,7 +136,7 @@ def read_composer_reply(text: str | None, *, refs: frozenset[str]) -> Review:
     from — an ask validated against a different parse is an ask validated against a
     different document."""
     try:
-        obj = json.loads(text or "")
+        obj = json.loads(_unfenced(text or ""))
     except (json.JSONDecodeError, TypeError) as e:
         raise Unreadable(f"the composer's reply did not parse as JSON: {e}") from e
     if not isinstance(obj, dict):

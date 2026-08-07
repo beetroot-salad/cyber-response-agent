@@ -99,6 +99,19 @@ def _source_one_provider_key(prov: providers.Provider) -> int:
     return 2
 
 
+def _accepts(sig: inspect.Signature, *args: Any, **kwargs: Any) -> bool:
+    """Can the accessor this signature describes be CALLED this way?
+
+    Asked of the signature rather than by calling it and catching `TypeError` — that would
+    also swallow a `TypeError` raised from INSIDE an accessor that took the argument fine, and
+    report a role whose model config is broken as one that simply owns its own model."""
+    try:
+        sig.bind(*args, **kwargs)
+    except TypeError:
+        return False
+    return True
+
+
 def _role_model_name(defn: Any, model_override: str | None) -> str:
     """The model name this role will ACTUALLY run on.
 
@@ -107,22 +120,36 @@ def _role_model_name(defn: Any, model_override: str | None) -> str:
     default while the run was about to execute on the override, so a broken override passed
     the preflight clean.
 
-    Which roles those are is read off the accessor's ARITY rather than a hand-list of the
+    Which roles those are is read off the accessor's SIGNATURE rather than a hand-list of the
     accessors themselves. The list was a second registry: a role whose accessor accepted the
     override but that nobody remembered to add validated the ambient default and ran on the
     override, with no test between the two — and after #797 no surviving test executes this
-    branch at all, so the omission would be silent. Arity cannot be forgotten separately,
-    because accepting the parameter is the whole of what makes a role overridable: the
-    already-resolved accessors (`gather_model`, the bundle builder's `lambda: name`, the
-    learning stages' own knobs) take none by construction."""
+    branch at all, so the omission would be silent. A signature cannot be forgotten
+    separately, because accepting the parameter is the whole of what makes a role overridable:
+    the already-resolved accessors (`gather_model`, the bundle builder's `lambda: name`, the
+    learning stages' own knobs) take none by construction.
+
+    What is read is whether the accessor can be HANDED the override, not merely whether it has
+    parameters. Non-empty arity is the strictly weaker property: `def m(*, explicit=None)` —
+    the natural spelling for an override parameter — reports a parameter and REFUSES a
+    positional call, so an arity check hands it one, the `TypeError` lands in
+    `preflight_role_models`' broad `except`, and every `--model` run refuses to start with
+    "model config raised". A keyword-only override is therefore passed by its NAME. An
+    accessor naming more than one keyword-only parameter names no single override, and is
+    treated as one that owns its model rather than guessed at."""
     if model_override is None:
         return str(defn.model())
     try:
-        takes_override = bool(inspect.signature(defn.model).parameters)
+        sig = inspect.signature(defn.model)
     except (TypeError, ValueError):
         # A callable whose signature cannot be read is not one we can hand an override to.
-        takes_override = False
-    return str(defn.model(model_override)) if takes_override else str(defn.model())
+        return str(defn.model())
+    if _accepts(sig, model_override):
+        return str(defn.model(model_override))
+    by_keyword = [p.name for p in sig.parameters.values() if p.kind is p.KEYWORD_ONLY]
+    if len(by_keyword) == 1 and _accepts(sig, **{by_keyword[0]: model_override}):
+        return str(defn.model(**{by_keyword[0]: model_override}))
+    return str(defn.model())
 
 
 def preflight_role_models(model_override: str | None = None) -> int:

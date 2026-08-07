@@ -131,7 +131,7 @@ CAUSE_TURN_BUDGET_SPENT = (
     "the forced-turn budget was spent without settling what the challenge review raised"
 )
 CAUSE_NOTHING_LEFT_TO_ASK = (
-    "no discriminating lead remains that the investigation was not already asked for"
+    "nothing discriminating remains that the investigation was not already asked for"
 )
 
 REPORT_CAUSES: tuple[str, ...] = (
@@ -165,9 +165,13 @@ class RecommendedLead:
 
     `ask` was `requirement` — the challenger's word for an assertion its counter-story
     needed settled. #797 retired the counter-story; what a review hands back is its ask, and
-    the field is renamed rather than left carrying the retired party's vocabulary."""
+    the field is renamed rather than left carrying the retired party's vocabulary.
 
-    lead_id: str
+    `target` was `lead_id`, for the same reason one layer on: #796's ask names an entity, an
+    edge, a lead OR a hypothesis (`reply.citable_refs` is the set it is checked against), so
+    a field spelled `lead_id` claimed a kind the contract stopped guaranteeing."""
+
+    target: str
     ask: str
     origin: str
 
@@ -241,15 +245,18 @@ def _render_challenged_message(material: tuple[RecommendedLead, ...], deps: Agen
     the message would leave production telling the model something the gate can no longer
     mean."""
     assert material, "the challenged arm never returns without discriminating material"
-    lines = [f"- {lead.lead_id}: {lead.ask}" for lead in material]
+    lines = [f"- {item.target}: {item.ask}" for item in material]
     # O6/O7: the discriminating material is derived from a payload-influenced role's output —
     # it returns inside the SAME run-salted untrusted frame the gather subagent's return
     # already uses (`defender._untrusted.wrap`, keyed on the INVESTIGATION's own salt, never
     # the review role's own — the review role minted a fresh one and never held this one).
     framed = _wrap("\n".join(lines), "untrusted", deps.salt)
+    # "measurement", not "lead": #796's ask names the entity, edge, lead or hypothesis to
+    # measure and the DIMENSION to measure it on — the investigation chooses the lead. Calling
+    # a vertex a lead here told the model a `v-` id was something it could go run.
     return (
-        f"The gate challenged this close — {len(material)} discriminating lead(s) remain. "
-        f"Investigate further before re-closing:\n{framed}"
+        f"The gate challenged this close — {len(material)} measurement(s) remain before it "
+        f"can stand. Investigate further before re-closing:\n{framed}"
     )
 
 
@@ -398,7 +405,7 @@ async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams
         deps, disposition, stages=stages, bounds=bounds,
     )
     material = tuple(
-        RecommendedLead(lead_id=target, ask=ask, origin="review")
+        RecommendedLead(target=target, ask=ask, origin="review")
         for target, ask in verdict.material
     )
     record = _record_dict(verdict, disposition, deps)

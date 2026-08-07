@@ -169,6 +169,28 @@ def test_every_unusable_composer_reply_is_refused(bad, refs):
         read_composer_reply(bad, refs=refs)
 
 
+def test_a_whole_reply_wrapped_in_a_code_fence_is_still_read(refs):
+    """The contract asks for one JSON object and nothing else, and a model that packages that
+    object in a ```json fence has met it in content and missed it in packaging. Refusing the
+    fence fails a confident close CLOSED on formatting, on every close, for as long as the
+    model has the habit — and unwrapping it changes nothing that is then validated."""
+    for fenced in (
+        f"```json\n{_reply()}\n```",
+        f"```\n{_reply()}\n```",
+        f"  ```json\n{_reply()}\n```  ",
+    ):
+        assert read_composer_reply(fenced, refs=refs).holds
+
+
+def test_a_fence_around_prose_is_still_unreadable(refs):
+    """The unwrap is anchored at BOTH ends of the whole reply. A fence that merely appears
+    inside a reply of prose means the composer answered outside its contract, and that is the
+    fail-closed arm rather than something to dig an object out of."""
+    with pytest.raises(Unreadable):
+        read_composer_reply(f"Here is my answer:\n```json\n{_reply()}\n```\nHope that helps.",
+                            refs=refs)
+
+
 def test_a_finding_of_holds_carrying_an_ask_is_refused(refs):
     """A composer that says the close holds AND asks for a measurement has contradicted
     itself, and either half could be the one it meant. Dropping the ask and committing would

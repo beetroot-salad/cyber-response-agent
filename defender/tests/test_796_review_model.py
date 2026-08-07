@@ -1,4 +1,4 @@
-"""#796 — the review's own model knob, and the arity rule that decides who gets `--model`.
+"""#796 — the review's own model knob, and the signature rule that decides who gets `--model`.
 
 The review roles run on a model pinned APART from the investigator's, for stability rather
 than for per-verdict quality (see `review_roles.DEFAULT_REVIEW_MODEL`). Two ways that pin can
@@ -88,13 +88,35 @@ def test_every_review_effort_is_legal_for_the_model_it_pins():
 
 
 # ---------------------------------------------------------------------------------------
-# The arity rule
+# The signature rule
 # ---------------------------------------------------------------------------------------
 
 
 def test_the_override_reaches_an_accessor_that_takes_one():
     taker = SimpleNamespace(model=lambda explicit=None: explicit or "ambient")
     assert run_entry._role_model_name(taker, "chosen") == "chosen"
+
+
+def test_the_override_reaches_a_keyword_only_accessor_by_its_name():
+    """Non-empty arity is the strictly weaker property. `def m(*, explicit=None)` is the
+    natural spelling for an override parameter and REFUSES a positional call, so an arity
+    check hands it one, `preflight_role_models`' broad `except` turns the `TypeError` into
+    "model config raised", and every `--model` run refuses to start — a role that can take the
+    override, reported as a broken model config."""
+    def model(*, explicit: str | None = None) -> str:
+        return explicit or "ambient"
+
+    assert run_entry._role_model_name(SimpleNamespace(model=model), "chosen") == "chosen"
+
+
+def test_an_accessor_naming_no_single_override_is_left_on_its_own_model():
+    """Two keyword-only parameters name no ONE override, so there is nothing to pass and the
+    role is treated as owning its model. Guessed at instead, the preflight would validate
+    whichever parameter happened to come first."""
+    def model(*, explicit: str | None = None, effort: str | None = None) -> str:
+        return explicit or effort or "ambient"
+
+    assert run_entry._role_model_name(SimpleNamespace(model=model), "chosen") == "ambient"
 
 
 def test_the_override_skips_an_accessor_that_takes_none():
@@ -112,6 +134,7 @@ def test_no_override_never_calls_an_accessor_with_one():
 
 def test_the_review_roles_are_overridable_by_that_rule():
     """The property the retired hand-list of accessors was maintained by hand to state. It is
-    read off arity now, so a role cannot be overridable and unlisted at the same time."""
+    read off the signature now, so a role cannot be overridable and unlisted at the same
+    time."""
     for defn in REVIEW_DEFS:
         assert run_entry._role_model_name(defn, "claude-sonnet-5") == "claude-sonnet-5"

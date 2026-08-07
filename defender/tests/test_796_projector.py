@@ -16,14 +16,17 @@ import pytest
 from defender.runtime.review.projector import (
     DISCRIMINATION_WITHHELD_LEAD_KEYS,
     INFERENCE_COMPANION_KEYS,
+    INFERENCE_HYPOTHESIS_KEYS,
     INFERENCE_LEAD_KEYS,
     EmptyInvestigation,
+    _EDGE_CITING_BUCKETS,
+    _EDGE_CITING_KEYS,
     discrimination_projection,
     observation_only,
     parse_investigation,
     support_projection,
 )
-from defender.skills.invlang import _walkers
+from defender.skills.invlang import _walkers, vocab
 from defender.tests._spec791 import (  # noqa: F401 — session-scoped autouse guard
     worktree_package_guard,
 )
@@ -73,6 +76,44 @@ def test_the_prune_drops_every_inference_key(companion):
     for lead in pruned.get("findings") or []:
         for key in INFERENCE_LEAD_KEYS:
             assert key not in lead, f"{lead.get('id')}.{key} survived the cut"
+
+
+def test_no_hypothesis_carries_its_weight_into_a_lens():
+    """The `:H` half of the cut, and the one the `:T` family rule does not reach.
+
+    `:H hypothesize.hypotheses` declares `weight|status` columns and `_walkers.final_weights`
+    seeds the run's weights from them, so a document that fills them hands the support lens —
+    told in its own prompt that it does not see which way anything moved — the movement
+    itself, in the two characters it was asked to reconstruct. The golden leaves them `null`
+    and `active`, so only a fixture that fills them can witness this.
+    """
+    filled = parse_investigation(
+        "```invlang\n"
+        ":V prologue.vertices [id|type|class|ident|attrs?]\n"
+        "v-001|identity|user/known-corp|dev.dana|\n"
+        "\n"
+        ":H hypothesize.hypotheses "
+        "[id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]\n"
+        "h-001|?benign|v-001|authenticated_as|session|interactive||--|refuted\n"
+        "h-002|?evil|v-001|authenticated_as|process|unclassified-process||++|active\n"
+        "\n"
+        ":L findings [id|loop|name|target|tests|system|window]\n"
+        "l-001|1|probe|v-001|h-001,h-002|elastic|alert-time\n"
+        "```\n"
+    )
+    declared = (filled.get("hypothesize") or {}).get("hypotheses") or []
+    assert [h.get("weight") for h in declared] == ["--", "++"], (
+        "the fixture declares no weights — the test proves nothing"
+    )
+
+    for projection in (
+        discrimination_projection(filled, SALT), support_projection(filled, SALT),
+    ):
+        for hypothesis in (_body(projection).get("hypothesize") or {}).get("hypotheses") or []:
+            for key in INFERENCE_HYPOTHESIS_KEYS:
+                assert key not in hypothesis, (
+                    f"{projection.lens} can read {hypothesis.get('id')}.{key}"
+                )
 
 
 def test_no_belief_movement_reaches_a_lens_verbatim(companion):
@@ -183,14 +224,36 @@ def test_the_ablation_removes_exactly_one_edge_and_changes_nothing_else(companio
     assert not after - before
 
 
+def _named_edges(node) -> set[str]:
+    """Every edge id anything under `node` NAMES, at any depth.
+
+    A recursive walk rather than a per-bucket reader, because the property it serves is about
+    the whole document a lens reads: an id cited by a row that survives, when the edge itself
+    is gone, is a tell wherever the row carrying it happens to live. The keys come from the
+    projector's own constant rather than being restated here."""
+    found: set[str] = set()
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key in _EDGE_CITING_KEYS and isinstance(value, str):
+                found.add(value)
+            found |= _named_edges(value)
+    elif isinstance(node, list):
+        for item in node:
+            found |= _named_edges(item)
+    return found
+
+
 def _cited_edges(body: dict) -> set[str]:
-    """Every edge id the `:R` rows name as their SUBJECT."""
+    """Every edge id the `:R` rows name as their SUBJECT.
+
+    The buckets come from the projector's own constant rather than being restated here: a
+    bucket added to the ablation and not to this list would leave the test green on exactly
+    the rows it stopped covering."""
     ids: set[str] = set()
     for lead in body.get("findings") or []:
         outcome = lead.get("outcome") or {}
-        for bucket in ("authorization_resolutions", "anchor_consultations", "impact_resolutions"):
-            for row in outcome.get(bucket) or []:
-                ids |= {row[k] for k in ("edge", "edge_ref") if isinstance(row.get(k), str)}
+        for bucket in _EDGE_CITING_BUCKETS:
+            ids |= _named_edges(outcome.get(bucket))
     return ids
 
 
@@ -207,6 +270,94 @@ def test_the_ablation_takes_the_rows_that_are_about_the_withheld_edge_with_it(co
     ablated = _body(support_projection(companion, SALT, without_edge=target))
     assert target not in _cited_edges(ablated)
     assert target not in _edges(ablated)
+
+
+#: A record whose ablation target IS the edge its `:H h-001.authz` contract cites. The golden's
+#: contracts name `e-002` while its target is `e-004`, so only a fixture built for the overlap
+#: can witness what a surviving citation does.
+_CONTRACT_CITES_THE_TARGET = (
+    "```invlang\n"
+    ":V prologue.vertices [id|type|class|ident|attrs?]\n"
+    "v-001|identity|user/known-corp|dev.dana|\n"
+    "v-002|session|interactive|session@db-1|\n"
+    "\n"
+    ":E prologue.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]\n"
+    "e-001|authenticated_as|v-002|v-001|2026-05-25T13:53:35Z|siem-event:elastic|host=db-1\n"
+    "\n"
+    ":H hypothesize.hypotheses "
+    "[id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]\n"
+    "h-001|?benign|v-001|authenticated_as|session|interactive||null|active\n"
+    "h-002|?evil|v-001|authenticated_as|session|interactive||null|active\n"
+    "\n"
+    ":H h-001.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]\n"
+    'ac1|e-001|iam-policy|"dev.dana is provisioned for db-1"|escalate|escalate\n'
+    "\n"
+    ":L findings [id|loop|name|target|tests|system|window]\n"
+    "l-001|1|identity-authz-check|v-001|h-001,h-002,ac1|identity|n/a\n"
+    "\n"
+    ":T resolutions\n"
+    "h-001  null → --    [l-001 r1 severe ⟂ e-001 :: dev.dana is not provisioned for db-1]\n"
+    "```\n"
+)
+
+
+def _contracts(body: dict) -> list[dict]:
+    hypotheses = (body.get("hypothesize") or {}).get("hypotheses") or []
+    return [c for h in hypotheses for c in h.get("authorization_contract") or []]
+
+
+def test_the_ablation_leaves_no_surviving_row_citing_the_edge_it_withheld():
+    """The ablation lens is never told an edge was removed — and a `:H <h>.authz` row still
+    naming an id that appears nowhere else in the projection tells it exactly that. A lens
+    hunting for a gap is not reconstructing.
+
+    The row itself survives: a contract is the hypothesis's QUESTION side, not an observation,
+    so deleting it would be a second difference and the reading would measure the projection
+    rather than the edge. Its citation degrades to the spelling a contract carries when no
+    observed edge stands behind it, which is what the investigation would have recorded had
+    the edge never been observed."""
+    from defender.runtime.review.projector import ablation_target
+
+    doc = parse_investigation(_CONTRACT_CITES_THE_TARGET)
+    target, _carried = ablation_target(doc)
+    before = _contracts(_body(support_projection(doc, SALT)))
+    assert [c.get("edge_ref") for c in before] == [target], (
+        "the fixture's contract does not cite the ablation target — the test proves nothing"
+    )
+
+    ablated = _body(support_projection(doc, SALT, without_edge=target))
+    assert target not in _edges(ablated), "the withheld edge survived"
+    assert target not in _named_edges(ablated), (
+        "a row the ablation left behind still cites the withheld edge"
+    )
+    survivors = _contracts(ablated)
+    assert [c.get("edge_ref") for c in survivors] == [vocab.UNOBSERVED_EDGE_REF]
+    assert [c.get("predicate") for c in survivors] == [c.get("predicate") for c in before], (
+        "the ablation took the contract's substance along with its citation"
+    )
+
+
+def test_a_junk_edge_row_does_not_fault_a_projection_the_support_lens_renders(companion):
+    """`_walkers.all_edges` isinstance-checks the same lists, so a non-dict element is
+    something the support projection renders without complaint. An ablation that RAISED on it
+    would fail the whole review closed — through the gate's stage-fault arm — for a fault the
+    ablation itself introduced, on a document every other lens read fine."""
+    prologue = companion.get("prologue") or {}
+    malformed = {
+        **companion,
+        "prologue": {**prologue, "edges": [*prologue.get("edges", []), "not-an-edge-row"]},
+    }
+    support_projection(malformed, SALT)  # the control: the support lens renders it
+
+    kept = (_body(
+        support_projection(malformed, SALT, without_edge="e-001"),
+    ).get("prologue") or {}).get("edges") or []
+    assert not any(isinstance(e, dict) and e.get("id") == "e-001" for e in kept), (
+        "the withheld edge survived"
+    )
+    assert "not-an-edge-row" in kept, (
+        "the ablation dropped a row that was not the edge — a second difference"
+    )
 
 
 def test_ablating_an_unknown_edge_changes_nothing(companion):

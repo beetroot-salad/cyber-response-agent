@@ -198,6 +198,25 @@ def test_an_empty_lens_reading_fails_the_review_closed(tmp_path):
     assert verdict.failure_kind == UNREADABLE
 
 
+def test_a_fault_on_the_second_pass_does_not_report_a_run_that_spent_no_turn(tmp_path):
+    """`turns_used` rides into the numbered review record. A challenged close comes back and
+    reviews again, so a fault on that second pass wrote down a run that had spent no forced
+    turn — the very turn the investigation had already been made to spend. Same defect as the
+    hardcoded trace round, one field over."""
+    deps, _run_dir = _deps(tmp_path)
+    target = _a_real_target(deps)
+    challenged = _run(deps, _bundle(
+        composer=_composer("gap", ask={"target": target, "prose": "provenance"}),
+    ))
+    assert challenged.outcome == CHALLENGED
+    assert challenged.turns_used == 1
+
+    faulted = _run(deps, _bundle(composer="not json"))
+    assert faulted.outcome == FORCED_INCONCLUSIVE
+    assert faulted.failure_kind == UNREADABLE
+    assert faulted.turns_used == 1, "the fault reported a run that had spent no forced turn"
+
+
 def test_a_missing_investigation_fails_the_review_closed(tmp_path):
     deps, run_dir = _deps(tmp_path)
     (run_dir / "investigation.md").unlink()
@@ -216,6 +235,47 @@ def test_every_dispatched_role_leaves_its_own_trace(tmp_path):
     _run(deps, _bundle(composer=_composer("holds")))
     for role in challenge_gate.REVIEW_ROLES:
         assert (run_dir / f"review_{role}_trace.jsonl").is_file(), f"{role} left no trace"
+
+
+def test_a_lens_that_was_never_dispatched_is_not_recorded_as_one_that_answered(tmp_path):
+    """A record with no strong belief movement has no edge to withhold, so the ablation lens
+    is skipped. Its row must not claim `ok` — every trace reader (the replay's own "the
+    reviewer really ran" assertion among them) takes `ok: true` as "this stage answered", so a
+    skipped lens spelled that way is a call the run dir says was made and was not."""
+    deps, run_dir = _deps(tmp_path)
+    (run_dir / "investigation.md").write_text(
+        "```invlang\n"
+        ":V prologue.vertices [id|type|class|ident|attrs?]\n"
+        "v-001|identity|user/known-corp|dev.dana|\n"
+        "\n"
+        ":H hypothesize.hypotheses "
+        "[id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]\n"
+        "h-001|?benign|v-001|authenticated_as|session|interactive||null|active\n"
+        "\n"
+        ":L findings [id|loop|name|target|tests|system|window]\n"
+        "l-001|1|probe|v-001|h-001|elastic|alert-time\n"
+        "```\n",
+        encoding="utf-8",
+    )
+    assert _run(deps, _bundle(composer=_composer("holds"))).outcome == STANDS
+
+    rows = read_jsonl_rows(run_dir / "review_ablation_trace.jsonl")
+    assert rows, "the skipped lens left no row at all — the trace cannot say it did not run"
+    assert rows[0].get("skipped"), "the row does not say the lens was skipped"
+    assert "ok" not in rows[0], "a lens that never ran is recorded as one that answered"
+
+
+def test_an_unknown_stage_name_is_refused_as_a_name(tmp_path):
+    """`stage()` resolves against the bundle's own fields, not by bare attribute lookup: a
+    bare `getattr` handed `stage("stage")` this very method back as a lens, and reported every
+    typo as "no run dir" — a diagnosis of a different fault than the one that happened."""
+    from defender.runtime.review_roles import UnboundReviewStage
+
+    bundle = _bundle(composer=_composer("holds"))
+    with pytest.raises(UnboundReviewStage, match="not a review stage"):
+        bundle.stage("stage")
+    with pytest.raises(UnboundReviewStage, match="not a review stage"):
+        bundle.stage("discriminaton")
 
 
 def test_a_lens_reply_reaches_the_trace_framed_and_never_bare(tmp_path):
@@ -293,6 +353,29 @@ def test_a_second_review_pass_is_not_recorded_as_the_first(tmp_path):
     rows = read_jsonl_rows(run_dir / "review_composer_trace.jsonl")
     rounds = [row["round"] for row in rows]
     assert sorted(set(rounds)) == [0, 1], f"both review passes recorded as one: {rounds}"
+
+
+@pytest.mark.parametrize(
+    "reply",
+    ['{"finding": "holds", "review": "r"}', "[1, 2]", '"prose"', "3", "plain prose"],
+)
+def test_no_stage_reply_stands_as_a_trace_row_whatever_shape_it_arrives_in(tmp_path, reply):
+    """The writer puts a reply on its own literal line only because every READER skips it, so
+    the two sides have to be one predicate — the writer asks `_io.parse_jsonl_row`, which is
+    the rule `read_jsonl_rows` applies. Asked here of the bytes, across the JSON types a model
+    can answer in: the file holds exactly one row, the gate's own, and the reply is recoverable
+    either way. A reader that loosened its rule alone would fail this from its own side."""
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    challenge_gate._write_trace_row(run_dir, "composer", 0, {"ok": True}, raw_reply=reply)
+
+    path = run_dir / "review_composer_trace.jsonl"
+    rows = read_jsonl_rows(path)
+    assert len(rows) == 1, f"a stage's reply was counted as a trace row of its own: {rows}"
+    assert rows[0]["round"] == 0, "the surviving row is not the gate's metadata"
+    assert rows[0].get("raw_reply") == reply or reply in path.read_text(encoding="utf-8"), (
+        "the reply reached no trace at all"
+    )
 
 
 def test_the_composers_json_reply_does_not_stand_as_a_trace_row_of_its_own(tmp_path):

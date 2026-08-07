@@ -217,18 +217,16 @@ def _is_row_shaped(raw_reply: str) -> bool:
     what makes the raw-line path below safe for a reply of PROSE. The composer's reply is a
     JSON object by contract, and its framed form puts that object on a line of its own: a
     round-less row carrying the review's prose that every trace reader counts as gate
-    metadata."""
-    for line in raw_reply.splitlines():
-        stripped = line.strip()
-        if not stripped:
-            continue
-        try:
-            parsed = json.loads(stripped)
-        except ValueError:
-            continue
-        if isinstance(parsed, dict):
-            return True
-    return False
+    metadata.
+
+    The question is ASKED of `_io.parse_jsonl_row` — the same predicate the reader applies —
+    rather than re-derived here. The two must agree exactly, because this side decides what
+    goes out as a raw line on the strength of the other side skipping it; a reader that
+    loosened to accept another JSON type would otherwise reintroduce the corruption from its
+    own end, silently, with nothing linking the two definitions."""
+    from defender._io import parse_jsonl_row
+
+    return any(parse_jsonl_row(line) is not None for line in raw_reply.splitlines())
 
 
 def _write_trace_row(
@@ -261,13 +259,22 @@ def _write_trace_row(
     write_guarded(_trace_path(run_dir, role), line, mode="append")
 
 
-def _mark_traces_incomplete(run_dir, round_no: int, reason: str) -> None:
+def _mark_traces_incomplete(deps: Any, round_no: int, reason: str) -> None:
     """Every review role's trace gets the marker, so a round that ended early is not left
     reading as if it had completed. The roster comes from `REVIEW_ROLES` rather than being
     restated here — with no roles bound this writes nothing, which is the honest record of a
-    gate that dispatched nothing."""
+    gate that dispatched nothing.
+
+    The reason rides FRAMED, on the investigation's salt, exactly as the stage replies on the
+    same files do. Half of what can land here is stage-derived — a reply the reader refused
+    quotes the model's own `finding`/`target`, and a stage error carries the provider's
+    message — so an unframed reason puts payload-influenced text into the one artifact whose
+    every other untrusted line is wrapped."""
     for role in REVIEW_ROLES:
-        _write_trace_row(run_dir, role, round_no, {"incomplete": True, "reason": reason})
+        _write_trace_row(
+            deps.run_dir, role, round_no,
+            {"incomplete": True, "reason": _wrap(reason, "untrusted", deps.salt)},
+        )
 
 
 @dataclass
@@ -293,33 +300,47 @@ class GateVerdict:
     failure_kind: str | None
 
 
-def _fail(role: str, outcome: StageOutcome) -> GateVerdict:
+def _fail(role: str, outcome: StageOutcome, *, turns_used: int) -> GateVerdict:
     """Every way the review can fail to deliver: one outcome, one cause, and the typed kind
     carrying which. The kind comes from the stage outcome rather than from this function, so a
     timeout and a raise stay apart without a branch here to keep in step with the one in
-    `_call_stage`."""
+    `_call_stage`.
+
+    `turns_used` is the run's OWN count, passed in rather than written as zero. A challenged
+    close comes back and reviews again, so a fault on the second pass reported a run that had
+    spent no forced turn — rule 13 of `docs/review-gate-retirement.md` ("the round is a
+    parameter, not a hardcoded zero"), one field over from where the round itself was fixed."""
     from .close_tool import CAUSE_REVIEW_INCOMPLETE, FORCED_INCONCLUSIVE
 
     return GateVerdict(
         outcome=FORCED_INCONCLUSIVE, disposition="inconclusive",
         cause=CAUSE_REVIEW_INCOMPLETE, detail=f"{role}: {outcome.detail}",
-        material=(), turns_used=0, failure_kind=outcome.failure_kind,
+        material=(), turns_used=turns_used, failure_kind=outcome.failure_kind,
     )
 
 
-async def _dispatch(role: str, stages: Any, request: StageRequest) -> StageOutcome:
-    """Look the stage up and call it, with the LOOKUP inside the fault arm.
+async def _dispatch(
+    role: str, stages: Any, render: Callable[[str], str], bounds: Bounds,
+) -> StageOutcome:
+    """Look the stage up, BUILD ITS REQUEST, and call it — all three inside the fault arm.
 
     The lookup used to sit outside `_call_stage`'s `try`, so a bundle missing an attribute
     raised past the gate, past the close tool, and into a driver that classifies five
     exception kinds and not that one. A partial bundle is a review that cannot run, which is
-    the same fact as a stage that raised."""
+    the same fact as a stage that raised.
+
+    The RENDER is here for exactly that reason too. It walks the parsed companion and
+    serialises it, and it runs on a document the investigator authored out of
+    attacker-influenced payloads — so it is a step that can raise, and outside this `try` it
+    raised past the same three frames. A projection that cannot be built is a review that
+    cannot run."""
     from .close_tool import STAGE_ERROR
 
     try:
         stage_fn = stages.stage(role)
-    except Exception as e:  # noqa: BLE001 — an unbindable stage fails the review closed
-        return StageOutcome(text=None, failure_kind=STAGE_ERROR, detail=str(e))
+        request = _fresh_stage_request(render, bounds)
+    except Exception as e:  # noqa: BLE001 — an unbuildable call fails the review closed
+        return StageOutcome(text=None, failure_kind=STAGE_ERROR, detail=str(e) or repr(e))
     return await _call_stage(role, stage_fn, request)
 
 
@@ -433,18 +454,24 @@ async def challenge_gate(deps: Any, disposition: str, *, stages: Any, bounds: Bo
     # here let an undecodable investigation.md raise past the gate, past the close tool and
     # into a driver that classifies five exception kinds and not that one.
     unreadable_document: tuple[type[BaseException], ...] = (EmptyInvestigation, *TEXT_READ_ERRORS)
-    try:
-        companion = parse_investigation(read_text_utf8(deps.run_dir / "investigation.md"))
-    except unreadable_document as e:
-        _mark_traces_incomplete(deps.run_dir, round_no, str(e))
-        return _fail("projector", StageOutcome(None, STAGE_ERROR, str(e)))
-
+    # The ablation target is chosen under the SAME guard: it is another walk over the same
+    # model-authored document, so it is another step that can raise past the gate, the close
+    # tool and the driver rather than failing the review closed.
+    #
     # The ablation is the SUPPORT lens again under one withheld edge — same role, same model,
     # same effort, same prompt — so its reading is a difference against the support reading
     # and not a difference between two configurations. A record with no strong belief movement
     # has nothing load-bearing to withhold; that is recorded rather than passed over, so the
     # trace says the lens did not run and why.
-    ablated = ablation_target(companion)
+    try:
+        companion = parse_investigation(read_text_utf8(deps.run_dir / "investigation.md"))
+        ablated = ablation_target(companion)
+    except unreadable_document as e:
+        _mark_traces_incomplete(deps, round_no, str(e))
+        return _fail("projector", StageOutcome(None, STAGE_ERROR, str(e)), turns_used=state.turns)
+    except Exception as e:  # noqa: BLE001 — a projector fault is a review that cannot run
+        _mark_traces_incomplete(deps, round_no, repr(e))
+        return _fail("projector", StageOutcome(None, STAGE_ERROR, repr(e)), turns_used=state.turns)
     # Each lens is a RENDERER, not a rendered string: `_fresh_stage_request` mints the call's
     # own salt and the projection is framed on it, so the prompt cannot be built before the
     # salt exists.
@@ -458,13 +485,16 @@ async def challenge_gate(deps: Any, disposition: str, *, stages: Any, bounds: Bo
             lambda salt: support_projection(companion, salt, without_edge=ablated_edge).text
         )
     else:
+        # NO `ok` KEY. `ok` is the answer verdict of a call that was made, and every trace
+        # reader — including the replay's own "the reviewer really ran" assertion — takes
+        # `ok: true` as "this stage answered". A lens that was never dispatched has no verdict;
+        # `skipped` alone is the honest row.
         _write_trace_row(
             deps.run_dir, "ablation", round_no,
-            {"ok": True, "skipped": "no strong belief movement cites an edge to withhold"},
+            {"skipped": "no strong belief movement cites an edge to withhold"},
         )
     outcomes = await asyncio.gather(*(
-        _dispatch(lens, stages, _fresh_stage_request(render, bounds))
-        for lens, render in lenses.items()
+        _dispatch(lens, stages, render, bounds) for lens, render in lenses.items()
     ))
 
     # EVERY dispatched lens gets its row before any of them is judged. The calls ran
@@ -480,33 +510,31 @@ async def challenge_gate(deps: Any, disposition: str, *, stages: Any, bounds: Bo
     readings: dict[str, str] = {}
     for lens, outcome in zip(lenses, outcomes, strict=True):
         if not outcome.ok:
-            _mark_traces_incomplete(deps.run_dir, round_no, outcome.detail or "stage fault")
-            return _fail(lens, outcome)
+            _mark_traces_incomplete(deps, round_no, outcome.detail or "stage fault")
+            return _fail(lens, outcome, turns_used=state.turns)
         try:
             readings[lens] = read_lens_reading(outcome.text)
         except Unreadable as e:
-            _mark_traces_incomplete(deps.run_dir, round_no, str(e))
-            return _fail(lens, StageOutcome(None, UNREADABLE, str(e)))
+            _mark_traces_incomplete(deps, round_no, str(e))
+            return _fail(lens, StageOutcome(None, UNREADABLE, str(e)), turns_used=state.turns)
 
     composer = await _dispatch(
         "composer", stages,
-        _fresh_stage_request(
-            lambda salt: composer_projection(companion, readings, salt, ablated=ablated).text,
-            bounds,
-        ),
+        lambda salt: composer_projection(companion, readings, salt, ablated=ablated).text,
+        bounds,
     )
     _write_trace_row(
         deps.run_dir, "composer", round_no, {"ok": composer.ok},
         raw_reply=_wrap(composer.text or composer.detail or "", "untrusted", deps.salt),
     )
     if not composer.ok:
-        _mark_traces_incomplete(deps.run_dir, round_no, composer.detail or "stage fault")
-        return _fail("composer", composer)
+        _mark_traces_incomplete(deps, round_no, composer.detail or "stage fault")
+        return _fail("composer", composer, turns_used=state.turns)
     try:
         review = read_composer_reply(composer.text, refs=citable_refs(companion))
     except Unreadable as e:
-        _mark_traces_incomplete(deps.run_dir, round_no, str(e))
-        return _fail("composer", StageOutcome(None, UNREADABLE, str(e)))
+        _mark_traces_incomplete(deps, round_no, str(e))
+        return _fail("composer", StageOutcome(None, UNREADABLE, str(e)), turns_used=state.turns)
 
     return _route(state, bounds, disposition, review, companion)
 

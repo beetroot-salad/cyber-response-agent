@@ -23,7 +23,7 @@ never hold that key).
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, fields as dc_fields, replace
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -220,7 +220,16 @@ class ReviewStages:
     composer: Any = None
 
     def stage(self, name: str) -> Any:
-        fn = getattr(self, name, None)
+        # The name is checked against this bundle's OWN fields before it is looked up. A bare
+        # `getattr` answers for anything on the class — `stage("stage")` handed the gate this
+        # method back as if it were a bound lens — and reported every typo as "no run dir",
+        # which is a diagnosis of a different fault than the one that happened.
+        if name not in {f.name for f in dc_fields(self)}:
+            raise UnboundReviewStage(
+                f"{name!r} is not a review stage — this bundle carries "
+                f"{sorted(f.name for f in dc_fields(self))}"
+            )
+        fn = getattr(self, name)
         if fn is None:
             raise UnboundReviewStage(
                 f"the {name} stage is not bound — this bundle was built by a composition root "
