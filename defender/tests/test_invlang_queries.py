@@ -516,7 +516,7 @@ def test_hypothesis_shape_resolves_attached_to_type_from_a_mid_run_vertex():
 
     An investigation declares vertices in two places, and a run that discovers one
     mid-investigation declares it in that lead's `outcome.observations` — then raises the
-    hypothesis anchored to it right there. `all_hypotheses` walks BOTH sites, so an index
+    hypothesis anchored to it right there. `case_hypotheses` walks BOTH sites, so an index
     built from the prologue alone resolved that anchor to no type at all, and the
     `attached_to_type` filter refused the hypothesis as a NON-match rather than as a missing
     id: the case dropped out of every precedent lookup, silently.
