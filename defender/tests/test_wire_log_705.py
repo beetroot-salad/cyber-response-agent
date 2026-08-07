@@ -17,10 +17,9 @@ it sums, making the survival demand's own sentence false by construction.
 """
 from __future__ import annotations
 
-import importlib.util
 import json
-import sys
-from pathlib import Path
+
+from defender.tests._by_path import WORKTREE, load_module
 
 import pytest
 
@@ -51,7 +50,7 @@ from defender.tests.e2e._replay_harness import (
     materialize,
 )
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = WORKTREE
 SALT = "0011223344556677"
 
 
@@ -60,13 +59,8 @@ def _load_dryrun():
 
     NOTE, carried from the demand: this script sits at the REPO ROOT, outside
     `specGraph.codeRoots`, so nothing mechanical checks the demands bound to it (G21/F13)."""
-    path = REPO_ROOT / "scripts" / "testing" / "compaction_dryrun.py"
-    spec = importlib.util.spec_from_file_location("compaction_dryrun_705", path)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    sys.modules["compaction_dryrun_705"] = module   # @dataclass resolves through sys.modules
-    spec.loader.exec_module(module)
-    return module
+    return load_module(WORKTREE / "scripts" / "testing" / "compaction_dryrun.py",
+                       name="compaction_dryrun_705")
 
 
 # ==========================================================================

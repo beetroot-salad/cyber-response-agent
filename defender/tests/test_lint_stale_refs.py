@@ -28,33 +28,16 @@ module globals is needed, which also keeps the lint_monkeypatch gate quiet.
 """
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
 
-WORKTREE = Path(__file__).resolve().parents[2]
-LINT_DIR = WORKTREE / "scripts" / "lint"
-LINT_PATH = LINT_DIR / "lint_stale_refs.py"
+from defender.tests._by_path import load_lint_gate
 
-
-def _load_gate():
-    if str(LINT_DIR) not in sys.path:
-        sys.path.insert(0, str(LINT_DIR))
-    spec = importlib.util.spec_from_file_location("lint_stale_refs", LINT_PATH)
-    assert spec is not None
-    assert spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = mod
-    spec.loader.exec_module(mod)
-    return mod
-
-
-GATE = _load_gate()
+GATE = load_lint_gate("lint_stale_refs")
 
 
 def _env(repo: Path) -> dict[str, str]:

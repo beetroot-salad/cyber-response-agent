@@ -28,12 +28,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+
+from defender.tests._by_path import load_lint_gate
+
 import pytest
 
 from defender.learning.core import drains, run_cycle  # noqa: E402
 from defender.learning.core import markers  # noqa: E402
 from defender.tests._spec791 import (  # noqa: E402
-    DEFENDER,
     PROJECT_PROFILE,
     RETIRED_DEAD_SYMBOLS,
     RETIRED_TELEMETRY_WRITER,
@@ -336,20 +338,7 @@ def test_791_every_new_dead_code_baseline_entry_names_this_issue(tmp_path):
 def _load_lint_ratchet():
     """`scripts/lint/` is a directory of standalone scripts, not an importable package — the
     gate is reached by path, the way CI reaches it."""
-    import importlib.util
-    import sys
-
-    name = "_spec791_baseline"
-    path = DEFENDER.parent / "scripts" / "lint" / "_baseline.py"
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None, f"the shared lint ratchet is not at {path}"
-    assert spec.loader is not None, f"the shared lint ratchet at {path} is not loadable"
-    mod = importlib.util.module_from_spec(spec)
-    # Registered BEFORE exec: the module's dataclasses resolve their own postponed
-    # annotations through sys.modules, and a path-loaded module is not there by default.
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)
-    return mod
+    return load_lint_gate("_baseline", name="_spec791_baseline")
 
 
 def test_791_the_project_profile_census_drops_the_retired_writer(tmp_path):

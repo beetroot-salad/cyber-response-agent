@@ -21,17 +21,14 @@ guard by `test_record_lead.py`.
 """
 from __future__ import annotations
 
-import importlib.util
-from pathlib import Path
+
+from defender.tests._by_path import DEFENDER, load_module
 
 import pytest
 
 pytest.importorskip("pydantic_ai")
 
-_RQ_PATH = Path(__file__).resolve().parents[1] / "scripts" / "gather_tools" / "record_query.py"
-_spec = importlib.util.spec_from_file_location("record_query", _RQ_PATH)
-ge = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(ge)
+ge = load_module(DEFENDER / "scripts" / "gather_tools" / "record_query.py")
 
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender.runtime.verbs import VerbContext  # noqa: E402

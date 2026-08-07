@@ -23,6 +23,7 @@ import pytest
 
 from defender import _git  # type: ignore[import-not-found]
 from defender.learning.author import shared as shared  # type: ignore[import-not-found]
+from defender.tests._repo import head_files, head_message, seed_repo
 
 
 CORPUS_REL = "defender/lessons/"
@@ -34,12 +35,7 @@ def _repo(tmp_path: Path) -> Path:
     """A fresh git repo with a seed commit and an empty corpus dir."""
     repo = tmp_path / "repo"
     (repo / CORPUS_REL).mkdir(parents=True)
-    subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
-    subprocess.run(["git", "-C", str(repo), "config", "user.email", "t@t"], check=True)
-    subprocess.run(["git", "-C", str(repo), "config", "user.name", "t"], check=True)
-    (repo / "README").write_text("seed\n")
-    subprocess.run(["git", "-C", str(repo), "add", "README"], check=True)
-    subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "seed"], check=True)
+    seed_repo(repo, add="README")
     return repo
 
 
@@ -47,18 +43,8 @@ def _corpus(repo: Path) -> Path:
     return repo / CORPUS_REL
 
 
-def _head_files(repo: Path) -> list[str]:
-    return subprocess.run(
-        ["git", "-C", str(repo), "show", "--name-only", "--pretty=format:", "HEAD"],
-        capture_output=True, text=True, check=True,
-    ).stdout.split()
 
 
-def _head_message(repo: Path) -> str:
-    return subprocess.run(
-        ["git", "-C", str(repo), "log", "-1", "--pretty=%B", "HEAD"],
-        capture_output=True, text=True, check=True,
-    ).stdout
 
 
 def _status(repo: Path, path: str) -> str:
@@ -77,9 +63,9 @@ def test_commit_corpus_commits_only_corpus(tmp_path):
     (_corpus(repo) / "x.md").write_text("hello\n")
     sha = shared.commit_corpus(repo, _corpus(repo), "lesson batch")
     assert sha == shared.git_head_sha(repo)
-    assert _head_files(repo) == ["defender/lessons/x.md"]
+    assert head_files(repo) == ["defender/lessons/x.md"]
     assert shared.changes_outside(repo, CORPUS_REL) == []
-    assert "Generation:" not in _head_message(repo)
+    assert "Generation:" not in head_message(repo)
 
 
 def test_commit_corpus_stages_only_corpus(tmp_path):
@@ -92,7 +78,7 @@ def test_commit_corpus_stages_only_corpus(tmp_path):
     subprocess.run(["git", "-C", str(repo), "add", "stray.txt"], check=True)
 
     shared.commit_corpus(repo, _corpus(repo), "lesson batch")
-    files = _head_files(repo)
+    files = head_files(repo)
     assert files == ["defender/lessons/x.md"]
     assert "stray.txt" not in files
     assert _status(repo, "stray.txt").startswith("A  ")
@@ -115,10 +101,10 @@ def test_commit_corpus_appends_trailers(tmp_path):
         repo, _corpus(repo), "lesson batch",
         trailers=[("Generation", "3"), ("Actor-Model", "claude-x")],
     )
-    msg = _head_message(repo)
+    msg = head_message(repo)
     assert "Generation: 3" in msg
     assert "Actor-Model: claude-x" in msg
-    assert _head_files(repo) == ["defender/lessons/x.md"]
+    assert head_files(repo) == ["defender/lessons/x.md"]
 
 
 def test_commit_corpus_rejects_message_carrying_trailers(tmp_path):

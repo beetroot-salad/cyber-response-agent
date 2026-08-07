@@ -33,6 +33,7 @@ from defender.learning.leads import pitfalls_curator  # type: ignore[import-not-
 from defender.learning.leads.lead_extraction import LeadAuthorError  # type: ignore[import-not-found]
 from defender.learning.core import config, persist  # type: ignore[import-not-found]
 from defender.learning.core.config import LoopPaths  # type: ignore[import-not-found]
+from defender.tests._repo import seed_skills_repo
 
 
 
@@ -48,29 +49,7 @@ def tmp_git_repo(tmp_path: Path) -> Path:
     ``lead-author/<id>`` worktree. The curator runs no git, so tests then make
     *working-tree* edits and call ``_verify_pitfalls_state`` / drive ``run_pitfalls``
     over them, asserting the loop's gate + commit behavior."""
-    repo = tmp_path / "repo"
-    catalog = repo / "defender" / "skills" / "gather" / "queries"
-    (catalog / "wazuh" / "_draft").mkdir(parents=True)
-    (catalog / "SCHEMA.md").write_text("# template schema\n")
-    (catalog / "wazuh" / "auth-events.md").write_text(
-        "---\nid: wazuh.auth-events\nstatus: established\n---\n"
-    )
-    (catalog / "wazuh" / "_draft" / "newthing.md").write_text(
-        "---\nid: wazuh.newthing\nstatus: draft\n---\n"
-    )
-    skill = repo / "defender" / "skills" / "elastic"
-    (skill / "_draft").mkdir(parents=True)
-    (skill / "SKILL.md").write_text("---\nname: defender-elastic\n---\n# elastic\n")
-    (skill / "_draft" / "README.md").write_text("# surface declaration\n")
-    (skill / "_draft" / "falco-na.md").write_text(
-        "---\nid: elastic.falco-na\nstatus: draft\n---\n# pending\n"
-    )
-    _run_git(repo, "init", "-q", "-b", "main")
-    _run_git(repo, "config", "user.email", "test@example.com")
-    _run_git(repo, "config", "user.name", "Test")
-    _run_git(repo, "add", "-A")
-    _run_git(repo, "commit", "-q", "-m", "seed")
-    return repo
+    return seed_skills_repo(tmp_path / "repo")
 
 
 

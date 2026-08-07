@@ -29,7 +29,6 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -80,6 +79,14 @@ from defender.learning.author.verify_forward.tool import (  # noqa: E402
     _assert_wellformed,
     _render_batch,
     run_forward_check,
+)
+from defender.tests._curator_scene import (
+    batch_counts as _counts,
+    curator_deps as _deps,
+    curator_scene as _scene,
+    source_bundle as _bundle,
+    build_curator_agent,
+    write_prompt,
 )
 
 _AUTHOR_RESULT_OK = (
@@ -170,19 +177,6 @@ def _seq(*responses: ModelResponse):
 
 
 
-def _scene(tmp_path: Path):
-    repo = tmp_path / "wt"
-    corpus = repo / "defender" / "lessons"
-    corpus.mkdir(parents=True)
-    runs = tmp_path / "state" / "runs"
-    runs.mkdir(parents=True)
-    pending = tmp_path / "state" / "_pending" / "findings.jsonl"
-    pending.parent.mkdir(parents=True)
-    pending.write_text("")
-    curdir = tmp_path / "state" / "_pending"
-    return SimpleNamespace(
-        tmp=tmp_path, repo=repo, corpus=corpus, runs=runs, pending=pending, curdir=curdir,
-    )
 
 
 def _lesson(scene, name: str = "lesson", body: str = "a candidate lesson body\n") -> str:
@@ -190,23 +184,8 @@ def _lesson(scene, name: str = "lesson", body: str = "a candidate lesson body\n"
     return f"defender/lessons/{name}.md"
 
 
-def _bundle(scene, run_id: str, *, transcript: str | None = None,
-            disposition: str = "malicious") -> Path:
-    d = scene.runs / run_id
-    d.mkdir(parents=True, exist_ok=True)
-    (d / "investigation.md").write_text(transcript or f"TRANSCRIPT-for-{run_id}\n")
-    (d / "source_refs.yaml").write_text(f"normalized_disposition: {disposition}\n")
-    return d
 
 
-def _deps(scene, *, run_verify, check=None, queued=(), corpus=None, runs=None, pending=None, box=None):
-    return CuratorDeps.for_run(
-        scene.curdir,
-        scene.repo,
-        corpus if corpus is not None else scene.corpus,
-        cfg=ForwardCheckConfig(check=check if check is not None else FINDINGS_CHECK, runs_dir=runs if runs is not None else scene.runs, pending=pending if pending is not None else scene.pending, queued_ids=frozenset(queued), run_verify=run_verify),
-        box=box,
-    )
 
 
 def _fpair(scene, run_id: str, *, direction: str = "adversarial",
@@ -220,10 +199,6 @@ def _lines(out: str) -> list[str]:
     return [ln for ln in out.splitlines() if ln.strip()]
 
 
-def _counts(out: str) -> tuple[int, int, int]:
-    m = re.search(r"BATCH:\s*n_good=(\d+)\s+n_bad=(\d+)\s+n_error=(\d+)", out)
-    assert m, f"no BATCH summary line in output:\n{out}"
-    return tuple(int(x) for x in m.groups())  # type: ignore[return-value]
 
 
 def _run(deps, pairs) -> str:
@@ -231,9 +206,8 @@ def _run(deps, pairs) -> str:
 
 
 def _prompt(tmp_path: Path) -> Path:
-    p = tmp_path / "forward.md"
-    p.write_text("Predict the disposition. End with VERDICT: GOOD or VERDICT: BAD.\n")
-    return p
+    return write_prompt(tmp_path, "forward.md",
+                        "Predict the disposition. End with VERDICT: GOOD or VERDICT: BAD.\n")
 
 
 
@@ -284,20 +258,7 @@ def test_d0b_results_in_input_order(tmp_path):
 
 
 def _build_curator_agent(tmp_path):
-    logger = observe.RequestLogger(tmp_path / "t.jsonl")
-    try:
-        return build_stage_agent(
-            CuratorDeps,
-            StageWiring(
-                prompt_path=_prompt(tmp_path), model="m", effort="low",
-                trace_name="t.jsonl", label="curator",
-            ),
-            logger,
-            make_model=_fake_model(_replay("")),
-        ), logger
-    except Exception:
-        logger.close()
-        raise
+    return build_curator_agent(tmp_path, _prompt(tmp_path), _fake_model(_replay("")))
 
 
 def test_d1_tool_registered_for_corpus_author(tmp_path):

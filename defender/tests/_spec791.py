@@ -44,6 +44,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from defender.tests._docker import satisfy_engine_keys  # noqa: F401 — re-exported: the four #791 suites reach it through their own harness
 
 import pytest
 
@@ -305,26 +306,6 @@ def loop_paths(tmp_path: Path):
     return LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
 
 
-def satisfy_engine_keys(monkeypatch, disposition: str = "inconclusive") -> None:
-    """Give the run cycle's key-sourcing step an ambient key per model it will touch, so a
-    scenario that is not ABOUT key sourcing does not fail in it (setenv, the sanctioned env
-    seam — never setattr)."""
-    from defender.learning.core.config import oracle_model
-    from defender.learning.core.directions import BY_NAME
-    from defender.learning.core.run_cycle import _directions_for
-    from defender.runtime import providers
-
-    models = {oracle_model()}
-    for name in _directions_for(disposition):
-        d = BY_NAME[name]
-        models.add(d.judge_wiring.model)
-        models.add(d.actor_model)
-    for model in models:
-        try:
-            var = providers.provider_for(model).api_key_var
-        except Exception:  # noqa: BLE001 — best effort; a red test must not rest on it
-            continue
-        monkeypatch.setenv(var, "spec791-not-used")
 
 
 def satisfy_entrypoint_keys(monkeypatch, tmp_path: Path) -> None:

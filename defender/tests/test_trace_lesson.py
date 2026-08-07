@@ -1,22 +1,15 @@
 """Tests for defender/learning/trace_lesson.py — in-context-outcome traceability."""
 from __future__ import annotations
 
-import importlib.util
 import json
-import sys
 from datetime import date, datetime, UTC
 from pathlib import Path
 
-TL_PATH = Path(__file__).resolve().parents[1] / "learning" / "ops" / "trace_lesson.py"
+from defender.tests._by_path import load_trace_lesson
 
 
 def _load():
-    spec = importlib.util.spec_from_file_location("trace_lesson", TL_PATH)
-    mod = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    sys.modules[spec.name] = mod
-    spec.loader.exec_module(mod)
-    return mod
+    return load_trace_lesson("trace_lesson")
 
 
 def _mk_run(runs: Path, name: str, *, disposition: str, loads: list[dict]):

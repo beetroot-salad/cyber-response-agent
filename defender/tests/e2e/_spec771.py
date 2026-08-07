@@ -65,12 +65,14 @@ import pytest
 
 from defender.runtime import box as box_mod
 
+from defender.tests._by_path import load_lint_gate, load_module
 from defender.tests.e2e._box665 import (  # noqa: F401
     DockerFault,
     RecordingDocker,
     _cp,
     requires_live_box,
 )
+from defender.tests._docker import daemon_reachable, is_dood
 
 DEFENDER = Path(__file__).resolve().parents[2]
 REPO_ROOT = DEFENDER.parent
@@ -94,36 +96,21 @@ def load_seccomp_generator():
     package. The demands that use it need `build()` — the pure function from vendored bytes to
     shipped profile — so that "the shipped profile is the platform default minus the ban" is
     asserted by RE-DERIVING it, not by re-listing its contents in a second place that can drift
-    from the first."""
-    import importlib.util
+    from the first.
 
-    spec = importlib.util.spec_from_file_location("gen_seccomp_profile", SECCOMP_GEN_PATH)
-    assert spec is not None, f"the profile generator does not exist at {SECCOMP_GEN_PATH}"
-    assert spec.loader is not None, f"the generator at {SECCOMP_GEN_PATH} is not importable"
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    `register=False`: the generator is read for one pure function and nothing imports it by
+    name, so the `sys.modules` slot stays free for a caller that means it."""
+    return load_module(SECCOMP_GEN_PATH, register=False)
 
 
 def load_write_lint():
     """Import the write lint as a module, by path.
 
     It lives at the repo root, outside every importable package, so `import` cannot reach it —
-    and two demands need it (the wrapper-detection one and the hard-gate one). Loaded once
-    here rather than twice inline: a second copy of the loader is a second chance for one
+    and two demands need it (the wrapper-detection one and the hard-gate one). Loaded through
+    the shared loader rather than inline: a second copy of the loader is a second chance for one
     demand to end up pointed at a file that no longer exists while still reporting green."""
-    import importlib.util
-    import sys
-
-    lint_dir = LINT_MODULE_PATH.parent
-    if str(lint_dir) not in sys.path:
-        sys.path.insert(0, str(lint_dir))
-    spec = importlib.util.spec_from_file_location("lint_unguarded_tree_write", LINT_MODULE_PATH)
-    assert spec is not None, f"the lint does not exist at {LINT_MODULE_PATH}"
-    assert spec.loader is not None, f"the lint at {LINT_MODULE_PATH} is not importable"
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return load_lint_gate("lint_unguarded_tree_write")
 
 
 def ban_dependency_files() -> dict[str, Path]:
@@ -197,27 +184,6 @@ def ban_dependency_files() -> dict[str, Path]:
 # There is deliberately NO fourth predicate for "runsc is registered but WITHOUT
 # --oci-seccomp". That state is exactly what the ban fault exists to report, and skipping on
 # it would let the suite go green on a host where the ban is not in force.
-def _daemon_reachable() -> bool:
-    try:
-        return subprocess.run(
-            ["docker", "version", "--format", "{{.Server.Version}}"],
-            capture_output=True, timeout=30,
-        ).returncode == 0
-    except (OSError, subprocess.SubprocessError):
-        return False
-
-
-def _is_dood() -> bool:
-    if not Path("/.dockerenv").exists():
-        return False
-    probe = subprocess.run(
-        ["docker", "info", "--format", "{{.DockerRootDir}}"],
-        capture_output=True, text=True, encoding="utf-8", timeout=30,
-    )
-    root = probe.stdout.strip()
-    return probe.returncode == 0 and bool(root) and not Path(root).exists()
-
-
 def _runtime_registered() -> bool:
     probe = subprocess.run(
         ["docker", "info", "--format", "{{range $k, $v := .Runtimes}}{{$k}} {{end}}"],
@@ -229,9 +195,9 @@ def _runtime_registered() -> bool:
 
 
 def _real_box_skip_reason() -> str | None:
-    if not _daemon_reachable():
+    if not daemon_reachable():
         return "no reachable Docker daemon"
-    if _is_dood() and not box_mod._covered(DEFENDER, box_mod._shared_mounts(box_mod._docker)):
+    if is_dood() and not box_mod._covered(DEFENDER, box_mod._shared_mounts(box_mod._docker)):
         return ("docker-outside-of-Docker with no shared mount covering the repo tree, so no "
                 "bind source resolves (C46)")
     if not _runtime_registered():
@@ -255,7 +221,7 @@ requires_real_box = pytest.mark.skipif(_REAL_BOX_SKIP is not None, reason=str(_R
 #: includes the ordinary developer machine, and which is exactly where a stale vendored default
 #: wants to be caught early.
 requires_daemon = pytest.mark.skipif(
-    not _daemon_reachable(), reason="no reachable Docker daemon"
+    not daemon_reachable(), reason="no reachable Docker daemon"
 )
 
 

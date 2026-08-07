@@ -6,12 +6,12 @@ from __future__ import annotations
 
 import dataclasses
 
-import subprocess
 
 from defender.learning.author import curator as curator
 from defender.learning.author.benign_actor import run as aenv
 from defender.learning.author.benign_actor import env as author_actor_env
 from defender.learning.core.config import LoopPaths
+from defender.tests._repo import head_message, seed_repo
 
 
 def _rows() -> list[dict]:
@@ -62,22 +62,14 @@ def test_commit_corpus_uses_per_config_label(tmp_path, monkeypatch) -> None:
     repo = tmp_path / "repo"
     corpus = repo / "defender" / "lessons-environment"
     corpus.mkdir(parents=True)
-    subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
-    subprocess.run(["git", "-C", str(repo), "config", "user.email", "t@t"], check=True)
-    subprocess.run(["git", "-C", str(repo), "config", "user.name", "t"], check=True)
-    (repo / "README").write_text("seed\n")
-    subprocess.run(["git", "-C", str(repo), "add", "README"], check=True)
-    subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "seed"], check=True)
+    seed_repo(repo, add="README")
 
     paths = LoopPaths(repo_root=repo)
     adv = aenv.build_adversarial_config(paths)
     ben = aenv.build_benign_config(paths)
 
     def _head_msg() -> str:
-        return subprocess.run(
-            ["git", "-C", str(repo), "log", "-1", "--pretty=%B", "HEAD"],
-            capture_output=True, text=True, check=True,
-        ).stdout
+        return head_message(repo)
 
     # #719: the commit is a config field, so the generation and the model come off the
     # config rather than being handed in per call.

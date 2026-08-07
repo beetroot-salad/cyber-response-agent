@@ -10,15 +10,14 @@ some.
 """
 from __future__ import annotations
 
-import importlib.util
 import json
-import sys
 from pathlib import Path
 
 import pytest
 
-GOLDEN_DIR = Path(__file__).resolve().parents[2] / "evals" / "oracle_golden"
-REPO_ROOT = GOLDEN_DIR.parents[2]
+from defender.evals.oracle_golden import story_from_run as STORY
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
 # `playground-v2/attacks/runs/` is `*`-ignored, so the runner records this suite
 # sweeps existed only on the machine that produced them — the sweep collected
 # nothing anywhere else and its guard failed. The corpus is checked in here
@@ -28,17 +27,6 @@ FIXTURE_RUNS_DIR = Path(__file__).resolve().parent / "_run_records"
 RUNS_DIR = REPO_ROOT / "playground-v2" / "attacks" / "runs"
 
 
-def _load(name: str, path: Path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None
-    assert spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = mod
-    spec.loader.exec_module(mod)
-    return mod
-
-
-STORY = _load("oracle_golden_story", GOLDEN_DIR / "story_from_run.py")
 
 META = {
     "run_id": "r-1", "scenario_id": "s", "description": "A scenario description.",

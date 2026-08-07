@@ -13,6 +13,8 @@ from __future__ import annotations
 import json
 
 import pytest
+
+from defender.tests._by_path import load_module
 import yaml
 
 from defender.evals.oracle_golden import generate_case
@@ -331,12 +333,7 @@ def test_source_alone_autofills_the_target_in_main(catalog, tmp_path, monkeypatc
 
 def _load_runner():
     """Import `runner.py` from the path the generator already resolves to it."""
-    import importlib.util
-
-    spec = importlib.util.spec_from_file_location("_attack_runner", generate_case.RUNNER)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return load_module(generate_case.RUNNER, name="_attack_runner")
 
 
 def test_source_override_relocates_every_step(tmp_path):

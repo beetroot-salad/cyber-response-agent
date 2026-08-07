@@ -20,8 +20,6 @@ import os
 import re
 import threading
 import time
-from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -32,8 +30,6 @@ from pydantic_ai.models import override_allow_model_requests  # noqa: E402
 
 from defender.tests._stage_args import as_curator_stage_args  # noqa: E402
 from defender.learning.author.curator_engine import (  # noqa: E402
-    CuratorDeps,
-    ForwardCheckConfig,
     _run_curator_pydantic,
     run_curator_stage,
 )
@@ -47,6 +43,12 @@ from defender.learning.author.verify_forward.checks import (  # noqa: E402
 from defender.learning.author.verify_forward.tool import (  # noqa: E402
     Pair,
     run_forward_check,
+)
+from defender.tests._curator_scene import (
+    batch_counts as _counts,
+    curator_deps as _deps,
+    curator_scene as _scene,
+    source_bundle as _bundle,
 )
 
 _AUTHOR_RESULT_OK = (
@@ -68,44 +70,12 @@ def _verifier(text: str, *, delay: float = 0.0):
 
 
 
-def _scene(tmp_path: Path):
-    repo = tmp_path / "wt"
-    corpus = repo / "defender" / "lessons"
-    corpus.mkdir(parents=True)
-    runs = tmp_path / "state" / "runs"
-    runs.mkdir(parents=True)
-    pending = tmp_path / "state" / "_pending" / "findings.jsonl"
-    pending.parent.mkdir(parents=True)
-    pending.write_text("")
-    curdir = tmp_path / "state" / "_pending"
-    return SimpleNamespace(
-        tmp=tmp_path, repo=repo, corpus=corpus, runs=runs, pending=pending, curdir=curdir,
-    )
 
 
-def _bundle(scene, run_id: str, *, disposition: str = "malicious") -> Path:
-    d = scene.runs / run_id
-    d.mkdir(parents=True, exist_ok=True)
-    (d / "investigation.md").write_text(f"TRANSCRIPT-for-{run_id}\n")
-    (d / "source_refs.yaml").write_text(f"normalized_disposition: {disposition}\n")
-    return d
 
 
-def _deps(scene, *, run_verify, check=None, queued=(), corpus=None, runs=None, pending=None):
-    return CuratorDeps.for_run(
-        scene.curdir,
-        scene.repo,
-        corpus if corpus is not None else scene.corpus,
-        cfg=ForwardCheckConfig(check=check if check is not None else FINDINGS_CHECK, runs_dir=runs if runs is not None else scene.runs, pending=pending if pending is not None else scene.pending, queued_ids=frozenset(queued), run_verify=run_verify),
-        box=None,
-    )
 
 
-def _counts(out: str) -> tuple[int, int, int]:
-    import re
-    m = re.search(r"BATCH:\s*n_good=(\d+)\s+n_bad=(\d+)\s+n_error=(\d+)", out)
-    assert m, f"no BATCH summary in output:\n{out}"
-    return tuple(int(x) for x in m.groups())  # type: ignore[return-value]
 
 
 

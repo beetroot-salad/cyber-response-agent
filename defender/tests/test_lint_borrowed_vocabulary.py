@@ -15,14 +15,12 @@ are — arming is a whole-corpus property, so it cannot be shown on the real tre
 """
 from __future__ import annotations
 
-import importlib.util
-import sys
 from pathlib import Path
+
+from defender.tests._by_path import load_lint_gate
 
 import pytest
 
-LINT_DIR = Path(__file__).resolve().parents[2] / "scripts" / "lint"
-LINT_PATH = LINT_DIR / "lint_borrowed_vocabulary.py"
 
 # A vocabulary owner: defines the set AND answers for it.
 _OWNER_ARMED = (
@@ -44,14 +42,7 @@ _BORROWER = (
 
 @pytest.fixture
 def gate():
-    if str(LINT_DIR) not in sys.path:
-        sys.path.insert(0, str(LINT_DIR))
-    spec = importlib.util.spec_from_file_location("lint_borrowed_vocabulary", LINT_PATH)
-    assert spec is not None
-    assert spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    return load_lint_gate("lint_borrowed_vocabulary")
 
 
 def _tree(tmp_path: Path, files: dict[str, str]) -> Path:

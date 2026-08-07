@@ -16,8 +16,8 @@ The demand list lives in ``spec_graph_613_614.yaml`` beside this file.
 """
 from __future__ import annotations
 
-import importlib.util
-from pathlib import Path
+
+from defender.tests._by_path import DEFENDER, load_module
 
 import pytest
 import yaml
@@ -29,7 +29,7 @@ from defender.learning.core.config import RunUnprocessable
 from defender.learning.pipeline.oracle.sample import parse_lead_events
 from defender.scripts.visualize.visualize_primitives import load_yaml
 
-SCRIPTS = Path(__file__).resolve().parents[1] / "scripts" / "lessons"
+SCRIPTS = DEFENDER / "scripts" / "lessons"
 
 _FLOW_FLOOD = "a: " + "[" * 3000
 _BLOCK_FLOOD = "\n".join(" " * i + f"k{i}:" for i in range(3000))
@@ -39,11 +39,7 @@ _HOSTILE_FLAT = "a b c d e f g h i"
 
 
 def _load_script(stem: str):
-    spec = importlib.util.spec_from_file_location(f"{stem}_614", SCRIPTS / f"{stem}.py")
-    mod = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(mod)
-    return mod
+    return load_module(SCRIPTS / f"{stem}.py", name=f"{stem}_614")
 
 
 

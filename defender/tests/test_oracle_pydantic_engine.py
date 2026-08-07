@@ -31,6 +31,8 @@ from defender.learning.pipeline.oracle_engine import (  # noqa: E402
 )
 from defender.runtime import observe, permission  # noqa: E402
 from defender.runtime.agent_definition import bind  # noqa: E402
+from defender.tests._engine_helpers import assert_stage_tools  # noqa: E402
+from defender.tests._engine_helpers import learning_run_dir  # noqa: E402
 from defender.tests._engine_helpers import fake_model as _fake_model  # noqa: E402
 from defender.tests._engine_helpers import replay_turns as _replay  # noqa: E402
 
@@ -41,10 +43,6 @@ _ORACLE_YAML = 'events:\n  - Computer: "FINANCE-DB"\n    EventID: 4624\n'
 
 
 
-def _lrd(tmp_path):
-    lrd = tmp_path / "learning_run"
-    lrd.mkdir()
-    return lrd
 
 
 def _prompt(tmp_path):
@@ -55,7 +53,7 @@ def _prompt(tmp_path):
 
 
 def test_run_oracle_pydantic_returns_yaml_and_writes_trace(tmp_path):
-    lrd = _lrd(tmp_path)
+    lrd = learning_run_dir(tmp_path)
     fn = _replay([{"text": _ORACLE_YAML}])
     with override_allow_model_requests(False):
         out = _run_oracle_pydantic(
@@ -89,7 +87,7 @@ def test_oracle_policy_denies_everything():
 
 
 def test_oracle_reads_under_defender_dir_without_read_roots(tmp_path):
-    lrd = _lrd(tmp_path)
+    lrd = learning_run_dir(tmp_path)
     pol = bind(ORACLE_DEF, lrd).policy
     assert pol.read_roots == ()
     allowed = permission.decide_read(
@@ -104,20 +102,7 @@ def test_oracle_reads_under_defender_dir_without_read_roots(tmp_path):
 
 
 def test_oracle_agent_is_read_only_no_writers():
-    logger = observe.RequestLogger(Path("/tmp/does-not-need-to-exist-oracle-tools.jsonl"))
-    try:
-        agent = _pydantic_stage.build_stage_agent(
-            OracleDeps,
-            StageWiring(
-                prompt_path=Path(__file__), model="any-model", effort="none",
-                trace_name="t.jsonl", label="oracle",
-            ),
-            logger,
-            make_model=_fake_model(_replay([{"text": ""}])),
-        )
-    finally:
-        logger.close()
-    assert list(agent._function_toolset.tools) == []
+    assert_stage_tools(OracleDeps, label="oracle", effort="none", expected=[])
 
 
 def test_build_oracle_agent_disables_glm_reasoning(monkeypatch):

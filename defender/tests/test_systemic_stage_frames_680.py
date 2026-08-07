@@ -34,6 +34,7 @@ from defender.runtime.tools import (
     _tool_bash,
     _tool_read_file,
 )
+from defender.tests._by_path import load_module, on_sys_path
 from defender.tests._engine_helpers import fake_model, replay_turns
 from defender.tests._frames680 import (
     DEFENDER,
@@ -66,6 +67,7 @@ from defender.tests._frames680 import (
     _pitfalls_prompt,
     _python_sources,
     _shape,
+    assert_producer_shape,
     _shared_module,
     _shared_wrap,
     _with_salt,
@@ -74,136 +76,55 @@ from defender.tests._frames680 import (
 def test_repair_gate_r1_build_judge_invocation_shape(tmp_path):
     """The real `build_judge_invocation` payload starts with its contract and retains ordered alert, story, synthesis, and manifest frames."""
     observation = _judge_fixture(tmp_path)
-    tags, bodies, salts, gaps = _shape(observation)
-    assert tags == observation.expected_tags
-    assert all(
-        any(required in body for body in bodies)
-        for required in observation.required_bodies
-    )
-    assert salts == (observation.salt,) * len(observation.expected_tags)
-    assert all(not gap.strip() for gap in gaps)
-    assert "{salt}" not in observation.prompt
-    assert "{content}" not in observation.prompt
+    assert_producer_shape(observation)
 
 
 def test_repair_gate_r1_invoke_actor_shape(tmp_path):
     """The real `invoke_actor` entry sends ordered contract, alert, actor-input, archetype, and menu frames to its injected actor transport."""
     observation = _capture_actor(tmp_path)
-    tags, bodies, salts, gaps = _shape(observation)
-    assert tags == observation.expected_tags
-    assert all(
-        any(required in body for body in bodies)
-        for required in observation.required_bodies
-    )
-    assert salts == (observation.salt,) * len(observation.expected_tags)
-    assert all(not gap.strip() for gap in gaps)
-    assert "{salt}" not in observation.prompt
-    assert "{content}" not in observation.prompt
+    assert_producer_shape(observation)
 
 
 def test_repair_gate_r1_invoke_actor_benign_shape(tmp_path):
     """The real `invoke_actor_benign` entry sends ordered contract, alert, rule, and entity frames to its injected actor transport."""
     observation = _capture_actor(tmp_path, benign=True)
-    tags, bodies, salts, gaps = _shape(observation)
-    assert tags == observation.expected_tags
-    assert all(
-        any(required in body for body in bodies)
-        for required in observation.required_bodies
-    )
-    assert salts == (observation.salt,) * len(observation.expected_tags)
-    assert all(not gap.strip() for gap in gaps)
-    assert "{salt}" not in observation.prompt
-    assert "{content}" not in observation.prompt
+    assert_producer_shape(observation)
 
 
 def test_repair_gate_r1_build_lead_user_prompt_shape():
     """The real `build_lead_user_prompt` output orders contract, story, lead, and sample bodies in fully substituted frames."""
     observation = _lead_prompt()
-    tags, bodies, salts, gaps = _shape(observation)
-    assert tags == observation.expected_tags
-    assert all(
-        any(required in body for body in bodies)
-        for required in observation.required_bodies
-    )
-    assert salts == (observation.salt,) * len(observation.expected_tags)
-    assert all(not gap.strip() for gap in gaps)
-    assert "{salt}" not in observation.prompt
-    assert "{content}" not in observation.prompt
+    assert_producer_shape(observation)
 
 
 def test_repair_gate_r1_run_findings_shape(tmp_path):
     """The real `_run_findings` payload captured at `run_verify` orders contract, transcript, lesson, disposition, and policy frames."""
     observation = _findings_prompt(tmp_path)
-    tags, bodies, salts, gaps = _shape(observation)
-    assert tags == observation.expected_tags
-    assert all(
-        any(required in body for body in bodies)
-        for required in observation.required_bodies
-    )
-    assert salts == (observation.salt,) * len(observation.expected_tags)
-    assert all(not gap.strip() for gap in gaps)
-    assert "{salt}" not in observation.prompt
-    assert "{content}" not in observation.prompt
+    assert_producer_shape(observation)
 
 
 def test_repair_gate_r1_run_actor_shape(tmp_path):
     """The real `_run_actor` payload captured at `run_verify` orders contract, actor story, observation, and lesson frames."""
     observation = _actor_verify_prompt(tmp_path)
-    tags, bodies, salts, gaps = _shape(observation)
-    assert tags == observation.expected_tags
-    assert all(
-        any(required in body for body in bodies)
-        for required in observation.required_bodies
-    )
-    assert salts == (observation.salt,) * len(observation.expected_tags)
-    assert all(not gap.strip() for gap in gaps)
-    assert "{salt}" not in observation.prompt
-    assert "{content}" not in observation.prompt
+    assert_producer_shape(observation)
 
 
 def test_repair_gate_r1_build_curator_user_prompt_shape(tmp_path):
     """The real `build_curator_user_prompt` output orders contract, fixed-tag manifest, and rows with fully substituted values."""
     observation = _curator_prompt(tmp_path)
-    tags, bodies, salts, gaps = _shape(observation)
-    assert tags == observation.expected_tags
-    assert all(
-        any(required in body for body in bodies)
-        for required in observation.required_bodies
-    )
-    assert salts == (observation.salt,) * len(observation.expected_tags)
-    assert all(not gap.strip() for gap in gaps)
-    assert "{salt}" not in observation.prompt
-    assert "{content}" not in observation.prompt
+    assert_producer_shape(observation)
 
 
 def test_repair_gate_r1_lead_author_invoke_agent_shape(tmp_path, monkeypatch):
     """The real `lead_author.invoke_agent` payload captured at its injected engine contains ordered contract, context, handoff, and pending-draft frames."""
     observation = _lead_author_prompt(tmp_path, monkeypatch)
-    tags, bodies, salts, gaps = _shape(observation)
-    assert tags == observation.expected_tags
-    assert all(
-        any(required in body for body in bodies)
-        for required in observation.required_bodies
-    )
-    assert salts == (observation.salt,) * len(observation.expected_tags)
-    assert all(not gap.strip() for gap in gaps)
-    assert "{salt}" not in observation.prompt
-    assert "{content}" not in observation.prompt
+    assert_producer_shape(observation)
 
 
 def test_repair_gate_r1_invoke_pitfalls_agent_shape(tmp_path, monkeypatch):
     """The real `_invoke_pitfalls_agent` payload captured at its injected engine contains ordered contract, context, and pitfalls-handoff frames."""
     observation = _pitfalls_prompt(tmp_path, monkeypatch)
-    tags, bodies, salts, gaps = _shape(observation)
-    assert tags == observation.expected_tags
-    assert all(
-        any(required in body for body in bodies)
-        for required in observation.required_bodies
-    )
-    assert salts == (observation.salt,) * len(observation.expected_tags)
-    assert all(not gap.strip() for gap in gaps)
-    assert "{salt}" not in observation.prompt
-    assert "{content}" not in observation.prompt
+    assert_producer_shape(observation)
 
 
 def test_repair_gate_r5_section_removal_survival(tmp_path, monkeypatch):
@@ -400,15 +321,10 @@ def test_stage_imports_the_relocated_shared_frame_on_its_first_invocation(tmp_pa
     """A first real stage-builder invocation succeeds with the relocated helper import and emits a framed user payload."""
     module = _shared_module()
     observation = _judge_fixture(tmp_path)
-    tags, bodies, salts, gaps = _shape(observation)
     assert module is not None
-    assert tags == observation.expected_tags
-    assert all(
-        any(required in body for body in bodies)
-        for required in observation.required_bodies
-    )
-    assert salts == (observation.salt,) * len(observation.expected_tags)
-    assert all(not gap.strip() for gap in gaps)
+    # The shared helper also picks up the two placeholder checks this copy had stopped
+    # short of; a fully-substituted `_judge_fixture` is what its nine siblings already pin.
+    assert_producer_shape(observation)
 
 
 def test_lead_author_harness_materializes_relocated_frame_dependency(tmp_path):
@@ -418,17 +334,11 @@ def test_lead_author_harness_materializes_relocated_frame_dependency(tmp_path):
     import sys
 
     evals_dir = DEFENDER / "evals"
-    spec = importlib.util.spec_from_file_location(
-        "issue_680_harness_lead", evals_dir / "harness_lead.py"
-    )
-    assert spec is not None
-    assert spec.loader is not None
-    harness = importlib.util.module_from_spec(spec)
-    sys.path.insert(0, str(evals_dir))
-    try:
-        spec.loader.exec_module(harness)
-    finally:
-        sys.path.remove(str(evals_dir))
+    # `evals/` on sys.path for the exec ONLY — the harness imports its siblings by bare
+    # name, but leaving the dir importable would shadow `defender.evals.*` for every later
+    # test in the session.
+    with on_sys_path(evals_dir):
+        harness = load_module(evals_dir / "harness_lead.py", name="issue_680_harness_lead")
 
     scenario = evals_dir / "scenarios_lead" / "underfold-sshd-narrowing"
     tree = tmp_path / "relocated"

@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import ast
 import os
-import subprocess
 from dataclasses import replace
 from pathlib import Path
 
@@ -35,6 +34,7 @@ from defender._io import read_jsonl_rows
 from defender.learning.author import curator, shared
 from defender.learning.author.benign_actor import run as benign_run
 from defender.learning.core.config import LoopPaths
+from defender.tests._repo import head_message, seed_repo
 
 
 
@@ -284,19 +284,12 @@ def _env_repo(tmp_path: Path):
     corpus.mkdir(parents=True)
     pending.mkdir(parents=True)
     (corpus / ".gitkeep").write_text("")
-    subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
-    subprocess.run(["git", "-C", str(repo), "config", "user.email", "t@t"], check=True)
-    subprocess.run(["git", "-C", str(repo), "config", "user.name", "t"], check=True)
-    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
-    subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "seed"], check=True)
+    seed_repo(repo)
     return repo
 
 
 def _commit_msg_for(repo: Path, rel_path: str) -> str:
-    return subprocess.run(
-        ["git", "-C", str(repo), "log", "-1", "--pretty=%B", "--", rel_path],
-        capture_output=True, text=True, check=True,
-    ).stdout
+    return head_message(repo, path=rel_path)
 
 
 def test_env_corpus_two_writers_distinct(tmp_path: Path):

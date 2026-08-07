@@ -18,38 +18,32 @@ Import conventions mirror the collected neighbors:
 """
 from __future__ import annotations
 
-import importlib.util
-import sys
 from pathlib import Path
 
 from defender._frontmatter import parse_frontmatter_or_none
+from defender.tests._by_path import DEFENDER, load_module
 from defender.evals.held_out import predicted_disposition
 from defender._vocab import DISPOSITION_ENUM
 from defender.runtime import orient
 from defender.runtime.verb_grant import VerbGrant
 from defender.scripts.visualize import visualize_primitives as vp
 
-DEFENDER = Path(__file__).resolve().parents[1]
 WORKTREE = Path(__file__).resolve().parents[2]
 
 
-def _load(name: str, path: Path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None
-    assert spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)
-    return mod
 
 
 def _hook():
-    """A FRESH hook module — a fresh ``descriptor_catalog`` lru_cache per test."""
-    return _load("inject591", DEFENDER / "hooks" / "inject_system_skill_description.py")
+    """A FRESH hook module — a fresh ``descriptor_catalog`` lru_cache per test.
+
+    `load_module` executes on every call, which is what makes that true."""
+    return load_module(DEFENDER / "hooks" / "inject_system_skill_description.py",
+                       name="inject591")
 
 
 def _scaffold():
-    return _load("vscaffold591", DEFENDER / "skills" / "connect" / "validate_scaffold.py")
+    return load_module(DEFENDER / "skills" / "connect" / "validate_scaffold.py",
+                       name="vscaffold591")
 
 
 def _report_run(tmp: Path, name: str, content: bytes) -> Path:

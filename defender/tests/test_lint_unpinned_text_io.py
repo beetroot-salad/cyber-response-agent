@@ -21,27 +21,15 @@ The gate is driven through its DI seam:
 """
 from __future__ import annotations
 
-import importlib.util
 import json
-import sys
 from pathlib import Path
 
 import pytest
 
-WORKTREE = Path(__file__).resolve().parents[2]
-LINT_DIR = WORKTREE / "scripts" / "lint"
-LINT_PATH = LINT_DIR / "lint_unpinned_text_io.py"
+from defender.tests._by_path import import_lint_lib, load_lint_gate
 
-
-def _load_gate():
-    if str(LINT_DIR) not in sys.path:
-        sys.path.insert(0, str(LINT_DIR))
-    spec = importlib.util.spec_from_file_location("lint_unpinned_text_io", LINT_PATH)
-    assert spec is not None
-    assert spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+_ASTLIB = import_lint_lib("_astlib")
+_GATE = load_lint_gate("lint_unpinned_text_io")
 
 
 def _pyfile(tree: Path, rel: str, src: str) -> Path:
@@ -60,18 +48,18 @@ def _write_baseline(path: Path, fingerprints: list[str]) -> None:
 
 def _kinds(tree: Path) -> set[str]:
     """The set of `file:function:kind` fingerprints found under `tree`."""
-    return {f.fingerprint for f in _load_gate()._scan(tree)}
+    return {f.fingerprint for f in _GATE._scan(tree)}
 
 
 def _flags(tmp_path: Path, src: str) -> bool:
     """True if the gate flags anything in `src`. One source, one scan."""
     tree = tmp_path / "scope"
     _pyfile(tree, "prod.py", src)
-    return bool(_load_gate()._scan(tree))
+    return bool(_GATE._scan(tree))
 
 
 def test_scan_and_ratchet_contract(tmp_path):
-    gate = _load_gate()
+    gate = _GATE
     tree = tmp_path / "scope"
     _pyfile(tree, "prod.py", "def f(p):\n    return p.read_text()\n")
     _pyfile(tree, "test_prod.py", "def f(p):\n    return p.read_text()\n")
@@ -147,12 +135,10 @@ def test_syntax_error_file_is_not_silently_skipped(tmp_path):
     on, so an unpinned `read_text()` sitting in an unparseable file was reported as clean.
     A gate that cannot look must not report clean (#618/#621), so the gate now raises
     ScanBlind, which `main()` surfaces as exit 2."""
-    import _astlib
-
     tree = tmp_path / "scope"
     _pyfile(tree, "broken.py", "def f(:\n")
     _pyfile(tree, "prod.py", "def f(p):\n    return p.read_text()\n")
-    with pytest.raises(_astlib.ScanBlind) as exc:
+    with pytest.raises(_ASTLIB.ScanBlind) as exc:
         _kinds(tree)
     assert "broken.py" in str(exc.value)
 
@@ -175,14 +161,14 @@ def test_real_tree_clean():
     """The regression check: the shipped baseline is EMPTY, so the real trees must
     scan clean. `main([])` scans BOTH scopes (defender/ + spec-flow/scripts/), so any
     new unpinned site in either tree turns this — and CI — red."""
-    assert _load_gate().main([]) == 0
+    assert _GATE.main([]) == 0
 
 
 def test_spec_flow_scripts_is_in_scope():
     """#655: the spec-graph tooling was dark to this gate (SCOPE was defender/ only),
     which let check_actors' unpinned reads land — the #643 false-clean. Pin that the
     tree is now a scanned scope so a future refactor can't silently drop it again."""
-    gate = _load_gate()
+    gate = _GATE
     assert gate.REPO_ROOT / "spec-flow" / "scripts" in gate.SCOPES
 
 
@@ -191,7 +177,7 @@ def test_multiple_scopes_are_prefixed_and_cannot_collide(tmp_path):
     same-file:function:kind site in two trees yields two DISTINCT fingerprints — otherwise one
     baseline entry would silence a real site in the other tree. Exercises the prefix seam directly
     (no monkeypatch), with the empty prefix returning `_scan` untouched (the single-scope path)."""
-    gate = _load_gate()
+    gate = _GATE
     a, b = tmp_path / "treeA", tmp_path / "treeB"
     _pyfile(a, "_config.py", "def f(p):\n    return p.read_text()\n")
     _pyfile(b, "_config.py", "def f(p):\n    return p.read_text()\n")

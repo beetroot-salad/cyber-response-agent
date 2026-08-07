@@ -22,12 +22,12 @@ reconcile them against the spec / the shipped code.
 """
 from __future__ import annotations
 
-import importlib.util
 import inspect
 import py_compile
 import re
-import sys
 from pathlib import Path
+
+from defender.tests._by_path import load_module
 
 from defender import _corpus
 from defender._frontmatter import parse_frontmatter
@@ -384,16 +384,8 @@ def _load_example(name: str):
     """Load a connect example module by path, with examples/ and the worktree root on sys.path
     so both the current (`from _adapter import …`) and the migrated (`from defender…`) import
     forms resolve."""
-    for p in (str(_EXAMPLES), str(_ROOT)):
-        if p not in sys.path:
-            sys.path.insert(0, p)
-    path = _EXAMPLES / f"{name}.py"
-    spec = importlib.util.spec_from_file_location(f"_connect_example_{name}", path)
-    assert spec is not None
-    assert spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    return load_module(_EXAMPLES / f"{name}.py", name=f"_connect_example_{name}",
+                       sys_path=(_EXAMPLES, _ROOT))
 
 
 def test_connect_examples_compile_against_the_live_tree():
