@@ -1,7 +1,6 @@
 {
-  "//": "lint_unguarded_tree_write baseline \u2014 a shared-tree write reachable while a box is alive that bypasses #771's alias-refusing primitives (write_guarded/guarded_mkdir/open_guarded). Fingerprint is file:function, file relative to the scan scope. Modules named in the writer census (LINT_HARD_GATED_MODULES, derived from _spec771.py's CENSUS) are HARD-gated \u2014 a finding there fails regardless of the baseline. Regenerate: python scripts/lint/lint_unguarded_tree_write.py --update-baseline.",
+  "//": "lint_unguarded_tree_write baseline — a shared-tree write reachable while a box is alive that bypasses #771's alias-refusing primitives (write_guarded/guarded_mkdir/open_guarded). Fingerprint is file:function, file relative to the scan scope. Modules named in the writer census (LINT_HARD_GATED_MODULES, derived from _spec771.py's CENSUS) are HARD-gated — a finding there fails regardless of the baseline. Regenerate: python scripts/lint/lint_unguarded_tree_write.py --update-baseline.",
   "entries": {
-    "_flock.py:open_lock": "intentional: mkdir of a LOCK file's parent, not a shared-tree artifact. Replaces the three baselined copies in learning/author/shared.py.",
     "evals/harness.py:capture_results": "",
     "evals/harness.py:main": "",
     "evals/harness.py:materialize": "",
@@ -28,7 +27,6 @@
     "learning/author/lessons/run.py:write_held_report": "",
     "learning/author/shared.py:assert_clean_corpus_dir": "",
     "learning/core/markers.py:_enqueue_marker": "",
-    "learning/core/markers.py:claim_markers": "intentional: mkdir of the queue's own inflight/ claim dir. Replaces the baselined copies in learning/core/drains.py and learning/core/run_cycle.py.",
     "learning/core/markers.py:enqueue_case_for_curation": "",
     "learning/core/markers.py:quarantine_marker": "",
     "learning/core/markers.py:rewrite_marker": "",
@@ -61,6 +59,8 @@
     "run_common.py:materialize_run_dir": "",
     "runtime/verb_roster.py:generate_roster": "",
     "scripts/case_history/ticket_writer.py:_write_receipt": "",
-    "scripts/visualize/visualize_run.py:render_and_mirror": ""
+    "scripts/visualize/visualize_run.py:render_and_mirror": "",
+    "_flock.py:open_lock": "intentional: mkdir of a LOCK file's parent, not a shared-tree artifact. Replaces the three baselined copies in learning/author/shared.py.",
+    "learning/core/markers.py:claim_markers": "intentional: mkdir of the queue's own inflight/ claim dir. Replaces the baselined copies in learning/core/drains.py and learning/core/run_cycle.py."
   }
 }
