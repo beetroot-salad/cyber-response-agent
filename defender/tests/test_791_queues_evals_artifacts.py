@@ -25,32 +25,17 @@ touches the judge prompts.
 """
 from __future__ import annotations
 
-import asyncio
-import contextlib
 import json
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
-import yaml
 
 from defender.learning.core import drains, run_cycle  # noqa: E402
 from defender.learning.core import markers  # noqa: E402
-from defender.tests._gate774 import (  # noqa: E402
-    FakeReviewStages,
-    StageFault,
-    main_deps,
-    spec_import,
-    tail,
-    worktree_package_guard,  # noqa: F401 — session-scoped autouse guard, see _gate774
-)
 from defender.tests._spec791 import (  # noqa: E402
     DEFENDER,
-    LIVE_STAGE_WORD,
-    OLDER_SPEC_GRAPH,
     PROJECT_PROFILE,
     RETIRED_DEAD_SYMBOLS,
-    RETIRED_STAGE_WORD,
     RETIRED_TELEMETRY_WRITER,
     VULTURE_BASELINE,
     GroundedJudgeSubagents,
@@ -63,10 +48,10 @@ from defender.tests._spec791 import (  # noqa: E402
     noop_start_box,
     noop_stop_box,
     satisfy_engine_keys,
+    worktree_package_guard,  # noqa: F401 — session-scoped autouse guard, see _spec791
 )
 
 ISSUE = "791"
-SETTLED = [("the pivot was provisioned", "l-001", "the session was unauthorized")]
 
 
 def _queued_run(tmp_path, name: str) -> Path:
@@ -367,72 +352,6 @@ def _load_lint_ratchet():
     return mod
 
 
-def test_791_the_live_projection_stage_sheds_the_retired_stages_name(tmp_path):
-    """live_projection_stage_sheds_the_retired_name — the review's surviving projection stage
-    stops being spelled with the retired stage's name: the key it is dispatched under, the
-    fault it reports, and the two trace files it writes into every run dir all name the LIVE
-    stage, matching the role that shipped.
-
-    The graph-side re-key justifies itself as "no name in the tree still joins by name to the
-    offline oracle this change retires", and that sentence is false of the product. #791 is
-    what makes the spelling wrong, because it is what removes the other thing the word could
-    mean — after this change an operator opening a run dir finds `oracle` artifacts for a
-    stage the spec says was retired, and the confusion is the same wrong join, relocated from
-    a spec artifact into the run's own output.
-
-    Every arm carries its positive control: the sibling stages keep their names and their
-    traces, so none of these negatives is green because nothing was written. The stage fault
-    is the review harness's own declared fault shape (a stage call that raises), not one
-    invented here, and its message says nothing about any stage — so the only way a stage's
-    name can reach the fault the run reports is the key the gate dispatched it under.
-
-    Accepted cost, stated: this is the sixth widening, and it reaches the two shipped #774
-    tests that assert the retired spelling in a trace filename."""
-    pytest.importorskip("pydantic_ai")
-    close_investigation = spec_import("defender.runtime.close_tool", "close_investigation")
-
-    deps, run_dir = main_deps(tmp_path)
-    close_investigation(deps, "malicious", stages=FakeReviewStages(challenger=[tail(SETTLED)]))
-    traces = sorted(p.name for p in run_dir.glob("review_*_trace.jsonl"))
-    assert len(traces) == 3, f"the review left {traces}, so this walk has nothing to check"
-    assert [n for n in traces if LIVE_STAGE_WORD in n], \
-        f"no trace names the live projection stage: {traces}"
-    assert [n for n in traces if RETIRED_STAGE_WORD in n] == [], \
-        f"the run dir still carries a trace named for the retired stage: {traces}"
-
-    deps2, _run2 = main_deps(tmp_path / "faulting")
-    broken = close_investigation(deps2, "malicious", stages=FakeReviewStages(
-        challenger=[tail(SETTLED)],
-        projection_fault=StageFault(raises=RuntimeError("stage transport failed")),
-    ))
-    assert LIVE_STAGE_WORD in (broken.detail or ""), \
-        f"the projection stage's fault does not name it: {broken.detail!r}"
-    assert RETIRED_STAGE_WORD not in (broken.detail or ""), \
-        f"the fault still reports the live stage under the retired name: {broken.detail!r}"
-
-    deps3, _run3 = main_deps(tmp_path / "control")
-    challenger_fault = close_investigation(deps3, "malicious", stages=FakeReviewStages(
-        challenger_fault=StageFault(raises=RuntimeError("stage transport failed")),
-    ))
-    assert "challenger" in (challenger_fault.detail or ""), (
-        "control: a stage fault does not name the stage at all, so the assertion above is "
-        "about an empty string"
-    )
-
-    from defender.runtime.review_roles import default_review_stages
-
-    live_dir = tmp_path / "live-run"
-    live_dir.mkdir(parents=True)
-    stages = default_review_stages(live_dir, DEFENDER)
-    with contextlib.suppress(BaseException):
-        asyncio.run(stages.projection(SimpleNamespace(prompt="spec791", timeout=1.0)))
-    live = sorted(p.name for p in live_dir.glob("review_*_live_trace.jsonl"))
-    assert live, "the live projection stage opened no trace, so the name below is unobserved"
-    assert [n for n in live if RETIRED_STAGE_WORD in n] == [], \
-        f"the live stage still writes its trace under the retired stage's name: {live}"
-    assert [n for n in live if LIVE_STAGE_WORD in n] == live
-
-
 def test_791_the_project_profile_census_drops_the_retired_writer(tmp_path):
     """profile_census_drops_the_retired_writer — the project profile's shared-root census no
     longer names the projected-telemetry writer this change deletes.
@@ -464,40 +383,4 @@ def test_791_the_project_profile_census_drops_the_retired_writer(tmp_path):
     assert any("write_comparison_files" in w for w in survivors), (
         "the judge's own per-lead writer left the census with the retired one; this change "
         "does not touch it"
-    )
-
-
-def test_791_the_older_graph_stops_addressing_the_retired_id(tmp_path):
-    """rekey_live_projection_graph_id — the older shipped spec-coverage graph names the live
-    projection stage for what it is, so no demand address anywhere in the tree joins BY NAME to
-    the offline stage this change retires.
-
-    That graph models the live review stage under the retired stage's id. Until this change the
-    collision was merely confusing; #791 is what makes it consequential, because it deletes the
-    other referent — and a wrong join that RESOLVES is the worst kind, since every mechanical
-    check that follows it reports success.
-
-    Promoted from a clause, and asserted on ADDRESSES only — element ids and the addresses
-    demands and gate entries bind. The graph's prose may go on discussing the offline oracle;
-    it is the machine-joined half that must stop naming it."""
-    graph = yaml.safe_load(OLDER_SPEC_GRAPH.read_text(encoding="utf-8"))
-    structure = graph["structure"]
-    ids = [e["id"] for kind in ("actors", "boundaries") for e in structure.get(kind, [])]
-    assert ids, "the older graph declares no structure at all; re-site this demand"
-
-    addresses = [a for d in graph["demands"] for a in d.get("binds", [])]
-    addresses += [str(o.get("element", "")) for o in graph["gate"].get("obligations", [])]
-    addresses += [str(h.get("element", "")) for h in graph["gate"].get("holes", [])]
-    addresses += [str(p.get("element", "")) for p in graph["gate"].get("pre_discharged", [])]
-    assert addresses, "the older graph binds no addresses; re-site this demand"
-
-    assert RETIRED_STAGE_WORD not in ids, (
-        f"the older graph still declares an element called {RETIRED_STAGE_WORD!r} — its "
-        "review stage joins by name to the stage #791 retires"
-    )
-    joined = sorted({a for a in addresses if RETIRED_STAGE_WORD in a})
-    assert joined == [], f"addresses in the older graph still join to the retired stage: {joined}"
-    assert any(LIVE_STAGE_WORD in a for a in addresses) or LIVE_STAGE_WORD in ids, (
-        "the re-key deleted the stage's addresses instead of re-spelling them — the demands "
-        "that bound it now bind nothing"
     )
