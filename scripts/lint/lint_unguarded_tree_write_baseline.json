@@ -25,11 +25,7 @@
     "learning/author/curator.py:invoke_curator_agent": "",
     "learning/author/lessons/run.py:invoke_agent": "",
     "learning/author/lessons/run.py:write_held_report": "",
-    "learning/author/shared.py:acquire_flock": "",
-    "learning/author/shared.py:acquire_flock_within": "",
-    "learning/author/shared.py:acquire_repo_lock": "",
     "learning/author/shared.py:assert_clean_corpus_dir": "",
-    "learning/core/drains.py:_drain_lead_author_markers": "",
     "learning/core/markers.py:_enqueue_marker": "",
     "learning/core/markers.py:enqueue_case_for_curation": "",
     "learning/core/markers.py:quarantine_marker": "",
@@ -41,10 +37,8 @@
     "learning/core/persist.py:append_findings": "",
     "learning/core/persist.py:append_pitfalls": "",
     "learning/core/persist.py:persist_run": "",
-    "learning/core/persist.py:queue_lock": "",
     "learning/core/persist.py:rotate_queue_locked": "",
     "learning/core/quarantine.py:preserve_tainted_tree": "",
-    "learning/core/run_cycle.py:_learn_drain_locked": "",
     "learning/core/run_cycle.py:_validate_judge_yaml": "",
     "learning/core/run_cycle.py:_write_leg_status": "",
     "learning/core/run_cycle.py:run_direction": "",
@@ -65,6 +59,8 @@
     "run_common.py:materialize_run_dir": "",
     "runtime/verb_roster.py:generate_roster": "",
     "scripts/case_history/ticket_writer.py:_write_receipt": "",
-    "scripts/visualize/visualize_run.py:render_and_mirror": ""
+    "scripts/visualize/visualize_run.py:render_and_mirror": "",
+    "_flock.py:open_lock": "intentional: mkdir of a LOCK file's parent, not a shared-tree artifact. Replaces the three baselined copies in learning/author/shared.py.",
+    "learning/core/markers.py:claim_markers": "intentional: mkdir of the queue's own inflight/ claim dir. Replaces the baselined copies in learning/core/drains.py and learning/core/run_cycle.py."
   }
 }

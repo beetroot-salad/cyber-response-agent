@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 import contextlib
-import fcntl
 import json
 import random
 import re
-import time
 from collections.abc import Iterator
 from pathlib import Path
 from uuid import uuid4
@@ -13,7 +11,7 @@ from typing import Any
 
 import yaml
 
-from defender import _git
+from defender import _flock, _git
 from defender.learning.pipeline._prompt import stage_user_message, structured_json_body
 from defender._text import is_content_less
 from defender._untrusted import wrap
@@ -26,78 +24,62 @@ class AuthorError(Exception):
 
 
 def acquire_repo_lock(lock_file: Path, *, timeout_seconds: int) -> Any:
-    lock_file.parent.mkdir(parents=True, exist_ok=True)
-    fh = lock_file.open("a+", encoding="utf-8")
-    deadline = time.monotonic() + max(1, timeout_seconds)
-    while True:
-        try:
-            fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-            return fh
-        except BlockingIOError as exc:
-            if time.monotonic() >= deadline:
-                fh.close()
-                raise TimeoutError(
-                    f"repo lock {lock_file} held by another author "
-                    f"for >{timeout_seconds}s"
-                ) from exc
-            time.sleep(0.2)
-
-
-def release_repo_lock(fh: Any) -> None:
-    if fh is None:
-        return
+    """The whole-repo authoring lock. Raises on expiry — a caller that got no lock must not
+    proceed to commit, and `author/drain.py`'s retire decision keys on this exception."""
+    fh = _flock.open_lock(lock_file)
     try:
-        fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
-    finally:
-        fh.close()
-
-
-def acquire_flock(path: Path) -> Any | None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fh = path.open("a+", encoding="utf-8")
-    try:
-        fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
-        fh.close()
-        return None
+        taken = _flock.take(fh, timeout_seconds=timeout_seconds, poll=_flock.SLOW_POLL)
     except BaseException:
         fh.close()
         raise
+    if not taken:
+        fh.close()
+        raise TimeoutError(
+            f"repo lock {lock_file} held by another author for >{timeout_seconds}s"
+        )
+    return fh
+
+
+def acquire_flock(path: Path) -> Any | None:
+    """Take it now or answer `None` — the "another tick holds it, skip" acquisition."""
+    fh = _flock.open_lock(path)
+    try:
+        taken = _flock.take(fh, timeout_seconds=0)
+    except BaseException:
+        fh.close()
+        raise
+    if not taken:
+        fh.close()
+        return None
     return fh
 
 
 def acquire_flock_within(path: Path, *, timeout_seconds: int) -> Any | None:
-    """Non-blocking acquisition retried until a deadline; `None` once it expires (#719).
+    """Retried until a deadline; `None` once it expires (#719).
 
     The drain's wait on a channel's APPEND lock. `acquire_flock` gives up instantly, which
     would make an appender's ordinary hold look like a permanent one; a plain blocking
     acquisition would let one channel's stuck appender hold the repo lock — and therefore
     every sibling channel's tick — indefinitely. The deadline is the caller's configured
-    repo-lock wait, so the two bounds cannot drift apart."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fh = path.open("a+", encoding="utf-8")
-    deadline = time.monotonic() + max(1, timeout_seconds)
-    while True:
-        try:
-            fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-            return fh
-        except BlockingIOError:
-            if time.monotonic() >= deadline:
-                fh.close()
-                return None
-            time.sleep(0.05)
-        except BaseException:
-            fh.close()
-            raise
-
-
-def release_flock(fh: Any) -> None:
-    if fh is None:
-        return
+    repo-lock wait, so the two bounds cannot drift apart. It answers `None` rather than
+    raising, deliberately: a busy channel is not a fault."""
+    fh = _flock.open_lock(path)
     try:
-        fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
-    finally:
+        taken = _flock.take(fh, timeout_seconds=timeout_seconds)
+    except BaseException:
         fh.close()
+        raise
+    if not taken:
+        fh.close()
+        return None
+    return fh
+
+
+#: The repo lock and the channel locks release identically — one `flock(LOCK_UN)` and a
+#: close. Two names for it is what the module had; the second is kept as an alias because
+#: `acquire_repo_lock`'s callers read better paired with a matching verb.
+release_flock = _flock.release
+release_repo_lock = _flock.release
 
 
 @contextlib.contextmanager

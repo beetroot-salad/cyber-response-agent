@@ -1032,6 +1032,50 @@ def test_learn_drain_marks_artifact_missing(tmp_path: Path):
     assert json.loads(failed.read_text())["failed"] == "artifact-missing"
 
 
+@pytest.mark.parametrize(
+    "body", ["{not valid json", "null", '["case-broken"]'], ids=["torn", "null", "list"],
+)
+def test_learn_drain_dead_letters_an_unservable_marker(tmp_path: Path, body: str):
+    """The learn queue dead-letters an unreadable marker, exactly as its sibling does.
+
+    This is the LEARN half of a property that only the lead-author queue had a test for.
+    Both queues run the same claim-and-serve protocol and both had the same forever-loop —
+    a marker that cannot be read is already claimed, so skipping it leaves it in `inflight/`
+    for the next tick's reclaim to hand back and fail on again — but the fix for it was
+    hand-carried into two copies and only one of them grew a test. Now that
+    `markers.claim_markers` owns the protocol, this pins the shared behaviour from the other
+    caller, so a regression in either queue has two chances to be caught rather than one.
+
+    Both unservable shapes: bytes that do not parse, and bytes that parse to something that
+    is not a mapping (`null`, a list) — the second still answers `spec.get("run_dir")` with
+    an AttributeError that unwinds the whole drain past every dead-letter path. The healthy
+    sibling in the same pass must still be served.
+    """
+    paths, _ = _isolate(tmp_path)
+    run_dir = tmp_path / "tmprun" / "case-real"
+    run_dir.mkdir(parents=True)
+    markers.enqueue_for_learning(run_dir, paths)
+    paths.learn_queue_dir.mkdir(parents=True, exist_ok=True)
+    (paths.learn_queue_dir / "case-broken.json").write_text(body, encoding="utf-8")
+
+    learned: list[Path] = []
+    rc = run_cycle.learn_drain(
+        paths,
+        run_one_fn=lambda rd: learned.append(rd) or 0,
+        render=lambda rd: None,
+    )
+
+    assert rc == 0
+    assert learned == [run_dir.resolve()], "the healthy request in the same pass was not served"
+    assert not (paths.learn_queue_dir / "case-broken.json").exists()
+    assert not (paths.learn_queue_dir / "inflight" / "case-broken.json").exists(), \
+        "the unservable marker was left claimed — the next tick reclaims and re-fails on it"
+    failed = paths.learn_queue_dir / "failed" / "case-broken.json"
+    assert json.loads(failed.read_text())["failed"].startswith("unreadable")
+    assert json.loads(failed.read_text())["run_id"] == "case-broken", \
+        "the learn queue's dead letter must be keyed on run_id, not the curation queue's case_id"
+
+
 def test_learn_drain_quarantines_run_one_error(tmp_path: Path):
     paths, _ = _isolate(tmp_path)
     run_dir = tmp_path / "tmprun" / "case-poison"
@@ -1081,7 +1125,9 @@ def test_learn_drain_skips_marker_lost_to_claim_race(tmp_path: Path, monkeypatch
         Path(src).unlink()
         raise FileNotFoundError(src)
 
-    monkeypatch.setattr(run_cycle.os, "replace", racing_replace)
+    # The claim itself moved into `markers.claim_markers` — both drains share it now — so
+    # the race is injected where the `os.replace` actually happens.
+    monkeypatch.setattr(markers.os, "replace", racing_replace)
     learned: list[Path] = []
     run_cycle.learn_drain(
         paths,

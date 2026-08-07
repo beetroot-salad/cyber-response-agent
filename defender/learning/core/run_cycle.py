@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import contextlib
 import json
-import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
@@ -28,7 +27,11 @@ from defender.learning.core.directions import (
     directions_for,
     raw_fallback_name,
 )
-from defender.learning.core.markers import quarantine_marker
+from defender.learning.core.markers import (
+    ClaimedMarker,
+    claim_markers,
+    quarantine_marker,
+)
 from defender.learning.core.persist import (
     DirectionArtifacts,
     append_findings,
@@ -316,60 +319,28 @@ def _render_transcript(run_dir: Path) -> None:
     render_and_mirror(run_dir)
 
 
-def _process_marker(
-    marker: Path,
-    inflight_dir: Path,
+def _serve_marker(
+    claim: ClaimedMarker,
     qdir: Path,
     run_one_fn: Callable[[Path], int],
     render: Callable[[Path], None],
-    *,
-    already_claimed: bool = False,
 ) -> bool:
-    if already_claimed:
-        # A marker RECLAIMED from `inflight/` (#791 P1): a prior drain died mid-claim and left
-        # it there, outside the top-level glob a plain count is computed from — it is served
-        # exactly like a freshly claimed one, just not moved again.
-        claimed = marker
-    else:
-        claimed = inflight_dir / marker.name
-        try:
-            os.replace(marker, claimed)
-        except FileNotFoundError:
-            return False
     try:
-        spec = json.loads(claimed.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as e:
-        quarantine_marker({"run_id": marker.stem}, claimed, qdir, f"unreadable: {e!r}")
-        return False
-    if not isinstance(spec, dict):
-        # A row that PARSES but is not a mapping is unreadable in the same way: `spec.get`
-        # below would raise an AttributeError past every dead-letter path, wedging the worker
-        # on a marker the reclaim hands straight back next tick.
-        quarantine_marker(
-            {"run_id": marker.stem}, claimed, qdir,
-            f"unreadable: not a mapping ({type(spec).__name__})",
-        )
-        return False
-    run_dir = Path(spec.get("run_dir", ""))
-    if not run_dir.is_dir():
-        quarantine_marker(spec, claimed, qdir, "artifact-missing")
-        return False
-    try:
-        run_one_fn(run_dir)
+        run_one_fn(claim.run_dir)
     except Exception as e:  # noqa: BLE001 — one poison run must not wedge the worker
-        quarantine_marker(spec, claimed, qdir, f"run-one-error: {e!r}")
+        quarantine_marker(claim.spec, claim.path, qdir, f"run-one-error: {e!r}")
         return False
     try:
-        render(run_dir)
+        render(claim.run_dir)
     except Exception as e:  # noqa: BLE001 — render is best-effort
-        _log(f"learn_drain: render failed for {run_dir.name}: {e!r} (continuing)")
+        _log(f"learn_drain: render failed for {claim.run_dir.name}: {e!r} (continuing)")
     with contextlib.suppress(OSError):
-        claimed.unlink()
+        claim.path.unlink()
     # #791 P2: the claim moved this identity OUT of the top level, which frees the slot for a
     # retry to land unobstructed while the claim was held. That retry is a re-request of the
     # run just learned, under the same name — absorb it here rather than relearn it.
     with contextlib.suppress(OSError):
-        (qdir / claimed.name).unlink()
+        claim.queued_path.unlink()
     return True
 
 
@@ -414,21 +385,13 @@ def _learn_drain_locked(
         )
         return 0
 
-    inflight_dir = qdir / "inflight"
-    orphans = sorted(inflight_dir.glob("*.json")) if inflight_dir.is_dir() else []
-    markers = sorted(qdir.glob("*.json"))
-    _log(
-        f"learn_drain: {len(markers)} run(s) queued for learning, {len(orphans)} reclaimed "
-        "from a prior claim — no automatic feed writes this queue anymore (#791)"
-    )
-    if markers or orphans:
-        inflight_dir.mkdir(parents=True, exist_ok=True)
     drained = 0
-    for marker in orphans:
-        if _process_marker(marker, inflight_dir, qdir, run_one_fn, render, already_claimed=True):
-            drained += 1
-    for marker in markers:
-        if _process_marker(marker, inflight_dir, qdir, run_one_fn, render):
+    claims = claim_markers(
+        qdir, identity_key="run_id", label="learn_drain", noun="learning",
+        extra=" — no automatic feed writes this queue anymore (#791)",
+    )
+    for claim in claims:
+        if _serve_marker(claim, qdir, run_one_fn, render):
             drained += 1
     _log(f"learn_drain: drained {drained} run(s)")
     return 0

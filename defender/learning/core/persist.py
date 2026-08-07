@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 import contextlib
-import fcntl
 import json
 import shutil
 import threading
-import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -13,6 +11,9 @@ from collections.abc import Callable
 
 import yaml
 
+# Imported as `_lockfile`: this module keeps `_flock` as the deliberate pre-#719 alias
+# for `queue_lock`, which in-module callers and the lock suites both reach for.
+from defender import _flock as _lockfile
 from defender._clock import now_iso
 from defender._text import is_content_less
 from defender._io import append_jsonl, read_jsonl_rows, write_atomic
@@ -46,37 +47,21 @@ def queue_lock(lock_path: Path, *, timeout_seconds: int | None = None):
     the failure the drain's own deadline-bounded read exists to prevent. Expiry raises
     `TimeoutError`, deliberately NOT a member of the drain's retire set: the batch is stuck
     and recorded, never bumped, because a busy lock is not the batch's fault."""
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    fh = lock_path.open("a+", encoding="utf-8")
+    fh = _lockfile.open_lock(lock_path)
     try:
-        if timeout_seconds is None:
-            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
-        else:
-            _flock_within(fh, lock_path, timeout_seconds)
+        taken = _lockfile.take(fh, timeout_seconds=timeout_seconds)
     except BaseException:
         fh.close()
         raise
+    if not taken:
+        fh.close()
+        raise TimeoutError(
+            f"queue lock {lock_path} held by an appender for >{timeout_seconds}s"
+        )
     try:
         yield
     finally:
-        try:
-            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
-        finally:
-            fh.close()
-
-
-def _flock_within(fh: Any, lock_path: Path, timeout_seconds: int) -> None:
-    deadline = time.monotonic() + max(1, timeout_seconds)
-    while True:
-        try:
-            fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-            return
-        except BlockingIOError as exc:
-            if time.monotonic() >= deadline:
-                raise TimeoutError(
-                    f"queue lock {lock_path} held by an appender for >{timeout_seconds}s"
-                ) from exc
-            time.sleep(0.05)
+        _lockfile.release(fh)
 
 
 #: The pre-#719 spelling, kept so in-module callers and the suites that drive the real

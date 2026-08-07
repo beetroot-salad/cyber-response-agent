@@ -3,8 +3,6 @@ from __future__ import annotations
 import contextlib
 import functools
 import importlib
-import json
-import os
 import subprocess
 import uuid
 from pathlib import Path
@@ -27,7 +25,12 @@ from defender.learning.author import shared as _author_shared
 from defender.learning.core.directions import BY_NAME
 from defender.learning.author.branch import AuthorBranch, BranchError
 from defender.learning.core.faults import run_or_dead_letter
-from defender.learning.core.markers import marker_identity, quarantine_marker, rewrite_marker
+from defender.learning.core.markers import (
+    claim_markers,
+    marker_identity,
+    quarantine_marker,
+    rewrite_marker,
+)
 from defender.learning.core.persist import read_pitfalls
 from defender.learning.core.quarantine import preserve_tainted_tree
 
@@ -152,77 +155,24 @@ def _quarantine_lead_author_failure(
     quarantine_marker(spec, marker, queue_dir, f"lead-author-error: {e!r}")
 
 
-def _read_marker_spec(claimed: Path) -> tuple[dict | None, str]:
-    """The claimed marker's spec row, or ``(None, reason)`` for one that cannot be served.
-
-    A row that PARSES but is not a mapping is unreadable in exactly the same way a torn one
-    is: the caller goes on to ask it for ``run_dir``, and a list/scalar/``null`` answers with
-    an ``AttributeError`` that unwinds the whole drain past every dead-letter path — leaving
-    the marker in ``inflight/`` for the reclaim to hand back next tick, fail on again, and
-    unwind on again, forever. Both shapes therefore report the same way.
-    """
-    try:
-        spec = json.loads(claimed.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as e:
-        return None, f"unreadable: {e!r}"
-    if not isinstance(spec, dict):
-        return None, f"unreadable: not a mapping ({type(spec).__name__})"
-    return spec, ""
-
-
 def _drain_lead_author_markers(
     paths: LoopPaths,
     run_lead_author: Callable[..., None],
     *,
     box: Any = None,
 ) -> None:
-    # #791: claim-and-serve is atomic — a request is moved OUT of the queue before it is
-    # served, exactly like the learn queue's own claim. Unlinking by PATH after reading would
-    # destroy a re-ask that lands on that same path (case-keyed identity, P2) while this pass
-    # is still serving it; the claim makes that path free for the re-ask's OWN marker instead.
     qdir = paths.author_queue_dir
-    markers = sorted(qdir.glob("*.json")) if qdir.is_dir() else []
-    inflight_dir = qdir / "inflight"
-    # A claim that is never reclaimed is a request LOST, not deferred: a drain that dies
-    # mid-serve leaves the marker in `inflight/`, which neither this pass's top-level glob nor
-    # `_has_lead_author_work`'s can see, so nothing would ever ask for that case again. Safe to
-    # reclaim unconditionally here and only here: `lead_author_drain` holds the drainer flock,
-    # so anything still sitting in `inflight/` belongs to a pass that is already dead.
-    orphans = sorted(inflight_dir.glob("*.json")) if inflight_dir.is_dir() else []
     max_retries = env_int("LEAD_AUTHOR_MAX_RETRIES", 3)
-    _log(
-        f"lead_author_drain: {len(markers)} run(s) queued for lead-author, "
-        f"{len(orphans)} reclaimed from a prior claim"
+    # `case_id`: this queue's live writer (`enqueue_case_for_curation`) mints the filename
+    # from the case, so that is what an unreadable row's dead letter is keyed on.
+    claims = claim_markers(
+        qdir, identity_key="case_id", label="lead_author_drain", noun="lead-author",
     )
-    if markers:
-        inflight_dir.mkdir(parents=True, exist_ok=True)
-    for marker in [*orphans, *markers]:
-        already_claimed = marker.parent == inflight_dir
-        claimed = marker if already_claimed else inflight_dir / marker.name
+    for claim in claims:
+        claimed, spec, run_dir = claim.path, claim.spec, claim.run_dir
         # Where a transient retry is re-queued, always the TOP level — never the claim slot a
         # reclaimed orphan was read from, which this pass is about to unlink.
-        queued_path = qdir / marker.name
-        if not already_claimed:
-            try:
-                os.replace(marker, claimed)
-            except FileNotFoundError:
-                continue
-        spec, reason = _read_marker_spec(claimed)
-        if spec is None:
-            # QUARANTINED, not skipped: a marker this pass cannot read is one no later pass can
-            # read either, and it has already been claimed — skipping leaves it in `inflight/`,
-            # where the reclaim above picks it up again next tick, fails again, and logs again,
-            # while `_has_lead_author_work` stays true on its presence forever. The learn
-            # queue's own claim-and-serve dead-letters the same shape (`run_cycle`, #791).
-            # The row's own keys are exactly what could not be read, so the dead letter is
-            # keyed off the marker's FILENAME — which is the case id this queue's live writer
-            # (`enqueue_case_for_curation`) mints it from.
-            quarantine_marker({"case_id": claimed.stem}, claimed, paths.author_queue_dir, reason)
-            continue
-        run_dir = Path(spec.get("run_dir", ""))
-        if not run_dir.is_dir():
-            quarantine_marker(spec, claimed, paths.author_queue_dir, "artifact-missing")
-            continue
+        queued_path = claim.queued_path
         try:
             drained = run_or_dead_letter(
                 functools.partial(run_lead_author, paths, run_dir, box=box),
