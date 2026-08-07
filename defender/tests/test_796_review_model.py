@@ -17,7 +17,6 @@ from defender.runtime import providers
 from defender.runtime.review_roles import (
     COMPOSER_DEF,
     DEFAULT_REVIEW_MODEL,
-    DISCRIMINATION_DEF,
     REVIEW_MODEL_ENV,
     SUPPORT_DEF,
     resolve_review_model,
@@ -26,7 +25,7 @@ from defender.tests._spec791 import (  # noqa: F401 — session-scoped autouse g
     worktree_package_guard,
 )
 
-REVIEW_DEFS = (DISCRIMINATION_DEF, SUPPORT_DEF, COMPOSER_DEF)
+REVIEW_DEFS = (SUPPORT_DEF, COMPOSER_DEF)
 
 
 @pytest.fixture(autouse=True)
@@ -68,15 +67,15 @@ def test_every_review_role_resolves_through_that_one_accessor():
         assert defn.model() == DEFAULT_REVIEW_MODEL
 
 
-def test_the_effort_split_is_lenses_below_composer():
+def test_the_effort_split_is_lens_below_composer():
     """A lens reconstructs what a projection supports; the composer weighs the readings
-    against the investigation's own account and decides whether a confident close survives."""
-    assert DISCRIMINATION_DEF.effort == SUPPORT_DEF.effort, (
-        "the lenses must share an effort — the ablation reading is only interpretable "
-        "against a support reading produced at the same one"
-    )
+    against the investigation's own account and decides whether a confident close survives.
+
+    The support lens is dispatched TWICE (itself and the ablation) off this one def, which is
+    what keeps the two readings interpretable as a difference: sharing an effort is not a rule
+    two roles have to be held to any more, it is a consequence of there being one role."""
+    assert SUPPORT_DEF.effort == "medium"
     assert COMPOSER_DEF.effort == "high"
-    assert DISCRIMINATION_DEF.effort == "medium"
 
 
 def test_every_review_effort_is_legal_for_the_model_it_pins():

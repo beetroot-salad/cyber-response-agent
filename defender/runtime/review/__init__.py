@@ -4,6 +4,10 @@ The package is the reviewer's own half of the gate: the projections each lens re
 (`projector`), the role prompts they run under, and the reading of what they return
 (`reply`). `challenge_gate` keeps the harness — bounds, the review state, the stage
 deadline, the trace rows and the routing — and dispatches into this package.
+
+Two prompts, three calls: `support` (dispatched twice, once as the ablation) and `composer`.
+#796's `discrimination` prompt is retired with its lens — see `challenge_gate`'s own
+docstring for why.
 """
 
 from __future__ import annotations

@@ -567,7 +567,11 @@ def test_effort_none_vs_None_distinct(monkeypatch, logger):
             _defn(role=AgentRole.ORACLE, model=lambda: "glm-5.2", effort="none", tools=ToolSet()),
             deps_type=OracleDeps, instructions="x", logger=logger, agent_id="o2",
         )
-    assert omit.model_settings is None
+    # Read through `extra_body`, not off the settings object: both agents now also carry a
+    # prompt-cache affinity key, so `omit` is no longer the bare `None` the seam returned —
+    # the distinction under test is whether the REASONING knob is present, and that is where
+    # it lives.
+    assert "extra_body" not in omit.model_settings
     assert disabled.model_settings["extra_body"]["reasoning_effort"] == "none"
     assert omit.model_settings != disabled.model_settings
 
@@ -613,7 +617,7 @@ def test_effort_live_on_toolfree(logger, tmp_path):
             agent_id="oracle", make_model=fake,
         )
         assert list(agent._function_toolset.tools) == []
-        assert agent.model_settings == settings
+        assert agent.model_settings == {**settings, "openai_prompt_cache_key": "oracle"}
         assert reqs == []
         result = agent.run_sync("project this lead", deps=bind(defn, tmp_path),
                                 usage_limits=UsageLimits(request_limit=1))

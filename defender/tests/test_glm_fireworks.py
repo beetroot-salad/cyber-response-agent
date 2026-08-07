@@ -222,6 +222,45 @@ def test_build_for_effort_pairs_model_with_effort_settings(monkeypatch):
     assert built.settings == {**_CACHE, "anthropic_effort": "low"}
 
 
+def test_cache_affinity_sets_the_fireworks_prompt_cache_key():
+    """Fireworks caching is automatic; what the key buys is REPLICA affinity, and pydantic-ai
+    spells it `openai_prompt_cache_key` (forwarded as `prompt_cache_key`)."""
+    assert providers.cache_affinity("kimi-k3", None, "ablation") == {
+        "openai_prompt_cache_key": "ablation"
+    }
+
+
+def test_cache_affinity_preserves_the_effort_setting_it_merges_into():
+    """The key CREATES settings where there were none and MERGES where there were. Both arms
+    are live: a role at `default` effort resolves to `None` settings, and every review lens
+    does — so an implementation that only merged would drop the key exactly where the
+    single-call roles need it, and one that only created would silently drop
+    `reasoning_effort` on every role that has one."""
+    merged = providers.cache_affinity(
+        "glm-5.2", providers.FIREWORKS.settings_for_effort("low"), "sess-7:main"
+    )
+    assert merged == {
+        "extra_body": {"reasoning_effort": "low"},
+        "openai_prompt_cache_key": "sess-7:main",
+    }
+
+
+def test_cache_affinity_leaves_anthropic_alone():
+    """Anthropic addresses its cache by the content of the prefix its breakpoint markers
+    delimit, not by a routing key — so the settings come back byte-identical, carrying no
+    foreign provider's field."""
+    before = providers.ANTHROPIC.settings_for_effort(None)
+    assert providers.cache_affinity("claude-sonnet-4-6", before, "sess-7:main") == before
+
+
+def test_cache_affinity_passes_an_unroutable_name_through():
+    """An affinity hint is an optimization. A name this registry cannot route returns the
+    settings untouched rather than raising — an unknown model is `run.py`'s all-roles
+    preflight to reject, and failing an agent BUILD over a cache hint would turn a routing
+    nicety into a dead run."""
+    assert providers.cache_affinity("no-such-model", {"a": 1}, "k") == {"a": 1}
+
+
 
 @pytest.mark.parametrize(("model", "key"), [
     (_GLM_ID, "glm-5.2"),
@@ -247,8 +286,32 @@ def test_pricing_glm_uses_fireworks_rates():
 
 
 def test_pricing_kimi_uses_fireworks_rates():
-    cost = pricing.usage_cost("kimi-k2p6", {"input_tokens": 1_000_000, "output_tokens": 1_000_000})
-    assert cost == pytest.approx(0.60 + 3.00)
+    cost = pricing.usage_cost("kimi-k2p6", {
+        "input_tokens": 1_000_000,
+        "output_tokens": 1_000_000,
+        "cache_read_input_tokens": 1_000_000,
+    })
+    assert cost == pytest.approx(0.95 + 4.00 + 0.16)
+
+
+def test_pricing_k3_is_not_k2p6_rates():
+    """The two Kimi rows are DIFFERENT prices, and the discriminator is asserted rather than
+    assumed: the table once carried K2.6's published triple ($0.95/$4.00) inside a comment on
+    the K3 row as if it were a second K3 tier, so a K3 run costed out at a third of its bill
+    while `model_key` was routing correctly the whole time."""
+    usage = {"input_tokens": 1_000_000, "output_tokens": 1_000_000}
+    assert pricing.usage_cost("kimi-k3", usage) == pytest.approx(3.00 + 15.00)
+    assert pricing.usage_cost("kimi-k2p6", usage) == pytest.approx(0.95 + 4.00)
+
+
+def test_fireworks_cached_input_is_discounted_against_its_own_input():
+    """Every Fireworks row prices a cache READ below its own input and a cache WRITE at
+    exactly it. A row that priced the read at the input rate would silently make the
+    highest-caching lane in the tree — gather runs at ~92% — look four times its real cost."""
+    for key in ("glm-5.2", "kimi-k2.6", "kimi-k3"):
+        row = pricing.PRICING[key]
+        assert row["cache_r"] < row["in"], key
+        assert row["cache_w"] == row["in"], key
 
 
 

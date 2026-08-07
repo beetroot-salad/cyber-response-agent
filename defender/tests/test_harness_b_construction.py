@@ -186,7 +186,12 @@ def test_settings_role_still_equals_pinned_values_after_collapse(monkeypatch):
 def test_build_agent_core_threads_def_model_and_effort_to_make_model(logger):
     """build_agent_core resolves the model via make_model(defn.model(), defn.effort) — the
     (name, effort) seam, calling the def's model THUNK — and pairs the returned model +
-    settings onto the Agent (observable via agent.model / agent.model_settings)."""
+    settings onto the Agent (observable via agent.model / agent.model_settings).
+
+    The seam stays TWO positional arguments. The prompt-cache affinity key is applied after
+    it returns, so what reaches the Agent is the seam's settings plus that one key — pinned
+    by EQUALITY against exactly that, so a third thing appearing between the seam and the
+    Agent is a failure here rather than something only the cache-key test below would see."""
     sentinel = {"SENTINEL": "s"}
     fake, calls = _capture_make_model(settings=sentinel)
     defn = AgentDefinition(role=AgentRole.MAIN, model=lambda: "glm-5.2", effort="low")
@@ -197,7 +202,30 @@ def test_build_agent_core_threads_def_model_and_effort_to_make_model(logger):
         )
     assert calls == [("glm-5.2", "low")]
     assert isinstance(agent.model, FunctionModel)
-    assert agent.model_settings == sentinel
+    assert agent.model_settings == {**sentinel, "openai_prompt_cache_key": "main"}
+
+
+def test_build_agent_core_keys_the_cache_on_the_conversation_when_there_is_one(logger):
+    """WITH a session the affinity key is that conversation's, so every turn of one growing
+    prefix asks for the replica already holding the previous turn; WITHOUT one it is the bare
+    agent id, which is what a single-call role (the review lenses) can reuse ACROSS runs.
+
+    Both arms are pinned here because they are the whole of the policy, and a key that
+    collapsed to one of them would be silently wrong in exactly the lane it did not fit: a
+    per-run key on a lens defeats the only reuse it has, and a bare agent id on `main` points
+    every concurrent run at one replica."""
+    defn = AgentDefinition(role=AgentRole.MAIN, model=lambda: "glm-5.2", effort="low")
+    with override_allow_model_requests(False):
+        in_session = driver.build_agent_core(
+            defn, deps_type=AgentDeps, instructions="x", logger=logger,
+            agent_id="main", make_model=_capture_make_model()[0], session_id="sess-7",
+        )
+        one_shot = driver.build_agent_core(
+            defn, deps_type=AgentDeps, instructions="x", logger=logger,
+            agent_id="ablation", make_model=_capture_make_model()[0],
+        )
+    assert in_session.model_settings["openai_prompt_cache_key"] == "sess-7:main"
+    assert one_shot.model_settings["openai_prompt_cache_key"] == "ablation"
 
 
 def test_build_agent_core_registers_read_only_pair(logger):
