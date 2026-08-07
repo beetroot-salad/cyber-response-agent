@@ -29,6 +29,7 @@ if __name__ == "__main__" and _VENV_PY.is_file() and Path(sys.executable) != _VE
 
 import argparse  # noqa: E402
 import asyncio  # noqa: E402
+import inspect  # noqa: E402
 from collections.abc import Callable  # noqa: E402
 from typing import Any, Protocol  # noqa: E402
 
@@ -98,19 +99,56 @@ def _source_one_provider_key(prov: providers.Provider) -> int:
     return 2
 
 
+def _accepts(sig: inspect.Signature, *args: Any, **kwargs: Any) -> bool:
+    """Can the accessor this signature describes be CALLED this way?
+
+    Asked of the signature rather than by calling it and catching `TypeError` — that would
+    also swallow a `TypeError` raised from INSIDE an accessor that took the argument fine, and
+    report a role whose model config is broken as one that simply owns its own model."""
+    try:
+        sig.bind(*args, **kwargs)
+    except TypeError:
+        return False
+    return True
+
+
 def _role_model_name(defn: Any, model_override: str | None) -> str:
     """The model name this role will ACTUALLY run on.
 
-    The operator's per-run `--model` reaches every role that resolves through the shared
-    main-model resolver — the investigator and the three review stages — and no role that
-    owns a knob of its own. Checking `defn.model()` alone validated the ambient default while
-    the run was about to execute on the override, so a broken override passed the preflight
-    clean."""
-    from defender.runtime import review_roles
+    The operator's per-run `--model` reaches every role whose accessor can TAKE it, and no
+    role that owns a knob of its own. Checking `defn.model()` alone validated the ambient
+    default while the run was about to execute on the override, so a broken override passed
+    the preflight clean.
 
-    shared = (driver.resolve_main_model, review_roles.resolve_review_model)
-    if model_override is not None and defn.model in shared:
+    Which roles those are is read off the accessor's SIGNATURE rather than a hand-list of the
+    accessors themselves. The list was a second registry: a role whose accessor accepted the
+    override but that nobody remembered to add validated the ambient default and ran on the
+    override, with no test between the two — and after #797 no surviving test executes this
+    branch at all, so the omission would be silent. A signature cannot be forgotten
+    separately, because accepting the parameter is the whole of what makes a role overridable:
+    the already-resolved accessors (`gather_model`, the bundle builder's `lambda: name`, the
+    learning stages' own knobs) take none by construction.
+
+    What is read is whether the accessor can be HANDED the override, not merely whether it has
+    parameters. Non-empty arity is the strictly weaker property: `def m(*, explicit=None)` —
+    the natural spelling for an override parameter — reports a parameter and REFUSES a
+    positional call, so an arity check hands it one, the `TypeError` lands in
+    `preflight_role_models`' broad `except`, and every `--model` run refuses to start with
+    "model config raised". A keyword-only override is therefore passed by its NAME. An
+    accessor naming more than one keyword-only parameter names no single override, and is
+    treated as one that owns its model rather than guessed at."""
+    if model_override is None:
+        return str(defn.model())
+    try:
+        sig = inspect.signature(defn.model)
+    except (TypeError, ValueError):
+        # A callable whose signature cannot be read is not one we can hand an override to.
+        return str(defn.model())
+    if _accepts(sig, model_override):
         return str(defn.model(model_override))
+    by_keyword = [p.name for p in sig.parameters.values() if p.kind is p.KEYWORD_ONLY]
+    if len(by_keyword) == 1 and _accepts(sig, **{by_keyword[0]: model_override}):
+        return str(defn.model(**{by_keyword[0]: model_override}))
     return str(defn.model())
 
 
@@ -173,7 +211,7 @@ class _Investigate(Protocol):
 
     def __call__(
         self, *, alert_path: Path, run_dir: Path, run_id: str, defender_dir: Path,
-        salt: str, model_name: str, box: Any,
+        salt: str, model_name: str, model_override: str | None, box: Any,
     ) -> dict[str, Any]: ...
 
 
@@ -185,6 +223,7 @@ def _drive_investigation(
     defender_dir: Path,
     salt: str,
     model_name: str,
+    model_override: str | None,
     box: Any,
 ) -> dict[str, Any]:
     """The production investigation call, as a SYNCHRONOUS callable.
@@ -201,15 +240,21 @@ def _drive_investigation(
         defender_dir=defender_dir,
         salt=salt,
         model_name=model_name,
+        model_override=model_override,
         box=box,
     ))
 
 
-def _run_investigation_lifecycle(
+def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs plus its four injection seams
     *,
     run_dir: Path,
     salt: str,
     model: str,
+    #: The operator's RAW `--model`, carried alongside the resolved `model` rather than
+    #: derived from it. The review roles pin their own default, and a caller that resolved
+    #: this against the investigator's would hand them a non-`None` model on every run,
+    #: making that default unreachable in production while a unit test still proved it.
+    model_override: str | None,
     defender_dir: Path,
     investigate: _Investigate = _drive_investigation,
     start_box: Callable[..., Any] = box_mod.start_box,
@@ -236,6 +281,7 @@ def _run_investigation_lifecycle(
             defender_dir=defender_dir,
             salt=salt,
             model_name=model,
+            model_override=model_override,
             box=box,
         )
         investigation_ok = True
@@ -281,6 +327,7 @@ def main(
         run_dir=run_dir,
         salt=salt,
         model=model,
+        model_override=ns.model,
         defender_dir=DEFENDER_DIR,
     )
 

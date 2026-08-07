@@ -21,6 +21,14 @@ assert STRONG_WEIGHTS.issubset(WEIGHT_BUCKETS), (
 assert REFUTED_WEIGHT in STRONG_WEIGHTS, "REFUTED_WEIGHT must be a strong weight"
 
 
+#: What a `:H <h>.authz` row's `edge_ref` says when the contract stands against the
+#: hypothesis's PROPOSED edge rather than an observed one. The parser writes it for a row that
+#: names no edge, and the review's ablation writes it over a row whose edge it withheld — so a
+#: contract never cites an id that is absent from the world the reader is looking at. One home
+#: for the two, because the second is only correct while it is spelled exactly like the first.
+UNOBSERVED_EDGE_REF: str = "proposed"
+
+
 TYPES: tuple[str, ...] = (
     "compute", "process", "thread", "memory-region", "module",
     "session", "identity", "storage", "database", "network-device",

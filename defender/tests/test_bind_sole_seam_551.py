@@ -109,6 +109,14 @@ from defender.runtime.permission import files  # noqa: E402
 from defender.runtime.permission.grant import Grant  # noqa: E402
 from defender.runtime.permission.policies._common import reader_grants  # noqa: E402
 from defender.runtime.permission.policy import AgentPolicy  # noqa: E402
+from defender.runtime.review_roles import (  # noqa: E402
+    COMPOSER_DEF,
+    DISCRIMINATION_DEF,
+    SUPPORT_DEF,
+    ComposerDeps,
+    DiscriminationDeps,
+    SupportDeps,
+)
 from defender.runtime.tools import AgentDeps, GatherDeps, _tool_write_file  # noqa: E402
 
 from defender.runtime.agent_definition import (  # noqa: E402
@@ -552,9 +560,15 @@ def test_d2_deps_class_maps_every_bindable_role(tmp_path):
         (bind(VERIFY_DEF, tmp_path, defender_dir=tmp_path / "vwt" / "defender"), VerifierDeps),
         (bind(LEAD_AUTHOR_DEF, tmp_path / "run", defender_dir=tmp_path / "wt" / "defender"),
          LeadAuthorDeps),
+        (bind(DISCRIMINATION_DEF, tmp_path), DiscriminationDeps),
+        (bind(SUPPORT_DEF, tmp_path), SupportDeps),
+        (bind(COMPOSER_DEF, tmp_path), ComposerDeps),
     ]
-    # 8 roles total: the 7 bindable ones above + CORPUS_AUTHOR (for_run-only, asserted below).
-    assert len({role for role in AgentRole}) == 8
+    # 11 roles total: the 10 bindable ones above + CORPUS_AUTHOR (for_run-only, asserted
+    # below). #796's three review roles bind with a bare `tmp_path` and nothing else — no
+    # scope, no defender_dir — which IS the assertion about them: a role that needed either
+    # would be a role holding a grant, and the whole posture is that they hold none.
+    assert len({role for role in AgentRole}) == 11
     for deps, expected in cases:
         assert type(deps) is expected, f"{deps.role} → {type(deps).__name__}, want {expected.__name__}"
     with pytest.raises((ValueError, TypeError)):

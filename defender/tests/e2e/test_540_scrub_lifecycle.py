@@ -332,7 +332,7 @@ def _drive_lifecycle(tmp_path, rec, *, fault=None, run_dir=None, **kw):
     seams = {"start_box": rec.start_box, "stop_box": rec.stop_box, "scrub": rec.scrub}
     seams.update(kw)   # a test may swap one seam for a faulting or real one
     return _run_investigation_lifecycle(
-        run_dir=run, salt="s741", model="m-741", defender_dir=DEFENDER,
+        run_dir=run, salt="s741", model="m-741", model_override=None, defender_dir=DEFENDER,
         investigate=_recording_investigate(rec.events, fault=fault), **seams,
     )
 

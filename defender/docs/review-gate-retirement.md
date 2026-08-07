@@ -1,15 +1,48 @@
 # The review gate between #797 and #796
 
+> **Both halves have landed.** The gate dispatches three blind lenses and a composer; the
+> interim posture below — `REVIEW_ROLES` empty, every confident close failing closed on
+> `NO_REVIEWER` — is history, and `NO_REVIEWER` is gone with it. The document is kept because
+> the rules are what outlive both changes; the prose below is written from where each rule
+> waited, and this note is what carries it forward.
+>
+> Two entries need updating in place. **Rule 16** is no longer unwitnessed:
+> `test_796_gate_arms.py::test_moving_the_generic_subagent_deadline_does_not_move_the_reviews`
+> re-pins the separation. **Rule 17** has its raiser again — `ReviewStages.stage()` raises
+> `UnboundReviewStage` for a bundle built without a run dir, and the gate takes it through the
+> ordinary stage-fault arm.
+>
+> The three rules under "code survives but the witness does not" are witnessed again: their
+> vulture-baseline entries are retired now that lenses call them.
+>
+> **Rules 9 and 13 came back with the reviewer, and both fired.** Rule 9's second path did not
+> exist — `_write_trace_row` always wrote the framed reply as its own literal line, which was
+> harmless only while no stage answered; the composer answers with a JSON OBJECT by contract,
+> so every close left a round-less row in the trace. It now rides inside the row's value when
+> any of its lines parses as an object — asked of `_io.parse_jsonl_row`, the same predicate
+> every trace reader applies, so the writer's raw-line choice cannot drift from what the
+> reader skips. Rule 13's "exactly one pass" no longer holds either: a challenged close comes
+> back and reviews again, so BOTH numbers `_fail` used to write as zero are parameters now —
+> the trace round is `ReviewState.turns`, and so is the `turns_used` the verdict carries into
+> the review record.
+>
+> The fresh-salt rule under "code survives but the witness does not" was half-held: the salt
+> was minted per call and read by nothing, so the record a lens reads went in UNFRAMED. The
+> projection is now rendered against that salt.
+
 #797 retired the live write-time gate's three review stages — the **challenger**, the
 **coherence checker** and the **projection stage** — and everything that existed only to
 serve them. #796 lands the blind lenses and the composer that replace them.
 
-**Between the two, the gate has no reviewer.** `challenge_gate.REVIEW_ROLES` is empty and
-every confident close takes the fail-closed arm: `forced-inconclusive`, cause "the challenge
-review did not complete", `failure_kind: error`, detail `challenge_gate.NO_REVIEWER`. That is
-the deliberate posture, not an outage. A gate that cannot review must not let a confident
-finding through, and committing one silently would be indistinguishable from a review that
-ran and found nothing. `defender/tests/test_797_retirement.py` is the live witness.
+**Between the two, the gate had no reviewer** — `challenge_gate.REVIEW_ROLES` was empty and
+every confident close took the fail-closed arm, with `NO_REVIEWER` as its detail. That window
+is closed: `REVIEW_ROLES` names the three lenses and the composer, and `NO_REVIEWER` is
+deleted. What survives the window is the ARM, and the rule it carries — a gate that cannot
+review must not let a confident finding through, and committing one silently would be
+indistinguishable from a review that ran and found nothing. Its witness is
+`test_797_retirement.py::test_797_a_confident_close_fails_closed_when_no_stage_is_bound`,
+which now drives it through an unbound bundle: `forced-inconclusive`, cause "the challenge
+review did not complete", `failure_kind: error`, detail from `UnboundReviewStage`.
 
 `inconclusive` closes are unaffected — they bypass the gate, as they always did.
 
@@ -31,10 +64,11 @@ already shipped once.**
 
 ### Rules whose CODE survives but whose witness does not
 
-These three are stated in code that #797 keeps and no test now reaches, because their only
-callers were the retired stages. They are the reason `_call_stage`, `_fresh_stage_request`,
-`bind_review_role` and `_make_live_stage` are in the vulture baseline rather than deleted —
-each baseline entry names the rule it is holding.
+These three were stated in code that #797 kept and no test then reached, because their only
+callers were the retired stages — which is why `_call_stage`, `_fresh_stage_request`,
+`bind_review_role` and `_make_live_stage` sat in the vulture baseline rather than being
+deleted. **#796 gave all three callers again and the baseline entries are retired**; the rows
+below name where each rule now lives.
 
 | Rule | Code that holds it |
 |---|---|
@@ -156,7 +190,8 @@ Each of these is stated as the rule, not as the deleted code, because #796's sha
 
 ## What #797 did NOT touch
 
-Turn accounting, the overlap rule (`ReviewState.raised_leads`, which #796 rekeys to
-`raised_asks`), the forced-turn cap, and everything in the offline learning loop.
+Turn accounting, the overlap rule (`ReviewState.raised_leads` then; #796 rekeyed it to
+`raised_asks` on `ask.target`), the forced-turn cap, and everything in the offline learning
+loop.
 `directions_for`, `ticket_seeds` and `mitre_corpus` stay — the learning loop is their other
 consumer; only the gate's use of them went.

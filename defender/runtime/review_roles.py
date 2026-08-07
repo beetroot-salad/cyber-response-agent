@@ -23,39 +23,72 @@ never hold that key).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields as dc_fields, replace
 from pathlib import Path
+from typing import Any, ClassVar
 
-from defender.runtime.agent_definition import AgentDefinition, RunScope, bind
+from defender._env import env_str
+from defender.runtime.agent_definition import AgentDefinition, RunScope, ToolSet, bind
+from defender.runtime.agent_role import AgentRole
 from defender.runtime.tools import AgentDeps
 
 __all__ = [
+    "COMPOSER_DEF",
+    "DEFAULT_REVIEW_MODEL",
+    "REVIEW_MODEL_ENV",
+    "DISCRIMINATION_DEF",
+    "SUPPORT_DEF",
+    "ComposerDeps",
+    "DiscriminationDeps",
     "ReviewStages",
+    "live_review_stages",
+    "SupportDeps",
     "UnboundReviewStage",
     "bind_review_role",
     "resolve_review_model",
 ]
 
+# The slash construction this used to carry ("a pure text-in/text-out projection") reads to
+# `test_grant_gate_575._named_programs` as a slash-GROUP of program names — the same shape as
+# `jq/ls/cat` — so a role bound to it named two programs its own lane denies. The reason is
+# PROMPT SURFACE: a model reading it would have been taught a command pair that does not
+# exist. It went unseen under #797 because the constant survived with no role attached to it.
 _DENY_REASON = (
-    "Blocked: this review stage is a pure text-in/text-out projection — its entire input is "
-    "inlined in the prompt and its entire output is one document. It holds no read grant and "
-    "no bash grant of any kind."
+    "Blocked: this review stage is a pure projection — it receives text and returns text. Its "
+    "entire input is inlined in the prompt and its entire output is one document. It holds no "
+    "read grant and no bash grant of any kind."
 )
 
 
+REVIEW_MODEL_ENV = "DEFENDER_REVIEW_MODEL"
+
+#: The review's own shipped default, PINNED APART from the investigator's. On the two frozen
+#: judge cases in `experiments/judge-glm52-vs-kimik3`, the investigator's default disagreed
+#: with ITSELF on both — a self-consistency floor of 0% on the label axis — where this model
+#: held 100% across four reps. The learning judge was ported on the same measurement and the
+#: same grounds (`learning/core/config.py:judge_model`), and the review is the same shape of
+#: job: a verdict read off a frozen input. n=2, validation only; enough to pin a default, not
+#: enough to close the question.
+DEFAULT_REVIEW_MODEL = "kimi-k3"
+
+
 def resolve_review_model(explicit: str | None = None) -> str:
-    """The model every review stage runs on — the INVESTIGATOR's own resolver, so an
-    operator's per-run `--model` reaches the review as well as the investigation, and the
-    shipped default has exactly ONE home.
+    """The model every review role runs on: the operator's `--model` if there is one, then
+    this review's OWN env var, then the review default.
 
-    A private copy of the env var and the default id was the shipped shape, on the stated
-    grounds of an import cycle. It bought a review that could not receive the override at all
-    (the accessor took no parameter) and a second copy of the default that drifts the first
-    time the default moves. The cycle is real but it is an IMPORT-TIME one only: `driver`
-    imports this module, so the import lives in the body rather than at module scope."""
-    from defender.runtime.driver import resolve_main_model
+    It deliberately does NOT read `DEFENDER_MODEL`. That is the investigator's knob, and a
+    review that read it would silently un-pin its default on every run that set it — including
+    every hermetic replay, which sets `DEFENDER_MODEL`/`DEFENDER_GATHER_MODEL` precisely to
+    keep its two fakes distinguishable. The stability this default is chosen for would then be
+    absent exactly where a run is cheapest to get wrong.
 
-    return resolve_main_model(explicit)
+    `explicit` is the OPERATOR's raw override and must stay raw to reach here — a caller that
+    resolves it against the main model first passes a non-`None` value on every run, and the
+    review default becomes unreachable in production while still looking correct to a unit
+    test that calls this with `None`."""
+    if explicit is not None:
+        return explicit
+    return env_str(REVIEW_MODEL_ENV, DEFAULT_REVIEW_MODEL)
 
 
 def bind_review_role(
@@ -63,6 +96,53 @@ def bind_review_role(
 ) -> AgentDeps:
     """Bind a review role's deps with its OWN fresh salt — PR7/PR8: never the session's."""
     return bind(defn, run_dir, scope=RunScope(), salt=None, defender_dir=defender_dir)
+
+
+@dataclass(frozen=True)
+class DiscriminationDeps(AgentDeps):
+    role: ClassVar[AgentRole] = AgentRole.DISCRIMINATION
+
+
+@dataclass(frozen=True)
+class SupportDeps(AgentDeps):
+    role: ClassVar[AgentRole] = AgentRole.SUPPORT
+
+
+@dataclass(frozen=True)
+class ComposerDeps(AgentDeps):
+    role: ClassVar[AgentRole] = AgentRole.COMPOSER
+
+
+# Each deps class exists ONLY to carry its `role` ClassVar. `AgentDeps.role` defaults to
+# `AgentRole.MAIN`, so a review role bound through the base class would hold MAIN's identity —
+# which passes the close tool's `deps.role is not AgentRole.MAIN` gate and flips
+# `_is_learning_role`. The override is the whole class.
+
+# The lenses read; the composer judges. The effort split follows that: a lens reconstructs
+# what a projection supports, the composer weighs three readings against the investigation's
+# own account and decides whether a confident close survives.
+_LENS_EFFORT = "medium"
+_COMPOSER_EFFORT = "high"
+
+
+def _review_def(role: AgentRole, deps_cls: type[AgentDeps], effort: str) -> AgentDefinition:
+    """One review role, built the ordinary zero-grant way: no tools, no bash shapes, no write
+    shapes, no corpus, none of the four `requires_*` preconditions. Everything that makes a
+    review role safe is the ABSENCE of a grant, so the definition says almost nothing — and
+    the one thing it must say (`deps_cls`, carrying the role identity) is the parameter."""
+    return AgentDefinition(
+        role=role,
+        model=resolve_review_model,
+        effort=effort,
+        tools=ToolSet(),
+        deps_cls=deps_cls,
+        deny_reason=_DENY_REASON,
+    )
+
+
+DISCRIMINATION_DEF = _review_def(AgentRole.DISCRIMINATION, DiscriminationDeps, _LENS_EFFORT)
+SUPPORT_DEF = _review_def(AgentRole.SUPPORT, SupportDeps, _LENS_EFFORT)
+COMPOSER_DEF = _review_def(AgentRole.COMPOSER, ComposerDeps, _COMPOSER_EFFORT)
 
 
 class UnboundReviewStage(RuntimeError):
@@ -76,11 +156,22 @@ class UnboundReviewStage(RuntimeError):
     the review CLOSED and names why, rather than acting confidently on the wrong tree."""
 
 
-def _make_live_stage(defn: AgentDefinition, run_dir: Path, defender_dir: Path, trace_name: str):
+def _make_live_stage(  # noqa: PLR0913 — one stage's full wiring, named once
+    defn: AgentDefinition, run_dir: Path, defender_dir: Path, trace_name: str,
+    *, agent_id: str, instructions: str,
+):
     """One live, agent-backed review stage: built lazily, one Agent per call, mirroring the
-    gather-subagent-from-tool-body pattern. NOT exercised by the hermetic suite (every
-    scenario there injects a fake), so treat a bundle built from it as a best-effort live
-    default."""
+    gather-subagent-from-tool-body pattern. NOT exercised by the hermetic suite — the replay
+    harness binds a fake bundle on the `review_stages` seam by DEFAULT, so a replay reaching
+    this function is itself the bug (`test_replay_skeleton` asserts no `*_live_trace.jsonl`
+    is written). Treat a bundle built from it as a best-effort live default.
+
+    `trace_name` and `agent_id` are PER LENS and not per role, because one role can be
+    dispatched twice. `RequestLogger` refuses a second concurrent open of a path, so a shared
+    trace file makes whichever call loses the race raise — caught as a stage error, failing
+    the whole review closed, non-deterministically. And `observe` keys its sequence and id on
+    `agent_id`, so a shared one collapses two readings into one in `llm_requests.jsonl` and in
+    the visualizer. The first fails loudly and at random; the second never fails at all."""
 
     async def call(request):
         from defender.runtime import observe
@@ -90,12 +181,8 @@ def _make_live_stage(defn: AgentDefinition, run_dir: Path, defender_dir: Path, t
         assert defn.deps_cls is not None, f"{defn.role.name}_DEF declares no deps_cls"
         try:
             agent = build_agent_core(
-                defn, deps_type=defn.deps_cls,
-                instructions=(
-                    "You are a review stage. Respond to exactly what the prompt asks; you "
-                    "hold no tools, no file-read grant, and no bash grant."
-                ),
-                logger=logger, agent_id=defn.role.value,
+                defn, deps_type=defn.deps_cls, instructions=instructions,
+                logger=logger, agent_id=agent_id,
             )
             deps = bind_review_role(defn, run_dir, defender_dir=defender_dir)
             result = await agent.run(request.prompt, deps=deps)
@@ -109,14 +196,77 @@ def _make_live_stage(defn: AgentDefinition, run_dir: Path, defender_dir: Path, t
 @dataclass
 class ReviewStages:
     """The injection bundle `run_investigation(review_stages=…)`/`close_investigation(stages=…)`
-    take — the seam, held open across #797/#796.
+    take.
 
-    IT CARRIES NO STAGES. #797 retired the three it was written around
-    (`challenger`/`coherence_checker`/`projection`) and #796 fills it with the lens and
-    composer roles that replace them. It is rewritten to an empty shape rather than kept with
-    the three dead attribute names, because a bundle whose attributes name roles that no
-    longer exist reads to every caller — and to the e2e harness's sixth injection seam — as if
-    those roles were still there to inject.
+    Every field DEFAULTS TO NONE rather than being required, because one composition root
+    genuinely has no run dir to bind a stage against (`driver.build_agent`) and must still
+    produce a bundle. An unfilled field is therefore not a programming error to raise on at
+    construction — it is a stage that is not bound, and `stage()` is where that becomes a
+    fault.
 
-    Between the two changes the gate has no reviewer at all and fails every confident close
-    closed; see `challenge_gate.NO_REVIEWER`."""
+    Read every stage through `stage()`, never off the attribute. The lookup used to sit
+    OUTSIDE the gate's `try`, so an `AttributeError` from a partial bundle escaped the
+    fail-closed arm entirely — past the gate, past the close tool, and into a driver that does
+    not classify it. Through `stage()` a missing lens is `UnboundReviewStage`, which the gate
+    catches like any other stage fault."""
+
+    discrimination: Any = None
+    support: Any = None
+    #: The SUPPORT role again, as a
+    #: SEPARATE call: its own trace file and its own agent id, because `RequestLogger`
+    #: refuses a second concurrent open of a path and `observe` keys its sequence on the
+    #: agent id. One role, two calls, two records.
+    ablation: Any = None
+    composer: Any = None
+
+    def stage(self, name: str) -> Any:
+        # The name is checked against this bundle's OWN fields before it is looked up. A bare
+        # `getattr` answers for anything on the class — `stage("stage")` handed the gate this
+        # method back as if it were a bound lens — and reported every typo as "no run dir",
+        # which is a diagnosis of a different fault than the one that happened.
+        if name not in {f.name for f in dc_fields(self)}:
+            raise UnboundReviewStage(
+                f"{name!r} is not a review stage — this bundle carries "
+                f"{sorted(f.name for f in dc_fields(self))}"
+            )
+        fn = getattr(self, name)
+        if fn is None:
+            raise UnboundReviewStage(
+                f"the {name} stage is not bound — this bundle was built by a composition root "
+                "that never held a run dir"
+            )
+        return fn
+
+
+def live_review_stages(
+    run_dir: Path, defender_dir: Path, *, model_override: str | None = None,
+) -> ReviewStages:
+    """The production bundle, buildable only where the run dir is.
+
+    `model_override` is the OPERATOR's raw `--model`, threaded here unresolved. Resolving it
+    against the investigator's model on the way would hand `resolve_review_model` a non-`None`
+    value on every run, and the review's own default would be unreachable in production while
+    a unit test calling it with `None` still proved it was the default."""
+    from defender.runtime.review import role_prompt
+
+    name = resolve_review_model(model_override)
+    # One read per ROLE, not per call: SUPPORT is dispatched twice and its asset does not
+    # change between the two.
+    prompts = {
+        defn.role.value: role_prompt(defn.role.value)
+        for defn in (DISCRIMINATION_DEF, SUPPORT_DEF, COMPOSER_DEF)
+    }
+
+    def staged(defn: AgentDefinition, lens: str) -> Any:
+        return _make_live_stage(
+            replace(defn, model=lambda: name), run_dir, defender_dir,
+            f"review_{lens}_live_trace.jsonl",
+            agent_id=lens, instructions=prompts[defn.role.value],
+        )
+
+    return ReviewStages(
+        discrimination=staged(DISCRIMINATION_DEF, "discrimination"),
+        support=staged(SUPPORT_DEF, "support"),
+        ablation=staged(SUPPORT_DEF, "ablation"),
+        composer=staged(COMPOSER_DEF, "composer"),
+    )

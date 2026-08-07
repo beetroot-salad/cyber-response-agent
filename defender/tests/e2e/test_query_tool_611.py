@@ -35,10 +35,11 @@ breaker outcome in the assertions below is production code's work.
 from __future__ import annotations
 
 import ast
-import importlib.util
 import inspect
 import json
+import os
 import re
+import subprocess
 from dataclasses import fields, replace
 from pathlib import Path
 
@@ -100,7 +101,28 @@ pytestmark = pytest.mark.e2e
 SALT = "aabbccddeeff0011"
 LEAD = "l-001"
 ADAPTERS_DIR = DEFENDER / "scripts" / "adapters"
-_HAS_DUCKDB = importlib.util.find_spec("duckdb") is not None
+
+
+def _sql_shim_aggregates() -> bool:
+    """Can the `defender-sql` shim OF THE TREE UNDER TEST actually aggregate a payload?
+
+    Deliberately not `find_spec("duckdb")`: that asks OUR interpreter, and the shim runs
+    in a different one — `bin/defender-sql` re-execs into `$DEFENDER_DIR/.venv/bin/python3`
+    and falls back to a bare `python3` when that tree has no venv. A checkout without its
+    own `.venv` (a review worktree, say) is then a process that imports duckdb driving a
+    shim that cannot, and the aggregation assertion below fails on the environment instead
+    of on the code. Ask the shim, the way the test does, and never raise: a missing binary
+    is a `False`.
+    """
+    try:
+        probe = subprocess.run(
+            [str(DEFENDER / "bin" / "defender-sql"), "SELECT 1"],
+            input=b"[]", capture_output=True, timeout=30,
+            env={**os.environ, "DEFENDER_DIR": str(DEFENDER)},
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return probe.returncode == 0
 
 PAYLOAD = [
     {"@timestamp": "2026-01-01T00:00:00Z", "user.name": "dev.dana", "event.action": "ssh_login"},
@@ -253,10 +275,11 @@ def test_query_return_wrap_positive_control(tmp_path):
     aggregates the real rows."""
     rec = VerbRecorder()
     payload_abs = None
+    sql_runs = _sql_shim_aggregates()
 
     turns = [q("elastic", "query", {"native_query": "FROM logs"})]
     sql_turn_idx = None
-    if _HAS_DUCKDB:
+    if sql_runs:
         sql_turn_idx = len(turns)
         turns.append(Turn(tool_calls=[("bash", {"command": "PLACEHOLDER"})]))
     turns.append(DONE)
@@ -279,9 +302,12 @@ def test_query_return_wrap_positive_control(tmp_path):
     assert "<run-" not in on_disk, "the persisted payload must be the raw bytes, never wrapped"
     assert json.loads(on_disk) == PAYLOAD
 
-    if _HAS_DUCKDB:
+    if sql_runs:
         assert re.search(r'"n":\s*2', gather.seen[-1]), \
             "defender-sql over the persisted payload did not aggregate the real rows"
+    else:
+        pytest.skip("this tree's defender-sql cannot aggregate (no duckdb in the venv it "
+                    "re-execs into) — the on-disk half of the control ran and held")
 
 
 

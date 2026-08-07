@@ -31,20 +31,21 @@ from defender.tests.e2e._replay_harness import (
     materialize,
     normalize,
 )
+from defender._io import read_jsonl_rows
 from defender.runtime import permission, tools as runtime_tools
 from defender.runtime.agent_definition import compile_policy_for
+from defender.runtime.close_tool import CAUSE_EVIDENCE_CANNOT_DISCRIMINATE
 from defender.runtime.driver import GATHER_DEF, MAIN_DEF
 from defender.skills.invlang.validate import validate_companion
+from defender.tests import _review_bundle
 
 pytestmark = pytest.mark.e2e
 
 
-# #797 retired the three review stages, so there is no stub bundle to inject: the review
-# bundle is empty until #796 lands its lenses and composer, and the gate fails every
-# confident close CLOSED. The two replays below drafted `malicious` and used to commit it on
-# a stub counter-story that arrived fully settled; they now commit `inconclusive`, which is
-# the deliberate interim posture and is asserted as such rather than worked around.
-CONFIDENT_CLOSE_IS_FORCED = "inconclusive"
+# The replays below draft `malicious` and the gate reviews it. They commit it again — the
+# harness binds a hermetic review bundle whose composer finds `holds` (see `_replay_harness`,
+# `review_stages`), so the reviewer runs end-to-end here rather than the replay asserting
+# whatever shape a live provider call happens to fail in.
 
 
 def test_replay_golden_v2sshd(tmp_path):
@@ -108,9 +109,8 @@ def test_replay_full_run_ab3(tmp_path, monkeypatch):
     )
 
     # #774/R1: the golden trace's report.md write is re-recorded as a close_investigation
-    # call. It reaches a confident (malicious) disposition, which the gate reviews — and #797
-    # left it with no review role to dispatch, so the review fails closed and the drafted
-    # disposition is overridden. No live provider call either way.
+    # call. It reaches a confident (malicious) disposition, which the gate reviews — three
+    # lenses and a composer, all four bound to the harness's hermetic bundle.
     drive(run_dir, run_id=run_id, salt=salt, main=replay)
 
     assert replay.calls == len(turns), \
@@ -126,16 +126,60 @@ def test_replay_full_run_ab3(tmp_path, monkeypatch):
     report = (run_dir / "report.md").read_text()
     m = re.search(r"^disposition:\s*(\w+)", report, re.M)
     assert m is not None
-    assert m.group(1) == CONFIDENT_CLOSE_IS_FORCED, (
-        "the drafted `malicious` reached disk — with no review role bound, a confident close "
-        "must be overridden, not committed"
+    assert m.group(1) == "malicious", (
+        "a review that ran and found the close sound must leave the drafted disposition alone"
     )
-    assert "failure_kind: error" in report, (
-        "the override is recorded as a finding about the evidence rather than as the review "
-        "machinery failing"
+    assert "failure_kind:" not in report, (
+        "the frontmatter names a machinery failure on a run where every stage answered"
     )
+
+    # The reviewer really ran, rather than the close committing past a gate that never
+    # dispatched: four stages, four traces, each carrying its round.
+    for role in ("discrimination", "support", "ablation", "composer"):
+        rows = read_jsonl_rows(run_dir / f"review_{role}_trace.jsonl")
+        assert rows, f"the {role} stage left no trace row"
+        assert rows[0].get("ok") is True, f"the {role} stage did not answer"
+    assert not list(run_dir.glob("review_*_live_trace.jsonl")), (
+        "a live stage was built: the run reached the provider-backed bundle, not the "
+        "harness's injected one"
+    )
+
     assert (run_dir / "tool_trace.jsonl").is_file()
 
+
+def test_a_gap_the_review_cannot_measure_overrides_the_confident_close(tmp_path):
+    """The gate's other arm, end to end: the composer finds a gap and can name no measurement
+    that would settle it, so the drafted `malicious` never reaches disk.
+
+    The pair with `test_replay_full_run_ab3` is the whole point — same machinery, same
+    confident draft, one bundle apart. A suite in which every review answers `holds` cannot
+    tell a reviewer that ran from a close that reached no reviewer at all, which is exactly
+    what the replays were unable to distinguish while the seam defaulted to a live bundle."""
+    run_id, salt = "replay-gap", "ccddeeff00112233"
+    run_dir = materialize(tmp_path, GOLDEN_AB3)
+    inv_text = (GOLDEN_AB3 / "investigation.md").read_text()
+
+    replay = ReplayFn([
+        Turn(tool_calls=[("write_file",
+                          {"path": str(run_dir / "investigation.md"), "content": inv_text})]),
+        Turn(tool_calls=[("close_investigation", {"disposition": "malicious"})]),
+        Turn(text="Investigation complete."),
+    ])
+    drive(run_dir, run_id=run_id, salt=salt, main=replay,
+          review_stages=_review_bundle.bundle(composer=_review_bundle.composer_reply(
+              "gap", review="the pivot rests on one inference no lead measured", ask=None,
+          )))
+
+    report = (run_dir / "report.md").read_text()
+    m = re.search(r"^disposition:\s*(\w+)", report, re.M)
+    assert m is not None
+    assert m.group(1) == "inconclusive", (
+        "the drafted `malicious` reached disk past a review that found a gap"
+    )
+    assert CAUSE_EVIDENCE_CANNOT_DISCRIMINATE in report
+    assert "failure_kind:" not in report, (
+        "an override the review DECIDED is recorded as the review machinery failing"
+    )
 
 
 @pytest.mark.parametrize(("label", "tool_name", "args_fn", "reason_substr", "escape_name"), [

@@ -535,7 +535,7 @@ def build_agent(  # noqa: PLR0913 — composition root: config + DI seams + the 
     # gate's own fault arm, instead of quietly acting on the wrong tree.
     stages = (
         review_stages if review_stages is not None
-        else review_roles.ReviewStages()  # lint-default: ok — DI seam owning its default (#797: the bundle carries no stages until #796)
+        else review_roles.ReviewStages()  # lint-default: ok — DI seam owning its default (the UNBOUND bundle: this root holds no run dir, so `stage()` raises UnboundReviewStage and the gate fails the close closed)
     )
     if main_defn.tools.close:
         register_close_tool(agent, stages=stages, bounds=bounds)
@@ -704,6 +704,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     store_factory: StoreFactory | None = None,
     review_stages: Any = None,
     bounds: challenge_gate.Bounds | None = None,
+    model_override: str | None = None,
 ) -> dict:
     model_name = resolve_main_model(model_name)
     # lint-default: ok — DI seam owning its default (the #774 repair's seventh seam: the
@@ -715,13 +716,17 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     # their policies on, and the operator's model choice. `build_agent` — which sees neither —
     # used to substitute the source tree for the run dir here.
     #
-    # #797: the bundle is EMPTY until #796 lands its lenses and composer, so the live default
-    # is buildable without either input for now. The assembly stays HERE rather than moving up
-    # to `build_agent` — the moment a stage exists again it needs the run dir, and moving the
-    # seam back afterwards is how the source-tree substitution got written the first time.
+    # `model_override` is the operator's RAW `--model` and is deliberately a different value
+    # from `model_name` above, which has already been resolved against the investigator's
+    # default. Handing the resolved one to the review would give it a non-`None` explicit
+    # model on every run, and the review's own pinned default would be unreachable in
+    # production while a unit test calling the resolver with `None` still proved it was the
+    # default.
     stages = (
         review_stages if review_stages is not None
-        else review_roles.ReviewStages()  # lint-default: ok — DI seam owning its default (the live bundle, buildable only where the run dir is)
+        else review_roles.live_review_stages(  # lint-default: ok — DI seam owning its default (the live bundle, buildable only where the run dir is)
+            run_dir, defender_dir, model_override=model_override,
+        )
     )
     make_model = make_model or providers.build_for_effort
     adapters = defender_dir / "scripts" / "adapters"

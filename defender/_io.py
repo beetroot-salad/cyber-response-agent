@@ -50,27 +50,40 @@ def use_utf8_stdio() -> None:
             reconfigure(encoding="utf-8", errors=getattr(stream, "errors", None) or "strict")
 
 
+def parse_jsonl_row(line: str) -> dict | None:
+    """One physical line as a JSONL ROW, or ``None`` if it is not one.
+
+    THE definition of what counts as a row, published rather than kept inside
+    :func:`read_jsonl_rows`, because the rule has a second reader that must agree with it
+    exactly. ``challenge_gate._write_trace_row`` decides whether a stage's framed reply may
+    stand in the file as its own physical line, and that is only safe while "a line every
+    reader skips" is the SAME predicate the reader applies — re-derived on the writer's side,
+    a reader that later accepted another JSON type would silently start counting a review
+    lens's reply as gate metadata, with nothing linking the two definitions.
+
+    A row is a line that parses AND parses to a dict: ``"x"``, ``3`` and ``[...]`` are all
+    valid JSON and none of them is one. Without that half the declared ``list[dict]`` was a
+    lie and every consumer's ``row.get(...)`` raised ``AttributeError`` on the first such
+    line — a class no drain guard names, so it crashed the worker every tick, which is
+    exactly the failure the tolerant reader exists to prevent.
+    """
+    s = line.strip()
+    if not s:
+        return None
+    try:
+        obj = json.loads(s)
+    except ValueError:
+        # `JSONDecodeError` IS a `ValueError`. The broader guard costs nothing and spares the
+        # two callers from having to agree on which of the two to name.
+        return None
+    return obj if isinstance(obj, dict) else None
+
+
 def read_jsonl_rows(path: Path) -> list[dict]:
     if not path.is_file():
         return []
-    rows: list[dict] = []
     text = path.read_text(encoding="utf-8", errors="replace")  # lint-jsonl-io: ok — the canonical tolerant reader  # noqa: E501
-    for line in text.splitlines():
-        s = line.strip()
-        if not s:
-            continue
-        try:
-            obj = json.loads(s)
-        except json.JSONDecodeError:
-            continue
-        # A JSONL line is a ROW: `"x"`, `3` and `[...]` are all valid JSON and none of them
-        # is one. Without this the declared `list[dict]` was a lie and every consumer's
-        # `row.get(...)` raised AttributeError on the first such line — a class no drain
-        # guard names, so it crashed the worker every tick, which is exactly the failure
-        # the tolerant reader exists to prevent.
-        if isinstance(obj, dict):
-            rows.append(obj)
-    return rows
+    return [row for line in text.splitlines() if (row := parse_jsonl_row(line)) is not None]
 
 
 def append_jsonl(path: Path, rows: list[dict]) -> int:
