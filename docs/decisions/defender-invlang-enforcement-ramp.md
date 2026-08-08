@@ -35,9 +35,22 @@ error rather than letting the write through. Scope is anchored to
    itself declares in `:H h-NNN.preds` / `.attr_preds` / `.refuts`. The
    parser derives those lists from head tokens and never joined them
    back to the declaring block, so a typo, a forward reference and a
-   *sibling's* `p1` all parsed clean (#798). It does NOT catch an
-   unknown `h-*` in the row itself — that needs the parser to
-   accumulate `:H` blocks first (#816).
+   *sibling's* `p1` all parsed clean (#798).
+6a. hypothesis-refs — the row's own `h-*` must be declared, at
+   `:H hypothesize.hypotheses` or at a lead's `:H l-NNN.new_hypotheses`
+   (#818). The projector opens no bucket for an unknown `h-*`, so a
+   phantom moved to `++` in silence and `_walkers.final_weights`
+   reported it live. It could not be enforced until `:H` blocks
+   accumulated (#817) — before that a legitimate mid-run fork's earlier
+   hypotheses were dropped and this error fired on a correct document.
+   One error per row (the citation half of rule 6 stands down for that
+   row), and it defers to rule 1 when a parse warning came off a
+   hypothesis *declaration* block: those warnings delete ids the
+   document still refers to, so the parse error already names the
+   cause. `examples/example-b-parallel-iam-cmdb.md` is the shipped
+   instance — its `:H` rows use `attached_to=e-001`, which `:H` forbids,
+   and four resolutions then point at the hypotheses those row errors
+   dropped. *Fix the example and the deference stops mattering there.*
 7. strong-move citation — a `++`/`--` must name at least one of them.
    The other half of rule 3's provenance tuple: which pre-committed
    claim the cited observation settled.

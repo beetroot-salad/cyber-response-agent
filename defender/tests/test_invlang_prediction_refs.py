@@ -223,6 +223,43 @@ def test_a_dropped_hypothesis_block_defers_to_its_own_parse_warning():
     assert [e for e in validate_companion(doc) if "whole block rejected" in e]
 
 
+def test_a_warning_that_drops_no_hypothesis_does_not_stand_the_rule_down():
+    """The deference is keyed to the DECLARING block, not to "the document
+    parsed without a single warning". An unknown block drops no `:H` row, so
+    h-404 is still phantom for exactly the reason the error gives — gating on
+    `not warnings` hid it behind any unrelated parse defect, and would have hid
+    it behind every warning added since."""
+    errors = _errors(_doc(
+        _two_hypotheses() + "\n"
+        ":Z bogus.block [a|b]\n"
+        "x|y\n"
+        "\n"
+        ":T resolutions\n"
+        "h-404  null → ++   [l-001 p1 severe ⟂ e-002 :: phantom]"
+    ))
+    assert len(errors) == 1
+    assert "'h-404'" in errors[0]
+
+
+def test_a_misspelled_new_hypotheses_block_names_itself():
+    """`:H l-NNN.new_hypotheses` is now a documented authoring surface, so the
+    singular typo is reachable. The projector drops an unhandled `:H` lead
+    sub-block, and with no warning the resolution row took the blame for a
+    hypothesis the author did declare — an error pointing at a correct row."""
+    doc = _doc(
+        _two_hypotheses() + "\n"
+        ":H l-001.new_hypothesis "
+        "[id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]\n"
+        "h-010|?mid-run-fork|v-001|executed|process|unclassified-process||null|active\n"
+        "\n"
+        ":T resolutions\n"
+        "h-010  null → +    [l-001 weak ⟂ e-002 :: the fork holds]"
+    )
+    assert [e for e in validate_companion(doc) if "new_hypothesis`" in e], (
+        "the parse warning must name the misspelled block"
+    )
+
+
 
 
 def test_a_strong_move_citing_nothing_is_rejected():

@@ -6,7 +6,11 @@ from typing import Any
 
 from defender._vocab import normalized_disposition
 from . import _walkers, vocab
-from .parser import INVLANG_FENCE_RE, parse_dense_companion
+from .parser import (
+    INVLANG_FENCE_RE,
+    dropped_a_hypothesis_declaration,
+    parse_dense_companion,
+)
 from .schema import CompanionBody, EdgeRecord, HypothesisRecord, VertexRecord
 
 STRONG_AUTH_KINDS = vocab.STRONG_AUTH_KINDS
@@ -99,7 +103,7 @@ def _known_ids(declared: set[str]) -> str:
 
 
 def _check_prediction_refs(
-    companion: CompanionBody, *, parse_clean: bool
+    companion: CompanionBody, *, declarations_intact: bool
 ) -> list[str]:
     """A resolution moves a hypothesis that was declared, and matches only the
     predictions and refutations that hypothesis declared.
@@ -119,10 +123,13 @@ def _check_prediction_refs(
     legitimate mid-run fork's earlier hypotheses were dropped by the parser and
     this error would have fired on a correct document.
 
-    `parse_clean` is what keeps that deference honest now: a `:H` block the
-    parser REJECTED (a stale header, an `attached_to` naming an edge) leaves
-    every resolution against it looking phantom, and the parse warning already
-    names the cause. One defect, one error.
+    `declarations_intact` is what keeps that deference honest now: a `:H`
+    DECLARATION block the parser rejected (a stale header, an `attached_to`
+    naming an edge) leaves every resolution against it looking phantom, and the
+    parse warning already names the cause. One defect, one error. It is keyed to
+    the declaring block, not to "the document parsed without a single warning" —
+    an unknown block or an unattributed `:R` row drops no hypothesis, so a
+    phantom alongside one must still be reported.
     """
     errors: list[str] = []
     declared_by_hyp = {
@@ -132,16 +139,19 @@ def _check_prediction_refs(
         )
         for hid, hyp in _walkers.all_hypotheses(companion).items()
     }
+    declared_hyp_ids = _known_ids(set(declared_by_hyp))
     for lid, res in _walkers.iter_resolutions(companion):
         hid = res.get("hypothesis")
-        entry = declared_by_hyp.get(hid) if isinstance(hid, str) else None
+        if not isinstance(hid, str):
+            continue
+        entry = declared_by_hyp.get(hid)
         if entry is None:
-            if parse_clean and isinstance(hid, str):
+            if declarations_intact:
                 errors.append(
                     f"lead {lid}: resolution moves undeclared hypothesis "
                     f"{hid!r} — no `:H hypothesize.hypotheses` or "
                     f"`:H l-NNN.new_hypotheses` row declares it (declared: "
-                    f"{_known_ids(set(declared_by_hyp))}); a hypothesis born "
+                    f"{declared_hyp_ids}); a hypothesis born "
                     f"mid-run is declared by the lead that found it, before "
                     f"anything resolves it"
                 )
@@ -590,7 +600,10 @@ def validate_companion(
         return errors
 
     errors.extend(_check_lead_refs(companion))
-    errors.extend(_check_prediction_refs(companion, parse_clean=not warnings))
+    errors.extend(_check_prediction_refs(
+        companion,
+        declarations_intact=not dropped_a_hypothesis_declaration(warnings),
+    ))
     errors.extend(_check_strong_move_provenance(companion))
     errors.extend(_check_closed_vocab(companion))
     errors.extend(_check_benign_gating(companion))

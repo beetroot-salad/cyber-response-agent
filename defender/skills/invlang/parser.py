@@ -157,6 +157,30 @@ _HYP_HEADER_COLS = {
 }
 
 
+#: The two block names that DECLARE a hypothesis, spelled as `ParseWarning.block`
+#: renders them (`:H <name>`). One owner: `_project_block`'s dispatch, the
+#: validator's "did a declaration get dropped?" test, and the SKILL/parser
+#: grammar pin all read which names are declaration sites from here, so they
+#: cannot drift into disagreeing about it.
+HYP_DECLARATION_BLOCK_RE = re.compile(
+    r"^:H (?:hypothesize\.hypotheses|l-[A-Za-z0-9]+\.new_hypotheses)$"
+)
+
+
+def dropped_a_hypothesis_declaration(warnings: list[ParseWarning]) -> bool:
+    """True when a parse warning came off a hypothesis DECLARATION block.
+
+    A rejected header or a bad row there deletes ids the document goes on
+    referring to, so every resolution against them looks phantom — the one case
+    where the undeclared-hypothesis error would point away from the defect. A
+    warning from anywhere ELSE (an unknown block, an unattributed `:R` row, a
+    malformed vertex) drops no declaration, so it must not stand that check
+    down: gating on "no warnings at all" hid a real phantom behind any unrelated
+    parse defect, and would have hidden more with every warning added since.
+    """
+    return any(HYP_DECLARATION_BLOCK_RE.match(w.block) for w in warnings)
+
+
 def _is_current_hyp_header(cols: list[str] | None) -> bool:
     if not cols:
         return False
@@ -798,6 +822,20 @@ class _Projector:
             # hypothesis could never carry a prediction for a resolution to cite.
             self._register_hypotheses(block, hyps, prologue=False)
             return
+        if tag == "H":
+            # `new_hypotheses` is the ONLY `:H` sub-block a lead carries, and it
+            # is now a documented authoring surface — so the singular typo is
+            # reachable. Silently dropping it left the fork vanished with zero
+            # warnings, and `_check_prediction_refs` then blamed the (correct)
+            # resolution row for moving an undeclared hypothesis. The other tags
+            # stay silent: `:L l-NNN.lead_preds` and friends are documented but
+            # unprojected, and warning on them needs the allowlist (#820).
+            self._warn(
+                block, -1, "",
+                f"unknown lead sub-block `:H l-NNN.{sub}` — the only `:H` block "
+                f"a lead carries is `:H l-NNN.new_hypotheses`; its rows were "
+                f"dropped",
+            )
 
     def _project_findings_block(self, block: Block) -> None:
         for idx, row, rec in self._for_each_row(block):
