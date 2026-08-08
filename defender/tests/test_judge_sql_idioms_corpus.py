@@ -199,7 +199,14 @@ def test_query_error_on_hits_shape_hint_points_at_the_struct():
     assert proc.returncode == 1
     assert "hint:" in proc.stderr
     assert "columns [total, returned, truncated, hits]" in proc.stderr
-    assert "unnest(hits) h FROM data LIMIT 1" in proc.stderr
+    # `DESCRIBE data` rather than `unnest(hits) … LIMIT 1`: it names the struct's fields AND
+    # their types in the one call, where the sample row shows names only.
+    assert "DESCRIBE data" in proc.stderr
+
+
+_HITS_PAYLOAD = ('{"index":"logs-*","total":142,"returned":20,"truncated":true,'
+                 '"hits":[{"@timestamp":"2026-08-07T11:32:52Z","message":"Failed password"}]}')
+_SKELETON = 'SELECT h."@timestamp", h.message FROM (SELECT unnest(hits) h FROM data)'
 
 
 @pytest.mark.parametrize("query", [
@@ -207,26 +214,52 @@ def test_query_error_on_hits_shape_hint_points_at_the_struct():
     'SELECT h."@timestamp", h.message FROM data, unnest(hits) AS h',
     # the unquoted @-field — a parser error that names the character, not the fix
     "SELECT h.@timestamp FROM (SELECT unnest(hits) h FROM data)",
+    # and an error with nothing to do with the shape at all
+    "SELEC * FROM data",
 ])
 def test_hits_hint_hands_back_a_runnable_query_not_a_description(query):
     """Both spellings a gather lead actually reached for in run reviewer-measure-0807-b, where
     six consecutive attempts failed against a hint that described the struct without ever showing
-    the FROM form that binds. The hint must carry a query the model can copy."""
-    proc = _sql('{"index":"logs-*","total":142,"returned":20,"truncated":true,'
-                '"hits":[{"@timestamp":"2026-08-07T11:32:52Z","message":"Failed password"}]}',
-                query)
+    the FROM form that binds. The hint must carry a query the model can copy.
+
+    The skeleton is the UNCONDITIONAL half of the hint — it is what stops the next query from
+    failing, so every error class gets it, including one that is not about the shape."""
+    proc = _sql(_HITS_PAYLOAD, query)
     assert proc.returncode == 1
     assert "FROM (SELECT unnest(hits) h FROM data)" in proc.stderr
     assert 'h."@timestamp"' in proc.stderr
-    # and it must name WHICH part of the lateral-join spelling fails, since that spelling
-    # binds fine — see test_the_lateral_join_hint_states_what_duckdb_actually_does
-    assert "names the TABLE" in proc.stderr
-    assert "column is called `unnest`" in proc.stderr
     # and the query it hands back must itself run
-    skeleton = 'SELECT h."@timestamp", h.message FROM (SELECT unnest(hits) h FROM data)'
-    assert skeleton in proc.stderr
-    assert _rows('{"hits":[{"@timestamp":"t","message":"m"}]}', skeleton) \
+    assert _SKELETON in proc.stderr
+    assert _rows('{"hits":[{"@timestamp":"t","message":"m"}]}', _SKELETON) \
         == [{"@timestamp": "t", "message": "m"}]
+
+
+def test_each_error_class_gets_only_the_clause_that_answers_it():
+    """The hint was one paragraph appended to every failure: a typo'd field, a syntax error and
+    a wrong table name all got the lateral-join warning, and in most of those duckdb had already
+    named the fix in its own first line (`Candidate Entries`, `Did you mean`). Detail is not
+    focus — a wall of text repeated per error buries the one sentence that applies.
+
+    So the prose half is keyed to what duckdb actually said, and the cases where duckdb names
+    the symptom rather than the cause are the only ones that earn it."""
+    lateral = _sql(_HITS_PAYLOAD, 'SELECT h."@timestamp" FROM data, unnest(hits) AS h').stderr
+    assert "binds `h` to the TABLE" in lateral
+    assert "column is called `unnest`" in lateral
+
+    at_field = _sql(_HITS_PAYLOAD, "SELECT h.@timestamp FROM (SELECT unnest(hits) h FROM data)").stderr
+    assert "must be double-quoted" in at_field, "the @-quoting error did not get the quoting rule"
+    assert "TABLE" not in at_field, "a parser error about `@` was handed the lateral-join lecture"
+
+    struct_key = _sql(_HITS_PAYLOAD, "SELECT h.usr FROM (SELECT unnest(hits) h FROM data)").stderr
+    assert "DESCRIBE data" in struct_key
+    assert "TABLE" not in struct_key
+
+    for unrelated in ("SELEC * FROM data", "SELECT * FROM dat"):
+        stderr = _sql(_HITS_PAYLOAD, unrelated).stderr
+        assert _SKELETON in stderr, "an unrelated error lost the copyable skeleton"
+        assert "TABLE" not in stderr, f"{unrelated!r} was handed the lateral-join lecture"
+        assert "double-quoted" not in stderr
+        assert "DESCRIBE data" not in stderr
 
 
 def test_the_lateral_join_hint_states_what_duckdb_actually_does():
