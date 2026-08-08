@@ -610,10 +610,26 @@ class _Projector:
             )
             return
         hyps = self._project_rows(block, _hypothesis_record)
-        self.out.setdefault("hypothesize", {})["hypotheses"] = hyps
+        # Extend, never assign. Append-only forbids rewriting the loop-1 block, so
+        # a loop that forks a hypothesis writes a SECOND `:H
+        # hypothesize.hypotheses` — which used to REPLACE the list, deleting every
+        # earlier loop's hypothesis from the companion with no parse warning, and
+        # with them the `:H h-NNN.preds` a later resolution resolves against and
+        # the `:H h-NNN.authz` contracts benign-gating has to find (#816).
+        self.out.setdefault("hypothesize", {}).setdefault("hypotheses", []).extend(hyps)
+        self._register_hypotheses(hyps)
+
+    def _register_hypotheses(self, hyps: list[Any]) -> None:
+        """Index the records a `:H h-NNN.<sub>` sub-block attaches to.
+
+        First declaration wins on a repeated id, matching
+        `_walkers.all_hypotheses`. Re-declaring a row to carry an updated field
+        is NOT a merge — that needs a status vocabulary and an append-only
+        amendment first (#798 non-goals).
+        """
         for h in hyps:
             hid = h.get("id")
-            if isinstance(hid, str):
+            if isinstance(hid, str) and hid not in self.hypotheses_by_id:
                 self.hypotheses_by_id[hid] = h
 
     def _project_hyp_subblock(self, block: Block, hyp_id: str, sub: str) -> None:
@@ -658,7 +674,13 @@ class _Projector:
             )
             return
         if tag == "H" and sub == "new_hypotheses":
-            lead["new_hypotheses"] = self._project_rows(block, _hypothesis_record)
+            hyps = self._project_rows(block, _hypothesis_record)
+            lead.setdefault("new_hypotheses", []).extend(hyps)
+            # A hypothesis born inside a lead declares its predictions the way a
+            # prologue one does — in a `:H h-NNN.preds` sub-block. Unregistered,
+            # that sub-block was rejected as "unknown hypothesis", so a mid-run
+            # hypothesis could never carry a prediction for a resolution to cite.
+            self._register_hypotheses(hyps)
             return
 
     def _project_findings_block(self, block: Block) -> None:
