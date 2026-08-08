@@ -292,6 +292,17 @@ class Conclude(TypedDict, total=False):
     # A bare `none` is the format's way of saying "no ceiling" and projects as absence, so
     # `conclude.get("ceiling_test")` answers "did this run name a gap" without a sentinel.
     ceiling_test: list[str]
+    # #806 — the lead id that tested the ALERTED entity for suspicion independent of the alert's
+    # own claim. It is what makes `disposition false-positive` reachable: refuting the detector
+    # says nothing about the host, so the exit is gated on having looked at the host anyway.
+    #
+    # A lead id and not prose, because prose cannot be checked. `_check_false_positive_gating`
+    # resolves it against `:L findings` and requires the lead to have COMMITTED a result and to
+    # target a vertex the PROLOGUE already carried. The prologue clause is the load-bearing one:
+    # in `pr815-rerun-0808` every lead after the refutation but one chased vertices the
+    # refutation itself introduced (v-006 the failing source, v-010 its workstation), which is
+    # how a run spends 124 of 131 queries and still never asks about the host it was paged for.
+    entity_check: str | None
     termination: Termination
 
 

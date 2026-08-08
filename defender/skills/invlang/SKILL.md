@@ -287,11 +287,14 @@ matched_archetype      routine-admin-login
 summary                "Login matched established bastion usage"
 ```
 
-- `disposition` — closed vocab (`enum disposition`), and the SAME three
-  keywords `report.md`'s frontmatter carries. A value outside it is denied on
+- `disposition` — closed vocab (`enum disposition`), and the SAME keywords
+  `report.md`'s frontmatter carries. A value outside it is denied on
   write; there is no `escalate` keyword — an escalation is
   `termination.category exhaustion-escalation` with `disposition
-  inconclusive`.
+  inconclusive`. One keyword describes the RULE rather than the alerted
+  entity — `false-positive`, for a rule that fired on a different kind of
+  behavior than it claims — and it is the one with an entry price: it
+  requires `detection_notes` and `entity_check` below.
 - `ceiling_test` — the checks you could NOT make. One row per gap, repeated,
   naming the host and the data source:
   `ceiling_test  "authorized_keys FIM on web-1 (auditd write events) not retrieved"`
@@ -306,6 +309,15 @@ summary                "Login matched established bastion usage"
   describes the rule, and one run can find both. A rule that caught what it
   claims gets no row — a reassuring note reads the same as a defect nobody
   looked for.
+- `entity_check` — required by `disposition false-positive`, unused
+  otherwise: the `:L findings` lead that tested the ALERTED entity for
+  suspicion independent of the alert's claim.
+  `entity_check  l-004`
+  The lead must have committed a result, and must target an entity the
+  prologue already carried. A committed lead against something the refutation
+  introduced — the source that was failing, the host behind it — does not
+  answer whether the alerted host was clean, which is the only question this
+  disposition leaves open.
 
 Every row is ONE line. A value that opens a quote and does not close it on
 the same row is denied on write, because the lines below it record nothing —
