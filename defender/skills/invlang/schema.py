@@ -275,6 +275,23 @@ class Conclude(TypedDict, total=False):
     # judge because `render_synthesis` dumps this whole dict; it is deliberately NOT mirrored into
     # `report.md`, which is host-rendered from typed values and carries no model prose (#774).
     detection_notes: str | None
+    # The checks the run could NOT make — one entry per gap, which is why it is a list where its
+    # neighbours are scalars: a run names each unreachable source separately ("authorized_keys FIM
+    # on web-1 (auditd write events) not retrieved"), and golden-case-018 writes three.
+    #
+    # It is recorded here because it was already being written and thrown away. Eleven checked-in
+    # lessons instruct it — the corpus is the ONLY place the model could learn the name, since
+    # `skills/invlang/SKILL.md` (the file ORIENT inlines) never mentioned it and
+    # `docs/dense-investigation-format.md` is a design doc no prompt loads. So the loop taught
+    # itself the field through lesson retrieval — it appears across 49 run files, 41 of them
+    # transcripts and llm_requests where the model is reasoning about it — and every one of the
+    # 6 conclude rows it actually authored was dropped here, leaving the judge unable to tell a
+    # benign close that checked everything from one that named a load-bearing gap. Which is the
+    # distinction those eleven lessons exist to force, from outside, where they cannot reach it.
+    #
+    # A bare `none` is the format's way of saying "no ceiling" and projects as absence, so
+    # `conclude.get("ceiling_test")` answers "did this run name a gap" without a sentinel.
+    ceiling_test: list[str]
     termination: Termination
 
 

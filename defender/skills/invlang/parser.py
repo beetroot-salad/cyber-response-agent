@@ -426,13 +426,27 @@ def _canonicalize_resolution_row(rec: dict[str, str]) -> ResolutionRow:
     return cast(ResolutionRow, out)
 
 
+#: Conclude rows that REPEAT — one row per item, accumulated in order. `ceiling_test` names one
+#: unreachable check each, so a run with three coverage gaps writes three rows and the duplicate
+#: guard below must not read the second and third as a key being overwritten.
+_CONCLUDE_LISTS: frozenset[str] = frozenset({"ceiling_test"})
+
 #: The scalar rows `:T conclude` projects, and the CLOSED set an unrecognized row is judged
 #: against. One owner: `Conclude` is the type the projection has to satisfy, so the set is read
 #: off it rather than restated here, where the two could drift a field apart.
-_CONCLUDE_SCALARS: frozenset[str] = frozenset(Conclude.__annotations__) - {"termination"}
-_CONCLUDE_KEYS_HINT = ", ".join(
-    sorted(_CONCLUDE_SCALARS) + ["termination.category", "termination.rationale"]
+_CONCLUDE_SCALARS: frozenset[str] = (
+    frozenset(Conclude.__annotations__) - {"termination"} - _CONCLUDE_LISTS
 )
+_CONCLUDE_KEYS_HINT = ", ".join(
+    sorted(_CONCLUDE_SCALARS | _CONCLUDE_LISTS)
+    + ["termination.category", "termination.rationale"]
+)
+
+#: What the format writes where a conclude row has nothing to say (`docs/dense-investigation-
+#: format.md`: these "carry `none` / `n/a`" unless the run terminated on a ceiling). A list row
+#: holding it projects as absence, so a reader tests `conclude.get("ceiling_test")` rather than
+#: filtering a sentinel back out.
+_CONCLUDE_EMPTY_MARKERS: frozenset[str] = frozenset({"none", "n/a"})
 
 
 def _close_loop(rows: list[str]) -> int | None:
@@ -588,10 +602,11 @@ class _Projector:
             key = m.group(1)
             raw = m.group(2).strip()
             value: Any = None if raw == "null" else _unquote(raw)
-            if key in seen:
+            if key in seen and key not in _CONCLUDE_LISTS:
                 # The continuation of a two-line value lands on whatever key its first word
                 # names, so this fires on the row that silently overwrote a real conclusion —
-                # `summary` clobbered by the tail of a `termination.rationale`, say.
+                # `summary` clobbered by the tail of a `termination.rationale`, say. A list key
+                # is exempt: repetition is how it carries more than one item.
                 self._warn(
                     block, index, row,
                     f"conclude: {key!r} is set twice in this block; the later row wins and "
@@ -604,22 +619,24 @@ class _Projector:
             elif key == "termination.rationale":
                 seen.add(key)
                 termination["rationale"] = value
+            elif key in _CONCLUDE_LISTS:
+                seen.add(key)
+                if isinstance(value, str) and value.strip().lower() in _CONCLUDE_EMPTY_MARKERS:
+                    continue
+                cast(list[str], conclude.setdefault(key, [])).append(value)
             elif key in _CONCLUDE_SCALARS:
                 seen.add(key)
                 conclude[key] = value
             # An unrecognized key is IGNORED, not warned. It reads like the obvious place to
             # catch an unquoted value that spilled onto a second line, and it cannot be: the
-            # lessons corpus instructs conclude rows this projection does not carry. Eleven
-            # checked-in lessons tell the model to record coverage gaps in `ceiling_test`
-            # ("name them by host and source type in `ceiling_test`"), a key absent from
-            # `Conclude` and dropped here since before #806 — golden-case-018 carries three of
-            # them. Warning would turn every run that OBEYS a lesson into a write-gate denial,
-            # and `learning/core/persist.py` would then dead-letter it instead of learning from
-            # it. The truncation this block is guarding against is caught upstream by
-            # `_check_one_line_rows`, on quote parity, which fires on both halves of a spilled
-            # quoted value without needing to know which keys are real. The unquoted spill
-            # stays undetected; that is the price of not denying instructed content, and the
-            # missing `ceiling_test` field is its own bug, not this one's to fix.
+            # lessons corpus can instruct conclude rows this projection does not carry, and
+            # `learning/core/persist.py` dead-letters a run whose investigation.md fails
+            # validation rather than learning from it — so a warning here turns "the model
+            # obeyed a lesson" into a discarded run. `ceiling_test` was exactly that case until
+            # this commit recorded it. The truncation this block guards against is caught
+            # upstream by `_check_one_line_rows` on quote parity, which fires on both halves of
+            # a spilled quoted value without needing to know which keys are real. An unquoted
+            # spill stays undetected; that is the price of not denying instructed content.
         if termination:
             conclude["termination"] = termination
 
