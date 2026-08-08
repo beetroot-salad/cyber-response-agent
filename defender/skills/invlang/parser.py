@@ -264,14 +264,6 @@ def _hyp_sub_authz_row(block: Block, row: str) -> AuthorizationContract:
     }
 
 
-_HYP_SUB_DISPATCH = {
-    "preds": ("predictions", _hyp_sub_pred_row),
-    "attr_preds": ("attribute_predictions", _hyp_sub_attr_pred_row),
-    "refuts": ("refutation_shape", _hyp_sub_refut_row),
-    "authz": ("authorization_contract", _hyp_sub_authz_row),
-}
-
-
 def _lead_header_record(
     rec: dict[str, str]
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
@@ -484,7 +476,7 @@ class _Projector:
 
     out: dict[str, Any] = field(default_factory=dict)
     warnings: list[ParseWarning] = field(default_factory=list)
-    hypotheses_by_id: dict[str, dict[str, Any]] = field(default_factory=dict)
+    hypotheses_by_id: dict[str, HypothesisRecord] = field(default_factory=dict)
     findings: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     # No "current lead" state, deliberately. Attribution used to fall back to
@@ -619,7 +611,7 @@ class _Projector:
         self.out.setdefault("hypothesize", {}).setdefault("hypotheses", []).extend(hyps)
         self._register_hypotheses(hyps)
 
-    def _register_hypotheses(self, hyps: list[Any]) -> None:
+    def _register_hypotheses(self, hyps: list[HypothesisRecord]) -> None:
         """Index the records a `:H h-NNN.<sub>` sub-block attaches to.
 
         First declaration wins on a repeated id, matching
@@ -653,12 +645,36 @@ class _Projector:
                     "parent_vertex", {}
                 )["attributes"] = attrs
             return
-        if sub not in _HYP_SUB_DISPATCH:
+        self._attach_hyp_sub_rows(block, hyp, sub)
+
+    def _attach_hyp_sub_rows(
+        self, block: Block, hyp: HypothesisRecord, sub: str
+    ) -> None:
+        """Project a `:H h-NNN.<sub>` block onto the field it declares.
+
+        The destination is named at each branch rather than looked up in a
+        `{sub: field_name}` table: a TypedDict write needs a LITERAL key, so the
+        table form can only type-check by widening the record back to
+        `dict[str, Any]` — which is how a hypothesis record stopped being a
+        `HypothesisRecord` to everything downstream of the projector. Same reason
+        `_walkers._iter_outcome_rows` takes a selector instead of a field name.
+        """
+        if sub == "preds":
+            if preds := self._project_rows(block, _hyp_sub_pred_row):
+                hyp["predictions"] = preds
             return
-        out_key, row_proj = _HYP_SUB_DISPATCH[sub]
-        rows = self._project_rows(block, row_proj)
-        if rows:
-            hyp[out_key] = rows
+        if sub == "attr_preds":
+            if attr_preds := self._project_rows(block, _hyp_sub_attr_pred_row):
+                hyp["attribute_predictions"] = attr_preds
+            return
+        if sub == "refuts":
+            if refuts := self._project_rows(block, _hyp_sub_refut_row):
+                hyp["refutation_shape"] = refuts
+            return
+        if sub == "authz":
+            if authz := self._project_rows(block, _hyp_sub_authz_row):
+                hyp["authorization_contract"] = authz
+            return
 
     def _project_lead_subblock(
         self, tag: str, sub: str, block: Block, lead: dict[str, Any]
