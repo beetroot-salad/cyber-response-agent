@@ -203,7 +203,7 @@ def test_query_error_on_hits_shape_hint_points_at_the_struct():
 
 
 @pytest.mark.parametrize("query", [
-    # the lateral-join spelling — duckdb answers "Candidate bindings: unnest" and says no more
+    # the lateral-join spelling — duckdb answers `Candidate bindings: : "unnest"` and no more
     'SELECT h."@timestamp", h.message FROM data, unnest(hits) AS h',
     # the unquoted @-field — a parser error that names the character, not the fix
     "SELECT h.@timestamp FROM (SELECT unnest(hits) h FROM data)",
@@ -217,13 +217,29 @@ def test_hits_hint_hands_back_a_runnable_query_not_a_description(query):
                 query)
     assert proc.returncode == 1
     assert "FROM (SELECT unnest(hits) h FROM data)" in proc.stderr
-    assert "does NOT bind" in proc.stderr
     assert 'h."@timestamp"' in proc.stderr
+    # and it must name WHICH part of the lateral-join spelling fails, since that spelling
+    # binds fine — see test_the_lateral_join_hint_states_what_duckdb_actually_does
+    assert "names the TABLE" in proc.stderr
+    assert "column is called `unnest`" in proc.stderr
     # and the query it hands back must itself run
     skeleton = 'SELECT h."@timestamp", h.message FROM (SELECT unnest(hits) h FROM data)'
     assert skeleton in proc.stderr
     assert _rows('{"hits":[{"@timestamp":"t","message":"m"}]}', skeleton) \
         == [{"@timestamp": "t", "message": "m"}]
+
+
+def test_the_lateral_join_hint_states_what_duckdb_actually_does():
+    """The hint's claim about the spelling it rules out has to be true, or it teaches a
+    second wrong fact while fixing the first. `FROM data, unnest(hits) AS h` DOES bind in
+    duckdb — `h` is the table alias and its single column is named `unnest`, which is the
+    whole reason `h.<field>` misses. Both halves are executed here so the sentence cannot
+    drift into folklore."""
+    payload = '{"hits":[{"@timestamp":"t","message":"m"}]}'
+    assert _rows(payload, 'SELECT h.unnest."@timestamp" AS ts FROM data, unnest(hits) AS h') \
+        == [{"ts": "t"}]
+    assert _rows(payload, 'SELECT u."@timestamp" AS ts FROM data, unnest(hits) AS t(u)') \
+        == [{"ts": "t"}]
 
 
 def test_query_error_on_esql_shape_hint_gives_the_positional_map():

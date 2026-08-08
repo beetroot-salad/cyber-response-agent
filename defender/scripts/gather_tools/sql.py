@@ -16,6 +16,12 @@ EXIT_INPUT_ERROR = 2
 
 _MAX_OBJECT_SIZE = 1 << 30
 
+#: The one spelling that binds `h` to the unnested STRUCT on the search-hits shape.
+#: Stated once because it is quoted in two places that a reader reaches by different
+#: routes — `--help`'s epilog and the query-error hint — and a form that drifts in one
+#: of them is a form that no longer runs.
+_HITS_FROM = "FROM (SELECT unnest(hits) h FROM data)"
+
 
 def _json_safe(value):
     if isinstance(value, float):
@@ -42,10 +48,12 @@ def _shape_hint(con) -> str:
     if "hits" in colset:
         idiom = (
             "search-hits shape — `unnest(hits)` yields a STRUCT. Copy this form:\n"
-            "    SELECT h.\"@timestamp\", h.message "
-            "FROM (SELECT unnest(hits) h FROM data) WHERE h.<field> = '<value>'\n"
-            "  `FROM data, unnest(hits) AS h` does NOT bind (duckdb answers "
-            "\"Candidate bindings: unnest\") — only the subquery form above works; "
+            f"    SELECT h.\"@timestamp\", h.message {_HITS_FROM} "
+            "WHERE h.<field> = '<value>'\n"
+            "  In `FROM data, unnest(hits) AS h`, `h` names the TABLE and its one "
+            "column is called `unnest`, so `h.<field>` does NOT resolve (duckdb "
+            'answers `Candidate bindings: : "unnest"`) — use the subquery '
+            "form above, which binds `h` to the struct itself; "
             "`@`-prefixed fields need double quotes (`h.\"@timestamp\"`); the field "
             "names live inside the struct "
             "(`SELECT unnest(hits) h FROM data LIMIT 1`)"
@@ -152,8 +160,7 @@ def main() -> int:
                     "no native aggregation (see skills/connect/adapter.md).",
         epilog="the payload IS the table — there is no wrapper envelope to reach "
                "through. example: defender-<system> query '<filter>' | defender-sql "
-               "\"SELECT h.user, count(*) c "
-               "FROM (SELECT unnest(hits) h FROM data) GROUP BY 1 ORDER BY c DESC\"",
+               f"\"SELECT h.user, count(*) c {_HITS_FROM} GROUP BY 1 ORDER BY c DESC\"",
     )
     parser.add_argument(
         "sql",
