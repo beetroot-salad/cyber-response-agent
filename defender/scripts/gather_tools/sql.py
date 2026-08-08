@@ -16,6 +16,12 @@ EXIT_INPUT_ERROR = 2
 
 _MAX_OBJECT_SIZE = 1 << 30
 
+#: The one spelling that binds `h` to the unnested STRUCT on the search-hits shape.
+#: Stated once because it is quoted in two places that a reader reaches by different
+#: routes — `--help`'s epilog and the query-error hint — and a form that drifts in one
+#: of them is a form that no longer runs.
+_HITS_FROM = "FROM (SELECT unnest(hits) h FROM data)"
+
 
 def _json_safe(value):
     if isinstance(value, float):
@@ -33,16 +39,51 @@ def _top_level_columns(con) -> list[str]:
     return [row[0] for row in con.execute("DESCRIBE data").fetchall()]
 
 
-def _shape_hint(con) -> str:
+def _error_note(message: str) -> str:
+    """The one clause that answers THIS error, or nothing.
+
+    duckdb already names its own fix for most of what lands here — `Candidate
+    Entries: "user"` for a mistyped struct key, `Did you mean "data"?` for a
+    mistyped table — and a paragraph appended to an error that self-answers buries
+    the answer the model already had. So prose is attached only where duckdb names
+    the symptom and not the cause: the lateral join, whose `Candidate bindings`
+    names a column without saying `h` bound the TABLE, and the unquoted `@`, whose
+    parser error points at the character rather than at the quoting rule.
+
+    Everything else gets the shape and the runnable skeleton alone. The skeleton is
+    unconditional because it is the thing that prevents the NEXT query from failing;
+    the prose is conditional because it is only ever about one of them.
+    """
+    low = message.lower()
+    if "candidate bindings" in low and "unnest" in low:
+        return (
+            "\n  `AS h` on a lateral `unnest` binds `h` to the TABLE, whose single "
+            "column is called `unnest` — so `h.<field>` cannot resolve. The subquery "
+            "form above binds `h` to the struct itself."
+        )
+    if 'syntax error at or near "@"' in low:
+        return (
+            "\n  `@`-prefixed and dotted field names must be double-quoted: "
+            "`h.\"@timestamp\"`, not `h.@timestamp`."
+        )
+    if "could not find key" in low:
+        return "\n  `DESCRIBE data` names the struct's fields and their types."
+    return ""
+
+
+def _shape_hint(con, message: str) -> str:
     try:
         cols = _top_level_columns(con)
     except Exception:  # noqa: BLE001 — advisory only; a broken introspection must not mask the real error
         return ""
     colset = set(cols)
+    # Each branch punctuates itself: a shape whose idiom ENDS in a copyable query must
+    # not have a sentence-terminating period appended to the query's last token.
     if "hits" in colset:
         idiom = (
-            "search-hits shape — `unnest(hits)` yields a STRUCT, filter on `h.<field>`; "
-            "the field names live inside it (`SELECT unnest(hits) h FROM data LIMIT 1`)"
+            "search-hits shape — `unnest(hits)` yields a STRUCT. Copy this form:\n"
+            f"    SELECT h.\"@timestamp\", h.message {_HITS_FROM} "
+            "WHERE h.<field> = '<value>'"
         )
     elif "values" in colset and "columns" in colset:
         try:
@@ -55,11 +96,12 @@ def _shape_hint(con) -> str:
         idiom = (
             "ES|QL shape — `unnest(values)` yields a POSITIONAL JSON array, NOT a struct "
             f"(`v.<field>` fails). Positions: {order}. Filter 1-based and unwrap the JSON: "
-            "`v[2]->>'$' = '<value>'`"
+            "`v[2]->>'$' = '<value>'`."
         )
     else:
-        idiom = "flat/array shape — the payload's keys ARE `data`'s columns; `SELECT * FROM data`, no `unnest`"
-    return f"\n  hint: `data` has columns [{', '.join(cols)}]; {idiom}."
+        idiom = ("flat/array shape — the payload's keys ARE `data`'s columns; "
+                 "`SELECT * FROM data`, no `unnest`.")
+    return f"\n  hint: `data` has columns [{', '.join(cols)}]; {idiom}{_error_note(message)}"
 
 
 def _truncation_note(con) -> str:
@@ -122,7 +164,8 @@ def _run(sql: str) -> int:
         try:
             cursor = con.execute(sql)
         except duckdb.Error as exc:
-            print(f"defender-sql: query error: {exc}{_shape_hint(con)}", file=sys.stderr)
+            print(f"defender-sql: query error: {exc}{_shape_hint(con, str(exc))}",
+                  file=sys.stderr)
             return EXIT_QUERY_ERROR
 
         columns = [col[0] for col in cursor.description] if cursor.description else []
@@ -146,8 +189,7 @@ def main() -> int:
                     "no native aggregation (see skills/connect/adapter.md).",
         epilog="the payload IS the table — there is no wrapper envelope to reach "
                "through. example: defender-<system> query '<filter>' | defender-sql "
-               "\"SELECT h.user, count(*) c "
-               "FROM (SELECT unnest(hits) h FROM data) GROUP BY 1 ORDER BY c DESC\"",
+               f"\"SELECT h.user, count(*) c {_HITS_FROM} GROUP BY 1 ORDER BY c DESC\"",
     )
     parser.add_argument(
         "sql",
