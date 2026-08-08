@@ -416,6 +416,89 @@ def _check_conclude_vocab(companion: CompanionBody) -> list[str]:
     )
 
 
+def _check_false_positive_gating(companion: CompanionBody) -> list[str]:
+    """`false-positive` is the one disposition that closes a case on a claim about the RULE, so
+    it is the one that has to prove it also looked at the entity (#806).
+
+    The exit exists because a mis-keyed rule fires forever and investigating each firing costs
+    what the investigation costs — `pr815-rerun-0808` settled the refutation in 7 queries and
+    then spent 124 more attributing the failing source. What it never did was ask whether db-1
+    itself was compromised, which it was. So the gate is not "did you conclude carefully", it is
+    "name the lead that looked at the alerted entity, and let me check it ran".
+
+    Three things are checked and each one is a way the exit could otherwise be faked:
+
+      * `detection_notes` — an FP close with no stated defect is a close with no reason;
+      * `entity_check` names a lead that EXISTS and COMMITTED a result — a planned-but-never-
+        dispatched lead is the shape of an investigation that stopped at the plan;
+      * that lead targets a vertex the PROLOGUE carried — an entity the ALERT named, not one the
+        refutation introduced. Without this clause `pr815-rerun-0808` passes on l-011 or l-015,
+        both committed, both about the workstation the rule wrongly implicated.
+
+    What it does NOT check is whether the lead asked a good question. In that run l-007 targeted
+    db-1 and committed, so this gate would have passed it — it read `authorized_keys` for
+    `svc.config-mgmt` and never for `root`, three rows below. Distinguishing those two is a
+    question about query parameters, which do not reach this layer and are not in the companion
+    at all. Closing that gap means a fixed indicator set the runtime executes rather than the
+    model choosing; this gate is the structural half, and its limit is recorded here so the next
+    author does not read a passing gate as a swept host.
+    """
+    conclude = companion.get("conclude") or {}
+    # Matched on what the value RENDERS as, for the reason `_check_benign_gating` records: this
+    # branch decides whether the checks below run at all, so a zero-width character clinging to
+    # the keyword would turn them off (#722).
+    if normalized_disposition(conclude.get("disposition")) != "false-positive":
+        return []
+
+    errors: list[str] = []
+
+    notes = conclude.get("detection_notes")
+    if not (isinstance(notes, str) and notes.strip()):
+        errors.append(
+            "disposition false-positive blocked: no `detection_notes` row — the "
+            "close rests on a claim about the rule, so the defect has to be stated"
+        )
+
+    lead_id = conclude.get("entity_check")
+    if not (isinstance(lead_id, str) and lead_id.strip()):
+        return errors + [
+            "disposition false-positive blocked: no `entity_check` row — name the "
+            "`:L findings` lead that tested the alerted entity for suspicion "
+            "independent of the alert's claim, or conclude in another vocabulary"
+        ]
+    lead_id = lead_id.strip()
+
+    lead = next(
+        (f for f in companion.get("findings") or [] if f.get("id") == lead_id), None
+    )
+    if lead is None:
+        return errors + [
+            f"disposition false-positive blocked: `entity_check` names {lead_id!r}, "
+            f"which is not a lead in `:L findings`"
+        ]
+
+    if not (bool(lead.get("resolutions")) or bool(lead.get("outcome"))):
+        errors.append(
+            f"disposition false-positive blocked: `entity_check` lead {lead_id} "
+            f"committed no result — a lead that was planned and never resolved did "
+            f"not test anything"
+        )
+
+    prologue_vertices = {
+        v.get("id") for v in (companion.get("prologue") or {}).get("vertices") or []
+    }
+    target = lead.get("target")
+    if target not in prologue_vertices:
+        errors.append(
+            f"disposition false-positive blocked: `entity_check` lead {lead_id} "
+            f"targets {target!r}, which the prologue does not carry — the check has "
+            f"to be against an entity the ALERT named, not one the refutation "
+            f"introduced"
+        )
+
+    return errors
+
+
 def _check_benign_gating(companion: CompanionBody) -> list[str]:
     conclude = companion.get("conclude") or {}
     # Matched on what the value RENDERS as (#722). This branch decides whether the benign
@@ -487,5 +570,6 @@ def validate_companion(
     errors.extend(_check_edge_authority(companion))
     errors.extend(_check_closed_vocab(companion))
     errors.extend(_check_benign_gating(companion))
+    errors.extend(_check_false_positive_gating(companion))
     errors.extend(_check_loop_close(companion))
     return errors

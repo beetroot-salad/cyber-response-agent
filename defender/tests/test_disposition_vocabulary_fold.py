@@ -81,7 +81,9 @@ def test_the_slot_order_is_stable():
     """The slot list is inlined into the runtime's ORIENT prompt. A set's iteration order is
     not stable across processes, and a prompt that reshuffles between runs is a diff that means
     nothing to whoever reads it."""
-    assert vocab.get_enum("disposition") == ("benign", "inconclusive", "malicious")
+    assert vocab.get_enum("disposition") == (
+        "benign", "false-positive", "inconclusive", "malicious",
+    )
 
 
 def test_the_slot_is_advertised_to_the_model():
@@ -95,8 +97,26 @@ def test_the_slot_is_advertised_to_the_model():
 # ═══════════════════════════════════════════════════════════════════════════
 
 @pytest.mark.parametrize("disposition", sorted(DISPOSITION_ENUM))
-def test_every_keyword_validates(disposition):
-    assert validate_companion(_companion(disposition), None) == []
+def test_every_keyword_clears_the_vocabulary_check(disposition):
+    """Every keyword is a KNOWN disposition — none of them draws the "not a known disposition"
+    error that `spicy` draws below.
+
+    Asserted as "no vocabulary error" rather than "no errors at all", which is what this said
+    before #806. A disposition may carry structural obligations on top of being spelled right
+    — `false-positive` requires the entity check that makes it reachable — and a bare companion
+    does not satisfy them. Reading those denials as a vocabulary failure would have forced the
+    gate to be weakened to keep this test passing."""
+    errors = validate_companion(_companion(disposition), None)
+    assert not any("is not a known disposition" in e for e in errors)
+
+
+def test_a_bare_false_positive_conclude_is_denied():
+    """The counterpart, and the one keyword a bare `conclude` cannot reach: `benign` passes
+    here vacuously (no vertices, no live hypotheses, nothing for its gate to check), which is
+    exactly the shape #806 exists to stop `false-positive` from inheriting."""
+    errors = validate_companion(_companion("false-positive"), None)
+    assert any("false-positive blocked" in e for e in errors)
+    assert validate_companion(_companion("benign"), None) == []
 
 
 def test_an_out_of_enum_disposition_is_an_error_not_a_skipped_gate():
