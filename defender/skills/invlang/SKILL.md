@@ -282,7 +282,6 @@ impact_verdict         none
 confidence             high
 matched_archetype      routine-admin-login
 summary                "Login matched established bastion usage"
-detection_notes        "Rule claims a same-user pattern; it joins on host only. Not tested here."
 ```
 
 - `disposition` — closed vocab (`enum disposition`), and the SAME three
@@ -290,10 +289,13 @@ detection_notes        "Rule claims a same-user pattern; it joins on host only. 
   write; there is no `escalate` keyword — an escalation is
   `termination.category exhaustion-escalation` with `disposition
   inconclusive`.
-- `detection_notes` — what the DETECTOR got wrong, when ORIENT's fidelity
-  check found something. It is not part of `summary`: the disposition
-  describes the world, this describes the rule, and a run can find both. Omit
-  it when the rule caught what it claims.
+- `detection_notes` — **optional**, and only for a detection defect ORIENT
+  actually found:
+  `detection_notes  "Claims a same-user pattern but groups by host, so the actor is untested."`
+  It is not part of `summary`: the disposition describes the world, this
+  describes the rule, and one run can find both. A rule that caught what it
+  claims gets no row — a reassuring note reads the same as a defect nobody
+  looked for.
 
 Every row is ONE line. A value that opens a quote and does not close it on
 the same row is denied on write, because the lines below it record nothing —
