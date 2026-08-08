@@ -12,14 +12,15 @@ from defender.learning.core.run_cycle import learn_drain, run_one
 
 _HELP_EPILOG = """\
 Direction dispatch (by the defender's normalized disposition):
-  benign        → adversarial direction only (hunt the missed attack / FN)
-  malicious     → benign direction only      (hunt the over-escalation / FP)
-  inconclusive  → both directions
+  benign          → adversarial direction only (hunt the missed attack / FN)
+  malicious       → benign direction only      (hunt the over-escalation / FP)
+  inconclusive    → both directions
+  false-positive  → neither: a verdict about the RULE, not the entity
 A disposition that maps to no direction is skipped.
 
 Inputs (must exist in <run_dir>):
   alert.json                 verbatim alert input
-  report.md                  YAML frontmatter with disposition ∈ {benign, inconclusive, malicious}
+  report.md                  YAML frontmatter with disposition ∈ {benign, false-positive, inconclusive, malicious}
   investigation.md           defender's invlang audit log
   executed_queries.jsonl     the queries table (FK lead_id) — written live by record_query.py
   gather_raw/{lead_id}.lead.json   the leads table — written live by record_lead.py

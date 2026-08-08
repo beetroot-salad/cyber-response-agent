@@ -299,7 +299,8 @@ summary                "Login matched established bastion usage"
   not retrieved" tells a reader nothing about what is still open. Omit the row
   (or write `none`) when nothing was out of reach. `ceiling_rationale` is the
   companion scalar: why concluding anyway is sound despite those gaps.
-- `detection_notes` — **optional**, and only for a detection defect ORIENT
+- `detection_notes` — **optional** except under `disposition
+  false-positive`, which requires it; and only for a detection defect ORIENT
   actually found:
   `detection_notes  "Claims a same-user pattern but groups by host, so the actor is untested."`
   It is not part of `summary`: the disposition describes the world, this
@@ -310,7 +311,8 @@ summary                "Login matched established bastion usage"
   otherwise: the `:L findings` lead that tested the ALERTED entity for
   suspicion independent of the alert's claim.
   `entity_check  l-004`
-  The lead must have committed a result, and must target an entity the
+  The lead must have RETURNED a result — not merely be declared, and not a
+  row whose only outcome is a `fail_reason` — and must target an entity the
   prologue already carried. A committed lead against something the refutation
   introduced — the source that was failing, the host behind it — does not
   answer whether the alerted host was clean, which is the only question this

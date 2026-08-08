@@ -68,7 +68,7 @@ def test_false_positive_is_in_the_shared_vocabulary():
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# the four ways the exit could be faked
+# the six ways the exit could be faked
 # ═══════════════════════════════════════════════════════════════════════════
 
 def test_a_stated_defect_is_required():
@@ -88,6 +88,37 @@ def test_an_entity_check_is_required():
                _conclude(disposition="false-positive", detection_notes=_NOTES))
     errors = validate_companion(doc, None)
     assert any("entity_check" in e for e in errors)
+
+
+@pytest.mark.parametrize("marker", ["none", "n/a", "None", "  N/A  "])
+def test_the_formats_empty_marker_is_not_a_stated_defect(marker):
+    """`none` / `n/a` are what a conclude row writes where it has NOTHING to say, and the
+    parser strips them only from list rows — a scalar keeps them as the literal text. A gate
+    testing `notes.strip()` alone therefore reads "no defect found" as a stated defect, which
+    is the emptiest possible FP close passing the check written to stop exactly that."""
+    doc = _doc(_PROLOGUE, _LEADS, _outcome("l-001", "v-011"),
+               _conclude(disposition="false-positive", detection_notes=marker,
+                         entity_check="l-001"))
+    errors = validate_companion(doc, None)
+    assert any("detection_notes" in e for e in errors)
+
+
+def test_a_lead_whose_only_outcome_is_a_failure_does_not_count():
+    """`:L findings`' `fail_reason` column projects into the lead's `outcome`, so a lead whose
+    query errored reads as "committed" to the loose test `_check_loop_close` uses. For closing
+    a loop that is right — the loop was worked. Here it is the gate's own failure mode: a
+    query that never landed tested the alerted entity for nothing."""
+    failed_lead = (
+        "```invlang\n"
+        ":L findings [id|loop|name|target|tests|system|window|fail_reason]\n"
+        "l-003|1|db1-authorized-keys|v-001|h-001|elastic|30d|index unavailable\n"
+        "```\n"
+    )
+    doc = _doc(_PROLOGUE, failed_lead,
+               _conclude(disposition="false-positive", detection_notes=_NOTES,
+                         entity_check="l-003"))
+    errors = validate_companion(doc, None)
+    assert any("committed no result" in e for e in errors)
 
 
 def test_the_named_lead_has_to_exist():
@@ -151,3 +182,76 @@ def test_a_zero_width_character_cannot_switch_the_gate_off(spelling):
     # this too, for a different reason, so the weaker assertion passes whether or not the gate
     # ran — and the gate failing open on an invisible character is the whole risk here.
     assert any("false-positive blocked" in e for e in errors)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# the price is collected at BOTH boundaries
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _paid(**over: str) -> str:
+    rows = {"disposition": "false-positive", "detection_notes": _NOTES,
+            "entity_check": "l-001", **over}
+    return _doc(_PROLOGUE, _LEADS, _outcome("l-001", "v-011"), _conclude(**rows))
+
+
+def test_the_entry_price_is_readable_from_a_companion_document():
+    """The write gate reads a parsed companion; the close reads a FILE. One function answers
+    both, so the two boundaries cannot drift into disagreeing about what is owed."""
+    from defender.skills.invlang.validate import false_positive_entry_price
+
+    assert false_positive_entry_price(_paid()) == []
+    assert false_positive_entry_price("") != []          # nothing written owes everything
+    assert false_positive_entry_price(_doc(_PROLOGUE, _LEADS)) != []
+
+
+def _close(tmp_path, companion: str, disposition: str):
+    """Drive the real close far enough to reach (or clear) the entry price."""
+    import asyncio
+
+    from defender.agents import MAIN_DEF
+    from defender.runtime import challenge_gate
+    from defender.runtime.agent_definition import bind
+    from defender.runtime.close_tool import _close_investigation_async
+    from defender.tests._review_bundle import bundle as _bundle
+    from defender.tests._review_bundle import composer_reply as _composer
+
+    run_dir = tmp_path / "run"
+    (run_dir / "gather_raw").mkdir(parents=True)
+    (run_dir / "investigation.md").write_text(companion, encoding="utf-8")
+    dfn = tmp_path / "defender"
+    dfn.mkdir(exist_ok=True)
+    deps = bind(MAIN_DEF, run_dir, defender_dir=dfn, salt="sess-salt")
+    return asyncio.run(_close_investigation_async(
+        deps, disposition, stages=_bundle(composer=_composer(finding="holds")),
+        bounds=challenge_gate.default_bounds(),
+    ))
+
+
+_BYPASS = (
+    "```invlang\n"
+    ":T conclude\n"
+    "disposition            benign\n"
+    "```\n"
+)
+
+
+def test_the_close_cannot_be_reached_around_the_write_gate(tmp_path):
+    """THE bypass. `report.md` is written from the close's ARGUMENT, and nothing else on that
+    path reads the companion — so concluding under a cheaper keyword (or none) and passing
+    `false-positive` to `close_investigation` would buy the exit for free, in the artifact the
+    learning loop, the evals and the ticket lane actually read."""
+    from pydantic_ai.exceptions import ModelRetry
+
+    with pytest.raises(ModelRetry) as e:
+        _close(tmp_path, _BYPASS, "false-positive")
+    assert "close blocked" in str(e.value)
+    assert "entity_check" in str(e.value)
+
+
+def test_a_companion_that_paid_the_price_closes(tmp_path):
+    """Positive control, asserted on the close COMMITTING rather than on the absence of one
+    message: a price that denied everything would satisfy the test above just as well, and the
+    exit this disposition exists for has to actually be reachable."""
+    result = _close(tmp_path, _paid(), "false-positive")
+    assert result.outcome == "stands"
+    assert (tmp_path / "run" / "report.md").exists()
