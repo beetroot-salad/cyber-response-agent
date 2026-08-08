@@ -202,6 +202,30 @@ def test_query_error_on_hits_shape_hint_points_at_the_struct():
     assert "unnest(hits) h FROM data LIMIT 1" in proc.stderr
 
 
+@pytest.mark.parametrize("query", [
+    # the lateral-join spelling — duckdb answers "Candidate bindings: unnest" and says no more
+    'SELECT h."@timestamp", h.message FROM data, unnest(hits) AS h',
+    # the unquoted @-field — a parser error that names the character, not the fix
+    "SELECT h.@timestamp FROM (SELECT unnest(hits) h FROM data)",
+])
+def test_hits_hint_hands_back_a_runnable_query_not_a_description(query):
+    """Both spellings a gather lead actually reached for in run reviewer-measure-0807-b, where
+    six consecutive attempts failed against a hint that described the struct without ever showing
+    the FROM form that binds. The hint must carry a query the model can copy."""
+    proc = _sql('{"index":"logs-*","total":142,"returned":20,"truncated":true,'
+                '"hits":[{"@timestamp":"2026-08-07T11:32:52Z","message":"Failed password"}]}',
+                query)
+    assert proc.returncode == 1
+    assert "FROM (SELECT unnest(hits) h FROM data)" in proc.stderr
+    assert "does NOT bind" in proc.stderr
+    assert 'h."@timestamp"' in proc.stderr
+    # and the query it hands back must itself run
+    skeleton = 'SELECT h."@timestamp", h.message FROM (SELECT unnest(hits) h FROM data)'
+    assert skeleton in proc.stderr
+    assert _rows('{"hits":[{"@timestamp":"t","message":"m"}]}', skeleton) \
+        == [{"@timestamp": "t", "message": "m"}]
+
+
 def test_query_error_on_esql_shape_hint_gives_the_positional_map():
     """The killer case a prompt cannot pre-teach: struct-style access on ES|QL `values`
     fails, and the hint names the EXACT position of each field FOR THIS payload — grounded

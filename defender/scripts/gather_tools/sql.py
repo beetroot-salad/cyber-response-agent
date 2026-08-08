@@ -41,8 +41,14 @@ def _shape_hint(con) -> str:
     colset = set(cols)
     if "hits" in colset:
         idiom = (
-            "search-hits shape — `unnest(hits)` yields a STRUCT, filter on `h.<field>`; "
-            "the field names live inside it (`SELECT unnest(hits) h FROM data LIMIT 1`)"
+            "search-hits shape — `unnest(hits)` yields a STRUCT. Copy this form:\n"
+            "    SELECT h.\"@timestamp\", h.message "
+            "FROM (SELECT unnest(hits) h FROM data) WHERE h.<field> = '<value>'\n"
+            "  `FROM data, unnest(hits) AS h` does NOT bind (duckdb answers "
+            "\"Candidate bindings: unnest\") — only the subquery form above works; "
+            "`@`-prefixed fields need double quotes (`h.\"@timestamp\"`); the field "
+            "names live inside the struct "
+            "(`SELECT unnest(hits) h FROM data LIMIT 1`)"
         )
     elif "values" in colset and "columns" in colset:
         try:
