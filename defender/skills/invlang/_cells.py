@@ -56,6 +56,27 @@ def _unquote(s: str) -> str:
     return s
 
 
+def _has_unbalanced_quote(s: str) -> bool:
+    """True when a row opens a `"` it never closes — the multi-line author's signature.
+
+    invlang is line-oriented: `_tokenize_fence` makes ONE row per line for every block, so a
+    value written across two lines keeps line one (quote dangling) and reparses the rest as
+    fresh rows. Parity is the test, not a leading `"`: `summary  "sensu" login is sanctioned`
+    is a valid one-line row that starts with a quote, and denying it would block a conclusion
+    the author cannot rewrite into anything the check likes better.
+    """
+    quotes = 0
+    i = 0
+    while i < len(s):
+        if s[i] == "\\" and i + 1 < len(s):
+            i += 2
+            continue
+        if s[i] == '"':
+            quotes += 1
+        i += 1
+    return quotes % 2 == 1
+
+
 def _row_cells(block: Block, row: str, expected: int) -> list[str]:
     cells = _split_cells(row)
     if len(cells) > expected:
