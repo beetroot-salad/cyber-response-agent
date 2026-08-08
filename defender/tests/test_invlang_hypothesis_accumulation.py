@@ -71,22 +71,48 @@ def test_a_later_block_cannot_un_declare_an_earlier_hypothesis_prediction():
     assert [p["id"] for p in h001["predictions"]] == ["p1"]
 
 
-def test_first_declaration_wins_when_a_second_block_repeats_an_id():
-    """Re-declaring a row to carry an updated field is not a merge — that needs a
-    status vocabulary and an append-only amendment first. Pinned so the choice is
-    visible: the sub-block index keeps the ORIGINAL record, matching
-    `_walkers.all_hypotheses`, rather than silently rebinding to the late one."""
+def test_re_emitting_the_table_neither_replaces_nor_duplicates():
+    """Accumulation is BY ID, not blind.
+
+    Re-emitting the whole table with one new row appended is the natural reading
+    of a table block, and it was correct under the old replace semantics. Blind
+    `extend` would turn it into duplicate rows — and `runtime/review/projector.py`
+    maps the raw list straight to the review lenses without the dedup
+    `_walkers.all_hypotheses` applies, so every lens would see h-001 twice.
+
+    First declaration wins, so a re-declared row carrying an updated field is
+    dropped rather than merged. That still needs a status vocabulary and an
+    append-only amendment (#798 non-goals); what it must not do is silently
+    corrupt the list."""
     body, warnings = parse_dense_companion(_doc(
         _loop_one() + "\n"
-        + _HYP_HEADER + "\n" + _hyp_row("h-001", "renamed-late") + "\n"
+        + _HYP_HEADER + "\n"
+        + _hyp_row("h-001", "renamed-late")
+        + _hyp_row("h-003", "genuinely-new") + "\n"
         + ":H h-001.preds [id|subject|claim]\n"
         'p1|proposed_parent|"claim"\n'
     ))
     assert warnings == []
     hyps = body["hypothesize"]["hypotheses"]
-    assert [h["name"] for h in hyps] == ["?adversary-shell", "?renamed-late"]
+    assert [h["name"] for h in hyps] == ["?adversary-shell", "?genuinely-new"]
     assert [p["id"] for p in hyps[0]["predictions"]] == ["p1"]
-    assert "predictions" not in hyps[1]
+
+
+def test_a_re_emitted_sub_block_does_not_duplicate_its_rows_either():
+    body, warnings = parse_dense_companion(_doc(
+        _loop_one()
+        + ":H h-001.preds [id|subject|claim]\n"
+        'p1|proposed_parent|"first"\n'
+        "\n"
+        ":H h-001.preds [id|subject|claim]\n"
+        'p1|proposed_parent|"re-emitted"\n'
+        'p2|proposed_parent|"genuinely new"\n'
+    ))
+    assert warnings == []
+    preds = body["hypothesize"]["hypotheses"][0]["predictions"]
+    assert [(p["id"], p["claim"]) for p in preds] == [
+        ("p1", "first"), ("p2", "genuinely new")
+    ]
 
 
 def test_a_benign_disposition_still_sees_an_earlier_loops_authz_contract():
@@ -220,12 +246,19 @@ def test_a_second_refuts_block_adds_a_refutation_rather_than_replacing():
     assert [r["id"] for r in h001["refutation_shape"]] == ["r1", "r2"]
 
 
-def test_the_table_outranks_a_lead_when_both_declare_one_id():
-    """`_walkers.all_hypotheses` reads the `:H hypothesize.hypotheses` table
-    before any lead's `new_hypotheses`, so the projector must index the TABLE
-    record whichever came first in the document. Indexing the lead record
-    instead landed `:H h-010.authz` on a record no consumer reads, and
-    `disposition: benign` passed on an unfulfilled contract."""
+def test_declaring_one_id_at_both_sites_is_rejected_and_the_table_still_outranks():
+    """Two sites declaring one id is not recoverable, so it is warned — and the
+    warning blocks the write, since `validate_companion` turns any parse warning
+    into an error.
+
+    Precedence alone cannot fix it. `_walkers.all_hypotheses` reads the `:H
+    hypothesize.hypotheses` table before any lead's `new_hypotheses`, so the
+    projector realigns to the table whatever the document order — but a
+    `:H h-010.authz` that appeared BEFORE the table row has already attached to
+    the lead record, and no rebinding moves it. Left silent, that landed a
+    contract on a record no consumer reads and `disposition: benign` passed on
+    it. Both halves are asserted: the document is refused, and what the readers
+    see is the table's record."""
     doc = _doc(
         _EDGE + "\n"
         + _LEAD_HEADER + "\n"
@@ -242,7 +275,8 @@ def test_the_table_outranks_a_lead_when_both_declare_one_id():
         ":T conclude\ndisposition            benign\n"
     )
     body, warnings = parse_dense_companion(doc)
-    assert warnings == []
+    assert len(warnings) == 1
+    assert "declared both by" in warnings[0].reason
     assert all_hypotheses(body)["h-010"].get("authorization_contract")
     blocked = [e for e in validate_companion(doc) if "authz contract ac1" in e]
     assert len(blocked) == 1, blocked

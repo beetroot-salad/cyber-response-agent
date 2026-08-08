@@ -471,6 +471,40 @@ _RESOLUTION_BUCKET_KEY = {
 }
 
 
+def _two_site_reason(hid: str) -> str:
+    return (
+        f"hypothesis {hid!r} is declared both by `:H hypothesize.hypotheses` and "
+        f"by a lead's `:H l-NNN.new_hypotheses` — declare it at exactly one site. "
+        f"Its `:H {hid}.<sub>` blocks attach to whichever record the parser met "
+        f"first, while every reader takes the table's, so a contract or "
+        f"prediction can land on a record nothing reads."
+    )
+
+
+def _extend_by_id(dest: list[Any], rows: list[Any]) -> None:
+    """Append the rows whose id the destination does not already carry.
+
+    Accumulation has to be by id, not blind: re-emitting a whole `:H
+    hypothesize.hypotheses` table with one new row appended is the natural
+    reading of a table block, and it was CORRECT under the old replace
+    semantics. Blind `extend` turned that pattern into duplicate rows, and
+    `runtime/review/projector.py` maps the raw list straight to the review
+    lenses without the dedup `_walkers.all_hypotheses` applies — so every lens
+    would have seen the same hypothesis twice.
+
+    First declaration wins, so the raw list holds exactly what the walkers
+    dedup to. A row with no id is always appended; nothing can key it.
+    """
+    seen = {r["id"] for r in dest if isinstance(r, dict) and r.get("id")}
+    for r in rows:
+        rid = r.get("id") if isinstance(r, dict) else None
+        if rid and rid in seen:
+            continue
+        if rid:
+            seen.add(rid)
+        dest.append(r)
+
+
 @dataclass
 class _Projector:
 
@@ -533,13 +567,15 @@ class _Projector:
         # only legal way to add one, and assignment deleted every vertex the
         # first block declared.
         if tag == "V" and name == "prologue.vertices":
-            self.out.setdefault("prologue", {}).setdefault("vertices", []).extend(
-                self._project_rows(block, _vertex_record)
+            _extend_by_id(
+                self.out.setdefault("prologue", {}).setdefault("vertices", []),
+                self._project_rows(block, _vertex_record),
             )
             return
         if tag == "E" and name == "prologue.edges":
-            self.out.setdefault("prologue", {}).setdefault("edges", []).extend(
-                self._project_rows(block, _edge_record)
+            _extend_by_id(
+                self.out.setdefault("prologue", {}).setdefault("edges", []),
+                self._project_rows(block, _edge_record),
             )
             return
         if tag == "H" and name == "hypothesize.hypotheses":
@@ -630,26 +666,29 @@ class _Projector:
         # earlier loop's hypothesis from the companion with no parse warning, and
         # with them the `:H h-NNN.preds` a later resolution resolves against and
         # the `:H h-NNN.authz` contracts benign-gating has to find (#816).
-        self.out.setdefault("hypothesize", {}).setdefault("hypotheses", []).extend(hyps)
-        self._register_hypotheses(hyps, prologue=True)
+        _extend_by_id(
+            self.out.setdefault("hypothesize", {}).setdefault("hypotheses", []), hyps
+        )
+        self._register_hypotheses(block, hyps, prologue=True)
 
     def _register_hypotheses(
-        self, hyps: list[HypothesisRecord], *, prologue: bool
+        self, block: Block, hyps: list[HypothesisRecord], *, prologue: bool
     ) -> None:
         """Index the records a `:H h-NNN.<sub>` sub-block attaches to.
 
-        First declaration wins on a repeated id, matching
-        `_walkers.all_hypotheses`. Re-declaring a row to carry an updated field
-        is NOT a merge — that needs a status vocabulary and an append-only
-        amendment first (#798 non-goals).
+        Re-declaring an id at the SAME site is a re-emission: the first
+        declaration stands, silently, because that is what `_extend_by_id` does
+        to the list and what `_walkers.all_hypotheses` does on the read side.
+        Re-declaring it at the OTHER site is not recoverable and is warned.
 
-        `prologue` is what makes "first wins" mean the SAME record here as it
-        does in `_walkers.all_hypotheses`, which walks the `:H
-        hypothesize.hypotheses` table before any lead's `new_hypotheses` rather
-        than in document order. Without it, an id declared in a lead and then
-        promoted into the table indexed the LEAD record here and the TABLE record
-        there — so a `:H h-NNN.authz` landed on a record no consumer reads, and
-        `disposition: benign` passed on an unfulfilled contract.
+        The two sites disagree on order — `_walkers.all_hypotheses` walks the
+        `:H hypothesize.hypotheses` table before any lead's `new_hypotheses`,
+        not the document — so an id declared in a lead and then promoted into
+        the table indexed the LEAD record here and the TABLE record there. A
+        `:H h-NNN.authz` between the two landed on a record no consumer reads,
+        and `disposition: benign` passed on an unfulfilled contract. `prologue`
+        realigns the precedence; the warning covers what precedence cannot,
+        since a sub-block already attached to the loser cannot be moved.
         """
         for h in hyps:
             hid = h.get("id")
@@ -658,8 +697,13 @@ class _Projector:
             if prologue:
                 if hid in self.prologue_hypothesis_ids:
                     continue
+                if hid in self.hypotheses_by_id:
+                    self._warn(block, -1, "", _two_site_reason(hid))
                 self.prologue_hypothesis_ids.add(hid)
                 self.hypotheses_by_id[hid] = h
+                continue
+            if hid in self.prologue_hypothesis_ids:
+                self._warn(block, -1, "", _two_site_reason(hid))
             elif hid not in self.hypotheses_by_id:
                 self.hypotheses_by_id[hid] = h
 
@@ -706,19 +750,19 @@ class _Projector:
         """
         if sub == "preds":
             if preds := self._project_rows(block, _hyp_sub_pred_row):
-                hyp.setdefault("predictions", []).extend(preds)
+                _extend_by_id(hyp.setdefault("predictions", []), preds)
             return
         if sub == "attr_preds":
             if attr_preds := self._project_rows(block, _hyp_sub_attr_pred_row):
-                hyp.setdefault("attribute_predictions", []).extend(attr_preds)
+                _extend_by_id(hyp.setdefault("attribute_predictions", []), attr_preds)
             return
         if sub == "refuts":
             if refuts := self._project_rows(block, _hyp_sub_refut_row):
-                hyp.setdefault("refutation_shape", []).extend(refuts)
+                _extend_by_id(hyp.setdefault("refutation_shape", []), refuts)
             return
         if sub == "authz":
             if authz := self._project_rows(block, _hyp_sub_authz_row):
-                hyp.setdefault("authorization_contract", []).extend(authz)
+                _extend_by_id(hyp.setdefault("authorization_contract", []), authz)
             return
 
     def _project_lead_subblock(
@@ -728,29 +772,31 @@ class _Projector:
         # l-NNN.observations.vertices` blocks kept only the last one, and
         # append-only leaves no way to write them as one (#816).
         if tag == "V" and sub == "observations.vertices":
-            lead.setdefault("outcome", {}).setdefault(
-                "observations", {}
-            ).setdefault("vertices", []).extend(
-                self._project_rows(block, _vertex_record)
+            _extend_by_id(
+                lead.setdefault("outcome", {}).setdefault(
+                    "observations", {}
+                ).setdefault("vertices", []),
+                self._project_rows(block, _vertex_record),
             )
             return
         if tag == "E" and sub == "observations.edges":
-            lead.setdefault("outcome", {}).setdefault(
-                "observations", {}
-            ).setdefault("edges", []).extend(
-                self._project_rows(block, _edge_record)
+            _extend_by_id(
+                lead.setdefault("outcome", {}).setdefault(
+                    "observations", {}
+                ).setdefault("edges", []),
+                self._project_rows(block, _edge_record),
             )
             return
         if tag == "H" and sub == "new_hypotheses":
             if self._stale_hyp_header(block):
                 return
             hyps = self._project_rows(block, _hypothesis_record)
-            lead.setdefault("new_hypotheses", []).extend(hyps)
+            _extend_by_id(lead.setdefault("new_hypotheses", []), hyps)
             # A hypothesis born inside a lead declares its predictions the way a
             # prologue one does — in a `:H h-NNN.preds` sub-block. Unregistered,
             # that sub-block was rejected as "unknown hypothesis", so a mid-run
             # hypothesis could never carry a prediction for a resolution to cite.
-            self._register_hypotheses(hyps, prologue=False)
+            self._register_hypotheses(block, hyps, prologue=False)
             return
 
     def _project_findings_block(self, block: Block) -> None:
