@@ -146,17 +146,14 @@ summary                "Login matched established bastion usage"
     assert validate_companion(text) == []
 
 
-def test_conclude_key_the_lessons_instruct_but_the_schema_lacks_is_not_denied():
-    """A conclude key this projection does not carry must be IGNORED, never denied.
+def test_conclude_records_every_ceiling_test_row_in_order():
+    """The gaps a run could not close are recorded, repeated, and in order.
 
-    `ceiling_test` is the live case: eleven checked-in lessons tell the model to record coverage
-    gaps there ("name them by host and source type in `ceiling_test`"), it is absent from
-    `Conclude`, and it has been dropped by this projection since long before #806 — a real run
-    dir, golden-case-018, carries three of them. Denying an unrecognized key would turn every
-    run that OBEYS one of those lessons into a write-gate denial, and `learning/core/persist.py`
-    dead-letters a run whose investigation.md fails validation rather than learning from it.
-    Repeated too, since the field is list-shaped in practice and a duplicate check must not
-    reach it either.
+    Eleven checked-in lessons instruct this field ("name them by host and source type in
+    `ceiling_test`") and the projection dropped every row a run authored, so the judge could not
+    tell a benign close that checked everything from one that named a load-bearing gap. It is a
+    LIST because a run names each unreachable source separately; golden-case-018 writes three,
+    and the duplicate-key guard must not read the second and third as a key being overwritten.
     """
     text = """\
 ```invlang
@@ -164,13 +161,50 @@ def test_conclude_key_the_lessons_instruct_but_the_schema_lacks_is_not_denied():
 disposition            benign
 ceiling_test           "l-009 Zeek HTTP detail for curl events not retrieved (request limit)"
 ceiling_test           "79.177.137.245 absent from the threat-intel catalog"
+ceiling_rationale      "both gaps are corroboration, not the load-bearing check"
 ```
 """
     body, warnings = parse_dense_companion(text)
-    assert warnings == [], f"an instructed-but-unprojected key was flagged: {warnings!r}"
+    assert warnings == [], f"repeated list rows were flagged as duplicates: {warnings!r}"
     assert validate_companion(text) == []
-    assert body["conclude"]["disposition"] == "benign"
+    assert body["conclude"]["ceiling_test"] == [
+        "l-009 Zeek HTTP detail for curl events not retrieved (request limit)",
+        "79.177.137.245 absent from the threat-intel catalog",
+    ]
+    assert body["conclude"]["ceiling_rationale"].startswith("both gaps")
+
+
+def test_conclude_ceiling_test_none_projects_as_absence():
+    """`none` is how the format spells "no ceiling", so it must not arrive as a one-item list a
+    reader has to filter — `conclude.get("ceiling_test")` is the whole question."""
+    text = """\
+```invlang
+:T conclude
+disposition            benign
+ceiling_test           none
+```
+"""
+    body, warnings = parse_dense_companion(text)
+    assert warnings == []
     assert "ceiling_test" not in body["conclude"]
+
+
+def test_ceiling_test_reaches_the_judge_prompt():
+    """The point of recording it: the stage that grades a benign close can now see what the run
+    could not reach. `render_synthesis` dumps the conclude dict, so this needs no other plumbing
+    — and before this commit the rows existed in 49 files and reached nothing."""
+    from defender.learning.pipeline.judge.compare import render_synthesis
+
+    text = """\
+```invlang
+:T conclude
+disposition            benign
+ceiling_test           "authorized_keys FIM on web-1 (auditd write events) not retrieved"
+```
+"""
+    body, _warnings = parse_dense_companion(text)
+    rendered = render_synthesis(body)
+    assert "authorized_keys FIM on web-1" in rendered
 
 
 def test_conclude_row_spanning_two_lines_warns_instead_of_truncating():
