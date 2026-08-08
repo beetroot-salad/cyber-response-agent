@@ -110,13 +110,20 @@ def test_every_keyword_clears_the_vocabulary_check(disposition):
     assert not any("is not a known disposition" in e for e in errors)
 
 
+@pytest.mark.parametrize("disposition", sorted(DISPOSITION_ENUM - {"false-positive"}))
+def test_an_ungated_keyword_draws_no_error_at_all(disposition):
+    """The `== []` half the test above used to carry, kept for every keyword that is NOT
+    priced. Narrowing the assertion to "no vocabulary error" for ALL FOUR would have let a gate
+    that spuriously fires on `malicious` — or on `benign` with nothing to check — ship green.
+    `benign` passes here vacuously (no vertices, no live hypotheses), which is exactly the
+    shape #806 exists to stop `false-positive` from inheriting."""
+    assert validate_companion(_companion(disposition), None) == []
+
+
 def test_a_bare_false_positive_conclude_is_denied():
-    """The counterpart, and the one keyword a bare `conclude` cannot reach: `benign` passes
-    here vacuously (no vertices, no live hypotheses, nothing for its gate to check), which is
-    exactly the shape #806 exists to stop `false-positive` from inheriting."""
+    """The counterpart, and the one keyword a bare `conclude` cannot reach."""
     errors = validate_companion(_companion("false-positive"), None)
     assert any("false-positive blocked" in e for e in errors)
-    assert validate_companion(_companion("benign"), None) == []
 
 
 def test_an_out_of_enum_disposition_is_an_error_not_a_skipped_gate():

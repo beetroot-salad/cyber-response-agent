@@ -68,7 +68,7 @@ before chasing them; don't "fix" the tests.
 
 ## Run dir + the two tables
 
-Each run writes to `$DEFENDER_RUNS_BASE/{run_id}/` (default `/tmp/defender-runs/`): `alert.json` (read-only input), `investigation.md` (invlang work log), `report.md` (YAML frontmatter — `disposition: benign|inconclusive|malicious` — is the headline the learning loop parses), `llm_requests.jsonl` + `tool_trace.jsonl` (observability), `transcript.html`, and the **two append-only tables**, written live during the run:
+Each run writes to `$DEFENDER_RUNS_BASE/{run_id}/` (default `/tmp/defender-runs/`): `alert.json` (read-only input), `investigation.md` (invlang work log), `report.md` (YAML frontmatter — `disposition: benign|false-positive|inconclusive|malicious` — is the headline the learning loop parses), `llm_requests.jsonl` + `tool_trace.jsonl` (observability), `transcript.html`, and the **two append-only tables**, written live during the run:
 
 | Table | Where | Key |
 |---|---|---|
@@ -79,7 +79,7 @@ The single read/join surface is `learning/lead_repository.py` (`joined` / `actor
 
 ## Learning loop (the headlining experiment)
 
-Off-process: `run.py` enqueues a marker; workers drain independently, each committing from its own git worktree off `origin/main` with one PR per batch — the loop is the sole committer, spawned agents run no git. Per case: disposition selects direction (`benign` → hunt the FN, `malicious` → hunt the FP, `inconclusive` → both) → **actor** writes a candidate story (may SKIP) → **oracle** synthesizes its telemetry → **judge** classifies + emits findings → queued findings accumulate until the **curators** fold them into lessons, each edit gated by the same-case **forward-check** regression (BAD = the lesson would flip a correctly-resolved case → revert). Lessons feed back into the runtime at PLAN time via `defender-lessons` retrieval.
+Off-process: `run.py` enqueues a marker; workers drain independently, each committing from its own git worktree off `origin/main` with one PR per batch — the loop is the sole committer, spawned agents run no git. Per case: disposition selects direction (`benign` → hunt the FN, `malicious` → hunt the FP, `inconclusive` → both, `false-positive` → neither: it is a verdict about the rule, not the entity, so it trains nothing — `directions.UNTRAINED_DISPOSITIONS`) → **actor** writes a candidate story (may SKIP) → **oracle** synthesizes its telemetry → **judge** classifies + emits findings → queued findings accumulate until the **curators** fold them into lessons, each edit gated by the same-case **forward-check** regression (BAD = the lesson would flip a correctly-resolved case → revert). Lessons feed back into the runtime at PLAN time via `defender-lessons` retrieval.
 
 ## Where to make changes
 

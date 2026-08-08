@@ -58,7 +58,7 @@ UNKNOWN_DISPOSITION = "?"
 
 def normalized_disposition(value: object) -> str | None:
     """A disposition as it RENDERS — a `DISPOSITION_ENUM` member — or `None` when it is not one
-    of the three. THE single answer to what a disposition value MEANS, wherever it was read
+    of them. THE single answer to what a disposition value MEANS, wherever it was read
     from: report frontmatter, an invlang `conclude` block, or a ticket's resolution line.
 
     The #722 zero-width strip lives here and nowhere else. Both artifacts are authored by a
