@@ -270,21 +270,10 @@ h-002  null → --    [l-001 r1 severe ⟂ e-002 :: normal source history refute
 ```
 
 `:T resolutions` says how a lead changed a commitment's weight. Cite
-prediction/refutation IDs and supporting edges.
-
-Head shape: `[<lead> <ids> <severity> ⟂ <edges> :: <annotation>]`. Three
-things are denied on write:
-
-- **Every cited `p*` / `ap*` / `r*` must be declared by THAT hypothesis'
-  own `:H h-NNN.preds` / `.attr_preds` / `.refuts`.** A sibling's `p1` is
-  not yours — both hypotheses spell it `p1`, and citing across is how a
-  weight gets moved by evidence it never predicted.
-- **A `++` or `--` must cite at least one id.** The strongest moves are
-  the ones that owe PREDICT an answer.
-- **`<severity>` is positional-LAST and not optional.** Leave it out and
-  the parser reads your ids as the severity, so
-  `[l-001 p1,p2,p3 ⟂ e-002]` cites nothing at all — with the ids sitting
-  right there in the row.
+prediction/refutation IDs and supporting edges. Head shape is
+`[<lead> <ids> <severity> ⟂ <edges> :: <annotation>]`; `<severity>` is
+positional-last and required — leave it out and the parser reads your
+ids as the severity.
 
 ### `:T conclude` (REPORT)
 
