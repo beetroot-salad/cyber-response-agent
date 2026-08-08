@@ -2,12 +2,13 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from typing import Any
 
 from defender._vocab import normalized_disposition
 from . import _walkers, vocab
-from .parser import INVLANG_FENCE_RE, parse_dense_companion
-from .schema import CompanionBody, EdgeRecord, VertexRecord
+from .parser import INVLANG_FENCE_RE, is_conclude_empty_marker, parse_dense_companion
+from .schema import CompanionBody, EdgeRecord, FindingRecord, VertexRecord
 
 STRONG_AUTH_KINDS = vocab.STRONG_AUTH_KINDS
 STRONG_WEIGHTS = vocab.STRONG_WEIGHTS
@@ -416,18 +417,169 @@ def _check_conclude_vocab(companion: CompanionBody) -> list[str]:
     )
 
 
-def _check_benign_gating(companion: CompanionBody) -> list[str]:
-    conclude = companion.get("conclude") or {}
-    # Matched on what the value RENDERS as (#722). This branch decides whether the benign
-    # structural checks run at all, so a zero-width character clinging to the keyword used to
-    # turn them all off — a gate failing open on an invisible character in model-authored text.
-    if normalized_disposition(conclude.get("disposition")) != "benign":
-        return []
+def _row_states_something(value: Any) -> bool:
+    """A `:T conclude` scalar that actually SAYS something — present, non-blank, and not the
+    format's own "nothing to say" marker, which only the parser gets to define."""
+    return (
+        isinstance(value, str)
+        and bool(value.strip())
+        and not is_conclude_empty_marker(value)
+    )
 
+
+def _lead_returned_a_result(lead: FindingRecord) -> bool:
+    """Did this lead come back with a RESULT — not merely with a record that it ran.
+
+    Deliberately stricter than `_check_loop_close`'s committed test, which counts ANY outcome:
+    `:L findings`' `fail_reason` column projects into `outcome` as `failure_reason`, so a lead
+    whose only recorded outcome is "the query errored" reads as committed there. For closing a
+    loop that is right — the loop was worked. Here it is the exact shape the gate exists to
+    reject: a failed query tested the alerted entity for nothing, and is one column away from
+    being the cheapest possible `entity_check`.
+    """
+    if lead.get("resolutions"):
+        return True
+    outcome = lead.get("outcome")
+    if not isinstance(outcome, dict):
+        return False
+    return bool(set(outcome) - {"failure_reason"})
+
+
+def _check_false_positive_gating(companion: CompanionBody) -> list[str]:
+    """`false-positive` is the one disposition that closes a case on a claim about the RULE, so
+    it is the one that has to prove it also looked at the entity (#806).
+
+    The exit exists because a mis-keyed rule fires forever and investigating each firing costs
+    what the investigation costs — `pr815-rerun-0808` settled the refutation in 7 queries and
+    then spent 124 more attributing the failing source. What it never did was ask whether db-1
+    itself was compromised, which it was. So the gate is not "did you conclude carefully", it is
+    "name the lead that looked at the alerted entity, and let me check it ran".
+
+    Three things are checked and each one is a way the exit could otherwise be faked:
+
+      * `detection_notes` — an FP close with no stated defect is a close with no reason, and
+        `none` is not a defect: the format's empty marker is rejected here, not read as prose;
+      * `entity_check` names a lead that EXISTS and RETURNED A RESULT — a planned-but-never-
+        dispatched lead is the shape of an investigation that stopped at the plan, and a lead
+        carrying only a `fail_reason` is the shape of one whose query never landed;
+      * that lead targets a vertex the PROLOGUE carried — an entity the ALERT named, not one the
+        refutation introduced. Without this clause `pr815-rerun-0808` passes on l-011 or l-015,
+        both committed, both about the workstation the rule wrongly implicated.
+
+    TWO things it does NOT check, both about the QUESTION the named lead asked:
+
+      * whether it was a good one. In that run l-007 targeted db-1 and committed, so this gate
+        would have passed it — it read `authorized_keys` for `svc.config-mgmt` and never for
+        `root`, three rows below. Distinguishing those two is a question about query parameters,
+        which do not reach this layer and are not in the companion at all;
+      * whether it was INDEPENDENT of the alert's claim. Nothing here separates the lead that
+        tested the host for its own suspicion from the lead that refuted the correlation — the
+        refutation's own leads target the alerted host too, and commit. A run can therefore
+        satisfy this gate with work it had already done before the refutation landed.
+
+    Closing either gap means a fixed indicator set the runtime executes rather than the model
+    choosing; this gate is the structural half, and its limits are recorded here so the next
+    author does not read a passing gate as a swept host.
+    """
+    conclude = companion.get("conclude") or {}
+    errors: list[str] = []
+
+    notes = conclude.get("detection_notes")
+    if not _row_states_something(notes):
+        errors.append(
+            "disposition false-positive blocked: no `detection_notes` row — the "
+            "close rests on a claim about the rule, so the defect has to be stated"
+        )
+
+    lead_id = conclude.get("entity_check")
+    if not (isinstance(lead_id, str) and lead_id.strip()):
+        return errors + [
+            "disposition false-positive blocked: no `entity_check` row — name the "
+            "`:L findings` lead that tested the alerted entity for suspicion "
+            "independent of the alert's claim, or conclude in another vocabulary"
+        ]
+    lead_id = lead_id.strip()
+
+    lead = next(
+        (f for f in companion.get("findings") or [] if f.get("id") == lead_id), None
+    )
+    if lead is None:
+        return errors + [
+            f"disposition false-positive blocked: `entity_check` names {lead_id!r}, "
+            f"which is not a lead in `:L findings`"
+        ]
+
+    if not _lead_returned_a_result(lead):
+        errors.append(
+            f"disposition false-positive blocked: `entity_check` lead {lead_id} "
+            f"committed no result — a lead that was planned and never resolved, or "
+            f"whose only outcome is a `fail_reason`, did not test anything"
+        )
+
+    prologue_vertices = {
+        v.get("id") for v in (companion.get("prologue") or {}).get("vertices") or []
+    }
+    target = lead.get("target")
+    if target not in prologue_vertices:
+        errors.append(
+            f"disposition false-positive blocked: `entity_check` lead {lead_id} "
+            f"targets {target!r}, which the prologue does not carry — the check has "
+            f"to be against an entity the ALERT named, not one the refutation "
+            f"introduced"
+        )
+
+    return errors
+
+
+def _check_benign_gating(companion: CompanionBody) -> list[str]:
     errors: list[str] = []
     errors += _check_benign_open_slots(companion)
     errors += _check_benign_authz(companion)
     return errors
+
+
+#: The structural price of a keyword, keyed by the keyword. Two dispositions carry one; the
+#: rest carry none. Declared as a table rather than as a guard clause inside each gate so a
+#: third priced keyword is a row here, not a third copy of the "is this my disposition"
+#: preamble — which is the line that has to get #722 right every time it is written.
+_DISPOSITION_GATES: dict[str, Callable[[CompanionBody], list[str]]] = {
+    "benign": _check_benign_gating,
+    "false-positive": _check_false_positive_gating,
+}
+
+
+def false_positive_entry_price(companion_text: str) -> list[str]:
+    """What `disposition false-positive` still owes, read off an `investigation.md` — empty when
+    it owes nothing.
+
+    Public because the price has to be collected at BOTH boundaries. This module gates the
+    `investigation.md` write; `report.md` is written by `close_investigation`, which takes its
+    disposition as a tool argument and never reads the companion. Without a second reader the
+    entry price is bypassable by writing `:T conclude` with a cheaper keyword — or none — and
+    passing `false-positive` to the close, which is the artifact the learning loop, the evals
+    and the ticket lane all actually read.
+
+    A missing or unparseable companion yields the same denials an empty one does: you cannot
+    close on a defect you never wrote down.
+    """
+    companion, _ = parse_dense_companion(companion_text)
+    return _check_false_positive_gating(companion)
+
+
+def _check_disposition_gating(companion: CompanionBody) -> list[str]:
+    """Run the structural checks this run's disposition is priced at, and only those.
+
+    Dispatched on what the value RENDERS as (#722). This is the ONE branch that decides
+    whether a disposition's structural checks run at all, so a zero-width character clinging
+    to the keyword used to turn them all off — a gate failing open on an invisible character
+    in model-authored text. `_check_conclude_vocab` denies the laced spelling separately, and
+    the two rules stay independent on purpose: either alone would leave a hole.
+    """
+    disposition = normalized_disposition(
+        (companion.get("conclude") or {}).get("disposition")
+    )
+    gate = _DISPOSITION_GATES.get(disposition) if disposition else None
+    return gate(companion) if gate is not None else []
 
 
 
@@ -486,6 +638,6 @@ def validate_companion(
     errors.extend(_check_lead_refs(companion))
     errors.extend(_check_edge_authority(companion))
     errors.extend(_check_closed_vocab(companion))
-    errors.extend(_check_benign_gating(companion))
+    errors.extend(_check_disposition_gating(companion))
     errors.extend(_check_loop_close(companion))
     return errors

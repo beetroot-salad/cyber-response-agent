@@ -138,9 +138,10 @@ matching every *X* fires on the routine ones.
 
 Judge a **logic defect**, not the case. "Claims same-user, joins no user" is
 settled here from the payload; "was this user authorized" is a lead. A defect
-you find goes in `:T conclude`'s `detection_notes` at REPORT and is
-independent of `disposition` — both can be true of one alert. A rule that
-caught what it claims needs no row.
+you find goes in `:T conclude`'s `detection_notes` at REPORT. It does not
+decide `disposition` — a defective rule can still fire on a compromised host,
+so both can be true of one alert — but `disposition false-positive` requires
+it. A rule that caught what it claims needs no row.
 
 Leave ORIENT once you have characterized the alert: the entities
 involved, the behavior under question, and what disposition turns on.
@@ -171,14 +172,23 @@ If PLAN can't name a real branch the next move resolves, scaffold a
 single mechanism + legitimacy contract and proceed; don't loop on
 prediction.
 
-**A refuted alert claim narrows the plan; it never closes the case.** When
-ORIENT found the rule did not catch what it claims, the alerted behavior is
-unexplained rather than explained — plan one lead that tests the alerted
-entity for independent suspicion, and let its result decide. Clean, and you
-can close on it; anything else, and you are investigating a real finding
-that the rule happened to surface for the wrong reason. Never disposition
-`benign` on the refutation alone: a mis-correlated rule can still fire on a
-compromised host.
+**A refuted alert claim narrows the plan to one lead.** When ORIENT found the
+rule did not catch what it claims, the alerted behavior is unexplained rather
+than explained — plan **one** lead testing the alerted entity for suspicion
+independent of that claim. The alerted entity is the one the *alert* named,
+not one the refutation just introduced; the failing source and its host are
+the rule's problem, not the case's. Let that lead decide: clean, and close
+`false-positive`, stating the defect in `detection_notes` and naming the lead
+in `entity_check`; anything else, and you are investigating a real finding the
+rule surfaced for the wrong reason. Never `benign` on the refutation alone —
+that asserts the entity is clean, which refuting a correlation is no evidence
+for.
+
+**Do not investigate the misfire.** Why the rule matched is answered once, for
+the rule, in one `detection_notes` line — not re-derived per alert by
+attributing sources and reconstructing what generated them. A mis-keyed rule
+fires forever; the run that chases each firing to its origin pays the full
+price of an investigation for a finding the case does not turn on.
 
 **`:H` is for discovery; `??` is for refinement.** Reach for `:H`
 when the upstream cause is genuinely non-obvious — competing stories
@@ -428,12 +438,20 @@ Call `close_investigation(disposition=...)` once ANALYZE has reached a
 confident finding. `disposition` is the closed enum:
 
 - `benign` — confident clear.
+- `false-positive` — the RULE fired on a different kind of behavior than
+  its name and description claim, and the one lead that tested the
+  alerted entity independently came back clean. It describes the
+  detector, not the world: it is not a cheaper `benign`. Write
+  `detection_notes` (the defect) and `entity_check` (that lead's id) into
+  `:T conclude` FIRST — this close reads them back out of
+  `investigation.md`, and returns without committing if they are not
+  there.
 - `inconclusive` — ran out of data, escalate. Commits immediately, no
   review — the learning loop runs the adversarial actor on these.
 - `malicious` — confident escalate, story confirmed.
 
-A confident disposition (`benign`/`malicious`) passes a live challenge
-gate before it commits. When the gate is not satisfied yet, the call
+Every confident disposition — anything but `inconclusive` — passes a live
+challenge gate before it commits. When the gate is not satisfied yet, the call
 returns without committing, names what to investigate further, and you
 get another ANALYZE/GATHER turn before calling `close_investigation`
 again — this is a normal part of the loop, not an error.

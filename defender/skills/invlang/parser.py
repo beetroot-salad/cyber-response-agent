@@ -449,6 +449,17 @@ _CONCLUDE_KEYS_HINT = ", ".join(
 _CONCLUDE_EMPTY_MARKERS: frozenset[str] = frozenset({"none", "n/a"})
 
 
+def is_conclude_empty_marker(value: object) -> bool:
+    """Does this conclude row value spell "nothing to say"? THE membership test for the
+    vocabulary above, beside the vocabulary.
+
+    A SCALAR row keeps the marker — only the list branch below drops it — so a gate that asks
+    "did the run state a defect" has to ask this rather than `value.strip()`: `detection_notes
+    none` is the row that explicitly says there is no defect, and it is not blank.
+    """
+    return isinstance(value, str) and value.strip().lower() in _CONCLUDE_EMPTY_MARKERS
+
+
 def _close_loop(rows: list[str]) -> int | None:
     for row in rows:
         m = re.match(r"^loop\s+(\S+)", row.strip())
@@ -621,7 +632,7 @@ class _Projector:
                 termination["rationale"] = value
             elif key in _CONCLUDE_LISTS:
                 seen.add(key)
-                if isinstance(value, str) and value.strip().lower() in _CONCLUDE_EMPTY_MARKERS:
+                if is_conclude_empty_marker(value):
                     continue
                 cast(list[str], conclude.setdefault(key, [])).append(value)
             elif key in _CONCLUDE_SCALARS:

@@ -167,9 +167,22 @@ BENIGN = Direction(
 
 BY_NAME = {ADVERSARIAL.name: ADVERSARIAL, BENIGN.name: BENIGN}
 
-# INVARIANT: the union of every `dispositions` is exactly `DISPOSITION_ENUM` — a typo or an
-# omission there silently drops a leg from BOTH the loop's dispatch and the transcript, with
-# nothing failing. Guarded by `test_every_disposition_selects_at_least_one_direction` (#716).
+#: Dispositions that select NO direction on purpose. Named here so the drift guard below can
+#: stay exact: an omission is still a bug, unless it is one this set declares.
+#:
+#: `false-positive` (#806) is a verdict about the RULE — it says the detection fired on a
+#: different kind of behaviour than it claims, and says nothing about whether the alerted entity
+#: was clean. Neither actor has a story to write from it: hunting the FN would mean disproving a
+#: claim the run never made, and hunting the FP would mean re-deriving the defect the run already
+#: stated. The tuning signal it carries belongs to the rule, per rule, not to this loop, which
+#: learns per case. A run with something to teach about the ENTITY has three other keywords and
+#: `_check_false_positive_gating` requires it to have looked before reaching this one.
+UNTRAINED_DISPOSITIONS: frozenset[str] = frozenset({"false-positive"})
+
+# INVARIANT: the union of every `dispositions` is exactly `DISPOSITION_ENUM` minus
+# `UNTRAINED_DISPOSITIONS` — a typo or an omission there silently drops a leg from BOTH the
+# loop's dispatch and the transcript, with nothing failing. Guarded by
+# `test_every_disposition_selects_at_least_one_direction` (#716).
 
 
 def directions_for(disposition: str) -> list[Direction]:

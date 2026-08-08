@@ -22,7 +22,12 @@ import pytest
 
 from defender._vocab import DISPOSITION_ENUM
 from defender.learning.core.config import ACTOR_OBSERVATION_TYPES
-from defender.learning.core.directions import BY_NAME, directions_for, raw_fallback_name
+from defender.learning.core.directions import (
+    BY_NAME,
+    UNTRAINED_DISPOSITIONS,
+    directions_for,
+    raw_fallback_name,
+)
 from defender.learning.core.validate import (
     ADVERSARIAL_JUDGE_OPTIONAL_KEYS,
     BENIGN_JUDGE_OPTIONAL_KEYS,
@@ -118,11 +123,24 @@ def test_views_cover_every_direction():
 def test_every_disposition_selects_at_least_one_direction():
     """The other half of the drift guard: a typo'd or omitted entry in
     `Direction.dispositions` would drop a leg from BOTH the loop's dispatch and the page,
-    with nothing failing."""
+    with nothing failing.
+
+    `UNTRAINED_DISPOSITIONS` is subtracted rather than the assertion loosened to `<=`: a
+    deliberate omission and a typo look identical to `<=`, and the typo is the bug this test
+    was written for (#716)."""
     declared = {d for direction in BY_NAME.values() for d in direction.dispositions}
-    assert declared == DISPOSITION_ENUM
-    for disposition in DISPOSITION_ENUM:
+    assert declared == DISPOSITION_ENUM - UNTRAINED_DISPOSITIONS
+    for disposition in DISPOSITION_ENUM - UNTRAINED_DISPOSITIONS:
         assert directions_for(disposition), disposition
+
+
+def test_false_positive_trains_nothing():
+    """#806. `false-positive` is in the vocabulary and selects no direction, so a run that
+    exits on a detection defect enqueues no actor work. Pinned as its own test because the
+    omission is the FEATURE — without it, `directions_for` returning `[]` reads like the bug
+    the test above exists to catch, and the next author 'fixes' it."""
+    assert "false-positive" in DISPOSITION_ENUM
+    assert directions_for("false-positive") == []
 
 
 # --- ids come off the direction name, through one mechanism -----------------------
