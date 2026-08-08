@@ -14,9 +14,11 @@ instead of at runtime (expensive, late). It compares the live constants, not a
 saved snapshot, so neither side can move alone.
 
 Coverage: the surfaces that have a fixed parser column constant —
-`:V`/`:E` rows, the `:H hypothesize.hypotheses` header, and the `:H h-NNN.<sub>`
-sub-blocks. `:L findings` and `:R …` blocks read their columns from the block's
-own header (no fixed constant), so they are out of scope here.
+`:V`/`:E` rows, both hypothesis-declaration headers
+(`:H hypothesize.hypotheses` and the mid-run fork's
+`:H l-NNN.new_hypotheses`), and the `:H h-NNN.<sub>` sub-blocks. `:L findings`
+and `:R …` blocks read their columns from the block's own header (no fixed
+constant), so they are out of scope here.
 """
 
 from __future__ import annotations
@@ -50,6 +52,21 @@ def _documented_headers() -> list[tuple[str, str, list[str]]]:
     return out
 
 
+def _is_hyp_declaration(tag: str, name: str) -> bool:
+    """The two sites that DECLARE a hypothesis, as opposed to hanging a
+    sub-block off one.
+
+    `:H l-NNN.new_hypotheses` is the mid-run fork's spelling and carries the
+    same 9-col header; since #817 the lead site runs the same
+    `_is_current_hyp_header` check, so drift costs it the same whole-block
+    rejection. Both are compared as SETS, matching that check — the header is
+    pinned on membership, not order.
+    """
+    return tag == "H" and (
+        name == "hypothesize.hypotheses" or name.endswith(".new_hypotheses")
+    )
+
+
 def _expected(tag: str, name: str) -> list[str] | None:
     """The parser column constant a documented `(tag, name)` block must match,
     or None when the block has no fixed constant (`:L`/`:R`/dynamic-header)."""
@@ -57,9 +74,9 @@ def _expected(tag: str, name: str) -> list[str] | None:
         return parser._VERTEX_COLS
     if tag == "E":
         return parser._EDGE_COLS
+    if _is_hyp_declaration(tag, name):
+        return sorted(parser._HYP_HEADER_COLS)
     if tag == "H":
-        if name == "hypothesize.hypotheses":
-            return sorted(parser._HYP_HEADER_COLS)
         if name.endswith(".preds"):
             return parser._HYP_PRED_COLS
         if name.endswith(".attr_preds"):
@@ -78,7 +95,7 @@ def test_skill_md_grammar_matches_parser_constants():
         expected = _expected(tag, name)
         if expected is None:
             continue
-        if tag == "H" and name == "hypothesize.hypotheses":
+        if _is_hyp_declaration(tag, name):
             assert sorted(cols) == expected, (
                 f":{tag} {name} header {cols} != parser _HYP_HEADER_COLS"
             )
