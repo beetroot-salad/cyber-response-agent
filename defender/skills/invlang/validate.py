@@ -98,9 +98,11 @@ def _known_ids(declared: set[str]) -> str:
     return ", ".join(sorted(declared)) or "none"
 
 
-def _check_prediction_refs(companion: CompanionBody) -> list[str]:
-    """A resolution matches only the predictions and refutations its own
-    hypothesis declared.
+def _check_prediction_refs(
+    companion: CompanionBody, *, parse_clean: bool
+) -> list[str]:
+    """A resolution moves a hypothesis that was declared, and matches only the
+    predictions and refutations that hypothesis declared.
 
     `_check_lead_refs`'s analogue for the other reference the parser derives by
     heuristic instead of by lookup: `matched_prediction_ids` is the id-shaped
@@ -110,12 +112,17 @@ def _check_prediction_refs(companion: CompanionBody) -> list[str]:
     that does not exist, or on one belonging to the hypothesis it is being
     weighed against.
 
-    A resolution whose `h-*` no `:H` row declares is skipped: there is no id set
-    to resolve against. That leaves a phantom-hypothesis hole this check does NOT
-    close — nothing warns on the unknown id, so the row moves a hypothesis that
-    does not exist in silence. Closing it needs the parser to accumulate `:H`
-    blocks first (#816); until then the error would fire on the legitimate
-    mid-run fork, whose earlier hypotheses the parser drops.
+    The row's `h-*` is the same reference one level up, and it went unchecked
+    for the same reason: the projector opens no bucket for it, so a phantom
+    moved to `++` in silence and `_walkers.final_weights` reported it live. It
+    could not be enforced until `:H` blocks accumulated (#817) — before that, a
+    legitimate mid-run fork's earlier hypotheses were dropped by the parser and
+    this error would have fired on a correct document.
+
+    `parse_clean` is what keeps that deference honest now: a `:H` block the
+    parser REJECTED (a stale header, an `attached_to` naming an edge) leaves
+    every resolution against it looking phantom, and the parse warning already
+    names the cause. One defect, one error.
     """
     errors: list[str] = []
     declared_by_hyp = {
@@ -129,6 +136,15 @@ def _check_prediction_refs(companion: CompanionBody) -> list[str]:
         hid = res.get("hypothesis")
         entry = declared_by_hyp.get(hid) if isinstance(hid, str) else None
         if entry is None:
+            if parse_clean and isinstance(hid, str):
+                errors.append(
+                    f"lead {lid}: resolution moves undeclared hypothesis "
+                    f"{hid!r} — no `:H hypothesize.hypotheses` or "
+                    f"`:H l-NNN.new_hypotheses` row declares it (declared: "
+                    f"{_known_ids(set(declared_by_hyp))}); a hypothesis born "
+                    f"mid-run is declared by the lead that found it, before "
+                    f"anything resolves it"
+                )
             continue
         preds, refuts = entry
         for pid in _unresolved(res.get("matched_prediction_ids") or [], preds):
@@ -574,7 +590,7 @@ def validate_companion(
         return errors
 
     errors.extend(_check_lead_refs(companion))
-    errors.extend(_check_prediction_refs(companion))
+    errors.extend(_check_prediction_refs(companion, parse_clean=not warnings))
     errors.extend(_check_strong_move_provenance(companion))
     errors.extend(_check_closed_vocab(companion))
     errors.extend(_check_benign_gating(companion))
