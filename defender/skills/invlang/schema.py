@@ -269,6 +269,12 @@ class Conclude(TypedDict, total=False):
     matched_archetype: str | None
     ceiling_rationale: str | None
     summary: str | None
+    # #806 — what the DETECTOR got wrong, kept out of `summary` on purpose. A run can find two
+    # independent things (the alert's own claim does not hold; the host is compromised anyway) and
+    # `disposition` has room for one. Free text, ONE line like every other row here. It reaches the
+    # judge because `render_synthesis` dumps this whole dict; it is deliberately NOT mirrored into
+    # `report.md`, which is host-rendered from typed values and carries no model prose (#774).
+    detection_notes: str | None
     termination: Termination
 
 

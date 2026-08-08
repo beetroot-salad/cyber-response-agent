@@ -128,6 +128,26 @@ compute/identity/application, single-token otherwise) is reproduced in the
 there and do **not** Read `defender/skills/invlang/SKILL.md` (it's already in
 your context). The CLI returns the live enums.
 
+**Test the alert's own claim.** The rule's `description` says what it aims
+to detect; its query implements an approximation of that. Read the two
+against each other and against the alerted event: *did this rule catch what
+it says it catches, here?* Some descriptions name their own limits — take
+them at their word. Where the rule aggregates or correlates, check which
+fields it joined on and which it did not; a rule that claims a same-actor
+pattern while joining only on the host has not tested the actor. (If the
+SIEM is Elastic, an EQL `sequence by host.name` says exactly that, and a
+`sequence` with no `by` clause joins on nothing but time.) Single-event
+rules have the same gap: a rule aiming at "suspicious *X*" and matching
+every *X* fires on the routine ones too.
+
+Look for a **logic defect**, not a judgment call: "the description claims
+same-user, the query has no user join" is settled here, from the payload.
+"Was this user authorized" is the investigation — leave it to the leads.
+
+Record what you find in `:T conclude`'s `detection_notes` at REPORT,
+whatever the disposition turns out to be. A refuted claim and a compromised
+host are independent findings, and both can be true of one alert.
+
 Leave ORIENT once you have characterized the alert: the entities
 involved, the behavior under question, and what disposition turns on.
 
@@ -156,6 +176,15 @@ you have already crossed into gather's surface — dispatch instead.
 If PLAN can't name a real branch the next move resolves, scaffold a
 single mechanism + legitimacy contract and proceed; don't loop on
 prediction.
+
+**A refuted alert claim narrows the plan; it never closes the case.** When
+ORIENT found the rule did not catch what it claims, the alerted behavior is
+unexplained rather than explained — plan one lead that tests the alerted
+entity for independent suspicion, and let its result decide. Clean, and you
+can close on it; anything else, and you are investigating a real finding
+that the rule happened to surface for the wrong reason. Never disposition
+`benign` on the refutation alone: a mis-correlated rule can still fire on a
+compromised host.
 
 **`:H` is for discovery; `??` is for refinement.** Reach for `:H`
 when the upstream cause is genuinely non-obvious — competing stories

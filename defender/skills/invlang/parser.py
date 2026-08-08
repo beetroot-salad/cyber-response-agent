@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import contextlib
 import re
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from typing import Any, cast
 
@@ -424,9 +424,25 @@ def _canonicalize_resolution_row(rec: dict[str, str]) -> ResolutionRow:
     return cast(ResolutionRow, out)
 
 
-def _project_conclude_scalars(conclude: dict[str, Any], rows: list[str]) -> None:
+#: The scalar rows `:T conclude` projects, and the CLOSED set an unrecognized row is judged
+#: against. Rows here are one-per-line by construction — the block is line-oriented, so a value
+#: spanning two lines is TWO rows to this loop, the second of which lands in no key. That used to
+#: be dropped in silence, which is how #806's refuted-correlation finding could be authored and
+#: lost: the model writes a note across three lines, line one survives with its opening quote
+#: dangling, and nothing anywhere says the rest is gone. A conclusion that quietly loses half of
+#: itself is worse than one that was never written, so an unrecognized row now WARNS — and
+#: `validate_companion` turns every parse warning into a write-gate denial the author can act on.
+_CONCLUDE_SCALARS: frozenset[str] = frozenset({
+    "disposition", "impact_verdict", "impact_severity", "confidence",
+    "matched_archetype", "ceiling_rationale", "summary", "detection_notes",
+})
+
+
+def _project_conclude_scalars(
+    conclude: dict[str, Any], rows: list[str], warn: Callable[[int, str, str], None]
+) -> None:
     termination: dict[str, Any] = {}
-    for row in rows:
+    for index, row in enumerate(rows):
         m = re.match(r"^(\S+)\s+(.*)$", row)
         if not m:
             continue
@@ -437,11 +453,27 @@ def _project_conclude_scalars(conclude: dict[str, Any], rows: list[str]) -> None
             termination["category"] = value
         elif key == "termination.rationale":
             termination["rationale"] = value
-        elif key in (
-            "disposition", "impact_verdict", "impact_severity",
-            "confidence", "matched_archetype", "ceiling_rationale", "summary",
-        ):
+        elif key in _CONCLUDE_SCALARS:
             conclude[key] = value
+            # An opened quote that never closes on its own row is the multi-line author's
+            # signature: `_unquote` leaves the leading `"` in place because it found no partner,
+            # so the stored value is a fragment wearing a quote. Warn on the row that OPENED it
+            # rather than only on the orphaned continuations, so the reason names the field.
+            if isinstance(value, str) and value.startswith('"'):
+                warn(
+                    index, row,
+                    f"conclude: {key} opens a quoted value that does not close on this row — "
+                    "invlang rows are one line each, so the rest of the value is dropped. "
+                    "Write it as ONE line (long is fine — `summary` routinely is).",
+                )
+        else:
+            warn(
+                index, row,
+                f"conclude: unrecognized row {key!r} — the block projects "
+                f"{sorted(_CONCLUDE_SCALARS)} plus termination.category / "
+                "termination.rationale. A row outside that set records nothing. If this is the "
+                "continuation of a value from the row above, join it onto one line.",
+            )
     if termination:
         conclude["termination"] = termination
 
@@ -563,7 +595,10 @@ class _Projector:
     def _project_t_block(self, block: Block) -> bool:
         name = block.name
         if name == "conclude":
-            _project_conclude_scalars(self.out.setdefault("conclude", {}), block.rows)
+            _project_conclude_scalars(
+                self.out.setdefault("conclude", {}), block.rows,
+                lambda i, row, reason: self._warn(block, i, row, reason),
+            )
             return True
         if name.startswith("conclude."):
             return True

@@ -282,6 +282,7 @@ impact_verdict         none
 confidence             high
 matched_archetype      routine-admin-login
 summary                "Login matched established bastion usage"
+detection_notes        "Rule claims a same-user pattern; it joins on host only. Not tested here."
 ```
 
 - `disposition` — closed vocab (`enum disposition`), and the SAME three
@@ -289,6 +290,14 @@ summary                "Login matched established bastion usage"
   write; there is no `escalate` keyword — an escalation is
   `termination.category exhaustion-escalation` with `disposition
   inconclusive`.
+- `detection_notes` — what the DETECTOR got wrong, when ORIENT's fidelity
+  check found something. It is not part of `summary`: the disposition
+  describes the world, this describes the rule, and a run can find both. Omit
+  it when the rule caught what it claims.
+
+Every row is ONE line. A value that opens a quote and does not close it on
+the same row is denied on write, because the lines below it record nothing —
+write long values as one long line, as `summary` already does.
 
 ### `:T close` (loop boundary)
 
