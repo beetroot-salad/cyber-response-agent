@@ -76,7 +76,7 @@ def test_a_prediction_id_no_hypothesis_declares_is_rejected():
     errors = _errors(_doc(
         _two_hypotheses() + "\n"
         ":T resolutions\n"
-        "h-001  null → +    [l-001 p9 mild ⟂ e-002 :: parent looks interactive]"
+        "h-001  null → +    [l-001 p9 weak ⟂ e-002 :: parent looks interactive]"
     ))
     assert len(errors) == 1
     assert "'p9'" in errors[0]
@@ -90,7 +90,7 @@ def test_a_siblings_prediction_id_is_rejected_even_though_it_exists():
     errors = _errors(_doc(
         _two_hypotheses() + "\n"
         ":T resolutions\n"
-        "h-002  null → +    [l-001 p2 mild ⟂ e-002 :: no packaging metadata]"
+        "h-002  null → +    [l-001 p2 weak ⟂ e-002 :: no packaging metadata]"
     ))
     assert len(errors) == 1
     assert "'p2'" in errors[0]
@@ -101,7 +101,7 @@ def test_an_undeclared_refutation_id_is_rejected():
     errors = _errors(_doc(
         _two_hypotheses() + "\n"
         ":T resolutions\n"
-        "h-001  null → -    [l-001 r7 mild ⟂ e-002 :: parent is packaged]"
+        "h-001  null → -    [l-001 r7 weak ⟂ e-002 :: parent is packaged]"
     ))
     assert len(errors) == 1
     assert "'r7'" in errors[0]
@@ -113,7 +113,7 @@ def test_declared_predictions_and_refutations_are_accepted():
         _two_hypotheses() + "\n"
         ":T resolutions\n"
         "h-001  null → ++   [l-001 p1,p2 severe ⟂ e-002 :: interactive parent, no packaging]\n"
-        "h-002  null → -    [l-001 p1 mild ⟂ e-002 :: some packaging metadata after all]"
+        "h-002  null → -    [l-001 p1 weak ⟂ e-002 :: some packaging metadata after all]"
     )) == []
 
 
@@ -128,14 +128,21 @@ def test_an_attribute_prediction_id_resolves_against_attr_preds():
     )) == []
 
 
-def test_a_resolution_against_an_undeclared_hypothesis_is_left_to_the_parser():
-    """h-404 has no `:H` row, so there is no id set to resolve against. The
-    parse layer owns that failure; repeating it once per citation would bury
-    it under three copies of the same news."""
+def test_a_resolution_against_an_undeclared_hypothesis_is_skipped_not_caught():
+    """h-404 has no `:H` row, so there is no id set to resolve against and this
+    rule stands down.
+
+    Pinning the LIMIT, not a virtue: nothing else catches the unknown `h-404`
+    either, so the row moves a phantom hypothesis in silence and
+    `_walkers.final_weights` reports it live. This rule cannot close that hole
+    on its own — a mid-run fork writes a second `:H hypothesize.hypotheses`
+    block, which the parser projects by REPLACING the list, so every loop-1
+    hypothesis vanishes and the error would fire on legitimate documents.
+    Accumulate first (#816), then tighten here."""
     assert _errors(_doc(
         _two_hypotheses() + "\n"
         ":T resolutions\n"
-        "h-404  null → +    [l-001 p1,p2 mild ⟂ e-002 :: unrelated]"
+        "h-404  null → +    [l-001 p1,p2 weak ⟂ e-002 :: unrelated]"
     )) == []
 
 
@@ -167,7 +174,7 @@ def test_a_weak_move_may_cite_nothing():
     assert _errors(_doc(
         _two_hypotheses() + "\n"
         ":T resolutions\n"
-        "h-001  null → +    [l-001 mild ⟂ e-002 :: suggestive, nothing settled]"
+        "h-001  null → +    [l-001 weak ⟂ e-002 :: suggestive, nothing settled]"
     )) == []
 
 
@@ -202,6 +209,20 @@ def test_an_undeclared_attribute_prediction_in_the_head_is_still_rejected():
     ))
     assert len(errors) == 1
     assert "'ap9'" in errors[0]
+
+
+def test_head_prose_is_not_a_citation():
+    """The head is not id-only — `[l-001 p1 + l-003 p1,p2 moderate ⟂ …]` is a
+    shipped shape. A `startswith` test read any word beginning `p`, `ap` or `r`
+    as a cited id, which cost nothing while the ids resolved against nothing;
+    once this rule joined them to the declaring block, `partial` in the head
+    became a denied write. Only an id-SHAPED token is a citation."""
+    for word in ("partial", "approved", "refuted"):
+        assert _errors(_doc(
+            _two_hypotheses() + "\n"
+            ":T resolutions\n"
+            f"h-001  null → ++   [l-001 p1 {word} severe ⟂ e-002 :: interactive parent]"
+        )) == [], word
 
 
 def test_omitting_severity_is_caught_as_a_strong_move_citing_nothing():

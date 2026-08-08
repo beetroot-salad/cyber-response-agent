@@ -33,9 +33,11 @@ error rather than letting the write through. Scope is anchored to
 6. prediction-refs — a resolution's `matched_prediction_ids` /
    `matched_refutation_ids` must resolve to ids the moved hypothesis
    itself declares in `:H h-NNN.preds` / `.attr_preds` / `.refuts`. The
-   parser derives those lists by prefix heuristic over head tokens and
-   never joined them back to the declaring block, so a typo, a forward
-   reference and a *sibling's* `p1` all parsed clean (#798).
+   parser derives those lists from head tokens and never joined them
+   back to the declaring block, so a typo, a forward reference and a
+   *sibling's* `p1` all parsed clean (#798). It does NOT catch an
+   unknown `h-*` in the row itself — that needs the parser to
+   accumulate `:H` blocks first (#816).
 7. strong-move citation — a `++`/`--` must name at least one of them.
    The other half of rule 3's provenance tuple: which pre-committed
    claim the cited observation settled.

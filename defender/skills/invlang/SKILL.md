@@ -271,9 +271,9 @@ h-002  null → --    [l-001 r1 severe ⟂ e-002 :: normal source history refute
 
 `:T resolutions` says how a lead changed a commitment's weight. Cite
 prediction/refutation IDs and supporting edges. Head shape is
-`[<lead> <ids> <severity> ⟂ <edges> :: <annotation>]`; `<severity>` is
-positional-last and required — leave it out and the parser reads your
-ids as the severity.
+`[<lead> <ids> <severity> ⟂ <edges> :: <annotation>]`; `<severity>` ∈
+{`severe`, `moderate`, `weak`} is positional-last and required — leave
+it out and the parser reads your ids as the severity.
 
 ### `:T conclude` (REPORT)
 

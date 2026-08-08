@@ -103,26 +103,34 @@ def _check_prediction_refs(companion: CompanionBody) -> list[str]:
     hypothesis declared.
 
     `_check_lead_refs`'s analogue for the other reference the parser derives by
-    heuristic instead of by lookup: `matched_prediction_ids` is every `p*`/`ap*`
-    head token, and nothing joined the result back to the declaring
+    heuristic instead of by lookup: `matched_prediction_ids` is the id-shaped
+    head tokens, and nothing joined the result back to the declaring
     `:H h-NNN.preds` block. So a typo, a forward reference, and a *sibling's*
     `p1` all parsed clean and validated clean — a `++` could rest on a prediction
     that does not exist, or on one belonging to the hypothesis it is being
     weighed against.
 
-    A resolution against a hypothesis this document never declares is left to
-    the parse warning that dropped the `:H` block. There is no id set to resolve
-    against there, and restating that one failure once per citation buries it.
+    A resolution whose `h-*` no `:H` row declares is skipped: there is no id set
+    to resolve against. That leaves a phantom-hypothesis hole this check does NOT
+    close — nothing warns on the unknown id, so the row moves a hypothesis that
+    does not exist in silence. Closing it needs the parser to accumulate `:H`
+    blocks first (#816); until then the error would fire on the legitimate
+    mid-run fork, whose earlier hypotheses the parser drops.
     """
-    hyps = _walkers.all_hypotheses(companion)
     errors: list[str] = []
+    declared_by_hyp = {
+        hid: (
+            _declared_prediction_ids(hyp),
+            {r["id"] for r in hyp.get("refutation_shape") or []},
+        )
+        for hid, hyp in _walkers.all_hypotheses(companion).items()
+    }
     for lid, res in _walkers.iter_resolutions(companion):
         hid = res.get("hypothesis")
-        hyp = hyps.get(hid) if isinstance(hid, str) else None
-        if hyp is None:
+        entry = declared_by_hyp.get(hid) if isinstance(hid, str) else None
+        if entry is None:
             continue
-        preds = _declared_prediction_ids(hyp)
-        refuts = {r["id"] for r in hyp.get("refutation_shape") or []}
+        preds, refuts = entry
         for pid in _unresolved(res.get("matched_prediction_ids") or [], preds):
             errors.append(
                 f"lead {lid}: resolution of {hid} cites prediction {pid!r}, "
@@ -219,10 +227,10 @@ def _check_strong_move_provenance(companion: CompanionBody) -> list[str]:
     observation it rests on, and WHICH pre-committed claim that observation
     settled.
 
-    The two were separate walks emitting interleaved errors about the same rows.
-    They share the `++`/`--` filter and answer one question between them, so the
-    row that is missing both now reports both together instead of once here and
-    once eighty lines away.
+    The citation half is new (#798) and lives here rather than in a walk of its
+    own: it shares this one's `++`/`--` filter and answers the other half of the
+    same question, so a row missing both reports both together instead of once
+    here and once eighty lines away.
 
     The citation half also catches how the ids go missing in practice. The head
     is `[<lead> <ids…> <severity> ⟂ <edges>]` and severity is positional-last, so

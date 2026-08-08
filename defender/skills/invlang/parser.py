@@ -321,7 +321,14 @@ _RESOLUTION_LINE_RE = re.compile(
 )
 
 
-_IFF_LITERAL_RE = re.compile(r"\b(ap\d+|p\d+|r\d+)\b")
+# What a prediction / refutation citation looks like, on either side of the row.
+# One owner: the head tokenizer `fullmatch`es it, the `⟺` scanner searches for it
+# word-bounded. A `startswith` test here instead let any head word beginning `p`,
+# `ap` or `r` (`partial`, `approved`, `refuted`) parse as a cited id — harmless
+# while nothing joined the list back to the declaring `:H` block, a blocked write
+# once `_check_prediction_refs` did.
+_REF_ID_RE = re.compile(r"ap\d+|p\d+|r\d+")
+_IFF_LITERAL_RE = re.compile(rf"\b(?:{_REF_ID_RE.pattern})\b")
 
 
 def _extract_iff_literals(annotation: str) -> tuple[list[str], list[str]]:
@@ -372,15 +379,13 @@ def _resolution_record(row: str) -> tuple[str | None, ResolutionRecord]:
         head_refs.extend(t.strip() for t in tok.split(",") if t.strip())
     supp_text = supp.strip()
     iff_pred_ids, iff_refut_ids = _extract_iff_literals(annotation)
-    # `ap*` counts as a matched PREDICTION here exactly as it does on the `⟺` side
-    # (`_extract_iff_literals` files everything that is not `r*` under predictions).
-    # A bare `startswith("p")` dropped it on the floor: the head spelling the
-    # validator's own error message asks for — `[l-001 ap1 severe ⟂ e-002]` — parsed
-    # as citing nothing at all.
-    matched_pred_ids = iff_pred_ids or [
-        t for t in head_refs if t.startswith(("ap", "p"))
-    ]
-    matched_refut_ids = iff_refut_ids or [t for t in head_refs if t.startswith("r")]
+    # Same split as the `⟺` side: an id-shaped token that is not `r*` is a
+    # prediction, so `ap*` files under predictions in both spellings. A bare
+    # `startswith("p")` dropped `ap1` on the floor — the head spelling the
+    # validator's own error message asks for parsed as citing nothing at all.
+    head_ids = [t for t in head_refs if _REF_ID_RE.fullmatch(t)]
+    matched_pred_ids = iff_pred_ids or [t for t in head_ids if not t.startswith("r")]
+    matched_refut_ids = iff_refut_ids or [t for t in head_ids if t.startswith("r")]
     record: ResolutionRecord = {
         "hypothesis": m.group("hyp"),
         "hypothesis_id": m.group("hyp"),
