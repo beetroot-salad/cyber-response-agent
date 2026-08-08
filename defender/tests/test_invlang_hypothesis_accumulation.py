@@ -16,6 +16,7 @@ hypothesis could not carry a prediction at all (#816).
 
 from __future__ import annotations
 
+from defender.skills.invlang._walkers import all_hypotheses
 from defender.skills.invlang.parser import parse_dense_companion
 from defender.skills.invlang.validate import validate_companion
 
@@ -160,3 +161,138 @@ def test_a_subblock_for_a_genuinely_unknown_hypothesis_still_warns():
     ))
     assert len(warnings) == 1
     assert "unknown hypothesis 'h-999'" in warnings[0].reason
+
+
+
+
+def test_a_second_preds_block_adds_a_prediction_rather_than_replacing():
+    """The sub-block has the same append-only shape as the table above it: a loop
+    that adds a prediction to a live hypothesis can only write a SECOND `:H
+    h-001.preds`, and assignment took the first block's predictions with it."""
+    body, warnings = parse_dense_companion(_doc(
+        _loop_one()
+        + ":H h-001.preds [id|subject|claim]\n"
+        'p1|proposed_parent|"parent is an interactive shell"\n'
+        "\n"
+        ":H h-001.preds [id|subject|claim]\n"
+        'p2|proposed_parent|"parent was launched from a terminal"\n'
+    ))
+    assert warnings == []
+    h001 = body["hypothesize"]["hypotheses"][0]
+    assert [p["id"] for p in h001["predictions"]] == ["p1", "p2"]
+
+
+def test_a_second_authz_block_cannot_drop_an_earlier_contract():
+    """The safety edge of the same defect. `ac1` is fulfilled by nothing; `ac2`
+    is authorized. While the second block REPLACED the contract list, ac1
+    vanished and the benign gate saw only the satisfied contract."""
+    doc = _doc(
+        _loop_one()
+        + ":H h-001.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]\n"
+        'ac1|e-001|iam-policy|"the account may run this"|escalate|escalate\n'
+        "\n"
+        ":H h-001.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]\n"
+        'ac2|e-001|iam-policy|"the account may reach this host"|escalate|escalate\n'
+        "\n"
+        ":R authz [resolved_by|fulfills_contract|anchor_kind|verdict]\n"
+        "l-001|ac2|iam-policy|authorized\n"
+        "\n"
+        + _LEAD_HEADER + "\n"
+        "l-001|1|authz-check|v-001|h-001|elastic|±10m\n"
+        "\n"
+        ":T conclude\ndisposition            benign\n"
+    )
+    blocked = [e for e in validate_companion(doc) if "authz contract" in e]
+    assert len(blocked) == 1, blocked
+    assert "ac1" in blocked[0]
+
+
+def test_a_second_refuts_block_adds_a_refutation_rather_than_replacing():
+    body, _warnings = parse_dense_companion(_doc(
+        _loop_one()
+        + ":H h-001.refuts [id|refutes|claim]\n"
+        'r1||"no shell ancestor"\n'
+        "\n"
+        ":H h-001.refuts [id|refutes|claim]\n"
+        'r2||"packaged installer path"\n'
+    ))
+    h001 = body["hypothesize"]["hypotheses"][0]
+    assert [r["id"] for r in h001["refutation_shape"]] == ["r1", "r2"]
+
+
+def test_the_table_outranks_a_lead_when_both_declare_one_id():
+    """`_walkers.all_hypotheses` reads the `:H hypothesize.hypotheses` table
+    before any lead's `new_hypotheses`, so the projector must index the TABLE
+    record whichever came first in the document. Indexing the lead record
+    instead landed `:H h-010.authz` on a record no consumer reads, and
+    `disposition: benign` passed on an unfulfilled contract."""
+    doc = _doc(
+        _EDGE + "\n"
+        + _LEAD_HEADER + "\n"
+        "l-001|1|process-ancestry|v-001|h-010|elastic|±10m\n"
+        "\n"
+        ":H l-001.new_hypotheses "
+        "[id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]\n"
+        + _hyp_row("h-010", "mid-run-fork")
+        + "\n"
+        + _HYP_HEADER + "\n" + _hyp_row("h-010", "mid-run-fork") + "\n"
+        + ":H h-010.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]\n"
+        'ac1|e-001|iam-policy|"the account may run this"|escalate|escalate\n'
+        "\n"
+        ":T conclude\ndisposition            benign\n"
+    )
+    body, warnings = parse_dense_companion(doc)
+    assert warnings == []
+    assert all_hypotheses(body)["h-010"].get("authorization_contract")
+    blocked = [e for e in validate_companion(doc) if "authz contract ac1" in e]
+    assert len(blocked) == 1, blocked
+
+
+def test_a_lead_declaring_hypotheses_off_a_stale_header_is_rejected_whole():
+    """The prologue site rejects an off-schema `:H` header outright. The lead site
+    skipped the check — and a lead-born record now reaches every consumer of
+    `_walkers.all_hypotheses`, so an off-schema row would have ridden in."""
+    body, warnings = parse_dense_companion(_doc(
+        _EDGE + "\n"
+        + _LEAD_HEADER + "\n"
+        "l-001|1|process-ancestry|v-001|h-010|elastic|±10m\n"
+        "\n"
+        ":H l-001.new_hypotheses [id|name|attached_to|rel]\n"
+        "h-010|?stale|v-001|executed\n"
+    ))
+    assert len(warnings) == 1
+    assert "whole block rejected" in warnings[0].reason
+    lead = next(f for f in body["findings"] if f["id"] == "l-001")
+    assert "new_hypotheses" not in lead
+
+
+def test_a_second_observations_block_adds_to_a_lead_rather_than_replacing():
+    """Not `:H`, same defect: the two observation sub-blocks assigned, so a lead
+    whose results arrive in two blocks kept only the last — and append-only
+    leaves no way to write them as one."""
+    body, warnings = parse_dense_companion(_doc(
+        _LEAD_HEADER + "\n"
+        "l-001|1|process-ancestry|v-001|h-001|elastic|±10m\n"
+        "\n"
+        ":V l-001.observations.vertices [id|type|class|ident|attrs?]\n"
+        "v-100|compute|server/internal/known-corp|host-a|\n"
+        "\n"
+        ":V l-001.observations.vertices [id|type|class|ident|attrs?]\n"
+        "v-101|compute|server/internal/known-corp|host-b|\n"
+    ))
+    assert warnings == []
+    lead = next(f for f in body["findings"] if f["id"] == "l-001")
+    observed = lead["outcome"]["observations"]["vertices"]
+    assert [v["id"] for v in observed] == ["v-100", "v-101"]
+
+
+def test_a_second_prologue_vertices_block_adds_rather_than_replacing():
+    body, warnings = parse_dense_companion(_doc(
+        ":V prologue.vertices [id|type|class|ident|attrs?]\n"
+        "v-001|compute|server/internal/known-corp|host-a|\n"
+        "\n"
+        ":V prologue.vertices [id|type|class|ident|attrs?]\n"
+        "v-002|compute|server/internal/known-corp|host-b|\n"
+    ))
+    assert warnings == []
+    assert [v["id"] for v in body["prologue"]["vertices"]] == ["v-001", "v-002"]
