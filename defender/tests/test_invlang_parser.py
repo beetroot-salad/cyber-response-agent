@@ -21,6 +21,7 @@ from defender.skills.invlang.parser import (
     _split_cells,
     parse_dense_companion,
 )
+from defender.skills.invlang.validate import validate_companion
 
 
 
@@ -125,6 +126,24 @@ detection_notes        "Rule joins on host.name only; failures and success are d
         "Rule joins on host.name only; failures and success are different users"
     )
     assert body["conclude"]["summary"].startswith("root authorized_keys")
+
+
+def test_conclude_without_detection_notes_is_clean_and_invents_no_key():
+    """The field is for a detection defect that was FOUND. Most runs find none, so its absence
+    is the ordinary case and must stay silent — and the key must not be conjured empty, since a
+    reader cannot tell an empty note from a defect nobody looked for."""
+    text = """\
+```invlang
+:T conclude
+disposition            benign
+confidence             high
+summary                "Login matched established bastion usage"
+```
+"""
+    body, warnings = parse_dense_companion(text)
+    assert warnings == []
+    assert "detection_notes" not in body["conclude"]
+    assert validate_companion(text) == []
 
 
 def test_conclude_row_spanning_two_lines_warns_instead_of_truncating():

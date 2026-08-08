@@ -129,24 +129,18 @@ there and do **not** Read `defender/skills/invlang/SKILL.md` (it's already in
 your context). The CLI returns the live enums.
 
 **Test the alert's own claim.** The rule's `description` says what it aims
-to detect; its query implements an approximation of that. Read the two
-against each other and against the alerted event: *did this rule catch what
-it says it catches, here?* Some descriptions name their own limits — take
-them at their word. Where the rule aggregates or correlates, check which
-fields it joined on and which it did not; a rule that claims a same-actor
-pattern while joining only on the host has not tested the actor. (If the
-SIEM is Elastic, an EQL `sequence by host.name` says exactly that, and a
-`sequence` with no `by` clause joins on nothing but time.) Single-event
-rules have the same gap: a rule aiming at "suspicious *X*" and matching
-every *X* fires on the routine ones too.
+to detect; its query implements an approximation. Read them against each
+other and against the alerted event: *did this rule catch what it says it
+catches, here?* Correlating and aggregating rules leak at their join fields
+— one claiming a same-actor pattern while grouping only by host never tested
+the actor. Single-event rules leak too: aiming at "suspicious *X*" and
+matching every *X* fires on the routine ones.
 
-Look for a **logic defect**, not a judgment call: "the description claims
-same-user, the query has no user join" is settled here, from the payload.
-"Was this user authorized" is the investigation — leave it to the leads.
-
-Record what you find in `:T conclude`'s `detection_notes` at REPORT,
-whatever the disposition turns out to be. A refuted claim and a compromised
-host are independent findings, and both can be true of one alert.
+Judge a **logic defect**, not the case. "Claims same-user, joins no user" is
+settled here from the payload; "was this user authorized" is a lead. A defect
+you find goes in `:T conclude`'s `detection_notes` at REPORT and is
+independent of `disposition` — both can be true of one alert. A rule that
+caught what it claims needs no row.
 
 Leave ORIENT once you have characterized the alert: the entities
 involved, the behavior under question, and what disposition turns on.
