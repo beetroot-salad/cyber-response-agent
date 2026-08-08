@@ -380,6 +380,27 @@ Keep commitments lean: one proposed upstream vertex plus one edge.
 1–2 predictions per hypothesis. `refutes` is a comma-separated list of
 prediction ids the refutation would overturn.
 
+### Forking a hypothesis mid-run
+
+Append-only forbids rewriting the loop-1 block, so a hypothesis a
+later loop raises is declared by a **new** block — under the lead
+whose results raised it:
+
+```invlang
+:H l-002.new_hypotheses [id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]
+h-010|?stager-dropped-payload|v-001|runs_on|process|unclassified-process||null|active
+
+:H h-010.preds [id|subject|claim]
+p1|proposed_parent|"the writing process is short-lived and not a package manager"
+```
+
+Columns are the `:H hypothesize.hypotheses` ones, and a second
+`:H hypothesize.hypotheses` block is the spelling for a fork no single
+lead raised. Both accumulate — earlier loops' hypotheses stay live and
+keep their predictions. Declare an id at exactly one of the two sites;
+a `:T resolutions` row naming an `h-*` neither declares is denied on
+write.
+
 ### Authz contracts
 
 Authz contracts live in `:H h-NNN.authz`:

@@ -1,4 +1,5 @@
-"""A resolution's `p*`/`ap*`/`r*` citations resolve, and a strong move carries one.
+"""A resolution's `h-*` and `p*`/`ap*`/`r*` references resolve, and a strong move
+carries one.
 
 `:H h-NNN.preds` / `.attr_preds` / `.refuts` are the sole sites that declare a
 prediction or a refutation shape. The parser never joined a resolution's
@@ -7,7 +8,11 @@ with `p` — so `h-001 … [l-001 p9 severe ⟂ e-002]` parsed clean and validat
 clean, and the semantic reviewer downstream would have been the first thing in
 the pipeline to notice p9 does not exist.
 
-The second rule is the other half of the strong-move provenance tuple
+The row's own `h-*` was the same hole one level up, deferred until `:H` blocks
+accumulated (#817/#818): an id no `:H` row declares moved a phantom hypothesis
+to `++` with nothing in the pipeline objecting.
+
+The strong-move rule is the other half of the provenance tuple
 (`_check_strong_move_provenance`): one half makes a `++`/`--` cite the
 observation, this one makes it name the pre-committed claim that observation
 settled (#798).
@@ -33,7 +38,12 @@ _STRONG_EDGE = (
     "e-002|executed|v-001|v-001|2026-05-05T03:42:11Z|siem-event:siem|\n"
 )
 
-_MARKERS = ("cites prediction", "cites refutation", "cites no prediction or refutation")
+_MARKERS = (
+    "cites prediction",
+    "cites refutation",
+    "cites no prediction or refutation",
+    "moves undeclared hypothesis",
+)
 
 
 def _doc(body: str) -> str:
@@ -128,22 +138,126 @@ def test_an_attribute_prediction_id_resolves_against_attr_preds():
     )) == []
 
 
-def test_a_resolution_against_an_undeclared_hypothesis_is_skipped_not_caught():
-    """h-404 has no `:H` row, so there is no id set to resolve against and this
-    rule stands down.
+def test_a_resolution_against_an_undeclared_hypothesis_is_rejected():
+    """h-404 has no `:H` row anywhere. Nothing else catches it — the projector
+    opens no bucket for an unknown `h-*`, so before this the row moved a phantom
+    to `++` in silence and `_walkers.final_weights` reported it live.
 
-    Pinning the LIMIT, not a virtue: nothing else catches the unknown `h-404`
-    either, so the row moves a phantom hypothesis in silence and
-    `_walkers.final_weights` reports it live. This rule cannot close that hole
-    on its own — a mid-run fork writes a second `:H hypothesize.hypotheses`
-    block, which the parser projects by REPLACING the list, so every loop-1
-    hypothesis vanishes and the error would fire on legitimate documents.
-    Accumulate first (#816), then tighten here."""
-    assert _errors(_doc(
+    Enforcing it had to wait for `:H` blocks to accumulate (#817): while a second
+    `:H hypothesize.hypotheses` REPLACED the list, every loop-1 hypothesis
+    vanished from a legitimately-forked document and this error fired on it."""
+    errors = _errors(_doc(
         _two_hypotheses() + "\n"
         ":T resolutions\n"
         "h-404  null → +    [l-001 p1,p2 weak ⟂ e-002 :: unrelated]"
+    ))
+    assert len(errors) == 1
+    assert "'h-404'" in errors[0]
+    assert "h-001, h-002" in errors[0], "the error must show what IS declared"
+
+
+def test_the_undeclared_hypothesis_is_reported_once_per_row_not_once_per_id():
+    """The row cites two predictions and neither can resolve, but the defect is
+    one undeclared `h-*` — the citation half stands down rather than piling
+    three errors on one row."""
+    errors = _errors(_doc(
+        _two_hypotheses() + "\n"
+        ":T resolutions\n"
+        "h-404  null → ++   [l-001 p1,p2 severe ⟂ e-002 :: phantom]"
+    ))
+    assert len(errors) == 1
+
+
+def test_a_hypothesis_the_lead_declares_mid_run_may_be_resolved():
+    """The legitimate fork this rule must not cost: `:H l-NNN.new_hypotheses`
+    declares h-010 inside the lead that found it, and a resolution against it is
+    as well-grounded as one against a loop-1 hypothesis."""
+    assert _errors(_doc(
+        _two_hypotheses() + "\n"
+        ":H l-001.new_hypotheses "
+        "[id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]\n"
+        "h-010|?mid-run-fork|v-001|executed|process|unclassified-process||null|active\n"
+        "\n"
+        ":H h-010.preds [id|subject|claim]\n"
+        'p1|proposed_parent|"the fork predicts this"\n'
+        "\n"
+        ":T resolutions\n"
+        "h-010  null → ++   [l-001 p1 severe ⟂ e-002 :: the fork holds]"
     )) == []
+
+
+def test_a_second_hypothesize_block_declares_a_fork_the_same_way():
+    """The other documented spelling. Both must be live before this rule can be,
+    since between them they are the only way to declare a hypothesis after
+    loop 1 — append-only forbids rewriting the first block."""
+    assert _errors(_doc(
+        _two_hypotheses() + "\n"
+        + _HYP_HEADER + "\n"
+        "h-003|?late-fork|v-001|executed|process|unclassified-process||null|active\n"
+        "\n"
+        ":T resolutions\n"
+        "h-003  null → +    [l-001 weak ⟂ e-002 :: suggestive]"
+    )) == []
+
+
+def test_a_dropped_hypothesis_block_defers_to_its_own_parse_warning():
+    """The `:H` header is off-schema, so the parser rejects the whole block and
+    h-001 never exists — every resolution against it then looks phantom. The
+    parse warning already names the cause; reporting the rows too would bury one
+    fixable defect under errors pointing away from it.
+
+    `examples/example-b-parallel-iam-cmdb.md` is the shipped instance: seven
+    parse warnings, and four resolutions against the hypotheses they dropped."""
+    doc = _doc(
+        _STRONG_EDGE + "\n"
+        ":H hypothesize.hypotheses [id|name|attached_to|rel]\n"
+        "h-001|?adversary-shell|v-001|executed\n"
+        "\n"
+        + _LEAD_HEADER + "\n"
+        "l-001|1|process-ancestry|v-001|h-001|elastic|±10m\n"
+        "\n"
+        ":T resolutions\n"
+        "h-001  null → +    [l-001 weak ⟂ e-002 :: suggestive]"
+    )
+    assert _errors(doc) == []
+    assert [e for e in validate_companion(doc) if "whole block rejected" in e]
+
+
+def test_a_warning_that_drops_no_hypothesis_does_not_stand_the_rule_down():
+    """The deference is keyed to the DECLARING block, not to "the document
+    parsed without a single warning". An unknown block drops no `:H` row, so
+    h-404 is still phantom for exactly the reason the error gives — gating on
+    `not warnings` hid it behind any unrelated parse defect, and would have hid
+    it behind every warning added since."""
+    errors = _errors(_doc(
+        _two_hypotheses() + "\n"
+        ":Z bogus.block [a|b]\n"
+        "x|y\n"
+        "\n"
+        ":T resolutions\n"
+        "h-404  null → ++   [l-001 p1 severe ⟂ e-002 :: phantom]"
+    ))
+    assert len(errors) == 1
+    assert "'h-404'" in errors[0]
+
+
+def test_a_misspelled_new_hypotheses_block_names_itself():
+    """`:H l-NNN.new_hypotheses` is now a documented authoring surface, so the
+    singular typo is reachable. The projector drops an unhandled `:H` lead
+    sub-block, and with no warning the resolution row took the blame for a
+    hypothesis the author did declare — an error pointing at a correct row."""
+    doc = _doc(
+        _two_hypotheses() + "\n"
+        ":H l-001.new_hypothesis "
+        "[id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]\n"
+        "h-010|?mid-run-fork|v-001|executed|process|unclassified-process||null|active\n"
+        "\n"
+        ":T resolutions\n"
+        "h-010  null → +    [l-001 weak ⟂ e-002 :: the fork holds]"
+    )
+    assert [e for e in validate_companion(doc) if "new_hypothesis`" in e], (
+        "the parse warning must name the misspelled block"
+    )
 
 
 

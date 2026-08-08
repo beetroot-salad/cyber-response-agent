@@ -14,9 +14,11 @@ instead of at runtime (expensive, late). It compares the live constants, not a
 saved snapshot, so neither side can move alone.
 
 Coverage: the surfaces that have a fixed parser column constant —
-`:V`/`:E` rows, the `:H hypothesize.hypotheses` header, and the `:H h-NNN.<sub>`
-sub-blocks. `:L findings` and `:R …` blocks read their columns from the block's
-own header (no fixed constant), so they are out of scope here.
+`:V`/`:E` rows, both hypothesis-declaration headers
+(`:H hypothesize.hypotheses` and the mid-run fork's
+`:H l-NNN.new_hypotheses`), and the `:H h-NNN.<sub>` sub-blocks. `:L findings`
+and `:R …` blocks read their columns from the block's own header (no fixed
+constant), so they are out of scope here.
 """
 
 from __future__ import annotations
@@ -50,6 +52,24 @@ def _documented_headers() -> list[tuple[str, str, list[str]]]:
     return out
 
 
+def _is_hyp_declaration(tag: str, name: str) -> bool:
+    """The two sites that DECLARE a hypothesis, as opposed to hanging a
+    sub-block off one.
+
+    `:H l-NNN.new_hypotheses` is the mid-run fork's spelling and carries the
+    same 9-col header; since #817 the lead site runs the same
+    `_is_current_hyp_header` check, so drift costs it the same whole-block
+    rejection. Both are compared as SETS, matching that check — the header is
+    pinned on membership, not order.
+
+    The parser owns WHICH names those are (`HYP_DECLARATION_BLOCK_RE`) rather
+    than a local `endswith`: only `l-<id>.new_hypotheses` is a declaration site
+    (`_LEAD_PREFIX_RE`), so a looser test here would pin a documented header the
+    parser silently drops.
+    """
+    return bool(parser.HYP_DECLARATION_BLOCK_RE.match(f":{tag} {name}"))
+
+
 def _expected(tag: str, name: str) -> list[str] | None:
     """The parser column constant a documented `(tag, name)` block must match,
     or None when the block has no fixed constant (`:L`/`:R`/dynamic-header)."""
@@ -57,9 +77,9 @@ def _expected(tag: str, name: str) -> list[str] | None:
         return parser._VERTEX_COLS
     if tag == "E":
         return parser._EDGE_COLS
+    if _is_hyp_declaration(tag, name):
+        return sorted(parser._HYP_HEADER_COLS)
     if tag == "H":
-        if name == "hypothesize.hypotheses":
-            return sorted(parser._HYP_HEADER_COLS)
         if name.endswith(".preds"):
             return parser._HYP_PRED_COLS
         if name.endswith(".attr_preds"):
@@ -74,11 +94,12 @@ def _expected(tag: str, name: str) -> list[str] | None:
 def test_skill_md_grammar_matches_parser_constants():
     documented = _documented_headers()
     pinned_tags: set[str] = set()
+    pinned_names: set[str] = set()
     for tag, name, cols in documented:
         expected = _expected(tag, name)
         if expected is None:
             continue
-        if tag == "H" and name == "hypothesize.hypotheses":
+        if _is_hyp_declaration(tag, name):
             assert sorted(cols) == expected, (
                 f":{tag} {name} header {cols} != parser _HYP_HEADER_COLS"
             )
@@ -87,8 +108,21 @@ def test_skill_md_grammar_matches_parser_constants():
                 f":{tag} {name} header {cols} != parser constant {expected}"
             )
         pinned_tags.add(tag)
+        pinned_names.add(name)
 
     assert {"V", "E", "H"} <= pinned_tags, (
         f"expected to pin :V/:E/:H grammar headers from SKILL.md, "
         f"found tags {sorted(pinned_tags)} — extraction may have broken"
+    )
+    # By NAME, not just by tag: `hypothesize.hypotheses` already contributes the
+    # `H` tag, so a rename or a singular typo in the documented fork header
+    # (`:H l-002.new_hypothesis`) leaves `_expected` returning None, this loop
+    # skipping the header, and the pin silently covering one declaration site
+    # instead of two — while the parser drops that block at runtime.
+    assert "hypothesize.hypotheses" in pinned_names, (
+        "SKILL.md no longer documents a `:H hypothesize.hypotheses` header"
+    )
+    assert any(n.endswith(".new_hypotheses") for n in pinned_names), (
+        f"SKILL.md must document the mid-run fork's `:H l-NNN.new_hypotheses` "
+        f"header for this pin to cover it; pinned names {sorted(pinned_names)}"
     )
