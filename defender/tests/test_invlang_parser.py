@@ -105,6 +105,74 @@ def test_conformant_parse_produces_no_warnings():
     assert body["conclude"]["disposition"] == "malicious"
 
 
+def test_conclude_carries_detection_notes():
+    """#806 — what the DETECTOR got wrong is its own row, not a clause inside `summary`.
+
+    The run that motivated it concluded `malicious` on a host that was genuinely compromised
+    while the alert's own correlation was false; both are true, and `disposition` holds one.
+    """
+    text = """\
+```invlang
+:T conclude
+disposition            malicious
+summary                "root authorized_keys carries three attacker@elsewhere keys"
+detection_notes        "Rule joins on host.name only; failures and success are different users"
+```
+"""
+    body, warnings = parse_dense_companion(text)
+    assert warnings == []
+    assert body["conclude"]["detection_notes"] == (
+        "Rule joins on host.name only; failures and success are different users"
+    )
+    assert body["conclude"]["summary"].startswith("root authorized_keys")
+
+
+def test_conclude_row_spanning_two_lines_warns_instead_of_truncating():
+    """A value written across two lines used to keep line one — opening quote and all — and drop
+    the rest in SILENCE. That is the #806 failure reproduced inside the fix for it: a conclusion
+    that loses half of itself is worse than one never written. Both halves are asserted, because
+    the continuation row and the row that opened the quote fail for different reasons and a fix
+    that catches only one still ships the truncation.
+    """
+    text = """\
+```invlang
+:T conclude
+disposition            malicious
+detection_notes        "Rule joins on host.name only.
+                        Failures and success are different users."
+```
+"""
+    body, warnings = parse_dense_companion(text)
+    reasons = " | ".join(w.reason for w in warnings)
+    assert "does not close on this row" in reasons, (
+        f"the opened-quote row did not warn — warnings were {reasons!r}"
+    )
+    assert "unrecognized row" in reasons, (
+        f"the orphaned continuation row did not warn — warnings were {reasons!r}"
+    )
+    # The fragment is still projected; the DENIAL is what stops it reaching disk, and it comes
+    # from validate_companion turning these warnings into write-gate errors.
+    assert body["conclude"]["detection_notes"].startswith('"')
+
+
+def test_conclude_unrecognized_row_warns():
+    """A row outside the projected set records nothing, so silence about it is a lie. No `:T
+    conclude` block anywhere in the tree used a key outside the set when this landed, so nothing
+    conformant newly warns."""
+    text = """\
+```invlang
+:T conclude
+disposition            benign
+detectoin_notes        "typo in the key name"
+```
+"""
+    _body, warnings = parse_dense_companion(text)
+    assert any("detectoin_notes" in w.reason for w in warnings), (
+        f"a misspelled conclude key was accepted in silence — warnings were "
+        f"{[w.reason for w in warnings]!r}"
+    )
+
+
 def test_conclude_subtable_is_accepted_and_ignored():
     text = """\
 ```invlang
