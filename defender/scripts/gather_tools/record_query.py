@@ -6,6 +6,7 @@ import json
 import re
 import sys
 from pathlib import Path
+from typing import Any
 
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
@@ -92,6 +93,33 @@ def _envelope_total(stdout: str) -> int | None:
     return None
 
 
+_TIME_KEYS = ("@timestamp", "timestamp")
+
+
+def _record_time(rec: Any) -> str | None:
+    if not isinstance(rec, dict):
+        return None
+    src = rec["_source"] if isinstance(rec.get("_source"), dict) else rec
+    for key in _TIME_KEYS:
+        if isinstance((v := src.get(key)), str) and v:
+            return v
+    return None
+
+
+def returned_span(records: list) -> tuple[str, str] | None:
+    """The time range the returned docs actually cover.
+
+    A capped payload is a *slice*, and which slice depends on the adapter's sort — for the
+    SIEM's `query` verb that is `@timestamp` descending, so a window bracketing an alert hands
+    back the window's newest N and the alert's own events can sit entirely outside them. The
+    envelope reports `total` and `returned` but never *which* docs these are, so a lead that
+    asked for ±15m around a pivot and got the last six minutes has no way to tell. Stating the
+    span costs nothing and is a fact about the payload, not advice about what to do next.
+    """
+    stamps = sorted(t for rec in records if (t := _record_time(rec)) is not None)
+    return (stamps[0], stamps[-1]) if stamps else None
+
+
 def build_truncated_view(stdout: str, payload_rel: str | None, run_dir: Path) -> str:
     size = len(stdout)
     records = _find_records(stdout)
@@ -109,6 +137,14 @@ def build_truncated_view(stdout: str, payload_rel: str | None, run_dir: Path) ->
                 f"filter and read its `total`); NEVER count the sample — its length "
                 f"is the cap, not a count."
             )
+            if (span := returned_span(records)) is not None:
+                lines.append(
+                    f"[record_query] those {len(records)} docs span {span[0]} … {span[1]} "
+                    f"— ONE slice of the {total}, not a spread across your window. The "
+                    f"other {total - len(records)} lie outside that span and no `limit` "
+                    f"reaches them: narrow the window onto the pivot you care about, or "
+                    f"compute the answer server-side with an aggregating query."
+                )
         else:
             lines.append(
                 f"[record_query] {len(records)} records, {size} bytes — showing the "
@@ -143,6 +179,64 @@ def build_truncated_view(stdout: str, payload_rel: str | None, run_dir: Path) ->
                 f"  cat {abs_payload} | defender-sql 'SELECT count(*) FROM data'"
             )
     return "\n".join(lines) + "\n"
+
+
+def _request_key(system: Any, verb: Any, params: Any) -> str:
+    return json.dumps(
+        [system, verb, params if isinstance(params, dict) else {}],
+        sort_keys=True, default=str,
+    )
+
+
+def repeat_note(
+    run_dir: Path, lead: str, *, seq: int, system: str, verb: str,
+    params: dict, payload_digest: str,
+) -> str | None:
+    """Name the earlier call in this lead that this one repeats, if any.
+
+    A repeat is invisible from inside the turn loop. The payload is persisted under a fresh
+    `{seq}.json` every call, and `build_truncated_view` embeds that path three times, so two
+    executions of the same query differ by one integer in three places and read as new
+    evidence. Nothing else in the loop compares a result to the one before it. Both branches
+    below are statements of fact about rows already in the table — no refusal, no advice the
+    caller has to accept — because the failure this addresses is a caller that has stopped
+    producing reasoning, and only a changed observation reaches one.
+    """
+    try:
+        rows = read_jsonl_rows(RunPaths(run_dir).executed_queries)
+    except OSError:
+        return None
+    key = _request_key(system, verb, params)
+    same_request: int | None = None
+    same_payload: int | None = None
+    for rec in rows:
+        if not isinstance(rec, dict) or rec.get("lead_id") != lead:
+            continue
+        prior = rec.get("seq")
+        if not isinstance(prior, int) or prior >= seq:
+            continue
+        if same_payload is None and rec.get("payload_digest") == payload_digest:
+            same_payload = prior
+        if same_request is None and _request_key(
+            rec.get("system"), rec.get("verb"), rec.get("params")
+        ) == key:
+            same_request = prior
+    if same_request is not None and same_payload is not None:
+        return (
+            f"[record_query] REPEAT — this is the same request you ran at seq {same_request}, "
+            f"and it returned the same payload byte for byte. It will keep returning this "
+            f"payload however many times you send it; the result is structural, not a "
+            f"transient to retry through. Change the approach, not the retry count."
+        )
+    if same_payload is not None:
+        return (
+            f"[record_query] NO-OP — your request differs from seq {same_payload} but the "
+            f"payload is byte-identical, so the change did not move the result set at all. "
+            f"Before varying it again, check the clause you added is a form this system "
+            f"actually applies: a filter the query language silently ignores narrows nothing "
+            f"and reports no error."
+        )
+    return None
 
 
 def _next_seq(run_dir: Path, lead: str) -> int:

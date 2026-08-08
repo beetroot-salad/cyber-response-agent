@@ -76,15 +76,27 @@ common case; the adapter passes the string through unmodified. Common
 forms used by v2 gather templates:
 
 - Field exact: `process.name: "sshd"`, `falco.rule: "Adding ssh keys to authorized_keys"`
-- Substring on `message`: `message: *"Failed password"*`
+- Text on `message`: `message: "Failed password"` — a **bare quoted phrase**, no wildcards
 - Disjunction: `host.name: ("web-1" OR "web-2")`
 - Boolean: `data_stream.dataset: "system.auth" AND process.name: "sudo"`
 - Squid by user: `user.name: "sre.alice" AND data_stream.dataset: "squid.access"`
 - Zeek by destination: `destination.ip: "172.18.0.20" AND data_stream.dataset: "zeek.connection"`
-- Postgres auth failures: `data_stream.dataset: "postgresql.log" AND message: *"authentication failed"*`
+- Postgres auth failures: `data_stream.dataset: "postgresql.log" AND message: "authentication failed"`
 - Nginx 5xx on a host: `host.name: "web-1" AND data_stream.dataset: "nginx.access" AND http.response.status_code: [500 TO 599]`
-- Keycloak LOGIN events: `loggerName: "org.keycloak.events" AND message: *'type="LOGIN"'*` (note the quoted-substring shape — events are key=value text inside `message`)
-- Unbound query for a domain: `data_stream.dataset: "unbound.queries" AND message: *"example.com"*`
+- Keycloak LOGIN events: `loggerName: "org.keycloak.events" AND message: "type LOGIN"` (the events are
+  key=value text inside `message`; the analyzer drops the `=` and the quotes, so match the *tokens*
+  in order — writing the punctuation into the phrase does not match more precisely, and wrapping it
+  in wildcards matches everything, see below)
+- Unbound query for a domain: `data_stream.dataset: "unbound.queries" AND message: "example.com"`
+
+**Never wrap a phrase in `*`.** `message: *"Failed password"*` looks like a substring match and is
+not one: the parser reads the bare `*` as a wildcard term matching every document that has a
+`message` field, so the clause is a **silent no-op** — no error, no warning, and `total` comes back
+identical to the same query with the clause deleted. In a disjunction it matches all of them, so
+the filter you thought narrowed the search returned the whole index instead. `message` is an
+analyzed text field: a quoted phrase already matches that token sequence *anywhere* in the value,
+which is the substring behaviour the `*` was reaching for. If a query's `total` does not move when
+you add a `message` clause, this is why.
 
 ## Index-pattern selection
 

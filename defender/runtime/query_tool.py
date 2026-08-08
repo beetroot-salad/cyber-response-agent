@@ -28,6 +28,7 @@ from defender.scripts.gather_tools.record_query import (
     _passthrough_max_bytes,
     build_truncated_view,
     payload_digest,
+    repeat_note,
 )
 
 from . import circuit_breaker
@@ -358,6 +359,15 @@ class QueryCapture(AbstractCapability[Any]):
             if (_is_event_payload(text) or len(text) > _passthrough_max_bytes())
             else text
         )
+        # Ahead of the view, not inside it: a small payload skips build_truncated_view
+        # entirely, and the repeat is the one thing the caller most needs to read first.
+        repeat = repeat_note(
+            deps.run_dir, deps.lead_id, seq=row["seq"], system=row["system"],
+            verb=row["verb"], params=row["params"],
+            payload_digest=row["payload_digest"],
+        )
+        if repeat is not None:
+            view = f"{repeat}\n{view}"
         return _format_bash_result(0, _wrap(view, "untrusted", deps.salt), "", note)
 
 
