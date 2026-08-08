@@ -156,6 +156,7 @@ GOLDEN_REFERENCED_TEMPLATE_IDS = frozenset({
 _GATHER_SKILL_REFERENTS = (
     "skills/gather/queries",
     "skills/gather/failure-modes.md",
+    "skills/gather/defender-sql.md",
 )
 
 
