@@ -128,6 +128,20 @@ compute/identity/application, single-token otherwise) is reproduced in the
 there and do **not** Read `defender/skills/invlang/SKILL.md` (it's already in
 your context). The CLI returns the live enums.
 
+**Test the alert's own claim.** The rule's `description` says what it aims
+to detect; its query implements an approximation. Read them against each
+other and against the alerted event: *did this rule catch what it says it
+catches, here?* Correlating and aggregating rules leak at their join fields
+— one claiming a same-actor pattern while grouping only by host never tested
+the actor. Single-event rules leak too: aiming at "suspicious *X*" and
+matching every *X* fires on the routine ones.
+
+Judge a **logic defect**, not the case. "Claims same-user, joins no user" is
+settled here from the payload; "was this user authorized" is a lead. A defect
+you find goes in `:T conclude`'s `detection_notes` at REPORT and is
+independent of `disposition` — both can be true of one alert. A rule that
+caught what it claims needs no row.
+
 Leave ORIENT once you have characterized the alert: the entities
 involved, the behavior under question, and what disposition turns on.
 
@@ -156,6 +170,15 @@ you have already crossed into gather's surface — dispatch instead.
 If PLAN can't name a real branch the next move resolves, scaffold a
 single mechanism + legitimacy contract and proceed; don't loop on
 prediction.
+
+**A refuted alert claim narrows the plan; it never closes the case.** When
+ORIENT found the rule did not catch what it claims, the alerted behavior is
+unexplained rather than explained — plan one lead that tests the alerted
+entity for independent suspicion, and let its result decide. Clean, and you
+can close on it; anything else, and you are investigating a real finding
+that the rule happened to surface for the wrong reason. Never disposition
+`benign` on the refutation alone: a mis-correlated rule can still fire on a
+compromised host.
 
 **`:H` is for discovery; `??` is for refinement.** Reach for `:H`
 when the upstream cause is genuinely non-obvious — competing stories

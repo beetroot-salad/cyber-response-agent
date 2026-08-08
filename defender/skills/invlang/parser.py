@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any, cast
 
 from ._cells import (
+    _has_unbalanced_quote,
     _parse_attrs,
     _require,
     _row_cells,  # noqa: F401 — re-export: invlang tests import it from `parser`
@@ -27,6 +28,7 @@ from .schema import (
     AuthorityRef,
     AuthorizationContract,
     CompanionBody,
+    Conclude,
     EdgeRecord,
     HypothesisRecord,
     ParentVertex,
@@ -424,26 +426,27 @@ def _canonicalize_resolution_row(rec: dict[str, str]) -> ResolutionRow:
     return cast(ResolutionRow, out)
 
 
-def _project_conclude_scalars(conclude: dict[str, Any], rows: list[str]) -> None:
-    termination: dict[str, Any] = {}
-    for row in rows:
-        m = re.match(r"^(\S+)\s+(.*)$", row)
-        if not m:
-            continue
-        key = m.group(1)
-        raw = m.group(2).strip()
-        value: Any = None if raw == "null" else _unquote(raw)
-        if key == "termination.category":
-            termination["category"] = value
-        elif key == "termination.rationale":
-            termination["rationale"] = value
-        elif key in (
-            "disposition", "impact_verdict", "impact_severity",
-            "confidence", "matched_archetype", "ceiling_rationale", "summary",
-        ):
-            conclude[key] = value
-    if termination:
-        conclude["termination"] = termination
+#: Conclude rows that REPEAT — one row per item, accumulated in order. `ceiling_test` names one
+#: unreachable check each, so a run with three coverage gaps writes three rows and the duplicate
+#: guard below must not read the second and third as a key being overwritten.
+_CONCLUDE_LISTS: frozenset[str] = frozenset({"ceiling_test"})
+
+#: The scalar rows `:T conclude` projects, and the CLOSED set an unrecognized row is judged
+#: against. One owner: `Conclude` is the type the projection has to satisfy, so the set is read
+#: off it rather than restated here, where the two could drift a field apart.
+_CONCLUDE_SCALARS: frozenset[str] = (
+    frozenset(Conclude.__annotations__) - {"termination"} - _CONCLUDE_LISTS
+)
+_CONCLUDE_KEYS_HINT = ", ".join(
+    sorted(_CONCLUDE_SCALARS | _CONCLUDE_LISTS)
+    + ["termination.category", "termination.rationale"]
+)
+
+#: What the format writes where a conclude row has nothing to say (`docs/dense-investigation-
+#: format.md`: these "carry `none` / `n/a`" unless the run terminated on a ceiling). A list row
+#: holding it projects as absence, so a reader tests `conclude.get("ceiling_test")` rather than
+#: filtering a sentinel back out.
+_CONCLUDE_EMPTY_MARKERS: frozenset[str] = frozenset({"none", "n/a"})
 
 
 def _close_loop(rows: list[str]) -> int | None:
@@ -516,8 +519,30 @@ class _Projector:
             yield idx, row, rec
 
 
+    def _check_one_line_rows(self, block: Block) -> None:
+        """Every invlang row is ONE line, in every block.
+
+        `_tokenize_fence` makes a row per line, so a value written across two lines keeps line
+        one with its quote dangling and reparses the rest as fresh rows — dropped, or worse,
+        landing on whatever key the continuation's first word happens to name. That used to be
+        silent, which is how #806's refuted-correlation finding could be authored and lost.
+        The guard is here rather than inside one block's projector because the truncation is a
+        property of the line-oriented surface, not of `:T conclude`: a two-line `:L findings`
+        name loses the lead's target, loop and system just as quietly.
+        """
+        for idx, row in enumerate(block.rows):
+            if _has_unbalanced_quote(row):
+                self._warn(
+                    block, idx, row,
+                    "row opens a quoted value that does not close on this row — invlang rows "
+                    "are ONE line each, so the lines below it are parsed as separate rows and "
+                    "the rest of the value is dropped. Write it as ONE line (long is fine — "
+                    "`summary` routinely is).",
+                )
+
     def project_block(self, block: Block) -> None:
         tag, name = block.tag, block.name
+        self._check_one_line_rows(block)
 
         if tag == "V" and name == "prologue.vertices":
             self.out.setdefault("prologue", {})["vertices"] = (
@@ -560,10 +585,65 @@ class _Projector:
 
         self._warn(block, -1, "", "unknown block — no projection rule")
 
+    def _project_conclude_scalars(self, block: Block) -> None:
+        conclude: dict[str, Any] = self.out.setdefault("conclude", {})
+        termination: dict[str, Any] = {}
+        seen: set[str] = set()
+        for index, row in enumerate(block.rows):
+            m = re.match(r"^(\S+)\s+(.*)$", row)
+            if not m:
+                self._warn(
+                    block, index, row,
+                    f"conclude: row records nothing — every row is `<key> <value>` on one "
+                    f"line, keyed by one of {_CONCLUDE_KEYS_HINT}. If this is the "
+                    f"continuation of a value from the row above, join it onto one line.",
+                )
+                continue
+            key = m.group(1)
+            raw = m.group(2).strip()
+            value: Any = None if raw == "null" else _unquote(raw)
+            if key in seen and key not in _CONCLUDE_LISTS:
+                # The continuation of a two-line value lands on whatever key its first word
+                # names, so this fires on the row that silently overwrote a real conclusion —
+                # `summary` clobbered by the tail of a `termination.rationale`, say. A list key
+                # is exempt: repetition is how it carries more than one item.
+                self._warn(
+                    block, index, row,
+                    f"conclude: {key!r} is set twice in this block; the later row wins and "
+                    f"the earlier value is lost. Keep one row per key, and join a value that "
+                    f"spilled onto a second line back into one line.",
+                )
+            if key == "termination.category":
+                seen.add(key)
+                termination["category"] = value
+            elif key == "termination.rationale":
+                seen.add(key)
+                termination["rationale"] = value
+            elif key in _CONCLUDE_LISTS:
+                seen.add(key)
+                if isinstance(value, str) and value.strip().lower() in _CONCLUDE_EMPTY_MARKERS:
+                    continue
+                cast(list[str], conclude.setdefault(key, [])).append(value)
+            elif key in _CONCLUDE_SCALARS:
+                seen.add(key)
+                conclude[key] = value
+            # An unrecognized key is IGNORED, not warned. It reads like the obvious place to
+            # catch an unquoted value that spilled onto a second line, and it cannot be: the
+            # lessons corpus can instruct conclude rows this projection does not carry, and
+            # `learning/core/persist.py` dead-letters a run whose investigation.md fails
+            # validation rather than learning from it — so a warning here turns "the model
+            # obeyed a lesson" into a discarded run. `ceiling_test` was exactly that case until
+            # this commit recorded it. The truncation this block guards against is caught
+            # upstream by `_check_one_line_rows` on quote parity, which fires on both halves of
+            # a spilled quoted value without needing to know which keys are real. An unquoted
+            # spill stays undetected; that is the price of not denying instructed content.
+        if termination:
+            conclude["termination"] = termination
+
     def _project_t_block(self, block: Block) -> bool:
         name = block.name
         if name == "conclude":
-            _project_conclude_scalars(self.out.setdefault("conclude", {}), block.rows)
+            self._project_conclude_scalars(block)
             return True
         if name.startswith("conclude."):
             return True
