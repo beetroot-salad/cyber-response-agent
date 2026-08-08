@@ -7,7 +7,7 @@ from typing import Any
 from defender._vocab import normalized_disposition
 from . import _walkers, vocab
 from .parser import INVLANG_FENCE_RE, parse_dense_companion
-from .schema import CompanionBody, EdgeRecord, VertexRecord
+from .schema import CompanionBody, EdgeRecord, HypothesisRecord, VertexRecord
 
 STRONG_AUTH_KINDS = vocab.STRONG_AUTH_KINDS
 STRONG_WEIGHTS = vocab.STRONG_WEIGHTS
@@ -77,6 +77,65 @@ def _check_lead_refs(companion: CompanionBody) -> list[str]:
                     f"`cites_leads` on {owner}'s resolution cites {owner} "
                     f"itself — it names the other leads the verdict rests on"
                 )
+    return errors
+
+
+def _declared_prediction_ids(hyp: HypothesisRecord) -> set[str]:
+    """Both PREDICT blocks: the `⟺` annotation form cites `ap*` next to `p*`, so
+    `:H h-NNN.attr_preds` declares matched-prediction ids just as `.preds` does."""
+    return {p["id"] for p in hyp.get("predictions") or []} | {
+        ap["id"] for ap in hyp.get("attribute_predictions") or []
+    }
+
+
+def _unresolved(cited: list[str], declared: set[str]) -> list[str]:
+    # Deduped: `[l-001 p1 + l-003 p1,p2 …]` cites p1 twice, and one undeclared id
+    # is one defect however many times the head names it.
+    return [c for c in dict.fromkeys(cited) if c not in declared]
+
+
+def _known_ids(declared: set[str]) -> str:
+    return ", ".join(sorted(declared)) or "none"
+
+
+def _check_prediction_refs(companion: CompanionBody) -> list[str]:
+    """A resolution matches only the predictions and refutations its own
+    hypothesis declared.
+
+    `_check_lead_refs`'s analogue for the other reference the parser derives by
+    heuristic instead of by lookup: `matched_prediction_ids` is every `p*`/`ap*`
+    head token, and nothing joined the result back to the declaring
+    `:H h-NNN.preds` block. So a typo, a forward reference, and a *sibling's*
+    `p1` all parsed clean and validated clean — a `++` could rest on a prediction
+    that does not exist, or on one belonging to the hypothesis it is being
+    weighed against.
+
+    A resolution against a hypothesis this document never declares is left to
+    the parse warning that dropped the `:H` block. There is no id set to resolve
+    against there, and restating that one failure once per citation buries it.
+    """
+    hyps = _walkers.all_hypotheses(companion)
+    errors: list[str] = []
+    for lid, res in _walkers.iter_resolutions(companion):
+        hid = res.get("hypothesis")
+        hyp = hyps.get(hid) if isinstance(hid, str) else None
+        if hyp is None:
+            continue
+        preds = _declared_prediction_ids(hyp)
+        refuts = {r["id"] for r in hyp.get("refutation_shape") or []}
+        for pid in _unresolved(res.get("matched_prediction_ids") or [], preds):
+            errors.append(
+                f"lead {lid}: resolution of {hid} cites prediction {pid!r}, "
+                f"which {hid} does not declare (`:H {hid}.preds` / "
+                f"`.attr_preds` declare: {_known_ids(preds)}) — a resolution "
+                f"matches only its own hypothesis's predictions"
+            )
+        for rid in _unresolved(res.get("matched_refutation_ids") or [], refuts):
+            errors.append(
+                f"lead {lid}: resolution of {hid} cites refutation {rid!r}, "
+                f"which {hid} does not declare (`:H {hid}.refuts` declares: "
+                f"{_known_ids(refuts)})"
+            )
     return errors
 
 
@@ -155,7 +214,23 @@ def _check_append_only(
 
 
 
-def _check_edge_authority(companion: CompanionBody) -> list[str]:
+def _check_strong_move_provenance(companion: CompanionBody) -> list[str]:
+    """Both halves of a strong move's provenance tuple, in one walk: WHICH
+    observation it rests on, and WHICH pre-committed claim that observation
+    settled.
+
+    The two were separate walks emitting interleaved errors about the same rows.
+    They share the `++`/`--` filter and answer one question between them, so the
+    row that is missing both now reports both together instead of once here and
+    once eighty lines away.
+
+    The citation half also catches how the ids go missing in practice. The head
+    is `[<lead> <ids…> <severity> ⟂ <edges>]` and severity is positional-last, so
+    a row that omits severity has its ids read as the severity and parses as
+    citing nothing — which is how `golden-v2sshd`'s
+    `h-002 null → ++ [l-001 p1,p2,p3 ⟂ e-002]` sat in the corpus with three
+    predictions written down and none of them bound (#798).
+    """
     auth_by_edge: dict[str, str] = {}
     for e in _walkers.all_edges(companion):
         eid = e.get("id")
@@ -169,6 +244,13 @@ def _check_edge_authority(companion: CompanionBody) -> list[str]:
         if after not in STRONG_WEIGHTS:
             continue
         hyp = res.get("hypothesis", "?")
+        if not (res.get("matched_prediction_ids") or res.get("matched_refutation_ids")):
+            errors.append(
+                f"lead {lid}: resolution of {hyp} to "
+                f"{after!r} cites no prediction or refutation id — a strong (++/--) "
+                f"move must name the `p*`/`ap*`/`r*` it turned on, in the "
+                f"`[<lead> <ids> <severity> ⟂ <edges>]` head"
+            )
         supporting = [s for s in (res.get("supporting_edges") or []) if isinstance(s, str)]
         if not supporting:
             errors.append(
@@ -484,7 +566,8 @@ def validate_companion(
         return errors
 
     errors.extend(_check_lead_refs(companion))
-    errors.extend(_check_edge_authority(companion))
+    errors.extend(_check_prediction_refs(companion))
+    errors.extend(_check_strong_move_provenance(companion))
     errors.extend(_check_closed_vocab(companion))
     errors.extend(_check_benign_gating(companion))
     errors.extend(_check_loop_close(companion))

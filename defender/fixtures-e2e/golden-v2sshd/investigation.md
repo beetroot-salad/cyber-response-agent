@@ -89,7 +89,7 @@ ac2|e-001|approved-source-list|"a documented authorized process or cron job on o
 
 :T resolutions
 h-001  null → --    [l-001 r1 severe ⟂ e-002 :: all 3 failure events from ::1 (loopback) not external — h-001 p1,p2 both false]
-h-002  null → ++    [l-001 p1,p2,p3 ⟂ e-002 :: all events from ::1; 2s total span; password auth — local process SSH retry pattern confirmed on all predictions]
+h-002  null → ++    [l-001 p1,p2,p3 severe ⟂ e-002 :: all events from ::1; 2s total span; password auth — local process SSH retry pattern confirmed on all predictions]
 
 :T close
 loop  1

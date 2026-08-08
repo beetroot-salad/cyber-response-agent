@@ -77,10 +77,14 @@
           "before": "null",
           "hypothesis": "h-002",
           "hypothesis_id": "h-002",
-          "matched_prediction_ids": [],
+          "matched_prediction_ids": [
+            "p1",
+            "p2",
+            "p3"
+          ],
           "matched_refutation_ids": [],
           "reasoning": "all events from ::1; 2s total span; password auth — local process SSH retry pattern confirmed on all predictions",
-          "severity_of_test": "p1,p2,p3",
+          "severity_of_test": "severe",
           "supporting_edges": [
             "e-002"
           ]

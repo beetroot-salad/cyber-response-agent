@@ -372,7 +372,14 @@ def _resolution_record(row: str) -> tuple[str | None, ResolutionRecord]:
         head_refs.extend(t.strip() for t in tok.split(",") if t.strip())
     supp_text = supp.strip()
     iff_pred_ids, iff_refut_ids = _extract_iff_literals(annotation)
-    matched_pred_ids = iff_pred_ids or [t for t in head_refs if t.startswith("p")]
+    # `ap*` counts as a matched PREDICTION here exactly as it does on the `⟺` side
+    # (`_extract_iff_literals` files everything that is not `r*` under predictions).
+    # A bare `startswith("p")` dropped it on the floor: the head spelling the
+    # validator's own error message asks for — `[l-001 ap1 severe ⟂ e-002]` — parsed
+    # as citing nothing at all.
+    matched_pred_ids = iff_pred_ids or [
+        t for t in head_refs if t.startswith(("ap", "p"))
+    ]
     matched_refut_ids = iff_refut_ids or [t for t in head_refs if t.startswith("r")]
     record: ResolutionRecord = {
         "hypothesis": m.group("hyp"),
