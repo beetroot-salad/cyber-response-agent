@@ -120,7 +120,13 @@ def iter_grounded_resolutions(companion: CompanionBody) -> Iterator[ResolutionRo
 
 def final_weights(companion: CompanionBody) -> dict[str, Any]:
     """Where every DECLARED hypothesis ended up: its `:H` weight, moved by each
-    resolution against it in document order.
+    resolution against it, last move winning.
+
+    NOT document order, and the difference is observable: `iter_resolutions` walks the
+    LEADS in declaration order and each lead's rows within that, so two leads moving one
+    hypothesis in a single `:T resolutions` block settle on the row belonging to the
+    later-DECLARED lead, not the later-written row. A block whose rows follow their leads
+    — every shipped document — is the case where the two orders coincide.
 
     A resolution MOVES a weight; it does not declare one. Seeding an entry from
     the resolution row instead minted a hypothesis no `:H` row carries, and the

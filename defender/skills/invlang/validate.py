@@ -180,35 +180,46 @@ def _undeclared_hypothesis(lid: str, site: str, hid: str, declared: str) -> str:
     )
 
 
-#: An `h-*` id, in the spelling `HYP_DECLARATION_BLOCK_RE` already uses for `l-*`. Only an
-#: id of this SHAPE is a hypothesis reference — `:L findings`' `tests` column is a list of
-#: the COMMITMENTS the lead was run for, and the shipped golden proves that is three id
-#: kinds, not one: `golden-sshpivot-ab3` tests `ac1` on l-002 and `p2` on l-003 alongside
-#: its `h-*`. Reading the column as hypotheses-only denied a correct document.
-_HYPOTHESIS_ID_RE = re.compile(r"h-[A-Za-z0-9]+")
+#: An `h-*` id, in the spelling `HYP_DECLARATION_BLOCK_RE` already uses for `l-*`, WIDENED to
+#: the hierarchical child form: when a lean hypothesis refines into sub-cases the language
+#: allocates `h-{parent}-{ordinal}` (`h-001` → `h-001-001`, `h-001-002`) and writes the children
+#: into the lead's `new_hypotheses` with the parent shelved in the same block
+#: (`docs/investigation-language.md` §Refinement via hierarchical IDs). A single-segment pattern
+#: failed to match those on the second hyphen, so a phantom CHILD — cited from the two sites that
+#: documented workflow writes to — was skipped instead of reported.
+_HYPOTHESIS_ID_RE = re.compile(r"h-[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*")
 
 
-def _cited_hypothesis_ids(lead: FindingRecord) -> Iterator[tuple[str, str]]:
-    """Every `h-*` a LEAD names, paired with the phrase that says where it named it.
+def _cited_hypothesis_ids(lead: FindingRecord) -> Iterator[tuple[str, list[str]]]:
+    """Every `h-*` a LEAD names, per site, paired with the phrase that says where.
 
     Two sites, and both are lists the parser splits without ever looking the ids up:
     `:L findings`' `tests` column projects to `tests_hypotheses` through `_split_csv`, and
     `:T shelved`'s first cell appends to `shelved`.
 
-    NOT checked, at either site: an id of some OTHER shape. A `p2` in `tests` is a
-    prediction the lead was run for and resolves against `:H h-NNN.preds`; an `ac1` is an
-    authorization contract. Whether those resolve is a separate rule against separate
-    declaring blocks, and this one owning the `h-*` alone is what keeps it from denying the
-    golden. `:T shelved`'s column is `hyp_id`, so the shape gate is a no-op there today —
-    it is applied anyway so both sites answer to one rule.
+    The shape gate applies at `tests` ONLY, because only `tests` is mixed. It is the list of
+    COMMITMENTS the lead was run for, and the shipped golden proves that is three id kinds, not
+    one: `golden-sshpivot-ab3` tests `ac1` on l-002 and `p2` on l-003 alongside its `h-*`. A `p2`
+    resolves against `:H h-NNN.preds` and an `ac1` against `:H h-NNN.authz` — separate rules
+    against separate declaring blocks — so reading the column as hypotheses-only denied a correct
+    document.
+
+    `:T shelved`'s column is `hyp_id`: every value in it IS a hypothesis reference. Gating it on
+    shape would exempt exactly the typo the rule exists to catch — `h_888`, `H-888`, `hyp-888`
+    all shelve nothing and would pass in silence — so the gate is withheld there and an
+    unrecognizable id is reported like any other undeclared one.
     """
-    for site, ids in (
-        ("`:L findings` tests", lead.get("tests_hypotheses")),
-        ("`:T shelved` shelves", lead.get("shelved")),
+    for site, ids, shaped in (
+        ("`:L findings` tests", lead.get("tests_hypotheses"), True),
+        ("`:T shelved` shelves", lead.get("shelved"), False),
     ):
-        for hid in ids or []:
-            if isinstance(hid, str) and _HYPOTHESIS_ID_RE.fullmatch(hid):
-                yield site, hid
+        cited = [
+            hid for hid in (ids or [])
+            if isinstance(hid, str) and hid
+            and (not shaped or _HYPOTHESIS_ID_RE.fullmatch(hid))
+        ]
+        if cited:
+            yield site, cited
 
 
 def _check_hypothesis_refs(
@@ -254,9 +265,10 @@ def _check_hypothesis_refs(
         if not isinstance(lead, dict):
             continue
         lid = lead.get("id", "?")
-        # Deduped per site: one id written twice in `tests` is one defect, not two.
-        for site, hid in dict.fromkeys(_cited_hypothesis_ids(lead)):
-            if hid not in declared:
+        # Deduped per site through `_unresolved`, the same dedup-then-filter the citation
+        # rule below uses: one id written twice in `tests` is one defect, not two.
+        for site, cited in _cited_hypothesis_ids(lead):
+            for hid in _unresolved(cited, declared):
                 errors.append(_undeclared_hypothesis(lid, site, hid, known))
     return errors
 

@@ -12,13 +12,21 @@ shipping.
 
 from __future__ import annotations
 
+import functools
 from pathlib import Path
 
 DEFENDER = Path(__file__).resolve().parents[1]
 
 
+@functools.cache
 def corpus_docs() -> list[Path]:
-    """The two `fixtures-e2e/` golden runs and the `examples/` the SKILL points at."""
+    """The two `fixtures-e2e/` golden runs and the `examples/` the SKILL points at.
+
+    Cached: this is called once per `parametrize` decorator, at COLLECTION time, and each
+    call globs two trees and reads every hit to filter on the fence. The list is a fact
+    about the tree, not about the caller, and every rule that adopts this helper would
+    otherwise add another full pass over the corpus before a single test runs.
+    """
     candidates = [
         *sorted((DEFENDER / "examples").glob("*.md")),
         *sorted((DEFENDER / "fixtures-e2e").glob("*/investigation.md")),

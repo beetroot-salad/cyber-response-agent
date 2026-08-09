@@ -109,6 +109,53 @@ def test_a_shelved_row_retiring_an_undeclared_hypothesis_is_rejected():
     assert "'h-888'" in errors[0]
 
 
+def test_a_phantom_hierarchical_child_is_reported_at_both_sites():
+    """The id shape the language allocates when a lean hypothesis refines into sub-cases:
+    `h-001` → `h-001-001` (`docs/investigation-language.md` §Refinement via hierarchical
+    IDs), written into the lead's `new_hypotheses` with the parent shelved in the SAME
+    block — so `tests` and `:T shelved` are precisely where children are named. A
+    single-segment `h-[A-Za-z0-9]+` gate failed on the second hyphen and skipped them,
+    which exempted the one id shape the two new sites were added for."""
+    errors = _errors(_doc(
+        _declaring("h-001") + "\n"
+        + _lead("h-001,h-001-777") + "\n"
+        + _SHELVED_HEADER + "\n"
+        'h-001-888|l-001|"refined away"\n'
+    ))
+    assert len(errors) == 2, errors
+    assert "'h-001-777'" in errors[0]
+    assert "'h-001-888'" in errors[1]
+
+
+def test_a_declared_hierarchical_child_costs_the_document_nothing():
+    """The other half: the fork is legitimate when the child IS declared, and widening the
+    shape must not turn a correct refinement into a refusal."""
+    assert _errors(_doc(
+        _declaring("h-001") + "\n"
+        + _lead("h-001-001") + "\n"
+        ":H l-001.new_hypotheses "
+        "[id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]\n"
+        + _hyp_row("h-001-001", "?refined-child") + "\n"
+        + _SHELVED_HEADER + "\n"
+        'h-001|l-001|"refined into children"\n'
+    )) == []
+
+
+def test_a_misspelled_shelved_id_is_reported_rather_than_skipped():
+    """`:T shelved`'s column is `hyp_id` — every value in it IS a hypothesis reference, so
+    an id of no recognizable shape is a phantom, not a commitment of some other kind. A
+    shape gate here would exempt exactly the typo the rule exists to catch."""
+    for bad in ("h_888", "H-888", "hyp-888"):
+        errors = _errors(_doc(
+            _declaring("h-001") + "\n"
+            + _lead("h-001") + "\n"
+            + _SHELVED_HEADER + "\n"
+            + f'{bad}|l-001|"weak signal"\n'
+        ))
+        assert len(errors) == 1, (bad, errors)
+        assert repr(bad) in errors[0]
+
+
 def test_a_commitment_of_another_kind_in_tests_is_not_read_as_a_hypothesis():
     """`tests` is the COMMITMENTS the lead was run for, and the shipped golden proves that
     is three id kinds: `golden-sshpivot-ab3` tests `ac1` on l-002 and `p2` on l-003. A rule

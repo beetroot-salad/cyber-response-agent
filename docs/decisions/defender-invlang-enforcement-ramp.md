@@ -58,11 +58,19 @@ error rather than letting the write through. Scope is anchored to
    added are the ones a run reaches FIRST — a lead can claim to test a
    hypothesis nobody declared, and a `:T shelved` row can retire one that
    never existed — so a typo used to surface a step late, pointing at the
-   resolution rather than at the PLAN row that introduced it. Scoped to
-   `h-*`-SHAPED ids: `tests` is the commitments the lead was run for and
-   the shipped golden proves that is three id kinds (`golden-sshpivot-ab3`
-   tests `ac1` on l-002, `p2` on l-003), so reading the column as
-   hypotheses-only denies a correct document.
+   resolution rather than at the PLAN row that introduced it.
+
+   `tests` alone is scoped to `h-*`-SHAPED ids, because `tests` alone is
+   mixed: it is the commitments the lead was run for and the shipped
+   golden proves that is three id kinds (`golden-sshpivot-ab3` tests `ac1`
+   on l-002, `p2` on l-003), so reading the column as hypotheses-only
+   denies a correct document. `:T shelved`'s column is `hyp_id` — every
+   value in it IS a hypothesis reference, so no shape gate applies there;
+   one would exempt exactly the typo the rule exists to catch (`h_888`
+   shelves nothing and would pass in silence). The shape itself covers the
+   hierarchical child form `h-{parent}-{ordinal}`, which is what a lean
+   hypothesis refines into and what the lead's `new_hypotheses` declares
+   with the parent shelved in the same block.
 
    The validator is a gate in front of a walker that minted the same
    phantom, and #821 closed that too: `_walkers.final_weights` seeded an
