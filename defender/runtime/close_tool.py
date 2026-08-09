@@ -28,6 +28,7 @@ from pydantic_ai.exceptions import ModelRetry
 from defender._artifact_schema import DISPOSITION_ENUM, validate_artifact
 from defender._untrusted import wrap as _wrap
 from defender.hooks.budget_enforcer import BUDGET_EXEMPT_TOOLS  # noqa: F401 — re-export, RS16
+from defender.skills.invlang.validate import false_positive_entry_price
 
 from . import challenge_gate
 from .agent_role import AgentRole
@@ -388,6 +389,23 @@ async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams
             "the close is terminal. Re-closing would re-run the whole review and overwrite "
             "both the recorded disposition and the first close's own review record."
         )
+    # #806: the one disposition with an entry price, collected here as well as at the
+    # `investigation.md` write gate. `report.md` is written FROM this argument, and nothing else
+    # on this path reads the companion — so without this the price is bypassable by concluding
+    # under a cheaper keyword and passing `false-positive` to the close. Placed AFTER the
+    # terminal-close refusal so R4's ordering holds, and before the gate so a close that owes
+    # the price never spends a review on it.
+    if disposition == "false-positive":
+        owed = false_positive_entry_price(
+            _read_companion_text(Path(deps.run_dir) / "investigation.md")
+        )
+        if owed:
+            raise ModelRetry(
+                "close blocked: `false-positive` says the RULE misfired, which is no evidence "
+                "about the alerted entity — so it is reachable only from an `investigation.md` "
+                "that states the defect and names the lead that checked the entity anyway. "
+                + " ".join(owed)
+            )
     if disposition == "inconclusive":
         # The gate reviews CONFIDENT closes only, so nothing was reviewed and there is no
         # stage output to diagnose — the empty detail here is the honest value, not a gap.
@@ -454,6 +472,20 @@ async def _tool_close_investigation(
     return result.message
 
 
+def _read_companion_text(path: Path) -> str:
+    """The investigation log as text, or empty when there is none to read.
+
+    Absence is not an error to raise here: an unwritten (or unreadable) companion states no
+    defect and names no entity check, so it owes the whole price and the caller denies with the
+    same actionable text a blank `:T conclude` earns. Raising instead would hand the model an
+    exception where it needs an instruction.
+    """
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+
+
 def register_close_tool(agent, *, stages: Any, bounds: challenge_gate.Bounds) -> None:
     """MAIN's composition root ONLY — never called for any other role's agent build, and
     only when that root's effective `ToolSet.close` is on."""
@@ -461,8 +493,10 @@ def register_close_tool(agent, *, stages: Any, bounds: challenge_gate.Bounds) ->
     @agent.tool
     async def close_investigation(ctx: RunContext[AgentDeps], disposition: str) -> str:
         """Commit this investigation's disposition once ANALYZE has reached a confident
-        finding. `disposition` is the typed enum (benign | inconclusive | malicious), never
-        free text. This is the ONLY way to record report.md — write_file/edit_file cannot
+        finding. `disposition` is the typed enum (benign | false-positive | inconclusive |
+        malicious), never free text — see SKILL §REPORT for what each one claims, and for
+        the `detection_notes` + `entity_check` rows `false-positive` requires in
+        `:T conclude`. This is the ONLY way to record report.md — write_file/edit_file cannot
         reach it. A confident disposition passes a live challenge gate before it commits;
         if the gate is not satisfied yet, this call returns without committing and the
         investigation continues for another ANALYZE/GATHER turn."""

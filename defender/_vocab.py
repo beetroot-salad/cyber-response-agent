@@ -30,7 +30,23 @@ from defender._text import strip_zero_width
 # and a set's iteration order is not stable across processes. The membership set is derived
 # from it and FROZEN: one owner for the vocabulary means one owner for its contents too, and a
 # plain `set` exported to a dozen modules is one `.add()` away from not being closed at all.
-DISPOSITION_VALUES: tuple[str, ...] = ("benign", "inconclusive", "malicious")
+#
+# `false-positive` (#806) is the fourth, and it describes the DETECTOR rather than the world:
+# the rule fired on a different kind of behaviour than its name and description claim. The other
+# three answer "what is true of the alerted entity"; a run that never established that has
+# nothing to say in their vocabulary, and used to be forced to pick anyway. `benign` was the
+# available lie — it asserts the entity is clean, which a refuted correlation is no evidence
+# for. Run `pr815-rerun-0808` is the case: the correlation was false AND the host had three
+# `attacker@elsewhere` keys in root's `authorized_keys`, and it closed `benign`.
+#
+# It is reachable only through `_check_false_positive_gating` (`skills/invlang/validate.py`),
+# which requires a committed lead against an entity the alert already named. A cheap exit from a
+# noisy rule is the point; a cheap exit from an uninvestigated host is what the gate prevents.
+#
+# It selects NO learning direction, deliberately — see `learning/core/directions.py`.
+DISPOSITION_VALUES: tuple[str, ...] = (
+    "benign", "false-positive", "inconclusive", "malicious",
+)
 DISPOSITION_ENUM = frozenset(DISPOSITION_VALUES)
 
 # What a surface shows where a disposition should be and none could be read. It lives HERE,
@@ -42,7 +58,7 @@ UNKNOWN_DISPOSITION = "?"
 
 def normalized_disposition(value: object) -> str | None:
     """A disposition as it RENDERS — a `DISPOSITION_ENUM` member — or `None` when it is not one
-    of the three. THE single answer to what a disposition value MEANS, wherever it was read
+    of them. THE single answer to what a disposition value MEANS, wherever it was read
     from: report frontmatter, an invlang `conclude` block, or a ticket's resolution line.
 
     The #722 zero-width strip lives here and nowhere else. Both artifacts are authored by a

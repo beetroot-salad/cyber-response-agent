@@ -167,9 +167,22 @@ BENIGN = Direction(
 
 BY_NAME = {ADVERSARIAL.name: ADVERSARIAL, BENIGN.name: BENIGN}
 
-# INVARIANT: the union of every `dispositions` is exactly `DISPOSITION_ENUM` — a typo or an
-# omission there silently drops a leg from BOTH the loop's dispatch and the transcript, with
-# nothing failing. Guarded by `test_every_disposition_selects_at_least_one_direction` (#716).
+#: Dispositions that select NO direction on purpose. Named here so the drift guard below can
+#: stay exact: an omission is still a bug, unless it is one this set declares.
+#:
+#: `false-positive` (#806) is a verdict about the RULE — it says the detection fired on a
+#: different kind of behaviour than it claims, and says nothing about whether the alerted entity
+#: was clean. Neither actor has a story to write from it: hunting the FN would mean disproving a
+#: claim the run never made, and hunting the FP would mean re-deriving the defect the run already
+#: stated. The tuning signal it carries belongs to the rule, per rule, not to this loop, which
+#: learns per case. A run with something to teach about the ENTITY has three other keywords and
+#: `_check_false_positive_gating` requires it to have looked before reaching this one.
+UNTRAINED_DISPOSITIONS: frozenset[str] = frozenset({"false-positive"})
+
+# INVARIANT: the union of every `dispositions` is exactly `DISPOSITION_ENUM` minus
+# `UNTRAINED_DISPOSITIONS` — a typo or an omission there silently drops a leg from BOTH the
+# loop's dispatch and the transcript, with nothing failing. Guarded by
+# `test_every_disposition_selects_at_least_one_direction` (#716).
 
 
 def directions_for(disposition: str) -> list[Direction]:
@@ -179,8 +192,15 @@ def directions_for(disposition: str) -> list[Direction]:
 
     It reads the disposition through the same `normalized_disposition` every consumer of a
     completed `report.md` goes through (#785), so the #722 strip cannot be applied on the
-    reading side and skipped on the dispatching one."""
+    reading side and skipped on the dispatching one.
+
+    An `UNTRAINED_DISPOSITIONS` member returns early rather than falling through the filter to
+    the same empty list. The filter would already produce it — no `Direction` names those
+    keywords — but only as an ABSENCE, which reads identically to the #716 drift bug this
+    function's invariant exists to catch. Consulting the set makes "trains nothing" a decision
+    the code states, and keeps the two readers of that set (here and the invariant) from being
+    a live one and a test-only one."""
     disp = normalized_disposition(disposition)
-    if disp is None:
+    if disp is None or disp in UNTRAINED_DISPOSITIONS:
         return []
     return [d for d in BY_NAME.values() if disp in d.dispositions]
