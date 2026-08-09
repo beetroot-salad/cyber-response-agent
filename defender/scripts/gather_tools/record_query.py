@@ -17,6 +17,7 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
 from defender._env import env_int
 from defender._io import read_jsonl_rows
 from defender._run_paths import RunPaths
+from defender.runtime.circuit_breaker import AGENT_FIXABLE_ERROR_CLASS
 
 LEAD_ID_RE = re.compile(r"^l-[A-Za-z0-9]+$")
 
@@ -129,11 +130,12 @@ def returned_span(records: list) -> tuple[str, str] | None:
     """The time range the returned docs actually cover.
 
     A capped payload is a *slice*, and which slice depends on the adapter's sort — for the
-    SIEM's `query` verb that is `@timestamp` descending, so a window bracketing an alert hands
-    back the window's newest N and the alert's own events can sit entirely outside them. The
-    envelope reports `total` and `returned` but never *which* docs these are, so a lead that
-    asked for ±15m around a pivot and got the last six minutes has no way to tell. Stating the
-    span costs nothing and is a fact about the payload, not advice about what to do next.
+    SIEM's `query` verb that is `@timestamp`, newest-first unless the call asked for `sort:
+    "asc"`, so a window bracketing an alert hands back the window's newest N by default and
+    the alert's own events can sit entirely outside them. The envelope reports `total` and
+    `returned` but never *which* docs these are, so a lead that asked for ±15m around a pivot
+    and got the last six minutes has no way to tell. Stating the span costs nothing and is a
+    fact about the payload, not advice about what to do next.
     """
     stamps = [t for rec in records if (t := _record_time(rec)) is not None]
     if not stamps:
@@ -238,7 +240,7 @@ def lead_rows(run_dir: Path, lead: str) -> list[dict]:
 
 def repeat_note(
     run_dir: Path, lead: str, *, seq: int, system: str, verb: str,
-    params: dict, payload_digest: str,
+    params: dict, payload_digest: str, exit_code: int = 0,
 ) -> str | None:
     """Name the earlier call in this lead that this one repeats, if any.
 
@@ -249,6 +251,13 @@ def repeat_note(
     below are statements of fact about rows already in the table — no refusal, no advice the
     caller has to accept — because the failure this addresses is a caller that has stopped
     producing reasoning, and only a changed observation reaches one.
+
+    `exit_code` is THIS call's, and selects the wording only — never whether a note fires
+    (#826 item 3). The comparison itself is unchanged and needs no exit code of its own: for a
+    failed call `payload_digest` is already `_record`'s `exit={code}; {detail}` form, so two
+    failures match each other and can never match a success's `N bytes, M line(s)`. What the
+    failing caller must not be told is that its request "returned the same payload" — it
+    returned no payload at all, and the fact that matched is the identical ERROR.
     """
     key = _request_key(system, verb, params)
     repeat_seq: int | None = None
@@ -275,12 +284,27 @@ def repeat_note(
             repeat_seq = prior
         if same_payload is None and payload_matches:
             same_payload = prior
+    if repeat_seq is not None and exit_code != 0:
+        return (
+            f"[record_query] REPEAT — this is the same request you ran at seq {repeat_seq}, "
+            f"and it failed the same way, character for character. It will keep failing this "
+            f"way however many times you send it; the result is structural, not a transient "
+            f"to retry through. Change the approach, not the retry count."
+        )
     if repeat_seq is not None:
         return (
             f"[record_query] REPEAT — this is the same request you ran at seq {repeat_seq}, "
             f"and it returned the same payload byte for byte. It will keep returning this "
             f"payload however many times you send it; the result is structural, not a "
             f"transient to retry through. Change the approach, not the retry count."
+        )
+    if same_payload is not None and exit_code != 0:
+        return (
+            f"[record_query] NO-OP — your request differs from seq {same_payload} but failed "
+            f"with the identical error, so the change did not reach whatever is rejecting it. "
+            f"Read the error before varying the request again: a call turned back by the "
+            f"system's own parameter check never ran, and no rewording of a clause it never "
+            f"applied will change that."
         )
     if same_payload is not None:
         return (
@@ -355,6 +379,29 @@ class GatherDeadEnd(Exception):
         self.escape = escape
 
 
+def _trip(
+    rows: list[dict], lead: str, *, system: Any, verb: Any, params: Any, threshold: int,
+    in_domain,
+) -> RepeatTrip | None:
+    """The ONE counting loop both guards drive, over the domain `in_domain` selects.
+
+    Identity and arithmetic are shared deliberately: two guards that counted the same
+    `(lead_id, system, verb, canonical(params))` by two hand-written loops would be one
+    normalisation fix away from disagreeing about what a repeat is, at two placements, with
+    only the DOMAIN ever meant to differ between them."""
+    key = _request_key(system, verb, _json_safe_params(params))
+    matches = [
+        r for r in rows
+        if isinstance(r, dict) and r.get("lead_id") == lead and in_domain(r)
+        and _request_key(r.get("system"), r.get("verb"), r.get("params")) == key
+    ]
+    occurrence = len(matches) + 1
+    if occurrence < threshold:
+        return None
+    seqs = [m["seq"] for m in matches if isinstance(m.get("seq"), int)]
+    return RepeatTrip(first_seq=min(seqs) if seqs else None, occurrence=occurrence)
+
+
 def repeat_trip(
     rows: list[dict], lead: str, *, system: Any, verb: Any, params: Any,
     threshold: int = REPEAT_THRESHOLD,
@@ -365,18 +412,44 @@ def repeat_trip(
     literally the same predicate the shipped `repeat_note` and a replay over a recorded table
     both drive. `rows` need not be pre-filtered to `lead`; the identity is `(lead_id, system,
     verb, canonical(params))`, checked here."""
-    key = _request_key(system, verb, _json_safe_params(params))
-    matches = [
-        r for r in rows
-        if isinstance(r, dict) and r.get("lead_id") == lead
-        and r.get("query_id") != ABOVE_GUARD_QUERY_ID
-        and _request_key(r.get("system"), r.get("verb"), r.get("params")) == key
-    ]
-    occurrence = len(matches) + 1
-    if occurrence < threshold:
-        return None
-    seqs = [m["seq"] for m in matches if isinstance(m.get("seq"), int)]
-    return RepeatTrip(first_seq=min(seqs) if seqs else None, occurrence=occurrence)
+    return _trip(
+        rows, lead, system=system, verb=verb, params=params, threshold=threshold,
+        in_domain=lambda r: r.get("query_id") != ABOVE_GUARD_QUERY_ID,
+    )
+
+
+def rejection_trip(
+    rows: list[dict], lead: str, *, system: Any, verb: Any, params: Any,
+    threshold: int = REPEAT_THRESHOLD,
+) -> RepeatTrip | None:
+    """The COMPANION guard's predicate (#826 item 4) — `repeat_trip` over the complementary
+    domain: the rejections that never reached `wrap_tool_execute`'s placement at all.
+
+    A repeat loop the pydantic ARGUMENT SCHEMA turns back, or one an unresolvable verb turns
+    back at the grant check, is invisible to `repeat_trip` by construction — its rows carry
+    `ABOVE_GUARD_QUERY_ID` precisely so they cannot count there. Nothing else bounded such a
+    loop except `DEFAULT_TOOL_RETRIES = 10`, whose exhaustion raised `UnexpectedModelBehavior`
+    and reached main as the same "Treat this lead as incomplete" idiom with no repeat named and
+    no trip row: a second, silent terminator. This is the guard for that class, and it is
+    deliberately a SECOND one rather than a widening of the first — the two count disjoint
+    domains, so neither can report a trip the other's placement could have prevented, and each
+    still agrees with a replay over its own domain.
+
+    THE DOMAIN IS NARROWER THAN `ABOVE_GUARD_QUERY_ID` ALONE, by `error_class`: an above-guard
+    row is in it only when it is `agent-fixable`. The third above-guard writer is
+    `_grant_check`'s adapter-load-error branch, whose rows are `infra` (exit 2) and whose
+    repeat is ALREADY owned end to end by `circuit_breaker` — two failures mark the system down
+    and the third call is answered by the down-message. Counting those here would give one
+    shape two owners and convert an infra outage into a lead-level dead end, so this guard
+    never sees them. Both fields are among the twelve frozen row keys; no thirteenth is
+    needed, and the same filter is what a replay over a recorded table applies."""
+    return _trip(
+        rows, lead, system=system, verb=verb, params=params, threshold=threshold,
+        in_domain=lambda r: (
+            r.get("query_id") == ABOVE_GUARD_QUERY_ID
+            and r.get("error_class") == AGENT_FIXABLE_ERROR_CLASS
+        ),
+    )
 
 
 def _ordinal(n: int) -> str:
@@ -392,6 +465,28 @@ def repeat_trip_detail(trip: RepeatTrip) -> str:
     and distinguishable from an ordinary parameter refusal (`trip_row_detail_names_the_
     repetition`): it names the repetition and the earliest seq it repeats."""
     return f"refused: repeat of request already issued at seq {trip.first_seq} ({_ordinal(trip.occurrence)} occurrence)"  # noqa: E501
+
+
+def rejection_trip_detail(trip: RepeatTrip) -> str:
+    """`repeat_trip_detail`'s counterpart for the companion guard's trip row. Says "turned
+    back", not "issued": the calls it counts never reached a system of record, and a downstream
+    reader that could not tell the two apart would report a lead as having queried something it
+    never queried."""
+    return f"refused: repeat of request already turned back at seq {trip.first_seq} ({_ordinal(trip.occurrence)} occurrence)"  # noqa: E501
+
+
+def rejection_dead_end_reason(system: str, verb: str, trip: RepeatTrip) -> str:
+    """`dead_end_reason`'s counterpart, and deliberately WITHOUT its executed-query count: a
+    request that never got past the argument schema or the grant check executed nothing at this
+    key, and the honest thing to tell main is what was rejected and that re-sending it is not a
+    route through. Never the model-authored `params` text, for `dead_end_reason`'s reason — an
+    unbounded fragment must not cross into main's context on a refusal path."""
+    return (
+        f"the request ({system} {verb}) was rejected before it ran and repeats the one already "
+        f"turned back at seq {trip.first_seq}; it has now been rejected "
+        f"{trip.occurrence} times for the same reason. The rejection is structural, not a "
+        "transient to retry through."
+    )
 
 
 def dead_end_reason(system: str, verb: str, trip: RepeatTrip, executed: int) -> str:

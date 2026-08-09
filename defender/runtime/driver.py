@@ -541,16 +541,40 @@ def build_agent(  # noqa: PLR0913 — composition root: config + DI seams + the 
         store=store,
     )
 
+    # agent_id → the gather session opened for it. Keyed by agent_id and not "the last one
+    # built" because sibling leads are dispatched CONCURRENTLY (one `gather` tool call per
+    # lead in a single main turn), so "the current gather session" is not a thing that
+    # exists. `agent_id` is `gather:{lead_id}` and `_run_gather`'s `claim_lead` refuses a
+    # reused `lead_id`, so it is unique within a run.
+    gather_sessions: dict[str, str] = {}
+
     def _build_gather(agent_id: str) -> Agent[GatherDeps, str]:
         gather_extra: Sequence[Any] = ()
         gather_session_id: str | None = None
         if store is not None:
             gather_session_id = store.new_session(agent_id=agent_id)
+            gather_sessions[agent_id] = gather_session_id
             gather_extra = _gather_extra_capabilities(store, gather_session_id, agent_id)
         return build_gather_agent(
             defender_dir, logger, agent_id, make_model, verbs, limits,
             extra_capabilities=gather_extra, session_id=gather_session_id,
         )
+
+    def _stamp_gather_terminator(agent_id: str, reason: str) -> None:
+        """`_flush_run_end`'s stamp, for a GATHER session (#826 item 1). Best-effort for the
+        same reason: the store may be exactly what ended this lead, and losing the terminator
+        must not also lose the lead's summary. There is no flush of a terminal exchange to
+        pair with it — gather's recorder commits every round as it goes and deliberately
+        withholds the doomed round's own continuation, so there is nothing left to reconcile
+        at the end; only the stamp is missing, and only the stamp is added."""
+        gather_session_id = gather_sessions.get(agent_id)
+        if store is None or gather_session_id is None:
+            return
+        try:
+            store.set_truncated_by(gather_session_id, reason)
+        except Exception as e:  # noqa: BLE001 — the store may already be the reason we're here
+            print(f"[run.py] gather truncated_by write skipped for {agent_id}: {e!r}",
+                  file=sys.stderr)
 
     # ALWAYS the role's own committed grant (#632) — never the per-call `verbs=` registry's
     # own grant. The dispatch catalog/template index is a ROLE-LEVEL surface (the same one
@@ -558,7 +582,10 @@ def build_agent(  # noqa: PLR0913 — composition root: config + DI seams + the 
     # one; a test injecting a registry scoped narrower (or differently) than GATHER_DEF's
     # real grant, for reasons that have nothing to do with catalog content, must not narrow
     # what the catalog advertises.
-    register_gather_tool(agent, _build_gather, GATHER_REQUEST_LIMIT, GATHER_DEF.verb_grant)
+    register_gather_tool(
+        agent, _build_gather, GATHER_REQUEST_LIMIT, GATHER_DEF.verb_grant,
+        _stamp_gather_terminator,
+    )
     # `build_agent` has no `run_dir` of its own, so it cannot BUILD a live bundle — a bundle
     # carrying live stages is assembled by `run_investigation`, the entry point that holds the
     # real run dir, and arrives here already bound to it. The fallback below must never

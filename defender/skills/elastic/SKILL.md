@@ -116,11 +116,19 @@ Things this Elasticsearch deployment **cannot** answer:
   comparison in an ES|QL pipe — rather than leaning on relative-now
   defaults; the rule engine and the agent ship-time drift relative to
   each other and rounding-to-now hides one-second ordering questions.
-  A window is also the only control you have over *which* docs a
-  capped `query` returns: it sorts newest-first and takes the first
-  20, so a wide window bracketing an alert hands back the window's
-  tail and can exclude the alert's own events entirely. Bracket the
-  pivot tightly, or aggregate with `esql`, which has no such cap.
+- **A capped `query` returns one END of your window, and you choose
+  which.** `query` / `alerts` take the first 20 docs in `@timestamp`
+  order, and that order is `params={"sort": "desc"}` — newest first —
+  unless you say otherwise. So a wide window bracketing an alert hands
+  back the window's *tail* by default and can exclude the alert's own
+  events entirely. `params={"sort": "asc"}` returns the window's
+  oldest 20 instead: ask for it whenever the question is what happened
+  **first** (what started a burst, what preceded the alert), because
+  the default answers the opposite question. The two orders are the two
+  ends and there is nothing between them — to reach the middle, bracket
+  the pivot tightly, or aggregate with `esql`, which has no such cap.
+  The result envelope echoes the `sort` it used, so a payload on disk
+  says which end it is.
 - **There are no flags.** Every verb binds its declared params **by
   name** through the `query` tool (`params={...}`) — there is no
   command line, no `--index`, no `--start`, and an unknown or

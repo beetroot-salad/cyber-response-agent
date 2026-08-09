@@ -103,7 +103,11 @@ def test_replay_full_run_ab3(tmp_path, monkeypatch):
     )
     replay = ReplayFn(turns)
 
-    async def _fake_run_gather(deps, gather_factory, request_limit, request, verb_grant=None):
+    async def _fake_run_gather(deps, gather_factory, request_limit, request, verb_grant=None,
+                               stamp_terminator=None):
+        # `stamp_terminator` is the gather-session terminator seam (#826 item 1). This fake
+        # replaces the whole frame, so it stamps nothing — a replayed dispatch has no
+        # terminator to record, and every arm that would call it is one this fake skips.
         return f"[replayed gather summary: lead={request.lead_id} system={request.system}]"
 
     monkeypatch.setattr(  # lint-monkeypatch: ok — boundary fake (see comment above)

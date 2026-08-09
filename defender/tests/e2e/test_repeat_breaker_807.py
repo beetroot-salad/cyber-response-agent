@@ -137,6 +137,7 @@ from defender.scripts.gather_tools.record_query import (  # noqa: E402
     GatherDeadEnd,
     RepeatTrip,
     lead_rows,
+    rejection_trip,
     repeat_trip,
 )
 
@@ -305,6 +306,36 @@ def _replay(rows: list[dict], *, threshold: int = REPEAT_THRESHOLD) -> list[tupl
             stopped.add(lead)
             continue
         prior.append(row)
+    return trips
+
+
+def _replay_rejections(
+    rows: list[dict], *, threshold: int = REPEAT_THRESHOLD,
+) -> list[tuple[str, int]]:
+    """The same oracle for the COMPANION guard (#826 item 4), differing from `_replay` only in
+    the production predicate it drives — which is the claim under test: the two guards are one
+    counting rule over two disjoint domains, so one replay shape serves both.
+
+    The trip row is accumulated BEFORE the stop, unlike `_replay`: the companion guard's
+    rejection row is written for every call including its last, so the recorded table holds
+    exactly `threshold` matching rows at a trip, and an oracle that withheld the last one would
+    disagree with the table the live run actually left."""
+    seen: dict[str, list[dict]] = {}
+    stopped: set[str] = set()
+    trips: list[tuple[str, int]] = []
+    for row in rows:
+        lead = row.get("lead_id")
+        if not isinstance(lead, str) or lead in stopped:
+            continue
+        prior = seen.setdefault(lead, [])
+        hit = rejection_trip(
+            prior, lead, system=row.get("system"), verb=row.get("verb"),
+            params=row.get("params"), threshold=threshold,
+        )
+        prior.append(row)
+        if hit is not None:
+            trips.append((lead, row.get("seq")))
+            stopped.add(lead)
     return trips
 
 
@@ -1226,11 +1257,22 @@ def test_counted_domain_excludes_validate_path_rows(tmp_path):
     among the twelve frozen keys, so an above-M2 row must carry a sentinel identity the guard
     skips: that sentinel is production work this test only observes, and it must live INSIDE
     the twelve (`set(row) == ROW_KEYS` is asserted on every such row here, so a thirteenth key
-    is not an available implementation). What the guard does NOT get from this narrowing is
-    named as a non-obligation, not left silent:
-    `unresolvable_verb_repeat_loops_are_out_of_scope`. Positive control on the same address
-    under the complementary condition: replace the two rejections with two genuine executions of
-    the same request and the very same third call IS refused."""
+    is not an available implementation).
+
+    WHAT THIS TEST NO LONGER SAYS (#826 item 4). Its second arm used to pin that three
+    identical UNRESOLVABLE-verb calls end the lead nowhere — `gather.calls == 4`, no incomplete
+    idiom — under `unresolvable_verb_repeat_loops_are_out_of_scope`, the non-obligation #807
+    recorded rather than leaving the gap silent. That non-obligation was discharged by the
+    follow-up it was filed against: those loops are now owned by the COMPANION guard, at their
+    own placement, over their own domain. The narrowing this test exists to pin is UNCHANGED
+    and is the whole point of the arm as rewritten — M2's guard still refuses none of them,
+    and `_replay` over their table still reports no trip. What changed is only that "M2 does
+    not own this" stopped meaning "nobody does". The first arm is untouched: two rejections
+    are below threshold, so the corrected third call still executes.
+
+    Positive control on the same address under the complementary condition: replace the two
+    rejections with two genuine executions of the same request and the very same third call IS
+    refused — by M2, whose own domain those rows are in."""
     params = {"native_query": "FROM logs"}
 
     rejected_rec = VerbRecorder()
@@ -1253,10 +1295,11 @@ def test_counted_domain_excludes_validate_path_rows(tmp_path):
 
     # `_grant_check`'s unresolvable branch: an UNDECLARED verb records its own exit-64 row and
     # raises ModelRetry, all strictly above M2. Three identical such calls are a repeat group
-    # under (lead_id, system, verb, canonical(params)) and the guard can refuse none of them —
-    # so the replay over their table must report no trip either, or the oracle overstates.
-    # This is the shape the fitted corpus cannot expose: its 6 exit-64 rows sit under distinct
-    # keys, so no group of >= 3 at one key exists in any recorded run (RF-J2's blind quadrant).
+    # under (lead_id, system, verb, canonical(params)) and M2 can refuse none of them — so
+    # `_replay`, M2's own oracle, must report no trip over their table either, or the oracle
+    # overstates M2's reach. This is the shape the fitted corpus cannot expose: its 6 exit-64
+    # rows sit under distinct keys, so no group of >= 3 at one key exists in any recorded run
+    # (RF-J2's blind quadrant).
     grant_rec = VerbRecorder()
     unresolvable = _run(
         tmp_path / "unresolvable", verbs=elastic_ok(grant_rec), run_id="d807-fa-grant", turns=[
@@ -1270,11 +1313,16 @@ def test_counted_domain_excludes_validate_path_rows(tmp_path):
     assert all(set(row) == ROW_KEYS for row in grant_rows), \
         "the above-M2 sentinel identity was added as a thirteenth key"
     assert grant_rec.calls == [], "an unresolvable verb reached the backend"
-    assert unresolvable.gather.calls == 4, \
-        "a call answered above M2 was refused by the guard — it is not in the counted domain"
-    assert INCOMPLETE_IDIOM not in unresolvable.summary()
     assert _replay(grant_rows) == [], \
-        "replay trips on a repeat the live guard can never refuse — live and replay disagree"
+        "M2's oracle trips on a repeat M2 can never refuse — live and replay disagree"
+    # The narrowing above is what this test pins; the stop below belongs to the OTHER guard,
+    # and is asserted here so the two verdicts stay recorded against the same table rather
+    # than in two suites that could drift into contradicting each other.
+    assert unresolvable.gather.calls == 3, \
+        "the third identical rejection did not end the lead — the companion guard is silent"
+    assert INCOMPLETE_IDIOM in unresolvable.summary()
+    assert _replay_rejections(grant_rows) == [(LEAD, 2)], \
+        "the companion guard's live stop and its replay over the same table disagree"
 
     genuine_rec = VerbRecorder()
     genuine = _run(tmp_path / "genuine", verbs=elastic_ok(genuine_rec), run_id="d807-fa-ctl", turns=[
