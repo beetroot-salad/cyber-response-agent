@@ -56,9 +56,10 @@ def test_replay_golden_v2sshd(tmp_path):
 
     # #774/R1: report.md is no longer model-writable — re-recorded against the close tool
     # (disposition inconclusive, so it commits immediately with no gate work at all).
+    # #810: investigation.md is landed by `append_block`, main's only writer. Onto an empty
+    # run dir the append IS the create, which is why the golden still reconstructs whole.
     replay = ReplayFn([
-        Turn(tool_calls=[("write_file",
-                          {"path": str(run_dir / "investigation.md"), "content": inv_text})]),
+        Turn(tool_calls=[("append_block", {"text": inv_text})]),
         Turn(tool_calls=[("close_investigation", {"disposition": "inconclusive"})]),
         Turn(text="Investigation complete."),
     ])
@@ -160,8 +161,7 @@ def test_a_gap_the_review_cannot_measure_overrides_the_confident_close(tmp_path)
     inv_text = (GOLDEN_AB3 / "investigation.md").read_text()
 
     replay = ReplayFn([
-        Turn(tool_calls=[("write_file",
-                          {"path": str(run_dir / "investigation.md"), "content": inv_text})]),
+        Turn(tool_calls=[("append_block", {"text": inv_text})]),
         Turn(tool_calls=[("close_investigation", {"disposition": "malicious"})]),
         Turn(text="Investigation complete."),
     ])
@@ -186,9 +186,11 @@ def test_a_gap_the_review_cannot_measure_overrides_the_confident_close(tmp_path)
     ("adapter-from-main", "bash",
      lambda rd: {"command": "defender-elastic query foo"},
      "not runnable from bash", None),
-    ("write-escape", "write_file",
-     lambda rd: {"path": str(rd.parent / "ESCAPE_OUTSIDE_RUNDIR.txt"), "content": "x"},
-     "declared paths", "ESCAPE_OUTSIDE_RUNDIR.txt"),
+    # #810 retired the ("write-escape", "write_file", …) arm: main has no verb that takes a
+    # caller-supplied write path, so the escape it drove cannot be EXPRESSED any more, let
+    # alone denied. The property it pinned is stronger now and is asserted directly by
+    # `test_main_cannot_name_a_write_path_at_all` below — a deny bounce would be the wrong
+    # oracle for it, since there is no longer a call to bounce.
     ("read-escape", "read_file",
      lambda rd: {"path": "/etc/passwd"},
      "outside them", None),
@@ -213,6 +215,37 @@ def test_main_loop_deny_bounces(tmp_path, label, tool_name, args_fn,
 
     if escape_name is not None:
         assert not (run_dir.parent / escape_name).exists()
+
+
+def test_main_cannot_name_a_write_path_at_all(tmp_path):
+    """The successor to the retired `write-escape` deny bounce (#810).
+
+    That arm drove `write_file` at a path outside the run dir and asserted the allowlist
+    refused it. Main no longer HAS a verb that accepts a write path: `append_block` is bound
+    to `<run_dir>/investigation.md` in the handler, so a model that wants to write elsewhere
+    has nothing to say it with. Unreachable beats denied — but only if it is actually
+    unreachable, so this asserts both halves: no path-taking writer is registered, and the
+    one writer that is lands on the transcript and creates nothing else."""
+    run_id, salt = "no-write-path", "99aabbccddeeff00"
+    run_dir = materialize(tmp_path, GOLDEN_AB3)
+
+    assert MAIN_DEF.tools.append is True
+    assert MAIN_DEF.tools.write is False, (
+        "main holds the path-taking write lane again; the escape is expressible"
+    )
+
+    before = {p.name for p in run_dir.parent.iterdir()}
+    replay = ReplayFn([
+        Turn(tool_calls=[("append_block", {"text": "+ probe\n"})]),
+        Turn(tool_calls=[("close_investigation", {"disposition": "inconclusive"})]),
+        Turn(text="done"),
+    ])
+    drive(run_dir, run_id=run_id, salt=salt, main=replay)
+
+    assert (run_dir / "investigation.md").read_text() == "+ probe\n"
+    assert {p.name for p in run_dir.parent.iterdir()} == before, (
+        "the append created something outside the run dir"
+    )
 
 
 def test_role_flip_data_access_is_role_dependent():

@@ -155,18 +155,22 @@ class _PhaseTagger:
     def _process_block(self, blk) -> None:
         if not isinstance(blk, dict) or blk.get("type") != "tool_use":
             return
-        if blk.get("name") not in ("Write", "Edit", "write_file", "edit_file"):
+        name = blk.get("name")
+        if name not in ("Write", "Edit", "write_file", "edit_file", "append_block"):
             return
         tu_id = blk.get("id") or ""
         if tu_id and tu_id in self.consumed_tool_use_ids:
             return
         inp = blk.get("input", {}) or {}
-        fp = str(inp.get("file_path") or inp.get("path") or "")
-        if not fp.endswith("investigation.md"):
-            return
+        # `append_block` is bound to investigation.md and carries no path (#810), so the
+        # path filter below cannot speak for it — the name already did.
+        if name != "append_block":
+            fp = str(inp.get("file_path") or inp.get("path") or "")
+            if not fp.endswith("investigation.md"):
+                return
         if tu_id:
             self.consumed_tool_use_ids.add(tu_id)
-        new_text = inp.get("content") or inp.get("new_string") or ""
+        new_text = inp.get("content") or inp.get("new_string") or inp.get("text") or ""
         for raw in _introduced_headers(new_text, self.seen_headers, self.header_re):
             self._advance(raw)
 

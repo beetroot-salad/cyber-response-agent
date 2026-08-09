@@ -346,7 +346,10 @@ def test_closed_ticket_tools_registration_order(tmp_path):
         return out
 
     bits = guard_bits("register_tools", frozenset({"register_tools"}))
-    assert bits == ["bash", "read", "write", "forward_check", "lesson_read",
+    # `append` sits beside `write` (#810): the two write lanes are adjacent because they are
+    # the same kind of grant, and the invariant this pins is unchanged — closed_tickets is
+    # LAST, so the deferred tail never migrates into the middle of the fixed order.
+    assert bits == ["bash", "read", "write", "append", "forward_check", "lesson_read",
                     "template_search", "query", BIT], (
         f"register_tools' presence-table order is {bits} — the closed_tickets guard must "
         "enter the fixed order at the TAIL, after query"

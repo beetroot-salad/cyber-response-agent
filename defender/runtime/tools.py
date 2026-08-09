@@ -445,6 +445,52 @@ def _tool_edit_file(deps: AgentDeps, path: str, old_string: str, new_string: str
     return f"edited {path} ({len(new_text)} bytes)"
 
 
+def _tool_append_block(deps: AgentDeps, text: str) -> str:
+    """Append to `investigation.md` — main's only write (#810).
+
+    No path: the run has one model-authored transcript and this is its writer, the way
+    `close_investigation` is `report.md`'s (#774). No anchor and no position either: the
+    document is validator-enforced append-only (`_check_append_only` refuses a dropped
+    fence, a dropped record, or an in-place mutation), so the anchored replace that
+    `edit_file` offers is a capability the artifact never had. Measured over three runs,
+    seven of the eight non-append `edit_file` calls failed.
+
+    Faces the identical gate the other two verbs do — same `decide_write`, same content
+    schema, same RS15 post-close refusal — on the resulting full document."""
+    p = deps.run_dir / "investigation.md"
+    if _closed_for_investigation_write(deps, p):
+        raise ModelRetry(
+            "investigation.md is no longer writable: the close already committed a "
+            "recorded disposition for this run, and a further append could silently "
+            "move it. The case is closed."
+        )
+    read_decision = permission.decide_read(
+        p, run_dir=deps.run_dir, defender_dir=deps.defender_dir, policy=deps.policy
+    )
+    if not read_decision.allow:
+        raise ModelRetry(read_decision.reason)
+    try:
+        current = read_text_utf8(p) if p.is_file() else ""
+    except UnicodeDecodeError:
+        raise ModelRetry(
+            "investigation.md is not valid UTF-8 text (binary or corrupt)"
+        ) from None
+    # Separate with a newline when the document does not already end in one. Existing
+    # bytes are never rewritten — not even trailing whitespace — so an append cannot
+    # itself trip the append-only check it is about to face.
+    sep = "\n" if current and not current.endswith("\n") else ""
+    new_text = current + sep + text
+    decision = permission.decide_write(
+        p, new_text, run_dir=deps.run_dir, defender_dir=deps.defender_dir, policy=deps.policy,
+    )
+    if not decision.allow:
+        raise ModelRetry(decision.reason)
+    _guarded_parents(deps, p)
+    write_guarded(p, new_text)
+    deps.authored_paths.add(_resolved(p))
+    return f"appended {len(text)} bytes to investigation.md ({len(new_text)} total)"
+
+
 def register_tools(agent, tools: ToolSet, verbs: Any = None) -> None:
 
     if tools.bash:
@@ -475,18 +521,28 @@ def register_tools(agent, tools: ToolSet, verbs: Any = None) -> None:
     if tools.write:
         @agent.tool
         async def write_file(ctx: RunContext[AgentDeps], path: str, content: str) -> str:
-            """Write a file in the run dir (investigation.md — the invlang work log).
-            Writes are validated against the invlang schema. To record a disposition,
-            use the close_investigation tool — it is the only writer of the report."""
+            """Write a file within this agent's declared write scope, replacing it whole.
+            Content is validated against the schema for whatever artifact the path names."""
             return _tool_write_file(ctx.deps, path, content)
 
         @agent.tool
         async def edit_file(
             ctx: RunContext[AgentDeps], path: str, old_string: str, new_string: str
         ) -> str:
-            """Replace the first occurrence of old_string with new_string in a run-dir
-            file (investigation.md). The resulting full text is validated (invlang)."""
+            """Replace the first occurrence of old_string with new_string in a file within
+            this agent's declared write scope. old_string must match exactly once. The
+            resulting full text is validated."""
             return _tool_edit_file(ctx.deps, path, old_string, new_string)
+
+    if tools.append:
+        @agent.tool
+        async def append_block(ctx: RunContext[AgentDeps], text: str) -> str:
+            """Append to investigation.md, the invlang work log — no path and no anchor,
+            because the run has one transcript and it only ever grows. Send ONE invlang
+            block per call. The resulting full document is validated (invlang); if it is
+            refused, nothing is written and the file still does not contain your text.
+            To record a disposition use close_investigation, the report's only writer."""
+            return _tool_append_block(ctx.deps, text)
 
     _register_deferred_tools(agent, tools, verbs)
 

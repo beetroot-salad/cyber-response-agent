@@ -283,7 +283,11 @@ MAIN_DEF = AgentDefinition(
     role=AgentRole.MAIN,
     model=resolve_main_model,
     effort="low",
-    tools=ToolSet(read=True, bash=True, write=True, close=True),
+    # `append`, not `write` (#810): main's write allowlist is exactly investigation.md, and
+    # that document is append-only by construction. The general verbs offered an anchored
+    # replace the artifact never admitted — seven of the eight non-append edit_file calls
+    # measured across three runs failed. Same move #774 made for report.md, one artifact later.
+    tools=ToolSet(read=True, bash=True, append=True, close=True),
     corpus_dirs=_CORPUS_DIRS,
     bash_shapes=(_main_bash_shapes,),
     write_shapes=(_main_write_shape,),

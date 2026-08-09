@@ -1246,6 +1246,13 @@ GATED_WRITE_ARMS = (
      lambda deps, p: runtime_tools._tool_edit_file(deps, p, "nothing to see.", "PWNED")),
     ("edit_file", "investigation.md", INVESTIGATION_BODY,
      lambda deps, p: runtime_tools._tool_edit_file(deps, p, "spec", "PWNED")),
+    # #810: `append_block` is main's ONLY writer, so it is the arm that now matters most here
+    # — the other two are held by the curator and lead-author roles. One arm, not two: the verb
+    # is bound to investigation.md and takes no path, so report.md is unreachable through it by
+    # construction rather than by refusal. It ignores the `p` the harness passes for the same
+    # reason, and lands on `deps.run_dir / "investigation.md"` — the planted name.
+    ("append_block", "investigation.md", INVESTIGATION_BODY,
+     lambda deps, p: runtime_tools._tool_append_block(deps, INVESTIGATION_BODY)),
 )
 
 #: (#774/R1: report.md left the model's write_file/edit_file allow entirely — both tools now

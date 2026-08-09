@@ -432,23 +432,29 @@ def test_unknown_tool_tiers_as_core(tmp_path):
 
 
 def test_tier_table_over_the_real_census(tmp_path):
-    """The tail tier is exactly MAIN's read_file, write_file and edit_file; every
-    GATHER tool is core including read_file, and `gather` itself is core — so parallel
-    subagents cannot drain the ten-call window MAIN needs for its report.
+    """The tail tier is exactly MAIN's read_file and append_block; every GATHER tool is
+    core including read_file, and `gather` itself is core — so parallel subagents cannot
+    drain the ten-call window MAIN needs for its report.
 
     The enumeration picks the subjects; the assertion is WIRED, not structural: with
-    the pool tripped, MAIN's write_file (tail) still executes and lands its bytes
+    the pool tripped, MAIN's append_block (tail) still executes and lands its bytes
     while MAIN's bash (core) is refused in the same run. SAME FACT SEEN TWICE — the
     tail window granted to fund the report is granted over the record that BOUNDS the
     window, which is why test_model_cannot_author_its_own_budget_state exists;
-    demoting write_file out of the tail breaks O2 and is the WRONG repair."""
+    demoting MAIN's writer out of the tail breaks O2 and is the WRONG repair.
+
+    #810 moved the SUBJECT, not the property. `write_file`/`edit_file` left MAIN when its
+    write grant became `append=True`, so `append_block` inherits the obligation whole: it
+    is the only way MAIN records a finding, and a budget-refusable transcript would mean a
+    run that hits the cap can no longer write down what it already knows."""
     main_names = _registered_names(MAIN_DEF)
     gather_names = _registered_names(GATHER_DEF)
-    assert {"read_file", "write_file", "edit_file", "bash", "gather"} <= main_names
+    assert {"read_file", "append_block", "bash", "gather"} <= main_names
+    assert not {"write_file", "edit_file"} & main_names, "the general write lane left MAIN"
     assert {"read_file", "bash", "template_search", "query"} <= gather_names
 
     assert {n for n in main_names if tier(n, AgentRole.MAIN) == "tail"} == \
-        {"read_file", "write_file", "edit_file"}
+        {"read_file", "append_block"}
     assert all(tier(n, AgentRole.GATHER) == "core" for n in gather_names)
     assert tier("gather", AgentRole.MAIN) == "core"
 
@@ -461,11 +467,11 @@ def test_tier_table_over_the_real_census(tmp_path):
     # standing, and it makes the identical point (a tail-tier write survives a tripped pool).
     inv = run_dir / "investigation.md"
     script = [[("bash", {"command": "echo hi"})],
-              [("write_file", {"path": str(inv), "content": ""})]]
+              [("append_block", {"text": "+ tail-tier append\n"})]]
     result, _ = drive_agent(MAIN_DEF, run_dir, script, limits=limits, enforce=True)
     text = str(result.all_messages())
     assert "BUDGET" in text.upper(), "the core-tier bash was not refused on a tripped pool"
-    assert inv.is_file(), "the tail-tier write_file was refused inside the tail band"
+    assert inv.is_file(), "the tail-tier append_block was refused inside the tail band"
 
 
 def test_same_tool_name_on_two_agents(tmp_path):
