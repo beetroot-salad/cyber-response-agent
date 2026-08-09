@@ -86,7 +86,8 @@ axes removed), so the next analyst sees the capability covers their case:
 ## Pitfalls
 
 - <pitfall 1: e.g. a null-heavy field that needs an `IS NOT NULL` guard, a
-  message-only field that needs `GROK`/`CASE`, NAT collapse, window edge cases>
+  structured field an earlier query re-derived out of `message` when the
+  integration had already parsed it, NAT collapse, window edge cases>
 ```
 
 Older templates carried `## What to summarize` and `## Baseline (when

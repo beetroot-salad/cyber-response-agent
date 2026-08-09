@@ -10,15 +10,6 @@ body_substitutions: [event_id]
 
 Retrieve a single sshd / PAM authentication log entry from `logs-system.auth-*` by Elasticsearch document ID (`_id`). Use when an alert graph references a specific auth-log ancestor event by `_id` and you need the exact host, timestamp, actor, and session outcome — typical in cross-tier pivot investigations where each hop is identified by a document ID.
 
-## What to summarize
-
-- `host.name` of the matched event (which host produced the auth record)
-- `@timestamp` of the event
-- user identity extracted from `message` field substring (e.g., "Accepted password for alice" or "Failed password for alice")
-- source IP extracted from `message` field substring (e.g., "from 10.1.2.3 port 22")
-- outcome: Accepted or Failed, from `message` field prefix
-- event type from `system.auth.ssh.event` when populated (e.g., `Invalid`, `Accepted`, `Failed`) — present when Filebeat ECS-parses the syslog line; distinguishes "Invalid user" rejections (no auth method attempted) from outcome-carrying auth events
-
 ## Query
 
 ```
@@ -32,8 +23,20 @@ Index: `logs-system.auth-*`
 - **Use the `query` verb, NOT `esql`.** This is a raw single-document
   fetch (you want the full `_source`), not an aggregation. For counts/distributions
   of auth events use `sshd-auth-history` (ES|QL) instead.
-- **Structured ECS fields may be populated.** For `Invalid user` events (observed in Filebeat 9.3.3), `user.name`, `source.ip`, and `system.auth.ssh.event` are all populated via ECS normalization — check structured fields first. For other event types (e.g., `Accepted password`, `Failed password`), `source.ip` may be absent; fall back to `message` substring extraction in that case.
+- **Read the structured fields; parse `message` only as a fallback.** These
+  events are ECS-normalized: `user.name`, `source.ip`, `source.port`,
+  `event.outcome`, `system.auth.ssh.event` (`Accepted` / `Failed` / `Invalid`)
+  and `system.auth.ssh.method` (`password` / `publickey`) are populated in their
+  own typed fields. `system.auth.ssh.method` is null on `Invalid user`
+  rejections — no auth method was ever reached — which distinguishes them from
+  outcome-carrying auth events. Fall back to `message` substrings only for a
+  value that is genuinely absent from the document.
 - **`_id` vs. field value.** The `event_id` parameter is the Elasticsearch document ID (`_id`), not a value inside the `message` field. Retrieve via direct `_id` lookup, not a field query.
-- **Index scope.** Auth-log events live in `logs-system.auth-*`; Falco events in `logs-falco.alerts-*`. Do not substitute indexes.
+- **Index scope — and never the `.ds-` name from alert metadata.** Auth-log
+  events live in `logs-system.auth-*`; Falco events in `logs-falco.alerts-*`. Do
+  not substitute indexes. An alert's `ancestor_events[].index` is the concrete
+  **backing** index (`.ds-logs-system.auth-default-2026.07.27-000004`); the
+  adapter allowlists datastream *patterns*, so binding it verbatim is refused —
+  map it to its pattern (`logs-system.auth-*`) first.
 - **Sweep pair for multi-hop pivots.** When a lead resolves multiple ancestor sessions in one hop (e.g., a workstation-tier event and a prod-tier event), dispatch this template once per `_id` and reconcile the results in the gather summary, or batch both IDs in one `native_query` body using the OR syntax: `_id: ("id1" OR "id2")`; both documents are returned in one shot.
 - **`event_id` is a query-body substitution into the `native_query`.** It is interpolated into `_id: "${event_id}"`; it is not a verb param of its own. A mistyped or unknown param name is rejected as a usage error (exit 64), naming the param.
