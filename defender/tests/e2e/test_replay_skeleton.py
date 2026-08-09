@@ -183,27 +183,28 @@ def test_a_gap_the_review_cannot_measure_overrides_the_confident_close(tmp_path)
     )
 
 
-@pytest.mark.parametrize(("label", "tool_name", "args_fn", "reason_substr", "escape_name"), [
+#: #810 retired the ("write-escape", "write_file", …) arm: main has no verb that takes a
+#: caller-supplied write path, so the escape it drove cannot be EXPRESSED any more, let alone
+#: denied. The property it pinned is stronger now and is asserted directly by
+#: `test_main_cannot_name_a_write_path_at_all` below — a deny bounce would be the wrong oracle
+#: for it, since there is no longer a call to bounce. That was also the only arm carrying an
+#: `escape_name`, so the column went with it rather than staying as a slot every arm passes
+#: `None` to and no assertion ever reads.
+@pytest.mark.parametrize(("label", "tool_name", "args_fn", "reason_substr"), [
     ("adapter-from-main", "bash",
      lambda rd: {"command": "defender-elastic query foo"},
-     "not runnable from bash", None),
-    # #810 retired the ("write-escape", "write_file", …) arm: main has no verb that takes a
-    # caller-supplied write path, so the escape it drove cannot be EXPRESSED any more, let
-    # alone denied. The property it pinned is stronger now and is asserted directly by
-    # `test_main_cannot_name_a_write_path_at_all` below — a deny bounce would be the wrong
-    # oracle for it, since there is no longer a call to bounce.
+     "not runnable from bash"),
     ("read-escape", "read_file",
      lambda rd: {"path": "/etc/passwd"},
-     "outside them", None),
+     "outside them"),
     ("raw-read-from-main", "read_file",
      lambda rd: {"path": str(rd / "gather_raw" / "l-001" / "0.json")},
-     "must not read gather_raw", None),
+     "must not read gather_raw"),
     ("shell-from-main", "bash",
      lambda rd: {"command": "curl http://example.invalid/x"},
-     "only the defender-* shims", None),
+     "only the defender-* shims"),
 ])
-def test_main_loop_deny_bounces(tmp_path, label, tool_name, args_fn,
-                                reason_substr, escape_name):
+def test_main_loop_deny_bounces(tmp_path, label, tool_name, args_fn, reason_substr):
     run_id, salt = f"deny-{label}", "8899aabbccddeeff"
     run_dir = materialize(tmp_path, GOLDEN_AB3)
 
@@ -213,9 +214,6 @@ def test_main_loop_deny_bounces(tmp_path, label, tool_name, args_fn,
     assert probe.calls >= 2, "deny did not bounce the agent back into the loop"
 
     assert reason_substr in probe.seen[-1]
-
-    if escape_name is not None:
-        assert not (run_dir.parent / escape_name).exists()
 
 
 def test_main_cannot_name_a_write_path_at_all(tmp_path):

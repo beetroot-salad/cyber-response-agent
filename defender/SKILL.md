@@ -2,8 +2,12 @@
 name: defender
 description: Investigate a security alert through a single-agent ReAct loop with phase discipline. Outputs a dense investigation log and a minimal disposition report; the lead/query tables that feed the offline learning loop are written live by the harness as you dispatch gather.
 # allowed-tools below is documentation only — Skill frontmatter does not enforce
-# a tool allowlist. Treat as a reader hint, not a security boundary.
-allowed-tools: Read, Write, Edit, Grep, Glob, Bash, Task, Skill
+# a tool allowlist. Treat as a reader hint, not a security boundary. It names the
+# verbs the RUNTIME actually registers for this role (runtime/tools.register_tools
+# under MAIN_DEF's ToolSet): this file becomes the system prompt frontmatter and
+# all, so a hint naming a verb the model does not have is a hint it spends turns
+# trying to call. `write_file`/`edit_file` left the roster with #810.
+allowed-tools: read_file, append_block, bash, gather, close_investigation
 ---
 
 You are the **defender**. Given an `alert.json`, work through a triage

@@ -23,6 +23,9 @@ from .agent_definition import ResolvedRoots, ToolSet
 from .agent_role import AgentRole
 
 from defender._untrusted import wrap as _wrap
+# The SAME byte ruler the #629 bounds are measured with — a write tool that reports "bytes"
+# has to report the number the gate will judge, not a codepoint count that under-reads it.
+from defender._artifact_schema import _utf8_len
 from defender.scripts.gather_tools.record_query import (
     _passthrough_max_bytes as _read_char_cap,
 )
@@ -477,8 +480,10 @@ def _tool_append_block(deps: AgentDeps, text: str) -> str:
         ) from None
     # Separate with a newline when the document does not already end in one. Existing
     # bytes are never rewritten — not even trailing whitespace — so an append cannot
-    # itself trip the append-only check it is about to face.
-    sep = "\n" if current and not current.endswith("\n") else ""
+    # itself trip the append-only check it is about to face. An EMPTY append gets no
+    # separator either: appending nothing must not mutate the document (the separator
+    # alone would be a byte the model never sent, on a call reporting zero bytes).
+    sep = "\n" if current and text and not current.endswith("\n") else ""
     new_text = current + sep + text
     decision = permission.decide_write(
         p, new_text, run_dir=deps.run_dir, defender_dir=deps.defender_dir, policy=deps.policy,
@@ -488,7 +493,13 @@ def _tool_append_block(deps: AgentDeps, text: str) -> str:
     _guarded_parents(deps, p)
     write_guarded(p, new_text)
     deps.authored_paths.add(_resolved(p))
-    return f"appended {len(text)} bytes to investigation.md ({len(new_text)} total)"
+    # UTF-8 BYTES, not characters: the SKILL tells the model this return IS a byte count and
+    # the 65536-byte cap it has to stay under is measured the same way. invlang rows carry
+    # `⟂ → ⟺` freely, so `len(str)` under-reports against the bound the gate applies.
+    return (
+        f"appended {_utf8_len(text)} bytes to investigation.md "
+        f"({_utf8_len(new_text)} total)"
+    )
 
 
 def register_tools(agent, tools: ToolSet, verbs: Any = None) -> None:

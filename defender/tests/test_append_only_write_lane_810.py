@@ -166,6 +166,37 @@ def test_a_located_row_is_not_printed_twice():
     assert reason.count("l-001|v-001") == 1
 
 
+def test_a_row_with_escapes_is_still_not_printed_twice():
+    """The sibling of the test above, and the reason it needed one. `ParseWarning.format()`
+    embeds the row as a `repr()`, so a row carrying a backslash or a quote is spelled
+    `'C:\\temp'` in the message and a raw-substring test does not find it. Both spellings
+    have to be checked or the escape-carrying rows — the ones most likely to be malformed
+    in the first place — get their row printed twice."""
+    malformed = ("```invlang\n:R attr_updates [resolved_by|target|key|value]\n"
+                 "l-001|v-001|note|C:\\temp\n```\n")
+    reason = validate_investigation(malformed, None)
+
+    assert "C:" in reason, "the fixture stopped reaching the renderer"
+    assert reason.count("l-001|v-001|note") == 1
+
+
+def test_an_over_bound_document_says_what_cannot_be_taken_back(tmp_path):
+    """Under append-only, "trim it" is advice the model may be unable to take: it has no
+    editor, so once the committed prefix fills the bound no block is small enough. The
+    refusal names the committed share, which is what distinguishes "send less" from "you are
+    out of room and should close"."""
+    committed = "x" * (INVESTIGATION_FILE_MAX - 100)
+    reason = validate_investigation(committed + "y" * 200, committed)
+
+    assert reason is not None
+    assert UNCHANGED_NOTICE in reason
+    assert f"{len(committed)} of those bytes are already committed" in reason
+    assert "close the investigation" in reason
+    # ...and on a CREATE there is nothing committed, so the old advice still stands.
+    fresh = validate_investigation("x" * (INVESTIGATION_FILE_MAX + 1), None)
+    assert "Trim it and re-send." in fresh
+
+
 def test_an_accepted_document_still_returns_no_reason():
     """The notice rides on refusals only — an accepted write says nothing at all."""
     good = ("```invlang\n:L findings [id|loop|name|target|tests|system|window]\n"
@@ -275,6 +306,38 @@ def test_a_repeating_last_line_is_not_an_obstacle(tmp_path):
     _tool_append_block(deps, "+ landed after the repeat\n")
 
     assert (run / "investigation.md").read_text() == repeated * 2 + "+ landed after the repeat\n"
+
+
+def test_an_empty_append_changes_nothing(tmp_path):
+    """The separator is computed before `text` is looked at, so an empty append used to add a
+    newline the model never sent — on a call whose own result says "appended 0 bytes". The
+    replay harness reaches this: `_split_at_fences` pads with empty chunks when the target has
+    fewer fences than write sites."""
+    from defender.runtime.tools import _tool_append_block
+
+    deps, run = _main_deps(tmp_path)
+    _tool_append_block(deps, "+ no trailing newline")
+    before = (run / "investigation.md").read_text()
+
+    _tool_append_block(deps, "")
+
+    assert (run / "investigation.md").read_text() == before
+
+
+def test_the_reported_count_is_utf8_bytes_not_characters(tmp_path):
+    """The SKILL tells the model this return IS a byte count, and the 65,536 cap it must stay
+    under is measured in UTF-8 bytes. invlang carries `⟂ → ⟺` freely, so a `len(str)` would
+    under-report against the very bound the gate applies and a model budgeting from it would
+    be refused a write it computed was safe."""
+    from defender.runtime.tools import _tool_append_block
+
+    deps, _run = _main_deps(tmp_path)
+    text = "+ v-001 ⟂ v-002 → v-003\n"
+
+    result = _tool_append_block(deps, text)
+
+    assert len(text.encode("utf-8")) > len(text), "the fixture lost its multibyte glyphs"
+    assert f"appended {len(text.encode('utf-8'))} bytes" in result
 
 
 def test_a_refused_append_leaves_no_residue(tmp_path):

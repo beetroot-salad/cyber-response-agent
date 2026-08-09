@@ -282,8 +282,19 @@ def _retarget_writes_as_appends(turns: list[Turn]) -> list[Turn]:
     ]
     if not sites:
         return turns
-    _, last_args = turns[sites[-1][0]].tool_calls[sites[-1][1]]
-    target = last_args.get("content") or last_args.get("new_string") or ""
+    last_name, last_args = turns[sites[-1][0]].tool_calls[sites[-1][1]]
+    # The re-split rests on the LAST recorded write being the whole document. An `edit_file`
+    # carries only the replacement FRAGMENT in `new_string`, so reading a target out of one
+    # would silently replay a few lines as if they were the finished artifact — and the
+    # byte-identity assertion downstream would then be comparing the golden against a stub.
+    # Fail loudly on a golden shaped that way instead.
+    target = last_args.get("content")
+    if last_name != "write_file" or not isinstance(target, str):
+        raise AssertionError(
+            "the golden's last investigation.md write is a "
+            f"{last_name} — `_retarget_writes_as_appends` needs a whole-document "
+            "`write_file` there to re-split, not an anchored fragment"
+        )
     for (t_i, c_i), chunk in zip(sites, _split_at_fences(target, len(sites)), strict=True):
         turns[t_i].tool_calls[c_i] = ("append_block", {"text": chunk})
     return turns

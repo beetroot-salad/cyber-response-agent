@@ -33,8 +33,8 @@ BUDGET_EXEMPT_TOOLS = frozenset({"close_investigation"})
 
 BUDGET_REFUSAL_MESSAGE = (
     "Budget stop: the {tool} tool is now PERMANENTLY withdrawn for the rest of this "
-    "run (the {limb} cap is reached and will not reset). Writing to investigation.md — "
-    "write_file / edit_file — and closing the investigation are still available. "
+    "run (the {limb} cap is reached and will not reset). Appending to investigation.md — "
+    "append_block — and closing the investigation are still available. "
     "Do not retry this tool; close the investigation now and record your report from "
     "the evidence you already have."
 )

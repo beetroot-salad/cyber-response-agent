@@ -264,7 +264,11 @@ def apply_writes(current: str, response: Message) -> str:
         # which would otherwise drop every call as "not investigation.md".
         if name == "append_block":
             text = args.get("text", "")
-            sep = "\n" if current and not current.endswith("\n") else ""
+            if not isinstance(text, str):
+                continue
+            # Same separator rule the tool itself applies (`tools._tool_append_block`),
+            # including the empty-append case: appending nothing changes nothing.
+            sep = "\n" if current and text and not current.endswith("\n") else ""
             current = current + sep + text
             continue
         if not str(args.get("path", "")).endswith("investigation.md"):
