@@ -192,8 +192,15 @@ def directions_for(disposition: str) -> list[Direction]:
 
     It reads the disposition through the same `normalized_disposition` every consumer of a
     completed `report.md` goes through (#785), so the #722 strip cannot be applied on the
-    reading side and skipped on the dispatching one."""
+    reading side and skipped on the dispatching one.
+
+    An `UNTRAINED_DISPOSITIONS` member returns early rather than falling through the filter to
+    the same empty list. The filter would already produce it — no `Direction` names those
+    keywords — but only as an ABSENCE, which reads identically to the #716 drift bug this
+    function's invariant exists to catch. Consulting the set makes "trains nothing" a decision
+    the code states, and keeps the two readers of that set (here and the invariant) from being
+    a live one and a test-only one."""
     disp = normalized_disposition(disposition)
-    if disp is None:
+    if disp is None or disp in UNTRAINED_DISPOSITIONS:
         return []
     return [d for d in BY_NAME.values() if disp in d.dispositions]
