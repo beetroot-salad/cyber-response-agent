@@ -131,6 +131,7 @@ def build_truncated_view(stdout: str, payload_rel: str | None, run_dir: Path) ->
     if records is not None:
         shown = min(len(records), PASSTHROUGH_SAMPLE_COUNT)
         if sampled:
+            assert total is not None  # `sampled` is only True when `total is not None`
             lines.append(
                 f"[record_query] {total} total matches (EXACT, from the envelope). "
                 f"This payload is a {len(records)}-doc SAMPLE (returned-doc cap), "
