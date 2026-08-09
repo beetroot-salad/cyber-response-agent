@@ -255,3 +255,25 @@ def test_a_companion_that_paid_the_price_closes(tmp_path):
     result = _close(tmp_path, _paid(), "false-positive")
     assert result.outcome == "stands"
     assert (tmp_path / "run" / "report.md").exists()
+
+
+def test_a_vertex_from_an_earlier_prologue_block_is_still_the_alerted_entity():
+    """The prologue clause reads a PROJECTION, so it inherits whatever that projection drops.
+
+    Append-only forbids rewriting the loop-1 block, so a run that learns of a second alerted
+    entity has exactly one way to record it: a second `:V prologue.vertices`. That block used to
+    REPLACE the first, which made this gate deny an `entity_check` against the host the alert
+    actually named — the model told to check the alerted entity, denied for having checked it,
+    with no edit available that complies. #817 made the block accumulate; this pins the gate's
+    dependence on that, which is not visible from either change alone.
+    """
+    two_blocks = _PROLOGUE + (
+        "```invlang\n"
+        ":V prologue.vertices [id|type|class|ident|attrs?]\n"
+        "v-002|compute|workstation/internal/known-corp|office-ws-1|os=linux\n"
+        "```\n"
+    )
+    doc = _doc(two_blocks, _LEADS, _outcome("l-001", "v-011"),
+               _conclude(disposition="false-positive", detection_notes=_NOTES,
+                         entity_check="l-001"))          # l-001 targets v-001, the FIRST block
+    assert validate_companion(doc, None) == []
