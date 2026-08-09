@@ -23,11 +23,20 @@ from defender.hooks.budget_enforcer import BudgetKill
 from defender._untrusted import wrap as _wrap
 from defender.scripts.adapters.faults import USAGE_EXIT_CODE, AdapterFault
 from defender.scripts.gather_tools.record_query import (
+    ABOVE_GUARD_QUERY_ID,
+    REPEAT_ESCAPE,
+    GatherDeadEnd,
     _is_event_payload,
+    _json_safe_params,
     _next_seq,
     _passthrough_max_bytes,
     build_truncated_view,
+    dead_end_reason,
+    lead_rows,
     payload_digest,
+    repeat_note,
+    repeat_trip,
+    repeat_trip_detail,
 )
 
 from . import circuit_breaker
@@ -58,7 +67,18 @@ _QID_TRAVERSAL = ("/", "\\", "..", "\x00")
 
 
 def resolve_query_id(system: str, verb: str, model_query_id: str | None) -> str:
-    if model_query_id:
+    # ABOVE_GUARD_QUERY_ID is reserved for the three writer sites that pass it directly
+    # (never through here) to mark a row the repeat guard must never count. A model-supplied
+    # `query_id` equal to that literal string — or carrying a traversal character the
+    # below-guard `_screen` would otherwise reject — must not reach a real row through this
+    # path: on the repeat-trip's own record (which sits ABOVE `_screen`), nothing else
+    # screens it, and letting it through would either forge the sentinel (permanently
+    # exempting that request from the repeat count) or persist an unscreened id.
+    if (
+        model_query_id
+        and model_query_id != ABOVE_GUARD_QUERY_ID
+        and not any(t in model_query_id for t in _QID_TRAVERSAL)
+    ):
         return model_query_id
     return f"{system}.{verb}" if verb else f"{system}.ad-hoc"
 
@@ -67,18 +87,6 @@ def _fault_exit(e: BaseException) -> int:
     if isinstance(e, SystemExit) and isinstance(e.code, int) and e.code != 0:
         return e.code
     return DEFAULT_FAULT_EXIT
-
-
-def _json_safe_params(value: Any) -> Any:
-    import math
-
-    if isinstance(value, float) and not math.isfinite(value):
-        return repr(value)
-    if isinstance(value, dict):
-        return {k: _json_safe_params(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_json_safe_params(v) for v in value]
-    return value
 
 
 def _payload_status(exit_code: int, payload: Any) -> str:
@@ -200,7 +208,7 @@ class QueryCapture(AbstractCapability[Any]):
             await self._record(
                 ctx.deps,
                 system=system, verb=verb,
-                query_id=resolve_query_id(system, verb, None),
+                query_id=ABOVE_GUARD_QUERY_ID,
                 params=_as_dict(raw.get("params")),
                 payload=None,
                 exit_code=USAGE_EXIT_CODE,
@@ -219,7 +227,7 @@ class QueryCapture(AbstractCapability[Any]):
         if load_error is not None:
             row, text = await self._record(
                 deps, system=system, verb=verb,
-                query_id=resolve_query_id(system, verb, None), params=params, payload=None,
+                query_id=ABOVE_GUARD_QUERY_ID, params=params, payload=None,
                 exit_code=DEFAULT_FAULT_EXIT, detail=load_error,
             )
             return None, self._model_view(deps, row, text, DEFAULT_FAULT_EXIT, load_error)
@@ -236,7 +244,7 @@ class QueryCapture(AbstractCapability[Any]):
         if decision.outcome != GRANTED:
             await self._record(
                 deps, system=system, verb=verb,
-                query_id=resolve_query_id(system, verb, None), params=params, payload=None,
+                query_id=ABOVE_GUARD_QUERY_ID, params=params, payload=None,
                 exit_code=USAGE_EXIT_CODE, detail=decision.refusal or "unresolvable",
             )
             raise ModelRetry(decision.refusal or f"unresolvable: {system}.{verb}")
@@ -285,6 +293,24 @@ class QueryCapture(AbstractCapability[Any]):
         tripped = _tripped_message(deps, system)
         if tripped is not None:
             return tripped
+
+        # The repeat guard sits ABOVE `_screen`, so it owns every repeat it can see —
+        # including a call the verb's own parameter check would refuse — rather than earning a
+        # third identical corrective `ModelRetry` the model already ignored twice. Its read is
+        # the count itself is derived from: no new persisted state.
+        rows = lead_rows(deps.run_dir, deps.lead_id)
+        trip = repeat_trip(rows, deps.lead_id, system=system, verb=verb, params=params)
+        if trip is not None:
+            query_id = resolve_query_id(system, verb, _as_str(model_query_id) or None)
+            await self._record(
+                deps, system=system, verb=verb, query_id=query_id, params=params,
+                payload=None, exit_code=USAGE_EXIT_CODE, detail=repeat_trip_detail(trip),
+            )
+            executed = sum(1 for r in rows if r.get("exit_code") == 0)
+            raise GatherDeadEnd(
+                reason=dead_end_reason(system, verb, trip, executed),
+                escape=REPEAT_ESCAPE,
+            )
 
         await self._screen(
             deps, decision, system, verb, params, model_query_id, self_key,
@@ -358,6 +384,15 @@ class QueryCapture(AbstractCapability[Any]):
             if (_is_event_payload(text) or len(text) > _passthrough_max_bytes())
             else text
         )
+        # Ahead of the view, not inside it: a small payload skips build_truncated_view
+        # entirely, and the repeat is the one thing the caller most needs to read first.
+        repeat = repeat_note(
+            deps.run_dir, deps.lead_id, seq=row["seq"], system=row["system"],
+            verb=row["verb"], params=row["params"],
+            payload_digest=row["payload_digest"],
+        )
+        if repeat is not None:
+            view = f"{repeat}\n{view}"
         return _format_bash_result(0, _wrap(view, "untrusted", deps.salt), "", note)
 
 

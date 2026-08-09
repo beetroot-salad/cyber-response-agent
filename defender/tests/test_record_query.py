@@ -118,6 +118,120 @@ def test_build_truncated_view_complete_envelope_is_not_flagged_sampled(tmp_path)
 
 
 
+def _capped(hits, total=142):
+    import json
+    return json.dumps({
+        "index": "logs-*", "total": total, "returned": len(hits),
+        "truncated": True, "hits": hits,
+    })
+
+
+def test_capped_view_states_the_span_the_returned_docs_actually_cover(tmp_path):
+    """A capped payload is ONE slice, and the envelope never says which.
+
+    The adapter sorts `@timestamp` desc and takes the first 20, so a lead bracketing an alert
+    at 11:40 with a ±15m window gets the window's last six minutes and none of the events it
+    came for. `total`/`returned` cannot express that; the span can.
+    """
+    hits = [
+        {"@timestamp": f"2026-08-07T11:5{i // 10}:0{i % 10}.000Z", "message": f"e{i}"}
+        for i in range(20)
+    ]
+    view = ge.build_truncated_view(_capped(hits), "gather_raw/l-001/0.json", tmp_path)
+    assert "2026-08-07T11:50:00.000Z … 2026-08-07T11:51:09.000Z" in view
+    assert "ONE slice of the 142" in view
+    assert "other 122" in view
+
+
+def test_span_line_is_omitted_when_records_carry_no_timestamp(tmp_path):
+    view = ge.build_truncated_view(
+        _capped([{"i": i} for i in range(20)]), "gather_raw/l-001/0.json", tmp_path
+    )
+    assert "142 total matches (EXACT" in view
+    assert "ONE slice" not in view
+
+
+def _row(seq, *, params, digest, lead="l-001"):
+    return {
+        "lead_id": lead, "seq": seq, "system": "elastic", "verb": "query",
+        "query_id": "elastic.probe", "params": params, "payload_digest": digest,
+    }
+
+
+def _write_rows(tmp_path, rows):
+    import json
+    from defender._run_paths import RunPaths
+    log = RunPaths(tmp_path).executed_queries
+    log.parent.mkdir(parents=True, exist_ok=True)
+    log.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+    return tmp_path
+
+
+def test_repeat_note_is_silent_on_the_first_call(tmp_path):
+    _write_rows(tmp_path, [_row(0, params={"q": "a"}, digest="25904 bytes, 1 line(s)")])
+    assert ge.repeat_note(
+        tmp_path, "l-001", seq=0, system="elastic", verb="query",
+        params={"q": "a"}, payload_digest="25904 bytes, 1 line(s)",
+    ) is None
+
+
+def test_repeat_note_names_the_identical_earlier_request(tmp_path):
+    d = "25904 bytes, 1 line(s)"
+    _write_rows(tmp_path, [
+        _row(0, params={"q": "a"}, digest=d),
+        _row(1, params={"q": "b"}, digest=d),
+        _row(2, params={"q": "b"}, digest=d),
+    ])
+    note = ge.repeat_note(
+        tmp_path, "l-001", seq=2, system="elastic", verb="query",
+        params={"q": "b"}, payload_digest=d,
+    )
+    assert note is not None
+    assert "REPEAT" in note
+    assert "seq 1" in note
+
+
+def test_repeat_note_flags_a_changed_request_that_moved_nothing(tmp_path):
+    """l-001's real turn 2: a narrowing filter was added and `total` did not move.
+
+    The filter was a wildcard-phrase clause the query language silently ignores, so the
+    payload came back byte-identical. Nothing in the loop compared the two, and the lead
+    spent its remaining 35 turns varying a filter that was never applied.
+    """
+    d = "25904 bytes, 1 line(s)"
+    _write_rows(tmp_path, [
+        _row(0, params={"q": "host:db-1"}, digest=d),
+        _row(1, params={"q": 'host:db-1 AND message: *"Accepted"*'}, digest=d),
+    ])
+    note = ge.repeat_note(
+        tmp_path, "l-001", seq=1, system="elastic", verb="query",
+        params={"q": 'host:db-1 AND message: *"Accepted"*'}, payload_digest=d,
+    )
+    assert note is not None
+    assert "NO-OP" in note
+    assert "seq 0" in note
+
+
+def test_repeat_note_ignores_other_leads_and_later_rows(tmp_path):
+    d = "25904 bytes, 1 line(s)"
+    _write_rows(tmp_path, [
+        _row(0, params={"q": "a"}, digest=d, lead="l-002"),
+        _row(0, params={"q": "a"}, digest="404 bytes, 1 line(s)"),
+        _row(1, params={"q": "a"}, digest=d),
+    ])
+    assert ge.repeat_note(
+        tmp_path, "l-001", seq=0, system="elastic", verb="query",
+        params={"q": "a"}, payload_digest="404 bytes, 1 line(s)",
+    ) is None
+
+
+def test_repeat_note_survives_a_missing_table(tmp_path):
+    assert ge.repeat_note(
+        tmp_path, "l-001", seq=3, system="elastic", verb="query",
+        params={"q": "a"}, payload_digest="1 bytes, 1 line(s)",
+    ) is None
+
+
 def test_seq_stays_monotonic_when_a_payload_write_fails(tmp_path):
     run_dir = materialize(tmp_path, GOLDEN_AB3)
     (run_dir / "gather_raw" / LEAD / "0.json").mkdir(parents=True)

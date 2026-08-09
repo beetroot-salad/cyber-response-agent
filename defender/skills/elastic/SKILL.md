@@ -109,14 +109,31 @@ Things this Elasticsearch deployment **cannot** answer:
 - **`logs-*` is a wide pattern.** Without an `event.dataset` or
   `data_stream.dataset` filter, your query searches every shipped
   stream including metricbeat noise. For focused queries, scope to
-  one data-stream explicitly: `--index 'logs-system.auth-*'` etc.
-- **Time anchors.** Use explicit `--start` / `--end` rather than
-  relative-now defaults; the rule engine and the agent ship-time
-  drift relative to each other and rounding-to-now hides one-second
-  ordering questions.
-- **`message:*"substring"*` is needed for sshd field extraction.**
-  Treat `message` as a single keyword field; wildcard substrings
-  retrieve the OpenSSH lines.
+  one data-stream explicitly: `params={"index": "logs-system.auth-*"}`
+  on `query` / `alerts`, or the `FROM` clause in an ES|QL pipe.
+- **Time anchors.** Bind the window explicitly — `params={"start":
+  "<iso>", "end": "<iso>"}` on `query` / `alerts`, a `@timestamp`
+  comparison in an ES|QL pipe — rather than leaning on relative-now
+  defaults; the rule engine and the agent ship-time drift relative to
+  each other and rounding-to-now hides one-second ordering questions.
+  A window is also the only control you have over *which* docs a
+  capped `query` returns: it sorts newest-first and takes the first
+  20, so a wide window bracketing an alert hands back the window's
+  tail and can exclude the alert's own events entirely. Bracket the
+  pivot tightly, or aggregate with `esql`, which has no such cap.
+- **There are no flags.** Every verb binds its declared params **by
+  name** through the `query` tool (`params={...}`) — there is no
+  command line, no `--index`, no `--start`, and an unknown or
+  mistyped param is rejected before it reaches Elasticsearch.
+- **Match `message` with a bare quoted phrase — `message: "Failed password"`.**
+  It is an analyzed *text* field, not a keyword, so a phrase already
+  matches that token sequence anywhere in the line, which is what
+  retrieves the OpenSSH entries. Wrapping it in wildcards
+  (`message: *"substring"*`) is a **silent no-op**: the bare `*` parses
+  as a term matching every document with a `message` field, so the
+  clause narrows nothing and `total` comes back unchanged — with no
+  error to tell you. In ES|QL the wildcard form *is* correct
+  (`message LIKE "*session opened*"`); the two languages differ here.
 
 ### When to use
 
