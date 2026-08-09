@@ -292,6 +292,24 @@ summary                "Login matched established bastion usage"
   write; there is no `escalate` keyword — an escalation is
   `termination.category exhaustion-escalation` with `disposition
   inconclusive`.
+- `ceiling_test` — the checks you could NOT make. One row per gap, repeated,
+  naming the host and the data source:
+  `ceiling_test  "authorized_keys FIM on web-1 (auditd write events) not retrieved"`
+  Name the specific source, not the shape of the question — "session commands
+  not retrieved" tells a reader nothing about what is still open. Omit the row
+  (or write `none`) when nothing was out of reach. `ceiling_rationale` is the
+  companion scalar: why concluding anyway is sound despite those gaps.
+- `detection_notes` — **optional**, and only for a detection defect ORIENT
+  actually found:
+  `detection_notes  "Claims a same-user pattern but groups by host, so the actor is untested."`
+  It is not part of `summary`: the disposition describes the world, this
+  describes the rule, and one run can find both. A rule that caught what it
+  claims gets no row — a reassuring note reads the same as a defect nobody
+  looked for.
+
+Every row is ONE line. A value that opens a quote and does not close it on
+the same row is denied on write, because the lines below it record nothing —
+write long values as one long line, as `summary` already does.
 
 ### `:T close` (loop boundary)
 

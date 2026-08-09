@@ -21,6 +21,7 @@ from defender.skills.invlang.parser import (
     _split_cells,
     parse_dense_companion,
 )
+from defender.skills.invlang.validate import validate_companion
 
 
 
@@ -103,6 +104,239 @@ def test_conformant_parse_produces_no_warnings():
     assert res["after"] == "--"
     assert res["supporting_edges"] == ["e-001"]
     assert body["conclude"]["disposition"] == "malicious"
+
+
+def test_conclude_carries_detection_notes():
+    """#806 — what the DETECTOR got wrong is its own row, not a clause inside `summary`.
+
+    The run that motivated it concluded `malicious` on a host that was genuinely compromised
+    while the alert's own correlation was false; both are true, and `disposition` holds one.
+    """
+    text = """\
+```invlang
+:T conclude
+disposition            malicious
+summary                "root authorized_keys carries three attacker@elsewhere keys"
+detection_notes        "Rule joins on host.name only; failures and success are different users"
+```
+"""
+    body, warnings = parse_dense_companion(text)
+    assert warnings == []
+    assert body["conclude"]["detection_notes"] == (
+        "Rule joins on host.name only; failures and success are different users"
+    )
+    assert body["conclude"]["summary"].startswith("root authorized_keys")
+
+
+def test_conclude_without_detection_notes_is_clean_and_invents_no_key():
+    """The field is for a detection defect that was FOUND. Most runs find none, so its absence
+    is the ordinary case and must stay silent — and the key must not be conjured empty, since a
+    reader cannot tell an empty note from a defect nobody looked for."""
+    text = """\
+```invlang
+:T conclude
+disposition            benign
+confidence             high
+summary                "Login matched established bastion usage"
+```
+"""
+    body, warnings = parse_dense_companion(text)
+    assert warnings == []
+    assert "detection_notes" not in body["conclude"]
+    assert validate_companion(text) == []
+
+
+def test_conclude_records_every_ceiling_test_row_in_order():
+    """The gaps a run could not close are recorded, repeated, and in order.
+
+    Eleven checked-in lessons instruct this field ("name them by host and source type in
+    `ceiling_test`") and the projection dropped every row a run authored, so the judge could not
+    tell a benign close that checked everything from one that named a load-bearing gap. It is a
+    LIST because a run names each unreachable source separately; golden-case-018 writes three,
+    and the duplicate-key guard must not read the second and third as a key being overwritten.
+    """
+    text = """\
+```invlang
+:T conclude
+disposition            benign
+ceiling_test           "l-009 Zeek HTTP detail for curl events not retrieved (request limit)"
+ceiling_test           "79.177.137.245 absent from the threat-intel catalog"
+ceiling_rationale      "both gaps are corroboration, not the load-bearing check"
+```
+"""
+    body, warnings = parse_dense_companion(text)
+    assert warnings == [], f"repeated list rows were flagged as duplicates: {warnings!r}"
+    assert validate_companion(text) == []
+    assert body["conclude"]["ceiling_test"] == [
+        "l-009 Zeek HTTP detail for curl events not retrieved (request limit)",
+        "79.177.137.245 absent from the threat-intel catalog",
+    ]
+    assert body["conclude"]["ceiling_rationale"].startswith("both gaps")
+
+
+def test_conclude_ceiling_test_none_projects_as_absence():
+    """`none` is how the format spells "no ceiling", so it must not arrive as a one-item list a
+    reader has to filter — `conclude.get("ceiling_test")` is the whole question."""
+    text = """\
+```invlang
+:T conclude
+disposition            benign
+ceiling_test           none
+```
+"""
+    body, warnings = parse_dense_companion(text)
+    assert warnings == []
+    assert "ceiling_test" not in body["conclude"]
+
+
+def test_ceiling_test_reaches_the_judge_prompt():
+    """The point of recording it: the stage that grades a benign close can now see what the run
+    could not reach. `render_synthesis` dumps the conclude dict, so this needs no other plumbing
+    — and before this commit the rows existed in 49 files and reached nothing."""
+    from defender.learning.pipeline.judge.compare import render_synthesis
+
+    text = """\
+```invlang
+:T conclude
+disposition            benign
+ceiling_test           "authorized_keys FIM on web-1 (auditd write events) not retrieved"
+```
+"""
+    body, _warnings = parse_dense_companion(text)
+    rendered = render_synthesis(body)
+    assert "authorized_keys FIM on web-1" in rendered
+
+
+def test_conclude_row_spanning_two_lines_warns_instead_of_truncating():
+    """A value written across two lines used to keep line one — opening quote and all — and drop
+    the rest in SILENCE. That is the #806 failure reproduced inside the fix for it: a conclusion
+    that loses half of itself is worse than one never written. Both halves are asserted, because
+    the continuation row and the row that opened the quote fail for different reasons and a fix
+    that catches only one still ships the truncation.
+
+    Both are caught by quote PARITY rather than by key membership: the opening row holds one
+    `"` and the orphaned tail holds its partner, so each is odd on its own. That matters because
+    membership cannot be the test — the lessons corpus instructs conclude keys this projection
+    does not carry (`ceiling_test`), and denying those would deny runs for obeying a lesson.
+    """
+    text = """\
+```invlang
+:T conclude
+disposition            malicious
+detection_notes        "Rule joins on host.name only.
+                        Failures and success are different users."
+```
+"""
+    body, warnings = parse_dense_companion(text)
+    rows_warned = {w.row_index for w in warnings if "does not close on this row" in w.reason}
+    assert rows_warned == {1, 2}, (
+        f"both halves of the spilled value must warn — got rows {sorted(rows_warned)} from "
+        f"{[(w.row_index, w.reason[:60]) for w in warnings]!r}"
+    )
+    # The fragment is still projected; the DENIAL is what stops it reaching disk, and it comes
+    # from validate_companion turning these warnings into write-gate errors. Assert the denial
+    # itself — warnings nobody converts would let the truncation ship with the suite green.
+    assert body["conclude"]["detection_notes"].startswith('"')
+    assert validate_companion(text), (
+        "the truncated write was not denied — parse warnings must reach the write gate"
+    )
+
+
+def test_one_line_rule_holds_outside_conclude():
+    """The truncation is a property of the line-oriented surface, not of `:T conclude`.
+
+    A `:L findings` name spilled onto a second line loses the lead's target, loop, mode and
+    system exactly as quietly, so the guard sits on every block's rows rather than inside one
+    projector — otherwise the `:T conclude` fix reads as a fix for the whole format and is not.
+    """
+    text = """\
+```invlang
+:L findings [id|name|target|loop|mode|system|status]
+l-001|"check the source ip against
+the cmdb registry"|v-003|1|scoped|cmdb|done
+```
+"""
+    _body, warnings = parse_dense_companion(text)
+    assert any("does not close on this row" in w.reason for w in warnings), (
+        f"a two-line `:L findings` row truncated in silence — warnings were "
+        f"{[w.reason for w in warnings]!r}"
+    )
+    assert validate_companion(text)
+
+
+def test_conclude_row_without_a_value_is_not_silently_dropped():
+    """`<key>` alone matches no `<key> <value>` row, and the projector used to `continue` past
+    it. A `disposition` line whose value slipped onto the next line then produced an EMPTY
+    conclude with zero warnings — no headline, and the disposition vocab and benign gates both
+    no-op on a key that isn't there."""
+    text = """\
+```invlang
+:T conclude
+disposition
+malicious
+```
+"""
+    body, warnings = parse_dense_companion(text)
+    assert body["conclude"] == {}
+    assert warnings, "a conclude row carrying no value vanished in silence"
+    assert validate_companion(text)
+
+
+def test_conclude_key_set_twice_names_the_clobbered_field():
+    """The continuation of a two-line value lands on whatever key its first word names, so the
+    damage is not always a dropped row — here the tail of `termination.rationale` overwrites the
+    run's `summary`. The warning has to name the field that was lost, not just the opener."""
+    text = """\
+```invlang
+:T conclude
+disposition            benign
+summary                "Login matched established bastion usage"
+termination.rationale  "host-query unavailable, so the
+summary of h-002 cannot reach --"
+```
+"""
+    _body, warnings = parse_dense_companion(text)
+    assert any("'summary' is set twice" in w.reason for w in warnings), (
+        f"the clobbered field was not named — warnings were "
+        f"{[w.reason for w in warnings]!r}"
+    )
+
+
+def test_quoted_word_inside_a_one_line_value_is_not_a_truncation():
+    """The test is quote PARITY, not a leading `"`. A value that opens with a quoted word and
+    continues in prose is a valid one line; denying it would block a conclusion whose author has
+    no rewrite that satisfies the check."""
+    text = """\
+```invlang
+:T conclude
+disposition            benign
+summary                "sensu" login from the monitoring host is sanctioned
+```
+"""
+    body, warnings = parse_dense_companion(text)
+    assert warnings == []
+    assert body["conclude"]["summary"].startswith('"sensu"')
+
+
+def test_a_misspelled_conclude_key_is_silently_ignored():
+    """The cost of the `ceiling_test` rule above, pinned so it is a decision and not a surprise.
+
+    `detectoin_notes` records nothing and nothing says so. Membership cannot distinguish a typo
+    from a key the lessons instruct and this projection has yet to carry, and denying the second
+    is the worse failure — it dead-letters a run for obeying a lesson. Quote parity still covers
+    the spilled-value case that motivated #806; a typo'd key does not spill, so it slips.
+    """
+    text = """\
+```invlang
+:T conclude
+disposition            benign
+detectoin_notes        "typo in the key name"
+```
+"""
+    body, warnings = parse_dense_companion(text)
+    assert warnings == []
+    assert "detectoin_notes" not in body["conclude"]
+    assert "detection_notes" not in body["conclude"]
 
 
 def test_conclude_subtable_is_accepted_and_ignored():
