@@ -343,10 +343,32 @@ def _bound_and_wrap(
     return text
 
 
-def _tool_read_file(deps: AgentDeps, path: str, pattern: str | None = None) -> str:
+def _tail_chars(text: str, n: int) -> str:
+    """The last `n` characters, trimmed FORWARD to the next line start so a `|`-delimited
+    invlang row never arrives cut in half and gets read as truncated data. `n` is therefore
+    a ceiling, not a target: the result is at most `n` characters, which is what a caller
+    asking for a bounded read wants. `n <= 0` yields nothing; a file shorter than `n` is
+    returned whole; text with no newline in the window is cut at `n`.
+
+    Its own fold rather than a reuse of `_bounded_read`, whose overflow path keeps the
+    HEAD — the wrong end of an append-only log (#810)."""
+    if n <= 0:
+        return ""
+    if len(text) <= n:
+        return text
+    cut = len(text) - n  # >= 1, since the whole-file case returned above
+    nl = text.find("\n", cut - 1)
+    return text[nl + 1:] if nl != -1 else text[cut:]
+
+
+def _tool_read_file(
+    deps: AgentDeps, path: str, pattern: str | None = None, tail: int | None = None
+) -> str:
     p, text = _gated_read(deps, path)
     if pattern is not None:
         text = _grep_lines(text, pattern)
+    if tail is not None:
+        text = _tail_chars(text, tail)
     return _bound_and_wrap(deps, p, path, text, read_tool="read_file")
 
 
@@ -436,13 +458,19 @@ def register_tools(agent, tools: ToolSet, verbs: Any = None) -> None:
     if tools.read:
         @agent.tool
         async def read_file(
-            ctx: RunContext[AgentDeps], path: str, pattern: str | None = None
+            ctx: RunContext[AgentDeps],
+            path: str,
+            pattern: str | None = None,
+            tail: int | None = None,
         ) -> str:
             """Read a file's contents (e.g. alert.json, a SKILL, a lesson). Pass
             `pattern` to return only the lines containing that substring — the grep
             fold, for scanning a large file (or when the read-only bash grep/cat
-            viewers are not available to this agent)."""
-            return _tool_read_file(ctx.deps, path, pattern)
+            viewers are not available to this agent). Pass `tail` for at most the last
+            N characters instead of the whole file, never starting mid-row — the cheap
+            way to re-sync with `investigation.md` after a frontier fold. Both compose:
+            `pattern` narrows first, then `tail` takes the end of what is left."""
+            return _tool_read_file(ctx.deps, path, pattern, tail)
 
     if tools.write:
         @agent.tool
