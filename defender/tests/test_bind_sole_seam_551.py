@@ -886,11 +886,14 @@ def test_d6_writers_pass_roots(tmp_path):
     # RED@#551-HEAD: _tool_write_file called decide_write WITHOUT roots → guard dormant → allowed.
     with pytest.raises(ModelRetry):
         _tool_write_file(deps, str(escape / "x.md"), "content")
-    # both call sites must pass the tree — a source check covers edit_file (whose read gate already
-    # denies the escape, so the wiring is not behaviourally separable there).
+    # EVERY call site must pass the tree — a source check covers edit_file and append_block
+    # (whose read gates already deny the escape, so the wiring is not behaviourally separable
+    # there). Three sites since #810 added append_block; the count is the census half of the
+    # assertion, so a new writer that skips the roots shows up here as a mismatch rather than
+    # as a dormant guard.
     tools_src = (PATHS.repo_root / "defender" / "runtime" / "tools.py").read_text()
     calls = re.findall(r"decide_write\(.*?policy=deps\.policy", tools_src, re.DOTALL)
-    assert len(calls) == 2
+    assert len(calls) == 3, "a decide_write call site appeared or vanished — check the roots"
     assert all("defender_dir=deps.defender_dir" in c for c in calls)
 
 

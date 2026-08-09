@@ -695,14 +695,23 @@ def test_agentspec_removed_migrated():
 
 
 def test_main_keeps_tools(logger):
-    """Landing oracle/verify ToolSet() does not squeeze main: main's ToolSet(read=True,
-    bash=True, write=True) still registers all four tools — the operator agent is unchanged."""
+    """Landing oracle/verify ToolSet() does not squeeze main: main's own ToolSet still
+    registers its full generic surface — the operator agent is unchanged by their arrival.
+
+    That surface is `bash`, `read_file`, `append_block` (#810). It was
+    `write_file`/`edit_file` until main's write grant became `append=True`: the two general
+    verbs offered an anchored replace over a whole document, and investigation.md — the only
+    name main's allowlist admits — is append-only. Their absence here IS the retirement, so
+    this list doubles as the assertion that they are gone."""
     with override_allow_model_requests(False):
         agent = driver.build_agent_core(
             MAIN_DEF, deps_type=AgentDeps, instructions="x", logger=logger,
             agent_id="main", make_model=_fake_model(_text_fn()),
         )
-    assert list(agent._function_toolset.tools) == ["bash", "read_file", "write_file", "edit_file"]
+    registered = list(agent._function_toolset.tools)
+    assert registered == ["bash", "read_file", "append_block"]
+    assert "write_file" not in registered
+    assert "edit_file" not in registered
 
 
 

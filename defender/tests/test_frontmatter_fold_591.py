@@ -1,8 +1,11 @@
 """Site A-E fold contracts for #591 (spec_graph_591-frontmatter-fold.yaml).
 
 Each folded reader (predicted_disposition / read_description + descriptor_catalog /
-parse_report / check_skill / _strip_frontmatter) must route through the ONE
-canonical grammar in defender/_frontmatter.py. Most tests here are RED against
+parse_report / check_skill / strip_frontmatter) must route through the ONE
+canonical grammar in defender/_frontmatter.py. #810 finished that fold for the
+last one: `strip_frontmatter` now LIVES in `_frontmatter` rather than being a
+private copy in `orient` that delegated to it, so the prompt loaders in
+`runtime/driver.py` could reach it too. Most tests here are RED against
 HEAD — they fail on the OLD loose/hand-rolled behavior, on a missing seam, or on
 a read that raises where the fold makes it fall back. That red is the point; it
 goes green when the implementation lands.
@@ -20,11 +23,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from defender._frontmatter import parse_frontmatter_or_none
+from defender._frontmatter import parse_frontmatter_or_none, strip_frontmatter
 from defender.tests._by_path import DEFENDER, load_module
 from defender.evals.held_out import predicted_disposition
 from defender._vocab import DISPOSITION_ENUM
-from defender.runtime import orient
 from defender.runtime.verb_grant import VerbGrant
 from defender.scripts.visualize import visualize_primitives as vp
 
@@ -200,9 +202,9 @@ def test_d0_check_skill(tmp_path):
 
 
 def test_d0_strip_frontmatter():
-    assert orient._strip_frontmatter("---\ndescription: x\n---\nBODY\n") == "BODY"
+    assert strip_frontmatter("---\ndescription: x\n---\nBODY\n") == "BODY"
     no_fence = "no fence here\nplain body\n"
-    assert orient._strip_frontmatter(no_fence) == no_fence
+    assert strip_frontmatter(no_fence) == no_fence
 
 
 def test_d_parity_grammar(tmp_path):
@@ -437,14 +439,14 @@ def test_d_unreadable_skill_fail_row(tmp_path):
 
 
 def test_d_closer_at_eof_strips():
-    stripped = orient._strip_frontmatter("---\ndescription: x\n---")
+    stripped = strip_frontmatter("---\ndescription: x\n---")
     assert "---" not in stripped
     assert "description" not in stripped
-    assert orient._strip_frontmatter("---\ndescription: x\n---\nBODY\n") == "BODY"
+    assert strip_frontmatter("---\ndescription: x\n---\nBODY\n") == "BODY"
 
 
 def test_d_no_fence_unchanged():
     no_fence = "no leading fence\njust body\n"
-    assert orient._strip_frontmatter(no_fence) == no_fence
+    assert strip_frontmatter(no_fence) == no_fence
     empty_mapping = "---\n---\n"
-    assert orient._strip_frontmatter(empty_mapping) == empty_mapping
+    assert strip_frontmatter(empty_mapping) == empty_mapping

@@ -15,8 +15,10 @@ Machinery (ReplayFn/drive/materialize/the model + subprocess fakes) lives in
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
+from pydantic_ai import ModelRetry
 
 from defender.tests.e2e._replay_harness import (
     GOLDEN_AB3,
@@ -27,7 +29,9 @@ from defender.tests.e2e._replay_harness import (
     drive,
     materialize,
 )
-from defender.runtime import circuit_breaker
+from defender.agents import MAIN_DEF
+from defender.runtime import circuit_breaker, tools as runtime_tools
+from defender.runtime.agent_definition import bind
 from defender.scripts.adapters.faults import TransportFault
 from defender.skills.invlang.validate import validate_companion
 
@@ -107,26 +111,37 @@ def test_circuit_breaker_kill_switch_aborts_run(tmp_path):
 
 
 def test_invlang_deny_bounces_then_recovers(tmp_path):
-    """Gate-as-feedback recovery: an investigation.md write that fails invlang
+    """Gate-as-feedback recovery: an investigation.md append that fails invlang
     validation is denied (ModelRetry), the validator's errors come back to the
-    model, and a corrected rewrite then commits. The in-process twin of the old
+    model, and a corrected append then commits. The in-process twin of the old
     hook's exit-2 → fix → retry loop, proven end-to-end through the driver — the
-    decide_write unit test sees the deny, never the bounce-and-recover."""
+    decide_write unit test sees the deny, never the bounce-and-recover.
+
+    #810 added the second half of the feedback: the refusal must also tell the model
+    that NOTHING WAS WRITTEN. Without it the model reads "fix and rewrite" as "your
+    text is on disk, now amend it" and anchors its recovery to a document that never
+    received the block — the measured failure this issue exists for. Asserted here
+    rather than only at the unit, because it is the bounce that has to carry it."""
     run_id, salt = "invlang-recover", "1234123412341234"
     run_dir = materialize(tmp_path, GOLDEN_AB3)
     good = (GOLDEN_AB3 / "investigation.md").read_text()
-    inv_path = str(run_dir / "investigation.md")
+    inv = run_dir / "investigation.md"
 
     main = ReplayFn([
-        Turn(tool_calls=[("write_file", {"path": inv_path, "content": "```yaml\nfoo: bar\n```\n"})]),
-        Turn(tool_calls=[("write_file", {"path": inv_path, "content": good})]),
+        Turn(tool_calls=[("append_block", {"text": "```yaml\nfoo: bar\n```\n"})]),
+        Turn(tool_calls=[("append_block", {"text": good})]),
         Turn(text="done"),
     ])
     drive(run_dir, run_id=run_id, salt=salt, main=main)
 
     assert main.calls == 3
     assert any("invlang validation" in s for s in main.seen)
-    produced = (run_dir / "investigation.md").read_text()
+    assert any("No changes were made" in s for s in main.seen), (
+        "the refusal did not tell the model the file was left unchanged"
+    )
+    produced = inv.read_text()
+    # The refused block left NO residue: the document is exactly the good append, not the
+    # good append concatenated onto the yaml fence that was denied.
     assert produced == good
     assert validate_companion(produced, None) == []
 
@@ -199,31 +214,38 @@ def test_gather_lead_guards_bounce_then_recover(tmp_path):
 
 
 def test_edit_file_guards_bounce_then_recover(tmp_path):
-    """edit_file's create-only / not-found / non-unique guards as retry feedback,
-    end-to-end: each bad edit bounces the model (ModelRetry); a unique edit then
-    commits. Mirrors Claude Code's Edit semantics through the real tool + gate.
+    """edit_file's create-only / not-found / non-unique guards as retry feedback: each
+    bad edit raises ModelRetry with its own reason; a unique edit then commits.
 
     #774/R1: report.md left MAIN's write allow-list entirely (the close tool is now its
     only writer), so this generic edit_file-guard probe — which never cared about the
     artifact's schema, only about the create-only/not-found/non-unique mechanics — now
-    drives investigation.md, still model-writable throughout the investigation."""
-    run_id, salt = "edit-guards", "abcdabcdabcdabcd"
+    drives investigation.md.
+
+    #810 dropped it a level, from a driven replay to the handler. `edit_file` is no longer
+    registered on MAIN, so there is no main turn that can call it — but the verb still
+    ships for the curator and lead-author roles, whose corpora it edits, and these three
+    guards are its whole contract and were tested NOWHERE else. Moving the probe keeps
+    them covered; deleting it with the registration would have retired a live verb's only
+    test. The write allowlist is unchanged (`_main_write_shape`), so MAIN's bound policy
+    is still a valid stand-in for exercising the handler."""
     run_dir = materialize(tmp_path, GOLDEN_AB3)
-    notes = str(run_dir / "investigation.md")
+    notes = run_dir / "investigation.md"
+    deps = bind(MAIN_DEF, run_dir, salt="abcdabcdabcdabcd",
+                defender_dir=Path(__file__).resolve().parents[2])
 
-    main = ReplayFn([
-        Turn(tool_calls=[("write_file", {"path": notes, "content": "alpha\nbeta\nalpha\n"})]),
-        Turn(tool_calls=[("edit_file", {"path": notes, "old_string": "", "new_string": "x"})]),
-        Turn(tool_calls=[("edit_file", {"path": notes, "old_string": "zzz", "new_string": "x"})]),
-        Turn(tool_calls=[("edit_file", {"path": notes, "old_string": "alpha", "new_string": "A"})]),
-        Turn(tool_calls=[("edit_file", {"path": notes, "old_string": "beta", "new_string": "BETA"})]),
-        Turn(text="done"),
-    ])
-    drive(run_dir, run_id=run_id, salt=salt, main=main)
+    runtime_tools._tool_write_file(deps, str(notes), "alpha\nbeta\nalpha\n")
 
-    assert main.calls == 6
-    assert (run_dir / "investigation.md").read_text() == "alpha\nBETA\nalpha\n"
-    seen = "\n".join(main.seen)
+    reasons = []
+    for old, new in (("", "x"), ("zzz", "x"), ("alpha", "A")):
+        with pytest.raises(ModelRetry) as exc:
+            runtime_tools._tool_edit_file(deps, str(notes), old, new)
+        reasons.append(str(exc.value))
+
+    runtime_tools._tool_edit_file(deps, str(notes), "beta", "BETA")
+
+    assert notes.read_text() == "alpha\nBETA\nalpha\n"
+    seen = "\n".join(reasons)
     assert "would overwrite it" in seen
     assert "old_string not found" in seen
     assert "is not unique" in seen

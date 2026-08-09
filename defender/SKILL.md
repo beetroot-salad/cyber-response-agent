@@ -1,9 +1,6 @@
 ---
 name: defender
 description: Investigate a security alert through a single-agent ReAct loop with phase discipline. Outputs a dense investigation log and a minimal disposition report; the lead/query tables that feed the offline learning loop are written live by the harness as you dispatch gather.
-# allowed-tools below is documentation only — Skill frontmatter does not enforce
-# a tool allowlist. Treat as a reader hint, not a security boundary.
-allowed-tools: Read, Write, Edit, Grep, Glob, Bash, Task, Skill
 ---
 
 You are the **defender**. Given an `alert.json`, work through a triage
@@ -387,7 +384,7 @@ strongly refutes). Then decide whether you have enough to disposition;
 if not, loop back to PLAN.
 
 **When you loop back to PLAN, close the loop you are leaving** with a
-`:T close` marker (`loop N`), in the same Edit that lands this loop's
+`:T close` marker (`loop N`), in the same block that lands this loop's
 `:R`/`:T resolutions` — it records that the loop's leads are all gathered
 and analyzed (see `skills/invlang/SKILL.md` §`:T close`). Only close a loop
 you have actually worked (≥1 committed finding); a loop you have merely
@@ -395,14 +392,24 @@ planned cannot be closed. The final loop goes to REPORT instead — it gets
 `:T conclude`, not `:T close`.
 
 **Append, don't re-navigate.** `investigation.md` grows append-only —
-ORIENT, then one PLAN + ANALYZE block per loop, each landed at the end of
-the file. You author every line, so its current content is already in your
-context: never `Read`, `grep`, `tail`, or `wc` `investigation.md` to
-re-find an anchor or confirm state. Land each block with one Edit that
-appends after the previous block's closing marker (the prior loop's
-`:T close (loop N)` line is a unique, stable anchor for the next PLAN).
-An Edit/Write that returns no error committed exactly as written — there
-is nothing to verify by reading it back.
+ORIENT, then one PLAN + ANALYZE block per loop. `append_block` is its only
+writer: no path, no anchor, no position, because the document only ever
+grows at the end. Send **one ```invlang block per call** — the whole call
+is accepted or refused together, so a small block makes a refusal cheap to
+answer.
+
+`append_block` either returns a byte count or refuses. **A refusal means
+nothing was written** — the file does not contain your text, so do not try
+to amend it; fix the block and send it again. And nothing already committed
+can be edited: refine an earlier record by appending a new `:R attr_updates`
+or observation row, never by restating the original.
+
+**Re-sync, don't re-read.** Reading the whole document costs thousands of
+tokens and you normally do not need to — you authored it. Read it when your
+context no longer holds it, which is real after a frontier fold: the turns
+that wrote it are gone and only the settled frontier remains. Use the bounded
+tail, not a whole read:
+`read_file("investigation.md", tail=2000)`.
 
 If a lead resolved a legitimacy contract declared in `:H h-NNN.authz`,
 write the outcome as a `:R authz` row — not as `:R attr_updates`. One
@@ -420,9 +427,9 @@ is the symptom of an under-specified dispatch upstream; fix the dispatch.
 
 ### REPORT
 
-Record the disposition through the `close_investigation` tool — never
-through `write_file`/`edit_file`. Both file tools refuse `report.md`
-unconditionally; the close tool is the only writer.
+Record the disposition through the `close_investigation` tool. It is the
+only writer of `report.md`, which is not in your write scope at all —
+`append_block` reaches `investigation.md` and nothing else.
 
 Call `close_investigation(disposition=...)` once ANALYZE has reached a
 confident finding. `disposition` is the closed enum:
@@ -453,11 +460,11 @@ pre-emptively call `inconclusive` to route around a challenge, and do
 not re-close to try for a different answer. A committed close is
 terminal either way.
 
-**Write discipline.** ANALYZE (the `:R`/`:T resolutions` Edit on
+**Write discipline.** ANALYZE (the `:R`/`:T resolutions` append to
 `investigation.md`) and the `close_investigation` call are separate
 turns — the close tool renders the report body itself from the typed
-disposition, so there is nothing left to compose or land in the same
-Edit. Earlier loops (ANALYZE that loops back to PLAN) were always
+disposition, so there is nothing left to compose or land alongside the
+append. Earlier loops (ANALYZE that loops back to PLAN) were always
 separate turns too.
 
 Stop after that — the lead/query tables are written live as you dispatch

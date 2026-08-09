@@ -551,7 +551,7 @@ def test_replay_run_crosses_budget_and_still_reports(tmp_path, enforced):
         Turn(tool_calls=[("bash", {"command": "echo one"})]),
         Turn(tool_calls=[("bash", {"command": "echo two"})]),
         Turn(tool_calls=[("bash", {"command": "echo three"})]),
-        Turn(tool_calls=[("write_file", {"path": str(inv), "content": inv_text})]),
+        Turn(tool_calls=[("append_block", {"text": inv_text})]),
         Turn(text="Investigation complete."),
     ])
     summary = drive(run_dir, run_id="e2e", salt=SALT, main=replay,
@@ -585,8 +585,7 @@ def test_each_trip_limb_opens_the_same_bounded_report_tail(tmp_path, enforced):
         rd = materialize(tmp_path / name, GOLDEN)
         rep = rd / "investigation.md"
         replay = ReplayFn([*script,
-                           Turn(tool_calls=[("write_file", {
-                               "path": str(rep), "content": inv_text})]),
+                           Turn(tool_calls=[("append_block", {"text": inv_text})]),
                            Turn(text="done")])
         drive(rd, run_id=name, salt=SALT, main=replay,
               gather=ReplayFn([Turn(text="summary")]), verbs=verbs, limits=limits)
@@ -625,20 +624,22 @@ def test_kill_lands_between_two_report_writes(tmp_path, enforced):
 
     #774/R1: report.md left MAIN's write allow-list entirely, so both writes this scenario
     is about now target investigation.md (still tail-tier, still model-writable across more
-    than one call) — a `write_file` establishing it, then an `edit_file` splicing an
-    addendum in a SECOND call, which is what "more than one call" needs regardless of which
-    artifact carries it."""
+    than one call).
+
+    #810 made both of them `append_block`. The scenario needs the artifact built over MORE
+    THAN ONE CALL and the tail exhausted after them; it never needed the second call to be a
+    splice, and a splice is no longer expressible — the document is append-only and its verb
+    has no anchor. Two appends, and the contract is the same one: whatever completed before
+    the kill is still on disk."""
     run_dir = materialize(tmp_path, GOLDEN)
     inv = run_dir / "investigation.md"
     inv_text = (GOLDEN / "investigation.md").read_text()
-    anchor = "## REPORT"
-    addendum = inv_text.replace(anchor, "## ADDENDUM\n\nnoted.\n\n" + anchor, 1)
-    assert addendum != inv_text, "the probe's anchor text is not in the golden document"
+    addendum_block = "\n## ADDENDUM\n\nnoted.\n"
+    expected = inv_text + addendum_block
 
     replay = ReplayFn([
-        Turn(tool_calls=[("write_file", {"path": str(inv), "content": inv_text})]),
-        Turn(tool_calls=[("edit_file", {"path": str(inv), "old_string": anchor,
-                                        "new_string": "## ADDENDUM\n\nnoted.\n\n" + anchor})]),
+        Turn(tool_calls=[("append_block", {"text": inv_text})]),
+        Turn(tool_calls=[("append_block", {"text": addendum_block})]),
         *tail_turns(run_dir, 15),
         Turn(text="never reached"),
     ])
@@ -646,7 +647,7 @@ def test_kill_lands_between_two_report_writes(tmp_path, enforced):
                     limits=caps(max_tool_calls=1, wall_clock_timeout=3600,
                                 grace_seconds=600))
 
-    assert inv.read_text() == addendum, "a completed prior write was lost by the kill"
+    assert inv.read_text() == expected, "a completed prior write was lost by the kill"
     assert summary["truncated_by"] == "budget"
     assert (run_dir / "tool_trace.jsonl").is_file()
 

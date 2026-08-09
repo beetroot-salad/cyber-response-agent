@@ -33,7 +33,7 @@ from defender._frontmatter import FrontmatterError, split_frontmatter
 # The normalizer is deliberately NOT imported here: this module holds the WRITE gate, and on
 # write the value is tested exactly — see the disposition check in `validate_report` below.
 from defender._vocab import DISPOSITION_ENUM
-from defender.skills.invlang.validate import validate_companion
+from defender.skills.invlang.validate import Diagnostic, diagnose
 
 # #629 — output-structure bounds for the run's two model-authored artifacts, all in
 # UTF-8 BYTES. These are a VOLUME + STRUCTURE control on bytes that leave the system
@@ -187,30 +187,77 @@ def validate_report(proposed_text: str) -> str | None:
     return None
 
 
+#: Every refusal on this artifact carries it (#810). The model is told its own context IS the
+#: file (`SKILL.md`, "Re-sync, don't re-read"), so the refusal text is a primary signal about
+#: what is on disk — and the old "fix and rewrite" wording implied the opposite of the truth.
+#: A model that believes a refused block landed then anchors its next edit to text that was
+#: never written, which is where six of the recovery failures measured on #810 came from.
+UNCHANGED_NOTICE = (
+    "No changes were made — the file on disk is unchanged and does not contain your text."
+)
+
+
+def _render_diagnostic(d: Diagnostic) -> str:
+    """One diagnostic as the model sees it. The message leads and is unchanged from before
+    #810; the locus and the corrections are additive lines beneath it, so a diagnostic that
+    carries neither renders exactly as it always did.
+
+    The row is suppressed when the message already contains it — a parse warning's
+    `format()` embeds `row=...`, and repeating it would be noise rather than help. That
+    embedding is a `repr()`, so the raw-substring test alone misses any row carrying a
+    backslash or a quote; both spellings are checked. A row past `format()`'s 200-char
+    truncation matches NEITHER, and is printed whole, which is the point of the line."""
+    lines = [f"  - {d.message}"]
+    if d.locus is not None and not (
+        d.locus.row_text in d.message or repr(d.locus.row_text) in d.message
+    ):
+        lines.append(f"    row: {d.locus.row_text}")
+    if d.fix:
+        lines.append(f"    use: {d.fix[0]}")
+        lines.extend(f"         {alt}" for alt in d.fix[1:])
+    return "\n".join(lines)
+
+
 def validate_investigation(proposed_text: str, current: str | None) -> str | None:
     """The investigation.md schema: the #629 byte bound FIRST (size-first short-circuit, so an
     over-bound document yields a deterministic SIZE-failure reason without the invlang validator
     ever running on the oversize text), then the pre-existing structural invlang validation
     against the full proposed text (`current`, the caller-supplied on-disk text, supplies the
     append-only baseline). Empty / whitespace-only text is 0-ish bytes under bound and
-    invlang-empty, so it accepts."""
+    invlang-empty, so it accepts.
+
+    Every refusing branch states that nothing was written (#810). This module owns the
+    rendering; `skills.invlang.validate` owns the finding — hence `diagnose` here rather than
+    the `validate_companion` string surface."""
     if _utf8_len(proposed_text) > INVESTIGATION_FILE_MAX:
+        # The size is the WHOLE document, and since #810 the only writer APPENDS to it — so
+        # "trim it and re-send" is advice the model cannot always take: once what is already
+        # committed fills the bound, no block is small enough and nothing can shrink the file.
+        # Name the on-disk share so the model can tell "send less" from "you are out of room".
+        on_disk = _utf8_len(current) if current is not None else 0
+        remedy = (
+            f"{on_disk} of those bytes are already committed and cannot be removed — send a "
+            "smaller block, or close the investigation on the evidence you already have."
+            if on_disk else "Trim it and re-send."
+        )
         return (
             f"investigation.md is {_utf8_len(proposed_text)} bytes, over the "
-            f"{INVESTIGATION_FILE_MAX}-byte limit — trim it and rewrite."
+            f"{INVESTIGATION_FILE_MAX}-byte limit. {UNCHANGED_NOTICE} {remedy}"
         )
     # Fail closed on an internal validator error — same as invlang_validate's
     # hook, which exits 2 (block) rather than letting the write through.
     try:
-        errors = validate_companion(proposed_text, current)
+        found = diagnose(proposed_text, current)
     except Exception as e:  # noqa: BLE001 — a blocking gate must fail closed
         return (
             f"investigation.md validation errored — failing closed: {e!r}. "
-            "Simplify the invlang and rewrite."
+            f"{UNCHANGED_NOTICE} Simplify the invlang and re-send."
         )
-    if errors:
-        return "investigation.md failed invlang validation — fix and rewrite:\n" + "\n".join(
-            f"  - {e}" for e in errors
+    if found:
+        return (
+            f"investigation.md failed invlang validation. {UNCHANGED_NOTICE}\n\n"
+            + "\n".join(_render_diagnostic(d) for d in found)
+            + "\n\nRe-send the block with those rows corrected."
         )
     return None
 

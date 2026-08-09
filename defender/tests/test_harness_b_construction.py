@@ -321,7 +321,12 @@ def test_build_agent_main_has_gather_dispatch_and_writers(monkeypatch, logger):
             bounds=challenge_gate.default_bounds(),
         )
     tools = set(agent._function_toolset.tools)
-    assert {"bash", "read_file", "write_file", "edit_file"} <= tools
+    # The authoring tool is `append_block` since #810 — MAIN's write grant is `append=True`,
+    # so the general write lane is not registered on it. The point of the assertion is that
+    # construction gives MAIN its authoring surface AND the layered gather dispatch, which
+    # holds unchanged; only the name of the authoring verb moved.
+    assert {"bash", "read_file", "append_block"} <= tools
+    assert not {"write_file", "edit_file"} & tools
     assert "gather" in tools
 
 

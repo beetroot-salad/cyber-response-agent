@@ -2,22 +2,81 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass, field
 from typing import Any
 
 from defender._vocab import normalized_disposition
 from . import _walkers, vocab
+from ._cells import _row_dict
+from ._types import RowError
 from .parser import (
     INVLANG_FENCE_RE,
+    ParseWarning,
     dropped_a_hypothesis_declaration,
+    iter_blocks,
     parse_dense_companion,
 )
-from .schema import CompanionBody, EdgeRecord, HypothesisRecord, VertexRecord
+from .schema import (
+    CompanionBody,
+    EdgeRecord,
+    HypothesisRecord,
+    VertexRecord,
+)
 
 STRONG_AUTH_KINDS = vocab.STRONG_AUTH_KINDS
 STRONG_WEIGHTS = vocab.STRONG_WEIGHTS
 _STRONG_AUTH_KINDS_STR = " / ".join(sorted(STRONG_AUTH_KINDS))
 
 _YAML_FENCE_RE = re.compile(r"```ya?ml\b")
+
+
+@dataclass(frozen=True)
+class Locus:
+    """Where a diagnostic's offending row actually is, when there is one row to point at.
+
+    `row_text` is the row as the author WROTE it — never a reconstruction. Both families that
+    populate a locus read it from the document: a parse warning carries its row, and the
+    `:R attr_updates` check walks blocks rather than folded records. `row_index` is the ordinal
+    WITHIN the block, not a file line number — nothing in the validator computes one — and only
+    the parse warnings have it."""
+
+    block: str
+    row_text: str
+    row_index: int | None = None
+
+
+@dataclass(frozen=True)
+class Diagnostic:
+    """One validation failure. `message` is the prose the model has always seen and is
+    unchanged; `locus` and `fix` are additive.
+
+    Only the families that can name a single offending row populate `locus` — parse
+    warnings and `:R attr_updates`. The document-global checks (append-only, lead and
+    prediction refs, strong-move provenance, benign gating, loop close, surface) have no
+    row to point at and leave it `None`; so do the vocab sub-checks over `:V`/`:E`/`:H`,
+    whose rows cannot be rebuilt without the block's declared column list. Those degrade
+    to exactly today's behaviour, which is the whole point of the field being optional."""
+
+    message: str
+    locus: Locus | None = None
+    fix: tuple[str, ...] = field(default_factory=tuple)
+
+
+def _plain(messages: list[str]) -> list[Diagnostic]:
+    """Lift the checks that carry no row into `Diagnostic`s. Keeping those checks on
+    `list[str]` is deliberate: they gain nothing from the type, and rewriting all seven
+    would be churn with no consumer."""
+    return [Diagnostic(m) for m in messages]
+
+
+def _parse_diagnostic(w: ParseWarning) -> Diagnostic:
+    """A parse warning already knows its block, ordinal and raw row — `w.format()` folds
+    them into prose and then nobody can get at them again. Keep the prose byte-identical
+    and carry the structure alongside it."""
+    return Diagnostic(
+        message=f"parse error: {w.format()}",
+        locus=Locus(block=w.block, row_text=w.row, row_index=w.row_index),
+    )
 
 
 def _normalize_newlines(text: str) -> str:
@@ -383,30 +442,65 @@ def _check_vocab_anchor_kinds(companion: CompanionBody) -> list[str]:
     return errors
 
 
-def _check_attr_update_keys(companion: CompanionBody) -> list[str]:
-    errors: list[str] = []
-    for upd in _walkers.iter_attr_updates(companion):
-        tgt = upd.get("target", "?")
-        for key in (upd.get("updates") or {}):
-            if key == "class" or (isinstance(key, str) and key.startswith("attrs.")):
+def _swap_cell(cells: list[str], at: int, replacement: str) -> str:
+    """One cell replaced, every other left exactly where the author put it."""
+    swapped = list(cells)
+    swapped[at] = replacement
+    return "|".join(swapped)
+
+
+def _check_attr_update_keys(proposed_text: str) -> list[Diagnostic]:
+    """`:R attr_updates` keys, checked over the ROWS rather than the folded records.
+
+    Reads blocks straight from the document because this is the one check that quotes a row
+    back and offers a corrected one. The fold keeps `{key: value}` per target and drops the
+    header, so rebuilding a row from it means assuming the conventional
+    `resolved_by|target|key|value` order — a convention `_row_dict` does not enforce, since it
+    zips whatever header the block declares. Against `[…|value|key]` that produced a
+    correction with its columns transposed: a "fix" that earns a second refusal (#825).
+
+    Here the `key` CELL is replaced in place and every other cell stays where the author put
+    it. A block whose header names no `key` column has no cell to substitute and no row this
+    can honestly point at, so it yields nothing — the row is not a refinement at all."""
+    out: list[Diagnostic] = []
+    for block in iter_blocks(proposed_text):
+        cols = block.columns or []
+        if block.name != "attr_updates" or "key" not in cols:
+            continue
+        at = cols.index("key")
+        for row in block.rows:
+            try:
+                rec = _row_dict(block, row)
+            except RowError:
+                continue  # already a parse warning; not this check's business
+            key = rec.get("key")
+            if not key or key == "class" or key.startswith("attrs."):
                 continue
-            errors.append(
-                f":R attr_updates on {tgt}: key {key!r} is not a valid "
-                f"refinement key — use `class` (class refinement) or "
-                f"`attrs.<name>` (attribute); a bare key is dropped silently"
-            )
-    return errors
+            cells = [rec.get(c, "") for c in cols]
+            out.append(Diagnostic(
+                message=(
+                    f":R attr_updates on {rec.get('target', '?')}: key {key!r} is not a "
+                    f"valid refinement key — use `class` (class refinement) or "
+                    f"`attrs.<name>` (attribute); a bare key is dropped silently"
+                ),
+                locus=Locus(block=":R attr_updates", row_text=row),
+                fix=(
+                    _swap_cell(cells, at, "class"),
+                    _swap_cell(cells, at, f"attrs.{key}"),
+                ),
+            ))
+    return out
 
 
-def _check_closed_vocab(companion: CompanionBody) -> list[str]:
-    errors: list[str] = []
-    errors += _check_vocab_vertices(companion)
-    errors += _check_vocab_edges(companion)
-    errors += _check_vocab_hypotheses(companion)
-    errors += _check_conclude_vocab(companion)
-    errors += _check_vocab_anchor_kinds(companion)
-    errors += _check_attr_update_keys(companion)
-    return errors
+def _check_closed_vocab(companion: CompanionBody, proposed_text: str) -> list[Diagnostic]:
+    out: list[Diagnostic] = []
+    out += _plain(_check_vocab_vertices(companion))
+    out += _plain(_check_vocab_edges(companion))
+    out += _plain(_check_vocab_hypotheses(companion))
+    out += _plain(_check_conclude_vocab(companion))
+    out += _plain(_check_vocab_anchor_kinds(companion))
+    out += _check_attr_update_keys(proposed_text)
+    return out
 
 
 
@@ -574,38 +668,53 @@ def _check_loop_close(companion: CompanionBody) -> list[str]:
 
 
 
-def validate_companion(
+def diagnose(
     proposed_text: str, current_text: str | None = None
-) -> list[str]:
+) -> list[Diagnostic]:
+    """The validator proper. Same checks in the same order as before; the only change is
+    that a failure now arrives as a `Diagnostic` rather than a bare string, so a caller
+    that wants to point at the offending row can.
+
+    `validate_companion` remains the string surface and is what nearly everything calls —
+    see its docstring."""
     proposed_text = _normalize_newlines(proposed_text)
     if current_text is not None:
         current_text = _normalize_newlines(current_text)
 
-    errors: list[str] = []
-    errors.extend(_check_surface(proposed_text))
+    found: list[Diagnostic] = []
+    found.extend(_plain(_check_surface(proposed_text)))
 
     companion, warnings = parse_dense_companion(proposed_text)
     current_companion: CompanionBody | None = None
     if current_text is not None:
         current_companion, _ = parse_dense_companion(current_text)
 
-    errors.extend(
+    found.extend(_plain(
         _check_append_only(proposed_text, current_text, companion, current_companion)
-    )
+    ))
 
-    for w in warnings:
-        errors.append(f"parse error: {w.format()}")
+    found.extend(_parse_diagnostic(w) for w in warnings)
 
     if not companion:
-        return errors
+        return found
 
-    errors.extend(_check_lead_refs(companion))
-    errors.extend(_check_prediction_refs(
+    found.extend(_plain(_check_lead_refs(companion)))
+    found.extend(_plain(_check_prediction_refs(
         companion,
         declarations_intact=not dropped_a_hypothesis_declaration(warnings),
-    ))
-    errors.extend(_check_strong_move_provenance(companion))
-    errors.extend(_check_closed_vocab(companion))
-    errors.extend(_check_benign_gating(companion))
-    errors.extend(_check_loop_close(companion))
-    return errors
+    )))
+    found.extend(_plain(_check_strong_move_provenance(companion)))
+    found.extend(_check_closed_vocab(companion, proposed_text))
+    found.extend(_plain(_check_benign_gating(companion)))
+    found.extend(_plain(_check_loop_close(companion)))
+    return found
+
+
+def validate_companion(
+    proposed_text: str, current_text: str | None = None
+) -> list[str]:
+    """The string surface over `diagnose`, kept because it is what the validator's callers
+    are written against: `learning/core/persist.py`, and thirteen assertion sites across
+    five suites that do substring work on the elements. `_artifact_schema` is the one
+    caller that wants the structure and calls `diagnose` directly."""
+    return [d.message for d in diagnose(proposed_text, current_text)]

@@ -48,6 +48,7 @@ on both sides.
 from __future__ import annotations
 
 import asyncio
+import re
 import shutil
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
@@ -241,20 +242,89 @@ def _turn_from_record(rec: dict, old_run_dir: str | None, new_run_dir: str | Non
     return Turn(tool_calls=calls, text=text)
 
 
+def _is_investigation_write(name: str, args: Mapping[str, Any]) -> bool:
+    return (name in ("write_file", "edit_file")
+            and str(args.get("path", "")).endswith("investigation.md"))
+
+
+def _split_at_fences(text: str, n: int) -> list[str]:
+    """Cut `text` into `n` pieces on ```invlang fence boundaries, so every running
+    concatenation is a valid prefix document rather than a half-open block."""
+    if n <= 1:
+        return [text]
+    starts = [m.start() for m in re.finditer(r"(?m)^```invlang", text)]
+    if len(starts) < n:
+        return [text] + [""] * (n - 1)
+    picks = ([0] + [starts[round(i * len(starts) / n)] for i in range(1, n)] + [len(text)])
+    return [text[a:b] for a, b in zip(picks, picks[1:], strict=False)]
+
+
+def _retarget_writes_as_appends(turns: list[Turn]) -> list[Turn]:
+    """Re-express a golden's recorded investigation.md writes as `append_block` calls (#810).
+
+    The goldens were recorded when main held `write_file`/`edit_file`, and at least one of
+    them (sshpivot-ab3) used `write_file` as a whole-document REWRITER — its four recorded
+    contents share a 176-character common prefix and then diverge, because the model kept
+    restating vertex rows instead of refining them. Main cannot express that any more, and
+    should not: the artifact is append-only.
+
+    So the recorded writes are not translated one-for-one — there is no delta to translate.
+    The LAST recorded content is the document the run actually produced, and it is split
+    across the same number of turns, on fence boundaries. Turn count, gather dispatches, bash
+    and read calls are all untouched, and the final artifact is byte-identical to the golden,
+    which is what the replays assert. What is lost is the intermediate states, which were
+    never asserted and which the surface no longer admits."""
+    sites = [
+        (t_i, c_i)
+        for t_i, turn in enumerate(turns)
+        for c_i, (name, args) in enumerate(turn.tool_calls)
+        if _is_investigation_write(name, args)
+    ]
+    if not sites:
+        return turns
+    last_name, last_args = turns[sites[-1][0]].tool_calls[sites[-1][1]]
+    # The re-split rests on the LAST recorded write being the whole document. An `edit_file`
+    # carries only the replacement FRAGMENT in `new_string`, so reading a target out of one
+    # would silently replay a few lines as if they were the finished artifact — and the
+    # byte-identity assertion downstream would then be comparing the golden against a stub.
+    # Fail loudly on a golden shaped that way instead.
+    target = last_args.get("content")
+    if last_name != "write_file" or not isinstance(target, str):
+        raise AssertionError(
+            "the golden's last investigation.md write is a "
+            f"{last_name} — `_retarget_writes_as_appends` needs a whole-document "
+            "`write_file` there to re-split, not an anchored fragment"
+        )
+    for (t_i, c_i), chunk in zip(sites, _split_at_fences(target, len(sites)), strict=True):
+        turns[t_i].tool_calls[c_i] = ("append_block", {"text": chunk})
+    return turns
+
+
 def load_turns_from_trace(
     trace_path: Path, *, old_run_dir: str | None = None, new_run_dir: str | None = None,
+    as_appends: bool = False,
 ) -> list[Turn]:
     """Parse a real `tool_trace.jsonl` into scripted Turns.
 
     Rewrites `old_run_dir`->`new_run_dir` in string args — the context-repro step
     (a recorded write/read names an absolute path into the ORIGINAL run dir). Full
     replay of the nested gather subagent additionally needs stubbed adapter deps.
+
+    Parsing is FAITHFUL by default: a recorded `write_file` comes back as a `write_file`
+    turn. `test_projection_move_705` reads this function as a frozen consumer of the
+    projection's format and would not be able to tell a format regression from a
+    translation if the translation were unconditional.
+
+    `as_appends=True` re-expresses recorded investigation.md writes as `append_block` —
+    what a script needs to DRIVE a golden through MAIN, whose write grant is `append`
+    since #810. See `_retarget_writes_as_appends` for why that is a re-split rather than
+    a rename.
     """
     turns: list[Turn] = []
     for rec in read_jsonl_rows(Path(trace_path)):
         if rec.get("type") == "assistant":
             turns.append(_turn_from_record(rec, old_run_dir, new_run_dir))
-    return turns
+    return _retarget_writes_as_appends(turns) if as_appends else turns
 
 
 
