@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -164,34 +164,113 @@ def _known_ids(declared: set[str]) -> str:
     return ", ".join(sorted(declared)) or "none"
 
 
-def _check_prediction_refs(
+#: The two blocks that DECLARE a hypothesis. Named in every undeclared-`h-*` error, so the
+#: author is told where the declaration goes rather than only that one is missing.
+_HYPOTHESIS_DECLARING_BLOCKS = (
+    "`:H hypothesize.hypotheses` or `:H l-NNN.new_hypotheses`"
+)
+
+
+def _undeclared_hypothesis(lid: str, site: str, hid: str, declared: str) -> str:
+    return (
+        f"lead {lid}: {site} undeclared hypothesis {hid!r} — no "
+        f"{_HYPOTHESIS_DECLARING_BLOCKS} row declares it (declared: {declared}); "
+        f"a hypothesis born mid-run is declared by the lead that found it, "
+        f"before anything references it"
+    )
+
+
+#: An `h-*` id, in the spelling `HYP_DECLARATION_BLOCK_RE` already uses for `l-*`. Only an
+#: id of this SHAPE is a hypothesis reference — `:L findings`' `tests` column is a list of
+#: the COMMITMENTS the lead was run for, and the shipped golden proves that is three id
+#: kinds, not one: `golden-sshpivot-ab3` tests `ac1` on l-002 and `p2` on l-003 alongside
+#: its `h-*`. Reading the column as hypotheses-only denied a correct document.
+_HYPOTHESIS_ID_RE = re.compile(r"h-[A-Za-z0-9]+")
+
+
+def _cited_hypothesis_ids(lead: FindingRecord) -> Iterator[tuple[str, str]]:
+    """Every `h-*` a LEAD names, paired with the phrase that says where it named it.
+
+    Two sites, and both are lists the parser splits without ever looking the ids up:
+    `:L findings`' `tests` column projects to `tests_hypotheses` through `_split_csv`, and
+    `:T shelved`'s first cell appends to `shelved`.
+
+    NOT checked, at either site: an id of some OTHER shape. A `p2` in `tests` is a
+    prediction the lead was run for and resolves against `:H h-NNN.preds`; an `ac1` is an
+    authorization contract. Whether those resolve is a separate rule against separate
+    declaring blocks, and this one owning the `h-*` alone is what keeps it from denying the
+    golden. `:T shelved`'s column is `hyp_id`, so the shape gate is a no-op there today —
+    it is applied anyway so both sites answer to one rule.
+    """
+    for site, ids in (
+        ("`:L findings` tests", lead.get("tests_hypotheses")),
+        ("`:T shelved` shelves", lead.get("shelved")),
+    ):
+        for hid in ids or []:
+            if isinstance(hid, str) and _HYPOTHESIS_ID_RE.fullmatch(hid):
+                yield site, hid
+
+
+def _check_hypothesis_refs(
     companion: CompanionBody, *, declarations_intact: bool
 ) -> list[str]:
-    """A resolution moves a hypothesis that was declared, and matches only the
-    predictions and refutations that hypothesis declared.
+    """`:H hypothesize.hypotheses` and `:H l-NNN.new_hypotheses` are the sole sites that
+    declare a hypothesis; every other mention of an `h-*` must resolve to one.
 
-    `_check_lead_refs`'s analogue for the other reference the parser derives by
-    heuristic instead of by lookup: `matched_prediction_ids` is the id-shaped
-    head tokens, and nothing joined the result back to the declaring
-    `:H h-NNN.preds` block. So a typo, a forward reference, and a *sibling's*
-    `p1` all parsed clean and validated clean — a `++` could rest on a prediction
-    that does not exist, or on one belonging to the hypothesis it is being
+    `_check_lead_refs`'s analogue for the other id the projector opens no bucket for. A
+    typo, a forward reference and a genuinely absent hypothesis are indistinguishable at
+    projection time, so a phantom moved to `++` in silence and `_walkers.final_weights`
+    reported it live.
+
+    Three sites reference an `h-*` and this owns all three (#821). Closing only the
+    resolution left the shallower two open, and they are the ones a run reaches first: a
+    lead can claim to TEST a hypothesis nobody declared, and a `:T shelved` row can retire
+    one that never existed — both silently, both upstream of the resolution the rule did
+    catch.
+
+    It could not be enforced until `:H` blocks accumulated (#817) — before that, a
+    legitimate mid-run fork's earlier hypotheses were dropped by the parser and this error
+    would have fired on a correct document.
+
+    `declarations_intact` is what keeps that deference honest now: a `:H` DECLARATION block
+    the parser rejected (a stale header, an `attached_to` naming an edge) leaves every
+    reference to it looking phantom, and the parse warning already names the cause. One
+    defect, one error. It is keyed to the declaring block, not to "the document parsed
+    without a single warning" — an unknown block or an unattributed `:R` row drops no
+    hypothesis, so a phantom alongside one must still be reported.
+    """
+    if not declarations_intact:
+        return []
+    declared = set(_walkers.all_hypotheses(companion))
+    known = _known_ids(declared)
+    errors: list[str] = []
+    for lid, res in _walkers.iter_resolutions(companion):
+        hid = res.get("hypothesis")
+        if isinstance(hid, str) and hid not in declared:
+            errors.append(
+                _undeclared_hypothesis(lid, "resolution moves", hid, known)
+            )
+    for lead in companion.get("findings") or []:
+        if not isinstance(lead, dict):
+            continue
+        lid = lead.get("id", "?")
+        # Deduped per site: one id written twice in `tests` is one defect, not two.
+        for site, hid in dict.fromkeys(_cited_hypothesis_ids(lead)):
+            if hid not in declared:
+                errors.append(_undeclared_hypothesis(lid, site, hid, known))
+    return errors
+
+
+def _check_prediction_refs(companion: CompanionBody) -> list[str]:
+    """A resolution matches only the predictions and refutations its own hypothesis
+    declared.
+
+    The reference the parser derives by heuristic instead of by lookup:
+    `matched_prediction_ids` is the id-shaped head tokens, and nothing joined the result
+    back to the declaring `:H h-NNN.preds` block. So a typo, a forward reference, and a
+    *sibling's* `p1` all parsed clean and validated clean — a `++` could rest on a
+    prediction that does not exist, or on one belonging to the hypothesis it is being
     weighed against.
-
-    The row's `h-*` is the same reference one level up, and it went unchecked
-    for the same reason: the projector opens no bucket for it, so a phantom
-    moved to `++` in silence and `_walkers.final_weights` reported it live. It
-    could not be enforced until `:H` blocks accumulated (#817) — before that, a
-    legitimate mid-run fork's earlier hypotheses were dropped by the parser and
-    this error would have fired on a correct document.
-
-    `declarations_intact` is what keeps that deference honest now: a `:H`
-    DECLARATION block the parser rejected (a stale header, an `attached_to`
-    naming an edge) leaves every resolution against it looking phantom, and the
-    parse warning already names the cause. One defect, one error. It is keyed to
-    the declaring block, not to "the document parsed without a single warning" —
-    an unknown block or an unattributed `:R` row drops no hypothesis, so a
-    phantom alongside one must still be reported.
     """
     errors: list[str] = []
     declared_by_hyp = {
@@ -201,22 +280,13 @@ def _check_prediction_refs(
         )
         for hid, hyp in _walkers.all_hypotheses(companion).items()
     }
-    declared_hyp_ids = _known_ids(set(declared_by_hyp))
     for lid, res in _walkers.iter_resolutions(companion):
         hid = res.get("hypothesis")
-        if not isinstance(hid, str):
-            continue
-        entry = declared_by_hyp.get(hid)
+        entry = declared_by_hyp.get(hid) if isinstance(hid, str) else None
         if entry is None:
-            if declarations_intact:
-                errors.append(
-                    f"lead {lid}: resolution moves undeclared hypothesis "
-                    f"{hid!r} — no `:H hypothesize.hypotheses` or "
-                    f"`:H l-NNN.new_hypotheses` row declares it (declared: "
-                    f"{declared_hyp_ids}); a hypothesis born "
-                    f"mid-run is declared by the lead that found it, before "
-                    f"anything resolves it"
-                )
+            # `_check_hypothesis_refs` owns the undeclared-`h-*` defect, and with no
+            # declaring block there is nothing to resolve these citations against. One
+            # defect stays one error rather than three piled on the same row.
             continue
         preds, refuts = entry
         for pid in _unresolved(res.get("matched_prediction_ids") or [], preds):
@@ -853,10 +923,11 @@ def diagnose(
         return found
 
     found.extend(_plain(_check_lead_refs(companion)))
-    found.extend(_plain(_check_prediction_refs(
+    found.extend(_plain(_check_hypothesis_refs(
         companion,
         declarations_intact=not dropped_a_hypothesis_declaration(warnings),
     )))
+    found.extend(_plain(_check_prediction_refs(companion)))
     found.extend(_plain(_check_strong_move_provenance(companion)))
     found.extend(_check_closed_vocab(companion, proposed_text))
     found.extend(_plain(_check_disposition_gating(companion)))

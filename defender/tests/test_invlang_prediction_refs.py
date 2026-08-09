@@ -26,7 +26,7 @@ import pytest
 
 from defender.skills.invlang.validate import validate_companion
 
-_DEFENDER = Path(__file__).resolve().parents[1]
+from defender.tests._invlang_corpus import corpus_docs, corpus_id
 
 _LEAD_HEADER = ":L findings [id|loop|name|target|tests|system|window]"
 _HYP_HEADER = (
@@ -355,29 +355,7 @@ def test_omitting_severity_is_caught_as_a_strong_move_citing_nothing():
 
 
 
-def _corpus_docs() -> list[Path]:
-    """Every SHIPPED document with an ```invlang fence: the two `fixtures-e2e/`
-    golden runs and the `examples/` the SKILL points at.
-
-    `learning/runs/` is deliberately absent. It is gitignored machine-local run
-    output (`.gitignore` line 79; `git ls-files` lists nothing under it), so
-    globbing it makes the parametrization a function of what happens to sit on
-    the developer's disk — empty on CI, where the guard is supposed to run, and
-    on a laptop able to go red over a run nobody is shipping."""
-    candidates = [
-        *sorted((_DEFENDER / "examples").glob("*.md")),
-        *sorted((_DEFENDER / "fixtures-e2e").glob("*/investigation.md")),
-    ]
-    docs = [p for p in candidates if "```invlang" in p.read_text(encoding="utf-8")]
-    # An empty parametrize list is a silently-green suite; if the corpus moves,
-    # this must be a loud collection error, not a check that stopped running.
-    assert docs, "no ```invlang corpus documents found — did the tree move?"
-    return docs
-
-
-@pytest.mark.parametrize(
-    "path", _corpus_docs(), ids=lambda p: str(p.relative_to(_DEFENDER))
-)
+@pytest.mark.parametrize("path", corpus_docs(), ids=corpus_id)
 def test_the_shipped_corpus_carries_no_prediction_reference_defect(path: Path):
     """Neither rule may cost the corpus a document. (`examples/` carries
     unrelated errors that predate this — the filter is to these two rules, so

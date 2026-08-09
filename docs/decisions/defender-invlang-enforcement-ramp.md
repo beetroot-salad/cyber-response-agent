@@ -36,9 +36,9 @@ error rather than letting the write through. Scope is anchored to
    parser derives those lists from head tokens and never joined them
    back to the declaring block, so a typo, a forward reference and a
    *sibling's* `p1` all parsed clean (#798).
-6a. hypothesis-refs — the row's own `h-*` must be declared, at
+6a. hypothesis-refs — every `h-*` a document names must be declared, at
    `:H hypothesize.hypotheses` or at a lead's `:H l-NNN.new_hypotheses`
-   (#818). The projector opens no bucket for an unknown `h-*`, so a
+   (#818, #821). The projector opens no bucket for an unknown `h-*`, so a
    phantom moved to `++` in silence and `_walkers.final_weights`
    reported it live. It could not be enforced until `:H` blocks
    accumulated (#817) — before that a legitimate mid-run fork's earlier
@@ -51,6 +51,29 @@ error rather than letting the write through. Scope is anchored to
    instance — its `:H` rows use `attached_to=e-001`, which `:H` forbids,
    and four resolutions then point at the hypotheses those row errors
    dropped. *Fix the example and the deference stops mattering there.*
+
+   #818 closed only the `:T resolutions` row. Three sites reference an
+   `h-*` and `_check_hypothesis_refs` now owns all three (#821): the
+   resolution, `:L findings`'s `tests` column, and `:T shelved`. The two
+   added are the ones a run reaches FIRST — a lead can claim to test a
+   hypothesis nobody declared, and a `:T shelved` row can retire one that
+   never existed — so a typo used to surface a step late, pointing at the
+   resolution rather than at the PLAN row that introduced it. Scoped to
+   `h-*`-SHAPED ids: `tests` is the commitments the lead was run for and
+   the shipped golden proves that is three id kinds (`golden-sshpivot-ab3`
+   tests `ac1` on l-002, `p2` on l-003), so reading the column as
+   hypotheses-only denies a correct document.
+
+   The validator is a gate in front of a walker that minted the same
+   phantom, and #821 closed that too: `_walkers.final_weights` seeded an
+   entry from the resolution row, so its key set — which is what
+   `live_hypothesis_ids` reports — could carry an id no `:H` row declares.
+   The gate only runs on the write; `skills/invlang/queries.py` and
+   `learning/pipeline/judge/compare.py` read the walker on documents that
+   never passed through it. Both already looked weights up BY a declared
+   id, so narrowing the key set to `all_hypotheses` changed neither, and
+   `_check_benign_authz`'s `live` loop already skipped ids `all_hypotheses`
+   does not carry.
 7. strong-move citation — a `++`/`--` must name at least one of them.
    The other half of rule 3's provenance tuple: which pre-committed
    claim the cited observation settled.

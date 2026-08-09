@@ -119,12 +119,28 @@ def iter_grounded_resolutions(companion: CompanionBody) -> Iterator[ResolutionRo
 
 
 def final_weights(companion: CompanionBody) -> dict[str, Any]:
+    """Where every DECLARED hypothesis ended up: its `:H` weight, moved by each
+    resolution against it in document order.
+
+    A resolution MOVES a weight; it does not declare one. Seeding an entry from
+    the resolution row instead minted a hypothesis no `:H` row carries, and the
+    keys are what `live_hypothesis_ids` reports — so an `h-*` that existed only
+    as a typo in `:T resolutions` was counted live (#821). `validate_companion`
+    denies that document, but this walker is read on documents that never went
+    through it: one carrying a parse warning, or one read back after the fact.
+    The gate is a second line here, not the first.
+
+    So the declared set is the whole key set, and an unknown `h-*` is dropped
+    rather than added — silently, because naming it is the validator's job and
+    this is the read side.
+    """
+    declared = all_hypotheses(companion)
     final: dict[str, Any] = {
-        hid: h.get("weight") for hid, h in all_hypotheses(companion).items()
+        hid: h.get("weight") for hid, h in declared.items()
     }
     for _lid, res in iter_resolutions(companion):
         hid = res.get("hypothesis")
-        if isinstance(hid, str):
+        if isinstance(hid, str) and hid in declared:
             final[hid] = res.get("after")
     return final
 
