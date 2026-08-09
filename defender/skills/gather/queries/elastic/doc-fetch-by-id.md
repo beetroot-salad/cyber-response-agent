@@ -31,7 +31,12 @@ For multiple IDs: `_id: ("${id1}" OR "${id2}")`. Scope to the specific data stre
   `logs-system.auth-*` documents the actor, source and outcome are already their
   own typed fields (`user.name`, `source.ip`, `source.port`, `event.outcome`,
   `system.auth.ssh.event`, `system.auth.ssh.method`). Do not re-extract them from
-  `message`.
+  `message`. Two caveats before you report one: those fields are populated on the
+  OpenSSH-format lines only — the `pam_unix(sshd:auth)` / session / cron
+  documents in the same index carry them null, and a null there is a parser gap,
+  not an anonymous actor — and `Failed password for invalid user <u>` lands
+  `user.name` with a **leading space** (`" dev.dana"`). Report the `TRIM`-ed
+  value, and say when the raw one differed.
 - **Index scope narrows precision — but map the alert's `.ds-` name first.** A
   wildcard index (`logs-*`) may surface the document if the ID exists in any
   stream, but risks false positives from ID reuse across data streams. Prefer the

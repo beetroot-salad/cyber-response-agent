@@ -389,11 +389,12 @@ bodies missing a time-range filter), so the lighter model carries the
 load without losing rigor.
 
 Gather picks a query template from
-`defender/skills/gather/queries/{system}/`, or authors a new one and
-writes it back. Gather returns: summary of observations + the
-`queries[]` it ran (id + bound params). Those `queries[]` — addressed
-by `(lead_id, seq)` in the queries table — are the authoritative record
-you reason from.
+`defender/skills/gather/queries/{system}/`, or coins a measurement id and
+writes the query itself — it never authors a template file; the offline
+lead-author curates the catalog from the execution record. Gather returns:
+summary of observations + the `queries[]` it ran (id + bound params). Those
+`queries[]` — addressed by `(lead_id, seq)` in the queries table — are the
+authoritative record you reason from.
 
 When PLAN issued multiple leads in one turn, **emit all the `gather`
 calls in the same assistant message** so the subagents run concurrently;
@@ -581,16 +582,17 @@ gather(
   goal="Did the file modification at 02:14:01Z trace to a managed apt upgrade?",
   what_to_summarize=[
     "whether a package-manager upgrade touched nginx around the 02:14:01Z modification",
-    "checksum_after vs the published Ubuntu package SHA for nginx 1.24.0-2ubuntu7.5",
+    "whether the binary now on disk is the published Ubuntu build of nginx 1.24.0-2ubuntu7.5",
     "whether the rest of the fleet upgraded the same package alongside this host",
   ],
 )
 ```
 
-The `:L` row's `±10m` is declared intent — no obligation restates it as a
-bound, so gather anchors on 02:14:01Z and picks the window it runs.
+The `:L` row's `±10m` is declared intent for the record — it never reaches
+gather, and no obligation restates it as a bound, so gather anchors on
+02:14:01Z and picks the window it runs.
 
-Gather authored a new template (`host-state.apt-history-around` —
+Gather coined a new measurement (`host-state.apt-history-around` —
 catalog was empty for this system) and returned: an `unattended-upgrades`
 event at 02:13:48Z (13s before the FIM fire), package signature verified,
 checksum_after matches the upstream Packages.gz SHA, fleet 11/12 received

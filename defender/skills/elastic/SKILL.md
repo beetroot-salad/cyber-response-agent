@@ -40,7 +40,7 @@ SIEM-generated signals.
 
 | Data stream | Source | What it carries |
 |---|---|---|
-| `logs-system.auth-*` | sshd, sudo, PAM via filebeat | `/var/log/auth.log` lines per host (Accepted/Failed sshd, sudo COMMAND=, pam_unix session open/close) |
+| `logs-system.auth-*` | sshd, sudo, PAM via filebeat | `/var/log/auth.log` lines per host (Accepted/Failed sshd, sudo COMMAND=, pam_unix session open/close). The OpenSSH-format lines are ECS-parsed: `user.name`, `source.ip`, `source.port`, `event.outcome`, `system.auth.ssh.{event,method}`; the pam_unix / session / cron lines are not (see §Gaps) |
 | `logs-system.syslog-*` | journal / syslog via filebeat | general syslog (cron, baseline activity, daemon noise) |
 | `logs-falco.alerts-*` | Falco eBPF syscall monitor | rule-fire records with `falco.rule`, `falco.priority`, `falco.output_fields.{container.name,proc.name,user.name,proc.cmdline}` |
 | `logs-zeek.connection-*` | Zeek conn.log via Elastic Zeek integration | per-flow records with ECS `source.{ip,port,bytes,packets}`, `destination.{...}`, `network.{protocol,transport,community_id,direction}`, plus `zeek.connection.*` |
@@ -76,13 +76,21 @@ into `.internal.alerts-security.alerts-default-*` with full
 
 Things this Elasticsearch deployment **cannot** answer:
 
-- **No parsed `user.name` / `source.ip` on sshd auth events.** The
-  `logs-system.auth` filebeat integration emits the raw syslog
-  `message` but does not extract the OpenSSH-format fields (`Failed
-  password for <user> from <ip>`). Treat `user.name` / `source.ip` as
-  derivable only by message-substring matching, not as filterable
-  fields. Means: brute-force / pivot rules currently key on `host.name`
-  only.
+- **No actor on the non-OpenSSH lines of `logs-system.auth-*`.** The
+  OpenSSH-format lines (`Accepted …`, `Failed …`, `Invalid user …`)
+  *are* ECS-parsed — `user.name`, `source.ip`, `source.port`,
+  `event.outcome`, `system.auth.ssh.event`, `system.auth.ssh.method`
+  are populated and typed on them, so filter and group on those
+  directly. The gap is everything else in the same index:
+  `pam_unix(sshd:auth)`, session open/close, cron and `runuser` lines
+  carry a null `user.name` and a null `system.auth.ssh.*` pair
+  (`event.outcome` itself is null on ~96% of the index), so an actor
+  read off those rows is a null, not an absence. One parser quirk on
+  top: `Failed password for invalid user <u>` lands `user.name` with a
+  **leading space** (`" dev.dana"`) while the sibling `Invalid user
+  <u>` line lands it clean — see
+  `skills/gather/queries/elastic/sshd-auth-history.md` §Pitfalls before
+  binding an equality predicate on `user.name`.
 - **Falco events name `host.hostname` as `soc-playground`** (the Docker
   host VPS), not the role-host container. Per-container attribution
   lives in `falco.output_fields.container.name`. When asking "which

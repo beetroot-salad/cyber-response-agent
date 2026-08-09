@@ -398,7 +398,9 @@ def register_gather_tool(
         system of record. `lead_id` echoes this lead's `:L` row id (append-only —
         a retry is a new row with a new id). `system` is the `:L` row's system,
         `goal` a one-sentence measurement contract, `what_to_summarize` the
-        dimensions the summary must cover. Returns a measurements-only summary;
+        obligations the summary must establish about the world — a report schema,
+        never a retrieval spec: no field names, no filters, no window bounds
+        (gather owns all three). Returns a measurements-only summary;
         the queries it runs are captured to the queries table automatically. Issue
         multiple `gather` calls in one turn to dispatch sibling leads in parallel."""
         request = GatherRequest(lead_id, system, goal, tuple(what_to_summarize))

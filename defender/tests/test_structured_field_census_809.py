@@ -11,7 +11,17 @@ structured fields ARE populated here.
 
 The ground truth is the payload: `gather_raw/l-003/7.json` came back with `user.name` (keyword),
 `source.ip` (ip), `source.port` (long), `event.outcome` (keyword), `system.auth.ssh.event`
-(keyword) and `system.auth.ssh.method` (keyword) as columns of the ES|QL result.
+(keyword) and `system.auth.ssh.method` (keyword) as columns of the ES|QL result — and
+`evals/oracle_golden/.../l-001/{0,1}.json` carries their *values*, which is the sharper record:
+the OpenSSH-format lines populate them; the `pam_unix(sshd:auth)` / session / cron lines in the
+same index carry them null, and `Failed password for invalid user <u>` lands `user.name` with a
+leading space. Populated is not the same as populated everywhere, and the pitfalls say so.
+
+Two detectors, because the defect has two shapes: prose that DERIVES a parsed field out of
+`message`, and prose that ASSERTS the field is unparsed. The second is the one the catalog-only
+first pass missed — `skills/elastic/SKILL.md` §Gaps ("No parsed `user.name` / `source.ip` …
+not as filterable fields") carries no `GROK` and no "extracted from", and gather Reads it in
+full before it ever opens a template.
 
 This is deliberately a NARROW pin over those named fields, not a general "don't parse
 `message`" detector. A lexical detector was measured against all 37 recorded `*.lead.json` in
@@ -26,11 +36,26 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from defender._corpus import iter_query_templates
+from defender._corpus import QueryTemplate, iter_query_templates
 
 _DEFENDER = Path(__file__).resolve().parents[1]
-_CATALOG = _DEFENDER / "skills" / "gather" / "queries"
-_GATHER_SKILL = _DEFENDER / "skills" / "gather" / "SKILL.md"
+_SKILLS = _DEFENDER / "skills"
+_CATALOG = _SKILLS / "gather" / "queries"
+_GATHER_SKILL = _SKILLS / "gather" / "SKILL.md"
+
+
+def _system_references() -> list[Path]:
+    """Every per-system reference gather Reads on a dispatch — `skills/{system}/SKILL.md`
+    (handed to it by name at dispatch, Read in full at ORIENT) and the `execution.md` beside
+    it. The catalog is not the only teacher: `skills/elastic/SKILL.md` outranks it, since
+    gather reads the system SKILL *before* it picks a template.
+    """
+    return sorted(
+        p
+        for name in ("SKILL.md", "execution.md")
+        for p in _SKILLS.glob(f"*/{name}")
+        if p.parent.name not in {"gather", "invlang", "handbook", "advisory"}
+    )
 
 # Populated, typed fields on `logs-system.auth-*` — verified against the `columns` of the
 # ES|QL payload cited above. Deriving any of these out of `message` is the defect.
@@ -70,7 +95,37 @@ LEGITIMATE_MESSAGE_PARSERS = {
 # one of the structured field names is the shape that taught l-004 to hand-roll the parse.
 _DERIVES_FROM_MESSAGE = re.compile(
     r"(?:CASE\s*\(\s*message\s+LIKE|GROK\s+message|"
-    r"(?:extracted|parsed|derive[sd]?)\s+(?:back\s+)?(?:out\s+of|from)\s+`?message`?)",
+    r"(?:extracted|parsed|derive[sd]?)\s+(?:back\s+)?(?:out\s+of|from)\s+"
+    r"(?:the\s+)?`?message`?)",
+    re.IGNORECASE,
+)
+
+# The other half of the same defect, and the one the derivation regex cannot see: prose that
+# ASSERTS the field isn't parsed. `skills/elastic/SKILL.md` carried "No parsed `user.name` /
+# `source.ip` … does not extract the OpenSSH-format fields … not as filterable fields" — no
+# `GROK`, no "extracted from", and the most authoritative site in the corpus.
+_CLAIMS_UNSTRUCTURED = re.compile(
+    r"(?:not\s+(?:a\s+)?structured\s+field"
+    r"|not\s+as\s+filterable"
+    r"|no\s+parsed\b"
+    r"|(?:does\s+not|doesn't|do\s+not|don't)\s+(?:extract|parse)"
+    r"|\bunparsed\b"
+    r"|message-only\b)",
+    re.IGNORECASE,
+)
+
+# Naming a retired claim in order to bury it is not making it. `sshd-auth-history`'s "(An older
+# catalog note claimed OpenSSH fields were unparsed and message-only — that is stale for this
+# cluster.)" must not read as the claim itself.
+_REFUTES_THE_CLAIM = re.compile(
+    r"\b(?:stale|obsolete|superseded|claimed|no\s+longer|was\s+wrong|is\s+wrong)\b",
+    re.IGNORECASE,
+)
+
+# What "still parses `message`" means for the allowlist's positive control — the substring
+# "message" alone is in every template's prose and would assert nothing.
+_PARSES_MESSAGE = re.compile(
+    r"(?:message\s+LIKE|GROK\s+message|MATCH\s*\(\s*message|QSTR\s*\(|KQL\s*\()",
     re.IGNORECASE,
 )
 
@@ -100,8 +155,15 @@ def _blocks(text: str) -> list[list[str]]:
     return blocks
 
 
+def _names_a_parsed_field(joined: str) -> bool:
+    return any(f in joined for f in STRUCTURED_AUTH_FIELDS) or any(
+        a in joined.lower() for a in STRUCTURED_AUTH_FIELDS_IN_PROSE
+    )
+
+
 def _offending_lines(text: str) -> list[str]:
-    """Blocks that derive a value from `message` while naming a field that is already parsed.
+    """Blocks that derive a value from `message`, or assert it is unparsed, while naming a
+    field the integration already extracted.
 
     Both halves must be present in the SAME block: `sshd-session-lifecycle`'s
     `message LIKE "*session opened*"` names no structured field and is not a finding, while a
@@ -110,13 +172,26 @@ def _offending_lines(text: str) -> list[str]:
     hits = []
     for block in _blocks(text):
         joined = " ".join(block)
-        if not _DERIVES_FROM_MESSAGE.search(joined):
+        asserts_unstructured = _CLAIMS_UNSTRUCTURED.search(
+            joined
+        ) and not _REFUTES_THE_CLAIM.search(joined)
+        if not _DERIVES_FROM_MESSAGE.search(joined) and not asserts_unstructured:
             continue
-        names_a_parsed_field = any(f in joined for f in STRUCTURED_AUTH_FIELDS) or any(
-            a in joined.lower() for a in STRUCTURED_AUTH_FIELDS_IN_PROSE
-        )
-        if names_a_parsed_field:
-            hits.append(next(ln.strip() for ln in block if _DERIVES_FROM_MESSAGE.search(ln)))
+        if _names_a_parsed_field(joined):
+            # The match was found in the JOINED block, so it may straddle a wrap — the
+            # corpus wraps at ~90 columns and `extracted\n  from \`message\`` is the common
+            # shape. Fall back to the block's first line rather than letting the per-line
+            # search come up empty and raise `StopIteration` out of the pin.
+            hits.append(
+                next(
+                    (
+                        ln.strip()
+                        for ln in block
+                        if _DERIVES_FROM_MESSAGE.search(ln) or _CLAIMS_UNSTRUCTURED.search(ln)
+                    ),
+                    block[0].strip(),
+                )
+            )
     return hits
 
 
@@ -131,13 +206,22 @@ def test_gather_skill_does_not_teach_re_deriving_a_parsed_field():
     )
 
 
+def _rel(tpl: QueryTemplate) -> str:
+    """`{system}/{file}` — the allowlist key. Taken from `tpl.system`, which `_corpus`
+    already resolves past `_draft/`, rather than from `path.parent.name`: that would key a
+    draft as `_draft/foo.md`, so no draft could ever be allowlisted and two systems' drafts
+    of the same name would collide into one entry."""
+    suffix = "_draft/" if tpl.path.parent.name == "_draft" else ""
+    return f"{tpl.system}/{suffix}{tpl.path.name}"
+
+
 def test_no_auth_template_re_derives_a_parsed_field():
     """The catalog is walked through `_corpus.iter_query_templates` — the one corpus walk
     (#585) — rather than a hand-rolled glob, so a template added under `_draft/` is covered
     the moment it lands."""
     offenders = {}
     for tpl in iter_query_templates(_CATALOG):
-        rel = f"{tpl.path.parent.name}/{tpl.path.name}"
+        rel = _rel(tpl)
         if rel in LEGITIMATE_MESSAGE_PARSERS:
             continue
         hits = _offending_lines(tpl.body)
@@ -149,27 +233,46 @@ def test_no_auth_template_re_derives_a_parsed_field():
     )
 
 
+def test_no_system_reference_asserts_the_parsed_fields_are_unparsed():
+    """The catalog was never the whole corpus. Gather Reads `skills/{system}/SKILL.md` in
+    full at ORIENT, *before* it opens a template — so a stale "No parsed `user.name` /
+    `source.ip` on sshd auth events … not as filterable fields" there outranks every pitfall
+    the catalog carries. That bullet sat in `skills/elastic/SKILL.md` through #809's first
+    pass; this is the walk that would have found it."""
+    offenders = {}
+    for path in _system_references():
+        hits = _offending_lines(path.read_text(encoding="utf-8"))
+        if hits:
+            offenders[f"{path.parent.name}/{path.name}"] = hits
+    assert not offenders, (
+        "per-system references teach that an already-parsed auth field is message-only "
+        f"({', '.join(STRUCTURED_AUTH_FIELDS)}): {offenders}"
+    )
+
+
 def test_the_allowlisted_parsers_still_parse_message():
     """A positive control: the exemptions above are exemptions, not dead entries. If one of
     these templates stops parsing `message` the allowlist should shrink, and if it is renamed
     or deleted the suffix key silently stops matching — either way the census above quietly
     widens without anyone noticing. This test is what notices."""
-    by_rel = {
-        f"{t.path.parent.name}/{t.path.name}": t for t in iter_query_templates(_CATALOG)
-    }
+    by_rel = {_rel(t): t for t in iter_query_templates(_CATALOG)}
     for rel, reason in LEGITIMATE_MESSAGE_PARSERS.items():
         assert rel in by_rel, f"allowlisted template {rel} no longer exists ({reason})"
-        assert "message" in by_rel[rel].body, (
+        assert _PARSES_MESSAGE.search(by_rel[rel].body), (
             f"{rel} no longer parses `message` — drop it from LEGITIMATE_MESSAGE_PARSERS "
             f"({reason})"
         )
 
 
 def test_the_pin_fires_on_the_text_it_was_written_against():
-    """A check that cannot fail holds nothing. These four snippets are the corpus verbatim at
-    `origin/main` before this issue — the exact prose that taught l-004 to hand-roll a GROK —
-    and each must be caught. Kept inline rather than read back out of git: the pin has to
-    discriminate on its own terms, not on the repository's history being reachable."""
+    """A check that cannot fail holds nothing. Each snippet below is a pre-fix corpus site —
+    the prose that taught l-004 to hand-roll a GROK — abridged only by eliding whole lines
+    that carry neither half of the detector, never reworded. Each must be caught. Kept inline
+    rather than read back out of git: the pin has to discriminate on its own terms, not on the
+    repository's history being reachable.
+
+    The last two came in a wrapped shape on purpose: the derivation phrase straddles the line
+    break, which is what the block scoping (and not a per-line scan) is for."""
     corpus_before = {
         "gather/SKILL.md": (
             "- Express the whole measurement *in the query*: counts via `COUNT(*) WHERE ...`,\n"
@@ -191,6 +294,22 @@ def test_the_pin_fires_on_the_text_it_was_written_against():
         "doc-fetch-by-id.md": (
             "- For system.auth events: `host.name`, `@timestamp`, `source.ip`, and auth "
             "outcome + target user extracted from `message` (OpenSSH syslog format)\n"
+        ),
+        # The site the catalog-only census could not see, in the file that outranks the
+        # catalog: no `GROK`, no "extracted from" — it just asserts the fields are unparsed.
+        "elastic/SKILL.md §Gaps": (
+            "- **No parsed `user.name` / `source.ip` on sshd auth events.** The\n"
+            "  `logs-system.auth` filebeat integration emits the raw syslog\n"
+            "  `message` but does not extract the OpenSSH-format fields (`Failed\n"
+            "  password for <user> from <ip>`). Treat `user.name` / `source.ip` as\n"
+            "  derivable only by message-substring matching, not as filterable\n"
+            "  fields.\n"
+        ),
+        # A wrapped derivation phrase — matched on the joined block, reported without
+        # blowing up on the per-line search that finds nothing.
+        "a wrapped derivation": (
+            "- For system.auth events the actor (`user.name`) and source IP are extracted\n"
+            "  from `message` (OpenSSH syslog format).\n"
         ),
     }
     missed = [name for name, text in corpus_before.items() if not _offending_lines(text)]

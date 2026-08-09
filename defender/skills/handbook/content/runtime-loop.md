@@ -60,11 +60,12 @@ This is the load-bearing rule of the runtime loop:
   violation, renamed, and it leaves the query out of the audit trail.
 - **Trust the return; don't re-derive from raw.** Gather's summary is the
   authoritative record. The main loop does not Read or Grep
-  `gather_raw/*.json` to spot-check fields. If the summary is missing
-  something, re-dispatch gather with a stricter `what_to_summarize` rather
-  than pulling raw into the main context — that's what made the dispatch
-  cheap. (ANALYZE may Grep a specific raw payload as a last resort when a
-  summary is thin; Read it whole only if Grep doesn't narrow it.)
+  `gather_raw/*.json` to spot-check fields. If an obligation came back
+  unaddressed, re-dispatch gather naming that obligation more sharply —
+  never a field list or a filter, and never by pulling raw into the main
+  context; that's what made the dispatch cheap. (ANALYZE may Grep a specific
+  raw payload as a last resort when a summary is thin; Read it whole only if
+  Grep doesn't narrow it.)
 - **Haiku is the default** for gather because its job is mechanical (pick
   template, bind params, run CLI, summarize); the system CLIs enforce
   structural correctness. Escalate to Sonnet only when a dispatch genuinely

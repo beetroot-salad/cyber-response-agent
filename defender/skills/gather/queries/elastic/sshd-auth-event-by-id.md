@@ -23,14 +23,22 @@ Index: `logs-system.auth-*`
 - **Use the `query` verb, NOT `esql`.** This is a raw single-document
   fetch (you want the full `_source`), not an aggregation. For counts/distributions
   of auth events use `sshd-auth-history` (ES|QL) instead.
-- **Read the structured fields; parse `message` only as a fallback.** These
-  events are ECS-normalized: `user.name`, `source.ip`, `source.port`,
-  `event.outcome`, `system.auth.ssh.event` (`Accepted` / `Failed` / `Invalid`)
-  and `system.auth.ssh.method` (`password` / `publickey`) are populated in their
-  own typed fields. `system.auth.ssh.method` is null on `Invalid user`
-  rejections — no auth method was ever reached — which distinguishes them from
-  outcome-carrying auth events. Fall back to `message` substrings only for a
-  value that is genuinely absent from the document.
+- **Read the structured fields; parse `message` only as a fallback.** On the
+  OpenSSH-format lines these events are ECS-normalized: `user.name`,
+  `source.ip`, `source.port`, `event.outcome`, `system.auth.ssh.event`
+  (`Accepted` / `Failed` / `Invalid`) and `system.auth.ssh.method` (`password` /
+  `publickey`) are populated in their own typed fields. Fall back to `message`
+  substrings only for a value that is genuinely absent from the document.
+- **A null structured field here is a parser gap, not an observation.** The
+  same index holds `pam_unix(sshd:auth)`, session open/close, cron and
+  `runuser` lines whose `user.name` and `system.auth.ssh.*` are null — read
+  `message` on those rather than reporting a null actor. `Invalid user`
+  rejections carry `event.outcome: "failure"`, `user.name` and `source.ip` but
+  a null `system.auth.ssh.method` (no auth method was ever reached) — that null
+  marks the missing *method*, not a missing outcome. And `Failed password for
+  invalid user <u>` lands `user.name` with a **leading space** (`" dev.dana"`),
+  where the sibling `Invalid user <u>` line lands it clean; compare
+  `TRIM`-ed values, never raw ones.
 - **`_id` vs. field value.** The `event_id` parameter is the Elasticsearch document ID (`_id`), not a value inside the `message` field. Retrieve via direct `_id` lookup, not a field query.
 - **Index scope — and never the `.ds-` name from alert metadata.** Auth-log
   events live in `logs-system.auth-*`; Falco events in `logs-falco.alerts-*`. Do

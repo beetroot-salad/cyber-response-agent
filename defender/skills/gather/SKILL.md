@@ -24,7 +24,8 @@ A fenced YAML block carries:
 - `system` — system of record (a `skills/` subdir). The catalog of templates is
   at `{defender_dir}/skills/gather/queries/{system}/`.
 - `goal` — one-sentence measurement contract.
-- `what_to_summarize` — the dimensions your summary must cover.
+- `what_to_summarize` — the obligations your summary must establish. A report
+  schema, not a retrieval spec: see §5 RETURN.
 
 ## Procedure
 
@@ -175,8 +176,9 @@ Report a `## Summary` — the measurement, as observations (values, counts, timi
 entity bindings). Every number is a value a query returned, never one you eyeballed.
 
 **Report what you found, not what you were asked.** `what_to_summarize` is your
-completeness checklist — every obligation gets addressed — but it is not the
-shape of your answer, and its wording is not a scope you report against:
+completeness checklist — **every obligation gets addressed, including with a
+measured "not observed"** — but it is not the shape of your answer, and its
+wording is not a scope you report against:
 
 - **The result that answers the lead's question leads**, whatever query produced
   it. A finding does not become less true for having come from a wider window
@@ -185,7 +187,10 @@ shape of your answer, and its wording is not a scope you report against:
   If one query returned nothing and another returned the events, the events are
   the answer; "zero in the window I was handed" is not a finding, it is a
   restatement of the question. Never file a result you found under an obligation
-  as "not applicable" because it fell outside the wording.
+  as "not applicable" because it fell outside the wording. An absence *nothing*
+  you ran contradicts is the opposite case: report the measured zero plainly —
+  silence where the entity habitually speaks is often the strongest signal, and
+  dropping it is the one way a checklist item goes unaddressed.
 - **Say where you looked** when it differed from what the lead described — "the
   lead said ±5m; the events are at −8m, so this is 11:30–11:45."
 - **Scope, never salience.** What earns the lead is a result that *answers the
