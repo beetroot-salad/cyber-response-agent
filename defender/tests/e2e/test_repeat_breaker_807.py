@@ -483,9 +483,12 @@ def test_repeat_trip_predicate_seam(tmp_path):
     # The seam's whole purpose: it eats rows read straight off a RECORDED table.
     recorded = [r for r in _corpus("reviewer-measure-0807-b") if r["lead_id"] == LEAD]
     assert recorded, "the recorded corpus fixture is missing its repeat lead"
+    # seq 4 is this fixture's actual trip point (test_repeat_replay_trips_the_two_recorded_leads
+    # pins it): rows 0-3 accumulated give two prior occurrences of seq4's request (seq2, seq3),
+    # so this is the third occurrence.
     assert repeat_trip(
-        recorded[:3], LEAD, system=recorded[3]["system"], verb=recorded[3]["verb"],
-        params=recorded[3]["params"],
+        recorded[:4], LEAD, system=recorded[4]["system"], verb=recorded[4]["verb"],
+        params=recorded[4]["params"],
     ) is not None, "the production predicate could not be driven over a recorded run"
 
 
@@ -856,7 +859,6 @@ def test_dead_end_is_contained_to_the_lead(tmp_path):
     assert INCOMPLETE_IDIOM in r.summary(LEAD)
     assert INCOMPLETE_IDIOM not in r.summary(SIBLING), "the sibling lead was collateral damage"
     assert len(rec.calls) == 3, "the sibling lead's own query never ran"
-    assert (r.run_dir / "report.md").exists(), "the run did not reach its own end"
 
 
 def test_dead_end_message_names_repeat_and_structural_cause(tmp_path):

@@ -946,6 +946,16 @@ def test_gather_abort_becomes_measurement_string(tmp_path, enforced):
     query_turn = Turn(tool_calls=[("query", {"system": "elastic", "verb": "esql",
                                              "params": {"index": "logs"},
                                              "query_id": "elastic.probe"})])
+    # #807's repeat guard refuses a lead's THIRD identical request before it ever reaches
+    # the backend, so 200 byte-identical calls would end this lead at occurrence 3 rather
+    # than exhausting the request limit this demand is about — a distinct request per call
+    # (varying `index`) keeps every call in-domain for the request-limit path.
+    distinct_query_turns = [
+        Turn(tool_calls=[("query", {"system": "elastic", "verb": "esql",
+                                    "params": {"index": f"logs-{i}"},
+                                    "query_id": "elastic.probe"})])
+        for i in range(200)
+    ]
 
     run_dir = materialize(tmp_path / "limit", GOLDEN)
     main = ReplayFn([
@@ -954,7 +964,7 @@ def test_gather_abort_becomes_measurement_string(tmp_path, enforced):
         Turn(text="done"),
     ])
     drive(run_dir, run_id="limit", salt=SALT, main=main,
-          gather=ReplayFn([query_turn] * 200), verbs=verbs, limits=caps())
+          gather=ReplayFn(distinct_query_turns), verbs=verbs, limits=caps())
     assert "hit its request limit" in "\n".join(main.seen)
     assert "Treat this lead as incomplete" in "\n".join(main.seen)
 

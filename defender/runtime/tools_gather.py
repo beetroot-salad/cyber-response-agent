@@ -25,6 +25,7 @@ from defender._corpus import QueryTemplate, iter_query_templates
 from defender.hooks.record_lead import claim_lead as _claim_lead
 from defender.hooks.inject_system_skill_description import descriptor_catalog as _descriptor_catalog
 from defender._untrusted import wrap as _wrap
+from defender.scripts.gather_tools.record_query import GatherDeadEnd
 from defender.scripts.gather_tools.record_query import LEAD_ID_RE as _LEAD_ID_RE
 from defender.runtime.verb_grant import VerbGrant
 
@@ -303,6 +304,11 @@ async def _run_gather(
             f"gather for {lead_id} hit its request limit ({e}) before finishing; "
             "any queries it ran are in the queries table. Treat this lead as "
             "incomplete and reason from what was captured."
+        )
+    except GatherDeadEnd as e:
+        output = (
+            f"gather for {lead_id} hit a dead end: {e.reason} {e.escape} Treat this "
+            "lead as incomplete and reason from what was captured."
         )
     except UnexpectedModelBehavior as e:
         output = (
