@@ -45,6 +45,7 @@ from .verb_grant import VerbGrant
 from .verbs import ModuleVerbRegistry
 
 from defender._env import env_bool
+from defender._frontmatter import strip_frontmatter
 from defender._run_paths import RunPaths
 from defender.hooks.budget_enforcer import (
     BUDGET_EXEMPT_TOOLS,
@@ -76,7 +77,14 @@ DEFAULT_TOOL_RETRIES = 10
 
 
 def _main_instructions(defender_dir: Path) -> str:
-    return (defender_dir / "SKILL.md").read_text(encoding="utf-8")
+    """MAIN's system prompt: the SKILL's BODY, without its frontmatter (#810).
+
+    The frontmatter is file metadata — `name`, `description` — that nothing in this runtime
+    parses; it used to ride into the prompt verbatim, and with it an `allowed-tools:` line
+    naming verbs the `ToolSet` does not register. The roster has exactly one enforced owner
+    (`MAIN_DEF.tools` → `register_tools`), so a second copy in prose could only ever drift,
+    and drifting it teaches the model to call a tool it does not have."""
+    return strip_frontmatter((defender_dir / "SKILL.md").read_text(encoding="utf-8"))
 
 
 def _user_prompt(run_dir: Path, alert_path: Path, defender_dir: Path, salt: str) -> str:
@@ -338,7 +346,13 @@ GATHER_DEF = AgentDefinition(
 
 
 def _gather_instructions(defender_dir: Path) -> str:
-    return (defender_dir / "skills" / "gather" / "SKILL.md").read_text(encoding="utf-8")
+    """Gather's system prompt, frontmatter stripped for the same reason MAIN's is. Gather's
+    carries no `allowed-tools`, so nothing was being mis-taught here — but a prompt loader
+    that keeps metadata for one role and drops it for the other is the asymmetry the next
+    `allowed-tools` line slips through."""
+    return strip_frontmatter(
+        (defender_dir / "skills" / "gather" / "SKILL.md").read_text(encoding="utf-8")
+    )
 
 
 def build_gather_agent(  # noqa: PLR0913 — composition root, same shape as build_agent

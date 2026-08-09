@@ -99,24 +99,6 @@ def iter_attr_updates(companion: CompanionBody) -> Iterator[AttributeUpdate]:
     return _iter_outcome_rows(companion, lambda o: o.get("attribute_updates"))
 
 
-def iter_attr_updates_with_lead(
-    companion: CompanionBody,
-) -> Iterator[tuple[str, AttributeUpdate]]:
-    """`iter_attr_updates`, but carrying the lead each row was attributed to — the
-    `resolved_by` column. A diagnostic that wants to quote the offending `:R attr_updates`
-    row needs it: the row is `resolved_by|target|key|value`, and the fold into
-    `AttributeUpdate` keeps only the last three. Shaped after `iter_resolutions` rather
-    than widening `_iter_outcome_rows`, whose three other callers do not want the id."""
-    for lead in companion.get("findings") or []:
-        if not isinstance(lead, dict):
-            continue
-        lid = lead.get("id", "?")
-        outcome = lead.get("outcome") or LeadOutcome()
-        for row in outcome.get("attribute_updates") or []:
-            if isinstance(row, dict):
-                yield lid, row
-
-
 def iter_anchor_consultations(
     companion: CompanionBody,
 ) -> Iterator[AnchorConsultation]:

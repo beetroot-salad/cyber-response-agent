@@ -7,13 +7,21 @@ from typing import Any
 
 from defender._vocab import normalized_disposition
 from . import _walkers, vocab
+from ._cells import _row_dict
+from ._types import RowError
 from .parser import (
     INVLANG_FENCE_RE,
     ParseWarning,
     dropped_a_hypothesis_declaration,
+    iter_blocks,
     parse_dense_companion,
 )
-from .schema import CompanionBody, EdgeRecord, HypothesisRecord, VertexRecord
+from .schema import (
+    CompanionBody,
+    EdgeRecord,
+    HypothesisRecord,
+    VertexRecord,
+)
 
 STRONG_AUTH_KINDS = vocab.STRONG_AUTH_KINDS
 STRONG_WEIGHTS = vocab.STRONG_WEIGHTS
@@ -26,10 +34,11 @@ _YAML_FENCE_RE = re.compile(r"```ya?ml\b")
 class Locus:
     """Where a diagnostic's offending row actually is, when there is one row to point at.
 
-    `row_text` is the row as the author wrote it (parse warnings) or as it reconstructs
-    from the block's canonical column order (`:R attr_updates`). `row_index` is the
-    ordinal WITHIN the block, not a file line number — nothing in the validator computes
-    one — and is absent wherever the row was rebuilt rather than captured."""
+    `row_text` is the row as the author WROTE it — never a reconstruction. Both families that
+    populate a locus read it from the document: a parse warning carries its row, and the
+    `:R attr_updates` check walks blocks rather than folded records. `row_index` is the ordinal
+    WITHIN the block, not a file line number — nothing in the validator computes one — and only
+    the parse warnings have it."""
 
     block: str
     row_text: str
@@ -433,41 +442,64 @@ def _check_vocab_anchor_kinds(companion: CompanionBody) -> list[str]:
     return errors
 
 
-def _check_attr_update_keys(companion: CompanionBody) -> list[Diagnostic]:
-    """The one vocab sub-check that can quote its own row. `:R attr_updates` has a fixed
-    column order — `[resolved_by|target|key|value]` — so the row rebuilds from the lead,
-    the target and the offending key/value pair, and both legal corrections render from
-    the same four fields. The model can then retype one row instead of re-deriving the
-    rule from prose."""
+def _swap_cell(cells: list[str], at: int, replacement: str) -> str:
+    """One cell replaced, every other left exactly where the author put it."""
+    swapped = list(cells)
+    swapped[at] = replacement
+    return "|".join(swapped)
+
+
+def _check_attr_update_keys(proposed_text: str) -> list[Diagnostic]:
+    """`:R attr_updates` keys, checked over the ROWS rather than the folded records.
+
+    Reads blocks straight from the document because this is the one check that quotes a row
+    back and offers a corrected one. The fold keeps `{key: value}` per target and drops the
+    header, so rebuilding a row from it means assuming the conventional
+    `resolved_by|target|key|value` order — a convention `_row_dict` does not enforce, since it
+    zips whatever header the block declares. Against `[…|value|key]` that produced a
+    correction with its columns transposed: a "fix" that earns a second refusal (#825).
+
+    Here the `key` CELL is replaced in place and every other cell stays where the author put
+    it. A block whose header names no `key` column has no cell to substitute and no row this
+    can honestly point at, so it yields nothing — the row is not a refinement at all."""
     out: list[Diagnostic] = []
-    for lead_id, upd in _walkers.iter_attr_updates_with_lead(companion):
-        tgt = upd.get("target", "?")
-        for key, value in (upd.get("updates") or {}).items():
-            if key == "class" or (isinstance(key, str) and key.startswith("attrs.")):
+    for block in iter_blocks(proposed_text):
+        cols = block.columns or []
+        if block.name != "attr_updates" or "key" not in cols:
+            continue
+        at = cols.index("key")
+        for row in block.rows:
+            try:
+                rec = _row_dict(block, row)
+            except RowError:
+                continue  # already a parse warning; not this check's business
+            key = rec.get("key")
+            if not key or key == "class" or key.startswith("attrs."):
                 continue
+            cells = [rec.get(c, "") for c in cols]
             out.append(Diagnostic(
                 message=(
-                    f":R attr_updates on {tgt}: key {key!r} is not a valid "
-                    f"refinement key — use `class` (class refinement) or "
+                    f":R attr_updates on {rec.get('target', '?')}: key {key!r} is not a "
+                    f"valid refinement key — use `class` (class refinement) or "
                     f"`attrs.<name>` (attribute); a bare key is dropped silently"
                 ),
-                locus=Locus(block=":R attr_updates", row_text=f"{lead_id}|{tgt}|{key}|{value}"),
+                locus=Locus(block=":R attr_updates", row_text=row),
                 fix=(
-                    f"{lead_id}|{tgt}|class|{value}",
-                    f"{lead_id}|{tgt}|attrs.{key}|{value}",
+                    _swap_cell(cells, at, "class"),
+                    _swap_cell(cells, at, f"attrs.{key}"),
                 ),
             ))
     return out
 
 
-def _check_closed_vocab(companion: CompanionBody) -> list[Diagnostic]:
+def _check_closed_vocab(companion: CompanionBody, proposed_text: str) -> list[Diagnostic]:
     out: list[Diagnostic] = []
     out += _plain(_check_vocab_vertices(companion))
     out += _plain(_check_vocab_edges(companion))
     out += _plain(_check_vocab_hypotheses(companion))
     out += _plain(_check_conclude_vocab(companion))
     out += _plain(_check_vocab_anchor_kinds(companion))
-    out += _check_attr_update_keys(companion)
+    out += _check_attr_update_keys(proposed_text)
     return out
 
 
@@ -672,7 +704,7 @@ def diagnose(
         declarations_intact=not dropped_a_hypothesis_declaration(warnings),
     )))
     found.extend(_plain(_check_strong_move_provenance(companion)))
-    found.extend(_check_closed_vocab(companion))
+    found.extend(_check_closed_vocab(companion, proposed_text))
     found.extend(_plain(_check_benign_gating(companion)))
     found.extend(_plain(_check_loop_close(companion)))
     return found

@@ -1,6 +1,6 @@
 """#810 — the write lane for an append-only artifact.
 
-Three mechanisms, one issue. The measured failure was that a refused write said "fix and
+Four mechanisms, one issue. The measured failure was that a refused write said "fix and
 rewrite" and never said the file was unchanged; `SKILL.md` tells the model its own context IS
 the document, so that wording sent it anchoring later edits at text the gate had refused to
 write. Six of nine recovery episodes across three runs opened exactly that way.
@@ -13,6 +13,11 @@ What ships:
     validator-enforced append-only and the general verbs offered a capability it never had.
   * `read_file(tail=N)` is how the model re-syncs when its context no longer holds the
     document, which is real after a frontier fold.
+  * No SKILL frontmatter reaches a system prompt, so the roster has one owner
+    (`MAIN_DEF.tools`) instead of a prose copy that drifts.
+
+The last section covers #825, found reviewing this PR: the `:R attr_updates` correction was
+built against a column order the grammar does not enforce.
 
 The registration half (MAIN's roster, the tier table, the write-allowlist census) lives with
 the suites that already owned those properties; this file owns the new behaviour.
@@ -79,8 +84,8 @@ def test_attr_update_key_diagnostic_quotes_its_row_and_both_legal_forms():
 
     This is the row the issue was filed about, verbatim: the validator knew `v-003` and
     `ident` but not the lead or the value, so the model was handed a rule and left to
-    reconstruct the row from it. The block's column order is fixed —
-    `[resolved_by|target|key|value]` — so all four fields are recoverable."""
+    reconstruct the row from it. The row now comes off the parser (`AttrRowOrigin`) rather
+    than being rebuilt — see the #825 section below for why rebuilding was not safe."""
     d = _only(diagnose(_BAD_ATTR_KEY, None), lambda d: "refinement key" in d.message)
 
     assert d.locus is not None
@@ -379,3 +384,119 @@ def test_a_duplicate_append_is_accepted_so_the_refusal_must_be_believed(tmp_path
     assert text == block * 2, "the gate is expected NOT to catch this — see the docstring"
     # ...and the tail is what lets the model see it happened.
     assert _tail_chars(text, len(block)).strip() == block.strip()
+
+
+# --------------------------------------------------------------------------- #
+# the roster has one owner, and the prompt does not carry a second copy
+# --------------------------------------------------------------------------- #
+
+def test_no_skill_frontmatter_reaches_a_system_prompt():
+    """`_main_instructions` used to read SKILL.md whole, so its `allowed-tools:` line was the
+    first thing in MAIN's system prompt — naming `Write, Edit` above a body that says to use
+    `append_block`. Nothing in this runtime parses that frontmatter, so it was pure
+    mis-instruction. Both prompt loaders now splice the BODY."""
+    from defender.runtime.driver import _gather_instructions, _main_instructions
+
+    main = _main_instructions(DEFENDER)
+    gather = _gather_instructions(DEFENDER)
+
+    assert not main.lstrip().startswith("---"), "MAIN's prompt still opens with frontmatter"
+    assert not gather.lstrip().startswith("---")
+    assert "allowed-tools" not in main
+    assert "name: defender-gather" not in gather
+    # ...and the body itself still arrived, so this is not passing on an empty read.
+    assert "You are the **defender**" in main
+    assert "gather subagent" in gather
+
+
+def test_the_skill_declares_no_tool_roster_of_its_own():
+    """The roster has one owner — `MAIN_DEF.tools`, which decides what `register_tools`
+    registers. A prose copy can only drift, and did: it kept naming `Write, Edit` after #810
+    removed them. Asserted on the FILE, not the prompt, because the point is that the second
+    copy is gone rather than merely hidden from the model."""
+    text = (DEFENDER / "SKILL.md").read_text(encoding="utf-8")
+
+    assert "allowed-tools" not in text, (
+        "SKILL.md declares a tool roster again — it will drift from MAIN_DEF.tools"
+    )
+
+
+def test_the_registered_roster_is_what_the_toolset_grants():
+    """The other half: whatever the enforced owner says is what actually registers. Pins the
+    roster this PR leaves MAIN with, so a future grant change has to be deliberate."""
+    from defender.runtime.agent_definition import ToolSet
+    from defender.runtime.driver import MAIN_DEF
+
+    assert MAIN_DEF.tools == ToolSet(read=True, bash=True, append=True, close=True)
+    assert MAIN_DEF.tools.write is False
+
+
+# --------------------------------------------------------------------------- #
+# #825 — the correction follows the block's DECLARED header, not a convention
+# --------------------------------------------------------------------------- #
+
+_TRANSPOSED = """```invlang
+:L findings [id|loop|name|target|tests|system|window]
+l-003|1|cmdb-lookup|v-001|h-001|cmdb|n/a
+```
+
+```invlang
+:R attr_updates [resolved_by|target|value|key]
+l-003|v-003|svc.config-mgmt|ident
+```
+"""
+
+
+def test_a_transposed_header_gets_a_correction_in_its_own_column_order():
+    """#825. `resolved_by|target|key|value` is what every real document happens to declare,
+    but `_cells._row_dict` zips whatever header the block names — the order is convention,
+    not grammar. Rebuilding the row from the folded `{key: value}` map assumed the
+    convention, so a block declaring `[…|value|key]` was handed a correction with its columns
+    swapped: pasting it would put `class` in the `value` cell and earn a second refusal.
+
+    The row now comes from the parser verbatim and only the `key` CELL is substituted, so the
+    suggestion is valid against the header the author actually wrote."""
+    d = _only(diagnose(_TRANSPOSED, None), lambda d: "refinement key" in d.message)
+
+    assert d.locus is not None
+    assert d.locus.row_text == "l-003|v-003|svc.config-mgmt|ident"
+    assert d.fix == (
+        "l-003|v-003|svc.config-mgmt|class",
+        "l-003|v-003|svc.config-mgmt|attrs.ident",
+    )
+    # the value cell is untouched and stays where the author put it
+    assert all(f.split("|")[2] == "svc.config-mgmt" for f in d.fix)
+
+
+def test_the_canonical_header_is_unchanged_by_that_fix():
+    """The regression guard for the common path: reading the row off the parser must produce
+    exactly what rebuilding it used to, for the order every real document declares."""
+    d = _only(diagnose(_BAD_ATTR_KEY, None), lambda d: "refinement key" in d.message)
+
+    assert d.locus.row_text == "l-003|v-003|ident|svc.config-mgmt"
+    assert d.fix == (
+        "l-003|v-003|class|svc.config-mgmt",
+        "l-003|v-003|attrs.ident|svc.config-mgmt",
+    )
+
+
+def test_a_header_without_a_key_column_degrades_instead_of_guessing():
+    """When the header names no `key` column there is no cell to substitute and no row this
+    can honestly point at. It degrades to the prose-only diagnostic — the same shape as the
+    seven checks that never had a row — rather than inventing a correction. A wrong fix is
+    worse than no fix, which is the whole finding behind #825."""
+    headerless = """```invlang
+:L findings [id|loop|name|target|tests|system|window]
+l-003|1|cmdb-lookup|v-001|h-001|cmdb|n/a
+```
+
+```invlang
+:R attr_updates [resolved_by|target|key|value]
+l-003|v-003|ident|svc.config-mgmt
+```
+""".replace("[resolved_by|target|key|value]", "[resolved_by|target|attribute|value]")
+    diags = [d for d in diagnose(headerless, None) if "refinement key" in d.message]
+
+    # the row parses with no `key` column, so the key check has nothing to complain about;
+    # what matters is that NOTHING here fabricates a locus.
+    assert all(d.locus is None and d.fix == () for d in diags)

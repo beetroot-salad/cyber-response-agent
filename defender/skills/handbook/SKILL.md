@@ -98,8 +98,10 @@ If you cite a fact that's load-bearing or surprising, name the source file.
   one-line answer. Err shorter; the user can always ask for more.
 - **Stay read-only.** The `allowed-tools: Read, Glob, Grep` frontmatter
   declares this skill's read-only posture — it's a reader hint, not an
-  enforced sandbox (`defender/SKILL.md` notes skill `allowed-tools` isn't
-  enforced). Honor it anyway: the handbook never edits run dirs, lessons,
+  enforced sandbox. Nothing in the runtime reads it; the enforced roster
+  is the role's `ToolSet` in `defender/agents.py`, which is why
+  `defender/SKILL.md` carries no such line at all. Honor the hint anyway:
+  the handbook never edits run dirs, lessons,
   skills, or the loop. If a question drifts into "now change it," hand off
   to the right file (see the precedence table) and stop.
 - **Flag stale docs.** The defender moves fast and the code wins. If
