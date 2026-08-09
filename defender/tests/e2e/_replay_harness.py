@@ -291,6 +291,7 @@ def _retarget_writes_as_appends(turns: list[Turn]) -> list[Turn]:
 
 def load_turns_from_trace(
     trace_path: Path, *, old_run_dir: str | None = None, new_run_dir: str | None = None,
+    as_appends: bool = False,
 ) -> list[Turn]:
     """Parse a real `tool_trace.jsonl` into scripted Turns.
 
@@ -298,14 +299,21 @@ def load_turns_from_trace(
     (a recorded write/read names an absolute path into the ORIGINAL run dir). Full
     replay of the nested gather subagent additionally needs stubbed adapter deps.
 
-    Recorded investigation.md writes are re-expressed as `append_block` — see
-    `_retarget_writes_as_appends` for why that is a re-split rather than a rename.
+    Parsing is FAITHFUL by default: a recorded `write_file` comes back as a `write_file`
+    turn. `test_projection_move_705` reads this function as a frozen consumer of the
+    projection's format and would not be able to tell a format regression from a
+    translation if the translation were unconditional.
+
+    `as_appends=True` re-expresses recorded investigation.md writes as `append_block` —
+    what a script needs to DRIVE a golden through MAIN, whose write grant is `append`
+    since #810. See `_retarget_writes_as_appends` for why that is a re-split rather than
+    a rename.
     """
     turns: list[Turn] = []
     for rec in read_jsonl_rows(Path(trace_path)):
         if rec.get("type") == "assistant":
             turns.append(_turn_from_record(rec, old_run_dir, new_run_dir))
-    return _retarget_writes_as_appends(turns)
+    return _retarget_writes_as_appends(turns) if as_appends else turns
 
 
 

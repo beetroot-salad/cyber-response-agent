@@ -99,6 +99,7 @@ def test_replay_full_run_ab3(tmp_path, monkeypatch):
     turns = load_turns_from_trace(
         GOLDEN_AB3 / "tool_trace.jsonl",
         old_run_dir=AB3_ORIG_RUN_DIR, new_run_dir=str(run_dir),
+        as_appends=True,   # the golden predates #810; MAIN's writer is append_block now
     )
     replay = ReplayFn(turns)
 
