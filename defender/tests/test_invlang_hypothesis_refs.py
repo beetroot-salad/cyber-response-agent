@@ -51,10 +51,12 @@ _EDGE = (
     "e-002|executed|v-001|v-001|2026-05-05T03:42:11Z|siem-event:siem|\n"
 )
 
-#: Scoped to the two sites this issue opened. `examples/` carries unrelated errors that
-#: predate it, so the corpus check below stays a check on this rule rather than a freeze of
-#: the whole validator's verdict.
-_MARKERS = ("tests undeclared hypothesis", "shelves undeclared hypothesis")
+#: Scoped to this rule. `examples/` carries unrelated errors that predate it, so the corpus
+#: check below stays a check on the rule rather than a freeze of the whole validator's
+#: verdict. One substring covers all four sites — `moves`/`tests`/`shelves`/`names`
+#: undeclared hypothesis — because they share the message body by construction.
+_MARKERS = ("undeclared hypothesis",)
+_COMMITMENT_MARKER = "tests commitment"
 
 
 def _doc(body: str) -> str:
@@ -291,9 +293,166 @@ def test_a_refuted_hypothesis_is_still_dropped_from_live():
 
 
 
+def test_a_conclude_naming_a_hypothesis_nothing_declares_is_rejected():
+    """The fourth site, and the one the parser used to throw away: `:T conclude.surviving`
+    was matched by a blanket `conclude.*` branch that projected nothing, so the run's
+    closing claim about what is still standing could name a phantom and no rule could see
+    it — while the rule against exactly that was written three sites over."""
+    errors = _errors(_doc(
+        _declaring("h-001") + "\n"
+        + _lead("h-001") + "\n"
+        ":T conclude.surviving [hyp_id|final_weight]\n"
+        "h-404|+\n"
+    ))
+    assert len(errors) == 1
+    assert "'h-404'" in errors[0]
+    assert "conclude.surviving" in errors[0], "the error must name the site"
+
+
+def test_a_conclude_naming_declared_hypotheses_costs_nothing():
+    assert _errors(_doc(
+        _declaring("h-001", "h-002") + "\n"
+        + _lead("h-001,h-002") + "\n"
+        ":T conclude.surviving [hyp_id|final_weight]\n"
+        "h-001|+\n"
+        "h-002|--\n"
+    )) == []
+
+
+def test_the_surviving_table_is_projected_rather_than_discarded():
+    """The parser half. Checking the reference needs the rows to reach the companion at
+    all, and `hypothesis` is the key `:T resolutions` records already use for it."""
+    companion = _parsed(
+        _declaring("h-001") + "\n"
+        + _lead("h-001") + "\n"
+        ":T conclude.surviving [hyp_id|final_weight]\n"
+        "h-001|+\n"
+    )
+    assert (companion.get("conclude") or {}).get("surviving_hypotheses") == [
+        {"hypothesis": "h-001", "final_weight": "+"}
+    ]
+
+
+
+
+def test_a_dropped_declaration_defers_for_its_own_ids_only():
+    """Per ID, not per DOCUMENT. `:H l-001.new_hypotheses` is rejected on its header so
+    h-005 is deleted and every reference to it must defer — but h-999 is a typo the same
+    row makes, unrelated to the dropped block, and standing the whole rule down for the
+    file hid it behind a warning that has nothing to do with it."""
+    doc = _doc(
+        _declaring("h-001") + "\n"
+        ":H l-001.new_hypotheses [id|name|attached_to|rel]\n"
+        "h-005|?dropped-with-its-block|v-001|executed\n"
+        "\n"
+        + _lead("h-001,h-005,h-999")
+    )
+    errors = _errors(doc)
+    assert len(errors) == 1, errors
+    assert "'h-999'" in errors[0]
+    assert "h-005" not in errors[0], "the dropped id defers to its own parse warning"
+    assert [e for e in validate_companion(doc) if "whole block rejected" in e]
+
+
+def test_an_unmappable_dropped_declaration_still_stands_the_rule_down():
+    """The honest fallback. A declaration row whose first cell is not id-shaped names no
+    id to defer FOR, so there is no way to tell a reference that block would have satisfied
+    from a genuine phantom — and reporting them would give two errors for one defect, which
+    is the whole reason the deference exists."""
+    assert _errors(_doc(
+        _declaring("h-001") + "\n"
+        ":H l-001.new_hypotheses [id|name|attached_to|rel]\n"
+        "not-an-id|?mangled|v-001|executed\n"
+        "\n"
+        + _lead("h-001,h-999")
+    )) == []
+
+
+
+
+def _commitment_errors(text: str) -> list[str]:
+    return [e for e in validate_companion(text) if _COMMITMENT_MARKER in e]
+
+
+def _with_preds(tests: str) -> str:
+    """h-001 declares p1 + ac1; h-002 declares p2 and nothing else."""
+    return _doc(
+        _declaring("h-001", "h-002") + "\n"
+        ":H h-001.preds [id|subject|claim]\n"
+        'p1|proposed_parent|"the parent is interactive"\n'
+        "\n"
+        ":H h-001.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]\n"
+        'ac1|e-002|iam-policy|"provisioned for the destination"|escalate|escalate\n'
+        "\n"
+        ":H h-002.preds [id|subject|claim]\n"
+        'p2|proposed_parent|"the parent is packaged"\n'
+        "\n"
+        + _lead(tests)
+    )
+
+
+def test_a_commitment_in_tests_that_no_tested_hypothesis_declares_is_rejected():
+    """The other half of the mixed column. Only its `h-*` was being resolved, so
+    `tests=h-001,p9` named a commitment that does not exist and validated clean — the same
+    hole the hypothesis half had, one namespace over."""
+    errors = _commitment_errors(_with_preds("h-001,p9"))
+    assert len(errors) == 1
+    assert "'p9'" in errors[0]
+
+
+def test_an_undeclared_authorization_contract_in_tests_is_rejected():
+    """`ac*` is the namespace no resolution head ever cites, so `tests` is the only place
+    it can be checked at all."""
+    errors = _commitment_errors(_with_preds("h-001,ac9"))
+    assert len(errors) == 1
+    assert "'ac9'" in errors[0]
+
+
+def test_a_declared_commitment_costs_the_document_nothing():
+    assert _commitment_errors(_with_preds("h-001,p1,ac1")) == []
+
+
+def test_a_siblings_commitment_is_rejected_even_though_it_exists():
+    """The scoping that makes the rule worth having: h-002 declares a p2 and h-001 does
+    not, so a row testing only h-001 may not name it. Resolving against every hypothesis in
+    the run would accept exactly the cross-citation `_check_prediction_refs` refuses one
+    level down."""
+    errors = _commitment_errors(_with_preds("h-001,p2"))
+    assert len(errors) == 1
+    assert "'p2'" in errors[0]
+
+
+def test_a_row_naming_both_hypotheses_may_name_either_commitment():
+    """The shipped golden's shape: `golden-sshpivot-ab3` tests `h-001,h-002,ac1` on l-002
+    and `h-001,h-002,p2` on l-003, and the commitment belongs to one of the two."""
+    assert _commitment_errors(_with_preds("h-001,h-002,p1,p2,ac1")) == []
+
+
+def test_an_unprojected_namespace_in_tests_is_left_alone():
+    """`:L l-NNN.lead_preds` is documented and unprojected (#820), so an `lp*` resolves
+    against nothing here. Reporting it would deny a document the format permits."""
+    assert _commitment_errors(_with_preds("h-001,lp1")) == []
+
+
+def test_an_undeclared_hypothesis_on_the_row_stands_the_commitment_check_down():
+    """One defect, one error: the row's `h-*` is the defect, and its commitments cannot be
+    scoped until that is fixed."""
+    assert _commitment_errors(_with_preds("h-999,p9")) == []
+    assert len(_errors(_with_preds("h-999,p9"))) == 1
+
+
+
+
 @pytest.mark.parametrize("path", corpus_docs(), ids=corpus_id)
 def test_the_shipped_corpus_carries_no_hypothesis_reference_defect(path: Path):
     assert _errors(path.read_text(encoding="utf-8")) == []
+
+
+@pytest.mark.parametrize("path", corpus_docs(), ids=corpus_id)
+def test_the_shipped_corpus_carries_no_tested_commitment_defect(path: Path):
+    """The golden is the reason this rule is scoped to the tested hypotheses rather than
+    to the document: l-002 tests `ac1` and l-003 tests `p2`, both legitimately."""
+    assert _commitment_errors(path.read_text(encoding="utf-8")) == []
 
 
 @pytest.mark.parametrize("path", corpus_docs(), ids=corpus_id)

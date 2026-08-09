@@ -260,6 +260,14 @@ class Termination(TypedDict, total=False):
     rationale: str | None
 
 
+class SurvivingHypothesis(TypedDict, total=False):
+    """A `:T conclude.surviving` row. `hypothesis` rather than `hyp_id`: it is the same
+    reference `:T resolutions` records already spell that way."""
+
+    hypothesis: str
+    final_weight: str
+
+
 class Conclude(TypedDict, total=False):
 
     disposition: str | None
@@ -303,6 +311,14 @@ class Conclude(TypedDict, total=False):
     # refutation itself introduced (v-006 the failing source, v-010 its workstation), which is
     # how a run spends 124 of 131 queries and still never asks about the host it was paged for.
     entity_check: str | None
+    # #821 — the run's own list of what it thinks survived, from
+    # `:T conclude.surviving [hyp_id|final_weight]`. Projected so its `h-*` is checkable
+    # like the other three sites that name one; the parser accepted the block and discarded
+    # its rows, so a conclude naming a hypothesis nothing declares passed in silence.
+    #
+    # Self-reported and omittable, which is exactly why benign-gating computes survival from
+    # the resolution record instead (enforcement ramp rule 5). Checkable, not authoritative.
+    surviving_hypotheses: list[SurvivingHypothesis]
     termination: Termination
 
 

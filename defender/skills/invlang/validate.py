@@ -11,9 +11,10 @@ from . import _walkers, vocab
 from ._cells import _row_dict
 from ._types import RowError
 from .parser import (
+    HYPOTHESIS_ID_RE,
     INVLANG_FENCE_RE,
     ParseWarning,
-    dropped_a_hypothesis_declaration,
+    deferred_hypothesis_ids,
     is_conclude_empty_marker,
     iter_blocks,
     parse_dense_companion,
@@ -171,23 +172,19 @@ _HYPOTHESIS_DECLARING_BLOCKS = (
 )
 
 
-def _undeclared_hypothesis(lid: str, site: str, hid: str, declared: str) -> str:
+def _undeclared_hypothesis(where: str, site: str, hid: str, declared: str) -> str:
+    """`where` locates the row — `"lead l-001: "`, or empty for a document-level block —
+    and `site` is the phrase naming the column that made the reference."""
     return (
-        f"lead {lid}: {site} undeclared hypothesis {hid!r} — no "
+        f"{where}{site} undeclared hypothesis {hid!r} — no "
         f"{_HYPOTHESIS_DECLARING_BLOCKS} row declares it (declared: {declared}); "
         f"a hypothesis born mid-run is declared by the lead that found it, "
         f"before anything references it"
     )
 
 
-#: An `h-*` id, in the spelling `HYP_DECLARATION_BLOCK_RE` already uses for `l-*`, WIDENED to
-#: the hierarchical child form: when a lean hypothesis refines into sub-cases the language
-#: allocates `h-{parent}-{ordinal}` (`h-001` → `h-001-001`, `h-001-002`) and writes the children
-#: into the lead's `new_hypotheses` with the parent shelved in the same block
-#: (`docs/investigation-language.md` §Refinement via hierarchical IDs). A single-segment pattern
-#: failed to match those on the second hyphen, so a phantom CHILD — cited from the two sites that
-#: documented workflow writes to — was skipped instead of reported.
-_HYPOTHESIS_ID_RE = re.compile(r"h-[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*")
+def _lead_prefix(lid: str) -> str:
+    return f"lead {lid}: "
 
 
 def _cited_hypothesis_ids(lead: FindingRecord) -> Iterator[tuple[str, list[str]]]:
@@ -216,14 +213,42 @@ def _cited_hypothesis_ids(lead: FindingRecord) -> Iterator[tuple[str, list[str]]
         cited = [
             hid for hid in (ids or [])
             if isinstance(hid, str) and hid
-            and (not shaped or _HYPOTHESIS_ID_RE.fullmatch(hid))
+            and (not shaped or HYPOTHESIS_ID_RE.fullmatch(hid))
         ]
         if cited:
             yield site, cited
 
 
+def _hypothesis_references(
+    companion: CompanionBody,
+) -> Iterator[tuple[str, str, list[str]]]:
+    """Every site that names an `h-*`, as `(where, site-phrase, ids-in-row-order)`.
+
+    The census in one place, so "which sites reference a hypothesis" is a list to extend
+    rather than a branch to remember to add — the fourth site went unchecked for exactly as
+    long as that answer lived in three separate loops.
+    """
+    for lid, res in _walkers.iter_resolutions(companion):
+        hid = res.get("hypothesis")
+        if isinstance(hid, str):
+            yield _lead_prefix(lid), "resolution moves", [hid]
+    surviving = [
+        row["hypothesis"]
+        for row in (companion.get("conclude") or {}).get("surviving_hypotheses") or []
+        if isinstance(row, dict) and isinstance(row.get("hypothesis"), str)
+    ]
+    if surviving:
+        yield "", "`:T conclude.surviving` names", surviving
+    for lead in companion.get("findings") or []:
+        if not isinstance(lead, dict):
+            continue
+        where = _lead_prefix(lead.get("id", "?"))
+        for site, cited in _cited_hypothesis_ids(lead):
+            yield where, site, cited
+
+
 def _check_hypothesis_refs(
-    companion: CompanionBody, *, declarations_intact: bool
+    companion: CompanionBody, *, deferred: frozenset[str] | None
 ) -> list[str]:
     """`:H hypothesize.hypotheses` and `:H l-NNN.new_hypotheses` are the sole sites that
     declare a hypothesis; every other mention of an `h-*` must resolve to one.
@@ -233,43 +258,108 @@ def _check_hypothesis_refs(
     projection time, so a phantom moved to `++` in silence and `_walkers.final_weights`
     reported it live.
 
-    Three sites reference an `h-*` and this owns all three (#821). Closing only the
-    resolution left the shallower two open, and they are the ones a run reaches first: a
-    lead can claim to TEST a hypothesis nobody declared, and a `:T shelved` row can retire
+    FOUR sites reference an `h-*` and this owns all four (#821). Closing only the
+    resolution left the other three open, and two of them are the ones a run reaches first:
+    a lead can claim to TEST a hypothesis nobody declared, and a `:T shelved` row can retire
     one that never existed — both silently, both upstream of the resolution the rule did
-    catch.
+    catch. The fourth is `:T conclude.surviving`, which the parser used to accept and
+    discard: the run's closing claim about what is still standing could name a phantom and
+    nothing looked, which is the last place in a document that should go unchecked.
 
     It could not be enforced until `:H` blocks accumulated (#817) — before that, a
     legitimate mid-run fork's earlier hypotheses were dropped by the parser and this error
     would have fired on a correct document.
 
-    `declarations_intact` is what keeps that deference honest now: a `:H` DECLARATION block
-    the parser rejected (a stale header, an `attached_to` naming an edge) leaves every
-    reference to it looking phantom, and the parse warning already names the cause. One
-    defect, one error. It is keyed to the declaring block, not to "the document parsed
-    without a single warning" — an unknown block or an unattributed `:R` row drops no
-    hypothesis, so a phantom alongside one must still be reported.
+    `deferred` is what keeps that deference honest now: a `:H` DECLARATION block the parser
+    rejected (a stale header, an `attached_to` naming an edge) leaves every reference to it
+    looking phantom, and the parse warning already names the cause. One defect, one error.
+    It is keyed to the dropped IDS, not to the document — one malformed `:H` row used to
+    silence the rule everywhere, so an unrelated typo three leads away went unreported
+    behind a warning that had nothing to do with it. `None` is the parser's "a dropped
+    declaration could not be mapped to an id at all", and only that stands the rule down
+    wholesale.
     """
-    if not declarations_intact:
+    if deferred is None:
         return []
     declared = set(_walkers.all_hypotheses(companion))
     known = _known_ids(declared)
+    # A dropped id is as good as a declared one HERE and only here: rule 1 already reported
+    # the block that deleted it, and a second error would point away from the fix.
+    resolvable = declared | deferred
+    # `_unresolved` per site, the same dedup-then-filter the citation rule uses: one id
+    # written twice in `tests` is one defect, not two.
+    return [
+        _undeclared_hypothesis(where, site, hid, known)
+        for where, site, cited in _hypothesis_references(companion)
+        for hid in _unresolved(cited, resolvable)
+    ]
+
+
+#: A commitment id, by namespace: `p*`/`ap*` predictions, `r*` refutation shapes, `ac*`
+#: authorization contracts. `_REF_ID_RE` in the parser covers the first three for the
+#: resolution head; `tests` can name a contract too, which no head ever cites.
+_COMMITMENT_ID_RE = re.compile(r"ap\d+|p\d+|r\d+|ac\d+")
+
+
+def _declared_commitments(hyp: HypothesisRecord) -> set[str]:
+    """Every id a hypothesis's `:H h-NNN.<sub>` blocks declare, across all four namespaces."""
+    return (
+        _declared_prediction_ids(hyp)
+        | {r["id"] for r in hyp.get("refutation_shape") or []}
+        | {
+            c["id"] for c in hyp.get("authorization_contract") or []
+            if isinstance(c, dict) and c.get("id")
+        }
+    )
+
+
+def _check_tested_commitment_refs(companion: CompanionBody) -> list[str]:
+    """A `p*`/`ap*`/`r*`/`ac*` in `:L findings`' `tests` column resolves against a
+    hypothesis that same row says it is testing.
+
+    The other half of the mixed column (#821). `tests` is the commitments a lead was run
+    for, and only its `h-*` was being resolved — so `tests=h-001,p9,ac9` named two
+    commitments that do not exist and validated clean, which is the same hole the `h-*` half
+    had, one namespace over.
+
+    Scoped to the hypotheses the SAME row names, not to the document. A `p2` means "h-001's
+    p2" when the row tests h-001; resolving it against every hypothesis in the run would
+    accept a sibling's `p2`, which is exactly the cross-citation `_check_prediction_refs`
+    exists to refuse one level down. A row naming no hypothesis at all has nothing to scope
+    to, so it falls back to every declared hypothesis rather than inventing a stricter rule
+    than the format states.
+
+    NOT checked: an id in no recognized namespace. `:L l-NNN.lead_preds` is a documented
+    block the parser does not project (#820), so its `lp*` would resolve against nothing —
+    reporting those would deny a document the format permits.
+    """
+    by_hyp = {
+        hid: _declared_commitments(hyp)
+        for hid, hyp in _walkers.all_hypotheses(companion).items()
+    }
     errors: list[str] = []
-    for lid, res in _walkers.iter_resolutions(companion):
-        hid = res.get("hypothesis")
-        if isinstance(hid, str) and hid not in declared:
-            errors.append(
-                _undeclared_hypothesis(lid, "resolution moves", hid, known)
-            )
     for lead in companion.get("findings") or []:
         if not isinstance(lead, dict):
             continue
-        lid = lead.get("id", "?")
-        # Deduped per site through `_unresolved`, the same dedup-then-filter the citation
-        # rule below uses: one id written twice in `tests` is one defect, not two.
-        for site, cited in _cited_hypothesis_ids(lead):
-            for hid in _unresolved(cited, declared):
-                errors.append(_undeclared_hypothesis(lid, site, hid, known))
+        tested = [t for t in lead.get("tests_hypotheses") or [] if isinstance(t, str)]
+        named = [t for t in tested if HYPOTHESIS_ID_RE.fullmatch(t)]
+        if any(h not in by_hyp for h in named):
+            # An undeclared or dropped `h-*` on this row: `_check_hypothesis_refs` owns
+            # that defect, and its commitments cannot be scoped until it is fixed.
+            continue
+        scope_ids = named or list(by_hyp)
+        scope: set[str] = set()
+        for h in scope_ids:
+            scope |= by_hyp[h]
+        cited = [t for t in tested if _COMMITMENT_ID_RE.fullmatch(t)]
+        for cid in _unresolved(cited, scope):
+            errors.append(
+                f"{_lead_prefix(lead.get('id', '?'))}`:L findings` tests commitment "
+                f"{cid!r}, which none of the hypotheses it tests declares "
+                f"({_known_ids(set(scope_ids))}) — a `p*`/`ap*` is declared by "
+                f"`:H h-NNN.preds` / `.attr_preds`, an `r*` by `.refuts` and an `ac*` by "
+                f"`.authz` (declared: {_known_ids(scope)})"
+            )
     return errors
 
 
@@ -936,10 +1026,10 @@ def diagnose(
 
     found.extend(_plain(_check_lead_refs(companion)))
     found.extend(_plain(_check_hypothesis_refs(
-        companion,
-        declarations_intact=not dropped_a_hypothesis_declaration(warnings),
+        companion, deferred=deferred_hypothesis_ids(warnings),
     )))
     found.extend(_plain(_check_prediction_refs(companion)))
+    found.extend(_plain(_check_tested_commitment_refs(companion)))
     found.extend(_plain(_check_strong_move_provenance(companion)))
     found.extend(_check_closed_vocab(companion, proposed_text))
     found.extend(_plain(_check_disposition_gating(companion)))

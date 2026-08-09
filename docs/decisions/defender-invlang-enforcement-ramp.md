@@ -52,13 +52,32 @@ error rather than letting the write through. Scope is anchored to
    and four resolutions then point at the hypotheses those row errors
    dropped. *Fix the example and the deference stops mattering there.*
 
-   #818 closed only the `:T resolutions` row. Three sites reference an
-   `h-*` and `_check_hypothesis_refs` now owns all three (#821): the
-   resolution, `:L findings`'s `tests` column, and `:T shelved`. The two
-   added are the ones a run reaches FIRST — a lead can claim to test a
-   hypothesis nobody declared, and a `:T shelved` row can retire one that
-   never existed — so a typo used to surface a step late, pointing at the
-   resolution rather than at the PLAN row that introduced it.
+   That deference is keyed to the dropped IDS, not to the document
+   (`parser.deferred_hypothesis_ids`). Answering only "did any
+   declaration get dropped?" meant one malformed `:H` row anywhere
+   silenced the rule for the whole file, so an unrelated typo three
+   leads away went unreported behind a warning that had nothing to do
+   with it. The id is recoverable in both failure modes — a whole-block
+   rejection carries `ParseWarning.dropped_ids`, a row-level failure
+   carries its row, whose first cell IS the id. `None` (a dropped row
+   too mangled to name an id) still stands the rule down wholesale,
+   because there is then no way to tell a reference that block would
+   have satisfied from a genuine phantom.
+
+   #818 closed only the `:T resolutions` row. FOUR sites reference an
+   `h-*` and `_check_hypothesis_refs` now owns all four (#821): the
+   resolution, `:L findings`'s `tests` column, `:T shelved`, and
+   `:T conclude.surviving`. Two of the three added are the ones a run
+   reaches FIRST — a lead can claim to test a hypothesis nobody declared,
+   and a `:T shelved` row can retire one that never existed — so a typo
+   used to surface a step late, pointing at the resolution rather than at
+   the PLAN row that introduced it. The fourth is the one a run reaches
+   LAST, and the parser was accepting it and discarding its rows
+   (`if name.startswith("conclude."): return True`), so the closing claim
+   about what is still standing could name a phantom and nothing looked.
+   It is now projected to `conclude.surviving_hypotheses[]` — *checkable,
+   not authoritative*: rule 5 still computes survival from the resolution
+   record, because this table is self-reported and omittable.
 
    `tests` alone is scoped to `h-*`-SHAPED ids, because `tests` alone is
    mixed: it is the commitments the lead was run for and the shipped
@@ -82,6 +101,20 @@ error rather than letting the write through. Scope is anchored to
    id, so narrowing the key set to `all_hypotheses` changed neither, and
    `_check_benign_authz`'s `live` loop already skipped ids `all_hypotheses`
    does not carry.
+6b. tested-commitment refs — a `p*`/`ap*`/`r*`/`ac*` in `:L findings`'s
+   `tests` column must be declared by a hypothesis that same row says it
+   is testing (#821). The other half of the mixed column: rule 6a
+   resolves its `h-*` and nothing resolved the rest, so
+   `tests=h-001,p9,ac9` named two commitments that do not exist and
+   validated clean — rule 6's hole, one namespace over, at the site that
+   writes it first. Scoped to the row's own hypotheses rather than the
+   document, or it would accept a sibling's `p2`, which is exactly the
+   cross-citation rule 6 refuses one level down; a row naming no
+   hypothesis falls back to every declared one. `ac*` is checkable
+   nowhere else — no resolution head cites a contract. An id in no
+   recognized namespace is left alone: `:L l-NNN.lead_preds` is
+   documented and unprojected (#820), so its `lp*` resolves against
+   nothing and reporting it would deny a legal document.
 7. strong-move citation — a `++`/`--` must name at least one of them.
    The other half of rule 3's provenance tuple: which pre-committed
    claim the cited observation settled.
