@@ -62,7 +62,17 @@ error rather than letting the write through. Scope is anchored to
    carries its row, whose first cell IS the id. `None` (a dropped row
    too mangled to name an id) still stands the rule down wholesale,
    because there is then no way to tell a reference that block would
-   have satisfied from a genuine phantom.
+   have satisfied from a genuine phantom. A warning naming NO id — a
+   header rejected on a block that held no rows — deleted nothing and so
+   defers for nothing; reading "named nothing" as "unmappable" put the
+   whole file back behind a warning that dropped no declaration at all.
+   `dropped_ids` is the authoritative channel and is read off whatever
+   block carries it, because the singular typo `:H l-NNN.new_hypothesis`
+   deletes declarations too and does not match the DECLARING names.
+
+   Rule 6b defers the same way by construction: a row whose `h-*` was
+   dropped is skipped (its commitments cannot be scoped), and so is a row
+   with nothing to scope against at all.
 
    #818 closed only the `:T resolutions` row. FOUR sites reference an
    `h-*` and `_check_hypothesis_refs` now owns all four (#821): the

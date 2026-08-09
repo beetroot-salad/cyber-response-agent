@@ -60,8 +60,8 @@ class ParseWarning:
     #: were still readable enough to name them. Structure carried alongside the prose, the
     #: same way `Diagnostic` carries a `Locus`: the message is unchanged, and a consumer
     #: that needs to know *which* ids went missing no longer has to re-parse it back out.
-    #: Only the whole-block rejection populates it — a row-level failure already carries
-    #: its row, and the id is that row's first cell.
+    #: The whole-block rejections populate it — a row-level failure already carries its
+    #: row, and the id is that row's first cell.
     dropped_ids: tuple[str, ...] = ()
 
     def format(self) -> str:
@@ -203,7 +203,9 @@ HYPOTHESIS_ID_RE = re.compile(r"h-[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*")
 
 
 def _row_first_cell(row: str) -> str:
-    return row.split("|", 1)[0].strip()
+    # Through `_split_cells` rather than `row.split("|")`, so an escaped `\|` or a quoted
+    # cell is read the same way every other cell extraction in this module reads it.
+    return _split_cells(row)[0]
 
 
 def deferred_hypothesis_ids(
@@ -229,12 +231,24 @@ def deferred_hypothesis_ids(
     id-shaped. Reporting references then would give two errors for one defect, which is the
     whole reason this deference exists; the caller treats `None` exactly as the predecessor
     treated `True`.
+
+    `dropped_ids` is the authoritative channel and is consulted whatever block carries it,
+    because a declaration is deleted from more than the two DECLARING names: the singular
+    typo `:H l-NNN.new_hypothesis` drops its rows too, and matching on the name alone left
+    that one warning to be followed by one error per reference site.
+
+    A warning that names NO id is skipped rather than deferred: a header rejected on a block
+    with no rows deleted nothing, so standing the rule down for the document would hide
+    every unrelated phantom behind a warning that dropped no declaration at all.
     """
     deferred: set[str] = set()
     for w in warnings:
-        if not HYP_DECLARATION_BLOCK_RE.match(w.block):
+        if w.dropped_ids:
+            named: tuple[str, ...] = w.dropped_ids
+        elif HYP_DECLARATION_BLOCK_RE.match(w.block) and w.row:
+            named = (_row_first_cell(w.row),)
+        else:
             continue
-        named = w.dropped_ids or ((_row_first_cell(w.row),) if w.row else ())
         usable = [i for i in named if HYPOTHESIS_ID_RE.fullmatch(i)]
         if not usable:
             return None
@@ -407,6 +421,12 @@ _RESOLUTION_LINE_RE = re.compile(
 _REF_ID_RE = re.compile(r"ap\d+|p\d+|r\d+")
 _IFF_LITERAL_RE = re.compile(rf"\b(?:{_REF_ID_RE.pattern})\b")
 
+#: A COMMITMENT id in any of the four namespaces a hypothesis declares — `_REF_ID_RE`'s three
+#: plus `ac*` authorization contracts, which no resolution head ever cites and which only
+#: `:L findings`' `tests` column can name. Composed from `_REF_ID_RE` rather than restating
+#: it, the same way `_IFF_LITERAL_RE` is, so the namespaces keep one owner.
+COMMITMENT_ID_RE = re.compile(rf"(?:{_REF_ID_RE.pattern})|ac\d+")
+
 
 def _extract_iff_literals(annotation: str) -> tuple[list[str], list[str]]:
     if not annotation:
@@ -518,11 +538,19 @@ def _canonicalize_resolution_row(rec: dict[str, str]) -> ResolutionRow:
 #: guard below must not read the second and third as a key being overwritten.
 _CONCLUDE_LISTS: frozenset[str] = frozenset({"ceiling_test"})
 
+#: `Conclude` fields that are their OWN `:T conclude.*` sub-table, never a flat
+#: `<key> <value>` row. They must be subtracted for the same reason `termination` always was:
+#: `_CONCLUDE_SCALARS` is read off `Conclude.__annotations__`, so a field added to carry a
+#: sub-table is otherwise advertised in `_CONCLUDE_KEYS_HINT` as a legal flat key AND
+#: projected as a STRING over the list the sub-table built — which then makes
+#: `_project_surviving_block`'s `setdefault(...).append(...)` raise on a str (#821).
+_CONCLUDE_SUBTABLES: frozenset[str] = frozenset({"termination", "surviving_hypotheses"})
+
 #: The scalar rows `:T conclude` projects, and the CLOSED set an unrecognized row is judged
 #: against. One owner: `Conclude` is the type the projection has to satisfy, so the set is read
 #: off it rather than restated here, where the two could drift a field apart.
 _CONCLUDE_SCALARS: frozenset[str] = (
-    frozenset(Conclude.__annotations__) - {"termination"} - _CONCLUDE_LISTS
+    frozenset(Conclude.__annotations__) - _CONCLUDE_SUBTABLES - _CONCLUDE_LISTS
 )
 _CONCLUDE_KEYS_HINT = ", ".join(
     sorted(_CONCLUDE_SCALARS | _CONCLUDE_LISTS)
@@ -1000,6 +1028,11 @@ class _Projector:
                 f"unknown lead sub-block `:H l-NNN.{sub}` — the only `:H` block "
                 f"a lead carries is `:H l-NNN.new_hypotheses`; its rows were "
                 f"dropped",
+                # Same reason as the stale-header rejection: the rows are readable and
+                # their first cell is the id, so `deferred_hypothesis_ids` can defer for
+                # exactly these instead of letting one typo here raise one undeclared-`h-*`
+                # error at every site that then references them.
+                dropped_ids=tuple(_row_first_cell(r) for r in block.rows),
             )
 
     def _project_findings_block(self, block: Block) -> None:
@@ -1083,7 +1116,11 @@ class _Projector:
         rows: list[dict[str, str]] = conclude.setdefault("surviving_hypotheses", [])
         for _idx, _row, rec in self._for_each_row(block, _SURVIVING_COLS):
             hid = rec.get("hyp_id")
-            if not hid:
+            # `none` / `n/a` is how an EMPTY array is written here, not a hypothesis id
+            # (`docs/dense-investigation-format.md`: "Empty arrays render as a single `none`
+            # row", `surviving_hypotheses` named among them). Projecting the marker made the
+            # undeclared-`h-*` rule refuse a run whose hypotheses were all refuted.
+            if not hid or is_conclude_empty_marker(hid):
                 continue
             # Keyed `hypothesis`, the name `:T resolutions` records already use for the
             # same reference — a reader that knows one shape reads the other.

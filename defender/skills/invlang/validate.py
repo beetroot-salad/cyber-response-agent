@@ -11,6 +11,7 @@ from . import _walkers, vocab
 from ._cells import _row_dict
 from ._types import RowError
 from .parser import (
+    COMMITMENT_ID_RE,
     HYPOTHESIS_ID_RE,
     INVLANG_FENCE_RE,
     ParseWarning,
@@ -295,12 +296,6 @@ def _check_hypothesis_refs(
     ]
 
 
-#: A commitment id, by namespace: `p*`/`ap*` predictions, `r*` refutation shapes, `ac*`
-#: authorization contracts. `_REF_ID_RE` in the parser covers the first three for the
-#: resolution head; `tests` can name a contract too, which no head ever cites.
-_COMMITMENT_ID_RE = re.compile(r"ap\d+|p\d+|r\d+|ac\d+")
-
-
 def _declared_commitments(hyp: HypothesisRecord) -> set[str]:
     """Every id a hypothesis's `:H h-NNN.<sub>` blocks declare, across all four namespaces."""
     return (
@@ -348,10 +343,16 @@ def _check_tested_commitment_refs(companion: CompanionBody) -> list[str]:
             # that defect, and its commitments cannot be scoped until it is fixed.
             continue
         scope_ids = named or list(by_hyp)
+        if not scope_ids:
+            # Nothing to scope AGAINST — the row names no hypothesis and the document
+            # declares none, which is the shape a rejected `:H` block leaves behind. Rule 1
+            # already reported that block; reporting every commitment on top of it is the
+            # second error for one defect the sibling rule's deference exists to prevent.
+            continue
         scope: set[str] = set()
         for h in scope_ids:
             scope |= by_hyp[h]
-        cited = [t for t in tested if _COMMITMENT_ID_RE.fullmatch(t)]
+        cited = [t for t in tested if COMMITMENT_ID_RE.fullmatch(t)]
         for cid in _unresolved(cited, scope):
             errors.append(
                 f"{_lead_prefix(lead.get('id', '?'))}`:L findings` tests commitment "

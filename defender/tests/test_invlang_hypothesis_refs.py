@@ -22,7 +22,9 @@ tested together here because either alone leaves the phantom reachable.
 
 The resolution site's own tests stay in `test_invlang_prediction_refs.py` with the
 prediction-citation rule they were written against; `_check_hypothesis_refs` now owns all
-three sites, and the error it emits for a resolution is unchanged.
+four sites, and the error it emits for a resolution keeps its `moves undeclared hypothesis`
+body — only the closing clause generalised, from "before anything resolves it" to "before
+anything references it", now that three more sites can be the thing referencing it.
 """
 
 from __future__ import annotations
@@ -319,6 +321,51 @@ def test_a_conclude_naming_declared_hypotheses_costs_nothing():
     )) == []
 
 
+@pytest.mark.parametrize("marker", ["none", "n/a", "None"])
+def test_an_empty_surviving_table_is_not_read_as_a_hypothesis(marker: str):
+    """`none` is how the format writes an EMPTY array, not an id
+    (`docs/dense-investigation-format.md`: "Empty arrays render as a single `none` row",
+    with `surviving_hypotheses` named among them; rule 36 in `investigation-language.md`
+    handles "absent or empty" explicitly). A run whose hypotheses were all refuted writes
+    exactly this row, and projecting the marker denied it at the write lane."""
+    companion = _parsed(
+        _declaring("h-001") + "\n"
+        + _lead("h-001") + "\n"
+        ":T conclude.surviving [hyp_id|final_weight]\n"
+        + marker + "\n"
+    )
+    assert (companion.get("conclude") or {}).get("surviving_hypotheses") == []
+    assert _errors(_doc(
+        _declaring("h-001") + "\n"
+        + _lead("h-001") + "\n"
+        ":T conclude.surviving [hyp_id|final_weight]\n"
+        + marker + "\n"
+    )) == []
+
+
+def test_the_surviving_key_is_not_advertised_as_a_flat_conclude_row():
+    """`_CONCLUDE_SCALARS` is read off `Conclude.__annotations__`, so a field added to carry
+    a SUB-TABLE joins the flat-key set unless it is subtracted like `termination` is. Left
+    in, the parse hint told the author `surviving_hypotheses` was a legal `:T conclude` row
+    — and writing one before the sub-table made `setdefault(...).append(...)` raise on a
+    `str`, which the write lane renders as "validation errored" and refuses the whole file."""
+    from defender.skills.invlang.parser import _CONCLUDE_KEYS_HINT, _CONCLUDE_SCALARS
+
+    assert "surviving_hypotheses" not in _CONCLUDE_SCALARS
+    assert "surviving_hypotheses" not in _CONCLUDE_KEYS_HINT
+    companion = _parsed(
+        _declaring("h-001") + "\n"
+        ":T conclude\n"
+        "surviving_hypotheses   none\n"
+        "\n"
+        ":T conclude.surviving [hyp_id|final_weight]\n"
+        "h-001|+\n"
+    )
+    assert (companion.get("conclude") or {}).get("surviving_hypotheses") == [
+        {"hypothesis": "h-001", "final_weight": "+"}
+    ]
+
+
 def test_the_surviving_table_is_projected_rather_than_discarded():
     """The parser half. Checking the reference needs the rows to reach the companion at
     all, and `hypothesis` is the key `:T resolutions` records already use for it."""
@@ -351,6 +398,58 @@ def test_a_dropped_declaration_defers_for_its_own_ids_only():
     assert len(errors) == 1, errors
     assert "'h-999'" in errors[0]
     assert "h-005" not in errors[0], "the dropped id defers to its own parse warning"
+    assert [e for e in validate_companion(doc) if "whole block rejected" in e]
+
+
+def test_a_declaration_block_that_dropped_nothing_defers_for_nothing():
+    """A rejected header on a `:H` block with NO rows deleted no id. The warning then names
+    none, and treating "named nothing" as "could not be mapped" stood the rule down for the
+    whole document — hiding every unrelated phantom behind a warning that dropped nothing at
+    all, which is the failure the per-ID keying was written to end."""
+    doc = _doc(
+        _declaring("h-001") + "\n"
+        ":H l-001.new_hypotheses [id|name]\n"
+        "\n"
+        + _lead("h-001,h-999")
+    )
+    errors = _errors(doc)
+    assert len(errors) == 1, errors
+    assert "'h-999'" in errors[0]
+
+
+def test_the_misspelled_declaration_block_defers_for_the_ids_it_dropped():
+    """`:H l-001.new_hypothesis` (singular) is the reachable typo, and it deletes the
+    declarations just as a rejected header does — the parser warns and says so. Keying the
+    deference to the two DECLARING names alone left that one warning followed by one
+    undeclared-`h-*` error at EVERY site that references the dropped fork."""
+    doc = _doc(
+        _declaring("h-001") + "\n"
+        + _lead("h-001,h-010") + "\n"
+        ":H l-001.new_hypothesis "
+        "[id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]\n"
+        + _hyp_row("h-010", "?mid-run-fork") + "\n"
+        + _SHELVED_HEADER + "\n"
+        'h-010|l-001|"retired"\n'
+        "\n"
+        ":T resolutions\n"
+        "h-010  null → +    [l-001 weak ⟂ e-002 :: the fork holds]"
+    )
+    assert _errors(doc) == []
+    assert [e for e in validate_companion(doc) if "new_hypothesis`" in e]
+
+
+def test_a_dropped_declaration_does_not_make_the_commitment_rule_double_report():
+    """The commitment half needs the same deference. With the `:H` block rejected there is
+    nothing to scope a `p*` against, and falling back to "every declared hypothesis" —
+    which is none — reported it on top of the parse warning: two errors, one defect."""
+    doc = _doc(
+        _EDGE + "\n"
+        ":H hypothesize.hypotheses [id|name|attached_to|rel]\n"
+        "h-001|?dropped-with-its-block|v-001|executed\n"
+        "\n"
+        + _lead("p1")
+    )
+    assert _commitment_errors(doc) == []
     assert [e for e in validate_companion(doc) if "whole block rejected" in e]
 
 
