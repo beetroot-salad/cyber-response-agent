@@ -338,10 +338,11 @@ It means "loop 1 is done — every lead I will gather/analyze in it is
 committed above; I am moving to the next loop." One scalar `loop N` row,
 nothing else: the invlang above is already the loop's record, so the marker
 carries no summary or disposition. Write one `:T close` per loop, in the same
-Edit that lands the loop's final `:R`/`:T resolutions`. The marker is what the
-runtime folds a completed loop on (see `runtime/compaction.fold_boundary`); it
-is rejected if loop N has no committed finding yet (you cannot close a
-loop you have only *planned*), so only close a loop you have actually worked.
+`append_block` call that lands the loop's final `:R`/`:T resolutions`. The
+marker is what the runtime folds a completed loop on (see
+`runtime/compaction.fold_boundary`); it is rejected if loop N has no committed
+finding yet (you cannot close a loop you have only *planned*), so only close a
+loop you have actually worked.
 The **last** loop goes to REPORT, not back to PLAN — it gets `:T conclude`,
 never `:T close`.
 

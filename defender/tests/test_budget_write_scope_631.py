@@ -183,20 +183,34 @@ def test_model_cannot_author_its_own_budget_state(tmp_path):
         assert not permission.decide_bash(command, run_dir=run_dir,
                                           defender_dir=DEFENDER, policy=policy).allow
 
+    # #810: the forge used to be driven as `write_file` at budget.json, refused by the write
+    # allowlist. MAIN no longer HAS a verb that takes a write path — `append_block` is bound to
+    # investigation.md in the handler — so the model cannot NAME budget.json through the tool
+    # surface at all. The gate assertions above still pin the allowlist for every caller that
+    # can; what the driven leg now exercises is the one path the model has left, bash redirect,
+    # which the reader lane refuses. Unnameable plus refused, rather than nameable and refused.
+    assert MAIN_DEF.tools.write is False, (
+        "MAIN holds a path-taking writer again — budget.json is nameable from the model"
+    )
+    assert MAIN_DEF.tools.append is True
+    # The pool is NOT pre-tripped here any more. It used to be, so that a tail-tier
+    # `write_file` would run past the cap and be refused by the allowlist — two properties
+    # braided into one leg. `bash` is core tier, so a tripped pool now refuses the forge for
+    # the wrong reason (budget, not policy) and the test would pass without the gate looking.
+    # The tier property has its own wired witness in test_budget_seams_631's tier census.
     open_budget(run_dir, "r")
-    limits = {**DEFAULT_LIMITS, "max_tool_calls": 1}
+    limits = DEFAULT_LIMITS
     update_budget_locked(run_dir, "r", "bash", limits=limits)
-    forged = json.dumps({"run_id": "r", "tool_calls": 0, "subagent_spawns": 0})
     result, _ = drive_agent(
         MAIN_DEF, run_dir,
-        [[("write_file", {"path": str(run_dir / "budget.json"), "content": forged})],
-         [("write_file", {"path": str(run_dir / "investigation.md"), "content": ""})]],
+        [[("bash", {"command": "echo '{\"tool_calls\": 0}' > budget.json"})],
+         [("append_block", {"text": ""})]],
         limits=limits, enforce=True,
     )
     on_disk = json.loads((run_dir / "budget.json").read_text())
     assert on_disk.get("tool_calls", 0) >= 1, "the forged counter reset landed"
     assert on_disk.get("run_id") == "r", "the forged budget.json displaced the run's own state"
-    assert "write allowlist" in str(result.all_messages()), (
+    assert "do not run arbitrary shell" in str(result.all_messages()), (
         "the refusal was not observable to the model"
     )
     assert (run_dir / "investigation.md").is_file(), "the tail's own artifact was lost"
@@ -223,15 +237,16 @@ def test_report_write_is_refused_and_investigation_write_still_succeeds(tmp_path
                                        defender_dir=DEFENDER, policy=policy)
     assert not decision.allow, "report.md is no longer model-writable after R1"
 
+    # The driven half, on MAIN's post-#810 surface: `append_block` lands investigation.md, and
+    # report.md has no verb to reach it with — the model cannot supply a write path at all, so
+    # the second leg is no longer a refused call but an unmakeable one. The gate assertions
+    # above keep pinning the allow-list itself for every caller that CAN name a path.
     open_budget(run_dir, "r")
     drive_agent(MAIN_DEF, run_dir,
-                [[("write_file", {"path": str(run_dir / "investigation.md"),
-                                  "content": inv_text})],
-                 [("write_file", {"path": str(run_dir / "report.md"),
-                                  "content": _report_text()})]],
+                [[("append_block", {"text": inv_text})]],
                 limits=DEFAULT_LIMITS, enforce=True)
     assert (run_dir / "investigation.md").read_text() == inv_text
-    assert not (run_dir / "report.md").exists(), "report.md must not commit through write_file"
+    assert not (run_dir / "report.md").exists(), "report.md must not commit from the main loop"
 
 
 def test_main_write_scope_is_an_explicit_allow_list(tmp_path):

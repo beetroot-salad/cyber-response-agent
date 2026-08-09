@@ -133,7 +133,8 @@ RESUME_FROM_TAIL = "Resume the CURRENT loop from the messages after this one."
 RESUME_RESTART_SHAPED = (
     "The turns that produced this record are no longer in the history — it is all "
     "that remains of them. Work the CURRENT loop from it and from investigation.md "
-    "on disk."
+    'on disk: `read_file("investigation.md", tail=2000)` for the end of the document '
+    "without paying for the whole of it."
 )
 
 
@@ -257,9 +258,21 @@ def apply_writes(current: str, response: Message) -> str:
                 args = json.loads(args)
             except (ValueError, TypeError):
                 continue
+        name = part.get("tool_name")
+        # `append_block` carries no path — the run has one transcript and the verb is bound
+        # to it (#810) — so it is targeted by name and must be tested BEFORE the path filter,
+        # which would otherwise drop every call as "not investigation.md".
+        if name == "append_block":
+            text = args.get("text", "")
+            if not isinstance(text, str):
+                continue
+            # Same separator rule the tool itself applies (`tools._tool_append_block`),
+            # including the empty-append case: appending nothing changes nothing.
+            sep = "\n" if current and text and not current.endswith("\n") else ""
+            current = current + sep + text
+            continue
         if not str(args.get("path", "")).endswith("investigation.md"):
             continue
-        name = part.get("tool_name")
         if name == "write_file":
             current = args.get("content", current)
         elif name == "edit_file":

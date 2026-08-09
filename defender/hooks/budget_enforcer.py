@@ -33,8 +33,8 @@ BUDGET_EXEMPT_TOOLS = frozenset({"close_investigation"})
 
 BUDGET_REFUSAL_MESSAGE = (
     "Budget stop: the {tool} tool is now PERMANENTLY withdrawn for the rest of this "
-    "run (the {limb} cap is reached and will not reset). Writing to investigation.md — "
-    "write_file / edit_file — and closing the investigation are still available. "
+    "run (the {limb} cap is reached and will not reset). Appending to investigation.md — "
+    "append_block — and closing the investigation are still available. "
     "Do not retry this tool; close the investigation now and record your report from "
     "the evidence you already have."
 )
@@ -217,8 +217,16 @@ def tail_exhausted(state: dict, limits: dict) -> bool:
     return elapsed is not None and elapsed > limits["wall_clock_timeout"] + limits["grace_seconds"]
 
 
+#: Main's own bookkeeping verbs: reading and recording cost budget but are never REFUSED for
+#: it, or a run that hits the cap could no longer write down what it already found.
+#: `append_block` joined when it became main's only writer (#810) — omitting it would have
+#: left the transcript budget-refusable mid-investigation. `write_file`/`edit_file` stay listed
+#: because the tier is keyed on a name, not on a grant, and a stale name here is inert.
+_MAIN_TAIL_TOOLS = ("read_file", "append_block", "write_file", "edit_file")
+
+
 def tier(tool_name: str, role: AgentRole) -> str:
-    if role is AgentRole.MAIN and tool_name in ("read_file", "write_file", "edit_file"):
+    if role is AgentRole.MAIN and tool_name in _MAIN_TAIL_TOOLS:
         return "tail"
     return "core"
 

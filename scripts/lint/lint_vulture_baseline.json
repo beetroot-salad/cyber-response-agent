@@ -45,6 +45,7 @@
     "defender/runtime/session_store.py: unused method 'fork' (60% confidence)": "unwired: session-store primitive shipped ahead of its consumer (#705); exercised only by the #705 store tests. Tracked with the rest of the store's unwired surface in #712.",
     "defender/runtime/session_store.py: unused method 'write_config' (60% confidence)": "unwired: session-store primitive shipped ahead of its consumer (#705); exercised only by the #705 store tests. Tracked with the rest of the store's unwired surface in #712.",
     "defender/runtime/session_store.py: unused variable 'requested_role_from_content' (100% confidence)": "intentional: hydrate()'s deliberate decoy parameter — a plausible-looking knob the reader never consults, per #705's spec",
+    "defender/runtime/tools.py: unused function 'append_block' (60% confidence)": "false-positive: @agent.tool registration — pydantic-ai dispatches it by tool name, never by symbol",
     "defender/runtime/tools.py: unused function 'edit_file' (60% confidence)": "false-positive: @agent.tool registration — pydantic-ai dispatches it by tool name, never by symbol",
     "defender/runtime/tools.py: unused function 'read_file' (60% confidence)": "false-positive: @agent.tool registration — pydantic-ai dispatches it by tool name, never by symbol",
     "defender/runtime/tools.py: unused function 'write_file' (60% confidence)": "false-positive: @agent.tool registration — pydantic-ai dispatches it by tool name, never by symbol",

@@ -27,7 +27,14 @@ class ToolSet:
 
     read: bool = False
     bash: bool = False
+    #: The general write lane: `write_file` + `edit_file`, anchored replace over a whole
+    #: document. What a corpus author needs.
     write: bool = False
+    #: The append lane: `append_block`, no anchor and no position. What an append-only
+    #: artifact needs, and all `investigation.md` has ever legitimately admitted (#810).
+    #: Disjoint from `write` in practice but not enforced so — both are writer grants and
+    #: both require `write_shapes`.
+    append: bool = False
     forward_check: bool = False
     lesson_read: bool = False
     template_search: bool = False
@@ -116,15 +123,18 @@ def resolve_roots(
 def _require_write_co_constraint(
     tools: ToolSet, write_shapes: tuple[Callable[[ResolvedRoots], tuple[Any, ...]], ...],
 ) -> None:
-    if tools.write and not write_shapes:
+    # Either grant makes the agent a writer: `append_block` faces the same allowlist and the
+    # same content schema `write_file`/`edit_file` do, so it needs the same scope (#810).
+    writes = tools.write or tools.append
+    if writes and not write_shapes:
         raise ValueError(
-            "a writer ToolSet (write=True) must declare non-empty write_shapes — an empty "
-            "write scope would deny every write (a dead writer)."
+            "a writer ToolSet (write=True or append=True) must declare non-empty "
+            "write_shapes — an empty write scope would deny every write (a dead writer)."
         )
-    if not tools.write and write_shapes:
+    if not writes and write_shapes:
         raise ValueError(
-            "write_shapes were declared but the ToolSet grants no writer (write=False) — "
-            "dead scope; drop the shapes or grant the writer."
+            "write_shapes were declared but the ToolSet grants no writer (write=False, "
+            "append=False) — dead scope; drop the shapes or grant the writer."
         )
 
 

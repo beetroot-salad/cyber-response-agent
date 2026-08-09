@@ -23,6 +23,9 @@ from .agent_definition import ResolvedRoots, ToolSet
 from .agent_role import AgentRole
 
 from defender._untrusted import wrap as _wrap
+# The SAME byte ruler the #629 bounds are measured with — a write tool that reports "bytes"
+# has to report the number the gate will judge, not a codepoint count that under-reads it.
+from defender._artifact_schema import _utf8_len
 from defender.scripts.gather_tools.record_query import (
     _passthrough_max_bytes as _read_char_cap,
 )
@@ -343,10 +346,32 @@ def _bound_and_wrap(
     return text
 
 
-def _tool_read_file(deps: AgentDeps, path: str, pattern: str | None = None) -> str:
+def _tail_chars(text: str, n: int) -> str:
+    """The last `n` characters, trimmed FORWARD to the next line start so a `|`-delimited
+    invlang row never arrives cut in half and gets read as truncated data. `n` is therefore
+    a ceiling, not a target: the result is at most `n` characters, which is what a caller
+    asking for a bounded read wants. `n <= 0` yields nothing; a file shorter than `n` is
+    returned whole; text with no newline in the window is cut at `n`.
+
+    Its own fold rather than a reuse of `_bounded_read`, whose overflow path keeps the
+    HEAD — the wrong end of an append-only log (#810)."""
+    if n <= 0:
+        return ""
+    if len(text) <= n:
+        return text
+    cut = len(text) - n  # >= 1, since the whole-file case returned above
+    nl = text.find("\n", cut - 1)
+    return text[nl + 1:] if nl != -1 else text[cut:]
+
+
+def _tool_read_file(
+    deps: AgentDeps, path: str, pattern: str | None = None, tail: int | None = None
+) -> str:
     p, text = _gated_read(deps, path)
     if pattern is not None:
         text = _grep_lines(text, pattern)
+    if tail is not None:
+        text = _tail_chars(text, tail)
     return _bound_and_wrap(deps, p, path, text, read_tool="read_file")
 
 
@@ -423,6 +448,60 @@ def _tool_edit_file(deps: AgentDeps, path: str, old_string: str, new_string: str
     return f"edited {path} ({len(new_text)} bytes)"
 
 
+def _tool_append_block(deps: AgentDeps, text: str) -> str:
+    """Append to `investigation.md` — main's only write (#810).
+
+    No path: the run has one model-authored transcript and this is its writer, the way
+    `close_investigation` is `report.md`'s (#774). No anchor and no position either: the
+    document is validator-enforced append-only (`_check_append_only` refuses a dropped
+    fence, a dropped record, or an in-place mutation), so the anchored replace that
+    `edit_file` offers is a capability the artifact never had. Measured over three runs,
+    seven of the eight non-append `edit_file` calls failed.
+
+    Faces the identical gate the other two verbs do — same `decide_write`, same content
+    schema, same RS15 post-close refusal — on the resulting full document."""
+    p = deps.run_dir / "investigation.md"
+    if _closed_for_investigation_write(deps, p):
+        raise ModelRetry(
+            "investigation.md is no longer writable: the close already committed a "
+            "recorded disposition for this run, and a further append could silently "
+            "move it. The case is closed."
+        )
+    read_decision = permission.decide_read(
+        p, run_dir=deps.run_dir, defender_dir=deps.defender_dir, policy=deps.policy
+    )
+    if not read_decision.allow:
+        raise ModelRetry(read_decision.reason)
+    try:
+        current = read_text_utf8(p) if p.is_file() else ""
+    except UnicodeDecodeError:
+        raise ModelRetry(
+            "investigation.md is not valid UTF-8 text (binary or corrupt)"
+        ) from None
+    # Separate with a newline when the document does not already end in one. Existing
+    # bytes are never rewritten — not even trailing whitespace — so an append cannot
+    # itself trip the append-only check it is about to face. An EMPTY append gets no
+    # separator either: appending nothing must not mutate the document (the separator
+    # alone would be a byte the model never sent, on a call reporting zero bytes).
+    sep = "\n" if current and text and not current.endswith("\n") else ""
+    new_text = current + sep + text
+    decision = permission.decide_write(
+        p, new_text, run_dir=deps.run_dir, defender_dir=deps.defender_dir, policy=deps.policy,
+    )
+    if not decision.allow:
+        raise ModelRetry(decision.reason)
+    _guarded_parents(deps, p)
+    write_guarded(p, new_text)
+    deps.authored_paths.add(_resolved(p))
+    # UTF-8 BYTES, not characters: the SKILL tells the model this return IS a byte count and
+    # the 65536-byte cap it has to stay under is measured the same way. invlang rows carry
+    # `⟂ → ⟺` freely, so `len(str)` under-reports against the bound the gate applies.
+    return (
+        f"appended {_utf8_len(text)} bytes to investigation.md "
+        f"({_utf8_len(new_text)} total)"
+    )
+
+
 def register_tools(agent, tools: ToolSet, verbs: Any = None) -> None:
 
     if tools.bash:
@@ -436,29 +515,45 @@ def register_tools(agent, tools: ToolSet, verbs: Any = None) -> None:
     if tools.read:
         @agent.tool
         async def read_file(
-            ctx: RunContext[AgentDeps], path: str, pattern: str | None = None
+            ctx: RunContext[AgentDeps],
+            path: str,
+            pattern: str | None = None,
+            tail: int | None = None,
         ) -> str:
             """Read a file's contents (e.g. alert.json, a SKILL, a lesson). Pass
             `pattern` to return only the lines containing that substring — the grep
             fold, for scanning a large file (or when the read-only bash grep/cat
-            viewers are not available to this agent)."""
-            return _tool_read_file(ctx.deps, path, pattern)
+            viewers are not available to this agent). Pass `tail` for at most the last
+            N characters instead of the whole file, never starting mid-row — the cheap
+            way to re-sync with `investigation.md` after a frontier fold. Both compose:
+            `pattern` narrows first, then `tail` takes the end of what is left."""
+            return _tool_read_file(ctx.deps, path, pattern, tail)
 
     if tools.write:
         @agent.tool
         async def write_file(ctx: RunContext[AgentDeps], path: str, content: str) -> str:
-            """Write a file in the run dir (investigation.md — the invlang work log).
-            Writes are validated against the invlang schema. To record a disposition,
-            use the close_investigation tool — it is the only writer of the report."""
+            """Write a file within this agent's declared write scope, replacing it whole.
+            Content is validated against the schema for whatever artifact the path names."""
             return _tool_write_file(ctx.deps, path, content)
 
         @agent.tool
         async def edit_file(
             ctx: RunContext[AgentDeps], path: str, old_string: str, new_string: str
         ) -> str:
-            """Replace the first occurrence of old_string with new_string in a run-dir
-            file (investigation.md). The resulting full text is validated (invlang)."""
+            """Replace the first occurrence of old_string with new_string in a file within
+            this agent's declared write scope. old_string must match exactly once. The
+            resulting full text is validated."""
             return _tool_edit_file(ctx.deps, path, old_string, new_string)
+
+    if tools.append:
+        @agent.tool
+        async def append_block(ctx: RunContext[AgentDeps], text: str) -> str:
+            """Append to investigation.md, the invlang work log — no path and no anchor,
+            because the run has one transcript and it only ever grows. Send ONE invlang
+            block per call. The resulting full document is validated (invlang); if it is
+            refused, nothing is written and the file still does not contain your text.
+            To record a disposition use close_investigation, the report's only writer."""
+            return _tool_append_block(ctx.deps, text)
 
     _register_deferred_tools(agent, tools, verbs)
 

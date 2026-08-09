@@ -6,7 +6,7 @@ import re
 import subprocess
 from pathlib import Path
 
-from defender._frontmatter import FrontmatterError, split_frontmatter
+from defender._frontmatter import strip_frontmatter
 from defender._io import read_text_soft, read_text_utf8
 from defender._untrusted import wrap
 
@@ -58,11 +58,6 @@ def _raw_alert(alert_path: Path, salt: str) -> str | None:
     )
 
 
-def _strip_frontmatter(text: str) -> str:
-    try:
-        return split_frontmatter(text)[2]
-    except FrontmatterError:
-        return text
 
 
 def _invlang_grammar(defender_dir: Path) -> str | None:
@@ -72,7 +67,7 @@ def _invlang_grammar(defender_dir: Path) -> str | None:
     return (
         "## invlang grammar (authoritative block syntax — author "
         "`investigation.md` from this; do NOT Read `skills/invlang/SKILL.md`, it "
-        "is reproduced here)\n\n" + _strip_frontmatter(text).strip()
+        "is reproduced here)\n\n" + strip_frontmatter(text).strip()
     )
 
 

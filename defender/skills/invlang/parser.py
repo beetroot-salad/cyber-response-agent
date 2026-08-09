@@ -118,6 +118,23 @@ _VERTEX_COLS = ["id", "type", "class", "ident", "attrs"]
 _EDGE_COLS = ["id", "rel", "src", "tgt", "when", "auth_kind:source", "attrs"]
 
 
+def iter_blocks(text: str) -> Iterator[Block]:
+    """Every invlang `Block` in `text`, in document order, with its DECLARED header and its
+    rows as the author wrote them.
+
+    The projection that `parse_dense_companion` builds is lossy on purpose — it folds rows
+    into records and drops the header — which is right for every consumer that asks "what
+    does this investigation say". A check that has to quote a row back, or substitute one
+    cell of it, needs the layer underneath, and rebuilding a row from the folded record
+    means assuming a column order the grammar does not enforce (#825).
+
+    Kept out of the companion deliberately: carrying per-row provenance on the records
+    inflated the parsed body by up to 25%, and that body is projected into the review lens
+    prompts."""
+    for fence in INVLANG_FENCE_RE.finditer(text):
+        yield from _tokenize_fence(fence.group(1))
+
+
 def _vertex_record(block: Block, row: str) -> VertexRecord:
     rec = _row_dict(block, row, _VERTEX_COLS)
     _require(rec, "id", "type", msg="vertex missing id/type")
