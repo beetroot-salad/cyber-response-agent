@@ -7,6 +7,7 @@ import math
 import re
 import sys
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -108,6 +109,22 @@ def _record_time(rec: Any) -> str | None:
     return None
 
 
+def _time_sort_key(ts: str) -> tuple[int, Any]:
+    """A chronological sort key for one `@timestamp` string, falling open to string order.
+
+    Plain string order breaks the moment two stamps in the same second carry different
+    fractional-second precision: `"...11:59:00Z"` sorts AFTER `"...11:59:00.500Z"` because
+    `.` (0x2E) is below `Z` (0x5A) in ASCII, even though 00Z is the earlier instant — inverting
+    `returned_span`'s reported start/end. Parsed timestamps sort first (chronologically);
+    anything unparseable sorts after, by its raw string, rather than raising on a field this
+    function was never handed a schema for.
+    """
+    try:
+        return (0, datetime.fromisoformat(ts.replace("Z", "+00:00")))
+    except ValueError:
+        return (1, ts)
+
+
 def returned_span(records: list) -> tuple[str, str] | None:
     """The time range the returned docs actually cover.
 
@@ -118,8 +135,11 @@ def returned_span(records: list) -> tuple[str, str] | None:
     asked for ±15m around a pivot and got the last six minutes has no way to tell. Stating the
     span costs nothing and is a fact about the payload, not advice about what to do next.
     """
-    stamps = sorted(t for rec in records if (t := _record_time(rec)) is not None)
-    return (stamps[0], stamps[-1]) if stamps else None
+    stamps = [t for rec in records if (t := _record_time(rec)) is not None]
+    if not stamps:
+        return None
+    stamps.sort(key=_time_sort_key)
+    return (stamps[0], stamps[-1])
 
 
 def build_truncated_view(stdout: str, payload_rel: str | None, run_dir: Path) -> str:
@@ -231,21 +251,33 @@ def repeat_note(
     producing reasoning, and only a changed observation reaches one.
     """
     key = _request_key(system, verb, params)
-    same_request: int | None = None
+    repeat_seq: int | None = None
     same_payload: int | None = None
     for rec in lead_rows(run_dir, lead):
+        # Excludes ABOVE_GUARD_QUERY_ID rows so this scans the SAME counted domain repeat_trip
+        # does (`test_repeat_key_is_the_shipped_request_key`: the two readers may name a
+        # different row from the matching set, but the set itself is one answer) — a row a
+        # call answered above the guard's own placement never reached the backend and its
+        # digest is an error string, not a payload.
+        if rec.get("query_id") == ABOVE_GUARD_QUERY_ID:
+            continue
         prior = rec.get("seq")
         if not isinstance(prior, int) or prior >= seq:
             continue
-        if same_payload is None and rec.get("payload_digest") == payload_digest:
+        payload_matches = rec.get("payload_digest") == payload_digest
+        # REPEAT requires BOTH conditions on the SAME row: `same_request`/`same_payload`
+        # used to be tracked as two independent "earliest match" scans, which could name two
+        # DIFFERENT prior rows and then assert a compound fact about only one of them.
+        if (
+            repeat_seq is None and payload_matches
+            and _request_key(rec.get("system"), rec.get("verb"), rec.get("params")) == key
+        ):
+            repeat_seq = prior
+        if same_payload is None and payload_matches:
             same_payload = prior
-        if same_request is None and _request_key(
-            rec.get("system"), rec.get("verb"), rec.get("params")
-        ) == key:
-            same_request = prior
-    if same_request is not None and same_payload is not None:
+    if repeat_seq is not None:
         return (
-            f"[record_query] REPEAT — this is the same request you ran at seq {same_request}, "
+            f"[record_query] REPEAT — this is the same request you ran at seq {repeat_seq}, "
             f"and it returned the same payload byte for byte. It will keep returning this "
             f"payload however many times you send it; the result is structural, not a "
             f"transient to retry through. Change the approach, not the retry count."
@@ -280,9 +312,12 @@ def _next_seq(run_dir: Path, lead: str) -> int:
 REPEAT_THRESHOLD = 3
 
 REPEAT_ESCAPE = (
-    "Sending this exact request again will not produce a different answer. Either treat this "
-    "lead as complete with what you already have, or change what you are asking for."
+    "Sending this exact request again will not produce a different answer. Move on with "
+    "what this lead has already captured, or change what you are asking for."
 )
+# Deliberately avoids the word "complete": `_run_gather`'s `except GatherDeadEnd` branch
+# appends the fixed `INCOMPLETE_IDIOM` ("Treat this lead as incomplete...") right after this
+# string in the message handed to main, and the two must not read as opposed dispositions.
 
 ABOVE_GUARD_QUERY_ID = "∅.above-repeat-guard"
 """The sentinel `query_id` for the three rows written ABOVE the guard's own placement in
@@ -291,9 +326,9 @@ ABOVE_GUARD_QUERY_ID = "∅.above-repeat-guard"
 unresolvable row). No call that reaches the guard could ever HAVE such a row itself refused, so
 counting one toward a later trip would let the replay oracle report a trip no live run can
 produce. P-a found no discriminator among the twelve frozen row keys between such a row and a
-validated one, so this value is deliberately reserved — never the model-supplied or derived
-`{system}.{verb}` form `resolve_query_id` would otherwise produce — and lives inside the
-existing twelve keys rather than adding a thirteenth."""
+validated one, so this value is deliberately reserved — `resolve_query_id` refuses to return it
+(or an unscreened traversal string) even when a model supplies one verbatim as `query_id` — and
+lives inside the existing twelve keys rather than adding a thirteenth."""
 
 
 @dataclass(frozen=True)
@@ -312,7 +347,10 @@ class GatherDeadEnd(Exception):
     stays contained to the one lead."""
 
     def __init__(self, reason: str, escape: str):
-        super().__init__(reason)
+        # Both args go through `super().__init__` (not just `reason`) so `.args` round-trips
+        # through `cls(*self.args)` — the reconstruction `pickle`/`copy.deepcopy` use — instead
+        # of raising "missing 1 required positional argument: 'escape'".
+        super().__init__(reason, escape)
         self.reason = reason
         self.escape = escape
 

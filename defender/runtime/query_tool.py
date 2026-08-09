@@ -67,7 +67,18 @@ _QID_TRAVERSAL = ("/", "\\", "..", "\x00")
 
 
 def resolve_query_id(system: str, verb: str, model_query_id: str | None) -> str:
-    if model_query_id:
+    # ABOVE_GUARD_QUERY_ID is reserved for the three writer sites that pass it directly
+    # (never through here) to mark a row the repeat guard must never count. A model-supplied
+    # `query_id` equal to that literal string — or carrying a traversal character the
+    # below-guard `_screen` would otherwise reject — must not reach a real row through this
+    # path: on the repeat-trip's own record (which sits ABOVE `_screen`), nothing else
+    # screens it, and letting it through would either forge the sentinel (permanently
+    # exempting that request from the repeat count) or persist an unscreened id.
+    if (
+        model_query_id
+        and model_query_id != ABOVE_GUARD_QUERY_ID
+        and not any(t in model_query_id for t in _QID_TRAVERSAL)
+    ):
         return model_query_id
     return f"{system}.{verb}" if verb else f"{system}.ad-hoc"
 
