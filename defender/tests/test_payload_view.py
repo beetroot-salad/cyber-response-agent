@@ -259,6 +259,29 @@ def test_the_view_respects_its_budget(tmp_path, ceiling):
     assert len(_json_block(view)) <= ceiling
 
 
+@pytest.mark.parametrize("ceiling", [400, 1200, 8192])
+@pytest.mark.parametrize(
+    "filler", ["x", "\n", '"', "café", "日本語"], ids=["ascii", "newline", "quote", "latin1", "cjk"]
+)
+def test_a_bounded_body_still_PARSES(tmp_path, ceiling, filler):
+    """Fitting the budget is half the demand; the other half is that what fits can be read.
+
+    The budget test above measured only LENGTH, and that is how two rulers-in-one-module shipped:
+    the per-element cost counted a 1-byte `,` while `_dumps` wrote `", "`, and the string clipper
+    counted CHARACTERS against a share denominated in serialized BYTES (`json.dumps` spends 2 on
+    a newline, 6 on a non-ASCII codepoint). Both overshot, `render`'s floor then cut the
+    serialized document at an arbitrary byte, and the view arrived as a mid-token prefix that
+    `json.loads` rejects — the exact failure this module indicts `_SAMPLE_MAX_CHARS` for. Parsing
+    is the property; length alone cannot see it."""
+    docs = [
+        {"@timestamp": f"2026-08-07T11:{i % 60:02d}:00Z", "host": f"web-{i}", "message": filler * 40}
+        for i in range(400)
+    ]
+    body = _json_block(_view(_lucene(docs, total=99999), ceiling=ceiling, run_dir=tmp_path))
+    assert len(body) <= ceiling
+    json.loads(body)  # raises if the view arrived cut mid-token
+
+
 def test_an_oversized_payload_with_no_bulk_node_is_still_bounded(tmp_path):
     """A wide flat object of short scalars has no list and no long string to cut. It must still
     not blow the budget — the walk falls back to a marked hard cut rather than passing it."""
@@ -266,6 +289,41 @@ def test_an_oversized_payload_with_no_bulk_node_is_still_bounded(tmp_path):
     view = _view(text, ceiling=2000, run_dir=tmp_path)
     assert len(view) < len(text)
     assert pv.ELISION_PREFIX in view
+
+
+def test_wide_fields_are_cut_even_when_the_payload_also_carries_a_bulk_node(tmp_path):
+    """`_fit_fields` was reachable only when there was NO bulk node at all, so a wide flat object
+    that happened to carry one long string kept all 4,000 of its fields and blew the budget by
+    70 KB. The scalars are what overflows here; the walk has to say so."""
+    payload = {f"field_number_{i}": f"v{i}" for i in range(4000)} | {"note": "N" * 3000}
+    body = _json_block(_view(json.dumps(payload), ceiling=2000, run_dir=tmp_path))
+    assert len(body) <= 2000
+    assert pv.ELISION_PREFIX in body
+    json.loads(body)
+
+
+def test_a_string_leaf_of_escaped_characters_stays_inside_the_budget(tmp_path):
+    """`host-state proc-tree` returns its `ps` forest as ONE string, and a process forest is
+    newlines. Clipped by character count against a byte share it serialized to twice its room."""
+    text = json.dumps({"host": "web-1", "ps_output": "root 1 /sbin/init\n" * 3000})
+    body = _json_block(_view(text, ceiling=2000, run_dir=tmp_path))
+    assert len(body) <= 2000
+    assert json.loads(body)["host"] == "web-1"
+    assert pv.ELISION_PREFIX in json.loads(body)["ps_output"]
+
+
+def test_a_mixed_offset_timestamp_batch_does_not_crash_the_view(tmp_path):
+    """`sort` comparing a NAIVE `fromisoformat` result with an AWARE one raises `TypeError` —
+    out of `render`, out of the `query` tool, and the lead loses the payload entirely. The
+    fallback `timestamp` key this walks is exactly where a bespoke adapter omits the offset,
+    so one such doc beside one elastic `...Z` doc was enough. `_clock.parse_iso_utc` reads a
+    naive value AS UTC for this reason and its own docstring names this caller's failure."""
+    docs = [
+        {"@timestamp": "2026-08-07T11:00:00Z", "m": "x" * 300},
+        {"@timestamp": "2026-08-07T10:00:00", "m": "y" * 300},
+    ] * 40
+    view = _view(_lucene(docs, total=9999), ceiling=1200, run_dir=tmp_path)
+    assert "2026-08-07T10:00:00 … 2026-08-07T11:00:00Z" in view
 
 
 def test_a_non_json_payload_is_bounded_and_marked(tmp_path):
@@ -280,7 +338,45 @@ def test_the_disk_path_is_offered_when_the_view_elides(tmp_path):
     assert "defender-sql" in view
 
 
+def test_a_server_capped_payload_is_never_offered_a_count_over_its_own_file(tmp_path):
+    """The file on disk holds the SERVER'S SLICE. `SELECT count(*)` over it returns the cap —
+    the number the same view's prose says never to count — so the footer must not advertise it.
+    The old `sampled` footer withheld the example for exactly this reason; the rewrite made the
+    footer unconditional and put the contradiction two lines apart."""
+    view = _view(_lucene(_docs(20), total=2471), ceiling=1200, run_dir=tmp_path)
+    assert "NEVER count the returned docs" in view
+    assert "count(*)" not in view
+    assert str(tmp_path / RUN) in view
+
+
+def test_a_bare_truncated_flag_still_reports_the_server_cap(tmp_path):
+    """`truncated: true` with no `total`/`returned` IS a server cap. It failed the prose branch's
+    counts guard and fell through to a bare byte count, so the one fact the server declared went
+    unsaid — and the elision line then told the lead the missing rows were "present in full on
+    disk", which is false: the server never sent them."""
+    text = json.dumps({"index": "logs-*", "truncated": True, "entries": _docs(200)})
+    view = _view(text, ceiling=1200, run_dir=tmp_path)
+    assert "The SERVER capped this result" in view
+    assert "NEVER count these docs" in view
+    assert "count(*)" not in view
+
+
 def _json_block(view: str) -> str:
     """The payload region of a rendered view — everything after the `[record_query]` prose."""
     lines = [ln for ln in view.splitlines() if not ln.startswith(("[record_query]", "→", "  "))]
     return "\n".join(lines).strip()
+
+
+def test_the_byte_ruler_holds_because_the_serializer_escapes():
+    """The module compares BYTES but measures with `len()`, which counts codepoints. They agree
+    only because `_dumps` leaves `ensure_ascii` on, so everything measured is pure ASCII.
+
+    Pinned because the coupling is invisible at every use site and #834's compact encoding is
+    exactly the change that would reach for `ensure_ascii=False`. Without it a CJK payload
+    measures a third of its weight and rides through the ceiling whole.
+    """
+    for value in ({"m": "日本語 café"}, {"m": "M" * 100}, {"m": "\n\"\\ x"}):
+        serialized = pv._dumps(value)
+        assert len(serialized) == len(serialized.encode("utf-8")), (
+            "ensure_ascii went off — len() is no longer the byte count this module compares"
+        )

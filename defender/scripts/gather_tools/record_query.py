@@ -90,8 +90,8 @@ def repeat_note(
     """Name the earlier call in this lead that this one repeats, if any.
 
     A repeat is invisible from inside the turn loop. The payload is persisted under a fresh
-    `{seq}.json` every call, and `build_truncated_view` embeds that path three times, so two
-    executions of the same query differ by one integer in three places and read as new
+    `{seq}.json` every call, and the payload view embeds that path in its footer, so two
+    executions of the same query differ by one integer and read as new
     evidence. Nothing else in the loop compares a result to the one before it. Both branches
     below are statements of fact about rows already in the table — no refusal, no advice the
     caller has to accept — because the failure this addresses is a caller that has stopped

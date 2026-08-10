@@ -10,12 +10,14 @@ seq collision). This file keeps ONLY the functions that outlived the CLI, becaus
 still imports them:
 
   - `derive_system` — the generic system-from-argv derivation (no per-system table);
-  - `build_truncated_view` / `PASSTHROUGH_SAMPLE_COUNT` — the field-shape sampler the query
-    tool's model view is built from;
   - and, re-pointed at `QueryCapture`, the seq→write→append INTEGRITY property (a failed
     payload write must not reuse a `(lead_id, seq)`), which the frozen suite does not exercise.
 
-`_passthrough_max_bytes` / `payload_digest` / `LEAD_ID_RE` survival is pinned by
+The model-visible view left with #832: `build_truncated_view` / `PASSTHROUGH_SAMPLE_COUNT` /
+`_passthrough_max_bytes` are gone, and `payload_view.py` (specced by `test_payload_view.py`)
+renders the payload now — this module records the query, that one renders its result.
+
+`payload_digest` / `LEAD_ID_RE` survival is pinned by
 `test_query_tool_611.py::test_record_query_module_survives_its_cli`; the lead-id claim-side
 guard by `test_record_lead.py`.
 """

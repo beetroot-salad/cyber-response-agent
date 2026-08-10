@@ -2,8 +2,12 @@
 
 read_file must not pull a multi-MB gather payload whole into the model's
 context (a hard 200K-token overflow). _bounded_read caps the returned view at
-the SAME constant that bounds record_query's passthrough, so a later read of
-the persisted payload can't defeat that cap. Under the ceiling a file comes
+the cap `_cap_for` picks BY PATH (#832): a captured payload (`gather_raw/`,
+`ticket_reads/`) is re-read at the capture ceiling, so a later read of the
+persisted payload can't defeat the bound the capture chose, while an authored
+file gets its own — the two were one constant until the capture ceiling
+dropped to 8 KB, which equality would have paid for by truncating
+`defender/SKILL.md`. Under the ceiling a file comes
 back verbatim (every authored SKILL/lesson/doc fits with room to spare); over
 it, the head plus a notice carrying the true size and a filter-first
 resolution, since the overflowing files are single-document JSON dumps a line
