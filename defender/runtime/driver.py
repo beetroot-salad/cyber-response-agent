@@ -794,12 +794,25 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     # model on every run, and the review's own pinned default would be unreachable in
     # production while a unit test calling the resolver with `None` still proved it was the
     # default.
-    stages = (
-        review_stages if review_stages is not None
-        else review_roles.live_review_stages(  # lint-default: ok — DI seam owning its default (the live bundle, buildable only where the run dir and the run's logger are)
-            run_dir, defender_dir, logger=logger, model_override=model_override,
+    #
+    # Guarded, because this resolution now happens BELOW the open: `live_review_stages` reads
+    # three prompt assets off the tree and `role_prompt` raises `FileNotFoundError` on a
+    # missing one. Above the logger that raise cost nothing; here it would leave
+    # `llm_requests.jsonl` open AND permanently registered in `observe._ACTIVE_PATHS`, so a
+    # second `run_investigation` in the same process could never reopen that path. The
+    # store-setup handler below closes the logger for exactly this reason; this window needs
+    # its own because a missing prompt asset is not a store fault and must not be reported
+    # as one.
+    try:
+        stages = (
+            review_stages if review_stages is not None
+            else review_roles.live_review_stages(  # lint-default: ok — DI seam owning its default (the live bundle, buildable only where the run dir and the run's logger are)
+                run_dir, defender_dir, logger=logger, model_override=model_override,
+            )
         )
-    )
+    except BaseException:
+        logger.close()
+        raise
 
     case_id = uuid.uuid4().hex
     factory = store_factory if store_factory is not None else _default_store_factory  # lint-default: ok — DI seam owning its default (R12's fifth seam)

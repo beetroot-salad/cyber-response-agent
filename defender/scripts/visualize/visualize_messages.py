@@ -6,7 +6,12 @@ from pathlib import Path
 
 from defender._io import read_jsonl_rows
 from defender._report import ReportRead
-from defender.runtime.review_roles import REVIEW_AGENT_ID_PREFIX
+# `agent_role` and NOT `review_roles`, though the latter re-exports the same constant:
+# `review_roles` pulls `runtime.tools` and with it the whole in-process runtime (pydantic-ai
+# included), and `learning/frontend/build.py` imports this package at module scope for the
+# page CSS alone. Same rule `visualize_runtime.close_vocabulary` states for `close_tool` —
+# the edge must not be paid by anything that only wants the stylesheet.
+from defender.runtime.agent_role import GATHER_AGENT_ID_PREFIX, REVIEW_AGENT_ID_PREFIX
 from defender.scripts.pricing import usage_cost
 from defender.scripts.visualize.visualize_data import phase_verb
 from defender.scripts.visualize.visualize_primitives import parse_report
@@ -111,7 +116,7 @@ def _iter_agent_responses(run_dir: Path, messages: list[dict] | None, prefix: st
 
 
 def _iter_gather_responses(run_dir: Path, messages: list[dict] | None):
-    return _iter_agent_responses(run_dir, messages, "gather:")
+    return _iter_agent_responses(run_dir, messages, GATHER_AGENT_ID_PREFIX)
 
 
 def _iter_review_responses(run_dir: Path, messages: list[dict] | None):
@@ -143,11 +148,7 @@ def gather_cost_by_phase(
     messages: list[dict] | None = None,
 ) -> tuple[dict[str, float], float]:
     out = {ph: 0.0 for ph in phase_order}
-    per_lead: dict[str, float] = {}
-    for lead, rec in _iter_gather_responses(run_dir, messages):
-        per_lead[lead] = per_lead.get(lead, 0.0) + usage_cost(
-            rec.get("model") or "", rec.get("usage") or {}
-        )
+    per_lead = _cost_by(_iter_gather_responses(run_dir, messages), lambda lead, _raw: lead)
     if per_lead:
         gphase = gather_dispatch_phase(events, tags)
         fallback = phase_order[0] if phase_order else None
@@ -208,7 +209,7 @@ def gather_cost_by_model(
     return _cost_by(_iter_gather_responses(run_dir, messages), lambda _s, raw: _pretty_model(raw))
 
 
-def review_cost_by_role(
+def review_cost_by_lens(
     run_dir: Path, messages: list[dict] | None = None
 ) -> dict[str, float]:
     """The write-time review gate's spend, split by LENS — support / ablation / composer.

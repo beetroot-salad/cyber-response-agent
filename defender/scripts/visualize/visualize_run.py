@@ -25,8 +25,8 @@ from defender.scripts.visualize.visualize_data import (
     phase_color,
     phase_verb,
     phase_wall_times,
+    review_cost_by_lens,
     review_cost_by_model,
-    review_cost_by_role,
     run_health,
     run_metadata,
     split_investigation_phases,
@@ -493,8 +493,8 @@ def render_runtime_page(run_dir: Path) -> str:
     # a gate and not a loop phase — the investigator is never "in" it — so a per-phase share
     # would put its cost inside a bar that says where the agent was, which is the one thing
     # that is not true of it (`visualize_runtime.render_review_gate`).
-    review_by_role = review_cost_by_role(run_dir, messages)
-    review_total = sum(review_by_role.values())
+    review_by_lens = review_cost_by_lens(run_dir, messages)
+    review_total = sum(review_by_lens.values())
     wall_times = phase_wall_times(events, tags, phase_order)
     g_wall_to, g_wall_from = gather_wall_by_phase(
         run_dir, events, tags, phase_order, messages
@@ -540,7 +540,7 @@ def render_runtime_page(run_dir: Path) -> str:
     )
     transcript_html, n_tx, tx_phases = render_runtime_transcript(entries, tools, phases)
     leads_html, n_leads = render_runtime_leads_queries(run_dir, leads)
-    review_html, n_reviewed = render_review_gate(run_dir, report, review_by_role)
+    review_html, n_reviewed = render_review_gate(run_dir, report, review_by_lens)
 
     # The review rides as a NAMED term inside the total, the way gather does on a phase's own
     # line. Folded silently it would be a number an operator cannot separate from the

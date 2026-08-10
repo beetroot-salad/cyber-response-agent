@@ -28,8 +28,9 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 from defender._env import env_str
+from defender.runtime import observe
 from defender.runtime.agent_definition import AgentDefinition, RunScope, ToolSet, bind
-from defender.runtime.agent_role import AgentRole
+from defender.runtime.agent_role import REVIEW_AGENT_ID_PREFIX, AgentRole
 from defender.runtime.tools import AgentDeps
 
 __all__ = [
@@ -61,12 +62,13 @@ _DENY_REASON = (
 
 REVIEW_MODEL_ENV = "DEFENDER_REVIEW_MODEL"
 
-#: The `agent_id` namespace every review stage's wire records carry, mirroring gather's
-#: `gather:{lead_id}`. Published rather than spelled at each end, because the writer here and
-#: the cost readers in `scripts/visualize/` must agree exactly: a prefix that drifted on one
-#: side silently drops the review out of the run's accounted total again, which is the whole
-#: of #787 and is invisible to every test that does not price a live run.
-REVIEW_AGENT_ID_PREFIX = "review:"
+# `REVIEW_AGENT_ID_PREFIX` — the `agent_id` namespace every review stage's wire records
+# carry — is re-exported here rather than DEFINED here. Its home is `agent_role`, beside
+# gather's, because the cost readers in `scripts/visualize/` must agree with this writer
+# exactly (a prefix that drifted on one side silently drops the review out of the run's
+# accounted total again, which is the whole of #787) and that module imports nothing but
+# `enum` — so agreeing costs the reader no runtime edge. Re-exported so a caller that already
+# holds the review's module does not have to know where the constant sleeps.
 
 #: The review's own shipped default, PINNED APART from the investigator's. On the two frozen
 #: judge cases in `experiments/judge-glm52-vs-kimik3`, the investigator's default disagreed
@@ -157,8 +159,8 @@ class UnboundReviewStage(RuntimeError):
 
 
 def _make_live_stage(  # noqa: PLR0913 — one stage's full wiring, named once
-    defn: AgentDefinition, run_dir: Path, defender_dir: Path, logger: Any,
-    *, agent_id: str, instructions: str, build: Any,
+    defn: AgentDefinition, run_dir: Path, defender_dir: Path,
+    logger: observe.RequestLogger, *, agent_id: str, instructions: str, build: Any,
 ):
     """One live, agent-backed review stage: built lazily, one Agent per call, mirroring the
     gather-subagent-from-tool-body pattern down to the wire log it writes into.
@@ -244,7 +246,7 @@ class ReviewStages:
 
 
 def live_review_stages(
-    run_dir: Path, defender_dir: Path, *, logger: Any,
+    run_dir: Path, defender_dir: Path, *, logger: observe.RequestLogger,
     model_override: str | None = None, build: Any = None,
 ) -> ReviewStages:
     """The production bundle, buildable only where the run dir AND the run's logger are.

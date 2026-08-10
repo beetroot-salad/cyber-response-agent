@@ -146,20 +146,28 @@ def test_replay_full_run_ab3(tmp_path, monkeypatch):
         rows = read_jsonl_rows(run_dir / f"review_{role}_trace.jsonl")
         assert rows, f"the {role} stage left no trace row"
         assert rows[0].get("ok") is True, f"the {role} stage did not answer"
-    # A live stage no longer leaves a file of its own to look for — since #787 it writes
-    # through the RUN's logger, under a `review:` agent id, into the same wire log the main
-    # agent and the gather subagents use. So the "the injected bundle really was the one that
-    # ran" guard asks the wire log instead: an injected stage calls no provider and therefore
-    # logs nothing at all. Asserted on a name the change did not delete, because the previous
-    # form asserted on one it did — a glob for a file nothing writes any more passes whether
-    # or not the live path was taken.
+    # WHICH bundle answered, asked POSITIVELY. A live stage no longer leaves a file of its
+    # own to look for (since #787 it writes through the run's logger under a `review:` agent
+    # id), and the wire log cannot stand in for that file: under
+    # `override_allow_model_requests(False)` a live stage raises INSIDE the model request, so
+    # `_log_request`'s `logger.log` never runs and no `review:` record is written whether or
+    # not the live path was taken. What only the injected bundle can produce is its own canned
+    # reading, on disk, in the lens traces — a live stage there would carry a provider error.
+    for lens in ("support", "ablation"):
+        trace = (run_dir / f"review_{lens}_trace.jsonl").read_text(encoding="utf-8")
+        assert _review_bundle.LENS_READING in trace, (
+            f"the {lens} reading is not the harness's — the run reached the provider-backed "
+            "bundle, not the injected one"
+        )
+    # Kept as a belt on the hermetic override itself: if a review call ever DID reach a
+    # provider, this is where the evidence would land.
     live = [
         r for r in read_jsonl_rows(run_dir / "llm_requests.jsonl")
         if str(r.get("agent_id", "")).startswith(REVIEW_AGENT_ID_PREFIX)
     ]
     assert not live, (
-        "a live stage was built: the run reached the provider-backed bundle, not the "
-        f"harness's injected one ({len(live)} review wire records)"
+        "a live stage reached a provider: the run is no longer hermetic "
+        f"({len(live)} review wire records)"
     )
 
     assert (run_dir / "tool_trace.jsonl").is_file()

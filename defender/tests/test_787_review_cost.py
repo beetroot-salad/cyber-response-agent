@@ -45,7 +45,7 @@ from defender.scripts.visualize.visualize_data import (
     deduped_main_records,
     gather_cost_by_model,
     review_cost_by_model,
-    review_cost_by_role,
+    review_cost_by_lens,
 )
 
 DEFENDER_DIR = Path(__file__).resolve().parents[1]
@@ -176,7 +176,9 @@ def test_a_live_stage_leaves_no_private_trace_file(run_dir):
         logger.close()
 
     assert not list(run_dir.glob("*_live_trace.jsonl"))
-    assert [p.name for p in run_dir.iterdir()] == ["llm_requests.jsonl"]
+    # `sorted`, because `iterdir()` yields in filesystem order — a list comparison against it
+    # is a flake waiting for the second artifact to land, not a stricter assertion.
+    assert sorted(p.name for p in run_dir.iterdir()) == ["llm_requests.jsonl"]
 
 
 def test_the_two_support_calls_stay_apart_in_the_log(run_dir):
@@ -190,8 +192,18 @@ def test_the_two_support_calls_stay_apart_in_the_log(run_dir):
     finally:
         logger.close()
 
-    ids = [r["id"] for r in read_jsonl_rows(run_dir / "llm_requests.jsonl")]
+    rows = read_jsonl_rows(run_dir / "llm_requests.jsonl")
+    # Asked of the AGENT ID, not of the record id. `_emit` keys `seq` on `agent_id`, so a
+    # bundle that gave all three lenses ONE id would still write three distinct record ids
+    # (`review:support#0/#1/#2`) — a uniqueness assertion cannot fail for the reason this
+    # test names. What collapses under a shared id is the attribution, so that is what is
+    # asked: three calls, three namespaces, and the reader splits them three ways.
+    assert [r["agent_id"] for r in rows] == [
+        f"{REVIEW_AGENT_ID_PREFIX}{lens}" for lens in _LENSES
+    ], "two review calls share an agent id — their readings collapse into one"
+    ids = [r["id"] for r in rows]
     assert len(set(ids)) == len(ids), f"two review calls share a record id: {ids}"
+    assert set(review_cost_by_lens(run_dir)) == set(_LENSES)
 
 
 # --------------------------------------------------------------------------------------
@@ -221,14 +233,14 @@ _ONE_CALL = usage_cost("kimi-k3", _USAGE)
 
 
 def test_the_review_s_spend_is_priced_per_lens(tmp_path):
-    by_role = review_cost_by_role(tmp_path, _MIXED)
+    by_lens = review_cost_by_lens(tmp_path, _MIXED)
 
-    assert set(by_role) == {"support", "ablation", "composer"}, (
+    assert set(by_lens) == {"support", "ablation", "composer"}, (
         "the lens is read off the agent id, so a key carrying the prefix means the reader "
         "and the writer disagree about where the namespace ends"
     )
-    assert all(cost == pytest.approx(_ONE_CALL) for cost in by_role.values())
-    assert sum(by_role.values()) == pytest.approx(3 * _ONE_CALL)
+    assert all(cost == pytest.approx(_ONE_CALL) for cost in by_lens.values())
+    assert sum(by_lens.values()) == pytest.approx(3 * _ONE_CALL)
 
 
 def test_the_review_s_spend_is_priced_per_model(tmp_path):
@@ -245,7 +257,7 @@ def test_the_review_is_priced_at_its_own_model_s_rate(tmp_path):
     assert pytest.approx(same_usage_as_main) != _ONE_CALL, (
         "fixture no longer discriminates — pick a review model whose price row differs"
     )
-    assert sum(review_cost_by_role(tmp_path, _MIXED).values()) == pytest.approx(3 * _ONE_CALL)
+    assert sum(review_cost_by_lens(tmp_path, _MIXED).values()) == pytest.approx(3 * _ONE_CALL)
 
 
 def test_the_three_namespaces_do_not_read_each_other(tmp_path):
@@ -259,14 +271,14 @@ def test_the_three_namespaces_do_not_read_each_other(tmp_path):
     without_review = [r for r in _MIXED if not str(r["agent_id"]).startswith(REVIEW_AGENT_ID_PREFIX)]
     assert gather_cost_by_model(tmp_path, without_review) == gather_cost_by_model(tmp_path, _MIXED)
     assert deduped_main_records(without_review) == deduped_main_records(_MIXED)
-    assert review_cost_by_role(tmp_path, without_review) == {}
+    assert review_cost_by_lens(tmp_path, without_review) == {}
 
 
 def test_a_request_record_is_not_priced(tmp_path):
     """Only responses carry usage. A reader that counted requests would multiply the review's
     cost by however many turns of history the wire log restates."""
     with_request = [*_MIXED, _wire(f"{REVIEW_AGENT_ID_PREFIX}support", "kimi-k3", kind="request")]
-    assert review_cost_by_role(tmp_path, with_request) == review_cost_by_role(tmp_path, _MIXED)
+    assert review_cost_by_lens(tmp_path, with_request) == review_cost_by_lens(tmp_path, _MIXED)
 
 
 def test_a_run_with_no_review_prices_nothing(tmp_path):
@@ -275,5 +287,5 @@ def test_a_run_with_no_review_prices_nothing(tmp_path):
     (tmp_path / "llm_requests.jsonl").write_text(
         json.dumps(_wire("main", "claude-sonnet-4-6")) + "\n", encoding="utf-8",
     )
-    assert review_cost_by_role(tmp_path) == {}
+    assert review_cost_by_lens(tmp_path) == {}
     assert review_cost_by_model(tmp_path) == {}

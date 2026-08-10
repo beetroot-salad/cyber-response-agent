@@ -471,7 +471,7 @@ def render_review_gate(
     bar or transcript group can imply the agent was ever "in" it. What it gets instead is
     its own section, keyed on the close ATTEMPT — which is the unit it actually has.
 
-    `costs` is the gate's spend per LENS (`visualize_messages.review_cost_by_role`). It is
+    `costs` is the gate's spend per LENS (`visualize_messages.review_cost_by_lens`). It is
     rendered HERE and nowhere in the phase machinery for the reason above: the money is real
     and belongs on the page, but the gate is not a place the investigator was."""
     subtitle = "— the write-time gate on a confident close (not a phase)"
