@@ -383,6 +383,7 @@ def phase_wall_times(
 from defender.scripts.visualize.visualize_messages import (  # noqa: F401
     LLM_REQUESTS,
     build_transcript,
+    deduped_main_records,
     gather_calls_by_phase,
     gather_cost_by_model,
     gather_cost_by_phase,
@@ -390,6 +391,8 @@ from defender.scripts.visualize.visualize_messages import (  # noqa: F401
     gather_wall_by_phase,
     load_messages,
     msg_phase_map,
+    review_cost_by_model,
+    review_cost_by_role,
     run_health,
     run_metadata,
     tool_usage,

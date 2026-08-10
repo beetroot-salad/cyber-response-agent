@@ -54,6 +54,10 @@ header.top h1 { margin: 0; font-size: 15px; font-weight: 600; color: var(--text-
 /* Run totals, promoted into the top bar from the old metrics card. */
 .top-stats { display: flex; gap: 10px; align-items: baseline; font-family: 'SF Mono', Menlo, Consolas, monospace; }
 .top-stats .ts-cost { font-size: 17px; font-weight: 700; color: var(--text-bright); }
+/* The review gate's share of the total, named beside it rather than folded into it — the
+   same treatment `.ps-gather` gives the gather subagents on a phase line, and the same
+   accent, because both answer "how much of this number was not the main agent". */
+.top-stats .ts-review { font-size: 12px; font-weight: 600; color: var(--accent-learning); }
 .top-stats .ts-wall { font-size: 14px; font-weight: 600; color: var(--text); }
 .top-stats .ts-sep { color: var(--text-dim); opacity: 0.6; }
 nav.tabs { display: flex; gap: 4px; margin-left: auto; }
@@ -713,6 +717,8 @@ pre.files { font-size: 11px; color: var(--text-dim); }
 .rv-badge.rv-skip { color: var(--text-dim); }
 .rv-attempts { font-size: 11px; color: var(--text-dim); font-family: 'SF Mono', Menlo, Consolas, monospace; }
 .rv-cause { font-size: 12px; color: var(--text-dim); font-style: italic; }
+.rv-cost { font-size: 12px; font-weight: 600; color: var(--accent-learning); font-family: 'SF Mono', Menlo, Consolas, monospace; }
+.rv-cost-lenses { font-size: 11px; color: var(--text-dim); font-family: 'SF Mono', Menlo, Consolas, monospace; }
 .rv-failnote { font-size: 12px; color: var(--bad); border-left: 3px solid var(--bad); padding: 6px 10px; background: var(--bg-3); border-radius: 0 4px 4px 0; margin-bottom: 12px; }
 
 .rv-attempt { border: 1px solid var(--border-2); border-radius: 6px; background: var(--bg-2); padding: 10px 12px; margin-bottom: 10px; }

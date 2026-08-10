@@ -25,6 +25,8 @@ from defender.scripts.visualize.visualize_data import (
     phase_color,
     phase_verb,
     phase_wall_times,
+    review_cost_by_model,
+    review_cost_by_role,
     run_health,
     run_metadata,
     split_investigation_phases,
@@ -487,6 +489,12 @@ def render_runtime_page(run_dir: Path) -> str:
     for ph in phase_order:
         attribution[ph]["gather_cost"] = gather_by_phase.get(ph, 0.0)
         attribution[ph]["cost"] += gather_by_phase.get(ph, 0.0)
+    # The review's spend is totalled but deliberately NOT attributed to a phase. The gate is
+    # a gate and not a loop phase — the investigator is never "in" it — so a per-phase share
+    # would put its cost inside a bar that says where the agent was, which is the one thing
+    # that is not true of it (`visualize_runtime.render_review_gate`).
+    review_by_role = review_cost_by_role(run_dir, messages)
+    review_total = sum(review_by_role.values())
     wall_times = phase_wall_times(events, tags, phase_order)
     g_wall_to, g_wall_from = gather_wall_by_phase(
         run_dir, events, tags, phase_order, messages
@@ -507,10 +515,18 @@ def render_runtime_page(run_dir: Path) -> str:
     wall_ms = sum(e.get("duration_ms") or 0 for e in events if e.get("type") == "result")
     main_model = md["models"][0] if md["models"] else "main"
     by_model = {main_model: main_total}
-    for model, cost in gather_cost_by_model(run_dir, messages).items():
-        by_model[model] = by_model.get(model, 0.0) + cost
+    for by_model_costs in (
+        gather_cost_by_model(run_dir, messages), review_cost_by_model(run_dir, messages),
+    ):
+        for model, cost in by_model_costs.items():
+            by_model[model] = by_model.get(model, 0.0) + cost
+    # `result_total` is the fallback for a run with no phases to attribute against, and it is
+    # the MAIN SESSION's figure (`observe.write_trace` hydrates that session alone). The
+    # subagent terms are added to it for the same reason they are added to the attributed
+    # sum: they are calls this run made, and this is the run's total.
     totals = {
-        "cost": (main_total + gather_total) if phase_order else result_total,
+        "cost": (main_total + gather_total if phase_order else result_total) + review_total,
+        "review_cost": review_total,
         "wall_ms": wall_ms,
         "by_model": by_model,
         "tool_calls": n_tool_calls,
@@ -524,10 +540,18 @@ def render_runtime_page(run_dir: Path) -> str:
     )
     transcript_html, n_tx, tx_phases = render_runtime_transcript(entries, tools, phases)
     leads_html, n_leads = render_runtime_leads_queries(run_dir, leads)
-    review_html, n_reviewed = render_review_gate(run_dir, report)
+    review_html, n_reviewed = render_review_gate(run_dir, report, review_by_role)
 
+    # The review rides as a NAMED term inside the total, the way gather does on a phase's own
+    # line. Folded silently it would be a number an operator cannot separate from the
+    # investigation's; left out of the total it would be the defect #787 reported.
+    review_note = (
+        f'<span class="ts-review">(incl review ${totals["review_cost"]:.4f})</span>'
+        if totals["review_cost"] else ""
+    )
     stats_html = (
         f'<span class="ts-cost">${totals.get("cost", 0.0):.4f}</span>'
+        f"{review_note}"
         f'<span class="ts-sep">·</span>'
         f'<span class="ts-wall">{fmt_duration(wall_ms)}</span>'
     )

@@ -771,10 +771,22 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     # gate's bounds, carrying the request ceiling's own BASE), resolved once at the entry
     # point and threaded inward as a concrete value.
     gate_bounds = bounds if bounds is not None else challenge_gate.default_bounds()
-    # THE one place a live review bundle can honestly be built: the entry point is the only
-    # frame that holds both the run dir the stages must write their traces into and anchor
-    # their policies on, and the operator's model choice. `build_agent` — which sees neither —
-    # used to substitute the source tree for the run dir here.
+    make_model = make_model or providers.build_for_effort
+    adapters = defender_dir / "scripts" / "adapters"
+    verbs = verbs if verbs is not None else ModuleVerbRegistry(adapters, GATHER_DEF.verb_grant)  # lint-default: ok — DI seam owning its default (tree-derived; no signature default possible)
+    limits = limits if limits is not None else DEFAULT_LIMITS  # lint-default: ok — DI seam owning its default (the cap table, threaded inward)
+    budget_started_monotonic = time.monotonic()
+    open_budget(run_dir, run_id)
+    logger = observe.RequestLogger(run_dir / "llm_requests.jsonl")
+
+    # THE one place a live review bundle can honestly be built, and it sits HERE — below the
+    # logger, not above it. The entry point is the only frame holding all three things a live
+    # stage needs: the run dir it anchors its policies on, the operator's model choice, and
+    # the run's own `RequestLogger`. It used to be resolved ten lines further up, where the
+    # logger did not yet exist, so every stage minted a private one and wrote to a file no
+    # reader ever opened — the review's model calls charged a provider and landed in no
+    # accounted total (#787). `build_agent`, which sees none of the three, used to substitute
+    # the source tree for the run dir here.
     #
     # `model_override` is the operator's RAW `--model` and is deliberately a different value
     # from `model_name` above, which has already been resolved against the investigator's
@@ -784,17 +796,10 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     # default.
     stages = (
         review_stages if review_stages is not None
-        else review_roles.live_review_stages(  # lint-default: ok — DI seam owning its default (the live bundle, buildable only where the run dir is)
-            run_dir, defender_dir, model_override=model_override,
+        else review_roles.live_review_stages(  # lint-default: ok — DI seam owning its default (the live bundle, buildable only where the run dir and the run's logger are)
+            run_dir, defender_dir, logger=logger, model_override=model_override,
         )
     )
-    make_model = make_model or providers.build_for_effort
-    adapters = defender_dir / "scripts" / "adapters"
-    verbs = verbs if verbs is not None else ModuleVerbRegistry(adapters, GATHER_DEF.verb_grant)  # lint-default: ok — DI seam owning its default (tree-derived; no signature default possible)
-    limits = limits if limits is not None else DEFAULT_LIMITS  # lint-default: ok — DI seam owning its default (the cap table, threaded inward)
-    budget_started_monotonic = time.monotonic()
-    open_budget(run_dir, run_id)
-    logger = observe.RequestLogger(run_dir / "llm_requests.jsonl")
 
     case_id = uuid.uuid4().hex
     factory = store_factory if store_factory is not None else _default_store_factory  # lint-default: ok — DI seam owning its default (R12's fifth seam)

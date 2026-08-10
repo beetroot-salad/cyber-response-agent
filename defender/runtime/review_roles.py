@@ -35,6 +35,7 @@ from defender.runtime.tools import AgentDeps
 __all__ = [
     "COMPOSER_DEF",
     "DEFAULT_REVIEW_MODEL",
+    "REVIEW_AGENT_ID_PREFIX",
     "REVIEW_MODEL_ENV",
     "SUPPORT_DEF",
     "ComposerDeps",
@@ -59,6 +60,13 @@ _DENY_REASON = (
 
 
 REVIEW_MODEL_ENV = "DEFENDER_REVIEW_MODEL"
+
+#: The `agent_id` namespace every review stage's wire records carry, mirroring gather's
+#: `gather:{lead_id}`. Published rather than spelled at each end, because the writer here and
+#: the cost readers in `scripts/visualize/` must agree exactly: a prefix that drifted on one
+#: side silently drops the review out of the run's accounted total again, which is the whole
+#: of #787 and is invisible to every test that does not price a live run.
+REVIEW_AGENT_ID_PREFIX = "review:"
 
 #: The review's own shipped default, PINNED APART from the investigator's. On the two frozen
 #: judge cases in `experiments/judge-glm52-vs-kimik3`, the investigator's default disagreed
@@ -141,46 +149,52 @@ class UnboundReviewStage(RuntimeError):
     """A review stage was called from a composition root that never held a run dir.
 
     Raised by the stage rather than resolved by substituting the defender source tree for the
-    missing run dir. That substitution was the shipped shape and it put each stage's live
-    trace file inside the repo checkout and anchored the review roles' compiled policies on
+    missing run dir. That substitution was the shipped shape and it wrote the review's live
+    artifacts inside the repo checkout and anchored the review roles' compiled policies on
     the source tree instead of on the run they were judging. Raising is the safer failure: the
     gate catches a stage's exception into its own stage-fault arm, so an unbound bundle fails
     the review CLOSED and names why, rather than acting confidently on the wrong tree."""
 
 
 def _make_live_stage(  # noqa: PLR0913 — one stage's full wiring, named once
-    defn: AgentDefinition, run_dir: Path, defender_dir: Path, trace_name: str,
-    *, agent_id: str, instructions: str,
+    defn: AgentDefinition, run_dir: Path, defender_dir: Path, logger: Any,
+    *, agent_id: str, instructions: str, build: Any,
 ):
     """One live, agent-backed review stage: built lazily, one Agent per call, mirroring the
-    gather-subagent-from-tool-body pattern. NOT exercised by the hermetic suite — the replay
-    harness binds a fake bundle on the `review_stages` seam by DEFAULT, so a replay reaching
-    this function is itself the bug (`test_replay_skeleton` asserts no `*_live_trace.jsonl`
-    is written). Treat a bundle built from it as a best-effort live default.
+    gather-subagent-from-tool-body pattern down to the wire log it writes into.
 
-    `trace_name` and `agent_id` are PER LENS and not per role, because one role can be
-    dispatched twice. `RequestLogger` refuses a second concurrent open of a path, so a shared
-    trace file makes whichever call loses the race raise — caught as a stage error, failing
-    the whole review closed, non-deterministically. And `observe` keys its sequence and id on
-    `agent_id`, so a shared one collapses two readings into one in `llm_requests.jsonl` and in
-    the visualizer. The first fails loudly and at random; the second never fails at all."""
+    It takes the RUN'S logger rather than minting its own. A review role's model calls are
+    calls the run made, and every operator-facing cost figure is derived from
+    `llm_requests.jsonl` or from the session store — so a stage on a private logger charged a
+    real provider and landed in no accounted total at all (#787). The gather subagent is the
+    precedent and the whole of the shape: one shared logger, one `agent_id` namespace, and a
+    reader that filters on the prefix.
+
+    `agent_id` is `review:{lens}` — PER LENS and not per role, because one role can be
+    dispatched twice and `observe` keys its sequence and id on `agent_id`, so a shared one
+    would collapse two readings into one in the log and in the visualizer. The per-lens split
+    that used to be a FILENAME survives here, as the id; nothing needs a file of its own.
+
+    The logger is NOT closed on the way out, and that is load-bearing rather than an
+    omission: it belongs to the run, the main agent is still writing to it, and
+    `RequestLogger.close` would take `llm_requests.jsonl` down mid-investigation.
+
+    `build` is the agent-builder seam, defaulted by `live_review_stages` to
+    `driver.build_agent_core`. It exists because this function is otherwise unreachable
+    without a provider — the replay harness binds a fake bundle on the `review_stages` seam
+    by DEFAULT, so a replay reaching here is itself the bug — and the two properties above
+    (the id namespace, and the logger surviving the call) are exactly the ones no live run is
+    a reasonable place to discover."""
 
     async def call(request):
-        from defender.runtime import observe
-        from defender.runtime.driver import build_agent_core
-
-        logger = observe.RequestLogger(run_dir / trace_name)
         assert defn.deps_cls is not None, f"{defn.role.name}_DEF declares no deps_cls"
-        try:
-            agent = build_agent_core(
-                defn, deps_type=defn.deps_cls, instructions=instructions,
-                logger=logger, agent_id=agent_id,
-            )
-            deps = bind_review_role(defn, run_dir, defender_dir=defender_dir)
-            result = await agent.run(request.prompt, deps=deps)
-            return str(result.output or "")
-        finally:
-            logger.close()
+        agent = build(
+            defn, deps_type=defn.deps_cls, instructions=instructions,
+            logger=logger, agent_id=agent_id,
+        )
+        deps = bind_review_role(defn, run_dir, defender_dir=defender_dir)
+        result = await agent.run(request.prompt, deps=deps)
+        return str(result.output or "")
 
     return call
 
@@ -204,9 +218,9 @@ class ReviewStages:
 
     support: Any = None
     #: The SUPPORT role again, as a
-    #: SEPARATE call: its own trace file and its own agent id, because `RequestLogger`
-    #: refuses a second concurrent open of a path and `observe` keys its sequence on the
-    #: agent id. One role, two calls, two records.
+    #: SEPARATE call under its own `review:{lens}` agent id, because `observe` keys its
+    #: sequence and its record ids on the agent id — a shared one collapses the two readings
+    #: into one in the wire log and in the visualizer. One role, two calls, two records.
     ablation: Any = None
     composer: Any = None
 
@@ -230,16 +244,26 @@ class ReviewStages:
 
 
 def live_review_stages(
-    run_dir: Path, defender_dir: Path, *, model_override: str | None = None,
+    run_dir: Path, defender_dir: Path, *, logger: Any,
+    model_override: str | None = None, build: Any = None,
 ) -> ReviewStages:
-    """The production bundle, buildable only where the run dir is.
+    """The production bundle, buildable only where the run dir AND the run's logger are.
+
+    `logger` is the run's own `RequestLogger` — the same object the main agent and every
+    gather subagent write through. It is required rather than defaulted: a bundle that could
+    mint its own would be a bundle whose calls land outside every accounted total, which is
+    the defect #787 reported. That the parameter has no default is what makes the composition
+    root the only place this bundle can be built, which is the point — it used to be resolved
+    ten lines above where the logger is opened, and the ordering was the whole bug.
 
     `model_override` is the OPERATOR's raw `--model`, threaded here unresolved. Resolving it
     against the investigator's model on the way would hand `resolve_review_model` a non-`None`
     value on every run, and the review's own default would be unreachable in production while
     a unit test calling it with `None` still proved it was the default."""
+    from defender.runtime.driver import build_agent_core
     from defender.runtime.review import role_prompt
 
+    build = build if build is not None else build_agent_core  # lint-default: ok — DI seam owning its default (the live agent builder; a signature default would close an import cycle)
     name = resolve_review_model(model_override)
     # One read per ROLE, not per call: SUPPORT is dispatched twice and its asset does not
     # change between the two.
@@ -250,9 +274,9 @@ def live_review_stages(
 
     def staged(defn: AgentDefinition, lens: str) -> Any:
         return _make_live_stage(
-            replace(defn, model=lambda: name), run_dir, defender_dir,
-            f"review_{lens}_live_trace.jsonl",
-            agent_id=lens, instructions=prompts[defn.role.value],
+            replace(defn, model=lambda: name), run_dir, defender_dir, logger,
+            agent_id=f"{REVIEW_AGENT_ID_PREFIX}{lens}",
+            instructions=prompts[defn.role.value], build=build,
         )
 
     return ReviewStages(

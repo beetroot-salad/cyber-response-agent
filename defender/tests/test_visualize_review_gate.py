@@ -269,6 +269,33 @@ def test_no_records_is_an_unfinished_run_not_a_clean_one(tmp_path):
     assert "no review record" in html
 
 
+def test_the_gate_s_spend_renders_split_by_lens(tmp_path):
+    """#787. The gate's model calls cost real money and used to appear in no operator-facing
+    figure at all. They surface HERE, per lens, because the lens is the decomposition this
+    gate has actually made a decision on — the measurement that retired the DISCRIMINATION
+    role was one lens's share of the review's cost."""
+    run = _challenged_then_stands(tmp_path)
+    html, _ = render_review_gate(
+        run, parse_report(run), {"support": 0.02, "ablation": 0.015, "composer": 0.065},
+    )
+
+    assert "review spend $0.1000" in html, "the gate's total is not the sum of its lenses"
+    for lens, shown in (("support", "$0.0200"), ("ablation", "$0.0150"), ("composer", "$0.0650")):
+        assert f"{lens} {shown}" in html, f"{lens}'s share is missing"
+
+
+def test_a_gate_that_called_no_model_shows_no_spend_line(tmp_path):
+    """Both callers that produce this: a replay, whose injected stages reach no provider, and
+    a run whose wire log predates the gate sharing it. `$0.0000` there would assert the gate
+    was free, which is a claim neither run supports."""
+    run = _challenged_then_stands(tmp_path)
+    report = parse_report(run)
+
+    for costs in (None, {}, {"support": 0.0, "ablation": 0.0, "composer": 0.0}):
+        html, _ = render_review_gate(run, report, costs)
+        assert "review spend" not in html, f"a spend line rendered for {costs!r}"
+
+
 def test_the_gate_is_not_a_phase(tmp_path):
     """The framing, as a test rather than a comment. The five phases are prompt-level and
     model-occupied; the gate is neither, and the moment it acquires a colour and a loop verb

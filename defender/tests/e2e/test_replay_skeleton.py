@@ -36,6 +36,7 @@ from defender.runtime import permission, tools as runtime_tools
 from defender.runtime.agent_definition import compile_policy_for
 from defender.runtime.close_tool import CAUSE_EVIDENCE_CANNOT_DISCRIMINATE
 from defender.runtime.driver import GATHER_DEF, MAIN_DEF
+from defender.runtime.review_roles import REVIEW_AGENT_ID_PREFIX
 from defender.skills.invlang.validate import validate_companion
 from defender.tests import _review_bundle
 
@@ -145,9 +146,20 @@ def test_replay_full_run_ab3(tmp_path, monkeypatch):
         rows = read_jsonl_rows(run_dir / f"review_{role}_trace.jsonl")
         assert rows, f"the {role} stage left no trace row"
         assert rows[0].get("ok") is True, f"the {role} stage did not answer"
-    assert not list(run_dir.glob("review_*_live_trace.jsonl")), (
+    # A live stage no longer leaves a file of its own to look for — since #787 it writes
+    # through the RUN's logger, under a `review:` agent id, into the same wire log the main
+    # agent and the gather subagents use. So the "the injected bundle really was the one that
+    # ran" guard asks the wire log instead: an injected stage calls no provider and therefore
+    # logs nothing at all. Asserted on a name the change did not delete, because the previous
+    # form asserted on one it did — a glob for a file nothing writes any more passes whether
+    # or not the live path was taken.
+    live = [
+        r for r in read_jsonl_rows(run_dir / "llm_requests.jsonl")
+        if str(r.get("agent_id", "")).startswith(REVIEW_AGENT_ID_PREFIX)
+    ]
+    assert not live, (
         "a live stage was built: the run reached the provider-backed bundle, not the "
-        "harness's injected one"
+        f"harness's injected one ({len(live)} review wire records)"
     )
 
     assert (run_dir / "tool_trace.jsonl").is_file()
