@@ -51,6 +51,7 @@ from defender.scripts.visualize.visualize_primitives import (
     section,
 )
 from defender.scripts.visualize.visualize_runtime import (
+    close_vocabulary,
     render_footer,
     render_review_gate,
     render_runtime_investigation,
@@ -158,16 +159,26 @@ def _gate_badge_html(report: ReportRead) -> str:
     with the file the learning loop and the judge both read. A `forced-inconclusive` says the
     headline disposition is the gate's and not the investigator's, which is the one thing a
     reader skimming this card would otherwise get wrong; § Review gate carries the rest.
+
+    THE OUTCOME ALONE IS NOT THE BADGE. The gate's BYPASS arm writes `outcome: stands` too —
+    `stands` is the close tool's word for "committed unchanged", not for "a review agreed" —
+    so keying only on it painted a green "the review held" badge on every `inconclusive`
+    close, contradicting § Review gate below, which reads the records and says "not reviewed".
+    The CAUSE is what tells the two apart, and it is read from its owner rather than spelled
+    here — see `visualize_runtime.close_vocabulary`.
     """
     outcome = str(report.frontmatter.get("outcome", "") or "")
     if not outcome:
         return ""
+    vocab = close_vocabulary()
     kind = report.frontmatter.get("failure_kind")
-    cls = {"stands": "gate-stands", "forced-inconclusive": "gate-forced"}.get(outcome, "gate-other")
-    label = f"gate: {outcome}"
     if kind:
-        cls = "gate-fault"
-        label += f" ({kind})"
+        cls, label = "gate-fault", f"gate: {outcome} ({kind})"
+    elif str(report.frontmatter.get("cause", "") or "") == vocab.not_reviewed_cause:
+        cls, label = "gate-skip", "gate: not reviewed"
+    else:
+        cls = {vocab.stands: "gate-stands", vocab.forced: "gate-forced"}.get(outcome, "gate-other")
+        label = f"gate: {outcome}"
     return f'<a class="gate-badge {cls}" href="#sec-review">{esc(label)}</a>'
 
 
@@ -178,7 +189,14 @@ def render_runtime_headline(
     leads: list,
 ) -> str:
     disposition = report.disposition_or_unknown
-    confidence = str(report.frontmatter.get("confidence", "?"))
+    # `close_tool.render_report` renders the frontmatter from typed arguments and does NOT
+    # write `confidence` — only pre-close-tool runs carry the key. Defaulting it to "?" put a
+    # permanently-empty `confidence: ?` on every current run, beside the gate badge that
+    # actually says something.
+    confidence = report.frontmatter.get("confidence")
+    conf_html = (
+        f'<span class="an-conf">confidence: {esc(str(confidence))}</span>' if confidence else ""
+    )
     body = report.body.strip() or "(no report body)"
 
     icon = _HEALTH_ICON.get(health["level"], "•")
@@ -197,7 +215,7 @@ def render_runtime_headline(
     <div class="fold-card card-analysis">
       <div class="an-top">
         <span class="disp-badge disp-{esc(disposition)}">{esc(disposition)}</span>
-        <span class="an-conf">confidence: {esc(confidence)}</span>
+        {conf_html}
         {_gate_badge_html(report)}
       </div>
       <div class="an-health">{health_html}</div>

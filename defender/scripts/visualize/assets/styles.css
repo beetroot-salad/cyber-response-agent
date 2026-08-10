@@ -331,8 +331,9 @@ section.stage-actor { border-left-color: var(--accent-actor); }
 section.stage-judge { border-left-color: var(--accent-judge); }
 section.stage-oracle { border-left-color: var(--accent-oracle); }
 section.stage-raw { border-left-color: var(--accent-raw); }
-/* The review gate's own accent — not a member of the phase palette, on purpose. */
-section.stage-review { border-left-color: var(--accent-actor); }
+/* No `section.stage-review` accent: the gate renders on the RUNTIME page only, and the rule
+   below strips those sections' borders entirely — a left-border colour there is dead style,
+   and the one it borrowed was the malicious actor's red from the judge page. */
 /* Runtime page: sections aren't boxes — just content separated by a thin rule.
    (The judge page keeps its boxed, color-coded stages.) */
 .content-runtime section.stage {
@@ -700,6 +701,8 @@ pre.files { font-size: 11px; color: var(--text-dim); }
 .gate-badge.gate-stands { color: var(--good); border-color: var(--good); }
 .gate-badge.gate-forced { color: var(--warn); border-color: var(--warn); }
 .gate-badge.gate-fault { color: var(--bad); border-color: var(--bad); }
+/* The gate BYPASS — an `inconclusive` close. Dashed, and never green: nothing was reviewed. */
+.gate-badge.gate-skip { color: var(--text-dim); border-style: dashed; }
 
 .rv-strip { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px; margin-bottom: 10px; }
 .rv-badge { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 4px; border: 1px solid var(--border); color: var(--text-dim); }

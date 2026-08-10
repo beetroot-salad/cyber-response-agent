@@ -205,6 +205,61 @@ def test_inconclusive_close_says_it_was_never_reviewed(tmp_path):
     assert "confident closes only" in html
 
 
+def test_a_bypassed_attempt_beside_a_reviewed_one_is_not_reported_as_stands(tmp_path):
+    """A run challenged once and then closed `inconclusive` has one attempt of each kind.
+    The bypassed one carries `verdict: stands` — the close tool's word for "committed
+    unchanged" — and rendering that verbatim says a review ran and the disposition survived,
+    which is the same claim the all-bypassed guard exists to refuse."""
+    run = tmp_path / "run"
+    run.mkdir()
+    _write_report(run, disposition="inconclusive", outcome="stands",
+                  cause="the disposition was recorded without a challenge review")
+    (run / review_record_path(run, 1).name).write_text(json.dumps({
+        "verdict": "challenged", "reviewed_disposition": "malicious", "detail": "",
+        "failure_kind": None,
+    }), encoding="utf-8")
+    (run / review_record_path(run, 2).name).write_text(json.dumps({
+        "verdict": "stands", "reviewed_disposition": "inconclusive", "detail": "",
+        "failure_kind": None,
+    }), encoding="utf-8")
+    _trace_row(run, "support", 0, {"ok": True}, _framed("support reading r0"))
+
+    html, n = render_review_gate(run, parse_report(run))
+    assert n == 1, "only the confident attempt was reviewed"
+    second = html.split("attempt 2", 1)[1]
+    assert "not reviewed" in second
+    assert "rv-stands" not in second, "the bypassed attempt must not claim a review held"
+
+
+def test_the_headline_badge_does_not_claim_a_review_that_never_ran(tmp_path):
+    """`_gate_badge_html` and § Review gate read the same run and must not disagree: an
+    `inconclusive` close writes `outcome: stands` with the not-reviewed cause."""
+    from defender.scripts.visualize.visualize_run import _gate_badge_html
+
+    run = tmp_path / "run"
+    run.mkdir()
+    _write_report(run, disposition="inconclusive", outcome="stands",
+                  cause="the disposition was recorded without a challenge review")
+    badge = _gate_badge_html(parse_report(run))
+    assert "not reviewed" in badge
+    assert "gate-stands" not in badge
+
+
+def test_a_framed_reply_keeps_its_paragraph_breaks(tmp_path):
+    """A blank line inside a framed reply is the model's own; dropping it reflows a
+    multi-paragraph reading into one run-on block on the surface that exists to show it."""
+    run = tmp_path / "run"
+    run.mkdir()
+    _write_report(run, disposition="benign", outcome="stands", cause="x")
+    (run / review_record_path(run, 1).name).write_text(json.dumps({
+        "verdict": "stands", "reviewed_disposition": "benign", "detail": "", "failure_kind": None,
+    }), encoding="utf-8")
+    _trace_row(run, "support", 0, {"ok": True}, _framed("para one\n\npara two"))
+
+    html, _ = render_review_gate(run, parse_report(run))
+    assert "para one\n\npara two" in html
+
+
 def test_no_records_is_an_unfinished_run_not_a_clean_one(tmp_path):
     run = tmp_path / "run"
     run.mkdir()
