@@ -294,11 +294,12 @@ def test_835_only_the_dispatched_systems_entries_carry_goal_prose(tmp_path):
 
 def test_835_a_system_with_no_templates_says_so_rather_than_rendering_nothing(tmp_path):
     """The tier split makes an empty on-target block reachable for the first time: main dispatches
-    systems the catalog has never had a template for (`ticket`, `threat-intel`), and a typo'd
-    system name lands here too. An omitted block reads to the model as a truncated index — the
-    silent-empty failure #585 exists to stop — so the block renders and names itself empty. The
-    system name is echoed UNNORMALIZED: a typo is then visible next to the descriptor index the
-    prompt already tells gather to confirm the target against."""
+    systems the catalog has never had a template for (`ticket`, `threat-intel`). An omitted block
+    reads to the model as a truncated index — the silent-empty failure #585 exists to stop — so
+    the block renders and names itself empty, echoing the system so the lead can see WHICH tier
+    came back empty. A MALFORMED system never reaches here: `_run_gather` holds the param to
+    `_SYSTEM_RE` first, so a mis-cased name is a retry rather than a catalog silently stripped of
+    every `## Goal`. A well-formed name the catalog simply has no template for is this case."""
     dfn = _catalog(tmp_path)
     prompt = _prompt_for(tmp_path, dfn, system="ticket")
 
@@ -710,6 +711,14 @@ def test_d16_the_skill_demands_reading_the_template_before_binding_its_id():
     assert "query_id" in skill
     assert "--query-id" not in skill, \
         "gather/SKILL.md still teaches the retired --query-id flag (#611: it is a `query` tool param)"
+    # The SKILL is not the only prompt text gather reads: `_INDEX_HEADER` and the
+    # `template_search` docstring are injected into the same dispatch, and BOTH still taught the
+    # dead flag until #835 — precisely because this assertion only ever read the SKILL. Widened
+    # to the module that carries them, so the next drift reds here instead of shipping.
+    engine = (_DEFENDER / "runtime" / "tools_gather.py").read_text()
+    assert "--query-id" not in engine, \
+        "runtime/tools_gather.py still teaches the retired --query-id flag — the index header " \
+        "and the template_search docstring are dispatch prompt text too (#611/#835)"
     assert re.search(r"read[^.]*(template|## query)[^.]*before[^.]*(pass|bind|query_id)", skill) or \
            re.search(r"(never|don't|do not)[^.]*(bind|pass)[^.]*query_id[^.]*(without|before)[^.]*read", skill), \
         "gather/SKILL.md must require reading the template body before binding its query_id"

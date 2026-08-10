@@ -15,8 +15,8 @@ aggregation, run it, report what it returns.
 
 ## Inputs
 
-A fenced YAML block — the `## Dispatch` section, at the END of your dispatch message,
-after the two indexes — carries:
+A fenced YAML block — the `## Dispatch` section, the LAST section of your dispatch
+message, after the indexes — carries:
 
 - `defender_dir` — repo root; anchor `Read`/`Bash` to `{defender_dir}/...`.
 - `run_dir` — the run's working dir; `alert.json` is at `{run_dir}/alert.json`.
@@ -116,12 +116,8 @@ query(system="{system}", verb="{verb}", params={...}, query_id="{system}.<id>")
   query (one lead may run several with different bindings). Omit it and the call still runs,
   recorded under a generic `{system}.{verb}`.
 - **The harness captures the query and its result automatically** — the queries table plus
-  the full payload on disk. You do not wrap the call, name a file, or record anything. What
-  comes back depends on SIZE and nothing else: a payload that fits arrives **whole and
-  verbatim** — read it, count it, quote it, it is all there. One too large arrives **bounded**,
-  with every dropped region marked `<<ELIDED n of m …>>` exactly where it was dropped. Those
-  elements are missing from your context only; they are on disk in full, at the absolute path
-  you also get. Nothing that arrives unmarked is a sample.
+  the full payload on disk. You do not wrap the call, name a file, or record anything. You
+  get a field-shape view of the payload back, plus the absolute path to the whole of it.
 - **Need to reduce a payload afterwards?** That is the one thing Bash is still for, and it
   is a *second* step over the file the query already wrote — never a pipe out of the query:
 

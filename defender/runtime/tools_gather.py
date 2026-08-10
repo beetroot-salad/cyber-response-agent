@@ -6,6 +6,7 @@ import sys
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Any
 
 from pydantic_ai import RunContext
 from pydantic_ai.exceptions import ModelRetry, UnexpectedModelBehavior, UsageLimitExceeded
@@ -43,6 +44,13 @@ class GatherRequest:
     what_to_summarize: tuple[str, ...]
 
 
+#: `(agent_id, system) -> the built gather agent`. Named and ANNOTATED because #835 widened it
+#: from one argument to two: the seam is untyped at both call sites otherwise, so a stale
+#: one-argument factory surfaces as a `TypeError` raised where no terminator arm catches it —
+#: outside the try in `_run_gather` — and unwinds through main's tool call mid-lead.
+GatherFactory = Callable[[str, str], Any]
+
+
 def _tripped_message(deps: GatherDeps, system: str | None) -> str | None:
     if system and circuit_breaker.is_tripped(deps.run_dir, system):
         return circuit_breaker.down_message(deps.run_dir, system)
@@ -65,6 +73,13 @@ def _repo_rel(defender_dir: Path, path: Path) -> str:
         return str(path.relative_to(defender_dir.parent))
     except ValueError:
         return str(path)
+
+
+def _locator(defender_dir: Path, t: QueryTemplate) -> str:
+    """The one `id — path` line. ONE spelling because both surfaces that emit it teach the
+    model the same shape: the dispatch index (where an off-target entry is nothing BUT this
+    line) and `template_search`'s hit header. Two copies drift the moment either is edited."""
+    return f"- `{t.id}` — `{_repo_rel(defender_dir, t.path)}`"
 
 
 def _template_index(
@@ -92,7 +107,7 @@ def _template_index(
             continue
         if verb_grant is not None and not verb_grant.allows(t.system, t.verb):
             continue
-        locator = f"- `{t.id}` — `{_repo_rel(defender_dir, t.path)}`"
+        locator = _locator(defender_dir, t)
         if t.system == dispatched:
             on_target.append(f"{locator}\n  {' '.join(t.goal.split())}")
         else:
@@ -104,9 +119,14 @@ def _template_index(
     if not on_target and not elsewhere:
         return ""
 
+    # No positional word ("above"/"below") in this arm: the descriptor index is absent whenever
+    # `_descriptor_catalog` returns None, and the other tier is absent on a one-system corpus, so
+    # a pointer at either is a dangling reference in exactly the degradation this block exists to
+    # make legible. `_run_gather` holds `system` to `_SYSTEM_RE` before the prompt is built, so
+    # reaching here means a well-formed system the catalog simply has no template for.
     on_target_block = "\n".join(on_target) if on_target else (
-        f"(none — no established `{dispatched}` template. Confirm that system name against the "
-        "descriptor index above; `template_search` before you coin.)"
+        f"(none — the catalog has no established `{dispatched}` template. Nothing is on-target: "
+        "`template_search` for a near neighbour, or read an off-tier path, before you coin.)"
     )
     blocks = [f"### `{dispatched}` — your dispatched system: id, path, `## Goal`\n{on_target_block}"]
     if elsewhere:
@@ -176,6 +196,9 @@ def _gather_prompt(
 
 
 _SYSTEM_RE = re.compile(r"[a-z0-9][a-z0-9-]*\Z")
+#: A ceiling on the same param, because #835 routes it into a provider request field
+#: (`openai_prompt_cache_key`) where the shape alone leaves the length model-controlled.
+_SYSTEM_MAX_LEN = 64
 
 _NO_HITS = (
     "no template matches {pattern!r} (searched {scope}). This means no template's text carries "
@@ -235,10 +258,7 @@ def _tool_template_search(deps: AgentDeps, pattern: str, system: str | None = No
         shown = matched[:_SEARCH_LINES_PER_TEMPLATE]
         dropped += len(matched) - len(shown)
         hit = "\n".join(
-            [
-                f"- `{t.id}` — `{_repo_rel(deps.defender_dir, t.path)}`",
-                *(f"    {ln}" for ln in shown),
-            ]
+            [_locator(deps.defender_dir, t), *(f"    {ln}" for ln in shown)]
         )
         (untrusted if permission.is_untrusted_read(t.path) else trusted).append(hit)
 
@@ -303,7 +323,7 @@ def _persist_gather_summary(run_dir: Path, lead_id: str, wrapped: str) -> None:
 
 
 async def _run_gather(  # noqa: C901 — the branch count IS the terminator census (see docstring)
-    deps: AgentDeps, gather_factory, request_limit: int, request: GatherRequest,
+    deps: AgentDeps, gather_factory: GatherFactory, request_limit: int, request: GatherRequest,
     verb_grant: VerbGrant, stamp_terminator: Callable[[str, str], None] | None = None,
 ) -> str:
     """`stamp_terminator(agent_id, reason)` records how a gather session ENDED, and is the
@@ -323,6 +343,22 @@ async def _run_gather(  # noqa: C901 — the branch count IS the terminator cens
         raise ModelRetry(
             f"invalid lead_id {lead_id!r}: echo the :L findings row id (an `l-` id) "
             "verbatim — it is the FK joining the leads and queries tables."
+        )
+    # SHAPE, not membership, and BEFORE `_claim_lead` so a correction is a retry of THIS lead
+    # rather than a burnt id. #835 made `system` load-bearing twice over — it selects the
+    # template index's on-target tier, and it is the prompt-cache lane key the composition root
+    # hands the provider — so the one key component that WAS validated (`lead_id`) got replaced
+    # by one that was not. Both new uses fail silently on a mis-cased or whitespace-bearing name:
+    # the catalog collapses to bare ids with every `## Goal` stripped, and the string goes out
+    # verbatim as `openai_prompt_cache_key`. `_SYSTEM_RE` is the same shape `template_search`
+    # already holds this param to. NOT `verb_grant.systems`: the role grant is deliberately
+    # decoupled from the per-run registry (see `register_gather_tool`'s call site in driver.py),
+    # so a system an injected registry declares must still dispatch.
+    if not _SYSTEM_RE.match(system) or len(system) > _SYSTEM_MAX_LEN:
+        raise ModelRetry(
+            f"malformed system {system!r}: a system name is lowercase letters, digits and "
+            "hyphens (`host-state`, `change-mgmt`) — the `:L` row's system, spelled as the "
+            "descriptor index spells it. Re-dispatch this same lead_id with the corrected name."
         )
     if _claim_lead({
         "run_dir": str(deps.run_dir), "lead_id": lead_id,
@@ -435,7 +471,7 @@ async def _run_gather(  # noqa: C901 — the branch count IS the terminator cens
 
 
 def register_gather_tool(
-    main_agent, gather_factory, request_limit: int, verb_grant: VerbGrant,
+    main_agent, gather_factory: GatherFactory, request_limit: int, verb_grant: VerbGrant,
     stamp_terminator: Callable[[str, str], None] | None = None,
 ) -> None:
 

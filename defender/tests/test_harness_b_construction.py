@@ -39,7 +39,6 @@ that parameter seam and env vars (`monkeypatch.setenv`), never `monkeypatch.seta
 """
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -250,15 +249,19 @@ def test_835_an_explicit_cache_key_overrides_both_derived_arms(logger):
     assert keyed.model_settings["openai_prompt_cache_key"] == "gather:identity"
 
 
-def test_835_gather_is_cache_keyed_on_the_system_while_its_agent_id_stays_the_lead(logger):
+def test_835_gather_is_cache_keyed_on_the_system_while_its_agent_id_stays_the_lead(logger, tmp_path):
     """The two names are now distinct, and each is load-bearing for something different: the
     prompt-cache lane is the SYSTEM's (that is what the shared prefix belongs to), while
     `agent_id` remains `gather:{lead_id}` — the wire log's line key, the session store's
     `agent_id` column, and what `_stamp_gather_terminator` looks a session up by.
 
-    Driven through the REAL factory the driver hands `register_gather_tool`, reached by driving
-    `_run_gather` with a fake `gather_factory` that records the pair it is called with — the
-    contract change (`gather_factory(agent_id, system)`) is what carries the system down."""
+    Two halves, and NEITHER reaches `driver._build_gather` — it is a closure inside
+    `build_agent`, unreachable without the `monkeypatch.setattr` this module's header forbids.
+    So: `_run_gather` driven with a recording fake pins the CONTRACT that carries the system
+    down (`gather_factory(agent_id, system)`), and `build_gather_agent` pins that a `cache_key`
+    argument lands on the model settings. The composition root's own
+    `cache_key=f"gather:{system}"` is still unpinned — an integration seam worth a test that can
+    observe the built gather agent's settings end-to-end."""
     import asyncio
 
     from defender.runtime import tools_gather
@@ -275,15 +278,14 @@ def test_835_gather_is_cache_keyed_on_the_system_while_its_agent_id_stays_the_le
         seen.append((agent_id, system))
         return _Agent()
 
-    with tempfile.TemporaryDirectory() as td:
-        run_dir = Path(td)
-        (run_dir / "gather_raw").mkdir()
-        deps = bind(MAIN_DEF, run_dir, salt="0011223344556677", defender_dir=_DEFENDER)
-        asyncio.run(tools_gather._run_gather(
-            deps, _factory, 40,
-            tools_gather.GatherRequest("l-005", "identity", "goal", ("what",)),
-            GATHER_DEF.verb_grant,
-        ))
+    run_dir = tmp_path / "run"
+    (run_dir / "gather_raw").mkdir(parents=True)
+    deps = bind(MAIN_DEF, run_dir, salt="0011223344556677", defender_dir=_DEFENDER)
+    asyncio.run(tools_gather._run_gather(
+        deps, _factory, 40,
+        tools_gather.GatherRequest("l-005", "identity", "goal", ("what",)),
+        GATHER_DEF.verb_grant,
+    ))
 
     assert seen == [("gather:l-005", "identity")]
 
