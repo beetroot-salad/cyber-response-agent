@@ -691,7 +691,7 @@ async def _drive_agent(  # noqa: PLR0913 — the loop's own inputs: agent, promp
     except UsageLimitExceeded as e:
         print(f"[run.py] request limit reached ({e}); writing partial trace",
               file=sys.stderr)
-        truncated_by = "request-limit"
+        truncated_by = session_store.TRUNCATED_BY_REQUEST_LIMIT
         exit_reason = "UsageLimitExceeded"
     except UnexpectedModelBehavior as e:
         # RS6 (#774): a stubborn model that keeps retrying a call the gate refuses (e.g. a
@@ -702,7 +702,7 @@ async def _drive_agent(  # noqa: PLR0913 — the loop's own inputs: agent, promp
         # what got stuck) rather than let the run end with no disposition at all.
         print(f"[run.py] {e}; forcing an unresolved close (retry budget exhausted)",
               file=sys.stderr)
-        truncated_by = "retry-exhausted"
+        truncated_by = session_store.TRUNCATED_BY_RETRY_EXHAUSTED
         exit_reason = "UnexpectedModelBehavior"
         # R4, the limb terminality has to answer separately: this handler bypasses the gate
         # and commits through the same path, so on a run whose disposition ALREADY committed
@@ -730,11 +730,11 @@ async def _drive_agent(  # noqa: PLR0913 — the loop's own inputs: agent, promp
                       f"({close_err!r})", file=sys.stderr)
     except RunAborted as e:
         print(f"[run.py] {e}; writing partial trace", file=sys.stderr)
-        truncated_by = "aborted"
+        truncated_by = session_store.TRUNCATED_BY_ABORTED
         exit_reason = "RunAborted"
     except BudgetKill as e:
         print(f"[run.py] {e}; writing partial trace", file=sys.stderr)
-        truncated_by = "budget"
+        truncated_by = session_store.TRUNCATED_BY_BUDGET
         exit_reason = "BudgetKill"
     except (sqlite3.Error, session_store.StoreError) as e:
         # StoreError, not StoreAppendError: PayloadNotRepresentable / IngestTailUnderflow
@@ -742,7 +742,7 @@ async def _drive_agent(  # noqa: PLR0913 — the loop's own inputs: agent, promp
         # ProcessHistory hook, and any one of them escaping takes the whole run.py
         # process down instead of writing the partial trace this handler exists for.
         print(f"[run.py] store append failed ({e!r}); stopping the run", file=sys.stderr)
-        truncated_by = "store"
+        truncated_by = session_store.TRUNCATED_BY_STORE
         exit_reason = "StoreAppendError"
     finally:
         _flush_run_end(run, store, session_id, truncated_by)

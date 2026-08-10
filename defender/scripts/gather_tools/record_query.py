@@ -299,12 +299,16 @@ def repeat_note(
             f"transient to retry through. Change the approach, not the retry count."
         )
     if same_payload is not None and exit_code != 0:
+        # Deliberately says nothing about WHERE the call was turned back. This arm fires for
+        # every non-zero exit, and the classes differ: exit 64 is a usage refusal that never
+        # reached the system, while exit 1 is the system's own answer to a query it did parse.
+        # An earlier wording asserted the first for both, which told a lead facing a genuine
+        # syntax error that rewording the query could not help — the one thing that would.
         return (
             f"[record_query] NO-OP — your request differs from seq {same_payload} but failed "
-            f"with the identical error, so the change did not reach whatever is rejecting it. "
-            f"Read the error before varying the request again: a call turned back by the "
-            f"system's own parameter check never ran, and no rewording of a clause it never "
-            f"applied will change that."
+            f"with the identical error, so the change did not reach whatever rejected it. "
+            f"Read the error text itself before varying the request again: it names the cause, "
+            f"and a variation that leaves that cause standing will return it again."
         )
     if same_payload is not None:
         return (
@@ -467,12 +471,21 @@ def repeat_trip_detail(trip: RepeatTrip) -> str:
     return f"refused: repeat of request already issued at seq {trip.first_seq} ({_ordinal(trip.occurrence)} occurrence)"  # noqa: E501
 
 
-def rejection_trip_detail(trip: RepeatTrip) -> str:
+def rejection_trip_detail(trip: RepeatTrip, rejection: str = "") -> str:
     """`repeat_trip_detail`'s counterpart for the companion guard's trip row. Says "turned
     back", not "issued": the calls it counts never reached a system of record, and a downstream
     reader that could not tell the two apart would report a lead as having queried something it
-    never queried."""
-    return f"refused: repeat of request already turned back at seq {trip.first_seq} ({_ordinal(trip.occurrence)} occurrence)"  # noqa: E501
+    never queried.
+
+    `rejection` is the error THIS call produced, kept as a tail because the companion guard's
+    trip row is not a row of its own: unlike `wrap_tool_execute`, where the refused request
+    never got to fail and the trip row records only the refusal, here one row is both the
+    rejection record and the trip row. Replacing the detail outright would have made the
+    append-only table permanently forget why the last call was malformed. The trip phrase
+    leads, so it survives `_record`'s 160-character digest truncation whole and the tail is
+    what gets cut."""
+    detail = f"refused: repeat of request already turned back at seq {trip.first_seq} ({_ordinal(trip.occurrence)} occurrence)"  # noqa: E501
+    return f"{detail}; rejected: {rejection}" if rejection else detail
 
 
 def rejection_dead_end_reason(system: str, verb: str, trip: RepeatTrip) -> str:
@@ -481,8 +494,12 @@ def rejection_dead_end_reason(system: str, verb: str, trip: RepeatTrip) -> str:
     key, and the honest thing to tell main is what was rejected and that re-sending it is not a
     route through. Never the model-authored `params` text, for `dead_end_reason`'s reason — an
     unbounded fragment must not cross into main's context on a refusal path."""
+    # `system`/`verb` are the RAW arguments at the schema placement and coarsen to `""` when
+    # the call did not supply them as strings at all — so the pair can be empty, and
+    # "the request ( )" would name nothing. Say that instead of rendering a blank.
+    target = f"{system} {verb}".strip() or "system/verb unreadable in the call's own arguments"
     return (
-        f"the request ({system} {verb}) was rejected before it ran and repeats the one already "
+        f"the request ({target}) was rejected before it ran and repeats the one already "
         f"turned back at seq {trip.first_seq}; it has now been rejected "
         f"{trip.occurrence} times for the same reason. The rejection is structural, not a "
         "transient to retry through."

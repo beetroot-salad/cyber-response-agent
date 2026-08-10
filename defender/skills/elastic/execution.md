@@ -50,8 +50,10 @@ wasted Read calls across runs. If a param you need isn't here, treat it as
 unsupported and escalate — don't infer one from the source.
 
 `query` / `alerts` emit a JSON payload
-`{"index": ..., "total": ..., "returned": ..., "truncated": ..., "hits": [...]}`
-where `hits` is the array of `_source` docs. That payload IS the output
+`{"index": ..., "total": ..., "returned": ..., "sort": ..., "truncated": ..., "hits": [...]}`
+where `hits` is the array of `_source` docs and `sort` echoes the order the
+20-doc cap was taken in (so the payload on disk says which end of the window
+it holds). That payload IS the output
 (there is no separate formatted-text mode); gather captures it under
 `gather_raw/{lead_id}/{seq}.json`.
 

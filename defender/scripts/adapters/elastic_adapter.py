@@ -233,7 +233,10 @@ def search_envelope(index: str, docs: list, total: int, truncated: bool, sort: s
         # without the order it was taken in, a reader of the envelope (or of the payload on
         # disk, long after the call) cannot tell whether the 20 it holds are the window's
         # first or its last — the same ambiguity the hardcoded order left in the call itself.
-        "sort": resolve_sort(sort),
+        # Echoed, not re-resolved: `_build_search_body` is the one membership test on this
+        # path and it runs BEFORE the request, so a second one here could only ever refuse a
+        # value Elasticsearch has already sorted by.
+        "sort": sort,
         "truncated": truncated,
         "hits": docs,
     }

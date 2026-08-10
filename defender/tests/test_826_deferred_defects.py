@@ -307,6 +307,16 @@ def test_the_trip_row_detail_says_turned_back_not_issued():
     assert "issued" in rq.repeat_trip_detail(trip), "the executed-path wording drifted"
     assert len(detail) <= 160
 
+    # The trip row is ALSO this call's rejection record — the row it would otherwise have
+    # written does not exist separately — so the error it produced is kept as a tail, and the
+    # trip phrase leads so the 160-char digest truncation eats the tail rather than it.
+    with_cause = rq.rejection_trip_detail(trip, "unknown param(s) ['fields']")
+    assert with_cause.startswith(detail)
+    assert "unknown param(s)" in with_cause
+    assert len(rq.rejection_trip_detail(trip, "x" * 500)[:160]) == 160
+    assert detail in rq.rejection_trip_detail(trip, "x" * 500)[:160], \
+        "a long rejection pushed the repetition itself out of the digest"
+
     reason = rq.rejection_dead_end_reason("elastic", "nosuch-verb", trip)
     assert "elastic nosuch-verb" in reason
     assert "rejected before it ran" in reason

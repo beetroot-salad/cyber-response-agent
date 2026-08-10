@@ -26,6 +26,7 @@ from defender.scripts.gather_tools.record_query import (
     ABOVE_GUARD_QUERY_ID,
     REPEAT_ESCAPE,
     GatherDeadEnd,
+    RepeatTrip,
     _is_event_payload,
     _json_safe_params,
     _next_seq,
@@ -200,7 +201,7 @@ class QueryCapture(AbstractCapability[Any]):
             )
         return None
 
-    async def _rejection_guard(self, deps, system: str, verb: str, params: dict) -> Any:
+    def _rejection_guard(self, deps, system: str, verb: str, params: dict) -> RepeatTrip | None:
         """The companion repeat guard (#826 item 4), shared by the two placements that reject a
         call ABOVE `wrap_tool_execute`'s guard: the argument schema, and the grant check's
         unresolvable-verb branch. Returns the `RepeatTrip` when this call is the `threshold`th
@@ -232,7 +233,7 @@ class QueryCapture(AbstractCapability[Any]):
             # here — that is what the row already stores, so the live count and a replay over
             # the recorded table read the same identity, which is the property that matters.
             params = _as_dict(raw.get("params"))
-            trip = await self._rejection_guard(ctx.deps, system, verb, params)
+            trip = self._rejection_guard(ctx.deps, system, verb, params)
             await self._record(
                 ctx.deps,
                 system=system, verb=verb,
@@ -240,7 +241,7 @@ class QueryCapture(AbstractCapability[Any]):
                 params=params,
                 payload=None,
                 exit_code=USAGE_EXIT_CODE,
-                detail=str(e) if trip is None else rejection_trip_detail(trip),
+                detail=str(e) if trip is None else rejection_trip_detail(trip, str(e)),
             )
             if trip is not None:
                 raise GatherDeadEnd(
@@ -280,14 +281,14 @@ class QueryCapture(AbstractCapability[Any]):
             # from both. The load-error branch above is deliberately NOT guarded: its rows are
             # `infra`, outside `rejection_trip`'s domain, and `circuit_breaker` already owns
             # that repeat end to end.
-            trip = await self._rejection_guard(deps, system, verb, params)
+            trip = self._rejection_guard(deps, system, verb, params)
+            refusal = decision.refusal or "unresolvable"
             await self._record(
                 deps, system=system, verb=verb,
                 query_id=ABOVE_GUARD_QUERY_ID, params=params, payload=None,
                 exit_code=USAGE_EXIT_CODE,
                 detail=(
-                    decision.refusal or "unresolvable" if trip is None
-                    else rejection_trip_detail(trip)
+                    refusal if trip is None else rejection_trip_detail(trip, refusal)
                 ),
             )
             if trip is not None:

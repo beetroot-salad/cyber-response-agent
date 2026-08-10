@@ -21,7 +21,8 @@ from pydantic_ai.exceptions import UnexpectedModelBehavior, UsageLimitExceeded  
 # at its unfinished end, so the driver (which pulls `tools` in properly) is imported ahead of
 # it — the same order every other suite that touches `_run_gather` arrives in.
 from defender.runtime.driver import GATHER_DEF, MAIN_DEF  # noqa: E402
-from defender.runtime import session_store, tools_gather  # noqa: E402
+from defender.hooks.budget_enforcer import BudgetKill  # noqa: E402
+from defender.runtime import circuit_breaker, session_store, tools_gather  # noqa: E402
 from defender.runtime.agent_definition import bind  # noqa: E402
 from defender.runtime.tools_gather import GatherRequest  # noqa: E402
 from defender.scripts.adapters.faults import UpstreamFault  # noqa: E402
@@ -125,10 +126,10 @@ def test_every_gather_terminator_arm_stamps_its_own_reason(tmp_path):
         return lambda agent_id: _Agent()
 
     arms = {
-        UsageLimitExceeded("limit"): tools_gather.REQUEST_LIMIT_TERMINATOR,
-        GatherDeadEnd("repeats seq 0", "move on"): tools_gather.DEAD_END_TERMINATOR,
-        UnexpectedModelBehavior("retries"): tools_gather.RETRY_EXHAUSTED_TERMINATOR,
-        session_store.StoreError("disk full"): tools_gather.STORE_TERMINATOR,
+        UsageLimitExceeded("limit"): session_store.TRUNCATED_BY_REQUEST_LIMIT,
+        GatherDeadEnd("repeats seq 0", "move on"): session_store.TRUNCATED_BY_DEAD_END,
+        UnexpectedModelBehavior("retries"): session_store.TRUNCATED_BY_RETRY_EXHAUSTED,
+        session_store.StoreError("disk full"): session_store.TRUNCATED_BY_STORE,
     }
     assert len(set(arms.values())) == len(arms), "two terminators share a reason string"
 
@@ -144,6 +145,31 @@ def test_every_gather_terminator_arm_stamps_its_own_reason(tmp_path):
         assert stamped[-1] == (f"gather:{lead}", expected)
         assert "Treat this lead as incomplete" in out, \
             "stamping the terminator changed what main is told"
+
+    # The two RUN-level ends. These are NOT degraded into a summary — they must reach
+    # `run_investigation`'s own catch, and `test_budget_kill_is_not_control_flow` pins that
+    # they do — so they are named on the way past instead. An unstamped session here would be
+    # item 1's defect intact for the two shapes the main loop already records under these very
+    # words, which is the whole reason the census cannot stop at the four arms above.
+    propagating = {
+        BudgetKill("tail exhausted"): session_store.TRUNCATED_BY_BUDGET,
+        circuit_breaker.RunAborted(5, ["elastic"]): session_store.TRUNCATED_BY_ABORTED,
+    }
+    assert len(set(arms.values()) | set(propagating.values())) == len(arms) + len(propagating), \
+        "two terminators share a reason string"
+
+    for i, (exc, expected) in enumerate(propagating.items()):
+        run_dir = materialize(tmp_path / f"prop{i}", GOLDEN_AB3)
+        deps = bind(MAIN_DEF, run_dir, salt=SALT, defender_dir=DEFENDER)
+        lead = f"l-01{i}"
+        with pytest.raises(type(exc)):
+            asyncio.run(tools_gather._run_gather(
+                deps, _factory_raising(exc), 40,
+                GatherRequest(lead, "elastic", "goal", ("what",)), GATHER_DEF.verb_grant,
+                lambda agent_id, reason: stamped.append((agent_id, reason)),
+            ))
+        assert stamped[-1] == (f"gather:{lead}", expected), \
+            "a run-level kill left its gather session reading as one that finished"
 
     # The CLEAN end stamps nothing: `truncated_by` unset must keep meaning "this finished".
     class _Clean:
@@ -187,53 +213,102 @@ def test_a_cut_off_lead_is_distinguishable_in_the_store_from_one_that_finished(t
           verbs=elastic_ok(rec), store_factory=store_factory(tmp_path, sink=stores))
 
     sessions = dict(sql(stores[-1], "SELECT agent_id, truncated_by FROM session"))
-    assert sessions[f"gather:{LEAD}"] == tools_gather.DEAD_END_TERMINATOR, \
+    assert sessions[f"gather:{LEAD}"] == session_store.TRUNCATED_BY_DEAD_END, \
         "the cut-off lead's session carries no terminator — it reads as one that finished"
     assert sessions["gather:l-002"] is None, \
         "the lead that finished was stamped as truncated"
     assert sessions["main"] is None, "the run itself did not end cleanly"
 
 
+class _UnstampableStore:
+    """A real store handle whose ONE broken operation is `set_truncated_by` — everything else
+    is the real object, so the run this drives is a real run against a real SQLite file that
+    happens to refuse the terminator write."""
+
+    def __init__(self, real):
+        self._real = real
+        self.attempts: list[tuple[str, str]] = []
+
+    def set_truncated_by(self, session_id: str, reason: str) -> None:
+        self.attempts.append((session_id, reason))
+        raise session_store.StoreError("the store cannot take the stamp")
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+
 def test_a_broken_store_cannot_turn_a_lost_terminator_into_a_lost_lead(tmp_path):
     """The stamp is best-effort, for `_flush_run_end`'s reason: the store may be exactly what
-    ended this lead. A stamp that raised would replace a missing session row with a missing
-    gather summary — trading the smaller loss for the larger one."""
+    ended this lead. A stamp that RAISED would replace a missing session row with a missing
+    gather summary — trading the smaller loss for the larger one — and on the two run-level
+    arms it would replace the kill itself, since the stamp runs in a `finally`.
+
+    Driven against a real run whose store refuses only `set_truncated_by`: the write is
+    attempted (a lost terminator must be a failed write, not a skipped one), and the lead's
+    summary survives it."""
     run_dir = materialize(tmp_path / "run", GOLDEN_AB3)
-    deps = bind(MAIN_DEF, run_dir, salt=SALT, defender_dir=DEFENDER)
+    rec = VerbRecorder()
+    main = ReplayFn([
+        Turn(tool_calls=[_dispatch(LEAD)]), Turn(text="Investigation complete."),
+    ])
+    gather = ReplayFn([
+        q("elastic", "query", PARAMS), q("elastic", "query", PARAMS),
+        q("elastic", "query", PARAMS), DONE,
+    ])
+    real_factory = store_factory(tmp_path)
+    wrapped: list[_UnstampableStore] = []
 
-    class _Agent:
-        async def run(self, *a, **kw):
-            raise session_store.StoreError("the store is gone")
+    def factory(case_id: str, run_dir_: Path):
+        # The sink collects the WRAPPER, not the handle underneath it: `attempts` is the
+        # observation this test turns on, and the inner handle never sees the call.
+        handle = _UnstampableStore(real_factory(case_id, run_dir_))
+        wrapped.append(handle)
+        return handle
 
-    def _exploding_stamp(agent_id: str, reason: str) -> None:
-        raise session_store.StoreError("and it is still gone")
+    drive(run_dir, run_id="d826-nostamp", salt=SALT, main=main, gather=gather,
+          verbs=elastic_ok(rec), store_factory=factory)
 
-    with pytest.raises(session_store.StoreError):
-        asyncio.run(tools_gather._run_gather(
-            deps, lambda agent_id: _Agent(), 40,
-            GatherRequest(LEAD, "elastic", "goal", ("what",)), GATHER_DEF.verb_grant,
-            _exploding_stamp,
-        ))
-    # The driver's own stamp swallows it, which is what production actually installs; this
-    # asserts the swallowing lives THERE and not in a `try` around every arm of `_run_gather`.
-    from defender.runtime import driver
-
-    assert "gather truncated_by write skipped" in Path(driver.__file__).read_text(
-        encoding="utf-8"), "the composition root stopped absorbing a failed stamp"
+    attempts = [reason for h in wrapped for _, reason in h.attempts]
+    assert session_store.TRUNCATED_BY_DEAD_END in attempts, \
+        "the terminator write was skipped rather than attempted"
+    summary = (run_dir / "gather_summaries" / f"{LEAD}.md").read_text(encoding="utf-8")
+    assert "Treat this lead as incomplete" in summary, \
+        "a failed terminator stamp cost the lead its summary"
 
 
-def test_the_gather_terminator_vocabulary_is_the_main_sessions(tmp_path):
-    """One column, one vocabulary. A reader joining `session` rows across both kinds asks
-    "was this cut off, and by what" once — three of gather's four terminators are shapes the
-    main loop has too, and they are spelled identically. `dead-end` is the one with no main
-    analogue: only a lead can be stopped by a repeat guard."""
-    driver_src = (Path(session_store.__file__).parent / "driver.py").read_text(encoding="utf-8")
-    for shared in (tools_gather.REQUEST_LIMIT_TERMINATOR,
-                   tools_gather.RETRY_EXHAUSTED_TERMINATOR,
-                   tools_gather.STORE_TERMINATOR):
-        assert f'"{shared}"' in driver_src, \
-            f"gather spells {shared!r} but the main loop does not — one column, two vocabularies"
-    assert f'"{tools_gather.DEAD_END_TERMINATOR}"' not in driver_src
+def test_both_writers_of_the_column_draw_on_one_vocabulary(tmp_path):
+    """One column, one vocabulary — structurally, not by agreement. `truncated_by` now has two
+    writers (the run-end flush on the MAIN session, the terminator stamp on a lead's), and both
+    take their values from `session_store`, which owns the column. A reader joining `session`
+    rows across both kinds of session asks "was this cut off, and by what" once.
+
+    Driven rather than grepped: a real run whose MAIN session is cut off by the store and whose
+    GATHER session is cut off by the repeat guard, with both stamped values checked against the
+    one closed set."""
+    assert len(set(session_store.TRUNCATED_BY_VALUES)) == len(session_store.TRUNCATED_BY_VALUES)
+
+    run_dir = materialize(tmp_path / "run", GOLDEN_AB3)
+    rec = VerbRecorder()
+    main = ReplayFn([
+        Turn(tool_calls=[_dispatch(LEAD)]), Turn(text="Investigation complete."),
+    ])
+    gather = ReplayFn([
+        q("elastic", "query", PARAMS), q("elastic", "query", PARAMS),
+        q("elastic", "query", PARAMS), DONE,
+    ])
+    stores: list = []
+    drive(run_dir, run_id="d826-vocab", salt=SALT, main=main, gather=gather,
+          verbs=elastic_ok(rec), store_factory=store_factory(tmp_path, sink=stores))
+
+    stamped = [
+        reason for (reason,) in sql(
+            stores[-1], "SELECT truncated_by FROM session WHERE truncated_by IS NOT NULL")
+    ]
+    assert stamped, "no session was stamped at all — the scenario stopped cutting one off"
+    for reason in stamped:
+        assert reason in session_store.TRUNCATED_BY_VALUES, \
+            f"{reason!r} is a value no reader of this column has been told about"
+    assert session_store.TRUNCATED_BY_DEAD_END in stamped
 
 
 # --------------------------------------------------------------------------------------- #
@@ -308,7 +383,7 @@ def test_a_schema_rejected_repeat_loop_ends_the_lead_and_leaves_a_trip_row(tmp_p
     # The session terminator (item 1) covers this new stop too — a fourth terminator with the
     # same gap is exactly what item 1 warned the next one would be.
     assert dict(sql(res.stores[-1], "SELECT agent_id, truncated_by FROM session"))[
-        f"gather:{LEAD}"] == tools_gather.DEAD_END_TERMINATOR
+        f"gather:{LEAD}"] == session_store.TRUNCATED_BY_DEAD_END
 
 
 def test_two_rejections_and_a_corrected_call_still_execute(tmp_path):
