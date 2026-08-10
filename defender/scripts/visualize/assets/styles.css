@@ -331,6 +331,9 @@ section.stage-actor { border-left-color: var(--accent-actor); }
 section.stage-judge { border-left-color: var(--accent-judge); }
 section.stage-oracle { border-left-color: var(--accent-oracle); }
 section.stage-raw { border-left-color: var(--accent-raw); }
+/* No `section.stage-review` accent: the gate renders on the RUNTIME page only, and the rule
+   below strips those sections' borders entirely — a left-border colour there is dead style,
+   and the one it borrowed was the malicious actor's red from the judge page. */
 /* Runtime page: sections aren't boxes — just content separated by a thin rule.
    (The judge page keeps its boxed, color-coded stages.) */
 .content-runtime section.stage {
@@ -688,6 +691,48 @@ pre.files { font-size: 11px; color: var(--text-dim); }
 .tx-text { white-space: pre-wrap; line-height: 1.5; color: var(--text); margin: 2px 0; }
 .tx-call > summary { color: var(--code); font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 12px; }
 .tx-noresults { padding: 16px; text-align: center; }
+
+/* ----- Review gate (#796) -----
+   Deliberately NOT coloured off the phase palette (`visualize_data.phase_color`): the gate
+   is not a phase, and borrowing ORIENT/PLAN/GATHER/ANALYZE/REPORT's colours here is what
+   would make it read as a sixth one. Its colours are keyed on the VERDICT instead. */
+.gate-badge { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 10px; border: 1px solid var(--border); color: var(--text-dim); text-decoration: none; }
+.gate-badge:hover { text-decoration: none; border-color: var(--accent); }
+.gate-badge.gate-stands { color: var(--good); border-color: var(--good); }
+.gate-badge.gate-forced { color: var(--warn); border-color: var(--warn); }
+.gate-badge.gate-fault { color: var(--bad); border-color: var(--bad); }
+/* The gate BYPASS — an `inconclusive` close. Dashed, and never green: nothing was reviewed. */
+.gate-badge.gate-skip { color: var(--text-dim); border-style: dashed; }
+
+.rv-strip { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px; margin-bottom: 10px; }
+.rv-badge { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 4px; border: 1px solid var(--border); color: var(--text-dim); }
+.rv-badge.rv-stands { color: var(--good); border-color: var(--good); }
+.rv-badge.rv-challenged { color: var(--warn); border-color: var(--warn); }
+.rv-badge.rv-forced { color: var(--bad); border-color: var(--bad); }
+.rv-badge.rv-fault { color: var(--bad); border-color: var(--bad); background: rgba(248, 81, 73, 0.08); }
+.rv-badge.rv-skip { color: var(--text-dim); }
+.rv-attempts { font-size: 11px; color: var(--text-dim); font-family: 'SF Mono', Menlo, Consolas, monospace; }
+.rv-cause { font-size: 12px; color: var(--text-dim); font-style: italic; }
+.rv-failnote { font-size: 12px; color: var(--bad); border-left: 3px solid var(--bad); padding: 6px 10px; background: var(--bg-3); border-radius: 0 4px 4px 0; margin-bottom: 12px; }
+
+.rv-attempt { border: 1px solid var(--border-2); border-radius: 6px; background: var(--bg-2); padding: 10px 12px; margin-bottom: 10px; }
+.rv-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.rv-n { font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-dim); font-weight: 600; }
+.rv-disp { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 12px; display: inline-flex; align-items: center; gap: 6px; }
+.rv-drafted { color: var(--text); }
+.rv-arrow { color: var(--text-dim); }
+.rv-committed { color: var(--warn); font-weight: 700; }
+.rv-detail { margin-top: 8px; }
+.rv-detail pre.text { font-size: 12px; }
+
+.rr-list { display: flex; flex-direction: column; gap: 5px; margin-top: 10px; }
+.rr-card > summary { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.rr-role { font-family: 'SF Mono', Menlo, Consolas, monospace; color: var(--code); font-weight: 600; }
+.rr-status { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
+.rr-status.rr-ok { color: var(--good); }
+.rr-status.rr-bad { color: var(--bad); }
+.rr-status.rr-skip { color: var(--text-dim); }
+.rr-note { font-size: 12px; color: var(--text-dim); font-style: italic; margin-bottom: 6px; }
 
 /* ----- Leads & queries table ----- */
 .lq-table { width: 100%; border-collapse: collapse; font-size: 12px; }

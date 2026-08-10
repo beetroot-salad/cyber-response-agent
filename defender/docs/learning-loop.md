@@ -37,7 +37,11 @@ because they flag known failure modes early.
 
 **Reinforcement learning.** The runtime defender is the *policy*. Its
 trajectory through ORIENT → PLAN → GATHER → ANALYZE → REPORT is an
-*episode*. The judge's outcome (`caught | survived | undecidable | ...`)
+*episode* — one the write-time review gate can extend (a challenged close
+buys further turns) or whose terminal action it can override (a confident
+disposition forced to `inconclusive`). The judge therefore grades the
+*committed* disposition, which is not always the one the policy chose.
+The judge's outcome (`caught | survived | undecidable | ...`)
 is a sparse, per-episode *reward signal* — and like all sparse rewards,
 it's hard to credit-assign back to the specific decision that earned it.
 The lessons corpus is a low-bandwidth *policy update*: instead of

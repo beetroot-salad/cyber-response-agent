@@ -12,7 +12,8 @@ shape; read the SKILL for the exact discipline.
 
 ```
 ORIENT → PLAN → GATHER → ANALYZE ─┬─→ PLAN  (loop — only when the next move discriminates)
-                                  └─→ REPORT
+                                  └─→ REPORT ── close_investigation ──→ ⟦review gate⟧ ─┬─→ committed
+                                                                                        └─→ back to PLAN
 ```
 
 The common case is a few iterations of PLAN → GATHER → ANALYZE before
@@ -23,6 +24,10 @@ There is **no enforced state machine.** Phase discipline lives in the prompt,
 not in a hook — consistent with the defender's learning-loop-first stance
 (`content/design.md`). The agent can in principle skip or reorder phases;
 when it does, that's signal for the learning loop, not a blocked write.
+
+**The review gate is the exception, and it is not a phase.** It is enforced in
+code, the investigator never occupies it, and it writes no `##` header into
+`investigation.md` — see §The close is gated below.
 
 ## Phases
 
@@ -44,10 +49,51 @@ when it does, that's signal for the learning loop, not a blocked write.
 - **ANALYZE** — record what gather's summary showed and grade it against the
   PLAN predictions with `:R` blocks (`++`/`+`/`-`/`--`). Decide whether
   there's enough to disposition; if not, loop back to PLAN.
-- **REPORT** — write `report.md`: YAML frontmatter (`case_id`,
-  `disposition`, `confidence`) + one paragraph citing the leads that
-  resolved it. `disposition` is a closed enum: `benign` | `inconclusive` |
-  `malicious`. Stop after that — `run.py` runs the projector and visualizer.
+- **REPORT** — call `close_investigation(disposition=…)`. It is the **only**
+  writer of `report.md`, which is not in the agent's write scope at all; the
+  body is host-rendered from typed arguments, so there is nothing to compose.
+  `disposition` is a closed enum: `benign` | `false-positive` |
+  `inconclusive` | `malicious`. A confident close then passes the review gate
+  (below) before anything is committed. Stop after that — `run.py` runs the
+  projector and visualizer.
+
+## The close is gated
+
+`close_investigation` does not commit a **confident** disposition (anything but
+`inconclusive`) on the agent's say-so. It runs a live write-time review first —
+`runtime/challenge_gate.py`, dispatching into `runtime/review/`.
+
+**Two blind lenses, then a composer.** The lenses read a *projection* of
+`investigation.md` with the whole `:T` family (belief movement — resolutions,
+weights, hypothesis status) pruned out. They see `:V`/`:E`/`:R`/`:H`/`:L` and
+reconstruct what the observations support, so their agreement is independent
+rather than an echo of the write-up. The **ablation** is the support lens
+re-asked with one load-bearing edge withheld and never told anything was
+removed — sensitivity measured by re-asking, not asserted. The **composer** runs
+last, sees both readings plus the investigation's own account, and returns one
+bit (`holds` | `gap`) plus prose and an optional `ask`.
+
+**The reviewer never picks the outcome.** It reports a finding; the host routes
+it, on turn count and raised-ask state no review role can see:
+
+| Gate outcome | What happens | `report.md` |
+|---|---|---|
+| `stands` | the drafted disposition commits | `outcome: stands` |
+| `challenged` | **nothing commits** — the ask comes back as discriminating material and the agent gets another ANALYZE/GATHER turn (`EXTRA_TURN_BOUND = 2`) | not written yet |
+| `forced-inconclusive` | a gap with no measurable ask, a repeat ask that bought nothing, or the turn budget spent | `disposition: inconclusive` |
+| `forced-inconclusive` + `failure_kind` | **fail closed** — a stage raised, timed out, replied unreadably, or no reviewer was bound | `failure_kind: timeout\|error\|unreadable` |
+
+A challenged close is a **normal part of the loop, not an error.** A committed
+close is terminal either way: re-closing is refused.
+
+**What it writes.** `review_record.{turn}.json` per close attempt, plus
+`review_{support,ablation,composer}_trace.jsonl` — see
+`content/run-artifacts.md`. `runtime.html` renders these as § Review gate.
+
+**Why it is not a phase.** The five phases are prompt-level with no enforced
+state machine; this is enforced in code, and the model is never in it. It writes
+no `##` header, so nothing in `investigation.md` marks it and the visualizer's
+phase machinery (`_LOOP_VERBS`, `phase_color`) deliberately does not know it.
 
 ## The gather-dispatch discipline
 
@@ -90,6 +136,7 @@ as Claude Code PreToolUse hooks):
 | `record_lead.claim_lead` | called in `runtime/tools.py` on gather dispatch | Writes the leads-table row `gather_raw/{lead_id}.lead.json` (goal + dimensions), claiming the `lead_id` with an atomic `O_CREAT|O_EXCL` create — a reused id raises (an integrity gate, not just a shim) |
 | `inject_system_skill_description.descriptor_catalog` | `runtime/tools.py` | Supplies the per-system SKILL `description:` catalog (progressive disclosure) so gather confirms relevance then reads the full SKILL |
 | `runtime/permission.py` | called before each tool | Blocks the main loop from running system CLIs directly or reading `gather_raw` to re-derive fields (positive grant enumeration — main carries no `gather_raw` shape); raises `ModelRetry` on a deny |
+| `challenge_gate.challenge_gate` | called inside `runtime/close_tool.py` on every **confident** close | The write-time review (§The close is gated). Fails closed: a stage that raises, times out or replies unreadably overrides the disposition to `inconclusive` rather than letting it commit silently |
 
 If a write or read is blocked, the fix is to dispatch gather — never to find
 another path to the bytes.
@@ -103,5 +150,5 @@ indeterminate-authz forcing a second loop) and
 `example-c-cumulative-escalation.md` (competing hypotheses where none
 reaches `++` but the cumulative pattern justifies escalation).
 
-Sources: `defender/SKILL.md`, `defender/runtime/` (driver, tools, permission),
-`defender/hooks/`.
+Sources: `defender/SKILL.md`, `defender/runtime/` (driver, tools, permission,
+close_tool, challenge_gate, review/), `defender/hooks/`.

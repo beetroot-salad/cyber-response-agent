@@ -27,6 +27,8 @@ The defender is really two loops stacked:
 1. **Runtime loop** — the online investigation. ORIENT → PLAN → GATHER →
    ANALYZE → REPORT, dispatching a Haiku gather subagent per query. Its job
    is to be honest about what it knows and escalate when the data runs out.
+   A **confident** close then passes a write-time review gate before it
+   commits — not a sixth phase, a gate the investigator never occupies.
    See `content/runtime-loop.md`.
 2. **Learning loop** — the offline, self-improving pipeline that runs after
    each investigation (unless `--no-learn`). It plays an adversarial actor
@@ -56,11 +58,21 @@ spends almost none, on purpose:
   experiment, not bugs** — they are exactly the signal the learning loop
   exists to discover and correct.
 
-The narrow exception is **plumbing hooks that materialize harness
-contracts** — extraction shims that replace prompt instructions the model
-would otherwise have to remember, plus the discipline gate that forces all
-data-source queries through the gather subagent. These are not safety gates.
-See `content/runtime-loop.md` §Hooks.
+There are **two exceptions**, both narrow and both deliberate:
+
+- **Plumbing hooks that materialize harness contracts** — extraction shims
+  that replace prompt instructions the model would otherwise have to
+  remember, plus the discipline gate that forces all data-source queries
+  through the gather subagent. These are not safety gates. See
+  `content/runtime-loop.md` §Reliability gates.
+- **The write-time review gate** on every confident close
+  (`runtime/challenge_gate.py`). This one *is* a semantic gate of the kind
+  the stance above rules out, and it is the standing exception rather than a
+  softening of the stance: a confident disposition is the one output nothing
+  downstream re-checks in time to matter, and the learning loop's own signal
+  is only as good as the dispositions it trains on. It is scoped to the
+  close — no phase state machine, no per-write validator — and it fails
+  closed. See `content/runtime-loop.md` §The close is gated.
 
 ## Relationship to soc-agent
 
@@ -68,8 +80,8 @@ See `content/runtime-loop.md` §Hooks.
 |---|---|---|
 | Status | Production plugin (v3) | Experimental PoC |
 | Loaded as | Claude Code plugin | in-process PydanticAI driver via `run.py` |
-| Loop | CONTEXTUALIZE → [SCREEN] → PREDICT → GATHER → ANALYZE → REPORT | ORIENT → PLAN → GATHER → ANALYZE → REPORT |
-| Safety | Three-layer report validation, state machine, invlang validator, budget enforcer | Deliberately none (learning-loop-first) |
+| Loop | CONTEXTUALIZE → [SCREEN] → PREDICT → GATHER → ANALYZE → REPORT | ORIENT → PLAN → GATHER → ANALYZE → REPORT, then the review gate on a confident close |
+| Safety | Three-layer report validation, state machine, invlang validator, budget enforcer | Learning-loop-first, so no phase state machine and no per-write validator — with one scoped exception: the fail-closed review gate on every confident close |
 | Learning | Post-mortem leads pipeline (slice-1) | The headlining experiment — full actor/judge/oracle loop |
 | Archetypes / precedents / permissions / act-mode | Yes | No |
 
