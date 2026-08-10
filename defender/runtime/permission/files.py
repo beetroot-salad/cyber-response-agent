@@ -219,10 +219,11 @@ def decide_read(
 RAW_MARKER = "gather_raw"
 RAW_DENY_REASON = (
     "Blocked: the main loop must not read gather_raw/. Gather's returned "
-    "summary is the authoritative record (defender SKILL §Principles). If a "
-    "field you need is missing, re-dispatch gather with a stricter "
-    "what_to_summarize — do not Read/Grep/jq the raw payload from the main "
-    "loop; that defeats the subagent isolation."
+    "summary is the authoritative record (defender SKILL §Principles). If an "
+    "obligation came back unaddressed, re-dispatch gather naming that "
+    "obligation more sharply — never a field list or a filter — and do not "
+    "Read/Grep/jq the raw payload from the main loop; that defeats the "
+    "subagent isolation."
 )
 
 

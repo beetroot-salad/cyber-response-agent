@@ -9,7 +9,7 @@ body_substitutions: [dst, end, src, start, user]
 ## Goal
 
 SSH authentication history on the `logs-system.auth-*` data — accepted/failed
-counts, auth-method distribution (publickey / password / other), the source IPs,
+counts, auth-method distribution (`system.auth.ssh.method`), the source IPs,
 the target hosts, and the first/last timestamps — over a time window. One
 **capability** template for every auth-history question: alert-window sequence,
 7-day baseline, "has this src ever reached this host", per-user or per-host
@@ -38,9 +38,7 @@ FROM logs-system.auth-*
         failed     = COUNT(*) WHERE event.outcome == "failure",
         first_seen = MIN(@timestamp),
         last_seen  = MAX(@timestamp)
-        BY auth_method = CASE(message LIKE "*publickey*", "publickey",
-                              message LIKE "*password*",  "password", "other"),
-           source.ip, host.name
+        BY auth_method = system.auth.ssh.method, source.ip, host.name
 | SORT accepted DESC, failed DESC
 ```
 
@@ -63,19 +61,39 @@ compares them to `@timestamp` directly.
 - **`event.outcome` is null on ~96% of this index** — session open/close, PAM,
   systemd-user, and cron lines all live in `logs-system.auth-*` with a null
   outcome (≈4.6M null vs ≈165K success / ≈92K failure cluster-wide). The
-  `event.outcome IS NOT NULL` predicate is **mandatory**: without it the
-  `auth_method` "other" bucket floods with non-auth noise. (The conditional
+  `event.outcome IS NOT NULL` predicate is **mandatory**: without it the `BY`
+  grouping floods with non-auth noise. (The conditional
   `COUNT(*) WHERE event.outcome == "..."` scalars are safe either way — nulls
   count toward neither — but the `BY` grouping is not.)
-- **Auth method is not a structured field** — there is no `auth.method`. It is
-  only inferable from the `message` text (`Accepted publickey for ...` /
-  `Accepted password for ...`), hence the `CASE(message LIKE ...)`. `LIKE` is a
-  **case-sensitive substring** match; if you need analyzer-based / case-folded
-  matching use `MATCH(message, "...")`, `QSTR("message:...")`, or `KQL("...")`.
+- **Auth method IS a structured field: `system.auth.ssh.method`** (keyword,
+  `password` / `publickey`). Group on it directly — reconstructing it from the
+  message text costs a `CASE` you don't need and throws the type away. It is
+  **null where no auth method was ever reached**: `Invalid user` rejections and
+  the `pam_unix(sshd:auth): authentication failure` lines both land in the null
+  bucket, so the null separates "a credential was offered and refused" (a
+  populated `password`/`publickey` row) from the rest — it does **not** tell the
+  two null causes apart. Split those on `event.action`, which is populated on
+  both: `ssh_login` on the OpenSSH-format lines (`Accepted` / `Failed` /
+  `Invalid user`), `authentication_failure` on `pam_unix(sshd:auth)`, and
+  `logged-on` / `logged-off` on the session lines.
 - **Structured fields ARE populated and typed here** — `source.ip` (ip),
-  `user.name` (keyword), `host.name` (keyword), `event.outcome` (keyword),
-  `@timestamp` (date). Filter on them directly; do not GROK them out of
-  `message`. (An older catalog note claimed OpenSSH fields were unparsed and
-  message-only — that is stale for this cluster.)
+  `source.port` (long), `user.name` (keyword), `host.name` (keyword),
+  `event.outcome` (keyword), `system.auth.ssh.event` (keyword: `Accepted` /
+  `Failed` / `Invalid`), `system.auth.ssh.method` (keyword), `@timestamp` (date).
+  Filter and group on them directly; do not GROK them out of `message`. (An older
+  catalog note claimed OpenSSH fields were unparsed and message-only — that is
+  stale for this cluster.) Populated on the **OpenSSH-format** lines; the
+  `pam_unix(sshd:auth)` / session / cron lines in the same index carry a null
+  `user.name` and a null `system.auth.ssh.*` pair. A null actor there is a
+  parser gap, not an anonymous login — never report it as one.
+- **`user.name` carries a leading space on `Failed password for invalid user`.**
+  Observed on this cluster: the `Failed password for invalid user dev.dana …`
+  line lands `user.name = " dev.dana"` while its sibling `Invalid user
+  dev.dana …` line lands `"dev.dana"`. So `AND user.name == "${user}"` returns
+  the `Invalid user` rows and **silently drops every `Failed password` row** —
+  a confidently-wrong zero on exactly the brute-force evidence you were sent
+  for. When the lead is about failures, either drop the `user.name` predicate
+  and read the value off the `BY` (both variants surface as their own rows), or
+  bind `TRIM(user.name) == "${user}"`.
 - **Timing.** `MIN`/`MAX(@timestamp)` give the window edges; for a per-bucket
   rate add `BY bucket = DATE_TRUNC(1 hour, @timestamp)`.

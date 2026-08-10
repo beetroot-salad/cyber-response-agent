@@ -126,3 +126,12 @@ there is no flag. Common scopes:
 - `index: 'logs-keycloak.events-*'` — Keycloak Quarkus log + events stream (scope further with `loggerName:`)
 - `index: 'logs-unbound.queries-*'` — Unbound resolver query/reply lines
 - `index: '.internal.alerts-security.alerts-default-*'` — alerts surface (the `alerts` verb's default)
+
+**An alert's own index names are backing indices, not patterns.**
+`ancestor_events[].index` in `alert.json` carries the concrete write-backing
+index behind a datastream — `.ds-logs-system.auth-default-2026.07.27-000004`.
+The adapter allowlists datastream *patterns*, so binding that verbatim is
+refused (`index '…' falls outside the configured patterns`). Map it to its
+pattern before you bind it: a `.ds-`-prefixed name containing `system.auth`
+is `logs-system.auth-*`, `falco.alerts` is `logs-falco.alerts-*`, and so on —
+the dataset segment between `.ds-logs-` and `-default-…` is the pattern's stem.
