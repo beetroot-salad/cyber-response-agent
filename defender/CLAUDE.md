@@ -12,6 +12,7 @@
 |---|---|
 | **the runtime** / **the driver** / **the main loop** | `runtime/driver.py` — the main-agent loop (ORIENT → PLAN → GATHER → ANALYZE → REPORT), tools in `runtime/tools.py` |
 | **the gate** / **permissions** | `runtime/permission/` — the single in-process deny-by-default gate (bash + file reads/writes). Design notes: `docs/runtime-gates.md`. Audit CLI: `scripts/policy_cli.py` (`defender-policy show\|explain`, operator-only) |
+| **the review gate** / **the reviewer** | `runtime/challenge_gate.py` (harness + routing) + `runtime/review/` (projections, role prompts, reply contract), dispatched from `runtime/close_tool.py`. **Not a loop phase** — a write-time gate every *confident* close passes before it commits; `inconclusive` bypasses it. Two blind lenses (`support`, `ablation`) + a `composer`, roster in `REVIEW_ROLES`. Fails closed |
 | **gather** | the per-lead data-access subagent — `skills/gather/` (prompt + query templates), dispatched from `runtime/tools.py`, calls the typed `query` tool (`runtime/query_tool.py`) |
 | **the actor** (malicious / benign) | `learning/pipeline/malicious_actor/`, `learning/pipeline/benign_actor/` — adversarial / FP-hunting story writers |
 | **the oracle** | `learning/pipeline/oracle/` — synthesizes the telemetry the actor's story would have produced |
@@ -32,6 +33,7 @@ defender/
   agents.py         # agent registry
   run_common.py     # shared run-dir + post-step helpers
   runtime/          # in-process PydanticAI engine: driver, tools, permission/, providers/, bash_exec, observe, orient, compaction
+                    #   close_tool.py + challenge_gate.py + review/ — the write-time review gate on every confident close
   hooks/            # gate LOGIC imported as libraries (lead claim, descriptors, budget, lesson-load) — no longer Claude Code hooks
   skills/           # invlang, gather, handbook, advisory + per-system references (elastic/ identity/ cmdb/ ticket/ change-mgmt/ threat-intel/ host-state/)
   scripts/          # adapters/, gather_tools/, visualize/, lessons/, case_history/, policy_cli.py, pricing.py, workspace_map.py
@@ -68,7 +70,7 @@ before chasing them; don't "fix" the tests.
 
 ## Run dir + the two tables
 
-Each run writes to `$DEFENDER_RUNS_BASE/{run_id}/` (default `/tmp/defender-runs/`): `alert.json` (read-only input), `investigation.md` (invlang work log), `report.md` (YAML frontmatter — `disposition: benign|false-positive|inconclusive|malicious` — is the headline the learning loop parses), `llm_requests.jsonl` + `tool_trace.jsonl` (observability), `transcript.html`, and the **two append-only tables**, written live during the run:
+Each run writes to `$DEFENDER_RUNS_BASE/{run_id}/` (default `/tmp/defender-runs/`): `alert.json` (read-only input), `investigation.md` (invlang work log), `report.md` (YAML frontmatter — `disposition: benign|false-positive|inconclusive|malicious` — is the headline the learning loop parses, alongside the review gate's `outcome`/`cause`/`failure_kind`), `review_record.{turn}.json` + `review_{role}_trace.jsonl` (the review gate, one record per close *attempt*), `llm_requests.jsonl` + `tool_trace.jsonl` (observability), `transcript.html` + `runtime.html`, and the **two append-only tables**, written live during the run:
 
 | Table | Where | Key |
 |---|---|---|

@@ -52,6 +52,7 @@ from defender.scripts.visualize.visualize_primitives import (
 )
 from defender.scripts.visualize.visualize_runtime import (
     render_footer,
+    render_review_gate,
     render_runtime_investigation,
     render_runtime_leads_queries,
     render_runtime_toc,
@@ -149,6 +150,27 @@ def render_judge_headline(
 _HEALTH_ICON = {"good": "✓", "warn": "⚠", "bad": "✗"}
 
 
+def _gate_badge_html(report: ReportRead) -> str:
+    """The review gate's outcome, beside the disposition it produced.
+
+    Read from report.md's own frontmatter — the gate WRITES `outcome`/`cause`/`failure_kind`
+    there — rather than re-derived from the review records, so the headline cannot disagree
+    with the file the learning loop and the judge both read. A `forced-inconclusive` says the
+    headline disposition is the gate's and not the investigator's, which is the one thing a
+    reader skimming this card would otherwise get wrong; § Review gate carries the rest.
+    """
+    outcome = str(report.frontmatter.get("outcome", "") or "")
+    if not outcome:
+        return ""
+    kind = report.frontmatter.get("failure_kind")
+    cls = {"stands": "gate-stands", "forced-inconclusive": "gate-forced"}.get(outcome, "gate-other")
+    label = f"gate: {outcome}"
+    if kind:
+        cls = "gate-fault"
+        label += f" ({kind})"
+    return f'<a class="gate-badge {cls}" href="#sec-review">{esc(label)}</a>'
+
+
 def render_runtime_headline(
     run_dir: Path,
     report: ReportRead,
@@ -176,6 +198,7 @@ def render_runtime_headline(
       <div class="an-top">
         <span class="disp-badge disp-{esc(disposition)}">{esc(disposition)}</span>
         <span class="an-conf">confidence: {esc(confidence)}</span>
+        {_gate_badge_html(report)}
       </div>
       <div class="an-health">{health_html}</div>
       <div class="an-cols">
@@ -483,6 +506,7 @@ def render_runtime_page(run_dir: Path) -> str:
     )
     transcript_html, n_tx, tx_phases = render_runtime_transcript(entries, tools, phases)
     leads_html, n_leads = render_runtime_leads_queries(run_dir, leads)
+    review_html, n_reviewed = render_review_gate(run_dir, report)
 
     stats_html = (
         f'<span class="ts-cost">${totals.get("cost", 0.0):.4f}</span>'
@@ -503,13 +527,14 @@ def render_runtime_page(run_dir: Path) -> str:
 <style>{CSS}</style></head><body id="top">
 {render_header(case_id, active="runtime", byline=byline, stats_html=stats_html)}
 <div class="layout">
-  {render_runtime_toc(phases, n_tx, n_leads, tx_phases, leads)}
+  {render_runtime_toc(phases, n_tx, n_leads, tx_phases, leads, n_reviewed)}
   <article class="content content-runtime">
     {render_runtime_headline(run_dir, report, health, leads)}
     {_render_policy_denials_section(run_dir)}
     {metrics_html}
     {render_alert_block(run_dir, open_=False)}
     {investigation_html}
+    {review_html}
     {leads_html}
     {transcript_html}
     {render_store_transcript_section(run_dir)}

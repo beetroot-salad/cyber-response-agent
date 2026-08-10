@@ -7,6 +7,7 @@ import subprocess
 from pathlib import Path
 
 from defender import _git
+from defender._report import ReportRead
 from defender.learning import lead_repository
 from defender.scripts.visualize.visualize_data import (
     normalize_phase_names,
@@ -245,6 +246,216 @@ def _render_tx_entry(e: dict, anchor_attr: str = "") -> str:
 
 
 
+def _review_records(run_dir: Path) -> list[tuple[int, dict]]:
+    """Every close ATTEMPT's numbered review record, in attempt order.
+
+    Numbered, not globbed-and-listed: a challenged close writes its record and commits
+    nothing, so a run that was challenged once leaves `review_record.1.json` beside
+    `review_record.2.json` and the two are different attempts at the same close — sorting
+    them lexically would put attempt 10 before attempt 2 the first time a bound moves."""
+    out: list[tuple[int, dict]] = []
+    for p in sorted(run_dir.glob("review_record.*.json")):
+        m = re.fullmatch(r"review_record\.(\d+)\.json", p.name)
+        if m is None:
+            continue
+        try:
+            rec = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        if isinstance(rec, dict):
+            out.append((int(m.group(1)), rec))
+    return sorted(out, key=lambda kv: kv[0])
+
+
+def _review_trace(path: Path) -> list[dict]:
+    """One review role's trace: each metadata row, with the framed reply that follows it.
+
+    Walked line by line rather than through `read_jsonl_rows`, and the split is decided by
+    `parse_jsonl_row` — the WRITER's own predicate. `_write_trace_row` puts a stage's framed
+    reply on its own physical line exactly when no reader could mistake it for a row, so the
+    ordinary row reader skips it by design; using that reader here would silently drop the
+    model's words this panel exists to show, and re-deriving the rule locally would drift
+    from the writer the moment either side moved."""
+    from defender._io import parse_jsonl_row
+
+    entries: list[dict] = []
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return entries
+    for line in text.splitlines():
+        row = parse_jsonl_row(line)
+        if row is not None:
+            entries.append({"row": row, "raw": []})
+        elif line.strip() and entries:
+            entries[-1]["raw"].append(line)
+    return entries
+
+
+def _review_reply_text(entry: dict) -> str:
+    """The role's raw framed reply, from whichever of the two places the writer put it: its
+    own physical line, or inside the row's `raw_reply` when the reply was itself row-shaped
+    (a composer reply is a JSON object, and on its own line it would corrupt the trace)."""
+    inline = entry["row"].get("raw_reply")
+    if isinstance(inline, str) and inline.strip():
+        return inline
+    return "\n".join(entry["raw"])
+
+
+_VERDICT_CLASS = {
+    "stands": "rv-stands",
+    "challenged": "rv-challenged",
+    "forced-inconclusive": "rv-forced",
+}
+
+
+def _review_row_status(row: dict) -> tuple[str, str]:
+    """One trace row's status label and class.
+
+    `skipped` and `ok: false` are kept apart, and a `skipped` row is never read as an answer:
+    the gate writes NO `ok` key for a lens it did not dispatch, precisely because every trace
+    reader takes `ok: true` as "this stage answered". Collapsing the two here would reinstate
+    that conflation one layer up, on the surface a human actually looks at."""
+    if row.get("incomplete"):
+        return "incomplete", "rr-bad"
+    if "skipped" in row:
+        return "skipped", "rr-skip"
+    if row.get("ok") is True:
+        return "ok", "rr-ok"
+    if row.get("ok") is False:
+        return "fault", "rr-bad"
+    return "—", "rr-skip"
+
+
+def _review_role_html(run_dir: Path, attempt: int) -> str:
+    """One close attempt's per-role calls. The roster comes from `REVIEW_ROLES` rather than
+    being restated here — the same reason the gate's own incomplete-marker walk reads it.
+
+    ATTEMPT N IS TRACE ROUND N-1, and the offset is real rather than a typo to tidy away.
+    The gate stamps its trace rows with `state.turns` as it ENTERS the review (0 on the first
+    close), while the record is numbered by the attempt it belongs to (`state.turns + 1` on a
+    committing arm, and the already-incremented `state.turns` on a challenged one — which
+    land on the same number). Filtering the traces on the record's own number is therefore an
+    off-by-one that renders every role panel empty, with nothing to say it did."""
+    from defender.runtime.challenge_gate import REVIEW_ROLES, review_trace_path
+
+    round_no = attempt - 1
+
+    cards: list[str] = []
+    for role in REVIEW_ROLES:
+        entries = [
+            e for e in _review_trace(review_trace_path(run_dir, role))
+            if e["row"].get("round") == round_no
+        ]
+        if not entries:
+            continue
+        for e in entries:
+            row = e["row"]
+            status, cls = _review_row_status(row)
+            # `reason` (incomplete) and `skipped` are gate-authored or stage-derived text and
+            # the reply is a model's own — all of it goes out through the untrusted escape.
+            note = row.get("reason") or row.get("skipped") or ""
+            reply = _review_reply_text(e)
+            inner = ""
+            if note:
+                inner += f'<div class="rr-note">{esc_untrusted(note)}</div>'
+            if reply.strip():
+                inner += pre_text_untrusted(reply)
+            if not inner:
+                inner = '<div class="empty">(no reply recorded)</div>'
+            cards.append(
+                f'<details class="block rr-card"><summary>'
+                f'<span class="rr-role">{esc(role)}</span>'
+                f'<span class="rr-status {cls}">{esc(status)}</span>'
+                f'</summary><div class="body">{inner}</div></details>'
+            )
+    if not cards:
+        return '<div class="empty">no role traces for this attempt</div>'
+    return f'<div class="rr-list">{"".join(cards)}</div>'
+
+
+def render_review_gate(run_dir: Path, report: ReportRead) -> tuple[str, int]:
+    """§ Review gate — the write-time review every CONFIDENT close passes.
+
+    Rendered as a gate and deliberately NOT as a phase: it has no `##` header in
+    `investigation.md`, the investigator never occupies it, and it is kept out of
+    `visualize_data`'s phase machinery (`_LOOP_VERBS`, `phase_color`) so no cost bar, wall
+    bar or transcript group can imply the agent was ever "in" it. What it gets instead is
+    its own section, keyed on the close ATTEMPT — which is the unit it actually has."""
+    subtitle = "— the write-time gate on a confident close (not a phase)"
+    records = _review_records(run_dir)
+    if not records:
+        body = (
+            '<div class="empty">no review record — the run never reached a close '
+            "(still in flight, or it failed before REPORT)</div>"
+        )
+        return (section("sec-review", "review", "Review gate", subtitle, body), 0)
+
+    committed = report.disposition_or_unknown
+    fm = report.frontmatter
+    outcome = str(fm.get("outcome", "—"))
+    cause = str(fm.get("cause", ""))
+    failure_kind = fm.get("failure_kind")
+
+    # An `inconclusive` close bypasses the gate entirely, so its record is the honest
+    # "nothing was reviewed" and not a review that found nothing.
+    reviewed = [(n, r) for n, r in records if r.get("reviewed_disposition") != "inconclusive"]
+    if not reviewed:
+        body = (
+            '<div class="rv-strip"><span class="rv-badge rv-skip">not reviewed</span>'
+            f'<span class="rv-cause">{esc(cause)}</span></div>'
+            '<div class="empty">the gate reviews confident closes only — an '
+            "<code>inconclusive</code> disposition commits immediately</div>"
+        )
+        return (section("sec-review", "review", "Review gate", subtitle, body), 0)
+
+    kind_html = (
+        f'<span class="rv-badge rv-fault">failure_kind: {esc(str(failure_kind))}</span>'
+        if failure_kind
+        else ""
+    )
+    strip = (
+        f'<div class="rv-strip"><span class="rv-badge {_VERDICT_CLASS.get(outcome, "rv-skip")}">'
+        f"{esc(outcome)}</span>{kind_html}"
+        f'<span class="rv-attempts">{len(records)} close attempt'
+        f'{"" if len(records) == 1 else "s"}</span>'
+        f'<span class="rv-cause">{esc(cause)}</span></div>'
+    )
+    if failure_kind:
+        strip += (
+            '<div class="rv-failnote">The review did not complete, so the close failed '
+            "<strong>closed</strong> — this is the machinery breaking, not a finding about "
+            "the case.</div>"
+        )
+
+    rows: list[str] = []
+    for n, rec in records:
+        verdict = str(rec.get("verdict", "—"))
+        drafted = str(rec.get("reviewed_disposition", "—"))
+        moved = (
+            f'<span class="rv-drafted">{esc(drafted)}</span>'
+            f'<span class="rv-arrow">→</span>'
+            f'<span class="rv-committed">{esc(committed)}</span>'
+            if verdict == "forced-inconclusive"
+            else f'<span class="rv-drafted">{esc(drafted)}</span>'
+        )
+        detail = str(rec.get("detail") or "")
+        detail_html = (
+            f'<div class="rv-detail">{pre_text_untrusted(detail)}</div>' if detail.strip() else ""
+        )
+        rows.append(
+            f'<div class="rv-attempt">'
+            f'<div class="rv-head"><span class="rv-n">attempt {n}</span>'
+            f'<span class="rv-badge {_VERDICT_CLASS.get(verdict, "rv-skip")}">{esc(verdict)}</span>'
+            f'<span class="rv-disp">{moved}</span></div>'
+            f"{detail_html}{_review_role_html(run_dir, n)}</div>"
+        )
+    return (
+        section("sec-review", "review", "Review gate", subtitle, strip + "".join(rows)),
+        len(reviewed),
+    )
+
+
 def render_runtime_leads_queries(run_dir: Path, leads: list | None = None) -> tuple[str, int]:
     if leads is None:
         leads = lead_repository.joined(run_dir)
@@ -316,12 +527,13 @@ def _phase_nav_li(ph: dict, href: str, data_attr: str = "") -> str:
     )
 
 
-def render_runtime_toc(
+def render_runtime_toc(  # noqa: PLR0913 — one argument per section the nav links
     phases: list[dict],
     n_tx: int,
     n_leads: int,
     tx_phases: set[str] | None = None,
     leads: list | None = None,
+    n_reviewed: int = 0,
 ) -> str:
     tx_phases = tx_phases or set()
     leads = leads or []
@@ -341,6 +553,11 @@ def render_runtime_toc(
     )
 
     investigation_item = _toc_dropdown("sec-investigation", "investigation", inv_links)
+    # A flat link, never a phase entry in the dropdown above: the gate is not one of the
+    # phases that nav enumerates, and giving it a `pn-tag` beside ORIENT/PLAN/… is exactly
+    # the "sixth phase" reading the section exists to avoid.
+    review_label = "review gate" + (f" ({n_reviewed})" if n_reviewed else "")
+    review_item = f'<li class="item"><a href="#sec-review">{review_label}</a></li>'
     leads_item = _toc_dropdown("sec-leads", f"leads &amp; queries ({n_leads})", lead_links, open_=False)
     transcript_item = _toc_dropdown("sec-transcript", f"transcript ({n_tx})", tx_links, open_=False)
     return f"""
@@ -351,6 +568,7 @@ def render_runtime_toc(
     <li class="item"><a href="#sec-metrics">metrics</a></li>
     <li class="item"><a href="#sec-alert">alert.json</a></li>
     {investigation_item}
+    {review_item}
     {leads_item}
     {transcript_item}
     <li class="item"><a href="#sec-footer">lesson commits</a></li>
