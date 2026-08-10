@@ -6,6 +6,7 @@ import json
 import math
 import re
 import sys
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -275,10 +276,19 @@ def append_query_row(  # noqa: PLR0913 — one parameter per ROW COLUMN the call
     disagree with `error_class_for_exit` is exactly the divergence the offline loop's
     `agent-fixable` filter cannot see.
 
-    Deliberately SYNCHRONOUS and lock-free. `_record`'s `self._seq_lock` guarded a block with
-    no `await` in it, so within one event loop this sequence was already atomic; keeping it
-    sync means the bash lane — which is not a coroutine — gets the same atomicity for free
-    rather than needing a second, differently-shaped guard."""
+    ATOMICITY IS BY THREAD-CONFINEMENT, not by a lock, and the distinction matters because the
+    two callers guard differently: `_record` still holds `QueryCapture._seq_lock` around this
+    call, the bash lane holds nothing. What actually keeps `(lead_id, seq)` unique is that this
+    function contains no `await`, so no caller on the event loop thread can interleave with it
+    — and `_tool_bash` is synchronous, so it runs on that thread too.
+
+    That is a CONTRACT, not an accident: moving the bash tool off-thread (an
+    `asyncio.to_thread(_tool_bash, …)` at its registration site, tempting because the lane can
+    block for `_BASH_TIMEOUT_S`) breaks it, because two threads would each compute
+    `_next_seq` and collide — the exact defect the mechanical gate's R2 demand was raised
+    about, and one that loses a payload sidecar silently since both writers are best-effort
+    about persistence. Anything that makes either writer concurrent needs a real cross-writer
+    lock here first."""
     seq = _next_seq(run_dir, lead_id)
     payload_rel = persist_payload(run_dir, lead_id, seq, payload_text)
     row = {
@@ -299,7 +309,23 @@ def append_query_row(  # noqa: PLR0913 — one parameter per ROW COLUMN the call
     return row
 
 
-def system_for_payload_operands(run_dir: Path, operands: Any) -> str:
+def _payload_key(operand: Path, base: Path) -> tuple[str, int] | None:
+    """The `(lead_id, seq)` a `gather_raw/{lead}/{seq}.json` operand names, or `None` for any
+    path that is not one — outside the tree, at the wrong depth, wrong suffix, unparseable
+    seq. Every rejection is a `continue` at the caller, so they are one answer here."""
+    try:
+        rel = Path(operand).resolve().relative_to(base)
+    except (ValueError, OSError):
+        return None
+    if len(rel.parts) != 2 or rel.suffix != ".json":
+        return None
+    try:
+        return (rel.parts[0], int(rel.stem))
+    except ValueError:
+        return None
+
+
+def system_for_payload_operands(run_dir: Path, operands: Iterable[Path]) -> str:
     """The system a reducer's failure belongs to: the system of the PAYLOAD it read.
 
     #823's M2, and the reason `derive_system` is not used for this. `derive_system` parses the
@@ -316,31 +342,34 @@ def system_for_payload_operands(run_dir: Path, operands: Any) -> str:
 
     `""` when no operand resolves to a run payload, which is the honest answer and not a
     guess: `collect_general_failures` skips a systemless row at its existing guard
-    (lead_extraction.py:100)."""
-    try:
-        rows = read_jsonl_rows(RunPaths(run_dir).executed_queries)
-    except OSError:
-        return ""
-    by_key = {
-        (r.get("lead_id"), r.get("seq")): r for r in rows if isinstance(r, dict)
-    }
+    (lead_extraction.py:100).
+
+    The operands are keyed FIRST and the table read only if one of them is a payload path, so
+    the common `defender-sql` call that opens no run payload costs no read at all — and the
+    read that does happen is the second of two on this path (`append_query_row`'s `_next_seq`
+    is the other), not the third."""
     try:
         base = RunPaths(run_dir).gather_raw.resolve()
     except OSError:
         return ""
-    for operand in operands or ():
-        try:
-            rel = Path(operand).resolve().relative_to(base)
-        except (ValueError, OSError):
+    keys = [k for operand in operands if (k := _payload_key(operand, base)) is not None]
+    if not keys:
+        return ""
+    try:
+        rows = read_jsonl_rows(RunPaths(run_dir).executed_queries)
+    except OSError:
+        return ""
+    wanted = set(keys)
+    by_key = {
+        (r.get("lead_id"), r.get("seq")): r
+        for r in rows
+        if isinstance(r, dict) and (r.get("lead_id"), r.get("seq")) in wanted
+    }
+    for key in keys:
+        row = by_key.get(key)
+        if row is None:
             continue
-        if len(rel.parts) != 2 or rel.suffix != ".json":
-            continue
-        try:
-            seq = int(rel.stem)
-        except ValueError:
-            continue
-        row = by_key.get((rel.parts[0], seq))
-        system = str((row or {}).get("system") or "").strip()
+        system = str(row.get("system") or "").strip()
         if system:
             return system
     return ""
@@ -454,6 +483,25 @@ REPEAT_ESCAPE = (
 # Deliberately avoids the word "complete": `_run_gather`'s `except GatherDeadEnd` branch
 # appends the fixed `INCOMPLETE_IDIOM` ("Treat this lead as incomplete...") right after this
 # string in the message handed to main, and the two must not read as opposed dispositions.
+
+RESERVED_QUERY_ID_PREFIX = "∅."
+"""The prefix every writer-only sentinel `query_id` carries, and the ONE screen that keeps a
+model from spelling one.
+
+`∅` is chosen because it fails `draft_synthesis._SAFE_ID_SEGMENT`, so the offline routers
+partition a sentinel row by construction rather than by a learned case. That property is
+useless if a model can claim the identity: a `query_id` the model supplies verbatim would let
+it stamp the repeat guard's own refusal record onto a query that was never refused, or route an
+arbitrary failing query into the pitfalls residue with unbounded model-authored `params` —
+past the `SHIM_COMMAND_MAX_CHARS` bound that exists for exactly that reach.
+
+`resolve_query_id` therefore refuses the whole prefix rather than one literal at a time, so a
+fourth sentinel is reserved the day it is defined instead of the day someone remembers."""
+
+
+def is_reserved_query_id(value: str) -> bool:
+    return value.startswith(RESERVED_QUERY_ID_PREFIX)
+
 
 ABOVE_GUARD_QUERY_ID = "∅.above-repeat-guard"
 """The sentinel `query_id` for the three rows written ABOVE the guard's own placement in

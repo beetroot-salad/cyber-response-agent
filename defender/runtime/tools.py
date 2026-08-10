@@ -26,6 +26,8 @@ from defender._untrusted import wrap as _wrap
 # The SAME byte ruler the #629 bounds are measured with — a write tool that reports "bytes"
 # has to report the number the gate will judge, not a codepoint count that under-reads it.
 from defender._artifact_schema import _utf8_len
+from defender.scripts.adapters.faults import USAGE_EXIT_CODE
+from defender.scripts.gather_tools import sql as defender_sql
 from defender.scripts.gather_tools import record_query
 from defender.scripts.gather_tools.record_query import (
     _passthrough_max_bytes as _read_char_cap,
@@ -34,6 +36,11 @@ from defender.hooks.record_lesson_load import (
     RUNTIME_LESSON_CORPORA as _RUNTIME_LESSON_CORPORA,
     lesson_name as _lesson_name,
 )
+
+#: The queries table's own infra code — `circuit_breaker.INFRA_EXIT_CODES`' member for a
+#: fault that is the environment's, not the caller's. Named rather than spelled `2` at the
+#: use site, so a reader of `_shim_exit_code` sees WHICH taxonomy the number belongs to.
+_INFRA_EXIT_CODE = 2
 
 _BASH_TIMEOUT_S = 120
 
@@ -159,8 +166,29 @@ def _bash_env(deps: AgentDeps) -> dict[str, str]:
     return run_common.run_env(deps.defender_dir, deps.run_dir)
 
 
-def _is_reducer_stage(argv: list[str]) -> bool:
-    return bool(argv) and argv[0] == permission.command_shape.SQL_SHIM
+def _shim_exit_code(rc: int) -> int:
+    """Translate `defender-sql`'s exit codes into the dialect the queries table speaks.
+
+    Two dialects meet here and they disagree on the number 2. The shim spends
+    `EXIT_INPUT_ERROR` (2) on the AGENT's mistakes — an empty pipe, a payload that is not JSON,
+    a malformed argv — while 2 in this table means INFRA (`circuit_breaker.INFRA_EXIT_CODES`,
+    where it is the adapter-load fault), and `collect_general_failures` drops every infra row.
+    Left untranslated, the commonest reduce mistakes were recorded and then silently discarded
+    — the exact failure M1 exists to end.
+
+    So the two genuinely different meanings are separated at the boundary rather than averaged:
+    an input error becomes `USAGE_EXIT_CODE`, this table's own "the caller's request was
+    refused"; a missing runtime (`EXIT_NO_RUNTIME`, which #823 split out of the shim's exit-2
+    bucket precisely so this mapping could be exact) becomes the table's infra code, because a
+    broken deployment is not a lesson any `execution.md` should carry. A query error (1) is
+    already agent-fixable and passes through. The shim's real status stays legible either way —
+    `payload_digest` records the raw `exit=N` and its stderr.
+    """
+    if rc == defender_sql.EXIT_INPUT_ERROR:
+        return USAGE_EXIT_CODE
+    if rc == defender_sql.EXIT_NO_RUNTIME:
+        return _INFRA_EXIT_CODE
+    return rc
 
 
 def _record_shim_failure(
@@ -176,24 +204,32 @@ def _record_shim_failure(
 
     FOUR conditions, each of them a demand of the spec and none of them incidental:
 
-    * `lead_id` — GATHER ONLY, and it falls out rather than being tested for: `lead_id` lives on
-      `GatherDeps`, not `AgentDeps`, so main's bash lane cannot produce one. The record is
-      per-lead and joins on that key; main's bash is investigation authoring, not gathering.
+    * `lead_id` — GATHER ONLY. `lead_id` lives on `GatherDeps`, not `AgentDeps`, so main's bash
+      lane structurally cannot produce one; the record is per-lead and joins on that key, and
+      main's bash is investigation authoring, not gathering. Narrowed with `isinstance` rather
+      than `getattr(deps, "lead_id", None)`: the getattr returns `Any`, which silently erased
+      the type of the value feeding `append_query_row(lead_id: str)` — and that value becomes a
+      `gather_raw/{lead_id}/` path component.
     * a non-zero exit — the trigger is a FAILURE, not a shim call. Recording the sanctioned
       happy path would make the pitfalls queue a transcript.
     * a REDUCER stage — not bash in general. `_tool_bash` serves `grep`, `cat` and `wc` too, and
-      a failing `wc` teaches a system nothing. `bin/` carries exactly one reducer.
+      a failing `wc` teaches a system nothing. `bin/` carries exactly one reducer. And it must
+      be the TERMINAL stage (`command_shape.terminal_reducer`): the box reports one exit code,
+      the last stage's, so a reducer piped into `head` has its failure hidden behind that
+      stage's 0 and a healthy reducer piped into a non-matching `grep` is handed its 1. Only
+      when the reducer IS the reported stage can the rc be attributed to it, and a record no
+      one can attribute is worse than no record — it reaches the curator as a lesson.
     * best-effort — this is an observation channel bolted beside the bash lane's real job, so a
       broken table must not turn a working command into a `ModelRetry`. The same posture
       `lead_rows` takes on its own read.
     """
-    lead_id = getattr(deps, "lead_id", None)
-    if lead_id is None or result.rc == 0:
+    if not isinstance(deps, GatherDeps) or deps.lead_id is None or result.rc == 0:
         return
-    stages = permission.command_shape.flat_stages(list(decision.pipelines or ()))
-    if not any(_is_reducer_stage(argv) for argv in stages):
+    lead_id: str = deps.lead_id
+    if not permission.command_shape.terminal_reducer(list(decision.pipelines or ())):
         return
     stderr = result.err.decode("utf-8", "replace")
+    recorded_command = command[:record_query.SHIM_COMMAND_MAX_CHARS]
     try:
         record_query.append_query_row(
             deps.run_dir,
@@ -207,17 +243,20 @@ def _record_shim_failure(
             ),
             verb=_BASH_VERB,
             query_id=record_query.BASH_SHIM_QUERY_ID,
-            params={"command": command[:record_query.SHIM_COMMAND_MAX_CHARS]},
-            raw_command=command[:record_query.SHIM_COMMAND_MAX_CHARS],
+            params={"command": recorded_command},
+            raw_command=recorded_command,
             # Empty, like every other failed row's sidecar: the file must EXIST or
             # `extract_from_joined` drops the row, but a failure has no evidence to persist and
             # the shim's stdout is attacker-influenced bytes.
             payload_text="",
-            exit_code=result.rc,
+            exit_code=_shim_exit_code(result.rc),
             payload_status="error",
             payload_digest=f"exit={result.rc}; {stderr.strip()[:160]}",
         )
-    except OSError:
+    # `Exception`, not `OSError`: the fourth condition above is the whole point of this call,
+    # and the write is not the only thing that can raise inside it. Narrower than the posture
+    # it claims is how an observation channel starts failing the command it observes.
+    except Exception:  # noqa: BLE001 — best-effort observability
         return
 
 

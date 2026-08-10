@@ -68,6 +68,7 @@ from defender.learning.leads import draft_synthesis, lead_extraction, lead_neigh
 from defender.learning.leads.lead_author import build_handoff
 from defender.learning.leads.lead_extraction import collect_general_failures
 from defender.runtime.box_codec import BoxResult
+from defender.runtime.query_tool import resolve_query_id
 from defender.scripts.gather_tools import record_query
 from defender.tests.e2e._replay_harness import (
     GOLDEN_AB3,
@@ -196,7 +197,7 @@ def _run(
 
     `run_dir` is passed by the scenarios that must name a payload path INSIDE a turn, since
     `materialize` refuses a second call on the same root."""
-    run_dir = materialize(root, GOLDEN_AB3) if run_dir is None else run_dir
+    run_dir = materialize(root, GOLDEN_AB3) if run_dir is None else run_dir  # lint-default: ok — the default is DERIVED from `root`, so it cannot be a signature default  # noqa: E501
     the_box = box if box is not None else _Box()
     rec = VerbRecorder()
     main = ReplayFn(main_turns if main_turns is not None else [
@@ -285,6 +286,87 @@ def test_failing_non_shim_bash_writes_no_row(tmp_path):
     assert box.calls, "the bash turn never reached the boundary, so the negative is vacuous"
     assert r.shim_rows == []
     assert len(r.rows) == 1
+
+
+def test_a_non_terminal_reducer_mints_no_row(tmp_path):
+    """a_non_terminal_reducer_mints_no_row — the box reports ONE exit code, the last stage's
+    (`bash_exec` returns `procs[-1].returncode`). So the reported rc is the reducer's only when
+    the reducer is the final stage. Piped into a non-matching `grep`, a perfectly healthy reduce
+    is handed grep's exit 1 — and recording that mints a pitfall record, from a reduce that
+    worked, which the curator then folds into `execution.md` as a lesson.
+
+    Attribution, not squeamishness: a record no one can attribute is worse than no record,
+    because this channel's output is prompt text every later gather subagent reads."""
+    run_dir = materialize(tmp_path, GOLDEN_AB3)
+    payload = run_dir / "gather_raw" / LEAD / "0.json"
+    box = _Box(rc=1, err=b"", match="grep")
+    r = _run(tmp_path, run_dir=run_dir, run_id="d823-nonterminal", box=box, turns=[
+        q("elastic", "query", {"native_query": "FROM logs"}),
+        Turn(tool_calls=[("bash", {
+            "command": f"cat {payload} | {SQL} 'SELECT 1' | grep zzz"})]),
+        DONE,
+    ])
+    assert box.calls, "the pipeline never reached the boundary, so the negative is vacuous"
+    assert r.shim_rows == [], "a healthy reduce was recorded as a pitfall on grep's exit code"
+
+
+def test_the_shims_exit_codes_are_translated_to_the_tables_dialect(tmp_path):
+    """the_shims_exit_codes_are_translated_to_the_tables_dialect — two exit-code dialects meet
+    at this boundary and disagree on the number 2. `defender-sql` spends 2 on the AGENT's
+    mistakes (empty pipe, non-JSON payload); 2 in the queries table means INFRA, and
+    `collect_general_failures` drops every infra row — so untranslated, the commonest reduce
+    mistakes were recorded and then silently discarded, which is the failure M1 exists to end.
+
+    The mapping is exact rather than averaged: a missing runtime keeps its infra meaning,
+    because a broken deployment is not a lesson any `execution.md` should carry — and since it
+    fails EVERY reduce, misfiling it would flood the queue with identical un-actionable
+    records."""
+    cases = [
+        (1, "agent-fixable", 1, "a SQL query error is the agent's and passes through"),
+        (2, "agent-fixable", 1, "an empty or non-JSON payload is the agent's mistake"),
+        (69, "infra", 0, "a missing duckdb is the environment's, and teaches nothing"),
+    ]
+    for rc, want_class, want_records, why in cases:
+        root = tmp_path / f"rc{rc}"
+        root.mkdir()
+        run_dir = materialize(root, GOLDEN_AB3)
+        r = _run(root, run_dir=run_dir, run_id=f"d823-rc{rc}", box=_Box(rc=rc), turns=[
+            q("elastic", "query", {"native_query": "FROM logs"}), _reduce(run_dir), DONE,
+        ])
+        shim = r.shim_rows
+        assert len(shim) == 1, f"rc={rc}: the failure was not recorded at all"
+        assert shim[0]["error_class"] == want_class, f"rc={rc}: {why}"
+        assert f"exit={rc}" in shim[0]["payload_digest"], "the raw status must stay legible"
+        reached = [p for p in collect_general_failures(r.leads(), r.run_dir)
+                   if p["query_id"] == BASH_SHIM_QUERY_ID]
+        assert len(reached) == want_records, f"rc={rc}: {why}"
+
+
+def test_a_model_cannot_forge_a_sentinel_query_id(tmp_path):
+    """a_model_cannot_forge_a_sentinel_query_id — the `∅.` prefix is RESERVED, not merely
+    conventional. `resolve_query_id` already refused `ABOVE_GUARD_QUERY_ID` verbatim; #823 adds
+    two more literals to the same namespace and the refusal must cover the prefix, not a list.
+
+    What a forgery buys otherwise: stamping the guard's own refusal identity onto a query that
+    was never refused, or routing an arbitrary failing query into the pitfalls residue with
+    unbounded model-authored `params` — past the very cap this issue added — or hiding a real
+    catalog failure from the lead-author."""
+    for forged in (BASH_SHIM_QUERY_ID, REPEAT_TRIP_QUERY_ID, record_query.ABOVE_GUARD_QUERY_ID):
+        assert record_query.is_reserved_query_id(forged)
+        assert resolve_query_id("elastic", "query", forged) == "elastic.query", (
+            f"a model-supplied {forged!r} reached a real row"
+        )
+    assert resolve_query_id("elastic", "query", "elastic.legit") == "elastic.legit", (
+        "the refusal is over-broad — an ordinary coined id was rewritten"
+    )
+
+    run_dir = materialize(tmp_path, GOLDEN_AB3)
+    r = _run(tmp_path, run_dir=run_dir, run_id="d823-forge", turns=[
+        q("elastic", "query", {"native_query": "FROM logs"}, query_id=BASH_SHIM_QUERY_ID),
+        DONE,
+    ])
+    assert r.rows[0]["query_id"] == "elastic.query"
+    assert r.shim_rows == [], "a real query row was routed into the shim residue"
 
 
 def test_main_lane_shim_failure_writes_no_row(tmp_path):

@@ -32,6 +32,7 @@ from defender.scripts.gather_tools.record_query import (
     append_query_row,
     build_truncated_view,
     dead_end_reason,
+    is_reserved_query_id,
     lead_rows,
     payload_digest,
     # Re-exported under its old private name: `_spec771` measures the site
@@ -73,16 +74,18 @@ _QID_TRAVERSAL = ("/", "\\", "..", "\x00")
 
 
 def resolve_query_id(system: str, verb: str, model_query_id: str | None) -> str:
-    # ABOVE_GUARD_QUERY_ID is reserved for the three writer sites that pass it directly
-    # (never through here) to mark a row the repeat guard must never count. A model-supplied
-    # `query_id` equal to that literal string — or carrying a traversal character the
-    # below-guard `_screen` would otherwise reject — must not reach a real row through this
-    # path: on the repeat-trip's own record (which sits ABOVE `_screen`), nothing else
-    # screens it, and letting it through would either forge the sentinel (permanently
-    # exempting that request from the repeat count) or persist an unscreened id.
+    # The `∅.` sentinels are reserved for the writer sites that pass them directly (never
+    # through here) to mark a row whose ROUTING the offline collectors take on trust — the
+    # rows the repeat guard must never count, the guard's own trip record, the bash lane's
+    # shim record. A model-supplied `query_id` spelling one of them — or carrying a traversal
+    # character the below-guard `_screen` would otherwise reject — must not reach a real row
+    # through this path: on the repeat-trip's own record (which sits ABOVE `_screen`), nothing
+    # else screens it, and letting it through would either forge a sentinel or persist an
+    # unscreened id. The screen is on the whole PREFIX, not on each literal, so it cannot fall
+    # behind the set (`record_query.is_reserved_query_id`).
     if (
         model_query_id
-        and model_query_id != ABOVE_GUARD_QUERY_ID
+        and not is_reserved_query_id(model_query_id)
         and not any(t in model_query_id for t in _QID_TRAVERSAL)
     ):
         return model_query_id
