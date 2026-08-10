@@ -115,11 +115,7 @@ from defender.runtime.tools import AgentDeps, _bash_env, _format_bash_result
 from defender._untrusted import wrap as _wrap
 from defender.runtime.verbs import DENIED, GRANTED, VerbContext
 from defender.scripts.adapters.faults import AdapterFault
-from defender.scripts.gather_tools.record_query import (
-    _is_event_payload,
-    _passthrough_max_bytes,
-    build_truncated_view,
-)
+from defender.scripts.gather_tools.payload_view import render as _render_payload
 from defender._clock import parse_iso_utc
 
 SYSTEM = "ticket"
@@ -366,11 +362,7 @@ def _capture_and_view(
             return _format_bash_result(
                 exit_code, "", _wrap(detail, "untrusted", deps.salt), note,
             )
-        view = (
-            build_truncated_view(text, payload_rel, run_dir)
-            if (_is_event_payload(text) or len(text) > _passthrough_max_bytes())
-            else text
-        )
+        view = _render_payload(text, payload_rel, run_dir)
         return _format_bash_result(0, _wrap(view, "untrusted", deps.salt), "", note)
 
     return _go()

@@ -16,6 +16,7 @@ from .files import (
     build_write_allow,
     decide_read,
     decide_write,
+    is_captured_payload,
     is_untrusted_read,
 )
 from .grant import OPENS_NOTHING, PROGRAMS, Grant, Route, under
@@ -42,6 +43,7 @@ __all__ = [
     "decide_bash",
     "decide_read",
     "decide_write",
+    "is_captured_payload",
     "is_untrusted_read",
     "require_anchor_root",
     "under",

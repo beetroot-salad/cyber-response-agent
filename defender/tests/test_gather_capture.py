@@ -19,7 +19,8 @@ import json
 
 from defender._io import append_jsonl
 from defender.hooks.record_lead import claim_lead
-from defender.scripts.gather_tools.record_query import _next_seq, build_truncated_view
+from defender.scripts.gather_tools.payload_view import render
+from defender.scripts.gather_tools.record_query import _next_seq
 
 
 def test_next_seq_counts_rows_not_files(tmp_path):
@@ -32,15 +33,13 @@ def test_next_seq_counts_rows_not_files(tmp_path):
     assert _next_seq(tmp_path, "l-002") == 1
 
 
-def test_truncated_view_samples_the_field_shape(tmp_path):
+def test_a_small_payload_reaches_the_lead_whole(tmp_path):
+    """This asserted the opposite until #832: a 30-byte two-record payload came back as a
+    "FIELD-SHAPE sample" — the records replaced by a notice and a disk path — because the key
+    happened to be spelled `hits`. The same two records under any other name rode through
+    untouched. Size decides now, and 30 bytes is not a context problem."""
     payload = json.dumps({"hits": [{"id": 1}, {"id": 2}]})
-    view = build_truncated_view(payload, "gather_raw/l-001/0.json", tmp_path)
-
-    assert "2 records" in view
-    assert "FIELD-SHAPE sample" in view
-    assert "sample[0]" in view
-    assert str(tmp_path / "gather_raw/l-001/0.json") in view
-    assert payload not in view
+    assert render(payload, "gather_raw/l-001/0.json", tmp_path) == payload
 
 
 def test_claim_lead_claims_then_rejects_reuse(tmp_path):

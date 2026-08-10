@@ -270,6 +270,17 @@ def is_untrusted_read(path: Path) -> bool:
     return p.name == "alert.json" or _names_raw(p) or _names_query_draft(p)
 
 
+def is_captured_payload(path: Path) -> bool:
+    """Whether a resolved path is a payload the `query` capture wrote (`gather_raw/`).
+
+    Narrower than `is_untrusted_read` on purpose, and answering a different question. That one
+    asks "must this be salt-tagged?" and takes in the alert and draft templates too; this one
+    asks "was this text already bounded once, on its way into context?" — which is true only of
+    a captured payload, and decides which read cap applies (#832 O7). `alert.json` is the run's
+    own input and is read whole; a payload is not."""
+    return _names_raw(Path(path))
+
+
 def decide_write(
     path: Path, proposed_text: str = "", *,
     run_dir: Path, defender_dir: Path,

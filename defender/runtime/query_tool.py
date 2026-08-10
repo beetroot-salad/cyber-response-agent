@@ -22,16 +22,14 @@ from defender._run_paths import RunPaths
 from defender.hooks.budget_enforcer import BudgetKill
 from defender._untrusted import wrap as _wrap
 from defender.scripts.adapters.faults import USAGE_EXIT_CODE, AdapterFault
+from defender.scripts.gather_tools.payload_view import render as _render_payload
 from defender.scripts.gather_tools.record_query import (
     ABOVE_GUARD_QUERY_ID,
     REPEAT_ESCAPE,
     GatherDeadEnd,
     RepeatTrip,
-    _is_event_payload,
     _json_safe_params,
     _next_seq,
-    _passthrough_max_bytes,
-    build_truncated_view,
     dead_end_reason,
     lead_rows,
     payload_digest,
@@ -444,11 +442,11 @@ class QueryCapture(AbstractCapability[Any]):
             # main loop reads as one span.
             body = detail if repeat is None else f"{repeat}\n{detail}"
             return _format_bash_result(exit_code, "", _wrap(body, "untrusted", deps.salt), note)
-        view = (
-            build_truncated_view(text, row["payload_path"], deps.run_dir)
-            if (_is_event_payload(text) or len(text) > _passthrough_max_bytes())
-            else text
-        )
+        # ONE call, no condition: `render` returns the payload verbatim when it fits and a
+        # bounded view when it does not (#832). The condition used to live here AND at the
+        # judge's mirror of this method, so "what counts as too big" was stated twice and could
+        # drift; the size test that replaced it belongs to the renderer, not to its callers.
+        view = _render_payload(text, row["payload_path"], deps.run_dir)
         if repeat is not None:
             view = f"{repeat}\n{view}"
         return _format_bash_result(0, _wrap(view, "untrusted", deps.salt), "", note)

@@ -26,8 +26,9 @@ from defender._untrusted import wrap as _wrap
 # The SAME byte ruler the #629 bounds are measured with — a write tool that reports "bytes"
 # has to report the number the gate will judge, not a codepoint count that under-reads it.
 from defender._artifact_schema import _utf8_len
-from defender.scripts.gather_tools.record_query import (
-    _passthrough_max_bytes as _read_char_cap,
+from defender._env import env_int
+from defender.scripts.gather_tools.payload_view import (
+    passthrough_max_bytes as _capture_view_cap,
 )
 from defender.hooks.record_lesson_load import (
     RUNTIME_LESSON_CORPORA as _RUNTIME_LESSON_CORPORA,
@@ -57,10 +58,26 @@ def _overflow_filter_hint(
     return f"Reduce it in a pipe{sink}:\n  cat {path} | {reducer}"
 
 
+def _read_char_cap() -> int:
+    """The cap on reading an AUTHORED file — a SKILL, a lesson, a design doc.
+
+    Its own number since #832, where the capture ceiling dropped to 8 KB. The two used to be one
+    constant, and the sharing was load-bearing in one direction only: a lead must not be able to
+    `read_file` a persisted payload and recover what the capture view withheld. But equality
+    over-served that property — `defender/SKILL.md` is 33,590 bytes and 16 of 20 files under
+    `docs/` clear 8 KB, so lowering the shared value would have truncated the runtime agent's own
+    spec to serve a bound on payload reads. `_cap_for` keeps the property and drops the equality:
+    the capture ceiling applies where a capture is being re-read, and nowhere else."""
+    return env_int("DEFENDER_AUTHORED_READ_MAX_CHARS", 65536)
+
+
+def _cap_for(p: Path) -> int:
+    return _capture_view_cap() if permission.is_captured_payload(p) else _read_char_cap()
+
+
 def _bounded_read(
-    text: str, path: str, *, filter_hint: str, read_tool: str = "read_file"
+    text: str, path: str, *, cap: int, filter_hint: str, read_tool: str = "read_file"
 ) -> str:
-    cap = _read_char_cap()
     if len(text) <= cap:
         return text
     total_lines = text.count("\n") + 1
@@ -335,7 +352,7 @@ def _bound_and_wrap(
     deps: AgentDeps, p: Path, path: str, text: str, *, read_tool: str
 ) -> str:
     text = _bounded_read(
-        text, path,
+        text, path, cap=_cap_for(p),
         filter_hint=_overflow_filter_hint(path, deps.policy, read_tool),
         read_tool=read_tool,
     )
