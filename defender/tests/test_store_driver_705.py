@@ -71,7 +71,7 @@ SALT = "0011223344556677"
 #: swallowing the turn in progress.
 _CLOSED_LOOP_INVLANG = """```invlang
 :L findings [id|loop|name|target|tests|system|window]
-l-001|1|raw-auth|v-001|h-001|elastic|w
+l-001|1|raw-auth|v-001||elastic|w
 
 :E l-001.observations.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]
 e-001|attempted_auth|v-003|v-001|2026-05-01T10:11:00Z|siem-event:wazuh|outcome=success
@@ -84,7 +84,7 @@ loop 1
 
 ```invlang
 :L findings [id|loop|name|target|tests|system|window]
-l-005|2|cmdb-ip|v-006|h-002|cmdb|w
+l-005|2|cmdb-ip|v-006||cmdb|w
 ```
 """
 

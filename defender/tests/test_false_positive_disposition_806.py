@@ -29,8 +29,8 @@ _PROLOGUE = (
 _LEADS = (
     "```invlang\n"
     ":L findings [id|loop|name|target|tests|system|window]\n"
-    "l-001|1|sshd-auth-events-detail|v-001|h-001|elastic|30d\n"
-    "l-002|2|bruteforce-source-attribution|v-006|h-002|elastic|30d\n"
+    "l-001|1|sshd-auth-events-detail|v-001||elastic|30d\n"
+    "l-002|2|bruteforce-source-attribution|v-006||elastic|30d\n"
     "```\n"
 )
 
@@ -111,7 +111,7 @@ def test_a_lead_whose_only_outcome_is_a_failure_does_not_count():
     failed_lead = (
         "```invlang\n"
         ":L findings [id|loop|name|target|tests|system|window|fail_reason]\n"
-        "l-003|1|db1-authorized-keys|v-001|h-001|elastic|30d|index unavailable\n"
+        "l-003|1|db1-authorized-keys|v-001||elastic|30d|index unavailable\n"
         "```\n"
     )
     doc = _doc(_PROLOGUE, failed_lead,

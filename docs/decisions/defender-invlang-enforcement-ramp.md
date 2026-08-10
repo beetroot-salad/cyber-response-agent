@@ -36,9 +36,9 @@ error rather than letting the write through. Scope is anchored to
    parser derives those lists from head tokens and never joined them
    back to the declaring block, so a typo, a forward reference and a
    *sibling's* `p1` all parsed clean (#798).
-6a. hypothesis-refs — the row's own `h-*` must be declared, at
+6a. hypothesis-refs — every `h-*` a document names must be declared, at
    `:H hypothesize.hypotheses` or at a lead's `:H l-NNN.new_hypotheses`
-   (#818). The projector opens no bucket for an unknown `h-*`, so a
+   (#818, #821). The projector opens no bucket for an unknown `h-*`, so a
    phantom moved to `++` in silence and `_walkers.final_weights`
    reported it live. It could not be enforced until `:H` blocks
    accumulated (#817) — before that a legitimate mid-run fork's earlier
@@ -51,6 +51,80 @@ error rather than letting the write through. Scope is anchored to
    instance — its `:H` rows use `attached_to=e-001`, which `:H` forbids,
    and four resolutions then point at the hypotheses those row errors
    dropped. *Fix the example and the deference stops mattering there.*
+
+   That deference is keyed to the dropped IDS, not to the document
+   (`parser.deferred_hypothesis_ids`). Answering only "did any
+   declaration get dropped?" meant one malformed `:H` row anywhere
+   silenced the rule for the whole file, so an unrelated typo three
+   leads away went unreported behind a warning that had nothing to do
+   with it. The id is recoverable in both failure modes — a whole-block
+   rejection carries `ParseWarning.dropped_ids`, a row-level failure
+   carries its row, whose first cell IS the id. `None` (a dropped row
+   too mangled to name an id) still stands the rule down wholesale,
+   because there is then no way to tell a reference that block would
+   have satisfied from a genuine phantom. A warning naming NO id — a
+   header rejected on a block that held no rows — deleted nothing and so
+   defers for nothing; reading "named nothing" as "unmappable" put the
+   whole file back behind a warning that dropped no declaration at all.
+   `dropped_ids` is the authoritative channel and is read off whatever
+   block carries it, because the singular typo `:H l-NNN.new_hypothesis`
+   deletes declarations too and does not match the DECLARING names.
+
+   Rule 6b defers the same way by construction: a row whose `h-*` was
+   dropped is skipped (its commitments cannot be scoped), and so is a row
+   with nothing to scope against at all.
+
+   #818 closed only the `:T resolutions` row. FOUR sites reference an
+   `h-*` and `_check_hypothesis_refs` now owns all four (#821): the
+   resolution, `:L findings`'s `tests` column, `:T shelved`, and
+   `:T conclude.surviving`. Two of the three added are the ones a run
+   reaches FIRST — a lead can claim to test a hypothesis nobody declared,
+   and a `:T shelved` row can retire one that never existed — so a typo
+   used to surface a step late, pointing at the resolution rather than at
+   the PLAN row that introduced it. The fourth is the one a run reaches
+   LAST, and the parser was accepting it and discarding its rows
+   (`if name.startswith("conclude."): return True`), so the closing claim
+   about what is still standing could name a phantom and nothing looked.
+   It is now projected to `conclude.surviving_hypotheses[]` — *checkable,
+   not authoritative*: rule 5 still computes survival from the resolution
+   record, because this table is self-reported and omittable.
+
+   `tests` alone is scoped to `h-*`-SHAPED ids, because `tests` alone is
+   mixed: it is the commitments the lead was run for and the shipped
+   golden proves that is three id kinds (`golden-sshpivot-ab3` tests `ac1`
+   on l-002, `p2` on l-003), so reading the column as hypotheses-only
+   denies a correct document. `:T shelved`'s column is `hyp_id` — every
+   value in it IS a hypothesis reference, so no shape gate applies there;
+   one would exempt exactly the typo the rule exists to catch (`h_888`
+   shelves nothing and would pass in silence). The shape itself covers the
+   hierarchical child form `h-{parent}-{ordinal}`, which is what a lean
+   hypothesis refines into and what the lead's `new_hypotheses` declares
+   with the parent shelved in the same block.
+
+   The validator is a gate in front of a walker that minted the same
+   phantom, and #821 closed that too: `_walkers.final_weights` seeded an
+   entry from the resolution row, so its key set — which is what
+   `live_hypothesis_ids` reports — could carry an id no `:H` row declares.
+   The gate only runs on the write; `skills/invlang/queries.py` and
+   `learning/pipeline/judge/compare.py` read the walker on documents that
+   never passed through it. Both already looked weights up BY a declared
+   id, so narrowing the key set to `all_hypotheses` changed neither, and
+   `_check_benign_authz`'s `live` loop already skipped ids `all_hypotheses`
+   does not carry.
+6b. tested-commitment refs — a `p*`/`ap*`/`r*`/`ac*` in `:L findings`'s
+   `tests` column must be declared by a hypothesis that same row says it
+   is testing (#821). The other half of the mixed column: rule 6a
+   resolves its `h-*` and nothing resolved the rest, so
+   `tests=h-001,p9,ac9` named two commitments that do not exist and
+   validated clean — rule 6's hole, one namespace over, at the site that
+   writes it first. Scoped to the row's own hypotheses rather than the
+   document, or it would accept a sibling's `p2`, which is exactly the
+   cross-citation rule 6 refuses one level down; a row naming no
+   hypothesis falls back to every declared one. `ac*` is checkable
+   nowhere else — no resolution head cites a contract. An id in no
+   recognized namespace is left alone: `:L l-NNN.lead_preds` is
+   documented and unprojected (#820), so its `lp*` resolves against
+   nothing and reporting it would deny a legal document.
 7. strong-move citation — a `++`/`--` must name at least one of them.
    The other half of rule 3's provenance tuple: which pre-committed
    claim the cited observation settled.

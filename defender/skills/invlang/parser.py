@@ -56,6 +56,13 @@ class ParseWarning:
     row: str
     reason: str
     file_path: str = ""
+    #: The ids this warning DELETED from the companion, when it deleted any and the rows
+    #: were still readable enough to name them. Structure carried alongside the prose, the
+    #: same way `Diagnostic` carries a `Locus`: the message is unchanged, and a consumer
+    #: that needs to know *which* ids went missing no longer has to re-parse it back out.
+    #: The whole-block rejections populate it — a row-level failure already carries its
+    #: row, and the id is that row's first cell.
+    dropped_ids: tuple[str, ...] = ()
 
     def format(self) -> str:
         loc = self.file_path or "(unknown file)"
@@ -116,6 +123,7 @@ def _tokenize_fence(body: str) -> list[Block]:
 
 _VERTEX_COLS = ["id", "type", "class", "ident", "attrs"]
 _EDGE_COLS = ["id", "rel", "src", "tgt", "when", "auth_kind:source", "attrs"]
+_SURVIVING_COLS = ["hyp_id", "final_weight"]
 
 
 def iter_blocks(text: str) -> Iterator[Block]:
@@ -185,19 +193,67 @@ HYP_DECLARATION_BLOCK_RE = re.compile(
     r"^:H (?:hypothesize\.hypotheses|l-[A-Za-z0-9]+\.new_hypotheses)$"
 )
 
+#: An `h-*` id, including the hierarchical child form: when a lean hypothesis refines into
+#: sub-cases the language allocates `h-{parent}-{ordinal}` (`h-001` → `h-001-001`) and
+#: writes the children into the lead's `new_hypotheses` with the parent shelved in the same
+#: block (`docs/investigation-language.md` §Refinement via hierarchical IDs). One owner:
+#: the validator reads which tokens are hypothesis references from here, and
+#: `deferred_hypothesis_ids` reads which dropped rows it can map back to one.
+HYPOTHESIS_ID_RE = re.compile(r"h-[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*")
 
-def dropped_a_hypothesis_declaration(warnings: list[ParseWarning]) -> bool:
-    """True when a parse warning came off a hypothesis DECLARATION block.
 
-    A rejected header or a bad row there deletes ids the document goes on
-    referring to, so every resolution against them looks phantom — the one case
-    where the undeclared-hypothesis error would point away from the defect. A
-    warning from anywhere ELSE (an unknown block, an unattributed `:R` row, a
-    malformed vertex) drops no declaration, so it must not stand that check
-    down: gating on "no warnings at all" hid a real phantom behind any unrelated
-    parse defect, and would have hidden more with every warning added since.
+def _row_first_cell(row: str) -> str:
+    # Through `_split_cells` rather than `row.split("|")`, so an escaped `\|` or a quoted
+    # cell is read the same way every other cell extraction in this module reads it.
+    return _split_cells(row)[0]
+
+
+def deferred_hypothesis_ids(
+    warnings: list[ParseWarning],
+) -> frozenset[str] | None:
+    """Which `h-*` ids a parse warning DELETED — the set the undeclared-hypothesis rule
+    must stay quiet about, because the parse error already names the cause.
+
+    A rejected header or a bad row on a hypothesis DECLARATION block deletes ids the
+    document goes on referring to, so every reference to them looks phantom — the one case
+    where the undeclared-hypothesis error would point away from the defect. A warning from
+    anywhere ELSE (an unknown block, an unattributed `:R` row, a malformed vertex) drops no
+    declaration and must not stand the rule down.
+
+    Per ID, not per DOCUMENT. The predecessor answered only "did any declaration get
+    dropped?", so one malformed `:H` row anywhere silenced the rule for the whole file and
+    an unrelated typo three leads away went unreported behind it. The id is recoverable in
+    both failure modes: a whole-block rejection carries `dropped_ids`, and a row-level
+    failure carries its row, whose first cell IS the id.
+
+    `None` means "stand down everywhere" and is the honest answer when a dropped
+    declaration cannot be mapped to an id at all — a row so malformed its first cell is not
+    id-shaped. Reporting references then would give two errors for one defect, which is the
+    whole reason this deference exists; the caller treats `None` exactly as the predecessor
+    treated `True`.
+
+    `dropped_ids` is the authoritative channel and is consulted whatever block carries it,
+    because a declaration is deleted from more than the two DECLARING names: the singular
+    typo `:H l-NNN.new_hypothesis` drops its rows too, and matching on the name alone left
+    that one warning to be followed by one error per reference site.
+
+    A warning that names NO id is skipped rather than deferred: a header rejected on a block
+    with no rows deleted nothing, so standing the rule down for the document would hide
+    every unrelated phantom behind a warning that dropped no declaration at all.
     """
-    return any(HYP_DECLARATION_BLOCK_RE.match(w.block) for w in warnings)
+    deferred: set[str] = set()
+    for w in warnings:
+        if w.dropped_ids:
+            named: tuple[str, ...] = w.dropped_ids
+        elif HYP_DECLARATION_BLOCK_RE.match(w.block) and w.row:
+            named = (_row_first_cell(w.row),)
+        else:
+            continue
+        usable = [i for i in named if HYPOTHESIS_ID_RE.fullmatch(i)]
+        if not usable:
+            return None
+        deferred.update(usable)
+    return frozenset(deferred)
 
 
 def _is_current_hyp_header(cols: list[str] | None) -> bool:
@@ -365,6 +421,12 @@ _RESOLUTION_LINE_RE = re.compile(
 _REF_ID_RE = re.compile(r"ap\d+|p\d+|r\d+")
 _IFF_LITERAL_RE = re.compile(rf"\b(?:{_REF_ID_RE.pattern})\b")
 
+#: A COMMITMENT id in any of the four namespaces a hypothesis declares — `_REF_ID_RE`'s three
+#: plus `ac*` authorization contracts, which no resolution head ever cites and which only
+#: `:L findings`' `tests` column can name. Composed from `_REF_ID_RE` rather than restating
+#: it, the same way `_IFF_LITERAL_RE` is, so the namespaces keep one owner.
+COMMITMENT_ID_RE = re.compile(rf"(?:{_REF_ID_RE.pattern})|ac\d+")
+
 
 def _extract_iff_literals(annotation: str) -> tuple[list[str], list[str]]:
     if not annotation:
@@ -476,11 +538,19 @@ def _canonicalize_resolution_row(rec: dict[str, str]) -> ResolutionRow:
 #: guard below must not read the second and third as a key being overwritten.
 _CONCLUDE_LISTS: frozenset[str] = frozenset({"ceiling_test"})
 
+#: `Conclude` fields that are their OWN `:T conclude.*` sub-table, never a flat
+#: `<key> <value>` row. They must be subtracted for the same reason `termination` always was:
+#: `_CONCLUDE_SCALARS` is read off `Conclude.__annotations__`, so a field added to carry a
+#: sub-table is otherwise advertised in `_CONCLUDE_KEYS_HINT` as a legal flat key AND
+#: projected as a STRING over the list the sub-table built — which then makes
+#: `_project_surviving_block`'s `setdefault(...).append(...)` raise on a str (#821).
+_CONCLUDE_SUBTABLES: frozenset[str] = frozenset({"termination", "surviving_hypotheses"})
+
 #: The scalar rows `:T conclude` projects, and the CLOSED set an unrecognized row is judged
 #: against. One owner: `Conclude` is the type the projection has to satisfy, so the set is read
 #: off it rather than restated here, where the two could drift a field apart.
 _CONCLUDE_SCALARS: frozenset[str] = (
-    frozenset(Conclude.__annotations__) - {"termination"} - _CONCLUDE_LISTS
+    frozenset(Conclude.__annotations__) - _CONCLUDE_SUBTABLES - _CONCLUDE_LISTS
 )
 _CONCLUDE_KEYS_HINT = ", ".join(
     sorted(_CONCLUDE_SCALARS | _CONCLUDE_LISTS)
@@ -585,12 +655,20 @@ class _Projector:
         lead.setdefault("resolutions", [])
         return lead
 
-    def _warn(self, block: Block, row_index: int, row: str, reason: str) -> None:
+    def _warn(
+        self,
+        block: Block,
+        row_index: int,
+        row: str,
+        reason: str,
+        dropped_ids: tuple[str, ...] = (),
+    ) -> None:
         self.warnings.append(ParseWarning(
             block=f":{block.tag} {block.name}",
             row_index=row_index,
             row=row,
             reason=reason,
+            dropped_ids=dropped_ids,
         ))
 
     def _project_rows(self, block: Block, project_one) -> list[Any]:
@@ -746,6 +824,9 @@ class _Projector:
         if name == "conclude":
             self._project_conclude_scalars(block)
             return True
+        if name == "conclude.surviving":
+            self._project_surviving_block(block)
+            return True
         if name.startswith("conclude."):
             return True
         if name == "close":
@@ -785,6 +866,10 @@ class _Projector:
                 f"parent_class|integrity_waived?|weight|status); whole "
                 f"block rejected"
             ),
+            # The rows are readable even though the header is not, and their first cell is
+            # the id. Naming them here is what lets the undeclared-hypothesis rule defer
+            # for exactly these ids instead of for the whole document.
+            dropped_ids=tuple(_row_first_cell(r) for r in block.rows),
         )
         return True
 
@@ -943,6 +1028,11 @@ class _Projector:
                 f"unknown lead sub-block `:H l-NNN.{sub}` — the only `:H` block "
                 f"a lead carries is `:H l-NNN.new_hypotheses`; its rows were "
                 f"dropped",
+                # Same reason as the stale-header rejection: the rows are readable and
+                # their first cell is the id, so `deferred_hypothesis_ids` can defer for
+                # exactly these instead of letting one typo here raise one undeclared-`h-*`
+                # error at every site that then references them.
+                dropped_ids=tuple(_row_first_cell(r) for r in block.rows),
             )
 
     def _project_findings_block(self, block: Block) -> None:
@@ -1006,6 +1096,38 @@ class _Projector:
                 self._warn(block, idx, row, "resolution has no lead attribution")
                 continue
             self.lead_bucket(lead_id).setdefault("resolutions", []).append(record)
+
+    def _project_surviving_block(self, block: Block) -> None:
+        """`:T conclude.surviving [hyp_id|final_weight]` — the run's own list of what it
+        thinks is still standing.
+
+        Projected, where every other `conclude.*` sub-block is still discarded, for one
+        reason: it is the FOURTH site that names an `h-*`, and the only one of the four the
+        parser threw away. A conclude naming a hypothesis nothing declares passed the
+        parser and the validator in silence, while the rule against exactly that was
+        written three sites over (#821).
+
+        Deliberately NOT wired into benign-gating. Survival there is computed from the
+        resolution record precisely because this table is omittable and self-reported
+        (enforcement ramp rule 5); projecting it makes the claim checkable, and must not
+        make it authoritative.
+        """
+        conclude: dict[str, Any] = self.out.setdefault("conclude", {})
+        rows: list[dict[str, str]] = conclude.setdefault("surviving_hypotheses", [])
+        for _idx, _row, rec in self._for_each_row(block, _SURVIVING_COLS):
+            hid = rec.get("hyp_id")
+            # `none` / `n/a` is how an EMPTY array is written here, not a hypothesis id
+            # (`docs/dense-investigation-format.md`: "Empty arrays render as a single `none`
+            # row", `surviving_hypotheses` named among them). Projecting the marker made the
+            # undeclared-`h-*` rule refuse a run whose hypotheses were all refuted.
+            if not hid or is_conclude_empty_marker(hid):
+                continue
+            # Keyed `hypothesis`, the name `:T resolutions` records already use for the
+            # same reference — a reader that knows one shape reads the other.
+            entry = {"hypothesis": hid}
+            if rec.get("final_weight"):
+                entry["final_weight"] = rec["final_weight"]
+            rows.append(entry)
 
     def _project_shelved_block(self, block: Block) -> None:
         for idx, row, rec in self._for_each_row(block):

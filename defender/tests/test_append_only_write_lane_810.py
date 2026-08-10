@@ -47,7 +47,7 @@ from defender.skills.invlang.validate import diagnose, validate_companion  # noq
 # a parse error alongside would let a weaker implementation pass these.
 _BAD_ATTR_KEY = """```invlang
 :L findings [id|loop|name|target|tests|system|window]
-l-003|1|cmdb-lookup-office-ws-1|v-001|h-001|cmdb|n/a
+l-003|1|cmdb-lookup-office-ws-1|v-001||cmdb|n/a
 ```
 
 ```invlang
@@ -205,7 +205,7 @@ def test_an_over_bound_document_says_what_cannot_be_taken_back(tmp_path):
 def test_an_accepted_document_still_returns_no_reason():
     """The notice rides on refusals only — an accepted write says nothing at all."""
     good = ("```invlang\n:L findings [id|loop|name|target|tests|system|window]\n"
-            "l-001|1|cmdb-lookup|v-001|h-001|cmdb|n/a\n```\n")
+            "l-001|1|cmdb-lookup|v-001||cmdb|n/a\n```\n")
 
     assert validate_investigation(good, None) is None
     assert validate_investigation("", None) is None
@@ -375,7 +375,7 @@ def test_a_duplicate_append_is_accepted_so_the_refusal_must_be_believed(tmp_path
 
     deps, run = _main_deps(tmp_path)
     block = ("```invlang\n:L findings [id|loop|name|target|tests|system|window]\n"
-             "l-001|1|cmdb-lookup|v-001|h-001|cmdb|n/a\n```\n")
+             "l-001|1|cmdb-lookup|v-001||cmdb|n/a\n```\n")
 
     _tool_append_block(deps, block)
     _tool_append_block(deps, block)
@@ -437,7 +437,7 @@ def test_the_registered_roster_is_what_the_toolset_grants():
 
 _TRANSPOSED = """```invlang
 :L findings [id|loop|name|target|tests|system|window]
-l-003|1|cmdb-lookup|v-001|h-001|cmdb|n/a
+l-003|1|cmdb-lookup|v-001||cmdb|n/a
 ```
 
 ```invlang
@@ -487,7 +487,7 @@ def test_a_header_without_a_key_column_degrades_instead_of_guessing():
     worse than no fix, which is the whole finding behind #825."""
     headerless = """```invlang
 :L findings [id|loop|name|target|tests|system|window]
-l-003|1|cmdb-lookup|v-001|h-001|cmdb|n/a
+l-003|1|cmdb-lookup|v-001||cmdb|n/a
 ```
 
 ```invlang
