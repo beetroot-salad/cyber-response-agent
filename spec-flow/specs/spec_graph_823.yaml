@@ -20,8 +20,10 @@ base: e3979163  # the fork commit write-code-from-spec's gate diffs against
 # The spec-flow write-tests orchestration did NOT run. No frontier chain, no phase B lenses, no
 # phase C blind answerers, no phase D gate, no §7 human seam, no phase F cold reconciler. The
 # human chose the direct path with that trade-off stated. Consequences a later reader must hold:
-#   * There is NO `gate:` block, deliberately. Phase D never ran and writing one would claim a
-#     check that did not happen.
+#   * The `gate:` block below is HALF a gate, and says so per rule. `spec-graph gate --residue`
+#     is a CLI, so the mechanical rules genuinely ran and their result is recorded. The
+#     JUDGMENT halves (R0's prose walk, R5, R6) are the author's own reading with no cold
+#     reviewer behind them — phase D's gate leaf never ran. Read those three accordingly.
 #   * The demands below are ONE author's reading of the design doc. Ambiguity here was not
 #     found by divergence between independent readings — the mechanism that normally finds it.
 #     During the DISCUSSION that reading was wrong three times (C2, C6, C7 below, all refuted
@@ -154,6 +156,17 @@ demands:
      # check of the same key, so a replay of a recorded table keeps matching the live run.
      # Renaming the row for the offline ROUTER must not widen what the guard SKIPS.
 
+  - {id: the_two_writers_share_one_seq_sequence, kind: uniqueness, form: test,
+     discharged_by: test_the_two_writers_share_one_seq_sequence,
+     binds: ["executed_queries", "tool_bash", "query_tool",
+             "interacts(tool_bash->executed_queries)"]}
+     # MINTED BY THE GATE, not by the design doc — R2 on `executed_queries.identity`. M1 makes
+     # the bash lane a second writer of a table keyed `(lead_id, seq)`, and nothing else in this
+     # suite pinned that the two writers allocate from ONE sequence. Independent allocation
+     # collides on `seq` and silently overwrites a payload sidecar, since both writers are
+     # best-effort about persistence. Driven INTERLEAVED in one lead, which is the only
+     # arrangement that can catch it.
+
   - {id: shim_row_never_causes_a_trip, kind: behavior, form: test,
      discharged_by: test_shim_row_never_causes_a_trip,
      binds: ["tool_bash", "record_query"]}
@@ -250,7 +263,7 @@ demands:
 
 structure:
 
-  axes: [lead_id, seq, system, verb, params, query_id]
+  axes: [lead_id, seq, system, verb, params, query_id, pitfall_id]
 
   actors:
     - {id: tool_bash,        frame: leg, provenance: code}   # runtime/tools.py::_tool_bash (:156) — M1's site
@@ -289,6 +302,21 @@ structure:
             for those rows lives in `executed_query`. Routing is by construction — `∅` fails
             `_SAFE_ID_SEGMENT` (draft_synthesis.py:22) — so no collector is edited."}
           sharing: serialized-append
+
+  interacts:
+
+    # --- the delta: the queries table gains a THIRD writer, in the bash lane ---
+    - {from: tool_bash, to: executed_queries, mode: write, via: fs, provenance: design}
+      # M1. `_tool_bash` had no edge to this table at all — that absence IS the issue's link 1.
+      # It writes through `record_query.append_query_row`, the same function `query_tool._record`
+      # now calls, so there is one row-assembly site rather than two that can drift.
+    - {from: tool_bash, to: executed_queries, mode: read, via: fs, provenance: design}
+      # M2's join, and a real cost worth naming: attributing the system means READING the table
+      # the same call is about to append to. Two reads per failed reduce (this one, plus
+      # `_next_seq` inside the writer), on a path that only runs when a reduce has already failed.
+    - {from: query_tool, to: executed_queries, mode: write, via: fs, provenance: code}
+      # Unchanged by this issue except for the trip row's `query_id` (M3); named so the third
+      # writer above reads as an ADDITION to a known set rather than the only writer in view.
 
 # ---------------------------------------------------------------------------
 # THE DISCRIMINATION RECORD — the compensating control that stands in for the gate this run did
@@ -443,6 +471,58 @@ claims:
      claim: "That footer command returns 1 on an ES envelope (counting the envelope, not the 4 events at hits[]._source).",
      probe: "pipe a 4-hit ES envelope into bin/defender-sql 'SELECT count(*) FROM data'",
      observed: "COULD NOT BE RE-EXECUTED IN THIS TREE: the worktree venv has no duckdb (`defender-sql: duckdb is not installed`), so the shim exits 2 before reaching the query. The issue author reports having run it; that observation is INHERITED, not reproduced here, and this claim is deliberately left `unprobed` rather than borrowing their verdict. NOTHING CITES IT — N5's waiver cites S6 (the line exists) instead, because the waiver is a scoping decision and does not rest on what the command returns."}
+
+gate:
+  # HALF a gate, and each entry says which half it is. `spec-graph gate --residue` ran (it is a
+  # CLI, not a leaf) and computed ONE firing across the mechanical rules. The three judgment
+  # halves are the author's own reading; phase D's gate leaf and phase F's cold reconciler never
+  # ran, so nothing independent checked them. A rule with no entry would read as skipped, so
+  # every rule has one.
+
+  evaluated:
+    - {rule: R0, fired: false, cites: [C2, C6, C7, S1]}
+      # MECHANICAL half: clean, and only after two real defects the tool caught — a dangling
+      # `interacts(tool_bash->executed_queries)` bind (the edge was asserted by a demand but
+      # declared nowhere in `structure`) and a `pitfall_id` key axis missing from the `axes:`
+      # registry. Both fixed in place; neither would have been found by re-reading.
+      # JUDGMENT half (AUTHOR'S OWN, no cold reviewer) — walked against gh#823's settled
+      # comment: every delta element traces to M1-M4 or to an O-obligation, and every M traces
+      # to at least one demand. No invented scope found. The three refuted claims (C2, C6, C7)
+      # are corrections carried IN-graph rather than design sentences left standing.
+    - {rule: R1, fired: false}
+    - {rule: R2, fired: true}
+      # THE ONE MECHANICAL FIRING, and it earned its keep: "writers ['query_tool', 'tool_bash']
+      # share the `executed_queries` sink — a uniqueness demand must drive them into one root at
+      # the composition frame." M1 makes the bash lane a second writer of a table whose primary
+      # key is `(lead_id, seq)`, and nothing in the suite pinned that the two allocate from ONE
+      # sequence. Independent allocation would collide on `seq` and silently overwrite a payload
+      # sidecar, since both writers are best-effort about persistence. Routed to an obligation.
+    - {rule: R3, fired: false}
+    - {rule: R4, fired: false}
+    - {rule: R5, fired: false, cites: [C4, S1]}
+      # JUDGMENT (AUTHOR'S OWN). The routing change is safe-by-construction rather than guarded:
+      # `∅` fails `_SAFE_ID_SEGMENT`, so a sentinel row cannot reach `synthesize_drafts` or
+      # `build_handoff` by the same predicate those collectors already apply. Nothing was
+      # loosened — the sentinel set grew by two literals and no collector was edited.
+    - {rule: R6, fired: false, cites: [C12, C14]}
+      # JUDGMENT (AUTHOR'S OWN), and the rule most worth firing here: the curator's prompt IS a
+      # rendered sink for model-authored text, and M1 newly routes a bash argv into it. Existing
+      # chooser/sanitizer: `_build_pitfalls_handoffs` projects four fields and
+      # `pitfalls_curator.py:69-70` wraps the whole handoff in a salted frame; the edit scope is
+      # then confined to `execution.md` by `_pitfalls_path_rule`. What was MISSING is length —
+      # `executed_query` was uncapped — and that is a demand
+      # (`shim_command_is_capped_in_the_record`), not a hole.
+    - {rule: R7, fired: false}
+
+  obligations:
+    - {rule: R2, element: executed_queries.identity,
+       resolved_to: the_two_writers_share_one_seq_sequence,
+       discharged_by: the_two_writers_share_one_seq_sequence}
+      # Discharged, and verified after the fact: both writers go through the one
+      # `record_query.append_query_row`, and the test drives them INTERLEAVED in a single lead
+      # (query, failed reduce, query, failed reduce) asserting `seq == [0, 1, 2, 3]` with four
+      # distinct sidecars on disk. The single-root property the rule demanded is the reason
+      # fork F1 chose a shared module-level writer over a `QueryCapture` handle.
 
 handoff:
 

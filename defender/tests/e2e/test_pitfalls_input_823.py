@@ -154,11 +154,19 @@ class _Res:
         proves a shim row persists one."""
         return lead_extraction.extract_from_joined(lead_repository.joined(self.run_dir))
 
-    def routed(self) -> tuple[int, int, int]:
-        """`(pitfalls, drafts, handoff)` for this run's leads, through the three PRODUCTION
-        collectors over the real catalog — the partition's own arithmetic, not a restatement
-        of it."""
+    def routed(self, query_id: str | None = None) -> tuple[int, int, int]:
+        """`(pitfalls, drafts, handoff)` through the three PRODUCTION collectors over the real
+        catalog — the partition's own arithmetic, not a restatement of it.
+
+        `query_id` scopes it to ONE row's routing. That distinction is the whole point for the
+        trip-row demands: the question is where the TRIP ROW goes, not where the run goes. The
+        rows below a trip keep the model's coined id and still become draft candidates, exactly
+        as they should — asserting `(1, 0, 0)` over the whole run would demand that #823 also
+        stop `synthesize_drafts` doing its job."""
         leads = self.leads()
+        if query_id is not None:
+            leads = [lead for lead in leads if lead.query_id == query_id]
+            assert leads, f"no lead carries {query_id!r}, so the routing claim is vacuous"
         catalog = lead_neighbors.load_catalog(None)
         by_id = {t.id for t in catalog}
         pitfalls = collect_general_failures(leads, self.run_dir, catalog=catalog)
@@ -405,31 +413,38 @@ def test_trip_row_carries_the_sentinel_identity(tmp_path):
     the refusal record only."""
     r = _looping_run(tmp_path, "d823-trip", "elastic.sshd-raw-events-window")
     rows = r.rows
-    assert len(rows) == 3 and rows[2]["exit_code"] == 64, "no trip row, so the premise is vacuous"
+    assert len(rows) == 3, f"the lead did not trip at the third request: {len(rows)} rows"
+    assert rows[2]["exit_code"] == 64, "no trip row, so the premise is vacuous"
     assert [row["query_id"] for row in rows[:2]] == ["elastic.sshd-raw-events-window"] * 2
     assert rows[2]["query_id"] == REPEAT_TRIP_QUERY_ID
     assert rows[2]["error_class"] == "agent-fixable"
 
 
 def test_trip_row_reaches_the_curator_and_mints_no_draft(tmp_path):
-    """trip_row_reaches_the_curator_and_mints_no_draft — O2's oracle. One looping lead routes
-    `(pitfalls=1, drafts=0, handoff=0)`. On this base the same run routes `(0, 1, 0)`: the trip
-    row is minted as `skills/elastic/_draft/sshd-raw-events-window.md`, a proposed catalog
-    template authored from the query the guard just refused."""
+    """trip_row_reaches_the_curator_and_mints_no_draft — O2's oracle. The TRIP ROW routes
+    `(pitfalls=1, drafts=0, handoff=0)`. On this base the same row routes `(0, 1, 0)`: it is
+    minted as `skills/elastic/_draft/sshd-raw-events-window.md`, a proposed catalog template
+    authored from the query the guard just refused."""
     r = _looping_run(tmp_path, "d823-triproute", "elastic.sshd-raw-events-window")
-    assert r.routed() == (1, 0, 0)
+    assert r.routed(REPEAT_TRIP_QUERY_ID) == (1, 0, 0)
+    # The scoping is the assertion, not a convenience: the two rows BELOW the trip keep the
+    # model's coined id and are STILL draft candidates, because they are ordinary coined
+    # queries. #823 moves the refusal record and nothing else.
+    assert r.routed("elastic.sshd-raw-events-window") == (0, 2, 0)
 
 
 def test_trip_row_on_a_catalog_id_still_reaches_the_curator(tmp_path):
     """trip_row_on_a_catalog_id_still_reaches_the_curator — the other branch of the misroute.
     When the model names an ESTABLISHED template, today's trip row resolves to it and
     `build_handoff` hands the lead-author a conduct trip as a failure OF that template, to be
-    folded into its doc. The sentinel closes both branches with one change."""
+    folded into its doc. The sentinel closes both branches with one change — and leaves the
+    established template's own two invocations going to the lead-author, where they belong."""
     catalog = lead_neighbors.load_catalog(None)
     established = sorted(t.id for t in catalog if t.id.startswith("elastic."))[0]
     r = _looping_run(tmp_path, "d823-tripcat", established)
     assert r.rows[2]["query_id"] == REPEAT_TRIP_QUERY_ID
-    assert r.routed() == (1, 0, 0)
+    assert r.routed(REPEAT_TRIP_QUERY_ID) == (1, 0, 0)
+    assert r.routed(established) == (0, 0, 1)
 
 
 def test_trip_row_still_counts_toward_a_later_check(tmp_path):
@@ -444,6 +459,34 @@ def test_trip_row_still_counts_toward_a_later_check(tmp_path):
     with_trip = record_query.repeat_trip([rows[0], rows[2]], LEAD, **key)
     assert with_trip is not None, "the renamed trip row left the guard's domain"
     assert with_trip.occurrence == record_query.REPEAT_THRESHOLD
+
+
+def test_the_two_writers_share_one_seq_sequence(tmp_path):
+    """the_two_writers_share_one_seq_sequence — R2, raised by the mechanical gate: after M1 the
+    queries table has TWO writers in the gather lane, and `seq` is half its primary key. If the
+    bash lane allocated a seq independently of the query tool, two rows would collide on
+    `(lead_id, seq)` and one payload sidecar would overwrite the other — silently, since both
+    writers are best-effort about persistence.
+
+    Driven interleaved, because that is the only arrangement that can catch it: query, failed
+    reduce, query, failed reduce in one lead. Both writers go through
+    `record_query.append_query_row`, so this pins the single-root property the gate demanded
+    rather than a coincidence of ordering."""
+    run_dir = materialize(tmp_path, GOLDEN_AB3)
+    r = _run(tmp_path, run_dir=run_dir, run_id="d823-seq", turns=[
+        q("elastic", "query", {"native_query": "FROM a"}),
+        _reduce(run_dir, seq=0),
+        q("elastic", "query", {"native_query": "FROM b"}),
+        _reduce(run_dir, seq=2),
+        DONE,
+    ])
+    seqs = [row["seq"] for row in r.rows]
+    assert seqs == [0, 1, 2, 3], f"the two writers did not share one sequence: {seqs}"
+    assert len(r.shim_rows) == 2, "the premise needs both shim rows to have been written"
+    paths = [row["payload_path"] for row in r.rows]
+    assert len(set(paths)) == len(paths), f"two rows share a payload sidecar: {paths}"
+    for row in r.rows:
+        assert (r.run_dir / row["payload_path"]).is_file()
 
 
 def test_shim_row_never_causes_a_trip(tmp_path):

@@ -15,9 +15,9 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender._env import env_int
-from defender._io import read_jsonl_rows
+from defender._io import guarded_mkdir, read_jsonl_rows, write_guarded
 from defender._run_paths import RunPaths
-from defender.runtime.circuit_breaker import AGENT_FIXABLE_ERROR_CLASS
+from defender.runtime.circuit_breaker import AGENT_FIXABLE_ERROR_CLASS, error_class_for_exit
 
 LEAD_ID_RE = re.compile(r"^l-[A-Za-z0-9]+$")
 
@@ -238,6 +238,114 @@ def lead_rows(run_dir: Path, lead: str) -> list[dict]:
     return [r for r in rows if isinstance(r, dict) and r.get("lead_id") == lead]
 
 
+def persist_payload(run_dir: Path, lead_id: str, seq: int, text: str) -> str | None:
+    """The payload sidecar at `gather_raw/{lead_id}/{seq}.json`, best-effort.
+
+    Moved here from `query_tool` (#823) so the two writers of the queries table persist their
+    by-ref payload through one function rather than two copies. `ValueError` as well as
+    `OSError`: `guarded_mkdir` raises it for a target outside the tree the anchor names, which
+    a `lead_id` carrying path separators or `..` produces. Best-effort persistence must not
+    become the run's crash.
+
+    The sidecar must EXIST even when empty: `lead_extraction.extract_from_joined` skips any row
+    whose `raw_ref` is not a file (lead_extraction.py:60), so a row written without one is
+    dropped from the offline loop entirely rather than merely arriving thin."""
+    lead_dir = RunPaths(run_dir).gather_raw / lead_id
+    payload_path = lead_dir / f"{seq}.json"
+    try:
+        guarded_mkdir(lead_dir, base=run_dir)
+        write_guarded(payload_path, text)
+    except (OSError, ValueError):
+        return None
+    return str(payload_path.relative_to(run_dir))
+
+
+def append_query_row(  # noqa: PLR0913 — one parameter per ROW COLUMN the caller must decide
+    run_dir: Path, *, lead_id: str, system: str, verb: str, query_id: str, params: dict,
+    raw_command: str, payload_text: str, exit_code: int, payload_status: str,
+    payload_digest: str,
+) -> dict:
+    """THE append to the queries table: allocate this lead's next seq, persist the payload
+    sidecar, assemble the twelve frozen keys, append one line.
+
+    Extracted from `QueryCapture._record` (#823 fork F1) because the gather bash lane became a
+    second writer and a second copy of this would be a third place for the row shape to drift
+    — `lint_duplicate_helpers` is the check that would have caught it. `error_class` is
+    DERIVED here from `exit_code` rather than accepted from the caller: a writer that could
+    disagree with `error_class_for_exit` is exactly the divergence the offline loop's
+    `agent-fixable` filter cannot see.
+
+    Deliberately SYNCHRONOUS and lock-free. `_record`'s `self._seq_lock` guarded a block with
+    no `await` in it, so within one event loop this sequence was already atomic; keeping it
+    sync means the bash lane — which is not a coroutine — gets the same atomicity for free
+    rather than needing a second, differently-shaped guard."""
+    seq = _next_seq(run_dir, lead_id)
+    payload_rel = persist_payload(run_dir, lead_id, seq, payload_text)
+    row = {
+        "lead_id": lead_id,
+        "seq": seq,
+        "system": system,
+        "verb": verb,
+        "query_id": query_id,
+        "params": _json_safe_params(dict(params)),
+        "raw_command": raw_command,
+        "payload_path": payload_rel,
+        "exit_code": exit_code,
+        "error_class": error_class_for_exit(exit_code),
+        "payload_status": payload_status,
+        "payload_digest": payload_digest,
+    }
+    write_guarded(RunPaths(run_dir).executed_queries, json.dumps(row) + "\n", mode="append")
+    return row
+
+
+def system_for_payload_operands(run_dir: Path, operands: Any) -> str:
+    """The system a reducer's failure belongs to: the system of the PAYLOAD it read.
+
+    #823's M2, and the reason `derive_system` is not used for this. `derive_system` parses the
+    argv, and a reducer argv names the reducer — `defender-sql` yields the system `"sql"`,
+    `defender-jq` yields `"jq"`, and a pitfall row carrying either makes
+    `_build_pitfalls_handoffs` emit `defender/skills/sql/execution.md` and invite the curator
+    to create a system directory for a system that does not exist (the phantom class closed
+    for `h-*` in #821/#828).
+
+    The payload path carries the answer instead: `gather_raw/{lead}/{seq}.json` joins straight
+    back to the row that wrote it, whose `system` was set by a real dispatch. Keyed on the
+    PAYLOAD's own lead, not the reading lead — the system is a property of the bytes, so a
+    cross-lead read still attributes correctly.
+
+    `""` when no operand resolves to a run payload, which is the honest answer and not a
+    guess: `collect_general_failures` skips a systemless row at its existing guard
+    (lead_extraction.py:100)."""
+    try:
+        rows = read_jsonl_rows(RunPaths(run_dir).executed_queries)
+    except OSError:
+        return ""
+    by_key = {
+        (r.get("lead_id"), r.get("seq")): r for r in rows if isinstance(r, dict)
+    }
+    try:
+        base = RunPaths(run_dir).gather_raw.resolve()
+    except OSError:
+        return ""
+    for operand in operands or ():
+        try:
+            rel = Path(operand).resolve().relative_to(base)
+        except (ValueError, OSError):
+            continue
+        if len(rel.parts) != 2 or rel.suffix != ".json":
+            continue
+        try:
+            seq = int(rel.stem)
+        except ValueError:
+            continue
+        row = by_key.get((rel.parts[0], seq))
+        system = str((row or {}).get("system") or "").strip()
+        if system:
+            return system
+    return ""
+
+
 def repeat_note(
     run_dir: Path, lead: str, *, seq: int, system: str, verb: str,
     params: dict, payload_digest: str, exit_code: int = 0,
@@ -357,6 +465,46 @@ produce. P-a found no discriminator among the twelve frozen row keys between suc
 validated one, so this value is deliberately reserved — `resolve_query_id` refuses to return it
 (or an unscreened traversal string) even when a model supplies one verbatim as `query_id` — and
 lives inside the existing twelve keys rather than adding a thirteenth."""
+
+BASH_SHIM_QUERY_ID = "∅.bash-shim"
+"""The sentinel `query_id` for a FAILED reducer-shim row from the gather bash lane (#823 M1).
+
+Shares `ABOVE_GUARD_QUERY_ID`'s `∅.` prefix because it needs the same property, for a different
+reader: `∅` fails `draft_synthesis._SAFE_ID_SEGMENT`, so `_draft_candidate_segments` returns
+`None` and the row falls past `synthesize_drafts`; it is not a catalog id, so `build_handoff`
+does not claim it either. What is left is `collect_general_failures` — the pitfalls residue,
+which is where a reducer mistake belongs, because `skills/{system}/execution.md` is the file
+the gather subagent reads before coining its next query.
+
+The routing is therefore BY CONSTRUCTION: no collector learned a new case and none was edited.
+A descriptive id would have been the trap — `{system}.defender-sql-unnest` passes the
+safe-segment match, so every failed reduce would have been minted as a candidate catalog
+template."""
+
+REPEAT_TRIP_QUERY_ID = "∅.repeat-trip"
+"""The sentinel `query_id` for the repeat guard's own trip row (#823 M3).
+
+A DISTINCT literal from `ABOVE_GUARD_QUERY_ID`, and the distinction is load-bearing:
+`repeat_trip`'s counted domain keys on that value alone and MUST NOT widen to include this one.
+`test_trip_row_is_itself_an_occurrence_on_replay` (#807) pins that a trip row counts toward a
+later check of the same key, so that a replay of a recorded table keeps matching the live run it
+replays. This constant changes what the row is CALLED — which only the offline router reads —
+never what the guard COUNTS.
+
+Before it, the trip row carried `resolve_query_id(...)`, the model's own coined id, and
+misrouted in both directions: a coined id was minted as a `_draft/` template proposing the very
+query the guard had just refused, and a catalog id was handed to the lead-author as a failure of
+that template. Neither reached the curator, which is the one reader that could act on it."""
+
+SHIM_COMMAND_MAX_CHARS = 2000
+"""The bound on a shim row's recorded command (#823, the security dive).
+
+`payload_digest` has always been capped at 160 chars, but `params` was not, and
+`draft_synthesis._structured_call` yaml-dumps `params` whole into the `executed_query` the
+curator's prompt receives — from where the agent can echo it into a committed `execution.md`.
+The command is model-authored text, so it is the one field of a shim row an attacker-influenced
+turn chooses freely. 2000 is far above any real reduce (the footer's own suggestion is ~60
+chars) and far below anything that could crowd a prompt."""
 
 
 @dataclass(frozen=True)
