@@ -11,14 +11,23 @@ Params bind **by name**, with literal JSON types (`"limit": 20`, never `"20"`).
 
 ```
 query(system="elastic", verb="health-check", params={})
-query(system="elastic", verb="query",  params={"native_query": "<query_string>", "start": "<iso>", "end": "<iso>", "limit": 20, "index": "<pattern>"})
-query(system="elastic", verb="alerts", params={"native_query": "<query_string>", "start": "<iso>", "end": "<iso>", "limit": 20, "index": "<pattern>"})
+query(system="elastic", verb="query",  params={"native_query": "<query_string>", "start": "<iso>", "end": "<iso>", "limit": 20, "index": "<pattern>", "sort": "desc"})
+query(system="elastic", verb="alerts", params={"native_query": "<query_string>", "start": "<iso>", "end": "<iso>", "limit": 20, "index": "<pattern>", "sort": "desc"})
 query(system="elastic", verb="esql",   params={"query": "<ES|QL pipe>"})
 ```
 
 Only `native_query` (for `query`/`alerts`) and `query` (for `esql`) are required;
 the rest have defaults. `limit` is clamped to a 20-doc cap — read the envelope's
 `total` for magnitudes, never pull-and-count.
+
+`sort` is `@timestamp` order and takes `"desc"` (the default, newest first) or
+`"asc"` (oldest first); any other value is refused. It decides **which end of your
+window** the 20-doc cap keeps, so it is the difference between "what happened last
+here" and "what happened first here" — ask for `"asc"` whenever the question is
+what *started* something, or the answer will be the tail of the window. It is not
+pagination: there is no third slice to ask for, and a middle one is reached by
+narrowing `start`/`end` or by aggregating with `esql`. The result envelope echoes
+the `sort` it used.
 
 `esql` runs a server-side **ES|QL** aggregation and returns the result table
 (`{columns, row_count, values}`) — the rows ARE the answer, with the aggregation
@@ -41,8 +50,10 @@ wasted Read calls across runs. If a param you need isn't here, treat it as
 unsupported and escalate — don't infer one from the source.
 
 `query` / `alerts` emit a JSON payload
-`{"index": ..., "total": ..., "returned": ..., "truncated": ..., "hits": [...]}`
-where `hits` is the array of `_source` docs. That payload IS the output
+`{"index": ..., "total": ..., "returned": ..., "sort": ..., "truncated": ..., "hits": [...]}`
+where `hits` is the array of `_source` docs and `sort` echoes the order the
+20-doc cap was taken in (so the payload on disk says which end of the window
+it holds). That payload IS the output
 (there is no separate formatted-text mode); gather captures it under
 `gather_raw/{lead_id}/{seq}.json`.
 

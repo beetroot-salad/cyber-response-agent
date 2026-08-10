@@ -37,6 +37,24 @@ POINTER_FILENAME = "session_store_pointer.json"
 #: caller through `append` at all: `fork()` writes its own entry directly.
 HEAD_MOVE_REASONS = ("fork", "fold")
 
+#: THE `truncated_by` vocabulary — every value any writer of that column may put in it, owned
+#: here because the column is. `set_truncated_by` has two callers now (the driver's run-end
+#: flush, on the MAIN session; the gather dispatch's terminator stamp, on a lead's), and a
+#: reader joining `session` rows asks "was this cut off, and by what" ONCE, across both kinds.
+#: Two writers spelling the same shape differently would make that a per-session-kind question
+#: — which is why the strings live here rather than one set at each writer. `dead-end` is the
+#: only value with no main-session analogue: only a lead can be stopped by the repeat guard.
+TRUNCATED_BY_REQUEST_LIMIT = "request-limit"
+TRUNCATED_BY_RETRY_EXHAUSTED = "retry-exhausted"
+TRUNCATED_BY_ABORTED = "aborted"
+TRUNCATED_BY_BUDGET = "budget"
+TRUNCATED_BY_STORE = "store"
+TRUNCATED_BY_DEAD_END = "dead-end"
+TRUNCATED_BY_VALUES = (
+    TRUNCATED_BY_REQUEST_LIMIT, TRUNCATED_BY_RETRY_EXHAUSTED, TRUNCATED_BY_ABORTED,
+    TRUNCATED_BY_BUDGET, TRUNCATED_BY_STORE, TRUNCATED_BY_DEAD_END,
+)
+
 CASE_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
 
 _CONFIG_REQUIRED_FIELDS = ("models", "corpus", "prompts", "versions")

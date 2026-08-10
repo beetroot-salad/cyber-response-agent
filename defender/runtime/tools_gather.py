@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import re
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -11,6 +12,7 @@ from pydantic_ai.exceptions import ModelRetry, UnexpectedModelBehavior, UsageLim
 from pydantic_ai.usage import UsageLimits
 
 from defender._io import guarded_mkdir, write_guarded
+from defender.hooks.budget_enforcer import BudgetKill
 
 from . import circuit_breaker
 from . import permission
@@ -254,10 +256,22 @@ def _persist_gather_summary(run_dir: Path, lead_id: str, wrapped: str) -> None:
               file=sys.stderr)
 
 
-async def _run_gather(
+async def _run_gather(  # noqa: C901 — the branch count IS the terminator census (see docstring)
     deps: AgentDeps, gather_factory, request_limit: int, request: GatherRequest,
-    verb_grant: VerbGrant,
+    verb_grant: VerbGrant, stamp_terminator: Callable[[str, str], None] | None = None,
 ) -> str:
+    """`stamp_terminator(agent_id, reason)` records how a gather session ENDED, and is the
+    composition root's (`driver.build_agent`) to supply: the gather session is opened inside
+    the factory, so this frame knows the `agent_id` that keys it but never the store or the
+    session id. `None` — every test double that builds a bare factory — leaves every arm
+    below behaving exactly as it did, which is what makes the seam optional rather than a
+    second thing a caller must get right.
+
+    The `except` arms below ARE this frame's complexity, and they are one per way a gather
+    session can end: four that degrade the lead into a summary main can still reason from, and
+    two that end the whole run and only pass through. Folding two of them together to clear a
+    complexity threshold would cost exactly what item 1 cost — a session ending with nothing
+    said about why."""
     lead_id, system = request.lead_id, request.system
     if not _LEAD_ID_RE.match(lead_id):
         raise ModelRetry(
@@ -281,7 +295,8 @@ async def _run_gather(
         verb_grant,
     )
 
-    gagent = gather_factory(f"gather:{lead_id}")
+    agent_id = f"gather:{lead_id}"
+    gagent = gather_factory(agent_id)
     gbase = bind(
         GATHER_DEF, deps.run_dir, salt=deps.salt, defender_dir=deps.defender_dir, box=deps.box,
     )
@@ -293,6 +308,15 @@ async def _run_gather(
         budget_started_monotonic=deps.budget_started_monotonic,
     )
     prompt = _gather_prompt(deps, request, catalog, verb_grant)
+    # `None` is the CLEAN end. Every arm below sets one, and the stamp happens once, in the
+    # try's `finally` — so a terminator arm added later without a stamp is a visibly missing
+    # assignment rather than a silently unstamped session (the shape #826 item 1 reported:
+    # three arms and `GatherDeadEnd` all ending on an unanswered tool call with `truncated_by`
+    # unset, which left no reader able to tell a lead that was CUT OFF from one that finished).
+    # `finally` and not "after the try" because the last two arms RE-RAISE: a run-level kill
+    # ends this session just as surely as a lead-level one, and the stamp is the only record
+    # either leaves behind on the gather side.
+    terminator: str | None = None
     try:
         result = await gagent.run(
             prompt, deps=gdeps,
@@ -300,17 +324,20 @@ async def _run_gather(
         )
         output = str(result.output or "")
     except UsageLimitExceeded as e:
+        terminator = session_store.TRUNCATED_BY_REQUEST_LIMIT
         output = (
             f"gather for {lead_id} hit its request limit ({e}) before finishing; "
             "any queries it ran are in the queries table. Treat this lead as "
             "incomplete and reason from what was captured."
         )
     except GatherDeadEnd as e:
+        terminator = session_store.TRUNCATED_BY_DEAD_END
         output = (
             f"gather for {lead_id} hit a dead end: {e.reason} {e.escape} Treat this "
             "lead as incomplete and reason from what was captured."
         )
     except UnexpectedModelBehavior as e:
+        terminator = session_store.TRUNCATED_BY_RETRY_EXHAUSTED
         output = (
             f"gather for {lead_id} ended abnormally ({e}); any queries it ran are in "
             "the queries table. Treat this lead as incomplete and reason from what was "
@@ -323,11 +350,34 @@ async def _run_gather(
         # the two above rather than letting the exception unwind through the main agent's
         # tool call and kill the whole process; if the store is genuinely broken, main's
         # own next append stops the run through the handled exit.
+        #
+        # The stamp below goes through the store that just failed, so this arm's own record is
+        # the one most likely to be lost. It is still attempted (and swallowed by the stamp's
+        # own best-effort arm): a store broken for APPEND is not necessarily broken for this
+        # one UPDATE, and the alternative — skipping it — guarantees the gap for the exact
+        # terminator a reader most needs to see.
+        terminator = session_store.TRUNCATED_BY_STORE
         output = (
             f"gather for {lead_id} could not be recorded ({e}); any queries it ran are "
             "in the queries table. Treat this lead as incomplete and reason from what "
             "was captured."
         )
+    except BudgetKill:
+        # NOT degraded into a summary, and deliberately so (`test_budget_kill_is_not_control_
+        # flow`): the budget kill ends the RUN, and converting it into a measurement string
+        # here would hide it from `run_investigation`'s own catch. Named on the way past so
+        # the session it ended is still distinguishable from one that finished.
+        terminator = session_store.TRUNCATED_BY_BUDGET
+        raise
+    except circuit_breaker.RunAborted:
+        # Likewise: the infra breaker's run-level abort passes through to the driver, which
+        # stamps `aborted` on the MAIN session. Its gather session ended at the same instant
+        # and gets the same word.
+        terminator = session_store.TRUNCATED_BY_ABORTED
+        raise
+    finally:
+        if terminator is not None and stamp_terminator is not None:
+            stamp_terminator(agent_id, terminator)
 
     wrapped = _wrap(output, "untrusted", deps.salt)
     _persist_gather_summary(deps.run_dir, lead_id, wrapped)
@@ -336,6 +386,7 @@ async def _run_gather(
 
 def register_gather_tool(
     main_agent, gather_factory, request_limit: int, verb_grant: VerbGrant,
+    stamp_terminator: Callable[[str, str], None] | None = None,
 ) -> None:
 
     @main_agent.tool
@@ -353,4 +404,5 @@ def register_gather_tool(
         request = GatherRequest(lead_id, system, goal, tuple(what_to_summarize))
         return await tools._run_gather(
             ctx.deps, gather_factory, request_limit, request, verb_grant,
+            stamp_terminator,
         )

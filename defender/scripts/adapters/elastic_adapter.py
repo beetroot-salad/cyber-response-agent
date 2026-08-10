@@ -135,7 +135,34 @@ def _raise_on_es_error(status: int, resp: dict, what: str) -> None:
 
 
 
-def _build_search_body(query_string, time_start, time_end, time_field, limit):
+SORT_NEWEST_FIRST = "desc"
+SORT_OLDEST_FIRST = "asc"
+SORT_ORDERS = (SORT_NEWEST_FIRST, SORT_OLDEST_FIRST)
+DEFAULT_SORT = SORT_NEWEST_FIRST
+
+
+def resolve_sort(sort: str) -> str:
+    """THE membership test for this adapter's sort vocabulary — the owner's answer, so no
+    caller re-derives what a value in `SORT_ORDERS` means.
+
+    The order used to be hardcoded `desc` (#826 item 2): every capped result was the 20 most
+    RECENT matching docs, and a lead asking what happened FIRST in a window was answered with
+    what happened last — with no parameter that could ask otherwise. `desc` remains the
+    default, so every existing call keeps its exact behaviour; what is added is the ability to
+    ask for the OTHER end of the same window. That is deliberately not pagination: `asc` and
+    `desc` are the two ENDS a bounded window has, and reaching a middle slice is still the
+    window's job, not a cursor's.
+    """
+    if sort not in SORT_ORDERS:
+        raise UpstreamFault(
+            f"invalid sort {sort!r}: one of {list(SORT_ORDERS)} — {SORT_NEWEST_FIRST!r} "
+            f"returns the newest matching docs in the window, {SORT_OLDEST_FIRST!r} the "
+            f"oldest. Neither pages: to reach docs between the two ends, narrow the window."
+        )
+    return sort
+
+
+def _build_search_body(query_string, time_start, time_end, time_field, limit, sort):
     filters: list[dict] = []
     if time_start or time_end:
         rng: dict[str, str] = {}
@@ -152,14 +179,16 @@ def _build_search_body(query_string, time_start, time_end, time_field, limit):
 
     return {
         "size": min(limit, RETURNED_DOC_CAP),
-        "sort": [{time_field: {"order": "desc"}}],
+        "sort": [{time_field: {"order": resolve_sort(sort)}}],
         "query": {"bool": {"must": must, "filter": filters}},
         "track_total_hits": True,
     }
 
 
-def _search(ctx, config, index_pattern, query_string, time_start, time_end, time_field, limit):
-    body = _build_search_body(query_string, time_start, time_end, time_field, limit)
+def _search(  # noqa: PLR0913 — one search body's parameters, threaded whole
+    ctx, config, index_pattern, query_string, time_start, time_end, time_field, limit, sort,
+):
+    body = _build_search_body(query_string, time_start, time_end, time_field, limit, sort)
     url = (
         f"{config['ELASTICSEARCH_URL'].rstrip('/')}/"
         f"{urllib.parse.quote(index_pattern, safe='-*,.')}/_search"
@@ -177,9 +206,9 @@ def _search(ctx, config, index_pattern, query_string, time_start, time_end, time
     return docs, total_hits, truncated
 
 
-def _search_verb(
+def _search_verb(  # noqa: PLR0913 — the two search verbs' shared body, one param each
     ctx: VerbContext, *, index_key: str, native_query: str,
-    start: str | None, end: str | None, limit: int, index: str | None,
+    start: str | None, end: str | None, limit: int, index: str | None, sort: str,
 ) -> dict:
     config = load_config(ctx)
     resolved = index or config[index_key]
@@ -188,12 +217,26 @@ def _search_verb(
     )
     docs, total, truncated = _search(
         ctx, config, resolved, native_query, start, end,
-        time_field="@timestamp", limit=limit,
+        time_field="@timestamp", limit=limit, sort=sort,
     )
+    return search_envelope(resolved, docs, total, truncated, sort)
+
+
+def search_envelope(index: str, docs: list, total: int, truncated: bool, sort: str) -> dict:
+    """The model-facing result shape of `query` / `alerts` — named rather than inlined because
+    it is the contract a lead reads and a payload on disk keeps, not an assembly detail."""
     return {
-        "index": resolved,
+        "index": index,
         "total": total,
         "returned": len(docs),
+        # WHICH end of the window these docs came from. `truncated` says a slice was taken;
+        # without the order it was taken in, a reader of the envelope (or of the payload on
+        # disk, long after the call) cannot tell whether the 20 it holds are the window's
+        # first or its last — the same ambiguity the hardcoded order left in the call itself.
+        # Echoed, not re-resolved: `_build_search_body` is the one membership test on this
+        # path and it runs BEFORE the request, so a second one here could only ever refuse a
+        # value Elasticsearch has already sorted by.
+        "sort": sort,
         "truncated": truncated,
         "hits": docs,
     }
@@ -239,10 +282,11 @@ def query(
     end: str | None = None,
     limit: int = DEFAULT_LIMIT,
     index: str | None = None,
+    sort: str = DEFAULT_SORT,
 ) -> dict:
     return _search_verb(
         ctx, index_key="ELASTIC_EVENTS_INDEX", native_query=native_query,
-        start=start, end=end, limit=limit, index=index,
+        start=start, end=end, limit=limit, index=index, sort=sort,
     )
 
 
@@ -255,10 +299,11 @@ def alerts(
     end: str | None = None,
     limit: int = DEFAULT_LIMIT,
     index: str | None = None,
+    sort: str = DEFAULT_SORT,
 ) -> dict:
     return _search_verb(
         ctx, index_key="ELASTIC_ALERTS_INDEX", native_query=native_query,
-        start=start, end=end, limit=limit, index=index,
+        start=start, end=end, limit=limit, index=index, sort=sort,
     )
 
 

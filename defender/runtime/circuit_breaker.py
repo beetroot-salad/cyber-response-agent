@@ -13,6 +13,14 @@ RUN_FAIL_KILL_LIMIT = 5
 
 INFRA_EXIT_CODES = frozenset({2, 124})
 
+#: The two values `error_class_for_exit` writes into every queries-table row, named because
+#: readers now BRANCH on them rather than only displaying them: the companion repeat guard's
+#: counted domain is the `agent-fixable` half of the above-guard rows, and the `infra` half is
+#: this module's own to own (#826 item 4). A reader that spelled the value itself would be one
+#: rename away from silently counting nothing.
+INFRA_ERROR_CLASS = "infra"
+AGENT_FIXABLE_ERROR_CLASS = "agent-fixable"
+
 
 def is_infra_failure(exit_code: int) -> bool:
     return exit_code in INFRA_EXIT_CODES
@@ -21,7 +29,7 @@ def is_infra_failure(exit_code: int) -> bool:
 def error_class_for_exit(exit_code: int) -> str | None:
     if exit_code == 0:
         return None
-    return "infra" if exit_code in INFRA_EXIT_CODES else "agent-fixable"
+    return INFRA_ERROR_CLASS if exit_code in INFRA_EXIT_CODES else AGENT_FIXABLE_ERROR_CLASS
 
 
 class RunAborted(Exception):

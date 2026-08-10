@@ -26,6 +26,7 @@ from defender.scripts.gather_tools.record_query import (
     ABOVE_GUARD_QUERY_ID,
     REPEAT_ESCAPE,
     GatherDeadEnd,
+    RepeatTrip,
     _is_event_payload,
     _json_safe_params,
     _next_seq,
@@ -34,6 +35,9 @@ from defender.scripts.gather_tools.record_query import (
     dead_end_reason,
     lead_rows,
     payload_digest,
+    rejection_dead_end_reason,
+    rejection_trip,
+    rejection_trip_detail,
     repeat_note,
     repeat_trip,
     repeat_trip_detail,
@@ -197,6 +201,24 @@ class QueryCapture(AbstractCapability[Any]):
             )
         return None
 
+    def _rejection_guard(self, deps, system: str, verb: str, params: dict) -> RepeatTrip | None:
+        """The companion repeat guard (#826 item 4), shared by the two placements that reject a
+        call ABOVE `wrap_tool_execute`'s guard: the argument schema, and the grant check's
+        unresolvable-verb branch. Returns the `RepeatTrip` when this call is the `threshold`th
+        identical rejection, else `None`.
+
+        Its counted domain (`rejection_trip`) is the complement of the first guard's, so the
+        two can never both own one call. The identity is extracted at the CALLER, because the
+        two placements read different argument surfaces — raw pre-validation arguments up at
+        the schema, validated ones at the grant check — which is exactly why one guard could
+        not serve both."""
+        if deps.lead_id is None:
+            return None
+        return rejection_trip(
+            lead_rows(deps.run_dir, deps.lead_id), deps.lead_id,
+            system=system, verb=verb, params=params,
+        )
+
     async def wrap_tool_validate(self, ctx, *, call, args, handler, **_):  # noqa: ANN001 — **_ absorbs the framework's tool_def
         if call.tool_name != TOOL_NAME:
             return await handler(args)
@@ -205,15 +227,27 @@ class QueryCapture(AbstractCapability[Any]):
         except (ValidationError, ModelRetry) as e:
             raw = _raw_args(args)
             system, verb = _as_str(raw.get("system")), _as_str(raw.get("verb"))
+            # THE SECOND IDENTITY EXTRACTION (P-a). These are the RAW arguments: this frame
+            # runs precisely because the schema refused to produce validated ones, so there is
+            # nothing else to key on. A `params` that is not a dict at all coarsens to `{}`
+            # here — that is what the row already stores, so the live count and a replay over
+            # the recorded table read the same identity, which is the property that matters.
+            params = _as_dict(raw.get("params"))
+            trip = self._rejection_guard(ctx.deps, system, verb, params)
             await self._record(
                 ctx.deps,
                 system=system, verb=verb,
                 query_id=ABOVE_GUARD_QUERY_ID,
-                params=_as_dict(raw.get("params")),
+                params=params,
                 payload=None,
                 exit_code=USAGE_EXIT_CODE,
-                detail=str(e),
+                detail=str(e) if trip is None else rejection_trip_detail(trip, str(e)),
             )
+            if trip is not None:
+                raise GatherDeadEnd(
+                    reason=rejection_dead_end_reason(system, verb, trip),
+                    escape=REPEAT_ESCAPE,
+                ) from e
             raise
 
     async def _grant_check(
@@ -242,11 +276,26 @@ class QueryCapture(AbstractCapability[Any]):
             )
 
         if decision.outcome != GRANTED:
+            # The unresolvable-verb repeat class — the same shape as the schema class at a
+            # different placement (#826 item 4), and the reason the companion guard is reached
+            # from both. The load-error branch above is deliberately NOT guarded: its rows are
+            # `infra`, outside `rejection_trip`'s domain, and `circuit_breaker` already owns
+            # that repeat end to end.
+            trip = self._rejection_guard(deps, system, verb, params)
+            refusal = decision.refusal or "unresolvable"
             await self._record(
                 deps, system=system, verb=verb,
                 query_id=ABOVE_GUARD_QUERY_ID, params=params, payload=None,
-                exit_code=USAGE_EXIT_CODE, detail=decision.refusal or "unresolvable",
+                exit_code=USAGE_EXIT_CODE,
+                detail=(
+                    refusal if trip is None else rejection_trip_detail(trip, refusal)
+                ),
             )
+            if trip is not None:
+                raise GatherDeadEnd(
+                    reason=rejection_dead_end_reason(system, verb, trip),
+                    escape=REPEAT_ESCAPE,
+                )
             raise ModelRetry(decision.refusal or f"unresolvable: {system}.{verb}")
 
         return decision, None
@@ -377,19 +426,28 @@ class QueryCapture(AbstractCapability[Any]):
 
     def _model_view(self, deps, row: dict, text: str, exit_code: int, detail: str) -> str:
         note = _payload_note(deps, row)
+        # ABOVE the exit-code split, not inside the success arm (#826 item 3). The early
+        # return used to sit here, so a lead repeating a request whose calls keep FAILING was
+        # the one population that never got the "you are repeating yourself" signal — the
+        # exact population most likely to loop, since a failure gives it nothing new to reason
+        # from either. Ahead of the view for the same reason it is on the success path: the
+        # repeat is what the caller most needs to read first.
+        repeat = repeat_note(
+            deps.run_dir, deps.lead_id, seq=row["seq"], system=row["system"],
+            verb=row["verb"], params=row["params"],
+            payload_digest=row["payload_digest"], exit_code=exit_code,
+        )
         if exit_code != 0:
-            return _format_bash_result(exit_code, "", _wrap(detail, "untrusted", deps.salt), note)
+            # Prepended to `detail` INSIDE the wrap, mirroring the success arm: the wrap is
+            # the untrusted boundary for this whole stream, and lifting one defender-authored
+            # line out of it would put a second, differently-trusted region in a result the
+            # main loop reads as one span.
+            body = detail if repeat is None else f"{repeat}\n{detail}"
+            return _format_bash_result(exit_code, "", _wrap(body, "untrusted", deps.salt), note)
         view = (
             build_truncated_view(text, row["payload_path"], deps.run_dir)
             if (_is_event_payload(text) or len(text) > _passthrough_max_bytes())
             else text
-        )
-        # Ahead of the view, not inside it: a small payload skips build_truncated_view
-        # entirely, and the repeat is the one thing the caller most needs to read first.
-        repeat = repeat_note(
-            deps.run_dir, deps.lead_id, seq=row["seq"], system=row["system"],
-            verb=row["verb"], params=row["params"],
-            payload_digest=row["payload_digest"],
         )
         if repeat is not None:
             view = f"{repeat}\n{view}"
