@@ -620,14 +620,14 @@ handoff:
        M2 both land on it. Branch `spec/823-pitfalls-input`, base e3979163."
 
   deferred:
-    - "PITFALLS QUEUE HAS NO DEDUP (code-review #4), filed as a follow-up. `append_pitfalls`
+    - "PITFALLS QUEUE HAS NO DEDUP (code-review #4) — filed as gh#840. `append_pitfalls`
        appends without dedup and `collect_general_failures` emits one record PER ROW, so the
        motivating incident — one lead brute-forcing the same reduce for eight turns — now
        enqueues 8 near-identical records and clears M4's threshold of 3 on a single lesson.
        This makes O3's oracle WEAKER than C9 already said: the queue can reach the threshold
        without the channel having learned three things. Not fixed here because dedup changes
        `collect_general_failures`, which this issue's scope explicitly does not touch."
-    - "SENTINEL ROWS REACH THE ACTOR, ORACLE AND JUDGE (code-review #5), filed as a follow-up.
+    - "SENTINEL ROWS REACH THE ACTOR, ORACLE AND JUDGE (code-review #5) — filed as gh#841.
        `lead_repository` applies NO sentinel filter, so `actor_view` (lead_repository.py:213)
        and `oracle/sample._query_lines` render `{id: ∅.bash-shim, params: {command: <shell>}}`
        to those stages as 'a query the defender ran', and `build_handoff` logs a WARN for each.
