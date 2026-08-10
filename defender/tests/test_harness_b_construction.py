@@ -39,12 +39,14 @@ that parameter seam and env vars (`monkeypatch.setenv`), never `monkeypatch.seta
 """
 from __future__ import annotations
 
+import tempfile
 from pathlib import Path
 
 import pytest
 
 pytest.importorskip("pydantic_ai")
 
+from pydantic_ai.exceptions import UsageLimitExceeded  # noqa: E402
 from pydantic_ai.messages import ModelResponse, TextPart  # noqa: E402
 from pydantic_ai.models import override_allow_model_requests  # noqa: E402
 from pydantic_ai.models.function import FunctionModel  # noqa: E402
@@ -226,6 +228,72 @@ def test_build_agent_core_keys_the_cache_on_the_conversation_when_there_is_one(l
         )
     assert in_session.model_settings["openai_prompt_cache_key"] == "sess-7:main"
     assert one_shot.model_settings["openai_prompt_cache_key"] == "ablation"
+
+
+def test_835_an_explicit_cache_key_overrides_both_derived_arms(logger):
+    """The third arm (#835). Gather HAS a session, so the derived key would be
+    `{session}:gather:{lead_id}` — which routes every sibling lead to its own replica and lets
+    none of them read the prefix they all share: gather's SKILL.md plus the dispatched system's
+    catalog, identical across leads AND across runs. An explicit key is how the caller that
+    knows what that prefix is keyed on says so.
+
+    Pinned against the SESSION arm specifically: an override that only beat the session-less arm
+    would be dead code on the one role that needs it. The two derived arms themselves stay
+    pinned, untouched, by the test above."""
+    defn = AgentDefinition(role=AgentRole.GATHER, model=lambda: "glm-5.2", effort="low")
+    with override_allow_model_requests(False):
+        keyed = driver.build_agent_core(
+            defn, deps_type=AgentDeps, instructions="x", logger=logger,
+            agent_id="gather:l-005", make_model=_capture_make_model()[0],
+            session_id="sess-7", cache_key="gather:identity",
+        )
+    assert keyed.model_settings["openai_prompt_cache_key"] == "gather:identity"
+
+
+def test_835_gather_is_cache_keyed_on_the_system_while_its_agent_id_stays_the_lead(logger):
+    """The two names are now distinct, and each is load-bearing for something different: the
+    prompt-cache lane is the SYSTEM's (that is what the shared prefix belongs to), while
+    `agent_id` remains `gather:{lead_id}` — the wire log's line key, the session store's
+    `agent_id` column, and what `_stamp_gather_terminator` looks a session up by.
+
+    Driven through the REAL factory the driver hands `register_gather_tool`, reached by driving
+    `_run_gather` with a fake `gather_factory` that records the pair it is called with — the
+    contract change (`gather_factory(agent_id, system)`) is what carries the system down."""
+    import asyncio
+
+    from defender.runtime import tools_gather
+    from defender.runtime.agent_definition import bind
+    from defender.runtime.driver import GATHER_DEF, MAIN_DEF
+
+    seen: list[tuple[str, str]] = []
+
+    class _Agent:
+        async def run(self, *a, **kw):
+            raise UsageLimitExceeded("stop here — the factory call is what this pins")
+
+    def _factory(agent_id: str, system: str):
+        seen.append((agent_id, system))
+        return _Agent()
+
+    with tempfile.TemporaryDirectory() as td:
+        run_dir = Path(td)
+        (run_dir / "gather_raw").mkdir()
+        deps = bind(MAIN_DEF, run_dir, salt="0011223344556677", defender_dir=_DEFENDER)
+        asyncio.run(tools_gather._run_gather(
+            deps, _factory, 40,
+            tools_gather.GatherRequest("l-005", "identity", "goal", ("what",)),
+            GATHER_DEF.verb_grant,
+        ))
+
+    assert seen == [("gather:l-005", "identity")]
+
+    fake, _ = _capture_make_model()
+    with override_allow_model_requests(False):
+        agent = driver.build_gather_agent(
+            _DEFENDER, logger, "gather:l-005", make_model=fake, verbs=FakeVerbs({}),
+            session_id="sess-7", cache_key="gather:identity",
+        )
+    assert agent.model_settings["openai_prompt_cache_key"] == "gather:identity"
 
 
 def test_build_agent_core_registers_read_only_pair(logger):

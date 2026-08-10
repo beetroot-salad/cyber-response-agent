@@ -47,11 +47,15 @@ def _draft_ids() -> set[str]:
 def test_d17_gather_dispatch_carries_the_template_index_end_to_end(tmp_path):
     """d3 + d4 + d17, through the real driver against the REAL repo corpus.
 
-    The dispatch prompt the gather subagent receives must carry every ESTABLISHED template id
+    The dispatch prompt the gather subagent receives must carry every ESTABLISHED template ID
     (all systems — not just the dispatched `elastic`) and NO draft id. Gather then binds one of
-    them: it tags `--query-id` with a template id it found in the index, and the queries table
+    them: it passes a template id it found in the index as `query_id`, and the queries table
     records that binding — which is the whole point of the change (a bound id is a catalog reuse;
     a coined id is a miss).
+
+    #835 narrows what "carry" means, and the last block pins the narrowing on the wire rather
+    than only at `_gather_prompt`: every id still arrives, but an off-target system's `## Goal`
+    prose does not.
     """
     from defender.tests.e2e._replay_harness import FakeVerbs
 
@@ -97,6 +101,17 @@ def test_d17_gather_dispatch_carries_the_template_index_end_to_end(tmp_path):
     assert "skills/gather/queries/elastic/sshd-auth-history.md" in dispatch
 
     assert "template_search" in dispatch
+
+    # #835, on the wire: an off-target system reaches the model as id + path, without its Goal.
+    from defender._corpus import iter_query_templates
+
+    off = next(t for t in iter_query_templates(_CATALOG)
+               if t.status == "established" and t.system == "cmdb")
+    assert off.id in dispatch, "an off-target id was filtered out rather than shortened"
+    assert " ".join(off.goal.split()) not in dispatch, "an off-target Goal reached the wire"
+    on = next(t for t in iter_query_templates(_CATALOG)
+              if t.status == "established" and t.system == "elastic")
+    assert " ".join(on.goal.split()) in dispatch, "the dispatched system lost its Goal prose"
 
     rows = (run_dir / "executed_queries.jsonl").read_text().strip().splitlines()
     assert rows, "gather executed no query"

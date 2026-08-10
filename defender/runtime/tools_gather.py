@@ -67,26 +67,64 @@ def _repo_rel(defender_dir: Path, path: Path) -> str:
         return str(path)
 
 
-def _template_index(defender_dir: Path, verb_grant: VerbGrant | None = None) -> str:
-    entries = [
-        f"- `{t.id}` — `{_repo_rel(defender_dir, t.path)}`\n"
-        f"  {' '.join(t.goal.split())}"
-        for t in iter_query_templates(_catalog_dir(defender_dir))
-        if t.status == "established" and "_draft" not in t.path.parts
-        and (verb_grant is None or verb_grant.allows(t.system, t.verb))
-    ]
-    return "\n".join(entries)
+def _template_index(
+    defender_dir: Path, dispatched: str, verb_grant: VerbGrant | None = None,
+) -> str:
+    """Two tiers (#835). The dispatched system's templates carry their `## Goal`; every other
+    system's shrink to an id and a path.
+
+    Not a per-system FILTER, which is what the measurement invites and what would break the
+    thing it measured: leads cross systems in practice (l-004, dispatched host-state, queried
+    cmdb; l-005, dispatched identity, queried four). Every established id stays in every
+    dispatch. What the off-target tier drops is the PROSE — which is the whole cost: 27 Goals
+    render 14.8k chars, 86% of a gather lead's user message, re-sent on all 22 of its turns,
+    for a catalog the lead will mostly never open.
+
+    The off-target tier keeps the PATH. There is no fetch-by-id tool, so the path is what makes
+    a cross-system reuse one `read_file` instead of a `template_search` round-trip first — and
+    `template_search` matches `body`, which excludes the frontmatter, so searching for the id
+    itself is not reliably even a hit.
+    """
+    on_target: list[str] = []
+    elsewhere: list[str] = []
+    for t in iter_query_templates(_catalog_dir(defender_dir)):
+        if t.status != "established" or "_draft" in t.path.parts:
+            continue
+        if verb_grant is not None and not verb_grant.allows(t.system, t.verb):
+            continue
+        locator = f"- `{t.id}` — `{_repo_rel(defender_dir, t.path)}`"
+        if t.system == dispatched:
+            on_target.append(f"{locator}\n  {' '.join(t.goal.split())}")
+        else:
+            elsewhere.append(locator)
+
+    # Before the tier headers, not after: an index with no entries at all is the UNAVAILABLE
+    # degradation `_gather_prompt` tests for, and a header rendered over two empty lists would
+    # make that check pass on a truthy string that says nothing (test d19).
+    if not on_target and not elsewhere:
+        return ""
+
+    on_target_block = "\n".join(on_target) if on_target else (
+        f"(none — no established `{dispatched}` template. Confirm that system name against the "
+        "descriptor index above; `template_search` before you coin.)"
+    )
+    blocks = [f"### `{dispatched}` — your dispatched system: id, path, `## Goal`\n{on_target_block}"]
+    if elsewhere:
+        blocks.append("### Other systems — id and path only\n" + "\n".join(elsewhere))
+    return "\n\n".join(blocks)
 
 
 _INDEX_HEADER = (
-    "\n## Query templates (the catalog index — every established template, every system)\n\n"
-    "Each entry is the template's `id:`, its path, and its `## Goal`. To REUSE one: `read_file` "
-    "its path, adapt the `## Query` body to this lead, and tag the adapter call "
-    "`--query-id <id>`. Read it BEFORE you tag it — an id you tag without opening the file is "
-    "recorded as a catalog reuse of a query you did not run, which corrupts the queries table. "
-    "Nothing here fits your lead → coin a fresh id instead (gather never writes to the catalog).\n"
-    "The Goals are indexed for keyword recall; when they read too coarse, `template_search` greps "
-    "the full bodies (including uncurated drafts, which the index below omits).\n\n"
+    "\n## Query templates (the established catalog — every template, every system)\n\n"
+    "Two tiers: the system you were dispatched to, each template as its `id:`, its path and its "
+    "`## Goal`; every other system, id and path only — leads do cross systems, and an off-tier "
+    "id is one `read_file` away. When the ids and Goals read too thin, `template_search` greps "
+    "every template's full body, including the uncurated drafts this index omits.\n"
+    "To REUSE one: `read_file` its path, adapt the `## Query` body to this lead, and pass its id "
+    "as `query_id` on your `query` call. Read it BEFORE you bind it — an id bound without "
+    "opening the file is recorded as a catalog reuse of a query you did not run, which corrupts "
+    "the queries table. Nothing here fits your lead → coin a fresh id instead (gather never "
+    "writes to the catalog).\n\n"
 )
 
 _INDEX_UNAVAILABLE = (
@@ -101,10 +139,30 @@ def _gather_prompt(
     deps: AgentDeps, request: GatherRequest, catalog: str | None,
     verb_grant: VerbGrant | None = None,
 ) -> str:
+    # SECTION ORDER IS THE CACHE PREFIX (#835). The two indexes vary only with the dispatched
+    # system and the tree; the Dispatch block varies with every lead. Emitting the indexes FIRST
+    # is what lets two leads on the same system share a prefix — behind the per-lead YAML they
+    # were re-paid in full on every dispatch, because a content-keyed prefix cache misses at
+    # `lead_id` and never reaches them. The lead's own question landing last is the same trade
+    # read the other way: it is what this message is FOR, and it sits in the recency slot.
+    block = "Begin gathering this lead.\n\n"
+    if catalog:
+        block += (
+            "## Systems of record (descriptor index — frontmatter only, "
+            f"progressive disclosure). Your target is `system: {request.system}`, named in the "
+            "Dispatch at the end of this message; confirm it here. These descriptions are "
+            "usually enough to pick a template or name a measurement — Read the target's full "
+            f"`{deps.defender_dir}/skills/{request.system}/SKILL.md` (and execution.md if "
+            "present) ONLY on demand, when you need field vocab or CLI specifics the "
+            "descriptor lacks; not on every dispatch.\n\n"
+            f"{catalog}\n"
+        )
+    index = _template_index(deps.defender_dir, request.system, verb_grant)
+    block += (_INDEX_HEADER + index + "\n") if index else _INDEX_UNAVAILABLE
+
     wts = "\n".join(f"  - {d}" for d in request.what_to_summarize) or "  - (unspecified)"
-    block = (
-        "Begin gathering this lead.\n\n"
-        "## Dispatch\n```yaml\n"
+    block += (
+        "\n## Dispatch\n```yaml\n"
         f"defender_dir: {deps.defender_dir}\n"
         f"run_dir: {deps.run_dir}\n"
         f"lead_id: {request.lead_id}\n"
@@ -113,19 +171,6 @@ def _gather_prompt(
         f"what_to_summarize:\n{wts}\n"
         "```\n"
     )
-    if catalog:
-        block += (
-            "\n## Systems of record (descriptor index — frontmatter only, "
-            f"progressive disclosure). Your target is `system: {request.system}` above; "
-            "confirm it here. These descriptions are usually enough to pick a "
-            f"template or name a measurement — Read the target's full "
-            f"`{deps.defender_dir}/skills/{request.system}/SKILL.md` (and execution.md if "
-            "present) ONLY on demand, when you need field vocab or CLI specifics the "
-            "descriptor lacks; not on every dispatch.\n\n"
-            f"{catalog}\n"
-        )
-    index = _template_index(deps.defender_dir, verb_grant)
-    block += (_INDEX_HEADER + index + "\n") if index else _INDEX_UNAVAILABLE
     return block
 
 
@@ -236,7 +281,7 @@ def register_template_search_tool(agent) -> None:
         everything below the frontmatter), including the uncurated `_draft/` ones the index omits.
         `system` optionally restricts the search to one system's dir; omit it to search all of
         them. Each hit gives you the template's `id` and its path — Read the path before you bind
-        the `id` with `--query-id`."""
+        the `id` as `query_id`."""
         return _tool_template_search(ctx.deps, pattern, system)
 
 
@@ -297,7 +342,11 @@ async def _run_gather(  # noqa: C901 — the branch count IS the terminator cens
     )
 
     agent_id = f"{GATHER_AGENT_ID_PREFIX}{lead_id}"
-    gagent = gather_factory(agent_id)
+    # `system` as well as `agent_id`: the two name different things now (#835). `agent_id` keys
+    # this lead's session and its wire-log lines; `system` is what the composition root keys the
+    # prompt-cache lane on, because the prefix this dispatch shares with its siblings is the
+    # system's, not the lead's. The factory owns that policy — this frame only knows both facts.
+    gagent = gather_factory(agent_id, system)
     gbase = bind(
         GATHER_DEF, deps.run_dir, salt=deps.salt, defender_dir=deps.defender_dir, box=deps.box,
     )

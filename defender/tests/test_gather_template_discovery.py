@@ -249,10 +249,19 @@ def test_d2_index_entry_carries_id_path_and_goal(tmp_path):
     assert "status: established" not in prompt
 
 
-def test_d3_index_does_not_vary_on_the_dispatched_system(tmp_path):
-    """The index covers ALL systems, not request.system: scoping to the dispatched system saves
-    almost nothing (elastic is 62% of the corpus) and couples the index to a param that is on
-    its way out. Dispatching the same lead as cmdb and as elastic yields the same index."""
+def test_d3_every_system_stays_reachable_from_any_dispatch(tmp_path):
+    """d3 demanded an index that does not vary on the dispatched system, on two grounds: that
+    scoping "saves almost nothing (elastic is 62% of the corpus)", and that `system` was "a param
+    on its way out". #835 measured both wrong. The all-systems render is 3,881 tokens — 86% of a
+    gather lead's user message, re-sent on all 22 turns of it — and a lead dispatched `identity`
+    was handed 3,709 tokens of off-target catalog; `system` is still the axis every dispatch,
+    every adapter and the circuit breaker key on.
+
+    What SURVIVES is the reason d3 existed, and it is why #835 tiers rather than filters: leads
+    cross systems (l-004, dispatched host-state, queried cmdb; l-005, dispatched identity, queried
+    four), so no dispatch may HIDE another system's templates. Every established id is still in
+    every dispatch — off-target ones as id + path, without the Goal prose. The render is still
+    deterministic; it is now deterministic per dispatched system."""
     dfn = _catalog(tmp_path)
     as_elastic = _prompt_for(tmp_path, dfn, system="elastic")
     as_cmdb = _prompt_for(tmp_path, dfn, system="cmdb")
@@ -260,7 +269,43 @@ def test_d3_index_does_not_vary_on_the_dispatched_system(tmp_path):
     for tid in ("elastic.sshd-auth-history", "cmdb.hostname-by-ip", "change-mgmt.active-changes"):
         assert tid in as_elastic, f"{tid} missing from an elastic dispatch"
         assert tid in as_cmdb, f"{tid} missing from a cmdb dispatch"
-    assert tools_gather._template_index(dfn) == tools_gather._template_index(dfn)
+    assert tools_gather._template_index(dfn, "cmdb") == tools_gather._template_index(dfn, "cmdb")
+
+
+def test_835_only_the_dispatched_systems_entries_carry_goal_prose(tmp_path):
+    """#835's demand, both directions off two renders of one corpus — so neither "keep every
+    Goal" (the shape being replaced) nor "drop every Goal" (which would strand the lead's own
+    system) can pass. The off-target entry keeps its PATH: there is no fetch-by-id tool, so the
+    path is what makes a cross-system reuse one `read_file` rather than a `template_search`
+    round-trip first."""
+    dfn = _catalog(tmp_path)
+    as_cmdb = _prompt_for(tmp_path, dfn, system="cmdb")
+    as_elastic = _prompt_for(tmp_path, dfn, system="elastic")
+
+    assert "Resolve an IP address to its documented host record." in as_cmdb
+    assert "Failed password" not in as_cmdb, "an off-target Goal survived in the index"
+    assert "elastic.sshd-auth-history" in as_cmdb
+    assert "skills/gather/queries/elastic/sshd-auth-history.md" in as_cmdb
+
+    assert "Failed password" in as_elastic
+    assert "Resolve an IP address to its documented host record." not in as_elastic
+    assert "cmdb.hostname-by-ip" in as_elastic
+
+
+def test_835_a_system_with_no_templates_says_so_rather_than_rendering_nothing(tmp_path):
+    """The tier split makes an empty on-target block reachable for the first time: main dispatches
+    systems the catalog has never had a template for (`ticket`, `threat-intel`), and a typo'd
+    system name lands here too. An omitted block reads to the model as a truncated index — the
+    silent-empty failure #585 exists to stop — so the block renders and names itself empty. The
+    system name is echoed UNNORMALIZED: a typo is then visible next to the descriptor index the
+    prompt already tells gather to confirm the target against."""
+    dfn = _catalog(tmp_path)
+    prompt = _prompt_for(tmp_path, dfn, system="ticket")
+
+    assert re.search(r"no established `?ticket", prompt), \
+        "a dispatched system with no templates must be named as empty, not silently omitted"
+    assert "cmdb.hostname-by-ip" in prompt, "the other tier vanished with it"
+    assert "elastic.sshd-auth-history" in prompt
 
 
 def test_d4_index_excludes_drafts_and_d4b_includes_established(tmp_path):
@@ -297,15 +342,30 @@ def test_d4c_a_template_with_no_status_is_not_admitted_as_established(tmp_path):
     assert "elastic.sshd-auth-history" in prompt
 
 
-def test_d23_index_block_stays_under_its_char_budget(tmp_path):
+def test_d23_index_block_stays_under_its_char_budget():
     """The index is prompt text paid on EVERY dispatch, on a cheap model with reasoning off, and
     it is bounded by nothing today (_read_char_cap does not apply — it is not a read). Pin a
-    ceiling so a future "just add ## Pitfalls too" is a red test, not a silent token tax. The
-    real corpus is 24 established Goals at 231-915 chars; 24_000 leaves generous headroom while
-    still catching an order-of-magnitude regression."""
-    block = tools_gather._template_index(_DEFENDER)
-    assert block is not None
-    assert len(block) < 24_000, f"the injected index block is {len(block)} chars"
+    ceiling so a future "just add ## Pitfalls too" is a red test, not a silent token tax.
+
+    #835 makes the render vary by dispatched system, so the ceiling measures the WORST CASE —
+    elastic, 14 of the 27 established templates. The old 24_000 was slack against a 14.8k render
+    that every dispatch paid; measured at the change, elastic renders 11.1k and every other
+    system ~3.5k. 13_000 keeps elastic headroom while red-ing a revert to all-systems-full prose.
+    Re-measure and move these numbers deliberately; do not raise one to make a run green.
+
+    The second assertion is the #835 demand as a regression pin rather than a shape test: if the
+    tiering stops working, no dispatch pays a small index and the floor rises with the ceiling."""
+    systems = {t.system for t in _corpus.iter_query_templates(_REAL_CATALOG)
+               if t.status == "established"}
+    rendered = {s: tools_gather._template_index(_DEFENDER, s) for s in systems}
+    assert rendered, "the shipped corpus renders no index at all"
+
+    worst = max(rendered.values(), key=len)
+    assert len(worst) < 13_000, f"the worst-case index block is {len(worst)} chars"
+    cheapest = min(rendered.values(), key=len)
+    assert len(cheapest) < 5_000, (
+        f"the cheapest dispatch still pays {len(cheapest)} chars — the tiering is not working"
+    )
 
 
 def test_d19_an_unbuildable_index_degrades_loudly(tmp_path):

@@ -15,7 +15,8 @@ aggregation, run it, report what it returns.
 
 ## Inputs
 
-A fenced YAML block carries:
+A fenced YAML block — the `## Dispatch` section, at the END of your dispatch message,
+after the two indexes — carries:
 
 - `defender_dir` — repo root; anchor `Read`/`Bash` to `{defender_dir}/...`.
 - `run_dir` — the run's working dir; `alert.json` is at `{run_dir}/alert.json`.
@@ -53,16 +54,18 @@ A template is the right reuse when its `## Goal` describes the same
 **measurement** — even with different bound params. Templates are **wide/superset
 queries you narrow**; fork on capability, not parameter axis.
 
-Your dispatch prompt carries the **template index**: every established template, every system,
-each as its `id`, its path, and its `## Goal`. Scan it first. When the Goals read too coarse to
+Your dispatch prompt carries the **template index** in two tiers: the system you were dispatched
+to, each template as its `id`, its path and its `## Goal`; every other system, id and path only.
+Scan your own tier first. Leads do cross systems — when nothing on-target fits, `read_file` an
+off-tier path to see what it measures. When the Goals read too coarse to
 tell whether one already measures this, call **`template_search`** — it searches each template's
 full body, every section (case-insensitively, and including the uncurated `_draft/` templates the
 index omits), for the concept terms an analyst would type (`sshd`, `sudo`, `/etc/passwd`,
 `listening port`).
 
 **Read the template body with `read_file` before you pass its id as `query_id`.** The index
-gives you the id, the Goal and the path — not the query — so an id you take from the index is an
-id you have not yet opened. Adapt the `## Query` body you actually read. A bound id is recorded
+gives you an id and a path — and, on your own tier, the Goal — never the query, so an id you
+take from the index is an id you have not yet opened. Adapt the `## Query` body you actually read. A bound id is recorded
 as a *reuse* of that template, so naming one you never read files a query you coined under a
 query you did not run, and silently corrupts the `(query_id, params)` join the offline
 lead-author builds the catalog from.
@@ -113,8 +116,12 @@ query(system="{system}", verb="{verb}", params={...}, query_id="{system}.<id>")
   query (one lead may run several with different bindings). Omit it and the call still runs,
   recorded under a generic `{system}.{verb}`.
 - **The harness captures the query and its result automatically** — the queries table plus
-  the full payload on disk. You do not wrap the call, name a file, or record anything. You
-  get a field-shape view of the payload back, plus the absolute path to the whole of it.
+  the full payload on disk. You do not wrap the call, name a file, or record anything. What
+  comes back depends on SIZE and nothing else: a payload that fits arrives **whole and
+  verbatim** — read it, count it, quote it, it is all there. One too large arrives **bounded**,
+  with every dropped region marked `<<ELIDED n of m …>>` exactly where it was dropped. Those
+  elements are missing from your context only; they are on disk in full, at the absolute path
+  you also get. Nothing that arrives unmarked is a sample.
 - **Need to reduce a payload afterwards?** That is the one thing Bash is still for, and it
   is a *second* step over the file the query already wrote — never a pipe out of the query:
 
