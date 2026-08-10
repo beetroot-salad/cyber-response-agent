@@ -70,7 +70,7 @@ before chasing them; don't "fix" the tests.
 
 ## Run dir + the two tables
 
-Each run writes to `$DEFENDER_RUNS_BASE/{run_id}/` (default `/tmp/defender-runs/`): `alert.json` (read-only input), `investigation.md` (invlang work log), `report.md` (YAML frontmatter — `disposition: benign|false-positive|inconclusive|malicious` — is the headline the learning loop parses; the same frontmatter also carries the review gate's `outcome`/`cause`/`failure_kind`, which today only the visualizer reads), `review_record.{turn}.json` + `review_{role}_trace.jsonl` (the review gate, one record per close *attempt*), `llm_requests.jsonl` + `tool_trace.jsonl` (observability), `transcript.html` + `runtime.html`, and the **two append-only tables**, written live during the run:
+Each run writes to `$DEFENDER_RUNS_BASE/{run_id}/` (default `/tmp/defender-runs/`): `alert.json` (read-only input), `investigation.md` (invlang work log), `report.md` (YAML frontmatter — `disposition: benign|false-positive|inconclusive|malicious` — is the headline the learning loop parses; the same frontmatter also carries the review gate's `outcome`/`cause`/`failure_kind`, which today only the visualizer reads), `review_record.{turn}.json` + `review_{role}_trace.jsonl` (the review gate, one record per close *attempt*), `llm_requests.jsonl` + `tool_trace.jsonl` (observability — `llm_requests.jsonl` is the run's ONE wire log: the main agent, every gather subagent as `gather:{lead_id}`, and every review stage as `review:{lens}` write through the same `RequestLogger`, which is what makes all three priceable), `transcript.html` + `runtime.html`, and the **two append-only tables**, written live during the run:
 
 | Table | Where | Key |
 |---|---|---|

@@ -442,14 +442,38 @@ def _review_role_html(traces: list[tuple[str, list[dict]]], attempt: int) -> str
     return f'<div class="rr-list">{"".join(cards)}</div>'
 
 
-def render_review_gate(run_dir: Path, report: ReportRead) -> tuple[str, int]:
+def _review_cost_html(costs: dict[str, float] | None) -> str:
+    """The gate's spend, totalled and split by lens.
+
+    Empty when nothing priced — which is the honest render for a replay (its injected stages
+    call no provider) and for a run whose wire log predates the review sharing it. A `$0.0000`
+    there would read as "the gate was free", which is a different claim."""
+    total = sum((costs or {}).values())
+    if not total:
+        return ""
+    per_lens = " · ".join(
+        f"{esc(lens)} ${cost:.4f}" for lens, cost in sorted((costs or {}).items())
+    )
+    return (
+        f'<div class="rv-strip"><span class="rv-cost">review spend ${total:.4f}</span>'
+        f'<span class="rv-cost-lenses">{per_lens}</span></div>'
+    )
+
+
+def render_review_gate(
+    run_dir: Path, report: ReportRead, costs: dict[str, float] | None = None,
+) -> tuple[str, int]:
     """§ Review gate — the write-time review every CONFIDENT close passes.
 
     Rendered as a gate and deliberately NOT as a phase: it has no `##` header in
     `investigation.md`, the investigator never occupies it, and it is kept out of
     `visualize_data`'s phase machinery (`_LOOP_VERBS`, `phase_color`) so no cost bar, wall
     bar or transcript group can imply the agent was ever "in" it. What it gets instead is
-    its own section, keyed on the close ATTEMPT — which is the unit it actually has."""
+    its own section, keyed on the close ATTEMPT — which is the unit it actually has.
+
+    `costs` is the gate's spend per LENS (`visualize_messages.review_cost_by_lens`). It is
+    rendered HERE and nowhere in the phase machinery for the reason above: the money is real
+    and belongs on the page, but the gate is not a place the investigator was."""
     subtitle = "— the write-time gate on a confident close (not a phase)"
     records = _review_records(run_dir)
     if not records:
@@ -487,6 +511,7 @@ def render_review_gate(run_dir: Path, report: ReportRead) -> tuple[str, int]:
         f'<span class="rv-attempts">{len(records)} close attempt'
         f'{"" if len(records) == 1 else "s"}</span>'
         f'<span class="rv-cause">{esc(cause)}</span></div>'
+        + _review_cost_html(costs)
     )
     if failure_kind:
         strip += (

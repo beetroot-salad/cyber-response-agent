@@ -771,23 +771,6 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     # gate's bounds, carrying the request ceiling's own BASE), resolved once at the entry
     # point and threaded inward as a concrete value.
     gate_bounds = bounds if bounds is not None else challenge_gate.default_bounds()
-    # THE one place a live review bundle can honestly be built: the entry point is the only
-    # frame that holds both the run dir the stages must write their traces into and anchor
-    # their policies on, and the operator's model choice. `build_agent` — which sees neither —
-    # used to substitute the source tree for the run dir here.
-    #
-    # `model_override` is the operator's RAW `--model` and is deliberately a different value
-    # from `model_name` above, which has already been resolved against the investigator's
-    # default. Handing the resolved one to the review would give it a non-`None` explicit
-    # model on every run, and the review's own pinned default would be unreachable in
-    # production while a unit test calling the resolver with `None` still proved it was the
-    # default.
-    stages = (
-        review_stages if review_stages is not None
-        else review_roles.live_review_stages(  # lint-default: ok — DI seam owning its default (the live bundle, buildable only where the run dir is)
-            run_dir, defender_dir, model_override=model_override,
-        )
-    )
     make_model = make_model or providers.build_for_effort
     adapters = defender_dir / "scripts" / "adapters"
     verbs = verbs if verbs is not None else ModuleVerbRegistry(adapters, GATHER_DEF.verb_grant)  # lint-default: ok — DI seam owning its default (tree-derived; no signature default possible)
@@ -795,6 +778,41 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     budget_started_monotonic = time.monotonic()
     open_budget(run_dir, run_id)
     logger = observe.RequestLogger(run_dir / "llm_requests.jsonl")
+
+    # THE one place a live review bundle can honestly be built, and it sits HERE — below the
+    # logger, not above it. The entry point is the only frame holding all three things a live
+    # stage needs: the run dir it anchors its policies on, the operator's model choice, and
+    # the run's own `RequestLogger`. It used to be resolved ten lines further up, where the
+    # logger did not yet exist, so every stage minted a private one and wrote to a file no
+    # reader ever opened — the review's model calls charged a provider and landed in no
+    # accounted total (#787). `build_agent`, which sees none of the three, used to substitute
+    # the source tree for the run dir here.
+    #
+    # `model_override` is the operator's RAW `--model` and is deliberately a different value
+    # from `model_name` above, which has already been resolved against the investigator's
+    # default. Handing the resolved one to the review would give it a non-`None` explicit
+    # model on every run, and the review's own pinned default would be unreachable in
+    # production while a unit test calling the resolver with `None` still proved it was the
+    # default.
+    #
+    # Guarded, because this resolution now happens BELOW the open: `live_review_stages` reads
+    # three prompt assets off the tree and `role_prompt` raises `FileNotFoundError` on a
+    # missing one. Above the logger that raise cost nothing; here it would leave
+    # `llm_requests.jsonl` open AND permanently registered in `observe._ACTIVE_PATHS`, so a
+    # second `run_investigation` in the same process could never reopen that path. The
+    # store-setup handler below closes the logger for exactly this reason; this window needs
+    # its own because a missing prompt asset is not a store fault and must not be reported
+    # as one.
+    try:
+        stages = (
+            review_stages if review_stages is not None
+            else review_roles.live_review_stages(  # lint-default: ok — DI seam owning its default (the live bundle, buildable only where the run dir and the run's logger are)
+                run_dir, defender_dir, logger=logger, model_override=model_override,
+            )
+        )
+    except BaseException:
+        logger.close()
+        raise
 
     case_id = uuid.uuid4().hex
     factory = store_factory if store_factory is not None else _default_store_factory  # lint-default: ok — DI seam owning its default (R12's fifth seam)

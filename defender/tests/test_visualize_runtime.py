@@ -281,3 +281,62 @@ def test_render_runtime_page_reconciles_and_renders(tmp_path, monkeypatch):
     headline = float(re.search(r'ts-cost">\$([0-9.]+)', html).group(1))
     segs = [float(x) for x in re.findall(r'cb-pct">\$([0-9.]+)', html)]
     assert abs(headline - sum(segs)) < 0.002, f"{headline} != {sum(segs)}"
+    # Asked of the rendered SPAN, not of the class name: the stylesheet is inlined into every
+    # page, so `"ts-review" in html` is true whether or not anything was rendered with it.
+    assert re.search(r'ts-review">', html) is None, (
+        "this fixture's gate made no model call, and a $0.0000 review term would read as "
+        "'the gate was free' rather than 'the gate did not run'"
+    )
+
+
+def _append_review_calls(run: Path, n_per_lens: int = 1) -> float:
+    """Give the fixture run a review gate that actually cost something, and return the total.
+
+    Written as wire records under `review:{lens}` because that is where the gate's calls land
+    since #787 — one shared `RequestLogger`, one `agent_id` namespace."""
+    from defender.scripts.pricing import usage_cost
+
+    rows = []
+    for lens in ("support", "ablation", "composer"):
+        for seq in range(n_per_lens):
+            rows.append({
+                "agent_id": f"review:{lens}", "seq": seq, "id": f"review:{lens}#{seq}",
+                "kind": "response", "model": "kimi-k3", "usage": _USAGE, "duration_ms": 900.0,
+                "message": {"kind": "response", "parts": [{"part_kind": "text", "content": "read"}]},
+            })
+    with (run / "llm_requests.jsonl").open("a", encoding="utf-8") as fh:
+        for row in rows:
+            fh.write(json.dumps(row) + "\n")
+    return len(rows) * usage_cost("kimi-k3", _USAGE)
+
+
+def test_the_review_gate_s_spend_is_inside_the_headline_and_named_there(tmp_path, monkeypatch):
+    """#787. The gate's calls are calls the run made, so they are IN the total — and named,
+    because an operator who cannot separate them cannot answer what the gate cost.
+
+    The headline therefore stops equalling the per-phase bar sum, and that is the intended
+    relationship rather than drift: the gate is not a phase (the investigator is never "in"
+    it), so its money has no phase segment to live in. Pinned as the exact difference."""
+    import re
+
+    run = _build_run(tmp_path)
+    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
+    review_total = _append_review_calls(run)
+    assert review_total > 0.002, "fixture too cheap to discriminate against the tolerance"
+
+    html = render_runtime_page(run)
+
+    headline = float(re.search(r'ts-cost">\$([0-9.]+)', html).group(1))
+    segs = [float(x) for x in re.findall(r'cb-pct">\$([0-9.]+)', html)]
+    assert abs(headline - (sum(segs) + review_total)) < 0.002, (
+        f"headline {headline} is not the phase bars {sum(segs)} plus the review {review_total}"
+    )
+
+    named = re.search(r'ts-review">\(incl review \$([0-9.]+)\)', html)
+    assert named is not None, "the review's share is folded into the total unnamed"
+    assert abs(float(named.group(1)) - review_total) < 0.0001
+
+    assert "kimi-k3" in html, (
+        "the by-model breakdown and the models byline must show the model the review "
+        "actually billed, not fold its spend into the investigator's row"
+    )

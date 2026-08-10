@@ -18,6 +18,7 @@ from . import circuit_breaker
 from . import permission
 from . import session_store
 from . import tools
+from .agent_role import GATHER_AGENT_ID_PREFIX
 from .tools import (
     GatherDeps,
     AgentDeps,
@@ -295,7 +296,7 @@ async def _run_gather(  # noqa: C901 — the branch count IS the terminator cens
         verb_grant,
     )
 
-    agent_id = f"gather:{lead_id}"
+    agent_id = f"{GATHER_AGENT_ID_PREFIX}{lead_id}"
     gagent = gather_factory(agent_id)
     gbase = bind(
         GATHER_DEF, deps.run_dir, salt=deps.salt, defender_dir=deps.defender_dir, box=deps.box,

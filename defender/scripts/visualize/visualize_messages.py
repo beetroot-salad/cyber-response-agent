@@ -6,6 +6,12 @@ from pathlib import Path
 
 from defender._io import read_jsonl_rows
 from defender._report import ReportRead
+# `agent_role` and NOT `review_roles`, though the latter re-exports the same constant:
+# `review_roles` pulls `runtime.tools` and with it the whole in-process runtime (pydantic-ai
+# included), and `learning/frontend/build.py` imports this package at module scope for the
+# page CSS alone. Same rule `visualize_runtime.close_vocabulary` states for `close_tool` —
+# the edge must not be paid by anything that only wants the stylesheet.
+from defender.runtime.agent_role import GATHER_AGENT_ID_PREFIX, REVIEW_AGENT_ID_PREFIX
 from defender.scripts.pricing import usage_cost
 from defender.scripts.visualize.visualize_data import phase_verb
 from defender.scripts.visualize.visualize_primitives import parse_report
@@ -93,14 +99,28 @@ def gather_calls_by_phase(
     return out
 
 
-def _iter_gather_responses(run_dir: Path, messages: list[dict] | None):
+def _iter_agent_responses(run_dir: Path, messages: list[dict] | None, prefix: str):
+    """Every wire response a subagent namespace wrote, as `(suffix, record)`.
+
+    Parameterised on the prefix rather than copied per namespace: the main agent, the gather
+    subagents and the review stages all write through ONE `RequestLogger` into
+    `llm_requests.jsonl` and are told apart only by `agent_id`, so "which of them is this
+    record" has exactly one shape and belongs in one function."""
     for rec in (load_messages(run_dir) if messages is None else messages):
         if rec.get("kind") != "response":
             continue
         aid = rec.get("agent_id", "main")
-        if not aid.startswith("gather:"):
+        if not aid.startswith(prefix):
             continue
-        yield aid.split(":", 1)[1], rec
+        yield aid[len(prefix):], rec
+
+
+def _iter_gather_responses(run_dir: Path, messages: list[dict] | None):
+    return _iter_agent_responses(run_dir, messages, GATHER_AGENT_ID_PREFIX)
+
+
+def _iter_review_responses(run_dir: Path, messages: list[dict] | None):
+    return _iter_agent_responses(run_dir, messages, REVIEW_AGENT_ID_PREFIX)
 
 
 def _gather_phase_for(dispatch_phase: str | None, phase_order: list[str]) -> str | None:
@@ -128,11 +148,7 @@ def gather_cost_by_phase(
     messages: list[dict] | None = None,
 ) -> tuple[dict[str, float], float]:
     out = {ph: 0.0 for ph in phase_order}
-    per_lead: dict[str, float] = {}
-    for lead, rec in _iter_gather_responses(run_dir, messages):
-        per_lead[lead] = per_lead.get(lead, 0.0) + usage_cost(
-            rec.get("model") or "", rec.get("usage") or {}
-        )
+    per_lead = _cost_by(_iter_gather_responses(run_dir, messages), lambda lead, _raw: lead)
     if per_lead:
         gphase = gather_dispatch_phase(events, tags)
         fallback = phase_order[0] if phase_order else None
@@ -177,15 +193,44 @@ def gather_wall_by_phase(
     return to_gather, from_dispatch
 
 
+def _cost_by(pairs, key) -> dict[str, float]:
+    """Price a namespace's wire responses and total them under whatever `key` names."""
+    out: dict[str, float] = {}
+    for suffix, rec in pairs:
+        raw = rec.get("model") or ""
+        k = key(suffix, raw)
+        out[k] = out.get(k, 0.0) + usage_cost(raw, rec.get("usage") or {})
+    return out
+
+
 def gather_cost_by_model(
     run_dir: Path, messages: list[dict] | None = None
 ) -> dict[str, float]:
-    out: dict[str, float] = {}
-    for _lead, rec in _iter_gather_responses(run_dir, messages):
-        raw = rec.get("model") or ""
-        pretty = _pretty_model(raw)
-        out[pretty] = out.get(pretty, 0.0) + usage_cost(raw, rec.get("usage") or {})
-    return out
+    return _cost_by(_iter_gather_responses(run_dir, messages), lambda _s, raw: _pretty_model(raw))
+
+
+def review_cost_by_lens(
+    run_dir: Path, messages: list[dict] | None = None
+) -> dict[str, float]:
+    """The write-time review gate's spend, split by LENS — support / ablation / composer.
+
+    Per lens and not per close ATTEMPT, though the attempt is the unit the gate's own record
+    is keyed on: the wire record carries no round, and the ordinal cannot stand in for one
+    because the ablation lens is skipped on a pass with no load-bearing edge to withhold, so
+    its n-th call is not its n-th round. The lens is also the decomposition this gate has
+    actually made a decision on — the measurement that retired the DISCRIMINATION role was
+    "52% of the review's cost" for one lens (`runtime/challenge_gate.py`)."""
+    return _cost_by(_iter_review_responses(run_dir, messages), lambda lens, _raw: lens)
+
+
+def review_cost_by_model(
+    run_dir: Path, messages: list[dict] | None = None
+) -> dict[str, float]:
+    """The same spend keyed by MODEL, for the run's by-model breakdown. The review runs on
+    its own pinned default (`review_roles.DEFAULT_REVIEW_MODEL`), separate from the
+    investigator's, so this is usually a row of its own — and correctly merges with main's
+    when an operator points both at one model."""
+    return _cost_by(_iter_review_responses(run_dir, messages), lambda _s, raw: _pretty_model(raw))
 
 
 def tool_usage(events: list[dict], messages: list[dict] | None = None) -> list[dict]:
