@@ -413,3 +413,122 @@ def test_the_squeeze_keeps_field_shape_before_value_shape(tmp_path):
     assert isinstance(first, dict)
     assert len(first) >= 40, "fields were dropped while values were still clippable"
     assert any(v.startswith("2026") for v in first.values() if isinstance(v, str))
+
+
+# --------------------------------------------------------------------------------------- #
+# A positional ROW degrades like a record does (#834).
+# --------------------------------------------------------------------------------------- #
+
+def _esql(rows: list[list], names: list[str]) -> str:
+    """The ES|QL envelope as the adapter now stores it: names once, rows as bare arrays."""
+    return json.dumps({
+        "query": "FROM logs-* | STATS ...",
+        "columns": [{"name": n, "type": "keyword"} for n in names],
+        "row_count": len(rows), "values": rows,
+    })
+
+
+def test_a_too_wide_row_keeps_cells_the_way_a_too_wide_record_keeps_fields(tmp_path):
+    """The sibling of `test_a_list_never_collapses_to_a_bare_marker`, for the other element
+    shape — and the regression #834 would have shipped without it.
+
+    `_fit_one`'s last-resort salvage was guarded `isinstance(element, dict)`, so an element
+    that was a LIST fell through to `return None`. Invisible while the ES|QL adapter re-zipped
+    every row into a dict; the moment it stopped, the corpus's widest payload — ONE row of
+    1,657 columns, a lead probing schema — went from 121 named cells to a bare marker. Same
+    ceiling, same bytes on disk, all the field shape gone.
+    """
+    names = [f"col_{j}" for j in range(1657)]
+    row = [f"value-{j}-{'x' * 20}" for j in range(1657)]
+    view = _view(_esql([row], names), ceiling=8192, run_dir=tmp_path)
+    body = json.loads(_json_block(view))
+
+    first = body["values"][0]
+    assert isinstance(first, list), "the row rendered as a bare marker — no cell survived"
+    assert len(first) > 1, f"only {len(first)} cells survived the squeeze"
+    assert first[-1].startswith(pv.ELISION_PREFIX), "a cut row must say it was cut"
+    assert len(_json_block(view)) <= 8192
+
+
+def test_a_named_cell_is_bound_to_the_RIGHT_name(tmp_path):
+    """The misattribution guarantee, which is what a positional encoding has to earn.
+
+    A cell carries no key: cell `i` means whatever `columns[i]` says it means. The failure that
+    matters is not a cell arriving unnamed — it is a cell arriving MISnamed, which in auth-log
+    triage is a wrong-user or wrong-host conclusion rather than a cosmetic error. That cannot
+    happen while BOTH regions are leading prefixes of their originals, because then index `i`
+    still means `i` on either side. Each is cut independently by the byte budget, so this is
+    the property to pin.
+
+    What deliberately does NOT hold: `len(columns) >= len(cells)`. `columns` entries are
+    `{name, type}` objects and cells are bare scalars, so the same share of bytes buys more
+    cells than names — measured, a 1,657-column row keeps 116 cells against 102 names, leaving
+    14 visible but unnamed. Honest degradation, not misattribution: the surplus is unbindable
+    and reads as such. Making the counts match would require `walk` to know that `columns`
+    NAMES `values`, which is the key-name rule this module exists to delete — a payload with a
+    `columns` list that indexes nothing would then be cut to fit a relationship it does not
+    have. The lead has the marker and the on-disk path for the rest.
+    """
+    names = [f"col_{j}" for j in range(1657)]
+    row = [f"value-{j}-{'x' * 20}" for j in range(1657)]
+    body = json.loads(_json_block(_view(_esql([row], names), ceiling=8192, run_dir=tmp_path)))
+
+    def _real(seq):
+        return [x for x in seq if not (isinstance(x, str) and x.startswith(pv.ELISION_PREFIX))]
+
+    kept_cells, kept_names = _real(body["values"][0]), _real(body["columns"])
+    assert kept_cells == row[:len(kept_cells)], "cells are not the leading prefix"
+    assert [c["name"] for c in kept_names] == names[:len(kept_names)], "columns are not the prefix"
+
+    bindable = min(len(kept_cells), len(kept_names))
+    assert bindable > 1, "nothing at all is bindable — the row carries no readable schema"
+    for i in range(bindable):
+        assert kept_cells[i] == f"value-{i}-{'x' * 20}", f"cell {i} does not belong to col_{i}"
+
+
+def test_a_cut_row_never_reorders_the_cells_it_keeps(tmp_path):
+    """Positional binding is only sound if the kept cells are a PREFIX. Keeping cells 0,1,4
+    would still be honest about the count and silently misattribute every value after the
+    gap — `columns[i]` would name a cell that is no longer at `i`."""
+    names = [f"col_{j}" for j in range(400)]
+    row = [f"cell-{j:03d}" for j in range(400)]
+    body = json.loads(_json_block(_view(_esql([row], names), ceiling=4096, run_dir=tmp_path)))
+
+    kept = [c for c in body["values"][0] if not c.startswith(pv.ELISION_PREFIX)]
+    assert kept == row[:len(kept)], "kept cells are not the leading prefix of the row"
+
+
+def test_the_elision_marker_for_a_row_counts_cells_not_elements(tmp_path):
+    """A row's marker is about CELLS. Reusing the list wording ("elements") would read as
+    "rows were dropped" on a payload where the row count is intact and only the row's own
+    width was cut — the exact metadata/bulk confusion this module keeps apart."""
+    names = [f"col_{j}" for j in range(400)]
+    view = _view(_esql([[f"c{j}" for j in range(400)]], names), ceiling=4096, run_dir=tmp_path)
+    marker = json.loads(_json_block(view))["values"][0][-1]
+    assert "cells" in marker, f"row marker does not name cells: {marker!r}"
+    assert marker.startswith(pv.ELISION_PREFIX)
+
+
+def test_a_list_whose_ONE_element_was_salvaged_is_not_marked_as_shortened():
+    """A marker means a real cut, or it means nothing.
+
+    `_fit_list` decided "did I keep every element?" BEFORE `_fit_one`'s salvage could complete
+    the list, so a one-row payload whose single row was squeezed came back with
+    `<<ELIDED 0 of 1 elements … the payload on disk has all 1>>` beside it, and an
+    `Elision(kind="list", kept=1, total=1)` in the record. A stated drop of zero, on the module
+    whose whole job is that "absent from this view" and "absent from the payload" never blur —
+    and 87 bytes of an 8 KB ceiling spent saying it. What the squeeze DID cost is marked inside
+    the row, by `_fit_cells`, where it happened.
+    """
+    names = [f"col_{j}" for j in range(1657)]
+    row = [f"value-{j}-{'x' * 20}" for j in range(1657)]
+    obj = json.loads(_esql([row], names))
+    walked, elisions = pv.walk(obj, 8192)
+
+    assert len(walked["values"]) == 1, "a list that kept its only element grew a marker"
+    assert not any(e.path == "values" for e in elisions), (
+        f"the row count was reported as elided: {[e for e in elisions if e.path == 'values']}"
+    )
+    assert any(e.path == "values[0]" and e.kind == "cells" for e in elisions), (
+        "the cut that DID happen — inside the row — went unrecorded"
+    )
