@@ -420,10 +420,17 @@ def test_no_verb_mutates_or_removes_a_committed_v_or_e_record(tmp_path):
         "v-002|identity|user/known-corp|attacker|",
     )
     reasons = _diagnose(mutated, committed)
-    assert any(
-        "append-only violation" in d.message and "v-002" in d.message for d in reasons
-    ), reasons
-    assert all(d.severity == "error" for d in reasons)
+    violations = [d for d in reasons if "append-only violation" in d.message]
+    assert any("v-002" in d.message for d in violations), reasons
+    # Severity is asserted per FAMILY, not over the whole diagnosis. The baseline here is
+    # `WARN_DOC`, which carries `WARN_ROW` by construction — so a correct implementation
+    # returns that row's WARNING alongside the append-only error, and a blanket
+    # `all(severity == "error")` contradicted `test_only_attr_update_key_family_warns` on the
+    # same fixture. What O3/SEC1 needs is that the in-place mutation is an ERROR; the second
+    # assertion pins that the warn row is the only other thing here, so this is narrower in
+    # wording and stricter in effect than the census it replaces.
+    assert all(d.severity == "error" for d in violations)
+    assert [d.severity for d in reasons if d not in violations] == ["warning"]
 
     # ...and the sanctioned route to the same intent still works.
     _fix(deps, WARN_ROW, REPAIRED_ROW)

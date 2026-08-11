@@ -814,8 +814,15 @@ def test_review_challenge_answered_by_a_warn_landing_block(tmp_path):
     deps, run = main_deps(tmp_path)
     seed_investigation(run, PROLOGUE)
 
+    # The composer's `ask` is an OBJECT — `{target, prose}` (`review/reply.py:173-176`) —
+    # not a list of targets. A list is refused as `Unreadable` before any routing happens,
+    # so the close came back `forced-inconclusive` and the challenge this scenario needs
+    # never occurred. Corrected to the shape the reply contract actually reads; `v-001` is
+    # citable because PROLOGUE declares it.
     challenged = _close(deps, "benign", stages=_review_bundle.bundle(
-        composer=_review_bundle.composer_reply("gap", ask=["v-001"]),
+        composer=_review_bundle.composer_reply(
+            "gap", ask={"target": "v-001", "prose": "what does CMDB say about this host?"},
+        ),
     ))
     assert challenged.outcome == CHALLENGED
     assert not (run / "report.md").exists()

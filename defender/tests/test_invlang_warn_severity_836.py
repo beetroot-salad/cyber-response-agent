@@ -380,7 +380,12 @@ def test_the_learning_mirror_carries_a_warn_only_document_onward(tmp_path):
     warn_entities = extract_case_entities(warn_run.parent / "mirror" / "investigation.md")
     clean_entities = extract_case_entities(clean_run.parent / "mirror" / "investigation.md")
     assert warn_entities == clean_entities
-    assert "v-001" in warn_entities, "the reader saw nothing at all — a vacuous comparison"
+    # The vacuity control, corrected: `extract_case_entities` (`learning/core/prologue.py:21`)
+    # collects the `:V` block's CLASS column, never the vertex id — so `"v-001" in …` was
+    # false for every document, at this base and any other. What proves the comparison above
+    # is not two empty strings is the class the prologue actually declares. The reader itself
+    # is UNMOVED by #836; only this assertion's idea of what it returns was wrong.
+    assert warn_entities == "bastion/internal/known-corp,user/known-corp"
 
     # reader 2 — the forward check, at interacts(forward_check->investigation_md)
     warn_text, warn_disp = load_run_context(warn_run.name, runs_dir=warn_run.parent)
