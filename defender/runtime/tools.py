@@ -2,14 +2,18 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, ClassVar, Self
+from typing import TYPE_CHECKING, Any, ClassVar, Self
+
+if TYPE_CHECKING:  # pragma: no cover — typing only; the runtime import stays lazy
+    from defender.skills.invlang.validate import Diagnostic
 
 from defender._clock import now_iso
 from defender._paths import PATHS
@@ -462,14 +466,19 @@ def _investigation_path(deps: AgentDeps) -> Path:
     return deps.run_dir / "investigation.md"
 
 
-def flagged_diagnostics(deps: AgentDeps) -> tuple[Any, ...]:
+def flagged_diagnostics(deps: AgentDeps) -> tuple[Diagnostic, ...]:
     """The run's currently-open repair window, re-derived from disk on every call.
 
     FAILS OPEN, deliberately and on all three paths that read it (`prepare=`, the write gate,
     the close gate). An unreadable or undecodable `investigation.md` is an unrelated fault;
     converting it into "every write and the close are refused" would manufacture exactly the
     unclosable run this mechanism exists to avoid. `append_block` still refuses an undecodable
-    document for its own pre-existing reason — that refusal is not this gate."""
+    document for its own pre-existing reason — that refusal is not this gate.
+
+    A warn diagnostic carrying NO `locus` is not in the window. The window is the set of rows
+    `fix_row` can address, and a locus-less finding names none — counting it would refuse the
+    append AND the close with no row the repair verb could ever clear, which is precisely the
+    unclosable run above. No family emits one today; this keeps that from being load-bearing."""
     from defender.skills.invlang.validate import warn_diagnostics
 
     p = _investigation_path(deps)
@@ -479,7 +488,7 @@ def flagged_diagnostics(deps: AgentDeps) -> tuple[Any, ...]:
     if not p.is_file():
         return ()
     try:
-        return tuple(warn_diagnostics(read_text_utf8(p)))
+        return _addressable(warn_diagnostics(read_text_utf8(p)))
     except Exception as e:  # noqa: BLE001 — fail open; a wedged run is the worse failure
         print(
             f"[tools] repair-window derivation failed, treating it as empty: {e!r}",
@@ -488,12 +497,16 @@ def flagged_diagnostics(deps: AgentDeps) -> tuple[Any, ...]:
         return ()
 
 
-def _flagged_rows(diags: tuple[Any, ...]) -> tuple[str, ...]:
+def _addressable(diags: Iterable[Diagnostic]) -> tuple[Diagnostic, ...]:
+    return tuple(d for d in diags if d.locus is not None)
+
+
+def _flagged_rows(diags: tuple[Diagnostic, ...]) -> tuple[str, ...]:
     return tuple(d.locus.row_text for d in diags if d.locus is not None)
 
 
 def flagged_write_refusal(
-    verb: str, diags: tuple[Any, ...], *, offered_text: bool = True
+    verb: str, diags: tuple[Diagnostic, ...], *, offered_text: bool = True
 ) -> str:
     """The gate's refusal, naming EVERY currently-flagged row and its `use:` alternatives.
 
@@ -508,9 +521,12 @@ def flagged_write_refusal(
     by the first sentence."""
     from defender._artifact_schema import UNCHANGED_LEAD, UNCHANGED_NOTICE, render_diagnostic
 
+    # The close's opening states what the CLOSE did not do — no disposition recorded — never
+    # "nothing was committed for this run", which flatly contradicts the next sentence ("the
+    # row LANDED and is committed") and reads as "your whole investigation was discarded".
     opening = (
         UNCHANGED_NOTICE if offered_text
-        else f"{UNCHANGED_LEAD} — nothing was committed for this run."
+        else f"{UNCHANGED_LEAD} — no disposition was recorded for this run."
     )
     return (
         f"{opening} `{verb}` is blocked while investigation.md carries a flagged "
@@ -522,7 +538,7 @@ def flagged_write_refusal(
     )
 
 
-def _warning_return(lead: str, diags: tuple[Any, ...]) -> str:
+def _warning_return(lead: str, diags: tuple[Diagnostic, ...]) -> str:
     """An ACCEPT that carries a warning. It LEADS with the bytes and says the block landed —
     a model that reads "warning" as "refusal" re-emits the whole block, which is the cost
     #836 exists to remove — and it never carries the unchanged-notice wording."""
@@ -551,7 +567,7 @@ def _tool_append_block(deps: AgentDeps, text: str) -> str:
 
     Faces the identical gate the other two verbs do — same `decide_write`, same content
     schema, same RS15 post-close refusal — on the resulting full document."""
-    p = deps.run_dir / "investigation.md"
+    p = _investigation_path(deps)
     if _closed_for_investigation_write(deps, p):
         raise ModelRetry(
             "investigation.md is no longer writable: the close already committed a "
@@ -608,10 +624,41 @@ def _tool_append_block(deps: AgentDeps, text: str) -> str:
     return lead
 
 
-def _warn_over(text: str) -> tuple[Any, ...]:
+def _warn_over(text: str) -> tuple[Diagnostic, ...]:
+    """The window over text held in memory. FAILS OPEN for the same reason
+    `flagged_diagnostics` does, and for one more: both call sites derive AFTER the bytes have
+    already landed, so a validator error raised here would surface as a failed tool call on a
+    write that succeeded — the one wrong answer #810 measured the cost of."""
     from defender.skills.invlang.validate import warn_diagnostics
 
-    return tuple(warn_diagnostics(text))
+    try:
+        return _addressable(warn_diagnostics(text))
+    except Exception as e:  # noqa: BLE001 — fail open; the write already landed
+        print(
+            f"[tools] repair-window derivation failed, treating it as empty: {e!r}",
+            file=sys.stderr,
+        )
+        return ()
+
+
+#: EVERY separator `str.splitlines()` honours, which is what `_tokenize_fence` splits a fence
+#: body on — so it is what decides where a ROW ends, and therefore what `Locus.row_text` holds.
+#: `split("\n")` alone left a row sitting after a `\v` `\f` `\x1c` `\x1d` `\x1e` `\x85`
+#: `\u2028` or `\u2029` FLAGGED but UNADDRESSABLE: `old_row` matched no whole line, so the
+#: repair refused while `append_block` and the close both refused for that same flagged row —
+#: a permanently wedged run, reachable from one `append_block` carrying one of those bytes.
+#: `\r\n` / `\r` never reach here: `read_text_utf8` translates them on read.
+#: Spelled as ESCAPES, never as the literal codepoints: two of them are invisible line breaks
+#: and would split THIS file for anything that reads it the way the tokenizer reads a fence.
+#: Captured, not consumed, so every untouched line keeps the separator the model wrote.
+_LINE_SEP_RE = re.compile("([\n\v\f\x1c\x1d\x1e\x85\u2028\u2029])")
+
+
+def _split_lines(text: str) -> tuple[list[str], list[str]]:
+    """`text` as the tokenizer sees it: its lines, and the separator that FOLLOWED each one
+    (`""` for the last). `lines[i] + seps[i]` reassembles the document byte for byte."""
+    parts = _LINE_SEP_RE.split(text)
+    return parts[0::2], parts[1::2] + [""]
 
 
 def _attr_block_columns(text: str, row: str) -> int | None:
@@ -626,7 +673,7 @@ def _attr_block_columns(text: str, row: str) -> int | None:
     return None
 
 
-def _new_row_shape_reason(new_row: str, cells: int) -> str | None:
+def _new_row_shape_reason(new_row: str, cells: int | None) -> str | None:
     """H3's guard: `new_row` is ONE row of the SAME block, or it is refused.
 
     `fix_row` is the first verb that rewrites a line INSIDE an already-open fence, and every
@@ -652,6 +699,11 @@ def _new_row_shape_reason(new_row: str, cells: int) -> str | None:
         return "it carries a fence delimiter (```), which would close the block early"
     if HEADER_RE.match(new_row.strip()):
         return "it is a block header, not a row"
+    # `cells is None` means the declaring block could not be located. Only the CELL-COUNT arm
+    # needs it — the three arms above are unconditional, so an unlocatable block narrows the
+    # guard by one check instead of switching the whole write surface off.
+    if cells is None:
+        return None
     got = len(_split_cells(new_row))
     if got != cells:
         return f"it has {got} cells but the block declares {cells}"
@@ -702,7 +754,7 @@ def _tool_fix_row(deps: AgentDeps, old_row: str, new_row: str) -> str:
         )
 
     current = read_text_utf8(p)
-    lines = current.split("\n")
+    lines, seps = _split_lines(current)
     whole = [i for i, line in enumerate(lines) if line.strip() == old_row]
     if not whole:
         raise ModelRetry(
@@ -739,10 +791,17 @@ def _tool_fix_row(deps: AgentDeps, old_row: str, new_row: str) -> str:
     # padded line would otherwise survive its own repair.
     hit = set(whole)
     if new_row:
-        rebuilt = [new_row if i in hit else line for i, line in enumerate(lines)]
+        rebuilt = [
+            (new_row if i in hit else line) + sep
+            for i, (line, sep) in enumerate(zip(lines, seps, strict=True))
+        ]
     else:
-        rebuilt = [line for i, line in enumerate(lines) if i not in hit]
-    new_text = "\n".join(rebuilt)
+        rebuilt = [
+            line + sep
+            for i, (line, sep) in enumerate(zip(lines, seps, strict=True))
+            if i not in hit
+        ]
+    new_text = "".join(rebuilt)
 
     decision = permission.decide_write(
         p, new_text, run_dir=deps.run_dir, defender_dir=deps.defender_dir, policy=deps.policy,

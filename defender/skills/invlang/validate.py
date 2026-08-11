@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from defender._vocab import normalized_disposition
 from . import _walkers, vocab
@@ -33,6 +33,9 @@ STRONG_WEIGHTS = vocab.STRONG_WEIGHTS
 _STRONG_AUTH_KINDS_STR = " / ".join(sorted(STRONG_AUTH_KINDS))
 
 _YAML_FENCE_RE = re.compile(r"```ya?ml\b")
+
+#: `Diagnostic.severity`'s closed set (#836). Declared once, beside the type that carries it.
+Severity = Literal["error", "warning"]
 
 
 @dataclass(frozen=True)
@@ -70,7 +73,11 @@ class Diagnostic:
     #: every family that does not opt in keeps exactly today's refusing behaviour — the
     #: partition is assigned per check family at diagnose time and is never document content,
     #: which is why no migration mechanism exists for bytes written before the field did.
-    severity: str = "error"
+    #: A closed `Literal`, not a bare `str`: the partition is read THREE ways across three
+    #: modules (`== "warning"` here, `!= "warning"` in `validate_companion` and in
+    #: `_artifact_schema.validate_investigation`), so a mistyped value would not fail — it
+    #: would file silently as error severity at every one of them.
+    severity: Severity = "error"
 
 
 def _plain(messages: list[str]) -> list[Diagnostic]:

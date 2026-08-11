@@ -230,6 +230,20 @@ def render_diagnostic(d: Diagnostic) -> str:
     return "\n".join(lines)
 
 
+def _warns_quietly(current: str) -> bool:
+    """Is a row flagged on the ON-DISK document? Answered for one purpose only: picking which
+    REMEDY the size refusal names.
+
+    It swallows a validator error rather than propagating it, because the branch that asks is
+    the one branch of this gate that has already decided its verdict — the write is denied
+    either way, and letting `diagnose` raise out of `validate_investigation` here would escape
+    the module's own fail-closed contract and take the tool call down instead of denying it."""
+    try:
+        return bool(warn_diagnostics(current))
+    except Exception:  # noqa: BLE001 — a prose choice must not decide the gate's control flow
+        return False
+
+
 def validate_investigation(proposed_text: str, current: str | None) -> str | None:
     """The investigation.md schema: the #629 byte bound FIRST (size-first short-circuit, so an
     over-bound document yields a deterministic SIZE-failure reason without the invlang validator
@@ -254,7 +268,7 @@ def validate_investigation(proposed_text: str, current: str | None) -> str | Non
         # #836: with a row flagged, "close the investigation" is a verb the M5 gate refuses —
         # the remedy would name the one move the model cannot make. `fix_row(old, "")` is the
         # escape that actually shrinks the document, and it is available exactly here.
-        if on_disk and current is not None and warn_diagnostics(current):
+        if on_disk and current is not None and _warns_quietly(current):
             remedy = (
                 f"{on_disk} of those bytes are already committed and cannot be removed, and a "
                 "flagged row is blocking the close — repair or delete it with "
