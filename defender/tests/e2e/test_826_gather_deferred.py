@@ -123,7 +123,7 @@ def test_every_gather_terminator_arm_stamps_its_own_reason(tmp_path):
             async def run(self, *a, **kw):
                 raise exc
 
-        return lambda agent_id: _Agent()
+        return lambda agent_id, system: _Agent()
 
     arms = {
         UsageLimitExceeded("limit"): session_store.TRUNCATED_BY_REQUEST_LIMIT,
@@ -182,7 +182,7 @@ def test_every_gather_terminator_arm_stamps_its_own_reason(tmp_path):
     deps = bind(MAIN_DEF, run_dir, salt=SALT, defender_dir=DEFENDER)
     before = len(stamped)
     asyncio.run(tools_gather._run_gather(
-        deps, lambda agent_id: _Clean(), 40,
+        deps, lambda agent_id, system: _Clean(), 40,
         GatherRequest("l-009", "elastic", "goal", ("what",)), GATHER_DEF.verb_grant,
         lambda agent_id, reason: stamped.append((agent_id, reason)),
     ))

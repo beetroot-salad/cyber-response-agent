@@ -45,9 +45,11 @@ What this query measures, in one or two sentences, **plus an explicit note
 that it is a wide/superset query you narrow** (see below). **Write for keyword
 recall** — name the concrete artifacts a future analyst would type when
 searching: daemon names (sshd, sudo), file paths (/etc/passwd), log fields
-(`source.ip`, `user.name`), syscalls. This body IS the template's entry in the index injected
-into every gather dispatch, and it is what `template_search` matches against, so a wide
-template's recall keywords are what keep a future narrowing from re-coining a sibling.
+(`source.ip`, `user.name`), syscalls. This body IS the template's index entry on a dispatch to
+its OWN system (a dispatch to any other system sees the id and the path alone, #835), and it is
+what `template_search` matches against — so the recall keywords carry more, not less: off-system,
+they are the only thing that makes this template findable at all, and a wide template's keywords
+are what keep a future narrowing from re-coining a sibling.
 
 ## Query
 

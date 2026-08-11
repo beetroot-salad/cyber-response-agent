@@ -6,6 +6,7 @@ import sys
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Any
 
 from pydantic_ai import RunContext
 from pydantic_ai.exceptions import ModelRetry, UnexpectedModelBehavior, UsageLimitExceeded
@@ -43,6 +44,13 @@ class GatherRequest:
     what_to_summarize: tuple[str, ...]
 
 
+#: `(agent_id, system) -> the built gather agent`. Named and ANNOTATED because #835 widened it
+#: from one argument to two: the seam is untyped at both call sites otherwise, so a stale
+#: one-argument factory surfaces as a `TypeError` raised where no terminator arm catches it —
+#: outside the try in `_run_gather` — and unwinds through main's tool call mid-lead.
+GatherFactory = Callable[[str, str], Any]
+
+
 def _tripped_message(deps: GatherDeps, system: str | None) -> str | None:
     if system and circuit_breaker.is_tripped(deps.run_dir, system):
         return circuit_breaker.down_message(deps.run_dir, system)
@@ -67,26 +75,93 @@ def _repo_rel(defender_dir: Path, path: Path) -> str:
         return str(path)
 
 
-def _template_index(defender_dir: Path, verb_grant: VerbGrant | None = None) -> str:
-    entries = [
-        f"- `{t.id}` — `{_repo_rel(defender_dir, t.path)}`\n"
-        f"  {' '.join(t.goal.split())}"
-        for t in iter_query_templates(_catalog_dir(defender_dir))
-        if t.status == "established" and "_draft" not in t.path.parts
-        and (verb_grant is None or verb_grant.allows(t.system, t.verb))
-    ]
-    return "\n".join(entries)
+def _locator(defender_dir: Path, t: QueryTemplate) -> str:
+    """The one `id — path` line. ONE spelling because both surfaces that emit it teach the
+    model the same shape: the dispatch index (where an off-target entry is nothing BUT this
+    line) and `template_search`'s hit header. Two copies drift the moment either is edited."""
+    return f"- `{t.id}` — `{_repo_rel(defender_dir, t.path)}`"
+
+
+@dataclass(frozen=True)
+class TemplateIndex:
+    """The rendered index, and — when it is empty — WHICH of the two emptinesses it is.
+
+    `text` alone cannot say. A corpus that could not be read and a corpus read in full whose
+    every template the role's verb grant refuses both render `""`, and they call for opposite
+    things to be said to the lead: the first is "templates may well exist, go look", the second
+    is "they exist and you may not run them". `established_seen` counts what the walk found
+    BEFORE the grant filter, which is exactly the bit that separates them.
+    """
+
+    text: str
+    established_seen: int
+
+
+def _template_index(
+    defender_dir: Path, dispatched: str, verb_grant: VerbGrant | None = None,
+) -> TemplateIndex:
+    """Two tiers (#835). The dispatched system's templates carry their `## Goal`; every other
+    system's shrink to an id and a path.
+
+    Not a per-system FILTER, which is what the measurement invites and what would break the
+    thing it measured: leads cross systems in practice (l-004, dispatched host-state, queried
+    cmdb; l-005, dispatched identity, queried four). Every established id stays in every
+    dispatch. What the off-target tier drops is the PROSE — which is the whole cost: 27 Goals
+    render 14.8k chars, 86% of a gather lead's user message, re-sent on all 22 of its turns,
+    for a catalog the lead will mostly never open.
+
+    The off-target tier keeps the PATH. There is no fetch-by-id tool, so the path is what makes
+    a cross-system reuse one `read_file` instead of a `template_search` round-trip first — and
+    `template_search` matches `body`, which excludes the frontmatter, so searching for the id
+    itself is not reliably even a hit.
+    """
+    on_target: list[str] = []
+    elsewhere: list[str] = []
+    established_seen = 0
+    for t in iter_query_templates(_catalog_dir(defender_dir)):
+        if t.status != "established" or "_draft" in t.path.parts:
+            continue
+        established_seen += 1
+        if verb_grant is not None and not verb_grant.allows(t.system, t.verb):
+            continue
+        locator = _locator(defender_dir, t)
+        if t.system == dispatched:
+            on_target.append(f"{locator}\n  {' '.join(t.goal.split())}")
+        else:
+            elsewhere.append(locator)
+
+    # Before the tier headers, not after: an index with no entries at all is a degradation
+    # `_gather_prompt` renders its own block for, and a header over two empty lists would make
+    # that check pass on a truthy string that says nothing (test d19).
+    if not on_target and not elsewhere:
+        return TemplateIndex("", established_seen)
+
+    # No positional word ("above"/"below") in this arm: the descriptor index is absent whenever
+    # `_descriptor_catalog` returns None, and the other tier is absent on a one-system corpus, so
+    # a pointer at either is a dangling reference in exactly the degradation this block exists to
+    # make legible. `_run_gather` holds `system` to `_SYSTEM_RE` before the prompt is built, so
+    # reaching here means a well-formed system the catalog simply has no template for.
+    on_target_block = "\n".join(on_target) if on_target else (
+        f"(none — the catalog has no established `{dispatched}` template. Nothing is on-target: "
+        "`template_search` for a near neighbour, or read an off-tier path, before you coin.)"
+    )
+    blocks = [f"### `{dispatched}` — your dispatched system: id, path, `## Goal`\n{on_target_block}"]
+    if elsewhere:
+        blocks.append("### Other systems — id and path only\n" + "\n".join(elsewhere))
+    return TemplateIndex("\n\n".join(blocks), established_seen)
 
 
 _INDEX_HEADER = (
-    "\n## Query templates (the catalog index — every established template, every system)\n\n"
-    "Each entry is the template's `id:`, its path, and its `## Goal`. To REUSE one: `read_file` "
-    "its path, adapt the `## Query` body to this lead, and tag the adapter call "
-    "`--query-id <id>`. Read it BEFORE you tag it — an id you tag without opening the file is "
-    "recorded as a catalog reuse of a query you did not run, which corrupts the queries table. "
-    "Nothing here fits your lead → coin a fresh id instead (gather never writes to the catalog).\n"
-    "The Goals are indexed for keyword recall; when they read too coarse, `template_search` greps "
-    "the full bodies (including uncurated drafts, which the index below omits).\n\n"
+    "\n## Query templates (the established catalog — every template, every system)\n\n"
+    "Two tiers: the system you were dispatched to, each template as its `id:`, its path and its "
+    "`## Goal`; every other system, id and path only — leads do cross systems, and an off-tier "
+    "id is one `read_file` away. When the ids and Goals read too thin, `template_search` greps "
+    "every template's full body, including the uncurated drafts this index omits.\n"
+    "To REUSE one: `read_file` its path, adapt the `## Query` body to this lead, and pass its id "
+    "as `query_id` on your `query` call. Read it BEFORE you bind it — an id bound without "
+    "opening the file is recorded as a catalog reuse of a query you did not run, which corrupts "
+    "the queries table. Nothing here fits your lead → coin a fresh id instead (gather never "
+    "writes to the catalog).\n\n"
 )
 
 _INDEX_UNAVAILABLE = (
@@ -96,15 +171,53 @@ _INDEX_UNAVAILABLE = (
     "for one before you coin a fresh query id.\n\n"
 )
 
+# The OTHER emptiness, and it is not the one above. The walk read the corpus in full and the
+# role's verb grant refused every template in it. Saying "the corpus could not be read" there
+# would be false, and "templates may well exist — go look" actively misleads: `template_search`
+# is NOT grant-filtered (it greps bodies, the grant gates verbs), so it will happily return a
+# template this role cannot run, and the lead would burn a turn binding it to find out.
+_INDEX_NONE_GRANTED = (
+    "\n## Query templates\n\n"
+    "The catalog was read in full, and NONE of its templates is runnable on your grant — every "
+    "one binds a verb you are not authorized for. This is not an empty catalog and not a read "
+    "failure. `template_search` still greps the corpus, but it searches template TEXT and does "
+    "not check your grant, so a hit is not a promise you can run it. Coin the query your lead "
+    "needs against a verb you do hold; if none exists, say so in your summary rather than "
+    "reporting a measurement you could not take.\n\n"
+)
+
 
 def _gather_prompt(
     deps: AgentDeps, request: GatherRequest, catalog: str | None,
     verb_grant: VerbGrant | None = None,
 ) -> str:
+    # SECTION ORDER IS THE CACHE PREFIX (#835). The two indexes vary only with the dispatched
+    # system and the tree; the Dispatch block varies with every lead. Emitting the indexes FIRST
+    # is what lets two leads on the same system share a prefix — behind the per-lead YAML they
+    # were re-paid in full on every dispatch, because a content-keyed prefix cache misses at
+    # `lead_id` and never reaches them. The lead's own question landing last is the same trade
+    # read the other way: it is what this message is FOR, and it sits in the recency slot.
+    block = "Begin gathering this lead.\n\n"
+    if catalog:
+        block += (
+            "## Systems of record (descriptor index — frontmatter only, "
+            f"progressive disclosure). Your target is `system: {request.system}`, named in the "
+            "Dispatch at the end of this message; confirm it here. These descriptions are "
+            "usually enough to pick a template or name a measurement — Read the target's full "
+            f"`{deps.defender_dir}/skills/{request.system}/SKILL.md` (and execution.md if "
+            "present) ONLY on demand, when you need field vocab or CLI specifics the "
+            "descriptor lacks; not on every dispatch.\n\n"
+            f"{catalog}\n"
+        )
+    index = _template_index(deps.defender_dir, request.system, verb_grant)
+    if index.text:
+        block += _INDEX_HEADER + index.text + "\n"
+    else:
+        block += _INDEX_NONE_GRANTED if index.established_seen else _INDEX_UNAVAILABLE
+
     wts = "\n".join(f"  - {d}" for d in request.what_to_summarize) or "  - (unspecified)"
-    block = (
-        "Begin gathering this lead.\n\n"
-        "## Dispatch\n```yaml\n"
+    block += (
+        "\n## Dispatch\n```yaml\n"
         f"defender_dir: {deps.defender_dir}\n"
         f"run_dir: {deps.run_dir}\n"
         f"lead_id: {request.lead_id}\n"
@@ -113,24 +226,14 @@ def _gather_prompt(
         f"what_to_summarize:\n{wts}\n"
         "```\n"
     )
-    if catalog:
-        block += (
-            "\n## Systems of record (descriptor index — frontmatter only, "
-            f"progressive disclosure). Your target is `system: {request.system}` above; "
-            "confirm it here. These descriptions are usually enough to pick a "
-            f"template or name a measurement — Read the target's full "
-            f"`{deps.defender_dir}/skills/{request.system}/SKILL.md` (and execution.md if "
-            "present) ONLY on demand, when you need field vocab or CLI specifics the "
-            "descriptor lacks; not on every dispatch.\n\n"
-            f"{catalog}\n"
-        )
-    index = _template_index(deps.defender_dir, verb_grant)
-    block += (_INDEX_HEADER + index + "\n") if index else _INDEX_UNAVAILABLE
     return block
 
 
 
 _SYSTEM_RE = re.compile(r"[a-z0-9][a-z0-9-]*\Z")
+#: A ceiling on the same param, because #835 routes it into a provider request field
+#: (`openai_prompt_cache_key`) where the shape alone leaves the length model-controlled.
+_SYSTEM_MAX_LEN = 64
 
 _NO_HITS = (
     "no template matches {pattern!r} (searched {scope}). This means no template's text carries "
@@ -190,10 +293,7 @@ def _tool_template_search(deps: AgentDeps, pattern: str, system: str | None = No
         shown = matched[:_SEARCH_LINES_PER_TEMPLATE]
         dropped += len(matched) - len(shown)
         hit = "\n".join(
-            [
-                f"- `{t.id}` — `{_repo_rel(deps.defender_dir, t.path)}`",
-                *(f"    {ln}" for ln in shown),
-            ]
+            [_locator(deps.defender_dir, t), *(f"    {ln}" for ln in shown)]
         )
         (untrusted if permission.is_untrusted_read(t.path) else trusted).append(hit)
 
@@ -236,7 +336,7 @@ def register_template_search_tool(agent) -> None:
         everything below the frontmatter), including the uncurated `_draft/` ones the index omits.
         `system` optionally restricts the search to one system's dir; omit it to search all of
         them. Each hit gives you the template's `id` and its path — Read the path before you bind
-        the `id` with `--query-id`."""
+        the `id` as `query_id`."""
         return _tool_template_search(ctx.deps, pattern, system)
 
 
@@ -258,7 +358,7 @@ def _persist_gather_summary(run_dir: Path, lead_id: str, wrapped: str) -> None:
 
 
 async def _run_gather(  # noqa: C901 — the branch count IS the terminator census (see docstring)
-    deps: AgentDeps, gather_factory, request_limit: int, request: GatherRequest,
+    deps: AgentDeps, gather_factory: GatherFactory, request_limit: int, request: GatherRequest,
     verb_grant: VerbGrant, stamp_terminator: Callable[[str, str], None] | None = None,
 ) -> str:
     """`stamp_terminator(agent_id, reason)` records how a gather session ENDED, and is the
@@ -279,6 +379,22 @@ async def _run_gather(  # noqa: C901 — the branch count IS the terminator cens
             f"invalid lead_id {lead_id!r}: echo the :L findings row id (an `l-` id) "
             "verbatim — it is the FK joining the leads and queries tables."
         )
+    # SHAPE, not membership, and BEFORE `_claim_lead` so a correction is a retry of THIS lead
+    # rather than a burnt id. #835 made `system` load-bearing twice over — it selects the
+    # template index's on-target tier, and it is the prompt-cache lane key the composition root
+    # hands the provider — so the one key component that WAS validated (`lead_id`) got replaced
+    # by one that was not. Both new uses fail silently on a mis-cased or whitespace-bearing name:
+    # the catalog collapses to bare ids with every `## Goal` stripped, and the string goes out
+    # verbatim as `openai_prompt_cache_key`. `_SYSTEM_RE` is the same shape `template_search`
+    # already holds this param to. NOT `verb_grant.systems`: the role grant is deliberately
+    # decoupled from the per-run registry (see `register_gather_tool`'s call site in driver.py),
+    # so a system an injected registry declares must still dispatch.
+    if not _SYSTEM_RE.match(system) or len(system) > _SYSTEM_MAX_LEN:
+        raise ModelRetry(
+            f"malformed system {system!r}: a system name is lowercase letters, digits and "
+            "hyphens (`host-state`, `change-mgmt`) — the `:L` row's system, spelled as the "
+            "descriptor index spells it. Re-dispatch this same lead_id with the corrected name."
+        )
     if _claim_lead({
         "run_dir": str(deps.run_dir), "lead_id": lead_id,
         "goal": request.goal, "what_to_summarize": list(request.what_to_summarize),
@@ -297,7 +413,11 @@ async def _run_gather(  # noqa: C901 — the branch count IS the terminator cens
     )
 
     agent_id = f"{GATHER_AGENT_ID_PREFIX}{lead_id}"
-    gagent = gather_factory(agent_id)
+    # `system` as well as `agent_id`: the two name different things now (#835). `agent_id` keys
+    # this lead's session and its wire-log lines; `system` is what the composition root keys the
+    # prompt-cache lane on, because the prefix this dispatch shares with its siblings is the
+    # system's, not the lead's. The factory owns that policy — this frame only knows both facts.
+    gagent = gather_factory(agent_id, system)
     gbase = bind(
         GATHER_DEF, deps.run_dir, salt=deps.salt, defender_dir=deps.defender_dir, box=deps.box,
     )
@@ -386,7 +506,7 @@ async def _run_gather(  # noqa: C901 — the branch count IS the terminator cens
 
 
 def register_gather_tool(
-    main_agent, gather_factory, request_limit: int, verb_grant: VerbGrant,
+    main_agent, gather_factory: GatherFactory, request_limit: int, verb_grant: VerbGrant,
     stamp_terminator: Callable[[str, str], None] | None = None,
 ) -> None:
 

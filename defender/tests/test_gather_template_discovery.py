@@ -39,6 +39,7 @@ from defender.runtime import permission, tools  # noqa: E402
 from defender.runtime import tools_gather  # noqa: E402
 from defender.runtime.agent_definition import ToolSet  # noqa: E402
 from defender.runtime.driver import GATHER_DEF, MAIN_DEF  # noqa: E402
+from defender.runtime.verb_grant import VerbGrant  # noqa: E402
 from defender.tests.e2e._replay_harness import FakeVerbs  # noqa: E402
 from defender.scripts import workspace_map as wsm  # noqa: E402
 
@@ -249,10 +250,19 @@ def test_d2_index_entry_carries_id_path_and_goal(tmp_path):
     assert "status: established" not in prompt
 
 
-def test_d3_index_does_not_vary_on_the_dispatched_system(tmp_path):
-    """The index covers ALL systems, not request.system: scoping to the dispatched system saves
-    almost nothing (elastic is 62% of the corpus) and couples the index to a param that is on
-    its way out. Dispatching the same lead as cmdb and as elastic yields the same index."""
+def test_d3_every_system_stays_reachable_from_any_dispatch(tmp_path):
+    """d3 demanded an index that does not vary on the dispatched system, on two grounds: that
+    scoping "saves almost nothing (elastic is 62% of the corpus)", and that `system` was "a param
+    on its way out". #835 measured both wrong. The all-systems render is 3,881 tokens — 86% of a
+    gather lead's user message, re-sent on all 22 turns of it — and a lead dispatched `identity`
+    was handed 3,709 tokens of off-target catalog; `system` is still the axis every dispatch,
+    every adapter and the circuit breaker key on.
+
+    What SURVIVES is the reason d3 existed, and it is why #835 tiers rather than filters: leads
+    cross systems (l-004, dispatched host-state, queried cmdb; l-005, dispatched identity, queried
+    four), so no dispatch may HIDE another system's templates. Every established id is still in
+    every dispatch — off-target ones as id + path, without the Goal prose. The render is still
+    deterministic; it is now deterministic per dispatched system."""
     dfn = _catalog(tmp_path)
     as_elastic = _prompt_for(tmp_path, dfn, system="elastic")
     as_cmdb = _prompt_for(tmp_path, dfn, system="cmdb")
@@ -260,7 +270,44 @@ def test_d3_index_does_not_vary_on_the_dispatched_system(tmp_path):
     for tid in ("elastic.sshd-auth-history", "cmdb.hostname-by-ip", "change-mgmt.active-changes"):
         assert tid in as_elastic, f"{tid} missing from an elastic dispatch"
         assert tid in as_cmdb, f"{tid} missing from a cmdb dispatch"
-    assert tools_gather._template_index(dfn) == tools_gather._template_index(dfn)
+    assert tools_gather._template_index(dfn, "cmdb") == tools_gather._template_index(dfn, "cmdb")
+
+
+def test_835_only_the_dispatched_systems_entries_carry_goal_prose(tmp_path):
+    """#835's demand, both directions off two renders of one corpus — so neither "keep every
+    Goal" (the shape being replaced) nor "drop every Goal" (which would strand the lead's own
+    system) can pass. The off-target entry keeps its PATH: there is no fetch-by-id tool, so the
+    path is what makes a cross-system reuse one `read_file` rather than a `template_search`
+    round-trip first."""
+    dfn = _catalog(tmp_path)
+    as_cmdb = _prompt_for(tmp_path, dfn, system="cmdb")
+    as_elastic = _prompt_for(tmp_path, dfn, system="elastic")
+
+    assert "Resolve an IP address to its documented host record." in as_cmdb
+    assert "Failed password" not in as_cmdb, "an off-target Goal survived in the index"
+    assert "elastic.sshd-auth-history" in as_cmdb
+    assert "skills/gather/queries/elastic/sshd-auth-history.md" in as_cmdb
+
+    assert "Failed password" in as_elastic
+    assert "Resolve an IP address to its documented host record." not in as_elastic
+    assert "cmdb.hostname-by-ip" in as_elastic
+
+
+def test_835_a_system_with_no_templates_says_so_rather_than_rendering_nothing(tmp_path):
+    """The tier split makes an empty on-target block reachable for the first time: main dispatches
+    systems the catalog has never had a template for (`ticket`, `threat-intel`). An omitted block
+    reads to the model as a truncated index — the silent-empty failure #585 exists to stop — so
+    the block renders and names itself empty, echoing the system so the lead can see WHICH tier
+    came back empty. A MALFORMED system never reaches here: `_run_gather` holds the param to
+    `_SYSTEM_RE` first, so a mis-cased name is a retry rather than a catalog silently stripped of
+    every `## Goal`. A well-formed name the catalog simply has no template for is this case."""
+    dfn = _catalog(tmp_path)
+    prompt = _prompt_for(tmp_path, dfn, system="ticket")
+
+    assert re.search(r"no established `?ticket", prompt), \
+        "a dispatched system with no templates must be named as empty, not silently omitted"
+    assert "cmdb.hostname-by-ip" in prompt, "the other tier vanished with it"
+    assert "elastic.sshd-auth-history" in prompt
 
 
 def test_d4_index_excludes_drafts_and_d4b_includes_established(tmp_path):
@@ -297,15 +344,30 @@ def test_d4c_a_template_with_no_status_is_not_admitted_as_established(tmp_path):
     assert "elastic.sshd-auth-history" in prompt
 
 
-def test_d23_index_block_stays_under_its_char_budget(tmp_path):
+def test_d23_index_block_stays_under_its_char_budget():
     """The index is prompt text paid on EVERY dispatch, on a cheap model with reasoning off, and
     it is bounded by nothing today (_read_char_cap does not apply — it is not a read). Pin a
-    ceiling so a future "just add ## Pitfalls too" is a red test, not a silent token tax. The
-    real corpus is 24 established Goals at 231-915 chars; 24_000 leaves generous headroom while
-    still catching an order-of-magnitude regression."""
-    block = tools_gather._template_index(_DEFENDER)
-    assert block is not None
-    assert len(block) < 24_000, f"the injected index block is {len(block)} chars"
+    ceiling so a future "just add ## Pitfalls too" is a red test, not a silent token tax.
+
+    #835 makes the render vary by dispatched system, so the ceiling measures the WORST CASE —
+    elastic, 14 of the 27 established templates. The old 24_000 was slack against a 14.8k render
+    that every dispatch paid; measured at the change, elastic renders 11.1k and every other
+    system ~3.5k. 13_000 keeps elastic headroom while red-ing a revert to all-systems-full prose.
+    Re-measure and move these numbers deliberately; do not raise one to make a run green.
+
+    The second assertion is the #835 demand as a regression pin rather than a shape test: if the
+    tiering stops working, no dispatch pays a small index and the floor rises with the ceiling."""
+    systems = {t.system for t in _corpus.iter_query_templates(_REAL_CATALOG)
+               if t.status == "established"}
+    rendered = {s: tools_gather._template_index(_DEFENDER, s).text for s in systems}
+    assert rendered, "the shipped corpus renders no index at all"
+
+    worst = max(rendered.values(), key=len)
+    assert len(worst) < 13_000, f"the worst-case index block is {len(worst)} chars"
+    cheapest = min(rendered.values(), key=len)
+    assert len(cheapest) < 5_000, (
+        f"the cheapest dispatch still pays {len(cheapest)} chars — the tiering is not working"
+    )
 
 
 def test_d19_an_unbuildable_index_degrades_loudly(tmp_path):
@@ -322,6 +384,45 @@ def test_d19_an_unbuildable_index_degrades_loudly(tmp_path):
     assert "template_search" in prompt
     assert re.search(r"index[^\n]*unavailable|unavailable[^\n]*index", prompt, re.I), \
         "an unbuildable index must say so in the prompt, not vanish from it"
+
+
+def test_an_all_denied_grant_is_not_reported_as_an_unreadable_corpus(tmp_path):
+    """d19's block claims a CAUSE — "the corpus could not be read" — for a condition with two.
+    A grant that allows no template in the catalog empties the same render, and the two want
+    opposite things said: "templates may well exist, go look" is true of a read failure and
+    misleading here, because `template_search` is NOT grant-filtered. It greps template TEXT
+    while the grant gates VERBS, so it returns hits this role cannot run, and the lead spends a
+    turn binding one to find out.
+
+    Both arms asserted here, on one corpus, so a future collapse back to a single message cannot
+    pass by satisfying whichever arm the test happened to check."""
+    dfn = _catalog(tmp_path)
+    deps = _deps(tmp_path, dfn)
+    request = _request("elastic")
+
+    denied = tools_gather._template_index(dfn, "elastic", VerbGrant(role="gather", entries=()))
+    assert denied.text == "", "a grant that allows nothing still rendered entries"
+    assert denied.established_seen > 0, \
+        "the walk must report what it FOUND, not what survived the grant — that is the whole bit"
+
+    prompt = tools_gather._gather_prompt(
+        deps, request, catalog="- `elastic`: the SIEM",
+        verb_grant=VerbGrant(role="gather", entries=()),
+    )
+    assert "could not be read" not in prompt, \
+        "a fully-read corpus was reported to the lead as a read failure"
+    assert "NONE of its templates is runnable on your grant" in prompt
+    assert "does not check your grant" in prompt, \
+        "the lead must be told template_search hits are not a promise it can run them"
+
+    # The positive control on the same address: a real read failure still says so. Without it,
+    # deleting the UNAVAILABLE arm entirely would pass every assertion above.
+    empty = tmp_path / "empty" / "defender"
+    (empty / "skills").mkdir(parents=True)
+    unreadable = tools_gather._template_index(empty, "elastic")
+    assert unreadable.text == ""
+    assert unreadable.established_seen == 0
+    assert "could not be read" in _prompt_for(tmp_path, empty)
 
 
 def test_d18_index_is_built_from_the_threaded_tree_and_is_not_memoized(tmp_path):
@@ -650,6 +751,14 @@ def test_d16_the_skill_demands_reading_the_template_before_binding_its_id():
     assert "query_id" in skill
     assert "--query-id" not in skill, \
         "gather/SKILL.md still teaches the retired --query-id flag (#611: it is a `query` tool param)"
+    # The SKILL is not the only prompt text gather reads: `_INDEX_HEADER` and the
+    # `template_search` docstring are injected into the same dispatch, and BOTH still taught the
+    # dead flag until #835 — precisely because this assertion only ever read the SKILL. Widened
+    # to the module that carries them, so the next drift reds here instead of shipping.
+    engine = (_DEFENDER / "runtime" / "tools_gather.py").read_text()
+    assert "--query-id" not in engine, \
+        "runtime/tools_gather.py still teaches the retired --query-id flag — the index header " \
+        "and the template_search docstring are dispatch prompt text too (#611/#835)"
     assert re.search(r"read[^.]*(template|## query)[^.]*before[^.]*(pass|bind|query_id)", skill) or \
            re.search(r"(never|don't|do not)[^.]*(bind|pass)[^.]*query_id[^.]*(without|before)[^.]*read", skill), \
         "gather/SKILL.md must require reading the template body before binding its query_id"

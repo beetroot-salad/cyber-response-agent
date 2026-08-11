@@ -45,6 +45,7 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
+from pydantic_ai.exceptions import UsageLimitExceeded  # noqa: E402
 from pydantic_ai.messages import ModelResponse, TextPart  # noqa: E402
 from pydantic_ai.models import override_allow_model_requests  # noqa: E402
 from pydantic_ai.models.function import FunctionModel  # noqa: E402
@@ -226,6 +227,75 @@ def test_build_agent_core_keys_the_cache_on_the_conversation_when_there_is_one(l
         )
     assert in_session.model_settings["openai_prompt_cache_key"] == "sess-7:main"
     assert one_shot.model_settings["openai_prompt_cache_key"] == "ablation"
+
+
+def test_835_an_explicit_cache_key_overrides_both_derived_arms(logger):
+    """The third arm (#835). Gather HAS a session, so the derived key would be
+    `{session}:gather:{lead_id}` — which routes every sibling lead to its own replica and lets
+    none of them read the prefix they all share: gather's SKILL.md plus the dispatched system's
+    catalog, identical across leads AND across runs. An explicit key is how the caller that
+    knows what that prefix is keyed on says so.
+
+    Pinned against the SESSION arm specifically: an override that only beat the session-less arm
+    would be dead code on the one role that needs it. The two derived arms themselves stay
+    pinned, untouched, by the test above."""
+    defn = AgentDefinition(role=AgentRole.GATHER, model=lambda: "glm-5.2", effort="low")
+    with override_allow_model_requests(False):
+        keyed = driver.build_agent_core(
+            defn, deps_type=AgentDeps, instructions="x", logger=logger,
+            agent_id="gather:l-005", make_model=_capture_make_model()[0],
+            session_id="sess-7", cache_key="gather:identity",
+        )
+    assert keyed.model_settings["openai_prompt_cache_key"] == "gather:identity"
+
+
+def test_835_gather_is_cache_keyed_on_the_system_while_its_agent_id_stays_the_lead(logger, tmp_path):
+    """The two names are now distinct, and each is load-bearing for something different: the
+    prompt-cache lane is the SYSTEM's (that is what the shared prefix belongs to), while
+    `agent_id` remains `gather:{lead_id}` — the wire log's line key, the session store's
+    `agent_id` column, and what `_stamp_gather_terminator` looks a session up by.
+
+    Two halves, and NEITHER reaches `driver._build_gather` — it is a closure inside
+    `build_agent`, unreachable without the `monkeypatch.setattr` this module's header forbids.
+    So: `_run_gather` driven with a recording fake pins the CONTRACT that carries the system
+    down (`gather_factory(agent_id, system)`), and `build_gather_agent` pins that a `cache_key`
+    argument lands on the model settings. The composition root's own
+    `cache_key=f"gather:{system}"` is still unpinned — an integration seam worth a test that can
+    observe the built gather agent's settings end-to-end."""
+    import asyncio
+
+    from defender.runtime import tools_gather
+    from defender.runtime.agent_definition import bind
+    from defender.runtime.driver import GATHER_DEF, MAIN_DEF
+
+    seen: list[tuple[str, str]] = []
+
+    class _Agent:
+        async def run(self, *a, **kw):
+            raise UsageLimitExceeded("stop here — the factory call is what this pins")
+
+    def _factory(agent_id: str, system: str):
+        seen.append((agent_id, system))
+        return _Agent()
+
+    run_dir = tmp_path / "run"
+    (run_dir / "gather_raw").mkdir(parents=True)
+    deps = bind(MAIN_DEF, run_dir, salt="0011223344556677", defender_dir=_DEFENDER)
+    asyncio.run(tools_gather._run_gather(
+        deps, _factory, 40,
+        tools_gather.GatherRequest("l-005", "identity", "goal", ("what",)),
+        GATHER_DEF.verb_grant,
+    ))
+
+    assert seen == [("gather:l-005", "identity")]
+
+    fake, _ = _capture_make_model()
+    with override_allow_model_requests(False):
+        agent = driver.build_gather_agent(
+            _DEFENDER, logger, "gather:l-005", make_model=fake, verbs=FakeVerbs({}),
+            session_id="sess-7", cache_key="gather:identity",
+        )
+    assert agent.model_settings["openai_prompt_cache_key"] == "gather:identity"
 
 
 def test_build_agent_core_registers_read_only_pair(logger):
