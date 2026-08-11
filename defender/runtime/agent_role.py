@@ -36,3 +36,14 @@ class AgentRole(Enum):
     # definition behind it is a live grant nothing claims.
     SUPPORT = "support"
     COMPOSER = "composer"
+
+
+#: The `agent_id` namespaces the run's ONE wire log (`llm_requests.jsonl`) is partitioned by:
+#: the main agent writes bare `main`, every gather subagent writes `gather:{lead_id}`, and
+#: every review stage writes `review:{lens}`. Published HERE — the leaf that already owns
+#: agent identity — because the writers live in the runtime (`tools_gather`, `review_roles`)
+#: and the cost readers live in `scripts/visualize/`, and a prefix that drifted on one side
+#: silently drops a whole namespace out of the run's accounted total (#787). This module
+#: imports nothing but `enum`, so the reader pays no runtime edge to agree with the writer.
+GATHER_AGENT_ID_PREFIX = "gather:"
+REVIEW_AGENT_ID_PREFIX = "review:"

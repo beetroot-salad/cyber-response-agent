@@ -1260,10 +1260,17 @@ def test_shim_flags_and_non_adapter_shims_are_removed_together():
 
 def test_record_query_module_survives_its_cli():
     """record_query_module_survives_its_cli — record_query.py survives the deletion of
-    main()/parse_params/_derive_verb because two runtime modules still import from it:
-    runtime/tools.py takes _passthrough_max_bytes as the read_file character cap (unrelated to
-    adapters, pinned by test_read_file_bounded), and runtime/query_tool.py takes the four
-    payload-recording helpers.
+    main()/parse_params/_derive_verb because runtime/query_tool.py still imports its
+    payload-recording helpers and its repeat guards.
+
+    Two of the four helpers this used to name are gone with #832, and their absence is the
+    point rather than an erosion of the demand. `_is_event_payload` decided whether a payload
+    reached the model whole by testing it against six vendor envelope key names;
+    `build_truncated_view` was the sampler behind it. Both now live in `payload_view.py` as one
+    size-driven renderer, so the module boundary this test defends moved with them. The read cap
+    is likewise no longer THIS module's constant: #832 split it, because a single number could
+    not both bound a payload re-read at 8 KB and return a 33,590-byte `SKILL.md` whole
+    (`test_read_file_bounded` holds both halves now).
 
     derive_system is NOT one of them. This docstring used to claim runtime/tools.py imported it
     alongside _passthrough_max_bytes; it does not, and never has on this branch. The matching
@@ -1271,9 +1278,8 @@ def test_record_query_module_survives_its_cli():
     test vouched for a live import that was not there while being incapable of noticing. Its only
     consumers are in tests/ (test_record_query.py), which is why the vulture gate reports it as
     test-only surface — see #712. Pin what actually holds the module up instead."""
-    assert callable(record_query._passthrough_max_bytes)
-    assert runtime_tools._read_char_cap is record_query._passthrough_max_bytes
-    for live in ("_is_event_payload", "_next_seq", "build_truncated_view", "payload_digest"):
+    assert callable(runtime_tools._read_char_cap)
+    for live in ("_next_seq", "payload_digest"):
         assert callable(getattr(record_query, live, None)), \
             f"runtime/query_tool.py imports {live} — the module no longer provides it"
 

@@ -14,7 +14,7 @@ import pytest
 pytest.importorskip("pydantic_ai")  # CI installs the runtime extra; skip otherwise
 
 from defender.scripts.adapters.faults import UpstreamFault  # noqa: E402
-from defender.scripts.gather_tools.record_query import _passthrough_max_bytes  # noqa: E402
+from defender.scripts.gather_tools.payload_view import passthrough_max_bytes  # noqa: E402
 from defender.tests.e2e._replay_harness import VerbRecorder  # noqa: E402
 from defender.tests._closed_ticket_672 import (  # noqa: E402
     DATED,
@@ -100,14 +100,14 @@ def test_oversized_payload_bounded_view_and_capture_row(tmp_path):
     (the judge run's context survival against an adversarially fat ticket), and never a
     silently complete-looking view: the tail of the payload is on disk at the row's
     payload_path, not in context. The bound is the query tool's OWN passthrough ceiling,
-    mirrored EXACTLY (V-B — not a shape check): _passthrough_max_bytes()
-    (DEFENDER_GATHER_PASSTHROUGH_MAX_BYTES, shipped 65536; record_query.py:65-68), computed
+    mirrored EXACTLY (V-B — not a shape check): passthrough_max_bytes()
+    (DEFENDER_GATHER_PASSTHROUGH_MAX_BYTES, shipped 8192 since #832; payload_view.py), computed
     over the payload's compact-JSON serialization exactly as the query-tool capture does
     (query_tool.py:354,406) — one byte OVER the ceiling is truncated with the note naming
     the payload's byte size; AT the ceiling the same shape rides inline WHOLE (the
     complementary control that pins the edge, so a middle-drop or a different threshold
     fails)."""
-    cap = _passthrough_max_bytes()
+    cap = passthrough_max_bytes()
 
     # (1) The far-oversized LISTING: bounded view + note + by-ref persistence.
     rec = VerbRecorder()

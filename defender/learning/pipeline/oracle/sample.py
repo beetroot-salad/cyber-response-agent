@@ -32,8 +32,27 @@ _RAW_SAMPLE_HEADER_RE = re.compile(r"^### Raw Sample Events\b.*$", re.MULTILINE)
 _JSON_BLOCK_RE = re.compile(r"```json\s*\n(.*?)\n```", re.DOTALL)
 
 
+def _is_esql_columns(value) -> bool:
+    """Is this the `columns` array of an ES|QL payload — the wire's own schema block?"""
+    return (
+        isinstance(value, list)
+        and bool(value)
+        and all(isinstance(c, dict) and {"name", "type"} <= set(c) for c in value)
+    )
+
+
 def _scrub_skeleton(value, key=None):
     if isinstance(value, dict):
+        # ES|QL states its field names ONCE, in `columns`, and its rows are bare arrays
+        # (#834). A pure type-walk scrubs the names as string VALUES — `{"name": "<name>"}` —
+        # so the skeleton arrives with no field names anywhere, where the pre-#834 per-row
+        # dicts kept them as keys. `columns` is passed through instead: it is the same schema
+        # this walk used to preserve, reaching the same prompt it always reached, so nothing
+        # newly untrusted is exposed — and `columns[].type` states the ES type, which is more
+        # than the JSON type a scrubbed value could ever carry.
+        if _is_esql_columns(value.get("columns")) and isinstance(value.get("values"), list):
+            return {k: (v if k == "columns" else _scrub_skeleton(v, k))
+                    for k, v in value.items()}
         return {k: _scrub_skeleton(v, k) for k, v in value.items()}
     if isinstance(value, list):
         return [_scrub_skeleton(value[0], key)] if value else []

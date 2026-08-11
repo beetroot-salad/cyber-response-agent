@@ -25,6 +25,8 @@ from defender.scripts.visualize.visualize_data import (
     phase_color,
     phase_verb,
     phase_wall_times,
+    review_cost_by_lens,
+    review_cost_by_model,
     run_health,
     run_metadata,
     split_investigation_phases,
@@ -51,7 +53,9 @@ from defender.scripts.visualize.visualize_primitives import (
     section,
 )
 from defender.scripts.visualize.visualize_runtime import (
+    close_vocabulary,
     render_footer,
+    render_review_gate,
     render_runtime_investigation,
     render_runtime_leads_queries,
     render_runtime_toc,
@@ -149,6 +153,37 @@ def render_judge_headline(
 _HEALTH_ICON = {"good": "✓", "warn": "⚠", "bad": "✗"}
 
 
+def _gate_badge_html(report: ReportRead) -> str:
+    """The review gate's outcome, beside the disposition it produced.
+
+    Read from report.md's own frontmatter — the gate WRITES `outcome`/`cause`/`failure_kind`
+    there — rather than re-derived from the review records, so the headline cannot disagree
+    with the file the learning loop and the judge both read. A `forced-inconclusive` says the
+    headline disposition is the gate's and not the investigator's, which is the one thing a
+    reader skimming this card would otherwise get wrong; § Review gate carries the rest.
+
+    THE OUTCOME ALONE IS NOT THE BADGE. The gate's BYPASS arm writes `outcome: stands` too —
+    `stands` is the close tool's word for "committed unchanged", not for "a review agreed" —
+    so keying only on it painted a green "the review held" badge on every `inconclusive`
+    close, contradicting § Review gate below, which reads the records and says "not reviewed".
+    The CAUSE is what tells the two apart, and it is read from its owner rather than spelled
+    here — see `visualize_runtime.close_vocabulary`.
+    """
+    outcome = str(report.frontmatter.get("outcome", "") or "")
+    if not outcome:
+        return ""
+    vocab = close_vocabulary()
+    kind = report.frontmatter.get("failure_kind")
+    if kind:
+        cls, label = "gate-fault", f"gate: {outcome} ({kind})"
+    elif str(report.frontmatter.get("cause", "") or "") == vocab.not_reviewed_cause:
+        cls, label = "gate-skip", "gate: not reviewed"
+    else:
+        cls = {vocab.stands: "gate-stands", vocab.forced: "gate-forced"}.get(outcome, "gate-other")
+        label = f"gate: {outcome}"
+    return f'<a class="gate-badge {cls}" href="#sec-review">{esc(label)}</a>'
+
+
 def render_runtime_headline(
     run_dir: Path,
     report: ReportRead,
@@ -156,7 +191,14 @@ def render_runtime_headline(
     leads: list,
 ) -> str:
     disposition = report.disposition_or_unknown
-    confidence = str(report.frontmatter.get("confidence", "?"))
+    # `close_tool.render_report` renders the frontmatter from typed arguments and does NOT
+    # write `confidence` — only pre-close-tool runs carry the key. Defaulting it to "?" put a
+    # permanently-empty `confidence: ?` on every current run, beside the gate badge that
+    # actually says something.
+    confidence = report.frontmatter.get("confidence")
+    conf_html = (
+        f'<span class="an-conf">confidence: {esc(str(confidence))}</span>' if confidence else ""
+    )
     body = report.body.strip() or "(no report body)"
 
     icon = _HEALTH_ICON.get(health["level"], "•")
@@ -175,7 +217,8 @@ def render_runtime_headline(
     <div class="fold-card card-analysis">
       <div class="an-top">
         <span class="disp-badge disp-{esc(disposition)}">{esc(disposition)}</span>
-        <span class="an-conf">confidence: {esc(confidence)}</span>
+        {conf_html}
+        {_gate_badge_html(report)}
       </div>
       <div class="an-health">{health_html}</div>
       <div class="an-cols">
@@ -446,6 +489,12 @@ def render_runtime_page(run_dir: Path) -> str:
     for ph in phase_order:
         attribution[ph]["gather_cost"] = gather_by_phase.get(ph, 0.0)
         attribution[ph]["cost"] += gather_by_phase.get(ph, 0.0)
+    # The review's spend is totalled but deliberately NOT attributed to a phase. The gate is
+    # a gate and not a loop phase — the investigator is never "in" it — so a per-phase share
+    # would put its cost inside a bar that says where the agent was, which is the one thing
+    # that is not true of it (`visualize_runtime.render_review_gate`).
+    review_by_lens = review_cost_by_lens(run_dir, messages)
+    review_total = sum(review_by_lens.values())
     wall_times = phase_wall_times(events, tags, phase_order)
     g_wall_to, g_wall_from = gather_wall_by_phase(
         run_dir, events, tags, phase_order, messages
@@ -466,10 +515,18 @@ def render_runtime_page(run_dir: Path) -> str:
     wall_ms = sum(e.get("duration_ms") or 0 for e in events if e.get("type") == "result")
     main_model = md["models"][0] if md["models"] else "main"
     by_model = {main_model: main_total}
-    for model, cost in gather_cost_by_model(run_dir, messages).items():
-        by_model[model] = by_model.get(model, 0.0) + cost
+    for by_model_costs in (
+        gather_cost_by_model(run_dir, messages), review_cost_by_model(run_dir, messages),
+    ):
+        for model, cost in by_model_costs.items():
+            by_model[model] = by_model.get(model, 0.0) + cost
+    # `result_total` is the fallback for a run with no phases to attribute against, and it is
+    # the MAIN SESSION's figure (`observe.write_trace` hydrates that session alone). The
+    # subagent terms are added to it for the same reason they are added to the attributed
+    # sum: they are calls this run made, and this is the run's total.
     totals = {
-        "cost": (main_total + gather_total) if phase_order else result_total,
+        "cost": (main_total + gather_total if phase_order else result_total) + review_total,
+        "review_cost": review_total,
         "wall_ms": wall_ms,
         "by_model": by_model,
         "tool_calls": n_tool_calls,
@@ -483,9 +540,18 @@ def render_runtime_page(run_dir: Path) -> str:
     )
     transcript_html, n_tx, tx_phases = render_runtime_transcript(entries, tools, phases)
     leads_html, n_leads = render_runtime_leads_queries(run_dir, leads)
+    review_html, n_reviewed = render_review_gate(run_dir, report, review_by_lens)
 
+    # The review rides as a NAMED term inside the total, the way gather does on a phase's own
+    # line. Folded silently it would be a number an operator cannot separate from the
+    # investigation's; left out of the total it would be the defect #787 reported.
+    review_note = (
+        f'<span class="ts-review">(incl review ${totals["review_cost"]:.4f})</span>'
+        if totals["review_cost"] else ""
+    )
     stats_html = (
         f'<span class="ts-cost">${totals.get("cost", 0.0):.4f}</span>'
+        f"{review_note}"
         f'<span class="ts-sep">·</span>'
         f'<span class="ts-wall">{fmt_duration(wall_ms)}</span>'
     )
@@ -503,13 +569,14 @@ def render_runtime_page(run_dir: Path) -> str:
 <style>{CSS}</style></head><body id="top">
 {render_header(case_id, active="runtime", byline=byline, stats_html=stats_html)}
 <div class="layout">
-  {render_runtime_toc(phases, n_tx, n_leads, tx_phases, leads)}
+  {render_runtime_toc(phases, n_tx, n_leads, tx_phases, leads, n_reviewed)}
   <article class="content content-runtime">
     {render_runtime_headline(run_dir, report, health, leads)}
     {_render_policy_denials_section(run_dir)}
     {metrics_html}
     {render_alert_block(run_dir, open_=False)}
     {investigation_html}
+    {review_html}
     {leads_html}
     {transcript_html}
     {render_store_transcript_section(run_dir)}

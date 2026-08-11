@@ -26,15 +26,29 @@ from defender._untrusted import wrap as _wrap
 # The SAME byte ruler the #629 bounds are measured with — a write tool that reports "bytes"
 # has to report the number the gate will judge, not a codepoint count that under-reads it.
 from defender._artifact_schema import _utf8_len
-from defender.scripts.gather_tools.record_query import (
-    _passthrough_max_bytes as _read_char_cap,
+from defender._env import env_int
+from defender.scripts.adapters.faults import USAGE_EXIT_CODE
+from defender.scripts.gather_tools import sql as defender_sql
+from defender.scripts.gather_tools import record_query
+from defender.scripts.gather_tools.payload_view import (
+    passthrough_max_bytes as _capture_view_cap,
 )
 from defender.hooks.record_lesson_load import (
     RUNTIME_LESSON_CORPORA as _RUNTIME_LESSON_CORPORA,
     lesson_name as _lesson_name,
 )
 
+#: The queries table's own infra code — `circuit_breaker.INFRA_EXIT_CODES`' member for a
+#: fault that is the environment's, not the caller's. Named rather than spelled `2` at the
+#: use site, so a reader of `_shim_exit_code` sees WHICH taxonomy the number belongs to.
+_INFRA_EXIT_CODE = 2
+
 _BASH_TIMEOUT_S = 120
+
+#: The `verb` a bash-lane row carries. Not a registry verb and deliberately unlike one: it keeps
+#: a shim row outside `repeat_trip`'s `(system, verb, params)` key by construction, so an
+#: observational row can never be mistaken for a dispatch attempt and trip the guard (#823 N3).
+_BASH_VERB = "bash"
 
 
 
@@ -57,10 +71,26 @@ def _overflow_filter_hint(
     return f"Reduce it in a pipe{sink}:\n  cat {path} | {reducer}"
 
 
+def _read_char_cap() -> int:
+    """The cap on reading an AUTHORED file — a SKILL, a lesson, a design doc.
+
+    Its own number since #832, where the capture ceiling dropped to 8 KB. The two used to be one
+    constant, and the sharing was load-bearing in one direction only: a lead must not be able to
+    `read_file` a persisted payload and recover what the capture view withheld. But equality
+    over-served that property — `defender/SKILL.md` is 33,590 bytes and 16 of 20 files under
+    `docs/` clear 8 KB, so lowering the shared value would have truncated the runtime agent's own
+    spec to serve a bound on payload reads. `_cap_for` keeps the property and drops the equality:
+    the capture ceiling applies where a capture is being re-read, and nowhere else."""
+    return env_int("DEFENDER_AUTHORED_READ_MAX_CHARS", 65536)
+
+
+def _cap_for(p: Path) -> int:
+    return _capture_view_cap() if permission.is_captured_payload(p) else _read_char_cap()
+
+
 def _bounded_read(
-    text: str, path: str, *, filter_hint: str, read_tool: str = "read_file"
+    text: str, path: str, *, cap: int, filter_hint: str, read_tool: str = "read_file"
 ) -> str:
-    cap = _read_char_cap()
     if len(text) <= cap:
         return text
     total_lines = text.count("\n") + 1
@@ -153,6 +183,100 @@ def _bash_env(deps: AgentDeps) -> dict[str, str]:
     return run_common.run_env(deps.defender_dir, deps.run_dir)
 
 
+def _shim_exit_code(rc: int) -> int:
+    """Translate `defender-sql`'s exit codes into the dialect the queries table speaks.
+
+    Two dialects meet here and they disagree on the number 2. The shim spends
+    `EXIT_INPUT_ERROR` (2) on the AGENT's mistakes — an empty pipe, a payload that is not JSON,
+    a malformed argv — while 2 in this table means INFRA (`circuit_breaker.INFRA_EXIT_CODES`,
+    where it is the adapter-load fault), and `collect_general_failures` drops every infra row.
+    Left untranslated, the commonest reduce mistakes were recorded and then silently discarded
+    — the exact failure M1 exists to end.
+
+    So the two genuinely different meanings are separated at the boundary rather than averaged:
+    an input error becomes `USAGE_EXIT_CODE`, this table's own "the caller's request was
+    refused"; a missing runtime (`EXIT_NO_RUNTIME`, which #823 split out of the shim's exit-2
+    bucket precisely so this mapping could be exact) becomes the table's infra code, because a
+    broken deployment is not a lesson any `execution.md` should carry. A query error (1) is
+    already agent-fixable and passes through. The shim's real status stays legible either way —
+    `payload_digest` records the raw `exit=N` and its stderr.
+    """
+    if rc == defender_sql.EXIT_INPUT_ERROR:
+        return USAGE_EXIT_CODE
+    if rc == defender_sql.EXIT_NO_RUNTIME:
+        return _INFRA_EXIT_CODE
+    return rc
+
+
+def _record_shim_failure(
+    deps: AgentDeps, decision: permission.BashDecision, command: str, result: Any,
+) -> None:
+    """#823 M1 — a FAILED reducer shim writes its own queries-table row.
+
+    `executed_queries.jsonl` was the query tool's alone, so the reduce step gather's own prompt
+    tells the subagent to run (`cat <payload> | defender-sql …`) left no trace anywhere the
+    offline loop reads. One measured lead spent its whole session brute-forcing DuckDB `unnest`
+    against a nested-envelope payload, and the pitfalls curator — whose entire job is folding
+    exactly that lesson into `skills/{system}/execution.md` — saw nothing.
+
+    FOUR conditions, each of them a demand of the spec and none of them incidental:
+
+    * `lead_id` — GATHER ONLY. `lead_id` lives on `GatherDeps`, not `AgentDeps`, so main's bash
+      lane structurally cannot produce one; the record is per-lead and joins on that key, and
+      main's bash is investigation authoring, not gathering. Narrowed with `isinstance` rather
+      than `getattr(deps, "lead_id", None)`: the getattr returns `Any`, which silently erased
+      the type of the value feeding `append_query_row(lead_id: str)` — and that value becomes a
+      `gather_raw/{lead_id}/` path component.
+    * a non-zero exit — the trigger is a FAILURE, not a shim call. Recording the sanctioned
+      happy path would make the pitfalls queue a transcript.
+    * a REDUCER stage — not bash in general. `_tool_bash` serves `grep`, `cat` and `wc` too, and
+      a failing `wc` teaches a system nothing. `bin/` carries exactly one reducer. And it must
+      be the TERMINAL stage (`command_shape.terminal_reducer`): the box reports one exit code,
+      the last stage's, so a reducer piped into `head` has its failure hidden behind that
+      stage's 0 and a healthy reducer piped into a non-matching `grep` is handed its 1. Only
+      when the reducer IS the reported stage can the rc be attributed to it, and a record no
+      one can attribute is worse than no record — it reaches the curator as a lesson.
+    * best-effort — this is an observation channel bolted beside the bash lane's real job, so a
+      broken table must not turn a working command into a `ModelRetry`. The same posture
+      `lead_rows` takes on its own read.
+    """
+    if not isinstance(deps, GatherDeps) or deps.lead_id is None or result.rc == 0:
+        return
+    lead_id: str = deps.lead_id
+    if not permission.command_shape.terminal_reducer(list(decision.pipelines or ())):
+        return
+    stderr = result.err.decode("utf-8", "replace")
+    recorded_command = command[:record_query.SHIM_COMMAND_MAX_CHARS]
+    try:
+        record_query.append_query_row(
+            deps.run_dir,
+            lead_id=lead_id,
+            # The system of the PAYLOAD the reducer read, never one parsed out of the argv —
+            # the argv names `defender-sql`, and a row saying `system: "sql"` would send the
+            # curator at a `skills/sql/execution.md` that must never exist. `""` when the
+            # command opened no run payload: `collect_general_failures` skips a systemless row.
+            system=record_query.system_for_payload_operands(
+                deps.run_dir, _opened_operands(deps, decision),
+            ),
+            verb=_BASH_VERB,
+            query_id=record_query.BASH_SHIM_QUERY_ID,
+            params={"command": recorded_command},
+            raw_command=recorded_command,
+            # Empty, like every other failed row's sidecar: the file must EXIST or
+            # `extract_from_joined` drops the row, but a failure has no evidence to persist and
+            # the shim's stdout is attacker-influenced bytes.
+            payload_text="",
+            exit_code=_shim_exit_code(result.rc),
+            payload_status="error",
+            payload_digest=f"exit={result.rc}; {stderr.strip()[:160]}",
+        )
+    # `Exception`, not `OSError`: the fourth condition above is the whole point of this call,
+    # and the write is not the only thing that can raise inside it. Narrower than the posture
+    # it claims is how an observation channel starts failing the command it observes.
+    except Exception:  # noqa: BLE001 — best-effort observability
+        return
+
+
 def _tool_bash(deps: AgentDeps, command: str) -> str:
     decision = permission.decide_bash(
         command, policy=deps.policy,
@@ -173,6 +297,7 @@ def _tool_bash(deps: AgentDeps, command: str) -> str:
         raise ModelRetry(f"command timed out after {_BASH_TIMEOUT_S}s: {command}") from e
     except box_mod.BoxFault as e:
         raise ModelRetry(f"the sandbox could not run this command: {e}") from e
+    _record_shim_failure(deps, decision, command, result)
     formatted = _format_bash_result(
         result.rc, result.out.decode("utf-8", "replace"), result.err.decode("utf-8", "replace"),
     )
@@ -335,7 +460,7 @@ def _bound_and_wrap(
     deps: AgentDeps, p: Path, path: str, text: str, *, read_tool: str
 ) -> str:
     text = _bounded_read(
-        text, path,
+        text, path, cap=_cap_for(p),
         filter_hint=_overflow_filter_hint(path, deps.policy, read_tool),
         read_tool=read_tool,
     )

@@ -307,23 +307,40 @@ def alerts(
     )
 
 
+def esql_payload(query: str, resp: dict) -> dict:
+    """The `esql` verb's payload, shaped from the raw ES|QL response.
+
+    `values` is left AS THE WIRE SENT IT: rows are bare arrays, cell `i` binding to
+    `columns[i]`. The adapter used to re-zip them into per-row dicts, which restated every
+    field name on every row — 1,778 KB of recorded payloads where 1,196 KB says the same
+    thing, on the payload class gather reads most (#834). The binding is not lost, it is
+    DERIVED at read time from `columns`, which the wire already states once.
+
+    Two things had documented the positional form all along, and both were wrong about
+    production for five weeks because the zip contradicted them: `sql.py`'s ES|QL hint (the
+    one printed on every failed reducer query) and `defender-sql.md`'s ES|QL idiom. Nothing
+    downstream had to change to make this land; they became true.
+
+    Pure, and separate from the verb, so `evals/oracle_golden/controls.py` can produce the
+    same shape through the same code instead of its own second copy of the zip — and so the
+    shape is testable without an HTTP seam.
+    """
+    values = resp.get("values", [])
+    return {
+        "query": query,
+        "columns": resp.get("columns", []),
+        "row_count": len(values),
+        "values": values,
+    }
+
+
 @verb(engine="esql", body_param="query")
 def esql(ctx: VerbContext, *, query: str) -> dict:  # noqa: A002 — shadows the `query` verb by design
     config = load_config(ctx)
     url = f"{config['ELASTICSEARCH_URL'].rstrip('/')}/_query?format=json"
     status, resp = _http_json(ctx, "POST", url, config, body={"query": query})
     _raise_on_es_error(status, resp, "ES|QL query")
-
-    columns = resp.get("columns", [])
-    values = resp.get("values", [])
-    names = [c.get("name") for c in columns]
-    rows = [dict(zip(names, row, strict=False)) for row in values]
-    return {
-        "query": query,
-        "columns": columns,
-        "row_count": len(rows),
-        "values": rows,
-    }
+    return esql_payload(query, resp)
 
 
 VERBS = {

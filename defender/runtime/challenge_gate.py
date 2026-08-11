@@ -225,7 +225,10 @@ def _fresh_stage_request(render: Callable[[str], str], bounds: Bounds) -> StageR
     return StageRequest(prompt=render(salt), salt=salt, timeout=bounds.stage_timeout)
 
 
-def _trace_path(run_dir, role: str):
+def review_trace_path(run_dir, role: str):
+    """One review role's trace file. PUBLIC for the same reason `review_record_path` is: the
+    run dir's readers (the runtime visualizer's § Review gate) need the shape, and a second
+    site spelling `review_{role}_trace.jsonl` is a filename with two owners."""
     from pathlib import Path
 
     return Path(run_dir) / f"review_{role}_trace.jsonl"
@@ -277,7 +280,7 @@ def _write_trace_row(
     # ONE guarded append per row, not one per physical line: the two lines are a single trace
     # record, and splitting them across two `write_guarded` calls both doubled the syscalls and
     # left a window in which the metadata row was on disk without the reply it describes.
-    write_guarded(_trace_path(run_dir, role), line, mode="append")
+    write_guarded(review_trace_path(run_dir, role), line, mode="append")
 
 
 def _mark_traces_incomplete(deps: Any, round_no: int, reason: str) -> None:
@@ -569,6 +572,7 @@ __all__ = [
     "default_bounds",
     "raised_request_limit",
     "review_record_path",
+    "review_trace_path",
     "stage_timeout",
     "write_review_record",
 ]

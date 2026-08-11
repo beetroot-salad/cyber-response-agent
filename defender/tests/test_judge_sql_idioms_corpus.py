@@ -30,6 +30,8 @@ from pathlib import Path
 
 import pytest
 
+from defender.scripts.adapters.elastic_adapter import esql_payload
+
 pytest.importorskip("duckdb")
 
 _DEFENDER = Path(__file__).resolve().parents[1]
@@ -114,9 +116,46 @@ def test_no_surface_resurrects_the_result_envelope(surface):
     assert "result.hits" not in surface.read_text(), f"{surface.name} re-teaches the dead recipe"
 
 
+def test_the_adapter_emits_the_shape_this_fixture_has():
+    """The guard the two tests below CLAIMED to be and were not, for five weeks.
+
+    `test_esql_shape_on_the_real_tracked_payload` says it is "driven off the real checked-in
+    payload… so a change to the ES|QL adapter's output shape breaks this". It is not: it reads
+    a FILE. That file was captured before `526a7316` taught the adapter to re-zip `values` into
+    per-row dicts — and was committed BY that same commit — so from that day the fixture said
+    positional, the adapter emitted dicts, and every assertion here went on passing against a
+    shape production had stopped producing. `sql.py`'s ES|QL hint and `defender-sql.md` were
+    written against the fixture six days later and inherited the same falsehood, which is how a
+    lead came to be handed a reducer recipe that raises a Binder Error.
+
+    So bind to the ADAPTER, not only to the file. `esql_payload` is the pure shaping step
+    (#834) — no HTTP, no transport seam, no monkeypatch — and re-introducing the zip inside it
+    turns this red, which is what the docstring below has always promised.
+    """
+    raw = {"columns": [{"name": "count", "type": "long"},
+                       {"name": "source.ip", "type": "ip"}],
+           "values": [[412, "203.0.113.7"], [7, "198.51.100.4"]]}
+    payload = esql_payload("FROM logs-* | STATS count = COUNT(*) BY source.ip", raw)
+
+    assert payload["values"] == raw["values"], "the adapter re-shaped rows the wire had sent"
+    assert all(isinstance(row, list) for row in payload["values"]), (
+        "rows arrived as dicts — the re-zip is back, and `defender-sql.md` plus sql.py's ES|QL "
+        "hint now teach an idiom that cannot run"
+    )
+    assert payload["row_count"] == len(raw["values"])
+
+    # The fixture is older than the envelope's `query` key, so it is a SUBSET of what the
+    # adapter emits, not an equal — the tests below read `columns`/`row_count`/`values` and
+    # nothing else. What has to match is the row shape, which is the thing that drifted.
+    fixture = json.loads(_REAL_ESQL.read_text())
+    assert set(fixture) <= set(payload), f"fixture carries keys the adapter does not: {set(fixture) - set(payload)}"
+    assert isinstance(fixture["values"][0], list), "the fixture drifted off the adapter's shape"
+
+
 def test_esql_shape_on_the_real_tracked_payload():
     """`{columns,row_count,values}` (31/640) — driven off the real checked-in payload, not
-    a hand-written one, so a change to the ES|QL adapter's output shape breaks this."""
+    a hand-written one. Pinned to the adapter by the test above, which is what makes the
+    "a change to the ES|QL adapter's output shape breaks this" claim true rather than hopeful."""
     payload = _REAL_ESQL.read_text()
     doc = json.loads(payload)
     assert set(doc) >= {"columns", "row_count", "values"}, "the real fixture changed shape"

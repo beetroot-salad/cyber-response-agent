@@ -35,8 +35,14 @@ import subprocess
 import sys
 from datetime import datetime, timedelta, UTC
 from pathlib import Path
+from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from defender.scripts.adapters.elastic_adapter import esql_payload  # noqa: E402
+
 ES_SH = REPO_ROOT / "infra" / "bin" / "es.sh"
 
 # The two bounds a lead's ES|QL carries. Captured as three groups so a rewrite can
@@ -164,6 +170,26 @@ def shape_matched_windows(start: datetime, end: datetime,
 _LIVENESS: dict[tuple[str, str], bool] = {}
 
 
+def named_cell(payload: dict, name: str, default: Any = None) -> Any:
+    """The named cell of a columnar ES|QL payload's FIRST row, or `default`.
+
+    `values` is the wire's own positional form since #834 — cell `i` binds to `columns[i]` —
+    so a read resolves the index off `columns` instead of hardcoding one. Pure, and named,
+    so the reader a caller runs is the reader a test can pin; a test that re-derives the
+    index inline pins its own copy and stays green when the caller regresses to `row[0]`.
+
+    `default` covers both "no rows" and "no such column": a probe whose projection does not
+    carry the name has measured nothing, which is not the same fact as a zero.
+    """
+    columns = payload.get("columns", [])
+    rows = payload.get("values", [])
+    idx = next((i for i, c in enumerate(columns) if c.get("name") == name), None)
+    if idx is None or not rows:
+        return default
+    row = rows[0]
+    return row[idx] if idx < len(row) else default
+
+
 def window_is_live(start: datetime, end: datetime) -> bool:
     """Was the environment RUNNING during this window?
 
@@ -183,8 +209,10 @@ def window_is_live(start: datetime, end: datetime) -> bool:
     if key not in _LIVENESS:
         probe = (f'FROM logs-*\n| WHERE @timestamp >= "{key[0]}" AND @timestamp < "{key[1]}"\n'
                  f"| STATS total = COUNT(*)")
-        rows = run_esql(probe)["values"]
-        total = rows[0].get("total", 0) if rows else 0
+        # Positional, because `values` is now the wire's own columnar form (#834). The index
+        # is resolved from `columns` rather than hardcoded to 0: this probe projects a single
+        # column today, and a name lookup does not rot if it ever projects two.
+        total = named_cell(run_esql(probe), "total", default=0)
         _LIVENESS[key] = bool(total)
     return _LIVENESS[key]
 
@@ -203,10 +231,12 @@ def run_esql(query: str, *, timeout: int = 180) -> dict:
     resp = json.loads(proc.stdout)
     if "error" in resp:
         raise RuntimeError(f"ES|QL error: {json.dumps(resp['error'])[:400]}")
-    names = [c.get("name") for c in resp.get("columns", [])]
-    rows = [dict(zip(names, row, strict=False)) for row in resp.get("values", [])]
-    return {"query": query, "columns": resp.get("columns", []),
-            "row_count": len(rows), "values": rows}
+    # Through the ADAPTER's own shaper, not a second copy of it. This module used to
+    # re-implement the zip under a docstring promising "the production `esql` verb's payload
+    # shape" — two producers, one promise, and nothing keeping them equal. #834 changed that
+    # shape; had the copy stayed, `label.py` would have gone on comparing an attack window
+    # in one encoding against its controls in the other.
+    return esql_payload(query, resp)
 
 
 def measure_controls(query: str, offsets_days: tuple[int, ...] = DEFAULT_OFFSETS_DAYS,

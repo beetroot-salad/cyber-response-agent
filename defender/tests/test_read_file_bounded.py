@@ -2,8 +2,12 @@
 
 read_file must not pull a multi-MB gather payload whole into the model's
 context (a hard 200K-token overflow). _bounded_read caps the returned view at
-the SAME constant that bounds record_query's passthrough, so a later read of
-the persisted payload can't defeat that cap. Under the ceiling a file comes
+the cap `_cap_for` picks BY PATH (#832): a captured payload (`gather_raw/`,
+`ticket_reads/`) is re-read at the capture ceiling, so a later read of the
+persisted payload can't defeat the bound the capture chose, while an authored
+file gets its own — the two were one constant until the capture ceiling
+dropped to 8 KB, which equality would have paid for by truncating
+`defender/SKILL.md`. Under the ceiling a file comes
 back verbatim (every authored SKILL/lesson/doc fits with room to spare); over
 it, the head plus a notice carrying the true size and a filter-first
 resolution, since the overflowing files are single-document JSON dumps a line
@@ -136,7 +140,8 @@ def test_overflow_hint_names_the_callers_read_tool_not_a_constant() -> None:
     assert "read_file(" not in hint
     assert "pattern=" in hint
     over = tools._bounded_read(
-        "x" * (tools._read_char_cap() + 10), _PATH, filter_hint=hint, read_tool="lesson_read",
+        "x" * (tools._read_char_cap() + 10), _PATH, cap=CAP,
+        filter_hint=hint, read_tool="lesson_read",
     )
     assert "[lesson_read]" in over
     assert "[read_file]" not in over
@@ -153,29 +158,45 @@ def test_overflow_hint_never_advertises_jq_over_a_file_operand(tmp_path) -> None
         assert f"jq '<filter>' {target}" not in tools._overflow_filter_hint(target, pol)
 
 
-def test_cap_matches_passthrough() -> None:
-    """The read cap IS record_query's passthrough cap — one shared source so
-    the on-disk read can't defeat the capture's bound."""
-    from defender.scripts.gather_tools.record_query import _passthrough_max_bytes
+def test_a_captured_payload_is_read_at_the_CAPTURE_ceiling() -> None:
+    """The property the shared constant used to carry, kept after #832 split it.
 
-    assert _passthrough_max_bytes() == CAP
+    A lead must not be able to `read_file` a persisted payload and recover what the capture view
+    withheld. That was enforced by making the two caps the SAME NUMBER — which over-served it:
+    when the capture ceiling dropped to 8 KB, equality would have truncated `defender/SKILL.md`
+    (33,590 bytes) and 16 of 20 files under `docs/` to bound a payload read. The bound now
+    follows the PATH, so both hold at once."""
+    from defender.scripts.gather_tools.payload_view import passthrough_max_bytes
+
+    assert tools._cap_for(Path("/run/gather_raw/l-1/0.json")) == passthrough_max_bytes()
+
+
+def test_an_authored_file_is_read_at_the_AUTHORED_cap() -> None:
+    """The complement, and the reason the split exists: `SKILL.md` is the runtime agent's own
+    spec and every authored file in the tree fits under this cap with room to spare."""
+    assert tools._cap_for(Path("/w/defender/SKILL.md")) == CAP
+    assert tools._cap_for(Path("/run/alert.json")) == CAP, (
+        "alert.json is the run's INPUT, not a capture — it is read whole"
+    )
+    assert (_DEFENDER / "SKILL.md").stat().st_size < CAP
 
 
 def test_under_cap_verbatim() -> None:
     text = "a SKILL\nwith a few lines\n"
-    assert tools._bounded_read(text, "/x/SKILL.md", filter_hint=_MAIN_HINT) == text
+    assert tools._bounded_read(text, "/x/SKILL.md", cap=CAP, filter_hint=_MAIN_HINT) == text
 
 
 def test_at_cap_verbatim() -> None:
     text = "x" * CAP
-    assert tools._bounded_read(text, "/x/f.json", filter_hint=_MAIN_HINT) == text
+    assert tools._bounded_read(text, "/x/f.json", cap=CAP, filter_hint=_MAIN_HINT) == text
 
 
 def test_over_cap_truncates_head_and_appends_notice(tmp_path) -> None:
     path = _PATH
     text = "y" * (CAP + 5000)
     out = tools._bounded_read(
-        text, path, filter_hint=tools._overflow_filter_hint(path, _main_policy(tmp_path)),
+        text, path, cap=CAP,
+        filter_hint=tools._overflow_filter_hint(path, _main_policy(tmp_path)),
     )
     head, _, note = out.partition("\n\n[read_file]")
     assert head == "y" * CAP
@@ -188,18 +209,18 @@ def test_over_cap_truncates_head_and_appends_notice(tmp_path) -> None:
 
 def test_notice_reports_true_line_count() -> None:
     blob = "z" * (CAP + 1000)
-    out = tools._bounded_read(blob, "/p.json", filter_hint=_MAIN_HINT)
+    out = tools._bounded_read(blob, "/p.json", cap=CAP, filter_hint=_MAIN_HINT)
     assert "/ 1 line(s)" in out
     assert "offset" not in out
     assert "limit" not in out
     lined = ("line\n" * ((CAP // 5) + 200))
-    out2 = tools._bounded_read(lined, "/p.json", filter_hint=_MAIN_HINT)
+    out2 = tools._bounded_read(lined, "/p.json", cap=CAP, filter_hint=_MAIN_HINT)
     assert f"/ {lined.count(chr(10)) + 1} line(s)" in out2
 
 
 def test_char_slice_never_splits_multibyte() -> None:
     text = "é" * (CAP + 100)
-    out = tools._bounded_read(text, "/p.json", filter_hint=_MAIN_HINT)
+    out = tools._bounded_read(text, "/p.json", cap=CAP, filter_hint=_MAIN_HINT)
     head = out.split("\n\n[read_file]")[0]
     assert head == "é" * CAP
     head.encode("utf-8")
