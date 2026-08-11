@@ -416,17 +416,22 @@ planned cannot be closed. The final loop goes to REPORT instead — it gets
 `:T conclude`, not `:T close`.
 
 **Append, don't re-navigate.** `investigation.md` grows append-only —
-ORIENT, then one PLAN + ANALYZE block per loop. `append_block` is its only
-writer: no path, no anchor, no position, because the document only ever
+ORIENT, then one PLAN + ANALYZE block per loop. `append_block` is what
+grows it: no path, no anchor, no position, because the document only ever
 grows at the end. Send **one ```invlang block per call** — the whole call
 is accepted or refused together, so a small block makes a refusal cheap to
 answer.
 
-`append_block` either returns a byte count or refuses. **A refusal means
-nothing was written** — the file does not contain your text, so do not try
-to amend it; fix the block and send it again. And nothing already committed
-can be edited: refine an earlier record by appending a new `:R attr_updates`
-or observation row, never by restating the original.
+`append_block` returns a byte count, refuses, or returns a byte count
+carrying a WARNING. **A refusal means nothing was written** — the file does
+not contain your text, so do not try to amend it; fix the block and send it
+again. A warning is the opposite: the block landed, one row in it is
+flagged, and every further write is blocked until you repair that row with
+`fix_row(old_row, new_row)` — copy the flagged row back exactly as the
+warning printed it, or pass an empty `new_row` to delete the line. And
+nothing already committed can be edited: refine an earlier record by
+appending a new `:R attr_updates` or observation row, never by restating
+the original.
 
 **Re-sync, don't re-read.** Reading the whole document costs thousands of
 tokens and you normally do not need to — you authored it. Read it when your
@@ -454,7 +459,7 @@ upstream; fix the dispatch.
 
 Record the disposition through the `close_investigation` tool. It is the
 only writer of `report.md`, which is not in your write scope at all —
-`append_block` reaches `investigation.md` and nothing else.
+`append_block` and `fix_row` reach `investigation.md` and nothing else.
 
 Call `close_investigation(disposition=...)` once ANALYZE has reached a
 confident finding. `disposition` is the closed enum:

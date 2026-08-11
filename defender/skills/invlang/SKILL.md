@@ -122,9 +122,12 @@ lead choice is mechanical.
   axes produces Cartesian-product nonsense. Per-slot enumeration is
   fine when only one axis is open.
 - **Resolution.** A lead closes the slot by writing a `:R attr_updates`
-  row with `key=class` (for class refinements) or `key=attrs.<name>`
-  (for attribute refinements) and the concrete value. Three-state
-  progression: `??` → `{a, b, c}` → concrete value.
+  row with `key=class` (for class refinements), `key=ident` (to sharpen
+  the vertex's identifier) or `key=attrs.<name>` (for attribute
+  refinements) and the concrete value. Three-state progression:
+  `??` → `{a, b, c}` → concrete value. The `:V` declaration itself is
+  IMMUTABLE — a sharpened `ident` is a new `:R` row, never a rewrite of
+  the row that declared the vertex.
 
 **Worked example.** A rule-5710 failed-auth alert names a source IP
 with no role/zone context. The defender doesn't yet know whether
@@ -224,8 +227,12 @@ l-001|v-003|class|bastion/internal/known-corp
 Adding `:V`/`:E` changes the observed graph. `:R attr_updates` records
 facts learned about existing graph objects — don't create vertices
 just for facts. This is also the surface for closing `??` slots
-(`key=class` for class refinements; `key=attrs.<name>` for attribute
-refinements) — see §Open questions.
+(`key=class` for class refinements; `key=ident` to sharpen the
+identifier; `key=attrs.<name>` for attribute refinements) — see
+§Open questions. Those three are the ONLY legal keys; any other key
+is flagged, and the flagged row blocks the next write until you repair
+it with `fix_row`. The `target` must name a vertex some `:V` block
+declares.
 
 ### `:R authz` (authz contract resolution)
 

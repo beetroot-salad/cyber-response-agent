@@ -449,12 +449,16 @@ def test_tier_table_over_the_real_census(tmp_path):
     run that hits the cap can no longer write down what it already knows."""
     main_names = _registered_names(MAIN_DEF)
     gather_names = _registered_names(GATHER_DEF)
-    assert {"read_file", "append_block", "bash", "gather"} <= main_names
+    assert {"read_file", "append_block", "fix_row", "bash", "gather"} <= main_names
     assert not {"write_file", "edit_file"} & main_names, "the general write lane left MAIN"
     assert {"read_file", "bash", "template_search", "query"} <= gather_names
 
+    # #836 moved the SUBJECT again, the same way #810 did: while a row is flagged BOTH the
+    # append and the close are refused, so a `fix_row` left at core tier would be permanently
+    # withdrawn at the cap with nothing left that can reopen either. It is METERED, not
+    # exempt — `BUDGET_EXEMPT_TOOLS` still holds only the close.
     assert {n for n in main_names if tier(n, AgentRole.MAIN) == "tail"} == \
-        {"read_file", "append_block"}
+        {"read_file", "append_block", "fix_row"}
     assert all(tier(n, AgentRole.GATHER) == "core" for n in gather_names)
     assert tier("gather", AgentRole.MAIN) == "core"
 

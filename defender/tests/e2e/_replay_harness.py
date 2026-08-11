@@ -242,7 +242,14 @@ def _turn_from_record(rec: dict, old_run_dir: str | None, new_run_dir: str | Non
     return Turn(tool_calls=calls, text=text)
 
 
+#: The verbs BOUND to investigation.md, which therefore carry no path to filter on — the name
+#: is the whole predicate. `append_block` has been one since #810 and `fix_row` since #836.
+_PATHLESS_INVESTIGATION_WRITES = ("append_block", "fix_row")
+
+
 def _is_investigation_write(name: str, args: Mapping[str, Any]) -> bool:
+    if name in _PATHLESS_INVESTIGATION_WRITES:
+        return True
     return (name in ("write_file", "edit_file")
             and str(args.get("path", "")).endswith("investigation.md"))
 

@@ -722,12 +722,23 @@ async def _drive_agent(  # noqa: PLR0913 — the loop's own inputs: agent, promp
                 # is ever consumed here; the run's own bounds are threaded anyway rather
                 # than re-resolved, so this limb cannot end up acting on a different value
                 # from the one the rest of the run was built with.
+                #: `forced=True` (#836/H1): the framework's own close is exempt from the
+                #: flagged-row gate. There is no model left to repair the row with, and
+                #: refusing here would end the run with NO report.md at all — which
+                #: dead-letters it at persist before investigation.md is ever validated,
+                #: for the wrong reason. Every close the MODEL invokes is still gated.
                 await _close_investigation_async(
-                    deps, "inconclusive", stages=None, bounds=bounds,
+                    deps, "inconclusive", stages=None, bounds=bounds, forced=True,
                 )
             except Exception as close_err:  # noqa: BLE001 — this exit must not itself raise
+                # ...but it must not SWALLOW it either. Until #836 this handler only logged,
+                # so a forced close that failed and one that committed were indistinguishable
+                # downstream — same truncated_by, same exit_reason, and the only difference a
+                # report.md nobody checks. The run then dead-lettered at persist for a missing
+                # artifact, invisibly. The exit reason now carries the failure.
                 print(f"[run.py] forced close after retry exhaustion also failed "
                       f"({close_err!r})", file=sys.stderr)
+                exit_reason = "ForcedCloseFailed"
     except RunAborted as e:
         print(f"[run.py] {e}; writing partial trace", file=sys.stderr)
         truncated_by = session_store.TRUNCATED_BY_ABORTED

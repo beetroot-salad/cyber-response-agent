@@ -709,7 +709,10 @@ def test_main_keeps_tools(logger):
             agent_id="main", make_model=_fake_model(_text_fn()),
         )
     registered = list(agent._function_toolset.tools)
-    assert registered == ["bash", "read_file", "append_block"]
+    # `fix_row` joined the roster with #836 — the repair verb rides the SAME `append=True`
+    # grant as `append_block`, so this exact-equality list is the tripwire for a future
+    # definition silently gaining a second write verb on investigation.md.
+    assert registered == ["bash", "read_file", "append_block", "fix_row"]
     assert "write_file" not in registered
     assert "edit_file" not in registered
 

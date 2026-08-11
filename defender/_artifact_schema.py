@@ -33,7 +33,7 @@ from defender._frontmatter import FrontmatterError, split_frontmatter
 # The normalizer is deliberately NOT imported here: this module holds the WRITE gate, and on
 # write the value is tested exactly — see the disposition check in `validate_report` below.
 from defender._vocab import DISPOSITION_ENUM
-from defender.skills.invlang.validate import Diagnostic, diagnose
+from defender.skills.invlang.validate import Diagnostic, diagnose, warn_diagnostics
 
 # #629 — output-structure bounds for the run's two model-authored artifacts, all in
 # UTF-8 BYTES. These are a VOLUME + STRUCTURE control on bytes that leave the system
@@ -192,12 +192,19 @@ def validate_report(proposed_text: str) -> str | None:
 #: what is on disk — and the old "fix and rewrite" wording implied the opposite of the truth.
 #: A model that believes a refused block landed then anchors its next edit to text that was
 #: never written, which is where six of the recovery failures measured on #810 came from.
+#: The notice's leading fragment, minted separately because #836 adds refusal paths that have
+#: no proposed text of their own — a refused CLOSE never offered any bytes, so "does not
+#: contain your text" would be a claim about nothing. Every new refusal LEADS with this, and
+#: an ACCEPT leads with its byte count instead: the model tells the two apart by the first
+#: sentence, which is what stops a warning from being read as a refusal and re-emitted.
+UNCHANGED_LEAD = "No changes were made"
+
 UNCHANGED_NOTICE = (
-    "No changes were made — the file on disk is unchanged and does not contain your text."
+    f"{UNCHANGED_LEAD} — the file on disk is unchanged and does not contain your text."
 )
 
 
-def _render_diagnostic(d: Diagnostic) -> str:
+def render_diagnostic(d: Diagnostic) -> str:
     """One diagnostic as the model sees it. The message leads and is unchanged from before
     #810; the locus and the corrections are additive lines beneath it, so a diagnostic that
     carries neither renders exactly as it always did.
@@ -206,7 +213,12 @@ def _render_diagnostic(d: Diagnostic) -> str:
     `format()` embeds `row=...`, and repeating it would be noise rather than help. That
     embedding is a `repr()`, so the raw-substring test alone misses any row carrying a
     backslash or a quote; both spellings are checked. A row past `format()`'s 200-char
-    truncation matches NEITHER, and is printed whole, which is the point of the line."""
+    truncation matches NEITHER, and is printed whole, which is the point of the line.
+
+    MODULE-PUBLIC since #836. It was private to the DENY path, which is exactly why the
+    accept path had no channel to show a warning through: a warn-only document makes this
+    module return no text at all, so the tool bodies re-derive and render through this one
+    renderer rather than growing a second, drifting spelling of the same three lines."""
     lines = [f"  - {d.message}"]
     if d.locus is not None and not (
         d.locus.row_text in d.message or repr(d.locus.row_text) in d.message
@@ -228,18 +240,33 @@ def validate_investigation(proposed_text: str, current: str | None) -> str | Non
 
     Every refusing branch states that nothing was written (#810). This module owns the
     rendering; `skills.invlang.validate` owns the finding — hence `diagnose` here rather than
-    the `validate_companion` string surface."""
+    the `validate_companion` string surface.
+
+    WARN-severity findings do not refuse (#836). They are not returned through this surface at
+    all — the `str | None` contract is unchanged, and the window is DERIVED by the tool bodies
+    rather than carried out of the gate."""
     if _utf8_len(proposed_text) > INVESTIGATION_FILE_MAX:
         # The size is the WHOLE document, and since #810 the only writer APPENDS to it — so
         # "trim it and re-send" is advice the model cannot always take: once what is already
         # committed fills the bound, no block is small enough and nothing can shrink the file.
         # Name the on-disk share so the model can tell "send less" from "you are out of room".
         on_disk = _utf8_len(current) if current is not None else 0
-        remedy = (
-            f"{on_disk} of those bytes are already committed and cannot be removed — send a "
-            "smaller block, or close the investigation on the evidence you already have."
-            if on_disk else "Trim it and re-send."
-        )
+        # #836: with a row flagged, "close the investigation" is a verb the M5 gate refuses —
+        # the remedy would name the one move the model cannot make. `fix_row(old, "")` is the
+        # escape that actually shrinks the document, and it is available exactly here.
+        if on_disk and current is not None and warn_diagnostics(current):
+            remedy = (
+                f"{on_disk} of those bytes are already committed and cannot be removed, and a "
+                "flagged row is blocking the close — repair or delete it with "
+                '`fix_row(old_row, "")`, then send a smaller block.'
+            )
+        elif on_disk:
+            remedy = (
+                f"{on_disk} of those bytes are already committed and cannot be removed — send a "
+                "smaller block, or close the investigation on the evidence you already have."
+            )
+        else:
+            remedy = "Trim it and re-send."
         return (
             f"investigation.md is {_utf8_len(proposed_text)} bytes, over the "
             f"{INVESTIGATION_FILE_MAX}-byte limit. {UNCHANGED_NOTICE} {remedy}"
@@ -253,10 +280,11 @@ def validate_investigation(proposed_text: str, current: str | None) -> str | Non
             f"investigation.md validation errored — failing closed: {e!r}. "
             f"{UNCHANGED_NOTICE} Simplify the invlang and re-send."
         )
-    if found:
+    errors = [d for d in found if d.severity != "warning"]
+    if errors:
         return (
             f"investigation.md failed invlang validation. {UNCHANGED_NOTICE}\n\n"
-            + "\n".join(_render_diagnostic(d) for d in found)
+            + "\n".join(render_diagnostic(d) for d in errors)
             + "\n\nRe-send the block with those rows corrected."
         )
     return None
