@@ -10,12 +10,14 @@ seq collision). This file keeps ONLY the functions that outlived the CLI, becaus
 still imports them:
 
   - `derive_system` — the generic system-from-argv derivation (no per-system table);
-  - `build_truncated_view` / `PASSTHROUGH_SAMPLE_COUNT` — the field-shape sampler the query
-    tool's model view is built from;
   - and, re-pointed at `QueryCapture`, the seq→write→append INTEGRITY property (a failed
     payload write must not reuse a `(lead_id, seq)`), which the frozen suite does not exercise.
 
-`_passthrough_max_bytes` / `payload_digest` / `LEAD_ID_RE` survival is pinned by
+The model-visible view left with #832: `build_truncated_view` / `PASSTHROUGH_SAMPLE_COUNT` /
+`_passthrough_max_bytes` are gone, and `payload_view.py` (specced by `test_payload_view.py`)
+renders the payload now — this module records the query, that one renders its result.
+
+`payload_digest` / `LEAD_ID_RE` survival is pinned by
 `test_query_tool_611.py::test_record_query_module_survives_its_cli`; the lead-id claim-side
 guard by `test_record_lead.py`.
 """
@@ -72,83 +74,12 @@ def test_derive_system_skips_non_adapter_and_unknown():
 
 
 
-def _big_hits_payload(n: int) -> str:
-    import json
-    return json.dumps({"hits": [{"i": i, "message": f"event {i}", "pad": "x" * 50} for i in range(n)]})
-
-
-def test_build_truncated_view_samples_records(tmp_path):
-    payload = _big_hits_payload(200)
-    view = ge.build_truncated_view(payload, "gather_raw/l-001/0.json", tmp_path)
-    assert "200 records" in view
-    assert view.count("sample[") == ge.PASSTHROUGH_SAMPLE_COUNT
-    assert "defender-sql" in view
-    assert "jq" not in view
-    assert str(tmp_path / "gather_raw/l-001/0.json") in view
-
-
-def test_build_truncated_view_non_json_falls_back_to_chars(tmp_path):
-    view = ge.build_truncated_view("x" * 5000, "gather_raw/l-001/0.json", tmp_path)
-    assert "bytes — pass-through truncated" in view
-    assert "sample[" not in view
-
-
-def test_build_truncated_view_capped_envelope_points_counts_at_total(tmp_path):
-    import json
-    payload = json.dumps({
-        "index": "logs-*", "total": 2471, "returned": 20, "truncated": True,
-        "hits": [{"i": i, "message": f"event {i}"} for i in range(20)],
-    })
-    view = ge.build_truncated_view(payload, "gather_raw/l-001/0.json", tmp_path)
-    assert "2471 total matches (EXACT" in view
-    assert "20-doc SAMPLE" in view
-    assert "| length" not in view
-    assert view.count("sample[") == ge.PASSTHROUGH_SAMPLE_COUNT
-
-
-def test_build_truncated_view_complete_envelope_is_not_flagged_sampled(tmp_path):
-    import json
-    payload = json.dumps({
-        "total": 3, "returned": 3, "truncated": False,
-        "hits": [{"i": i} for i in range(3)],
-    })
-    view = ge.build_truncated_view(payload, "gather_raw/l-001/0.json", tmp_path)
-    assert "FIELD-SHAPE sample" in view
-    assert "total matches (EXACT" not in view
-
-
-
-def _capped(hits, total=142):
-    import json
-    return json.dumps({
-        "index": "logs-*", "total": total, "returned": len(hits),
-        "truncated": True, "hits": hits,
-    })
-
-
-def test_capped_view_states_the_span_the_returned_docs_actually_cover(tmp_path):
-    """A capped payload is ONE slice, and the envelope never says which.
-
-    The adapter sorts `@timestamp` desc and takes the first 20, so a lead bracketing an alert
-    at 11:40 with a ±15m window gets the window's last six minutes and none of the events it
-    came for. `total`/`returned` cannot express that; the span can.
-    """
-    hits = [
-        {"@timestamp": f"2026-08-07T11:5{i // 10}:0{i % 10}.000Z", "message": f"e{i}"}
-        for i in range(20)
-    ]
-    view = ge.build_truncated_view(_capped(hits), "gather_raw/l-001/0.json", tmp_path)
-    assert "2026-08-07T11:50:00.000Z … 2026-08-07T11:51:09.000Z" in view
-    assert "ONE slice of the 142" in view
-    assert "other 122" in view
-
-
-def test_span_line_is_omitted_when_records_carry_no_timestamp(tmp_path):
-    view = ge.build_truncated_view(
-        _capped([{"i": i} for i in range(20)]), "gather_raw/l-001/0.json", tmp_path
-    )
-    assert "142 total matches (EXACT" in view
-    assert "ONE slice" not in view
+# The field-shape sampler that used to live here moved to `payload_view.py` with #832, and
+# its tests to `test_payload_view.py`. One of them —
+# `test_build_truncated_view_complete_envelope_is_not_flagged_sampled` — pinned the DEFECT:
+# it asserted that a complete 3-of-3 envelope still reads "FIELD-SHAPE sample". Measured over
+# the recorded corpus that wording reached 41 of 62 elastic payloads whose every record was
+# already in context, telling the lead not to count what it could see in full.
 
 
 def _row(seq, *, params, digest, lead="l-001"):

@@ -101,6 +101,7 @@ Off-process: `run.py` enqueues a marker; workers drain independently, each commi
 
 - **Anchor a default in one place.** Resolve an optional input once at the boundary, thread it inward non-`Optional`; don't re-coalesce in the body (`x = x if x is not None else DEFAULT`). Prefer `is not None` over `or`. Enforced under `defender/` by `scripts/lint/lint_unanchored_default.py` (repo root); suppress deliberate sites with `# lint-default: ok — <reason>`.
 - Runs live outside the repo (`/tmp/defender-runs/`) so transcripts stay out of git.
+- **In the devcontainer, set `DEFENDER_RUNS_BASE=/workspace/.defender-runs`** (gitignored) — the default `/tmp/defender-runs` is not a path this container shares with the docker daemon, so the box cannot resolve its bind source and `start_box` fails with a C46/DooD `BoxFault`.
 
 ## Out of scope here
 

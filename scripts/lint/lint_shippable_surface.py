@@ -26,6 +26,7 @@ from pathlib import Path
 
 from _astlib import ScanBlind, read_source
 from _baseline import Finding, gate
+from _gitscope import git_ignored
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFENDER = REPO_ROOT / "defender"
@@ -115,14 +116,19 @@ def _excluded(rel: str) -> bool:
 
 def _scan() -> list[Finding]:
     findings: list[Finding] = []
-    for path in DEFENDER.rglob("*"):
-        if not path.is_file():
-            continue
-        if path.suffix not in TEXT_SUFFIXES:
+    # Minus what git ignores — see `_gitscope`. `EXCLUDED_PREFIXES` covers what is deliberately
+    # out of scope; only git covers the run artifacts a working tree accumulates but a fresh CI
+    # checkout never has (66 findings here against CI's zero).
+    candidates = [
+        p for p in DEFENDER.rglob("*")
+        if p.is_file() and p.suffix in TEXT_SUFFIXES
+        and not _excluded(p.relative_to(REPO_ROOT).as_posix())
+    ]
+    ignored = git_ignored(REPO_ROOT, candidates)
+    for path in candidates:
+        if path in ignored:
             continue
         rel = path.relative_to(REPO_ROOT).as_posix()
-        if _excluded(rel):
-            continue
         text = read_source(path, rel)
         for lineno, line in enumerate(text.splitlines(), start=1):
             if "lint-shippable: ok" in line:

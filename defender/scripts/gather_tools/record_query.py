@@ -8,14 +8,12 @@ import re
 import sys
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender._env import env_int
 from defender._io import guarded_mkdir, read_jsonl_rows, write_guarded
 from defender._run_paths import RunPaths
 from defender.runtime.circuit_breaker import AGENT_FIXABLE_ERROR_CLASS, error_class_for_exit
@@ -25,13 +23,10 @@ LEAD_ID_RE = re.compile(r"^l-[A-Za-z0-9]+$")
 _ADAPTER_RE = re.compile(r"(?:^|/)(\w+)_adapter\.py$")
 _NON_ADAPTER = frozenset({"invlang"})
 
-def _passthrough_max_bytes() -> int:
-    return env_int("DEFENDER_GATHER_PASSTHROUGH_MAX_BYTES", 65536)
-
-
-PASSTHROUGH_SAMPLE_COUNT = 3
-_SAMPLE_MAX_CHARS = 600
-_RECORD_KEYS = ("hits", "results", "events", "records", "data", "rows")
+# The model-visible view of a captured payload lives in `payload_view.py` (#832) — this module
+# records the query, that one renders its result. They were one file while the view was a
+# key-name guess made inline; splitting them is what let the view become a testable unit with
+# its own budget arithmetic, and it keeps the repeat guards below free of it.
 
 
 def derive_system(inner: list[str]) -> str | None:
@@ -55,156 +50,6 @@ def payload_digest(stdout: str, stderr: str, exit_code: int) -> str:
         return f"exit={exit_code}; {stderr.strip()[:160]}"
     lines = stdout.count("\n") + 1 if stdout.strip() else 0
     return f"{len(stdout)} bytes, {lines} line(s)"
-
-
-def _find_records(stdout: str):
-    try:
-        obj = json.loads(stdout)
-    except (json.JSONDecodeError, ValueError):
-        return None
-    if isinstance(obj, list):
-        return obj
-    if isinstance(obj, dict):
-        for key in _RECORD_KEYS:
-            if isinstance(obj.get(key), list):
-                return obj[key]
-        lists = [v for v in obj.values() if isinstance(v, list)]
-        if lists:
-            return max(lists, key=len)
-    return None
-
-
-def _is_event_payload(stdout: str) -> bool:
-    try:
-        obj = json.loads(stdout)
-    except (json.JSONDecodeError, ValueError):
-        return False
-    if isinstance(obj, list):
-        return True
-    if isinstance(obj, dict):
-        return any(isinstance(obj.get(k), list) for k in _RECORD_KEYS)
-    return False
-
-
-def _envelope_total(stdout: str) -> int | None:
-    try:
-        obj = json.loads(stdout)
-    except (json.JSONDecodeError, ValueError):
-        return None
-    if isinstance(obj, dict) and isinstance(obj.get("total"), int) and not isinstance(
-        obj.get("total"), bool
-    ):
-        return obj["total"]
-    return None
-
-
-_TIME_KEYS = ("@timestamp", "timestamp")
-
-
-def _record_time(rec: Any) -> str | None:
-    if not isinstance(rec, dict):
-        return None
-    src = rec["_source"] if isinstance(rec.get("_source"), dict) else rec
-    for key in _TIME_KEYS:
-        if isinstance((v := src.get(key)), str) and v:
-            return v
-    return None
-
-
-def _time_sort_key(ts: str) -> tuple[int, Any]:
-    """A chronological sort key for one `@timestamp` string, falling open to string order.
-
-    Plain string order breaks the moment two stamps in the same second carry different
-    fractional-second precision: `"...11:59:00Z"` sorts AFTER `"...11:59:00.500Z"` because
-    `.` (0x2E) is below `Z` (0x5A) in ASCII, even though 00Z is the earlier instant — inverting
-    `returned_span`'s reported start/end. Parsed timestamps sort first (chronologically);
-    anything unparseable sorts after, by its raw string, rather than raising on a field this
-    function was never handed a schema for.
-    """
-    try:
-        return (0, datetime.fromisoformat(ts.replace("Z", "+00:00")))
-    except ValueError:
-        return (1, ts)
-
-
-def returned_span(records: list) -> tuple[str, str] | None:
-    """The time range the returned docs actually cover.
-
-    A capped payload is a *slice*, and which slice depends on the adapter's sort — for the
-    SIEM's `query` verb that is `@timestamp`, newest-first unless the call asked for `sort:
-    "asc"`, so a window bracketing an alert hands back the window's newest N by default and
-    the alert's own events can sit entirely outside them. The envelope reports `total` and
-    `returned` but never *which* docs these are, so a lead that asked for ±15m around a pivot
-    and got the last six minutes has no way to tell. Stating the span costs nothing and is a
-    fact about the payload, not advice about what to do next.
-    """
-    stamps = [t for rec in records if (t := _record_time(rec)) is not None]
-    if not stamps:
-        return None
-    stamps.sort(key=_time_sort_key)
-    return (stamps[0], stamps[-1])
-
-
-def build_truncated_view(stdout: str, payload_rel: str | None, run_dir: Path) -> str:
-    size = len(stdout)
-    records = _find_records(stdout)
-    total = _envelope_total(stdout)
-    sampled = records is not None and total is not None and total > len(records)
-    lines: list[str] = []
-    if records is not None:
-        shown = min(len(records), PASSTHROUGH_SAMPLE_COUNT)
-        if sampled:
-            assert total is not None  # `sampled` is only True when `total is not None`
-            lines.append(
-                f"[record_query] {total} total matches (EXACT, from the envelope). "
-                f"This payload is a {len(records)}-doc SAMPLE (returned-doc cap), "
-                f"{size} bytes — showing the first {shown} for field shape. COUNTS "
-                f"come from `total` (to count a subset, re-query with the narrowing "
-                f"filter and read its `total`); NEVER count the sample — its length "
-                f"is the cap, not a count."
-            )
-            if (span := returned_span(records)) is not None:
-                lines.append(
-                    f"[record_query] those {len(records)} docs span {span[0]} … {span[1]} "
-                    f"— ONE slice of the {total}, not a spread across your window. The "
-                    f"other {total - len(records)} lie outside that span and no `limit` "
-                    f"reaches them: narrow the window onto the pivot you care about, or "
-                    f"compute the answer server-side with an aggregating query."
-                )
-        else:
-            lines.append(
-                f"[record_query] {len(records)} records, {size} bytes — showing the "
-                f"first {shown} as a FIELD-SHAPE sample (to write your filters). Do NOT "
-                f"count these or read values off them; compute over the full payload on disk."
-            )
-        for idx, rec in enumerate(records[:PASSTHROUGH_SAMPLE_COUNT]):
-            sample = json.dumps(rec, default=str)
-            if len(sample) > _SAMPLE_MAX_CHARS:
-                sample = sample[:_SAMPLE_MAX_CHARS] + "…"
-            lines.append(f"sample[{idx}]: {sample}")
-    else:
-        lines.append(f"[record_query] {size} bytes — pass-through truncated")
-        lines.append(stdout[:_SAMPLE_MAX_CHARS * PASSTHROUGH_SAMPLE_COUNT] + "…")
-    if payload_rel:
-        abs_payload = run_dir / payload_rel
-        if sampled:
-            lines.append(f"sample payload (≤ cap, field shape only): {abs_payload}")
-            lines.append(
-                "→ COUNTS come from a query envelope's `total`, not this file: to count "
-                "a subset, re-query with the narrowing filter and read its `total`. Use "
-                "the on-disk sample only to read field shape, e.g. (the viewers read "
-                "STDIN — pipe the file in, don't pass it as an operand):\n"
-                f"  cat {abs_payload} | head -40"
-            )
-        else:
-            lines.append(f"full payload: {abs_payload}")
-            lines.append(
-                "→ compute every value over the full payload on disk (defender-sql, grep); "
-                "never count or read answers off the samples above. The reducers read STDIN "
-                "— pipe the file in, don't pass it as an operand, e.g.:\n"
-                f"  cat {abs_payload} | defender-sql 'SELECT count(*) FROM data'"
-            )
-    return "\n".join(lines) + "\n"
 
 
 def _request_key(system: Any, verb: Any, params: Any) -> str:
@@ -382,8 +227,8 @@ def repeat_note(
     """Name the earlier call in this lead that this one repeats, if any.
 
     A repeat is invisible from inside the turn loop. The payload is persisted under a fresh
-    `{seq}.json` every call, and `build_truncated_view` embeds that path three times, so two
-    executions of the same query differ by one integer in three places and read as new
+    `{seq}.json` every call, and the payload view embeds that path in its footer, so two
+    executions of the same query differ by one integer and read as new
     evidence. Nothing else in the loop compares a result to the one before it. Both branches
     below are statements of fact about rows already in the table — no refusal, no advice the
     caller has to accept — because the failure this addresses is a caller that has stopped

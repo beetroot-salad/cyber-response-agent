@@ -37,6 +37,7 @@ import sys
 from pathlib import Path
 
 from _astlib import ScanBlind, read_source
+from _gitscope import git_ignored
 from _baseline import Finding, gate
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -97,19 +98,23 @@ def _is_excluded(rel: str) -> bool:
 
 
 def _iter_defender_files() -> list[Path]:
+    """Every shipped text file under `defender/`, minus what git ignores.
+
+    `EXCLUDED_PREFIXES` scopes what is DELIBERATELY out of scope (per-vendor skill content,
+    fixtures, docs); `git_ignored` scopes what is not part of the repo at all. Only the second
+    can cover a directory a RUN writes — `learning/runs/`, `author-queue/`, `learn-queue/`
+    accumulate in any working tree that has executed the loop, and reported 290 findings here
+    against CI's zero, since a fresh checkout has none of them."""
     out: list[Path] = []
     if not DEFENDER.is_dir():
         return out
-    for path in DEFENDER.rglob("*"):
-        if not path.is_file():
-            continue
-        if path.suffix not in TEXT_SUFFIXES:
-            continue
-        rel = path.relative_to(REPO_ROOT).as_posix()
-        if _is_excluded(rel):
-            continue
-        out.append(path)
-    return out
+    candidates = [
+        p for p in DEFENDER.rglob("*")
+        if p.is_file() and p.suffix in TEXT_SUFFIXES
+        and not _is_excluded(p.relative_to(REPO_ROOT).as_posix())
+    ]
+    ignored = git_ignored(REPO_ROOT, candidates)
+    return [p for p in candidates if p not in ignored]
 
 
 def check_hardcoded_paths() -> list[Finding]:

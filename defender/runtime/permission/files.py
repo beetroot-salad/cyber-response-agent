@@ -270,6 +270,27 @@ def is_untrusted_read(path: Path) -> bool:
     return p.name == "alert.json" or _names_raw(p) or _names_query_draft(p)
 
 
+# The judge's ticket-read capture writes `ticket_reads/{seq}.json` instead of `gather_raw/`
+# (`learning/pipeline/judge/closed_ticket_tool.py`). `_run_paths._PAYLOAD_SHAPES` already names
+# BOTH as "the two by-ref payload families a run writes"; a cap that knew only the first left the
+# judge — which holds `read=True` — able to re-read at the authored ceiling exactly what the
+# capture view withheld, which is the one property the #832 O7 split exists to keep.
+TICKET_READS_MARKER = "ticket_reads"
+
+
+def is_captured_payload(path: Path) -> bool:
+    """Whether a resolved path is a payload a capture wrote — `gather_raw/` (the `query` tool)
+    or `ticket_reads/` (the judge's closed-ticket capture).
+
+    Narrower than `is_untrusted_read` on purpose, and answering a different question. That one
+    asks "must this be salt-tagged?" and takes in the alert and draft templates too; this one
+    asks "was this text already bounded once, on its way into context?" — which is true only of
+    a captured payload, and decides which read cap applies (#832 O7). `alert.json` is the run's
+    own input and is read whole; a payload is not."""
+    p = Path(path)
+    return _names_raw(p) or TICKET_READS_MARKER in p.parts
+
+
 def decide_write(
     path: Path, proposed_text: str = "", *,
     run_dir: Path, defender_dir: Path,
