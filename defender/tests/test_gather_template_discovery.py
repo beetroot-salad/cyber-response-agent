@@ -39,6 +39,7 @@ from defender.runtime import permission, tools  # noqa: E402
 from defender.runtime import tools_gather  # noqa: E402
 from defender.runtime.agent_definition import ToolSet  # noqa: E402
 from defender.runtime.driver import GATHER_DEF, MAIN_DEF  # noqa: E402
+from defender.runtime.verb_grant import VerbGrant  # noqa: E402
 from defender.tests.e2e._replay_harness import FakeVerbs  # noqa: E402
 from defender.scripts import workspace_map as wsm  # noqa: E402
 
@@ -358,7 +359,7 @@ def test_d23_index_block_stays_under_its_char_budget():
     tiering stops working, no dispatch pays a small index and the floor rises with the ceiling."""
     systems = {t.system for t in _corpus.iter_query_templates(_REAL_CATALOG)
                if t.status == "established"}
-    rendered = {s: tools_gather._template_index(_DEFENDER, s) for s in systems}
+    rendered = {s: tools_gather._template_index(_DEFENDER, s).text for s in systems}
     assert rendered, "the shipped corpus renders no index at all"
 
     worst = max(rendered.values(), key=len)
@@ -383,6 +384,45 @@ def test_d19_an_unbuildable_index_degrades_loudly(tmp_path):
     assert "template_search" in prompt
     assert re.search(r"index[^\n]*unavailable|unavailable[^\n]*index", prompt, re.I), \
         "an unbuildable index must say so in the prompt, not vanish from it"
+
+
+def test_an_all_denied_grant_is_not_reported_as_an_unreadable_corpus(tmp_path):
+    """d19's block claims a CAUSE — "the corpus could not be read" — for a condition with two.
+    A grant that allows no template in the catalog empties the same render, and the two want
+    opposite things said: "templates may well exist, go look" is true of a read failure and
+    misleading here, because `template_search` is NOT grant-filtered. It greps template TEXT
+    while the grant gates VERBS, so it returns hits this role cannot run, and the lead spends a
+    turn binding one to find out.
+
+    Both arms asserted here, on one corpus, so a future collapse back to a single message cannot
+    pass by satisfying whichever arm the test happened to check."""
+    dfn = _catalog(tmp_path)
+    deps = _deps(tmp_path, dfn)
+    request = _request("elastic")
+
+    denied = tools_gather._template_index(dfn, "elastic", VerbGrant(role="gather", entries=()))
+    assert denied.text == "", "a grant that allows nothing still rendered entries"
+    assert denied.established_seen > 0, \
+        "the walk must report what it FOUND, not what survived the grant — that is the whole bit"
+
+    prompt = tools_gather._gather_prompt(
+        deps, request, catalog="- `elastic`: the SIEM",
+        verb_grant=VerbGrant(role="gather", entries=()),
+    )
+    assert "could not be read" not in prompt, \
+        "a fully-read corpus was reported to the lead as a read failure"
+    assert "NONE of its templates is runnable on your grant" in prompt
+    assert "does not check your grant" in prompt, \
+        "the lead must be told template_search hits are not a promise it can run them"
+
+    # The positive control on the same address: a real read failure still says so. Without it,
+    # deleting the UNAVAILABLE arm entirely would pass every assertion above.
+    empty = tmp_path / "empty" / "defender"
+    (empty / "skills").mkdir(parents=True)
+    unreadable = tools_gather._template_index(empty, "elastic")
+    assert unreadable.text == ""
+    assert unreadable.established_seen == 0
+    assert "could not be read" in _prompt_for(tmp_path, empty)
 
 
 def test_d18_index_is_built_from_the_threaded_tree_and_is_not_memoized(tmp_path):

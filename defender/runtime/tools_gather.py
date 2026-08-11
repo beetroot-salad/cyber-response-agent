@@ -82,9 +82,24 @@ def _locator(defender_dir: Path, t: QueryTemplate) -> str:
     return f"- `{t.id}` — `{_repo_rel(defender_dir, t.path)}`"
 
 
+@dataclass(frozen=True)
+class TemplateIndex:
+    """The rendered index, and — when it is empty — WHICH of the two emptinesses it is.
+
+    `text` alone cannot say. A corpus that could not be read and a corpus read in full whose
+    every template the role's verb grant refuses both render `""`, and they call for opposite
+    things to be said to the lead: the first is "templates may well exist, go look", the second
+    is "they exist and you may not run them". `established_seen` counts what the walk found
+    BEFORE the grant filter, which is exactly the bit that separates them.
+    """
+
+    text: str
+    established_seen: int
+
+
 def _template_index(
     defender_dir: Path, dispatched: str, verb_grant: VerbGrant | None = None,
-) -> str:
+) -> TemplateIndex:
     """Two tiers (#835). The dispatched system's templates carry their `## Goal`; every other
     system's shrink to an id and a path.
 
@@ -102,9 +117,11 @@ def _template_index(
     """
     on_target: list[str] = []
     elsewhere: list[str] = []
+    established_seen = 0
     for t in iter_query_templates(_catalog_dir(defender_dir)):
         if t.status != "established" or "_draft" in t.path.parts:
             continue
+        established_seen += 1
         if verb_grant is not None and not verb_grant.allows(t.system, t.verb):
             continue
         locator = _locator(defender_dir, t)
@@ -113,11 +130,11 @@ def _template_index(
         else:
             elsewhere.append(locator)
 
-    # Before the tier headers, not after: an index with no entries at all is the UNAVAILABLE
-    # degradation `_gather_prompt` tests for, and a header rendered over two empty lists would
-    # make that check pass on a truthy string that says nothing (test d19).
+    # Before the tier headers, not after: an index with no entries at all is a degradation
+    # `_gather_prompt` renders its own block for, and a header over two empty lists would make
+    # that check pass on a truthy string that says nothing (test d19).
     if not on_target and not elsewhere:
-        return ""
+        return TemplateIndex("", established_seen)
 
     # No positional word ("above"/"below") in this arm: the descriptor index is absent whenever
     # `_descriptor_catalog` returns None, and the other tier is absent on a one-system corpus, so
@@ -131,7 +148,7 @@ def _template_index(
     blocks = [f"### `{dispatched}` — your dispatched system: id, path, `## Goal`\n{on_target_block}"]
     if elsewhere:
         blocks.append("### Other systems — id and path only\n" + "\n".join(elsewhere))
-    return "\n\n".join(blocks)
+    return TemplateIndex("\n\n".join(blocks), established_seen)
 
 
 _INDEX_HEADER = (
@@ -152,6 +169,21 @@ _INDEX_UNAVAILABLE = (
     "The catalog index is UNAVAILABLE for this dispatch (the corpus could not be read). This is a "
     "degradation, not an empty catalog: templates may well exist. Use `template_search` to look "
     "for one before you coin a fresh query id.\n\n"
+)
+
+# The OTHER emptiness, and it is not the one above. The walk read the corpus in full and the
+# role's verb grant refused every template in it. Saying "the corpus could not be read" there
+# would be false, and "templates may well exist — go look" actively misleads: `template_search`
+# is NOT grant-filtered (it greps bodies, the grant gates verbs), so it will happily return a
+# template this role cannot run, and the lead would burn a turn binding it to find out.
+_INDEX_NONE_GRANTED = (
+    "\n## Query templates\n\n"
+    "The catalog was read in full, and NONE of its templates is runnable on your grant — every "
+    "one binds a verb you are not authorized for. This is not an empty catalog and not a read "
+    "failure. `template_search` still greps the corpus, but it searches template TEXT and does "
+    "not check your grant, so a hit is not a promise you can run it. Coin the query your lead "
+    "needs against a verb you do hold; if none exists, say so in your summary rather than "
+    "reporting a measurement you could not take.\n\n"
 )
 
 
@@ -178,7 +210,10 @@ def _gather_prompt(
             f"{catalog}\n"
         )
     index = _template_index(deps.defender_dir, request.system, verb_grant)
-    block += (_INDEX_HEADER + index + "\n") if index else _INDEX_UNAVAILABLE
+    if index.text:
+        block += _INDEX_HEADER + index.text + "\n"
+    else:
+        block += _INDEX_NONE_GRANTED if index.established_seen else _INDEX_UNAVAILABLE
 
     wts = "\n".join(f"  - {d}" for d in request.what_to_summarize) or "  - (unspecified)"
     block += (
