@@ -125,6 +125,28 @@ class ReplayFn:
         return ModelResponse(parts=[TextPart(content="(replay exhausted)")])
 
 
+class ToolRoster(ReplayFn):
+    """`ReplayFn` + capture of the model-visible tool roster.
+
+    `AgentInfo.function_tools` — the second argument every `FunctionModel` callable receives
+    — is the tool definitions as the MODEL is offered them, which is the only honest place to
+    read a registration or an advertised schema from: a registry entry, or the annotation
+    re-inspected off the function object, would both pass while the wire carried something
+    else. Lives here rather than in each suite that wants it: three suites had grown the same
+    six-line subclass."""
+
+    __name__ = "ToolRoster"
+
+    def __init__(self, turns: list[Turn]):
+        super().__init__(turns)
+        self.tool_defs: list | None = None
+
+    def __call__(self, messages, info) -> ModelResponse:
+        if self.tool_defs is None:
+            self.tool_defs = list(info.function_tools)
+        return super().__call__(messages, info)
+
+
 class DenyProbe:
     """A model that emits one offending tool call, then text. Records the message
     history of each request so a script can assert the deny reason came back."""

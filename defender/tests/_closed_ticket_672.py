@@ -28,7 +28,12 @@ from defender.learning.core.config import JudgeWiring  # noqa: E402
 from defender.learning.pipeline.judge.engine_pydantic import _run_judge_pydantic  # noqa: E402
 from defender.learning.pipeline.judge.run import invoke_judge  # noqa: E402
 from defender.runtime.providers import BuiltModel  # noqa: E402
-from defender.tests.e2e._replay_harness import FakeVerbs, ReplayFn, Turn, VerbRecorder  # noqa: E402
+from defender.tests.e2e._replay_harness import (  # noqa: E402
+    FakeVerbs,
+    ToolRoster,
+    Turn,
+    VerbRecorder,
+)
 
 pytestmark = pytest.mark.e2e
 
@@ -161,19 +166,10 @@ def _ticket_registry(
 # ── the drive: the REAL judge leg entry, fakes through its injection seams ───────────────
 
 
-class _Script(ReplayFn):
-    """ReplayFn + capture of the model-visible tool roster (AgentInfo.function_tools) —
-    the observation channel for registration and schema demands: what the MODEL is offered,
-    not what some registry claims."""
-
-    def __init__(self, turns):
-        super().__init__(turns)
-        self.tool_defs = None
-
-    def __call__(self, messages, info):
-        if self.tool_defs is None:
-            self.tool_defs = list(info.function_tools)
-        return super().__call__(messages, info)
+#: This suite's observation channel for registration and schema demands: what the MODEL is
+#: offered, not what some registry claims. The harness owns the class (`ToolRoster`); the
+#: local name stays so the drive below keeps reading as this suite's own script.
+_Script = ToolRoster
 
 
 def _case(tmp_path: Path, name: str = CASE):

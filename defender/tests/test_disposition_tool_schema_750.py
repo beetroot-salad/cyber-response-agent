@@ -48,7 +48,7 @@ from defender.runtime.close_tool import (  # noqa: E402
 )
 from defender.runtime.tools import AgentDeps  # noqa: E402
 from defender.tests._review_bundle import bundle, composer_reply  # noqa: E402
-from defender.tests.e2e._replay_harness import ReplayFn, Turn  # noqa: E402
+from defender.tests.e2e._replay_harness import ToolRoster, Turn  # noqa: E402
 
 GOLDEN = Path(__file__).resolve().parents[1] / "fixtures-e2e" / "golden-v2sshd"
 
@@ -80,27 +80,6 @@ def _stages():
     return bundle(composer=composer_reply(finding="holds"))
 
 
-class _ToolRoster(ReplayFn):
-    """A `ReplayFn` that also captures the model-visible tool roster.
-
-    `AgentInfo.function_tools` — the second argument every `FunctionModel` callable receives —
-    is the tool definitions as the MODEL is offered them, which is the only honest place to read
-    an advertised schema from: a registry entry, or the annotation re-inspected off the function
-    object, would both pass while the wire carried something else.
-    """
-
-    __name__ = "ToolRoster"
-
-    def __init__(self, turns: list[Turn]):
-        super().__init__(turns)
-        self.tool_defs: list | None = None
-
-    def __call__(self, messages, info):
-        if self.tool_defs is None:
-            self.tool_defs = list(info.function_tools)
-        return super().__call__(messages, info)
-
-
 def _drive_tool(tmp_path: Path, disposition: str | None = None):
     """Register the REAL close tool on an agent and run it against a scripted model.
 
@@ -118,7 +97,7 @@ def _drive_tool(tmp_path: Path, disposition: str | None = None):
             Turn(tool_calls=[("close_investigation", {"disposition": disposition})]),
             Turn(text="acknowledged; stopping"),
         ]
-    script = _ToolRoster(turns)
+    script = ToolRoster(turns)
     agent = Agent(FunctionModel(script), deps_type=AgentDeps)
     register_close_tool(agent, stages=_stages(), bounds=challenge_gate.default_bounds())
     with override_allow_model_requests(False):
@@ -127,7 +106,7 @@ def _drive_tool(tmp_path: Path, disposition: str | None = None):
     return script, run_dir
 
 
-def _close_tool_def(script: _ToolRoster):
+def _close_tool_def(script: ToolRoster):
     """The one tool `register_close_tool` put in front of the model."""
     defs = script.tool_defs or []
     names = [t.name for t in defs]
@@ -328,6 +307,29 @@ def test_the_tool_lane_refuses_a_value_outside_the_vocabulary(tmp_path):
     )
     assert not (run_dir / "report.md").exists(), (
         "an out-of-vocabulary disposition committed a report through the tool lane"
+    )
+
+
+def test_a_member_of_the_vocabulary_commits_through_the_tool_lane(tmp_path):
+    """O2's positive control on the MODEL-FACING lane, and it has to be on this lane.
+
+    The sync entry's control says the CLOSE works; it says nothing about the registration.
+    Every "nothing reached report.md" above would hold just as well if the registered tool
+    could not commit at all — `stages`/`bounds` threaded wrong through the closure, or a
+    close whose write never happens — and each of those passes the refusals while breaking
+    the only lane a real run uses. `inconclusive` bypasses the review gate, so this arm
+    needs no live stage to say the lane can still write.
+    """
+    script, run_dir = _drive_tool(tmp_path, disposition="inconclusive")
+
+    seen = "\n".join(script.seen)
+    assert "disposition must be exactly one of" not in seen, (
+        f"a member of the vocabulary was refused on the tool lane. Saw: {seen!r}"
+    )
+    report = run_dir / "report.md"
+    assert report.exists(), "a valid disposition did not commit through the tool lane"
+    assert "disposition: inconclusive" in report.read_text(encoding="utf-8"), (
+        f"the committed report does not carry the disposition: {report.read_text()!r}"
     )
 
 

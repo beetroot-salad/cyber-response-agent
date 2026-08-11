@@ -386,8 +386,13 @@ async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams
     # gate's value is what the report frontmatter is later written FROM, so normalizing here would
     # launder the injected character past the very gate that exists to deny it.
     if not (isinstance(disposition, str) and disposition in DISPOSITION_ENUM):
+        # Rendered from the ORDERED TUPLE, never from `sorted(DISPOSITION_ENUM)`: `_vocab`
+        # names deny reasons as the reason the authored form is a tuple, and this refusal and
+        # the tool schema above are read in the SAME round trip — a fifth member appended out
+        # of alphabetical order would otherwise hand the model two orderings of one closed
+        # vocabulary while it is trying to correct itself.
         raise ModelRetry(
-            f"disposition must be exactly one of {sorted(DISPOSITION_ENUM)} (got "
+            f"disposition must be exactly one of {list(DISPOSITION_VALUES)} (got "
             f"{disposition!r}) — a typed enum, not free text"
         )
     # R4: a COMMITTED close is terminal, and the refusal comes BEFORE the gate so a second
@@ -502,8 +507,15 @@ def _read_companion_text(path: Path) -> str:
 
 #: The `disposition` argument AS THE MODEL IS OFFERED IT (#750): a plain `str` carrying the
 #: owner's vocabulary in its JSON schema. Derived from `DISPOSITION_VALUES`, so a fifth member
-#: reaches the model with nobody editing prose — #806 added `false-positive` by hand-syncing
-#: every surface that spelled the members out, and this tool's docstring was one of them.
+#: reaches the model's TOOL SCHEMA with nobody editing this file — #806 added `false-positive`
+#: by hand-syncing every surface that spelled the members out, and this tool's docstring was
+#: one of them.
+#:
+#: The generated-from-the-owner property holds for the TOOL SCHEMA ONLY. `SKILL.md` §REPORT —
+#: the runtime system prompt, read every turn — still hand-enumerates the members, and it
+#: carries a paragraph of MEANING per member rather than just the names, so it is not
+#: derivable from a tuple of strings. A fifth member therefore grows this schema automatically
+#: and leaves that roster stale, which is a prompt change, not this one.
 #:
 #: `json_schema_extra`, NOT a `StrEnum` or a `Literal`, DELIBERATELY. pydantic does not validate
 #: against it, so an out-of-enum value still reaches the body and the exact test in
