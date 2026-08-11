@@ -13,10 +13,11 @@ The two halves have to be pinned TOGETHER, because each one is dangerous without
     following fails this file;
   * the schema must NOT BECOME THE GATE (NU2). `json_schema_extra` is a hint pydantic does not
     validate against, and the design depends on that: if the framework ever rejected the argument
-    first, `close_tool.py:374` would become unreachable from the tool lane, the SYNC host entry
-    (which never passes through tool-argument validation at all) would be left ungated, and #722's
-    exact retry text — the one that renders an invisible character visibly — would be replaced by
-    a framework message that echoes the offending value raw.
+    first, the membership test in `_close_investigation_async` (named, never cited by line
+    number — a line number rots on the next edit above it) would become unreachable from the
+    tool lane, the SYNC host entry (which never passes through tool-argument validation at all)
+    would be left ungated, and #722's exact retry text — the one that renders an invisible
+    character visibly — would be replaced by a framework message that echoes the value raw.
 
 Hermetic: the model is a `FunctionModel` replaying scripted turns (`tests/e2e/_replay_harness`),
 and the close's four review stages are the shared no-provider bundle. Both enter through the
@@ -41,6 +42,7 @@ from defender.agents import MAIN_DEF  # noqa: E402
 from defender.runtime import challenge_gate  # noqa: E402
 from defender.runtime.agent_definition import bind  # noqa: E402
 from defender.runtime.close_tool import (  # noqa: E402
+    STANDS,
     close_investigation,
     register_close_tool,
 )
@@ -219,15 +221,17 @@ def test_the_schema_hint_is_not_the_gate(tmp_path):
     """NU2. With the enum advertised, an out-of-enum value STILL reaches the tool body.
 
     This pins a framework behavior the design leans on: pydantic does not validate against
-    `json_schema_extra`, so the advertised enum is a hint to the model and `close_tool.py:374`
-    remains the sole rejecter. If a future pydantic (or a future annotation — a `Literal`, a
-    `StrEnum`) rejected the argument first, three things break silently at once: the host check
-    becomes unreachable from the tool lane, the SYNC entry that never sees tool-argument
-    validation is left as the only ungated lane, and the retry text stops being ours.
+    `json_schema_extra`, so the advertised enum is a hint to the model and the membership test
+    in `_close_investigation_async` remains the sole rejecter. If a future pydantic (or a future
+    annotation — a `Literal`, a `StrEnum`) rejected the argument first, three things break
+    silently at once: the host check becomes unreachable from the tool lane, the SYNC entry that
+    never sees tool-argument validation is left as the only ungated lane, and the retry text
+    stops being ours.
 
-    The discriminator is WHOSE refusal came back. The host's message is written at :374 and
-    nothing else in the stack produces it, so its presence is the evidence the body ran; a
-    framework rejection would instead hand the model a validation error it never wrote.
+    The discriminator is WHOSE refusal came back. The host's message is written by
+    `_close_investigation_async` and nothing else in the stack produces it, so its presence is
+    the evidence the body ran; a framework rejection would instead hand the model a validation
+    error it never wrote.
 
     The first assertion is the premise, not decoration: without the advertised enum this test
     would pass vacuously, pinning nothing about a hint that is not there.
@@ -240,8 +244,9 @@ def test_the_schema_hint_is_not_the_gate(tmp_path):
 
     seen = "\n".join(script.seen)
     assert "a typed enum, not free text" in seen, (
-        "the host's own refusal never reached the model — the argument was rejected before "
-        f"the tool body ran, which leaves :374 unreachable from this lane. Saw: {seen!r}"
+        "the host's own refusal never reached the model — the argument was rejected before the "
+        "tool body ran, which leaves the membership test in `_close_investigation_async` "
+        f"unreachable from this lane. Saw: {seen!r}"
     )
     assert "Input should be" not in seen, (
         "a pydantic validation error came back instead of the host's refusal — the schema "
@@ -275,6 +280,25 @@ def test_the_sync_host_entry_refuses_every_near_miss(tmp_path, disposition):
     )
 
 
+@pytest.mark.parametrize("disposition", [["benign"], {"disposition": "benign"}, 1, None])
+def test_the_sync_host_entry_denies_a_non_string_rather_than_crashing(tmp_path, disposition):
+    """O2's unhashable arm, and the one near miss the string list above cannot express.
+
+    `DISPOSITION_ENUM` is a frozenset, so a bare `value in DISPOSITION_ENUM` raises `TypeError`
+    on an unhashable value instead of denying — the crash `_vocab.normalized_disposition`
+    documents and `_artifact_schema` guards with an `isinstance` test one layer later. The tool
+    lane cannot deliver one (pydantic validates the argument as `str`), so this lane is the only
+    place the guard can be observed, and it is the lane with nothing in front of it.
+    """
+    deps, run_dir = _deps(tmp_path)
+
+    with pytest.raises(ModelRetry) as excinfo:
+        close_investigation(deps, disposition, stages=_stages())
+
+    assert "disposition must be exactly one of" in str(excinfo.value)
+    assert not (run_dir / "report.md").exists()
+
+
 def test_a_member_of_the_vocabulary_still_closes(tmp_path):
     """O2's positive control, and it belongs to the same lane.
 
@@ -286,7 +310,7 @@ def test_a_member_of_the_vocabulary_still_closes(tmp_path):
 
     result = close_investigation(deps, "inconclusive", stages=_stages())
 
-    assert result.outcome == "stands"
+    assert result.outcome == STANDS
     assert (run_dir / "report.md").exists(), "a valid disposition did not commit"
 
 
@@ -346,5 +370,13 @@ def test_the_refusal_escapes_an_invisible_character_rather_than_echoing_it(tmp_p
     seen = "\n".join(script.seen)
     assert "'beni\\u200bgn'" in seen, (
         f"the model was handed a refusal that hides the character it must fix: {seen!r}"
+    )
+    # BOTH halves on this lane too, not just the escaped one: an escaped copy alongside a raw
+    # echo still hands the model a rejected answer that reads identical to a valid one, and
+    # this is the lane the model actually reads. `ToolCallPart` carries no `content`, so the
+    # model's own laced argument is not what this would be seeing.
+    assert LACED not in seen, (
+        "the model was handed the laced value raw, so its rejected answer reads as identical "
+        f"to a valid one: {seen!r}"
     )
     assert not (tool_run_dir / "report.md").exists()

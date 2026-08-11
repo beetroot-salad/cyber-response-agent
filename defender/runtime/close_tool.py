@@ -28,10 +28,12 @@ from pydantic_ai.exceptions import ModelRetry
 
 from defender._artifact_schema import validate_artifact
 from defender._untrusted import wrap as _wrap
-# The vocabulary from its OWNER, not through the report schema, which was only forwarding it
-# here (#785's rule: a module that USES the vocabulary imports it; a module that only PASSED
-# IT ON no longer names it at all). Both halves are used — the set for the exact membership
-# test in `_close_investigation_async`, the ordered tuple for the argument schema below.
+# The vocabulary from its OWNER, not second-hand through the report schema — `_artifact_schema`
+# has its own gate to run on it and names it for that, but it was never this module's supplier
+# (#785's rule: a module that USES the vocabulary imports it from the owner, so a consumer's
+# import list never doubles as someone else's distribution channel). Both halves are used — the
+# set for the exact membership test in `_close_investigation_async`, the ordered tuple for the
+# argument schema below.
 from defender._vocab import DISPOSITION_ENUM, DISPOSITION_VALUES
 from defender.hooks.budget_enforcer import BUDGET_EXEMPT_TOOLS  # noqa: F401 — re-export, RS16
 from defender.skills.invlang.validate import false_positive_entry_price
@@ -371,13 +373,19 @@ async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams
             "close_investigation is reachable only from the investigator (main) role — "
             f"not from {deps.role.value}"
         )
+    # `isinstance(str)` FIRST, for the same reason `_artifact_schema` states it: a non-string
+    # value (a YAML list, an int) is unhashable, so a bare `value in DISPOSITION_ENUM` (a set)
+    # would raise TypeError out of the gate instead of denying. The tool lane cannot reach here
+    # with one — pydantic validates the argument as `str` — but the SYNC host entry has nothing
+    # in front of it, which is the whole reason the refusal lives in the body.
+    #
     # lint-vocabulary: ok — the same WRITE-gate asymmetry `_artifact_schema` states, one layer
     # earlier: this is the LIVE close, so the author is still on the other end of the call and an
     # exact test hands it retry text it can act on. `normalized_disposition` would silently ACCEPT
     # a zero-width-laced value and commit a close no reader can tell from a clean one — and this
     # gate's value is what the report frontmatter is later written FROM, so normalizing here would
     # launder the injected character past the very gate that exists to deny it.
-    if disposition not in DISPOSITION_ENUM:
+    if not (isinstance(disposition, str) and disposition in DISPOSITION_ENUM):
         raise ModelRetry(
             f"disposition must be exactly one of {sorted(DISPOSITION_ENUM)} (got "
             f"{disposition!r}) — a typed enum, not free text"
@@ -549,6 +557,7 @@ __all__ = [
     "UNREADABLE",
     "ArtifactValidator",
     "CloseResult",
+    "DispositionArg",
     "RecommendedLead",
     "close_investigation",
     "register_close_tool",
