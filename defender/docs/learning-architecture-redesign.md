@@ -8,9 +8,14 @@ absorbs the deferred pointers in `learning-loop-actor-learning.md` (learning
 actor) and `learning-loop.md` §Future Enhancements (live self-evaluation). When
 this ships, those sections get rewritten rather than cross-referenced.
 
-Held-out fixture recruitment is a **prerequisite for measuring any of this** and
-is being handled separately. Every metric below is uncomputable until it lands.
-`defender/fixtures/held-out/` still contains only a README.
+**Held-out recruitment blocks less than an earlier draft claimed.** It gates the
+overfitting gap (§What dies) and promotion gating (§Lesson attribution), and
+nothing else. The pairwise metrics inside the loop — realized fork depth, "no fork
+point is a finding," fork position as a difficulty read, A-vs-B trajectory
+comparison, question fitness, and the with/without-lesson ablation — are computed
+on synthetic sibling pairs and need no held-out fixture. Recruitment is still
+sequenced first because promotion is worthless without it, but it does not block
+building the loop. `defender/fixtures/held-out/` still contains only a README.
 
 ### What the 2026-08-11 revision changed
 
@@ -22,12 +27,24 @@ reworked the third. Concretely:
   challenge gate; #796/#797 then replaced its three stages with two blind lenses
   plus a composer (`REVIEW_ROLES = ("support", "ablation", "composer")` in
   `runtime/challenge_gate.py`). The gate **writes no counter-story**, which
-  retires §One corpus, one role as it was written.
+  retires the original draft's "one corpus, one role" merge as it was written.
 - **#792 retired the offline oracle** from the learning loop entirely.
 - **The oracle design inverted.** It no longer serves queries from a
-  materialized world; it **intercepts real query results and modifies them**
-  (§The oracle). This retires lazy generation, the base-world ledger, and the
-  "scenario spec format" open question that this doc called its largest unknown.
+  materialized world; the real deployment is the base and the scenario is a diff
+  against it (§The oracle). This retires lazy generation, the base-world ledger,
+  and the "scenario spec format" open question that this doc called its largest
+  unknown.
+- **The oracle mechanism splits by system class.** Only Elastic aggregates (12 of
+  its 14 templates; 0 of the other 14 across the six state systems), and response
+  patching cannot survive an aggregate. Elastic gets its **query target**
+  rewritten to a scenario index — a config swap, with `confine_index` supplying
+  fail-closed for free — while the six state systems get their **responses**
+  patched.
+- **Pinned windows shrank to an authoring constraint.** Time anchors must be
+  absolute rather than relative to run time; there is no pinning machinery to
+  build.
+- **Bindings are minted at materialization**, not lazily at first query, with a
+  deterministic function for the tail.
 - **Minimal-twin invariance is dropped.** Scenarios are seed → refined
   mutations with no enforced mechanical delta (§Seeds and mutations). `ΔW` is no
   longer a literal diff.
@@ -42,30 +59,31 @@ reworked the third. Concretely:
 
 ## The diagnosis
 
-The current loop is two mechanisms wearing one coat.
+The old loop was two mechanisms wearing one coat: **counterfactual review of a
+real case**, and **training against a simulated world**. #792 unfused them by
+deleting the offline oracle, and #774/#796 shipped review as a live write-time
+gate. What is left is nothing training against a simulated world.
 
-One mechanism is **counterfactual review of a real case**: a blind actor writes a
-story against the lead sequence the defender actually ran, and the judge tests it
-against the raw payloads. The other is **training against a simulated world**: the
-oracle stands in for telemetry that was never produced.
+This document designs that half. The concrete case for why it is needed is
+§Empirical grounding, which is worth reading before the design.
 
-They are fused because the oracle exists to bridge the actor's blindness. The
-actor cannot see results (or it would mark its own homework), so its story has to
-be converted into a falsifiable per-lead prediction before the real payloads can
-contradict it. That is the oracle's actual job in this design: **it is a blinding
-device, not a world model.** The judge has been white-box over the raw payloads
-all along.
+Note what changes about the oracle in the process. In the old loop it was **a
+blinding device, not a world model** — it existed to convert a blind actor's story
+into a falsifiable prediction. The component this document designs is a world
+model, holds state, and is authored per scenario. Where an older doc describes the
+oracle as a projection over a story, that describes the retired stage.
 
-The cost of the fusion is that the oracle sits in the one place where its error is
-undetectable. It answers a counterfactual about a world where something *else*
-actually happened, which is why its whole vocabulary is a signed delta over
-baseline, and why calibrating it required an entire golden-set campaign with a
-held-out ledger.
+## Notation
 
-This diagnosis stands and is now half-settled by events: #792 unfused the two
-mechanisms by deleting the offline oracle, leaving counterfactual review as the
-live gate and nothing training against a simulated world. This document is the
-design for the missing half.
+Three deltas carry most of the argument below:
+
+- **`ΔW` — world delta.** The difference between two sibling worlds: the seed
+  scenario's overlay versus the mutated one's. No longer a literal diff (§Seeds
+  and mutations).
+- **`ΔO` — observation delta.** The difference the oracle actually exposed to the
+  defender: the same query served under two fork ids, compared.
+- **`ΔT` — trajectory delta.** The difference in the defender's investigation and
+  verdict across the two siblings, read off the leads and queries tables.
 
 ## The three moving pieces
 
@@ -186,10 +204,15 @@ What this costs, stated plainly, because the original draft leaned on it:
   how much variance reduction §The judge's shared prefix buys. At the limit —
   divergence on the first query — you are back to two independent runs.
 
-The response to the third is to **measure realized fork depth and treat it as
-questioner fitness**, not to re-impose a constraint. A mutation that stays
-coherent yet still shares a long prefix produces a sharper signal than one that
-forks immediately, and that is an observation rather than a rule.
+The response to the third needs care, because the obvious move is a trap.
+**Realized fork depth is a diagnostic, and it is reported rather than selected
+on.** It is tempting to make it a questioner fitness term — a mutation that stays
+coherent yet shares a long prefix does produce a sharper signal. But fork depth is
+monotone in delta size, so selecting on it is selection for small deltas: the
+constraint this section just dropped, re-entering through the back door and
+without the auditability that made minimal twins worth having. If it is ever
+promoted to a fitness term, that promotion owes an argument for why soft pressure
+toward small deltas is safe where a hard constraint was not.
 
 Depth of one to two is a tightening of the original draft's unbounded descent.
 It keeps revalidation incremental (one edit's feasibility, not a whole world),
@@ -209,8 +232,10 @@ ways:
 - **Grounding with no config file and no cold-start corpus.** The questioner
   needs no prior knowledge of the deployment to write its first scenario.
 - **Feasibility becomes mechanical.** An unresolvable placeholder *is* the
-  infeasibility verdict — no LLM judging plausibility. This is §Scenario
-  solvability's "prove it, don't assert it" moved one step earlier.
+  infeasibility verdict — no LLM judging plausibility. This is the "prove it,
+  don't assert it" discipline of §The discriminator spine, moved one step earlier,
+  and it is the first stage of the single validation pass described in §The oracle
+  checks feasibility.
 - **Deployment portability.** The same scenario template resolves differently in
   another org, so the curriculum is not bound to one lab.
 - **Training does the mining.** Every binding is a real query whose answer is a
@@ -235,9 +260,15 @@ reference is a placeholder; a bound one is an env-fact key
 (`{{compute:web-server/internal}}` vs. `compute/web-1`). Binding is resolution.
 See §The data model.
 
-**Bind-time queries are the oracle's, not the defender's.** They must not land in
-`executed_queries.jsonl`, or they pollute `ΔT` and the judge's read of what the
-defender actually did.
+**Bind-time queries are the oracle's, not the defender's — and they need their own
+table.** They must not land in `executed_queries.jsonl`, or they pollute `ΔT` and
+the judge's read of what the defender actually did. But they are also exactly the
+mining corpus (§Producers), so they cannot simply be discarded either. They go to
+a third append-only artifact alongside the run dir's two tables — call it
+`oracle_queries.jsonl` — written by the oracle, read by the environment miner, and
+**never** read by the judge. Naming it is not a detail: two mechanisms in this
+document depend on it, and an earlier draft forbade the queries from the only log
+it named while requiring them elsewhere.
 
 ## The oracle
 
@@ -260,18 +291,96 @@ for systems-of-record state" is no longer the blocker**: the base is the real
 deployment, and the spec is a diff against it.
 
 **The constraint that makes or breaks it: the overlay is authored once, then
-applied by code per query.** If an LLM decides the modification per response,
-siblings contradict across queries — the defender asks for processes on a host,
-then network connections on the same host, and two independent decisions produce
+applied by code.** If an LLM decides the modification per response, siblings
+contradict across queries — the defender asks for processes on a host, then
+network connections on the same host, and two independent decisions produce
 events that do not corroborate. That is the failure the original draft called
-load-bearing, and it is the defender's whole method. Per-query becomes a
-deterministic filter-and-merge: select overlay rows matching this predicate and
-window, inject; apply removal predicates, drop. LLM cost moves from per-call to
-per-scenario.
+load-bearing, and it is the defender's whole method. LLM cost belongs at scenario
+authoring, never in the serving path.
 
 **Consistency is the load-bearing risk, not fidelity.** The defender corroborates
 one system against another and pivots on values it got from an earlier answer. A
 world that contradicts itself across a run teaches it that corroboration is noise.
+
+### The mechanism splits by system class
+
+"Apply the overlay to the response" is the right description for six of the seven
+systems and the wrong one for Elastic, because only Elastic aggregates. Counting
+the shipped templates under `skills/gather/queries/`:
+
+| System | Templates | Aggregating |
+|---|---|---|
+| elastic | 14 | **12** |
+| change-mgmt | 3 | 0 |
+| cmdb | 3 | 0 |
+| host-state | 4 | 0 |
+| identity | 4 | 0 |
+
+**Response patching cannot survive an aggregate.** If a query returns
+`STATS count() BY host` and the overlay injects three events, the applier has to
+recompute the aggregate — which means reimplementing the result semantics of the
+verb, for injection and removal both. Splitting the query at the filter/aggregate
+boundary (execute the filter for real, merge overlay rows, then aggregate) works
+in principle, but its limit is **data volume**, not evaluator complexity: the
+aggregate exists precisely so the rows do not come back, and splitting means
+pulling every pre-aggregation row to the oracle. `SORT`/`LIMIT` make it worse,
+since injection must precede truncation.
+
+So the mechanism differs by class:
+
+| | Mechanism | Seam |
+|---|---|---|
+| **Elastic** | rewrite the query's **target** to a scenario index | `ELASTIC_EVENTS_INDEX` config; `confine_index` follows it |
+| **The six state systems** | patch the **response** by entity predicate | the verb registry |
+
+**For Elastic this stops being interception at all.** `elastic_adapter.py` already
+resolves the target through a single indirection —
+`resolved = index or config["ELASTIC_EVENTS_INDEX"]`, then
+`confine_index(resolved, (config["ELASTIC_EVENTS_INDEX"], config["ELASTIC_ALERTS_INDEX"]))`
+— so pointing the defender at a scenario index is a **config swap**, not a hook.
+Aggregation, `SORT` and `LIMIT` then run natively in the engine and are correct by
+construction: no splitting, no local evaluator, no volume problem.
+
+**And confinement supplies fail-closed for free.** Because the guard validates
+against the same config value that was swapped, a defender query reaching the real
+index is not a silent scenario deletion — it is a `ConfinementFault`. The hazard
+this document previously had to pin with a test becomes structurally impossible on
+the one system where volume made it most likely.
+
+**Do not write overlay events into the raw index.** Bulk indexing would accept
+them, and it is wrong four ways: synthetic attack events contaminate real
+telemetry that detection rules and future baselines both read; removal remains
+impossible, since a query against the raw index cannot be made to miss real
+documents; cleanup by delete-by-query is expensive and eventually consistent, so
+leftovers pollute the next run; and two scenarios in flight would see each other.
+Data streams are append-only besides.
+
+**Building the scenario index.** `POST _reindex` copies a window's results into a
+new index and admits a script that transforms or drops documents on the way, so
+addition and removal both work and nothing depends on filter semantics. Cost is
+proportional to window size, which is the number to measure before committing —
+it decides whether scratch indices can be per-fork (simpler, and it makes fork
+divergence two indices that are identical until the mutation) or must be shared
+per scenario.
+
+Two cheaper Elastic mechanisms are worth knowing and both have caveats. An
+**alias over multiple indices** gives union-with-native-aggregation and no copying
+at all, but offers no removal — and note that `confine_index` refuses a comma-list
+target outright (*"names a multi-index list — refused whole"*), so the union has
+to be an alias, which is a single name and passes. A **filtered alias** could
+express removal as `must_not: {ids: …}`, but **whether ES|QL honors alias filters
+the way `_search` does is unverified** and should be settled by experiment before
+anything is designed on it. Reindex is the safe default.
+
+**What has to be true for this to port.** Not "Elastic has aliases" — the general
+requirement is that **the query's data source is a rewritable indirection rather
+than a hardcoded physical table**, which the adapter already satisfies. Every
+serious analytical store has the equivalent: Splunk searches several indexes and
+materializes through summary indexing; KQL `union`s tables and excludes with
+`where`; BigQuery, Snowflake and Databricks express the whole idea as a view
+(`SELECT * FROM real UNION ALL SELECT * FROM overlay WHERE id NOT IN (…)`), which
+is the cleanest form of it. One honest asymmetry: **union ports everywhere,
+removal is where portability thins** — and removal is already the harder half.
 
 **"Telemetry" undersells the spec.** Seven systems of record sit behind the typed
 query tool and only one is an event stream. A scenario that modifies events and
@@ -296,26 +405,38 @@ Three consequences the add/remove framing does not cover on its own:
   event stream's auth record, and possibly a CR. Authoring them independently
   guarantees drift.
 
-**Pin the scenario's time window to a fixed past window.** The deployment keeps
-running — `playground-v2` alone has 21 Poisson-scheduled baseline actions — so
-two runs at different times see different backgrounds and `ΔO` is contaminated by
-drift that has nothing to do with the mutation. Pinning makes the real substrate
-immutable so the only difference between siblings is the overlay. It costs
-nothing and it is what makes `ΔO` readable.
+**Scenario time anchors are absolute, not relative to run time.** This is a
+constraint on authoring, not a mechanism to build. The deployment keeps running —
+`playground-v2` alone has 21 Poisson-scheduled baseline actions — but events are
+appended at the *present*, never backfilled into the past, and the query surface
+already takes a bound `${start}` (12 of 12 time-bounded templates; none uses a
+`now-Nd` form). A query over a closed historical window therefore returns the same
+rows whenever it runs, and sibling drift disappears without any pinning
+machinery. An earlier draft of this section claimed pinning "costs nothing"; the
+truth is there is nothing to pin.
 
-**The fail-closed invariant inverts, so the test changes.** In the serving design
-the hazard was accidentally reaching the real world (`query_tool.py:380` resolves
-`registry.verbs(system)[verb]`, which falls through to the real adapters when no
-override is threaded). Here, reaching the real world *is* the design, and the
-hazard is a response **slipping past the applier** and returning unmodified truth
-— a silent scenario deletion rather than a silent leak. The applier must be able
-to assert "this envelope intersects the overlay and I patched it" versus "no
-intersection," and that assertion is what a test pins.
+Two residues, both small. The six state systems mostly have no as-of read, so they
+answer "as of now" — but the overlay *declares* the state that matters, so both
+siblings receive the declared value regardless, and only undeclared background
+state can drift. And for Elastic the point is moot once §The mechanism splits by
+system class gives the scenario its own index: that substrate is frozen by
+construction.
 
-The seam itself is cheap: `VerbRegistry` (`runtime/verbs.py:225`) is nominally
-typed — its constructor refuses anything that is not a real `VerbGrant`, and
-`decide()` is the single grant point — so the interception oracle is one subclass
-overriding `verbs()`.
+**On the state side the fail-closed invariant inverts, so the test changes.** In
+the serving design the hazard was accidentally reaching the real world
+(`register_query_tool` resolves `registry.verbs(system)[verb]`, which falls
+through to the real adapters when no override is threaded). For a patched
+response, reaching the real world *is* the design, and the hazard is a response
+**slipping past the applier** and returning unmodified truth — a silent scenario
+deletion rather than a silent leak. The applier must be able to assert "this
+envelope intersects the overlay and I patched it" versus "no intersection," and
+that assertion is what a test pins. Elastic needs no such test, because
+confinement already converts the same hazard into a fault.
+
+The seam itself is cheap: `VerbRegistry` (`runtime/verbs.py`) is nominally typed —
+its constructor refuses anything that is not a real `VerbGrant`, and `decide()` is
+the single grant point — so the state-side oracle is one subclass overriding
+`verbs()`.
 
 ### The oracle is stateful
 
@@ -324,30 +445,42 @@ It remembers three distinct things, and conflating them is a defect:
 - **The overlay** — what the scenario declares. Authored once, immutable for the
   run.
 - **Bindings** — detail the overlay did not specify but a response needs: a PID, a
-  session id, a source port, a timestamp inside a window. Invented at first
-  materialization and **memoized forever after**.
+  session id, a source port, a timestamp inside a window.
 - **The realization log** — what was actually served, per query. The same overlay
-  row renders differently under different projections, aggregations and
-  truncations, and the defender pivots on values from earlier answers. A value
-  that was served has to keep existing.
+  row renders differently under different projections and truncations, and the
+  defender pivots on values from earlier answers. A value that was served has to
+  keep existing.
+
+**Bindings are minted at scenario materialization, not lazily at first query.**
+This is the point where the author-once-apply-by-code constraint would otherwise
+break: a binding invented mid-run is a decision made in the serving path, and if
+an LLM makes it the constraint is void at the first unspecified field. Minting up
+front also puts cross-system agreement somewhere it can be checked — an injected
+session id has to agree with the identity system's last-login and with the event
+stream's auth record, and that is a property of one authoring pass, not of three
+independent inventions.
+
+A lazy tail survives: a query may project a field the overlay never anticipated.
+That tail must be a **deterministic function of `(row_id, field, seed)`** — never a
+judgment call — so it is reproducible across forks and across re-runs.
 
 ### One oracle, one tool, per-fork
 
 **A single oracle instance serves every fork, through a tool that names the fork
 (`serve(query, fork_id)`).** This is not only a context saving. It is a
 correctness requirement: the shared prefix in §The judge is only valid if both
-forks return byte-identical responses across it, and two oracle instances would
-independently invent the PIDs, session ids and ports the overlay left unspecified.
-One bindings ledger shared across forks is what makes the prefix reproducible.
+forks return byte-identical responses across it, and that holds only if one
+bindings ledger and one realization log are shared across siblings. Two instances
+would diverge on the lazy tail even with the overlay minted up front.
 
 Fork detection falls out of the same component for free: serve a query under both
 fork ids and compare. Identical means no fork is needed yet; different means this
 is the fork point. No separate divergence checker is required.
 
-### The oracle is also the feasibility and consistency checker
+### The oracle checks feasibility, and detects its own contradictions
 
-With no declared inventory to check against, **feasibility is established by
-probing** — the same real query access that serves the run. This is
+**Feasibility is established by probing**, since there is no declared inventory to
+check against — the same real query access that serves the run. This is
 deployment-agnostic and degrades correctly: an org with a bad CMDB gets
 feasibility from the systems it does have.
 
@@ -356,6 +489,21 @@ defect). An enum check says a class tuple is *spellable*; a bind says whether it
 has a **referent in this deployment**. A tuple that fails to bind means either the
 vocabulary is wrong or the deployment has no such thing, and either way something
 needs resolving.
+
+**Feasibility is checked in one pass with three stages, not in three places.**
+Placeholder binding, entity probing and the solvability/resolving-path derivation
+(§The discriminator spine) are stages of a single pre-run validation, and each can
+reject the scenario. Describing them separately invites three implementations of
+one gate.
+
+**Contradiction detection is the realization log's job.** §The judge requires a
+`discard` verdict for episodes where the oracle contradicted itself or the spec,
+and something has to notice. Because every served response is logged, a later
+response that disagrees with an earlier one on a value the defender could have
+pivoted on is mechanically detectable — same overlay row, incompatible rendering.
+What the log cannot catch is a contradiction between the overlay and the *real*
+substrate it was applied to; that surfaces only as an implausible answer, and it
+is why `discard` also has to be available to the judge as a declared verdict.
 
 ## The judge
 
@@ -394,9 +542,12 @@ be over the full response, not the summary the main agent sees.
 
 The payoff is not mainly cost. Independent A and B runs put LLM run-to-run
 variance into `ΔT`, and for an agent this long that variance is large enough to
-swamp a single mutation's effect. A shared prefix eliminates it exactly.
-**Pinning the window kills environment noise; sharing the prefix kills agent
-noise. What remains in `ΔT` is the mutation.**
+swamp a single mutation's effect. A shared prefix eliminates **the prefix's**
+variance exactly — and only the prefix's. Past the fork the two branches sample
+independently, and the suffix is where the mutation's effect lives. So the fork
+sharpens `ΔT` substantially without making it noise-free, which is why
+§Lesson attribution still requires replication and why no scenario or lesson is
+promoted on one pair.
 
 Three consequences:
 
@@ -451,7 +602,13 @@ reasoning: the prediction was declared, the outcome is observed. Failure
 elsewhere means the scenario was hard by accident; cheap resolution means it was
 too easy.
 
-**A `discard` verdict is required** (no current outcome enum has one). If the
+**A `discard` verdict is required.** `OUTCOME_ENUM`
+(`learning/core/config.py`) today is
+`{caught, survived, undecidable, incoherent, skip-passthrough}`, and none of those
+is it. `incoherent` is the near miss and the distinction matters: `incoherent`
+judges the *story* — the actor produced something that does not hold together.
+`discard` judges the *episode* — both players may have behaved well, but the world
+they were graded in was corrupt, so no finding about either is admissible. If the
 oracle contradicted the spec or an earlier answer, the episode teaches nothing
 about either player and blaming one is worse than dropping it.
 
@@ -528,7 +685,7 @@ The axis is **cost-to-derive × staleness half-life**, not churn alone:
 
 | Cluster | Cost to derive | Half-life | Natural key | Needed at | Verdict |
 |---|---|---|---|---|---|
-| Referent | one lookup | weeks | the identifier | ORIENT | **never cache** — resolve live / bind |
+| Referent | one lookup | node: slow / alias: weeks | the identifier | ORIENT | **cache the node, never the alias edge** |
 | Norm | baseline + control window + a judgment | months | (entity, activity) | ORIENT, ANALYZE | cache; highest value |
 | Semantics | requires a *surprise* | ~never | (system, query shape) | GATHER, ANALYZE | cache; highest value per entry |
 | Sanctioned path | moderate | quarters | (activity, asset class) | ANALYZE | cache |
@@ -540,11 +697,13 @@ Four things fall out:
 an independent confirmation that `alert_rule_ids` is the wrong anchor — it is
 correct for exactly the one class to be removed.
 
-**Referent facts should not be lessons.** They rot fastest *and* they are trivial
-to re-derive, so caching buys nothing and costs correctness. This is why
-`container-1df4bcd65ee4-role` and `jump-box-1-ip-assignment` are the most fragile
-files in the corpus. Referents want a query — which is exactly what placeholder
-binding provides.
+**Referent facts split, and the corpus currently caches the wrong half.** The
+*node* — that a host exists, its role, what it is for — is slow-moving and worth
+persisting. The *alias edge* mapping an identifier to that node is the volatile
+part and is trivial to re-derive, so it should be resolved live by placeholder
+binding. `container-1df4bcd65ee4-role` and `jump-box-1-ip-assignment` are the
+corpus's most fragile files precisely because they cached the edge and not the
+node. §The data model gives this its structural form.
 
 **Norm facts are the expensive ones and are needed earliest.** They are what
 "unusual" means, so they are load-bearing at ORIENT before the defender has done
@@ -678,8 +837,9 @@ Three decisions that need making rather than defaulting:
 3. **Semantics facts do not fit the entity graph, and they are the highest-value
    class.** Their subject is `(system, verb, param-shape)` — an *instrument*, not a
    deployment entity. The graph needs a second node family that is not invlang's.
-   This is the real modeling strain and is better named than papered over with a
-   synthetic vertex type.
+   This is the real modeling strain, and §Open questions carries its default: two
+   discriminated subject shapes in one schema (`entity/…` and `instrument/…`),
+   rather than a synthetic vertex type pretending an instrument is a host.
 
 ### The current schema, and what changes
 
@@ -834,7 +994,7 @@ analyze discipline / decision discipline. §Empirical grounding's CMDB case is
 exactly this and needed no adversary to find — a comparison found it.
 
 **Two things this cannot produce**, both of which must come from the runtime feed:
-observability facts (see §Alert realism below), and semantics facts that only
+observability facts (rule coverage bounds them — §What dies), and semantics facts that only
 surface mid-investigation rather than at bind time.
 
 ## Authoring flow
@@ -1037,7 +1197,9 @@ neither has landed:
 
 ## Sequencing
 
-1. **Held-out recruitment** — separate session, blocking every metric here.
+1. **Held-out recruitment** — separate session. It gates promotion and the
+   overfitting gap, not the in-loop pairwise metrics (§Status), so it is first
+   because promotion is worthless without it, not because it blocks the build.
    `fixtures/held-out/` is still a README.
 2. **The two cheap fixes above** — prompt edits, no architecture.
 3. **The vocabulary fixes** (§The vocabulary defect) — inline the catalogs,
@@ -1051,21 +1213,29 @@ neither has landed:
 5. **The environment miner.** One pass over the (query, response) corpus, runtime
    feed first. On the critical path: it is the grounding substrate, and the
    current producer is being deferred.
-6. **The interception seam.** `VerbRegistry` subclass, overlay ledger, bindings
-   memoization, realization log — failing closed on *un-applied* rather than on
-   *leaked*. Then placeholder binding on top of it.
-7. **Solvability and resolving-path derivation**, from the world.
-8. **The judge's discriminator spine, the fork, and the pair as the unit of
+6. **The oracle seam, Elastic side first.** Measure a typical investigation
+   window in documents, then build the scenario index (`_reindex` with a
+   transform script) and the `ELASTIC_EVENTS_INDEX` swap. This half needs no
+   interception code and inherits fail-closed from `confine_index`, so it is both
+   the cheaper half and the one that retires the aggregate problem.
+7. **The state side.** `VerbRegistry` subclass, overlay ledger, binding minting,
+   realization log, `oracle_queries.jsonl` — failing closed on *un-applied*
+   rather than on *leaked*. Then placeholder binding on top of it.
+8. **Solvability and resolving-path derivation**, from the world — one validation
+   pass with three stages (bind, probe, derive), not three gates.
+9. **The judge's discriminator spine, the fork, and the pair as the unit of
    judgment.** Requires agent-state resumability.
-9. **Questioner strategy corpus + seed pipeline** — including filling the ticket
-   corpus with adjudicated cases and making the intel feed technique-shaped.
-10. **Lesson attribution in shadow mode.** #695's stable identity and
+10. **Questioner strategy corpus + seed pipeline** — including filling the ticket
+    corpus with adjudicated cases and making the intel feed technique-shaped.
+11. **Lesson attribution in shadow mode.** #695's stable identity and
     loaded/applied/decisive sidecar without changing retrieval order. Also the
     forward-check's retirement point.
-11. **Paired ablation and probe siblings.** Establish causal lift before any
+12. **Paired ablation and probe siblings.** Establish causal lift before any
     attribution score affects promotion.
-12. **Curriculum search.** Mutation policy, tournaments and score-informed
-    retrieval only after the validity gates and held-out archive are trustworthy.
+13. **Curriculum search.** Mutation policy and score-informed retrieval only after
+    the validity gates and held-out archive are trustworthy. Note that fork depth
+    stays a diagnostic here (§Seeds and mutations) unless the argument for
+    selecting on it gets made.
 
 ## Open questions
 
@@ -1075,15 +1245,33 @@ oracle needs a materialized base world (no); whether siblings must be minimal
 twins (no); whether the questioner and runtime reviewer share a corpus (moot —
 the shipped gate writes no counter-story).
 
+**Decisions, not questions.** Three items block sequencing steps, so each carries
+a default and a failure branch rather than waiting for an answer:
+
+- **Removal predicates** (blocks step 6). *Default:* removal happens during
+  `_reindex` — the transform script omits the documents the overlay withdraws, so
+  no contradicting rows survive because the scratch index never contains them.
+  *If the window turns out too large to copy:* fall back to a filtered alias, and
+  if ES|QL does not honor alias filters, scenarios that require removal are
+  restricted to windows small enough to reindex, and the FP-hunt direction is
+  scoped accordingly.
+- **Agent-state resumability** (blocks step 9). *Default:* snapshot the message
+  history plus a copy of the run dir at a turn boundary; the two tables are
+  append-only so a fork is a copy rather than a merge. *If a turn-boundary
+  snapshot proves insufficient:* the fork degrades to two independent runs, `ΔT`
+  reacquires full run-to-run variance, and the replication budget in step 12 must
+  absorb it. The design still works; it gets more expensive.
+- **The second node family for semantics facts** (blocks step 4). *Default:* two
+  discriminated subject shapes in one schema — `entity/<type>/<id>` and
+  `instrument/<system>.<verb>` — rather than a synthetic vertex type that pretends
+  an instrument is a deployment entity. *If that proves unwieldy:* semantics facts
+  get their own corpus with its own key, at the cost of two retrieval paths.
+
 Still open:
 
-- **Node-keyed vs. edge-keyed environment facts**, and the second node family
-  that semantics facts need (§The data model). The largest remaining modeling
-  question.
-- **Removal predicates.** Expressing "this baseline activity did not happen" over
-  real rows, without leaving contradicting rows behind.
-- **Agent-state resumability** — what exactly must be snapshotted at a fork
-  boundary, and whether the run dir copy is sufficient.
+- **Node-keyed vs. edge-keyed environment facts** within the entity family
+  (§The data model) — referent facts key on a node, norm and sanctioned-path on
+  an edge, and whether that is one schema or two is unsettled.
 - **Mutation catalog and family policy.** Which framework-backed dimensions may
   vary independently, and which must remain coupled to preserve realism.
 - **Cross-family cost calibration.** Whether structural resolving-path cost is
