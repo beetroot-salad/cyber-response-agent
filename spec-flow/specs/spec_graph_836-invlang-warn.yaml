@@ -21,7 +21,9 @@ base: c0dca747  # the fork commit write-code-from-spec's gate diffs against
 # THE HUMAN SEAM (§7) HAS RUN — `.spec-flow/frontiers/70-resolutions.md` is this spec's
 # CONTROLLING DOCUMENT wherever it conflicts with anything else here, including the design doc.
 # 17 forks in, 17 resolved (8 human-decided H1-H8, 9 auto-resolved A1-A9), 26 obligations
-# minted, 4 non-obligations (N7-N10), 2 follow-ups filed (FU-1, FU-2). Every `handoff.forks`
+# minted, 4 non-obligations (N7-N10), 3 follow-ups filed (FU-1, FU-2, FU-3 — FU-3 filed at
+# phase F, `.spec-flow/frontiers/97-append-only-repairs.md`; see its note beside
+# `v_declaration_stays_immutable` / `no_verb_mutates_committed_record` below). Every `handoff.forks`
 # entry below was written BEFORE that seam and is kept as the decision record it was; the
 # resolution each one took is stated in `70-resolutions.md` and carried into the demands and
 # the `gate.holes` entries above. Demand #0's provisional reading was CONFIRMED (A1), not
@@ -729,6 +731,20 @@ demands:
     cites: [b3]
     # M6/O3. Positive control: ident_is_a_legal_refinement_key — the legal route to the same
     # intent. b3 executed: mutating v-002's ident in the `:V` declaration DOES trip append-only.
+    # F-repair (97-append-only-repairs.md, phase F): the test as first written did NOT construct
+    # b3's probe — it appended a SECOND `:V prologue.vertices` block redeclaring v-001 with a
+    # mutated core and expected `_tool_append_block` to refuse it via `ModelRetry`. That never
+    # fires, for any implementation: `_tool_append_block` only ever composes `on_disk + text`, so
+    # the original (unmutated) declaration is always the FIRST occurrence of the id in the
+    # resulting document, and `_check_append_only`'s `_by_id_first` keeps the first declaration
+    # per id — the duplicate second block is invisible to the core comparison (rt8's boundary,
+    # b3's own `observed` note). Rewritten to construct what b3 actually probed — an IN-PLACE
+    # edit of the row already on disk (here, v-001's `ident` AND, mirroring b3 exactly, v-002's),
+    # driven directly through `diagnose`/`_check_append_only`, not through the write verb. The
+    # write-verb-level property this demand's `binds` still names
+    # (`interacts(append_block->investigation_md)`) is exactly the gap filed as FU-3: append_block
+    # has no enforcer of a committed-vertex mutation of its own, because it structurally cannot
+    # construct one.
 
   # =========================================================================
   # O3 / SEC1 — the negative universal, and the census it rests on
@@ -749,6 +765,11 @@ demands:
     # before append-only sees it, and an embedded fence delimiter deletes content with no
     # warning. Discharging this demand REQUIRES the F-C shape guard; a suite that asserts it
     # today would be asserting a property the code does not have.
+    # F-repair (97-append-only-repairs.md, phase F) — same correction as
+    # `v_declaration_stays_immutable` above: the `append_block` half of this test was rewritten
+    # from a duplicate-block append (never refused, for any implementation — FU-3) to an
+    # in-place edit of v-002's committed core, driven directly through `diagnose`/
+    # `_check_append_only`, exactly as b3 probed it.
   - id: main_toolset_unchanged
     kind: negative
     form: test
@@ -1644,6 +1665,19 @@ claims:
       INSERTION of a new record (rt9) nor for a second declaration of an existing id (rt8).
     verdict: holds
     source: discuss
+    # LEDGER CORRECTION (phase F, 95-nullstub-audit.md finding 1 / 97-append-only-repairs.md):
+    # what this claim covers, precisely — b3's probe ran `_check_append_only`/`diagnose`
+    # DIRECTLY on a full document with v-002's `:V` row rewritten IN PLACE (single declaration,
+    # rewritten, not duplicated) against a committed baseline. It says nothing about the WRITE
+    # VERB `_tool_append_block`, and cannot: that verb only ever composes `on_disk + text`, so a
+    # "mutated" declaration submitted through it necessarily arrives as a SECOND `:V
+    # prologue.vertices` block — exactly the "second declaration of an existing id" case this
+    # entry's own `observed` note already names as OUT of b3's coverage (rt8's boundary). Two
+    # demands (`v_declaration_stays_immutable`, `no_verb_mutates_committed_record`) originally
+    # cited b3 while their tests constructed the uncovered duplicate-block case instead of b3's
+    # in-place one — silently accepted, zero diagnostics, at unmodified c0dca747. Both tests were
+    # rewritten at phase F to construct what b3 actually probed; the duplicate-block gap itself
+    # is filed as FU-3, unfixed.
   - id: b4
     kind: behavior
     claim: >
@@ -3236,6 +3270,29 @@ handoff:
        outcome) before phase E; if the content is refused upstream (most likely, given rt11's
        adjacent finding), this closes as unreachable with no demand; if admitted, a hostile-
        value demand at the render site is required. 0 premises — pure probe gap."
+    - "FU-3 — APPENDING A SECOND `:V prologue.vertices` BLOCK THAT REDECLARES A COMMITTED
+       VERTEX ID WITH A DIFFERENT CORE IS SILENTLY ACCEPTED. Filed at phase F
+       (95-nullstub-audit.md finding 1; repaired at 97-append-only-repairs.md), demonstrated
+       directly against real, unmodified c0dca747 code: zero diagnostics. `_check_append_only`
+       compares `:V`/`:E` cores via `_by_id_first`, which keeps the FIRST declaration per id
+       (documented, rt8's own probe); `_tool_append_block` only ever composes `on_disk + text`,
+       never replacing existing bytes, so the ORIGINAL declaration is unconditionally the first
+       occurrence of any preserved id and the comparison can never see a mutation submitted
+       through the verb — a structural property of the verb's append semantics, not a
+       missed-case bug fixable by a different fixture. PRE-EXISTING, on `append_block`'s own
+       surface (unrelated to #836's warn-then-gate mechanism), and O3/SEC1 THEREFORE HAS NO
+       ENFORCER OF ITS OWN TODAY for this construction — only `_check_append_only`/`diagnose`
+       called directly (as claim b3 does) can observe an in-place mutation; the write verb
+       cannot construct one to be observed. Two demands, `v_declaration_stays_immutable` and
+       `no_verb_mutates_committed_record`, originally cited b3 while their tests (mistakenly)
+       constructed this exact duplicate-block case through `_tool_append_block` and expected a
+       `ModelRetry` that never fires, for any implementation — both rewritten at phase F to
+       construct what b3 actually probed (an in-place edit, via `diagnose` directly, matching
+       b3's own v-002 construction). NO DEMAND BINDS FU-3 ITSELF: closing it would require
+       either a new `:V`-mutation guard inside `_check_append_only` that inspects EVERY
+       declaration of an id (not just the first) or a structural change to how `append_block`
+       admits `:V`/`:E` content at all — a design decision for a human, left open here as this
+       phase's residue. 0 premises against #836; filed, not fixed."
 
   nullstub_passes:
     - "test_append_block_size_bound_unchanged_by_fix_row — R7 known-noise-mode regression: the
@@ -3246,6 +3303,21 @@ handoff:
        is nothing here for the implementation to make true."
     - "test_agentdeps_gains_no_window_field — M3's own negative: the seam gains NOTHING. Green
        against HEAD is the property; it goes red the moment a stored window is added."
+    - "close_report_validator_unchanged / test_close_report_validator_meets_a_diagnostic_it_
+       never_saw_before (test_invlang_warn_severity_836.py:296) — class NON-ASSERT. Its own
+       assertion, validate_artifact('report.md', body, None) is None, is true against
+       unmodified c0dca747 and under every warn_diagnostics variant tried (correct,
+       always-empty, always-unfiltered): report.md's validator never runs the :R attr_updates
+       check at all, so this line is insensitive to how #836 implements the window. The test's
+       redness comes entirely from a second line belonging to a different demand
+       (window_is_derived / flagged_row_identity_is_row_text: flagged_rows(WARN_DOC) ==
+       (WARN_ROW,)). Confirmed by the 95-nullstub-audit.md leaf as the task's seeded instance;
+       no other NON-ASSERT case was found in the audited 55."
+    - "Census correction (95-nullstub-audit.md): 55 items never reach their own assertion, not
+       51 — the earlier 90-mechanical.md figure was explicitly sampled and undercounted
+       _tool_fix_row by 2 while missing two whole classes (UNCHANGED_LEAD ImportError, 3;
+       KeyError('identifier'), 3) entirely. Full classification tally over the 55: 49
+       DISCRIMINATING, 1 NON-ASSERT, 0 TAUTOLOGY, 5 UNDECIDABLE."
   refuted:
     - "b6's version label — the mechanism holds, but at pydantic-ai-slim 1.107.0 (the pin, the
        lockfile and the installed version), not 2.19. The 2.19.0 reading came from a stray

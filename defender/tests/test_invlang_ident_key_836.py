@@ -335,12 +335,23 @@ def test_append_only_still_compares_the_declared_identifier(tmp_path):
     """The negative M6 must not weaken: mutating a committed vertex's `ident` IN THE `:V`
     DECLARATION still trips append-only.
 
-    Claim b3 executed it — the mutation is caught as "committed vertex v-001 was mutated in
-    place". M6 gives the model a LEGAL route to the same intent (a `:R` refinement), and the
-    positive control below is that route succeeding, so the negative is not green merely
-    because the document became unwritable."""
-    from pydantic_ai.exceptions import ModelRetry
+    Claim b3 executed exactly this construction — "mutate v-002's ident in the :V
+    declaration, run _check_append_only" — an IN-PLACE edit of the row already on disk, one
+    declaration, rewritten, never a second one appended after it. Driven directly through
+    `diagnose`/`_check_append_only` on both vertices (v-001's `ident`, then v-002's), because
+    that is the layer b3 actually probed and the layer that genuinely refuses it.
 
+    `_tool_append_block` CANNOT construct this case at all: it only ever composes
+    `on_disk + text`, so a "mutated" declaration submitted through it necessarily arrives as a
+    SECOND `:V prologue.vertices` block, and `_check_append_only`'s `_by_id_first` keeps the
+    FIRST declaration per id — the untouched original — so the comparison never sees the
+    duplicate. That gap is real, pre-existing, and out of this suite's scope (tracked as FU-3
+    in the spec graph's handoff block); this test does not attempt to discharge it through the
+    verb.
+
+    M6 gives the model a LEGAL route to the same intent (a `:R` refinement), and the positive
+    control below is that route succeeding, so the negative is not green merely because the
+    document became unwritable."""
     from defender.runtime.tools import _tool_append_block
 
     deps, run = main_deps(tmp_path)
@@ -352,9 +363,16 @@ def test_append_only_still_compares_the_declared_identifier(tmp_path):
     assert any("append-only violation" in d.message for d in reasons)
     assert all(d.severity == "error" for d in reasons)
 
-    with pytest.raises(ModelRetry):
-        _tool_append_block(deps, mutated)
-    assert (run / "investigation.md").read_text(encoding="utf-8") == committed
+    # ...and the same holds for v-002 — the exact vertex/field b3's ledger entry names.
+    mutated_v2 = PROLOGUE.replace(
+        "v-002|identity|user/known-corp|jsmith|",
+        "v-002|identity|user/known-corp|attacker|",
+    )
+    reasons_v2 = _diagnose(mutated_v2, committed)
+    assert any(
+        "append-only violation" in d.message and "v-002" in d.message for d in reasons_v2
+    ), reasons_v2
+    assert all(d.severity == "error" for d in reasons_v2)
 
     # ...and the sanctioned route to the same intent lands.
     _tool_append_block(deps, attr_block(_IDENT_ROW))

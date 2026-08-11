@@ -379,14 +379,27 @@ def test_no_verb_mutates_or_removes_a_committed_v_or_e_record(tmp_path):
     Claim `x1`'s discharge argument is GONE — `_check_append_only` never inspects `:R` rows
     — so this negative rests entirely on H3's `new_row` guard plus append-only's own
     comparison of `:V`/`:E` cores. Both are driven here: `fix_row` cannot smuggle a record
-    into a flagged row's position, and `append_block` cannot mutate one that is already
-    committed.
+    into a flagged row's position, and a committed vertex core cannot be mutated in place.
+
+    The append-only half is driven directly through `diagnose`/`_check_append_only`, exactly
+    as claim b3 executed it — "mutate v-002's ident in the :V declaration, run
+    _check_append_only" — an IN-PLACE edit of the row already on disk, one declaration,
+    rewritten, never a second one appended after it. `_tool_append_block` cannot construct
+    this case at all: it only ever composes `on_disk + text`, so a "mutated" declaration
+    submitted through it necessarily arrives as a SECOND `:V prologue.vertices` block, and
+    `_check_append_only`'s `_by_id_first` keeps the FIRST declaration per id — the untouched
+    original — so the comparison never sees the duplicate. That gap is real, pre-existing,
+    and out of this suite's scope (tracked as FU-3 in the spec graph's handoff block); this
+    test does not attempt to discharge it through the verb.
 
     The positive control is the last block: the SANCTIONED route to the same intent — a `:R`
     refinement — succeeds, so the negative is not green merely because every write fails."""
     from pydantic_ai.exceptions import ModelRetry
 
-    from defender.runtime.tools import _tool_append_block
+    def _diagnose(text, current=None):
+        from defender.skills.invlang.validate import diagnose
+
+        return diagnose(text, current)
 
     deps, run = main_deps(tmp_path)
     seed_investigation(run, WARN_DOC)
@@ -401,10 +414,16 @@ def test_no_verb_mutates_or_removes_a_committed_v_or_e_record(tmp_path):
             _fix(deps, WARN_ROW, smuggled)
     assert _inv(run) == committed
 
-    # append_block cannot mutate a committed vertex core (claim b3, executed)
-    with pytest.raises(ModelRetry):
-        _tool_append_block(deps, "```invlang\n:V prologue.vertices [id|type|class|ident|attrs?]\n"
-                                 "v-001|compute|bastion/internal/known-corp|OTHER.corp|kind=physical\n```\n")
+    # a committed vertex core cannot be mutated in place (claim b3, executed exactly this way)
+    mutated = committed.replace(
+        "v-002|identity|user/known-corp|jsmith|",
+        "v-002|identity|user/known-corp|attacker|",
+    )
+    reasons = _diagnose(mutated, committed)
+    assert any(
+        "append-only violation" in d.message and "v-002" in d.message for d in reasons
+    ), reasons
+    assert all(d.severity == "error" for d in reasons)
 
     # ...and the sanctioned route to the same intent still works.
     _fix(deps, WARN_ROW, REPAIRED_ROW)

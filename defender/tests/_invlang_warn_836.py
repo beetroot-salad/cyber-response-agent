@@ -173,9 +173,9 @@ def main_deps(tmp_path: Path) -> tuple[Any, Path]:
     Same shape `test_append_only_write_lane_810.py::_main_deps` uses, so the two suites
     exercise one construction path rather than two."""
     run = tmp_path / "run"
-    run.mkdir()
+    run.mkdir(parents=True)
     dfn = tmp_path / "defender"
-    dfn.mkdir()
+    dfn.mkdir(parents=True)
     return bind(MAIN_DEF, run, defender_dir=dfn), run
 
 
