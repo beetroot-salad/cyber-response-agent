@@ -7,8 +7,8 @@ marked where it happened**. Size decides, and nothing else does.
 
 What this replaces. The decision used to be `_is_event_payload`: true if the payload was a list,
 or a dict carrying one of `("hits","results","events","records","data","rows")`. That tuple is a
-cross-vendor SIEM envelope-key list — Elasticsearch's `hits`, Splunk's `results`, Datadog's
-`data`, Sentinel's `rows` — written when defender talked to one real vendor. Six of the seven
+cross-vendor SIEM envelope-key list: the name each major log platform gives its bulk array,
+written when defender talked to one real vendor. #832 carries the per-vendor census. Six of the seven
 systems here are bespoke, and their authors named each list after its contents. Measured over 894
 recorded payloads, `hits` matched; `results`/`events`/`records`/`data`/`rows` matched NOTHING,
 while `values` `entries` `packages` `users` `hosts` `changes` `tickets` `indicators` `keys` all
@@ -47,8 +47,8 @@ from defender._env import env_int
 #: The in-context ceiling for ONE captured payload. Lowered from 65536 to 8192 with #832: at
 #: 64 KB the reduction path fired 6 times in 894 payloads while a 33 KB result entered gather's
 #: context whole and was re-read every turn (the cache-read tax `47f2dfb3` was chasing when it
-#: reached for a shape gate instead). Every payload above 8 KB in the corpus is elastic; no
-#: identity profile, host record, ticket, package list or authorized_keys reaches it, so those
+#: reached for a shape gate instead). Every payload above 8 KB in the corpus came from the SIEM;
+#: no identity profile, host record, ticket, package list or key listing reaches it, so those
 #: pass whole BY RULE rather than by luck.
 #:
 #: NOT the cap on reading an authored file — `runtime/tools.py` holds that one separately, and
@@ -63,7 +63,7 @@ def passthrough_max_bytes() -> int:
 
 #: A string value longer than this is bulk in its own right and clips, marked, AT THE LEAF.
 #: Deliberately not a cap on the serialized record, which is what it used to be: clipping
-#: `json.dumps(record)` drops whole trailing FIELDS, and 80 of 80 real elastic sample records
+#: `json.dumps(record)` drops whole trailing FIELDS, and 80 of 80 real SIEM sample documents
 #: exceeded 600 chars, so every one arrived as a mid-token prefix — a "field-shape sample" that
 #: dropped part of the field shape. A record keeps all its keys; only a bulky value is cut.
 LEAF_MAX_CHARS = 600
@@ -594,7 +594,7 @@ def render(
     """The model-visible view of one captured payload.
 
     Under the ceiling the payload is returned VERBATIM — no prose, no samples, no reformatting.
-    That is 94% of the recorded corpus, and it is the whole of the fix for the 41 of 62 elastic
+    That is 94% of the recorded corpus, and it is the whole of the fix for the 41 of 62 SIEM
     payloads that were complete, entirely visible, and told not to count themselves.
     """
     cap = passthrough_max_bytes() if ceiling is None else ceiling
