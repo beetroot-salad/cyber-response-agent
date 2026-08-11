@@ -597,7 +597,8 @@ async def dispatch_correlation(  # noqa: C901, PLR0913 — item 3's own dispatch
     if store is not None:
         gather_session_id = store.new_session(agent_id=agent_id)
 
-    def gather_factory(_agent_id: str):
+    def gather_factory(_agent_id: str, system: str):
+        from .agent_role import GATHER_AGENT_ID_PREFIX
         from .driver import _gather_extra_capabilities
 
         extra: list = []
@@ -606,6 +607,11 @@ async def dispatch_correlation(  # noqa: C901, PLR0913 — item 3's own dispatch
         return build_gather_agent(
             defender_dir, logger, _agent_id, make_model, registry, limits,
             extra_capabilities=extra, session_id=gather_session_id,
+            # #835 — same per-system cache-key convention as the model-dispatched path
+            # (`driver.py::_build_gather`): item 3 is bound to the alerts index only, so its
+            # own template-catalog prefix stays `elastic` regardless of what `request.system`
+            # says (the narrowed grant already confines it there).
+            cache_key=f"{GATHER_AGENT_ID_PREFIX}{system}",
         )
 
     def stamp_terminator(_agent_id: str, reason: str) -> None:

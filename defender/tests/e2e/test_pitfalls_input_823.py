@@ -141,6 +141,14 @@ class _Res:
         return read_jsonl_rows(RunPaths(self.run_dir).executed_queries)
 
     @property
+    def own_rows(self) -> list[dict]:
+        """`.rows` filtered to exclude #808's harness-authored leads (`l-000`/`l-00c`) —
+        the rows produced by THIS test's own dispatched lead, not lead-0's unconditional
+        pre-ORIENT resolution against `GOLDEN_AB3`'s alert."""
+        from defender.runtime.lead_zero import RESERVED_LEAD_IDS
+        return [r for r in self.rows if r.get("lead_id") not in RESERVED_LEAD_IDS]
+
+    @property
     def shim_rows(self) -> list[dict]:
         return [r for r in self.rows if r.get("query_id") == BASH_SHIM_QUERY_ID]
 
@@ -155,6 +163,12 @@ class _Res:
         proves a shim row persists one."""
         return lead_extraction.extract_from_joined(lead_repository.joined(self.run_dir))
 
+    def own_leads(self) -> list:
+        """`.leads()` filtered to exclude #808's harness-authored leads (`l-000`/`l-00c`) —
+        mirrors `own_rows` for the offline-extraction view."""
+        from defender.runtime.lead_zero import RESERVED_LEAD_IDS
+        return [lead for lead in self.leads() if lead.lead_id not in RESERVED_LEAD_IDS]
+
     def routed(self, query_id: str | None = None) -> tuple[int, int, int]:
         """`(pitfalls, drafts, handoff)` through the three PRODUCTION collectors over the real
         catalog — the partition's own arithmetic, not a restatement of it.
@@ -164,7 +178,7 @@ class _Res:
         rows below a trip keep the model's coined id and still become draft candidates, exactly
         as they should — asserting `(1, 0, 0)` over the whole run would demand that #823 also
         stop `synthesize_drafts` doing its job."""
-        leads = self.leads()
+        leads = self.own_leads()
         if query_id is not None:
             leads = [lead for lead in leads if lead.query_id == query_id]
             assert leads, f"no lead carries {query_id!r}, so the routing claim is vacuous"
@@ -233,8 +247,8 @@ def test_failing_reducer_shim_writes_one_row(tmp_path):
         _reduce(run_dir),
         DONE,
     ])
-    assert len(r.rows) == 2, "the query row plus exactly one shim row"
-    shim = r.rows[1]
+    assert len(r.own_rows) == 2, "the query row plus exactly one shim row"
+    shim = r.own_rows[1]
     assert shim["query_id"] == BASH_SHIM_QUERY_ID
     assert shim["verb"] == "bash"
     assert shim["params"]["command"].startswith("cat ")
@@ -267,7 +281,7 @@ def test_succeeding_reducer_shim_writes_no_row(tmp_path):
     ])
     assert r.box.calls, "the reduce never reached the boundary, so the negative is vacuous"
     assert r.shim_rows == []
-    assert len(r.rows) == 1, "only the query row"
+    assert len(r.own_rows) == 1, "only the query row"
 
 
 def test_failing_non_shim_bash_writes_no_row(tmp_path):
@@ -285,7 +299,7 @@ def test_failing_non_shim_bash_writes_no_row(tmp_path):
     ])
     assert box.calls, "the bash turn never reached the boundary, so the negative is vacuous"
     assert r.shim_rows == []
-    assert len(r.rows) == 1
+    assert len(r.own_rows) == 1
 
 
 def test_a_non_terminal_reducer_mints_no_row(tmp_path):
@@ -365,7 +379,7 @@ def test_a_model_cannot_forge_a_sentinel_query_id(tmp_path):
         q("elastic", "query", {"native_query": "FROM logs"}, query_id=BASH_SHIM_QUERY_ID),
         DONE,
     ])
-    assert r.rows[0]["query_id"] == "elastic.query"
+    assert r.own_rows[0]["query_id"] == "elastic.query"
     assert r.shim_rows == [], "a real query row was routed into the shim residue"
 
 
@@ -385,7 +399,7 @@ def test_main_lane_shim_failure_writes_no_row(tmp_path):
         turns=[DONE],
     )
     assert r.box.calls, "main's bash turn never reached the boundary"
-    assert r.rows == [], "a main-lane shim failure wrote a queries row"
+    assert r.own_rows == [], "a main-lane shim failure wrote a queries row"
 
 
 # =============================================================================================
@@ -455,7 +469,7 @@ def test_shim_row_reaches_the_curator_and_nothing_else(tmp_path):
     r = _run(tmp_path, run_dir=run_dir, run_id="d823-route", turns=[
         q("elastic", "query", {"native_query": "FROM logs"}), _reduce(run_dir), DONE,
     ])
-    pitfalls = collect_general_failures(r.leads(), r.run_dir)
+    pitfalls = collect_general_failures(r.own_leads(), r.run_dir)
     assert len(pitfalls) == 1, "the shim failure did not reach the pitfalls curator"
     rec = pitfalls[0]
     assert rec["system"] == "elastic"
@@ -494,7 +508,7 @@ def test_trip_row_carries_the_sentinel_identity(tmp_path):
     the model's id (#807's `repeat_key_ignores_query_id` pins that they must), so this changes
     the refusal record only."""
     r = _looping_run(tmp_path, "d823-trip", "elastic.sshd-raw-events-window")
-    rows = r.rows
+    rows = r.own_rows
     assert len(rows) == 3, f"the lead did not trip at the third request: {len(rows)} rows"
     assert rows[2]["exit_code"] == 64, "no trip row, so the premise is vacuous"
     assert [row["query_id"] for row in rows[:2]] == ["elastic.sshd-raw-events-window"] * 2
@@ -524,7 +538,7 @@ def test_trip_row_on_a_catalog_id_still_reaches_the_curator(tmp_path):
     catalog = lead_neighbors.load_catalog(None)
     established = sorted(t.id for t in catalog if t.id.startswith("elastic."))[0]
     r = _looping_run(tmp_path, "d823-tripcat", established)
-    assert r.rows[2]["query_id"] == REPEAT_TRIP_QUERY_ID
+    assert r.own_rows[2]["query_id"] == REPEAT_TRIP_QUERY_ID
     assert r.routed(REPEAT_TRIP_QUERY_ID) == (1, 0, 0)
     assert r.routed(established) == (0, 0, 1)
 
@@ -536,7 +550,7 @@ def test_trip_row_still_counts_toward_a_later_check(tmp_path):
     trip row counts, so a replay of a recorded table keeps matching the live run. Renaming the
     row for the offline ROUTER must not silently widen what the guard SKIPS."""
     r = _looping_run(tmp_path, "d823-domain", "elastic.coined-a")
-    rows = r.rows
+    rows = r.own_rows
     key = {"system": "elastic", "verb": "query", "params": {"native_query": "FROM logs"}}
     with_trip = record_query.repeat_trip([rows[0], rows[2]], LEAD, **key)
     assert with_trip is not None, "the renamed trip row left the guard's domain"
@@ -562,12 +576,12 @@ def test_the_two_writers_share_one_seq_sequence(tmp_path):
         _reduce(run_dir, seq=2),
         DONE,
     ])
-    seqs = [row["seq"] for row in r.rows]
+    seqs = [row["seq"] for row in r.own_rows]
     assert seqs == [0, 1, 2, 3], f"the two writers did not share one sequence: {seqs}"
     assert len(r.shim_rows) == 2, "the premise needs both shim rows to have been written"
-    paths = [row["payload_path"] for row in r.rows]
+    paths = [row["payload_path"] for row in r.own_rows]
     assert len(set(paths)) == len(paths), f"two rows share a payload sidecar: {paths}"
-    for row in r.rows:
+    for row in r.own_rows:
         assert (r.run_dir / row["payload_path"]).is_file()
 
 
@@ -661,8 +675,8 @@ def test_catalog_template_failures_still_route_to_the_lead_author(tmp_path):
         verbs=raising(rec, UpstreamFault("ES|QL query failed (HTTP 400): Unknown column")),
         turns=[q("elastic", "probe", {}, query_id=established), DONE],
     )
-    assert r.rows[0]["error_class"] == "agent-fixable", "the premise needs a real failure"
-    assert r.rows[0]["query_id"] == established
+    assert r.own_rows[0]["error_class"] == "agent-fixable", "the premise needs a real failure"
+    assert r.own_rows[0]["query_id"] == established
     assert r.routed() == (0, 0, 1), "an established template's failure left the lead-author"
 
 
@@ -677,5 +691,5 @@ def test_budget_exhausted_lead_mints_no_record(tmp_path):
         q("elastic", "query", {"native_query": "FROM c"}),
         DONE,
     ])
-    assert [row["exit_code"] for row in r.rows] == [0, 0, 0], "a distinct-query lead tripped"
-    assert collect_general_failures(r.leads(), r.run_dir) == []
+    assert [row["exit_code"] for row in r.own_rows] == [0, 0, 0], "a distinct-query lead tripped"
+    assert collect_general_failures(r.own_leads(), r.run_dir) == []
