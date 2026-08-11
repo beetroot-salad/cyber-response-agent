@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import sys
 from dataclasses import dataclass, replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -135,18 +136,36 @@ def _ip_sort_key(ip: str) -> tuple:
     return (0, octets)
 
 
+def _ecs_field(doc: dict, flat_key: str, *nested_path: str) -> Any:
+    """#808 review fix — read an ECS-shaped field that may arrive either as a literal flat
+    dotted key (matching the fixture-driven test doubles in this suite, and Kibana's own
+    `kibana.alert.*` namespace) or as standard nested ECS JSON (`{"host": {"name": ...}}`) —
+    the shape `elastic_adapter._search` actually hands back for `_source` (docs pass through
+    UNMODIFIED, per this module's own probe evidence), and the shape this project's own
+    `fixtures/*/alert.json` uses for the same conceptual fields. Prefers the flat key; falls
+    back to walking the nested path so a real, ECS-nested document still yields entities."""
+    if flat_key in doc:
+        return doc[flat_key]
+    cur: Any = doc
+    for part in nested_path:
+        if not isinstance(cur, dict):
+            return None
+        cur = cur.get(part)
+    return cur
+
+
 def _entities_from_docs(docs: list[dict]) -> Entities:
     hosts: set[str] = set()
     users: set[str] = set()
     ips: set[str] = set()
     for doc in docs:
-        h = doc.get("host.name")
+        h = _ecs_field(doc, "host.name", "host", "name")
         if isinstance(h, str) and h.strip():
             hosts.add(h)
-        u = doc.get("user.name")
+        u = _ecs_field(doc, "user.name", "user", "name")
         if isinstance(u, str) and u.strip():
             users.add(u)
-        ip = doc.get("source.ip")
+        ip = _ecs_field(doc, "source.ip", "source", "ip")
         if isinstance(ip, str) and ip.strip():
             ips.add(ip)
     return Entities(
@@ -188,25 +207,28 @@ async def _capture_issue(
     before = len(_rows_for(deps.run_dir, deps.lead_id))
     call = SimpleNamespace(tool_name="query")
     args = {"system": "elastic", "verb": verb, "params": params}
+    # #808 review fix — stash the in-memory result as `handler` produces it, so a later
+    # write failure (below) can recover it WITHOUT re-issuing the same backend call a
+    # second time. `wrap_tool_execute` runs `handler` at most once per call.
+    captured: list[Any] = []
 
     async def handler(_args: dict) -> Any:
         fn = capture._registry.verbs("elastic")[verb]
         vctx = VerbContext(defender_dir=deps.defender_dir, run_dir=deps.run_dir, env=env)
-        return await asyncio.to_thread(fn, vctx, **params)
+        result = await asyncio.to_thread(fn, vctx, **params)
+        captured.append(result)
+        return result
 
     ctx = SimpleNamespace(deps=deps)
     try:
         text = await capture.wrap_tool_execute(ctx, call=call, args=args, handler=handler)
     except (OSError, ValueError):
-        # K8(iii)/d62 — RENDER FROM THE IN-MEMORY RESULT, THEN WRITE: a queries-table write
-        # that cannot land (a directory squatting the table's own name) must cost the run
-        # its evidence ROW, never its evidence. `QueryCapture._record` raises before it can
-        # return anything, so the only way to keep what item 1 already resolved is to read
-        # it again, directly — bypassing the capture (and its now-failing write) entirely.
-        try:
-            envelope = await handler(args)
-        except Exception:  # noqa: BLE001 — the backend itself failing here is a plain miss
-            return None, ""
+        # K8(iii)/d62 — RENDER FROM THE IN-MEMORY RESULT: a queries-table write that cannot
+        # land (a directory squatting the table's own name) must cost the run its evidence
+        # ROW, never its evidence — and (review fix) never a second real backend call for
+        # the same logical fetch: `captured` already holds whatever `handler` returned
+        # before `QueryCapture._record`'s write raised.
+        envelope = captured[0] if captured else None
         return (envelope if isinstance(envelope, dict) else None), ""
     after = _rows_for(deps.run_dir, deps.lead_id)
     if len(after) <= before:
@@ -214,9 +236,17 @@ async def _capture_issue(
     row = after[-1]
     if row.get("exit_code") != 0:
         return None, text
-    payload_path = deps.run_dir / row["payload_path"]
+    payload_path = row.get("payload_path")
+    if not isinstance(payload_path, str):
+        # #808 review fix — a successful call (exit_code == 0) whose sidecar payload
+        # failed to PERSIST (a disk-full/permission fault on the write, distinct from the
+        # write-failure branch above) leaves `payload_path` None; falling back to the
+        # in-memory result this same call already produced beats crashing on
+        # `Path(...) / None`.
+        envelope = captured[0] if captured else None
+        return (envelope if isinstance(envelope, dict) else None), text
     try:
-        data = json.loads(payload_path.read_text(encoding="utf-8"))
+        data = json.loads((deps.run_dir / payload_path).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None, text
     if not isinstance(data, dict):
@@ -224,34 +254,56 @@ async def _capture_issue(
     return data, text
 
 
-def _record_manual_row(deps: _CaptureDeps, verb: str, params: dict, docs: dict | None) -> None:
+#: The capped path's own default exit code for an UNMAPPED fault — mirrors
+#: `query_tool.DEFAULT_FAULT_EXIT` (not imported directly: that module's constant is an
+#: internal implementation detail of the model-facing capture, not a shared contract).
+_UNMAPPED_FAULT_EXIT = 2
+
+
+def _record_manual_row(
+    deps: _CaptureDeps, verb: str, params: dict, payload: Any, *, exit_code: int,
+) -> None:
     """Write a queries-table row with the SAME twelve-key shape `QueryCapture._record`
-    writes, WITHOUT feeding `circuit_breaker.record_outcome` — the mechanism that lets item
-    1's own calls PAST its first recorded failure keep running (`d63`) without letting the
-    breaker's per-system counter cross the trip boundary on lead-0's behalf (`d61`,
-    K8(ii)/R2-F1: the cap bounds RECORDED failures, not calls)."""
+    writes — including `error_class`/`payload_status` derived the SAME way
+    (`circuit_breaker.error_class_for_exit`, `query_tool._payload_status`'s own rule), not
+    hardcoded (#808 review fix: a hardcoded `error_class="infra"` mis-filed a genuinely
+    agent-fixable capped-path fault out of `lead_extraction.collect_general_failures`'
+    pitfalls curation) — WITHOUT feeding `circuit_breaker.record_outcome` — the mechanism
+    that lets item 1's own calls PAST its first recorded failure keep running (`d63`)
+    without letting the breaker's per-system counter cross the trip boundary on lead-0's
+    behalf (`d61`, K8(ii)/R2-F1: the cap bounds RECORDED failures, not calls)."""
+    import shlex
+
+    from defender._io import guarded_mkdir, write_guarded
+    from defender.runtime.circuit_breaker import error_class_for_exit
     from defender.scripts.gather_tools.record_query import _json_safe_params, _next_seq, payload_digest
-    from defender._io import write_guarded
 
     seq = _next_seq(deps.run_dir, deps.lead_id)
     lead_dir = RunPaths(deps.run_dir).gather_raw / deps.lead_id
     payload_name = f"gather_raw/{deps.lead_id}/{seq}.json"
     payload_rel: str | None = payload_name
-    text = json.dumps(docs, default=str) if docs is not None else ""
-    from defender._io import guarded_mkdir
+    text = json.dumps(payload, default=str) if exit_code == 0 else ""
     try:
         guarded_mkdir(lead_dir, base=deps.run_dir)
         write_guarded(deps.run_dir / payload_name, text)
     except (OSError, ValueError):
         payload_rel = None
+    if exit_code != 0:
+        payload_status = "error"
+    elif payload is None or (isinstance(payload, (dict, list, tuple, set, str)) and len(payload) == 0):
+        payload_status = "empty"
+    else:
+        payload_status = "ok"
     row = {
         "lead_id": deps.lead_id, "seq": seq, "system": "elastic", "verb": verb,
         "query_id": f"elastic.{verb}", "params": _json_safe_params(dict(params)),
-        "raw_command": f"elastic {verb} " + " ".join(f"{k}={v}" for k, v in params.items()),
-        "payload_path": payload_rel, "exit_code": 2 if docs is None else 0,
-        "error_class": None if docs is not None else "infra",
-        "payload_status": "ok" if docs is not None else "error",
-        "payload_digest": payload_digest(text, "", 0) if docs is not None else "exit=2; capped",
+        "raw_command": shlex.join(["elastic", verb, *(f"{k}={v}" for k, v in params.items())]),
+        "payload_path": payload_rel, "exit_code": exit_code,
+        "error_class": error_class_for_exit(exit_code),
+        "payload_status": payload_status,
+        "payload_digest": (
+            payload_digest(text, "", 0) if exit_code == 0 else f"exit={exit_code}; capped"
+        ),
     }
     write_guarded(RunPaths(deps.run_dir).executed_queries, json.dumps(row) + "\n", mode="append")
 
@@ -264,7 +316,23 @@ def _breaker_failures(run_dir: Path) -> int:
         state = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return 0
-    return int(state.get("systems", {}).get("elastic", {}).get("failures", 0) or 0)
+    # #808 review fix — `3`, `"x"` and `[…]` are all valid JSON and none of them is a
+    # breaker state (the same "parsed fine, wrong shape" case `circuit_breaker._load`
+    # guards explicitly); without these isinstance checks a corrupted or adversarially
+    # planted `circuit_breaker.json` raises `AttributeError`/`ValueError` here, uncaught,
+    # degrading item 1's WHOLE resolution instead of just this one state read.
+    if not isinstance(state, dict):
+        return 0
+    systems = state.get("systems")
+    if not isinstance(systems, dict):
+        return 0
+    sysrec = systems.get("elastic")
+    if not isinstance(sysrec, dict):
+        return 0
+    try:
+        return int(sysrec.get("failures", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 class _CallLedger:
@@ -277,6 +345,8 @@ class _CallLedger:
         self.capped = False
 
     async def call(self, capture, deps, verb, params, env):
+        from defender.scripts.adapters.faults import AdapterFault
+
         before = _breaker_failures(self.run_dir)
         if self.capped:
             # Past the cap: issue the call directly (bypassing QueryCapture's own automatic
@@ -285,12 +355,24 @@ class _CallLedger:
                 fn = capture._registry.verbs("elastic")[verb]
                 vctx = VerbContext(defender_dir=deps.defender_dir, run_dir=deps.run_dir, env=env)
                 envelope = await asyncio.to_thread(fn, vctx, **params)
-                _record_manual_row(deps, verb, params, envelope)
+                _record_manual_row(deps, verb, params, envelope, exit_code=0)
                 return envelope, ""
-            except circuit_breaker.RunAborted:
+            except (circuit_breaker.RunAborted, asyncio.CancelledError,
+                    KeyboardInterrupt, GeneratorExit):
+                # #808 review fix — cancellation/control-flow signals must propagate, not be
+                # absorbed as "a capped call's own fault": swallowing `CancelledError` here
+                # breaks task cancellation (the caller's `task.cancel()` would silently do
+                # nothing) and `KeyboardInterrupt`/`GeneratorExit` are never a query's own
+                # fault to begin with.
                 raise
-            except BaseException:  # noqa: BLE001 — a capped call's own fault must not raise
-                _record_manual_row(deps, verb, params, None)
+            except AdapterFault as e:
+                # #808 review fix — a MAPPED fault keeps its own exit code/class (matching
+                # `QueryCapture._record`'s own `except AdapterFault` arm) instead of always
+                # being filed as `error_class="infra"`.
+                _record_manual_row(deps, verb, params, None, exit_code=e.exit_code)
+                return None, ""
+            except BaseException:  # noqa: BLE001 — an unmapped capped-call fault must not raise
+                _record_manual_row(deps, verb, params, None, exit_code=_UNMAPPED_FAULT_EXIT)
                 return None, ""
         envelope, text = await _capture_issue(capture, deps, verb, params, env)
         after = _breaker_failures(self.run_dir)
@@ -343,7 +425,11 @@ def _render_doc(doc: dict, lead_id: str, seq: int) -> str:
     for key in sorted(doc):
         if key in ("@timestamp", "message"):
             continue
-        lines.append(f"  {key}: {_sanitize(doc[key])}")
+        # #808 review fix — the field NAME, not just its value, must be neutralized: an
+        # attacker-influenced document whose key itself carries a `<run-…-…>`-shaped
+        # delimiter would otherwise end the untrusted frame early, exactly the class of
+        # forgery this module's value-side `_sanitize` calls already exist to close.
+        lines.append(f"  {_sanitize(key)}: {_sanitize(doc[key])}")
     if "message" in doc:
         lines.append(f"  message: {_sanitize(_elide(doc['message'], lead_id, seq))}")
     return "\n".join(lines)
@@ -416,10 +502,19 @@ async def _resolve_item1(  # noqa: C901, PLR0912, PLR0915 — item 1's own branc
     from defender.scripts.adapters.elastic_adapter import load_config
 
     deps = _build_deps(run_dir, defender_dir, salt, run_id, L0)
-    claim_lead({
+    claimed = claim_lead({
         "run_dir": str(run_dir), "lead_id": L0, "goal": ITEM1_GOAL,
         "what_to_summarize": ITEM1_WHAT_TO_SUMMARIZE, "provenance": HARNESS_PROVENANCE,
     })
+    if claimed == 2:
+        # #808 review fix — someone else already owns L0 (a planted collision, the exact
+        # shape `test_a_harness_side_reclaim_takes_claim_leads_return_two_arm` exercises
+        # for L3): degrade rather than issue backend calls or append a second, inconsistent
+        # `:L findings` row under an id this call does not own. Mirrors
+        # `prepare_correlation_lead`'s own L3 collision arm — previously item 1 discarded
+        # `claim_lead`'s return value entirely and proceeded regardless.
+        return (_unavailable(f"{L0} is already claimed by something else on this run dir"),
+                Entities(), STATUS_FAILED)
     _declare_l_finding(run_dir, L0, "ancestor resolution")
 
     alert_id = alert.get("alert_id")
@@ -536,7 +631,15 @@ def _correlation_contract(alert: dict, entities: Entities) -> tuple[str, list[st
                           ("source IP", entities.source_ips)):
         for v in values:
             entity_bits.append(f"{label} {_sanitize(v)}")
-    entity_text = "; ".join(entity_bits) if entity_bits else "(no entities resolved)"
+    if not entity_bits:
+        # #808 review fix — a resolution that reached the backend and found documents but
+        # extracted no host/user/source-ip (a null `host.name` on a correlation/sequence
+        # alert, or an unparsed pam_unix/session/cron ancestor line — both real, documented
+        # shapes per skills/elastic/SKILL.md) must not dispatch a correlation lead with
+        # nothing to correlate on. Matches this suite's own documented gate: "item 3
+        # dispatches only when item 1 resolved at least one non-empty entity set."
+        return None
+    entity_text = "; ".join(entity_bits)
 
     goal = (
         "Correlate ANY signature of alert already on the SOC's radar for these entities — "
@@ -557,6 +660,7 @@ async def dispatch_correlation(  # noqa: C901, PLR0913 — item 3's own dispatch
     *, run_dir: Path, defender_dir: Path, salt: str, run_id: str,
     goal: str, what_to_summarize: list[str], verbs: Any, limits: dict,
     make_model: Any, logger: Any, box: Any, store: Any = None,
+    budget_started_monotonic: float = 0.0,
 ) -> str | None:
     """The ASYNC half of item 3: dispatch the real gather subagent for `l-00c`, reusing the
     shared terminator/bookkeeping seam (`tools_gather._run_gather`, K15) with
@@ -624,7 +728,16 @@ async def dispatch_correlation(  # noqa: C901, PLR0913 — item 3's own dispatch
 
     gbase = bind(GATHER_DEF, run_dir, salt=salt, defender_dir=defender_dir, box=box)
     assert isinstance(gbase, GatherDeps)
-    gdeps = replace(gbase, run_id=run_id, lead_id=L3)
+    # #808 review fix — thread the RUN's own budget-clock origin through, the same way
+    # `_run_gather`'s own model-dispatched path does (`gdeps = replace(gbase, ...,
+    # budget_started_monotonic=deps.budget_started_monotonic)`, tools_gather.py). Without
+    # this, `bind`'s own `AgentDeps` default (`default_factory=time.monotonic`) stamps a
+    # FRESH origin at whenever this coroutine happens to start, so under
+    # `DEFENDER_BUDGET_ENFORCE` the correlation lead's wall-clock enforcement measures
+    # elapsed time from its own start rather than sharing the run's true remaining budget.
+    gdeps = replace(
+        gbase, run_id=run_id, lead_id=L3, budget_started_monotonic=budget_started_monotonic,
+    )
 
     request = GatherRequest(L3, "elastic", goal, tuple(what_to_summarize))
     try:
@@ -634,7 +747,9 @@ async def dispatch_correlation(  # noqa: C901, PLR0913 — item 3's own dispatch
         )
     except (BudgetKill, circuit_breaker.RunAborted):
         raise
-    except Exception:  # noqa: BLE001 — item 3's own dispatch must never break the run
+    except Exception as e:  # noqa: BLE001 — item 3's own dispatch must never break the run
+        print(f"[run.py] correlation lead dispatch failed ({e!r}); skipping its summary",
+              file=sys.stderr)
         return None
 
 
@@ -746,7 +861,11 @@ def resolve_lead_zero(
                 run_dir=run_dir, defender_dir=defender_dir, salt=salt, run_id=resolved_run_id,
                 alert=alert, capture=capture, env=env, limits=limits,
             )
-        except (BudgetKill, circuit_breaker.RunAborted):
+        except (BudgetKill, circuit_breaker.RunAborted, asyncio.CancelledError,
+                KeyboardInterrupt, GeneratorExit):
+            # #808 review fix — cancellation/control-flow signals must propagate rather than
+            # degrade into a plain "item 1 failed" result: swallowing `CancelledError` here
+            # breaks task cancellation semantics for whatever is running this coroutine.
             raise
         except BaseException as e:  # noqa: BLE001 — item 1's own faults degrade, never raise
             return _unavailable(f"{e!r}"), Entities(), STATUS_FAILED

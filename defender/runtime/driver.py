@@ -784,6 +784,31 @@ def _flush_run_end(run: Any, store: Any, session_id: str, truncated_by: str | No
             print(f"[run.py] truncated_by write skipped: {e!r}", file=sys.stderr)
 
 
+async def _reap_correlation_task(task: Any) -> None:
+    """#808 review fix — `correlation_task` (item 3's fire-and-forget dispatch, scheduled via
+    `asyncio.ensure_future` in `run_investigation`) is only ever awaited by
+    `_inject_correlation`, itself only reached when MAIN prepares a SECOND model request. A
+    run that closes after exactly one request — or that exits `_drive_agent` through any of
+    its OTHER handled exceptions before a second request is ever prepared — would otherwise
+    leave this task running, unawaited and uncancelled, past `run_investigation`'s own
+    return: it keeps issuing real backend/model calls and writing to the run dir (queries
+    table, `gather_raw/l-00c/*`, `budget.json`, the session store) concurrently with
+    `run.py`'s post-run steps on that same tree, and any exception it raises is never
+    retrieved. Called unconditionally right after `_drive_agent` returns: a no-op if
+    `_inject_correlation` already consumed it."""
+    if task is None:
+        return
+    if not task.done():
+        task.cancel()
+    try:
+        await task
+    except Exception as e:  # noqa: BLE001 — this cleanup step must not itself break the run
+        print(f"[run.py] correlation task reaped with an unretrieved fault: {e!r}",
+              file=sys.stderr)
+    except asyncio.CancelledError:
+        pass
+
+
 async def _drive_agent(  # noqa: PLR0913 — the loop's own inputs: agent, prompt, deps, store, bounds
     agent: Agent[AgentDeps, str], prompt: str, deps: AgentDeps, store: Any, session_id: str,
     bounds: challenge_gate.Bounds,
@@ -996,6 +1021,11 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
                 run_dir=run_dir, defender_dir=defender_dir, salt=salt, run_id=run_id,
                 goal=goal, what_to_summarize=what_to_summarize, verbs=lead_zero_verbs,
                 limits=limits, make_model=make_model, logger=logger, box=box, store=store,
+                # #808 review fix — share the RUN's own budget-clock origin (see
+                # lead_zero.dispatch_correlation's docstring note) rather than letting it
+                # default to a fresh `time.monotonic()` stamp taken whenever this task
+                # happens to start.
+                budget_started_monotonic=budget_started_monotonic,
             ))
 
     agent = build_agent(
@@ -1014,6 +1044,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
         agent, prompt, deps, store, session_id, gate_bounds,
     )
     wall_ms = (time.time() - t0) * 1000.0
+    await _reap_correlation_task(correlation_task)
 
     result = run.result if run is not None else None
     try:
