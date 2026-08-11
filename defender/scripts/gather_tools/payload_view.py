@@ -288,9 +288,13 @@ def _replace(obj: Any, path: tuple[str, ...], value: Any) -> Any:
     return {k: (_replace(v, rest, value) if k == head else v) for k, v in obj.items()}
 
 
-def _list_marker(kept: int, total: int) -> str:
+def _list_marker(kept: int, total: int, noun: str = "elements") -> str:
+    """The marker for a region cut by COUNT. `noun` names what was counted — elements of a
+    list, fields of a record, cells of a positional row — because a lead reading "elements"
+    over a row whose count is intact reads it as "rows were dropped". Passed rather than
+    patched in afterwards with `.replace`, which silently no-ops the day the wording moves."""
     return (
-        f"{ELISION_PREFIX} {total - kept} of {total} elements — dropped from THIS VIEW only; "
+        f"{ELISION_PREFIX} {total - kept} of {total} {noun} — dropped from THIS VIEW only; "
         f"the payload on disk has all {total}>>"
     )
 
@@ -383,14 +387,17 @@ def _fit_one(element: Any, room: int, path: str, out: list[Elision]) -> Any | No
     whatever the payload made it: a dict for search hits, a bare array for an ES|QL row since
     #834. Returns `None` when the element cannot be represented at all — a scalar too long for
     even the tightest cap — which leaves the marker to speak alone."""
+    squeezed = element
     for cap in _SQUEEZE_CAPS:
         leaves: list[Elision] = []
-        candidate = _clip_leaves(element, path, leaves, cap)
-        if len(_dumps(candidate)) <= room:
+        squeezed = _clip_leaves(element, path, leaves, cap)
+        if len(_dumps(squeezed)) <= room:
             out.extend(leaves)
-            return candidate
+            return squeezed
+    # `squeezed` is the tightest cap's candidate, already built by the last pass above — the
+    # last resort re-clipped the whole element a fifth time to rebuild exactly it, which on a
+    # 1,657-cell row is a full traversal and serialization spent to reach the same value.
     if room > 0:
-        squeezed = _clip_leaves(element, path, [], _SQUEEZE_CAPS[-1])
         if isinstance(element, dict):
             return _fit_fields(squeezed, room, out, path=path)
         if isinstance(element, list):
@@ -416,8 +423,6 @@ def _fit_list(node: _Node, share: int, out: list[Elision]) -> Any:
         kept.append(clipped)
         out.extend(leaves)
         used += cost
-    if len(kept) == len(node.value):
-        return kept
     if not kept and node.value:
         # Not one element fit — see `_fit_one`. Squeeze the first rather than show none: a list
         # rendered as a bare marker carries no field name at all, and the biggest documents are
@@ -425,6 +430,14 @@ def _fit_list(node: _Node, share: int, out: list[Elision]) -> Any:
         squeezed = _fit_one(node.value[0], max(share - reserve - 2, 0), f"{node.label}[0]", out)
         if squeezed is not None:
             kept = [squeezed]
+    if len(kept) == len(node.value):
+        # Checked AFTER the salvage, not before, because the salvage can complete the list: a
+        # one-row payload (`row_count: 1` with 1,657 columns) whose single element was squeezed
+        # has lost no ELEMENT at all. Read before, this branch appended
+        # `<<ELIDED 0 of 1 elements … the payload on disk has all 1>>` plus an `Elision(1, 1)`
+        # — a stated drop of zero, on a view whose one job is that a marker means a real cut.
+        # What the squeeze did cost is marked INSIDE the element, by `_fit_cells`/`_fit_fields`.
+        return kept
     out.append(Elision(node.label, "list", len(kept), len(node.value)))
     return [*kept, _list_marker(len(kept), len(node.value))]
 
@@ -441,7 +454,7 @@ def _fit_fields(obj: dict, budget: int, out: list[Elision], *, path: str = "") -
     Keep whole key/value pairs until the budget is spent and say how many were dropped — the one
     case where a payload is bulky purely by having many fields."""
     marker_key = f"{ELISION_PREFIX}>>"
-    marker = _list_marker(0, len(obj)).replace("elements", "fields")
+    marker = _list_marker(0, len(obj), "fields")
     reserve = len(_dumps({marker_key: marker})) + _SEP  # measured, not a guessed 120
     kept: dict[str, Any] = {}
     used = 2
@@ -457,7 +470,7 @@ def _fit_fields(obj: dict, budget: int, out: list[Elision], *, path: str = "") -
     if len(kept) == len(obj):
         return kept
     out.append(Elision(path, "fields", len(kept), len(obj)))
-    kept[marker_key] = _list_marker(len(kept), len(obj)).replace("elements", "fields")
+    kept[marker_key] = _list_marker(len(kept), len(obj), "fields")
     return kept
 
 
@@ -476,7 +489,7 @@ def _fit_cells(row: list, budget: int, out: list[Elision], *, path: str = "") ->
     binds to `columns[i]`, so `columns[:len(kept)]` names precisely the survivors. Nothing
     here has to know that — it falls out of not reordering.
     """
-    marker = _list_marker(0, len(row)).replace("elements", "cells")
+    marker = _list_marker(0, len(row), "cells")
     reserve = len(_dumps(marker)) + _SEP
     kept: list[Any] = []
     used = 2
@@ -489,7 +502,7 @@ def _fit_cells(row: list, budget: int, out: list[Elision], *, path: str = "") ->
     if len(kept) == len(row):
         return kept
     out.append(Elision(path, "cells", len(kept), len(row)))
-    return [*kept, _list_marker(len(kept), len(row)).replace("elements", "cells")]
+    return [*kept, _list_marker(len(kept), len(row), "cells")]
 
 
 def walk(obj: Any, budget: int) -> tuple[Any, list[Elision]]:

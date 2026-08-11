@@ -35,6 +35,7 @@ import subprocess
 import sys
 from datetime import datetime, timedelta, UTC
 from pathlib import Path
+from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
@@ -169,6 +170,26 @@ def shape_matched_windows(start: datetime, end: datetime,
 _LIVENESS: dict[tuple[str, str], bool] = {}
 
 
+def named_cell(payload: dict, name: str, default: Any = None) -> Any:
+    """The named cell of a columnar ES|QL payload's FIRST row, or `default`.
+
+    `values` is the wire's own positional form since #834 — cell `i` binds to `columns[i]` —
+    so a read resolves the index off `columns` instead of hardcoding one. Pure, and named,
+    so the reader a caller runs is the reader a test can pin; a test that re-derives the
+    index inline pins its own copy and stays green when the caller regresses to `row[0]`.
+
+    `default` covers both "no rows" and "no such column": a probe whose projection does not
+    carry the name has measured nothing, which is not the same fact as a zero.
+    """
+    columns = payload.get("columns", [])
+    rows = payload.get("values", [])
+    idx = next((i for i, c in enumerate(columns) if c.get("name") == name), None)
+    if idx is None or not rows:
+        return default
+    row = rows[0]
+    return row[idx] if idx < len(row) else default
+
+
 def window_is_live(start: datetime, end: datetime) -> bool:
     """Was the environment RUNNING during this window?
 
@@ -188,15 +209,10 @@ def window_is_live(start: datetime, end: datetime) -> bool:
     if key not in _LIVENESS:
         probe = (f'FROM logs-*\n| WHERE @timestamp >= "{key[0]}" AND @timestamp < "{key[1]}"\n'
                  f"| STATS total = COUNT(*)")
-        payload = run_esql(probe)
         # Positional, because `values` is now the wire's own columnar form (#834). The index
         # is resolved from `columns` rather than hardcoded to 0: this probe projects a single
         # column today, and a name lookup does not rot if it ever projects two.
-        idx = next(
-            (i for i, c in enumerate(payload["columns"]) if c.get("name") == "total"), None
-        )
-        rows = payload["values"]
-        total = rows[0][idx] if rows and idx is not None else 0
+        total = named_cell(run_esql(probe), "total", default=0)
         _LIVENESS[key] = bool(total)
     return _LIVENESS[key]
 

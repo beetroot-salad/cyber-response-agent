@@ -172,14 +172,35 @@ def test_the_esql_payload_leaves_rows_as_the_wire_sent_them():
 
 
 def test_the_liveness_probe_reads_its_column_by_name_not_by_luck():
-    """`window_is_live` resolves `total`'s INDEX off `columns` rather than hardcoding 0. The
-    probe projects one column today; a positional read that assumed so would misreport liveness
-    the day it projects two, and a false "not live" silently drops a case from the measurement.
+    """`named_cell` — the reader `window_is_live` runs — resolves `total`'s INDEX off
+    `columns` rather than hardcoding 0. The probe projects one column today; a positional read
+    that assumed so would misreport liveness the day it projects two, and a false "not live"
+    silently drops a case from the measurement.
+
+    Driven through the production reader, not a copy of it: an earlier version of this test
+    re-derived the index inline and asserted on its own arithmetic, so it stayed green for
+    every regression `window_is_live` could have. `window_is_live` itself is I/O and stays
+    unexercised here; what is pinned is the only part of it that decides which cell is read.
     """
     payload = CONTROLS.esql_payload(
         "q", {"columns": [{"name": "first_seen", "type": "date"},
                           {"name": "total", "type": "long"}],
               "values": [["2026-07-25T09:22:37Z", 444]]})
 
-    idx = next(i for i, c in enumerate(payload["columns"]) if c.get("name") == "total")
-    assert payload["values"][0][idx] == 444, "the probe would have read the wrong cell"
+    assert CONTROLS.named_cell(payload, "total") == 444, "the probe read the wrong cell"
+    assert CONTROLS.named_cell(payload, "first_seen") == "2026-07-25T09:22:37Z"
+
+
+def test_a_column_the_probe_did_not_project_is_not_a_zero():
+    """An absent column and a measured zero are different facts. `named_cell` returns the
+    caller's `default` for both "no such column" and "no rows" — `window_is_live` passes 0
+    there deliberately (a window with no ingest is dead), and the day a caller needs to tell
+    the two apart it can pass `None` instead of inferring it from a fabricated zero."""
+    empty = CONTROLS.esql_payload("q", {"columns": [{"name": "total", "type": "long"}],
+                                        "values": []})
+    assert CONTROLS.named_cell(empty, "total", default=0) == 0
+    assert CONTROLS.named_cell(empty, "total") is None
+
+    mismatched = CONTROLS.esql_payload("q", {"columns": [{"name": "other", "type": "long"}],
+                                             "values": [[7]]})
+    assert CONTROLS.named_cell(mismatched, "total") is None, "read a cell it cannot name"

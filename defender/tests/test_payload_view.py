@@ -507,3 +507,28 @@ def test_the_elision_marker_for_a_row_counts_cells_not_elements(tmp_path):
     marker = json.loads(_json_block(view))["values"][0][-1]
     assert "cells" in marker, f"row marker does not name cells: {marker!r}"
     assert marker.startswith(pv.ELISION_PREFIX)
+
+
+def test_a_list_whose_ONE_element_was_salvaged_is_not_marked_as_shortened():
+    """A marker means a real cut, or it means nothing.
+
+    `_fit_list` decided "did I keep every element?" BEFORE `_fit_one`'s salvage could complete
+    the list, so a one-row payload whose single row was squeezed came back with
+    `<<ELIDED 0 of 1 elements … the payload on disk has all 1>>` beside it, and an
+    `Elision(kind="list", kept=1, total=1)` in the record. A stated drop of zero, on the module
+    whose whole job is that "absent from this view" and "absent from the payload" never blur —
+    and 87 bytes of an 8 KB ceiling spent saying it. What the squeeze DID cost is marked inside
+    the row, by `_fit_cells`, where it happened.
+    """
+    names = [f"col_{j}" for j in range(1657)]
+    row = [f"value-{j}-{'x' * 20}" for j in range(1657)]
+    obj = json.loads(_esql([row], names))
+    walked, elisions = pv.walk(obj, 8192)
+
+    assert len(walked["values"]) == 1, "a list that kept its only element grew a marker"
+    assert not any(e.path == "values" for e in elisions), (
+        f"the row count was reported as elided: {[e for e in elisions if e.path == 'values']}"
+    )
+    assert any(e.path == "values[0]" and e.kind == "cells" for e in elisions), (
+        "the cut that DID happen — inside the row — went unrecorded"
+    )
