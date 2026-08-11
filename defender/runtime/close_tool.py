@@ -20,13 +20,21 @@ import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
+from pydantic import Field
 from pydantic_ai import RunContext
 from pydantic_ai.exceptions import ModelRetry
 
-from defender._artifact_schema import DISPOSITION_ENUM, validate_artifact
+from defender._artifact_schema import validate_artifact
 from defender._untrusted import wrap as _wrap
+# The vocabulary from its OWNER, not second-hand through the report schema — `_artifact_schema`
+# has its own gate to run on it and names it for that, but it was never this module's supplier
+# (#785's rule: a module that USES the vocabulary imports it from the owner, so a consumer's
+# import list never doubles as someone else's distribution channel). Both halves are used — the
+# set for the exact membership test in `_close_investigation_async`, the ordered tuple for the
+# argument schema below.
+from defender._vocab import DISPOSITION_ENUM, DISPOSITION_VALUES
 from defender.hooks.budget_enforcer import BUDGET_EXEMPT_TOOLS  # noqa: F401 — re-export, RS16
 from defender.skills.invlang.validate import false_positive_entry_price
 
@@ -365,15 +373,26 @@ async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams
             "close_investigation is reachable only from the investigator (main) role — "
             f"not from {deps.role.value}"
         )
+    # `isinstance(str)` FIRST, for the same reason `_artifact_schema` states it: a non-string
+    # value (a YAML list, an int) is unhashable, so a bare `value in DISPOSITION_ENUM` (a set)
+    # would raise TypeError out of the gate instead of denying. The tool lane cannot reach here
+    # with one — pydantic validates the argument as `str` — but the SYNC host entry has nothing
+    # in front of it, which is the whole reason the refusal lives in the body.
+    #
     # lint-vocabulary: ok — the same WRITE-gate asymmetry `_artifact_schema` states, one layer
     # earlier: this is the LIVE close, so the author is still on the other end of the call and an
     # exact test hands it retry text it can act on. `normalized_disposition` would silently ACCEPT
     # a zero-width-laced value and commit a close no reader can tell from a clean one — and this
     # gate's value is what the report frontmatter is later written FROM, so normalizing here would
     # launder the injected character past the very gate that exists to deny it.
-    if disposition not in DISPOSITION_ENUM:
+    if not (isinstance(disposition, str) and disposition in DISPOSITION_ENUM):
+        # Rendered from the ORDERED TUPLE, never from `sorted(DISPOSITION_ENUM)`: `_vocab`
+        # names deny reasons as the reason the authored form is a tuple, and this refusal and
+        # the tool schema above are read in the SAME round trip — a fifth member appended out
+        # of alphabetical order would otherwise hand the model two orderings of one closed
+        # vocabulary while it is trying to correct itself.
         raise ModelRetry(
-            f"disposition must be exactly one of {sorted(DISPOSITION_ENUM)} (got "
+            f"disposition must be exactly one of {list(DISPOSITION_VALUES)} (got "
             f"{disposition!r}) — a typed enum, not free text"
         )
     # R4: a COMMITTED close is terminal, and the refusal comes BEFORE the gate so a second
@@ -486,20 +505,46 @@ def _read_companion_text(path: Path) -> str:
         return ""
 
 
+#: The `disposition` argument AS THE MODEL IS OFFERED IT (#750): a plain `str` carrying the
+#: owner's vocabulary in its JSON schema. Derived from `DISPOSITION_VALUES`, so a fifth member
+#: reaches the model's TOOL SCHEMA with nobody editing this file — #806 added `false-positive`
+#: by hand-syncing every surface that spelled the members out, and this tool's docstring was
+#: one of them.
+#:
+#: The generated-from-the-owner property holds for the TOOL SCHEMA ONLY. `SKILL.md` §REPORT —
+#: the runtime system prompt, read every turn — still hand-enumerates the members, and it
+#: carries a paragraph of MEANING per member rather than just the names, so it is not
+#: derivable from a tuple of strings. A fifth member therefore grows this schema automatically
+#: and leaves that roster stale, which is a prompt change, not this one.
+#:
+#: `json_schema_extra`, NOT a `StrEnum` or a `Literal`, DELIBERATELY. pydantic does not validate
+#: against it, so an out-of-enum value still reaches the body and the exact test in
+#: `_close_investigation_async` stays the SOLE rejecter. Hand the type system the enum instead
+#: and pydantic refuses first, which breaks three things at once: the host check becomes
+#: unreachable from this lane, the SYNC entry (nothing validates a tool argument in front of
+#: it) is left as the only lane the check still guards, and #722's repr-escaped retry text is
+#: replaced by a framework message that echoes the invisible character RAW — measured, not
+#: assumed: `input: "beni<U+200B>gn"`. The hint is for the model; the gate stays ours.
+DispositionArg = Annotated[str, Field(json_schema_extra={"enum": list(DISPOSITION_VALUES)})]
+
+
 def register_close_tool(agent, *, stages: Any, bounds: challenge_gate.Bounds) -> None:
     """MAIN's composition root ONLY — never called for any other role's agent build, and
     only when that root's effective `ToolSet.close` is on."""
 
     @agent.tool
-    async def close_investigation(ctx: RunContext[AgentDeps], disposition: str) -> str:
+    async def close_investigation(
+        ctx: RunContext[AgentDeps], disposition: DispositionArg
+    ) -> str:
         """Commit this investigation's disposition once ANALYZE has reached a confident
-        finding. `disposition` is the typed enum (benign | false-positive | inconclusive |
-        malicious), never free text — see SKILL §REPORT for what each one claims, and for
-        the `detection_notes` + `entity_check` rows `false-positive` requires in
-        `:T conclude`. This is the ONLY way to record report.md — write_file/edit_file cannot
-        reach it. A confident disposition passes a live challenge gate before it commits;
-        if the gate is not satisfied yet, this call returns without committing and the
-        investigation continues for another ANALYZE/GATHER turn."""
+        finding. `disposition` is a closed enum whose members are in this tool's own schema,
+        never free text, and the value is compared EXACTLY — a near miss is refused rather
+        than guessed at, so send the keyword with nothing around it. See SKILL §REPORT for
+        what each one claims, and for the `detection_notes` + `entity_check` rows
+        `false-positive` requires in `:T conclude`. This is the ONLY way to record report.md —
+        write_file/edit_file cannot reach it. A confident disposition passes a live challenge
+        gate before it commits; if the gate is not satisfied yet, this call returns without
+        committing and the investigation continues for another ANALYZE/GATHER turn."""
         return await _tool_close_investigation(ctx.deps, disposition, stages=stages, bounds=bounds)
 
 
@@ -524,6 +569,7 @@ __all__ = [
     "UNREADABLE",
     "ArtifactValidator",
     "CloseResult",
+    "DispositionArg",
     "RecommendedLead",
     "close_investigation",
     "register_close_tool",
