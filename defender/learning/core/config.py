@@ -505,7 +505,13 @@ class RunUnprocessable(Exception):
 
 
 def pitfalls_threshold() -> int:
-    return env_int("LEARNING_PITFALLS_THRESHOLD", 5)
+    # 3, not 5 (#823 M4). At 5 the queue never filled: three archived runs — 227 rows, 33 of
+    # them agent-fixable — put exactly 2 records in front of the curator, so it has never run
+    # once and no `execution.md` has the `## Common pitfalls` section its prompt writes into.
+    # The number is a reasoned floor rather than a measured one: #823's yield oracle is
+    # explicitly deferred, because the bash-shim rows that should dominate the queue could not
+    # be counted from an archive recorded before they were written.
+    return env_int("LEARNING_PITFALLS_THRESHOLD", 3)
 
 
 def make_logger(prefix: str, *, flush: bool = False) -> Callable[[str], None]:

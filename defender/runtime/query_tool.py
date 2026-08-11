@@ -17,8 +17,6 @@ from pydantic_ai.exceptions import (
     ToolRetryError,
 )
 
-from defender._io import guarded_mkdir, write_guarded
-from defender._run_paths import RunPaths
 from defender.hooks.budget_enforcer import BudgetKill
 from defender._untrusted import wrap as _wrap
 from defender.scripts.adapters.faults import USAGE_EXIT_CODE, AdapterFault
@@ -26,13 +24,18 @@ from defender.scripts.gather_tools.payload_view import render as _render_payload
 from defender.scripts.gather_tools.record_query import (
     ABOVE_GUARD_QUERY_ID,
     REPEAT_ESCAPE,
+    REPEAT_TRIP_QUERY_ID,
     GatherDeadEnd,
     RepeatTrip,
-    _json_safe_params,
-    _next_seq,
+    _json_safe_params,  # noqa: F401 — re-export: test_repeat_breaker_807 imports it from here
+    append_query_row,
     dead_end_reason,
+    is_reserved_query_id,
     lead_rows,
     payload_digest,
+    # Re-exported under its old private name: `_spec771` measures the site
+    # `query_tool._persist_payload` by that name (its X5 return-none MeasuredSite).
+    persist_payload as _persist_payload,  # noqa: F401
     rejection_dead_end_reason,
     rejection_trip,
     rejection_trip_detail,
@@ -69,16 +72,18 @@ _QID_TRAVERSAL = ("/", "\\", "..", "\x00")
 
 
 def resolve_query_id(system: str, verb: str, model_query_id: str | None) -> str:
-    # ABOVE_GUARD_QUERY_ID is reserved for the three writer sites that pass it directly
-    # (never through here) to mark a row the repeat guard must never count. A model-supplied
-    # `query_id` equal to that literal string — or carrying a traversal character the
-    # below-guard `_screen` would otherwise reject — must not reach a real row through this
-    # path: on the repeat-trip's own record (which sits ABOVE `_screen`), nothing else
-    # screens it, and letting it through would either forge the sentinel (permanently
-    # exempting that request from the repeat count) or persist an unscreened id.
+    # The `∅.` sentinels are reserved for the writer sites that pass them directly (never
+    # through here) to mark a row whose ROUTING the offline collectors take on trust — the
+    # rows the repeat guard must never count, the guard's own trip record, the bash lane's
+    # shim record. A model-supplied `query_id` spelling one of them — or carrying a traversal
+    # character the below-guard `_screen` would otherwise reject — must not reach a real row
+    # through this path: on the repeat-trip's own record (which sits ABOVE `_screen`), nothing
+    # else screens it, and letting it through would either forge a sentinel or persist an
+    # unscreened id. The screen is on the whole PREFIX, not on each literal, so it cannot fall
+    # behind the set (`record_query.is_reserved_query_id`).
     if (
         model_query_id
-        and model_query_id != ABOVE_GUARD_QUERY_ID
+        and not is_reserved_query_id(model_query_id)
         and not any(t in model_query_id for t in _QID_TRAVERSAL)
     ):
         return model_query_id
@@ -348,9 +353,16 @@ class QueryCapture(AbstractCapability[Any]):
         rows = lead_rows(deps.run_dir, deps.lead_id)
         trip = repeat_trip(rows, deps.lead_id, system=system, verb=verb, params=params)
         if trip is not None:
-            query_id = resolve_query_id(system, verb, _as_str(model_query_id) or None)
+            # REPEAT_TRIP_QUERY_ID, not `resolve_query_id(...)` (#823 M3). The refusal is
+            # recorded under its own identity rather than under whatever the model called the
+            # request it was refused, because three offline collectors partition this table on
+            # `query_id` and the model's id sent the trip row to the wrong two: a coined id was
+            # minted as a `_draft/` template proposing the refused query, and a catalog id was
+            # handed to the lead-author as a failure of that template. The guard's own counted
+            # domain is untouched — it keys on ABOVE_GUARD_QUERY_ID alone, and #807 pins that
+            # this row still counts on replay.
             await self._record(
-                deps, system=system, verb=verb, query_id=query_id, params=params,
+                deps, system=system, verb=verb, query_id=REPEAT_TRIP_QUERY_ID, params=params,
                 payload=None, exit_code=USAGE_EXIT_CODE, detail=repeat_trip_detail(trip),
             )
             executed = sum(1 for r in rows if r.get("exit_code") == 0)
@@ -398,26 +410,25 @@ class QueryCapture(AbstractCapability[Any]):
         run_dir = deps.run_dir
 
         async with self._seq_lock:
-            seq = _next_seq(run_dir, deps.lead_id)
-            payload_rel = _persist_payload(run_dir, deps.lead_id, seq, text)
-            row = {
-                "lead_id": deps.lead_id,
-                "seq": seq,
-                "system": system,
-                "verb": verb,
-                "query_id": query_id,
-                "params": _json_safe_params(dict(params)),
-                "raw_command": _raw_command(system, verb, params),
-                "payload_path": payload_rel,
-                "exit_code": exit_code,
-                "error_class": circuit_breaker.error_class_for_exit(exit_code),
-                "payload_status": _payload_status(exit_code, payload),
-                "payload_digest": (
+            # The twelve keys are assembled by `append_query_row` (#823 F1), which the gather
+            # bash lane's shim recorder also calls. The lock stays: it is this path's, and it
+            # is cheaper to keep than to argue that nothing will ever add an `await` here.
+            row = append_query_row(
+                run_dir,
+                lead_id=deps.lead_id,
+                system=system,
+                verb=verb,
+                query_id=query_id,
+                params=params,
+                raw_command=_raw_command(system, verb, params),
+                payload_text=text,
+                exit_code=exit_code,
+                payload_status=_payload_status(exit_code, payload),
+                payload_digest=(
                     payload_digest(text, "", 0) if exit_code == 0
                     else f"exit={exit_code}; {detail.strip()[:160]}"
                 ),
-            }
-            write_guarded(RunPaths(run_dir).executed_queries, json.dumps(row) + "\n", mode="append")
+            )
 
         circuit_breaker.record_outcome(run_dir, system, exit_code)
         return row, text
@@ -491,20 +502,6 @@ def _as_str(v: Any) -> str:
 
 def _as_dict(v: Any) -> dict:
     return v if isinstance(v, dict) else {}
-
-
-def _persist_payload(run_dir, lead_id: str, seq: int, text: str) -> str | None:
-    lead_dir = RunPaths(run_dir).gather_raw / lead_id
-    payload_path = lead_dir / f"{seq}.json"
-    try:
-        guarded_mkdir(lead_dir, base=run_dir)
-        write_guarded(payload_path, text)
-    except (OSError, ValueError):
-        # ValueError as well as OSError: `guarded_mkdir` raises it for a target that is not
-        # inside the tree the anchor names, which a `lead_id` carrying path separators or `..`
-        # produces here. Best-effort persistence must not become the run's crash.
-        return None
-    return str(payload_path.relative_to(run_dir))
 
 
 from .tools import _bash_env, _format_bash_result  # noqa: E402

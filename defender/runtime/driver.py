@@ -28,7 +28,7 @@ from . import providers
 from . import selection
 from . import session_store
 from .agent_definition import AgentDefinition, ResolvedRoots, ToolSet, bind
-from .agent_role import AgentRole
+from .agent_role import GATHER_AGENT_ID_PREFIX, AgentRole
 from . import challenge_gate
 from . import review_roles
 from .close_tool import register_close_tool
@@ -204,6 +204,32 @@ def gather_model() -> str:
 MakeModel = Callable[[str, str | None], BuiltModel]
 
 
+def _affinity_key(agent_id: str, session_id: str | None, cache_key: str | None) -> str:
+    """THE prompt-cache affinity key, for every role — the whole policy, in one place.
+
+    A named function and not three nested conditionals at the call site because there are three
+    arms now, each answering "what prefix does this agent share, and with whom":
+
+    1. An explicit `cache_key` wins. Gather is its whole population (#835): a gather session HAS
+       a conversation, but its `agent_id` is `gather:{lead_id}`, so arm 2 would route every
+       sibling lead to a different replica and none of them could share the prefix they have in
+       common — gather's SKILL.md and the dispatched system's catalog, byte-identical across
+       leads AND across runs. Only the caller knows what that prefix is keyed on, so it says.
+    2. WITH a session, the key is that conversation's: one growing prefix, and every turn of it
+       wants the replica already holding the previous turn.
+    3. WITHOUT one the agent is a one-shot (the review lenses are the whole of this class), so
+       there is no within-run prefix to keep warm and the bare `agent_id` is better: it is
+       stable ACROSS runs, the only reuse a single-call role can have — its role instructions,
+       identical every run, warm on the replica this key routes to.
+
+    `defender/CLAUDE.md`'s anchor-a-default rule is satisfied by this being the ONE site that
+    knows the policy; threading a resolved key inward would make all four callers compute one.
+    """
+    if cache_key is not None:
+        return cache_key
+    return f"{session_id}:{agent_id}" if session_id is not None else agent_id
+
+
 def build_agent_core(  # noqa: PLR0913 — the single build site's config + 3 DI seams (make_model/verbs/limits); every param is load-bearing per-build
     defn: AgentDefinition,
     *,
@@ -217,22 +243,15 @@ def build_agent_core(  # noqa: PLR0913 — the single build site's config + 3 DI
     limits: dict = DEFAULT_LIMITS,
     session_id: str | None = None,
     store: Any = None,
+    cache_key: str | None = None,
 ) -> Agent[Any, str]:
     model_name = defn.model()
     built = make_model(model_name, defn.effort)
-    # The prompt-cache affinity key, applied HERE and not inside `make_model`: the seam is a
-    # two-positional-argument callable every engine in the tree (and a dozen test doubles)
-    # passes by that shape, and the key is not a property of the model anyway.
-    #
-    # WITH a session the key is that conversation's — one growing prefix, and every turn of it
-    # wants the replica that already holds the previous turn. WITHOUT one the agent is a
-    # one-shot (the review lenses are the whole of this class), so there is no within-run
-    # prefix to keep warm and the bare `agent_id` is the better key: it is stable ACROSS runs,
-    # which is the only reuse a single-call role can have — its role instructions, identical
-    # on every run, sitting warm on the replica that key routes to.
+    # Applied HERE and not inside `make_model`: the seam is a two-positional-argument callable
+    # every engine in the tree (and a dozen test doubles) passes by that shape, and the key is
+    # not a property of the model anyway.
     settings = providers.cache_affinity(
-        model_name, built.settings,
-        f"{session_id}:{agent_id}" if session_id is not None else agent_id,
+        model_name, built.settings, _affinity_key(agent_id, session_id, cache_key),
     )
     capabilities: list[Any] = [
         _make_hooks(logger, agent_id, enforce=defn.budget_enforced, limits=limits,
@@ -362,6 +381,7 @@ def build_gather_agent(  # noqa: PLR0913 — composition root, same shape as bui
     limits: dict = DEFAULT_LIMITS,
     extra_capabilities: Sequence[Any] = (),
     session_id: str | None = None,
+    cache_key: str | None = None,
 ) -> Agent[GatherDeps, str]:
     name = gather_model()
     return build_agent_core(
@@ -379,6 +399,7 @@ def build_gather_agent(  # noqa: PLR0913 — composition root, same shape as bui
         verbs=verbs,
         limits=limits,
         session_id=session_id,
+        cache_key=cache_key,
     )
 
 
@@ -548,7 +569,7 @@ def build_agent(  # noqa: PLR0913 — composition root: config + DI seams + the 
     # reused `lead_id`, so it is unique within a run.
     gather_sessions: dict[str, str] = {}
 
-    def _build_gather(agent_id: str) -> Agent[GatherDeps, str]:
+    def _build_gather(agent_id: str, system: str) -> Agent[GatherDeps, str]:
         gather_extra: Sequence[Any] = ()
         gather_session_id: str | None = None
         if store is not None:
@@ -558,6 +579,14 @@ def build_agent(  # noqa: PLR0913 — composition root: config + DI seams + the 
         return build_gather_agent(
             defender_dir, logger, agent_id, make_model, verbs, limits,
             extra_capabilities=gather_extra, session_id=gather_session_id,
+            # Keyed on the SYSTEM, not this lead and not this run (#835). What the dispatch
+            # prompt puts in front of the lead's question — gather's SKILL.md, the descriptor
+            # index, this system's catalog — is identical for every lead dispatched here, in
+            # this run and the next; the key is the only thing that routes them to one replica
+            # so the second lead reads that prefix instead of re-paying it. `agent_id` stays
+            # `gather:{lead_id}`: the wire log, the session store and the terminator stamp all
+            # key on it, and none of them wants a system.
+            cache_key=f"{GATHER_AGENT_ID_PREFIX}{system}",
         )
 
     def _stamp_gather_terminator(agent_id: str, reason: str) -> None:

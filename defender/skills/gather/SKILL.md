@@ -15,7 +15,8 @@ aggregation, run it, report what it returns.
 
 ## Inputs
 
-A fenced YAML block carries:
+A fenced YAML block — the `## Dispatch` section, the LAST section of your dispatch
+message, after the indexes — carries:
 
 - `defender_dir` — repo root; anchor `Read`/`Bash` to `{defender_dir}/...`.
 - `run_dir` — the run's working dir; `alert.json` is at `{run_dir}/alert.json`.
@@ -53,16 +54,18 @@ A template is the right reuse when its `## Goal` describes the same
 **measurement** — even with different bound params. Templates are **wide/superset
 queries you narrow**; fork on capability, not parameter axis.
 
-Your dispatch prompt carries the **template index**: every established template, every system,
-each as its `id`, its path, and its `## Goal`. Scan it first. When the Goals read too coarse to
+Your dispatch prompt carries the **template index** in two tiers: the system you were dispatched
+to, each template as its `id`, its path and its `## Goal`; every other system, id and path only.
+Scan your own tier first. Leads do cross systems — when nothing on-target fits, `read_file` an
+off-tier path to see what it measures. When the Goals read too coarse to
 tell whether one already measures this, call **`template_search`** — it searches each template's
 full body, every section (case-insensitively, and including the uncurated `_draft/` templates the
 index omits), for the concept terms an analyst would type (`sshd`, `sudo`, `/etc/passwd`,
 `listening port`).
 
 **Read the template body with `read_file` before you pass its id as `query_id`.** The index
-gives you the id, the Goal and the path — not the query — so an id you take from the index is an
-id you have not yet opened. Adapt the `## Query` body you actually read. A bound id is recorded
+gives you an id and a path — and, on your own tier, the Goal — never the query, so an id you
+take from the index is an id you have not yet opened. Adapt the `## Query` body you actually read. A bound id is recorded
 as a *reuse* of that template, so naming one you never read files a query you coined under a
 query you did not run, and silently corrupts the `(query_id, params)` join the offline
 lead-author builds the catalog from.

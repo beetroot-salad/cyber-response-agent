@@ -1,0 +1,646 @@
+tests: defender/tests/e2e   # the suite this graph is the derivation of. Every demand is
+                            # reachable only through a driven gather run, so every test is e2e.
+schema_version: 1
+design: "823"   # gh#823, issue comment 5241676239 — "Intent + design — settled". Scope is
+                # links 1-3 plus the threshold (M1-M4); link 4 is N4.
+base: e3979163  # the fork commit write-code-from-spec's gate diffs against
+
+# ---------------------------------------------------------------------------
+# READ THIS FIRST
+#
+# The change: the PITFALLS CURATOR'S INPUT. The offline loop is a text-editing loop over the
+# prompt corpus — a gather failure becomes a bullet in `skills/{system}/execution.md`, which a
+# later gather subagent reads before the moment it would repeat the mistake
+# (`skills/gather/SKILL.md:63-66`). Four links carry it: the failure PRODUCES A ROW, the row is
+# CLASSIFIED `agent-fixable`, the row ROUTES to the curator, the bullet is READ BACK. Measured
+# over three archived runs the channel harvests 2 records from 227 rows against a threshold of
+# 5 (C10) — it has never completed one revolution.
+#
+# HOW THIS SPEC WAS PRODUCED — READ BEFORE TRUSTING IT.
+# The spec-flow write-tests orchestration did NOT run. No frontier chain, no phase B lenses, no
+# phase C blind answerers, no phase D gate, no §7 human seam, no phase F cold reconciler. The
+# human chose the direct path with that trade-off stated. Consequences a later reader must hold:
+#   * The `gate:` block below is HALF a gate, and says so per rule. `spec-graph gate --residue`
+#     is a CLI, so the mechanical rules genuinely ran and their result is recorded. The
+#     JUDGMENT halves (R0's prose walk, R5, R6) are the author's own reading with no cold
+#     reviewer behind them — phase D's gate leaf never ran. Read those three accordingly.
+#   * The demands below are ONE author's reading of the design doc. Ambiguity here was not
+#     found by divergence between independent readings — the mechanism that normally finds it.
+#     During the DISCUSSION that reading was wrong three times (C2, C6, C7 below, all refuted
+#     by executed probe, none by re-reading), which is the calibration to apply to this file.
+#   * Compensating control actually run: every demand was executed against unchanged `base`
+#     before the suite was committed. See THE DISCRIMINATION RECORD, the comment block just
+#     above `claims:`.
+#
+# NAMES THIS SPEC MINTS ON THE PRODUCTION SIDE — the implementer must build them under exactly
+# these names or the suite cannot import:
+#   record_query.BASH_SHIM_QUERY_ID    = "∅.bash-shim"
+#   record_query.REPEAT_TRIP_QUERY_ID  = "∅.repeat-trip"
+#   record_query.SHIM_COMMAND_MAX_CHARS
+#
+# WHAT THIS SPEC DELIBERATELY DOES NOT TOUCH: `repeat_trip`'s counted domain
+# (`record_query.py:421`). See fork F3.
+#
+# TOOL STATUS at commit: `spec-graph lint|binds|claims` all clean. `spec-graph actors` reports 2
+# UNMODELLED driver contexts (`evals/harness_lead.py`, `evals/oracle_golden/generate_case.py`) —
+# the merged spec_graph_807.yaml reports the SAME two, so this is a standing repo-wide condition
+# this graph neither introduced nor is scoped to fix. Left unwaived for the same reason 807
+# leaves it unwaived: a waiver here would claim a decision nobody made.
+# ---------------------------------------------------------------------------
+
+demands:
+
+  # =========================================================================
+  # O1 — an agent-fixable gather failure produces exactly one curator-readable record,
+  #      whatever tool it came through. Today `_tool_bash` writes nothing (C1).
+  # =========================================================================
+
+  - {id: failing_reducer_shim_writes_one_row, kind: behavior, form: test,
+     discharged_by: test_failing_reducer_shim_writes_one_row,
+     binds: ["tool_bash", "record_query", "interacts(tool_bash->executed_queries)"]}
+     # A `defender-sql` reduce that exits non-zero appends ONE row carrying the sentinel
+     # identity, verb `bash`, the argv, the shim's exit code, and `agent-fixable` — the class
+     # `lead_extraction.py:98` gates on. The trigger is a FAILURE of a REDUCER, not bash in
+     # general: `runtime/permission/command_shape.py` already carries the shim vocabulary
+     # (`SQL_SHIM`, `flat_stages`), and `bin/` holds exactly one reducer.
+
+  - {id: shim_row_keeps_the_frozen_twelve_key_contract, kind: shape, form: test,
+     discharged_by: test_shim_row_keeps_the_frozen_twelve_key_contract,
+     binds: ["executed_queries", "tool_bash"]}
+     # `set(row) == ROW_KEYS`. Every reader of this table walks the same twelve keys, and
+     # #807's own sentinel was required to fit inside them for the same reason.
+
+  - {id: succeeding_reducer_shim_writes_no_row, kind: behavior, form: test,
+     discharged_by: test_succeeding_reducer_shim_writes_no_row,
+     binds: ["tool_bash", "executed_queries"]}
+     # INVARIANT GUARD — holds on base and after. Recording a successful reduce would turn the
+     # pitfalls queue into a transcript.
+
+  - {id: failing_non_shim_bash_writes_no_row, kind: behavior, form: test,
+     discharged_by: test_failing_non_shim_bash_writes_no_row,
+     binds: ["tool_bash", "executed_queries"]}
+     # INVARIANT GUARD. `test_capture_fires_only_for_the_query_tool` (#611) pins that ordinary
+     # bash stays silent on this table; the shape driven here is that test's own, so the gate
+     # provably admits it and the negative is not vacuous.
+
+  # ---- minted by /code-review xhigh AFTER the first implementation commit. Each is a defect
+  # ---- the suite as first written did not discriminate against; see handoff.forks F4-F6.
+
+  - {id: a_non_terminal_reducer_mints_no_row, kind: negative, form: test,
+     discharged_by: test_a_non_terminal_reducer_mints_no_row,
+     binds: ["tool_bash", "executed_queries"]}
+     # ATTRIBUTION. `bash_exec` reports `procs[-1].returncode` — ONE exit code, the last stage's
+     # — so the reported rc is the reducer's only when the reducer is the final stage. The first
+     # implementation used `any(is_reducer_stage(...))`, which handed a healthy reduce piped into
+     # a non-matching `grep` that grep's exit 1 and minted a pitfall from a reduce that worked.
+     # Connectors are refused for the same reason: across `&&`/`||` the rc belongs to whichever
+     # pipeline ran last, and a short-circuit means the reducer may not have run at all.
+
+  - {id: the_shims_exit_codes_are_translated_to_the_tables_dialect, kind: behavior, form: test,
+     discharged_by: test_the_shims_exit_codes_are_translated_to_the_tables_dialect,
+     binds: ["tool_bash", "record_query", "executed_queries"]}
+     # TWO DIALECTS DISAGREE ON THE NUMBER 2. `defender-sql` spends `EXIT_INPUT_ERROR` (2) on the
+     # AGENT's mistakes (empty pipe, non-JSON payload); 2 in this table is INFRA, and
+     # `collect_general_failures` drops every infra row — so the commonest reduce mistakes were
+     # recorded and then silently discarded, which is the failure M1 exists to end.
+     # The mapping is EXACT, not averaged: this issue split `EXIT_NO_RUNTIME` (69) out of the
+     # shim's exit-2 bucket so a missing duckdb keeps its infra meaning. A broken deployment
+     # fails EVERY reduce, so misfiling it as agent-fixable would flood the queue with identical
+     # un-actionable records and trip M4's lowered threshold on noise.
+     # rejected: a blanket 2 -> 64, correct for 3 of the 4 exit-2 sites. The fourth writes into
+     #   a prompt corpus, and no test pinned exit 2 for the missing-runtime branch.
+
+  - {id: a_model_cannot_forge_a_sentinel_query_id, kind: negative, form: test,
+     discharged_by: test_a_model_cannot_forge_a_sentinel_query_id,
+     binds: ["query_tool", "record_query"]}
+     # THE `∅.` PREFIX IS RESERVED, not conventional. `resolve_query_id` refused
+     # `ABOVE_GUARD_QUERY_ID` by literal; this issue added two more literals to the same
+     # namespace and the refusal had to become prefix-wide. A forgery otherwise stamps the
+     # guard's own refusal identity onto a query that was never refused, routes an arbitrary
+     # failing query into the pitfalls residue with unbounded model-authored `params` — past the
+     # cap this issue added for exactly that reach — or hides a real catalog failure from the
+     # lead-author.
+
+  # =========================================================================
+  # O4 — nothing this change writes may name a system that does not exist.
+  # =========================================================================
+
+  - {id: shim_row_takes_the_system_of_the_payload_it_reduces, kind: behavior, form: test,
+     discharged_by: test_shim_row_takes_the_system_of_the_payload_it_reduces,
+     binds: ["tool_bash", "record_query", "executed_queries"]}
+     # M2. The system comes from the PAYLOAD the reducer reads — the operand resolves to
+     # `gather_raw/{lead}/{seq}.json` and that row's `system` is the shim row's system.
+     # `_opened_operands` (`runtime/tools.py:255`) already yields those resolved paths through
+     # the permission layer's own parse, so this needs no new command regex.
+     # REJECTED: `derive_system` (`record_query.py:36`), which the ISSUE proposed wiring. C2
+     # refuted it — it returns 'sql' for a `defender-sql` pipeline. A row carrying
+     # `system: "sql"` makes `_build_pitfalls_handoffs` emit
+     # `execution_md_path: defender/skills/sql/execution.md` and invites the curator to create
+     # a phantom system directory, the class closed for `h-*` in #821/#828.
+
+  - {id: no_record_names_a_system_absent_from_the_run, kind: behavior, form: test,
+     discharged_by: test_no_record_names_a_system_absent_from_the_run,
+     binds: ["executed_queries", "lead_extraction"]}
+     # The negative universal, stated generally so a future shim cannot reintroduce the class.
+     # Carries its own non-vacuity guard (a shim row must exist), because on base the universal
+     # is true only because no shim row is ever written.
+
+  - {id: shim_without_a_payload_operand_has_no_system_and_is_skipped, kind: behavior, form: test,
+     discharged_by: test_shim_without_a_payload_operand_has_no_system_and_is_skipped,
+     binds: ["tool_bash", "lead_extraction"]}
+     # A reduce that opens no run payload has nothing to attribute to. The row is still written
+     # — the failure happened — with an empty system, and `collect_general_failures` skips it at
+     # the EXISTING guard (`lead_extraction.py:100`). Inventing a system here is what O4 forbids.
+
+  - {id: shim_row_reaches_the_curator_and_nothing_else, kind: behavior, form: test,
+     discharged_by: test_shim_row_reaches_the_curator_and_nothing_else,
+     binds: ["lead_extraction", "lead_repository", "draft_synthesis", "lead_author"]}
+     # O1's oracle, end to end through the REAL join, the REAL extraction and the three REAL
+     # collectors. Note the coupling this also proves: `extract_from_joined` drops any row whose
+     # payload sidecar is missing (`lead_extraction.py:60`), so a shim row must persist one or
+     # the curator never sees it at all.
+
+  # =========================================================================
+  # O2 — a lead that loops teaches, and pollutes nothing (M3).
+  # =========================================================================
+
+  - {id: trip_row_carries_the_sentinel_identity, kind: behavior, form: test,
+     discharged_by: test_trip_row_carries_the_sentinel_identity,
+     binds: ["query_tool", "record_query", "executed_queries"]}
+     # The refusal is recorded under `REPEAT_TRIP_QUERY_ID`, not under whatever the model called
+     # the request it was refused. The two rows BELOW the trip keep the model's id — #807's
+     # `repeat_key_ignores_query_id` pins that they must.
+
+  - {id: trip_row_reaches_the_curator_and_mints_no_draft, kind: behavior, form: test,
+     discharged_by: test_trip_row_reaches_the_curator_and_mints_no_draft,
+     binds: ["draft_synthesis", "lead_extraction", "lead_author"]}
+     # O2's oracle: `(pitfalls, drafts, handoff) == (1, 0, 0)`. On base the same run routes
+     # `(0, 1, 0)` — C7, executed: the trip row is minted as
+     # `skills/elastic/_draft/sshd-raw-events-window.md`, a proposed catalog template authored
+     # from the query the guard just refused.
+
+  - {id: trip_row_on_a_catalog_id_still_reaches_the_curator, kind: behavior, form: test,
+     discharged_by: test_trip_row_on_a_catalog_id_still_reaches_the_curator,
+     binds: ["lead_author", "lead_extraction"]}
+     # The misroute's OTHER branch. When the model names an established template, today's trip
+     # row resolves to it and `build_handoff` hands the lead-author a conduct trip as a failure
+     # OF that template. One sentinel closes both branches.
+
+  - {id: trip_row_still_counts_toward_a_later_check, kind: behavior, form: test,
+     discharged_by: test_trip_row_still_counts_toward_a_later_check,
+     binds: ["record_query", "executed_queries"]}
+     # INVARIANT GUARD, and the reason F3 was resolved the way it was. #807's
+     # `trip_row_is_itself_an_occurrence_on_replay` pins that a trip row counts toward a later
+     # check of the same key, so a replay of a recorded table keeps matching the live run.
+     # Renaming the row for the offline ROUTER must not widen what the guard SKIPS.
+
+  - {id: the_two_writers_share_one_seq_sequence, kind: uniqueness, form: test,
+     discharged_by: test_the_two_writers_share_one_seq_sequence,
+     binds: ["executed_queries", "tool_bash", "query_tool",
+             "interacts(tool_bash->executed_queries)"]}
+     # MINTED BY THE GATE, not by the design doc — R2 on `executed_queries.identity`. M1 makes
+     # the bash lane a second writer of a table keyed `(lead_id, seq)`, and nothing else in this
+     # suite pinned that the two writers allocate from ONE sequence. Independent allocation
+     # collides on `seq` and silently overwrites a payload sidecar, since both writers are
+     # best-effort about persistence. Driven INTERLEAVED in one lead, which is the only
+     # arrangement that can catch it.
+
+  - {id: shim_row_never_causes_a_trip, kind: behavior, form: test,
+     discharged_by: test_shim_row_never_causes_a_trip,
+     binds: ["tool_bash", "record_query"]}
+     # N3: shim rows are OBSERVATIONAL. Three identical failing reduces do not dead-end the
+     # lead. Live termination is #807's and is out of scope here. The exemption needs no code —
+     # a shim row's verb is `bash`, so it cannot collide with a query key — which is why this
+     # pins the OBSERVABLE rather than a domain predicate.
+
+  # =========================================================================
+  # Security — the committed corpus is the asset.
+  # =========================================================================
+
+  - {id: shim_command_is_capped_in_the_record, kind: behavior, form: test,
+     discharged_by: test_shim_command_is_capped_in_the_record,
+     binds: ["tool_bash", "lead_extraction", "draft_synthesis"]}
+     # `stderr_digest` is capped at 160 (`query_tool.py:416-419`) but `executed_query` is not —
+     # `_structured_call` (`draft_synthesis.py:27-31`) yaml-dumps `params` whole (C14). An
+     # unbounded model-authored command therefore enters the curator's prompt, and possibly a
+     # committed file, in full. Guard-plus-positive-control: the test asserts the bound at the
+     # ROW and again at the RECORD the curator's prompt receives.
+
+  - {id: shim_row_payload_is_not_the_untrusted_stdout, kind: behavior, form: test,
+     discharged_by: test_shim_row_payload_is_not_the_untrusted_stdout,
+     binds: ["tool_bash", "executed_queries"]}
+     # A failed row's sidecar is empty, the way every other failed query row's is
+     # (`query_tool.py:398`). The shim's stdout is attacker-influenced bytes and the sidecar is
+     # a by-ref EVIDENCE surface; a failure has no evidence. The sidecar must still EXIST, or
+     # extraction drops the row (see `shim_row_reaches_the_curator_and_nothing_else`).
+
+  # =========================================================================
+  # O3 — the channel can complete a revolution (M4).
+  # =========================================================================
+
+  - {id: pitfalls_threshold_default_is_three, kind: behavior, form: test,
+     discharged_by: test_pitfalls_threshold_default_is_three,
+     binds: ["loop_config"]}
+     # A DEFAULT, not a constant: the env override stays. O3's yield oracle is NOT claimed here
+     # — see the `deferred` verdict on C9.
+
+  # =========================================================================
+  # Non-obligations — examined noes. A rejected reading recorded so it cannot re-enter as an
+  # assumption. Each holds on base AND after.
+  # =========================================================================
+
+  - {id: catalog_template_failures_still_route_to_the_lead_author, kind: negative, form: test,
+     discharged_by: test_catalog_template_failures_still_route_to_the_lead_author,
+     binds: ["lead_extraction", "lead_author"]}
+     # N1. `lead_extraction.py:102` is the partition boundary, not blindness — pinned by
+     # `test_lead_author.py:840`/`:867`. Both templates #807 cited are catalog members, so they
+     # route to the agent that edits their docs. Removing the skip double-routes, not unblinds.
+
+  - {id: budget_exhausted_lead_mints_no_record, kind: negative, form: test,
+     discharged_by: test_budget_exhausted_lead_mints_no_record,
+     binds: ["lead_extraction"]}
+     # N2. A lead that spends its budget on DISTINCT queries has no nameable mistake. `l-012`
+     # ran 36 queries with 36 distinct keys and died on `request_limit` (C8); the curator's own
+     # prompt would skip it and `execution.md` is the wrong file for a conduct lesson. The
+     # repeat guard cannot see it either — it is not a repeat.
+
+  - {id: main_lane_shim_failure_writes_no_row, kind: negative, form: test,
+     discharged_by: test_main_lane_shim_failure_writes_no_row,
+     binds: ["tool_bash", "executed_queries"]}
+     # N-main (fork F2). The record is per-LEAD and joins on `lead_id`, which main does not have
+     # (`_record` raises on `deps.lead_id is None`). Main's bash is investigation authoring, not
+     # evidence gathering. Pinned so a later widening is a decision rather than a drift.
+
+  # ---- waivers with no test, recorded so the absence is examined rather than silent ----
+
+  - {id: common_pitfalls_section_is_not_created_by_this_work, kind: negative, form: waiver,
+     binds: ["lead_extraction"], cites: [C13],
+     outcome: {nl: "This work creates no `## Common pitfalls` section in any execution.md and
+       adds no test that one exists; the curator's own prompt creates it on first tick."}}
+     # N4 (link 4). Zero `execution.md` files carry a `## Common pitfalls` section (C13) — a
+     # CONSEQUENCE of the curator never having run, not a separate defect. `lead_pitfalls.md`
+     # step 3 already creates the section on its first tick. Explicitly out of scope per the
+     # human's instruction ("fix all links but link 4").
+
+  - {id: record_query_footer_line_is_out_of_scope, kind: negative, form: waiver,
+     binds: ["record_query"], cites: [S6],
+     outcome: {nl: "The non-sampled footer that hands the model
+       `… | defender-sql 'SELECT count(*) FROM data'` is left exactly as it is by this work."}}
+     # N5. The non-sampled footer (`record_query.py:198-205`) hands the model
+     # `… | defender-sql 'SELECT count(*) FROM data'`, which returns 1 on an ES envelope — the
+     # PROXIMATE CAUSE of the l-003 failures this work makes visible. It belongs with the #807
+     # footer work on `fix/807-message-idiom-and-footer-guard`, not here.
+
+  - {id: derive_system_stays_unwired, kind: negative, form: waiver,
+     binds: ["record_query"], cites: [C2],
+     outcome: {nl: "`derive_system` gains no production caller and keeps its five tests; the
+       system attribution this work adds never calls it."}}
+     # N6. `derive_system` is not the mechanism (C2). Its five tests and
+     # `test_query_tool_611.py:1240` — which pins the ABSENCE of a production caller — are
+     # untouched by this work.
+
+structure:
+
+  axes: [lead_id, seq, system, verb, params, query_id, pitfall_id]
+
+  actors:
+    - {id: tool_bash,        frame: leg, provenance: code}   # runtime/tools.py::_tool_bash (:156) — M1's site
+    - {id: query_tool,       frame: leg, provenance: code}   # runtime/query_tool.py::QueryCapture — M3's site (:352)
+    - {id: record_query,     frame: leg, provenance: code}   # scripts/gather_tools/record_query.py — the sentinels
+    - {id: lead_repository,  frame: leg, provenance: code}   # learning/lead_repository.py — the join
+    - {id: lead_extraction,  frame: leg, provenance: code}   # learning/leads/lead_extraction.py — collect_general_failures
+    - {id: draft_synthesis,  frame: leg, provenance: code}   # learning/leads/draft_synthesis.py — the draft collector
+    - {id: lead_author,      frame: leg, provenance: code}   # learning/leads/lead_author.py — build_handoff
+    - {id: loop_config,      frame: leg, provenance: code}   # learning/core/config.py — pitfalls_threshold
+
+  boundaries:
+
+    - id: executed_queries
+      provenance: code
+      facets:
+        identity:
+          key_axes: [lead_id, seq]
+          evidence: {nl: "The queries table. Two writers on base — `query_tool.py:422` and the
+            judge's `closed_ticket_tool.py:359` (C1). M1 adds a THIRD, in the gather bash lane.
+            `RunPaths.executed_queries` (_run_paths.py:40-41) is the sole path constructor."}
+          sharing: serialized-append
+        payload:
+          evidence: {nl: "The frozen twelve keys. The shim row lives inside them; `query_id`
+            carries the routing sentinel and `params.command` the argv, so no thirteenth key is
+            an available implementation."}
+
+    - id: pitfalls_queue
+      provenance: code
+      facets:
+        identity:
+          key_axes: [pitfall_id]
+          evidence: {nl: "The nine-field pitfall record, UNCHANGED by this issue. What changes
+            is which producers can populate it and what `query_id` MEANS: it is a routing key,
+            not an identity. Three ∅-prefixed literals mark 'route to the residue' and identity
+            for those rows lives in `executed_query`. Routing is by construction — `∅` fails
+            `_SAFE_ID_SEGMENT` (draft_synthesis.py:22) — so no collector is edited."}
+          sharing: serialized-append
+
+  interacts:
+
+    # --- the delta: the queries table gains a THIRD writer, in the bash lane ---
+    - {from: tool_bash, to: executed_queries, mode: write, via: fs, provenance: design}
+      # M1. `_tool_bash` had no edge to this table at all — that absence IS the issue's link 1.
+      # It writes through `record_query.append_query_row`, the same function `query_tool._record`
+      # now calls, so there is one row-assembly site rather than two that can drift.
+    - {from: tool_bash, to: executed_queries, mode: read, via: fs, provenance: design}
+      # M2's join, and a real cost worth naming: attributing the system means READING the table
+      # the same call is about to append to. Two reads per failed reduce (this one, plus
+      # `_next_seq` inside the writer), on a path that only runs when a reduce has already failed.
+    - {from: query_tool, to: executed_queries, mode: write, via: fs, provenance: code}
+      # Unchanged by this issue except for the trip row's `query_id` (M3); named so the third
+      # writer above reads as an ADDITION to a known set rather than the only writer in view.
+
+# ---------------------------------------------------------------------------
+# THE DISCRIMINATION RECORD — the compensating control that stands in for the gate this run did
+# not produce. It is a comment, not a top-level key: the schema has no slot for it, and
+# inventing one would put an unvalidated key in front of every later reader. The prose summary
+# lives in `handoff.deviations`, which the merge reviewer reads.
+#
+# METHOD. The full suite was executed against unchanged base e3979163 with ONLY the three minted
+# constants present as a throwaway stub (reverted before commit), so each test failed for ITS
+# OWN reason rather than at a shared collection error.
+#
+# OBSERVED. 19 tests: 13 failed, 6 passed.
+#
+# FAILED ON BASE (the demands — all 13):
+#   failing_reducer_shim_writes_one_row, shim_row_keeps_the_frozen_twelve_key_contract,
+#   shim_row_takes_the_system_of_the_payload_it_reduces,
+#   no_record_names_a_system_absent_from_the_run,
+#   shim_without_a_payload_operand_has_no_system_and_is_skipped,
+#   shim_row_reaches_the_curator_and_nothing_else, trip_row_carries_the_sentinel_identity,
+#   trip_row_reaches_the_curator_and_mints_no_draft,
+#   trip_row_on_a_catalog_id_still_reaches_the_curator, shim_row_never_causes_a_trip,
+#   shim_command_is_capped_in_the_record, shim_row_payload_is_not_the_untrusted_stdout,
+#   pitfalls_threshold_default_is_three
+#
+# PASSED ON BASE (all 6 are INVARIANT GUARDS or waivers — they must hold in BOTH states, so
+# passing on base is their contract, not a defect):
+#   succeeding_reducer_shim_writes_no_row, failing_non_shim_bash_writes_no_row,
+#   main_lane_shim_failure_writes_no_row, trip_row_still_counts_toward_a_later_check,
+#   catalog_template_failures_still_route_to_the_lead_author,
+#   budget_exhausted_lead_mints_no_record
+#
+# WHAT THE RUN CAUGHT IN THE SUITE ITSELF — the reason it was worth running:
+#   * `no_record_names_a_system_absent_from_the_run` passed only because no shim row existed at
+#     all; the universal was vacuous. It now asserts one does.
+#   * `succeeding_reducer_shim_writes_no_row` never checked the reduce reached the boundary.
+#   * `failing_non_shim_bash_writes_no_row` drove a bare `grep`, which the permission gate
+#     DENIED, so nothing reached the box. Rewritten onto #611's proven-admitted shape.
+#
+# REST OF TREE on base with the stub reverted: 556 passed, 48 skipped across tests/e2e,
+# test_pitfalls_curator, test_lead_author and test_826_deferred_defects.
+# ---------------------------------------------------------------------------
+
+claims:
+
+  # ======================= inherited from the design doc (gh#823) =======================
+  # Ids and verdicts kept verbatim from the issue comment. Three of these REFUTED the reading
+  # the issue or the author arrived at by inspection; they are the calibration for this file.
+
+  - {id: C1, source: discuss, kind: census, probe_kind: search, verdict: holds,
+     claim: "`executed_queries.jsonl` has exactly two writers; `_tool_bash` is not one.",
+     probe: "grep -rn 'executed_queries' --include=*.py, excluding tests/worktrees; read runtime/tools.py:156-181",
+     observed: "runtime/query_tool.py:422 (write_guarded) and learning/pipeline/judge/closed_ticket_tool.py:359 (append_jsonl). _tool_bash formats and returns; no write."}
+
+  - {id: C2, source: discuss, kind: behavior, probe_kind: executed, verdict: refuted,
+     claim: "derive_system misattributes reducer shims, so it cannot supply link 1's system.",
+     probe: "derive_system() over five real argv shapes incl. the record_query footer's own pipeline",
+     observed: "'cat …|defender-sql …' -> 'sql'; 'cat …|defender-jq …' -> 'jq'; 'grep …' -> None; 'defender-elastic query x' -> 'elastic'. REFUTES the issue's stated mechanism for link 1."}
+
+  - {id: C3, source: discuss, kind: behavior, probe_kind: executed, verdict: holds,
+     claim: "The payload path in the command recovers the true system.",
+     probe: "regex over sample commands joined to reviewer-measure-0807-b's rows",
+     observed: "l-003/4 -> 'elastic'; l-001/0 -> 'elastic'; a command with no payload path -> None"}
+
+  - {id: C4, source: discuss, kind: reachability, probe_kind: executed, verdict: unrefuted,
+     claim: "A ∅-prefixed query_id cannot resolve to a catalog template or mint a draft.",
+     probe: "_draft_candidate_segments + catalog membership for the sentinels and two safe-segment counterexamples",
+     observed: "both ∅ ids -> None / not in catalog. 'elastic.defender-sql-unnest' -> ('elastic','defender-sql-unnest') i.e. WOULD mint a draft — which is why a coined shim id was rejected."}
+
+  - {id: C5, source: discuss, kind: behavior, probe_kind: executed, verdict: holds,
+     claim: "A shim row shaped per M1/M2 reaches the pitfalls curator and nothing else.",
+     probe: "synthetic ExecutedLead through collect_general_failures + build_handoff on the real catalog",
+     observed: "pitfalls=1 handoff=0; record carries system elastic, the sentinel id, the argv and the shim's digest"}
+
+  - {id: C6, source: discuss, kind: behavior, probe_kind: executed, verdict: refuted,
+     claim: "The trip row as written today reaches the curator.",
+     probe: "same harness, trip row with the model's coined id vs the ∅ sentinel",
+     observed: "coined id -> pitfalls=0, handoff=0; ∅.repeat-trip -> pitfalls=1, handoff=0. REFUTES the issue's 'lands for free' claim."}
+
+  - {id: C7, source: discuss, kind: behavior, probe_kind: executed, verdict: holds,
+     claim: "A coined trip row is minted as a _draft catalog template.",
+     probe: "synthesize_drafts([trip_lead], catalog_dir=tmp, catalog=real)",
+     observed: "wrote elastic/_draft/sshd-raw-events-window.md, status: draft, Goal 'auto-drafted from a coined gather query'. REFUTES the author's own earlier build_handoff misroute story."}
+
+  - {id: C8, source: discuss, kind: behavior, probe_kind: executed, verdict: holds,
+     claim: "The repeat breaker covers l-001 and cannot cover l-012.",
+     probe: "group each lead's rows by (system, verb, params) across all three archived runs",
+     observed: "l-001: 37 rows / 3 keys / mode 35 -> trips at the 3rd. l-012: 36 rows / 36 keys / mode 1 -> cannot trip."}
+
+  - {id: C9, source: discuss, kind: census, probe_kind: executed, verdict: deferred,
+     claim: "Link 3's standalone yield is ~1 record per three runs; O3 rests on M1.",
+     probe: "count leads whose max repeat key >= 3, per archived run",
+     observed: "reviewer-measure-0807-b: 1 (l-001). pr815: 0. pr822: 0. O3's yield oracle CANNOT be measured from an archive that never recorded bash; it needs a post-implementation run."}
+
+  - {id: C10, source: discuss, kind: behavior, probe_kind: executed, verdict: holds,
+     claim: "The curator's live harvest today is 2 records across 227 rows, below any threshold.",
+     probe: "replay the three-way partition (real catalog, real _draft_candidate_segments) over all three runs",
+     observed: "70/131/26 rows; agent-fixable 4/27/2; -> pitfalls 0/2/0, both cmdb.get-host exit-64 param rejections. pitfalls_threshold()=5."}
+
+  - {id: C11, source: discuss, kind: behavior, probe_kind: executed, verdict: holds,
+     claim: "exit 64 classifies agent-fixable, so a trip/rejection row is already correctly classed.",
+     probe: "error_class_for_exit(0|1|64)",
+     observed: "0 -> None; 1 -> agent-fixable; 64 -> agent-fixable (64 not in INFRA_EXIT_CODES={2,124})"}
+
+  - {id: C12, source: discuss, kind: referential, probe_kind: read, verdict: holds,
+     claim: "The curator's edit scope, not its toolset, is confined to execution.md.",
+     probe: "read lead_author_engine.py:57, pitfalls_curator.py:83-99",
+     observed: "ToolSet(read=True, bash=True, write=True); _pitfalls_path_rule raises on any non-execution.md path and on delete"}
+
+  - {id: C13, source: discuss, kind: census, probe_kind: search, verdict: holds,
+     claim: "No execution.md carries a ## Common pitfalls section (link 4, N4).",
+     probe: "grep -ln 'Common pitfalls' defender/skills/*/execution.md",
+     observed: "no hits; only cmdb, elastic, identity have an execution.md at all"}
+
+  - {id: C14, source: discuss, kind: referential, probe_kind: read, verdict: holds,
+     claim: "executed_query is uncapped while stderr_digest is capped at 160.",
+     probe: "read draft_synthesis.py:27-41; query_tool.py:416-419",
+     observed: "_structured_call yaml-dumps params whole, no length bound; digest slices detail[:160]"}
+
+  # ============================ minted while writing this spec ============================
+
+  - {id: S1, source: write-tests, kind: referential, probe_kind: read, verdict: holds,
+     claim: "#807 PINS that the trip row counts toward a later check, so M3 must not widen the guard's domain.",
+     probe: "read tests/e2e/test_repeat_breaker_807.py:1338-1363 and record_query.py:409-422",
+     observed: "test_trip_row_is_itself_an_occurrence_on_replay asserts repeat_trip([rows[0], trip], …) is not None with occurrence == REPEAT_THRESHOLD; in_domain is `query_id != ABOVE_GUARD_QUERY_ID`. Extending that to a sentinel SET would have broken it — this refuted the author's first resolution of F3."}
+
+  - {id: S2, source: write-tests, kind: census, probe_kind: search, verdict: holds,
+     claim: "No test anywhere asserts the trip row's query_id, so M3 lands without amending another issue's spec.",
+     probe: "grep -n 'query_id' over test_repeat_breaker_807.py and the sentinel across tests/",
+     observed: "807:650 asserts rows[:2] only (the two rows BELOW the trip). test_826_deferred_defects.py:57 uses ABOVE_GUARD_QUERY_ID, an untouched literal."}
+
+  - {id: S3, source: write-tests, kind: referential, probe_kind: read, verdict: holds,
+     claim: "A reducer-shim vocabulary and an opened-operand resolver already exist; M1/M2 reuse them.",
+     probe: "read runtime/permission/command_shape.py, hooks/_cmd_segments.py, runtime/tools.py:255-260",
+     observed: "SQL_SHIM='defender-sql'; NON_ADAPTER_SHIMS={defender-invlang,defender-lessons,defender-sql}; flat_stages(pipelines); _opened_operands(deps, decision) yields resolved operand paths through the permission layer's own parse. bin/ holds exactly one reducer."}
+
+  - {id: S4, source: write-tests, kind: behavior, probe_kind: executed, verdict: holds,
+     claim: "extract_from_joined drops a row whose payload sidecar is missing, so a shim row must persist one.",
+     probe: "read lead_extraction.py:53-66 and drive the suite's routing test",
+     observed: "`if q.raw_ref is None or not q.raw_ref.is_file(): continue`; payload_status must be in {ok,empty,suspect_empty,error,partial} or LeadAuthorError. 'error' is valid."}
+
+  - {id: S5, source: write-tests, kind: behavior, probe_kind: executed, verdict: holds,
+     claim: "#611's existing bash-silence test survives M1 unchanged.",
+     probe: "read test_query_tool_611.py:705-727; run the suite on base",
+     observed: "It drives `cat alert.json | wc -l` — a SUCCEEDING, NON-shim command — so M1's 'failing reducer only' trigger leaves it green. 556 passed on base with the new suite excluded."}
+
+  - {id: S6, source: write-tests, kind: referential, probe_kind: read, verdict: holds,
+     claim: "The non-sampled footer exists and hands the model the count command N5 waives.",
+     probe: "read scripts/gather_tools/record_query.py:198-205",
+     observed: "The non-sampled arm appends `→ compute every value over the full payload on disk (defender-sql, grep)` followed by `cat {abs_payload} | defender-sql 'SELECT count(*) FROM data'`. This is what grounds N5's SCOPING waiver — that the line exists and belongs to the #807 footer branch."}
+
+  - {id: S7, source: write-tests, kind: behavior, probe_kind: executed, verdict: unprobed,
+     claim: "That footer command returns 1 on an ES envelope (counting the envelope, not the 4 events at hits[]._source).",
+     probe: "pipe a 4-hit ES envelope into bin/defender-sql 'SELECT count(*) FROM data'",
+     observed: "COULD NOT BE RE-EXECUTED IN THIS TREE: the worktree venv has no duckdb (`defender-sql: duckdb is not installed`), so the shim exits 2 before reaching the query. The issue author reports having run it; that observation is INHERITED, not reproduced here, and this claim is deliberately left `unprobed` rather than borrowing their verdict. NOTHING CITES IT — N5's waiver cites S6 (the line exists) instead, because the waiver is a scoping decision and does not rest on what the command returns."}
+
+gate:
+  # HALF a gate, and each entry says which half it is. `spec-graph gate --residue` ran (it is a
+  # CLI, not a leaf) and computed ONE firing across the mechanical rules. The three judgment
+  # halves are the author's own reading; phase D's gate leaf and phase F's cold reconciler never
+  # ran, so nothing independent checked them. A rule with no entry would read as skipped, so
+  # every rule has one.
+
+  evaluated:
+    - {rule: R0, fired: false, cites: [C2, C6, C7, S1]}
+      # MECHANICAL half: clean, and only after two real defects the tool caught — a dangling
+      # `interacts(tool_bash->executed_queries)` bind (the edge was asserted by a demand but
+      # declared nowhere in `structure`) and a `pitfall_id` key axis missing from the `axes:`
+      # registry. Both fixed in place; neither would have been found by re-reading.
+      # JUDGMENT half (AUTHOR'S OWN, no cold reviewer) — walked against gh#823's settled
+      # comment: every delta element traces to M1-M4 or to an O-obligation, and every M traces
+      # to at least one demand. No invented scope found. The three refuted claims (C2, C6, C7)
+      # are corrections carried IN-graph rather than design sentences left standing.
+    - {rule: R1, fired: false}
+    - {rule: R2, fired: true}
+      # THE ONE MECHANICAL FIRING, and it earned its keep: "writers ['query_tool', 'tool_bash']
+      # share the `executed_queries` sink — a uniqueness demand must drive them into one root at
+      # the composition frame." M1 makes the bash lane a second writer of a table whose primary
+      # key is `(lead_id, seq)`, and nothing in the suite pinned that the two allocate from ONE
+      # sequence. Independent allocation would collide on `seq` and silently overwrite a payload
+      # sidecar, since both writers are best-effort about persistence. Routed to an obligation.
+    - {rule: R3, fired: false}
+    - {rule: R4, fired: false}
+    - {rule: R5, fired: false, cites: [C4, S1]}
+      # JUDGMENT (AUTHOR'S OWN). The routing change is safe-by-construction rather than guarded:
+      # `∅` fails `_SAFE_ID_SEGMENT`, so a sentinel row cannot reach `synthesize_drafts` or
+      # `build_handoff` by the same predicate those collectors already apply. Nothing was
+      # loosened — the sentinel set grew by two literals and no collector was edited.
+    - {rule: R6, fired: false, cites: [C12, C14]}
+      # JUDGMENT (AUTHOR'S OWN), and the rule most worth firing here: the curator's prompt IS a
+      # rendered sink for model-authored text, and M1 newly routes a bash argv into it. Existing
+      # chooser/sanitizer: `_build_pitfalls_handoffs` projects four fields and
+      # `pitfalls_curator.py:69-70` wraps the whole handoff in a salted frame; the edit scope is
+      # then confined to `execution.md` by `_pitfalls_path_rule`. What was MISSING is length —
+      # `executed_query` was uncapped — and that is a demand
+      # (`shim_command_is_capped_in_the_record`), not a hole.
+    - {rule: R7, fired: false}
+
+  obligations:
+    - {rule: R2, element: executed_queries.identity,
+       resolved_to: the_two_writers_share_one_seq_sequence,
+       discharged_by: the_two_writers_share_one_seq_sequence}
+      # Discharged, and verified after the fact: both writers go through the one
+      # `record_query.append_query_row`, and the test drives them INTERLEAVED in a single lead
+      # (query, failed reduce, query, failed reduce) asserting `seq == [0, 1, 2, 3]` with four
+      # distinct sidecars on disk. The single-root property the rule demanded is the reason
+      # fork F1 chose a shared module-level writer over a `QueryCapture` handle.
+
+handoff:
+
+  # Branch is `spec/823-pitfalls-input`; the fork commit is the top-level `base:` above. Neither
+  # is a `handoff` slot — the schema keeps this block to the decision channels.
+
+  forks:
+    - "F1 — WHERE THE BASH WRITER LIVES. Resolved on the spine (no §7 seam ran): extract a
+       module-level row writer that both `_tool_bash` and `QueryCapture._record` use, keeping
+       the seq lock and the `write_guarded` append in ONE place. The recording machinery
+       (`_record`, `_next_seq`, `_persist_payload`, `self._seq_lock`) is today `QueryCapture`'s,
+       in query_tool.py, while `_tool_bash` is a plain function over `deps`. REJECTED: handing
+       `_tool_bash` a `QueryCapture` handle, which coreferences an execute-path object from a
+       lane that never executes a verb. `lint_duplicate_helpers` is the check that would catch
+       a third copy of the append instead."
+    - "F2 — MAIN-LANE BASH. Resolved: gather-only, matching the design doc. `_tool_bash` serves
+       both lanes (driver.py:298 and :338) and `_record` raises when `deps.lead_id is None`. The
+       pitfall record is per-lead and joins on lead_id; main's bash is investigation authoring,
+       not evidence gathering. Recorded as the waiver `main_lane_shim_failure_writes_no_row` and
+       pinned by a test, so a later widening is a decision rather than a drift."
+    - "F3 — WHETHER THE GUARD SKIPS THE NEW SENTINELS. The author's FIRST resolution was 'both
+       new sentinels are guard-exempt', and it was WRONG — S1 refuted it before any test was
+       written. It conflated two readers: the guard's COUNTED DOMAIN and the offline ROUTER both
+       read `query_id`, for different reasons, and M3 needs only the router. RESOLVED: leave
+       `repeat_trip`'s `in_domain` (record_query.py:421) exactly as it is. The trip row keeps
+       counting on replay — #807's invariant — and routes to the curator purely because
+       `∅.repeat-trip` fails `_SAFE_ID_SEGMENT` and is absent from the catalog. A shim row
+       cannot collide with a query key regardless (its verb is `bash`), so its exemption is
+       vacuous and gets NO CODE; the suite pins the observable, not the mechanism."
+
+  deviations:
+    - "AN ADVERSARIAL REVIEW RAN AFTER THE FIRST IMPLEMENTATION COMMIT (`/code-review xhigh`)
+       and is the closest thing this run had to the phase F cold reconciler it skipped. It
+       returned 12 findings and it was RIGHT about the ones that mattered — three were real
+       defects in code the author had already called green, each now a demand:
+       `a_non_terminal_reducer_mints_no_row` (the box reports one exit code and the first
+       implementation attributed it to the wrong stage), `the_shims_exit_codes_are_translated_
+       to_the_tables_dialect` (exit-2 reduce failures were classed infra and silently dropped —
+       M1 half-built), and `a_model_cannot_forge_a_sentinel_query_id` (the new `∅.` literals
+       were forgeable). Two more are recorded under `deferred` as follow-ups.
+       CALIBRATION FOR A LATER READER: this is the third time in this issue that a reading which
+       looked settled was wrong, and the second time the error survived a full green gate. The
+       graph's header warning about a single author's reading is not boilerplate."
+    - "THE WRITE-TESTS ORCHESTRATION DID NOT RUN. No frontier chain, no phase B lenses, no
+       phase C blind answerers, no phase D gate, no §7 human seam, no phase F cold reconciler —
+       the human chose the direct path with the trade-off stated. The unknown-unknown region
+       ran degraded: ambiguity was NOT found by divergence between independent readings."
+    - "No `gate:` block, deliberately. Phase D never ran; writing one would claim a check that
+       did not happen. `write-code-from-spec`'s spec-diff check is therefore unavailable, and
+       `finalize` has no conservation chain to trace an escape back to."
+    - "COMPENSATING CONTROL actually run in place of the gate — the DISCRIMINATION RECORD, in
+       the comment block above `claims:`. The whole suite was executed against unchanged base
+       e3979163 before commit: 13 demands failed, 6 invariant guards passed. It found two
+       vacuity holes and one denied-command bug IN THE SUITE ITSELF, all fixed before commit."
+    - "NEXT ACTION for the implementer: build M1-M4 against this suite. The three minted
+       constants must exist or the suite cannot import. Start at F1's shared row writer — M1 and
+       M2 both land on it. Branch `spec/823-pitfalls-input`, base e3979163."
+
+  deferred:
+    - "PITFALLS QUEUE HAS NO DEDUP (code-review #4) — filed as gh#840. `append_pitfalls`
+       appends without dedup and `collect_general_failures` emits one record PER ROW, so the
+       motivating incident — one lead brute-forcing the same reduce for eight turns — now
+       enqueues 8 near-identical records and clears M4's threshold of 3 on a single lesson.
+       This makes O3's oracle WEAKER than C9 already said: the queue can reach the threshold
+       without the channel having learned three things. Not fixed here because dedup changes
+       `collect_general_failures`, which this issue's scope explicitly does not touch."
+    - "SENTINEL ROWS REACH THE ACTOR, ORACLE AND JUDGE (code-review #5) — filed as gh#841.
+       `lead_repository` applies NO sentinel filter, so `actor_view` (lead_repository.py:213)
+       and `oracle/sample._query_lines` render `{id: ∅.bash-shim, params: {command: <shell>}}`
+       to those stages as 'a query the defender ran', and `build_handoff` logs a WARN for each.
+       PRE-EXISTING, not introduced here: `∅.above-repeat-guard` rows have flowed the same path
+       since #826 — verified, `lead_repository` has never mentioned the sentinel. This issue
+       WIDENS it with a second population carrying up to 2000 chars of model-authored shell.
+       Not fixed here because deciding what 'the queries the defender ran' means for three
+       downstream consumers is a design question, not a bug fix inside this diff."
+    - "O3's YIELD ORACLE (C9). 'The channel completes a revolution' is designed for, NOT
+       demonstrated. Link 3 alone yields ~1 record per three archived runs, so O3 rests on M1's
+       yield, which cannot be measured from an archive that never recorded bash. After M1 ships,
+       run an investigation that reduces a payload and confirm the pitfalls queue reaches 3 from
+       one run. Until that runs, M4's threshold of 3 is a reasoned guess at the right number."
+    - "N5's FOOTER LINE (record_query.py:198-205) is the proximate cause of the l-003 failures
+       this work makes visible. Landing #823 without it means the corpus learns the lesson while
+       the prompt keeps handing out the command that teaches it."

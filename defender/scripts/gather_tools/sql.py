@@ -14,6 +14,16 @@ EXIT_OK = 0
 EXIT_QUERY_ERROR = 1
 EXIT_INPUT_ERROR = 2
 
+#: A missing `duckdb` is the ONE failure here that is not the caller's fault, and #823 made the
+#: difference load-bearing: `_record_shim_failure` now files a failed reduce as a lesson for the
+#: pitfalls curator, which writes into `skills/{system}/execution.md` — prompt text every later
+#: gather subagent reads. Sharing `EXIT_INPUT_ERROR` with the three agent mistakes made a broken
+#: deployment indistinguishable from a bad payload, and since a deployment fault fails EVERY
+#: reduce it would have filled the queue with identical un-actionable records. 69 is sysexits'
+#: `EX_UNAVAILABLE` (the service is not available), and no test or caller pinned the old value
+#: for this branch — the three that pin `EXIT_INPUT_ERROR` all pin agent mistakes.
+EXIT_NO_RUNTIME = 69
+
 _MAX_OBJECT_SIZE = 1 << 30
 
 #: The one spelling that binds `h` to the unnested STRUCT on the search-hits shape.
@@ -128,7 +138,7 @@ def _run(sql: str) -> int:
             "(cd defender && uv pip install --python .venv/bin/python -e '.[runtime]').",
             file=sys.stderr,
         )
-        return EXIT_INPUT_ERROR
+        return EXIT_NO_RUNTIME
 
     raw = sys.stdin.buffer.read()
     if not raw.strip():
