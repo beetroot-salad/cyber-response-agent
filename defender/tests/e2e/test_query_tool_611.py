@@ -142,9 +142,18 @@ class _Run:
     def rows(self) -> list[dict]:
         return read_jsonl_rows(self.run_dir / "executed_queries.jsonl")
 
+    @property
+    def own_rows(self) -> list[dict]:
+        """`.rows` filtered to exclude #808's harness-authored leads (`l-000`/`l-00c`) —
+        the rows produced by THIS test's own dispatched lead, not lead-0's unconditional
+        pre-ORIENT resolution against `GOLDEN_AB3`'s alert."""
+        from defender.runtime.lead_zero import RESERVED_LEAD_IDS
+        return [r for r in self.rows if r.get("lead_id") not in RESERVED_LEAD_IDS]
+
     def row(self) -> dict:
-        assert len(self.rows) == 1, f"expected exactly one queries row, got {self.rows}"
-        return self.rows[0]
+        rows = self.own_rows
+        assert len(rows) == 1, f"expected exactly one queries row, got {rows}"
+        return rows[0]
 
     @property
     def gather_saw(self) -> str:
@@ -388,7 +397,7 @@ def test_arg_shape_validation_error_still_writes_a_64_row(tmp_path):
         DONE,
     ])
     assert rec.calls == []
-    rows = r.rows
+    rows = r.own_rows
     assert len(rows) == 1, "an arg-shape failure wrote no row — half the exit-64 class is gone"
     assert rows[0]["exit_code"] == 64
     assert rows[0]["error_class"] == "agent-fixable"
@@ -679,7 +688,7 @@ def test_run_aborted_still_kills_the_run_positive_control(tmp_path):
     assert circuit_breaker.RUN_FAIL_KILL_LIMIT == 5
     assert r.breaker["total_failures"] >= circuit_breaker.RUN_FAIL_KILL_LIMIT
     assert r.main.calls == 1, "RunAborted was swallowed — the run kept going past the kill limit"
-    assert len(r.rows) == 5
+    assert len(r.own_rows) == 5
 
 
 def test_breaker_pre_call_trip_returns_without_executing(tmp_path):
@@ -696,7 +705,7 @@ def test_breaker_pre_call_trip_returns_without_executing(tmp_path):
         DONE,
     ])
     assert len(rec.calls) == 2, "the tripped system was queried again"
-    assert len(r.rows) == 2, "the pre-call trip recorded a query that never executed"
+    assert len(r.own_rows) == 2, "the pre-call trip recorded a query that never executed"
     assert "[circuit-breaker]" in r.gather_saw
     assert "is DOWN" in r.gather_saw
     assert r.gather.calls == 4
@@ -724,8 +733,12 @@ def test_capture_fires_only_for_the_query_tool(tmp_path):
           verbs=elastic_ok(rec))
 
     assert gather.calls == 4, "one of the three non-query tools was intercepted and derailed"
-    assert read_jsonl_rows(run_dir / "executed_queries.jsonl") == [], \
-        "a non-query tool call wrote a queries row"
+    from defender.runtime.lead_zero import RESERVED_LEAD_IDS
+    own_rows = [
+        row for row in read_jsonl_rows(run_dir / "executed_queries.jsonl")
+        if row.get("lead_id") not in RESERVED_LEAD_IDS
+    ]
+    assert own_rows == [], "a non-query tool call wrote a queries row"
     assert not (run_dir / "gather_raw" / LEAD).exists(), "a non-query tool wrote a payload"
 
 
@@ -817,7 +830,7 @@ def test_concurrent_queries_do_not_collide_on_seq(tmp_path):
     r = run_gather(tmp_path, verbs=_echo_registry(rec), turns=[_two_in_one_turn(), DONE])
 
     assert sorted(c.params["tag"] for c in rec.calls) == ["alpha", "beta"]
-    rows = r.rows
+    rows = r.own_rows
     assert len(rows) == 2
     assert sorted(row["seq"] for row in rows) == [0, 1]
     assert len({row["payload_path"] for row in rows}) == 2
@@ -838,8 +851,12 @@ def test_seq_collision_would_misdirect_the_judge(tmp_path):
     keys = [(row["lead_id"], row["seq"]) for row in rows]
     assert len(set(keys)) == len(keys), f"duplicate (lead_id, seq) key: {keys}"
 
+    from defender.runtime.lead_zero import RESERVED_LEAD_IDS
     leads = lead_repository.joined(r.run_dir)
-    queries = [qr for lead in leads for qr in lead.queries]
+    queries = [
+        qr for lead in leads for qr in lead.queries
+        if lead.lead_id not in RESERVED_LEAD_IDS
+    ]
     assert len(queries) == 2
     refs = [qr.raw_ref for qr in queries]
     assert all(ref is not None for ref in refs), \
@@ -1143,9 +1160,11 @@ def test_stage_tables_still_round_trips(tmp_path):
     assert read_jsonl_rows(dst / "executed_queries.jsonl") == r.rows
     for row in r.rows:
         assert (dst / row["payload_path"]).read_text() == (r.run_dir / row["payload_path"]).read_text()
+    from defender.runtime.lead_zero import RESERVED_LEAD_IDS
     staged = lead_repository.joined(dst)
-    assert [lead.lead_id for lead in staged] == [LEAD]
-    assert len(staged[0].queries) == 2
+    own_staged = [lead for lead in staged if lead.lead_id not in RESERVED_LEAD_IDS]
+    assert [lead.lead_id for lead in own_staged] == [LEAD]
+    assert len(own_staged[0].queries) == 2
 
 
 
@@ -1297,8 +1316,10 @@ def test_replay_actor_still_loads_the_staged_tables(tmp_path):
     assert paths.alert.is_file()
     assert paths.gather_raw.is_dir() or paths.executed_queries.is_file()
 
+    from defender.runtime.lead_zero import RESERVED_LEAD_IDS
     view = lead_repository.actor_view(staged)
-    assert view["leads"] == [{
+    own_leads = [lead for lead in view["leads"] if lead["lead_id"] not in RESERVED_LEAD_IDS]
+    assert own_leads == [{
         "lead_id": LEAD,
         "queries": [{"query_id": "elastic.probe-alpha", "params": {"tag": "alpha"}}],
     }]
@@ -1323,5 +1344,5 @@ def test_e2e_replay_harness_has_an_injected_verb_seam(tmp_path):
     r = run_gather(tmp_path, verbs=raising(rec, TransportFault("connection refused")), turns=[
         q("elastic", "probe", {}), q("elastic", "probe", {}), DONE,
     ])
-    assert [row["exit_code"] for row in r.rows] == [2, 2]
+    assert [row["exit_code"] for row in r.own_rows] == [2, 2]
     assert circuit_breaker.is_tripped(r.run_dir, "elastic")

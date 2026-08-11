@@ -1,6 +1,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 import os
 import sqlite3
 import sys
@@ -87,14 +89,51 @@ def _main_instructions(defender_dir: Path) -> str:
     return strip_frontmatter((defender_dir / "SKILL.md").read_text(encoding="utf-8"))
 
 
-def _user_prompt(run_dir: Path, alert_path: Path, defender_dir: Path, salt: str) -> str:
-    orientation = orient.orientation(run_dir, defender_dir, alert_path, salt)
-    return (
+def _user_prompt(  # noqa: PLR0913 — the harness's own pre-turn seams (#808)
+    run_dir: Path, alert_path: Path, defender_dir: Path, salt: str,
+    *, verbs: Any = None, limits: dict = DEFAULT_LIMITS, run_id: str | None = None,
+) -> tuple[str, Any, str]:
+    """#808 — lead-0's own call site. It takes its OWN exception handler (K8/N3): a
+    `BudgetKill` or `circuit_breaker.RunAborted` raised inside `resolve_lead_zero` (its
+    QueryCapture path inherits both) is caught HERE, so it never escapes `_user_prompt` and
+    ends the run before MAIN's first prompt — the run degrades the section instead.
+
+    Returns `(prompt, entities, status)`: the entities/status feed item 3's dispatch gate
+    (`d22`), computed once here rather than re-resolved by a second lead_zero call."""
+    from . import lead_zero as lead_zero_mod
+    from .circuit_breaker import RunAborted
+
+    entities: Any = lead_zero_mod.Entities()
+    status = lead_zero_mod.STATUS_FAILED
+    try:
+        result = lead_zero_mod.resolve_lead_zero(
+            run_dir=run_dir, defender_dir=defender_dir, alert_path=alert_path, salt=salt,
+            verbs=verbs, limits=limits, run_id=run_id,
+        )
+        lead_zero_text = lead_zero_mod.render_orient_section(result)
+        entities = result.entities
+        status = result.status
+    except (BudgetKill, RunAborted) as e:
+        print(f"[run.py] lead-0 degraded ({e!r}); continuing without it", file=sys.stderr)
+        degraded = lead_zero_mod.LeadZeroResult(
+            text=lead_zero_mod._render_section(
+                lead_zero_mod._unavailable(f"a run-level fault interrupted resolution: {e!r}"),
+                salt,
+            ),
+            entities=lead_zero_mod.Entities(), status=lead_zero_mod.STATUS_FAILED,
+        )
+        lead_zero_text = lead_zero_mod.render_orient_section(degraded)
+
+    orientation = orient.orientation(
+        run_dir, defender_dir, alert_path, salt, lead_zero_section=lead_zero_text,
+    )
+    prompt = (
         "Begin the investigation.\n\n"
         f"run_dir: {run_dir}\n"
         f"alert: {alert_path}\n\n"
         f"{orientation}"
     )
+    return prompt, entities, status
 
 
 def _budget_state_for_enforcement(state: dict, deps: AgentDeps) -> dict:
@@ -419,7 +458,50 @@ def _fold_decision(run_dir: Path) -> tuple[int, str] | None:
     return fold_through, compaction.frontier_text(inv_text, fold_through)
 
 
-def _make_store_render_processor(store: Any, session_id: str, *, fold: bool, request_limit: int):
+def _make_store_render_processor(  # noqa: PLR0913 — #808's correlation injector rides this seam
+    store: Any, session_id: str, *, fold: bool, request_limit: int,
+    correlation_task: Any = None,
+):
+    injected = [False]
+
+    async def _inject_correlation() -> None:
+        """#808/K10/F2 — item 3's async frame, awaited HERE: right before MAIN's SECOND
+        request is prepared (`requests == 1`, i.e. round 1 already completed), never before
+        the first (the marker must not be in message 0). Writes the summary DIRECTLY into
+        MAIN's own session so the store-hydrated list the next render produces carries it —
+        `ProcessHistory` returns `hydrate(...)`, a list rebuilt FROM the store, so a plain
+        append to `messages` would be discarded."""
+        if correlation_task is None or injected[0]:
+            return
+        injected[0] = True
+        try:
+            summary = await correlation_task
+        except (BudgetKill, RunAborted):
+            raise
+        except Exception as e:  # noqa: BLE001 — item 3's own dispatch must never break the run
+            summary = None
+            print(f"[run.py] correlation lead injection skipped: {e!r}", file=sys.stderr)
+        if not summary:
+            return
+        from datetime import UTC, datetime as _dt
+
+        from pydantic_ai.messages import ModelRequest as _MR, UserPromptPart as _UPP
+
+        from . import lead_zero as _lz
+        from .session_store import path_row_ids as _path_row_ids
+
+        ids = _path_row_ids(store, session_id)
+        parent = ids[-1] if ids else None
+        row = _MR(
+            parts=[_UPP(content=(
+                f"## Correlation lead ({_lz.L3}) — dispatched automatically at ORIENT time, "
+                "off the ancestors lead-0 resolved\n\n"
+                f"{summary}"
+            ))],
+            timestamp=_dt.now(UTC),
+        )
+        store.append(session_id, [row], agent_id="main", parent_id=parent, synthesized=True)
+
     async def process(ctx: RunContext[AgentDeps], messages: list) -> list:
         # The framework appends this round's own request to state history and only
         # THEN checks the request limit (pydantic_ai's `_prepare_request`), so by the
@@ -438,6 +520,8 @@ def _make_store_render_processor(store: Any, session_id: str, *, fold: bool, req
             selection.ingest(store, session_id, messages[:-1], agent_id="main")
             return messages
         selection.ingest(store, session_id, messages, agent_id="main")
+        if requests >= 1:
+            await _inject_correlation()
         decision = _fold_decision(ctx.deps.run_dir) if fold else None
         return selection.render(
             store, session_id, messages, agent_id="main", fold=decision is not None,
@@ -474,6 +558,7 @@ def _make_gather_recorder(store: Any, session_id: str, agent_id: str):
 
 def _main_extra_capabilities(
     store: Any, session_id: str, *, request_limit: int | None = None,
+    correlation_task: Any = None,
 ) -> list[ProcessHistory[Any]]:
     """`request_limit` is the ceiling the RUN was handed — base plus the gate's forced-turn
     bound — and the default is the RAISED ceiling of the shipped bounds, never the un-raised
@@ -492,7 +577,8 @@ def _main_extra_capabilities(
         else challenge_gate.raised_request_limit(challenge_gate.default_bounds())
     )
     return [ProcessHistory(_make_store_render_processor(
-        store, session_id, fold=_compaction_enabled(), request_limit=limit))]
+        store, session_id, fold=_compaction_enabled(), request_limit=limit,
+        correlation_task=correlation_task))]
 
 
 def _gather_extra_capabilities(store: Any, session_id: str, agent_id: str) -> list[ProcessHistory[Any]]:
@@ -505,6 +591,7 @@ def build_agent(  # noqa: PLR0913 — composition root: config + DI seams + the 
     *, main_model: str | None = None, verbs: Any = None, limits: dict = DEFAULT_LIMITS,
     store: Any = None, session_id: str | None = None, review_stages: Any = None,
     bounds: challenge_gate.Bounds,
+    correlation_task: Any = None,
 ) -> Agent[AgentDeps, str]:
     # The bounds arrive RESOLVED, non-`Optional`, and are used under their own name. They
     # used to be re-coalesced here, which gave the gate's ONE bounds object a default at four
@@ -516,6 +603,7 @@ def build_agent(  # noqa: PLR0913 — composition root: config + DI seams + the 
         assert session_id is not None, "a store requires its session_id (build_agent's own contract)"
         extra = _main_extra_capabilities(
             store, session_id, request_limit=challenge_gate.raised_request_limit(bounds),
+            correlation_task=correlation_task,
         )
     _override = " (DEFENDER_GATHER_MODEL override)" if os.environ.get("DEFENDER_GATHER_MODEL") else ""
     print(f"[run.py] gather model: {gather_model()}{_override}", file=sys.stderr)
@@ -767,6 +855,10 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     model_override: str | None = None,
 ) -> dict:
     model_name = resolve_main_model(model_name)
+    # #808/K12/d49 — lead-0's OWN registry seam: a scenario that injected no `verbs=` at all
+    # must not have lead-0 acquire one by way of the ordinary MAIN-gather default resolved
+    # a few lines below. Captured before that default is applied.
+    lead_zero_verbs = verbs
     # lint-default: ok — DI seam owning its default (the #774 repair's seventh seam: the
     # gate's bounds, carrying the request ceiling's own BASE), resolved once at the entry
     # point and threaded inward as a concrete value.
@@ -826,16 +918,49 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
             case_id=case_id, store_path=None,
         )
 
+    prompt, lead_zero_entities, lead_zero_status = _user_prompt(
+        run_dir, alert_path, defender_dir, salt,
+        verbs=lead_zero_verbs, limits=limits, run_id=run_id,
+    )
+
+    # #808/F2 — item 3's async frame: scheduled here (right after `_user_prompt` returns,
+    # i.e. after item 1 has resolved synchronously) and awaited later, inside the store's
+    # own render processor, right before MAIN's SECOND request. A scenario with no injected
+    # registry (`lead_zero_verbs is None`) dispatches nothing (K12).
+    correlation_task: Any = None
+    if lead_zero_verbs is not None:
+        from . import lead_zero as lead_zero_mod
+
+        try:
+            alert_doc = json.loads(alert_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            alert_doc = {}
+        contract = lead_zero_mod.prepare_correlation_lead(
+            run_dir, alert_doc, lead_zero_entities, lead_zero_status,
+        )
+        if contract is not None:
+            goal, what_to_summarize = contract
+            # K23 — chain the budget hooks around lead-0's OWN dispatch: routing through
+            # QueryCapture/the gather machinery does not, by itself, move `budget.json`
+            # (P7, executed) — `subagent_spawns` is gated on the literal tool name "gather",
+            # which a harness dispatch never emits.
+            lead_zero_mod._budget_account(run_dir, run_id, "gather", limits)
+            correlation_task = asyncio.ensure_future(lead_zero_mod.dispatch_correlation(
+                run_dir=run_dir, defender_dir=defender_dir, salt=salt, run_id=run_id,
+                goal=goal, what_to_summarize=what_to_summarize, verbs=lead_zero_verbs,
+                limits=limits, make_model=make_model, logger=logger, box=box, store=store,
+            ))
+
     agent = build_agent(
         defender_dir, logger, make_model, main_model=model_name, verbs=verbs, limits=limits,
         store=store, session_id=session_id, review_stages=stages, bounds=gate_bounds,
+        correlation_task=correlation_task,
     )
     deps = replace(
         bind(MAIN_DEF, run_dir, salt=salt, defender_dir=defender_dir, box=box),
         run_id=run_id,
         budget_started_monotonic=budget_started_monotonic,
     )
-    prompt = _user_prompt(run_dir, alert_path, defender_dir, salt)
 
     t0 = time.time()
     run, truncated_by, exit_reason = await _drive_agent(

@@ -75,9 +75,16 @@ def main(argv: list[str] | None = None) -> int:
     # Controls — hidden ground-truth baseline.
     shutil.copyfile(ns.controls, hidden / "controls.yaml")
 
+    from defender.runtime.lead_zero import HARNESS_PROVENANCE
+
     leads = lead_repository.joined(ns.run_dir)
     leads_rows = []
     for jl in leads:
+        if jl.provenance == HARNESS_PROVENANCE:
+            # #808 — the harness-authored leads (l-000/l-00c) are excluded from the frozen
+            # case: they are not part of what a MODEL projection is scored against, and
+            # freezing them would fail every future projection's lead-set integrity gate.
+            continue
         # ORACLE-VISIBLE: exactly the fields build_lead_user_prompt consumes.
         leads_rows.append({
             "lead_id": jl.lead_id,

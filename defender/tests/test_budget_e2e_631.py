@@ -43,6 +43,7 @@ from defender.hooks.budget_enforcer import (
     open_budget,
     update_budget_locked,
 )
+from defender.runtime.lead_zero import RESERVED_LEAD_IDS
 from defender.tests.e2e._replay_harness import (
     GOLDEN,
     FakeVerbs,
@@ -77,6 +78,15 @@ def caps(**over) -> dict:
 
 def budget(run_dir: Path) -> dict:
     return json.loads((run_dir / "budget.json").read_text())
+
+
+def own_rows(run_dir: Path) -> list[dict]:
+    """The queries-table rows written by this test's own scripted `gather`/`query`
+    calls — excluding lead-0's harness-executed rows (`RESERVED_LEAD_IDS`), which are
+    written on every `drive()` call that injects a `verbs=` registry regardless of
+    anything this test scripts."""
+    return [r for r in read_jsonl_rows(run_dir / "executed_queries.jsonl")
+            if r["lead_id"] not in RESERVED_LEAD_IDS]
 
 
 def report_text() -> str:
@@ -827,7 +837,9 @@ def test_subagent_dispatched_into_an_already_stopped_pool(tmp_path, enforced):
 
     assert gather.calls == 0, "the subagent's model was invoked on an already-stopped pool"
     assert recorder.calls == [], "the subagent did work inside an already-stopped pool"
-    assert not (run_dir / "executed_queries.jsonl").exists()
+    assert own_rows(run_dir) == [], (
+        "the subagent wrote a queries row into an already-stopped pool"
+    )
     assert refusal_stem() in "\n".join(main.seen), (
         "MAIN did not observe the gather dispatch being refused"
     )
@@ -886,7 +898,7 @@ def test_stopped_query_writes_no_row(tmp_path, enforced):
 
     assert gather.calls >= 1, "the subagent never ran, so the ordering was not exercised"
     assert recorder.verbs == ["esql"], "the stopped query's handler ran (no short-circuit)"
-    rows = list(read_jsonl_rows(run_dir / "executed_queries.jsonl"))
+    rows = own_rows(run_dir)
     assert len(rows) == 1, (
         f"the stopped query wrote a phantom row — {len(rows)} rows for 1 executed query"
     )
@@ -921,7 +933,7 @@ def test_executed_query_writes_a_row(tmp_path, unenforced):
           ]),
           verbs=verbs, limits=caps())
 
-    rows = list(read_jsonl_rows(run_dir / "executed_queries.jsonl"))
+    rows = own_rows(run_dir)
     assert len(rows) == 1
     assert rows[0]["lead_id"] == "l-001"
     assert rows[0]["system"] == "elastic"
@@ -1025,7 +1037,7 @@ def test_gather_has_no_per_call_timeout(tmp_path, unenforced):
           verbs=verbs, limits=caps())
 
     assert "finished after a long call" in "\n".join(main.seen)
-    rows = list(read_jsonl_rows(run_dir / "executed_queries.jsonl"))
+    rows = own_rows(run_dir)
     assert rows, "the completed call wrote no queries row"
     assert rows[0]["exit_code"] == 0, (
         "a per-call stopwatch synthesized a timeout row for a call that completed"

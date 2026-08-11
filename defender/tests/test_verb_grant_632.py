@@ -18,9 +18,11 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
+from defender._io import read_jsonl_rows  # noqa: E402
 from defender.learning.pipeline.judge.engine_pydantic import JUDGE_DEF  # noqa: E402
 from defender.runtime.agent_definition import bind, compile_policy_for  # noqa: E402
 from defender.runtime.driver import GATHER_DEF, MAIN_DEF  # noqa: E402
+from defender.runtime.lead_zero import RESERVED_LEAD_IDS  # noqa: E402
 from defender.runtime.verbs import ModuleVerbRegistry  # noqa: E402
 from defender.tests.e2e._replay_harness import VerbRecorder  # noqa: E402
 from defender.tests._closed_ticket_672 import (  # noqa: E402
@@ -106,12 +108,27 @@ def test_a_registry_shaped_object_is_rejected_at_the_seam_the_build_path_reaches
     with pytest.raises((TypeError, ValueError)):
         run_gather(tmp_path / "duck", verbs=shaped, turns=[q("elastic", "query"), DONE],
                    run_id="duck632")
-    assert rec.calls == [], "a duck-typed registry reached a verb body"
+    # lead-0 (#808) resolves BEFORE this build path's type check ever runs — it is
+    # harness-issued pre-ORIENT work, not a model-facing call, and it takes whatever
+    # `verbs` object was injected (duck-typed or not) through its own reserved lead
+    # (`l-000`). That is accepted, documented behaviour, not the hole this demand
+    # guards: the guard is that no MODEL-driven call ever reaches a verb body through
+    # the rejected registry, which the run's own table (keyed by lead_id) can still
+    # show directly even though `VerbRecorder` itself can't tell the two callers apart.
+    duck_rows = read_jsonl_rows(tmp_path / "duck" / "run" / "executed_queries.jsonl")
+    own_duck_rows = [r for r in duck_rows if r.get("lead_id") not in RESERVED_LEAD_IDS]
+    assert own_duck_rows == [], "a duck-typed registry reached a verb body via a model-driven call"
 
-    ok = run_gather(tmp_path / "typed", verbs=_elastic(rec), turns=[q("elastic", "query"), DONE],
+    rec2 = VerbRecorder()
+    ok = run_gather(tmp_path / "typed", verbs=_elastic(rec2), turns=[q("elastic", "query"), DONE],
                     run_id="typed632")
-    assert [c.verb for c in rec.calls] == ["query"]
-    assert len(ok.rows) == 1
+    # lead-0's own shell fetch (`alerts`) is UNDECLARED against this scoped table (only
+    # `query`/`esql` are granted) — that raises `ModelRetry` before its handler ever
+    # runs, writing l-000 exactly one usage row and never reaching a verb body, so
+    # `rec2` still sees only the model's own scripted `query` call.
+    assert [c.verb for c in rec2.calls] == ["query"]
+    own_ok_rows = [r for r in ok.rows if r.get("lead_id") not in RESERVED_LEAD_IDS]
+    assert len(own_ok_rows) == 1
 
     # The second model-facing site: the judge's own leg, through its own registry seam.
     judge_rec = VerbRecorder()
@@ -559,5 +576,10 @@ def test_health_check_is_granted_uniformly_to_gather(tmp_path: Path):
     r = run_gather(tmp_path, verbs=gather, turns=[q("elastic", HEALTH_CHECK), DONE],
                    run_id="hc632")
     assert [c.verb for c in rec.calls] == [HEALTH_CHECK]
-    assert len(r.rows) == 1
-    assert r.rows[0]["exit_code"] == 0
+    # lead-0 (#808) also attempts `alerts` against this table ahead of the model's own
+    # turn — `alerts` is nominally granted (the full gather grant) but not declared in
+    # this test's narrow table, so it lands one l-000 UNDECLARED usage row and never
+    # reaches a verb body. Scope the row assertion to the model's own lead.
+    own_rows = [row for row in r.rows if row["lead_id"] not in RESERVED_LEAD_IDS]
+    assert len(own_rows) == 1
+    assert own_rows[0]["exit_code"] == 0

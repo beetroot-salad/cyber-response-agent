@@ -107,7 +107,7 @@ def test_mistyped_params_cannot_trip_a_healthy_system(tmp_path):
     ], run_id="q611-nottripped")
 
     assert len(rec.calls) == 1, "the well-formed query never ran — the breaker tripped on typos"
-    assert [row["exit_code"] for row in r.rows] == [64, 64, 0]
+    assert [row["exit_code"] for row in r.own_rows] == [64, 64, 0]
     assert not r.breaker.get("systems", {}).get("elastic", {}).get("tripped_at"), \
         "two of the agent's own type slips tripped the breaker on a healthy system"
     assert r.rows[-1]["payload_status"] == "ok", "the live system did not answer after the typos"

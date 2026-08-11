@@ -12,7 +12,6 @@ handling + the gate-as-feedback recovery loop are in `test_replay_error_paths.py
 """
 from __future__ import annotations
 
-import json
 import re
 from pathlib import Path
 
@@ -36,6 +35,7 @@ from defender.runtime import permission, tools as runtime_tools
 from defender.runtime.agent_definition import compile_policy_for
 from defender.runtime.close_tool import CAUSE_EVIDENCE_CANNOT_DISCRIMINATE
 from defender.runtime.driver import GATHER_DEF, MAIN_DEF
+from defender.runtime.lead_zero import RESERVED_LEAD_IDS
 from defender.skills.invlang.validate import validate_companion
 from defender.tests import _review_bundle
 
@@ -313,9 +313,13 @@ def test_nested_gather_capture(tmp_path):
     assert lead_row.is_file()
     assert "check sshd auth history" in lead_row.read_text()
 
-    qlines = (run_dir / "executed_queries.jsonl").read_text().splitlines()
-    assert len(qlines) == 1
-    row = json.loads(qlines[0])
+    # lead-0 (#808) resolves against GOLDEN_AB3 ahead of MAIN's own turn and lands its
+    # own (l-000) row in this same table — scope to the model-driven lead this scenario
+    # is actually about.
+    rows = [r for r in read_jsonl_rows(run_dir / "executed_queries.jsonl")
+            if r["lead_id"] not in RESERVED_LEAD_IDS]
+    assert len(rows) == 1
+    row = rows[0]
     assert row["lead_id"] == "l-001"
     assert row["system"] == "elastic"
     assert row["exit_code"] == 0

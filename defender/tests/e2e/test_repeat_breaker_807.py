@@ -106,6 +106,7 @@ from defender._run_paths import RunPaths  # noqa: E402
 from defender.learning import lead_repository  # noqa: E402
 from defender.learning.leads import lead_extraction  # noqa: E402
 from defender.runtime import circuit_breaker, observe  # noqa: E402
+from defender.runtime.lead_zero import RESERVED_LEAD_IDS  # noqa: E402
 from defender.runtime.query_tool import _json_safe_params  # noqa: E402
 from defender.runtime.verb_grant import VerbGrant  # noqa: E402
 from defender.runtime.verbs import ModuleVerbRegistry, VerbContext, VerbRegistry  # noqa: E402
@@ -165,6 +166,11 @@ class _Res:
     @property
     def rows(self) -> list[dict]:
         return read_jsonl_rows(RunPaths(self.run_dir).executed_queries)
+
+    @property
+    def own_rows(self) -> list[dict]:
+        """.rows filtered to exclude #808's harness-authored leads (l-000/l-00c)."""
+        return [r for r in self.rows if r.get("lead_id") not in RESERVED_LEAD_IDS]
 
     def rows_for(self, lead: str) -> list[dict]:
         return [r for r in self.rows if r.get("lead_id") == lead]
@@ -565,7 +571,7 @@ def test_repeat_trips_on_third_identical_request(tmp_path):
         DONE,
     ])
     assert len(rec.calls) == 2, "calls 1 and 2 must execute; call 3 must not"
-    rows = r.rows
+    rows = r.own_rows
     assert len(rows) == 3
     assert [row["exit_code"] for row in rows] == [0, 0, 64]
     assert INCOMPLETE_IDIOM in r.summary()
@@ -646,7 +652,7 @@ def test_repeat_key_ignores_query_id(tmp_path):
         DONE,
     ])
     assert len(rec.calls) == 2
-    rows = r.rows
+    rows = r.own_rows
     assert [row["query_id"] for row in rows[:2]] == ["elastic.db-1-sshd-a", "elastic.db-1-sshd-b"]
     assert rows[2]["exit_code"] == 64, "three coined ids for one request did not trip"
     assert INCOMPLETE_IDIOM in r.summary()
@@ -666,9 +672,9 @@ def test_repeat_trip_never_reaches_the_backend(tmp_path):
     ])
     assert len(rec.calls) == 2, "the refused call reached the backend"
     assert rec.verbs == ["query", "query"]
-    assert r.rows[2]["exit_code"] == 64
-    assert r.rows[2]["payload_status"] == "error", "a refused call recorded a payload"
-    assert (r.run_dir / r.rows[2]["payload_path"]).read_text(encoding="utf-8") == "", \
+    assert r.own_rows[2]["exit_code"] == 64
+    assert r.own_rows[2]["payload_status"] == "error", "a refused call recorded a payload"
+    assert (r.run_dir / r.own_rows[2]["payload_path"]).read_text(encoding="utf-8") == "", \
         "the refused call's sidecar holds a backend answer"
 
 
@@ -688,7 +694,7 @@ def test_repeat_trip_sits_after_grant_and_infra_breaker(tmp_path):
             DONE,
         ])
     assert denied_rec.calls == []
-    assert denied.rows == [], "a DENIED call wrote an evidence row"
+    assert denied.own_rows == [], "a DENIED call wrote an evidence row"
     assert len(denied.denials) == 3, "the denial record is the DENIED path's only artifact"
     assert denied.gather.calls == 4, "a denied repeat tripped the guard — it is answered above M2"
     assert INCOMPLETE_IDIOM not in denied.summary()
@@ -700,7 +706,7 @@ def test_repeat_trip_sits_after_grant_and_infra_breaker(tmp_path):
             q("elastic", "probe", {}), q("elastic", "probe", {}), q("elastic", "probe", {}), DONE,
         ])
     assert len(down_rec.calls) == 2, "the tripped system was queried again"
-    assert len(down.rows) == 2, "the down-message call recorded a row"
+    assert len(down.own_rows) == 2, "the down-message call recorded a row"
     assert "is DOWN" in down.gather_saw
     assert down.gather.calls == 4, "the infra breaker's answer was replaced by a dead end"
 
@@ -723,7 +729,7 @@ def test_repeat_trip_row_is_agent_fixable(tmp_path):
         q("elastic", "query", {"native_query": "FROM logs"}),
         DONE,
     ])
-    trip = r.rows[2]
+    trip = r.own_rows[2]
     assert trip["exit_code"] != 0, "no trip happened, so the negative is vacuous"
     assert trip["exit_code"] == 64
     assert trip["error_class"] == "agent-fixable"
@@ -748,7 +754,7 @@ def test_repeat_trip_leaves_the_infra_breaker_untouched(tmp_path):
         q("elastic", "query", {"native_query": "FROM logs"}),
         DONE,
     ])
-    assert r.rows[2]["exit_code"] == 64, "no trip happened, so the negative is vacuous"
+    assert r.own_rows[2]["exit_code"] == 64, "no trip happened, so the negative is vacuous"
     assert not (r.run_dir / "circuit_breaker.json").exists(), \
         "the repeat trip wrote infra-breaker state"
     assert r.breaker == {}
@@ -766,7 +772,7 @@ def test_repeat_trip_leaves_the_infra_breaker_untouched(tmp_path):
             q("elastic", "query", {"native_query": "FROM logs"}),
             DONE,
         ])
-    assert prior.rows[2]["exit_code"] == 64, "no trip happened, so the negative is vacuous"
+    assert prior.own_rows[2]["exit_code"] == 64, "no trip happened, so the negative is vacuous"
     assert INCOMPLETE_IDIOM in prior.summary()
     assert circuit_breaker.is_tripped(prior.run_dir, "cmdb") is True, \
         "the repeat trip cleared an unrelated system's earlier infra trip"
@@ -804,7 +810,7 @@ def test_trip_row_conforms_to_the_frozen_row_contract(tmp_path):
         q("elastic", "query", {"native_query": "FROM logs"}),
         DONE,
     ])
-    trip = r.rows[2]
+    trip = r.own_rows[2]
     assert trip["exit_code"] == 64, "row 2 must be the trip itself, not an ordinary third success"
     assert set(trip) == ROW_KEYS
     assert trip["lead_id"] == LEAD
@@ -931,7 +937,7 @@ def test_repeat_key_normalizes_param_key_order(tmp_path):
         DONE,
     ])
     assert len(rec.calls) == 2, "key order alone made two calls read as different requests"
-    assert r.rows[2]["exit_code"] == 64
+    assert r.own_rows[2]["exit_code"] == 64
     assert INCOMPLETE_IDIOM in r.summary()
 
 
@@ -996,7 +1002,7 @@ def test_repeat_count_is_derived_from_the_table(tmp_path):
         DONE,
     ])
     assert len(organic_rec.calls) == 2
-    assert organic.rows[2]["exit_code"] == 64
+    assert organic.own_rows[2]["exit_code"] == 64
 
     seeded_rec = VerbRecorder()
     seeded = _run(
@@ -1006,7 +1012,7 @@ def test_repeat_count_is_derived_from_the_table(tmp_path):
     )
     assert seeded_rec.calls == [], \
         "the session executed the request — the count came from memory, not from the table"
-    assert seeded.rows[2]["exit_code"] == 64
+    assert seeded.own_rows[2]["exit_code"] == 64
     assert INCOMPLETE_IDIOM in seeded.summary()
 
 
@@ -1167,7 +1173,7 @@ def test_repeat_guard_never_fires_above_its_own_placement(tmp_path):
             q("elastic", "probe", {"native_query": "FROM logs"}),
             DONE,
         ])
-    rows = r.rows
+    rows = r.own_rows
     assert len(rows) >= 2, "the load-error branch stopped recording its rows"
     assert {row["exit_code"] for row in rows} == {2}, \
         "a load-error call was recorded as anything other than the infra fault it is"
@@ -1199,7 +1205,7 @@ def test_repeat_trip_empty_params_is_its_own_domain_member(tmp_path):
         DONE,
     ])
     assert len(rec.calls) == 2, "a parameterless verb was exempted from the guard"
-    rows = r.rows
+    rows = r.own_rows
     assert [row["params"] for row in rows] == [{}, {}, {}]
     assert rows[2]["exit_code"] == 64
     assert INCOMPLETE_IDIOM in r.summary()
@@ -1219,7 +1225,10 @@ def test_lead_repository_reads_the_trip_row_unchanged(tmp_path):
         q("elastic", "query", {"native_query": "FROM logs"}),
         DONE,
     ])
-    leads = lead_repository.joined(r.run_dir)
+    leads = [
+        lead for lead in lead_repository.joined(r.run_dir)
+        if lead.lead_id not in RESERVED_LEAD_IDS
+    ]
     assert [lead.lead_id for lead in leads] == [LEAD]
     queries = leads[0].queries
     assert [qr.seq for qr in queries] == [0, 1, 2]
@@ -1279,7 +1288,7 @@ def test_counted_domain_excludes_validate_path_rows(tmp_path):
     rejected = _run(tmp_path / "rejected", verbs=elastic_ok(rejected_rec), run_id="d807-fa", turns=[
         _bad_args(params), _bad_args(params), q("elastic", "query", params), DONE,
     ])
-    rows = rejected.rows
+    rows = rejected.own_rows
     assert len(rows) == 3, "the two schema rejections did not leave their validate-path rows"
     assert [row["exit_code"] for row in rows[:2]] == [64, 64]
     assert rows[0]["params"] == params, "P-a's shape changed: the rejection row lost the key it collides on"
@@ -1306,7 +1315,7 @@ def test_counted_domain_excludes_validate_path_rows(tmp_path):
             q("elastic", "nosuch-verb", params), q("elastic", "nosuch-verb", params),
             q("elastic", "nosuch-verb", params), DONE,
         ])
-    grant_rows = unresolvable.rows
+    grant_rows = unresolvable.own_rows
     assert len(grant_rows) == 3, "the unresolvable branch stopped recording its rows"
     assert [row["exit_code"] for row in grant_rows] == [64, 64, 64]
     assert [row["verb"] for row in grant_rows] == ["nosuch-verb"] * 3
@@ -1329,7 +1338,7 @@ def test_counted_domain_excludes_validate_path_rows(tmp_path):
         q("elastic", "query", params), q("elastic", "query", params),
         q("elastic", "query", params), DONE,
     ])
-    assert genuine.rows[2]["exit_code"] == 64, \
+    assert genuine.own_rows[2]["exit_code"] == 64, \
         "the control could not see a difference: two EXECUTED occurrences must refuse the third"
     assert len(genuine_rec.calls) == 2
     assert INCOMPLETE_IDIOM in genuine.summary()
@@ -1349,7 +1358,7 @@ def test_trip_row_is_itself_an_occurrence_on_replay(tmp_path):
         q("elastic", "query", {"native_query": "FROM logs"}),
         DONE,
     ])
-    rows = r.rows
+    rows = r.own_rows
     trip = rows[2]
     assert trip["exit_code"] == 64, "no trip row was produced, so the premise is vacuous"
 
@@ -1403,13 +1412,17 @@ def test_trip_row_survives_the_learning_extractors_payload_gate(tmp_path):
         q("elastic", "query", {"native_query": "FROM logs"}),
         DONE,
     ])
-    trip = r.rows[2]
+    trip = r.own_rows[2]
     assert trip["payload_status"] == "error"
     sidecar = r.run_dir / trip["payload_path"]
     assert sidecar.is_file(), "the trip row's sidecar is missing — extract_from_joined drops the row"
     assert sidecar.read_text(encoding="utf-8") == ""
 
-    executed = lead_extraction.extract_from_joined(lead_repository.joined(r.run_dir))
+    own_leads = [
+        lead for lead in lead_repository.joined(r.run_dir)
+        if lead.lead_id not in RESERVED_LEAD_IDS
+    ]
+    executed = lead_extraction.extract_from_joined(own_leads)
     assert len(executed) == 3, "the trip row was dropped before the learning loop could see it"
     assert executed[2].payload_status == "error"
     assert executed[2].error_class == "agent-fixable"
@@ -1432,7 +1445,7 @@ def test_screen_refused_repeats_count_toward_the_trip(tmp_path):
     assert r.gather_saw.count("unknown param(s)") == 2, \
         "the screen must still teach on the first two; only the third is a dead end"
     assert r.gather.calls == 3, "the third refusal was a ModelRetry, not a dead end"
-    rows = r.rows
+    rows = r.own_rows
     assert len(rows) == 3
     assert [row["exit_code"] for row in rows] == [64, 64, 64]
     assert rows[2]["params"] == bad, "the trip row did not record the request as the lead sent it"
@@ -1469,8 +1482,8 @@ def test_concurrent_identical_siblings_still_stop_the_lead(tmp_path):
     assert len(rec.calls) == 2, "a sibling of the tripping call still reached the backend"
     assert r.gather.calls == 3, "the concurrent trip did not end the lead"
     assert INCOMPLETE_IDIOM in r.summary()
-    assert any(row["exit_code"] == 64 for row in r.rows), "no trip row was written at all"
-    assert [row["exit_code"] for row in r.rows[:2]] == [0, 0]
+    assert any(row["exit_code"] == 64 for row in r.own_rows), "no trip row was written at all"
+    assert [row["exit_code"] for row in r.own_rows[:2]] == [0, 0]
 
 
 def test_gather_dead_end_payload_binds_reason_and_escape(tmp_path):
@@ -1548,7 +1561,7 @@ def test_dead_end_message_does_not_echo_model_authored_params(tmp_path):
         "the params fragment reached main's context by some other surface than the summary"
     assert canary not in (r.run_dir / "gather_summaries" / f"{LEAD}.md").read_text(encoding="utf-8")
 
-    rows = r.rows
+    rows = r.own_rows
     assert rows[0]["params"]["native_query"] == canary, \
         "the control failed: the request is unrecoverable through the sanctioned path too"
     assert canary in rows[0]["raw_command"]
@@ -1628,7 +1641,7 @@ def test_trip_row_detail_names_the_repetition(tmp_path):
         q("elastic", "query", {"native_query": "FROM logs"}),
         DONE,
     ])
-    rows = r.rows
+    rows = r.own_rows
     assert len(rows) == 4
     refusal, trip = rows[2], rows[3]
 
@@ -1662,7 +1675,7 @@ def test_repeat_of_a_failing_request_still_trips(tmp_path):
             q("elastic", "probe", {}), q("elastic", "probe", {}), q("elastic", "probe", {}), DONE,
         ])
     assert len(rec.calls) == 2, "the third identical failing request still reached the backend"
-    rows = r.rows
+    rows = r.own_rows
     assert [row["exit_code"] for row in rows] == [1, 1, 64]
     assert r.breaker == {}, "an agent-fixable failure opened the infra breaker and answered first"
     assert INCOMPLETE_IDIOM in r.summary()

@@ -1,0 +1,772 @@
+"""Harness-executed lead-0 (#808).
+
+Before MAIN's first ORIENT turn, the runtime (item 1) resolves the alert's ancestor
+documents and (item 2 -- SKIPPED, an explicit non-obligation, #808) and (item 3) dispatches
+one tightly-bounded correlation gather lead, both writing into the run's leads/queries
+tables under the reserved ids ``l-000``/``l-00c`` so the learning loop and the review gate
+cite them like any model-dispatched lead.
+
+This module owns every backend call, run-dir write and dispatch item 1/item 3 add;
+``orient.py`` stays a pure text-assembler that calls ``resolve_lead_zero`` and formats the
+returned block as one more ORIENT section.
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+import re
+from dataclasses import dataclass, replace
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
+
+from defender._io import read_jsonl_rows, read_text_soft
+from defender._run_paths import RunPaths
+from defender._untrusted import wrap as _wrap
+from defender.hooks.budget_enforcer import (
+    DEFAULT_LIMITS,
+    BudgetKill,
+    read_budget,
+    tail_exhausted,
+    update_budget_locked,
+)
+from defender.hooks.record_lead import claim_lead
+from defender.runtime import circuit_breaker
+from defender.runtime.verbs import VerbContext
+
+# ─── the names this spec mints on the production side ───────────────────────────────────
+L0 = "l-000"
+L3 = "l-00c"
+RESERVED_LEAD_IDS = (L0, L3)
+CORRELATION_REQUEST_LIMIT = 8
+
+PROVENANCE_KEY = "provenance"
+HARNESS_PROVENANCE = "harness"
+
+LEAD_ZERO_HEADING = "## Alert ancestors"
+
+STATUS_FAILED = "failed"
+STATUS_EMPTY = "succeeded-empty"
+STATUS_TRUNCATED = "succeeded-truncated"
+STATUS_WITH_ENTITIES = "succeeded-with-entities"
+
+UNAVAILABLE = "_(unavailable:"
+SHORTFALL = "_(incomplete:"
+ELIDED = "_(elided:"
+
+#: The per-document `message` rendering budget (K17). Any value that keeps the block
+#: materially smaller than a large payload satisfies the demand; no magic number is
+#: mandated by the spec.
+MESSAGE_CHAR_BUDGET = 4000
+
+ALERT_ID_FIELD = "kibana.alert.uuid"
+GROUP_ID_FIELD = "kibana.alert.group.id"
+BUILDING_BLOCK_FIELD = "kibana.alert.building_block_type"
+
+ITEM1_GOAL = (
+    "Resolve this alert's ancestor documents (the constituent events of its EQL sequence, "
+    "or the ancestor_events batch) so MAIN has their timestamp/message/structured fields at "
+    "ORIENT without spending a lead or a gather round on it."
+)
+ITEM1_WHAT_TO_SUMMARIZE = [
+    "each resolved ancestor document's timestamp, message and structured fields",
+]
+
+_ANY_RUN_TAG = re.compile(r"</?run-[0-9a-zA-Z]*-[a-z-]+>")
+
+
+# ─── the return contract (F1) ────────────────────────────────────────────────────────────
+
+@dataclass(frozen=True)
+class Entities:
+    hosts: tuple[str, ...] = ()
+    users: tuple[str, ...] = ()
+    source_ips: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class LeadZeroResult:
+    text: str
+    entities: Entities
+    status: str
+
+
+# ─── small sync/async bridge ─────────────────────────────────────────────────────────────
+
+def _run_sync(coro: Any) -> Any:
+    """Run an async coroutine from a SYNCHRONOUS caller, whether or not an event loop is
+    already running on this thread. `resolve_lead_zero` is a synchronous entry point
+    (r9/r10) called both from bare pytest functions (no loop) and from inside
+    `run_investigation` (already inside a running loop) — the latter cannot call
+    `asyncio.run()` directly, so it hands the coroutine to a fresh thread with its own loop
+    instead."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    import concurrent.futures
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+        return ex.submit(asyncio.run, coro).result()
+
+
+# ─── sanitizing wrap-delimiter shapes (K1 round 2 + F4) ─────────────────────────────────
+
+def _sanitize(text: Any) -> str:
+    """Neutralize any `<run-…-…>`-shaped delimiter in externally-sourced content BEFORE it
+    is wrapped or interpolated. `wrap()` performs no escaping of its own delimiter shape, so
+    an attacker-authored `message`/`user.name`/`source.ip` carrying a byte-exact close tag
+    would otherwise end the untrusted frame (or item 3's contract) early."""
+    if not isinstance(text, str):
+        text = str(text)
+    return _ANY_RUN_TAG.sub(lambda m: m.group(0).replace("<", "‹").replace(">", "›"), text)
+
+
+# ─── entities ─────────────────────────────────────────────────────────────────────────
+
+def _ip_sort_key(ip: str) -> tuple:
+    parts = ip.split(".")
+    try:
+        octets = tuple(int(p) for p in parts)
+    except ValueError:
+        return (1, ip)
+    if len(octets) != 4:
+        return (1, ip)
+    return (0, octets)
+
+
+def _entities_from_docs(docs: list[dict]) -> Entities:
+    hosts: set[str] = set()
+    users: set[str] = set()
+    ips: set[str] = set()
+    for doc in docs:
+        h = doc.get("host.name")
+        if isinstance(h, str) and h.strip():
+            hosts.add(h)
+        u = doc.get("user.name")
+        if isinstance(u, str) and u.strip():
+            users.add(u)
+        ip = doc.get("source.ip")
+        if isinstance(ip, str) and ip.strip():
+            ips.add(ip)
+    return Entities(
+        hosts=tuple(sorted(hosts)),
+        users=tuple(sorted(users)),
+        source_ips=tuple(sorted(ips, key=_ip_sort_key)),
+    )
+
+
+# ─── deps for routing through the real QueryCapture (K7/d10) ────────────────────────────
+
+@dataclass(frozen=True)
+class _CaptureDeps:
+    run_dir: Path
+    defender_dir: Path
+    salt: str
+    run_id: str
+    lead_id: str
+    box: Any = None
+    budget_started_monotonic: float = 0.0
+
+
+def _rows_for(run_dir: Path, lead_id: str) -> list[dict]:
+    return [r for r in read_jsonl_rows(RunPaths(run_dir).executed_queries)
+            if r.get("lead_id") == lead_id]
+
+
+async def _capture_issue(
+    capture: Any, deps: _CaptureDeps, verb: str, params: dict, env: dict,
+) -> tuple[dict | None, str]:
+    """Issue ONE call through the REAL `QueryCapture.wrap_tool_execute` — the model's own
+    routing (K7/d10): all eight screens (grant, breaker, repeat-guard, traversal, param
+    validation, self-ticket, confine_index, guard_outbound) run exactly as they do for a
+    model-dispatched query.
+
+    Returns `(envelope_or_None, raw_result_text)`. `None` covers both "screened" (breaker
+    trip, repeat trip, grant denial — no row written at all) and "attempted but failed"
+    (a row IS written, with a nonzero exit code)."""
+    before = len(_rows_for(deps.run_dir, deps.lead_id))
+    call = SimpleNamespace(tool_name="query")
+    args = {"system": "elastic", "verb": verb, "params": params}
+
+    async def handler(_args: dict) -> Any:
+        fn = capture._registry.verbs("elastic")[verb]
+        vctx = VerbContext(defender_dir=deps.defender_dir, run_dir=deps.run_dir, env=env)
+        return await asyncio.to_thread(fn, vctx, **params)
+
+    ctx = SimpleNamespace(deps=deps)
+    try:
+        text = await capture.wrap_tool_execute(ctx, call=call, args=args, handler=handler)
+    except (OSError, ValueError):
+        # K8(iii)/d62 — RENDER FROM THE IN-MEMORY RESULT, THEN WRITE: a queries-table write
+        # that cannot land (a directory squatting the table's own name) must cost the run
+        # its evidence ROW, never its evidence. `QueryCapture._record` raises before it can
+        # return anything, so the only way to keep what item 1 already resolved is to read
+        # it again, directly — bypassing the capture (and its now-failing write) entirely.
+        try:
+            envelope = await handler(args)
+        except Exception:  # noqa: BLE001 — the backend itself failing here is a plain miss
+            return None, ""
+        return (envelope if isinstance(envelope, dict) else None), ""
+    after = _rows_for(deps.run_dir, deps.lead_id)
+    if len(after) <= before:
+        return None, text
+    row = after[-1]
+    if row.get("exit_code") != 0:
+        return None, text
+    payload_path = deps.run_dir / row["payload_path"]
+    try:
+        data = json.loads(payload_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None, text
+    if not isinstance(data, dict):
+        return None, text
+    return data, text
+
+
+def _record_manual_row(deps: _CaptureDeps, verb: str, params: dict, docs: dict | None) -> None:
+    """Write a queries-table row with the SAME twelve-key shape `QueryCapture._record`
+    writes, WITHOUT feeding `circuit_breaker.record_outcome` — the mechanism that lets item
+    1's own calls PAST its first recorded failure keep running (`d63`) without letting the
+    breaker's per-system counter cross the trip boundary on lead-0's behalf (`d61`,
+    K8(ii)/R2-F1: the cap bounds RECORDED failures, not calls)."""
+    from defender.scripts.gather_tools.record_query import _json_safe_params, _next_seq, payload_digest
+    from defender._io import write_guarded
+
+    seq = _next_seq(deps.run_dir, deps.lead_id)
+    lead_dir = RunPaths(deps.run_dir).gather_raw / deps.lead_id
+    payload_name = f"gather_raw/{deps.lead_id}/{seq}.json"
+    payload_rel: str | None = payload_name
+    text = json.dumps(docs, default=str) if docs is not None else ""
+    from defender._io import guarded_mkdir
+    try:
+        guarded_mkdir(lead_dir, base=deps.run_dir)
+        write_guarded(deps.run_dir / payload_name, text)
+    except (OSError, ValueError):
+        payload_rel = None
+    row = {
+        "lead_id": deps.lead_id, "seq": seq, "system": "elastic", "verb": verb,
+        "query_id": f"elastic.{verb}", "params": _json_safe_params(dict(params)),
+        "raw_command": f"elastic {verb} " + " ".join(f"{k}={v}" for k, v in params.items()),
+        "payload_path": payload_rel, "exit_code": 2 if docs is None else 0,
+        "error_class": None if docs is not None else "infra",
+        "payload_status": "ok" if docs is not None else "error",
+        "payload_digest": payload_digest(text, "", 0) if docs is not None else "exit=2; capped",
+    }
+    write_guarded(RunPaths(deps.run_dir).executed_queries, json.dumps(row) + "\n", mode="append")
+
+
+def _breaker_failures(run_dir: Path) -> int:
+    path = Path(run_dir) / "circuit_breaker.json"
+    if not path.is_file():
+        return 0
+    try:
+        state = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return 0
+    return int(state.get("systems", {}).get("elastic", {}).get("failures", 0) or 0)
+
+
+class _CallLedger:
+    """Tracks item 1's OWN contribution to the elastic per-system breaker across a
+    resolution, so a second (and later) infra failure can still be ISSUED (`d63`,
+    fall-through on every fault class) without being RECORDED past the cap (`d61`)."""
+
+    def __init__(self, run_dir: Path):
+        self.run_dir = run_dir
+        self.capped = False
+
+    async def call(self, capture, deps, verb, params, env):
+        before = _breaker_failures(self.run_dir)
+        if self.capped:
+            # Past the cap: issue the call directly (bypassing QueryCapture's own automatic
+            # `record_outcome`), still writing a queries-table row of the same shape.
+            try:
+                fn = capture._registry.verbs("elastic")[verb]
+                vctx = VerbContext(defender_dir=deps.defender_dir, run_dir=deps.run_dir, env=env)
+                envelope = await asyncio.to_thread(fn, vctx, **params)
+                _record_manual_row(deps, verb, params, envelope)
+                return envelope, ""
+            except circuit_breaker.RunAborted:
+                raise
+            except BaseException:  # noqa: BLE001 — a capped call's own fault must not raise
+                _record_manual_row(deps, verb, params, None)
+                return None, ""
+        envelope, text = await _capture_issue(capture, deps, verb, params, env)
+        after = _breaker_failures(self.run_dir)
+        if after > before:
+            self.capped = True
+        return envelope, text
+
+
+def _build_deps(run_dir: Path, defender_dir: Path, salt: str, run_id: str, lead_id: str) -> _CaptureDeps:
+    return _CaptureDeps(
+        run_dir=run_dir, defender_dir=defender_dir, salt=salt, run_id=run_id, lead_id=lead_id,
+    )
+
+
+# ─── budget chaining (K23) ────────────────────────────────────────────────────────────
+
+def _budget_gate(run_dir: Path, limits: dict) -> None:
+    """Unconditional (not gated on `DEFENDER_BUDGET_ENFORCE`): lead-0 is harness pre-turn
+    work, and its own wall-clock discipline is not a product toggle the way the model's own
+    tool refusals are."""
+    state = read_budget(run_dir)
+    if tail_exhausted(state, limits):
+        raise BudgetKill("lead-0's own call refused: the run's budget tail is exhausted")
+
+
+def _budget_account(run_dir: Path, run_id: str, tool_name: str, limits: dict) -> None:
+    import contextlib
+
+    with contextlib.suppress(Exception):  # accounting must never break the run
+        update_budget_locked(run_dir, run_id, tool_name, limits=limits)
+
+
+# ─── item 1 rendering ─────────────────────────────────────────────────────────────────
+
+def _elide(message: str, lead_id: str, seq: int) -> str:
+    if not isinstance(message, str) or len(message) <= MESSAGE_CHAR_BUDGET:
+        return message if isinstance(message, str) else str(message)
+    head = message[:MESSAGE_CHAR_BUDGET]
+    return (
+        f"{head}\n{ELIDED} {len(message)} chars, full text at "
+        f"gather_raw/{lead_id}/{seq}.json)"
+    )
+
+
+def _render_doc(doc: dict, lead_id: str, seq: int) -> str:
+    lines = []
+    ts = doc.get("@timestamp")
+    if ts:
+        lines.append(f"- @timestamp: {_sanitize(ts)}")
+    for key in sorted(doc):
+        if key in ("@timestamp", "message"):
+            continue
+        lines.append(f"  {key}: {_sanitize(doc[key])}")
+    if "message" in doc:
+        lines.append(f"  message: {_sanitize(_elide(doc['message'], lead_id, seq))}")
+    return "\n".join(lines)
+
+
+def _sort_chrono(docs: list[dict]) -> list[dict]:
+    def key(d):
+        return str(d.get("@timestamp") or "")
+    return sorted(docs, key=key)
+
+
+def _unavailable(reason: str) -> str:
+    return f"{UNAVAILABLE} {reason})"
+
+
+# ─── item 1: ancestor resolution ─────────────────────────────────────────────────────
+
+_DS_RE = re.compile(r"^\.ds-(?P<name>.+)-[^-]+-\d{4}\.\d{2}\.\d{2}-\d+$")
+
+
+def _map_backing_index(index: str) -> str:
+    """K2 — an open, bounded rewrite from a concrete `.ds-<name>-<namespace>-<date>-
+    <generation>` backing index to the datastream pattern it belongs to, never a hardcoded
+    substring table. A no-match passes the string through UNCHANGED so `confine_index`'s own
+    gate refuses it."""
+    if not isinstance(index, str):
+        return index
+    m = _DS_RE.match(index)
+    if not m:
+        return index
+    return f"{m.group('name')}-*"
+
+
+async def _fetch_batched(ancestors: list[dict], issue) -> tuple[list[dict], int, bool]:
+    """Batch ancestor ids by MAPPED backing index — one call per distinct index, never one
+    per ancestor (d5). Returns `(docs, requested_count, truncated_any)`; `issue` is the
+    caller's own budget-gated, success-tracking call wrapper."""
+    by_index: dict[str, list[str]] = {}
+    for a in ancestors:
+        aid = a.get("id")
+        idx = a.get("index")
+        if not isinstance(aid, str) or not aid.strip():
+            continue
+        if not isinstance(idx, str) or not idx.strip():
+            continue
+        mapped = _map_backing_index(idx)
+        by_index.setdefault(mapped, []).append(aid)
+
+    if not by_index:
+        return [], 0, False
+
+    docs: list[dict] = []
+    truncated_any = False
+    for mapped_index, ids in sorted(by_index.items()):
+        predicate = " OR ".join(f'"{i}"' for i in ids)
+        params = {"native_query": f"_id: ({predicate})", "limit": 20,
+                  "index": mapped_index, "sort": "desc"}
+        envelope = await issue("query", params)
+        if envelope is None:
+            continue
+        docs.extend(envelope.get("hits") or [])
+        truncated_any = truncated_any or bool(envelope.get("truncated"))
+    return docs, sum(len(v) for v in by_index.values()), truncated_any
+
+
+async def _resolve_item1(  # noqa: C901, PLR0912, PLR0915 — item 1's own branch/call census: the shell fetch, the group/fallback branch, the empty/no-group fallback, per-call budget gating — see the module docstring
+    *, run_dir: Path, defender_dir: Path, salt: str, run_id: str, alert: dict,
+    capture: Any, env: dict, limits: dict,
+) -> tuple[str, Entities, str]:
+    from defender.scripts.adapters.elastic_adapter import load_config
+
+    deps = _build_deps(run_dir, defender_dir, salt, run_id, L0)
+    claim_lead({
+        "run_dir": str(run_dir), "lead_id": L0, "goal": ITEM1_GOAL,
+        "what_to_summarize": ITEM1_WHAT_TO_SUMMARIZE, "provenance": HARNESS_PROVENANCE,
+    })
+    _declare_l_finding(run_dir, L0, "ancestor resolution")
+
+    alert_id = alert.get("alert_id")
+    signal_index = alert.get("signal_index")
+    if not isinstance(signal_index, str) or not signal_index.strip():
+        try:
+            cfg = load_config(VerbContext(defender_dir=defender_dir, run_dir=run_dir, env=env))
+            signal_index = cfg["ELASTIC_ALERTS_INDEX"]
+        except Exception:  # noqa: BLE001 — degrade the whole item, never the run
+            return (_unavailable("could not resolve this alert's signal_index"),
+                    Entities(), STATUS_FAILED)
+
+    ancestor_events = alert.get("ancestor_events") or []
+    if not isinstance(ancestor_events, list):
+        ancestor_events = []
+
+    ledger = _CallLedger(run_dir)
+    issued_any = False
+    saw_success = False
+
+    async def _issue(verb: str, params: dict):
+        nonlocal issued_any, saw_success
+        issued_any = True
+        _budget_gate(run_dir, limits)
+        envelope, _text = await ledger.call(capture, deps, verb, params, env)
+        _budget_account(run_dir, run_id, "query", limits)
+        if envelope is not None:
+            saw_success = True
+        return envelope
+
+    shell: dict | None = None
+    if isinstance(alert_id, str) and alert_id.strip():
+        shell = await _issue("alerts", {
+            "native_query": f'{ALERT_ID_FIELD}:"{alert_id}"', "limit": 1,
+            "index": signal_index, "sort": "desc",
+        })
+        if isinstance(shell, dict):
+            hits = shell.get("hits") or []
+            shell = hits[0] if hits else None
+
+    group_id = shell.get(GROUP_ID_FIELD) if isinstance(shell, dict) else None
+    docs: list[dict] = []
+    requested = len(ancestor_events)
+    truncated = False
+
+    if isinstance(group_id, str) and group_id.strip():
+        envelope = await _issue("alerts", {
+            "native_query": f'{GROUP_ID_FIELD}:"{group_id}"', "limit": 20,
+            "index": signal_index, "sort": "desc",
+        })
+        hits = [h for h in ((envelope or {}).get("hits") or []) if h.get(BUILDING_BLOCK_FIELD)]
+        if hits:
+            docs = hits
+            requested = max(requested, len(hits))
+            truncated = bool((envelope or {}).get("truncated"))
+        else:
+            # F10 — no group, or a group resolving to zero building blocks: fall back.
+            docs, requested2, truncated = await _fetch_batched(ancestor_events, _issue)
+            requested = max(requested, requested2)
+    else:
+        docs, requested2, truncated = await _fetch_batched(ancestor_events, _issue)
+        requested = max(requested, requested2)
+
+    if not issued_any:
+        return (_unavailable("no usable ancestor identifier or alert id survived — no "
+                              "fetch was issued"), Entities(), STATUS_EMPTY)
+
+    docs = _sort_chrono(docs)
+    entities = _entities_from_docs(docs)
+
+    body_lines = []
+    if docs:
+        for i, d in enumerate(docs):
+            body_lines.append(_render_doc(d, L0, i))
+    elif saw_success:
+        body_lines.append(_unavailable("the resolution reached the backend and found nothing"))
+    else:
+        body_lines.append(_unavailable("every backend call this resolution attempted failed"))
+
+    if requested and (len(docs) < requested or truncated):
+        body_lines.append(
+            f"{SHORTFALL} resolved {len(docs)} of {requested} requested ancestor "
+            "document(s))"
+        )
+
+    text = "\n\n".join(body_lines)
+
+    if not saw_success:
+        status = STATUS_FAILED
+    elif not docs:
+        status = STATUS_EMPTY
+    elif requested and (len(docs) < requested or truncated):
+        status = STATUS_TRUNCATED
+    else:
+        status = STATUS_WITH_ENTITIES
+
+    return text, entities, status
+
+
+# ─── item 3: the correlation lead's harness-authored contract ───────────────────────────
+
+def _correlation_contract(alert: dict, entities: Entities) -> tuple[str, list[str]] | None:
+    ts = alert.get("alert_timestamp")
+    if not isinstance(ts, str) or not ts.strip():
+        return None
+    try:
+        from datetime import datetime
+        datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+    entity_bits = []
+    for label, values in (("host", entities.hosts), ("user", entities.users),
+                          ("source IP", entities.source_ips)):
+        for v in values:
+            entity_bits.append(f"{label} {_sanitize(v)}")
+    entity_text = "; ".join(entity_bits) if entity_bits else "(no entities resolved)"
+
+    goal = (
+        "Correlate ANY signature of alert already on the SOC's radar for these entities — "
+        f"{entity_text} — over a bounded window around {_sanitize(ts)}. Search the alerts "
+        "index ONLY (this is a correlation over prior alerts, not raw telemetry). Do not "
+        "narrow to this alert's own rule; a different rule firing on the same host/user is "
+        "exactly the related behaviour this lead exists to surface."
+    )
+    what = [
+        "the count of same-signature alerts on-host in the window",
+        "the count of same-signature alerts fleet-wide in the window",
+        "whether any correlated alert is already benign-explained",
+    ]
+    return goal, what
+
+
+async def dispatch_correlation(  # noqa: C901, PLR0913 — item 3's own dispatch: the narrowed registry, the session/terminator wiring, the pre-claimed seam call — one composition frame
+    *, run_dir: Path, defender_dir: Path, salt: str, run_id: str,
+    goal: str, what_to_summarize: list[str], verbs: Any, limits: dict,
+    make_model: Any, logger: Any, box: Any, store: Any = None,
+) -> str | None:
+    """The ASYNC half of item 3: dispatch the real gather subagent for `l-00c`, reusing the
+    shared terminator/bookkeeping seam (`tools_gather._run_gather`, K15) with
+    `pre_claimed=True` (F5/F3 — the leads row was already claimed synchronously, before
+    MAIN's first turn, by `resolve_lead_zero`/`prepare_correlation_lead`)."""
+    from .agent_definition import bind
+    from .driver import GATHER_DEF, build_gather_agent
+    from .tools import GatherDeps
+    from .tools_gather import GatherRequest, _run_gather
+    from .verb_grant import VerbGrant
+
+    narrowed = VerbGrant(role="lead-zero-correlation",
+                          entries=(("elastic", "alerts", "r"), ("elastic", "health-check", "r")))
+
+    # A thin re-grant wrapper: same verb resolution, a narrower grant object — so `esql`
+    # (never `confine_index`'d, g6/r19) is denied at the grant check rather than reaching a
+    # transport (F3/K7/d19).
+    from .verbs import VerbRegistry
+
+    class _Narrowed(VerbRegistry):
+        def __init__(self, inner):
+            super().__init__(narrowed)
+            self._inner = inner
+
+        def systems(self):
+            return self._inner.systems()
+
+        def verbs(self, system):
+            return self._inner.verbs(system)
+
+        def _cold_verb_names(self, system):
+            return self._inner._cold_verb_names(system)
+
+    registry = _Narrowed(verbs)
+
+    agent_id = f"gather:{L3}"
+    gather_session_id: str | None = None
+    if store is not None:
+        gather_session_id = store.new_session(agent_id=agent_id)
+
+    def gather_factory(_agent_id: str):
+        from .driver import _gather_extra_capabilities
+
+        extra: list = []
+        if store is not None and gather_session_id is not None:
+            extra = _gather_extra_capabilities(store, gather_session_id, _agent_id)
+        return build_gather_agent(
+            defender_dir, logger, _agent_id, make_model, registry, limits,
+            extra_capabilities=extra, session_id=gather_session_id,
+        )
+
+    def stamp_terminator(_agent_id: str, reason: str) -> None:
+        if store is None or gather_session_id is None:
+            return
+        try:
+            store.set_truncated_by(gather_session_id, reason)
+        except Exception as e:  # noqa: BLE001 — the store may already be the reason we're here
+            print(f"[run.py] correlation lead truncated_by write skipped: {e!r}")
+
+    gbase = bind(GATHER_DEF, run_dir, salt=salt, defender_dir=defender_dir, box=box)
+    assert isinstance(gbase, GatherDeps)
+    gdeps = replace(gbase, run_id=run_id, lead_id=L3)
+
+    request = GatherRequest(L3, "elastic", goal, tuple(what_to_summarize))
+    try:
+        return await _run_gather(
+            gdeps, gather_factory, CORRELATION_REQUEST_LIMIT, request, narrowed,
+            stamp_terminator, pre_claimed=True,
+        )
+    except (BudgetKill, circuit_breaker.RunAborted):
+        raise
+    except Exception:  # noqa: BLE001 — item 3's own dispatch must never break the run
+        return None
+
+
+def _declare_l_finding(run_dir: Path, lead_id: str, name: str) -> None:
+    """K11/N6 — the HARNESS writes lead-0's declaring `:L findings` row into
+    `investigation.md`, before MAIN's first turn: with no such row, `invlang_validate`
+    refuses any citation of the reserved id as an "undeclared lead" (P6, executed)."""
+    from defender._io import write_guarded
+
+    path = RunPaths(run_dir).investigation
+    block = (
+        f"## lead-0 ({lead_id}) — harness-authored, declared before the investigation begins\n\n"
+        "```invlang\n"
+        ":L findings [id|loop|name|target|tests|system|window]\n"
+        f"{lead_id}|0|{name}|||elastic|n/a\n"
+        "```\n\n"
+    )
+    try:
+        existing = path.read_text(encoding="utf-8") if path.is_file() else ""
+        write_guarded(path, existing + block)
+    except (OSError, ValueError) as e:  # noqa: BLE001 — best-effort; never breaks the run
+        print(f"[lead_zero] could not declare {lead_id} in investigation.md: {e!r}")
+
+
+def prepare_correlation_lead(run_dir: Path, alert: dict, entities: Entities, status: str) -> tuple[str, list[str]] | None:
+    """The SYNCHRONOUS half of item 3: gate on the resolution status (d22 — dispatches on
+    WITH_ENTITIES and TRUNCATED, not on FAILED/EMPTY), build the harness-authored contract,
+    and claim `l-00c`'s leads row BEFORE MAIN's first turn (F5). Returns `(goal,
+    what_to_summarize)` when item 3 should actually dispatch, else `None`."""
+    if status not in (STATUS_WITH_ENTITIES, STATUS_TRUNCATED):
+        return None
+    contract = _correlation_contract(alert, entities)
+    if contract is None:
+        return None
+    goal, what = contract
+    claimed = claim_lead({
+        "run_dir": str(run_dir), "lead_id": L3, "goal": goal,
+        "what_to_summarize": what, "provenance": HARNESS_PROVENANCE,
+    })
+    if claimed == 2:
+        # Someone else already owns this id (a planted collision) — do not touch it further.
+        return None
+    _declare_l_finding(run_dir, L3, "correlation lead")
+    return goal, what
+
+
+# ─── the wrap + section assembly ─────────────────────────────────────────────────────
+
+def _render_section(body: str, salt: str) -> str:
+    """`LeadZeroResult.text` (d0): item 1's rendered block IN ITS ENTIRETY inside ONE
+    `wrap(text, "untrusted", salt)` frame — nothing outside it. The ORIENT heading is a
+    separate, TRUSTED line `render_orient_section` prepends when assembling the section
+    text `orient.py` appends; it is not part of the entry point's own return value."""
+    return _wrap(body, "untrusted", salt)
+
+
+def render_orient_section(result: LeadZeroResult) -> str:
+    """The ORIENT-time section text: the trusted heading (naming the reserved ids MAIN must
+    not reuse — R7 `interacts(main_agent->lead_id)`) followed by item 1's whole untrusted
+    frame, unmodified."""
+    return (
+        f"{LEAD_ZERO_HEADING} (resolved by the harness before your first turn — reserved "
+        f"lead ids {L0} (this resolution) and {L3} (a correlation lead dispatched off it, "
+        "if any) are already claimed; do not reuse them)\n\n" + result.text
+    )
+
+
+# ─── the entry point (F1) ─────────────────────────────────────────────────────────────
+
+def resolve_lead_zero(
+    *, run_dir: Path, defender_dir: Path, alert_path: Path, salt: str, verbs: Any,
+    limits: dict = DEFAULT_LIMITS, run_id: str | None = None,
+) -> LeadZeroResult:
+    run_dir = Path(run_dir)
+    defender_dir = Path(defender_dir)
+    resolved_run_id = run_id or run_dir.name
+
+    if verbs is None:
+        unavailable_text = _render_section(
+            _unavailable("no verb registry was injected into this run"), salt)
+        return LeadZeroResult(text=unavailable_text, entities=Entities(), status=STATUS_FAILED)
+
+    alert_text, err = read_text_soft(Path(alert_path))
+    if alert_text is None:
+        body = _unavailable(f"could not read the alert: {err}")
+        return LeadZeroResult(text=_render_section(body, salt), entities=Entities(), status=STATUS_FAILED)
+    try:
+        alert = json.loads(alert_text)
+    except (ValueError, TypeError) as e:
+        body = _unavailable(f"the alert is not valid JSON: {e!r}")
+        return LeadZeroResult(text=_render_section(body, salt), entities=Entities(), status=STATUS_FAILED)
+    if not isinstance(alert, dict):
+        body = _unavailable("the alert is not a JSON object")
+        return LeadZeroResult(text=_render_section(body, salt), entities=Entities(), status=STATUS_FAILED)
+
+    from defender import run_common
+    from .query_tool import QueryCapture
+
+    try:
+        env = run_common.run_env(defender_dir, run_dir)
+    except Exception:  # noqa: BLE001 — orientation-adjacent work must never break the run
+        env = {}
+
+    capture = QueryCapture(verbs, "gather")
+
+    async def _go():
+        try:
+            return await _resolve_item1(
+                run_dir=run_dir, defender_dir=defender_dir, salt=salt, run_id=resolved_run_id,
+                alert=alert, capture=capture, env=env, limits=limits,
+            )
+        except (BudgetKill, circuit_breaker.RunAborted):
+            raise
+        except BaseException as e:  # noqa: BLE001 — item 1's own faults degrade, never raise
+            return _unavailable(f"{e!r}"), Entities(), STATUS_FAILED
+
+    body, entities, status = _run_sync(_go())
+    return LeadZeroResult(text=_render_section(body, salt), entities=entities, status=status)
+
+
+__all__ = [
+    "CORRELATION_REQUEST_LIMIT",
+    "ELIDED",
+    "HARNESS_PROVENANCE",
+    "L0",
+    "L3",
+    "LEAD_ZERO_HEADING",
+    "PROVENANCE_KEY",
+    "RESERVED_LEAD_IDS",
+    "SHORTFALL",
+    "STATUS_EMPTY",
+    "STATUS_FAILED",
+    "STATUS_TRUNCATED",
+    "STATUS_WITH_ENTITIES",
+    "UNAVAILABLE",
+    "Entities",
+    "LeadZeroResult",
+    "dispatch_correlation",
+    "prepare_correlation_lead",
+    "resolve_lead_zero",
+]

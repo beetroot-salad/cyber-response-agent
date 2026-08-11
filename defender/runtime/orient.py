@@ -106,7 +106,10 @@ def _build_corpus_vocab_section(env: dict[str, str], sig: str | None) -> str | N
     return None
 
 
-def orientation(run_dir: Path, defender_dir: Path, alert_path: Path, salt: str) -> str:
+def orientation(
+    run_dir: Path, defender_dir: Path, alert_path: Path, salt: str,
+    *, lead_zero_section: str | None = None,
+) -> str:
     try:
         from defender import run_common
         env = run_common.run_env(defender_dir, run_dir)
@@ -123,6 +126,12 @@ def orientation(run_dir: Path, defender_dir: Path, alert_path: Path, salt: str) 
     alert_block = _raw_alert(alert_path, salt)
     if alert_block:
         sections.append(alert_block)
+
+    # #808 — lead-0's item 1 (ancestor resolution) has already run, sync, before this text
+    # is assembled; `resolve_lead_zero` did the network I/O and the table writes, this is a
+    # pure formatting append (`d15` — orient.py stays a text-assembler).
+    if lead_zero_section:
+        sections.append(lead_zero_section)
 
     try:
         from defender.scripts.workspace_map import workspace_map

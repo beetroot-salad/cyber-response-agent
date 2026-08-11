@@ -445,9 +445,33 @@ class _Run:
         return read_jsonl_rows(p) if p.is_file() else []
 
     @property
+    def own_rows(self) -> list[dict]:
+        """`.rows` filtered to exclude #808's harness-authored leads (`l-000`/`l-00c`) —
+        the rows produced by THIS test's own dispatched lead, not lead-0's unconditional
+        pre-ORIENT resolution against the run's alert fixture."""
+        from defender.runtime.lead_zero import RESERVED_LEAD_IDS
+        return [r for r in self.rows if r.get("lead_id") not in RESERVED_LEAD_IDS]
+
+    @property
     def denials(self) -> list[dict]:
         p = self.run_dir / observe.POLICY_DENIALS
         return read_jsonl_rows(p) if p.is_file() else []
+
+    @property
+    def own_denials(self) -> list[dict]:
+        """`.denials` with #808's harness-authored ancestor-fetch attempt dropped, if it's
+        there — item 1 issues its own `elastic.alerts` call synchronously before MAIN's
+        first turn, so if that call itself lands as a policy denial (the registry declares
+        `alerts` but does not grant it), its record is always the FIRST in the stream. A
+        policy-denial record carries no `lead_id` by design (§7 R12), so unlike `own_rows`
+        this can't filter by id — it can only rely on lead-0's fixed position. Only the
+        LEADING entry is ever dropped, and only when it is `alerts`: a test that later
+        scripts its own genuine `elastic.alerts` denial (as part of its own turns, after
+        lead-0's own attempt) keeps that record."""
+        d = self.denials
+        if d and d[0].get("verb") == "alerts":
+            return d[1:]
+        return d
 
     @property
     def payload_files(self) -> list[Path]:
