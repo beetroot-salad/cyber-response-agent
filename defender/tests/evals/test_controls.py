@@ -137,3 +137,49 @@ def test_a_query_with_an_odd_bound_count_is_refused_not_patched():
         one, (7,), operation_window=(start, start + timedelta(hours=1)), dry_run=True)
     assert controls == []
     assert contribution is None
+
+
+# --------------------------------------------------------------------------------------- #
+# One producer of the ES|QL payload shape, not two (#834).
+# --------------------------------------------------------------------------------------- #
+
+def test_controls_emit_the_adapters_payload_shape_because_they_use_its_shaper():
+    """This module's docstring promises payloads "in the SAME shape the production `esql` verb
+    stores", so `label.py` compares an attack window against its controls like with like. That
+    promise used to rest on a SECOND copy of the adapter's zip living here — two producers, one
+    invariant, and nothing keeping them equal. #834 changed the shape; a hand-maintained copy
+    would have left `label.py` comparing dicts against arrays and calling it a measurement.
+
+    Pinned at the seam rather than by re-asserting the shape: `run_esql` is I/O and untestable
+    here, but the shaping it delegates to is not.
+    """
+    from defender.scripts.adapters import elastic_adapter
+
+    assert CONTROLS.esql_payload is elastic_adapter.esql_payload, (
+        "controls.py has grown its own copy of the payload shaper again"
+    )
+
+
+def test_the_esql_payload_leaves_rows_as_the_wire_sent_them():
+    """`values` stays columnar: names once in `columns`, rows as bare arrays. The liveness
+    probe below reads them positionally, which is only sound if nothing re-zips on the way."""
+    raw = {"columns": [{"name": "total", "type": "long"}], "values": [[444]]}
+    payload = CONTROLS.esql_payload("FROM logs-* | STATS total = COUNT(*)", raw)
+
+    assert payload["values"] == [[444]]
+    assert payload["row_count"] == 1
+    assert payload["columns"] == raw["columns"]
+
+
+def test_the_liveness_probe_reads_its_column_by_name_not_by_luck():
+    """`window_is_live` resolves `total`'s INDEX off `columns` rather than hardcoding 0. The
+    probe projects one column today; a positional read that assumed so would misreport liveness
+    the day it projects two, and a false "not live" silently drops a case from the measurement.
+    """
+    payload = CONTROLS.esql_payload(
+        "q", {"columns": [{"name": "first_seen", "type": "date"},
+                          {"name": "total", "type": "long"}],
+              "values": [["2026-07-25T09:22:37Z", 444]]})
+
+    idx = next(i for i, c in enumerate(payload["columns"]) if c.get("name") == "total")
+    assert payload["values"][0][idx] == 444, "the probe would have read the wrong cell"

@@ -84,7 +84,7 @@ class Elision:
     always whole: `kept`/`total` are counts of elements (a list) or characters (a string)."""
 
     path: str
-    kind: str  # "list" | "string" | "fields" | "text"
+    kind: str  # "list" | "string" | "fields" | "cells" | "text"
     kept: int
     total: int
 
@@ -378,17 +378,23 @@ def _fit_one(element: Any, room: int, path: str, out: list[Elision]) -> Any | No
 
     Field shape is preserved ahead of value shape, in that order: clip the string leaves harder
     and harder first (a 12-char value still distinguishes a timestamp from a count), and only
-    when even that will not fit start dropping FIELDS via `_fit_fields`. Returns `None` when the
-    element cannot be represented at all, which leaves the marker to speak alone."""
+    when even that will not fit start dropping the element's own members — `_fit_fields` for a
+    record, `_fit_cells` for a positional row. Both halves are needed because an element is
+    whatever the payload made it: a dict for search hits, a bare array for an ES|QL row since
+    #834. Returns `None` when the element cannot be represented at all — a scalar too long for
+    even the tightest cap — which leaves the marker to speak alone."""
     for cap in _SQUEEZE_CAPS:
         leaves: list[Elision] = []
         candidate = _clip_leaves(element, path, leaves, cap)
         if len(_dumps(candidate)) <= room:
             out.extend(leaves)
             return candidate
-    if isinstance(element, dict) and room > 0:
+    if room > 0:
         squeezed = _clip_leaves(element, path, [], _SQUEEZE_CAPS[-1])
-        return _fit_fields(squeezed, room, out, path=path)
+        if isinstance(element, dict):
+            return _fit_fields(squeezed, room, out, path=path)
+        if isinstance(element, list):
+            return _fit_cells(squeezed, room, out, path=path)
     return None
 
 
@@ -453,6 +459,37 @@ def _fit_fields(obj: dict, budget: int, out: list[Elision], *, path: str = "") -
     out.append(Elision(path, "fields", len(kept), len(obj)))
     kept[marker_key] = _list_marker(len(kept), len(obj)).replace("elements", "fields")
     return kept
+
+
+def _fit_cells(row: list, budget: int, out: list[Elision], *, path: str = "") -> Any:
+    """A wide positional ROW — the list-shaped mirror of `_fit_fields`, and the reason it
+    exists is that `_fit_one` had only the dict half.
+
+    `_fit_one`'s last resort was guarded `isinstance(element, dict)`, so an element that was
+    a LIST fell straight through to `return None` and the marker spoke alone. That guard was
+    invisible while every tabular payload arrived as dicts; #834 stopped the ES|QL adapter
+    re-zipping its rows, and on the corpus's widest payload — one row of 1,657 columns, a
+    lead probing schema — the view went from 121 named cells to zero. Same budget, same
+    payload, all the field shape gone, on exactly the payload it is shown for.
+
+    Cells are kept from the FRONT, which is what makes a cut row still readable: cell `i`
+    binds to `columns[i]`, so `columns[:len(kept)]` names precisely the survivors. Nothing
+    here has to know that — it falls out of not reordering.
+    """
+    marker = _list_marker(0, len(row)).replace("elements", "cells")
+    reserve = len(_dumps(marker)) + _SEP
+    kept: list[Any] = []
+    used = 2
+    for cell in row:
+        cost = len(_dumps(cell)) + _SEP
+        if used + cost + reserve > budget:
+            break
+        kept.append(cell)
+        used += cost
+    if len(kept) == len(row):
+        return kept
+    out.append(Elision(path, "cells", len(kept), len(row)))
+    return [*kept, _list_marker(len(kept), len(row)).replace("elements", "cells")]
 
 
 def walk(obj: Any, budget: int) -> tuple[Any, list[Elision]]:

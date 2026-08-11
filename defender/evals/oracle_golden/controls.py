@@ -37,6 +37,11 @@ from datetime import datetime, timedelta, UTC
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from defender.scripts.adapters.elastic_adapter import esql_payload  # noqa: E402
+
 ES_SH = REPO_ROOT / "infra" / "bin" / "es.sh"
 
 # The two bounds a lead's ES|QL carries. Captured as three groups so a rewrite can
@@ -183,8 +188,15 @@ def window_is_live(start: datetime, end: datetime) -> bool:
     if key not in _LIVENESS:
         probe = (f'FROM logs-*\n| WHERE @timestamp >= "{key[0]}" AND @timestamp < "{key[1]}"\n'
                  f"| STATS total = COUNT(*)")
-        rows = run_esql(probe)["values"]
-        total = rows[0].get("total", 0) if rows else 0
+        payload = run_esql(probe)
+        # Positional, because `values` is now the wire's own columnar form (#834). The index
+        # is resolved from `columns` rather than hardcoded to 0: this probe projects a single
+        # column today, and a name lookup does not rot if it ever projects two.
+        idx = next(
+            (i for i, c in enumerate(payload["columns"]) if c.get("name") == "total"), None
+        )
+        rows = payload["values"]
+        total = rows[0][idx] if rows and idx is not None else 0
         _LIVENESS[key] = bool(total)
     return _LIVENESS[key]
 
@@ -203,10 +215,12 @@ def run_esql(query: str, *, timeout: int = 180) -> dict:
     resp = json.loads(proc.stdout)
     if "error" in resp:
         raise RuntimeError(f"ES|QL error: {json.dumps(resp['error'])[:400]}")
-    names = [c.get("name") for c in resp.get("columns", [])]
-    rows = [dict(zip(names, row, strict=False)) for row in resp.get("values", [])]
-    return {"query": query, "columns": resp.get("columns", []),
-            "row_count": len(rows), "values": rows}
+    # Through the ADAPTER's own shaper, not a second copy of it. This module used to
+    # re-implement the zip under a docstring promising "the production `esql` verb's payload
+    # shape" — two producers, one promise, and nothing keeping them equal. #834 changed that
+    # shape; had the copy stayed, `label.py` would have gone on comparing an attack window
+    # in one encoding against its controls in the other.
+    return esql_payload(query, resp)
 
 
 def measure_controls(query: str, offsets_days: tuple[int, ...] = DEFAULT_OFFSETS_DAYS,
