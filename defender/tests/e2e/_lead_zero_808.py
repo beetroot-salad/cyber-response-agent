@@ -258,16 +258,19 @@ SHELL_DEFAULT: Any = object()   # sentinel: "a shell alert that resolves, carryi
 def _shell_answer(shell: Any, index: str, answer: Answer) -> Answer:
     """Compose the SHELL fetch onto a scenario's ancestor answer.
 
-    Item 1's first backend call is always the by-`alert_id` shell fetch, so a scenario's own
-    `answer` serves calls 2..n. `shell` is a document (or list) the fetch returns, `[]`/`None`
-    for "unresolvable by alert_id", or an exception instance the fetch raises."""
+    Keyed on the call's OWN predicate (`native_query` starting with `ALERT_ID_FIELD:`, the
+    shell fetch's unique signature — d60/c-lookup), not on call order: when K13 correctly
+    skips the shell fetch (no usable `alert_id`), item 1's first and only call is the
+    batched ancestor fetch, and a call-order interceptor would misroute it into this
+    scenario's shell answer instead of `answer`. `shell` is a document (or list) the fetch
+    returns, `[]`/`None` for "unresolvable by alert_id", or an exception instance the fetch
+    raises."""
     if shell is SHELL_DEFAULT:
         shell = shell_doc()
-    n = [0]
 
     def _answer(verb: str, params: dict) -> Any:
-        n[0] += 1
-        if n[0] > 1:
+        native_query = params.get("native_query") or ""
+        if not native_query.startswith(f"{ALERT_ID_FIELD}:"):
             return answer(verb, params)
         if isinstance(shell, BaseException):
             raise shell

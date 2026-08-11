@@ -59,6 +59,7 @@ from defender.tests.e2e._lead_zero_808 import (  # noqa: E402
     hit,
     run,
 )
+from defender.tests.e2e._replay_harness import Turn  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 
@@ -216,7 +217,13 @@ def test_the_golden_case_builder_keeps_a_scoreable_lead_set(tmp_path):
     case would fail integrity rather than score."""
     from defender.evals.oracle_golden import build_case
 
-    res = run(tmp_path / "run", run_id="lz808-case", answer=answer_hits(DOCS))
+    res = run(tmp_path / "run", run_id="lz808-case", answer=answer_hits(DOCS),
+              main_turns=[
+                  Turn(tool_calls=[("gather", {
+                      "lead_id": "l-001", "system": "elastic", "goal": "measure this lead",
+                      "what_to_summarize": ["auth events"]})]),
+                  Turn(text="Investigation complete."),
+              ])
     story = tmp_path / "story.md"
     story.write_text("the ground-truth story\n", encoding="utf-8")
     controls = tmp_path / "controls.yaml"
