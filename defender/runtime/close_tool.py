@@ -20,13 +20,19 @@ import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
+from pydantic import Field
 from pydantic_ai import RunContext
 from pydantic_ai.exceptions import ModelRetry
 
-from defender._artifact_schema import DISPOSITION_ENUM, validate_artifact
+from defender._artifact_schema import validate_artifact
 from defender._untrusted import wrap as _wrap
+# The vocabulary from its OWNER, not through the report schema, which was only forwarding it
+# here (#785's rule: a module that USES the vocabulary imports it; a module that only PASSED
+# IT ON no longer names it at all). Both halves are used — the set for the exact membership
+# test in `_close_investigation_async`, the ordered tuple for the argument schema below.
+from defender._vocab import DISPOSITION_ENUM, DISPOSITION_VALUES
 from defender.hooks.budget_enforcer import BUDGET_EXEMPT_TOOLS  # noqa: F401 — re-export, RS16
 from defender.skills.invlang.validate import false_positive_entry_price
 
@@ -486,20 +492,39 @@ def _read_companion_text(path: Path) -> str:
         return ""
 
 
+#: The `disposition` argument AS THE MODEL IS OFFERED IT (#750): a plain `str` carrying the
+#: owner's vocabulary in its JSON schema. Derived from `DISPOSITION_VALUES`, so a fifth member
+#: reaches the model with nobody editing prose — #806 added `false-positive` by hand-syncing
+#: every surface that spelled the members out, and this tool's docstring was one of them.
+#:
+#: `json_schema_extra`, NOT a `StrEnum` or a `Literal`, DELIBERATELY. pydantic does not validate
+#: against it, so an out-of-enum value still reaches the body and the exact test in
+#: `_close_investigation_async` stays the SOLE rejecter. Hand the type system the enum instead
+#: and pydantic refuses first, which breaks three things at once: the host check becomes
+#: unreachable from this lane, the SYNC entry (nothing validates a tool argument in front of
+#: it) is left as the only lane the check still guards, and #722's repr-escaped retry text is
+#: replaced by a framework message that echoes the invisible character RAW — measured, not
+#: assumed: `input: "beni<U+200B>gn"`. The hint is for the model; the gate stays ours.
+DispositionArg = Annotated[str, Field(json_schema_extra={"enum": list(DISPOSITION_VALUES)})]
+
+
 def register_close_tool(agent, *, stages: Any, bounds: challenge_gate.Bounds) -> None:
     """MAIN's composition root ONLY — never called for any other role's agent build, and
     only when that root's effective `ToolSet.close` is on."""
 
     @agent.tool
-    async def close_investigation(ctx: RunContext[AgentDeps], disposition: str) -> str:
+    async def close_investigation(
+        ctx: RunContext[AgentDeps], disposition: DispositionArg
+    ) -> str:
         """Commit this investigation's disposition once ANALYZE has reached a confident
-        finding. `disposition` is the typed enum (benign | false-positive | inconclusive |
-        malicious), never free text — see SKILL §REPORT for what each one claims, and for
-        the `detection_notes` + `entity_check` rows `false-positive` requires in
-        `:T conclude`. This is the ONLY way to record report.md — write_file/edit_file cannot
-        reach it. A confident disposition passes a live challenge gate before it commits;
-        if the gate is not satisfied yet, this call returns without committing and the
-        investigation continues for another ANALYZE/GATHER turn."""
+        finding. `disposition` is a closed enum whose members are in this tool's own schema,
+        never free text, and the value is compared EXACTLY — a near miss is refused rather
+        than guessed at, so send the keyword with nothing around it. See SKILL §REPORT for
+        what each one claims, and for the `detection_notes` + `entity_check` rows
+        `false-positive` requires in `:T conclude`. This is the ONLY way to record report.md —
+        write_file/edit_file cannot reach it. A confident disposition passes a live challenge
+        gate before it commits; if the gate is not satisfied yet, this call returns without
+        committing and the investigation continues for another ANALYZE/GATHER turn."""
         return await _tool_close_investigation(ctx.deps, disposition, stages=stages, bounds=bounds)
 
 
