@@ -68,6 +68,10 @@ def passthrough_max_bytes() -> int:
 #: dropped part of the field shape. A record keeps all its keys; only a bulky value is cut.
 LEAF_MAX_CHARS = 600
 
+#: The shortest value prefix worth keeping beside a marker. Below this a clip states nothing
+#: about the value it replaced, and `_clip_string` refuses rather than emit a mangled marker.
+_MIN_CLIP_PREFIX = 8
+
 #: Every reduction carries this, in the scope where it happened. A silently shortened array is
 #: valid JSON that parses clean and counts wrong — the exact failure this module exists to stop —
 #: so the marker is deliberately not JSON-shaped and cannot be read as data.
@@ -301,8 +305,17 @@ def _clip_string(text: str, room: int) -> tuple[str, bool]:
     and a clipper that returns more than its room is a budget that does not hold."""
     if len(text) <= room:
         return text, False
-    keep = max(room - len(_string_marker(0, len(text))), 0)
-    return (text[:keep] + _string_marker(keep, len(text)))[:room], True
+    marker = _string_marker(0, len(text))
+    keep = room - len(marker)
+    if keep < _MIN_CLIP_PREFIX or room >= len(text):
+        # A clip has to leave BOTH a legible prefix and a whole marker, or it is not a clip.
+        # The marker runs ~25 characters, so at the small caps `_fit_one` squeezes down to, the
+        # `[:room]` clamp was cutting the MARKER itself: a 24-character timestamp came back as
+        # `'<<ELIDED 24 '` — not a value, not a marker, and no shorter than what it replaced.
+        # Refuse, and let the caller drop whole FIELDS instead: that trades a real saving for
+        # something it can state exactly.
+        return text, False
+    return text[:keep] + _string_marker(keep, len(text)), True
 
 
 def _clip_serialized(text: str, room: int) -> tuple[str, bool]:
@@ -328,19 +341,55 @@ def _clip_serialized(text: str, room: int) -> tuple[str, bool]:
     return text[:lo] + _string_marker(lo, len(text)), True
 
 
-def _clip_leaves(value: Any, path: str, out: list[Elision]) -> Any:
+def _clip_leaves(value: Any, path: str, out: list[Elision], leaf_cap: int = LEAF_MAX_CHARS) -> Any:
     """Long string leaves inside a KEPT element. The element keeps every key it had; only the
-    bulky value is cut, and it says so where it was cut."""
+    bulky value is cut, and it says so where it was cut.
+
+    `leaf_cap` is normally `LEAF_MAX_CHARS`. `_fit_one` lowers it when a single element is
+    itself wider than the whole share."""
     if isinstance(value, str):
-        clipped, did = _clip_string(value, LEAF_MAX_CHARS)
+        clipped, did = _clip_string(value, leaf_cap)
         if did:
-            out.append(Elision(path, "string", LEAF_MAX_CHARS, len(value)))
+            out.append(Elision(path, "string", leaf_cap, len(value)))
         return clipped
     if isinstance(value, dict):
-        return {k: _clip_leaves(v, f"{path}.{k}", out) for k, v in value.items()}
+        return {k: _clip_leaves(v, f"{path}.{k}", out, leaf_cap) for k, v in value.items()}
     if isinstance(value, list):
-        return [_clip_leaves(v, f"{path}[{i}]", out) for i, v in enumerate(value)]
+        return [_clip_leaves(v, f"{path}[{i}]", out, leaf_cap) for i, v in enumerate(value)]
     return value
+
+
+#: Leaf caps `_fit_one` walks down when ONE element does not fit the share, before it gives up
+#: on values and starts dropping fields. Descending, and the last is deliberately tiny: a
+#: 12-character value still shows the lead that the field is an ISO stamp rather than an integer,
+#: which is the whole reason elements are shown instead of a key list.
+_SQUEEZE_CAPS = (300, 120, 40, 12)
+
+
+def _fit_one(element: Any, room: int, path: str, out: list[Elision]) -> Any | None:
+    """ONE element squeezed into `room`, for the case where not even the first fits whole.
+
+    Found against the LIVE stack: a security alert document serializes to 8,568 bytes — larger
+    than the entire 8,192-byte ceiling — so `_fit_list` kept zero of 20 and the lead received
+    `hits: ["<<ELIDED 20 of 20 elements>>"]`. Honest, and useless: no field name survived, on
+    exactly the payload where the lead most needs to write a narrowing filter. The old sampler
+    was WRONG about completeness but did show three documents, so on the biggest documents the
+    honest rewrite was a regression in the one thing elements are shown for.
+
+    Field shape is preserved ahead of value shape, in that order: clip the string leaves harder
+    and harder first (a 12-char value still distinguishes a timestamp from a count), and only
+    when even that will not fit start dropping FIELDS via `_fit_fields`. Returns `None` when the
+    element cannot be represented at all, which leaves the marker to speak alone."""
+    for cap in _SQUEEZE_CAPS:
+        leaves: list[Elision] = []
+        candidate = _clip_leaves(element, path, leaves, cap)
+        if len(_dumps(candidate)) <= room:
+            out.extend(leaves)
+            return candidate
+    if isinstance(element, dict) and room > 0:
+        squeezed = _clip_leaves(element, path, [], _SQUEEZE_CAPS[-1])
+        return _fit_fields(squeezed, room, out, path=path)
+    return None
 
 
 def _fit_list(node: _Node, share: int, out: list[Elision]) -> Any:
@@ -363,6 +412,13 @@ def _fit_list(node: _Node, share: int, out: list[Elision]) -> Any:
         used += cost
     if len(kept) == len(node.value):
         return kept
+    if not kept and node.value:
+        # Not one element fit — see `_fit_one`. Squeeze the first rather than show none: a list
+        # rendered as a bare marker carries no field name at all, and the biggest documents are
+        # exactly the ones a lead needs field shape from to narrow its next query.
+        squeezed = _fit_one(node.value[0], max(share - reserve - 2, 0), f"{node.label}[0]", out)
+        if squeezed is not None:
+            kept = [squeezed]
     out.append(Elision(node.label, "list", len(kept), len(node.value)))
     return [*kept, _list_marker(len(kept), len(node.value))]
 
@@ -374,7 +430,7 @@ def _fit_string(node: _Node, share: int, out: list[Elision]) -> Any:
     return clipped
 
 
-def _fit_fields(obj: dict, budget: int, out: list[Elision]) -> Any:
+def _fit_fields(obj: dict, budget: int, out: list[Elision], *, path: str = "") -> Any:
     """A wide flat object of short scalars: no list, no long string, nothing structural to cut.
     Keep whole key/value pairs until the budget is spent and say how many were dropped — the one
     case where a payload is bulky purely by having many fields."""
@@ -394,7 +450,7 @@ def _fit_fields(obj: dict, budget: int, out: list[Elision]) -> Any:
         used += cost
     if len(kept) == len(obj):
         return kept
-    out.append(Elision("", "fields", len(kept), len(obj)))
+    out.append(Elision(path, "fields", len(kept), len(obj)))
     kept[marker_key] = _list_marker(len(kept), len(obj)).replace("elements", "fields")
     return kept
 

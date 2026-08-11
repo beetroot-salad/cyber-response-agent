@@ -380,3 +380,36 @@ def test_the_byte_ruler_holds_because_the_serializer_escapes():
         assert len(serialized) == len(serialized.encode("utf-8")), (
             "ensure_ascii went off — len() is no longer the byte count this module compares"
         )
+
+
+def test_a_list_never_collapses_to_a_bare_marker(tmp_path):
+    """Found against the LIVE stack, not in a fixture.
+
+    A real security alert document serializes to 8,568 bytes — larger than the whole 8,192-byte
+    ceiling — so no element fit its share and a 163 KB `alerts` payload rendered as
+    `hits: ["<<ELIDED 20 of 20 elements>>"]`. Honest and useless: not one field name survived,
+    on exactly the payload a lead most needs field shape from to narrow its next query. The old
+    sampler was wrong about completeness but did show three documents, so on the biggest
+    documents the honest rewrite had regressed the one thing elements are shown for.
+    """
+    fat = [{f"field_{j}": f"value-{i}-{j}-{'x' * 40}" for j in range(60)} for i in range(20)]
+    view = _view(_lucene(fat, total=37442), ceiling=8192, run_dir=tmp_path)
+    body = json.loads(_json_block(view))
+    first = body["hits"][0]
+    assert isinstance(first, dict), "the list rendered as a bare marker — no field shape at all"
+    assert len(first) >= 20, f"only {len(first)} fields survived the squeeze"
+    assert body["hits"][-1].startswith(pv.ELISION_PREFIX)
+    assert len(_json_block(view)) <= 8192
+
+
+def test_the_squeeze_keeps_field_shape_before_value_shape(tmp_path):
+    """Values clip progressively (`_SQUEEZE_CAPS`) before any FIELD is dropped: a 12-character
+    value still tells the lead the field is an ISO stamp and not a count, which is the whole
+    reason elements are shown instead of a key list."""
+    one = [{f"f{j}": "2026-05-25T15:27:22.928Z" for j in range(80)}]
+    view = _view(_lucene(one), ceiling=2000, run_dir=tmp_path)
+    body = json.loads(_json_block(view))
+    first = body["hits"][0]
+    assert isinstance(first, dict)
+    assert len(first) >= 40, "fields were dropped while values were still clippable"
+    assert any(v.startswith("2026") for v in first.values() if isinstance(v, str))
