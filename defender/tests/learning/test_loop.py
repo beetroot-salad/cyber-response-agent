@@ -83,6 +83,56 @@ def test_redact_exemplar_scrubs_values_keeps_shape():
     assert '"ok": false' in out
 
 
+def _esql_sample(body: str) -> str:
+    return f"### Raw Sample Events (first 3)\n\n```json\n{body}\n```\n"
+
+
+def test_redact_exemplar_keeps_the_field_names_of_a_COLUMNAR_esql_payload():
+    """The skeleton's whole job is "what fields does this lead's telemetry have".
+
+    ES|QL states its field names once in `columns` and its rows as bare arrays (#834), so a
+    pure type-walk scrubs the names as string VALUES and the oracle is handed a skeleton with
+    no field names at all — where the pre-#834 per-row dicts kept them as keys. The names must
+    survive; the ROW must not, because that is the data.
+    """
+    out = oracle_mod.redact_exemplar(_esql_sample(json.dumps({
+        "query": "FROM logs-* | STATS failed = COUNT(*) BY host.name",
+        "columns": [{"name": "host.name", "type": "keyword"},
+                    {"name": "failed", "type": "long"},
+                    {"name": "source.ip", "type": "ip"}],
+        "row_count": 2,
+        "values": [["web-01", 12, "10.1.1.5"], ["web-02", 3, "10.1.1.9"]],
+    })))
+
+    for name in ("host.name", "failed", "source.ip"):
+        assert f'"{name}"' in out, f"the skeleton lost the field name {name!r}"
+    for es_type in ("keyword", "long", "ip"):
+        assert f'"{es_type}"' in out, f"the declared ES type {es_type!r} went with them"
+    for leaked in ("web-01", "web-02", "10.1.1.5", "10.1.1.9"):
+        assert leaked not in out, f"a ROW value survived the scrub: {leaked!r}"
+    assert '"<query>"' in out, "the query text is data and is still scrubbed"
+
+
+def test_the_columns_passthrough_does_not_unscrub_a_document_that_merely_has_that_key():
+    """Passing `columns` through is licensed by it being ES|QL's SCHEMA block, not by its
+    name. A document with a `columns` key that is not that block — no `values` list beside
+    it, or entries that are not `{name, type}` descriptors — is data, and an attacker who
+    could get a field named `columns` into an index would otherwise have bought themselves
+    an unscrubbed region of the oracle's prompt."""
+    not_an_envelope = oracle_mod.redact_exemplar(_esql_sample(json.dumps(
+        {"columns": [{"name": "secret-host", "type": "keyword"}], "values": "not-a-list"})))
+    assert "secret-host" not in not_an_envelope, "scrubbing was skipped without a `values` list"
+
+    wrong_shape = oracle_mod.redact_exemplar(_esql_sample(json.dumps(
+        {"columns": [{"label": "secret-host"}], "values": [[1]]})))
+    assert "secret-host" not in wrong_shape, "scrubbing was skipped on a non-descriptor entry"
+
+    nested_name = oracle_mod.redact_exemplar(_esql_sample(json.dumps(
+        {"user": {"name": "alice"}, "host": {"name": "db-07"}})))
+    for leaked in ("alice", "db-07"):
+        assert leaked not in nested_name, f"a `name` VALUE survived the scrub: {leaked!r}"
+
+
 def test_redact_exemplar_no_sample_block_is_placeholder():
     assert oracle_mod.redact_exemplar("## Query Results\n(no raw block)\n").startswith("(")
 
