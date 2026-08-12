@@ -546,10 +546,12 @@ def test_benign_body_renders_in_one_intact_fence_positive_control(tmp_path):
 
 
 def _seed_pitfalls(paths, *, system: str, digest: str, n: int = 2) -> None:
+    """``n`` queued pitfalls, each a distinct mistake: the digest is suffixed per row because
+    #840 collapses rows sharing one into a single record, and the threshold counts records."""
     _persist.append_pitfalls(
         [{"schema_version": 1, "pitfall_id": f"r:l-{i:03d}:0", "source_run": "r",
           "system": system, "query_id": f"{system}.esql", "goal": "g",
-          "executed_query": "FROM bad", "stderr_digest": digest,
+          "executed_query": "FROM bad", "stderr_digest": f"{digest} #{i}",
           "error_class": "agent-fixable"} for i in range(n)],
         paths=paths,
     )

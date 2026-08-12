@@ -150,6 +150,23 @@ the mapping into `error_class`.
   full (not grepped) on the coin branch, a bloated or duplicate-ridden
   pitfalls section is a standing context tax, not just grep noise; the
   curator must prune as aggressively as it appends.
+- **Dedup is structural, not just prompted (#840).** The bias above was
+  the whole growth control until one lead brute-forcing the same reduce
+  for eight turns enqueued eight near-identical records and cleared
+  #823's threshold of 3 on a single lesson. The queue keeps every row —
+  it is the evidence, and #823 N3 pins the row-level duplication — but
+  both seams that *read* it collapse rows sharing a
+  `(system, stderr_digest)` into one record carrying `occurrences: N`
+  (`persist.merge_pitfalls`). A row whose digest carries no diagnosis —
+  blank, or nothing but the `exit=N;` envelope an empty stderr leaves
+  behind — keys to itself instead: the absence of a verdict is not a
+  verdict two rows share, and folding on it would hand the curator one
+  exemplar and rotate the rest away as if curated.
+  So the threshold counts distinct mistakes,
+  which is what makes clearing it evidence that the channel learned that
+  many things (#823 O3), and the curator is handed one entry per mistake
+  with the count as its severity signal rather than N copies to notice
+  are copies.
 
 ## Staging
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import re
 import shutil
 import threading
 from dataclasses import dataclass
@@ -310,7 +311,92 @@ def append_findings(
 
 
 
+#: The envelope `record_query.payload_digest` wraps EVERY failing call in (`exit={code}; `).
+#: It is shared by every failure of a system, so it is not itself a diagnosis.
+_EXIT_ENVELOPE = re.compile(r"^\s*exit=-?\d+\s*;\s*")
+
+
+def _digest_diagnosis(digest: str) -> str:
+    return _EXIT_ENVELOPE.sub("", digest, count=1)
+
+
+def pitfall_key(row: dict) -> tuple[str, str]:
+    """The identity of a MISTAKE, which is not the identity of a failing row (#840).
+
+    `(system, stderr_digest)`. The digest is the adapter's own diagnosis of what went wrong
+    and is what `lead_pitfalls.md` step 2 reads to name the mistake and its fix, so two rows
+    carrying the same one in the same system are the same lesson however differently the
+    agent phrased the query that provoked it — which is exactly the l-003 shape: eight turns
+    varying the SQL against one unchanging `Binder Error`. `query_id` is deliberately OUT of
+    the key: two coined queries that earn the identical rejection teach one bullet, and
+    every bash-shim row carries the same sentinel id anyway.
+
+    `system` is STRIPPED, because `_build_pitfalls_handoffs` groups on the stripped value:
+    keys coarser than the grouping would hand the curator two entries it then reads as two
+    bullets, which is the one thing the collapse exists to prevent.
+
+    A row whose digest carries NO diagnosis — absent, blank, or nothing but the adapter's
+    `exit=N;` envelope, which an adapter that fails with an empty stderr writes on every
+    call — keys to ITSELF. Merging on the absence of a verdict is not merging on a shared
+    verdict: it would fold unrelated mistakes behind one exemplar, hand the curator only
+    that exemplar's query, and then rotate the rest into `consumed` as though they had been
+    curated. `is_content_less`, not `.strip()`, so a digest of zero-width filler cannot
+    read as a diagnosis either (#722's rule, same reason).
+    """
+    system = str(row.get("system") or "").strip()
+    digest = str(row.get("stderr_digest") or "")
+    if is_content_less(_digest_diagnosis(digest)):
+        return (system, "\x00" + str(row.get("pitfall_id") or ""))
+    return (system, digest)
+
+
+def _occurrences(row: dict) -> int:
+    # A queue row IS one occurrence and carries no count of its own; a record already
+    # merged carries the count it was merged from, so re-merging a merged set is a no-op.
+    n = row.get("occurrences")
+    return n if isinstance(n, int) and not isinstance(n, bool) and n > 0 else 1
+
+
+def merge_pitfalls(rows: list[dict]) -> list[dict]:
+    """Collapse repeats of one mistake into one record carrying `occurrences: N` (#840).
+
+    N identical failures are evidence of SEVERITY as well as noise, so the count survives
+    the collapse — it is what tells the curator which bullet is worth the context tax. The
+    FIRST row of a key is the exemplar and keeps every other field: its `pitfall_id` (so the
+    record still names a real row), its `source_run`, and any queue bookkeeping the drain has
+    stamped on it. Later rows contribute their count and nothing else. Order is first-seen,
+    and the result re-merges to itself, so the two consuming seams can each merge without
+    caring whether the other already did.
+    """
+    out: list[dict] = []
+    by_key: dict[tuple[str, str], dict] = {}
+    for row in rows:
+        key = pitfall_key(row)
+        if (exemplar := by_key.get(key)) is not None:
+            exemplar["occurrences"] += _occurrences(row)
+            continue
+        rec = dict(row)
+        rec["occurrences"] = _occurrences(row)
+        by_key[key] = rec
+        out.append(rec)
+    return out
+
+
 def append_pitfalls(rows: list[dict], *, paths: LoopPaths = DEFAULT_PATHS) -> int:
+    """Append the failing rows verbatim. The COLLAPSE happens on the way out (#840).
+
+    Deliberately still an append, and deliberately not deduplicating here. #719 D9 leaves
+    exactly one function in `learning/` that rewrites a queue file wholesale — the merging
+    rotation — so an appender that bumped a count on a row already on disk would be the
+    second, racing the drain's read-modify-write window for no gain. The queue therefore
+    stays what it is: the evidence, one line per failure, matching the row-level duplication
+    #823 N3 pins in the queries table.
+
+    What #840 fixes is the RECORD set the queue is read as: `merge_pitfalls` collapses it at
+    both seams that consume it — the curation threshold (`pitfalls_curator.run_pitfalls`,
+    `drains._has_lead_author_work`) and the curator's handoff. A reader that counts these
+    rows is counting failures, never lessons.
+    """
     if not rows:
         return 0
     with queue_lock(paths.pitfalls.append_lock):

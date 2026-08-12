@@ -125,12 +125,16 @@ def test_verify_pitfalls_state_returns_sorted_changed(tmp_git_repo: Path):
 
 
 def _seed_pitfalls(paths, n: int) -> None:
+    """``n`` queued pitfalls, each a DISTINCT mistake — one `stderr_digest` per row, since
+    #840 collapses repeats of one digest into a single record and the threshold counts
+    records. These cases are about the gate and the rotation, not the collapse."""
     persist.append_pitfalls(
         [
             {
                 "schema_version": 1, "pitfall_id": f"r:l-{i:03d}:0", "source_run": "r",
                 "system": "elastic", "query_id": "elastic.esql", "goal": "g",
-                "executed_query": "bad pipe", "stderr_digest": "exit=1; mismatched input",
+                "executed_query": "bad pipe",
+                "stderr_digest": f"exit=1; mismatched input at token {i}",
                 "error_class": "agent-fixable",
             }
             for i in range(n)

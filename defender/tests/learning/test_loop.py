@@ -794,6 +794,8 @@ def test_has_lead_author_work_fires_on_pitfalls_threshold(tmp_path: Path, monkey
     paths, _ = _isolate(tmp_path)
     assert drains._has_lead_author_work(paths) is False
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
+    # Digest-less rows stay two distinct MISTAKES post-#840: an absent diagnosis is not a
+    # shared one, so `pitfall_key` keys each such row to itself rather than folding them.
     persist.append_pitfalls(
         [{"pitfall_id": f"r:{i}", "system": "elastic"} for i in range(2)], paths=paths
     )

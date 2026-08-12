@@ -402,7 +402,15 @@ def _run_locked(run_dir: Path, deps: LeadAuthorDeps, *, box: Any = None) -> int:
         )
         if failures:
             _loop_persist.append_pitfalls(failures, paths=deps.paths)
-            _log(f"collected {len(failures)} general-failure pitfall(s) into the queue")
+            # Both numbers: the failures are what the run did, the distinct count is how many
+            # mistakes THIS RUN made once its repeats collapse (#840) — not what the curation
+            # threshold will see, which merges this run's rows against every row already
+            # queued. A lead that loops makes the gap large, and that gap is the signal.
+            distinct = len(_loop_persist.merge_pitfalls(failures))
+            _log(
+                f"collected {len(failures)} general failure(s) into the queue "
+                f"({distinct} distinct mistake(s) in this run)"
+            )
         _write_state(collected_marker, _loop_config.now_iso() + "\n")
 
     repo_root = deps.paths.repo_root
