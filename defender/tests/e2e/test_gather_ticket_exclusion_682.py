@@ -15,6 +15,7 @@ import pytest
 pytest.importorskip("pydantic_ai")
 
 from defender._io import read_jsonl_rows  # noqa: E402
+from defender.runtime.lead_zero import RESERVED_LEAD_IDS  # noqa: E402
 from defender.runtime.verbs import VerbContext  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     GOLDEN_AB3,
@@ -44,6 +45,13 @@ class _Run:
     @property
     def rows(self) -> list[dict]:
         return read_jsonl_rows(self.run_dir / "executed_queries.jsonl")
+
+    @property
+    def own_rows(self) -> list[dict]:
+        """`.rows` filtered to exclude #808's harness-authored leads (`l-000`/`l-00c`) — the
+        rows produced by THIS test's own dispatched lead, not lead-0's unconditional
+        pre-ORIENT resolution against `GOLDEN_AB3`'s alert."""
+        return [r for r in self.rows if r.get("lead_id") not in RESERVED_LEAD_IDS]
 
     @property
     def all_model_text(self) -> str:
@@ -157,9 +165,9 @@ def test_direct_self_get_rejected_before_store_and_capture(tmp_path):
     )
 
     assert rec.calls == []
-    assert len(run.rows) == 1
-    assert run.rows[0]["exit_code"] == 64
-    assert run.rows[0]["error_class"] == "agent-fixable"
+    assert len(run.own_rows) == 1
+    assert run.own_rows[0]["exit_code"] == 64
+    assert run.own_rows[0]["error_class"] == "agent-fixable"
     assert run.payload_text() == ""
     assert "SELF-TICKET-SECRET" not in run.all_model_text
     assert run.breaker.get("total_failures", 0) == 0
@@ -213,7 +221,7 @@ def test_list_drops_only_self_and_preserves_open_case_correlation(tmp_path):
     )
     assert "SELF-LIST-SECRET" not in run.payload_text()
     assert "SELF-LIST-SECRET" not in run.all_model_text
-    assert run.rows[0]["exit_code"] == 0
+    assert run.own_rows[0]["exit_code"] == 0
 
 
 def test_other_open_ticket_get_remains_available_and_persisted(tmp_path):
@@ -237,7 +245,7 @@ def test_other_open_ticket_get_remains_available_and_persisted(tmp_path):
     assert rec.only().params == {"key": OTHER, "require_closed": False}
     assert run.payload() == other
     assert "ACTIVE-CASE-CONTEXT" in run.all_model_text
-    assert run.rows[0]["exit_code"] == 0
+    assert run.own_rows[0]["exit_code"] == 0
 
 
 def test_get_response_that_resolves_to_self_is_withheld_before_capture(tmp_path):
@@ -258,8 +266,8 @@ def test_get_response_that_resolves_to_self_is_withheld_before_capture(tmp_path)
     # business code (1, a 404 / query error), so the queries table distinguishes "withheld
     # the current case" from "no such ticket" without parsing the free-text detail. It stays
     # outside the infra set, so the breaker is untouched.
-    assert run.rows[0]["exit_code"] == 3
-    assert run.rows[0]["error_class"] == "agent-fixable"
+    assert run.own_rows[0]["exit_code"] == 3
+    assert run.own_rows[0]["error_class"] == "agent-fixable"
     assert run.payload_text() == ""
     assert "MISROUTED-SELF-SECRET" not in run.all_model_text
     assert run.breaker.get("total_failures", 0) == 0
@@ -282,8 +290,8 @@ def test_malformed_ticket_payload_fails_without_persisting_vendor_content(
     )
 
     assert len(rec.calls) == 1
-    assert run.rows[0]["exit_code"] == 2
-    assert run.rows[0]["error_class"] == "infra"
+    assert run.own_rows[0]["exit_code"] == 2
+    assert run.own_rows[0]["error_class"] == "infra"
     assert run.payload_text() == ""
     assert run.breaker["systems"]["ticket"]["failures"] == 1
 

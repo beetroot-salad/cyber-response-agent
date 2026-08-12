@@ -96,7 +96,7 @@ def test_a_denied_verb_returns_a_legible_refusal_and_the_run_continues(tmp_path:
 
     assert rec.calls == [], "the denied verb body ran"
     assert r.gather.calls >= 2, "the refusal did not come back as a result the loop continued past"
-    assert r.rows == [], "a denied call wrote an evidence row"
+    assert r.own_rows == [], "a denied call wrote an evidence row"
     assert r.breaker.get("total_failures", 0) == 0
     assert "esql" in r.gather_saw
 
@@ -112,11 +112,11 @@ def test_a_denied_verb_is_not_the_unknown_verb_path(tmp_path: Path):
     unknown = run_gather(tmp_path / "b", verbs=_registry(rec),
                          turns=[q("elastic", "nosuch-verb"), DONE], run_id="d2-unknown")
 
-    assert denied.rows == []
-    assert len(unknown.rows) == 1, "an undeclared verb stopped writing its row"
-    assert unknown.rows[0]["error_class"] == "agent-fixable"
-    assert denied.denials, "the denial left no audit record at all"
-    assert unknown.denials == [], "an undeclared verb was audited as a policy denial"
+    assert denied.own_rows == []
+    assert len(unknown.own_rows) == 1, "an undeclared verb stopped writing its row"
+    assert unknown.own_rows[0]["error_class"] == "agent-fixable"
+    assert denied.own_denials, "the denial left no audit record at all"
+    assert unknown.own_denials == [], "an undeclared verb was audited as a policy denial"
 
 
 def test_an_undeclared_verb_keeps_todays_unknown_verb_treatment(tmp_path: Path):
@@ -130,10 +130,10 @@ def test_an_undeclared_verb_keeps_todays_unknown_verb_treatment(tmp_path: Path):
                    run_id="d37")
 
     assert rec.calls == []
-    assert len(r.rows) == 1
-    assert r.rows[0]["exit_code"] != 0
-    assert r.rows[0]["error_class"] == "agent-fixable"
-    assert r.rows[0]["verb"] == "nosuch-verb"
+    assert len(r.own_rows) == 1
+    assert r.own_rows[0]["exit_code"] != 0
+    assert r.own_rows[0]["error_class"] == "agent-fixable"
+    assert r.own_rows[0]["verb"] == "nosuch-verb"
     assert r.gather.calls >= 2, "the unknown verb did not bounce the agent back into its loop"
 
 
@@ -187,8 +187,8 @@ def test_a_refusal_lists_only_the_roles_granted_subset(tmp_path: Path):
                        turns=[q("ticket", "query"), DONE], run_id="d65-whole")
     assert reg.decide("ticket", "query").outcome == UNDECLARED, \
         "a wholly ungranted system read as denied rather than unresolvable"
-    assert len(whole.rows) == 1, "a wholly ungranted system wrote no unresolvable row"
-    assert whole.denials == [], "a wholly ungranted system was audited as a policy denial"
+    assert len(whole.own_rows) == 1, "a wholly ungranted system wrote no unresolvable row"
+    assert whole.own_denials == [], "a wholly ungranted system was audited as a policy denial"
 
 
 
@@ -228,11 +228,11 @@ def test_a_denied_gather_verb_leaves_no_queries_row_and_no_payload_file(tmp_path
                    watch=True)
 
     assert rec.calls == [], "a denied verb body ran"
-    assert r.rows == [], "a lead whose every query was denied still put rows on the evidence surface"
+    assert r.own_rows == [], "a lead whose every query was denied still put rows on the evidence surface"
     assert r.payload_files == [], "a denied call left a payload file behind"
     assert not (r.run_dir / "gather_raw" / LEAD).exists(), \
         "the lead-scoped payload directory was allocated for a denial"
-    assert len(r.denials) == 2, "the two denials are not both in the audit stream"
+    assert len(r.own_denials) == 2, "the two denials are not both in the audit stream"
 
     # Conservation. The snapshots straddle the two denied calls; the first is the state the
     # dispatch left, and it must survive them byte for byte.
@@ -255,7 +255,7 @@ def test_a_denied_gather_verb_leaves_no_queries_row_and_no_payload_file(tmp_path
                        turns=[q(*DENIED_PAIR), q(*DENIED_PAIR), q(*GRANTED_PAIR), DONE],
                        run_id="d3-seq")
     assert [c.verb for c in kept.calls] == ["query"]
-    assert [row["seq"] for row in later.rows] == [0], \
+    assert [row["seq"] for row in later.own_rows] == [0], \
         "a denial consumed a sequence number the granted call then skipped"
 
 
@@ -268,11 +268,11 @@ def test_a_granted_gather_verb_still_writes_its_row_and_its_payload(tmp_path: Pa
     r = run_gather(tmp_path, verbs=_registry(rec), turns=[q(*GRANTED_PAIR), DONE], run_id="d31")
 
     assert [c.verb for c in rec.calls] == ["query"]
-    assert len(r.rows) == 1
-    assert r.rows[0]["exit_code"] == 0
-    assert r.rows[0]["seq"] == 0
+    assert len(r.own_rows) == 1
+    assert r.own_rows[0]["exit_code"] == 0
+    assert r.own_rows[0]["seq"] == 0
     assert (r.run_dir / "gather_raw" / LEAD / "0.json").is_file()
-    assert r.denials == [], "a granted call was audited as a policy denial"
+    assert r.own_denials == [], "a granted call was audited as a policy denial"
 
 
 def test_a_denial_outside_a_dispatched_lead_runs_no_lead_scoped_allocation(tmp_path: Path):
@@ -291,8 +291,8 @@ def test_a_denial_outside_a_dispatched_lead_runs_no_lead_scoped_allocation(tmp_p
 
     r = run_gather(tmp_path, verbs=reg, turns=[q(*DENIED_PAIR), DONE], run_id="d44")
     assert not (r.run_dir / "gather_raw" / LEAD).exists()
-    assert len(r.denials) == 1, "the denial was not audited at all"
-    assert "lead_id" not in r.denials[0], \
+    assert len(r.own_denials) == 1, "the denial was not audited at all"
+    assert "lead_id" not in r.own_denials[0], \
         "the denial record carries lead-scoped state a denial must never allocate"
 
 
@@ -311,9 +311,9 @@ def test_a_malformed_call_keeps_todays_queries_row(tmp_path: Path):
                    turns=[q(*GRANTED_PAIR, {"nosuch_param": 1}), DONE], run_id="d5")
 
     assert rec.calls == []
-    assert len(r.rows) == 1
-    assert r.rows[0]["error_class"] == "agent-fixable"
-    assert r.denials == []
+    assert len(r.own_rows) == 1
+    assert r.own_rows[0]["error_class"] == "agent-fixable"
+    assert r.own_denials == []
 
 
 def test_a_malformed_and_denied_call_takes_the_denial_path(tmp_path: Path):
@@ -331,10 +331,10 @@ def test_a_malformed_and_denied_call_takes_the_denial_path(tmp_path: Path):
                    turns=[q(*DENIED_PAIR, {"nosuch_param": 1}), DONE], run_id="d55")
 
     assert rec.calls == []
-    assert r.rows == [], "the malformed-and-denied call still left an evidence row"
-    assert len(r.denials) == 1, \
+    assert r.own_rows == [], "the malformed-and-denied call still left an evidence row"
+    assert len(r.own_denials) == 1, \
         "one unrecognised parameter suppressed the denial record — the malformed check ran first"
-    assert r.denials[0]["verb"] == "esql"
+    assert r.own_denials[0]["verb"] == "esql"
     assert "esql" in r.gather_saw, "the model saw the malformedness, not the denial"
 
 
@@ -365,11 +365,11 @@ def test_a_denied_call_is_refused_before_its_query_id_meets_the_traversal_screen
                    turns=[q(*DENIED_PAIR, query_id=hostile), DONE], run_id="d53")
 
     assert rec.calls == []
-    assert r.rows == [], "the traversal-and-denied call still left an evidence row"
-    assert len(r.denials) == 1, "the traversal screen ran first and suppressed the denial record"
+    assert r.own_rows == [], "the traversal-and-denied call still left an evidence row"
+    assert len(r.own_denials) == 1, "the traversal screen ran first and suppressed the denial record"
     assert "esql" in r.gather_saw, "the model saw the traversal reason, not the denial"
 
-    record = r.denials[0]
+    record = r.own_denials[0]
     assert hostile not in json.dumps(record), \
         "the raw model-authored traversal id landed in the durable denial record unnormalized"
     assert record.get("call_id"), "the record identifies no call at all — the projection is empty"
@@ -382,12 +382,12 @@ def test_a_denied_call_is_refused_before_its_query_id_meets_the_traversal_screen
 
     assert kept.calls == [], \
         "a granted call's traversal-shaped query_id reached the verb — the screen is gone"
-    assert len(screened.rows) == 1, \
+    assert len(screened.own_rows) == 1, \
         "the screened call lost the malformed treatment the screen has always given it"
-    assert screened.rows[0]["error_class"] == "agent-fixable"
-    assert screened.rows[0]["query_id"] != hostile, \
+    assert screened.own_rows[0]["error_class"] == "agent-fixable"
+    assert screened.own_rows[0]["query_id"] != hostile, \
         "the model-authored traversal id became the call's catalog id"
-    assert screened.denials == [], \
+    assert screened.own_denials == [], \
         "a granted call refused by the traversal screen was audited as a policy denial"
 
 
@@ -410,9 +410,9 @@ def test_a_denial_is_decided_before_the_availability_short_circuit(tmp_path: Pat
     ], run_id="d56")
 
     assert circuit_breaker.is_tripped(r.run_dir, "elastic"), "the system never went down"
-    assert len(r.denials) == 1, "the availability short-circuit silenced the denial's audit record"
-    assert r.denials[0]["verb"] == "esql"
-    assert len(r.rows) == 2, "the denial against a down system wrote an evidence row"
+    assert len(r.own_denials) == 1, "the availability short-circuit silenced the denial's audit record"
+    assert r.own_denials[0]["verb"] == "esql"
+    assert len(r.own_rows) == 2, "the denial against a down system wrote an evidence row"
 
 
 
@@ -451,9 +451,9 @@ def test_an_infra_fault_still_moves_the_circuit_breaker(tmp_path: Path):
                    turns=[q(*GRANTED_PAIR), DONE], run_id="d33")
 
     assert len(rec.calls) == 1, "the granted verb never ran — the outage is not the fault under test"
-    assert r.rows[0]["error_class"] == "infra"
+    assert r.own_rows[0]["error_class"] == "infra"
     assert r.breaker["systems"]["elastic"]["failures"] == 1
-    assert r.denials == [], "an infra fault was relabelled into the policy-denial stream"
+    assert r.own_denials == [], "an infra fault was relabelled into the policy-denial stream"
 
 
 
@@ -508,11 +508,11 @@ def test_a_denial_is_decided_from_the_grant_without_importing_the_adapter(tmp_pa
 
     r = run_gather(tmp_path / "run", verbs=reg, system="cmdb",
                    turns=[q("cmdb", "list-hosts"), DONE], run_id="d38-unloadable")
-    assert r.rows == [], \
+    assert r.own_rows == [], \
         "the denial on an unloadable system was recorded as an unresolvable query instead"
-    assert len(r.denials) == 1, \
+    assert len(r.own_denials) == 1, \
         "a denial on an unloadable system produced no audit record — it was downgraded"
-    assert r.denials[0]["verb"] == "list-hosts"
+    assert r.own_denials[0]["verb"] == "list-hosts"
 
 
 def test_a_transient_adapter_import_failure_does_not_stick_across_a_run(tmp_path: Path):
@@ -536,9 +536,9 @@ def test_a_transient_adapter_import_failure_does_not_stick_across_a_run(tmp_path
                    run_id="d39")
 
     assert len(calls) == 2, "the second call was answered from a remembered failure"
-    assert len(r.rows) == 2
-    assert r.rows[1]["exit_code"] == 0, "the retry inherited the first call's failure"
-    assert r.denials == [], "an import failure was recorded as a policy denial"
+    assert len(r.own_rows) == 2
+    assert r.own_rows[1]["exit_code"] == 0, "the retry inherited the first call's failure"
+    assert r.own_denials == [], "an import failure was recorded as a policy denial"
 
 
 def test_repeated_identical_denials_each_audit_and_never_move_run_state(tmp_path: Path):
@@ -556,8 +556,8 @@ def test_repeated_identical_denials_each_audit_and_never_move_run_state(tmp_path
     r = run_gather(tmp_path, verbs=_registry(rec), turns=[*(q(*DENIED_PAIR) for _ in range(n)), DONE],
                    run_id="d42")
 
-    assert len(r.denials) == n, "denials were deduplicated or cached"
-    assert r.rows == []
+    assert len(r.own_denials) == n, "denials were deduplicated or cached"
+    assert r.own_rows == []
     assert r.breaker.get("total_failures", 0) == 0
     assert rec.calls == []
 
@@ -581,9 +581,9 @@ def test_a_case_or_whitespace_variant_of_a_granted_name_never_executes(
                    run_id=f"d48-{abs(hash((system, verb)))}")
 
     assert rec.calls == [], f"the near-miss {system}.{verb} reached a verb body"
-    assert r.denials == [], "a near-miss was audited as a policy denial rather than unresolvable"
-    assert len(r.rows) == 1, "a near-miss wrote no unresolvable row"
-    assert r.rows[0]["exit_code"] != 0
+    assert r.own_denials == [], "a near-miss was audited as a policy denial rather than unresolvable"
+    assert len(r.own_rows) == 1, "a near-miss wrote no unresolvable row"
+    assert r.own_rows[0]["exit_code"] != 0
 
 
 
@@ -602,9 +602,9 @@ def test_gather_is_denied_ticket_get_ticket(tmp_path: Path):
                    turns=[q("ticket", "get-ticket", {"key": "SOC-1"}), DONE], run_id="d22")
 
     assert rec.calls == [], "gather reached get-ticket"
-    assert r.rows == []
-    assert len(r.denials) == 1
-    assert r.denials[0]["verb"] == "get-ticket"
+    assert r.own_rows == []
+    assert len(r.own_denials) == 1
+    assert r.own_denials[0]["verb"] == "get-ticket"
 
 
 def test_gather_list_tickets_still_reaches_the_store(tmp_path: Path):
@@ -632,10 +632,10 @@ def test_gather_list_tickets_still_reaches_the_store(tmp_path: Path):
                    turns=[q("ticket", "list-tickets", {}), DONE], run_id="d34")
 
     assert [c.verb for c in rec.calls] == ["list-tickets"]
-    assert len(r.rows) == 1
-    assert r.rows[0]["exit_code"] == 0
+    assert len(r.own_rows) == 1
+    assert r.own_rows[0]["exit_code"] == 0
     assert "SOC-777" in r.gather_delta, "the granted read's own content never reached the model"
-    assert r.denials == []
+    assert r.own_denials == []
 
 
 def test_the_self_case_list_filter_still_excludes_the_current_ticket(tmp_path: Path):
@@ -670,8 +670,8 @@ def test_the_self_case_list_filter_still_excludes_the_current_ticket(tmp_path: P
                    turns=[q("ticket", "list-tickets", {}), DONE], run_id=run_id)
 
     assert len(rec.calls) == 1, "the filter was applied by refusing the call instead of filtering it"
-    assert len(r.rows) == 1
-    assert r.rows[0]["exit_code"] == 0
+    assert len(r.own_rows) == 1
+    assert r.own_rows[0]["exit_code"] == 0
     assert "SOC-777" in r.gather_delta, \
         "the screen dropped the whole listing — the exclusion below would hold vacuously"
     assert run_id not in r.gather_delta, \
@@ -691,8 +691,8 @@ def test_the_self_case_list_filter_still_excludes_the_current_ticket(tmp_path: P
                    turns=[q("ticket", "list-tickets", {}), DONE], run_id="d23b")
 
     assert len(shaped.calls) == 1
-    assert len(b.rows) == 1
-    assert b.rows[0]["exit_code"] != 0, \
+    assert len(b.own_rows) == 1
+    assert b.own_rows[0]["exit_code"] != 0, \
         "a non-object listing bypassed the screen instead of being filed as malformed"
     assert "d23b" not in b.gather_delta, \
         "a bare array bypassed the self-case exclusion — the screen keys on the payload's shape"
@@ -713,11 +713,11 @@ def test_an_impersonated_query_id_does_not_change_the_grant_decision(tmp_path: P
     denied = run_gather(tmp_path / "a", verbs=_registry(rec),
                         turns=[q(*DENIED_PAIR, query_id=forged), DONE], run_id="d69-denied")
     assert rec.calls == [], "an impersonated id bought execution of a withheld verb"
-    assert denied.rows == []
+    assert denied.own_rows == []
 
     allowed = run_gather(tmp_path / "b", verbs=_registry(rec),
                          turns=[q(*GRANTED_PAIR, query_id=forged), DONE], run_id="d69-allowed")
     assert [c.verb for c in rec.calls] == ["query"]
-    assert allowed.rows[0]["query_id"] == forged
-    assert allowed.rows[0]["system"] == "elastic"
-    assert allowed.rows[0]["verb"] == "query"
+    assert allowed.own_rows[0]["query_id"] == forged
+    assert allowed.own_rows[0]["system"] == "elastic"
+    assert allowed.own_rows[0]["verb"] == "query"

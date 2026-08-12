@@ -360,6 +360,7 @@ def _persist_gather_summary(run_dir: Path, lead_id: str, wrapped: str) -> None:
 async def _run_gather(  # noqa: C901 — the branch count IS the terminator census (see docstring)
     deps: AgentDeps, gather_factory: GatherFactory, request_limit: int, request: GatherRequest,
     verb_grant: VerbGrant, stamp_terminator: Callable[[str, str], None] | None = None,
+    *, pre_claimed: bool = False,
 ) -> str:
     """`stamp_terminator(agent_id, reason)` records how a gather session ENDED, and is the
     composition root's (`driver.build_agent`) to supply: the gather session is opened inside
@@ -395,7 +396,12 @@ async def _run_gather(  # noqa: C901 — the branch count IS the terminator cens
             "hyphens (`host-state`, `change-mgmt`) — the `:L` row's system, spelled as the "
             "descriptor index spells it. Re-dispatch this same lead_id with the corrected name."
         )
-    if _claim_lead({
+    # K15/F3 (#808): a lead the HARNESS already claimed (the reserved ids, claimed at run
+    # start before MAIN's first turn) must not be re-claimed here — `claim_lead`'s reuse arm
+    # returns 2 harmlessly on its own, but `_run_gather`'s ordinary path turns that into a
+    # `ModelRetry` with no model in the loop to retry it, which would end the run inside
+    # `_user_prompt` for every harness dispatch rather than only a pathological one.
+    if not pre_claimed and _claim_lead({
         "run_dir": str(deps.run_dir), "lead_id": lead_id,
         "goal": request.goal, "what_to_summarize": list(request.what_to_summarize),
     }) == 2:

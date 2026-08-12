@@ -162,9 +162,15 @@ class _Run:
     def rows(self) -> list[dict]:
         return read_jsonl_rows(self.run_dir / "executed_queries.jsonl")
 
+    @property
+    def own_rows(self) -> list[dict]:
+        """`.rows` filtered to exclude #808's harness-authored leads (`l-000`/`l-00c`)."""
+        from defender.runtime.lead_zero import RESERVED_LEAD_IDS
+        return [r for r in self.rows if r.get("lead_id") not in RESERVED_LEAD_IDS]
+
     def row(self) -> dict:
-        assert len(self.rows) == 1, f"expected exactly one queries row, got {self.rows}"
-        return self.rows[0]
+        assert len(self.own_rows) == 1, f"expected exactly one queries row, got {self.own_rows}"
+        return self.own_rows[0]
 
 
 def q(system: str, verb_name: str, params: dict, query_id: str | None = None) -> Turn:
@@ -198,6 +204,13 @@ def run_gather(tmp_path: Path, *, verbs, turns: list[Turn], system: str = "elast
 def _executed_leads(run_dir: Path) -> list:
     _joined, leads = lead_extraction.extract(run_dir)
     return leads
+
+
+def _own_executed_leads(run_dir: Path) -> list:
+    """`_executed_leads` filtered to exclude #808's harness-authored leads (`l-000`/`l-00c`), for
+    call sites that index into the list and need the lead dispatched under test, not lead-0's."""
+    from defender.runtime.lead_zero import RESERVED_LEAD_IDS
+    return [lead for lead in _executed_leads(run_dir) if lead.lead_id not in RESERVED_LEAD_IDS]
 
 
 
@@ -272,7 +285,7 @@ def test_canonical_record_engine_verb_is_verbatim_body(tmp_path):
     assert row["verb"] == "esql"
     assert row["params"] == {"query": pipe}
 
-    lead = _executed_leads(r.run_dir)[0]
+    lead = _own_executed_leads(r.run_dir)[0]
     record = draft_synthesis._executed_query(lead)
     assert record == pipe, "the canonical record is not the verbatim esql body"
     assert row["raw_command"] not in record, "the record leaked the shlex audit string"
@@ -333,13 +346,13 @@ def test_canonical_record_never_raw_command_positive_control(tmp_path):
     r = run_gather(tmp_path / "e", verbs=_seven_registry(rec), system="elastic",
                    turns=[q("elastic", "esql", {"query": pipe}, query_id="elastic.c"), DONE],
                    run_id="q620-pc-esql")
-    assert draft_synthesis._executed_query(_executed_leads(r.run_dir)[0]) == pipe
+    assert draft_synthesis._executed_query(_own_executed_leads(r.run_dir)[0]) == pipe
 
     rec2 = VerbRecorder()
     r2 = run_gather(tmp_path / "c", verbs=_seven_registry(rec2), system="cmdb",
                     turns=[q("cmdb", "get-host", {"host": "db-1"}, query_id="cmdb.c"), DONE],
                     run_id="q620-pc-cmdb")
-    record = draft_synthesis._executed_query(_executed_leads(r2.run_dir)[0])
+    record = draft_synthesis._executed_query(_own_executed_leads(r2.run_dir)[0])
     assert "get-host" in record
     assert "db-1" in record
 
@@ -353,10 +366,13 @@ def test_produced_row_threads_to_the_canonical_record(tmp_path):
     r = run_gather(tmp_path, verbs=_seven_registry(rec), system="cmdb", turns=[
         q("cmdb", "get-host", {"host": "web-7"}, query_id="cmdb.host-lookup"), DONE,
     ])
+    from defender.runtime.lead_zero import RESERVED_LEAD_IDS
     rows = lead_repository.load_queries(r.run_dir)
-    assert [row.query_id for row in rows] == ["cmdb.host-lookup"]
+    own_rows = [row for row in rows if row.lead_id not in RESERVED_LEAD_IDS]
+    assert [row.query_id for row in own_rows] == ["cmdb.host-lookup"]
     leads = lead_extraction.extract_from_joined(lead_repository.joined(r.run_dir))
-    record = draft_synthesis._executed_query(leads[0])
+    own_leads = [lead for lead in leads if lead.lead_id not in RESERVED_LEAD_IDS]
+    record = draft_synthesis._executed_query(own_leads[0])
     assert record != r.row()["raw_command"]
     assert "get-host" in record
     assert "web-7" in record

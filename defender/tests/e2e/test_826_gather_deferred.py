@@ -65,6 +65,15 @@ class _Res:
 
         return read_jsonl_rows(RunPaths(self.run_dir).executed_queries)
 
+    @property
+    def own_rows(self) -> list[dict]:
+        """`.rows` filtered to exclude #808's harness-authored leads (`l-000`/`l-00c`) —
+        the rows THIS test's own dispatched lead wrote, not lead-0's unconditional
+        pre-ORIENT resolution against `GOLDEN_AB3`'s alert (mirrors
+        `test_query_tool_611._Run.own_rows`)."""
+        from defender.runtime.lead_zero import RESERVED_LEAD_IDS
+        return [r for r in self.rows if r.get("lead_id") not in RESERVED_LEAD_IDS]
+
     def summary(self, lead: str = LEAD) -> str:
         return (self.run_dir / "gather_summaries" / f"{lead}.md").read_text(encoding="utf-8")
 
@@ -329,7 +338,8 @@ def test_a_lead_repeating_a_failing_request_is_told_so_before_it_is_stopped(tmp_
             Turn(tool_calls=[("query", {"system": "elastic", "verb": "probe", "params": {}})]),
             DONE,
         ])
-    assert [row["exit_code"] for row in res.rows] == [1, 1], "the faults stopped being recorded"
+    assert [row["exit_code"] for row in res.own_rows] == [1, 1], \
+        "the faults stopped being recorded"
     second = res.gather.seen[-1]
     assert "REPEAT" in second, "a failing repeat still reaches the model with no repeat named"
     assert "seq 0" in second
@@ -364,7 +374,7 @@ def test_a_schema_rejected_repeat_loop_ends_the_lead_and_leaves_a_trip_row(tmp_p
         verbs=elastic_ok(rec),
         turns=[_bad_args(PARAMS), _bad_args(PARAMS), _bad_args(PARAMS), DONE])
 
-    rows = res.rows
+    rows = res.own_rows
     assert len(rows) == REPEAT_THRESHOLD, "the rejection rows stopped being written"
     assert [row["exit_code"] for row in rows] == [64] * REPEAT_THRESHOLD
     assert res.gather.calls == REPEAT_THRESHOLD, \
@@ -394,7 +404,7 @@ def test_two_rejections_and_a_corrected_call_still_execute(tmp_path):
     res = _run(
         tmp_path / "run", tmp_path=tmp_path, run_id="d826-corrected", verbs=elastic_ok(rec),
         turns=[_bad_args(PARAMS), _bad_args(PARAMS), q("elastic", "query", PARAMS), DONE])
-    assert [row["exit_code"] for row in res.rows] == [64, 64, 0]
+    assert [row["exit_code"] for row in res.own_rows] == [64, 64, 0]
     assert len(rec.calls) == 1, "the corrected call never reached the backend"
     assert "Treat this lead as incomplete" not in res.summary()
 
@@ -411,7 +421,7 @@ def test_the_two_guards_never_both_own_one_lead(tmp_path):
             _bad_args(PARAMS), q("elastic", "query", PARAMS),
             _bad_args(PARAMS), q("elastic", "query", PARAMS), DONE,
         ])
-    assert [row["exit_code"] for row in res.rows] == [64, 0, 64, 0]
+    assert [row["exit_code"] for row in res.own_rows] == [64, 0, 64, 0]
     assert len(rec.calls) == 2
     assert "Treat this lead as incomplete" not in res.summary(), \
         "a lead was stopped by a count no single guard's domain holds"

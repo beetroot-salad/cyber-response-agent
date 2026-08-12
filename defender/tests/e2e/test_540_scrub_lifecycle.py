@@ -62,6 +62,7 @@ from defender.hooks.record_lead import claim_lead  # noqa: E402
 from defender.runtime import permission  # noqa: E402
 from defender.runtime import tools as runtime_tools  # noqa: E402
 from defender.runtime.agent_definition import bind, compile_policy_for  # noqa: E402
+from defender.runtime.lead_zero import RESERVED_LEAD_IDS  # noqa: E402
 from pydantic_ai.exceptions import ModelRetry  # noqa: E402
 
 from defender.runtime.box import (  # noqa: E402
@@ -1514,7 +1515,11 @@ def test_gather_only_workflow_completes_via_its_substitute(tmp_path):
 
     assert rec.verbs == ["query"]
     assert (run_dir / "gather_raw" / "l-001.lead.json").is_file(), "the leads row never landed"
-    rows = [json.loads(ln) for ln in
-            (run_dir / "executed_queries.jsonl").read_text(encoding="utf-8").splitlines() if ln]
+    # lead-0 (#808) resolves against GOLDEN_AB3 ahead of MAIN's own turn and lands its
+    # own (l-000) row in this same table — scope to the model-driven lead this workflow
+    # is actually about.
+    all_rows = [json.loads(ln) for ln in
+                (run_dir / "executed_queries.jsonl").read_text(encoding="utf-8").splitlines() if ln]
+    rows = [r for r in all_rows if r["lead_id"] not in RESERVED_LEAD_IDS]
     assert len(rows) == 1
     assert rows[0]["lead_id"] == "l-001"

@@ -103,8 +103,13 @@ def test_duplicate_helper_baseline_drops_the_five_pair_exclusive_names(tmp_path:
     # renderer collided in NAME ONLY with evals/judge_equivalence.py's), which took the
     # arithmetic to 14. Retiring the judge A/B harness removed the other half of that
     # collision, so `render_report` is no longer a duplicate name at all and the entry left
-    # the baseline — back to the 13 this demand's own fold arrived at.
-    assert len(entries) == 13, f"baseline is {len(entries)} entries, expected 13"
+    # the baseline — back to the 13 this demand's own fold arrived at. #808's harness-executed
+    # lead-0 step then added `_render_section` (lead_zero.py's untrusted-frame wrapper collides
+    # in NAME ONLY with invlang/advisory.py's AdvisorySection renderer), taking it to 14 again,
+    # and `_rows_for` (lead_zero.py's own executed_queries.jsonl reader collides in NAME ONLY
+    # with #832's payload_view.py in-memory reducer helper, merged into main concurrently),
+    # taking it to 15.
+    assert len(entries) == 15, f"baseline is {len(entries)} entries, expected 15"
 
     proc = subprocess.run(
         ["python3", "scripts/lint/lint_duplicate_helpers.py"],

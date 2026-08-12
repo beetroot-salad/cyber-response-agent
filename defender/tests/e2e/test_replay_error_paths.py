@@ -32,10 +32,19 @@ from defender.tests.e2e._replay_harness import (
 from defender.agents import MAIN_DEF
 from defender.runtime import circuit_breaker, tools as runtime_tools
 from defender.runtime.agent_definition import bind
+from defender.runtime.lead_zero import RESERVED_LEAD_IDS
 from defender.scripts.adapters.faults import TransportFault
 from defender.skills.invlang.validate import validate_companion
 
 pytestmark = pytest.mark.e2e
+
+
+def _own_qlines(run_dir: Path) -> list[str]:
+    """The run's own queries-table lines, EXCLUDING lead-0's (#808) reserved rows —
+    lead-0 resolves against every alert this suite drives (`verbs` is always injected),
+    contributing rows of its own the scripted scenario never anticipated."""
+    lines = (run_dir / "executed_queries.jsonl").read_text().splitlines()
+    return [q for q in lines if json.loads(q).get("lead_id") not in RESERVED_LEAD_IDS]
 
 
 def _down(*systems: str) -> FakeVerbs:
@@ -104,7 +113,7 @@ def test_circuit_breaker_kill_switch_aborts_run(tmp_path):
     assert gather.calls == circuit_breaker.RUN_FAIL_KILL_LIMIT
     cb = json.loads((run_dir / "circuit_breaker.json").read_text())
     assert cb["total_failures"] == circuit_breaker.RUN_FAIL_KILL_LIMIT
-    qlines = (run_dir / "executed_queries.jsonl").read_text().splitlines()
+    qlines = _own_qlines(run_dir)
     assert len(qlines) == circuit_breaker.RUN_FAIL_KILL_LIMIT
     assert all(json.loads(q)["exit_code"] == 2 for q in qlines)
     assert (run_dir / "tool_trace.jsonl").is_file()
@@ -175,7 +184,7 @@ def test_tripped_system_dispatch_returns_down_message(tmp_path):
     assert gather.calls == 4
     cb = json.loads((run_dir / "circuit_breaker.json").read_text())
     assert cb["systems"]["elastic"]["failures"] == circuit_breaker.PER_SYSTEM_FAIL_LIMIT
-    qlines = (run_dir / "executed_queries.jsonl").read_text().splitlines()
+    qlines = _own_qlines(run_dir)
     assert len(qlines) == circuit_breaker.PER_SYSTEM_FAIL_LIMIT
     assert (run_dir / "gather_raw" / "l-001.lead.json").is_file()
     assert (run_dir / "gather_raw" / "l-002.lead.json").is_file()

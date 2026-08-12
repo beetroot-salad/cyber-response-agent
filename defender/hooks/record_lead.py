@@ -37,9 +37,14 @@ def claim_lead(dispatch: dict) -> int:
         return 0
 
     sidecar_path = sidecar_dir / f"{lead_id}.lead.json"
-    payload = json.dumps(
-        {"goal": str(goal).strip(), "what_to_summarize": list(wtc)}, indent=2
-    ) + "\n"
+    body: dict = {"goal": str(goal).strip(), "what_to_summarize": list(wtc)}
+    provenance = dispatch.get("provenance")
+    if provenance:
+        # K11: the leads table gains a PROVENANCE field. Written only when the caller
+        # names one (the harness's own reserved-id claims) — an absent field reads as
+        # model-authored, since every row already on disk predates this addition.
+        body["provenance"] = str(provenance)
+    payload = json.dumps(body, indent=2) + "\n"
 
     try:
         fd = os.open(sidecar_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)

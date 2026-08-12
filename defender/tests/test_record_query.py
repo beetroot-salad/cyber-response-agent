@@ -186,7 +186,10 @@ def test_seq_stays_monotonic_when_a_payload_write_fails(tmp_path):
     ])
     drive(run_dir, run_id="rq-seq", salt=SALT, main=main, gather=gather, verbs=verbs)
 
-    rows = read_jsonl_rows(run_dir / "executed_queries.jsonl")
+    # lead-0 (#808) resolves against GOLDEN_AB3 ahead of MAIN's own turn and writes its
+    # own (l-000) row(s) into this same table — scope to `LEAD`'s own rows, which is
+    # what seq-monotonicity-within-a-lead actually means here.
+    rows = [r for r in read_jsonl_rows(run_dir / "executed_queries.jsonl") if r["lead_id"] == LEAD]
     assert [r["seq"] for r in rows] == [0, 1]
     assert rows[0]["payload_path"] is None
     assert rows[1]["payload_path"] == f"gather_raw/{LEAD}/1.json"

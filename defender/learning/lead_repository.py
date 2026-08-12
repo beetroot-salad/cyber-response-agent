@@ -56,6 +56,9 @@ class JoinedLead:
     what_to_summarize: list
     queries: list
     orphan: bool = False
+    #: K11 — absent (`None`) reads as model-authored; every row on disk before this field
+    #: existed predates the schema addition and must join the same way.
+    provenance: str | None = None
 
 
 
@@ -76,10 +79,17 @@ def load_leads(run_dir: Path) -> dict[str, dict]:
         if not isinstance(data, dict):
             continue
         wts = data.get("what_to_summarize")
-        leads[lead_id] = {
+        provenance = data.get("provenance")
+        entry = {
             "goal": str(data.get("goal", "")),
             "what_to_summarize": list(wts) if isinstance(wts, list) else [],
         }
+        if provenance:
+            # Only set when present — pre-#808 callers that build the exact dict literal
+            # `{"goal": ..., "what_to_summarize": ...}` (no provenance key at all) must keep
+            # matching a row this schema addition did not touch.
+            entry["provenance"] = str(provenance)
+        leads[lead_id] = entry
     return leads
 
 
@@ -155,6 +165,7 @@ def joined(run_dir: Path) -> list[JoinedLead]:
                 what_to_summarize=lead.get("what_to_summarize", []),
                 queries=sorted(buckets.get(lid, []), key=lambda r: r.seq),
                 orphan=lid not in leads,
+                provenance=lead.get("provenance") if lid in leads else None,
             )
         )
     for lid in orphans:

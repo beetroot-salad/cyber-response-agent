@@ -102,7 +102,9 @@
           "defender/runtime/session_store.py::StoreHandle.set_truncated_by",
           "defender/runtime/session_store.py::StoreHandle.set_last_render_len",
           "defender/runtime/session_store.py::open_store",
-          "defender/runtime/session_store.py::write_case_pointer"
+          "defender/runtime/session_store.py::write_case_pointer",
+          "defender/runtime/lead_zero.py::dispatch_correlation",
+          "defender/runtime/driver.py::_make_store_render_processor"
         ],
         "readers": [
           "defender/runtime/session_store.py::hydrate",
@@ -183,14 +185,21 @@
           "defender/runtime/tools.py::_tool_write_file",
           "defender/runtime/tools.py::_tool_edit_file",
           "defender/scripts/case_history/ticket_writer.py::_write_receipt",
-          "defender/scripts/visualize/visualize_run.py::render_and_mirror"
+          "defender/scripts/visualize/visualize_run.py::render_and_mirror",
+          "defender/runtime/lead_zero.py::resolve_lead_zero",
+          "defender/runtime/lead_zero.py::dispatch_correlation",
+          "defender/runtime/lead_zero.py::prepare_correlation_lead",
+          "defender/runtime/lead_zero.py::_declare_l_finding",
+          "defender/runtime/lead_zero.py::_record_manual_row"
         ],
         "readers": [
           "defender/runtime/scrub.py::scrub",
           "defender/run_common.py::cross_check_tables",
           "defender/run_common.py::enqueue_learning",
           "defender/learning/lead_repository.py::joined",
-          "defender/_run_paths.py::contained_payload"
+          "defender/_run_paths.py::contained_payload",
+          "defender/runtime/lead_zero.py::_rows_for",
+          "defender/evals/oracle_golden/build_case.py::main"
         ],
         "grep": [
           "tool_trace.jsonl",
