@@ -88,7 +88,15 @@ def test_correlation_lead_goal_and_dimensions_are_fixed_by_the_harness(tmp_path)
     fidelity demand (`d25`) is already a clause, because the hermetic suite scripts model
     turns and any test of the summary's CONTENT pins the script's own text. Requiring the two
     counts as NAMED dimensions moves the obligation from unassertable to
-    assertable-at-the-seam — the sidecar's payload is what the suite can read."""
+    assertable-at-the-seam — the sidecar's payload is what the suite can read.
+
+    THE SIGNATURE HALF OF THAT QUOTE NO LONGER HOLDS, and deliberately (#859). "Same-signature"
+    contradicted `d20` in the same contract — the goal says do NOT narrow to this alert's own
+    rule — and, read literally, a per-rule breakdown is 8-16 `alerts` calls against `d21`'s
+    request limit of 8, on a grant that withholds the one verb (`esql`) that could group by rule
+    in a single call. The dimensions now say "across any rule". What this test asserts is
+    unchanged and is what K18 actually moved to the seam: two NAMED count dimensions, one
+    on-host and one fleet-wide."""
     res = run(tmp_path, run_id="lz808-contract", answer=answer_hits(TWO_ACTORS))
 
     sidecar = res.sidecar(L3)
@@ -318,6 +326,16 @@ def test_correlation_summary_reaches_main_before_its_second_request(tmp_path):
     headings in MAIN's prompted procedure with no runtime referent — a test pinned to PLAN
     pins a proxy."""
     marker = "11 fleet-wide"
+    # The marker is a FRAGMENT of the scripted summary, chosen to be distinctive enough that
+    # finding it in a request proves the summary reached it. Pinned to its source: the summary
+    # is edited whenever item 3's dimensions change (#859 rewrote both), and a marker that
+    # silently stopped being a substring would make both assertions below pass vacuously — the
+    # negative because nothing carries it, the positive because it would red for the wrong
+    # reason and invite raising the wrong half.
+    assert marker in CORRELATION_SUMMARY, (
+        f"the delivery marker {marker!r} is no longer a fragment of the scripted gather "
+        f"summary {CORRELATION_SUMMARY!r} — re-derive it from the summary's current text"
+    )
     res = run(tmp_path, run_id="lz808-delivery", answer=answer_hits(TWO_ACTORS),
               gather_turns=[Turn(text=CORRELATION_SUMMARY)])
 

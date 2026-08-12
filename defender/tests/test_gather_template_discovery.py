@@ -813,6 +813,50 @@ def test_d24_status_agrees_with_the_draft_directory():
         assert in_draft_dir == (r.status == "draft"), f"{r.path}: status {r.status!r} vs its location"
 
 
+def test_the_harness_named_correlation_template_is_runnable_on_the_grant_that_names_it():
+    """`lead_zero.CORRELATION_TEMPLATE` is named OUTRIGHT in item 3's harness-authored goal
+    ("read it first ... it already carries the entity-disjunct body"), so the id is prompt text
+    a lead with no model in the loop acts on. Nothing else pins the join: the constant lives in
+    `runtime/`, the file lives in the catalog, and the grant that decides whether the file is
+    even RENDERED lives in a third place.
+
+    Three ways it silently breaks, all of them the failure #859 exists to remove — a rename or
+    a demotion to `_draft/` (the id resolves to nothing), and a `verb:` change (the id resolves
+    to a template `_template_index` filters out of this role's own index, because the grant
+    refuses its verb). In every one the harness tells the lead to bind a template its index does
+    not list, and the lead spends its bounded budget discovering that.
+
+    The last assertion is the goal's own remaining claim: this is what the grant-filtered index
+    offers. Not "the one template" as a literal — a second `alerts` template is a legitimate
+    authoring move — but the named one must be IN that set."""
+    from defender.runtime.lead_zero import (
+        CORRELATION_GRANT,
+        CORRELATION_SYSTEM,
+        CORRELATION_TEMPLATE,
+    )
+
+    established = [t for t in _corpus.iter_query_templates(_REAL_CATALOG)
+                   if t.status == "established" and "_draft" not in t.path.parts]
+    named = [t for t in established if t.id == CORRELATION_TEMPLATE]
+    assert named, (
+        f"item 3's contract names {CORRELATION_TEMPLATE!r}, which is not an established "
+        f"template — the harness sends the correlation lead to read a file that is not in its "
+        f"index (ids present: {sorted(t.id for t in established if t.system == CORRELATION_SYSTEM)})"
+    )
+    tpl = named[0]
+    assert CORRELATION_GRANT.allows(tpl.system, tpl.verb), (
+        f"{CORRELATION_TEMPLATE} binds verb {tpl.verb!r}, which "
+        f"{CORRELATION_GRANT.role!r} does not hold — `_template_index` filters it out of the "
+        "very dispatch whose goal names it, so the lead is told to bind a template its own "
+        "index does not list"
+    )
+
+    runnable = tools_gather._template_index(_DEFENDER, CORRELATION_SYSTEM, CORRELATION_GRANT)
+    assert CORRELATION_TEMPLATE in runnable.text, (
+        "the correlation lead's grant-filtered template index does not carry the id its own "
+        f"goal tells it to bind:\n{runnable.text}"
+    )
+
 
 def test_search_reads_sections_beyond_goal_and_query(tmp_path):
     """The search must read the FULL body, not just the two parsed sections.

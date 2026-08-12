@@ -79,6 +79,15 @@ def _sole_system(grant: VerbGrant) -> str:
 
 CORRELATION_SYSTEM = _sole_system(CORRELATION_GRANT)
 
+#: Item 1's OWN system, and deliberately not `CORRELATION_SYSTEM`. Every backend call item 1
+#: issues names this string directly — `_capture_issue`'s `args`, `_record_manual_row`'s row +
+#: `query_id` + `raw_command`, `_breaker_failures`' per-system state read, `_CallLedger.call`'s
+#: registry lookup — so its `:L findings` row must be labelled from the SAME anchor those calls
+#: use. Labelling it from the correlation grant's derived system reads as a dedup while the two
+#: are the same string, and mislabels item 1's row the moment `CORRELATION_GRANT` names a
+#: different vendor: the row would say one system while the queries it joins say another.
+ITEM1_SYSTEM = "elastic"
+
 PROVENANCE_KEY = "provenance"
 HARNESS_PROVENANCE = "harness"
 
@@ -244,14 +253,14 @@ async def _capture_issue(
     (a row IS written, with a nonzero exit code)."""
     before = len(_rows_for(deps.run_dir, deps.lead_id))
     call = SimpleNamespace(tool_name="query")
-    args = {"system": "elastic", "verb": verb, "params": params}
+    args = {"system": ITEM1_SYSTEM, "verb": verb, "params": params}
     # #808 review fix — stash the in-memory result as `handler` produces it, so a later
     # write failure (below) can recover it WITHOUT re-issuing the same backend call a
     # second time. `wrap_tool_execute` runs `handler` at most once per call.
     captured: list[Any] = []
 
     async def handler(_args: dict) -> Any:
-        fn = capture._registry.verbs("elastic")[verb]
+        fn = capture._registry.verbs(ITEM1_SYSTEM)[verb]
         vctx = VerbContext(defender_dir=deps.defender_dir, run_dir=deps.run_dir, env=env)
         result = await asyncio.to_thread(fn, vctx, **params)
         captured.append(result)
@@ -333,9 +342,11 @@ def _record_manual_row(
     else:
         payload_status = "ok"
     row = {
-        "lead_id": deps.lead_id, "seq": seq, "system": "elastic", "verb": verb,
-        "query_id": f"elastic.{verb}", "params": _json_safe_params(dict(params)),
-        "raw_command": shlex.join(["elastic", verb, *(f"{k}={v}" for k, v in params.items())]),
+        "lead_id": deps.lead_id, "seq": seq, "system": ITEM1_SYSTEM, "verb": verb,
+        "query_id": f"{ITEM1_SYSTEM}.{verb}", "params": _json_safe_params(dict(params)),
+        "raw_command": shlex.join(
+            [ITEM1_SYSTEM, verb, *(f"{k}={v}" for k, v in params.items())]
+        ),
         "payload_path": payload_rel, "exit_code": exit_code,
         "error_class": error_class_for_exit(exit_code),
         "payload_status": payload_status,
@@ -364,7 +375,7 @@ def _breaker_failures(run_dir: Path) -> int:
     systems = state.get("systems")
     if not isinstance(systems, dict):
         return 0
-    sysrec = systems.get("elastic")
+    sysrec = systems.get(ITEM1_SYSTEM)
     if not isinstance(sysrec, dict):
         return 0
     try:
@@ -390,7 +401,7 @@ class _CallLedger:
             # Past the cap: issue the call directly (bypassing QueryCapture's own automatic
             # `record_outcome`), still writing a queries-table row of the same shape.
             try:
-                fn = capture._registry.verbs("elastic")[verb]
+                fn = capture._registry.verbs(ITEM1_SYSTEM)[verb]
                 vctx = VerbContext(defender_dir=deps.defender_dir, run_dir=deps.run_dir, env=env)
                 envelope = await asyncio.to_thread(fn, vctx, **params)
                 _record_manual_row(deps, verb, params, envelope, exit_code=0)
@@ -553,7 +564,7 @@ async def _resolve_item1(  # noqa: C901, PLR0912, PLR0915 — item 1's own branc
         # `claim_lead`'s return value entirely and proceeded regardless.
         return (_unavailable(f"{L0} is already claimed by something else on this run dir"),
                 Entities(), STATUS_FAILED)
-    _declare_l_finding(run_dir, L0, "ancestor resolution")
+    _declare_l_finding(run_dir, L0, "ancestor resolution", ITEM1_SYSTEM)
 
     alert_id = alert.get("alert_id")
     signal_index = alert.get("signal_index")
@@ -685,17 +696,18 @@ def _correlation_contract(alert: dict, entities: Entities) -> tuple[str, list[st
         "index ONLY (this is a correlation over prior alerts, not raw telemetry). Do not "
         "narrow to this alert's own rule; a different rule firing on the same host/user is "
         "exactly the related behaviour this lead exists to surface. Bind "
-        f"`{CORRELATION_TEMPLATE}` — read it first: it is the one catalog template your grant "
-        "can run, and it already carries the entity-disjunct body and the window params this "
-        "contract needs. Each count is the result envelope's `total`, which the 20-doc `hits` "
-        "cap does not bound — a `truncated` result still carries a complete count."
+        f"`{CORRELATION_TEMPLATE}` — read it first: it is named by your grant-filtered template "
+        "index, and it already carries the entity-disjunct body and the window params this "
+        "contract needs. Each count is the result envelope's `total`, which the `hits` cap does "
+        "not bound — a `truncated` result still carries a complete count."
     )
     # Two dimensions, both answerable by ONE `alerts` call each. The third — "whether any
     # correlated alert is already benign-explained" — was struck: `kibana.alert.workflow_status`
-    # is `"open"` on every alert this environment produces (nothing in `playground-v2/` ever
-    # writes it), and the systems that could carry a benign explanation (`ticket`,
-    # `change-mgmt`) are outside this lead's grant. It had exactly one possible answer, so it
-    # bought no information and cost the lead a dimension it had to spend calls failing to meet.
+    # is `"open"` on every alert this environment produces (nothing in the environment's own
+    # provisioning ever writes it), and the systems that could carry a benign explanation
+    # (`ticket`, `change-mgmt`) are outside this lead's grant. It had exactly one possible
+    # answer, so it bought no information and cost the lead a dimension it had to spend calls
+    # failing to meet.
     #
     # "across any rule", not "same-signature": the goal above says do NOT narrow to this
     # alert's own rule, and the dimensions used to say "same-signature" — read literally, a
@@ -703,9 +715,21 @@ def _correlation_contract(alert: dict, entities: Entities) -> tuple[str, list[st
     # limit of 8, and the one verb that could group-by in a single call (`esql`) is exactly
     # what this lead's grant withholds for index confinement (g6/r19). The contract now asks
     # for what the granted verb can actually return.
+    #
+    # Each dimension names its ENTITY SCOPE. "on-host"/"fleet-wide" alone do not: read
+    # literally, "the count of alerts fleet-wide" is every alert the environment emitted in
+    # the window — a number about the SOC, not about this alert — while the template's own
+    # fleet-wide narrowing (drop `host.name`, keep `user.name`/`source.ip`) counts THESE
+    # entities anywhere. Two different numbers, and the lead's prose summary is the only thing
+    # MAIN sees, so the contract has to say which one it wants. The on-host dimension names
+    # the host SET for the same reason: item 1 routinely resolves more than one host (#808's
+    # own worked example resolves two), and one `alerts` call over an OR of them is a merged
+    # count that answers neither host on its own unless the contract asked for the merge.
     what = [
-        "the count of alerts on-host in the window, across any rule (the envelope's `total`)",
-        "the count of alerts fleet-wide in the window, across any rule (the envelope's `total`)",
+        "the count of alerts on-host in the window — every host item 1 resolved, OR'd into "
+        "one call — across any rule (the envelope's `total`)",
+        "the count of alerts fleet-wide for these same entities (no host predicate) in the "
+        "window, across any rule (the envelope's `total`)",
     ]
     return goal, what
 
@@ -721,11 +745,10 @@ async def dispatch_correlation(  # noqa: C901, PLR0913 — item 3's own dispatch
     `pre_claimed=True` (F5/F3 — the leads row was already claimed synchronously, before
     MAIN's first turn, by `resolve_lead_zero`/`prepare_correlation_lead`)."""
     from .agent_definition import bind
+    from .agent_role import GATHER_AGENT_ID_PREFIX
     from .driver import GATHER_DEF, build_gather_agent
     from .tools import GatherDeps
     from .tools_gather import GatherRequest, _run_gather
-
-    narrowed = CORRELATION_GRANT
 
     # A thin re-grant wrapper: same verb resolution, a narrower grant object — so `esql`
     # (never `confine_index`'d, g6/r19) is denied at the grant check rather than reaching a
@@ -734,7 +757,7 @@ async def dispatch_correlation(  # noqa: C901, PLR0913 — item 3's own dispatch
 
     class _Narrowed(VerbRegistry):
         def __init__(self, inner):
-            super().__init__(narrowed)
+            super().__init__(CORRELATION_GRANT)
             self._inner = inner
 
         def systems(self):
@@ -748,13 +771,16 @@ async def dispatch_correlation(  # noqa: C901, PLR0913 — item 3's own dispatch
 
     registry = _Narrowed(verbs)
 
-    agent_id = f"gather:{L3}"
+    # The SAME spelling `_run_gather` derives for the agent id it hands `gather_factory` and
+    # `stamp_terminator` (`f"{GATHER_AGENT_ID_PREFIX}{lead_id}"`). Spelled literally here, the
+    # session this frame opens and the session those two callbacks key would drift apart the
+    # moment the prefix moved, with nothing to catch it — the store would carry an orphan row.
+    agent_id = f"{GATHER_AGENT_ID_PREFIX}{L3}"
     gather_session_id: str | None = None
     if store is not None:
         gather_session_id = store.new_session(agent_id=agent_id)
 
     def gather_factory(_agent_id: str, system: str):
-        from .agent_role import GATHER_AGENT_ID_PREFIX
         from .driver import _gather_extra_capabilities
 
         extra: list = []
@@ -801,7 +827,7 @@ async def dispatch_correlation(  # noqa: C901, PLR0913 — item 3's own dispatch
     request = GatherRequest(L3, CORRELATION_SYSTEM, goal, tuple(what_to_summarize))
     try:
         return await _run_gather(
-            gdeps, gather_factory, CORRELATION_REQUEST_LIMIT, request, narrowed,
+            gdeps, gather_factory, CORRELATION_REQUEST_LIMIT, request, CORRELATION_GRANT,
             stamp_terminator, pre_claimed=True,
         )
     except (BudgetKill, circuit_breaker.RunAborted):
@@ -812,10 +838,16 @@ async def dispatch_correlation(  # noqa: C901, PLR0913 — item 3's own dispatch
         return None
 
 
-def _declare_l_finding(run_dir: Path, lead_id: str, name: str) -> None:
+def _declare_l_finding(run_dir: Path, lead_id: str, name: str, system: str) -> None:
     """K11/N6 — the HARNESS writes lead-0's declaring `:L findings` row into
     `investigation.md`, before MAIN's first turn: with no such row, `invlang_validate`
-    refuses any citation of the reserved id as an "undeclared lead" (P6, executed)."""
+    refuses any citation of the reserved id as an "undeclared lead" (P6, executed).
+
+    `system` is the CALLER's, not a module constant: this frame serves both reserved ids and
+    they do not share an authority for it — item 1's is the literal its own backend calls name
+    (`ITEM1_SYSTEM`), item 3's is derived from the grant that confines it (`CORRELATION_SYSTEM`).
+    The two are the same string today; a shared constant would silently mislabel one of the two
+    rows the moment they stop being."""
     from defender._io import write_guarded
 
     path = RunPaths(run_dir).investigation
@@ -823,7 +855,7 @@ def _declare_l_finding(run_dir: Path, lead_id: str, name: str) -> None:
         f"## lead-0 ({lead_id}) — harness-authored, declared before the investigation begins\n\n"
         "```invlang\n"
         ":L findings [id|loop|name|target|tests|system|window]\n"
-        f"{lead_id}|0|{name}|||{CORRELATION_SYSTEM}|n/a\n"
+        f"{lead_id}|0|{name}|||{system}|n/a\n"
         "```\n\n"
     )
     try:
@@ -851,7 +883,7 @@ def prepare_correlation_lead(run_dir: Path, alert: dict, entities: Entities, sta
     if claimed == 2:
         # Someone else already owns this id (a planted collision) — do not touch it further.
         return None
-    _declare_l_finding(run_dir, L3, "correlation lead")
+    _declare_l_finding(run_dir, L3, "correlation lead", CORRELATION_SYSTEM)
     return goal, what
 
 
@@ -940,6 +972,7 @@ __all__ = [
     "CORRELATION_TEMPLATE",
     "ELIDED",
     "HARNESS_PROVENANCE",
+    "ITEM1_SYSTEM",
     "L0",
     "L3",
     "LEAD_ZERO_HEADING",

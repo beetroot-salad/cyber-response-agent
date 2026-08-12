@@ -49,9 +49,29 @@ host.name:"${host}" OR user.name:"${user}" OR source.ip:"${ip}"
   predicate silently excludes exactly the multi-host alerts a correlation lead
   most wants. Run the user / source-IP disjuncts too, and say which count came
   from which predicate.
+- **`user.name` can arrive with a LEADING SPACE, and this template binds it as an
+  exact term.** `Failed password for invalid user <u>` lands `user.name` as
+  `" dev.dana"` while the sibling `Invalid user <u>` line lands it clean
+  (`skills/elastic/SKILL.md` §Gaps, `sshd-auth-history.md` §Pitfalls) — and an
+  alert copies its source document's value verbatim, so an entity resolved off an
+  ancestor document reaches this query space-prefixed. `user.name:" dev.dana"` is
+  a different keyword term from `user.name:"dev.dana"` and matches nothing: a
+  space-prefixed entity silently returns `"total": 0`, which reads as "no
+  correlated alerts" rather than as a parser quirk. OR both spellings
+  (`user.name:("dev.dana" OR " dev.dana")`) whenever a bound value is
+  space-prefixed, and say which spelling produced the count.
 - **Bind the window through the verb's own `start` / `end` params**, not a
   `@timestamp` clause in the Lucene body — they are declared params of `alerts`,
   and mixing the two makes the effective window unreadable from the queries table.
+- **`elastic.detection-alerts` measures the same index over the same window** and
+  is the one to bind when your grant reaches `esql`: it returns the per-rule
+  histogram (`STATS COUNT(*) BY rule, severity, host.name`) this template cannot,
+  in one call. Bind THIS one only when `esql` is withheld — a grant confined to
+  the alerts index holds `alerts` and not `esql` — and read that sibling's
+  pitfalls, which apply verbatim here. Both carry `correlate alerts` /
+  `kibana.alert` keyword recall, so a `template_search` returns both, and
+  `template_search` does NOT check your grant: a hit is not a promise you can
+  run it.
 - **Every alert in this environment carries `kibana.alert.workflow_status:
   "open"`.** Nothing in `playground-v2/` ever triages one, so "is this alert
   already benign-explained" is not a measurement this index can take — it is a
