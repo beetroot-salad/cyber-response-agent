@@ -25,7 +25,12 @@ from defender._io import use_utf8_stdio
 
 def _json_safe(obj):
     if isinstance(obj, dict):
-        return {k: _json_safe(v) for k, v in obj.items()}
+        # KEYS too: YAML types a bare `2026-01-01:` as a `datetime.date` and `!!binary` as
+        # `bytes`, either of which json.dumps rejects — and one such key in one lesson's
+        # frontmatter aborted the whole build rather than degrading that lesson (#854 F-20).
+        # Routing the key through _json_safe first turns a date into its ISO string.
+        return {(k if isinstance(k, str) else str(_json_safe(k))): _json_safe(v)
+                for k, v in obj.items()}
     if isinstance(obj, (set, frozenset)):
         return [_json_safe(v) for v in sorted(obj, key=str)]
     if isinstance(obj, (list, tuple)):

@@ -70,6 +70,27 @@ def test_git_status_survives_non_utf8_path(tmp_path):
     assert strays == ["stray-\udcff.md"]
 
 
+def test_git_status_z_consumes_the_rename_origpath(tmp_path):
+    """A staged rename emits TWO NUL fields — `R  <newPath>` then a bare `<origPath>`.
+    Reading the second as a record of its own fabricated a phantom whose status was the
+    first two characters of the old path and whose path was that path minus two (#854 F-17)."""
+    repo = _repo(tmp_path)
+    _git.git(["mv", "seed.md", "renamed.md"], cwd=repo)
+    records = _git.git_status(repo)
+    assert records == [("R ", "renamed.md")]
+
+
+def test_git_status_z_rename_does_not_swallow_the_next_record(tmp_path):
+    """Only the origPath field is consumed — a real record following the rename survives."""
+    repo = _repo(tmp_path)
+    (repo / "zz-other.md").write_text("x\n")
+    _git.git(["mv", "seed.md", "renamed.md"], cwd=repo)
+    records = _git.git_status(repo)
+    assert ("R ", "renamed.md") in records
+    assert ("??", "zz-other.md") in records
+    assert len(records) == 2
+
+
 def test_git_status_pathspec_scopes(tmp_path):
     repo = _repo(tmp_path)
     sub = repo / "sub"

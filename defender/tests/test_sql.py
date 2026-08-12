@@ -30,12 +30,18 @@ pytest.importorskip("duckdb")
 defender_sql = load_module(DEFENDER / "scripts" / "gather_tools" / "sql.py", name="defender_sql")
 
 
-def _run(monkeypatch, capsys, payload, query: str) -> tuple[int, str]:
+def _run_full(monkeypatch, capsys, payload, query: str) -> tuple[int, str, str]:
     data = payload.encode() if isinstance(payload, str) else payload
     fake_stdin = types.SimpleNamespace(buffer=io.BytesIO(data))
     monkeypatch.setattr("sys.stdin", fake_stdin)
     code = defender_sql._run(query)
-    return code, capsys.readouterr().out
+    captured = capsys.readouterr()
+    return code, captured.out, captured.err
+
+
+def _run(monkeypatch, capsys, payload, query: str) -> tuple[int, str]:
+    code, out, _err = _run_full(monkeypatch, capsys, payload, query)
+    return code, out
 
 
 _PAYLOAD = json.dumps({
@@ -73,6 +79,64 @@ def test_aggregates_ndjson(monkeypatch, capsys):
     assert json.loads(out) == [{"u": "a", "c": 2}, {"u": "b", "c": 1}]
 
 
+
+
+_ECS_PAYLOAD = json.dumps({
+    "index": "logs-*", "total": 1, "returned": 1, "truncated": False,
+    "hits": [
+        {
+            "user": {"name": "sre.alice"},
+            "process": {"name": "nc"},
+            "host": {"name": "web-04"},
+            "agent": {"name": "wazuh-agent-2"},
+        },
+    ],
+})
+
+
+def test_duplicate_output_columns_all_survive(monkeypatch, capsys):
+    """ECS nests the interesting fields, so an unaliased two-field projection collides
+    on the leaf name. Both values must reach the row — zipping into a dict used to keep
+    only the last, and exit 0 said nothing about it (#854 F-13)."""
+    code, out, err = _run_full(
+        monkeypatch, capsys, _ECS_PAYLOAD,
+        "SELECT h.user.name, h.process.name FROM (SELECT unnest(hits) h FROM data)",
+    )
+    assert code == defender_sql.EXIT_OK
+    assert json.loads(out) == [{"name": "sre.alice", "name_1": "nc"}]
+    assert "name -> name_1" in err
+
+
+def test_duplicate_column_rename_is_stable_across_three_way_collision(monkeypatch, capsys):
+    code, out, err = _run_full(
+        monkeypatch, capsys, _ECS_PAYLOAD,
+        "SELECT h.user.name, h.process.name, h.host.name "
+        "FROM (SELECT unnest(hits) h FROM data)",
+    )
+    assert code == defender_sql.EXIT_OK
+    assert json.loads(out) == [
+        {"name": "sre.alice", "name_1": "nc", "name_2": "web-04"}]
+    assert "name -> name_1" in err
+    assert "name -> name_2" in err
+
+
+def test_rename_does_not_collide_with_a_literal_alias_of_the_same_name(monkeypatch, capsys):
+    """The renamer must not manufacture a NEW collision when the projection already
+    contains the name it would generate."""
+    assert defender_sql._disambiguate_columns(["name", "name_1", "name"]) == (
+        ["name", "name_1", "name_2"], ["name -> name_2"])
+    assert defender_sql._disambiguate_columns(["a", "b"]) == (["a", "b"], [])
+
+
+def test_unique_columns_emit_no_collision_note(monkeypatch, capsys):
+    code, out, err = _run_full(
+        monkeypatch, capsys, _ECS_PAYLOAD,
+        "SELECT h.user.name AS user_name, h.process.name AS process_name "
+        "FROM (SELECT unnest(hits) h FROM data)",
+    )
+    assert code == defender_sql.EXIT_OK
+    assert json.loads(out) == [{"user_name": "sre.alice", "process_name": "nc"}]
+    assert "renamed" not in err
 
 
 def test_empty_stdin_is_input_error(monkeypatch, capsys):

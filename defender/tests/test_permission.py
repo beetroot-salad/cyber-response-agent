@@ -299,6 +299,14 @@ def test_timeout_prefix_keeps_legit_pipeline(cmd):
     # command is never handed on as a shape anyone acts on.
     "defender-elastic query 'unterminated\nrest'",
     "cat /run/report.md | jq '.a\n.b'",
+    # #854 F-22 — a connector at a line boundary. Each physical line is lexed on its own, so
+    # the token used to be DROPPED and `A | B` ran as `A ; B`: the second stage read /dev/null
+    # and the miss was indistinguishable downstream from a genuine no-match. It now joins its
+    # `\`-continuation sibling in the same fail-closed lexing refusal.
+    "cat /run/report.md |\nwc -l",
+    "cat /run/report.md\n| wc -l",
+    "cat /run/report.md &&\nwc -l /run/report.md",
+    "cat /run/report.md\n&& wc -l /run/report.md",
 ])
 def test_unparseable_quote_spanning_newline_fails_closed(cmd):
     d = _bash(cmd, GATHER)

@@ -153,3 +153,22 @@ def test_json_safe_coerces_exotic_types():
     assert out["d"] == "2026-06-02"
     assert isinstance(out["t"], str)
     json.dumps(out)
+
+
+def test_json_safe_coerces_exotic_dict_keys():
+    """The docstring's invariant covers KEYS as well: YAML types a bare `2026-01-01:` as
+    a date and `!!binary` as bytes, and json.dumps rejects both — which aborted the whole
+    build over one lesson's frontmatter instead of degrading that lesson (#854 F-20)."""
+    import datetime
+    import json
+
+    out = serialize._json_safe({
+        datetime.date(2026, 1, 1): "oops",
+        b"\xff": "binary key",
+        ("a", "b"): "tuple key",
+        "plain": "kept",
+    })
+    assert out["2026-01-01"] == "oops"
+    assert out["plain"] == "kept"
+    assert all(isinstance(k, str) for k in out)
+    assert json.loads(json.dumps(out))["2026-01-01"] == "oops"

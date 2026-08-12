@@ -114,6 +114,44 @@ def _shape_hint(con, message: str) -> str:
     return f"\n  hint: `data` has columns [{', '.join(cols)}]; {idiom}{_error_note(message)}"
 
 
+def _disambiguate_columns(columns: list[str]) -> tuple[list[str], list[str]]:
+    """Make the result-set column names unique, and say which ones moved.
+
+    An unaliased projection of two ECS-nested fields — `h.host.name, h.agent.name`,
+    `h.source.ip, h.destination.ip` — collides on the leaf, and a row built by zipping
+    into a dict keeps only the LAST of each colliding pair (#854 F-13). Renaming rather
+    than refusing keeps a legitimate `SELECT *` over a self-join working; the stderr note
+    is what makes the narrowing loud, since a silently-dropped column is indistinguishable
+    downstream from a field the payload never carried.
+    """
+    seen: dict[str, int] = {}
+    out: list[str] = []
+    renamed: list[str] = []
+    for col in columns:
+        n = seen.get(col, 0)
+        seen[col] = n + 1
+        if n == 0:
+            out.append(col)
+            continue
+        name = f"{col}_{n}"
+        while name in seen:  # a literal `name_1` already in the projection must not collide too
+            n += 1
+            name = f"{col}_{n}"
+        seen[name] = 1
+        out.append(name)
+        renamed.append(f"{col} -> {name}")
+    return out, renamed
+
+
+def _collision_note(renamed: list[str]) -> str:
+    return (
+        f"defender-sql: note — duplicate output column name(s) renamed: {', '.join(renamed)}. "
+        "Two projected fields share a leaf name (ECS nests them: `host.name`, `agent.name`). "
+        "Alias them explicitly to control the key: "
+        "SELECT h.host.name AS host_name, h.agent.name AS agent_name"
+    )
+
+
 def _truncation_note(con) -> str:
     try:
         if "truncated" not in _top_level_columns(con):
@@ -179,10 +217,13 @@ def _run(sql: str) -> int:
             return EXIT_QUERY_ERROR
 
         columns = [col[0] for col in cursor.description] if cursor.description else []
+        columns, renamed = _disambiguate_columns(columns)
         rows = [_json_safe(dict(zip(columns, record, strict=True)))
                 for record in cursor.fetchall()]
         json.dump(rows, sys.stdout, default=str, allow_nan=False)
         sys.stdout.write("\n")
+        if renamed:
+            print(_collision_note(renamed), file=sys.stderr)
         note = _truncation_note(con)
         if note:
             print(note, file=sys.stderr)

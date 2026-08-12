@@ -690,7 +690,7 @@ def test_d17_env_check_uses_the_worktree_corpus(tmp_path):
     d.mkdir(parents=True)
     (d / "investigation.md").write_text(
         "```invlang\n:V prologue.vertices [id|type|class|ident|attrs?]\n"
-        "v-001|process|process:nc|nc[1]|\n```\n"
+        "v-001|process|nc|nc[1]|\n```\n"
     )
     scene.pending.write_text(json.dumps(
         {"observation_id": "obs-1", "alert_rule_key": "rule-Z", "source_run_dir": "run-E"}

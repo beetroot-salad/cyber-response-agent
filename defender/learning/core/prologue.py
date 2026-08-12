@@ -18,7 +18,12 @@ def extract_case_entities(investigation_path: Path) -> str:
                 break
             cols = s.split("|")
             if len(cols) >= 3 and cols[0].strip().startswith("v-"):
-                tok = cols[2].strip()
-                if tok and tok not in seen:
+                typ, cls = cols[1].strip(), cols[2].strip()
+                # The `class` cell carries the slash-tuple ONLY (skills/invlang/SKILL.md);
+                # every consumer parses these tokens as `type:class`, so qualify here.
+                if not typ or not cls:
+                    continue
+                tok = f"{typ}:{cls}"
+                if tok not in seen:
                     seen.append(tok)
     return ",".join(seen)

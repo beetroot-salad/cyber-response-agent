@@ -56,6 +56,10 @@ SELECT v[2]->>'$' FROM (SELECT unnest(values) v FROM data)
   "absent" — it cannot support an absence refutation. The tool says so on stderr.
 - **A count over one payload when the lead named several.** Cover every seq, not
   just `0`.
+- **Two projected fields that share a leaf name.** ECS nests them, so an unaliased
+  `h.host.name, h.agent.name` projects two columns both called `name`. The second
+  and later ones come back as `name_1`, `name_2` and the tool says which on stderr —
+  alias them (`AS host_name`, `AS agent_name`) to control the key yourself.
 
 When a system's own row shape has a recipe recorded, it is in the
 `execution.md` your dispatch prompt names — read that rather than re-deriving

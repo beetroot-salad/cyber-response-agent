@@ -60,11 +60,22 @@ def git_status(cwd: Path, *, pathspec: Path | str | None = None) -> list[tuple[s
     if pathspec is not None:
         args += ["--", str(pathspec)]
     out = _run(args, cwd=cwd).stdout
+    fields = out.split("\0")
     records: list[tuple[str, str]] = []
-    for rec in out.split("\0"):
-        if len(rec) < 3:
+    i = 0
+    while i < len(fields):
+        rec = fields[i]
+        i += 1
+        if len(rec) < 4:
+            # `XY <path>` — the shortest real record is 3 chars of prefix plus a name.
             continue
-        records.append((rec[:2], rec[3:] if rec[2] == " " else rec[2:]))
+        xy, path = rec[:2], rec[3:]
+        records.append((xy, path))
+        if xy[0] in "RC" or xy[1] in "RC":
+            # A rename/copy record is FOLLOWED by its `<origPath>` as a field of its own.
+            # Consuming it here is what stops it being read as a record whose status is the
+            # first two characters of a path and whose path is that path minus two (#854 F-17).
+            i += 1
     return records
 
 
