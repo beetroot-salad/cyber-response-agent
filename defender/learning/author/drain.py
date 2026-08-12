@@ -58,7 +58,7 @@ from defender._io import (
 from defender.learning.author import shared as author_shared
 from defender.learning.author._config import BucketSpec, CorpusAuthorConfig
 from defender.learning.core import persist
-from defender.learning.core.config import QueueChannel, make_logger
+from defender.learning.core.config import QueueChannel, make_logger, provenance_field
 
 AuthorError = author_shared.AuthorError
 
@@ -446,7 +446,11 @@ def _project(
 
 
 def _assert_corpus_attributable(cfg: CorpusAuthorConfig, committed: list[dict]) -> None:
-    """Every file this tick left in the corpus must cite a row the author COMMITTED.
+    """Every file this tick CHANGED in the corpus must be vouched for by a COMMITTED row.
+
+    Vouched for means one of two things, and `_vouched_for` owns which: the file cites a
+    committed id, or it was already in history and claims exactly the provenance it claimed
+    there — the second being what keeps an ordinary supersede flip out of this gate's way.
 
     The other post-flight cross-check, `verify_agent_state`, is AGGREGATE — committed
     non-empty ⇔ corpus dirty — which is one bit for a whole batch. So the homogeneous case
@@ -469,32 +473,70 @@ def _assert_corpus_attributable(cfg: CorpusAuthorConfig, committed: list[dict]) 
     `_undo_agent_edits` -> `_restore_corpus` deletes the unvouched-for file, the batch is
     bumped and stays queued, and the tick returns 2."""
     key = cfg.channel.id_key
-    field = f"source_{key}s"
+    field = provenance_field(key)
     ids = {row[key] for row in committed if isinstance(row.get(key), str)}
     unattributed = [
-        rel for rel in _changed_corpus_paths(cfg)
-        if not _cited_ids(cfg.repo_root / rel, field) & ids
+        rel for xy, rel in _changed_corpus_records(cfg)
+        if not _vouched_for(cfg.repo_root, rel, xy, field, ids)
     ]
     if unattributed:
         raise AuthorError(
             f"author left {len(unattributed)} file(s) in {cfg.corpus_dir_rel} that no "
-            f"committed row vouches for: {unattributed}; each must cite at least one "
-            f"{field} entry from this batch's committed set ({sorted(ids)}) — refusing to "
-            "commit (a pathspec-wide commit would sweep them in)"
+            f"committed row vouches for: {unattributed}; each must either cite a "
+            f"{field} entry from this batch's committed set ({sorted(ids)}) or leave its "
+            f"{field} exactly as HEAD has it — refusing to commit (a pathspec-wide commit "
+            "would sweep them in)"
         )
 
 
-def _changed_corpus_paths(cfg: CorpusAuthorConfig) -> list[str]:
-    """The corpus files this tick added or modified, repo-relative.
+def _changed_corpus_records(cfg: CorpusAuthorConfig) -> list[tuple[str, str]]:
+    """`(status, repo-relative path)` for the corpus files this tick added or modified.
 
     The corpus is CLEAN at the top of every tick (`assert_clean_corpus_dir` refuses to
     author otherwise), so what git reports dirty under it is exactly what this agent call
     wrote. Deletions are excluded: there is no file left to attribute, and a lesson the
-    curator retired is vouched for by the same commit that removes it."""
+    curator retired is vouched for by the same commit that removes it. The STATUS rides
+    along because `_vouched_for` needs to know whether the agent created the file or edited
+    one that was already in history."""
     return sorted(
-        path
-        for xy, path in _git.git_status(cfg.repo_root, pathspec=cfg.corpus_dir)
-        if "D" not in xy
+        (
+            (xy, path)
+            for xy, path in _git.git_status(cfg.repo_root, pathspec=cfg.corpus_dir)
+            if "D" not in xy
+        ),
+        key=lambda rec: rec[1],
+    )
+
+
+def _vouched_for(
+    repo_root: Path, rel: str, xy: str, field: str, ids: set[str]
+) -> bool:
+    """Does this changed corpus file need a voucher from this batch, and does it have one?
+
+    Citing a committed id is the voucher, and for a file the agent CREATED (`??`) it is the
+    only one — that is F-02's own case, a rejected lesson citing nothing at all.
+
+    An already-committed file gets a second way to pass, and without it this gate faults on
+    ordinary curation. The actor/environment curators retire a contradicted lesson by
+    flipping the OLD file to `status: stale, superseded_by: {new}` while the replacement is
+    the file that cites the new observation (`benign_actor/prompt.md`, `malicious_actor/
+    prompt.md`, "Supersede"), and the lessons curator reverts a forward-BAD fold by
+    re-editing the target back to its pre-batch body. Neither edit claims new provenance —
+    the file cites exactly what it cited at HEAD — so it is not a lesson authored for a row
+    of this batch, vouches for nothing, and needs no voucher. Requiring one anyway reverted
+    the whole tick, deleted the legitimately-authored replacement with it, and bumped the
+    batch toward the ceiling that retires it into the graveyard."""
+    cited = _cited_ids(repo_root / rel, field)
+    if cited & ids:
+        return True
+    return xy != "??" and cited == _cited_ids_at_head(repo_root, rel, field)
+
+
+def _cited_ids_at_head(repo_root: Path, rel: str, field: str) -> set[str]:
+    """What the same corpus file cited BEFORE this tick — empty for a path HEAD has no blob
+    for, which is why only a file git already tracks may lean on this comparison."""
+    return _cited_ids_in(
+        _git.git(["show", f"HEAD:{rel}"], cwd=repo_root, check=False), field
     )
 
 
@@ -502,10 +544,17 @@ def _cited_ids(path: Path, field: str) -> set[str]:
     """The queue-row ids one corpus file claims as its source. A file whose frontmatter
     cannot be read cites nothing — malformed is unattributable, which is the disposition it
     should have had anyway."""
-    malformed: tuple[type[BaseException], ...] = (FrontmatterError, *TEXT_READ_ERRORS)
     try:
-        fm, _raw, _body = split_frontmatter(read_text_utf8(path))
-    except malformed:
+        text = read_text_utf8(path)
+    except TEXT_READ_ERRORS:
+        return set()
+    return _cited_ids_in(text, field)
+
+
+def _cited_ids_in(text: str, field: str) -> set[str]:
+    try:
+        fm, _raw, _body = split_frontmatter(text)
+    except FrontmatterError:
         return set()
     cited = fm.get(field)
     if not isinstance(cited, list):

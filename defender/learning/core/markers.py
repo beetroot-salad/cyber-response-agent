@@ -159,7 +159,7 @@ def claim_markers(
             quarantine_marker({identity_key: claimed.stem}, claimed, queue_dir, reason)
             continue
         raw_run_dir = spec.get("run_dir")
-        if not isinstance(raw_run_dir, str) or not raw_run_dir:
+        if not isinstance(raw_run_dir, str) or not Path(raw_run_dir).is_absolute():
             # #852 F-18. The unguarded `Path(spec.get("run_dir", ""))` had two failure
             # shapes, and one check closes both. A non-string value (`null`, a number, a
             # list) raised TypeError OUT of this generator — past every dead-letter path
@@ -167,9 +167,15 @@ def claim_markers(
             # default resolved to `Path(".")`, so a row with NO `run_dir` — exactly the
             # shape `quarantine_marker`'s own dead letter writes — was SERVED, against the
             # process CWD, and quarantined later under whatever the serve then failed on.
+            # ABSOLUTE, not merely non-empty: `""` is only the loudest of the paths that
+            # resolve against the CWD, and the drain's CWD is a worktree it is about to
+            # `reset --hard`. Both writers of these queues store `str(run_dir.resolve())`,
+            # so a relative value is by construction a row nothing this loop wrote.
             # The type belongs here rather than in `_read_spec`, whose contract is the
             # row's top-level shape, not the meaning of any one field.
-            quarantine_marker(spec, claimed, queue_dir, "unreadable: run_dir is not a path")
+            quarantine_marker(
+                spec, claimed, queue_dir, "unreadable: run_dir is not an absolute path"
+            )
             continue
         run_dir = Path(raw_run_dir)
         if not run_dir.is_dir():

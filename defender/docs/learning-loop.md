@@ -352,11 +352,15 @@ audit-only. Queueable finding types are `lead-set`, `lead-quality`,
 6. **Commit + post-flight** — the author commits lesson edits if any survived.
    `author.py` verifies that the claimed `commit_sha` is HEAD, that HEAD
    touches only `defender/lessons/*.md`, and that the lessons dir is clean.
-   Before the commit, every file left in the corpus must also be
-   **attributable**: it has to cite at least one id from this batch's committed
-   set under the channel's own `source_finding_ids` / `source_observation_ids`
-   (#852). The commit is pathspec-wide, so without that a lesson the
-   forward-check rejected rode into history on a batch-mate that passed.
+   Before the commit, every file this tick left CHANGED in the corpus must also
+   be **attributable**: it has to cite at least one id from this batch's
+   committed set under the channel's own `source_finding_ids` /
+   `source_observation_ids` (#852). The commit is pathspec-wide, so without that
+   a lesson the forward-check rejected rode into history on a batch-mate that
+   passed. An already-committed file whose provenance list is byte-identical to
+   HEAD's is exempt — a supersede's `status: stale` flip and a reverted
+   forward-BAD fold claim no new source, so they vouch for nothing and need no
+   voucher.
    Then it atomically rotates `_pending/findings.jsonl`, appends consumed
    findings to `_pending/consumed.jsonl`, and logs held/skip batches
    to `_pending/findings.held_report.log` — on every tick that held or skipped

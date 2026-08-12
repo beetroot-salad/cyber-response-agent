@@ -205,6 +205,101 @@ def test_852_f02_attribution_reads_the_channels_own_provenance_key(tmp_path: Pat
     assert _head_files(paths.repo_root) == ["defender/lessons-actor/cited.md"]
 
 
+def test_852_f02_a_supersede_flip_is_not_read_as_an_unattributed_file(tmp_path: Path):
+    """F-02's other control: the gate must not fault ORDINARY curation.
+
+    `Supersede` is a documented step on both observation curators — "author the new lesson,
+    flip the old one to `status: stale, superseded_by: {new-name}`". The flipped file is a
+    MODIFICATION of a lesson already in history, and it does not gain a `source_observation_
+    ids` entry from this batch, because the batch's observation is what the REPLACEMENT
+    cites. Demanding a voucher from it faults the tick, restores the corpus — deleting the
+    legitimate replacement with it — and bumps the batch toward the ceiling that retires it
+    into the graveyard, i.e. turns a routine supersede into permanent data loss.
+
+    The exemption is narrow on purpose: it is the file's provenance list being byte-identical
+    to HEAD's, not "modifications are fine". A file the agent CREATED never qualifies (F-02's
+    own case cites nothing), and a fold that appends an id the forward check rejected has
+    changed its provenance and still fails."""
+    paths = h.make_paths(tmp_path)
+    ch = h.channel_of(paths, "actor_observations")
+    h.seed(ch, [h.row_for("actor_observations", "a/1")])
+
+    seeded = h.cfg_for(paths, "actor_observations")
+    old = _write_corpus_file(seeded.corpus_dir, "old-fact", "source_observation_ids", ["a/0"])
+    h.git(paths.repo_root, "add", "-A")
+    h.git(paths.repo_root, "commit", "-q", "-m", "an earlier batch's lesson")
+
+    def curate(rows, batch_id, cfg):
+        _write_corpus_file(cfg.corpus_dir, "new-fact", "source_observation_ids", ["a/1"])
+        old.write_text(
+            old.read_text(encoding="utf-8").replace(
+                "description:", "status: stale\nsuperseded_by: new-fact\ndescription:"
+            ),
+            encoding="utf-8",
+        )
+        return {
+            "committed": ["a/1"],
+            "consumed_skip": [],
+            "held_forward_bad": [],
+            "commit_message": "author actor lesson, supersede the contradicted one",
+        }
+
+    cfg = h.cfg_for(paths, "actor_observations", invoke_agent=curate)
+    assert drain.run_batch(cfg=cfg) == 0, "the supersede flip faulted the tick"
+    assert sorted(_head_files(paths.repo_root)) == [
+        "defender/lessons-actor/new-fact.md",
+        "defender/lessons-actor/old-fact.md",
+    ]
+    assert "status: stale" in old.read_text(encoding="utf-8")
+    assert h.pending_by_id(ch) == {}, "the batch was re-queued by a tick that committed"
+
+
+def test_852_f02_a_modified_file_that_claims_a_new_source_still_needs_a_voucher(
+    tmp_path: Path,
+):
+    """The exemption's edge. A fold that APPENDS an id — the one the forward check then
+    rejected — has claimed new provenance, so "unchanged since HEAD" does not cover it and
+    the file must still be vouched for by the committed set. Without this the exemption
+    would reopen F-02 for every fold onto an existing lesson.
+
+    Driven on the FINDINGS channel, not an observation one, so that the attribution gate is
+    the only thing that can fault this tick: `held_forward_bad` is a bucket only this channel
+    declares, and a result naming it on an observation channel is rejected by the partition
+    validator two steps earlier — which returns the same rc=2 and restores the same corpus,
+    for a reason that has nothing to do with attribution. Checked by deletion: with the gate
+    call removed, this test fails."""
+    paths = h.make_paths(tmp_path)
+    ch = h.channel_of(paths, "findings")
+    for run_id in ("run-G", "run-B"):
+        h.write_source_refs(paths, run_id)
+    h.seed(ch, [h.row_for("findings", "run-G/0"), h.row_for("findings", "run-B/0")])
+
+    seeded = h.cfg_for(paths, "findings")
+    old = _write_corpus_file(seeded.corpus_dir, "old-fact", "source_finding_ids", ["run-A/0"])
+    h.git(paths.repo_root, "add", "-A")
+    h.git(paths.repo_root, "commit", "-q", "-m", "an earlier batch's lesson")
+
+    def curate(rows, batch_id, cfg):
+        _write_corpus_file(cfg.corpus_dir, "vouched", "source_finding_ids", ["run-G/0"])
+        # The forward check said run-B/0's fold flips a green case; the curator was told to
+        # re-edit the target back and did not.
+        _write_corpus_file(
+            cfg.corpus_dir, "old-fact", "source_finding_ids", ["run-A/0", "run-B/0"]
+        )
+        return {
+            "committed": ["run-G/0"],
+            "consumed_skip": [],
+            "held_forward_bad": [{"finding_id": "run-B/0", "reason": "flips a green case"}],
+            "commit_message": "defender: lesson vouched",
+        }
+
+    cfg = h.cfg_for(paths, "findings", invoke_agent=curate)
+    assert drain.run_batch(cfg=cfg) == 2, "the rejected fold rode in on its batch-mate"
+    assert _commits(paths.repo_root) == 2
+    assert "run-B/0" not in old.read_text(encoding="utf-8"), "the rejected fold survived"
+    assert sorted(h.pending_by_id(ch)) == ["run-B/0", "run-G/0"]
+
+
 # --------------------------------------------------------------------------------------
 # F-03 — a skip is not a serve
 # --------------------------------------------------------------------------------------

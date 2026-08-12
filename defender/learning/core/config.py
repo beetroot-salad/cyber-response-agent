@@ -37,6 +37,18 @@ class QueueChannel:
     id_key: str
 
 
+def provenance_field(id_key: str) -> str:
+    """The corpus frontmatter list a lesson cites its source queue rows under.
+
+    ONE spelling, because two gates that must agree read it: the pre-author idempotency
+    gate (`existing_finding_ids` / `existing_observation_ids`), which decides a row was
+    already authored, and the drain's attribution gate (#852 F-02), which decides a corpus
+    file is vouched for by this batch. A file attributable under one spelling and invisible
+    to the other is authored again on every following tick, so the two are derived from the
+    channel's `id_key` here rather than hand-spelled at each site."""
+    return f"source_{id_key}s"
+
+
 @dataclass(frozen=True)
 class LegDirs:
     """The two roots one direction leg writes across: the finished investigation it READS,

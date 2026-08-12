@@ -177,15 +177,19 @@ def _quarantine_lead_author_failure(
     quarantine_marker(spec, marker, queue_dir, f"lead-author-error: {e!r}")
 
 
-def _requeue_or_drop(claim: ClaimedMarker, spec: dict, *, note: str) -> None:
+def _requeue_or_drop(claim: ClaimedMarker, *, note: str) -> None:
     """Hand one claimed request back to the queue, then release the claim.
 
     The re-queue lands at the TOP level — never at `claim.path`, the slot a reclaimed orphan
     was read from and this pass is about to unlink — and it is CREATE-IF-ABSENT. A fresher
     request for the same case that arrived while this one was claimed already occupies that
     slot, and the queue's contract is that the later run wins (#791), so the older spec is
-    dropped rather than atomically written over it (#852 F-04)."""
-    if requeue_marker(claim.queued_path, spec):
+    dropped rather than atomically written over it (#852 F-04).
+
+    The spec comes off the CLAIM rather than as its own argument: what goes back on the
+    queue and what is unlinked from `inflight/` are two halves of one hand-back, and a
+    caller able to pass a spec belonging to some other claim could split them."""
+    if requeue_marker(claim.queued_path, claim.spec):
         _log(f"lead_author_drain: {note} — left queued for retry")
     else:
         _log(
@@ -228,8 +232,7 @@ def _drain_lead_author_markers(
             # marker still queued would meet the same held lock, and claiming them only to
             # hand them straight back is churn against a queue another process is reading.
             _requeue_or_drop(
-                claim, spec,
-                note=f"{marker_identity(spec, claimed)} not served: {e}",
+                claim, note=f"{marker_identity(spec, claimed)} not served: {e}",
             )
             break
         except _LeadAuthorRetry as e:
@@ -242,7 +245,7 @@ def _drain_lead_author_markers(
             else:
                 spec["attempts"] = attempts
                 _requeue_or_drop(
-                    claim, spec,
+                    claim,
                     note=f"transient on {marker_identity(spec, claimed)} "
                          f"(attempt {attempts}/{max_retries})",
                 )

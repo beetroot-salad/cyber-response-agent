@@ -30,6 +30,7 @@ from defender.learning.core.config import (
     author_timeout as _author_timeout,
     make_logger,
     now_iso,
+    provenance_field,
 )
 
 
@@ -112,10 +113,13 @@ def disposition_for(cfg: AuthorConfig, run_id: str) -> str | None:
 
 def existing_finding_ids(cfg: AuthorConfig) -> set[str]:
     ids: set[str] = set()
+    # The same spelling the drain's attribution gate reads (#852 F-02): a file attributable
+    # there but invisible here is authored again on every following tick.
+    field = provenance_field(cfg.channel.id_key)
     for lesson in iter_lessons(
         cfg.corpus_dir, warn_label=lambda p: f"finding-id pre-flight: {p.name}"
     ):
-        sids = lesson.fm.get("source_finding_ids") or []
+        sids = lesson.fm.get(field) or []
         if isinstance(sids, list):
             ids.update(sid for sid in sids if isinstance(sid, str))
     return ids
