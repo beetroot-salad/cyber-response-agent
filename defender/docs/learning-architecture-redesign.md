@@ -1,4 +1,4 @@
-# Learning architecture — redesign (2026-07-30, revised 2026-08-11)
+# Training loop architecture (2026-07-30, revised 2026-08-12)
 
 ## Status
 
@@ -17,7 +17,7 @@ on synthetic sibling pairs and need no held-out fixture. Recruitment is still
 sequenced first because promotion is worthless without it, but it does not block
 building the loop. `defender/fixtures/held-out/` still contains only a README.
 
-### What the 2026-08-11 revision changed
+### What the 2026-08-11/12 revision changed
 
 The original draft had one architecture with three components. Two shipped or
 were overtaken while the third was still on paper, and a working session then
@@ -54,8 +54,14 @@ reworked the third. Concretely:
   `hosts/inventory.yaml`. A non-stale asset inventory is not a thing an
   arbitrary deployment has (§Seeds and mutations).
 - **Environment facts became load-bearing** — they are the grounding substrate
-  that replaces the config files, so §Environment facts is new and long, and
-  environment mining moved onto the critical path.
+  that replaces the config files, which put environment mining on the critical
+  path.
+- **The corpus design split out.** It had grown longer than the training-loop
+  subject it was serving, and it has a different reader and a different timeline:
+  the training loop is unbuilt, while the corpus exists today and its vocabulary
+  is already drifting. It is now `environment-corpus-and-vocabulary.md`, which
+  also took frontier-keyed retrieval. §Environment facts here keeps the three
+  points the training loop depends on.
 
 ## The diagnosis
 
@@ -85,6 +91,56 @@ Three deltas carry most of the argument below:
 - **`ΔT` — trajectory delta.** The difference in the defender's investigation and
   verdict across the two siblings, read off the leads and queries tables.
 
+## Empirical grounding
+
+Two findings from `20260728T161845Z-fresh-case`, a Falco `authorized_keys` write
+correctly disposed `malicious`.
+
+**The old loop yields nothing on it.** A malicious disposition routes to the FP
+hunt, and no benign story survives an SSH key whose comment is literally
+`attacker@elsewhere`. Skip or incoherent. A whole disposition class is silent.
+
+**A directly applicable lesson existed and did not retrieve.** The corpus holds a
+lesson stating that `loginuid=-1` licenses "non-interactive automated context" and
+nothing more, that container init and cron produce an identical profile, and that
+origin claims require ancestry Falco cannot supply. Two lessons loaded for this
+run; that was not one of them — it is keyed to the signature it was born from, a
+different rule. The investigation then inferred "no authenticated session
+initiated this process — classic remote execution pattern," and separately
+recorded that no parent process was captured, and reasoned past it.
+
+That defect lands in an awkward place:
+
+- **Training grades it as a clean win.** The disposition was right, and rests on
+  one thing: the key comment literally reads `attacker@elsewhere`. Each other
+  support is an artifact of the environment. `loginuid=-1` is how the scenario
+  runner executes *anything*, benign included. "Host absent from CMDB" holds for
+  every container case, because Falco reports the Docker host while the logical
+  host is registered — the defender queried the wrong entity and read the null as
+  incriminating. And the co-occurring `nc` events it reported as a multi-stage
+  attack chain belong to the baseline scheduler, which generates them
+  `category: noise` to fire that exact rule against that exact host. **The shipped
+  report asserts an attack chain that did not happen.** Outcome grading sees none
+  of this, because the disposition matched.
+- **Review cannot prove it either.** It can only say the inference is unsound. The
+  proof is generating that twin and watching the defender escalate.
+
+So: **review nominates on real data, the generator falsifies.** This case earns
+its place at the front: it is the source of the environment-defect judge bucket
+(§The discriminator spine) and, in the corpus doc, of both the null-reading trap
+and the interpretation-cache argument.
+
+**Two cheap fixes remain available, independent of everything above**, and
+neither has landed:
+
+- Make the judge's likelihood-ratio check **symmetric**. It still runs only on
+  benign dispositions (`learning/pipeline/judge/malicious.md:146` — *"When
+  `report.md` records a **benign** disposition"*); on a malicious call it should
+  ask whether the incriminating observables fit routine automation equally well.
+- **Re-key observable-semantics lessons** off the alert signature (minding that
+  the two corpora disagree on rule-id namespace) — the stopgap for
+  the corpus doc §Retrieval.
+
 ## The three moving pieces
 
 The training loop is **questioner → oracle → judge**, around the **defender**
@@ -104,8 +160,9 @@ loop cannot supply.
 
 Two other components from the original draft remain, with changed standing:
 
-**Frontier-keyed lesson retrieval** (§Retrieval) is unchanged and independent of
-the training loop.
+**Frontier-keyed lesson retrieval** is unchanged and independent of the training
+loop; it moved to the corpus doc §Retrieval with the rest
+of the corpus design.
 
 **Runtime adversarial review has shipped and is no longer part of this design.**
 `runtime/challenge_gate.py` + `runtime/review/` run two blind lenses and a
@@ -253,17 +310,18 @@ Partial recovery, and it is real: **informative bind failures are semantics
 discoveries.** An oracle that tries CMDB-by-IP, gets nothing, retries by hostname
 and succeeds has derived the CMDB fact at bind time. The residual is the part
 that only surfaces mid-investigation, which is the runtime feed's job
-(§Environment facts — producers).
+(the corpus doc §Producers).
 
 **Placeholders and environment-fact keys are one vocabulary.** An unbound
 reference is a placeholder; a bound one is an env-fact key
 (`{{compute:web-server/internal}}` vs. `compute/web-1`). Binding is resolution.
-See §The data model.
+See the corpus doc §The data model.
 
 **Bind-time queries are the oracle's, not the defender's — and they need their own
 table.** They must not land in `executed_queries.jsonl`, or they pollute `ΔT` and
 the judge's read of what the defender actually did. But they are also exactly the
-mining corpus (§Producers), so they cannot simply be discarded either. They go to
+mining corpus (the corpus doc §Producers), so they cannot
+simply be discarded either. They go to
 a third append-only artifact alongside the run dir's two tables — call it
 `oracle_queries.jsonl` — written by the oracle, read by the environment miner, and
 **never** read by the judge. Naming it is not a detail: two mechanisms in this
@@ -336,7 +394,8 @@ So the mechanism differs by class:
 **For Elastic this stops being interception at all.** `elastic_adapter.py` already
 resolves the target through a single indirection —
 `resolved = index or config["ELASTIC_EVENTS_INDEX"]`, then
-`confine_index(resolved, (config["ELASTIC_EVENTS_INDEX"], config["ELASTIC_ALERTS_INDEX"]))`
+`confine_index(resolved, (config["ELASTIC_EVENTS_INDEX"],
+config["ELASTIC_ALERTS_INDEX"]))`
 — so pointing the defender at a scenario index is a **config swap**, not a hook.
 Aggregation, `SORT` and `LIMIT` then run natively in the engine and are correct by
 construction: no splitting, no local evaluator, no volume problem.
@@ -484,10 +543,11 @@ check against — the same real query access that serves the run. This is
 deployment-agnostic and degrades correctly: an org with a bad CMDB gets
 feasibility from the systems it does have.
 
-It also closes a hole the vocabulary has never had covered (§The vocabulary
-defect). An enum check says a class tuple is *spellable*; a bind says whether it
-has a **referent in this deployment**. A tuple that fails to bind means either the
-vocabulary is wrong or the deployment has no such thing, and either way something
+It also closes a hole the vocabulary has never had covered (the corpus doc §The
+vocabulary defect). An enum check says a class tuple is *spellable*; a bind says
+whether it has a **referent in this deployment**. A tuple that fails to bind
+means either the vocabulary is wrong or the deployment has no such thing, and
+either way something
 needs resolving.
 
 **Feasibility is checked in one pass with three stages, not in three places.**
@@ -623,379 +683,44 @@ judge is white-box over raw payloads on a real case, so its error is
 writes many scenarios. Solvability-derived-from-the-world and the `discard`
 verdict are the defenses, and both are load-bearing rather than nice-to-have.
 
-## Environment facts
-
-Environment facts were a byproduct of the old loop. With the config files gone
-they are the **grounding substrate** — the questioner's world knowledge, the
-placeholder vocabulary, and the defender's standing world model. This section is
-therefore on the critical path, not an appendix.
-
-### Environment memory is an interpretation cache
-
-The valuable content is not the data, it is the **reading**.
-`svc-monitoring-network-probe-cadence-baseline` stores an observation (origin
-`canary-1`, ~10 nc/hour, `first_seen` three days before the window, no covering
-ticket) *and* an interpretation (at that rate one more occurrence stands out
-rather than blending into an absent baseline). Live baselining regenerates the
-first and not the second.
-
-The second is where the defender has demonstrably failed. In
-§Empirical grounding the defender had the `nc` events in hand and read them as a
-multi-stage attack chain when they were the baseline generator doing its job. The
-rows were available; the reading was wrong.
-
-So the corpus is not compensating for data the defender cannot reach. It is
-compensating for **a judgment it would plausibly get wrong re-deriving under
-partial information**, which implies an authoring criterion the corpus does not
-have today:
-
-> Cache an interpretation only when a competent reader looking at the same rows
-> would plausibly read them differently. If the reading is obvious from the data,
-> let the defender derive it — otherwise you pay staleness risk for nothing.
-
-### The clusters
-
-Environment questions sort into four kinds by what the fact *does* to an
-investigation, plus one that does not belong:
-
-**Referent — "what is this thing?"** Identifier → entity and its class tuple.
-`jump-box-1-ip-assignment`, `container-1df4bcd65ee4-role`.
-
-**Norm — "what is normal here?"** Distributional; needs a baseline window and a
-shape-matched control. `svc-monitoring-network-probe-cadence-baseline`.
-
-**Semantics — "what does this answer license?"** About the instrument, not the
-deployment. `cmdb-indexes-by-hostname-not-ip`,
-`container-uid-namespace-isolation`.
-
-**Sanctioned path — "how is this supposed to happen?"** Normative.
-`authorized-keys-host-cr-baseline`.
-
-**Encounter-class — "what does the standard investigation for this alert look
-at?"** `sshd-success-preauthentication-shell-envelope` states that the lead set
-for that rule targets auth telemetry and that in-session shell activity is
-outside it. That is a fact about the **defender's playbook**, not the deployment.
-It sits in this corpus because the corpus's reader is the actor and it is
-gray-box blind-spot knowledge. If the corpus becomes questioner grounding plus
-defender world model, this class must split off.
-
-### Cache economics decide what belongs
-
-The axis is **cost-to-derive × staleness half-life**, not churn alone:
-
-| Cluster | Cost to derive | Half-life | Natural key | Needed at | Verdict |
-|---|---|---|---|---|---|
-| Referent | one lookup | node: slow / alias: weeks | the identifier | ORIENT | **cache the node, never the alias edge** |
-| Norm | baseline + control window + a judgment | months | (entity, activity) | ORIENT, ANALYZE | cache; highest value |
-| Semantics | requires a *surprise* | ~never | (system, query shape) | GATHER, ANALYZE | cache; highest value per entry |
-| Sanctioned path | moderate | quarters | (activity, asset class) | ANALYZE | cache |
-| Encounter-class | — | per playbook edit | **alert rule** | actor-only | does not belong here |
-
-Four things fall out:
-
-**Only the class that does not belong keys naturally on the alert rule.** That is
-an independent confirmation that `alert_rule_ids` is the wrong anchor — it is
-correct for exactly the one class to be removed.
-
-**Referent facts split, and the corpus currently caches the wrong half.** The
-*node* — that a host exists, its role, what it is for — is slow-moving and worth
-persisting. The *alias edge* mapping an identifier to that node is the volatile
-part and is trivial to re-derive, so it should be resolved live by placeholder
-binding. `container-1df4bcd65ee4-role` and `jump-box-1-ip-assignment` are the
-corpus's most fragile files precisely because they cached the edge and not the
-node. §The data model gives this its structural form.
-
-**Norm facts are the expensive ones and are needed earliest.** They are what
-"unusual" means, so they are load-bearing at ORIENT before the defender has done
-any work.
-
-**Reading a null safely requires two clusters at once.** Compare
-`authorized-keys-host-cr-baseline` — *"a missing CR is positive evidence of
-anomaly, not an absence of evidence"*, because 26 records exist and zero are for
-this host (a **norm** fact) — with `cmdb-indexes-by-hostname-not-ip`, where a null
-*"means 'lookup by IP is unsupported,' not 'host is absent'"* (a **semantics**
-fact). Both are nulls; one is meaningful and one is an artifact of how the
-question was asked. The defender cannot safely read any null without one fact
-from each cluster, and misreading one is exactly what §Empirical grounding
-records.
-
-### Staleness, verification, and its limits
-
-**Each cached fact should carry its derivation query and the value observed at
-record time.** Then staleness stops being unanswerable and becomes one call:
-re-run, compare. If the observation holds the interpretation stands; if it moved,
-the reading needs revisiting. `authorized-keys-host-cr-baseline` is already
-almost this — "zero approved change records for this host across 26 total
-records" is precisely checkable — it just does not say how to check it.
-
-**The query is derivation metadata, not the key** (§The data model).
-
-**The policy is per-case, not global.** Retrieval hands the defender the cached
-interpretation *and* its derivation query; whether to spend a call is decided by
-how much weight the fact is about to carry. invlang already has the vocabulary:
-`WEIGHT_BUCKETS` with `STRONG_WEIGHTS = {++, --}`. A fact about to support a
-strong move gets re-verified; one riding at `+`/`-` takes the cache.
-
-**Invalidation is nearly free.** Any run that queries the same ground for its own
-reasons is an incidental re-verification — a run that observes 40/hour against a
-cached ~10/hour has contradicted the cache, and the system can notice without a
-dedicated freshness pass. This is "training does the mining" read in the other
-direction: the query stream that populates the cache is the stream that
-invalidates it.
-
-Two limits to hold onto:
-
-- **Verification catches staleness, not birth defects.** An interpretation that
-  was wrong when written survives re-verification looking healthy, because the
-  observation still holds. That is the promotion bar's job, not the cache's.
-- **The failure is asymmetric and points the wrong way.** A stale *referent*
-  fails loudly — the lookup errors or resolves to nothing. A stale *norm* fails
-  **silently and toward benign**: "this identity normally pulls 40k" applied after
-  that job was decommissioned excuses exactly the pull that needed catching. That
-  asymmetry argues for making verify-when-load-bearing mandatory for the norm
-  class rather than leaving it to judgment.
-
-### The data model
-
-**The key is the subject, not the query.** A query carries a time window the fact
-is not about, param bindings that restate the subject, adapter dialect coupling,
-and no canonical form (many queries establish one fact, so it never dedupes) —
-and decisively, **procedures do not compose**. You cannot traverse from one query
-to another. Subjects reference each other; that is what makes the graph possible.
-
-**Environment facts are graph-shaped, and the edge vocabulary already exists.**
-`skills/invlang/vocab.py` defines 26 relations, and the source layout already
-groups the standing ones:
-
-```
-"spawned", "executed", "loaded_by", "opened", "connected_to",
-"read", "wrote", "created", "deleted", "modified", "listed",
-"runs_on", "contained_in",                          <- standing
-"authenticated_as", "authenticated_via", "initiated_by",
-"triggered_by", "escalated_privilege", "assumed_role",
-"granted_consent", "issued",
-"member_of", "identified_as", "component_of",       <- standing
-"attempted_auth", "governs",                        <- governs: standing
-```
-
-The split is not formalized — no constant, no doc — but it is there. **Event
-relations are what an investigation records; standing relations are what the
-environment corpus holds.** Same vocabulary, different tense: the per-case invlang
-companion is the event subgraph, the environment corpus is the standing subgraph
-over the same nodes.
-
-Two immediate payoffs:
-
-- **`identified_as` is the alias edge** — the CMDB-vs-Falco-vs-Docker problem, and
-  what `jump-box-1-ip-assignment` and `container-1df4bcd65ee4-role` encode as flat
-  prose today. It also refines "do not cache referents": the **node** is stable
-  and worth persisting, the **alias edges** are the volatile part and should be
-  resolved live. Those two files cached the edge, not the node.
-- **`governs` is the sanctioned-path edge.**
-
-**Values may be other keys, and may be multi-valued.** Norm facts are
-set-valued (an identity runs on six roles) and the natural match is containment,
-so single-valued forces either explosion into N facts or stringification that
-loses matching.
-
-**MV forces one field.** An observed set read as a complete set is the null-reading
-trap at the schema level: "runs on these six roles" derived from observation
-almost never means "and nowhere else." Every MV value needs an explicit
-`observed | exhaustive` marker, or it silently asserts closure it never
-established.
-
-A skeleton, with the claim shape varying by cluster:
-
-```yaml
-subject:  compute/dev-ws-4                 # a node — the key
-relation: read                             # when the fact is about an edge
-object:   database/db-1                    # a value that IS another key
-claim:
-  kind: norm                               # referent | norm | semantics | sanctioned
-  measure: {rows_per_run: 40000, cadence: nightly}
-  scope: observed                          # observed | exhaustive
-derivation:
-  query: {...}                             # metadata, not identity
-  observed_value: 41320
-  observed_at: 2026-07-14
-interpretation: >
-  40k from this identity against this store is routine volume; the
-  discriminating signal is the initiating host, not the count.
-```
-
-**Greppability is preserved, not traded away.** Keep flat markdown files, put
-references in frontmatter as **typed tokens** (`compute/dev-ws-4`), and derive the
-graph by resolving them. Grep still finds every mention of a node by its token;
-the graph is a view, not a database. This is the same posture as lessons already
-having grep and no index.
-
-Three decisions that need making rather than defaulting:
-
-1. **Node-keyed or edge-keyed** — probably both, by cluster: referent facts key on
-   a node, norm and sanctioned-path facts on an edge.
-2. **The `observed | exhaustive` marker** above.
-3. **Semantics facts do not fit the entity graph, and they are the highest-value
-   class.** Their subject is `(system, verb, param-shape)` — an *instrument*, not a
-   deployment entity. The graph needs a second node family that is not invlang's.
-   This is the real modeling strain, and §Open questions carries its default: two
-   discriminated subject shapes in one schema (`entity/…` and `instrument/…`),
-   rather than a synthetic vertex type pretending an instrument is a host.
-
-### The current schema, and what changes
-
-`lessons-environment/_TEMPLATE.md` today:
-
-```yaml
-subject:            # OPTIONAL — kebab referent; the fold/equivalence key
-alert_rule_ids: []  # REQUIRED, non-empty — THE ANCHOR
-entities:           # CONJUNCTIVE invlang {type, class} selectors
-relevance_criteria: # one-line predicate the actor scans
-mutable: true
-status: live        # live | stale (+ superseded_by)
-recorded_at:        # batch id
-source_observation_ids: []
-```
-
-**What is already right:** the body convention (state the standing truth, not "do
-X"), which is the mechanics-not-likelihood rule the whole corpus needs;
-`mutable`/`status`/`superseded_by` as a real staleness mechanism (the gap is that
-nothing *drives* the flip); and `source_observation_ids` as a provenance slot an
-oracle-authored fact can populate with query/response references.
-
-**`alert_rule_ids` is removed.** It is required and non-empty today, and a lesson
-with a disjoint anchor is skipped — so the questioner, which writes before an
-alert exists, has no value for the mandatory key. `cmdb-indexes-by-hostname-not-ip`
-shows the damage: a universal truth about how the CMDB is indexed, keyed to two
-rule ids, unretrievable for any other alert. Entity/topic selectors become the
-primary key, which raises the stakes on the vocabulary defect below.
-
-**Retrieval must gain a broadening mode.** `entities` is conjunctive AND, so it
-only ever narrows; there is no "everything known about this deployment region"
-query, which is exactly what grounding needs.
-
-**The curator's retrieval check needs a second form.** It re-runs retrieval with
-the source case's real prologue entities, which is genuine protection against a
-selector unsatisfiable by its own birth case — but a questioner-facing fact has no
-source-case prologue, so "is it retrievable" must be asked against a topic query
-instead.
-
-### The vocabulary defect that blocks this
-
-Making entity selectors the primary key requires the type/class vocabulary to be
-trustworthy. It currently is not.
-
-**`type` is well controlled.** 16 values in `skills/invlang/vocab.py::TYPES`,
-served as `defender-invlang enum types`, and **validated** —
-`validate.py::_check_vocab_vertices` rejects an unknown vertex type.
-
-**`class` slot values are not validated at all.** The grammar is documented
-(`compute` = `<role>/<zone>/<provenance>`, `identity` = `<kind>/<provenance>`,
-etc.) and the slot enums exist in `vocab.py` (`COMPUTE_ROLE`, `COMPUTE_ZONE`,
-`COMPUTE_KIND`, …), served via `enum compute.zone`. Nothing consumes them for
-checking: `validate.py` checks `type`, `relation`, `auth_kind` and `anchor_kind`,
-and treats `class` purely structurally (`??` open slots, refinement-key form).
-
-**It has already drifted.** Sampling real investigations, the distinct `compute`
-tuples are `web-server/prod/known-corp`, `workstation/preprod/known-corp`,
-`monitoring/internal/known-corp`, `ip-only/internet/novel`. `enum compute.zone`
-is `internal | dmz | partner | regulated | internet | cloud-managed | unknown` —
-so `prod` and `preprod` are off-enum.
-
-**Two docs teach the wrong grammar.** `lessons-environment/_TEMPLATE.md` says
-`compute = <role>/<zone>/<kind>`, and `lessons_env_retrieve.py`'s help gives
-`web-server/internal/container` as its worked example. Slot 3 is `provenance`;
-`container` is a `compute.kind` value. Both documents that teach curators how to
-write selectors are wrong about the same slot.
-
-**Why it happened: the agent never enumerates.** A complete investigation trace
-(`fixtures-e2e/golden-sshpivot-ab3/tool_trace.jsonl`) shows every tool call —
-read `alert.json`, read `skills/invlang/SKILL.md`, `cat` two lessons,
-`defender-invlang hypothesis-vocabulary`, `defender-invlang hypothesis-shape`,
-four `write_file`, four `gather`, `close_investigation`. **Zero `enum` calls.**
-The skill says *"They are not preloaded into this skill — look them up when you
-need a value"*, and the agent never concludes that it needs to. It did call
-`hypothesis-vocabulary` and `hypothesis-shape` — purpose-built commands answering
-a question it was actively holding. `enum compute.zone` requires first suspecting
-that one's natural word might be wrong, which a confident agent filling a slot
-will not do.
-
-`type` survived anyway because it has two protections the class slots lack: it
-appears in SKILL.md's grammar table and every worked example, *and* the validator
-rejects unknown values.
-
-**The drift is slot-specific and diagnostic.** `role` and `provenance` values are
-all in-enum; `zone` values are not. `compute.zone` encodes *network topology*,
-but the word "zone" reads to any practitioner as *deployment tier*. Two concepts
-competing for one slot name.
-
-That yields a general test worth adopting: **the vocabulary's sole consumer is
-the agent, so naturalness is measurable.** Sample what the agent writes when it
-does not enumerate and diff against the enum. Agreement means the name and the
-concept agree; divergence means the slot name invites a different concept.
-
-**The failure is silent in both directions.** `_selector_satisfied` is pure string
-comparison, and the retrieval help tells its reader *"No output = nothing
-matched: reason from the alert and general operations knowledge."* A vocabulary
-mismatch is indistinguishable from "nothing relevant exists."
-
-**The fixes, in order of value:**
-
-1. **Inline the catalogs into SKILL.md.** All 21 catalogs, 211 values, are
-   **2,436 characters** against SKILL.md's **24,400** — 10% of one file. The
-   "don't preload, look them up" trade saves that and buys a corpus whose class
-   slots are both unread and unvalidated. Put the values where the agent
-   demonstrably already looks.
-2. **Validate class slots, dispatched on type**, in the validator that already
-   checks `type`, and run lesson selectors through the same check at author time.
-   Greppability helps the agent *choose*; validation is what makes a wrong choice
-   *visible*.
-3. **Fix `zone`** — rename the slot to what the enum means, or widen the enum to
-   what the name means.
-4. **Then add corpus-derived counts** (`internal (47) prod (12) dmz (3)`) as the
-   discovery surface, with the enum as the floor and a novel value as a flagged
-   review item rather than a hard error. That keeps the vocabulary responsive to
-   what is natural without letting drift compound silently.
-
-Placeholder binding (§Placeholders and binding) is the third and strongest check,
-because it tests for a referent rather than for spelling.
-
-### Producers
-
-**Today both feeds are judge-emitted from actor directions**, and the curator
-lives inside the benign-actor author package:
-
-| Feed | Emitted by | Queue | Curator |
-|---|---|---|---|
-| FP direction | benign judge `environment_observations` | `_pending/environment_observations.jsonl` | `author_actor_benign.py` |
-| Adversarial (#298) | malicious judge — positive facts from a refuted misprediction | `_pending/actor_environment_observations.jsonl` | `author_actor_env.py` |
-
-Both fold into one corpus through `learning/author/benign_actor/prompt.md` ("You
-are the **environment lessons curator**"), gated by a deterministic retrieval
-check and committing their own batch. **Deferring the actor work therefore
-orphans the corpus** — which is why it cannot simply be deferred alongside it.
-
-**The replacement is one mechanism with two feeds.** Both the oracle and the
-runtime are the same thing: a component holding a corpus of (query, response)
-pairs against the real deployment. In training that is the oracle; at runtime it
-is the persisted `executed_queries.jsonl` plus `gather_raw/` payloads, which
-already exist per run. One offline miner over that corpus, two inputs.
-
-This reopens what the original draft closed off. It ruled that a training
-reviewer only sees synthetic worlds, so an environment fact authored there
-describes an invented deployment. With interception, every gather query returns
-real data outside the overlay — so a fact is sound as long as its supporting rows
-were not patched, and **the applier knows exactly which rows it touched**. Row-level
-provenance makes that a mechanical check.
-
-**A fourth judge bucket is an environment fact.** When `ΔT` diverges, is not
-explained by the mutation, and is not a reasoning error, the deployment misled the
-defender. Add **environment defect** alongside lead-set gap / lead quality /
-analyze discipline / decision discipline. §Empirical grounding's CMDB case is
-exactly this and needed no adversary to find — a comparison found it.
-
-**Two things this cannot produce**, both of which must come from the runtime feed:
-observability facts (rule coverage bounds them — §What dies), and semantics facts that only
-surface mid-investigation rather than at bind time.
+## Environment facts — see the companion doc
+
+Environment facts were a byproduct of the old loop. With the `playground-v2/`
+config files ruled out as inputs (§Seeds and mutations) they became the
+**grounding substrate**: the questioner's world knowledge, the placeholder
+vocabulary, and the defender's standing world model.
+
+That made them large enough to own a document.
+**`environment-corpus-and-vocabulary.md`** carries the corpus design — the
+interpretation-cache framing, the referent/norm/semantics/sanctioned-path
+clusters and their cache economics, the subject-keyed graph data model, the
+schema change that drops `alert_rule_ids`, the vocabulary defect blocking it, and
+frontier-keyed retrieval.
+
+Three things from it bear on the training loop directly, and are stated here so
+this document stands alone on them:
+
+**The corpus is on the critical path, and its only current producer is being
+deferred.** Both feeds are judge-emitted from actor directions, and the curator
+lives inside the benign-actor author package — so deferring actor work orphans
+the corpus. The replacement is one miner over a (query, response) corpus with two
+feeds: the oracle in training, the persisted run tables at runtime.
+
+**Interception is what lets training runs author environment facts at all.** The
+original draft ruled they could not, because a training reviewer sees only
+synthetic worlds. With the real deployment as the base, a fact is sound as long as
+its supporting rows were not patched — and the applier knows exactly which rows it
+touched, so row-level provenance makes that a mechanical check.
+
+**Environment defect is the judge's fourth attribution bucket** (§The
+discriminator spine). When `ΔT` diverges, is not explained by the mutation, and is
+not a reasoning error, the deployment misled the defender. §Empirical grounding's
+CMDB case is exactly this, and no adversary was needed to find it — a comparison
+found it.
+
+Two classes the training loop **cannot** produce, both of which must come from the
+runtime feed: observability facts (rule coverage bounds them — §What dies), and
+semantics facts that surface mid-investigation rather than at bind time.
 
 ## Authoring flow
 
@@ -1070,35 +795,6 @@ Because model runs are stochastic, no scenario or lesson is promoted from one
 tournament. The shared prefix (§The fork) reduces the variance that makes this
 expensive, but it does not remove the need for repetition.
 
-## Retrieval — frontier keying
-
-Two consequences, both load-bearing and both independent of the training loop.
-
-**Retrieval must run per gather loop, not once at PLAN.** A lesson about what a
-field does and does not license is only relevant once the field is in hand. In
-§Empirical grounding the process class was still `??` when lessons loaded, so no
-keying scheme could have surfaced the applicable lesson at that moment.
-
-**Match by containment, not by similarity score.** The frontier has structure —
-typed slots with `??`, plus the open hypothesis set — so a lesson declares the
-pattern it applies to and matching is mechanical, fewer slots matching more. This
-is assembly, not construction: the invlang advisory verb already does
-frontier-keyed recall, and the environment corpus already matches by slot-wise
-selector containment.
-
-Three gaps close it. The advisory recalls precedent *cases*; lessons need
-selectors and become a recall class. Its frontier is hypothesis names only —
-`??` slots are out of scope today, and the motivating case's frontier item is
-exactly slot-shaped. And the frontier is model-supplied at the prompt;
-per-gather-loop retrieval derives it mechanically from the investigation file.
-One guard: selectors need a specificity floor — fewer-slots-matching-more makes
-an empty selector an every-loop lesson.
-
-**The schema defect this fixes** is the same one §Environment facts removes
-`alert_rule_ids` for: lessons key on the alert signature they were born from,
-which is right for coverage lessons and wrong for observable-semantics lessons,
-whose trigger condition has nothing to do with which rule fired.
-
 ## What dies, what transfers
 
 **The frozen-actor secondary metric is already retired** (`evals/secondary.py`,
@@ -1146,93 +842,38 @@ strings do so as the answer-key defense, and the oracle must preserve that), the
 two tables and their join surface, the curators, the drain/worktree/PR machinery,
 and the lessons corpora themselves.
 
-## Empirical grounding
-
-Two findings from `20260728T161845Z-fresh-case`, a Falco `authorized_keys` write
-correctly disposed `malicious`.
-
-**The old loop yields nothing on it.** A malicious disposition routes to the FP
-hunt, and no benign story survives an SSH key whose comment is literally
-`attacker@elsewhere`. Skip or incoherent. A whole disposition class is silent.
-
-**A directly applicable lesson existed and did not retrieve.** The corpus holds a
-lesson stating that `loginuid=-1` licenses "non-interactive automated context" and
-nothing more, that container init and cron produce an identical profile, and that
-origin claims require ancestry Falco cannot supply. Two lessons loaded for this
-run; that was not one of them — it is keyed to the signature it was born from, a
-different rule. The investigation then inferred "no authenticated session
-initiated this process — classic remote execution pattern," and separately
-recorded that no parent process was captured, and reasoned past it.
-
-That defect lands in an awkward place:
-
-- **Training grades it as a clean win.** The disposition was right, and rests on
-  one thing: the key comment literally reads `attacker@elsewhere`. Each other
-  support is an artifact of the environment. `loginuid=-1` is how the scenario
-  runner executes *anything*, benign included. "Host absent from CMDB" holds for
-  every container case, because Falco reports the Docker host while the logical
-  host is registered — the defender queried the wrong entity and read the null as
-  incriminating. And the co-occurring `nc` events it reported as a multi-stage
-  attack chain belong to the baseline scheduler, which generates them
-  `category: noise` to fire that exact rule against that exact host. **The shipped
-  report asserts an attack chain that did not happen.** Outcome grading sees none
-  of this, because the disposition matched.
-- **Review cannot prove it either.** It can only say the inference is unsound. The
-  proof is generating that twin and watching the defender escalate.
-
-So: **review nominates on real data, the generator falsifies.** This case is also
-the source of three separate conclusions elsewhere in this document — the
-null-reading trap needing two fact clusters, the environment-defect judge bucket,
-and the interpretation-cache argument.
-
-**Two cheap fixes remain available, independent of everything above**, and
-neither has landed:
-
-- Make the judge's likelihood-ratio check **symmetric**. It still runs only on
-  benign dispositions (`learning/pipeline/judge/malicious.md:146` — *"When
-  `report.md` records a **benign** disposition"*); on a malicious call it should
-  ask whether the incriminating observables fit routine automation equally well.
-- **Re-key observable-semantics lessons** off the alert signature (minding that
-  the two corpora disagree on rule-id namespace) — the stopgap for §Retrieval.
-
 ## Sequencing
+
+**The corpus doc carries its own sequence, and items 1–5 there run first.** The
+vocabulary fixes, the schema change and the miner are prerequisites for the
+questioner having anything to ground on, and none of them waits on the training
+loop. What follows is this document's own order, assuming that work is in flight.
 
 1. **Held-out recruitment** — separate session. It gates promotion and the
    overfitting gap, not the in-loop pairwise metrics (§Status), so it is first
    because promotion is worthless without it, not because it blocks the build.
    `fixtures/held-out/` is still a README.
 2. **The two cheap fixes above** — prompt edits, no architecture.
-3. **The vocabulary fixes** (§The vocabulary defect) — inline the catalogs,
-   validate class slots, resolve `zone`. Small, and everything keyed on entity
-   selectors depends on them.
-4. **Frontier retrieval + environment schema.** Give the invlang advisory a
-   lessons recall class, extend its frontier from open hypotheses to `??` slots,
-   derive the frontier mechanically per gather loop; drop `alert_rule_ids`, add
-   the broadening query mode, add `derivation` and the `observed | exhaustive`
-   marker.
-5. **The environment miner.** One pass over the (query, response) corpus, runtime
-   feed first. On the critical path: it is the grounding substrate, and the
-   current producer is being deferred.
-6. **The oracle seam, Elastic side first.** Measure a typical investigation
+3. **The oracle seam, Elastic side first.** Measure a typical investigation
    window in documents, then build the scenario index (`_reindex` with a
    transform script) and the `ELASTIC_EVENTS_INDEX` swap. This half needs no
    interception code and inherits fail-closed from `confine_index`, so it is both
    the cheaper half and the one that retires the aggregate problem.
-7. **The state side.** `VerbRegistry` subclass, overlay ledger, binding minting,
+4. **The state side.** `VerbRegistry` subclass, overlay ledger, binding minting,
    realization log, `oracle_queries.jsonl` — failing closed on *un-applied*
    rather than on *leaked*. Then placeholder binding on top of it.
-8. **Solvability and resolving-path derivation**, from the world — one validation
+5. **Solvability and resolving-path derivation**, from the world — one validation
    pass with three stages (bind, probe, derive), not three gates.
-9. **The judge's discriminator spine, the fork, and the pair as the unit of
+6. **The judge's discriminator spine, the fork, and the pair as the unit of
    judgment.** Requires agent-state resumability.
-10. **Questioner strategy corpus + seed pipeline** — including filling the ticket
+7. **Questioner strategy corpus + seed pipeline** — including filling the ticket
     corpus with adjudicated cases and making the intel feed technique-shaped.
-11. **Lesson attribution in shadow mode.** #695's stable identity and
+8. **Lesson attribution in shadow mode.** #695's stable identity and
     loaded/applied/decisive sidecar without changing retrieval order. Also the
     forward-check's retirement point.
-12. **Paired ablation and probe siblings.** Establish causal lift before any
+9. **Paired ablation and probe siblings.** Establish causal lift before any
     attribution score affects promotion.
-13. **Curriculum search.** Mutation policy and score-informed retrieval only after
+10. **Curriculum search.** Mutation policy and score-informed retrieval only after
     the validity gates and held-out archive are trustworthy. Note that fork depth
     stays a diagnostic here (§Seeds and mutations) unless the argument for
     selecting on it gets made.
@@ -1270,7 +911,8 @@ a default and a failure branch rather than waiting for an answer:
 Still open:
 
 - **Node-keyed vs. edge-keyed environment facts** within the entity family
-  (§The data model) — referent facts key on a node, norm and sanctioned-path on
+  (the corpus doc §The data model) — referent facts key on a
+  node, norm and sanctioned-path on
   an edge, and whether that is one schema or two is unsettled.
 - **Mutation catalog and family policy.** Which framework-backed dimensions may
   vary independently, and which must remain coupled to preserve realism.
