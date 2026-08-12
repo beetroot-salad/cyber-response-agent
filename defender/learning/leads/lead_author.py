@@ -64,6 +64,13 @@ from defender.learning.leads._lead_spine import (
 
 
 QUEUE_LOCK_FILE = PENDING_DIR / ".lock"
+
+#: What `run` returns when it did NOT serve because another lead-author tick holds the queue
+#: lock. Distinct from 0 because the drain's next move is to delete the request it just
+#: served: a skip reported as a completed serve deleted every marker the pass had claimed —
+#: the whole queued batch gone, no work done, no dead letter, no retry (#852 F-03). Distinct
+#: from 2 because it is not a fault: the request is intact and the next tick serves it.
+QUEUE_LOCK_SKIP_RC = 3
 LEAD_AUTHOR_PROMPT = LEARNING_DIR / "leads" / "lead_author.md"
 
 
@@ -374,7 +381,7 @@ def run(
         deps = build_lead_author_deps(paths)
     queue_lock = deps.acquire_queue_lock()
     if queue_lock is None:
-        return 0
+        return QUEUE_LOCK_SKIP_RC
     try:
         return _run_locked(run_dir, deps, box=box)
     finally:
@@ -522,7 +529,9 @@ worktree and opens the PR.
 
 Preconditions
   * No other lead-author tick may be running (per-author queue lock at
-    defender/learning/_pending_leads/.lock).
+    defender/learning/_pending_leads/.lock). Violating it is not silent: this returns
+    rc=3 without serving, and the drain puts the request back on the queue untouched
+    for the next tick rather than counting the skip as a serve.
   * ``<run_dir>/executed_queries.jsonl`` and ``<run_dir>/gather_raw/``
     (the two tables) must exist — written live during the run by
     record_query.py + record_lead.py.

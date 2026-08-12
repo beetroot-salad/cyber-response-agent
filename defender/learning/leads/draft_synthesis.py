@@ -19,7 +19,15 @@ if TYPE_CHECKING:
     from defender.learning.leads.lead_extraction import ExecutedLead
 
 
-_SAFE_ID_SEGMENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+#: The sink-side hostile-id guard on a MODEL-COINED `query_id` segment, anchored at both
+#: ends with `\A`/`\Z` rather than `^`/`$` (#852 F-21). `$` also matches immediately before a
+#: trailing newline, so a segment ending in one passed this guard and minted a catalog path
+#: holding a control character — a draft whose own frontmatter no longer parses, leaving that id
+#: permanently uncataloguable and silently absent from the pitfalls queue. `\Z` matches at the
+#: end of the string and nowhere else, which is the property the guard was written to have.
+#: Both anchors are explicit so the pattern keeps that property under `search`/`fullmatch`
+#: too, not only under the `match` its call sites happen to use.
+_SAFE_ID_SEGMENT = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._-]*\Z")
 
 _FENCE_LINE = re.compile(r"^(?:```|~~~)")
 

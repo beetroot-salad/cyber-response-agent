@@ -172,6 +172,40 @@ def test_traversal_query_id_does_not_escape_catalog(tmp_path):
     assert list(tmp_path.rglob("PWNED.md")) == []
 
 
+def test_control_character_query_id_does_not_mint_an_unparseable_draft(tmp_path):
+    """#852 F-21. A coined `query_id` segment ending in a NEWLINE must not pass the
+    hostile-id guard, in either segment.
+
+    `_SAFE_ID_SEGMENT` anchored with `$`, which also matches immediately before a trailing
+    newline — so `"elastic\\n.probe"` passed, and `synthesize_drafts` minted (and the
+    lead-author loop then committed) a catalog path holding a control character. That draft's
+    own frontmatter no longer parses, so the id is permanently uncataloguable: `iter_query_
+    templates` warn-skips the file and the pitfall it stands for is silently absent from the
+    queue. The model chooses `query_id` freely — the `query` tool declares it as a bare
+    `str | None`, and the boundary screens only `/ \\ .. NUL` and the `∅.` prefix — so the
+    sink is where this has to hold."""
+    cat = _catalog(tmp_path)
+    created = lead_author.synthesize_drafts([
+        _lead("elastic\n.probe", {"query": _ESQL_PIPE}, verb="esql", system="elastic"),
+        _lead("elastic.probe\n", {"query": _ESQL_PIPE}, verb="esql", system="elastic"),
+    ], catalog_dir=cat)
+    assert created == []
+    assert [p for p in cat.rglob("*") if "\n" in p.name] == []
+    assert not (cat / "elastic" / "_draft").exists()
+
+
+def test_safe_id_segment_anchors_at_the_end_of_the_string():
+    """The anchor itself, pinned: `\\Z` and not `$`, at both ends.
+
+    Bound directly because the call sites read the guard through `match`, which hides a weak
+    tail anchor — every id this rejects, it rejects for the same reason, and the next reader
+    of this pattern should not have to rediscover which of the two anchors it is."""
+    assert lead_author._SAFE_ID_SEGMENT.match("elastic") is not None
+    assert lead_author._SAFE_ID_SEGMENT.match("elastic\n") is None
+    assert lead_author._SAFE_ID_SEGMENT.match("elastic\nprobe") is None
+    assert lead_author._SAFE_ID_SEGMENT.search("!!elastic") is None
+
+
 def test_untagged_verb_not_drafted(tmp_path):
     """A bare `{system}.{verb}` id whose suffix IS the recorded verb (no coined --query-id) is a
     non-candidate — an untagged call must not mint a junk catch-all draft."""

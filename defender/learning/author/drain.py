@@ -46,7 +46,15 @@ from pydantic_ai.exceptions import ModelRetry
 
 from defender import _git
 from defender._git import GitError
-from defender._io import append_jsonl, guarded_mkdir, read_jsonl_rows, write_guarded
+from defender._frontmatter import FrontmatterError, split_frontmatter
+from defender._io import (
+    TEXT_READ_ERRORS,
+    append_jsonl,
+    guarded_mkdir,
+    read_jsonl_rows,
+    read_text_utf8,
+    write_guarded,
+)
 from defender.learning.author import shared as author_shared
 from defender.learning.author._config import BucketSpec, CorpusAuthorConfig
 from defender.learning.core import persist
@@ -339,6 +347,7 @@ def _author_and_rotate(  # noqa: PLR0913 — one tick's whole state, threaded ra
             )
             committed, bucket_held, bucket_consumed = _project(result, all_rows, cfg)
             if committed:
+                _git_read("corpus attribution", _assert_corpus_attributable, cfg, committed)
                 commit_sha = cfg.commit_fn(
                     author_shared.commit_message(result, cfg.noun), cfg
                 )
@@ -434,6 +443,74 @@ def _project(
         target = bucket_consumed if bucket.disposition == "consumed" else bucket_held
         target[bucket.name] = rows
     return committed, bucket_held, bucket_consumed
+
+
+def _assert_corpus_attributable(cfg: CorpusAuthorConfig, committed: list[dict]) -> None:
+    """Every file this tick left in the corpus must cite a row the author COMMITTED.
+
+    The other post-flight cross-check, `verify_agent_state`, is AGGREGATE — committed
+    non-empty ⇔ corpus dirty — which is one bit for a whole batch. So the homogeneous case
+    was caught (nothing committed, a file left behind: it raises, the file is restored away
+    and the rows are re-queued) and the MIXED case was not: with at least one lesson
+    legitimately committed — the normal shape, since a batch is >= LEARNING_AUTHOR_THRESHOLD
+    rows — a lesson the curator wrote and then itself reported as `held_forward_bad` was
+    swept into the pathspec-wide corpus commit by its passing batch-mates. The forward check
+    said that lesson would flip a correctly-resolved case; the corpus committed it anyway
+    (#852 F-02).
+
+    Attribution is per FILE and by the channel's OWN provenance key — `source_finding_ids`
+    on the lessons corpus, `source_observation_ids` on the observation corpora, the same
+    field the pre-author idempotency gate reads back off the corpus. Keying on
+    `channel.id_key` rather than accepting either spelling is what keeps a committed file
+    visible to that gate: a lessons file citing observation ids would be attributable here
+    and invisible there, i.e. authored again on every following tick.
+
+    Raising `AuthorError` routes through the path the aggregate check already established:
+    `_undo_agent_edits` -> `_restore_corpus` deletes the unvouched-for file, the batch is
+    bumped and stays queued, and the tick returns 2."""
+    key = cfg.channel.id_key
+    field = f"source_{key}s"
+    ids = {row[key] for row in committed if isinstance(row.get(key), str)}
+    unattributed = [
+        rel for rel in _changed_corpus_paths(cfg)
+        if not _cited_ids(cfg.repo_root / rel, field) & ids
+    ]
+    if unattributed:
+        raise AuthorError(
+            f"author left {len(unattributed)} file(s) in {cfg.corpus_dir_rel} that no "
+            f"committed row vouches for: {unattributed}; each must cite at least one "
+            f"{field} entry from this batch's committed set ({sorted(ids)}) — refusing to "
+            "commit (a pathspec-wide commit would sweep them in)"
+        )
+
+
+def _changed_corpus_paths(cfg: CorpusAuthorConfig) -> list[str]:
+    """The corpus files this tick added or modified, repo-relative.
+
+    The corpus is CLEAN at the top of every tick (`assert_clean_corpus_dir` refuses to
+    author otherwise), so what git reports dirty under it is exactly what this agent call
+    wrote. Deletions are excluded: there is no file left to attribute, and a lesson the
+    curator retired is vouched for by the same commit that removes it."""
+    return sorted(
+        path
+        for xy, path in _git.git_status(cfg.repo_root, pathspec=cfg.corpus_dir)
+        if "D" not in xy
+    )
+
+
+def _cited_ids(path: Path, field: str) -> set[str]:
+    """The queue-row ids one corpus file claims as its source. A file whose frontmatter
+    cannot be read cites nothing — malformed is unattributable, which is the disposition it
+    should have had anyway."""
+    malformed: tuple[type[BaseException], ...] = (FrontmatterError, *TEXT_READ_ERRORS)
+    try:
+        fm, _raw, _body = split_frontmatter(read_text_utf8(path))
+    except malformed:
+        return set()
+    cited = fm.get(field)
+    if not isinstance(cited, list):
+        return set()
+    return {c for c in cited if isinstance(c, str)}
 
 
 def _retire_unkeyable(

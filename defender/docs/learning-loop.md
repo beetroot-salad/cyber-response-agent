@@ -352,9 +352,15 @@ audit-only. Queueable finding types are `lead-set`, `lead-quality`,
 6. **Commit + post-flight** — the author commits lesson edits if any survived.
    `author.py` verifies that the claimed `commit_sha` is HEAD, that HEAD
    touches only `defender/lessons/*.md`, and that the lessons dir is clean.
+   Before the commit, every file left in the corpus must also be
+   **attributable**: it has to cite at least one id from this batch's committed
+   set under the channel's own `source_finding_ids` / `source_observation_ids`
+   (#852). The commit is pathspec-wide, so without that a lesson the
+   forward-check rejected rode into history on a batch-mate that passed.
    Then it atomically rotates `_pending/findings.jsonl`, appends consumed
-   findings to `_pending/consumed.jsonl`, and logs no-commit held/skip batches
-   to `_pending/findings.held_report.log`.
+   findings to `_pending/consumed.jsonl`, and logs held/skip batches
+   to `_pending/findings.held_report.log` — on every tick that held or skipped
+   a row, whether or not the same tick also committed.
 
 ### Why Lessons, Not an Addendum Library
 
@@ -412,7 +418,7 @@ defender/learning/runs/{run_id}/
 defender/learning/_pending/
   findings.jsonl              # queueable findings
   consumed.jsonl              # consumed committed/idempotent/skipped findings
-  findings.held_report.log    # no-commit held/skip summaries (findings channel)
+  findings.held_report.log    # held/skip summaries per tick (findings channel)
 
 defender/lessons/
   *.md                        # committed pitfall lessons read at PLAN time

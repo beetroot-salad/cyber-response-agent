@@ -30,6 +30,7 @@
     "learning/core/markers.py:enqueue_case_for_curation": "",
     "learning/core/markers.py:quarantine_marker": "",
     "learning/core/markers.py:rewrite_marker": "",
+    "learning/core/markers.py:requeue_marker": "intentional: the same queue writes its three siblings above are baselined for — the author/learn queues live under `state_root`, which `LoopPaths.with_repo_root` keeps OUTSIDE the worktree and outside every box mount, so no boxed writer can plant a component here. The staged temp file is written through `write_atomic` (i.e. `write_guarded`) already; what is left is the queue dir's own mkdir and the `os.link` that publishes the slot atomically (#852 F-04).",
     "learning/core/persist.py:_append_observations": "",
     "learning/core/persist.py:_copy_shared_inputs": "",
     "learning/core/persist.py:_rewrite_queue": "",
