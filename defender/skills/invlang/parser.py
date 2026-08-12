@@ -19,6 +19,7 @@ from ._cells import (
     _split_quoted,  # noqa: F401 — re-export: invlang tests import it from `parser`
     _split_subcells,  # noqa: F401 — re-export: invlang tests import it from `parser`
     _unquote,
+    is_conclude_empty_marker,  # noqa: F401 — re-export: parser is this name's public home
 )
 from ._types import Block, RowError
 from .vocab import UNOBSERVED_EDGE_REF
@@ -100,15 +101,27 @@ def _tokenize_fence(body: str) -> list[Block]:
         if m:
             in_story = False
             cols_raw = m.group("cols")
-            cols = (
-                [c.strip().rstrip("?") for c in cols_raw.split("|")]
+            declared = (
+                [c.strip() for c in cols_raw.split("|")]
                 if cols_raw is not None
                 else None
+            )
+            cols = (
+                [c.rstrip("?") for c in declared] if declared is not None else None
+            )
+            required = (
+                max(
+                    (i + 1 for i, c in enumerate(declared) if not c.endswith("?")),
+                    default=0,
+                )
+                if declared is not None
+                else 0
             )
             cur = Block(
                 tag=m.group("tag"),
                 name=m.group("name"),
                 columns=cols,
+                required_cells=required,
             )
             blocks.append(cur)
             continue
@@ -304,8 +317,17 @@ def _build_proposed_edge(rec: dict[str, str]) -> ProposedEdge:
 
 
 
+#: The DECLARING side of `HYPOTHESIS_ID_RE`, built from it rather than restating it. The
+#: restatement was narrower — single-segment only — so a hierarchical child that the four
+#: reference sites accept (#821/#828) could not declare `:H h-001-001.preds`: the block fell
+#: through to the generic "unknown block" warning and the write was denied, leaving a
+#: committed child unable to declare the prediction `_check_strong_move_provenance` then
+#: demands before it can be moved `++`/`--` (#853/F-27). One owner means the two cannot
+#: drift again, and a typoed child id now lands on `_project_hyp_subblock`'s "sub-block
+#: references unknown hypothesis" warning, which names the actual cause.
 _HYP_PREFIX_RE = re.compile(
-    r"^(?P<hyp>h-[A-Za-z0-9]+)\.(?P<sub>preds|attr_preds|refuts|authz|parent_attrs)$"
+    rf"^(?P<hyp>{HYPOTHESIS_ID_RE.pattern})"
+    rf"\.(?P<sub>preds|attr_preds|refuts|authz|parent_attrs)$"
 )
 
 _HYP_PRED_COLS = ["id", "subject", "claim"]
@@ -556,24 +578,6 @@ _CONCLUDE_KEYS_HINT = ", ".join(
     sorted(_CONCLUDE_SCALARS | _CONCLUDE_LISTS)
     + ["termination.category", "termination.rationale"]
 )
-
-#: What the format writes where a conclude row has nothing to say (`docs/dense-investigation-
-#: format.md`: these "carry `none` / `n/a`" unless the run terminated on a ceiling). A list row
-#: holding it projects as absence, so a reader tests `conclude.get("ceiling_test")` rather than
-#: filtering a sentinel back out.
-_CONCLUDE_EMPTY_MARKERS: frozenset[str] = frozenset({"none", "n/a"})
-
-
-def is_conclude_empty_marker(value: object) -> bool:
-    """Does this conclude row value spell "nothing to say"? THE membership test for the
-    vocabulary above, beside the vocabulary.
-
-    A SCALAR row keeps the marker — only the list branch below drops it — so a gate that asks
-    "did the run state a defect" has to ask this rather than `value.strip()`: `detection_notes
-    none` is the row that explicitly says there is no defect, and it is not blank.
-    """
-    return isinstance(value, str) and value.strip().lower() in _CONCLUDE_EMPTY_MARKERS
-
 
 def _close_loop(rows: list[str]) -> int | None:
     for row in rows:
@@ -967,20 +971,52 @@ class _Projector:
         """
         if sub == "preds":
             if preds := self._project_rows(block, _hyp_sub_pred_row):
+                self._warn_repeated_ids(block, preds)
                 _extend_by_id(hyp.setdefault("predictions", []), preds)
             return
         if sub == "attr_preds":
             if attr_preds := self._project_rows(block, _hyp_sub_attr_pred_row):
+                self._warn_repeated_ids(block, attr_preds)
                 _extend_by_id(hyp.setdefault("attribute_predictions", []), attr_preds)
             return
         if sub == "refuts":
             if refuts := self._project_rows(block, _hyp_sub_refut_row):
+                self._warn_repeated_ids(block, refuts)
                 _extend_by_id(hyp.setdefault("refutation_shape", []), refuts)
             return
         if sub == "authz":
             if authz := self._project_rows(block, _hyp_sub_authz_row):
+                self._warn_repeated_ids(block, authz)
                 _extend_by_id(hyp.setdefault("authorization_contract", []), authz)
             return
+
+    def _warn_repeated_ids(self, block: Block, rows: list[Any]) -> None:
+        """An id written twice in ONE sub-block DELETES the second row, so say so.
+
+        `_extend_by_id` keeps the first record per id — correct against the re-emission it
+        exists for, which is a whole block sent again as a SECOND block — but WITHIN one
+        block a repeated id is never a re-emission, and the row it drops carries content
+        nothing else does. A second `ac1` with a different predicate simply vanished, and
+        `_check_benign_authz` then discharged the surviving contract and closed benign over
+        a legitimacy question no lead ever asked. Same shape for a second `p1`/`r1`: the
+        prediction is gone while `:T resolutions` goes on citing the id.
+
+        Only the rows of the block in hand are compared, which is what keeps the legal
+        cross-block repeat silent.
+        """
+        seen: set[str] = set()
+        for r in rows:
+            rid = r.get("id") if isinstance(r, dict) else None
+            if not isinstance(rid, str) or not rid:
+                continue
+            if rid in seen:
+                self._warn(
+                    block, -1, "",
+                    f"{rid!r} is declared twice in this block; only the FIRST row is kept "
+                    f"and the later one is discarded with everything it declares. Give each "
+                    f"row its own id, or send the added rows as a second block.",
+                )
+            seen.add(rid)
 
     def _project_lead_subblock(
         self, tag: str, sub: str, block: Block, lead: dict[str, Any]
