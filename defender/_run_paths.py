@@ -127,17 +127,55 @@ class RunPaths:
 _NO_BUNDLE = "_unresolvable_source_run_dir"
 _NAMELESS = {"", ".", ".."}
 
+#: The lead-id alphabet, as the BODY of `l-<body>` — ONE spelling for every gate that has an
+#: opinion about a lead id, because they are not independent facts. A validator that admits an
+#: id a path shape refuses does not fail loose, it fails ABSURD: `claim_lead` mints the payload
+#: at `gather_raw/l-auth1/0.json`, the query tool hands gather that exact path and tells it to
+#: `cat` it, and gather's own read gate then refuses its own payload (#850 F-09 — the gate said
+#: `l-\d+` while all four validators said `l-[A-Za-z0-9]+`, so a lettered id was latently
+#: unreadable by the only agent entitled to it).
+#:
+#: The three id validators (`hooks.record_lead.LEAD_ID_RE`, `scripts.gather_tools.record_query.
+#: LEAD_ID_RE`, `learning.lead_repository._LEAD_ID_RE`) and the two path shapes
+#: (`_PAYLOAD_SHAPES` below, `permission.policies._common.read_shapes`) all compose off this.
+LEAD_ID_BODY = r"[A-Za-z0-9]+"
+
+#: `\Z`, not `$`: `$` also matches BEFORE a trailing newline, so `l-abc\n` passes `.match()` and
+#: composes a lead dir whose name ends in a newline — the one known hole adv:PO7 recorded against
+#: this validator (`tests/test_store_boundary_705.py`, where `CASE_ID_RE` closed it and this one
+#: did not). The path shapes never admitted it, so the anchor is what keeps validator and gate
+#: agreeing at BOTH ends rather than only the loose one.
+LEAD_ID_RE = re.compile(rf"^l-{LEAD_ID_BODY}\Z")
+
+#: The gather payload family, relative to a run dir. Shared with the runtime read gate rather
+#: than re-spelled there: it is the same set of files, named once.
+GATHER_RAW_SHAPE = rf"gather_raw/l-{LEAD_ID_BODY}/[0-9]+\.json"
+
 # The two by-ref payload families a run writes, as literal shapes: the gather lane's
-# `gather_raw/{lead_id}/{seq}.json` (lead ids are claim-gated to this same alphabet) and the
-# judge's ticket-read capture `ticket_reads/{seq}.json`. Anything else recorded in the queries
-# table is not an artifact this system produces.
+# `gather_raw/{lead_id}/{seq}.json` (lead ids are claim-gated to the same alphabet, above) and
+# the judge's ticket-read capture `ticket_reads/{seq}.json`. Anything else recorded in the
+# queries table is not an artifact this system produces.
 #
 # `[0-9]`, not `\d`: a str pattern's `\d` matches every Unicode decimal (`٣.json` passes), which
 # would widen the whitelist past anything a writer produces and past the ASCII-only lead-id
 # alphabet standing next to it. Both seqs are `f"{int}"`, so ASCII is the exact shape.
 _PAYLOAD_SHAPES = (
-    re.compile(r"gather_raw/l-[A-Za-z0-9]+/[0-9]+\.json"),
+    re.compile(GATHER_RAW_SHAPE),
     re.compile(r"ticket_reads/[0-9]+\.json"),
+)
+
+#: The case's ANSWER KEY: the finished investigation's own reasoning, its disposition, and the
+#: query record behind them. Named as a set because the learning loop STAGES all four into
+#: `<learning_run_dir>/` (`learning.core.persist._copy_shared_inputs` writes the first two and
+#: `source_refs.yaml`; `lead_repository.stage_tables` writes `executed_queries.jsonl`) — and that
+#: dir IS the gray-box actor's own run root, whose whole purpose is to withhold them (#850 F-19).
+#: `alert.json` is deliberately NOT here: it is the case INPUT, handed to the actor in its own
+#: user message, so denying it would withhold nothing and break the one artifact it is given.
+#:
+#: The read gate spends this at `permission.files.names_case_answer_key`; the names live here
+#: because this module already owns what a run dir is called.
+CASE_ANSWER_KEY_NAMES = frozenset(
+    {"investigation.md", "report.md", "source_refs.yaml", "executed_queries.jsonl"}
 )
 
 # `resolve()` on a hostile operand — a symlink cycle, an embedded NUL, a name past PATH_MAX.

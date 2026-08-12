@@ -264,8 +264,9 @@ def test_a3_under_fullmatches_the_resolved_path(env):
 def test_a4_path_shapes_are_tight_never_any_char_star(env):
     """a4 (negative): no path shape uses `[^\\x00]*` — that class admits spaces and newlines, so an
     approved path would not be a safe token downstream. Machine-generated paths get machine-tight
-    grammars (`gather_raw/l-\\d+/\\d+\\.json`), pinned behaviorally: gather's own payload path
-    ALLOWs, a free-form name at the same depth DENIES."""
+    grammars (`gather_raw/l-[A-Za-z0-9]+/[0-9]+\\.json` — `_run_paths.GATHER_RAW_SHAPE`, the one
+    spelling the lead-id validators also compose off since #850 F-09), pinned behaviorally:
+    gather's own payload path ALLOWs, a free-form name at the same depth DENIES."""
     for name, pol in _all_policies(env).items():
         shapes = [s for g in pol.bash_allow for s in g.scope] + list(pol.read_allow)
         for s in shapes:

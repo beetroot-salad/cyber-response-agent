@@ -5,14 +5,11 @@ import contextlib
 import errno
 import json
 import os
-import re
 import sys
 from pathlib import Path
 
 from defender._io import guarded_mkdir
-from defender._run_paths import RunPaths
-
-LEAD_ID_RE = re.compile(r"^l-[A-Za-z0-9]+$")
+from defender._run_paths import LEAD_ID_RE, RunPaths  # noqa: F401 — re-export: this module is the claim gate's import surface
 
 
 def claim_lead(dispatch: dict) -> int:

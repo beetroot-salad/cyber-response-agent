@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from defender._run_paths import GATHER_RAW_SHAPE
 from defender.hooks._cmd_segments import NON_ADAPTER_SHIMS
 from defender.runtime.permission.grant import (
     SEG,
@@ -35,7 +36,13 @@ def read_shapes(
         under(run, rf"gather_summaries/{SEG}"),
     ]
     if raw:
-        shapes.append(under(run, r"gather_raw/l-\d+/\d+\.json"))
+        # `_run_paths.GATHER_RAW_SHAPE`, not a second spelling of it (#850 F-09). This shape and
+        # the lead-id VALIDATORS answer the same question and must not drift: the payload path
+        # gather is told to `cat` is minted from a claimed lead id, so a gate narrower than the
+        # validator denies gather its own payload — which is what a local `l-\d+` did here while
+        # every validator in the system said `l-[A-Za-z0-9]+`. (It also carried `\d`, which a str
+        # pattern reads as every Unicode decimal — wider than any writer, in the other direction.)
+        shapes.append(under(run, GATHER_RAW_SHAPE))
     shapes.append(under(dfn, rf"(?:{corpus})(?:/{SEG})*/{SEG}\.md"))
     return PathShapes(shapes)
 
