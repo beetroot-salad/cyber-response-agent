@@ -77,7 +77,7 @@ Each run writes to `$DEFENDER_RUNS_BASE/{run_id}/` (default `/tmp/defender-runs/
 | **leads** | `gather_raw/{lead_id}.lead.json` (written via `claim_lead` — id reuse raises) | `lead_id` (the `:L` invlang row id) |
 | **queries** | `executed_queries.jsonl` (captured in-process by the `query` tool); raw payloads by-ref at `gather_raw/{lead_id}/{seq}.json` | `(lead_id, seq)`, FK `lead_id` |
 
-The single read/join surface is `learning/lead_repository.py` (`joined` / `actor_view`) — consumers never re-parse the artifacts. `query_id` is `{system}.{kebab-name}`, matching a template under `skills/gather/queries/` when one fit (`ad-hoc` = one-off probe); `params` are bound values. A `∅.`-prefixed `query_id` is a **sentinel**: a writer-only record of something that never reached a system (a refused repeat, a failed reducer shim), which `joined` splits onto `JoinedLead.observations` so that `JoinedLead.queries` means only what the defender ran — `.rows` is the remerge, for the readers that mean the table (#841). Schema may still break during the PoC phase.
+The single read/join surface is `learning/lead_repository.py` (`joined` / `actor_view`) — consumers never re-parse the artifacts. `query_id` is `{system}.{kebab-name}`, matching a template under `skills/gather/queries/` when one fit (`ad-hoc` = one-off probe); `params` are bound values. A `∅.`-prefixed `query_id` is a **sentinel**: a writer-only record of something that never reached a system (a refused repeat, a failed reducer shim), which `joined` splits onto `JoinedLead.sentinels` so that `JoinedLead.queries` means only what the defender ran — `.rows` is the remerge, for the readers that mean the table (#841). Schema may still break during the PoC phase.
 
 ## Learning loop (the headlining experiment)
 

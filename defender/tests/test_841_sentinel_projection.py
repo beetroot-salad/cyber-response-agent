@@ -14,7 +14,7 @@ the judge each received it verbatim, framed as something the defender ran.
 THE FIX IS A SPLIT IN THE PROJECTION, not a filter in `load_queries`. A blanket filter at the
 reader would have unbuilt #823: `collect_general_failures` reaches these rows through the same
 `joined` → `extract_from_joined` path, and the pitfalls residue is exactly where a failed
-reduce belongs. So `JoinedLead.queries` holds the queries, `JoinedLead.observations` holds the
+reduce belongs. So `JoinedLead.queries` holds the queries, `JoinedLead.sentinels` holds the
 sentinels, and `JoinedLead.rows` remerges them in the table's own seq order for the two readers
 that mean "the table" — the offline extraction and the run-inspection HTML.
 
@@ -101,6 +101,11 @@ def run(tmp_path) -> Path:
     _row(
         run, "l-002", 0, query_id=BASH_SHIM_QUERY_ID, verb="bash", exit_code=1,
         params={"command": SHIM_COMMAND},
+        # EMPTY, the way `runtime/tools.py` writes a shim row's sidecar: the file must exist
+        # or `extract_from_joined` drops the row, but a failed reduce has no evidence to
+        # persist and the shim's stdout is attacker-influenced bytes. A realistic-looking
+        # payload here would hide what a consumer that reaches for this path actually gets.
+        payload="",
     )
     return run
 
@@ -116,7 +121,7 @@ def _only(leads: list, lead_id: str):
 
 
 def test_row_names_itself_by_the_writers_own_predicate():
-    """`QueryRow.observation` delegates to `is_reserved_query_id` — the whole PREFIX, not a
+    """`QueryRow.is_sentinel` delegates to `is_reserved_query_id` — the whole PREFIX, not a
     list of literals restated on the read side. A fourth sentinel must partition on the day
     it is defined, not on the day someone remembers this module."""
     def _q(query_id: str) -> lr.QueryRow:
@@ -127,15 +132,15 @@ def test_row_names_itself_by_the_writers_own_predicate():
         )
 
     for sentinel in (ABOVE_GUARD_QUERY_ID, BASH_SHIM_QUERY_ID, REPEAT_TRIP_QUERY_ID, "∅.future"):
-        assert _q(sentinel).observation, sentinel
+        assert _q(sentinel).is_sentinel, sentinel
     for real in ("elastic.auth-events-by-host", "ad-hoc", "cmdb.hostname-by-ip", ""):
-        assert not _q(real).observation, real
+        assert not _q(real).is_sentinel, real
 
 
 def test_joined_splits_queries_from_observations_and_remerges_by_seq(run):
     jl = _only(lr.joined(run), "l-001")
     assert [q.seq for q in jl.queries] == [0, 1]
-    assert [q.query_id for q in jl.observations] == [REPEAT_TRIP_QUERY_ID]
+    assert [q.query_id for q in jl.sentinels] == [REPEAT_TRIP_QUERY_ID]
     # `.rows` is the table's own order, which is what `query_index` keys `pitfall_id` on.
     assert [q.seq for q in jl.rows] == [0, 1, 2]
 
@@ -146,7 +151,7 @@ def test_a_lead_whose_only_rows_are_sentinels_still_joins(run):
     shape of ("this lead found nothing"), so it must still appear."""
     jl = _only(lr.joined(run), "l-002")
     assert jl.queries == []
-    assert [q.query_id for q in jl.observations] == [BASH_SHIM_QUERY_ID]
+    assert [q.query_id for q in jl.sentinels] == [BASH_SHIM_QUERY_ID]
     assert jl.goal == "reduce the envelope"
 
 
@@ -178,15 +183,19 @@ def test_oracle_lead_prompt_carries_no_sentinel(run):
     through this lead's queries". For a refusal record there are no such events, and for a
     shim row the "query" is model-authored shell text."""
     prompt = oracle_sample.build_lead_user_prompt(
-        _only(lr.joined(run), "l-002"), story="the actor staged an exfil", sample_text="(none)",
-        salt="aabbccddeeff0011",
+        _only(lr.joined(run), "l-002"), story="the actor staged an exfil",
+        sample_text="(no schema sample)", salt="aabbccddeeff0011",
     )
     assert SHIM_COMMAND not in prompt
     assert BASH_SHIM_QUERY_ID not in prompt
-    assert "(none)" in prompt  # `_query_lines`' own empty rendering, not a crash
+    # `_query_lines`' OWN empty rendering, under the `queries:` heading — asserting a bare
+    # "(none)" would pass on the `sample_text` this call supplies, whatever the query block
+    # said.
+    assert "queries:\n  (none)" in prompt
 
     l1 = oracle_sample.build_lead_user_prompt(
-        _only(lr.joined(run), "l-001"), story="s", sample_text="(none)", salt="aabbccddeeff0011",
+        _only(lr.joined(run), "l-001"), story="s", sample_text="(no schema sample)",
+        salt="aabbccddeeff0011",
     )
     assert REPEAT_TRIP_QUERY_ID not in l1
     assert l1.count("id: elastic.auth-events-by-host") == 2
@@ -198,6 +207,13 @@ def test_judge_comparison_carries_no_sentinel(run):
     l2 = compare._render_lead_file(comparisons["l-002"], run / "gather_raw")
     assert SHIM_COMMAND not in l2
     assert "(no queries executed for this lead)" in l2
+    # ...and the sentinel's payload does not come back through `_payload_paths`' fallback.
+    # For a lead with no queries at all that fallback names `gather_raw/{lead}/0.json`, which
+    # IS the sentinel's own sidecar — written EMPTY by the runtime — so the lead file would
+    # say "no queries executed" and then instruct the judge to ground an absence claim in it.
+    assert compare._payload_paths(comparisons["l-002"], run / "gather_raw") == []
+    assert str(run / "gather_raw" / "l-002" / "0.json") not in l2
+    assert "absence claim must cover" not in l2
 
     l1 = compare._render_lead_file(comparisons["l-001"], run / "gather_raw")
     assert REPEAT_TRIP_QUERY_ID not in l1

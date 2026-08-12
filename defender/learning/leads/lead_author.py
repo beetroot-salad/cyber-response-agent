@@ -21,7 +21,6 @@ from defender.learning.pipeline._prompt import stage_user_message, structured_js
 from defender.learning.leads import lead_neighbors
 from defender.learning.leads import lead_render
 from defender.runtime.verbs import engine_for
-from defender.scripts.gather_tools.record_query import is_reserved_query_id
 
 from defender.learning.leads.path_validation import (  # noqa: F401  (re-exported)
     CATALOG_DIR,
@@ -106,7 +105,7 @@ def build_handoff(
     grouped: dict[Path, list[ExecutedLead]] = {}
     seen_order: list[Path] = []
     for lead in executed:
-        if is_reserved_query_id(lead.query_id):
+        if lead.is_sentinel:
             # Not a contract violation and not this collector's row: a `∅.`-prefixed sentinel
             # records something the defender did NOT run, and it is routed to the pitfalls
             # residue by construction (#823). Before #841 it fell to the WARN below, which
@@ -500,8 +499,9 @@ def _prepare_handoffs(
 
     if not handoffs and not pending_drafts:
         _log(
-            f"all {len(executed)} extracted lead(s) had unresolved "
-            "query_ids and no pending drafts — nothing to do"
+            f"none of the {len(executed)} extracted lead(s) resolved to a catalog "
+            "template (unresolved query_id, or a `∅.` sentinel routed to the pitfalls "
+            "residue) and there are no pending drafts — nothing to do"
         )
         _write_state(
             _done_sentinel(run_dir),

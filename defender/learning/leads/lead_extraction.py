@@ -38,6 +38,10 @@ class ExecutedLead:
     payload_status: str
     payload_digest: str
     error_class: str | None
+    #: `QueryRow.is_sentinel`, carried through so the collectors downstream partition on the
+    #: SAME predicate the projection did (#841) rather than each re-deriving it from the
+    #: `query_id` string. Defaults `False` so a hand-built row in a test is an ordinary query.
+    is_sentinel: bool = False
 
 
 _VALID_PAYLOAD_STATUSES = frozenset(
@@ -87,6 +91,7 @@ def extract_from_joined(joined_leads: list) -> list[ExecutedLead]:
                     payload_status=q.payload_status,
                     payload_digest=str(q.payload_digest)[:200],
                     error_class=q.error_class,
+                    is_sentinel=q.is_sentinel,
                 )
             )
     return out

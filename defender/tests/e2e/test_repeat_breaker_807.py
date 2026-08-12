@@ -1222,7 +1222,7 @@ def test_lead_repository_reads_the_trip_row_unchanged(tmp_path):
 
     #841 moved WHICH LIST the trip row joins into, and nothing else: it is a refusal record,
     not a query the defender ran, so `JoinedLead.queries` no longer holds it and
-    `JoinedLead.observations` does. Every fact this test was written to protect is asserted
+    `JoinedLead.sentinels` does. Every fact this test was written to protect is asserted
     below through `.rows`, which is the seq-ordered remerge — the row is not dropped, its
     payload is still reachable to the join surface, staging is still byte-unfiltered, and the
     replay verdict is still identical."""
@@ -1243,10 +1243,10 @@ def test_lead_repository_reads_the_trip_row_unchanged(tmp_path):
     # #841's split, on the one lead that has both populations: the two calls that reached
     # elastic are the queries, the refusal is the observation.
     assert [qr.seq for qr in leads[0].queries] == [0, 1]
-    assert [qr.seq for qr in leads[0].observations] == [2]
+    assert [qr.seq for qr in leads[0].sentinels] == [2]
     trip = rows[2]
     assert trip.query_id == REPEAT_TRIP_QUERY_ID
-    assert trip.observation
+    assert trip.is_sentinel
     assert trip.exit_code == 64
     assert trip.error_class == "agent-fixable"
     assert trip.raw_ref is not None, "the trip row's payload is unreachable to the join surface"

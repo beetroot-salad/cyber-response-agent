@@ -49,13 +49,13 @@ class QueryRow:
     raw_ref: Path | None
 
     @property
-    def observation(self) -> bool:
+    def is_sentinel(self) -> bool:
         """Is this row a WRITER-ONLY record rather than a query the defender ran?
 
         The `∅.`-prefixed sentinels (`record_query.RESERVED_QUERY_ID_PREFIX`) all share one
         property: nothing they describe reached a system of record. A repeat the guard refused,
         a call the argument schema turned back, a reducer shim that failed — each is an
-        OBSERVATION about the lead's conduct, written into the queries table because that is
+        RECORD about the lead's conduct, written into the queries table because that is
         the only append-only surface the run has, not because a query was issued.
 
         The predicate is the writer's own (`is_reserved_query_id`, #823) rather than a second
@@ -81,16 +81,16 @@ class JoinedLead:
     #: named `queries` that holds only queries makes the safe reading the default one. The rows
     #: are still HERE, not dropped, because `collect_general_failures` reaches them through
     #: `extract_from_joined` — the pitfalls residue is the whole point of #823.
-    observations: list = field(default_factory=list)
+    sentinels: list = field(default_factory=list)
 
     @property
     def rows(self) -> list:
         """Every row this lead has in the queries table, in seq order — `queries` and
-        `observations` remerged. For the readers that mean "the table", not "the queries":
+        `sentinels` remerged. For the readers that mean "the table", not "the queries":
         the offline extraction (whose `pitfall_id` keys on position, so the order must be the
         table's own) and the run-inspection HTML (where hiding a refusal row from a human
         debugging the run is the opposite of the help)."""
-        return sorted([*self.queries, *self.observations], key=lambda r: r.seq)
+        return sorted([*self.queries, *self.sentinels], key=lambda r: r.seq)
 
 
 
@@ -199,7 +199,7 @@ def joined(run_dir: Path) -> list[JoinedLead]:
                 queries=issued,
                 orphan=lid not in leads,
                 provenance=lead.get("provenance") if lid in leads else None,
-                observations=observed,
+                sentinels=observed,
             )
         )
     for lid in orphans:
@@ -211,14 +211,14 @@ def joined(run_dir: Path) -> list[JoinedLead]:
                 what_to_summarize=[],
                 queries=issued,
                 orphan=True,
-                observations=observed,
+                sentinels=observed,
             )
         )
     return out
 
 
 def _partition(rows: list[QueryRow]) -> tuple[list[QueryRow], list[QueryRow]]:
-    """`(queries, observations)`, each seq-ordered.
+    """`(queries, sentinels)`, each seq-ordered.
 
     A lead is bucketed on ALL its rows before this split, and the split is what decides which
     of the two lists each row lands in — never whether the LEAD appears at all. A lead whose
@@ -226,8 +226,8 @@ def _partition(rows: list[QueryRow]) -> tuple[list[QueryRow], list[QueryRow]]:
     run really did open and the pitfalls residue really does read."""
     ordered = sorted(rows, key=lambda r: r.seq)
     return (
-        [r for r in ordered if not r.observation],
-        [r for r in ordered if r.observation],
+        [r for r in ordered if not r.is_sentinel],
+        [r for r in ordered if r.is_sentinel],
     )
 
 
@@ -281,7 +281,7 @@ def actor_view(run_dir: Path) -> dict:
         # The lead is registered BEFORE the skip, so a lead whose only rows are sentinels
         # still reaches the actor with an empty query list rather than vanishing.
         entries = grouped.setdefault(q.lead_id, [])
-        if q.observation:
+        if q.is_sentinel:
             continue
         entries.append({"query_id": q.query_id, "params": q.params})
     return {

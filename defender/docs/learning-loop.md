@@ -229,7 +229,7 @@ of things that never reached a system, kept in the table because it is the run's
 only append-only surface. `joined` therefore projects each lead in two parts
 (#841): `JoinedLead.queries` — the queries the defender actually ran, and what
 the actor, the oracle and the judge are each shown — and
-`JoinedLead.observations`, which the pitfalls residue
+`JoinedLead.sentinels`, which the pitfalls residue
 (`collect_general_failures`) reaches through `JoinedLead.rows`, the seq-ordered
 remerge. The filter is deliberately NOT in `load_queries`: dropping the rows at
 the reader would delete the lead-author's one view of a failed reduce, which is
