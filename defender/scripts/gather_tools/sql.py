@@ -124,6 +124,11 @@ def _disambiguate_columns(columns: list[str]) -> tuple[list[str], list[str]]:
     is what makes the narrowing loud, since a silently-dropped column is indistinguishable
     downstream from a field the payload never carried.
     """
+    # Every LITERAL name is reserved up front, not as the walk reaches it: a projection can
+    # spell its own `name_1` alias AFTER the collision that would generate one, and a generated
+    # name that took it would hand the agent its alias holding the other column's value —
+    # a silently wrong answer of exactly the kind this function exists to prevent.
+    taken = set(columns)
     seen: dict[str, int] = {}
     out: list[str] = []
     renamed: list[str] = []
@@ -134,10 +139,11 @@ def _disambiguate_columns(columns: list[str]) -> tuple[list[str], list[str]]:
             out.append(col)
             continue
         name = f"{col}_{n}"
-        while name in seen:  # a literal `name_1` already in the projection must not collide too
+        while name in taken:
             n += 1
             name = f"{col}_{n}"
-        seen[name] = 1
+        seen[col] = n + 1
+        taken.add(name)
         out.append(name)
         renamed.append(f"{col} -> {name}")
     return out, renamed

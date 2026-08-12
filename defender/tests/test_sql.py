@@ -120,11 +120,18 @@ def test_duplicate_column_rename_is_stable_across_three_way_collision(monkeypatc
     assert "name -> name_2" in err
 
 
-def test_rename_does_not_collide_with_a_literal_alias_of_the_same_name(monkeypatch, capsys):
+def test_rename_does_not_collide_with_a_literal_alias_of_the_same_name():
     """The renamer must not manufacture a NEW collision when the projection already
-    contains the name it would generate."""
+    contains the name it would generate — in EITHER order. The alias-last spelling is the
+    one that bites: a generated `name_1` that took the alias's key would hand the agent
+    `name_1` holding the other column's value, silently."""
     assert defender_sql._disambiguate_columns(["name", "name_1", "name"]) == (
         ["name", "name_1", "name_2"], ["name -> name_2"])
+    assert defender_sql._disambiguate_columns(["name", "name", "name_1"]) == (
+        ["name", "name_2", "name_1"], ["name -> name_2"])
+    assert defender_sql._disambiguate_columns(["name", "name", "name", "name_1", "name_2"]) == (
+        ["name", "name_3", "name_4", "name_1", "name_2"],
+        ["name -> name_3", "name -> name_4"])
     assert defender_sql._disambiguate_columns(["a", "b"]) == (["a", "b"], [])
 
 

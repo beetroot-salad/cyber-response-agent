@@ -365,6 +365,24 @@ def test_extract_case_entities_skips_rows_missing_type_or_class(tmp_path: Path) 
     assert loop.extract_case_entities(inv) == "process:nc"
 
 
+def test_extract_case_entities_skips_an_enumerated_candidate_class(tmp_path: Path) -> None:
+    """`,` is the DELIMITER of the string this builds, and invlang spells an unresolved
+    class as an enumerated candidate set (`{a/b/c, d/e/f}`). Emitting one would split
+    across the comma — truncating the real entity AND fabricating a second out of the
+    tail — so the row yields no token, exactly like a half-filled one."""
+    inv = tmp_path / "investigation.md"
+    inv.write_text(
+        "```invlang\n"
+        ":V prologue.vertices [id|type|class|ident|attrs?]\n"
+        "v-001|compute|{monitoring-agent/internal/known-corp, ip-only/internet/novel}|1.2.3.4|\n"
+        "v-002|process|nc|nc[1]|\n"
+        "```\n"
+    )
+    entities = loop.extract_case_entities(inv)
+    assert entities == "process:nc"
+    assert all(tok.count(":") == 1 for tok in entities.split(","))
+
+
 def test_extract_case_entities_absent_block(tmp_path: Path) -> None:
     inv = tmp_path / "investigation.md"
     inv.write_text("```invlang\n:H hypothesize.hypotheses\n```\n")

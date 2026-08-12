@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
+import math
 import sys
 from pathlib import Path
 from typing import TypedDict
@@ -37,6 +38,11 @@ def _json_safe(obj):
         return [_json_safe(v) for v in obj]
     if isinstance(obj, (_dt.date, _dt.datetime)):
         return obj.isoformat()
+    if isinstance(obj, float) and not math.isfinite(obj):
+        # `json.dumps` ACCEPTS these and emits bare `NaN`/`Infinity`, which is not JSON — so a
+        # YAML `.nan` in one lesson's frontmatter poisons `lessons.json` for every strict reader
+        # of it. Same degrade-this-lesson rule as the exotic types above (#854 F-20).
+        return None
     if obj is None or isinstance(obj, (str, bool, int, float)):
         return obj
     return str(obj)

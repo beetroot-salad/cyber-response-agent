@@ -65,11 +65,16 @@ class _PipelineBuilder:
 
     def feed_token(self, toks: list[str], i: int) -> int:
         t, n = toks[i], len(toks)
-        if (t == "|" or t in _PIPELINE_SEPARATORS) and not self.cur_argv and not self.cur_stages:
-            # An operator with nothing to its left. Within a line that is a bash syntax error;
+        if t in _DANGLING_CONNECTORS and not self.cur_argv and not self.cur_stages:
+            # A connector with nothing to its left. Within a line that is a bash syntax error;
             # ACROSS lines (`A\n| B`) it is the half of #854 F-22 where the token was dropped
             # and `A | B` silently became `A ; B` — a second stage on /dev/null, reported as
             # the last pipeline's rc.
+            #
+            # Same set as the trailing check, and for the same reason: a leading `;` drops
+            # NOTHING (`A` then `; B` already means the two commands it runs), so refusing it
+            # would deny a harmless command under a reason — this module's docstring, the
+            # gate's UNTOKENIZABLE_REASON, SKILL.md — that names `|`/`&&`/`||` and not `;`.
             raise UntokenizableCommand(
                 f"pipeline/connector token {t!r} opens a line with nothing to its left"
             )
