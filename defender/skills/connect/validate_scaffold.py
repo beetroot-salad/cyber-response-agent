@@ -120,7 +120,11 @@ def check_skill(report: Report, defender: Path, system: str) -> None:
     if execution.exists():
         report.add(PASS, f"skills/{system}/execution.md exists")
     elif has_inline:
-        report.add(PASS, "SKILL.md embeds a ## Execution section inline (no separate execution.md)")
+        # Was a PASS. The inline shape is what the four stubs used, and it put each one's
+        # `docker exec … curl` transport in the file the orchestrator reads to route (#261) —
+        # while leaving gather to discover the missing sibling with a Read that 404s.
+        report.add(WARN, "SKILL.md embeds ## Execution inline — split it into execution.md "
+                         "(docs/system-skill-shape.md)")
     else:
         report.add(WARN, "no execution.md and no inline ## Execution section")
 

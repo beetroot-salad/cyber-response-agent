@@ -38,9 +38,8 @@ through the `esql` verb (an ES|QL pipe against the `logs-*` data streams) and
 filters through `query`/`alerts`; other systems have their own verbs (e.g.
 cmdb `get-host`, identity `can-access`), each binding named params — so
 ES|QL is the SIEM's language, not the universal query shape. Read the
-execution surface your dispatch prompt names — a sibling `execution.md` for
-some systems, `SKILL.md`'s `## Execution` section for the rest — only if you
-need the index list or the system's verb/param details.
+`execution.md` your dispatch prompt names only if you need the index list or
+the system's verb/param details.
 
 **You own the retrieval — the time window included.** The lead names the
 question and its anchors (a timestamp, an identity, a host); it does not name

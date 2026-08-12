@@ -191,13 +191,13 @@ def _execution_surface(defender_dir: Path, system: str) -> str:
     """Which file carries `system`'s execution surface — verbs, params, exit codes, the pitfalls
     curator's `## Common pitfalls` — resolved off the tree at dispatch.
 
-    Only 3 of the 7 systems split it today into a sibling `execution.md`; the stubs keep it
-    inline as `SKILL.md`'s `## Execution` section (`docs/system-skill-shape.md`), and the
-    pitfalls curator creates the file for any system the first time it has a pitfall to record.
-    So which of the two it is, is a fact about the tree — not one a prompt can state once. Every
-    site that named the path unconditionally (this one, gather's ORIENT and coin branches,
-    `defender-sql`) bought the same wasted turn on those four: a Read that 404s. Named here, on
-    a line that varies only with the dispatched system and the tree, it costs no cache prefix.
+    All seven systems split it today, so this resolves to the path on every live dispatch. The
+    absent arm is not dead: `connect` scaffolds a new system's `SKILL.md` before its
+    `execution.md` exists (`validate_scaffold.py` warns rather than fails), and until this was
+    named at dispatch, gather spent a turn per lead finding that out — a Read that 404s, 20 of
+    them across the 30 recorded runs, on the four systems that had no file. The check is what
+    keeps the promise honest for the next system, rather than resting on a convention that has
+    already been broken once.
     """
     execution = Path(defender_dir) / "skills" / system / "execution.md"
     if execution.is_file():

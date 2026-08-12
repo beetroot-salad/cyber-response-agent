@@ -22,10 +22,16 @@ variables into the orchestrator's context, where it groped for them
 instead of dispatching gather (issue #261). Splitting the file removes
 the trigger structurally rather than with a "don't read this" note.
 
-(Some stub systems still carry their Execution section inline in
-`SKILL.md`; they hold no secrets, so the leak doesn't apply. New
-systems and any system with real credentials use the `execution.md`
-split.)
+**All seven systems use the split** — there is no inline variant. The four
+stubs (`change-mgmt`, `host-state`, `ticket`, `threat-intel`) carried their
+Execution section inline until the extraction, on the reasoning that a stub
+holds no secrets; that reasoning was wrong on its own terms, because each of
+their `### Connectivity` blocks spelled out the `docker --context
+soc-playground exec <bastion> curl http://…` transport and each `### Config`
+named the adapter's env vars. That is the #261 shape exactly, sitting in the
+file the orchestrator reads to route. The uniformity is also what lets gather
+be told the path unconditionally instead of probing for it
+(`runtime/tools_gather.py::_execution_surface`).
 
 ## Visibility surface — four fields
 
