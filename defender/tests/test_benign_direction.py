@@ -332,22 +332,55 @@ def test_verifier_expected_disposition_direction_aware() -> None:
 
 
 def test_extract_case_entities_emits_qualified_class_tokens(tmp_path: Path) -> None:
-    """The dense `class` column is already `type:class`-qualified; emit it
-    verbatim (no double-prefix) so it matches lessons_env_retrieve selectors."""
+    """The invlang `class` cell carries the slash-tuple ONLY, so the extractor has to
+    qualify it with the `type` cell — every consumer parses `type:class` (#854 F-05)."""
     inv = tmp_path / "investigation.md"
     inv.write_text(
         "```invlang\n"
         ":V prologue.vertices [id|type|class|ident|attrs?]\n"
-        "v-001|endpoint|endpoint:linux|web-04.prod|role=asset-server\n"
-        "v-002|process|process:nc|nc[2188]|cmdline_via=shell\n"
-        "v-003|socket|socket:tcp|10.20.7.118:9100|\n"
-        "v-002|process|process:nc|nc[2190]|\n"
+        "v-001|endpoint|linux|web-04.prod|role=asset-server\n"
+        "v-002|process|nc|nc[2188]|cmdline_via=shell\n"
+        "v-003|socket|tcp|10.20.7.118:9100|\n"
+        "v-002|process|nc|nc[2190]|\n"
         "\n"
         ":E prologue.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]\n"
         "e-001|connected|v-002|v-003|2026-05-05T03:42:11Z|siem-event:wazuh|\n"
         "```\n"
     )
     assert loop.extract_case_entities(inv) == "endpoint:linux,process:nc,socket:tcp"
+
+
+def test_extract_case_entities_skips_rows_missing_type_or_class(tmp_path: Path) -> None:
+    """A half-filled vertex row yields no token at all, rather than a `:cls` / `typ:`
+    fragment no selector could ever satisfy."""
+    inv = tmp_path / "investigation.md"
+    inv.write_text(
+        "```invlang\n"
+        ":V prologue.vertices [id|type|class|ident|attrs?]\n"
+        "v-001||nc|nc[1]|\n"
+        "v-002|process||nc[2]|\n"
+        "v-003|process|nc|nc[3]|\n"
+        "```\n"
+    )
+    assert loop.extract_case_entities(inv) == "process:nc"
+
+
+def test_extract_case_entities_skips_an_enumerated_candidate_class(tmp_path: Path) -> None:
+    """`,` is the DELIMITER of the string this builds, and invlang spells an unresolved
+    class as an enumerated candidate set (`{a/b/c, d/e/f}`). Emitting one would split
+    across the comma — truncating the real entity AND fabricating a second out of the
+    tail — so the row yields no token, exactly like a half-filled one."""
+    inv = tmp_path / "investigation.md"
+    inv.write_text(
+        "```invlang\n"
+        ":V prologue.vertices [id|type|class|ident|attrs?]\n"
+        "v-001|compute|{monitoring-agent/internal/known-corp, ip-only/internet/novel}|1.2.3.4|\n"
+        "v-002|process|nc|nc[1]|\n"
+        "```\n"
+    )
+    entities = loop.extract_case_entities(inv)
+    assert entities == "process:nc"
+    assert all(tok.count(":") == 1 for tok in entities.split(","))
 
 
 def test_extract_case_entities_absent_block(tmp_path: Path) -> None:
@@ -391,6 +424,38 @@ def test_retrieve_skips_empty_anchor_on_rule_query(tmp_path: Path) -> None:
     assert names == {"anchored.md", "unanchored.md"}
 
 
+def test_extractor_tokens_satisfy_a_prologue_keyed_selector(tmp_path: Path) -> None:
+    """End to end over the seam #854 F-05 broke: a lesson keyed on the case's own
+    prologue entity is retrieved when the extractor's own output is passed to
+    --entities. Under the unqualified token it matched nothing and was dropped."""
+    inv = tmp_path / "investigation.md"
+    inv.write_text(
+        "```invlang\n"
+        ":V prologue.vertices [id|type|class|ident|attrs?]\n"
+        "v-001|compute|workstation/internal/known-corp|web-04.prod|\n"
+        "v-002|process|nc|nc[2188]|\n"
+        "```\n"
+    )
+    entities = loop.extract_case_entities(inv)
+    assert entities == "compute:workstation/internal/known-corp,process:nc"
+
+    corpus = tmp_path / "lessons-environment"
+    _write_lesson(
+        corpus, "keyed",
+        "alert_rule_ids: [rule-100110]\nstatus: live\n"
+        "entities:\n  - {type: process, class: nc}\n"
+        "  - {type: compute, class: workstation}",
+    )
+    _write_lesson(
+        corpus, "other-type",
+        "alert_rule_ids: [rule-100110]\nstatus: live\n"
+        "entities:\n  - {type: socket, class: tcp}",
+    )
+    names = {Path(p).name for p in _retrieve(
+        corpus, "--alert-rule-ids", "rule-100110", "--entities", entities)}
+    assert names == {"keyed.md"}
+
+
 
 from defender.learning.author.verify_forward import env as verify_forward_env  # type: ignore[import-not-found]  # noqa: E402
 
@@ -410,7 +475,7 @@ def _make_source_run(tmp_path: Path, prologue_rows: str) -> Path:
 def test_verify_env_case_entities_from_prologue_not_row(tmp_path: Path) -> None:
     """The check rebuilds case entities from the source investigation prologue,
     so a bad selector the curator copied into the observation can't self-confirm."""
-    run = _make_source_run(tmp_path, "v-001|process|process:nc|nc[1]|\n")
+    run = _make_source_run(tmp_path, "v-001|process|nc|nc[1]|\n")
     row = {
         "source_run_dir": str(run) + "/",
         "entities": [{"type": "process", "class": "process:nc"}],
@@ -449,7 +514,7 @@ def _run_verify_env(
 def test_verify_env_bad_when_lesson_selector_unsatisfiable(tmp_path: Path) -> None:
     """A lesson whose selector the real prologue can't satisfy → BAD, even when
     the observation row echoes the same selector (the old self-confirming bug)."""
-    run = _make_source_run(tmp_path, "v-001|process|process:nc|nc[1]|\n")
+    run = _make_source_run(tmp_path, "v-001|process|nc|nc[1]|\n")
     corpus = tmp_path / "lessons-environment"
     pending = tmp_path / "env.jsonl"
     obs = {
@@ -477,7 +542,7 @@ def test_verify_env_bad_when_lesson_selector_unsatisfiable(tmp_path: Path) -> No
 def test_verify_env_bad_when_rule_anchor_missing_canonical_key(tmp_path: Path) -> None:
     """The check queries by the canonical alert_rule_key; a lesson anchored only
     on the judge's divergent rule id (missing the canonical key) → BAD."""
-    run = _make_source_run(tmp_path, "v-001|process|process:nc|nc[1]|\n")
+    run = _make_source_run(tmp_path, "v-001|process|nc|nc[1]|\n")
     corpus = tmp_path / "lessons-environment"
     pending = tmp_path / "env.jsonl"
     obs = {

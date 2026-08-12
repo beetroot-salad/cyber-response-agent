@@ -14,6 +14,10 @@ from defender.hooks._cmd_segments import tokenize
 _OPERATOR_CHARS = frozenset("<>|&;")
 _PIPELINE_SEPARATORS = frozenset({"||", "&&", ";"})
 
+#: The tokens that leave a line INCOMPLETE when they close it — `A |`, `A &&` need the next
+#: line to mean anything. `;` is deliberately absent: `A;` is a finished command.
+_DANGLING_CONNECTORS = frozenset({"|", "&&", "||"})
+
 
 class BashExecError(Exception):
     pass
@@ -61,6 +65,19 @@ class _PipelineBuilder:
 
     def feed_token(self, toks: list[str], i: int) -> int:
         t, n = toks[i], len(toks)
+        if t in _DANGLING_CONNECTORS and not self.cur_argv and not self.cur_stages:
+            # A connector with nothing to its left. Within a line that is a bash syntax error;
+            # ACROSS lines (`A\n| B`) it is the half of #854 F-22 where the token was dropped
+            # and `A | B` silently became `A ; B` — a second stage on /dev/null, reported as
+            # the last pipeline's rc.
+            #
+            # Same set as the trailing check, and for the same reason: a leading `;` drops
+            # NOTHING (`A` then `; B` already means the two commands it runs), so refusing it
+            # would deny a harmless command under a reason — this module's docstring, the
+            # gate's UNTOKENIZABLE_REASON, SKILL.md — that names `|`/`&&`/`||` and not `;`.
+            raise UntokenizableCommand(
+                f"pipeline/connector token {t!r} opens a line with nothing to its left"
+            )
         if t == "|":
             self.end_stage()
             return i + 1
@@ -94,6 +111,13 @@ def parse(inner: str) -> list[Pipeline]:
         i, n = 0, len(toks)
         while i < n:
             i = builder.feed_token(toks, i)
+        if toks and toks[-1] in _DANGLING_CONNECTORS:
+            # The other half of #854 F-22: `A |` / `A &&` closing a line. There is no shell
+            # to join the lines, so the connector would be dropped and the implicit `;` below
+            # would run the next line as an independent command.
+            raise UntokenizableCommand(
+                f"pipeline/connector token {toks[-1]!r} closes a line with nothing to its right"
+            )
         builder.end_pipeline(";")
     return builder.pipelines
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
+import math
 import sys
 from pathlib import Path
 from typing import TypedDict
@@ -25,13 +26,23 @@ from defender._io import use_utf8_stdio
 
 def _json_safe(obj):
     if isinstance(obj, dict):
-        return {k: _json_safe(v) for k, v in obj.items()}
+        # KEYS too: YAML types a bare `2026-01-01:` as a `datetime.date` and `!!binary` as
+        # `bytes`, either of which json.dumps rejects — and one such key in one lesson's
+        # frontmatter aborted the whole build rather than degrading that lesson (#854 F-20).
+        # Routing the key through _json_safe first turns a date into its ISO string.
+        return {(k if isinstance(k, str) else str(_json_safe(k))): _json_safe(v)
+                for k, v in obj.items()}
     if isinstance(obj, (set, frozenset)):
         return [_json_safe(v) for v in sorted(obj, key=str)]
     if isinstance(obj, (list, tuple)):
         return [_json_safe(v) for v in obj]
     if isinstance(obj, (_dt.date, _dt.datetime)):
         return obj.isoformat()
+    if isinstance(obj, float) and not math.isfinite(obj):
+        # `json.dumps` ACCEPTS these and emits bare `NaN`/`Infinity`, which is not JSON — so a
+        # YAML `.nan` in one lesson's frontmatter poisons `lessons.json` for every strict reader
+        # of it. Same degrade-this-lesson rule as the exotic types above (#854 F-20).
+        return None
     if obj is None or isinstance(obj, (str, bool, int, float)):
         return obj
     return str(obj)

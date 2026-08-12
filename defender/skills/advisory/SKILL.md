@@ -42,7 +42,9 @@ goal: <one-sentence: what the caller wants past cases to tell them>
 
    **One physical line.** No shell joins your lines, so a `\` continuation
    continues nothing: each line is lexed on its own and the command fails to
-   tokenize. Long invocations stay on one line.
+   tokenize. The same holds for a `|`, `&&`, or `||` at a line boundary
+   (`A |` then `B`, or `A` then `| B`): it is refused, not joined. Long
+   invocations stay on one line.
 
    `--frontier` is repeatable — one flag per hypothesis name, not
    comma-joined. When the dispatch frontier is empty, omit the

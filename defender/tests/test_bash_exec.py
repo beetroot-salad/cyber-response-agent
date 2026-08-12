@@ -221,6 +221,37 @@ def test_non_utf8_output_does_not_crash():
     assert "�" in out
 
 
+@pytest.mark.parametrize("cmd", [
+    "echo a\n| grep a",     # connector opens the second line
+    "echo a |\ngrep a",     # connector closes the first line
+    "echo a\n&& echo b",
+    "echo a &&\necho b",
+    "echo a\n|| echo b",
+    "echo a ||\necho b",
+])
+def test_line_boundary_connector_fails_closed(cmd):
+    """A `|`/`&&`/`||` at a line boundary used to be DROPPED — each physical line is lexed
+    on its own, so `A |\\nB` silently ran as `A ; B`: the second stage got /dev/null instead
+    of the first's output, and the reported rc was the last pipeline's. Nothing downstream
+    could tell that from a genuine no-match, so it has to refuse like its `\\`-continuation
+    sibling (#854 F-22)."""
+    with pytest.raises(bash_exec.UntokenizableCommand):
+        _run(cmd)
+
+
+def test_leading_connector_on_a_single_line_fails_closed():
+    """The same guard covers the within-a-line spelling, which is a bash syntax error."""
+    with pytest.raises(bash_exec.UntokenizableCommand):
+        _run("| grep a")
+
+
+def test_trailing_semicolon_still_parses():
+    """`;` closes a FINISHED command, so it is not a dangling connector."""
+    rc, out, _err = _run("echo a ;\necho b")
+    assert rc == 0
+    assert out == "a\nb\n"
+
+
 def test_unexpected_redirect_fails_closed(tmp_path):
     target = tmp_path / "should_not_write"
     with pytest.raises(bash_exec.BashExecError):

@@ -47,10 +47,12 @@ def _stage_unsafe(argv: list[str]) -> bool:
 
 
 UNTOKENIZABLE_REASON = (
-    "Blocked: the command could not be tokenized — an unbalanced quote or a trailing "
-    "`\\`. Each PHYSICAL LINE is lexed on its own (there is no shell to join them), so "
-    "a `\\` line-continuation and a newline inside a quoted argument both fail here, "
-    "even when the command is otherwise allowed. Rewrite it as a SINGLE line."
+    "Blocked: the command could not be tokenized — an unbalanced quote, a trailing "
+    "`\\`, or a `|`/`&&`/`||` sitting at a line boundary. Each PHYSICAL LINE is lexed on "
+    "its own (there is no shell to join them), so a `\\` line-continuation, a newline "
+    "inside a quoted argument, and a connector that opens or closes a line (`A |` then "
+    "`B`, or `A` then `| B`) all fail here, even when the command is otherwise allowed. "
+    "Rewrite it as a SINGLE line."
 )
 
 

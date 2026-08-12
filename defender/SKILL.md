@@ -299,7 +299,8 @@ defender-invlang advisory --signature <signature_id> --class lead_discrimination
 
 **One physical line.** There is no shell joining your lines, so a `\` continuation
 does not continue anything — each line is lexed on its own and the command fails to
-tokenize. Long invocations stay on one line.
+tokenize. The same holds for a `|`, `&&`, or `||` at a line boundary (`A |` then `B`,
+or `A` then `| B`): it is refused, not joined. Long invocations stay on one line.
 
 Pass `--signature` from `alert.rule.id` in `alert.json`. Each
 `--frontier` takes one `?hypothesis` name; repeat the flag for each

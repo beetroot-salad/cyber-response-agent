@@ -192,7 +192,7 @@ def test_m2_env_checks_write_no_trace(tmp_path):
     src.mkdir(parents=True)
     (src / "investigation.md").write_text(
         "```invlang\n:V prologue.vertices [id|type|class|ident|attrs?]\n"
-        "v-001|process|process:nc|nc[1]|\n```\n"
+        "v-001|process|nc|nc[1]|\n```\n"
     )
     scene.pending.write_text(json.dumps(
         {"observation_id": "obs-1", "alert_rule_key": "rule-Z", "source_run_dir": "run-E"}
